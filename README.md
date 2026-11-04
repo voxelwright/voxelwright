@@ -21,7 +21,7 @@ The standard `CODEX_HOME` environment variable may select an existing Codex
 login profile. Login files stay in that profile; Village does not copy them.
 
 Create a separate candidate directory. Supply the trusted task text on standard input. The candidate
-must not contain the running Village controller or project Codex configuration.
+must be disjoint from the trusted Village checkout and contain no project Codex configuration. Start the controller from its trusted checkout.
 The output directory must be new and outside the candidate. Then run:
 
 ```sh
