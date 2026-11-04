@@ -15,8 +15,10 @@ a successful model turn alone cannot pass it. Passing checks produces
 
 Requires Python 3.13+ and a Codex CLI supporting permission profiles,
 `exec --ignore-user-config`, and the features in `village/runner.py`.
-The measured Mac run used Codex `0.166.0-alpha.6` bundled with ChatGPT.
+The measured runs used Codex `0.166.0-alpha.6` on macOS and `0.160.0` on Linux.
 There are no Python package dependencies.
+The standard `CODEX_HOME` environment variable may select an existing Codex
+login profile. Login files stay in that profile; Village does not copy them.
 
 Create a separate candidate directory and a task text file. The candidate
 must not contain the running Village controller or project Codex configuration.
@@ -28,7 +30,8 @@ python3 -m village \
   --prompt /absolute/path/to/task.txt \
   --output /absolute/path/to/new-evidence \
   --codex /absolute/path/to/codex \
-  --check /bin/sh -c 'test "$(/bin/sh greet.sh)" = "Hello, Village!"'
+  --model gpt-6.1-sol \
+  --check /bin/sh -c 'actual=$(/bin/sh greet.sh && printf x) && test "$actual" = "$(printf "Hello, Village!\nx")"'
 ```
 
 `--check` is the final option. Its arguments come from the trusted operator,
@@ -45,10 +48,11 @@ python3 -m compileall -q village scripts
 git diff --check
 ```
 
-The live Mac proof uses the real CLI and existing login. It first demonstrates
+The live proof uses the real CLI and existing login. It first demonstrates
 that the check rejects a broken program, asks the agent to repair it, runs the
 same check, and probes denied sibling access, protected configuration writes
-and direct TCP access:
+and local TCP access. Each denial probe first succeeds outside the sandbox;
+its synthetic sentinels are then reset and checked for changes:
 
 ```sh
 python3 -m scripts.prove_runner --codex /absolute/path/to/codex
@@ -59,13 +63,12 @@ Local measurements and review status live in [evidence](evidence/001-worker.md).
 
 ## Current boundary
 
-This is a synthetic-data development slice, tested on macOS arm64. Linux
-operation, family isolation, durable job recovery, richer runtime permissions
-and the family interface remain unproven. Gas City's supported Beads/Dolt path
-is being tested as the factory coordinator. Temporal's separate persistence
-experiment passed; neither experiment establishes the final stack.
+This is a synthetic-data development slice, tested on macOS arm64 and Linux
+x86_64. Family isolation, durable job recovery, richer runtime permissions and
+the family interface remain unproven.
 
-Worker commands receive workspace access and Codex's minimal OS runtime reads.
+Worker commands receive workspace access, Codex's minimal OS runtime reads and
+read access to the exact trusted Codex executable, needed by Linux's sandbox.
 Sibling files, ordinary network access and protected control directories are
 denied by the named Codex permission profile. The runner filters environment
 variables and disables automatic instruction loading, connectors, hooks,

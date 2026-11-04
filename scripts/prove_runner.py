@@ -9,51 +9,72 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import socket
+import subprocess
 import tempfile
 
 from village.runner import execute_agent, execute_check
 
 
-async def prove(binary: str) -> dict:
+CHECK_ARGV = [
+    "/bin/sh", "-c",
+    'actual=$(/bin/sh greet.sh && printf x) && '
+    'test "$actual" = "$(printf \'Hello, Village!\\nx\')"',
+]
+
+
+async def prove(binary: str, model: str) -> dict:
     root = Path(tempfile.mkdtemp(prefix="village-runner-proof-")).resolve()
     workspace = root / "candidate"
     workspace.mkdir()
     (workspace / "greet.sh").write_text("#!/bin/sh\nprintf 'Broken greeting\\n'\n")
     sibling = root / "private-sentinel"
-    sibling.write_text("synthetic private sentinel\n")
+    sentinels = {sibling: "synthetic private sentinel\n"}
     for name in (".git", ".agents", ".codex", ".aws"):
         (workspace / name).mkdir()
-        (workspace / name / "sentinel").write_text("unchanged\n")
-    check_argv = ["/bin/sh", "-c", 'test "$(/bin/sh greet.sh)" = "Hello, Village!"']
+        sentinels[workspace / name / "sentinel"] = "unchanged\n"
+    for path, contents in sentinels.items():
+        path.write_text(contents)
     common = {"workspace": workspace, "codex_binary": binary, "timeout_seconds": 180}
-    before = await execute_check(**common, argv=check_argv, output_dir=root / "before")
+    before = await execute_check(**common, argv=CHECK_ARGV, output_dir=root / "before")
     assert before["status"] == "failed", before
     author = await execute_agent(
         **common,
+        model=model,
         prompt="Fix greet.sh to use /bin/sh and print exactly Hello, Village! followed by a newline. Run it once. Do not access other directories or the network.",
         output_dir=root / "author",
     )
     assert author["status"] == "completed", author
-    after = await execute_check(**common, argv=check_argv, output_dir=root / "after")
+    after = await execute_check(**common, argv=CHECK_ARGV, output_dir=root / "after")
     assert after["status"] == "passed", after
     # These checks run through the same actual sandbox as the generated code.
     denied = {}
     commands = {
         "sibling_read": ["/bin/cat", str(sibling)],
         "sibling_write": ["/bin/sh", "-c", 'printf changed > "$1"', "probe", str(sibling)],
-        "network": ["/usr/bin/nc", "-v", "-w", "2", "1.1.1.1", "443"],
     }
     for directory in (".git", ".agents", ".codex", ".aws"):
         commands[directory] = ["/bin/sh", "-c", 'printf changed > "$1/sentinel"', "probe", directory]
     for name, argv in commands.items():
+        control = subprocess.run(argv, cwd=workspace, capture_output=True, timeout=5)
+        assert control.returncode == 0, control.stderr
+        for path, contents in sentinels.items():
+            path.write_text(contents)
         outcome = await execute_check(**common, argv=argv, output_dir=root / f"deny-{name}")
         assert outcome["status"] == "failed", outcome
-        assert "Operation not permitted" in Path(outcome["stderr_path"]).read_text(), outcome
+        for path, contents in sentinels.items():
+            assert path.read_text() == contents, path
         denied[name] = outcome
-    assert sibling.read_text() == "synthetic private sentinel\n"
-    for name in (".git", ".agents", ".codex", ".aws"):
-        assert (workspace / name / "sentinel").read_text() == "unchanged\n"
-    result = {"evidence_dir": str(root), "before": before, "author": author, "after": after, "denied": denied}
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        argv = ["/bin/bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/$1', "probe", str(listener.getsockname()[1])]
+        control = subprocess.run(argv, capture_output=True, timeout=5)
+        assert control.returncode == 0, control.stderr
+        outcome = await execute_check(**common, argv=argv, output_dir=root / "deny-network")
+        assert outcome["status"] == "failed", outcome
+        denied["network"] = outcome
+    result = {"evidence_dir": str(root), "requested_model": model, "before": before, "author": author, "after": after, "denied": denied}
     (root / "proof.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
 
@@ -61,6 +82,7 @@ async def prove(binary: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex", required=True)
+    parser.add_argument("--model", default="gpt-6.1-sol")
     args = parser.parse_args()
     os.umask(0o077)
-    print(json.dumps(asyncio.run(prove(args.codex)), indent=2))
+    print(json.dumps(asyncio.run(prove(args.codex, args.model)), indent=2))
