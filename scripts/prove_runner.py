@@ -17,9 +17,8 @@ from village.runner import execute_agent, execute_check
 
 
 CHECK_ARGV = [
-    "/bin/sh", "-c",
-    'actual=$(/bin/sh greet.sh && printf x) && '
-    'test "$actual" = "$(printf \'Hello, Village!\\nx\')"',
+    "/bin/bash", "-o", "pipefail", "-c",
+    "/bin/sh greet.sh | /usr/bin/cmp -s - <(printf 'Hello, Village!\\n')",
 ]
 
 

@@ -31,7 +31,7 @@ python3 -m village \
   --output /absolute/path/to/new-evidence \
   --codex /absolute/path/to/codex \
   --model gpt-6.1-sol \
-  --check /bin/sh -c 'actual=$(/bin/sh greet.sh && printf x) && test "$actual" = "$(printf "Hello, Village!\nx")"'
+  --check /bin/bash -o pipefail -c '/bin/sh greet.sh | /usr/bin/cmp -s - <(printf "Hello, Village!\n")'
 ```
 
 `--check` is the final option. Its arguments come from the trusted operator,
