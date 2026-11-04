@@ -85,3 +85,5 @@ capabilities, verification and recovery suited to those actions.
 Work is tracked in [GitHub issues](https://github.com/voxelwright/voxelwright/issues).
 The earlier `specs/` files are historical proposals, superseded by the owner's
 November 4 request and [AGENTS.md](AGENTS.md).
+
+Use an exclusively owned candidate directory containing independent copies of files. A local Git clone must use `--no-hardlinks`. Village rejects pre-existing hard links before each phase; it assumes no other host process changes the candidate during a run.
