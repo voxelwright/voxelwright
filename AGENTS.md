@@ -52,8 +52,9 @@ The imported reviewer files contain examples from another repository. Apply
 their principles to Village's actual stack. Their upstream/Linear paths,
 production permissions, deployments and model names are not Village settings
 or grants. Use GitHub for tracking. Run Codd whenever Village schema or
-migrations change, regardless of directory or database technology. Use the
-session's available model for reviewer subagents. Respect the host's managed
+migrations change, regardless of directory or database technology. Default subagents to GPT-6.1 Sol for coding, debugging, parsing and tool use.
+Escalate to GPT-6 Astra for high-stakes simulations, strict architectural
+constraints or mission-critical decisions where an error is expensive. Respect the host's managed
 worktree tools for isolated probes.
 
 Local gates and measured results are documented in README.md as they become

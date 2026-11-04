@@ -20,14 +20,13 @@ There are no Python package dependencies.
 The standard `CODEX_HOME` environment variable may select an existing Codex
 login profile. Login files stay in that profile; Village does not copy them.
 
-Create a separate candidate directory and a task text file. The candidate
+Create a separate candidate directory. Supply the trusted task text on standard input. The candidate
 must not contain the running Village controller or project Codex configuration.
 The output directory must be new and outside the candidate. Then run:
 
 ```sh
-python3 -m village \
+printf '%s\n' 'Fix greet.sh to print Hello, Village!' | python3 -m village \
   --workspace /absolute/path/to/candidate \
-  --prompt /absolute/path/to/task.txt \
   --output /absolute/path/to/new-evidence \
   --codex /absolute/path/to/codex \
   --model gpt-6.1-sol \
