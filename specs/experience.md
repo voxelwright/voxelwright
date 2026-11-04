@@ -1,3 +1,6 @@
+> Historical proposal from November 3, 2026. Superseded by the owner's
+> November 4 request and AGENTS.md. This is not shipped behavior or current authority.
+
 # Dogfood experience
 
 A private home for useful help. Not a monitoring console with beige paint.

@@ -1,3 +1,6 @@
+> Historical proposal from November 3, 2026. Superseded by the owner's
+> November 4 request and AGENTS.md. This is not shipped behavior or current authority.
+
 # Existing research carried forward
 
 Decision sources (administrator workspace, 2026-11-02): projects/family-harness/VILLAGE.md; research/platform-recommendation.md; platform-overalls.md; platform-behavioral-experience.md; projects/reports/2026-11-02-village-platform-review.md. These are source-reviewed design inputs, not runtime proofs. The dogfood is deliberately a precursor, not a replacement for the full product contract.

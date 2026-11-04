@@ -4,3 +4,9 @@ node_modules/
 *.sqlite*
 *.sock
 artifacts/
+.tools/
+.village/
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/

@@ -1,3 +1,6 @@
+> Historical proposal from November 3, 2026. Superseded by the owner's
+> November 4 request and AGENTS.md. This is not shipped behavior or current authority.
+
 # Village · private dogfood 0.1
 
 ## Problem and authorization — 2026-11-02

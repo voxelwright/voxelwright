@@ -1,3 +1,6 @@
+> Historical proposal from November 3, 2026. Superseded by the owner's
+> November 4 request and AGENTS.md. This is not shipped behavior or current authority.
+
 # Actionable backlog
 - [ ] V01 Reviewed private dogfood: durable Gilfoyle conversation, real Astra adapter, readiness responsibility, warm UI, tested private deployment.
 - [ ] V02 GitHub admin: after main push, change default branch to main; delete only setup-verification-20261103T004156Z. Dedicated API auth required for Issues/Projects/protection inspection.

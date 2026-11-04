@@ -1,3 +1,6 @@
+> Historical proposal from November 3, 2026. Superseded by the owner's
+> November 4 request and AGENTS.md. This is not shipped behavior or current authority.
+
 # Dogfood browser/server seam v1
 
 All routes require owner identity and exact configured host. Mutation requires matching Origin and application/json. Production has no TCP listener. Response errors: {error: plain-language message}; no stack/credential output.
