@@ -106,6 +106,51 @@ store was tested. Original receipts/procedure:
 `/private/tmp/village-gascity-workflow-audit.md` (temporary audit artifacts,
 not prerequisites for applying this recipe).
 
+## Native dependent review handoff, November 5
+
+The installed **bd-backed** Gas City 1.5.1 / Beads 1.3.2 fixture kept a routed
+review task unclaimable while its author prerequisite was open or deferred;
+closure made it ready. Fresh-process readback retained the edge. Plain
+`sling --no-formula --no-convoy` records the route without removing dependencies.
+This executes the actual provider path and supersedes the earlier file-store
+probe's limit for this narrow dependency behavior. It does not validate a whole
+v2 repair formula or every store.
+
+Use the native ready/hook path for dependency eligibility. Source inspection
+shows that a direct Beads `--claim` does not itself enforce dependency readiness;
+do not substitute it for the exercised hook path. Persist a known dependent ID
+before creation. If create or route acknowledgment is lost, reconcile that exact
+ID's metadata, edges and route before continuing. The actual-effect probe created
+one ID, recovered dropped acknowledgments and rejected changed intent metadata
+with zero model calls.
+
+Village's unmerged adapter binds verified receipts before conditionally closing
+the author prerequisite and checks native state again before dispatch. An actual
+empty-owner conditional update rejected a foreign holder and left it deferred.
+Beads actors/assignees are caller-asserted strings, not authentication. Distinguish
+the adapter's `gc bd update --if-assignee ... --if-status ...` passthrough from
+Gas City's library `BdStore.Close`, which adds `--force`. The later upstream
+Beads close-guard change is source-only and is not installed 1.3.2 behavior.
+
+The real synthetic handoff at `a78fdbe` completed seven independent reports and
+remained held. Restart and explicit same-round replay preserved author/model
+receipt hashes. The saved review result and following native status update are
+separate observations; the proof waits for canonical settlement. The first
+observer failed overall by reading between them and remains a failed receipt.
+The final proof-only oracle at `52303fc` rejected known early-termination and
+custom-equality cases, but the separate targeted boundary audit remained
+incomplete. These controls establish no general Python security boundary.
+
+Evidence: handoff record
+and its linked structured receipts in the handoff candidate,
+with distinct runtime `6a530ac`, real-model `a78fdbe` and final-checker `52303fc`
+heads. Pinned sources: [route](https://github.com/gastownhall/gascity/blob/v1.5.1/cmd/gc/cmd_sling.go#L750-L781),
+[hook readiness](https://github.com/gastownhall/gascity/blob/v1.5.1/cmd/gc/cmd_hook_claim.go#L449-L457),
+[known-ID create](https://github.com/steveyegge/beads/blob/v1.3.2/cmd/bd/create.go#L548-L595),
+[conditional update](https://github.com/steveyegge/beads/blob/v1.3.2/cmd/bd/update.go#L887-L932),
+[library close](https://github.com/gastownhall/gascity/blob/v1.5.1/internal/beads/bdstore.go#L2696-L2702)
+and [unadopted upstream close change](https://github.com/steveyegge/beads/commit/6d27a4f96e7fb74e2db516d7be9c80475f59dbef).
+
 ## Confirmed adapter lessons
 
 These are confirmed Village integration lessons, **not native Gas City bugs**.

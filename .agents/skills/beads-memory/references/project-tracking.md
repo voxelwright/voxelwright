@@ -7,12 +7,43 @@ links back through `external_ref`; child tasks own detailed steps, dependency
 eligibility and specialist claims. This adds no bidirectional synchronization,
 automatic factory routing, daemon or simultaneous multiwriter guarantee.
 
-The active trial's epic is `village-7in`, linked to
+The earlier bounded trial's epic is `village-7in`, linked to
 GitHub issue 17. Its steps are
 documentation authoring, independent review, then private publication/readback.
 The coordinator updates task state only when the corresponding evidence exists;
 agent completion and a clean review are different milestones. Completing these
 steps does not itself close GitHub issue 17.
+
+The later bounded factory handoff uses epic `village-wzd`, linked to GitHub
+issue 13. Its six milestones are native grounding, implementation, integration
+proof, complete independent review, reviewed documentation, then publication and
+final evidence. Review and documentation each depend on integration proof;
+publication has explicit dependencies on both. Initial setup/readback used 27
+commands in 6.165 seconds and exported 12 issue records. It established the stored
+graph and first claim, not later execution. Later transition snapshots bind
+actual grounding and implementation evidence; inspect the latest operational
+receipt before changing status.
+
+Separate epic `village-7nk` links GitHub issue 15. Its native dependency on this
+handoff slice is necessary only: full issue 13 and the independently measured
+bootstrap comparison remain required. Closing a narrow slice cannot satisfy the
+wider milestone or close its GitHub issue. The explicit all-project export is
+now `backups/project-records.jsonl`; the earlier completed-trial snapshot remains
+intact. The issue-only and same-host recovery limits below still apply.
+
+These November 5 operational snapshots are preserved with the handoff candidate's
+structured handoff receipts. They are evidence records, not
+permission, automatic factory dispatch or a simultaneous-multiwriter proof.
+Beads claim and actor strings are operational identities, not authenticated
+family identities. The pinned [issue validation source](https://github.com/steveyegge/beads/blob/v1.3.2/internal/validation/issue.go#L150-L174)
+and the native conditional-ownership probe in that receipt bound this distinction.
+
+The later integration-to-review transition also created independent measurement
+task `village-bh7`, with the same GitHub issue 15 reference and no parent or
+dependency. It records the bounded source/budget/usage/timing/intervention account;
+it is not a qualification prerequisite. The transition's native readback and
+13-record snapshot are bound in `docs/.mintlify/factory-handoff-preparation.json`.
+This is native task metadata, not automatic GitHub synchronization.
 
 ## Native operations and evidence
 

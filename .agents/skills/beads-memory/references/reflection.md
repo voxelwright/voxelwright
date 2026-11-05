@@ -63,6 +63,42 @@ and receipt failure/mutation matrix.
 The matrix used local model/GC stubs, not real provider calls; its first run
 failed and an unchanged focused rerun passed, with the initial cause unproved.
 
+Handoff R3 supplies another confirmed reviewer lesson: a single failed handoff
+followed by restored-state recovery missed corruption on intervening retries.
+Two missing-intent retries now preserve completed receipts; public-submit and
+both-role registration tests detect side-effect-ordering and configuration gaps.
+See the source-bound checkpoint record
+and the testing guidance in [technology grounding](../../technology-grounding/SKILL.md).
+These are scoped examples for reviewed candidate guidance, not an implemented
+memory capture or automatic promotion loop.
+
+## Bounded research lessons, November 5
+
+A read-only Living Brain assessment recommends improving the lifecycle around
+native Beads before adopting another store. This is proposed guidance, not a
+Village capture/retrieval integration. Preserve source and repository/version
+scope, validation date, candidate/confirmed/stale/contested status and correction
+or counterevidence. Apply authorization and eligibility before relevance; use
+bounded task context. A score, recent access or model agreement is not validation.
+
+Correction or retraction must cover derived summaries and future prompt context,
+not only the source row. Living Brain's [delete-source contract](https://docs.livingbrain.com/api-reference/captures/remove-source)
+explicitly retains derived pages. Its [design policies](https://docs.livingbrain.com/docs/design-policies)
+separate placement and resurfacing from permission; its [health guide](https://docs.livingbrain.com/docs/brain-health)
+does not claim correctness. These are documented vendor contracts, not executed
+Village behavior or adopted thresholds. Do not copy opaque health scores.
+
+Before promoting a retrieval or consolidation mechanism, compare held-out later
+worker behavior against no memory and simple native keyed retrieval with the
+same answer model, acceptance and resource budget. Keep gold answers outside
+memory. Measure mistake avoidance, unsupported assertions, stale/conflicting or
+irrelevant retrieval, correction/retraction and validation age, counting capture,
+consolidation and read costs. [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2)
+is inspiration for workflow/gotcha/premise-aware evaluation, not an installed
+dependency or completed benchmark. Research provenance and limits are in
+[the research record](../../../../evidence/010-memory-research.json). Reflection
+changes only a candidate skill; independent review and existing authority remain.
+
 Primary sources: [pinned rules](https://github.com/gastownhall/beads/blob/v1.3.2/cmd/bd/rules.go),
 [changed upstream rules](https://github.com/gastownhall/beads/blob/6d713a74849f6168f5bbe973e0bfde64cfae8393/cmd/bd/rules.go),
 [closed-issue compaction](https://github.com/gastownhall/beads/blob/v1.3.2/cmd/bd/compact.go),
