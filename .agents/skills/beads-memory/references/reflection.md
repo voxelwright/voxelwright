@@ -1,4 +1,4 @@
-# Reflection, rules and skill promotion — 1.3.2
+# Reflection, rules and skill promotion (Beads 1.3.2)
 
 Source/probe evidence as of 2026-11-04. Beads memories are explicit keyed text;
 storage, triggering, synthesis, validation and accepted-skill delivery are

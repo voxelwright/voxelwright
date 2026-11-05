@@ -3,7 +3,7 @@ name: technology-grounding
 description: Onboard vendors and dependencies with versioned skillpacks; ground integrations, substantial stack changes, and uncertain technical behavior in current primary sources and executable experiments. Use before implementing consequential assumptions; skip routine edits whose relevant behavior is already understood and verified.
 ---
 
-# Technology Grounding
+# Technology grounding
 
 Use general knowledge to choose a direction, then gain enough current expertise
 in the relevant technology to make the next useful change with evidence. This

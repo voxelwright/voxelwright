@@ -1,4 +1,4 @@
-# Role context, packs and reflection — 1.5.1
+# Role context, packs and reflection (Gas City 1.5.1)
 
 Source-inspected on 2026-11-04; no model context-effectiveness probe was run.
 

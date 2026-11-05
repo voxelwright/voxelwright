@@ -1,4 +1,4 @@
-# Native memory and prompt injection — 1.3.2
+# Native memory and prompt injection (Beads 1.3.2)
 
 Evidence date: 2026-11-04. Executed version:
 `1.3.2 (9b65b9e19: 9b65b9e198ac)` using

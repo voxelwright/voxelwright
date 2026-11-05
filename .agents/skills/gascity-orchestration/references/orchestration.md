@@ -1,4 +1,4 @@
-# Native workflow and execution — 1.5.1
+# Native workflow and execution (Gas City 1.5.1)
 
 Evidence date: 2026-11-04. Adopted `gc version`: 1.5.1. Tag resolves to
 `4f698fe2a7eefae49e545c5e38189f1b63fb9b39`; a version string alone does not
