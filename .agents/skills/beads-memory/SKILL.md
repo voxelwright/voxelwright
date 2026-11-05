@@ -1,6 +1,6 @@
 ---
 name: beads-memory
-description: Use or integrate Beads keyed persistent memory and prime context in Village; inspect native rules audit or compaction when evaluating engineering-learning workflows. Distinguishes memory from task/session history and automatic learning.
+description: Use Village's versioned Beads guidance for keyed memory, prime context, reflection boundaries, or detailed project tasks and dependencies alongside GitHub scope tracking.
 ---
 
 # Beads memory
@@ -12,6 +12,9 @@ Load only the reference needed for the task:
   [native memory](references/native-memory.md), including the synthetic probe.
 - For periodic reflection, coding-rule consolidation, compaction or reviewer
   lesson promotion, read [reflection boundaries](references/reflection.md).
+- For detailed project tasks, dependencies, claims and issue-record recovery,
+  read [project tracking](references/project-tracking.md). GitHub retains project
+  scope and issue completion; Beads records the detailed execution plan.
 
 Reuse native keyed memory before inventing another store. Durable work items,
 provider session history, persistent knowledge and automatic insight extraction
@@ -23,7 +26,7 @@ per-person ACL, semantic relevance ranking, or complete history erasure. Key
 prefixes do not provide audience isolation. Keep real family data out until
 identity/audience boundaries are independently enforced and proved.
 
-Refresh affected guidance when the Beads binary, store/backend, prime flags,
+Refresh affected guidance when the Beads binary, store/backend, tracking commands, prime flags,
 memory schema or rule-compaction behavior changes. Compare pinned and current
 primary source before adopting new semantics. Record confirmed, generalizable
 reviewer lessons with evidence and status in a reviewed candidate update;

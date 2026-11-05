@@ -60,6 +60,14 @@ python3 -m scripts.prove_runner --codex /absolute/path/to/codex
 After green gates, use the supplied [reviewer skills](.agents/skills/reviewers/SKILL.md).
 Local measurements and review status live in [evidence](evidence/001-worker.md).
 
+For documentation and knowledge-upkeep changes, run `git diff --check`, the
+skill-creator `quick_validate.py` for changed packs, and `mint broken-links`
+from `docs/`. Freeze the exact page/config/skill payloads for independent
+Editor review before remote writes. The [bounded adoption evidence](evidence/008-knowledge-upkeep.json)
+records the Beads 1.3.2 task/dependency and issue-record recovery probes,
+Mintlify Base settings, source references and remaining limits. Base writes
+autocommit; Site publication requires a live deployment and content readback.
+
 ## Current boundary
 
 This is a synthetic-data development slice, tested on macOS arm64 and Linux
