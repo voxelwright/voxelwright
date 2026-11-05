@@ -17,6 +17,11 @@ request supersedes the earlier implementation proposals in Git history.
 - Follow `.agents/skills/documentation-maintenance` for every change and merge
   to main. A documentation specialist owns updates; the coordinating agent
   dispatches them. Editor reviews each documentation change before Mintlify writes.
+  After a clean independent Editor review, publish the reviewed handbook to the
+  existing private Mintlify site and verify deployment and content readback. The
+  owner authorized this ongoing process on November 5, 2026; do not ask for routine
+  publishing approval. This grant covers private docs only, not Village source
+  merges, application releases, public deployment or access-setting changes.
 - Track work in GitHub issues. Branches use `feature/`. Commit subjects use
   `[#<issue>] <change>`. Keep changes reviewable; do not merge or deploy publicly.
 - Tilt is optional. Use the shortest repeatable local proof for the slice.
