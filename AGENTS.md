@@ -28,7 +28,10 @@ request supersedes the earlier implementation proposals in Git history.
 - Name states and metrics honestly. Agent completion is not verification.
 - Test meaningful failure paths and boundaries. A failed or interrupted action
   must not silently become successful or be replayed without reconciliation.
-- Check installed versions and source when behavior is uncertain.
+- Use `.agents/skills/technology-grounding` for technology adoption, integration,
+  substantial stack changes, or uncertain behavior. Onboarding a vendor or
+  adding a dependency requires creating or updating a versioned skillpack.
+  Ground consequential assumptions in current sources and executable experiments.
 - Keep product language warm and clear. Technical controls belong in the
   workshop and settings when they help someone make a decision.
 
