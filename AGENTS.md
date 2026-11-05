@@ -14,6 +14,9 @@ request supersedes the earlier implementation proposals in Git history.
 - Use the supplied `.agents/skills/reviewers` and `review-protocol` skills.
   Give each reviewer fresh context and the same immutable head. Fix confirmed
   findings and rerun the affected lenses. Incomplete review is not a clean round.
+- Follow `.agents/skills/documentation-maintenance` for every change and merge
+  to main. A documentation specialist owns updates; the coordinating agent
+  dispatches them. Editor reviews each documentation change before Mintlify writes.
 - Track work in GitHub issues. Branches use `feature/`. Commit subjects use
   `[#<issue>] <change>`. Keep changes reviewable; do not merge or deploy publicly.
 - Tilt is optional. Use the shortest repeatable local proof for the slice.
