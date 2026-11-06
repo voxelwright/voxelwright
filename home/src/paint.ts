@@ -356,171 +356,6 @@ export function paintPhoto(kind: 'beach' | 'cat' | 'drawing' | 'mountains', seed
   return toTexture(c)
 }
 
-/** Faded cottage wallpaper over limewash: soft stripes and little painted sprigs. */
-export function paintWallpaper(seed: number, base: RGB, w = 1024, h = 1024) {
-  const plaster = paintPlaster(seed, base, w, h).image as HTMLCanvasElement
-  const [c, g] = canvas(w, h)
-  g.drawImage(plaster, 0, 0)
-  const r = rng(seed + 11)
-  for (let x = 0; x < w; x += 128) {
-    g.fillStyle = 'rgba(214,170,120,0.10)'
-    g.fillRect(x + 40, 0, 48, h)
-    g.fillStyle = 'rgba(255,246,228,0.10)'
-    g.fillRect(x + 4, 0, 6, h)
-  }
-  // Sprigs: a stem, two leaves and a berry on a loose half-drop grid
-  const sprig = (x: number, y: number, s: number, a: number) => {
-    g.save()
-    g.translate(x, y)
-    g.rotate(a)
-    g.scale(s, s)
-    g.strokeStyle = 'rgba(112,124,82,0.26)'
-    g.lineWidth = 2.2
-    g.beginPath()
-    g.moveTo(0, 14)
-    g.quadraticCurveTo(3, 0, -2, -14)
-    g.stroke()
-    g.fillStyle = 'rgba(122,140,88,0.24)'
-    for (const [lx, ly, la] of [[-5, 2, -0.8], [5, -4, 0.8]] as const) {
-      g.beginPath()
-      g.ellipse(lx, ly, 6, 2.6, la, 0, Math.PI * 2)
-      g.fill()
-    }
-    g.fillStyle = 'rgba(196,96,74,0.28)'
-    g.beginPath()
-    g.arc(-2, -15, 3, 0, Math.PI * 2)
-    g.fill()
-    g.restore()
-  }
-  for (let y = 0; y < h; y += 96)
-    for (let x = 0; x < w; x += 128) {
-      const ox = (y / 96) % 2 ? 64 : 0
-      sprig(x + ox + 20 + (r() - 0.5) * 10, y + 48 + (r() - 0.5) * 10, 0.8 + r() * 0.15, (r() - 0.5) * 0.5)
-    }
-  // Age: uneven fading
-  const n = makeNoise(seed + 5, 32)
-  const img = g.getImageData(0, 0, w, h)
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4
-      const f = 0.94 + (n(x / 220, y / 220, 3) - 0.5) * 0.14
-      img.data[i] *= f
-      img.data[i + 1] *= f
-      img.data[i + 2] *= f * 0.98
-    }
-  g.putImageData(img, 0, 0)
-  return toTexture(c)
-}
-
-/** Painted tongue-and-groove panelling: vertical boards with worn edges. */
-export function paintPanelling(seed: number, base: RGB, boards = 8, w = 1024, h = 512) {
-  const n = makeNoise(seed, 64)
-  const bw = w / boards
-  const r = rng(seed + 1)
-  const tone = Array.from({ length: boards }, () => 0.93 + r() * 0.1)
-  const [c] = pixels(w, h, (x, y) => {
-    const b = Math.floor(x / bw)
-    const bx = x - b * bw
-    const brush = n(x / 3, y / 60, 2)
-    const wear = n(x / 40, y / 40, 4)
-    let t = tone[b] * (0.95 + (brush - 0.5) * 0.08)
-    if (bx < 3) t *= 0.55
-    else if (bx < 6) t *= 0.85
-    else if (bx > bw - 3) t *= 1.06
-    const worn = wear > 0.72 && (bx < 10 || bx > bw - 10) ? 1 : 0
-    const col = mixRGB(base, [150, 104, 70], worn * 0.6)
-    return [col[0] * t, col[1] * t, col[2] * t]
-  })
-  return toTexture(c)
-}
-
-/** A soft flame: hot core, orange body, black edges. Drawn additively. */
-export function paintFlame(seed: number) {
-  const w = 128, h = 256
-  const n = makeNoise(seed, 16)
-  const [c] = pixels(w, h, (x, y) => {
-    const u = (x / w - 0.5) * 2
-    const v = 1 - y / h
-    const width = (1 - v) * 0.85 * (0.75 + n(x / 18, y / 26, 3) * 0.5)
-    const d = Math.abs(u) / Math.max(width, 0.02)
-    const body = Math.max(0, 1 - d) * Math.min(1, v * 6) * (1 - v * 0.6)
-    const core = Math.max(0, 1 - d * 1.8) * Math.max(0, 1 - v * 1.6)
-    return [Math.min(255, 255 * (body * 1.2 + core)), Math.min(255, 255 * (body * 0.55 + core * 0.9)), Math.min(255, 255 * (body * 0.12 + core * 0.55))]
-  })
-  return toTexture(c)
-}
-
-/** A paper wall calendar for November with a few family marks. */
-export function paintCalendar(seed: number) {
-  const w = 512, h = 768
-  const n = makeNoise(seed, 32)
-  const [c, g] = pixels(w, h, (x, y) => {
-    const t = 0.97 + (n(x / 24, y / 24, 3) - 0.5) * 0.05
-    return [250 * t, 244 * t, 230 * t]
-  })
-  const sky = g.createLinearGradient(0, 40, 0, 330)
-  sky.addColorStop(0, '#f2c891')
-  sky.addColorStop(1, '#d98b4d')
-  g.fillStyle = sky
-  g.fillRect(30, 40, w - 60, 290)
-  const r = rng(seed)
-  g.fillStyle = '#8f9a5a'
-  g.fillRect(30, 260, w - 60, 70)
-  for (let i = 0; i < 5; i++) {
-    const x = 70 + i * 92, y = 230
-    g.fillStyle = '#6a4a30'
-    g.fillRect(x - 4, y, 8, 40)
-    for (let k = 0; k < 26; k++) {
-      g.fillStyle = r() < 0.4 ? '#c8562e' : r() < 0.6 ? '#e09a3e' : '#9a7a3a'
-      g.beginPath()
-      g.arc(x + (r() - 0.5) * 60, y - 10 + (r() - 0.5) * 44, 7 + r() * 8, 0, Math.PI * 2)
-      g.fill()
-    }
-  }
-  g.fillStyle = 'rgba(70,50,40,0.9)'
-  g.font = 'bold 44px Georgia, serif'
-  g.fillText('November', 36, 392)
-  g.strokeStyle = 'rgba(120,90,70,0.35)'
-  g.lineWidth = 2
-  const gx = 30, gy = 420, cw = (w - 60) / 7, ch = 60
-  for (let i = 0; i <= 7; i++) {
-    g.beginPath(); g.moveTo(gx + i * cw, gy); g.lineTo(gx + i * cw, gy + ch * 5); g.stroke()
-  }
-  for (let j = 0; j <= 5; j++) {
-    g.beginPath(); g.moveTo(gx, gy + j * ch); g.lineTo(gx + cw * 7, gy + j * ch); g.stroke()
-  }
-  g.font = '18px Georgia, serif'
-  g.fillStyle = 'rgba(80,60,50,0.8)'
-  const cell = (d: number) => [gx + ((d + 6) % 7) * cw, gy + Math.floor((d + 6) / 7) * ch] as const
-  for (let d = 1; d <= 30; d++) {
-    const [x, y] = cell(d)
-    g.fillText(String(d), x + 6, y + 22)
-  }
-  // Family marks: a circled day, a heart and a scribble
-  g.strokeStyle = 'rgba(200,60,50,0.8)'
-  g.lineWidth = 4
-  const [ax, ay] = cell(6)
-  g.beginPath()
-  g.ellipse(ax + cw / 2, ay + ch / 2, cw * 0.45, ch * 0.42, 0.1, 0, Math.PI * 2)
-  g.stroke()
-  g.fillStyle = 'rgba(214,90,110,0.9)'
-  const [bx, by] = cell(14)
-  const hx = bx + cw / 2, hy = by + ch / 2 + 6
-  g.beginPath()
-  g.moveTo(hx, hy + 12)
-  g.bezierCurveTo(hx - 22, hy - 4, hx - 10, hy - 20, hx, hy - 8)
-  g.bezierCurveTo(hx + 10, hy - 20, hx + 22, hy - 4, hx, hy + 12)
-  g.fill()
-  g.strokeStyle = 'rgba(40,90,160,0.75)'
-  g.lineWidth = 3
-  const [sx0, sy0] = cell(21)
-  g.beginPath()
-  g.moveTo(sx0 + 8, sy0 + 42)
-  for (let i = 1; i < 8; i++) g.lineTo(sx0 + 8 + i * 6, sy0 + 42 + (i % 2 ? -8 : 0))
-  g.stroke()
-  return toTexture(c)
-}
-
 /** A child's crayon drawing of the family and the house, on rough paper. */
 export function paintKidDrawing(seed: number) {
   const w = 512, h = 384
@@ -587,5 +422,75 @@ export function paintGlass(seed: number) {
     v += Math.max(0, n(x / 60, y / 60, 3) - 0.55) * 0.25
     return [255 * v, 244 * v, 224 * v]
   })
+  return toTexture(c)
+}
+
+/** Brushed stainless steel: fine vertical streaks over a soft tonal drift. */
+export function paintBrushed(seed: number) {
+  const n = makeNoise(seed, 64)
+  const [c] = pixels(256, 1024, (x, y) => {
+    const t = 0.9 + (n(x / 0.8, y / 90, 2) - 0.5) * 0.12 + (n(x / 60, y / 200, 3) - 0.5) * 0.1
+    return [204 * t, 208 * t, 212 * t]
+  })
+  return toTexture(c)
+}
+
+/** A child's alphabet poster: Ukrainian letters, each with a little painted animal blob. */
+export function paintAlphabet(seed: number) {
+  const w = 384, h = 512
+  const [c, g] = canvas(w, h)
+  g.fillStyle = '#fbf8f1'
+  g.fillRect(0, 0, w, h)
+  const r = rng(seed)
+  const letters = 'АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ'
+  const cols = 5, cw = (w - 30) / cols, ch = (h - 30) / 7
+  const colors = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f', '#9c6ade', '#e8a0bf', '#6a994e']
+  for (let i = 0; i < Math.min(letters.length, cols * 7); i++) {
+    const x = 15 + (i % cols) * cw, y = 15 + Math.floor(i / cols) * ch
+    g.fillStyle = colors[Math.floor(r() * colors.length)]
+    g.beginPath()
+    g.ellipse(x + cw * 0.68, y + ch * 0.55, cw * 0.17, ch * 0.2, r() * 2, 0, Math.PI * 2)
+    g.fill()
+    g.fillStyle = '#3b3340'
+    g.font = 'bold 26px Georgia, serif'
+    g.fillText(letters[i], x + 4, y + ch * 0.6)
+  }
+  return toTexture(c)
+}
+
+/** A watercolour botanical print: potted plants on a shelf, soft washes on cream paper. */
+export function paintBotanical(seed: number) {
+  const w = 384, h = 512
+  const n = makeNoise(seed, 32)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.97 + (n(x / 20, y / 20, 3) - 0.5) * 0.05
+    return [248 * t, 244 * t, 234 * t]
+  })
+  const r = rng(seed)
+  const wash = (x: number, y: number, rx: number, ry: number, color: string, a: number) => {
+    g.fillStyle = color
+    g.globalAlpha = a
+    g.beginPath()
+    g.ellipse(x, y, rx, ry, r() * 3, 0, Math.PI * 2)
+    g.fill()
+    g.globalAlpha = 1
+  }
+  g.fillStyle = 'rgba(150,110,80,0.6)'
+  g.fillRect(40, 300, w - 80, 6)
+  const pots: [number, string][] = [[100, '#d9a07a'], [195, '#e8e2d6'], [290, '#b9805a']]
+  for (const [x, pot] of pots) {
+    for (let i = 0; i < 26; i++) {
+      const a = -Math.PI / 2 + (r() - 0.5) * 2.4, d = 20 + r() * 60
+      wash(x + Math.cos(a) * d, 250 + Math.sin(a) * d, 9 + r() * 6, 5 + r() * 3, r() < 0.5 ? '#6f9a5a' : '#9cbf7a', 0.55)
+    }
+    for (let i = 0; i < 12; i++) wash(x + (r() - 0.5) * 30, 320 + i * 12, 7, 4, '#7fa66a', 0.5)
+    g.fillStyle = pot
+    g.globalAlpha = 0.85
+    g.beginPath()
+    g.moveTo(x - 26, 260); g.lineTo(x + 26, 260); g.lineTo(x + 20, 300); g.lineTo(x - 20, 300)
+    g.fill()
+    g.globalAlpha = 1
+  }
+  for (let i = 0; i < 30; i++) wash(60 + r() * (w - 120), 400 + r() * 60, 6 + r() * 6, 3, '#a9c48d', 0.35)
   return toTexture(c)
 }

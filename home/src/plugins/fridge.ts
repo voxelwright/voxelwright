@@ -3,70 +3,103 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z } from '../layout'
-import { paintEnamel, paintPhoto } from '../paint'
+import { paintAlphabet, paintBrushed, paintKidDrawing, paintPhoto, rng } from '../paint'
 
-const PHOTOS = [
-  { kind: 'beach', x: -0.17, y: 1.52, rot: 0.08, magnet: '#d9534f' },
-  { kind: 'cat', x: 0.14, y: 1.42, rot: -0.1, magnet: '#f0ad4e' },
-  { kind: 'drawing', x: -0.12, y: 1.12, rot: -0.05, magnet: '#5bc0de' },
-  { kind: 'mountains', x: 0.16, y: 1.06, rot: 0.12, magnet: '#7cb35b' },
-] as const
+const KINDS = ['beach', 'cat', 'mountains', 'drawing'] as const
+const MAGNETS = ['#d9534f', '#f0ad4e', '#5bc0de', '#7cb35b', '#b388c9', '#f7e7c6']
 
+/**
+ * The heart of the kitchen: a stainless bottom-freezer fridge covered in
+ * polaroids, magnets, an alphabet poster and a child's drawing. Photos are
+ * painted placeholders until family privacy is in place.
+ */
 export default {
   name: 'fridge',
   inject: ['stage'],
   apply(ctx: Context) {
+    const low = ctx.stage.quality === 'low'
     const group = new THREE.Group()
     group.name = 'fridge'
-    const W = 0.78, H = 1.82, D = 0.68
+    const W = 0.72, H = 1.78, D = 0.68
     group.position.set(1.5, 0, WALL_Z + D / 2 + 0.02)
     group.rotation.y = -0.12
 
-    const enamel = new THREE.MeshPhysicalMaterial({
-      map: paintEnamel(9, [196, 222, 206]),
-      roughness: 0.32,
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.25,
-    })
-    const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 6, 0.09), enamel)
-    body.position.y = H / 2 + 0.06
+    const brushed = paintBrushed(9)
+    const steel = new THREE.MeshPhysicalMaterial({ map: brushed, color: '#eef0f2', metalness: 0.3, roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.3 })
+    const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 4, 0.03), steel)
+    body.position.y = H / 2 + 0.04
     body.castShadow = body.receiveShadow = true
     group.add(body)
 
-    // Freezer seam and chrome handles
-    const seam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.96, 0.008, 0.01), new THREE.MeshStandardMaterial({ color: '#7e958a' }))
-    seam.position.set(0, 1.4 + 0.3, D / 2 + 0.001)
+    const front = D / 2
+    const freezerTop = 0.62
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.012, 0.01), new THREE.MeshStandardMaterial({ color: '#4a4a4a' }))
+    seam.position.set(0, freezerTop, front + 0.001)
     group.add(seam)
-    const chrome = new THREE.MeshStandardMaterial({ color: '#e8e2d6', metalness: 1, roughness: 0.22 })
-    for (const [y, len] of [[1.84, 0.16], [1.3, 0.34]]) {
-      const handle = new THREE.Mesh(new RoundedBoxGeometry(0.035, len, 0.04, 3, 0.012), chrome)
-      handle.position.set(-W / 2 + 0.08, y, D / 2 + 0.035)
-      handle.castShadow = true
-      group.add(handle)
+    const handleMat = new THREE.MeshStandardMaterial({ color: '#d8d6d0', metalness: 1, roughness: 0.25 })
+    const door = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.6, 0.035, 3, 0.01), handleMat)
+    door.position.set(W / 2 - 0.06, 1.25, front + 0.03)
+    const drawer = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.03, 0.035, 3, 0.01), handleMat)
+    drawer.position.set(0, freezerTop - 0.06, front + 0.03)
+    for (const h of [door, drawer]) {
+      h.castShadow = true
+      group.add(h)
     }
-    const feet = new THREE.Mesh(new THREE.BoxGeometry(W * 0.9, 0.06, D * 0.9), new THREE.MeshStandardMaterial({ color: '#3a3430', roughness: 0.8 }))
-    feet.position.y = 0.03
-    group.add(feet)
 
-    // Photos held by round magnets
-    const magnetGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.012, 20)
-    PHOTOS.forEach((p, i) => {
+    // Laundry baskets on top, as in the real kitchen.
+    const rope = new THREE.MeshStandardMaterial({ color: '#efe8dc', roughness: 0.95 })
+    const band = new THREE.MeshStandardMaterial({ color: '#b48a5e', roughness: 0.9 })
+    for (const x of [-0.17, 0.17]) {
+      const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.2, 20, 1), rope)
+      basket.position.set(x, H + 0.04 + 0.1, 0)
+      basket.castShadow = true
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.152, 0.148, 0.035, 20, 1, true), band)
+      stripe.position.set(x, H + 0.04 + 0.04, 0)
+      group.add(basket, stripe)
+    }
+
+    // Everything stuck to the door sits just in front of it.
+    const magnetGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.01, 14)
+    const stick = (mesh: THREE.Mesh, x: number, y: number, rot: number, layer: number, magnet?: string) => {
+      mesh.position.set(x, y, front + 0.003 + layer * 0.0006)
+      mesh.rotation.z = rot
+      mesh.receiveShadow = true
+      if (magnet) {
+        const m = new THREE.Mesh(magnetGeo, new THREE.MeshStandardMaterial({ color: magnet, roughness: 0.3 }))
+        m.rotation.x = Math.PI / 2
+        const size = (mesh.geometry as THREE.PlaneGeometry).parameters.height
+        m.position.set(0, size / 2 - 0.015, 0.006)
+        m.castShadow = true
+        mesh.add(m)
+      }
+      group.add(mesh)
+    }
+
+    const alphabet = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.35), new THREE.MeshStandardMaterial({ map: paintAlphabet(3), roughness: 0.8 }))
+    stick(alphabet, -0.1, 1.05, 0.0, 0)
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.165), new THREE.MeshStandardMaterial({ map: paintKidDrawing(61), roughness: 0.9 }))
+    stick(art, 0.17, 0.95, 0.06, 1, '#e8a0bf')
+
+    // Polaroids, mostly on the upper door, a couple on the freezer.
+    const r = rng(42)
+    const count = low ? 10 : 16
+    const spots: [number, number][] = []
+    let s = 1
+    for (let i = 0; i < count; i++) {
+      const lower = i >= count - 3
+      let x = 0, y = 0
+      for (let tries = 0; tries < 20; tries++) {
+        x = -W / 2 + 0.09 + r() * (W - 0.24)
+        y = lower ? 0.2 + r() * 0.3 : 1.32 + r() * 0.42
+        if (spots.every(([sx, sy]) => Math.abs(sx - x) > 0.1 || Math.abs(sy - y) > 0.12)) break
+      }
+      spots.push([x, y])
       const photo = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.17, 0.2),
-        new THREE.MeshStandardMaterial({ map: paintPhoto(p.kind, 50 + i), roughness: 0.75 }),
+        new THREE.PlaneGeometry(0.09 * (s = 0.85 + r() * 0.5), 0.105 * s),
+        new THREE.MeshStandardMaterial({ map: paintPhoto(KINDS[Math.floor(r() * KINDS.length)], 50 + i), roughness: 0.7 }),
       )
-      photo.position.set(p.x, p.y, D / 2 + 0.003 + i * 0.0004)
-      photo.rotation.z = p.rot
-      photo.castShadow = true
-      photo.receiveShadow = true
-      const magnet = new THREE.Mesh(magnetGeo, new THREE.MeshStandardMaterial({ color: p.magnet, roughness: 0.3 }))
-      magnet.rotation.x = Math.PI / 2
-      magnet.position.set(0, 0.085, 0.006)
-      magnet.castShadow = true
-      photo.add(magnet)
-      group.add(photo)
-    })
-
+      stick(photo, x, y, (r() - 0.5) * 0.3, 2 + (i % 3), r() < 0.6 ? MAGNETS[i % MAGNETS.length] : undefined)
+    }
     own(ctx, group)
   },
 }

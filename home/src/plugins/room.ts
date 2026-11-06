@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
-import { paintWallpaper, paintWood } from '../paint'
+import { paintPlaster, paintWood } from '../paint'
 
 export default {
   name: 'room',
@@ -12,7 +12,7 @@ export default {
     const room = new THREE.Group()
     room.name = 'room'
 
-    const floorTex = paintWood({ seed: 11, planks: 8, light: [170, 116, 74], dark: [128, 82, 50], knots: 3 })
+    const floorTex = paintWood({ seed: 11, planks: 8, light: [222, 186, 140], dark: [176, 136, 96], knots: 2 })
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping
     floorTex.repeat.set(2, 3)
     floorTex.rotation = Math.PI / 2
@@ -24,7 +24,7 @@ export default {
     floor.receiveShadow = true
     room.add(floor)
 
-    const plaster = paintWallpaper(5, [246, 230, 204])
+    const plaster = paintPlaster(5, [246, 238, 224])
     plaster.wrapS = plaster.wrapT = THREE.RepeatWrapping
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
     const T = 0.18
@@ -51,8 +51,8 @@ export default {
 
     // Skirting board
     const skirt = new THREE.Mesh(
-      new THREE.BoxGeometry(6.8, 0.12, 0.03),
-      new THREE.MeshStandardMaterial({ color: '#7a5034', roughness: 0.7 }),
+      new THREE.BoxGeometry(6.8, 0.1, 0.02),
+      new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 }),
     )
     skirt.position.set(0, 0.06, WALL_Z + 0.015)
     room.add(skirt)
@@ -60,7 +60,7 @@ export default {
     own(ctx, room)
 
     // Soft bounce light from the warm room. The fire's own light lives in the hearth plugin.
-    const hemi = own(ctx, new THREE.HemisphereLight('#ffe6c4', '#7a5238', 1.1))
+    const hemi = own(ctx, new THREE.HemisphereLight('#fff0dc', '#a07a58', 1.6))
     hemi.name = 'room fill'
 
     ctx.effect(() => {

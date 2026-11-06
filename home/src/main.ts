@@ -8,20 +8,20 @@ import motes from './plugins/motes'
 import camera from './plugins/camera'
 import lamp from './plugins/lamp'
 import postfx from './plugins/postfx'
-import panelling from './plugins/panelling'
 import glass from './plugins/glass'
 import sunbeam from './plugins/sunbeam'
-import hearth from './plugins/hearth'
-import shelf from './plugins/shelf'
 import plant from './plugins/plant'
-import drawing from './plugins/drawing'
-import calendar from './plugins/calendar'
 import rimlight from './plugins/rimlight'
 import notebook from './plugins/notebook'
+import cabinets from './plugins/cabinets'
+import chairs from './plugins/chairs'
+import highchair from './plugins/highchair'
+import toyshelf from './plugins/toyshelf'
+import botanical from './plugins/botanical'
 
 const plugins = {
-  renderer, room, panelling, window: windowView, glass, sunbeam, table, fridge, hearth,
-  shelf, plant, drawing, calendar, motes, lamp, rimlight, camera, notebook, postfx,
+  renderer, room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
+  toyshelf, botanical, plant, motes, lamp, rimlight, camera, notebook, postfx,
 }
 // ?plugins=renderer,room loads a subset, used to measure baselines.
 const only = new URLSearchParams(location.search).get('plugins')?.split(',')
