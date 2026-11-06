@@ -22,7 +22,8 @@ the per-run temp directory, LANG, the npm cache). srt adds its proxy variables.
 
 Settings used (`filesystem` and `network` are both required):
 
-- `filesystem.denyRead`: `~`, the user temp directory, `/Library/Keychains`,
+- `filesystem.denyRead`: the controller's home and user temp directories as
+  absolute real paths, `/Library/Keychains`,
   `**/.env`, `**/.env.*`. `allowRead` (wins over `denyRead`, except for the
   more specific `.env` globs): the candidate repo, the Node install, the run's
   temp directory.
@@ -33,8 +34,15 @@ Settings used (`filesystem` and `network` are both required):
 
 ## Verified behaviour
 
-- Reads of `~/.ssh` and `~/Documents`, writes outside the allowed paths, and
-  `curl`/`fetch` to the internet all fail with EPERM or a proxy refusal.
+- Never write `~` in a path rule. srt expands it with `os.homedir()` in its
+  own process, which reads the HOME the host passes (the per-run temp
+  directory). Until November 6 the policy said `~`, so the real home was
+  readable inside the sandbox; the earlier claim here that `~/.ssh` reads
+  failed was wrong. Regression `sandbox-denies-home` now writes a synthetic
+  file under the real home and in the user temp directory and expects EPERM
+  for both, while the candidate stays readable.
+- Writes outside the allowed paths and `curl`/`fetch` to the internet fail
+  with EPERM or a proxy refusal.
 - A `vite.config.ts` that writes outside the candidate makes `vite build` exit
   non-zero with EPERM (`npm run regressions`, case
   `malicious-vite-config-under-srt`).

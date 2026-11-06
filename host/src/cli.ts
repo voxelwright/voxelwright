@@ -7,6 +7,7 @@ import { core } from './elder.ts'
 import claudeCode from './plugins/claude-code.ts'
 import codex, { codexDisabled } from './plugins/codex.ts'
 import homeChecks from './plugins/home-checks.ts'
+import { checkTimeoutMs } from './proc.ts'
 import { runOnce } from './run.ts'
 
 const { values, positionals } = parseArgs({
@@ -20,6 +21,15 @@ const { values, positionals } = parseArgs({
 const request = positionals.join(' ').trim()
 if (!request) {
   console.error('Usage: npm run elder -- "<request>" [--executor claude-code|codex] [--timeout-ms N] [--candidates DIR]')
+  process.exit(2)
+}
+
+// Number('') is 0 and Number('abc') is NaN; both would mean no deadline.
+let timeoutMs: number
+try {
+  timeoutMs = checkTimeoutMs(Number(values['timeout-ms']))
+} catch (error) {
+  console.error(String(error))
   process.exit(2)
 }
 
@@ -38,7 +48,7 @@ try {
     executor: values.executor,
     source: process.env.INIT_CWD ?? process.cwd(),
     candidatesRoot: values.candidates,
-    timeoutMs: Number(values['timeout-ms']),
+    timeoutMs,
   })
   console.log(JSON.stringify({ status: result.status, executor: result.executor, model: result.model, checks: result.checks, durations: result.durations, screenshot: result.screenshot, result: resultPath }, null, 2))
   process.exitCode = result.status === 'passed' ? 0 : 1

@@ -11,6 +11,7 @@
 // aborts when bootstrap_check_in is denied. home-checks.ts relies on Chrome's
 // own renderer sandbox instead (see there).
 import { spawn, type ChildProcess } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -20,6 +21,12 @@ import { exec, type ProcResult } from './proc.ts'
 const srt = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '.bin', 'srt')
 /** The Node install running the controller: …/bin/node → … */
 const nodePrefix = dirname(dirname(process.execPath))
+/**
+ * The controller's real home and temp directories, as absolute paths. srt
+ * expands `~` with its own os.homedir(), which reads the HOME this module sets
+ * to the per-run temp directory, so a `~` rule would deny only that.
+ */
+export const deniedRoots = [realpathSync(homedir()), realpathSync(tmpdir())]
 /** The Elder's own npm cache. The trusted lockfile's integrity hashes guard what comes out of it. */
 export const npmCache = join(homedir(), '.village', 'npm-cache')
 
@@ -48,7 +55,7 @@ export async function createSandbox(policy: SandboxPolicy): Promise<Sandbox> {
       allowLocalBinding: policy.network === 'loopback',
     },
     filesystem: {
-      denyRead: ['~', tmpdir(), '/Library/Keychains', '**/.env', '**/.env.*'],
+      denyRead: [...deniedRoots, '/Library/Keychains', '**/.env', '**/.env.*'],
       allowRead: [policy.repo, nodePrefix, tmp, ...(policy.network === 'npm' ? [npmCache] : [])],
       allowWrite: [home, tmp, ...(policy.network === 'npm' ? [npmCache] : [])],
       denyWrite: policy.network === 'npm' ? [] : [join(home, 'node_modules')],

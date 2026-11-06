@@ -16,7 +16,8 @@ export interface ProcOptions {
   cwd: string
   /** Passed as the whole environment. Callers build it from an allowlist; nothing is inherited. */
   env: NodeJS.ProcessEnv
-  timeoutMs?: number
+  /** Required: a whole number of milliseconds from 1 to MAX_TIMEOUT_MS. */
+  timeoutMs: number
   /** stdout and stderr are also appended here. */
   logFile?: string
 }
@@ -26,15 +27,29 @@ const PIPE_GRACE_MS = 1000
 /** How long SIGTERM gets before SIGKILL. */
 const KILL_GRACE_MS = 5000
 
+/** The longest deadline any command may get. */
+export const MAX_TIMEOUT_MS = 60 * 60_000
+
+/** Returns ms when it is a usable deadline; throws otherwise. NaN, 0, negatives, Infinity and fractions are refused. */
+export function checkTimeoutMs(ms: number): number {
+  if (!Number.isInteger(ms) || ms < 1 || ms > MAX_TIMEOUT_MS) throw new RangeError(`Timeout must be a whole number of milliseconds from 1 to ${MAX_TIMEOUT_MS}, got ${ms}`)
+  return ms
+}
+
 /**
- * Run a command in its own process group. It never rejects: a spawn error is
- * returned as spawnError. On timeout the whole group gets SIGTERM, then
+ * Run a command in its own process group. It rejects only for an invalid
+ * timeout, before anything starts; a spawn error is returned as spawnError. On timeout the whole group gets SIGTERM, then
  * SIGKILL. The promise resolves at the deadline (plus the kill grace) or once
  * the process has exited, without waiting for a descendant that left the
  * group and still holds stdout or stderr open.
  */
 export function exec(cmd: string, args: string[], options: ProcOptions): Promise<ProcResult> {
   const started = performance.now()
+  try {
+    checkTimeoutMs(options.timeoutMs)
+  } catch (error) {
+    return Promise.reject(error)
+  }
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
@@ -74,20 +89,18 @@ export function exec(cmd: string, args: string[], options: ProcOptions): Promise
       timers.push(setTimeout(finish, PIPE_GRACE_MS))
     })
     child.on('close', finish)
-    if (options.timeoutMs) {
-      timers.push(
-        setTimeout(() => {
-          timedOut = true
-          killGroup(child.pid, 'SIGTERM')
-          timers.push(
-            setTimeout(() => {
-              killGroup(child.pid, 'SIGKILL')
-              finish()
-            }, KILL_GRACE_MS),
-          )
-        }, options.timeoutMs),
-      )
-    }
+    timers.push(
+      setTimeout(() => {
+        timedOut = true
+        killGroup(child.pid, 'SIGTERM')
+        timers.push(
+          setTimeout(() => {
+            killGroup(child.pid, 'SIGKILL')
+            finish()
+          }, KILL_GRACE_MS),
+        )
+      }, options.timeoutMs),
+    )
   })
 }
 

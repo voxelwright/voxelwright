@@ -27,6 +27,8 @@ export interface ExecutorOutcome {
   model: string
   durationMs: number
   detail?: string
+  /** What the executor reported about its session: servers, tools, usage, cost. */
+  report?: Record<string, unknown>
 }
 
 export interface Executor {
@@ -46,11 +48,11 @@ export interface Check {
   /** Runs before the executor, to record the base the check compares against. */
   prepare?(candidate: Candidate): Promise<void>
   run(candidate: Candidate): Promise<Omit<CheckResult, 'durationMs'>>
-  /** 'in-page': the result comes from code that shares a page with the candidate. A failure counts; a pass proves nothing. */
+  /** 'in-page': the result comes from code that shares a page with the candidate, which can fake it. A failure is a warning; it never decides the status. */
   evidence?: 'in-page'
 }
 
-/** The checks a run must have, in order. A run with any of them missing fails. */
+/** The checks a run must have, in order. A run with any of them missing fails. The ones without in-page evidence are the gates. */
 export const EXPECTED_CHECKS = ['controller-files', 'build', 'screenshot', 'plugin-lifecycle'] as const
 
 export class Elder {
