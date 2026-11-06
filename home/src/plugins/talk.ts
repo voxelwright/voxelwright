@@ -750,16 +750,15 @@ export default {
         frontMat.map = blankTex
         backMat.map = blankTex
         if (k >= n) return
-        // Every sheet carries the pages it moves between, so a quick flip reads as written pages.
+        // The first leaf lifts the old page and the last one lands the new page; leaves between are blank paper.
+        const lifts = k === 0, lands = k === n - 1
         if (dir === 1) {
-          copyInto(oldRight, sheetFronts[k])
-          mirrorInto(scratch, sheetBacks[k])
+          if (lifts) { copyInto(oldRight, sheetFronts[k]); frontMat.map = s.frontTex }
+          if (lands) { mirrorInto(scratch, sheetBacks[k]); backMat.map = s.backTex }
         } else {
-          mirrorInto(oldLeft, sheetBacks[k])
-          copyInto(scratch, sheetFronts[k])
+          if (lifts) { mirrorInto(oldLeft, sheetBacks[k]); backMat.map = s.backTex }
+          if (lands) { copyInto(scratch, sheetFronts[k]); frontMat.map = s.frontTex }
         }
-        frontMat.map = s.frontTex
-        backMat.map = s.backTex
         frontMat.map.needsUpdate = true
         backMat.map.needsUpdate = true
         frontMat.needsUpdate = backMat.needsUpdate = true
