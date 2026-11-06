@@ -16,6 +16,8 @@ the requested behavior. Read only the relevant reference:
   [orchestration](references/orchestration.md), including the small local proof.
 - For role prompts, provider hooks, packs, skills, or scheduled reflection, read
   [context delivery](references/context.md).
+- For a Codex worker's MCP server/tool/resource admission or effective-config
+  checks, read [Codex capabilities](references/codex-capabilities.md).
 
 Keep trusted verification, immutable review-head binding, verdict aggregation,
 owner authorization and release policy outside candidate/model control. A role
