@@ -24,10 +24,11 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   `[#<issue>] <change>`.
 - The lead routes work and delegates it. Builders write code in their own
   worktrees.
-- Every change gets the default gate before it lands on the integration
-  branch. The builder runs the changed flow and its tests, one
-  `.agents/skills/adversarial-review` pass reviews it, and the lead checks the
-  result. A mocked provider proves orchestration only, never a model
+- Default gate: the builder runs the changed flow and its tests, and the lead
+  checks the result before it lands on the integration branch `feature/village`.
+  One `.agents/skills/adversarial-review` pass then reviews each batch on the
+  integration branch; confirmed findings are fixed forward. Nothing leaves the
+  integration branch unreviewed. A mocked provider proves orchestration only, never a model
   integration. Say which one you ran.
 - Use the seven-lens `.agents/skills/reviewers` review only for changes to
   privacy boundaries, authentication, the data model or migrations (always
@@ -47,6 +48,10 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 
 ## Agents and models
 
+- A lock file on the maintainer's machine can block agents from `codex`,
+  `gcloud` and related tools. Never work around it (for example with an
+  app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
+  until the owner authorizes a specific use.
 - Choose each subagent's model by task. Use Haiku or Sonnet for lookups,
   summaries and routine code, and Opus at medium effort for architecture, hard
   debugging and high-stakes calls. Use GPT-6.1 Sol through T3 delegation when it
