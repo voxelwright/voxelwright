@@ -151,6 +151,28 @@ heads. Pinned sources: [route](https://github.com/gastownhall/gascity/blob/v1.5.
 [library close](https://github.com/gastownhall/gascity/blob/v1.5.1/internal/beads/bdstore.go#L2696-L2702)
 and [unadopted upstream close change](https://github.com/steveyegge/beads/commit/6d27a4f96e7fb74e2db516d7be9c80475f59dbef).
 
+## Explicit completed-round adoption
+
+Village's native-adoption candidate
+uses `review-adopt --round ... --reason ...` to settle one already completed
+follow-up into a held native review task. Journal selection/report/prompt/event
+hashes and previous pointers before the effect; require native readback and
+local settlement before repair admission. Recheck reports after acknowledgement.
+After an applied update loses its acknowledgement, reconcile from native
+readback without a duplicate effect or model call. Default replay preserves the
+adopted pointer. One immutable
+adoption per native review task is the bounded lifecycle, not an adoption chain.
+
+Actual Gas City 1.5.1 / Beads 1.3.2 proof at runtime `58848eb` used generated
+providers: one adoption effect, zero extra updates during dropped-acknowledgement
+reconciliation and zero live models. It proves admission only; a separate local
+synthetic gate completed a repair. The later test-only `96bfa5b` adds a regression
+that rejects changed report bytes immediately after native acknowledgement;
+removing the existing recheck fails the intended assertion. Runtime is unchanged.
+Status/assignee guards are not a metadata revision compare-and-swap against an
+external writer retaining both. Inspected upstream `--if-revision` is source-only
+and unadopted. This candidate proves no whole formula workflow or release.
+
 ## Confirmed adapter lessons
 
 These are confirmed Village integration lessons, **not native Gas City bugs**.
