@@ -114,7 +114,11 @@ export function promote(options: PromoteOptions): Promise<Outcome> {
       return refuse('missing-candidate', `I couldn't find a checked candidate called ${id}, so there's nothing to put into the home.`, { candidate: id })
     }
     if (checked.status !== 'passed') {
-      const failing = Object.entries((checked.checks ?? {}) as Record<string, string>).filter(([, v]) => v !== 'pass').map(([k, v]) => `${k} ${v}`)
+      const executor = (checked.executorOutcome as { status?: string } | undefined)?.status
+      const failing =
+        executor && executor !== 'completed'
+          ? [`the change itself ${executor === 'timeout' ? 'ran out of time' : 'did not finish'}, so nothing was checked`]
+          : Object.entries((checked.checks ?? {}) as Record<string, string>).filter(([, v]) => v !== 'pass').map(([k, v]) => `${k} ${v}`)
       refuse('not-passed', `${id} didn't pass its checks${failing.length ? ` (${failing.join(', ')})` : checked.error ? ` (${checked.error})` : ''}, so it stays out of the home.`, { candidate: id, status: checked.status })
     }
     const files = checked.files as Record<string, Hash> | undefined

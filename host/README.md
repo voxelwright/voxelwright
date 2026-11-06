@@ -205,15 +205,19 @@ promotion gave it (a hand edit or a later promotion). Every attempt, refused
 or not, appends a line with a plain message to `results.jsonl`.
 
 `npm run check-promote` (November 6, 2026, headless Chrome, 1280×800,
-`?q=low`): 19 of 19 steps. A passing candidate's red box was in the kernel's
-active list and on screen (7.3% of pixels newly red; noise 0.003%) 262 ms
-after the promote command returned, with no page load; rollback took it out in
-271 ms and left no file, as recorded. Each refusal (no `--approve`, missing,
-failed, edited after the check, uncommitted live changes, rollback over a
-hand edit) exited 1 and wrote its entry. The proof:
-`proof/20261106T233029-promote.json`.
+`?q=low`): 19 of 19 steps. The promote command took 1.2 s; the candidate's red
+box was then in the kernel's active list and on screen (7.3% of pixels newly
+red; noise 0.003%) 854 ms later, with no page load. Rollback took 0.8 s and
+the box was gone 328 ms later, with no file left, as recorded. Earlier run on
+the same code: 739 + 262 ms and 550 + 271 ms. Each refusal (no `--approve`,
+missing, failed, edited after the check, uncommitted live changes, rollback
+over a hand edit) exited 1 and wrote its entry. Proof:
+`proof/20261106T234036-promote.json`. `npm run regressions`: 24 of 24.
 
-Not yet: a hot-added plugin is loaded globally, not into a room plan, until
+Not yet: rollback has only been proved for an added file (restoring an
+earlier version is untested), and a hash failure partway through a
+promotion or rollback stops with an error and leaves the live tree dirty,
+which the next attempt refuses. A hot-added plugin is loaded globally, not into a room plan, until
 the next page load; `ready()` does not list it. Two promotions at once are not
 locked against each other. The live server runs Vite dev, not a production
 build, and is not sandboxed (it runs only controller-owned config; promoted
