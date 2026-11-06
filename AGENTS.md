@@ -34,6 +34,9 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   include Codd), network or device control, firmware, or the factory's own
   permission policy.
 - Tilt is optional. Use the shortest repeatable local proof.
+- The owner works on this Mac while agents run. Never open visible browser
+  windows or GUI apps: run Chrome/Playwright headless (WebGPU flags or a
+  WebGL2 fallback), or use the Ally for anything that needs a display.
 - Keep evidence short: the command, the result and the measurements that matter.
   Routine changes need no receipt archives.
 - Keep README commands current. Update the private handbook (`docs/`) at
