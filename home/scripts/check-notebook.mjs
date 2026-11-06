@@ -85,17 +85,16 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   check('click outside goes back instantly with reduced motion', dist(back, seat) < 0.05, { back, seat })
 
   // Unload: DOM, listeners and page texture go away cleanly; reload works.
-  const before = await page.evaluate(() => window.village.snapshot())
+  const controls = '.village-offscreen, [data-entry="notebook"]'
+  const before = await page.evaluate((sel) => ({ ...window.village.snapshot(), controls: document.querySelectorAll(sel).length }), controls)
   await page.evaluate(() => window.village.unload('notebook'))
   await page.waitForTimeout(300)
-  const controls = '.village-offscreen, [data-entry="notebook"]'
   const after = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
   check('unload removes the notebook controls and frame hook', after.dom === 0 && after.s.frameHooks === before.frameHooks - 1 && !after.s.plugins.registered.includes('notebook'), { dom: after.dom, hooks: [before.frameHooks, after.s.frameHooks] })
   await page.evaluate(() => window.village.load('notebook'))
   await page.waitForTimeout(400)
   const again = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
-  // The input, the villager's reply live region (#40) and the entry button.
-  check('reload restores it', again.dom === 3 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
+  check('reload restores it', again.dom === before.controls && before.controls > 0 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
   await context.close()
 }
 

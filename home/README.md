@@ -327,3 +327,49 @@ distinctness and fit with the room. Means over seven categories:
 Every round asked for better grounding (contact shadows, warm rim light) and
 complained when furniture hid villagers from the seated view. Screenshots are
 in `screenshots/talk/`.
+
+## Notebook, richer (#42 prototype)
+
+`?talk=notebook` swaps the table's notebook for a closed linen book
+(`src/plugins/talk.ts`; `notebook.ts` returns early on the same flag). Choose
+it and the cover swings open while the camera eases down. A cloth ribbon per
+villager spills from the pages onto the table, each ending in a sewn tag with
+the villager's mark and name; the chosen one also lies down the gutter. Paper
+tabs on the fore-edge open Talk and Tasks. Changing villager flips four
+leaves, changing section or PgUp/PgDn turns one; with reduced motion the book
+opens and turns instantly.
+
+Alex's villager is live through the host API (`src/villager.ts`). June and
+Bram are synthetic: their pages say they are not awake yet and take no
+writing. Tasks are a synthetic sample list; ticks are kept in local storage
+(`village.talk.tasks`), as is the place in the book. A line that could not be
+sent stays on the page marked "kept here, not sent" and is never resent on
+its own. All text is painted on the paper; the DOM holds one off-screen input
+and one polite live region.
+
+Keys while open: type and Enter to write; ← → another villager (when the line
+is empty); ↑ ↓ Talk or Tasks; PgUp PgDn earlier and later pages; Tab moves a
+warm highlight over ribbons, tabs and tasks and Enter or Space chooses;
+Escape closes. The pencilled key note on the villager's card is rubbed out
+after the first arrow key. Pointer: click a tag, a tab, a task, or the
+"earlier"/"later" corners.
+
+`node scripts/check-talk-notebook.mjs` starts a stub host and dev server on a
+temporary root and proves, headless: no change without the flag; the book
+takes the table's place; Tab and Enter open it; ArrowRight flips to June,
+who takes no writing; a click on Alex's tag turns back; a line gets a reply
+written gradually; Tab and Enter tick one task and a click ticks another;
+Escape closes; ticks, place and the last answer survive a reload; unload and
+load are clean. 15 of 15 passed (stub host, November 6, 2026).
+
+Real exchange through the new notebook (Sonnet, operator login, M1 Pro),
+line "Could you help me remember to water the fern?": one note written,
+then a four-sentence reply. First text 10.0 s and whole turn 10.7 s measured
+in the host; $0.0103. Screenshots: `screenshots/talk/notebook-*.jpg`.
+
+Look, ui-craft rounds (fresh Opus each round, screenshots at `?q=high` and
+`?q=low` plus the rubric, "real object, not an app" and friction): mean 6.1,
+6.9, 6.9, 6.9; lowest category 5, 6, 6, 5. The 9/10 bar was not reached.
+Opus only; no GPT reviewer this slice. Still named: motion polish of the
+multi-leaf flip, the sun band across the writing page, and the key note
+printed on the paper.
