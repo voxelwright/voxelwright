@@ -5,7 +5,7 @@ description: Configure or debug Village's Gas City formulas, agent execution, ro
 
 # Gas City orchestration
 
-Grounded on **Gas City 1.5.1**, refreshed **2026-11-05**. This is expertise for
+Grounded on **Gas City 1.5.1**, refreshed **2026-11-06**. This is expertise for
 Village's observed integration needs, not certification of the whole platform.
 
 Start with the installed version and the actual city/provider/store configuration.
@@ -14,6 +14,9 @@ the requested behavior. Read only the relevant reference:
 
 - For stages, dependencies, checks, gates, retries, or execution runtimes, read
   [orchestration](references/orchestration.md), including the small local proof.
+- For the separate confirmed-case candidate with unreleased Beads, read the
+  [revision contract](../beads-memory/references/revision-cas.md); it does not
+  upgrade the established 1.3.2 memory/tracking baseline or existing stores.
 - For role prompts, provider hooks, packs, skills, or scheduled reflection, read
   [context delivery](references/context.md).
 - For a Codex worker's MCP server/tool/resource admission or effective-config

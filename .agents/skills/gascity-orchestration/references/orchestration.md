@@ -225,8 +225,21 @@ synthetic gate completed a repair. The later test-only `96bfa5b` adds a regressi
 that rejects changed report bytes immediately after native acknowledgement;
 removing the existing recheck fails the intended assertion. Runtime is unchanged.
 Status/assignee guards are not a metadata revision compare-and-swap against an
-external writer retaining both. Inspected upstream `--if-revision` is source-only
-and unadopted. This candidate proves no whole formula workflow or release.
+external writer retaining both. Within that adoption candidate, inspected upstream `--if-revision` remains
+source-only and unadopted. The separate confirmed-case candidate below qualifies
+a newer isolated path. Neither candidate proves a whole formula workflow or release.
+
+## Separate confirmed-case revision path
+
+PR 30 at `fcec37f65cbc98ed066eb5aac7425704dfe491de` qualifies explicit receipt-bound case resolution at measured runtime `de283ab2b2eca1fce00380830388b9fbb9d18048` with Gas City 1.5.1, unreleased Beads and private official Dolt 2.6.0 in proxied-server mode. Load the [Beads revision reference](../../beads-memory/references/revision-cas.md) for the exact contract, binary/build provenance, typed metadata merge, actual post-read refusal and partial revision coverage. The old 1.3.2 status/assignee-only predicates did not prevent that metadata race. Inline revision syntax retains the positional exact-ID checks; missing aliases refuse without mutation, while the distinct GC collision branch remains source-inspected only.
+
+The fresh 79-test gate and actual native flow passed with generated providers and no models, leaving review held. Three cleanup stages exited zero with no survivors. Historical setup/preflight/typing/oracle failures remain separate. This does not upgrade a live store, change the installed baseline, qualify a whole formula/reviewer/repair workflow or establish a new model integration. Refresh the affected native proof when these interfaces or dependency identities change.
+
+## Bounded native author/check route
+
+The source-bound author/check record qualifies a narrower stage than the full reviewer/repair workflow. Save the stable convoy before cook; reconcile an uncertain acknowledgement from unique attached graph readback and refuse automatic repetition when the effect is unknown. Take the route lock before inspecting saved intent. Join current root lifecycle, graph attachment and author completion to the saved route/claim around waits and canonical verification. These are point-in-time adapter readbacks, not a native atomic snapshot or store CAS.
+
+Historical complete native PASS belongs to `a164e65`; R9 runtime `aeaab145` passed its 40-test Linux gate and a real author/check but failed the fixture-restoration comparator overall. Do not transfer the earlier restart proof to the repaired source. Native edits/restoration can advance the root revision and its dependency projection even when visible semantic state is restored. A source-grounded proof correction and complete rerun remain pending. Keep failed cleanup or failed proof controls failed. The child native review-step has no accepted qualification in this snapshot. These are manually authored candidate lessons, not automatic skill promotion or a trusted-controller policy change.
 
 ## Confirmed adapter lessons
 

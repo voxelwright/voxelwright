@@ -10,6 +10,9 @@ Load only the reference needed for the task:
 
 - For remember/upsert/recall/search/forget or prompt injection, read
   [native memory](references/native-memory.md), including the synthetic probe.
+- For explicit confirmed-case resolution using the isolated unreleased revision
+  interface, read [revision CAS](references/revision-cas.md). Memory/tracking
+  remains on the recorded 1.3.2 baseline; this is not an existing-store upgrade.
 - For periodic reflection, coding-rule consolidation, compaction or reviewer
   lesson promotion, read [reflection boundaries](references/reflection.md).
 - For detailed project tasks, dependencies, claims and issue-record recovery,
