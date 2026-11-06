@@ -1,5 +1,5 @@
-// Scripted run in a real, headed Google Chrome.
-// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--unload]
+// Scripted run in Google Chrome, headless unless --headed is passed.
+// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--unload] [--headed]
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -9,18 +9,18 @@ const flag = (name) => args.includes(`--${name}`)
 
 const browser = await chromium.launch({
   channel: 'chrome',
-  headless: false,
-  args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-position=0,0'],
+  headless: !flag('headed'),
+  args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist', '--window-position=0,0'],
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
 const errors = []
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 page.on('pageerror', (e) => errors.push(String(e)))
 await page.goto(url)
-await page.evaluate(() => window.village.ready())
+const readiness = await page.evaluate(() => window.village.ready())
 await page.waitForTimeout(2000)
 
-const result = { url }
+const result = { url, readiness }
 result.loaded = await page.evaluate(() => {
   const { objects, ...rest } = window.village.snapshot()
   return rest
@@ -61,7 +61,7 @@ if (flag('perf')) {
 if (shot) await page.screenshot({ path: shot })
 
 if (flag('unload')) {
-  const strip = (s) => ({ plugins: s.plugins.length, sceneObjects: s.sceneObjects, objects: s.objects.join('|'), frameHooks: s.frameHooks, geometries: s.geometries, textures: s.textures, fog: s.fog, drawSwapped: s.drawSwapped })
+  const strip = (s) => ({ plugins: s.plugins.active.length, sceneObjects: s.sceneObjects, objects: s.objects.join('|'), frameHooks: s.frameHooks, geometries: s.geometries, textures: s.textures, fog: s.fog, drawPasses: s.drawPasses })
   const frame = () => page.waitForTimeout(300)
   const proof = {}
   for (const name of ['fridge', 'postfx', 'room']) {
@@ -88,3 +88,4 @@ if (flag('unload')) {
 result.errors = errors
 console.log(JSON.stringify(result, null, 2))
 await browser.close()
+if (!readiness.ok) process.exitCode = 1

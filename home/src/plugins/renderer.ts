@@ -20,13 +20,22 @@ export default {
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)
     const backend = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2'
 
+    const passes: Array<() => void> = []
     const stage: Stage = {
       renderer,
       scene,
       camera,
       quality,
       backend,
-      draw: () => renderer.render(scene, camera),
+      draw: () => (passes.at(-1) ?? (() => renderer.render(scene, camera)))(),
+      addDrawPass: (pass) => {
+        passes.push(pass)
+        return () => {
+          const i = passes.lastIndexOf(pass)
+          if (i >= 0) passes.splice(i, 1)
+        }
+      },
+      drawPasses: () => passes.length,
     }
 
     const canvas = renderer.domElement

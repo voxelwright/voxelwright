@@ -1,6 +1,6 @@
 // The plugin kernel is Cordis. This file only adds what Village needs on top:
-// a typed stage service, scene-object ownership that reverses on unload, and
-// Vite hot replacement that disposes the old fiber before loading the new one.
+// a typed stage service, scene-object ownership that reverses on unload, plugin
+// failure handling, and Vite hot replacement that disposes the old fiber first.
 import { Context, type Fiber, type Plugin } from 'cordis'
 import type * as THREE from 'three/webgpu'
 
@@ -12,8 +12,15 @@ export interface Stage {
   camera: THREE.PerspectiveCamera
   quality: Quality
   backend: 'WebGPU' | 'WebGL2'
-  /** The function that draws one frame. Post-processing swaps it and restores it on unload. */
+  /** Draws one frame with the most recently added draw pass, or a plain render. */
   draw: () => void
+  /**
+   * Add a draw pass that replaces the plain render while it is present. Returns
+   * its removal. Passes are removed by identity, so plugins can unload in any order.
+   */
+  addDrawPass: (pass: () => void) => () => void
+  /** How many draw passes are present, for inspection. */
+  drawPasses: () => number
 }
 
 declare module 'cordis' {
@@ -22,15 +29,37 @@ declare module 'cordis' {
   }
   interface Events {
     'village/frame'(dt: number, elapsed: number): void
+    'village/plugin-error'(name: string, error: unknown): void
   }
 }
 
 export const root = new Context()
 const fibers = new Map<string, Fiber>()
+/** Plugins whose last load failed, with the error. Cleared by the next load of that name. */
+const failures = new Map<string, unknown>()
+
+// Cordis FiberState values (a const enum in its typings, so not importable at runtime).
+const FAILED = 3
+
+// A plugin whose apply throws ends in FAILED after Cordis has already run the
+// effects it registered. Surface the error and free the name for a fixed version.
+// root.plugin() returns a wrapper whose prototype is the fiber, hence the lookup.
+root.on('internal/status', (fiber) => {
+  if (fiber.state !== FAILED) return
+  const name = [...fibers].find(([, f]) => Object.getPrototypeOf(f) === fiber || f === fiber)?.[0]
+  if (!name) return
+  const error = (fiber as unknown as { _error: unknown })._error
+  fibers.delete(name)
+  failures.set(name, error)
+  console.error(`Village plugin "${name}" failed to load:`, error)
+  root.emit('village/plugin-error', name, error)
+  void fiber.dispose()
+})
 
 export function load(plugin: Plugin & { name: string }): Fiber {
   const existing = fibers.get(plugin.name)
   if (existing) return existing
+  failures.delete(plugin.name)
   const fiber = root.plugin(plugin)
   fibers.set(plugin.name, fiber)
   return fiber
@@ -42,6 +71,18 @@ export async function unload(name: string): Promise<boolean> {
   fibers.delete(name)
   await fiber.dispose()
   return true
+}
+
+export type PluginState = 'active' | 'loading' | 'waiting' | 'failed'
+
+/** Each registered or failed plugin and its state. Waiting means a service it injects is missing. */
+export function pluginStates(): Record<string, { state: PluginState; error?: string }> {
+  const states: Record<string, { state: PluginState; error?: string }> = {}
+  for (const [name, fiber] of fibers) {
+    states[name] = { state: fiber.state === 2 ? 'active' : fiber.state === 0 ? 'waiting' : 'loading' }
+  }
+  for (const [name, error] of failures) states[name] = { state: 'failed', error: String(error) }
+  return states
 }
 
 /** Dev hot reload: dispose the running version, then load the edited module. */

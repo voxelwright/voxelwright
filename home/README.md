@@ -9,13 +9,22 @@ All textures are painted in code in `src/paint.ts`.
 ```sh
 npm install
 npm run dev            # http://localhost:5181, add ?q=low for phones
-npm run measure -- --perf --unload   # with the dev server running
+npm run measure -- --perf --unload   # with the dev server running, headless
+node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 npm run typecheck
 npm run build
 ```
 
 `?plugins=renderer,room` loads only the named plugins. `window.village` exposes
-`snapshot()`, `load(name)` and `unload(name)` for inspection.
+`snapshot()`, `load(name)`, `unload(name)` and `ready()` for inspection.
+
+A plugin whose `apply` throws is logged, emits `village/plugin-error`, has its
+effects released and is removed from the registry, so a fixed version can load
+under the same name. `ready()` resolves once every requested plugin is active
+or failed and returns `ok`, the active list and any problems. `snapshot()`
+separates registered, active and failed plugins. Post-processing adds a draw
+pass with `stage.addDrawPass()`; passes are removed by identity, so plugins can
+unload in any order.
 
 ## Plugins
 
@@ -30,7 +39,7 @@ updates by disposing the running fiber and loading the edited module.
 ## Measured (November 6, 2026)
 
 Command: `node scripts/measure.mjs [url] --perf --unload --shot=path` with
-the dev server on port 5181. It drives headed Google Chrome through Playwright
+the dev server on port 5181. It drove headed Google Chrome through Playwright
 1.65 at 1440×900. Hardware: Apple M1 Pro with a 120 Hz display.
 Backend: WebGPU.
 
