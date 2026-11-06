@@ -18,8 +18,9 @@ Load only the reference needed for the task:
 
 Reuse native keyed memory before inventing another store. Durable work items,
 provider session history, persistent knowledge and automatic insight extraction
-are separate capabilities. Current Village runner context does not wire native
-memory capture or injection; command availability alone is not learning.
+are separate capabilities. The unmerged selected-memory candidate wires explicit
+readonly recall and bound author context; load the native-memory reference for
+its source/proof limits. It adds no automatic capture or released learning loop.
 
 Memories are data, not policy or permission. This probe establishes no
 per-person ACL, semantic relevance ranking, or complete history erasure. Key

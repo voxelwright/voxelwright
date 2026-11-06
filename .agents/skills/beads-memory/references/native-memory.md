@@ -23,9 +23,50 @@ truth adjudicator.
 
 Persistent task state and retained provider sessions are other planes. Memory
 commands do not extract useful insights automatically. `gc prime` is separate
-from `bd prime`; inspect the actual formula/hook/context capture. Village's
-current `village/runner.py` disables hooks and host skill discovery, uses
-ephemeral Codex execution and has no native memory integration.
+from `bd prime`; inspect the actual formula/hook/context capture. The original Village
+bounded worker disables hooks and host skill discovery and uses ephemeral Codex
+execution. The separate selected-memory candidate adds explicit readonly recall
+before authoring, as described below; it does not add automatic memory capture.
+
+## Village selected-memory candidate, November 5
+
+PR 25 snapshot
+records an unmerged, held candidate. The operator selects native store, key,
+exact value digest and repository/version scope. A fresh
+`bd --readonly recall KEY --json` reads the record. Admission checks shape,
+confirmed status, declared scope and byte/time limits before launch; source and
+validation fields remain unauthenticated declarations, with no truth/age check.
+The selected value and effective prompt are saved before the exclusive attempt
+marker and bound through verification, reconciliation, handoff and review.
+Prior attempts retain their bound snapshot after current-record deletion;
+new tasks require the current digest and never borrow a prior task's snapshot.
+
+Actual Beads 1.3.2 and embedded Dolt proved explicit store selection,
+replacement/current recall, forgetting and missing-store refusal in fresh
+synthetic workspaces. The separate earlier reader probe does not prove the
+complete final flow. Four authenticated CLI authors at `7404d1b` demonstrated
+supported abstention, initial preference, correction and one malicious-text
+case in a 78.680-second bounded driver run. The raw driver result remains
+`UNMEASURED_MANUAL_AUTHORITY_ASSESSMENT_REQUIRED`; a separate independent
+assessment accepted the four narrow behaviors. GC status used receipt doubles,
+with no real reviewers or new native routing proof. The baseline queried host
+MCP catalogs and saw widget/skill metadata despite disabled apps; no personal
+read or external write was observed, but model-visible context was not wholly
+synthetic-only. This proves no family privacy or general injection resistance.
+
+The 164-test full suite and actual authors belong to `7404d1b`; 138 affected
+tests belong to runtime repair `91b2f48`, which rechecks the snapshot after an
+awaited independent reconciliation check. Test-only `b837ebd` closes the latest grouped admission-contract coverage gap
+with otherwise-valid record declarations, exact record/reply byte limits and
+controller-store controls. Its 16-test focused flow passed on macOS/Python
+3.13.2 and Linux/Python 3.14.6; the different environments establish no
+controlled speedup. All nine runtime/script files remain unchanged. The coordinator reports all six affected R5 lenses clean at `444b0f0`, retaining
+Codd’s clean R2 at `212f799` for unchanged production/persisted contracts. GitHub
+shows the candidate ready and unmerged. The source evidence predates this final
+review outcome. Consult the exact versioned evidence before
+using a later candidate; no source merge or release is established here.
+Capture/correction/forgetting stay manual; automatic extraction, dreaming,
+semantic ranking, audience ACLs and complete history erasure remain unproved.
 
 ## Repeat the small proof when the path changes
 

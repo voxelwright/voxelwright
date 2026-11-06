@@ -114,3 +114,16 @@ assert the absence of effects; testing a validator alone does not prove its call
 uses it before creation. Include every configured role in registration checks.
 The source-bound regression and mutation controls are in the linked handoff record;
 these are candidate engineering instructions, not automatic memory learning.
+
+Source-bound contract/testing lessons from the selected-memory and execution-facts
+candidates: independently exercise declared input contracts with otherwise-valid
+fixtures, including exact byte limits so a broader guard cannot hide the missing
+one. Require a mutation to fail the intended acceptance assertion; an unrelated
+mock `TypeError` or cleanup error is not a completed control. Preserve reproduced
+failing counterexamples even when a later lens omits them, and freeze source
+through gates so a successful mixed-source run is not attributed to one head.
+The memory record
+and execution-facts record
+retain originating gaps, corrected assertions and incomplete controls. These are
+manually authored candidate instructions; independent Editor review precedes
+adoption. They do not prove automatic lesson capture or source-review completeness.

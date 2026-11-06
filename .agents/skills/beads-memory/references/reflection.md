@@ -72,11 +72,21 @@ and the testing guidance in [technology grounding](../../technology-grounding/SK
 These are scoped examples for reviewed candidate guidance, not an implemented
 memory capture or automatic promotion loop.
 
+The selected-memory and execution-facts candidates add source-bound contract
+and test-oracle lessons to the existing
+[technology-grounding guidance](../../technology-grounding/SKILL.md): use
+otherwise-valid boundary fixtures, require the intended mutation assertion,
+retain reproduced counterexamples and bind gates to immutable source. These
+manual candidate updates still need independent Editor review; no automatic
+reviewer extraction, reflection or promotion is implemented. The bounded
+selected-memory trial in [native memory](native-memory.md) changes that
+candidate's author context only; it does not make reflection run.
+
 ## Bounded research lessons, November 5
 
 A read-only Living Brain assessment recommends improving the lifecycle around
-native Beads before adopting another store. This is proposed guidance, not a
-Village capture/retrieval integration. Preserve source and repository/version
+native Beads before adopting another store. This broader lifecycle remains proposed; the separate selected-memory candidate
+now exercises explicit bounded recall, not automatic capture or consolidation. Preserve source and repository/version
 scope, validation date, candidate/confirmed/stale/contested status and correction
 or counterevidence. Apply authorization and eligibility before relevance; use
 bounded task context. A score, recent access or model agreement is not validation.
