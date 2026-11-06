@@ -168,7 +168,57 @@ With the sandbox and gates (November 6, 2026, same Mac):
   fails.
 - Neither executor can look at the scene, so `ui-craft`'s screenshot loop is
   not run.
-- Promotion, hot-swap, rollback, review and a chat surface are later units.
+- Review and a chat surface are later units. Promotion and rollback: below.
+
+# Live home, promotion and rollback (#43)
+
+```sh
+npm run live -- install [--live ~/.village/live] [--commit HEAD]
+npm run live -- serve [--port 5183]
+npm run live -- status
+npm run elder -- promote <candidate-id> --approve
+npm run elder -- rollback [promotion-id|last]
+npm run check-promote          # headless proof, stub executors, scratch live home
+```
+
+`install` copies `home/` at one commit with `git archive` (new files, then
+`assertNoSharedInodes` against the checkout), starts a git repository there,
+and runs `npm ci`. `node_modules`, `dist`, `server.json` and `results.jsonl`
+are ignored, so they never count as uncommitted. `serve` runs the live home's
+own Vite with one extra plugin (`src/live-vite.ts`): a new file in
+`src/plugins/` is loaded into the running page through the dev kernel, and a
+deleted one is unloaded, instead of Vite reloading the page. Edited plugin
+files hot-swap as before. Nothing in `home/` changes for this.
+
+`promote` needs `--approve` on the command line; nothing a candidate or model
+wrote counts as approval. It also needs `result.json` with `passed`,
+`controller-files` passing, and the per-file sha256 that runs now record
+under `files` at check time. Every changed path must be under
+`home/src/plugins/`, and the working tree, the candidate commit's blobs and
+the recorded hashes must agree. The live install must have no uncommitted
+changes. It copies the files, appends a promotion entry (candidate, files,
+hashes before and after, the live commit before) to `promotions.jsonl`, and
+commits with the hardened git flags. `rollback` restores each file from that
+earlier live commit, checks it against the recorded hash, and records a
+rollback entry. It refuses when any promoted file no longer has the hash the
+promotion gave it (a hand edit or a later promotion). Every attempt, refused
+or not, appends a line with a plain message to `results.jsonl`.
+
+`npm run check-promote` (November 6, 2026, headless Chrome, 1280×800,
+`?q=low`): 19 of 19 steps. A passing candidate's red box was in the kernel's
+active list and on screen (7.3% of pixels newly red; noise 0.003%) 262 ms
+after the promote command returned, with no page load; rollback took it out in
+271 ms and left no file, as recorded. Each refusal (no `--approve`, missing,
+failed, edited after the check, uncommitted live changes, rollback over a
+hand edit) exited 1 and wrote its entry. The proof:
+`proof/20261106T233029-promote.json`.
+
+Not yet: a hot-added plugin is loaded globally, not into a room plan, until
+the next page load; `ready()` does not list it. Two promotions at once are not
+locked against each other. The live server runs Vite dev, not a production
+build, and is not sandboxed (it runs only controller-owned config; promoted
+plugin code runs in the browser). `village.kernel` is reachable by any page
+script in dev builds.
 
 # Villager (#40)
 
