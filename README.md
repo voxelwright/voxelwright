@@ -78,6 +78,19 @@ from application code. Prior attempts R1 through R5 remain recorded as failures,
 functional pass but overall cleanup failure. This does not qualify the complete
 issue 13 workflow, issue 15 comparison or family isolation.
 
+The [native worker capability R5/R6 evidence](evidence/019-codex-worker-requirements.md)
+records actual Codex 0.160.0 worker launches with explicit synthetic instrumentation.
+R5 distinguishes `exec --ignore-user-config` from its load-user control. R6 uses
+native requirements mounted read-only at both policy paths: absent policy starts
+all three servers, empty requirements starts none, exact executable/ordered-argument
+identity admits one, and either identity mismatch starts none. R6 passed 260 typed
+preflights, 54 mount checks and five namespace/device controls in 4.572 outer
+seconds. Five loopback HTTP 400 requests intentionally failed the workers;
+zero models were served and zero tools dispatched. R5 passed in 2.318 seconds
+with two requests. Earlier R1–R4 failures remain recorded, including R3's 11
+unauthenticated public OpenAI route/401 events. These probes add native expertise,
+not production admission, family isolation or real-provider integration.
+
 ## Current boundary
 
 This is a synthetic-data development slice, tested on macOS arm64 and Linux
