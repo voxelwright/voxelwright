@@ -51,6 +51,7 @@ export default {
 
     // Open notebook: linen cover, two curled pages, the start of a note.
     const book = new THREE.Group()
+    book.name = 'notebook'
     book.position.set(0.05, top + 0.002, 0.12)
     book.rotation.y = -0.08
     book.scale.setScalar(1.3)
@@ -70,6 +71,7 @@ export default {
         pageGeometry(0.29, 0.4, side),
         new THREE.MeshStandardMaterial({ map: pages[i], roughness: 0.92 }),
       )
+      page.name = side === 1 ? 'notebook right page' : 'notebook left page'
       page.rotation.x = -Math.PI / 2
       page.position.y = 0.008
       page.castShadow = page.receiveShadow = true

@@ -17,10 +17,11 @@ import plant from './plugins/plant'
 import drawing from './plugins/drawing'
 import calendar from './plugins/calendar'
 import rimlight from './plugins/rimlight'
+import notebook from './plugins/notebook'
 
 const plugins = {
   renderer, room, panelling, window: windowView, glass, sunbeam, table, fridge, hearth,
-  shelf, plant, drawing, calendar, motes, lamp, rimlight, camera, postfx,
+  shelf, plant, drawing, calendar, motes, lamp, rimlight, camera, notebook, postfx,
 }
 // ?plugins=renderer,room loads a subset, used to measure baselines.
 const only = new URLSearchParams(location.search).get('plugins')?.split(',')
