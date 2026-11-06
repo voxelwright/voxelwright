@@ -21,6 +21,7 @@ export default {
       new THREE.MeshBasicMaterial({ map: paintGarden(3), fog: false }),
     )
     garden.position.set(cx - 1.5, 1.6, WALL_Z - 6)
+    garden.userData.seatOnly = true // a painted card: from above it shows over the wall (#42)
     group.add(garden)
 
     const frameMat = new THREE.MeshStandardMaterial({

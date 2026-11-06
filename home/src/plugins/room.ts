@@ -37,6 +37,7 @@ export default {
       const uv = m.geometry.attributes.uv as THREE.BufferAttribute
       for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa - W0) / (W1 - W0), (uv.getY(i) * (yb - ya) + ya) / H)
       m.castShadow = m.receiveShadow = true
+      m.userData.inward = new THREE.Vector3(0, 0, 1) // cut away when a camera stands behind it (#42)
       room.add(m)
     }
     block(W0, d0, 0, H)
@@ -49,6 +50,7 @@ export default {
     const side = new THREE.Mesh(new THREE.BoxGeometry(T, H, 6), wallMat)
     side.position.set(-3.4, H / 2, WALL_Z + 3)
     side.receiveShadow = side.castShadow = true
+    side.userData.inward = new THREE.Vector3(1, 0, 0)
     room.add(side)
 
     // Skirting board
