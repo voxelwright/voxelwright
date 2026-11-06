@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { Context } from 'cordis'
 import { core } from './elder.ts'
 import claudeCode from './plugins/claude-code.ts'
-import codex from './plugins/codex.ts'
+import codex, { codexDisabled } from './plugins/codex.ts'
 import homeChecks from './plugins/home-checks.ts'
 import { runOnce } from './run.ts'
 
@@ -26,6 +26,11 @@ if (!request) {
 const root = new Context()
 const fibers = [root.plugin(core), root.plugin(claudeCode), root.plugin(codex), root.plugin(homeChecks)]
 for (const fiber of fibers) await fiber.await()
+
+if (values.executor === 'codex' && !root.elder.executors.has('codex')) {
+  console.error(codexDisabled)
+  process.exit(2)
+}
 
 try {
   const { result, resultPath } = await runOnce(root.elder, {

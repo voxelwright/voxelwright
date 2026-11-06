@@ -1,12 +1,15 @@
-// One Elder run: copy, edit, check, record. The controller picks the checks;
-// the run passes only when the executor completed and every check passed.
-// There is no retry. A failed run is committed and recorded as failed.
+// One Elder run: copy, install, record the base, edit, check, commit, record.
+// The controller picks the checks; the run passes only when the executor
+// completed and every expected check ran and passed. There is no retry.
+// result.json is written on every path, including a failed copy, install,
+// executor spawn or commit.
 import { existsSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { createCandidate } from './candidate.ts'
-import type { CheckResult, Elder, ExecutorOutcome } from './elder.ts'
-import { exec, must } from './proc.ts'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { assertNoSharedInodes, createCandidate, pruneCandidates } from './candidate.ts'
+import { EXPECTED_CHECKS, type Candidate, type CheckResult, type Elder, type ExecutorOutcome } from './elder.ts'
+import { mustGit } from './proc.ts'
+import { createSandbox } from './sandbox.ts'
 
 export interface RunOptions {
   request: string
@@ -14,6 +17,8 @@ export interface RunOptions {
   source: string
   candidatesRoot: string
   timeoutMs: number
+  /** Passed candidates kept besides failed ones. */
+  keep?: number
 }
 
 export function instructions(request: string, repo: string): string {
@@ -29,85 +34,120 @@ Do it as one new home plugin:
 - Read .agents/skills/village-home-stack/SKILL.md and two existing files in home/src/plugins/ first.
 - Add home/src/plugins/<name>.ts in the same shape: default export { name, inject: ['stage'], apply(ctx) },
   objects added with own(ctx, ...), and the import.meta.hot line at the end.
-- Register it in home/src/main.ts under a key equal to its name.
-- Leave home/src/kernel.ts untouched unless the change cannot work without it.
-${uiCraft}- Keep it small and in keeping with the existing scene.
-- Work only inside this directory. Do not install packages, do not commit, and do not run a dev server.
+- main.ts loads every file in home/src/plugins/ by itself. Do not edit main.ts.
+- Change nothing outside home/src/plugins/. The controller fails the run if any other file changes,
+  including kernel.ts, main.ts, configs, package files, scripts and node_modules.
+${uiCraft}- Keep it small, visible from the default camera, and in keeping with the existing scene.
+- Do not install packages, do not commit, and do not run a dev server.
   The controller builds the home and checks it in a browser after you finish.`
 }
 
+type Status = 'passed' | 'failed'
+
 export async function runOnce(elder: Elder, options: RunOptions) {
-  const executor = elder.executors.get(options.executor)
-  if (!executor) throw new Error(`No executor named ${options.executor}. Loaded: ${[...elder.executors.keys()].join(', ')}`)
   const id = `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}-${options.executor}`
   const started = performance.now()
-  const candidate = await createCandidate(options.source, options.candidatesRoot, id)
+  const root = resolve(options.candidatesRoot)
+  const runDir = join(root, id)
+  await mkdir(runDir, { recursive: true })
+  const resultPath = join(runDir, 'result.json')
 
-  const install = await exec('npm', ['ci', '--prefer-offline', '--no-audit', '--no-fund'], {
-    cwd: join(candidate.repo, 'home'),
-    logFile: join(candidate.runDir, 'install.log'),
-  })
-  if (install.code !== 0) throw new Error(`npm ci failed in the candidate; see ${candidate.runDir}/install.log`)
-
-  const outcome: ExecutorOutcome = await executor.run({
-    dir: candidate.repo,
-    prompt: instructions(options.request, candidate.repo),
-    timeoutMs: options.timeoutMs,
-    logFile: join(candidate.runDir, 'executor.log'),
-  })
-
-  const checks: Record<string, CheckResult> = {}
-  for (const [name, check] of elder.checks) {
-    if (outcome.status !== 'completed') {
-      checks[name] = { pass: false, ran: false, durationMs: 0, detail: `Not run: executor ${outcome.status}` }
-      continue
-    }
-    const t = performance.now()
-    let result: Omit<CheckResult, 'durationMs'>
-    try {
-      result = await check.run(candidate)
-    } catch (error) {
-      result = { pass: false, detail: String(error) }
-    }
-    checks[name] = { ...result, durationMs: Math.round(performance.now() - t) }
-  }
-  const passed = outcome.status === 'completed' && Object.values(checks).every((c) => c.pass)
-
-  // Changes outside a plugin file are worth a reviewer's eye: the page probe relies on main.ts and the kernel.
-  const changed = await must('git', ['status', '--porcelain'], candidate.repo)
-  const controllerFilesTouched = await must('git', ['diff', '--stat', candidate.baseCommit, '--', 'home/src/kernel.ts', 'home/scripts', 'home/package.json', 'home/vite.config.ts', 'home/tsconfig.json'], candidate.repo)
-
-  // Never run hooks the model may have planted in the candidate's .git.
-  const git = ['-c', 'core.hooksPath=/dev/null']
-  await must('git', [...git, 'add', '-A'], candidate.repo)
-  await must('git', [...git, 'commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Elder candidate ${id}: ${passed ? 'passed' : 'failed'}\n\nRequest: ${options.request}\nExecutor: ${options.executor} (${outcome.model}), ${outcome.status}`], candidate.repo)
-  const commit = await must('git', ['rev-parse', 'HEAD'], candidate.repo)
-
-  const result = {
+  const result: Record<string, unknown> & { status: Status; error: string | null } = {
     id,
-    status: passed ? 'passed' : 'failed',
+    status: 'failed',
+    error: null,
+    stage: 'start',
     request: options.request,
     executor: options.executor,
-    model: outcome.model,
-    executorOutcome: outcome,
-    baseCommit: candidate.baseCommit,
-    branch: candidate.branch,
-    commit,
-    repo: candidate.repo,
-    inodesSharedWithSource: candidate.inodesShared,
-    changedFiles: changed.split('\n').filter(Boolean),
-    controllerFilesTouched: controllerFilesTouched || null,
-    durations: {
-      totalMs: Math.round(performance.now() - started),
-      installMs: install.durationMs,
-      executorMs: outcome.durationMs,
-      checksMs: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.durationMs])),
-    },
-    checks: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.ran === false ? 'not run' : v.pass ? 'pass' : 'fail'])),
-    checkDetails: checks,
-    screenshot: (checks.screenshot?.detail as { path?: string } | undefined)?.path ?? null,
   }
-  const resultPath = join(candidate.runDir, 'result.json')
-  await writeFile(resultPath, JSON.stringify(result, null, 2) + '\n')
+  const checks: Record<string, CheckResult> = {}
+  const durations: Record<string, unknown> = {}
+  let candidate: Candidate | undefined
+  let outcome: ExecutorOutcome | undefined
+
+  try {
+    const executor = elder.executors.get(options.executor)
+    if (!executor) throw new Error(`No executor named ${options.executor}. Loaded: ${[...elder.executors.keys()].join(', ') || 'none'}`)
+    const missing = EXPECTED_CHECKS.filter((name) => !elder.checks.has(name))
+    if (missing.length) throw new Error(`Expected checks are not registered: ${missing.join(', ')}`)
+
+    result.stage = 'copy'
+    candidate = await createCandidate(options.source, root, id)
+    Object.assign(result, { baseCommit: candidate.baseCommit, branch: candidate.branch, repo: candidate.repo })
+
+    // Install from the base commit's lockfile before the executor exists, under srt with only the npm registry reachable.
+    result.stage = 'install'
+    const sandbox = await createSandbox({ repo: candidate.repo, network: 'npm' })
+    const install = await sandbox
+      .run('npm', ['ci', '--ignore-scripts', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: join(candidate.repo, 'home'), timeoutMs: 300_000, logFile: join(runDir, 'install.log') })
+      .finally(() => sandbox.dispose())
+    durations.installMs = install.durationMs
+    if (install.code !== 0) throw new Error(`npm ci failed in the candidate (${install.spawnError ?? `exit ${install.code}`}); see install.log`)
+
+    result.stage = 'inodes'
+    result.inodeCheck = await assertNoSharedInodes(options.source, candidate.repo)
+
+    result.stage = 'prepare'
+    for (const name of EXPECTED_CHECKS) await elder.checks.get(name)!.prepare?.(candidate)
+
+    result.stage = 'executor'
+    outcome = await executor.run({
+      dir: candidate.repo,
+      prompt: instructions(options.request, candidate.repo),
+      timeoutMs: options.timeoutMs,
+      logFile: join(runDir, 'executor.log'),
+    })
+    Object.assign(result, { model: outcome.model, executorOutcome: outcome })
+    durations.executorMs = outcome.durationMs
+
+    result.stage = 'checks'
+    let blocked: string | undefined = outcome.status === 'completed' ? undefined : `executor ${outcome.status}`
+    for (const name of EXPECTED_CHECKS) {
+      const check = elder.checks.get(name)!
+      if (blocked) {
+        checks[name] = { pass: false, ran: false, evidence: check.evidence, durationMs: 0, detail: `Not run: ${blocked}` }
+        continue
+      }
+      const t = performance.now()
+      let checked: Omit<CheckResult, 'durationMs'>
+      try {
+        checked = await check.run(candidate)
+      } catch (error) {
+        checked = { pass: false, detail: String(error) }
+      }
+      checks[name] = { ...checked, evidence: check.evidence, durationMs: Math.round(performance.now() - t) }
+      // Later checks run candidate code or trust files an earlier check vouches for.
+      if (!checked.pass) blocked = `${name} failed`
+    }
+    const passed = outcome.status === 'completed' && EXPECTED_CHECKS.every((name) => checks[name]?.pass === true)
+    result.status = passed ? 'passed' : 'failed'
+
+    result.stage = 'commit'
+    const gitTouched = ((checks['controller-files']?.detail as { controllerOwned?: string[] } | undefined)?.controllerOwned ?? []).some((p) => p === '.git' || p.startsWith('.git/'))
+    if (gitTouched) {
+      result.commit = null
+      result.commitSkipped = 'The candidate changed its .git directory'
+    } else {
+      await mustGit(['add', '-A'], candidate.repo)
+      await mustGit(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Elder candidate ${id}: ${result.status}\n\nRequest: ${options.request}\nExecutor: ${options.executor} (${outcome.model}), ${outcome.status}`], candidate.repo)
+      result.commit = await mustGit(['rev-parse', 'HEAD'], candidate.repo)
+    }
+    result.stage = 'done'
+  } catch (error) {
+    result.status = 'failed'
+    result.error = error instanceof Error ? error.message : String(error)
+  } finally {
+    durations.totalMs = Math.round(performance.now() - started)
+    durations.checksMs = Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.durationMs]))
+    Object.assign(result, {
+      durations,
+      checks: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.ran === false ? 'not run' : v.pass ? 'pass' : 'fail'])),
+      inPageEvidence: Object.keys(checks).filter((k) => checks[k].evidence === 'in-page'),
+      checkDetails: checks,
+      screenshot: (checks.screenshot?.detail as { path?: string } | undefined)?.path ?? null,
+    })
+    await writeFile(resultPath, JSON.stringify(result, null, 2) + '\n')
+  }
+  result.pruned = await pruneCandidates(root, options.keep ?? 5).catch((e) => `Prune failed: ${e}`)
   return { result, resultPath }
 }

@@ -7,7 +7,7 @@
 // that would otherwise ask, such as a write outside the candidate.
 import type { Context } from 'cordis'
 import { register, type ExecutorTask } from '../elder.ts'
-import { exec } from '../proc.ts'
+import { allowedEnv, exec } from '../proc.ts'
 
 export interface Config {
   model?: string
@@ -20,8 +20,8 @@ export default {
     const model = config.model ?? 'sonnet'
     register(ctx, ctx.elder.executors, 'claude-code', {
       async run(task: ExecutorTask) {
-        // The operator's shell wraps `claude` to drop NODE_OPTIONS; do the same.
-        const { NODE_OPTIONS: _, ...env } = process.env
+        // Allowlisted environment only (no NODE_OPTIONS, tokens or cloud settings); the login comes from the keychain.
+        const env = allowedEnv()
         const args = [
           '-p', task.prompt,
           '--model', model,
@@ -41,11 +41,11 @@ export default {
         }
         const models = Object.keys(reported.modelUsage ?? {})
         return {
-          status: result.timedOut ? 'timeout' : result.code === 0 && !reported.is_error ? 'completed' : 'failed',
+          status: result.timedOut ? 'timeout' : result.code === 0 && !result.spawnError && !reported.is_error ? 'completed' : 'failed',
           exitCode: result.code,
           model: models.length ? models.join(',') : `${model} (requested; none reported)`,
           durationMs: result.durationMs,
-          detail: reported.result?.slice(-2000),
+          detail: result.spawnError ?? reported.result?.slice(-2000),
         }
       },
     })

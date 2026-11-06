@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 
 export interface ProcResult {
+  /** null when the process was killed or never started. */
   code: number | null
   timedOut: boolean
+  /** Set when the command could not be started (ENOENT, EACCES and so on). */
+  spawnError?: string
   stdout: string
   stderr: string
   durationMs: number
@@ -11,56 +14,84 @@ export interface ProcResult {
 
 export interface ProcOptions {
   cwd: string
-  env?: NodeJS.ProcessEnv
+  /** Passed as the whole environment. Callers build it from an allowlist; nothing is inherited. */
+  env: NodeJS.ProcessEnv
   timeoutMs?: number
   /** stdout and stderr are also appended here. */
   logFile?: string
 }
 
+/** How long output may keep arriving after the process exits, from descendants holding the pipes. */
+const PIPE_GRACE_MS = 1000
+/** How long SIGTERM gets before SIGKILL. */
+const KILL_GRACE_MS = 5000
+
 /**
- * Run a command in its own process group. On timeout the whole group gets
- * SIGTERM, then SIGKILL five seconds later, so agent subprocesses stop too.
+ * Run a command in its own process group. It never rejects: a spawn error is
+ * returned as spawnError. On timeout the whole group gets SIGTERM, then
+ * SIGKILL. The promise resolves at the deadline (plus the kill grace) or once
+ * the process has exited, without waiting for a descendant that left the
+ * group and still holds stdout or stderr open.
  */
 export function exec(cmd: string, args: string[], options: ProcOptions): Promise<ProcResult> {
   const started = performance.now()
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    })
-    const log = options.logFile ? createWriteStream(options.logFile, { flags: 'a' }) : undefined
+  return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
-    child.stdout.on('data', (chunk: Buffer) => {
+    let timedOut = false
+    let spawnError: string | undefined
+    let exitCode: number | null = null
+    let settled = false
+    const timers: NodeJS.Timeout[] = []
+    const log = options.logFile ? createWriteStream(options.logFile, { flags: 'a' }) : undefined
+
+    const child = spawn(cmd, args, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+    const finish = () => {
+      if (settled) return
+      settled = true
+      for (const t of timers) clearTimeout(t)
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      log?.end()
+      resolve({ code: exitCode, timedOut, spawnError, stdout, stderr, durationMs: Math.round(performance.now() - started) })
+    }
+
+    child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk
       log?.write(chunk)
     })
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk
       log?.write(chunk)
     })
-    let timedOut = false
-    let killer: NodeJS.Timeout | undefined
-    const timer = options.timeoutMs
-      ? setTimeout(() => {
-          timedOut = true
-          signal(child.pid, 'SIGTERM')
-          killer = setTimeout(() => signal(child.pid, 'SIGKILL'), 5000)
-        }, options.timeoutMs)
-      : undefined
-    child.on('error', reject)
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      clearTimeout(killer)
-      log?.end()
-      resolve({ code, timedOut, stdout, stderr, durationMs: Math.round(performance.now() - started) })
+    child.on('error', (error) => {
+      spawnError = String(error)
+      finish()
     })
+    child.on('exit', (code) => {
+      exitCode = code
+      // Let buffered output drain, but do not wait on pipes an escaped descendant holds.
+      timers.push(setTimeout(finish, PIPE_GRACE_MS))
+    })
+    child.on('close', finish)
+    if (options.timeoutMs) {
+      timers.push(
+        setTimeout(() => {
+          timedOut = true
+          killGroup(child.pid, 'SIGTERM')
+          timers.push(
+            setTimeout(() => {
+              killGroup(child.pid, 'SIGKILL')
+              finish()
+            }, KILL_GRACE_MS),
+          )
+        }, options.timeoutMs),
+      )
+    }
   })
 }
 
-function signal(pid: number | undefined, name: NodeJS.Signals): void {
+export function killGroup(pid: number | undefined, name: NodeJS.Signals): void {
   if (!pid) return
   try {
     process.kill(-pid, name)
@@ -69,9 +100,32 @@ function signal(pid: number | undefined, name: NodeJS.Signals): void {
   }
 }
 
-/** Run a command that must succeed, and return its trimmed stdout. */
-export async function must(cmd: string, args: string[], cwd: string): Promise<string> {
-  const result = await exec(cmd, args, { cwd })
-  if (result.code !== 0) throw new Error(`${cmd} ${args.join(' ')} failed (${result.code}): ${result.stderr.trim()}`)
+/** Environment variables a child may inherit from the controller. Everything else is dropped. */
+const INHERITED = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR']
+
+/** The controller's environment reduced to the allowlist, plus explicit additions. */
+export function allowedEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const name of INHERITED) if (process.env[name] !== undefined) env[name] = process.env[name]
+  return { ...env, ...extra }
+}
+
+/**
+ * git that ignores hooks, fsmonitor, global and system config. Use it for
+ * every git call on a candidate: the executor can write the candidate's .git.
+ */
+export function git(args: string[], cwd: string): Promise<ProcResult> {
+  const safe = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null']
+  return exec('git', [...safe, ...args], {
+    cwd,
+    env: allowedEnv({ GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' }),
+    timeoutMs: 60_000,
+  })
+}
+
+/** Run git, require success, and return its trimmed stdout. */
+export async function mustGit(args: string[], cwd: string): Promise<string> {
+  const result = await git(args, cwd)
+  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed (${result.code}${result.spawnError ? `, ${result.spawnError}` : ''}): ${result.stderr.trim()}`)
   return result.stdout.trim()
 }

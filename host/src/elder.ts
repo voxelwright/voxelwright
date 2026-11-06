@@ -35,19 +35,27 @@ export interface Executor {
 
 export interface CheckResult {
   pass: boolean
-  /** false when the check was skipped because the executor did not complete. */
+  /** false when the check was skipped: the executor did not complete, or an earlier check failed. */
   ran?: boolean
+  evidence?: 'in-page'
   durationMs: number
   detail?: unknown
 }
 
 export interface Check {
+  /** Runs before the executor, to record the base the check compares against. */
+  prepare?(candidate: Candidate): Promise<void>
   run(candidate: Candidate): Promise<Omit<CheckResult, 'durationMs'>>
+  /** 'in-page': the result comes from code that shares a page with the candidate. A failure counts; a pass proves nothing. */
+  evidence?: 'in-page'
 }
+
+/** The checks a run must have, in order. A run with any of them missing fails. */
+export const EXPECTED_CHECKS = ['controller-files', 'build', 'screenshot', 'plugin-lifecycle'] as const
 
 export class Elder {
   readonly executors = new Map<string, Executor>()
-  /** Run in insertion order. */
+  /** Run in EXPECTED_CHECKS order. */
   readonly checks = new Map<string, Check>()
 }
 

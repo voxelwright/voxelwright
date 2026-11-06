@@ -19,10 +19,20 @@ import highchair from './plugins/highchair'
 import toyshelf from './plugins/toyshelf'
 import botanical from './plugins/botanical'
 
-const plugins = {
+const listed = {
   renderer, room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
   toyshelf, botanical, plant, motes, lamp, rimlight, camera, notebook, postfx,
 }
+// Any other file in plugins/ loads after the list under its declared name, so
+// adding a plugin never means editing this file. The Elder relies on that:
+// candidates may change only plugins/.
+type Loadable = Parameters<typeof load>[0]
+const discovered = import.meta.glob<Loadable>('./plugins/*.ts', { eager: true, import: 'default' })
+const known = new Set<Loadable>(Object.values(listed))
+const extra = Object.fromEntries(
+  Object.values(discovered).filter((p) => p && !known.has(p) && !(p.name in listed)).map((p) => [p.name, p]),
+)
+const plugins: Record<string, Loadable> = { ...listed, ...extra }
 // ?plugins=renderer,room loads a subset, used to measure baselines.
 const only = new URLSearchParams(location.search).get('plugins')?.split(',')
 for (const [name, plugin] of Object.entries(plugins)) if (!only || only.includes(name)) load(plugin)
@@ -57,7 +67,7 @@ function snapshot() {
 
 const village = {
   snapshot,
-  load: (name: keyof typeof plugins) => load(plugins[name]),
+  load: (name: string) => load(plugins[name]),
   unload,
   /**
    * Resolves once every requested plugin is active or has failed, or after
