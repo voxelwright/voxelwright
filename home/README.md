@@ -145,6 +145,43 @@ shadow change. GPT was not available. Screenshots: `screenshots/engine-before.pn
 Ally (Linux, AMD Phoenix1): no Chromium, Chrome or Node installed, so nothing
 was measured there.
 
+## Camera variants (#42 probe)
+
+`?cam=iso` looks down on the room like a dollhouse: a 20° perspective camera
+16 m away (the stage camera stays perspective, so postfx and entries keep
+working). Drag or Q/E orbit within about -30° to +80°, the wheel zooms from the
+whole room to the table. `?cam=third` stands 2.4 m behind and 2.2 m above a
+point on the floor; clicking the floor walks there, clicking an object walks to
+a step in front of it (and chooses it, if it is an entry). Without `?cam=`
+nothing changes. Both rigs hang off the resting pose that `travel()` moves, so
+room walks work, and focus poses blend the field of view back to 40°. Q/E are
+ignored while typing, so the notebook still takes the letter q.
+
+Cheap fixes so the views look meant: walls tagged `userData.inward` hide when
+the camera is behind them, the rooms' fog slides back with the camera's
+distance, a warm backdrop replaces the dark beyond the room, iso fades the
+floor's edge into it, and the window's painted garden (`userData.seatOnly`) is
+hidden in iso because it showed over the wall.
+
+Still broken from these angles: the kitchen has no ceiling and only two walls,
+so the pendant cord hangs from nothing and the right side ends in haze; the
+kitchen floor is a 9 m square that runs past the walls; sunlight lands on the
+open floor as large hard-edged wedges; the base cabinets read as floating at
+the open end; hidden walls stop casting shadows; the living room's walls are
+one-sided planes that vanish from outside; in third person, walking to the
+fridge leaves only two entries on screen, so Tab reaches only those.
+
+Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
+(`npm run measure -- <url> --perf --gpu`):
+
+| Mode | Draw calls | GPU p50 / p95 ms |
+| --- | --- | --- |
+| seat | 482 | 8.7 / 10.4 |
+| `?cam=iso` | 491 | 9.8 to 10.6 / 16.4 to 17.1 |
+| `?cam=third` | 491 | 10.8 / 17.1 |
+
+Screenshots: `screenshots/talk/cam-*.jpg`.
+
 ## Measured, kitchen scene (November 6, 2026)
 
 Headless Chrome through Playwright 1.65 (`--enable-unsafe-webgpu
