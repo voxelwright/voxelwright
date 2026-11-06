@@ -56,17 +56,19 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   summaries and routine code, and Opus at medium effort for architecture, hard
   debugging and high-stakes calls. Use GPT-6.1 Sol through T3 delegation when it
   fits, and GPT-6 Astra in Codex sessions for decisions that are expensive to get wrong.
-- Routing table (starting budgets; adjust from the dispatch log):
+- Routing table. Units are bounded by a clear stop condition and a time box,
+  not a token cap:
 
-  | Work | Model | Budget |
-  | --- | --- | --- |
-  | Lookup, fetch, summarize a page | Haiku or Sonnet | 60k tokens, 2 min |
-  | Research with sources | Sonnet | 100k, 5 min |
-  | Reviewer (adversarial review) | Sonnet | 120k, 10 min |
-  | Critic | GPT-6.1 Sol via T3, medium | one pass |
-  | Security review (Sentinel) | Opus, medium | 100k, 10 min |
-  | Build one unit | Opus, medium | 150k, 30 min; split larger units |
-  | Merge or small fix | Sonnet | 100k, 15 min |
+  | Work | Model |
+  | --- | --- |
+  | Lookup, fetch, summarize a page | Haiku or Sonnet |
+  | Research with sources | Sonnet |
+  | Reviewer (adversarial review) | Sonnet |
+  | Critic | GPT-6.1 Sol via T3, medium |
+  | Security review (Sentinel) | Opus, medium |
+  | Build one unit (logic, infrastructure) | Opus, medium |
+  | UI, 3D and visual work | Opus, high or extra-high, with the ui-craft hill climb until a cross-model consensus of 9/10 or better |
+  | Merge or small fix | Sonnet |
 
 - Keep subagents short-lived. Give each one unit of work, end it when the work
   is done, and never leave one idle.
@@ -103,10 +105,12 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   installed executables, live checkouts, configuration or user files.
 - A self-improvement changes a candidate checkout, never the running trusted
   controller or its permission policy.
-- Standing grants: push `feature/` branches; open draft PRs and mark them ready;
-  use the Ally for isolated Linux proofs; publish the reviewed private handbook.
-  Not granted: merging to main, application releases, public deployment,
-  access-setting changes and real family data.
+- Standing grants: push `feature/` branches; open PRs and mark them ready;
+  merge a PR into main once it has passed the review loop and the handbook
+  reflects it, or into an archive/candidate branch when it may not be used
+  (owner, November 6, 2026); use the Ally for isolated Linux proofs; publish
+  the reviewed private handbook. Not granted: application releases, public
+  deployment, access-setting changes and real family data.
 
 ## Supplied reviewers
 
