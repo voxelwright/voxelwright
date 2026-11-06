@@ -133,3 +133,36 @@ textures inside the renderer. Neither count grows over repeated cycles.
 Hot reload: editing `src/plugins/fridge.ts` while the page was open replaced
 the fridge without a page reload. The new rotation applied, and the object
 and GPU counts stayed the same.
+
+## Villager (#40)
+
+Enter in the notebook also sends the line to Alex's villager (a synthetic
+person). Its reply is written onto the facing page in its own green hand, at
+32 characters a second, so a reply that arrives in chunks still reads as
+writing. The finished reply goes to a polite live region for screen readers.
+After a reload the last answer is already on the page. If the villager host is
+not running, the page says "Your villager is out for a moment" and the line is
+still kept in local storage.
+
+The dev server (`vite.config.ts`) hands same-origin pages the host's
+per-launch token at `/villager/launch`, read from
+`$VILLAGE_ROOT/villager/launch.json` (default `~/.village`), and forwards
+`/villager/api/*` to the host on `127.0.0.1:$VILLAGER_PORT` (default 5190).
+Start the host with `npm run villager` in `host/`.
+
+`node scripts/check-villager.mjs [--shot=path]` starts its own stub host and
+dev server on a temporary root and proves, headless: the token is required
+and not handed to cross-site requests; Enter sends the line and the reply is
+written gradually onto the facing page; the proxy streams without buffering;
+the answer is back after a reload; after a host restart the page fetches the
+new token and the villager resumes the same session; with the host down the
+page says so and keeps the line; both processes stop. 13 of 13 passed
+(November 6, 2026). `--agent=claude` runs one real exchange instead.
+
+Real exchange, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet), line "I
+keep forgetting to water the plants": one `write_note` call created
+`notes/plants.md`, then a four-sentence reply. Sonnet 6 input, 288 output,
+3,154 cache-read and 1,741 cache-creation tokens; a Haiku helper call 1,176
+in and 17 out. Cost $0.0103. First text 5.3 s, whole turn 5.9 s, measured in
+the host from the start of the turn. Screenshot:
+`screenshots/villager-sonnet.jpg`.
