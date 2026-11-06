@@ -38,6 +38,24 @@ const waitStill = async (page) => {
   await page.waitForFunction(() => !window.village.kernel.root.get('rooms').moving, null, { timeout: 15000 })
   await page.waitForTimeout(300)
 }
+// The projected centre of a box can fall between parts (between shelves) or on
+// the wall in front of a doorway's reveal; search outwards for a point on the object.
+const hoverOn = async (page, e) => {
+  let hover = null
+  const near = [[0, 0]]
+  for (let r = 30; r <= 120; r += 30) for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, 1], [-1, 1], [1, -1]]) near.push([dx * r, dy * r])
+  for (const [dx, dy] of near) {
+    await page.mouse.move(e.x + dx, e.y + dy)
+    await page.waitForTimeout(dx || dy ? 120 : 250)
+    hover = await state(page)
+    if (hover.hovered === e.id) {
+      e.x += dx
+      e.y += dy
+      break
+    }
+  }
+  return hover
+}
 const residue = (page) => page.evaluate(() => {
   const s = window.village.snapshot()
   return { objects: s.objects.join('|'), plugins: s.plugins.active.join(','), frameHooks: s.frameHooks, geometries: s.geometries, textures: s.textures, dom: s.dom, entries: s.entries.map((e) => e.id).sort().join(',') }
@@ -76,18 +94,7 @@ for (const room of ['kitchen', 'living']) {
 for (const room of ['kitchen', 'living']) {
   const { context, page } = await open(`room=${room}`, 'reduce')
   for (const e of (await entries(page)).filter((e) => !DOORS[e.id])) {
-    // The projected centre can fall between parts (between shelves); search nearby for the object.
-    let hover = null
-    for (const [dx, dy] of [[0, 0], [0, -30], [0, 30], [-30, 0], [30, 0], [0, -60], [0, 60], [-60, -30], [60, 30]]) {
-      await page.mouse.move(e.x + dx, e.y + dy)
-      await page.waitForTimeout(250)
-      hover = await state(page)
-      if (hover.hovered === e.id) {
-        e.x += dx
-        e.y += dy
-        break
-      }
-    }
+    const hover = await hoverOn(page, e)
     if (shots && e.id === 'fridge') await page.screenshot({ path: `${shots}/hover-fridge.png` })
     if (shots && e.id === 'idea-garden') await page.screenshot({ path: `${shots}/hover-idea-garden.png` })
     await page.mouse.click(e.x, e.y)
@@ -98,6 +105,48 @@ for (const room of ['kitchen', 'living']) {
     await page.waitForTimeout(150)
     const left = await state(page)
     check(`${room}: pointer hovers, labels and chooses ${e.id}`, hover.hovered === e.id && hover.label === e.label && chosen.active === e.id && left.active === null, { hover, chosen, left })
+  }
+  await context.close()
+}
+
+// Occlusion: furniture in front of an entry blocks it. Find a point where the
+// high chair is the nearest thing hit and the kitchen doorway lies behind it;
+// hovering there shows no label and clicking there stays in the kitchen.
+{
+  const { context, page } = await open('', 'reduce')
+  const spot = await page.evaluate(async () => {
+    // The same three.js module the page runs, so its Raycaster works on the scene.
+    const url = performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/deps/three_webgpu.js'))
+    const THREE = await import(url)
+    const { scene, camera, renderer } = window.village.kernel.root.get('stage')
+    const chair = scene.getObjectByName('highchair')
+    const door = scene.getObjectByName('kitchen doorway')
+    const rect = renderer.domElement.getBoundingClientRect()
+    const rc = new THREE.Raycaster()
+    const box = new THREE.Box3().setFromObject(chair)
+    const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(camera))
+    const [x0, x1] = [Math.min(...corners.map((c) => c.x)), Math.max(...corners.map((c) => c.x))]
+    const [y0, y1] = [Math.min(...corners.map((c) => c.y)), Math.max(...corners.map((c) => c.y))]
+    for (let i = 1; i < 24; i++) for (let j = 1; j < 24; j++) {
+      const ndc = new THREE.Vector2(x0 + ((x1 - x0) * i) / 24, y0 + ((y1 - y0) * j) / 24)
+      rc.setFromCamera(ndc, camera)
+      const behind = rc.intersectObject(door, true)[0]
+      const first = rc.intersectObject(scene, true).find((h) => h.object.isMesh && h.object.material.depthWrite !== false)
+      let o = first?.object
+      while (o && o !== chair) o = o.parent
+      if (behind && o === chair && first.distance < behind.distance) return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height }
+    }
+    return null
+  })
+  check('occlusion: a point exists where the high chair stands in front of the kitchen doorway', spot, spot)
+  if (spot) {
+    await page.mouse.move(spot.x, spot.y)
+    await page.waitForTimeout(250)
+    const hover = await state(page)
+    await page.mouse.click(spot.x, spot.y)
+    await page.waitForTimeout(400)
+    const after = await state(page)
+    check('occlusion: the high chair blocks the doorway behind it (no label, the click stays in the kitchen)', hover.hovered === null && after.room === 'kitchen' && !after.moving, { spot, hover, after })
   }
   await context.close()
 }
@@ -122,6 +171,7 @@ for (const room of ['kitchen', 'living']) {
   const textures = []
   for (let cycle = 0; cycle < 2; cycle++) {
     const door = (await entries(page)).find((e) => e.id === 'to-living')
+    await hoverOn(page, door)
     await page.mouse.click(door.x, door.y)
     await page.waitForTimeout(50)
     const frames = fps()

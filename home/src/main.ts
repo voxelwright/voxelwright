@@ -52,6 +52,9 @@ const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, st
 const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
 // ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
 const only = params.get('plugins')?.split(',')
+// With rooms listed too, each room brings only its listed plugins, so the Elder's
+// lifecycle baseline (every active plugin but one) really leaves that one out.
+if (only) for (const plan of Object.values(PLANS)) plan.plugins = plan.plugins.filter((n) => only.includes(n))
 for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
 const keepRooms = params.get('rooms') !== 'unload'
 

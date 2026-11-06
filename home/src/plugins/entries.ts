@@ -68,8 +68,9 @@ export default {
   name: 'entries',
   inject: ['stage'],
   apply(ctx: Context) {
-    const { camera, renderer } = ctx.stage
+    const { camera, renderer, scene } = ctx.stage
     const live = new Map<string, Live>()
+    const owners = new Map<THREE.Object3D, Live>()
     let active: Live | null = null
     let hovered: Live | null = null
     let pointerHover: Live | null = null
@@ -164,12 +165,22 @@ export default {
       const rect = renderer.domElement.getBoundingClientRect()
       ndc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
       raycaster.setFromCamera(ndc, camera)
-      let best: { e: Live; d: number } | null = null
-      for (const e of live.values()) {
-        const hit = raycaster.intersectObject(e.object, true)[0]
-        if (hit && (!best || hit.distance < best.d)) best = { e, d: hit.distance }
+      // The nearest solid thing wins, so furniture blocks the entries behind it.
+      for (const { object } of raycaster.intersectObject(scene, true)) {
+        if (!solid(object)) continue
+        for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+          const e = owners.get(o)
+          if (e) return e
+        }
+        return null
       }
-      return best?.e ?? null
+      return null
+    }
+    /** Seen and opaque to the eye: hidden rooms, light shafts, glows and motes don't block. */
+    const solid = (object: THREE.Object3D) => {
+      if (!(object as THREE.Mesh).isMesh) return false
+      for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false
+      return ([] as THREE.Material[]).concat((object as THREE.Mesh).material).some((m) => m.visible && m.depthWrite)
     }
     let down: { x: number; y: number } | null = null
     const onMove = (event: PointerEvent) => {
@@ -276,6 +287,7 @@ export default {
         button.addEventListener('focus', () => setHover(e))
         button.addEventListener('blur', () => hovered === e && setHover(pointerHover))
         live.set(entry.id, e)
+        owners.set(entry.object, e)
         nav.append(button)
         sortIn = 3
         return () => {
@@ -285,6 +297,7 @@ export default {
           glowTo(e, 0)
           button.remove()
           live.delete(entry.id)
+          owners.delete(entry.object)
         }
       },
       get active() {
