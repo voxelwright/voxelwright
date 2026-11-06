@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "elder": "node src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "regressions": "node test/regressions.ts"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.81",

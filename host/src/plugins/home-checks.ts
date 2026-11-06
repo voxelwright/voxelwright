@@ -221,9 +221,10 @@ function launchChrome(proxyBypass: string, tmp: string) {
       '--enable-unsafe-webgpu',
       '--use-angle=metal',
       '--ignore-gpu-blocklist',
-      // Every request but the preview server goes to a closed port.
+      // Every request but the preview server goes to a closed port. <-loopback> drops
+      // Chrome's implicit bypass for localhost, so other local servers are not reachable.
       '--proxy-server=http://127.0.0.1:9',
-      `--proxy-bypass-list=${proxyBypass}`,
+      `--proxy-bypass-list=<-loopback>;${proxyBypass}`,
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
     ],
   })

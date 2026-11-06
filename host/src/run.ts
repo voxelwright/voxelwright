@@ -3,10 +3,11 @@
 // completed and every expected check ran and passed. There is no retry.
 // result.json is written on every path, including a failed copy, install,
 // executor spawn or commit.
+import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { assertNoSharedInodes, createCandidate, pruneCandidates } from './candidate.ts'
+import { assertNoSharedInodes, createCandidate, diffManifests, manifest, pruneCandidates } from './candidate.ts'
 import { EXPECTED_CHECKS, type Candidate, type CheckResult, type Elder, type ExecutorOutcome } from './elder.ts'
 import { mustGit } from './proc.ts'
 import { createSandbox } from './sandbox.ts'
@@ -45,7 +46,8 @@ ${uiCraft}- Keep it small, visible from the default camera, and in keeping with 
 type Status = 'passed' | 'failed'
 
 export async function runOnce(elder: Elder, options: RunOptions) {
-  const id = `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}-${options.executor}`
+  // The random part keeps two runs in the same second apart; ids still sort by time.
+  const id = `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}-${randomBytes(3).toString('hex')}-${options.executor}`
   const started = performance.now()
   const root = resolve(options.candidatesRoot)
   const runDir = join(root, id)
@@ -90,6 +92,9 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     result.stage = 'prepare'
     for (const name of EXPECTED_CHECKS) await elder.checks.get(name)!.prepare?.(candidate)
 
+    // The commit below runs git on the candidate; it must not read a .git the executor rewrote.
+    const gitBefore = await manifest(join(candidate.repo, '.git'))
+
     result.stage = 'executor'
     outcome = await executor.run({
       dir: candidate.repo,
@@ -123,10 +128,12 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     result.status = passed ? 'passed' : 'failed'
 
     result.stage = 'commit'
-    const gitTouched = ((checks['controller-files']?.detail as { controllerOwned?: string[] } | undefined)?.controllerOwned ?? []).some((p) => p === '.git' || p.startsWith('.git/'))
-    if (gitTouched) {
+    const gitChanges = diffManifests(gitBefore, await manifest(join(candidate.repo, '.git')))
+    const gitTouched = [...gitChanges.added, ...gitChanges.modified, ...gitChanges.deleted]
+    if (gitTouched.length) {
+      result.status = 'failed'
       result.commit = null
-      result.commitSkipped = 'The candidate changed its .git directory'
+      result.commitSkipped = `The executor changed .git: ${gitTouched.slice(0, 10).join(', ')}`
     } else {
       await mustGit(['add', '-A'], candidate.repo)
       await mustGit(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Elder candidate ${id}: ${result.status}\n\nRequest: ${options.request}\nExecutor: ${options.executor} (${outcome.model}), ${outcome.status}`], candidate.repo)
