@@ -8,8 +8,20 @@ import motes from './plugins/motes'
 import camera from './plugins/camera'
 import lamp from './plugins/lamp'
 import postfx from './plugins/postfx'
+import panelling from './plugins/panelling'
+import glass from './plugins/glass'
+import sunbeam from './plugins/sunbeam'
+import hearth from './plugins/hearth'
+import shelf from './plugins/shelf'
+import plant from './plugins/plant'
+import drawing from './plugins/drawing'
+import calendar from './plugins/calendar'
+import rimlight from './plugins/rimlight'
 
-const plugins = { renderer, room, window: windowView, table, fridge, motes, lamp, camera, postfx }
+const plugins = {
+  renderer, room, panelling, window: windowView, glass, sunbeam, table, fridge, hearth,
+  shelf, plant, drawing, calendar, motes, lamp, rimlight, camera, postfx,
+}
 // ?plugins=renderer,room loads a subset, used to measure baselines.
 const only = new URLSearchParams(location.search).get('plugins')?.split(',')
 for (const [name, plugin] of Object.entries(plugins)) if (!only || only.includes(name)) load(plugin)

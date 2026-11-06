@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
-import { paintPlaster, paintWood } from '../paint'
+import { paintWallpaper, paintWood } from '../paint'
 
 export default {
   name: 'room',
@@ -24,7 +24,7 @@ export default {
     floor.receiveShadow = true
     room.add(floor)
 
-    const plaster = paintPlaster(5, [246, 230, 204])
+    const plaster = paintWallpaper(5, [246, 230, 204])
     plaster.wrapS = plaster.wrapT = THREE.RepeatWrapping
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
     const T = 0.18
@@ -35,7 +35,7 @@ export default {
       m.position.set((xa + xb) / 2, (ya + yb) / 2, WALL_Z - T / 2)
       // Keep painted plaster at a consistent scale across blocks
       const uv = m.geometry.attributes.uv as THREE.BufferAttribute
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa) / 3, (uv.getY(i) * (yb - ya) + ya) / 3)
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa) / 2.2, (uv.getY(i) * (yb - ya) + ya) / 2.2)
       m.castShadow = m.receiveShadow = true
       room.add(m)
     }
@@ -59,15 +59,9 @@ export default {
 
     own(ctx, room)
 
-    // Soft bounce light from the warm room, and a flickering hearth off to the right.
+    // Soft bounce light from the warm room. The fire's own light lives in the hearth plugin.
     const hemi = own(ctx, new THREE.HemisphereLight('#ffe6c4', '#7a5238', 1.1))
     hemi.name = 'room fill'
-    const hearth = own(ctx, new THREE.PointLight('#ff8a3c', 5, 7, 1.6))
-    hearth.name = 'hearth glow'
-    hearth.position.set(3.0, 0.6, 0.6)
-    ctx.on('village/frame', (_dt, t) => {
-      hearth.intensity = 4.2 + Math.sin(t * 7.1) * 0.4 + Math.sin(t * 13.3 + 1) * 0.3 + Math.sin(t * 2.3) * 0.5
-    })
 
     ctx.effect(() => {
       const before = scene.fog

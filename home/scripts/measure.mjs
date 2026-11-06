@@ -14,7 +14,7 @@ const browser = await chromium.launch({
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
 const errors = []
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && errors.push(m.text()))
 page.on('pageerror', (e) => errors.push(String(e)))
 await page.goto(url)
 const readiness = await page.evaluate(() => window.village.ready())

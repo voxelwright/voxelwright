@@ -177,19 +177,43 @@ export function paintGarden(seed: number) {
   ridge(0.6, 90, '#b9a672', 200)
   ridge(0.66, 70, '#8f9a5a', 150)
   // Trees as clustered painterly dabs
+  // Trees: a forked trunk, then several leaf clumps painted in layers of small
+  // dabs (shadow, mid, sunlit), so the crown reads as masses with gaps.
   const tree = (x: number, y: number, s: number, dark: string, light: string) => {
-    g.fillStyle = '#5b4632'
-    g.fillRect(x - s * 0.05, y - s * 0.2, s * 0.1, s * 0.6)
-    for (let i = 0; i < 70; i++) {
-      const a = r() * Math.PI * 2, d = Math.sqrt(r()) * s * 0.5
-      const px = x + Math.cos(a) * d, py = y - s * 0.55 + Math.sin(a) * d * 0.85
-      const lit = (px - x) < 0 ? 0.65 : 0.25 // sun from the left
-      g.fillStyle = r() < lit ? light : dark
-      g.globalAlpha = 0.85
+    const mid = light
+    g.strokeStyle = '#4a3828'
+    g.lineCap = 'round'
+    const limb = (x0: number, y0: number, x1: number, y1: number, wdt: number) => {
+      g.lineWidth = wdt
       g.beginPath()
-      g.ellipse(px, py, s * (0.06 + r() * 0.08), s * (0.05 + r() * 0.06), r() * 3, 0, Math.PI * 2)
-      g.fill()
+      g.moveTo(x0, y0)
+      g.quadraticCurveTo((x0 + x1) / 2 + (r() - 0.5) * s * 0.1, (y0 + y1) / 2, x1, y1)
+      g.stroke()
     }
+    const fork = y - s * 0.45
+    limb(x, y + s * 0.3, x + s * 0.02, fork, s * 0.09)
+    const clumps: [number, number, number][] = [[x, fork - s * 0.38, s * 0.3]]
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i - 2) * 0.55 + (r() - 0.5) * 0.3
+      const len = s * (0.3 + r() * 0.2)
+      const ex = x + Math.cos(a) * len, ey = fork + Math.sin(a) * len
+      limb(x + s * 0.02, fork, ex, ey, s * 0.04)
+      clumps.push([ex, ey - s * 0.05, s * (0.16 + r() * 0.1)])
+    }
+    const dabs = (cx: number, cy: number, rad: number, color: string, count: number, bias: number, alpha: number) => {
+      g.fillStyle = color
+      g.globalAlpha = alpha
+      for (let i = 0; i < count; i++) {
+        const a = r() * Math.PI * 2, d = Math.sqrt(r()) * rad
+        const px = cx + Math.cos(a) * d + bias * rad * 0.25, py = cy + Math.sin(a) * d * 0.8 + Math.abs(bias) * rad * 0.15
+        g.beginPath()
+        g.ellipse(px, py, s * (0.018 + r() * 0.022), s * (0.012 + r() * 0.014), r() * 3, 0, Math.PI * 2)
+        g.fill()
+      }
+    }
+    for (const [cx, cy, rad] of clumps) dabs(cx, cy, rad, dark, 140, 0.3, 0.9)
+    for (const [cx, cy, rad] of clumps) dabs(cx - rad * 0.12, cy - rad * 0.1, rad * 0.85, mid, 110, -0.4, 0.8)
+    for (const [cx, cy, rad] of clumps) dabs(cx - rad * 0.3, cy - rad * 0.3, rad * 0.5, '#e9d27e', 50, -0.8, 0.75)
     g.globalAlpha = 1
   }
   tree(w * 0.12, h * 0.7, 300, '#4f6b33', '#a8b257')
@@ -329,5 +353,239 @@ export function paintPhoto(kind: 'beach' | 'cat' | 'drawing' | 'mountains', seed
   g.font = 'italic 30px "Bradley Hand", "Segoe Print", cursive'
   const captions = { beach: 'summer, 2026', cat: 'Biscuit', drawing: 'by Mila', mountains: 'our hike' }
   g.fillText(captions[kind], ix + 6, h - 40)
+  return toTexture(c)
+}
+
+/** Faded cottage wallpaper over limewash: soft stripes and little painted sprigs. */
+export function paintWallpaper(seed: number, base: RGB, w = 1024, h = 1024) {
+  const plaster = paintPlaster(seed, base, w, h).image as HTMLCanvasElement
+  const [c, g] = canvas(w, h)
+  g.drawImage(plaster, 0, 0)
+  const r = rng(seed + 11)
+  for (let x = 0; x < w; x += 128) {
+    g.fillStyle = 'rgba(214,170,120,0.10)'
+    g.fillRect(x + 40, 0, 48, h)
+    g.fillStyle = 'rgba(255,246,228,0.10)'
+    g.fillRect(x + 4, 0, 6, h)
+  }
+  // Sprigs: a stem, two leaves and a berry on a loose half-drop grid
+  const sprig = (x: number, y: number, s: number, a: number) => {
+    g.save()
+    g.translate(x, y)
+    g.rotate(a)
+    g.scale(s, s)
+    g.strokeStyle = 'rgba(112,124,82,0.26)'
+    g.lineWidth = 2.2
+    g.beginPath()
+    g.moveTo(0, 14)
+    g.quadraticCurveTo(3, 0, -2, -14)
+    g.stroke()
+    g.fillStyle = 'rgba(122,140,88,0.24)'
+    for (const [lx, ly, la] of [[-5, 2, -0.8], [5, -4, 0.8]] as const) {
+      g.beginPath()
+      g.ellipse(lx, ly, 6, 2.6, la, 0, Math.PI * 2)
+      g.fill()
+    }
+    g.fillStyle = 'rgba(196,96,74,0.28)'
+    g.beginPath()
+    g.arc(-2, -15, 3, 0, Math.PI * 2)
+    g.fill()
+    g.restore()
+  }
+  for (let y = 0; y < h; y += 96)
+    for (let x = 0; x < w; x += 128) {
+      const ox = (y / 96) % 2 ? 64 : 0
+      sprig(x + ox + 20 + (r() - 0.5) * 10, y + 48 + (r() - 0.5) * 10, 0.8 + r() * 0.15, (r() - 0.5) * 0.5)
+    }
+  // Age: uneven fading
+  const n = makeNoise(seed + 5, 32)
+  const img = g.getImageData(0, 0, w, h)
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      const f = 0.94 + (n(x / 220, y / 220, 3) - 0.5) * 0.14
+      img.data[i] *= f
+      img.data[i + 1] *= f
+      img.data[i + 2] *= f * 0.98
+    }
+  g.putImageData(img, 0, 0)
+  return toTexture(c)
+}
+
+/** Painted tongue-and-groove panelling: vertical boards with worn edges. */
+export function paintPanelling(seed: number, base: RGB, boards = 8, w = 1024, h = 512) {
+  const n = makeNoise(seed, 64)
+  const bw = w / boards
+  const r = rng(seed + 1)
+  const tone = Array.from({ length: boards }, () => 0.93 + r() * 0.1)
+  const [c] = pixels(w, h, (x, y) => {
+    const b = Math.floor(x / bw)
+    const bx = x - b * bw
+    const brush = n(x / 3, y / 60, 2)
+    const wear = n(x / 40, y / 40, 4)
+    let t = tone[b] * (0.95 + (brush - 0.5) * 0.08)
+    if (bx < 3) t *= 0.55
+    else if (bx < 6) t *= 0.85
+    else if (bx > bw - 3) t *= 1.06
+    const worn = wear > 0.72 && (bx < 10 || bx > bw - 10) ? 1 : 0
+    const col = mixRGB(base, [150, 104, 70], worn * 0.6)
+    return [col[0] * t, col[1] * t, col[2] * t]
+  })
+  return toTexture(c)
+}
+
+/** A soft flame: hot core, orange body, black edges. Drawn additively. */
+export function paintFlame(seed: number) {
+  const w = 128, h = 256
+  const n = makeNoise(seed, 16)
+  const [c] = pixels(w, h, (x, y) => {
+    const u = (x / w - 0.5) * 2
+    const v = 1 - y / h
+    const width = (1 - v) * 0.85 * (0.75 + n(x / 18, y / 26, 3) * 0.5)
+    const d = Math.abs(u) / Math.max(width, 0.02)
+    const body = Math.max(0, 1 - d) * Math.min(1, v * 6) * (1 - v * 0.6)
+    const core = Math.max(0, 1 - d * 1.8) * Math.max(0, 1 - v * 1.6)
+    return [Math.min(255, 255 * (body * 1.2 + core)), Math.min(255, 255 * (body * 0.55 + core * 0.9)), Math.min(255, 255 * (body * 0.12 + core * 0.55))]
+  })
+  return toTexture(c)
+}
+
+/** A paper wall calendar for November with a few family marks. */
+export function paintCalendar(seed: number) {
+  const w = 512, h = 768
+  const n = makeNoise(seed, 32)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.97 + (n(x / 24, y / 24, 3) - 0.5) * 0.05
+    return [250 * t, 244 * t, 230 * t]
+  })
+  const sky = g.createLinearGradient(0, 40, 0, 330)
+  sky.addColorStop(0, '#f2c891')
+  sky.addColorStop(1, '#d98b4d')
+  g.fillStyle = sky
+  g.fillRect(30, 40, w - 60, 290)
+  const r = rng(seed)
+  g.fillStyle = '#8f9a5a'
+  g.fillRect(30, 260, w - 60, 70)
+  for (let i = 0; i < 5; i++) {
+    const x = 70 + i * 92, y = 230
+    g.fillStyle = '#6a4a30'
+    g.fillRect(x - 4, y, 8, 40)
+    for (let k = 0; k < 26; k++) {
+      g.fillStyle = r() < 0.4 ? '#c8562e' : r() < 0.6 ? '#e09a3e' : '#9a7a3a'
+      g.beginPath()
+      g.arc(x + (r() - 0.5) * 60, y - 10 + (r() - 0.5) * 44, 7 + r() * 8, 0, Math.PI * 2)
+      g.fill()
+    }
+  }
+  g.fillStyle = 'rgba(70,50,40,0.9)'
+  g.font = 'bold 44px Georgia, serif'
+  g.fillText('November', 36, 392)
+  g.strokeStyle = 'rgba(120,90,70,0.35)'
+  g.lineWidth = 2
+  const gx = 30, gy = 420, cw = (w - 60) / 7, ch = 60
+  for (let i = 0; i <= 7; i++) {
+    g.beginPath(); g.moveTo(gx + i * cw, gy); g.lineTo(gx + i * cw, gy + ch * 5); g.stroke()
+  }
+  for (let j = 0; j <= 5; j++) {
+    g.beginPath(); g.moveTo(gx, gy + j * ch); g.lineTo(gx + cw * 7, gy + j * ch); g.stroke()
+  }
+  g.font = '18px Georgia, serif'
+  g.fillStyle = 'rgba(80,60,50,0.8)'
+  const cell = (d: number) => [gx + ((d + 6) % 7) * cw, gy + Math.floor((d + 6) / 7) * ch] as const
+  for (let d = 1; d <= 30; d++) {
+    const [x, y] = cell(d)
+    g.fillText(String(d), x + 6, y + 22)
+  }
+  // Family marks: a circled day, a heart and a scribble
+  g.strokeStyle = 'rgba(200,60,50,0.8)'
+  g.lineWidth = 4
+  const [ax, ay] = cell(6)
+  g.beginPath()
+  g.ellipse(ax + cw / 2, ay + ch / 2, cw * 0.45, ch * 0.42, 0.1, 0, Math.PI * 2)
+  g.stroke()
+  g.fillStyle = 'rgba(214,90,110,0.9)'
+  const [bx, by] = cell(14)
+  const hx = bx + cw / 2, hy = by + ch / 2 + 6
+  g.beginPath()
+  g.moveTo(hx, hy + 12)
+  g.bezierCurveTo(hx - 22, hy - 4, hx - 10, hy - 20, hx, hy - 8)
+  g.bezierCurveTo(hx + 10, hy - 20, hx + 22, hy - 4, hx, hy + 12)
+  g.fill()
+  g.strokeStyle = 'rgba(40,90,160,0.75)'
+  g.lineWidth = 3
+  const [sx0, sy0] = cell(21)
+  g.beginPath()
+  g.moveTo(sx0 + 8, sy0 + 42)
+  for (let i = 1; i < 8; i++) g.lineTo(sx0 + 8 + i * 6, sy0 + 42 + (i % 2 ? -8 : 0))
+  g.stroke()
+  return toTexture(c)
+}
+
+/** A child's crayon drawing of the family and the house, on rough paper. */
+export function paintKidDrawing(seed: number) {
+  const w = 512, h = 384
+  const n = makeNoise(seed, 32)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.97 + (n(x / 8, y / 8, 2) - 0.5) * 0.06
+    return [252 * t, 248 * t, 236 * t]
+  })
+  const r = rng(seed)
+  const crayon = (color: string, width: number, pts: [number, number][]) => {
+    for (let pass = 0; pass < 3; pass++) {
+      g.strokeStyle = color
+      g.globalAlpha = 0.55
+      g.lineWidth = width * (0.7 + r() * 0.5)
+      g.lineCap = g.lineJoin = 'round'
+      g.beginPath()
+      pts.forEach(([x, y], i) => (i ? g.lineTo(x + (r() - 0.5) * 3, y + (r() - 0.5) * 3) : g.moveTo(x, y)))
+      g.stroke()
+    }
+    g.globalAlpha = 1
+  }
+  for (let x = 10; x < w; x += 7) crayon('#5aa0e0', 6, [[x, 10], [x + 4, 46]])
+  crayon('#f6c02a', 10, Array.from({ length: 13 }, (_, i) => [440 + Math.cos(i / 2) * 34, 80 + Math.sin(i / 2) * 34] as [number, number]))
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2
+    crayon('#f6c02a', 6, [[440 + Math.cos(a) * 44, 80 + Math.sin(a) * 44], [440 + Math.cos(a) * 64, 80 + Math.sin(a) * 64]])
+  }
+  for (let x = 6; x < w; x += 6) crayon('#4caf50', 5, [[x, h - 10], [x + 3, h - 40 - r() * 10]])
+  crayon('#d84315', 7, [[60, 300], [60, 190], [190, 190], [190, 300], [60, 300]])
+  crayon('#8d6e63', 8, [[48, 196], [125, 120], [202, 196]])
+  crayon('#795548', 6, [[110, 300], [110, 250], [140, 250], [140, 300]])
+  crayon('#42a5f5', 5, [[150, 215], [178, 215], [178, 240], [150, 240], [150, 215]])
+  const person = (x: number, s: number, color: string) => {
+    const head = 300 - 120 * s
+    crayon('#5d4037', 5, Array.from({ length: 11 }, (_, i) => [x + Math.cos(i / 1.6) * 14 * s, head + Math.sin(i / 1.6) * 14 * s] as [number, number]))
+    const neck = head + 14 * s
+    crayon(color, 9, [[x, neck], [x - 18 * s, 300 - 30 * s], [x + 18 * s, 300 - 30 * s], [x, neck]])
+    crayon('#5d4037', 4, [[x - 6, 300 - 30 * s], [x - 8, 314]])
+    crayon('#5d4037', 4, [[x + 6, 300 - 30 * s], [x + 8, 314]])
+    crayon('#5d4037', 4, [[x - 26 * s, neck + 30 * s], [x + 26 * s, neck + 30 * s]])
+  }
+  person(260, 1, '#ab47bc')
+  person(320, 1.1, '#1e88e5')
+  person(372, 0.7, '#ef5350')
+  crayon('#ff9800', 7, [[410, 305], [440, 305], [445, 292], [432, 300], [418, 292], [410, 305]])
+  g.fillStyle = 'rgba(229,57,53,0.85)'
+  g.font = 'bold 34px "Comic Sans MS", "Chalkboard SE", cursive'
+  g.fillText('MILA', 236, 120)
+  return toTexture(c)
+}
+
+/** Soft diagonal reflections and faint smudges for window glass, drawn additively. */
+export function paintGlass(seed: number) {
+  const w = 512, h = 512
+  const n = makeNoise(seed + 2, 16)
+  const r = rng(seed)
+  const streaks = Array.from({ length: 3 }, (_, i) => ({ x: 120 + i * 150 + r() * 40, width: 70 - i * 18, strength: 0.16 + r() * 0.1 }))
+  const [c] = pixels(w, h, (x, y) => {
+    let v = 0
+    for (const s of streaks) {
+      const d = Math.abs(x + y * 0.55 - s.x - h * 0.27) / s.width
+      v += Math.max(0, 1 - d * d) * s.strength
+    }
+    v += Math.max(0, n(x / 60, y / 60, 3) - 0.55) * 0.25
+    return [255 * v, 244 * v, 224 * v]
+  })
   return toTexture(c)
 }
