@@ -495,3 +495,87 @@ export function paintBotanical(seed: number) {
   for (let i = 0; i < 30; i++) wash(60 + r() * (w - 120), 400 + r() * 60, 6 + r() * 6, 3, '#a9c48d', 0.35)
   return toTexture(c)
 }
+
+/** Woven linen book cloth: warp and weft threads, slubs, a little wear. Repeats. */
+export function paintLinen(seed: number, base: RGB, size = 512) {
+  const n = makeNoise(seed, 64)
+  const r = rng(seed + 1)
+  const slubs = Array.from({ length: 40 }, () => [r() * size, r() * size, 6 + r() * 30] as const)
+  return pixels(size, size, (x, y) => {
+    const warp = Math.sin((x / size) * Math.PI * 2 * 128) * 0.5 + 0.5
+    const weft = Math.sin((y / size) * Math.PI * 2 * 128) * 0.5 + 0.5
+    const over = ((Math.floor((x / size) * 128) + Math.floor((y / size) * 128)) & 1) ? warp : weft
+    let slub = 0
+    for (const [sx, sy, len] of slubs) if (Math.abs(y - sy) < 1.5 && Math.abs(x - sx) < len) slub = 0.06
+    const t = 0.76 + over * 0.24 + (n(x / 18, y / 18, 4) - 0.5) * 0.18 + slub
+    return [base[0] * t, base[1] * t, base[2] * t]
+  })[0]
+}
+
+/** Grosgrain ribbon: fine ribs across its width, a soft sheen down the middle. Width runs along x. */
+export function paintRibbon(seed: number, base: RGB) {
+  const n = makeNoise(seed, 32)
+  return pixels(64, 512, (x, y) => {
+    // Flat cloth: ribs across, a woven selvedge line near each edge, no rounded shading.
+    const rib = Math.sin(y * 1.9) * 0.5 + 0.5
+    const selvedge = (x > 4 && x < 7) || (x > 56 && x < 59) ? 0.82 : 1
+    const edge = x < 2 || x > 61 ? 0.8 : 1
+    const t = (0.84 + rib * 0.16 + (n(x / 8, y / 8, 3) - 0.5) * 0.1) * selvedge * edge
+    return [base[0] * t, base[1] * t, base[2] * t]
+  })[0]
+}
+
+/** The edge of a stack of paper: many fine cream lines. Lines run along x. */
+export function paintPageEdges(seed: number) {
+  const r = rng(seed)
+  const shades = Array.from({ length: 256 }, () => 0.86 + r() * 0.14)
+  return pixels(256, 256, (_x, y) => {
+    const t = shades[y]
+    return [246 * t, 236 * t, 214 * t]
+  })[0]
+}
+
+/**
+ * A blank notebook page with paper grain, faint rules from `top` every `row`
+ * px, foxing at the outer edges and a shadow along the gutter. side -1 is a
+ * left page (gutter on its right), 1 a right page.
+ */
+export function paintPaper(seed: number, side: 1 | -1, w: number, h: number, top: number, row: number) {
+  const n = makeNoise(seed, 64)
+  const fiber = makeNoise(seed + 5, 64)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.965 + (n(x / 34, y / 34, 4) - 0.5) * 0.05 + (fiber(x / 3, y / 9, 2) - 0.5) * 0.025
+    return [252 * t, 245 * t, 228 * t]
+  })
+  g.strokeStyle = 'rgba(120,150,190,0.30)'
+  g.lineWidth = 2
+  for (let y = top; y < h - 70; y += row) {
+    g.beginPath()
+    g.moveTo(side === 1 ? 70 : 40, y)
+    g.lineTo(side === 1 ? w - 40 : w - 70, y)
+    g.stroke()
+  }
+  // Gutter: the paper bends down into the spine.
+  const gx = side === 1 ? 0 : w
+  const gutter = g.createLinearGradient(gx, 0, gx + side * 150, 0)
+  gutter.addColorStop(0, 'rgba(90,60,30,0.42)')
+  gutter.addColorStop(0.4, 'rgba(90,60,30,0.1)')
+  gutter.addColorStop(1, 'rgba(90,60,30,0)')
+  g.fillStyle = gutter
+  g.fillRect(0, 0, w, h)
+  // Foxing: the outer edges warm and darken a little with handling.
+  const ox = side === 1 ? w : 0
+  const outer = g.createLinearGradient(ox, 0, ox - side * 90, 0)
+  outer.addColorStop(0, 'rgba(170,120,60,0.16)')
+  outer.addColorStop(1, 'rgba(170,120,60,0)')
+  g.fillStyle = outer
+  g.fillRect(0, 0, w, h)
+  for (const [y0, dir] of [[0, 1], [h, -1]] as const) {
+    const edge = g.createLinearGradient(0, y0, 0, y0 + dir * 60)
+    edge.addColorStop(0, 'rgba(170,120,60,0.12)')
+    edge.addColorStop(1, 'rgba(170,120,60,0)')
+    g.fillStyle = edge
+    g.fillRect(0, 0, w, h)
+  }
+  return c
+}
