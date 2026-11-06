@@ -100,6 +100,20 @@ Results and screenshots are in `proof/`.
 The lifecycle check also caught a hand-made plugin that added its group to
 the scene without `own()`: neither the unload nor the reload matched.
 
+With the sandbox and gates (November 6, 2026, same Mac):
+
+- `npm run elder -- "add a small clock above the window"`: claude-code,
+  claude-sonnet-5-5, passed every check. Executor 63.6 s, total 119.0 s. The
+  plugin added only `home/src/plugins/clock.ts`; 0.25% of pixels changed from
+  the base render.
+- `npm run regressions`: 13 of 13 cases got the expected result, including a
+  malicious `vite.config.ts`, edits to `main.ts`, the kernel and
+  `node_modules`, a faked `window.village`, an empty check registry, a spawn
+  error, a timeout with an escaped child, a tampered `.git`, a Chrome launch
+  failure and the browser's network block.
+- `node test/sandbox-overhead.ts <repo>`, medians of three: `srt` adds 0.16 s
+  to `tsc --noEmit` and 0.68 s to `vite build`.
+
 ## Not yet
 
 - Chrome runs under its own sandbox, not `srt`. A custom `sandbox-exec`
