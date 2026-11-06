@@ -39,7 +39,7 @@ export default {
     })
     const strip = new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: '#ffe2ae', emissiveIntensity: 1.4 })
     const glowTex = paintGlow()
-    const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.32 })
+    const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.2 })
     const ceramic = new THREE.MeshStandardMaterial({ map: paintCeramic(5), roughness: 0.35 })
     const stemMat = new THREE.MeshStandardMaterial({ color: '#5d7f33', roughness: 0.7 })
     const leaves = new Foliage('heart')
@@ -75,22 +75,27 @@ export default {
       group.add(p)
       const top = at.clone().add(new THREE.Vector3(0, height, 0))
       if (kind === 'bush') {
-        for (let i = 0; i < 26; i++) {
+        for (let i = 0; i < 44; i++) {
           const a = r() * Math.PI * 2
           const dir = new THREE.Vector3(Math.cos(a) * 0.5, 1, Math.sin(a) * 0.5)
-          broad.add(top.clone().add(new THREE.Vector3(Math.cos(a) * 0.02, 0.02 + r() * 0.12, Math.sin(a) * 0.02)), dir, 0.1 + r() * 0.04, ['#6f9a3d', '#7faa45', '#8fb84d'][i % 3], r() * 3)
+          broad.add(top.clone().add(new THREE.Vector3(Math.cos(a) * 0.02, 0.02 + r() * 0.16, Math.sin(a) * 0.02)), dir, 0.09 + r() * 0.05, ['#6f9a3d', '#7faa45', '#8fb84d'][i % 3], r() * 3)
         }
       } else stems.push(...pothos(leaves, top, radius, 40 + shelf * 7 + Math.round(dx * 10), low ? 2 : kind === 'golden' ? 4 : 3, stemMat, kind === 'golden'))
     }
-    place(0, -0.25, 0.085, 0.15, 'bush')
-    place(0, 0.12, 0.09, 0.15, 'golden')
-    place(2, -0.15, 0.08, 0.13, 'pothos')
-    place(2, 0.3, 0.065, 0.1, 'bush')
+    // Layered: pots overlap along each shelf and vines from the upper shelves fall past the lower ones.
+    place(0, -0.3, 0.085, 0.15, 'bush')
+    place(0, 0.05, 0.09, 0.15, 'golden')
+    place(0, 0.34, 0.06, 0.1, 'pothos')
+    place(1, 0.38, 0.06, 0.1, 'golden')
+    place(2, -0.32, 0.08, 0.13, 'pothos')
+    place(2, 0.05, 0.07, 0.12, 'golden')
+    place(2, 0.36, 0.065, 0.1, 'bush')
+    place(3, 0.38, 0.055, 0.09, 'pothos')
     // The top shelves hold a candle, a little stack of books and a ceramic bud vase.
     const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.1, 20), new THREE.MeshStandardMaterial({ color: '#2a201c', roughness: 0.3 }))
-    candle.position.copy(tops[1]).add(new THREE.Vector3(-0.3, 0.05, 0))
+    candle.position.copy(tops[1]).add(new THREE.Vector3(-0.36, 0.05, 0))
     const vase = pot(0.035, 0.12, ceramic)
-    vase.position.copy(tops[3]).add(new THREE.Vector3(0.1, 0, 0))
+    vase.position.copy(tops[3]).add(new THREE.Vector3(0.05, 0, 0))
     const books = new THREE.Group()
     for (const [i, colour] of ['#a5483a', '#e2c79a', '#4f6b5a'].entries()) {
       const b = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.15), new THREE.MeshStandardMaterial({ color: colour, roughness: 0.8 }))
@@ -98,7 +103,7 @@ export default {
       b.rotation.y = (r() - 0.5) * 0.2
       books.add(b)
     }
-    books.position.copy(tops[1]).add(new THREE.Vector3(0.15, 0, 0))
+    books.position.copy(tops[1]).add(new THREE.Vector3(0.0, 0, 0))
     const pumpkin = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 10), new THREE.MeshStandardMaterial({ color: '#c8682e', roughness: 0.7 }))
     pumpkin.scale.y = 0.7
     pumpkin.position.copy(tops[3]).add(new THREE.Vector3(-0.32, 0.04, 0))

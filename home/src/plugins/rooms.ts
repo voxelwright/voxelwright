@@ -49,8 +49,9 @@ export const PLANS: Record<string, RoomPlan> = {
   },
   living: {
     plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors'],
-    home: pose([LIVING_X - 0.45, 1.45, 3.1], [LIVING_X + 0.1, 1.2, -1.2]),
-    arrive: pose([LIVING_X - 1.4, 1.5, 3.6], [LIVING_X - 0.6, 1.25, -1.2]),
+    // The plants and shelves are the subject; the workshop door is a quiet right edge.
+    home: pose([LIVING_X + 0.6, 1.4, 2.35], [LIVING_X - 0.12, 1.28, -2.2]),
+    arrive: pose([LIVING_X - 0.3, 1.45, 3.0], [LIVING_X - 0.6, 1.3, -2.2]),
     fog: ['#d8c4ac', 9, 30],
   },
 }

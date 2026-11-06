@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { LIVING_X } from '../layout'
-import { paintWood } from '../paint'
+import { paintPhoto, paintWood, rng } from '../paint'
 import { LOUNGE } from './lounge'
 
 /** A fluted light-oak sideboard with a glowing table lamp and a serving board on top. */
@@ -58,13 +58,38 @@ export default {
     base.position.y = 0.035
     const shade = new THREE.Mesh(
       new THREE.CylinderGeometry(0.08, 0.08, 0.3, 28, 1, true),
-      new THREE.MeshStandardMaterial({ color: '#fbf3e3', emissive: '#ffd9a0', emissiveIntensity: 0.7, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: '#fbf3e3', emissive: '#ffd9a0', emissiveIntensity: 0.3, side: THREE.DoubleSide }),
     )
     shade.position.y = 0.22
-    const glow = new THREE.PointLight('#ffc98a', 0.55, 2.2, 1.8)
+    const glow = new THREE.PointLight('#ffc98a', 0.4, 2.2, 1.8)
     glow.position.y = 0.24
     lamp.add(base, shade, glow)
     group.add(lamp)
+    // Framed family photos leaning at the back, and a stack of cookbooks.
+    const frame = (kind: 'beach' | 'mountains', seed: number, w: number, h: number, x: number, colour: string) => {
+      const f = new THREE.Group()
+      const wood = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.02), new THREE.MeshStandardMaterial({ color: colour, roughness: 0.6 }))
+      const photo = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.05, h - 0.05), new THREE.MeshStandardMaterial({ map: paintPhoto(kind, seed), roughness: 0.4 }))
+      photo.position.z = 0.0105
+      wood.castShadow = true
+      f.add(wood, photo)
+      f.position.set(x, H + 0.02 + h / 2, -D / 2 + 0.07)
+      f.rotation.x = -0.12
+      group.add(f)
+    }
+    frame('beach', 4, 0.3, 0.38, -0.27, '#efe4cf')
+    frame('mountains', 7, 0.2, 0.17, 0.42, '#b88a5c')
+    const r = rng(17)
+    const stack = new THREE.Group()
+    for (const [i, colour] of ['#3f5d4c', '#e8dcc2', '#b5523b', '#f0c76a'].entries()) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.24 - i * 0.012, 0.035, 0.17), new THREE.MeshStandardMaterial({ color: colour, roughness: 0.85 }))
+      b.position.y = 0.0175 + i * 0.035
+      b.rotation.y = (r() - 0.5) * 0.25
+      b.castShadow = true
+      stack.add(b)
+    }
+    stack.position.set(0.6, H + 0.02, 0.02)
+    group.add(stack)
     own(ctx, group)
   },
 }

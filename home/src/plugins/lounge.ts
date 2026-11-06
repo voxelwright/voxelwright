@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { canvas, paintPlaster, paintWood, toTexture } from '../paint'
+import { canvas, paintKidDrawing, paintPlaster, paintWood, rng, toTexture } from '../paint'
 import { LIVING_X } from '../layout'
 
 /** Living room corner measurements, local to the room. */
@@ -63,25 +63,65 @@ export default {
     skirtSide.position.set(right - 0.01, 0.045, back + 3)
     room.add(skirtSide)
 
-    // A soft woven rug in front of the sideboard.
+    // A soft woven rug in front of the sideboard: terracotta and honey bands on cream wool.
     const [rc, rg] = canvas(512, 320)
-    rg.fillStyle = '#e9dccb'
+    rg.fillStyle = '#efdcc0'
     rg.fillRect(0, 0, 512, 320)
-    for (let y = 18; y < 320; y += 22) {
-      rg.fillStyle = y % 44 < 22 ? 'rgba(176, 120, 92, 0.35)' : 'rgba(120, 140, 110, 0.25)'
-      rg.fillRect(14, y, 484, 6)
+    const weave = rng(41)
+    for (let i = 0; i < 2200; i++) {
+      rg.fillStyle = `rgba(150, 90, 50, ${0.03 + weave() * 0.05})`
+      rg.fillRect(weave() * 512, weave() * 320, 2 + weave() * 6, 1)
     }
-    rg.strokeStyle = '#b0785c'
-    rg.lineWidth = 10
+    for (const [y, h, colour] of [[40, 16, '#c06a45'], [64, 6, '#e0a95a'], [250, 6, '#e0a95a'], [264, 16, '#c06a45']] as const) {
+      rg.fillStyle = colour
+      rg.globalAlpha = 0.75
+      rg.fillRect(20, y, 472, h)
+    }
+    rg.globalAlpha = 0.5
+    for (let x = 60; x < 460; x += 56) {
+      rg.fillStyle = '#b5583a'
+      rg.beginPath()
+      rg.moveTo(x, 160)
+      rg.lineTo(x + 18, 130)
+      rg.lineTo(x + 36, 160)
+      rg.lineTo(x + 18, 190)
+      rg.closePath()
+      rg.fill()
+    }
+    rg.globalAlpha = 1
+    rg.strokeStyle = '#a4553a'
+    rg.lineWidth = 12
     rg.strokeRect(8, 8, 496, 304)
     const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.4), new THREE.MeshStandardMaterial({ map: toTexture(rc), roughness: 1 }))
     rug.rotation.x = -Math.PI / 2
-    rug.position.set(-0.6, 0.004, back + 1.6)
+    rug.position.set(-0.4, 0.004, back + 1.3)
     rug.receiveShadow = true
     room.add(rug)
 
+    // A child's painting taped to the side wall, between the plant corner and the workshop door.
+    const painting = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.48), new THREE.MeshStandardMaterial({ map: paintKidDrawing(8), roughness: 0.9 }))
+    painting.rotation.y = -Math.PI / 2
+    painting.rotation.x = 0.02
+    painting.position.set(right - 0.006, 1.5, back + 0.95)
+    room.add(painting)
+
+    // A low cushioned bench under the plant shelves, pine base and an oatmeal cushion.
+    const pine = new THREE.MeshStandardMaterial({ map: paintWood({ seed: 52, w: 256, h: 128, planks: 1, light: [214, 178, 134], dark: [184, 146, 104], knots: 1 }), roughness: 0.6 })
+    const bench = new THREE.Group()
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.36, 0.36), pine)
+    base.position.y = 0.18
+    const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.07, 0.34, 6, 1, 4), new THREE.MeshStandardMaterial({ color: '#e9dfcf', roughness: 1 }))
+    const bulge = cushion.geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < bulge.count; i++) if (bulge.getY(i) > 0) bulge.setY(i, bulge.getY(i) + 0.018 * Math.cos((bulge.getX(i) / 0.76) * Math.PI) * Math.cos((bulge.getZ(i) / 0.34) * Math.PI))
+    cushion.geometry.computeVertexNormals()
+    cushion.position.y = 0.395
+    for (const m of [base, cushion]) m.castShadow = m.receiveShadow = true
+    bench.add(base, cushion)
+    bench.position.set(0.3, 0, back + 0.22)
+    room.add(bench)
+
     // Evening light: a warm key from the lamp side, a soft fill, and a bounce.
-    const fill = new THREE.HemisphereLight('#fff4e6', '#9a8068', 1.05)
+    const fill = new THREE.HemisphereLight('#fff4e6', '#9a8068', 1.15)
     fill.name = 'lounge fill'
     room.add(fill)
     const key = new THREE.DirectionalLight('#ffd9a8', 1.15)

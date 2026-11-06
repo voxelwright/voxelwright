@@ -15,7 +15,7 @@ npm run typecheck
 npm run build
 ```
 
-`?plugins=renderer,room` loads only the named plugins. `window.village` exposes
+`?plugins=renderer,room` loads only the named plugins; when `rooms` is listed, each room brings only its listed plugins. `window.village` exposes
 `snapshot()`, `load(name)`, `unload(name)` and `ready()` for inspection.
 
 A plugin whose `apply` throws is logged, emits `village/plugin-error`, has its
@@ -56,7 +56,7 @@ There is no menu bar. Meaningful objects are entries, registered through the
 `entries` plugin with a label, an object and an action. Pointer hover gives a
 soft warm glow and a handwritten label; click or tap chooses; Tab cycles the
 entries on screen from left to right and wraps, Enter chooses, Escape or a
-click elsewhere backs out. Touch skips hover. With `prefers-reduced-motion`
+click elsewhere backs out. Touch skips hover. The nearest visible, depth-writing mesh under the pointer wins, so furniture blocks the entries behind it; light shafts, glows and hidden rooms do not. With `prefers-reduced-motion`
 glows, labels and camera moves are instant.
 
 Entries today: the notebook, the fridge (frames its door; family moments and
@@ -88,7 +88,7 @@ headless cap) in every mode:
 | --- | --- | --- | --- |
 | kitchen | DPR 2 | 480 | 52,121 |
 | kitchen | `?q=low` | 412 | 48,893 |
-| living | DPR 2 | 143 | 23,731 |
+| living | DPR 2 | 187 | 39,249 |
 | living | `?q=low` | 140 | 22,003 |
 
 ## Measured, kitchen scene (November 6, 2026)
