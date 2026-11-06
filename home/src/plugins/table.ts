@@ -28,7 +28,7 @@ export default {
 
     const top = TABLE_TOP
     const wood = new THREE.MeshStandardMaterial({
-      map: paintWood({ seed: 7, planks: 4, light: [214, 160, 104], dark: [138, 86, 48], knots: 4 }),
+      map: paintWood({ seed: 7, planks: 4, light: [236, 198, 144], dark: [212, 170, 118], knots: 2 }),
       roughness: 0.48,
     })
     const slab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.055, 1.0), wood)
@@ -36,7 +36,7 @@ export default {
     slab.castShadow = slab.receiveShadow = true
     group.add(slab)
 
-    const legMat = new THREE.MeshStandardMaterial({ color: '#8a5a36', roughness: 0.6 })
+    const legMat = new THREE.MeshStandardMaterial({ color: '#f3efe7', roughness: 0.5 })
     const legGeo = new THREE.CylinderGeometry(0.035, 0.026, top - 0.055, 12)
     for (const [x, z] of [[-0.8, -0.42], [0.8, -0.42], [-0.8, 0.42], [0.8, 0.42]]) {
       const leg = new THREE.Mesh(legGeo, legMat)
@@ -51,6 +51,7 @@ export default {
 
     // Open notebook: linen cover, two curled pages, the start of a note.
     const book = new THREE.Group()
+    book.name = 'notebook'
     book.position.set(0.05, top + 0.002, 0.12)
     book.rotation.y = -0.08
     book.scale.setScalar(1.3)
@@ -70,6 +71,7 @@ export default {
         pageGeometry(0.29, 0.4, side),
         new THREE.MeshStandardMaterial({ map: pages[i], roughness: 0.92 }),
       )
+      page.name = side === 1 ? 'notebook right page' : 'notebook left page'
       page.rotation.x = -Math.PI / 2
       page.position.y = 0.008
       page.castShadow = page.receiveShadow = true

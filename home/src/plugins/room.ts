@@ -12,7 +12,7 @@ export default {
     const room = new THREE.Group()
     room.name = 'room'
 
-    const floorTex = paintWood({ seed: 11, planks: 8, light: [170, 116, 74], dark: [128, 82, 50], knots: 3 })
+    const floorTex = paintWood({ seed: 11, planks: 8, light: [222, 186, 140], dark: [176, 136, 96], knots: 2 })
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping
     floorTex.repeat.set(2, 3)
     floorTex.rotation = Math.PI / 2
@@ -24,7 +24,7 @@ export default {
     floor.receiveShadow = true
     room.add(floor)
 
-    const plaster = paintPlaster(5, [246, 230, 204])
+    const plaster = paintPlaster(5, [246, 238, 224])
     plaster.wrapS = plaster.wrapT = THREE.RepeatWrapping
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
     const T = 0.18
@@ -35,7 +35,7 @@ export default {
       m.position.set((xa + xb) / 2, (ya + yb) / 2, WALL_Z - T / 2)
       // Keep painted plaster at a consistent scale across blocks
       const uv = m.geometry.attributes.uv as THREE.BufferAttribute
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa) / 3, (uv.getY(i) * (yb - ya) + ya) / 3)
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa) / 2.2, (uv.getY(i) * (yb - ya) + ya) / 2.2)
       m.castShadow = m.receiveShadow = true
       room.add(m)
     }
@@ -51,23 +51,17 @@ export default {
 
     // Skirting board
     const skirt = new THREE.Mesh(
-      new THREE.BoxGeometry(6.8, 0.12, 0.03),
-      new THREE.MeshStandardMaterial({ color: '#7a5034', roughness: 0.7 }),
+      new THREE.BoxGeometry(6.8, 0.1, 0.02),
+      new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 }),
     )
     skirt.position.set(0, 0.06, WALL_Z + 0.015)
     room.add(skirt)
 
     own(ctx, room)
 
-    // Soft bounce light from the warm room, and a flickering hearth off to the right.
-    const hemi = own(ctx, new THREE.HemisphereLight('#ffe6c4', '#7a5238', 1.1))
+    // Soft bounce light from the warm room. The fire's own light lives in the hearth plugin.
+    const hemi = own(ctx, new THREE.HemisphereLight('#fff0dc', '#a07a58', 1.6))
     hemi.name = 'room fill'
-    const hearth = own(ctx, new THREE.PointLight('#ff8a3c', 5, 7, 1.6))
-    hearth.name = 'hearth glow'
-    hearth.position.set(3.0, 0.6, 0.6)
-    ctx.on('village/frame', (_dt, t) => {
-      hearth.intensity = 4.2 + Math.sin(t * 7.1) * 0.4 + Math.sin(t * 13.3 + 1) * 0.3 + Math.sin(t * 2.3) * 0.5
-    })
 
     ctx.effect(() => {
       const before = scene.fog

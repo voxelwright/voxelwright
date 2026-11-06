@@ -26,10 +26,9 @@ export default {
 
     const pipeline = new THREE.RenderPipeline(stage.renderer, output)
     ctx.effect(() => {
-      const previous = stage.draw
-      stage.draw = () => pipeline.render()
+      const remove = stage.addDrawPass(() => pipeline.render())
       return () => {
-        stage.draw = previous
+        remove()
         pipeline.dispose()
         glow.dispose()
         scenePass.dispose()

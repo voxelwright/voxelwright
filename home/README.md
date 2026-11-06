@@ -1,6 +1,6 @@
 # Village home
 
-A golden-hour kitchen corner rendered with three.js (WebGPU, falling back to
+The family kitchen at golden hour, painterly and stylized, rendered with three.js (WebGPU, falling back to
 WebGL2). Every piece of the scene is a Cordis plugin that unloads cleanly.
 All textures are painted in code in `src/paint.ts`.
 
@@ -9,25 +9,60 @@ All textures are painted in code in `src/paint.ts`.
 ```sh
 npm install
 npm run dev            # http://localhost:5181, add ?q=low for phones
-npm run measure -- --perf --unload   # with the dev server running
+npm run measure -- --perf --unload   # with the dev server running, headless
+node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 npm run typecheck
 npm run build
 ```
 
 `?plugins=renderer,room` loads only the named plugins. `window.village` exposes
-`snapshot()`, `load(name)` and `unload(name)` for inspection.
+`snapshot()`, `load(name)`, `unload(name)` and `ready()` for inspection.
+
+A plugin whose `apply` throws is logged, emits `village/plugin-error`, has its
+effects released and is removed from the registry, so a fixed version can load
+under the same name. `ready()` resolves once every requested plugin is active
+or failed and returns `ok`, the active list and any problems. `snapshot()`
+separates registered, active and failed plugins. Post-processing adds a draw
+pass with `stage.addDrawPass()`; passes are removed by identity, so plugins can
+unload in any order.
 
 ## Plugins
 
 `renderer` provides the `stage` service: renderer, scene, camera, quality and
-the per-frame `village/frame` event. `room`, `window`, `table`, `fridge`,
-`motes`, `lamp`, `camera` and `postfx` inject `stage`. Each one registers its
+the per-frame `village/frame` event. `camera` provides the `view` service,
+which eases the camera to a pose and back. Every other plugin injects `stage`:
+`room`, `window`, `glass`, `sunbeam`, `cabinets`, `table`, `chairs`,
+`highchair`, `fridge`, `toyshelf`, `botanical`, `plant`, `motes`, `lamp`,
+`rimlight` and `postfx`. `notebook` injects `stage` and `view`. Each one registers its
 objects, listeners and atmosphere through Cordis effects, so `fiber.dispose()`
 reverses them. `own()` in `src/kernel.ts` also releases each object's
 geometries, materials and textures. In dev, every plugin file accepts Vite hot
 updates by disposing the running fiber and loading the edited module.
 
-## Measured (November 6, 2026)
+## Notebook
+
+Click or tap the notebook, or press Tab then Enter, and the camera eases down
+to the open page. Typing appears on the paper in handwriting. Enter keeps the
+line in this browser's local storage (`village.notebook.lines`). Escape or a
+click elsewhere eases back. With `prefers-reduced-motion` the camera moves
+without easing. `node scripts/check-notebook.mjs` proves the keyboard and
+pointer paths, storage, reduced motion and a clean unload and reload.
+
+## Measured, kitchen scene (November 6, 2026)
+
+Headless Chrome through Playwright 1.65 (`--enable-unsafe-webgpu
+--use-angle=metal`), 1440×900, Apple M1 Pro. Backend: WebGPU.
+
+| Mode | Canvas | p50 frame | p95 frame | Draw calls | Triangles |
+| --- | --- | --- | --- | --- | --- |
+| default, DPR 2 | 2880×1800 | 16.7 ms | 16.7 ms | 541 | 35,301 |
+| `?q=low` | 1440×900 | 16.7 ms | 16.8 ms | 473 | 32,073 |
+
+Headless Chrome caps animation frames at 60 Hz, so these show the scene holds
+60 fps, not how much headroom remains. The `--unload` proof still restores the
+same objects for `fridge`, `postfx` and `room`.
+
+## Measured, first scene (November 6, 2026)
 
 Command: `node scripts/measure.mjs [url] --perf --unload --shot=path --headed`
 with the dev server on port 5181. These numbers came from headed Google Chrome

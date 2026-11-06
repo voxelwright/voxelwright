@@ -177,19 +177,43 @@ export function paintGarden(seed: number) {
   ridge(0.6, 90, '#b9a672', 200)
   ridge(0.66, 70, '#8f9a5a', 150)
   // Trees as clustered painterly dabs
+  // Trees: a forked trunk, then several leaf clumps painted in layers of small
+  // dabs (shadow, mid, sunlit), so the crown reads as masses with gaps.
   const tree = (x: number, y: number, s: number, dark: string, light: string) => {
-    g.fillStyle = '#5b4632'
-    g.fillRect(x - s * 0.05, y - s * 0.2, s * 0.1, s * 0.6)
-    for (let i = 0; i < 70; i++) {
-      const a = r() * Math.PI * 2, d = Math.sqrt(r()) * s * 0.5
-      const px = x + Math.cos(a) * d, py = y - s * 0.55 + Math.sin(a) * d * 0.85
-      const lit = (px - x) < 0 ? 0.65 : 0.25 // sun from the left
-      g.fillStyle = r() < lit ? light : dark
-      g.globalAlpha = 0.85
+    const mid = light
+    g.strokeStyle = '#4a3828'
+    g.lineCap = 'round'
+    const limb = (x0: number, y0: number, x1: number, y1: number, wdt: number) => {
+      g.lineWidth = wdt
       g.beginPath()
-      g.ellipse(px, py, s * (0.06 + r() * 0.08), s * (0.05 + r() * 0.06), r() * 3, 0, Math.PI * 2)
-      g.fill()
+      g.moveTo(x0, y0)
+      g.quadraticCurveTo((x0 + x1) / 2 + (r() - 0.5) * s * 0.1, (y0 + y1) / 2, x1, y1)
+      g.stroke()
     }
+    const fork = y - s * 0.45
+    limb(x, y + s * 0.3, x + s * 0.02, fork, s * 0.09)
+    const clumps: [number, number, number][] = [[x, fork - s * 0.38, s * 0.3]]
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i - 2) * 0.55 + (r() - 0.5) * 0.3
+      const len = s * (0.3 + r() * 0.2)
+      const ex = x + Math.cos(a) * len, ey = fork + Math.sin(a) * len
+      limb(x + s * 0.02, fork, ex, ey, s * 0.04)
+      clumps.push([ex, ey - s * 0.05, s * (0.16 + r() * 0.1)])
+    }
+    const dabs = (cx: number, cy: number, rad: number, color: string, count: number, bias: number, alpha: number) => {
+      g.fillStyle = color
+      g.globalAlpha = alpha
+      for (let i = 0; i < count; i++) {
+        const a = r() * Math.PI * 2, d = Math.sqrt(r()) * rad
+        const px = cx + Math.cos(a) * d + bias * rad * 0.25, py = cy + Math.sin(a) * d * 0.8 + Math.abs(bias) * rad * 0.15
+        g.beginPath()
+        g.ellipse(px, py, s * (0.018 + r() * 0.022), s * (0.012 + r() * 0.014), r() * 3, 0, Math.PI * 2)
+        g.fill()
+      }
+    }
+    for (const [cx, cy, rad] of clumps) dabs(cx, cy, rad, dark, 140, 0.3, 0.9)
+    for (const [cx, cy, rad] of clumps) dabs(cx - rad * 0.12, cy - rad * 0.1, rad * 0.85, mid, 110, -0.4, 0.8)
+    for (const [cx, cy, rad] of clumps) dabs(cx - rad * 0.3, cy - rad * 0.3, rad * 0.5, '#e9d27e', 50, -0.8, 0.75)
     g.globalAlpha = 1
   }
   tree(w * 0.12, h * 0.7, 300, '#4f6b33', '#a8b257')
@@ -329,5 +353,144 @@ export function paintPhoto(kind: 'beach' | 'cat' | 'drawing' | 'mountains', seed
   g.font = 'italic 30px "Bradley Hand", "Segoe Print", cursive'
   const captions = { beach: 'summer, 2026', cat: 'Biscuit', drawing: 'by Mila', mountains: 'our hike' }
   g.fillText(captions[kind], ix + 6, h - 40)
+  return toTexture(c)
+}
+
+/** A child's crayon drawing of the family and the house, on rough paper. */
+export function paintKidDrawing(seed: number) {
+  const w = 512, h = 384
+  const n = makeNoise(seed, 32)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.97 + (n(x / 8, y / 8, 2) - 0.5) * 0.06
+    return [252 * t, 248 * t, 236 * t]
+  })
+  const r = rng(seed)
+  const crayon = (color: string, width: number, pts: [number, number][]) => {
+    for (let pass = 0; pass < 3; pass++) {
+      g.strokeStyle = color
+      g.globalAlpha = 0.55
+      g.lineWidth = width * (0.7 + r() * 0.5)
+      g.lineCap = g.lineJoin = 'round'
+      g.beginPath()
+      pts.forEach(([x, y], i) => (i ? g.lineTo(x + (r() - 0.5) * 3, y + (r() - 0.5) * 3) : g.moveTo(x, y)))
+      g.stroke()
+    }
+    g.globalAlpha = 1
+  }
+  for (let x = 10; x < w; x += 7) crayon('#5aa0e0', 6, [[x, 10], [x + 4, 46]])
+  crayon('#f6c02a', 10, Array.from({ length: 13 }, (_, i) => [440 + Math.cos(i / 2) * 34, 80 + Math.sin(i / 2) * 34] as [number, number]))
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2
+    crayon('#f6c02a', 6, [[440 + Math.cos(a) * 44, 80 + Math.sin(a) * 44], [440 + Math.cos(a) * 64, 80 + Math.sin(a) * 64]])
+  }
+  for (let x = 6; x < w; x += 6) crayon('#4caf50', 5, [[x, h - 10], [x + 3, h - 40 - r() * 10]])
+  crayon('#d84315', 7, [[60, 300], [60, 190], [190, 190], [190, 300], [60, 300]])
+  crayon('#8d6e63', 8, [[48, 196], [125, 120], [202, 196]])
+  crayon('#795548', 6, [[110, 300], [110, 250], [140, 250], [140, 300]])
+  crayon('#42a5f5', 5, [[150, 215], [178, 215], [178, 240], [150, 240], [150, 215]])
+  const person = (x: number, s: number, color: string) => {
+    const head = 300 - 120 * s
+    crayon('#5d4037', 5, Array.from({ length: 11 }, (_, i) => [x + Math.cos(i / 1.6) * 14 * s, head + Math.sin(i / 1.6) * 14 * s] as [number, number]))
+    const neck = head + 14 * s
+    crayon(color, 9, [[x, neck], [x - 18 * s, 300 - 30 * s], [x + 18 * s, 300 - 30 * s], [x, neck]])
+    crayon('#5d4037', 4, [[x - 6, 300 - 30 * s], [x - 8, 314]])
+    crayon('#5d4037', 4, [[x + 6, 300 - 30 * s], [x + 8, 314]])
+    crayon('#5d4037', 4, [[x - 26 * s, neck + 30 * s], [x + 26 * s, neck + 30 * s]])
+  }
+  person(260, 1, '#ab47bc')
+  person(320, 1.1, '#1e88e5')
+  person(372, 0.7, '#ef5350')
+  crayon('#ff9800', 7, [[410, 305], [440, 305], [445, 292], [432, 300], [418, 292], [410, 305]])
+  g.fillStyle = 'rgba(229,57,53,0.85)'
+  g.font = 'bold 34px "Comic Sans MS", "Chalkboard SE", cursive'
+  g.fillText('MILA', 236, 120)
+  return toTexture(c)
+}
+
+/** Soft diagonal reflections and faint smudges for window glass, drawn additively. */
+export function paintGlass(seed: number) {
+  const w = 512, h = 512
+  const n = makeNoise(seed + 2, 16)
+  const r = rng(seed)
+  const streaks = Array.from({ length: 3 }, (_, i) => ({ x: 120 + i * 150 + r() * 40, width: 70 - i * 18, strength: 0.16 + r() * 0.1 }))
+  const [c] = pixels(w, h, (x, y) => {
+    let v = 0
+    for (const s of streaks) {
+      const d = Math.abs(x + y * 0.55 - s.x - h * 0.27) / s.width
+      v += Math.max(0, 1 - d * d) * s.strength
+    }
+    v += Math.max(0, n(x / 60, y / 60, 3) - 0.55) * 0.25
+    return [255 * v, 244 * v, 224 * v]
+  })
+  return toTexture(c)
+}
+
+/** Brushed stainless steel: fine vertical streaks over a soft tonal drift. */
+export function paintBrushed(seed: number) {
+  const n = makeNoise(seed, 64)
+  const [c] = pixels(256, 1024, (x, y) => {
+    const t = 0.9 + (n(x / 0.8, y / 90, 2) - 0.5) * 0.12 + (n(x / 60, y / 200, 3) - 0.5) * 0.1
+    return [204 * t, 208 * t, 212 * t]
+  })
+  return toTexture(c)
+}
+
+/** A child's alphabet poster: Ukrainian letters, each with a little painted animal blob. */
+export function paintAlphabet(seed: number) {
+  const w = 384, h = 512
+  const [c, g] = canvas(w, h)
+  g.fillStyle = '#fbf8f1'
+  g.fillRect(0, 0, w, h)
+  const r = rng(seed)
+  const letters = 'АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ'
+  const cols = 5, cw = (w - 30) / cols, ch = (h - 30) / 7
+  const colors = ['#e07a5f', '#3d85c6', '#81b29a', '#f2cc8f', '#9c6ade', '#e8a0bf', '#6a994e']
+  for (let i = 0; i < Math.min(letters.length, cols * 7); i++) {
+    const x = 15 + (i % cols) * cw, y = 15 + Math.floor(i / cols) * ch
+    g.fillStyle = colors[Math.floor(r() * colors.length)]
+    g.beginPath()
+    g.ellipse(x + cw * 0.68, y + ch * 0.55, cw * 0.17, ch * 0.2, r() * 2, 0, Math.PI * 2)
+    g.fill()
+    g.fillStyle = '#3b3340'
+    g.font = 'bold 26px Georgia, serif'
+    g.fillText(letters[i], x + 4, y + ch * 0.6)
+  }
+  return toTexture(c)
+}
+
+/** A watercolour botanical print: potted plants on a shelf, soft washes on cream paper. */
+export function paintBotanical(seed: number) {
+  const w = 384, h = 512
+  const n = makeNoise(seed, 32)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const t = 0.97 + (n(x / 20, y / 20, 3) - 0.5) * 0.05
+    return [248 * t, 244 * t, 234 * t]
+  })
+  const r = rng(seed)
+  const wash = (x: number, y: number, rx: number, ry: number, color: string, a: number) => {
+    g.fillStyle = color
+    g.globalAlpha = a
+    g.beginPath()
+    g.ellipse(x, y, rx, ry, r() * 3, 0, Math.PI * 2)
+    g.fill()
+    g.globalAlpha = 1
+  }
+  g.fillStyle = 'rgba(150,110,80,0.6)'
+  g.fillRect(40, 300, w - 80, 6)
+  const pots: [number, string][] = [[100, '#d9a07a'], [195, '#e8e2d6'], [290, '#b9805a']]
+  for (const [x, pot] of pots) {
+    for (let i = 0; i < 26; i++) {
+      const a = -Math.PI / 2 + (r() - 0.5) * 2.4, d = 20 + r() * 60
+      wash(x + Math.cos(a) * d, 250 + Math.sin(a) * d, 9 + r() * 6, 5 + r() * 3, r() < 0.5 ? '#6f9a5a' : '#9cbf7a', 0.55)
+    }
+    for (let i = 0; i < 12; i++) wash(x + (r() - 0.5) * 30, 320 + i * 12, 7, 4, '#7fa66a', 0.5)
+    g.fillStyle = pot
+    g.globalAlpha = 0.85
+    g.beginPath()
+    g.moveTo(x - 26, 260); g.lineTo(x + 26, 260); g.lineTo(x + 20, 300); g.lineTo(x - 20, 300)
+    g.fill()
+    g.globalAlpha = 1
+  }
+  for (let i = 0; i < 30; i++) wash(60 + r() * (w - 120), 400 + r() * 60, 6 + r() * 6, 3, '#a9c48d', 0.35)
   return toTexture(c)
 }
