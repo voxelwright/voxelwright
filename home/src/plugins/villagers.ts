@@ -30,7 +30,7 @@ export default {
   inject: ['stage', 'entries', 'view'],
   apply(ctx: Context) {
     const lineup = flag === 'lineup'
-    if (!flag || !(lineup || flag in KINDS)) return
+    if (!flag || !(lineup || Object.hasOwn(KINDS, flag))) return
     const { stage, entries, view } = ctx
     const phys = stage.features().has('phys')
     const group = new THREE.Group()

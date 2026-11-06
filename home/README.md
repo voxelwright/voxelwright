@@ -250,7 +250,9 @@ values.
 
 Frame cost, headless Chrome, 1440x900, DPR 2 (`?q=high`) or 1 (`?q=low`),
 M1 Pro, WebGPU, `npm run measure -- '<url>' --perf --gpu`, one 6 s run each
-(GPU p50 varies 1 to 3 ms between runs of the same page):
+(GPU p50 varies 1 to 3 ms between runs of the same page). Taken before the last
+tuning pass (shadow size, colours), which added no draw calls. The first `low`
+run of `d` stalled headless (0.2 fps); the table shows a rerun:
 
 | Flag | Tier | Draw calls | Triangles | GPU p50 / p95 ms |
 | --- | --- | --- | --- | --- |
