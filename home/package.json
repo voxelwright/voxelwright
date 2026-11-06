@@ -1,0 +1,23 @@
+{
+  "name": "village-home",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "measure": "node scripts/measure.mjs"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.12",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.187.0",
+    "playwright": "1.65.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.6"
+  }
+}
