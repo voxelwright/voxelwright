@@ -106,6 +106,61 @@ store was tested. Original receipts/procedure:
 `/private/tmp/village-gascity-workflow-audit.md` (temporary audit artifacts,
 not prerequisites for applying this recipe).
 
+## Executed v2 retry, restart and scoped failure, November 5
+
+R6 exercised Gas City 1.5.1 / Beads 1.3.2 / Dolt 2.2.0 on actual Ally Linux,
+using standard subprocess/one_shot agents with deterministic adapters and the
+native providerless core dispatcher. The incorrect first artifact (7) was
+rejected by an independent native exec check; native attempt two stayed held
+before its artifact effect. Native supervisor stop/start resumed that same bead
+in a new process without replaying the first effect. Artifact 12 then passed;
+two explicitly required leaves executed and closed pass. Exact gate/held/root
+readbacks stayed open, and held was absent from ready. A separate max-one check
+failed its required scope/root and closed downstream leaves skipped without
+execution. This supersedes the small recipe's execution limits for these narrow
+bd-backed paths, not its recorded historical result.
+
+Apply the observed contracts:
+
+- PackV2 uses `agents/<name>/agent.toml`, not inline legacy agent tables. Assert
+  effective provider/store/session configuration before cooking. Reuse the core
+  providerless dispatcher; a scripted duplicate is not its native identity.
+- Generic external Dolt initialization needs complete endpoint/database inputs
+  through the supported direct/external selectors. A legacy host/port stanza
+  alone did not initialize the pending scope. Reusing persisted native binding
+  after removing one-shot init inputs proves binding reuse, not isolation.
+- Bind effects to exact claim root/route/iteration/step facts and cook
+  `id_mapping`. Initial and retry reference namespaces differ in pinned source;
+  a prefix match misclassified the first attempt. Do not dispatch by substring.
+- `needs` waits for closure, not successful outcome. Required failure propagation
+  in the executed formula uses scope membership plus `gc.on_fail = abort_scope`.
+  Explicitly name required downstream leaves for fan-in.
+- Beads default list hides gates even with `--all`; use `--include-gates` and
+  exact gate/held/root `show` plus blocking-edge/ready checks. Wire type is
+  `issue_type`. A human gate proves blocking, not authenticated approval.
+- `hook` may return exit 1 with exact `ok=true/action=drain/reason=no_work`.
+  Classify that supported drain separately; malformed replies, work exit 1 and
+  operational claim errors remain errors and cannot count as completed work.
+- `supervisor stop` is asynchronous unless `--wait` is requested. Await native
+  settlement and supervisor exit before fallback; keep the fixture's Dolt alive
+  until residual native clients settle. R5 passed functional checks but failed
+  overall with exits `[0,130]` and one SIGKILL after a repeated shutdown request.
+  R6's supported stop/wait order produced `[0,0]`, Dolt 0 and no residual cleanup
+  errors. Preserve timeout/nonzero/SIGKILL/survivor outcomes as failures.
+
+R6: 187.541 native seconds, 188.903632305 outer seconds, 76 native commands,
+20 passing Linux controls, zero model calls. This is actual native orchestration
+with synthetic executables, not a model integration, seven-reviewer proof,
+interrupted-verdict recovery, family boundary or complete issue 13/15 workflow.
+[Evidence and replayable payload](../../../../evidence/017-native-formula.md)
+bind the original manifests, full failure history, source hashes and limits.
+The copied payload's pending-R6 status predates the separately bound PASS.
+
+Pinned source remains `4f698fe2a7eefae49e545c5e38189f1b63fb9b39`. Current upstream
+`8e75c50aa84540eaaf185db3cb9b103d04d6aa3f` adds logical-settled recovery and
+unlaunchable-checker drift handling in `internal/dispatch/ralph.go`; these are
+source-only, unadopted fixes. Refresh the probe before relying on those boundaries.
+
 ## Native dependent review handoff, November 5
 
 The installed **bd-backed** Gas City 1.5.1 / Beads 1.3.2 fixture kept a routed
