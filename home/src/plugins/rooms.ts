@@ -11,6 +11,8 @@ export interface RoomPlan {
   home: Pose
   /** Where the camera starts when someone walks in, a step behind home. */
   arrive: Pose
+  /** Fog colour, near and far, applied while the room is the current one. */
+  fog: [string, number, number]
 }
 
 export interface Rooms {
@@ -43,11 +45,13 @@ export const PLANS: Record<string, RoomPlan> = {
       'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor'],
     home: pose([0.1, 1.45, 2.7], [0.12, 1.05, -0.9]),
     arrive: pose([-0.9, 1.5, 0.6], [-0.4, 1.2, -1.6]),
+    fog: ['#e8c49a', 6, 22],
   },
   living: {
     plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors'],
     home: pose([LIVING_X - 0.45, 1.45, 3.1], [LIVING_X + 0.1, 1.2, -1.2]),
     arrive: pose([LIVING_X - 1.4, 1.5, 3.6], [LIVING_X - 0.6, 1.25, -1.2]),
+    fog: ['#d8c4ac', 9, 30],
   },
 }
 
@@ -62,7 +66,7 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
   return {
     name: 'rooms',
     inject: ['stage', 'view', 'entries'],
-    async apply(ctx: Context) {
+    apply(ctx: Context) {
       const keep = new URLSearchParams(location.search).get('rooms') !== 'unload'
       const view = ctx.view
       let current = PLANS[start] ? start : 'kitchen'
@@ -102,12 +106,33 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
       }
       const leave = async (name: string) => {
         for (const n of [...PLANS[name].plugins].reverse()) await unload(n)
+        shown.delete(name)
+      }
+      // Lights reach every object in the scene, so a room kept loaded next door
+      // is hidden: its objects, lights and shadows are skipped until someone walks in.
+      const { scene } = ctx.stage
+      const shown = new Map<string, THREE.Object3D[]>()
+      const enterAndRecord = async (name: string) => {
+        const before = new Set(scene.children)
+        enter(name)
+        await settle(PLANS[name].plugins)
+        shown.set(name, scene.children.filter((c) => !before.has(c)))
+      }
+      const show = (name: string) => {
+        for (const [room, objects] of shown) for (const o of objects) o.visible = room === name
+        const [colour, near, far] = PLANS[name].fog
+        scene.fog = new THREE.Fog(colour, near, far)
       }
 
       ctx.effect(() => {
+        const atmosphere = { fog: scene.fog, background: scene.background }
+        scene.background = new THREE.Color('#2a1d16')
         document.head.append(style)
         document.body.append(veil)
         return () => {
+          scene.fog = atmosphere.fog
+          scene.background = atmosphere.background
+          for (const objects of shown.values()) for (const o of objects) o.visible = true
           veil.remove()
           style.remove()
           // The rooms this service loaded leave with it.
@@ -116,8 +141,6 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
         }
       }, 'rooms')
 
-      for (const name of keep ? Object.keys(PLANS) : [current]) enter(name)
-      await view.travel(PLANS[current].home, 0)
 
       ctx.provide('rooms', {
         get current() {
@@ -142,8 +165,8 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           await fade(true)
           await walk
           const t1 = performance.now()
-          if (!keep) enter(name)
-          await settle(PLANS[name].plugins)
+          if (!keep) await enterAndRecord(name)
+          show(name)
           await frames(2) // first frames compile the new room's shaders, still behind the veil
           if (!keep) await leave(from)
           current = name
@@ -159,6 +182,16 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           moving = false
         },
       })
+
+      // Door plugins inject this service, which Cordis offers once apply returns,
+      // so the first rooms load after it, without apply waiting on them.
+      void view.travel(PLANS[current].home, 0)
+      void (async () => {
+        for (const name of keep ? [current, ...Object.keys(PLANS).filter((n) => n !== current)] : [current]) {
+          await enterAndRecord(name)
+          show(current)
+        }
+      })()
     },
   }
 }

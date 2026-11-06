@@ -8,7 +8,6 @@ export default {
   name: 'room',
   inject: ['stage'],
   apply(ctx: Context) {
-    const { scene } = ctx.stage
     const room = new THREE.Group()
     room.name = 'room'
 
@@ -65,17 +64,6 @@ export default {
     // Soft bounce light from the warm room. The fire's own light lives in the hearth plugin.
     const hemi = own(ctx, new THREE.HemisphereLight('#fff0dc', '#a07a58', 1.6))
     hemi.name = 'room fill'
-
-    ctx.effect(() => {
-      const before = scene.fog
-      const background = scene.background
-      scene.fog = new THREE.Fog('#e8c49a', 6, 22)
-      scene.background = new THREE.Color('#2a1d16')
-      return () => {
-        scene.fog = before
-        scene.background = background
-      }
-    }, 'room atmosphere')
   },
 }
 
