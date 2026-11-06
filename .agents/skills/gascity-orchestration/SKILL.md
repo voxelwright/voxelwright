@@ -5,7 +5,7 @@ description: Configure or debug Village's Gas City formulas, agent execution, ro
 
 # Gas City orchestration
 
-Grounded on **Gas City 1.5.1**, as of **2026-11-04**. This is expertise for
+Grounded on **Gas City 1.5.1**, refreshed **2026-11-05**. This is expertise for
 Village's observed integration needs, not certification of the whole platform.
 
 Start with the installed version and the actual city/provider/store configuration.
