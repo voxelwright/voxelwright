@@ -1,5 +1,6 @@
-// Scripted run in a real, headed Google Chrome.
-// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--unload]
+// Scripted run in Google Chrome, headless by default so no window takes focus.
+// --headed shows the window; the README perf numbers were taken headed.
+// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--unload] [--headed]
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -9,8 +10,8 @@ const flag = (name) => args.includes(`--${name}`)
 
 const browser = await chromium.launch({
   channel: 'chrome',
-  headless: false,
-  args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--window-position=0,0'],
+  headless: !flag('headed'),
+  args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist', '--window-position=0,0'],
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
 const errors = []
