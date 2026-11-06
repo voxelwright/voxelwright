@@ -94,7 +94,8 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   await page.evaluate(() => window.village.load('notebook'))
   await page.waitForTimeout(400)
   const again = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
-  check('reload restores it', again.dom === 2 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
+  // The input, the villager's reply live region (#40) and the entry button.
+  check('reload restores it', again.dom === 3 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
   await context.close()
 }
 

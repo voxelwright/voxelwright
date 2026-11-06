@@ -21,7 +21,8 @@ async function open(query = '', reducedMotion = 'no-preference') {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && errors.push(m.text()))
+  // With no villager host running, /villager/launch answers 503 by design (#40); the page copes.
+  page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && !m.location().url.includes('/villager/') && errors.push(m.text()))
   await page.goto(`${base}?${query}`)
   const ready = await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
