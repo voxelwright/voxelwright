@@ -56,10 +56,23 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   summaries and routine code, and Opus at medium effort for architecture, hard
   debugging and high-stakes calls. Use GPT-6.1 Sol through T3 delegation when it
   fits, and GPT-6 Astra in Codex sessions for decisions that are expensive to get wrong.
+- Routing table (starting budgets; adjust from the dispatch log):
+
+  | Work | Model | Budget |
+  | --- | --- | --- |
+  | Lookup, fetch, summarize a page | Haiku or Sonnet | 60k tokens, 2 min |
+  | Research with sources | Sonnet | 100k, 5 min |
+  | Reviewer (adversarial review) | Sonnet | 120k, 10 min |
+  | Critic | GPT-6.1 Sol via T3, medium | one pass |
+  | Security review (Sentinel) | Opus, medium | 100k, 10 min |
+  | Build one unit | Opus, medium | 150k, 30 min; split larger units |
+  | Merge or small fix | Sonnet | 100k, 15 min |
+
 - Keep subagents short-lived. Give each one unit of work, end it when the work
   is done, and never leave one idle.
-- Record every dispatch in `.agents/dispatch-log.jsonl`. It is the first
-  dataset for Village's own model routing.
+- Record every dispatch in `.agents/dispatch-log.jsonl` on `feature/village`
+  and commit it with each integration. It is the first dataset for Village's
+  own model routing.
 - When work enters a new technology or unfamiliar area, build the expertise
   into a versioned skill with `.agents/skills/technology-grounding`. Draw on
   primary sources, official skills, community knowledge and short experiments.
