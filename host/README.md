@@ -120,11 +120,26 @@ With the sandbox and gates (November 6, 2026, same Mac):
   claude-sonnet-5-5, passed every check. Executor 63.6 s, total 119.0 s. The
   plugin added only `home/src/plugins/clock.ts`; 0.25% of pixels changed from
   the base render.
-- `npm run regressions`: 13 of 13 cases got the expected result, including a
+- `npm run regressions` (before the fixes): 13 of 13 cases got the expected result, including a
   malicious `vite.config.ts`, edits to `main.ts`, the kernel and
   `node_modules`, a faked `window.village`, an empty check registry, a spawn
   error, a timeout with an escaped child, a tampered `.git`, a Chrome launch
   failure and the browser's network block.
+- After the sandbox, MCP and gating fixes (November 6, 2026, same Mac):
+  `npm run regressions`, 24 of 24 as expected, about 6 minutes, nothing left
+  in `$TMPDIR`. Each guarded line (absolute `denyRead`, the strict MCP flag
+  and its check, the timeout validation, the symlink clause, each git flag,
+  the env allowlist and in-page gating) was mutated once; a regression failed
+  for every one.
+- A tiny `claude -p --model sonnet` request with the executor's flags: without
+  `--strict-mcp-config`, 515k to 71k cache-creation tokens and $2.06 or $0.29
+  per run; with it, under 1k and $0.004 to $0.005. The `init` event listed no
+  MCP servers either way.
+- `npm run elder -- "put a small brass bell on the table"`: claude-code,
+  claude-sonnet-5-5, passed all three gates (plugin-lifecycle warned; see
+  Not yet). `init`: no MCP servers, tools Edit, Glob, Grep, Read, Write.
+  14.5k cache-creation and 72k cache-read tokens, 3.0k output, $0.095.
+  Executor 27.8 s, total 74.9 s; added only `home/src/plugins/bell.ts`.
 - `node test/sandbox-overhead.ts <repo>`, medians of three: `srt` adds 0.16 s
   to `tsc --noEmit` and 0.68 s to `vite build`.
 
