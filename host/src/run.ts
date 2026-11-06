@@ -1,6 +1,7 @@
 // One Elder run: copy, install, record the base, edit, check, commit, record.
 // The controller picks the checks; the run passes only when the executor
-// completed and every expected check ran and passed. There is no retry.
+// completed and every out-of-page gate ran and passed. In-page checks only add
+// warnings. There is no retry.
 // result.json is written on every path, including a failed copy, install,
 // executor spawn or commit.
 import { randomBytes } from 'node:crypto'
@@ -9,7 +10,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { assertNoSharedInodes, createCandidate, diffManifests, manifest, pruneCandidates } from './candidate.ts'
 import { EXPECTED_CHECKS, type Candidate, type CheckResult, type Elder, type ExecutorOutcome } from './elder.ts'
-import { mustGit } from './proc.ts'
+import { checkTimeoutMs, mustGit } from './proc.ts'
 import { createSandbox } from './sandbox.ts'
 
 export interface RunOptions {
@@ -68,6 +69,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
   let outcome: ExecutorOutcome | undefined
 
   try {
+    checkTimeoutMs(options.timeoutMs)
     const executor = elder.executors.get(options.executor)
     if (!executor) throw new Error(`No executor named ${options.executor}. Loaded: ${[...elder.executors.keys()].join(', ') || 'none'}`)
     const missing = EXPECTED_CHECKS.filter((name) => !elder.checks.has(name))
@@ -121,10 +123,14 @@ export async function runOnce(elder: Elder, options: RunOptions) {
         checked = { pass: false, detail: String(error) }
       }
       checks[name] = { ...checked, evidence: check.evidence, durationMs: Math.round(performance.now() - t) }
-      // Later checks run candidate code or trust files an earlier check vouches for.
-      if (!checked.pass) blocked = `${name} failed`
+      // Later checks run candidate code or trust files an earlier gate vouches for.
+      if (!checked.pass && !check.evidence) blocked = `${name} failed`
     }
-    const passed = outcome.status === 'completed' && EXPECTED_CHECKS.every((name) => checks[name]?.pass === true)
+    // In-page evidence comes from code the candidate can replace, so it never decides the status.
+    const gates = EXPECTED_CHECKS.filter((name) => !elder.checks.get(name)!.evidence)
+    result.gates = gates
+    result.warnings = EXPECTED_CHECKS.filter((name) => elder.checks.get(name)!.evidence && checks[name]?.ran !== false && !checks[name]?.pass).map((name) => `${name} (in-page) failed`)
+    const passed = outcome.status === 'completed' && gates.every((name) => checks[name]?.pass === true)
     result.status = passed ? 'passed' : 'failed'
 
     result.stage = 'commit'

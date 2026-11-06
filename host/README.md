@@ -26,10 +26,12 @@ a timeout or the commit.
    left out), and a base build and screenshot of the unchanged home.
 4. Runs one executor in the candidate with the request and fixed
    instructions (one new file in `home/src/plugins/`, nothing else). Timeout:
-   6 minutes. No retry.
+   6 minutes by default; `--timeout-ms` takes a whole number from 1 to
+   3,600,000, and anything else (`abc`, `0`, `NaN`) is refused. No retry.
 5. Runs the checks from `src/plugins/home-checks.ts` in a fixed order and
-   stops at the first failure. The run fails if any expected check is not
-   registered.
+   stops at the first failed gate. The run fails if any expected check is not
+   registered. The status rests only on the three out-of-page gates
+   (`result.json` lists them under `gates`).
    - `controller-files`: everything outside `home/src/plugins/` is unchanged,
      and that folder holds only regular files. Any other change fails the run
      and names the path. So the kernel, `main.ts`, configs, scripts and
@@ -41,11 +43,12 @@ a timeout or the commit.
    - `screenshot`: headless Chrome on `vite preview` (preview under `srt`),
      with no page errors seen through CDP, a screenshot that is not blank, and
      more than 0.05% of pixels changed from the base render.
-   - `plugin-lifecycle`, labeled in-page evidence: for each added plugin,
-     unload then reload in the page. Unloading must match a fresh page without
-     the plugin, and reloading must match the page before. It reads
-     `window.village`, which plugin code can replace, so a failure fails the
-     run and a pass proves nothing by itself.
+   - `plugin-lifecycle`, in-page evidence and not a gate: for each added
+     plugin, unload then reload in the page. Unloading must match a fresh page
+     without the plugin, and reloading must match the page before. It reads
+     `window.village`, which plugin code can replace: a plugin that leaks on
+     unload and wraps `window.village` in a Proxy passes it. A failure is
+     listed under `warnings`; neither result changes the status.
 6. Commits on `candidate/<id>` and records the result. If the executor
    changed `.git`, nothing is committed and the run fails. Every git call
    uses `core.hooksPath=/dev/null`, `core.fsmonitor=false`,
@@ -55,9 +58,14 @@ a timeout or the commit.
 ## Sandbox
 
 Candidate-influenced Node tools run under Anthropic's sandbox runtime
-(`srt` 0.0.81, Seatbelt). Reads are denied under the home directory and the
-user temp directory except the candidate, the Node install and a per-run temp
-directory; keychains and `.env` files are denied everywhere. Writes go only
+(`srt` 0.0.81, Seatbelt). Reads are denied under the controller's home
+directory and the user temp directory, given as absolute paths, except the
+candidate, the Node install and a per-run temp directory; keychains and `.env`
+files are denied everywhere. Before November 6 the rule said `~`, which srt
+expands with the HOME the host sets to the temp directory, so the real home
+was readable (`~/.zshrc`, `~/.ssh/*.pub`, `~/.claude.json`, the trusted
+checkout). The `sandbox-denies-home` regression now reads a synthetic file
+under the real home from inside the sandbox and expects EPERM. Writes go only
 to the candidate's `home/` (not `node_modules`) and the temp directory. There
 is no network except loopback for the preview, or the npm registry for the
 install. The environment is a fixed list with HOME set to the temp directory.
@@ -76,12 +84,18 @@ deadline and one cleanup scope.
 ## Executors
 
 Both get the controller's environment reduced to PATH, HOME, USER, LOGNAME,
-SHELL, LANG, LC_ALL, TERM and TMPDIR.
+SHELL, LANG, LC_ALL, TERM and TMPDIR. Every command, the executor included,
+needs a timeout from 1 ms to one hour.
 
-- `claude-code`: `claude -p --model sonnet --output-format json --restricted
+- `claude-code`: `claude -p --model sonnet --output-format stream-json
+  --verbose --restricted --strict-mcp-config --mcp-config '{"mcpServers":{}}'
   --permission-mode acceptEdits --permission-prompts none --tools
   Read,Edit,Write,Glob,Grep --no-session-persistence`. No Bash, because the
   model can rewrite `package.json` scripts that an allowed command would run.
+  `executor.log` holds the stream: the `init` event, every tool call and the
+  result. The run fails when the `init` event is missing or lists an MCP
+  server or `mcp__` tool; `result.json` records the servers, tools, usage and
+  cost under `executorOutcome.report`.
 - `codex`: off. It registers only with `ELDER_ALLOW_CODEX=1`, because a lock file on the maintainer's machine can block the tool. Not run since
   November 6. Its `workspace-write` sandbox limits writes, not reads.
 
@@ -106,11 +120,26 @@ With the sandbox and gates (November 6, 2026, same Mac):
   claude-sonnet-5-5, passed every check. Executor 63.6 s, total 119.0 s. The
   plugin added only `home/src/plugins/clock.ts`; 0.25% of pixels changed from
   the base render.
-- `npm run regressions`: 13 of 13 cases got the expected result, including a
+- `npm run regressions` (before the fixes): 13 of 13 cases got the expected result, including a
   malicious `vite.config.ts`, edits to `main.ts`, the kernel and
   `node_modules`, a faked `window.village`, an empty check registry, a spawn
   error, a timeout with an escaped child, a tampered `.git`, a Chrome launch
   failure and the browser's network block.
+- After the sandbox, MCP and gating fixes (November 6, 2026, same Mac):
+  `npm run regressions`, 24 of 24 as expected, about 6 minutes, nothing left
+  in `$TMPDIR`. Each guarded line (absolute `denyRead`, the strict MCP flag
+  and its check, the timeout validation, the symlink clause, each git flag,
+  the env allowlist and in-page gating) was mutated once; a regression failed
+  for every one.
+- A tiny `claude -p --model sonnet` request with the executor's flags: without
+  `--strict-mcp-config`, 515k to 71k cache-creation tokens and $2.06 or $0.29
+  per run; with it, under 1k and $0.004 to $0.005. The `init` event listed no
+  MCP servers either way.
+- `npm run elder -- "put a small brass bell on the table"`: claude-code,
+  claude-sonnet-5-5, passed all three gates (plugin-lifecycle warned; see
+  Not yet). `init`: no MCP servers, tools Edit, Glob, Grep, Read, Write.
+  14.5k cache-creation and 72k cache-read tokens, 3.0k output, $0.095.
+  Executor 27.8 s, total 74.9 s; added only `home/src/plugins/bell.ts`.
 - `node test/sandbox-overhead.ts <repo>`, medians of three: `srt` adds 0.16 s
   to `tsc --noEmit` and 0.68 s to `vite build`.
 
@@ -124,6 +153,16 @@ With the sandbox and gates (November 6, 2026, same Mac):
   timeout. The run no longer waits for it, but nothing kills it.
 - The trusted checkout is unreadable to sandboxed tools only because it lives
   under the home directory.
+- `plugin-lifecycle` warns on every plugin since the rooms service landed
+  (e324bb0): the unloaded page never matches the `?plugins=` baseline. It no
+  longer gates, so runs still pass, but its warning carries no signal until
+  the baseline is rebuilt. There is no out-of-page check that a plugin
+  unloads cleanly.
+- The `init` event listed no MCP servers even without `--strict-mcp-config`;
+  the connectors load after it. The flag is what keeps them out (measured
+  below); the `init` assertion only catches servers present at start.
+- `GIT_CONFIG_NOSYSTEM` has no regression: the system config is not a file
+  a test should write.
 - The 0.05% screenshot threshold rests on one noise sample (0.008% between two
   renders with nothing added). A plugin too small to change that many pixels
   fails.

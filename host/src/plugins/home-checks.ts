@@ -11,8 +11,8 @@
 //   and it differs from the base render taken before the executor ran.
 //
 // plugin-lifecycle calls window.village, which candidate plugin code shares a
-// page with. Its results are in-page evidence: a failure fails the run, a pass
-// proves nothing on its own.
+// page with and can replace. Its result is in-page evidence: a failure is a
+// warning in result.json, and neither a pass nor a failure changes the status.
 //
 // Browser: Playwright's headless Chrome with Chrome's own renderer sandbox on
 // (Playwright turns it off by default). srt cannot host Chrome on macOS; see
