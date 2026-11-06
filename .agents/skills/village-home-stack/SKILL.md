@@ -17,8 +17,9 @@ three 0.187.0, cordis 4.0.0-rc.12, vite 8.3.6, typescript 5.9.3, playwright 1.65
 - Cordis 4 has no `'dispose'` event in its types. Use `ctx.effect` instead.
 - Hot reload: each plugin module calls `import.meta.hot.accept(m => replace(m.default))`.
   Cordis's own HMR plugin targets Node file watching; it isn't used here.
-- `WebGPURenderer` + `await renderer.init()` uses WebGPU in headed Chrome 
-  (`channel: 'chrome'`, `--enable-unsafe-webgpu`). Read
+- `WebGPURenderer` + `await renderer.init()` uses WebGPU in Chrome, headed or
+  headless (`channel: 'chrome'`, `--enable-unsafe-webgpu`, `--use-angle=metal`;
+  headless verified November 6, 2026 on an M1 Pro by the Elder's checks). Read
   `renderer.backend.isWebGPUBackend` to see which backend ran.
 - Post-processing: `THREE.RenderPipeline(renderer, outputNode)` with `pass()`,
   `bloom` (`three/addons/tsl/display/BloomNode.js`) and `film` (`FilmNode.js`).

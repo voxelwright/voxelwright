@@ -29,9 +29,10 @@ updates by disposing the running fiber and loading the edited module.
 
 ## Measured (November 6, 2026)
 
-Command: `node scripts/measure.mjs [url] --perf --unload --shot=path` with
-the dev server on port 5181. It drives headed Google Chrome through Playwright
-1.65 at 1440×900. Hardware: Apple M1 Pro with a 120 Hz display.
+Command: `node scripts/measure.mjs [url] --perf --unload --shot=path --headed`
+with the dev server on port 5181. These numbers came from headed Google Chrome
+through Playwright 1.65 at 1440×900. The script now runs headless unless
+`--headed` is passed, so it doesn't take focus on a Mac someone is using. Hardware: Apple M1 Pro with a 120 Hz display.
 Backend: WebGPU.
 
 | Mode | Canvas | p50 frame | p95 frame | Draw calls | Triangles |
