@@ -8,7 +8,8 @@ All textures are painted in code in `src/paint.ts`.
 
 ```sh
 npm install
-npm run dev            # http://localhost:5173, add ?q=low for phones
+npm run dev            # http://localhost:5181, add ?q=low for phones
+npm run measure -- --perf --unload   # with the dev server running
 npm run typecheck
 npm run build
 ```
@@ -30,7 +31,7 @@ updates by disposing the running fiber and loading the edited module.
 
 Command: `node scripts/measure.mjs [url] --perf --unload --shot=path` with
 the dev server on port 5181. It drives headed Google Chrome through Playwright
-1.65 at 1440×900. Hardware: Apple M-series Mac with a 120 Hz display.
+1.65 at 1440×900. Hardware: Apple M1 Pro with a 120 Hz display.
 Backend: WebGPU.
 
 | Mode | Canvas | p50 frame | p95 frame | Draw calls | Triangles |
