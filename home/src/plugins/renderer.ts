@@ -12,14 +12,16 @@ const gpuMode = params.get('gpu') === '1'
 const fxParam = params.get('fx')
 
 /**
- * Each tier: device pixel ratio cap and the features it runs. GPU ms thresholds
- * (measured pass time at the tier above, median of the calibration frames) decide
- * when the page steps down. Numbers come from the README's measured tables.
+ * Each tier: device pixel ratio cap and the features it runs. maxGpuMs is the
+ * median GPU time (submit to queue done) over the calibration frames above which
+ * the page steps down to the next tier. Numbers come from the README's tables.
  */
 export const TIERS: Record<Quality, { dpr: number; fx: string[]; maxGpuMs: number }> = {
-  // M1 Pro kitchen, 2880x1800: 7.9 ms bare, 9.1 ms with these three. 12 ms keeps a
-  // third of a 60 Hz frame spare. GTAO (+5 to 9 ms) and SSGI (+286 ms) stay opt-in.
-  high: { dpr: 2, fx: ['phys', 'csm', 'traa'], maxGpuMs: 12 },
+  // M1 Pro kitchen, 2880x1800: 7 to 8 ms bare, 9 to 11.5 ms with phys and traa; runs
+  // vary by 2 to 3 ms. 13 ms leaves about 3.7 ms of a 60 Hz frame. csm (+2 ms, +286
+  // draws) showed no visible change from this camera; gtao (+5 to 9 ms) and ssgi
+  // (+286 ms) cost too much. Those three stay opt-in through ?fx=.
+  high: { dpr: 2, fx: ['phys', 'traa'], maxGpuMs: 13 },
   medium: { dpr: 1.5, fx: ['phys', 'traa'], maxGpuMs: 12 },
   low: { dpr: 1, fx: [], maxGpuMs: Infinity },
 }

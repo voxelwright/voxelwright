@@ -8,7 +8,7 @@ All textures are painted in code in `src/paint.ts`.
 
 ```sh
 npm install
-npm run dev            # http://localhost:5181, add ?q=low for phones
+npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 npm run typecheck
@@ -90,6 +90,60 @@ headless cap) in every mode:
 | kitchen | `?q=low` | 412 | 48,893 |
 | living | DPR 2 | 187 | 39,249 |
 | living | `?q=low` | 140 | 22,003 |
+
+## Engine: GPU time, features and tiers (#41, November 6, 2026)
+
+`npm run measure -- --perf --gpu` adds `?gpu=1` and reports, per frame, GPU ms
+(submit to `device.queue.onSubmittedWorkDone()`), the summed three.js timestamp
+pass durations, and CPU ms (frame hooks plus draw). Chrome launches with
+`--enable-webgpu-developer-features`; timestamp sums were then not on 100 us
+steps. GPU ms is quantized to 0.1 ms by `performance.now()`. The timestamp sums
+are not frame cost on this Mac: bloom mips of a few pixels each read about 5 ms
+and a frame summed to 60 to 70 ms while holding 60 fps, so passes overlap.
+
+`?fx=phys,csm,gtao,traa,ssgi` runs exactly the named features: physical
+materials (lacquered fridge, transmissive window glass, glazed mug and ceramics),
+cascaded soft sun shadows, GTAO at half resolution, TRAA in place of 4x MSAA,
+and SSGI (2 slices, 8 steps). Headless Chrome, 1440x900, DPR 2, M1 Pro, WebGPU,
+one 6 s run each; repeat runs of the same page vary by 1 to 3 ms:
+
+| Room | Features | GPU p50 / p95 ms |
+| --- | --- | --- |
+| kitchen | none | 7.0 to 7.9 / 9.5 to 10.2 |
+| kitchen | phys | 11.9 / 16.2 |
+| kitchen | csm | 9.9 / 11.2 (draw calls 480 to 766) |
+| kitchen | gtao | 16.9 / 17.4 (frame bound) |
+| kitchen | traa | 12.8 / 17.1 |
+| kitchen | gtao, traa | 12.6 / 16.5 |
+| kitchen | phys, csm, traa | 9.1 / 11.2 |
+| kitchen | phys, traa (high tier) | 11.5 / 16.9 |
+| kitchen | ssgi | 293.8 / 298.0 (15 fps) |
+| kitchen | `?q=low` | 3.4 / 4.4 |
+| living | none | 6.6 / 9.2 |
+| living | phys | 7.7 / 9.4 |
+| living | gtao | 14.4 / 23.1 |
+| living | traa | 8.3 / 10.2 |
+| living | phys, traa (high tier) | 8.5 / 10.3 |
+| living | `?q=low` | 3.2 / 4.5 |
+
+SSGI is not usable here; baked lighting is the next step for bounce light.
+
+Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
+medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
+skips 15 frames, takes the median GPU ms of 45 frames (or of 2 s, at least 8),
+and steps down when high exceeds 13 ms or medium exceeds 12 ms. Stepping down
+lowers the pixel ratio and rebuilds postfx; scene content keeps its load-time
+detail. `?q=high|medium|low` skips calibration, and `?q=low` behaves as before.
+`?fx=ssgi` with no `?q=` proved the step-down: 294 ms at high moved to medium.
+
+Look (one round, blind A/B, rubric only, before `?q=high&fx=` against after
+`?q=high&fx=phys,csm,traa`): Opus 6.5 to 7.0, Sonnet 7.1 to 7.3. Both saw
+calmer speculars (faucet, cabinet edge) and a cleaner steam wisp; neither saw a
+shadow change. GPT was not available. Screenshots: `screenshots/engine-before.png`,
+`screenshots/engine-after.png`.
+
+Ally (Linux, AMD Phoenix1): no Chromium, Chrome or Node installed, so nothing
+was measured there.
 
 ## Measured, kitchen scene (November 6, 2026)
 
