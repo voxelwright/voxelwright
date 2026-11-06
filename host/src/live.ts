@@ -6,7 +6,7 @@
 //   npm run live -- install [--live DIR] [--commit REV]
 //   npm run live -- serve [--live DIR] [--port 5183]
 //   npm run live -- status [--live DIR]
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
@@ -98,11 +98,9 @@ export async function serve(live: string, port: number) {
   const url = `http://127.0.0.1:${port}/`
   const info = join(resolve(live), 'server.json')
   await writeFile(info, JSON.stringify({ pid: process.pid, port, url, startedAt: new Date().toISOString() }) + '\n')
-  const stop = async () => {
-    await rm(info, { force: true })
-    await server.close()
-    process.exit(0)
-  }
+  // Vite exits the process on SIGTERM itself, so the record is removed on exit.
+  process.on('exit', () => rmSync(info, { force: true }))
+  const stop = () => void server.close().finally(() => process.exit(0))
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
   console.log(JSON.stringify({ serving: url, live: resolve(live) }))
