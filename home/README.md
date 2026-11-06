@@ -169,7 +169,11 @@ kitchen floor is a 9 m square that runs past the walls; sunlight lands on the
 open floor as large hard-edged wedges; the base cabinets read as floating at
 the open end; hidden walls stop casting shadows; the living room's walls are
 one-sided planes that vanish from outside; in third person, walking to the
-fridge leaves only two entries on screen, so Tab reaches only those.
+fridge leaves only two entries on screen, so Tab reaches only those; with the
+garden hidden, the iso window shows the floor behind the wall (a garden card
+sized to the opening, or a floor clipped to the room, would fix both).
+`cam-third-fridge.jpg` was taken with the pointer still on the fridge, so its
+hover glow makes it look beige.
 
 Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
 (`npm run measure -- <url> --perf --gpu`):
@@ -177,9 +181,10 @@ Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
 | Mode | Draw calls | GPU p50 / p95 ms |
 | --- | --- | --- |
 | seat | 482 | 8.7 / 10.4 |
-| `?cam=iso` | 491 | 9.8 to 10.6 / 16.4 to 17.1 |
+| `?cam=iso` | 491 | 10.6 / 17.1 |
 | `?cam=third` | 491 | 10.8 / 17.1 |
 
+The extra 9 draw calls are objects the wider views no longer cull.
 Screenshots: `screenshots/talk/cam-*.jpg`.
 
 ## Measured, kitchen scene (November 6, 2026)
