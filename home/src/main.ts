@@ -18,24 +18,42 @@ import chairs from './plugins/chairs'
 import highchair from './plugins/highchair'
 import toyshelf from './plugins/toyshelf'
 import botanical from './plugins/botanical'
+import entries from './plugins/entries'
+import kitchendoor from './plugins/kitchendoor'
+import lounge from './plugins/lounge'
+import sideboard from './plugins/sideboard'
+import growshelves from './plugins/growshelves'
+import plantstand from './plugins/plantstand'
+import loungedoors from './plugins/loungedoors'
+import { PLANS, rooms } from './plugins/rooms'
 
+const params = new URLSearchParams(location.search)
 const listed = {
-  renderer, room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
-  toyshelf, botanical, plant, motes, lamp, rimlight, camera, notebook, postfx,
+  renderer, camera, entries, postfx,
+  room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
+  toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
+  lounge, sideboard, growshelves, plantstand, loungedoors,
 }
-// Any other file in plugins/ loads after the list under its declared name, so
-// adding a plugin never means editing this file. The Elder relies on that:
-// candidates may change only plugins/.
+// Any other file in plugins/ joins the catalog under its declared name, so adding a plugin
+// never means editing this file. The Elder relies on that: candidates may change only plugins/.
+// A discovered plugin no room plan claims is placed in the kitchen, the room that opens first.
 type Loadable = Parameters<typeof load>[0]
-const discovered = import.meta.glob<Loadable>('./plugins/*.ts', { eager: true, import: 'default' })
+const discovered = import.meta.glob<Loadable>(['./plugins/*.ts', '!./plugins/rooms.ts'], { eager: true, import: 'default' })
 const known = new Set<Loadable>(Object.values(listed))
 const extra = Object.fromEntries(
   Object.values(discovered).filter((p) => p && !known.has(p) && !(p.name in listed)).map((p) => [p.name, p]),
 )
-const plugins: Record<string, Loadable> = { ...listed, ...extra }
-// ?plugins=renderer,room loads a subset, used to measure baselines.
-const only = new URLSearchParams(location.search).get('plugins')?.split(',')
-for (const [name, plugin] of Object.entries(plugins)) if (!only || only.includes(name)) load(plugin)
+PLANS.kitchen.plugins.push(...Object.keys(extra))
+const catalog: Record<string, Loadable> = { ...listed, ...extra }
+// ?room=living starts in another room.
+const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
+const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start) }
+/** Loaded for the whole visit; the rooms service loads and unloads the rest. */
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
+// ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
+const only = params.get('plugins')?.split(',')
+for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
+const keepRooms = params.get('rooms') !== 'unload'
 
 /** What is registered right now: used by the unload proof and the perf run. */
 function snapshot() {
@@ -53,6 +71,9 @@ function snapshot() {
       failed: Object.fromEntries(named('failed').map((n) => [n, states[n].error])),
     },
     services: { stage: Boolean(stage) },
+    room: root.get('rooms')?.current ?? null,
+    entries: root.get('entries')?.list() ?? [],
+    dom: document.body.querySelectorAll('*').length,
     sceneObjects: objects.length,
     objects: objects.sort(),
     frameHooks: hooks.length,
@@ -75,7 +96,8 @@ const village = {
    * every requested plugin is active.
    */
   ready: (timeoutMs = 15000) => new Promise<Readiness>((resolve) => {
-    const wanted = only ?? Object.keys(plugins)
+    const current = root.get('rooms')?.current ?? start
+    const wanted = only ?? [...GLOBAL, ...(keepRooms ? Object.values(PLANS).flatMap((p) => p.plugins) : PLANS[current].plugins)]
     const deadline = performance.now() + timeoutMs
     const check = () => {
       const states = pluginStates()

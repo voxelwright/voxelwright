@@ -104,17 +104,18 @@ export function paintWood(opts: { seed: number; w?: number; h?: number; planks: 
   return toTexture(c)
 }
 
-export function paintPlaster(seed: number, base: RGB, w = 1024, h = 1024) {
+/** Plaster with a faint limewash. wash scales the brush strokes; 1 is the old, heavier look. */
+export function paintPlaster(seed: number, base: RGB, w = 1024, h = 1024, wash = 1) {
   const n = makeNoise(seed, 64)
   const [c, g] = pixels(w, h, (x, y) => {
     const m = n(x / 160, y / 160, 5)
     const s = n(x / 14 + 50, y / 40, 2)
-    const t = 0.9 + (m - 0.5) * 0.22 + (s - 0.5) * 0.06
+    const t = 0.9 + 0.05 * (1 - wash) + ((m - 0.5) * 0.22 + (s - 0.5) * 0.06) * (0.4 + 0.6 * wash)
     return [base[0] * t, base[1] * t, base[2] * t * 0.98]
   })
   // Broad limewash brush strokes
   const r = rng(seed + 3)
-  g.globalAlpha = 0.05
+  g.globalAlpha = 0.05 * wash
   for (let i = 0; i < 260; i++) {
     g.strokeStyle = r() > 0.5 ? '#fff6e6' : '#c9b08c'
     g.lineWidth = 20 + r() * 60
@@ -351,7 +352,7 @@ export function paintPhoto(kind: 'beach' | 'cat' | 'drawing' | 'mountains', seed
   g.restore()
   g.fillStyle = 'rgba(70,60,60,0.75)'
   g.font = 'italic 30px "Bradley Hand", "Segoe Print", cursive'
-  const captions = { beach: 'summer, 2026', cat: 'Biscuit', drawing: 'by Mila', mountains: 'our hike' }
+  const captions = { beach: 'summer, 2026', cat: 'naptime', drawing: 'our house', mountains: 'our hike' }
   g.fillText(captions[kind], ix + 6, h - 40)
   return toTexture(c)
 }
@@ -403,7 +404,7 @@ export function paintKidDrawing(seed: number) {
   crayon('#ff9800', 7, [[410, 305], [440, 305], [445, 292], [432, 300], [418, 292], [410, 305]])
   g.fillStyle = 'rgba(229,57,53,0.85)'
   g.font = 'bold 34px "Comic Sans MS", "Chalkboard SE", cursive'
-  g.fillText('MILA', 236, 120)
+  g.fillText('HOME', 236, 120)
   return toTexture(c)
 }
 

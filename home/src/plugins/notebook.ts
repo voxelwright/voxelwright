@@ -34,44 +34,26 @@ function saveLines(lines: string[]): boolean {
  */
 export default {
   name: 'notebook',
-  inject: ['stage', 'view'],
+  inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
-    const { scene, camera, renderer } = ctx.stage
-    const view = ctx.view
+    const { scene } = ctx.stage
+    const { view, entries } = ctx
     const lines = readLines()
     let draft = ''
     let open = false
     let caretOn = true
 
-    // Accessible controls: a real button to reach with Tab, and a text field for the keyboard.
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = 'Write in the notebook'
-    button.setAttribute('aria-label', 'Write in the notebook')
+    // The entries layer gives the notebook its button, label and picking; the
+    // notebook keeps a text field so the keyboard can write on the page.
     const input = document.createElement('input')
     input.type = 'text'
     input.maxLength = 48
     input.autocomplete = 'off'
     input.setAttribute('aria-label', 'A line for the notebook')
-    const hint = document.createElement('div')
-    hint.setAttribute('aria-live', 'polite')
+    input.className = 'village-offscreen'
     const style = document.createElement('style')
-    style.textContent = `
-      .village-offscreen { position: fixed; left: 50%; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; font-size: 16px; }
-      .village-hint { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 8px); opacity: 0;
-        padding: 10px 18px; border-radius: 999px; background: rgba(251, 243, 226, 0.92); color: #5a4030;
-        font: italic 18px "Bradley Hand", "Segoe Print", cursive; box-shadow: 0 6px 24px rgba(60, 30, 10, 0.25);
-        transition: opacity 240ms ease, transform 240ms ease; pointer-events: none; white-space: nowrap; }
-      .village-hint.shown { opacity: 1; transform: translate(-50%, 0); }
-      @media (prefers-reduced-motion: reduce) { .village-hint { transition: none; } }
-    `
-    button.className = input.className = 'village-offscreen'
-    hint.className = 'village-hint'
-
-    const showHint = (text: string | null) => {
-      if (text) hint.textContent = text
-      hint.classList.toggle('shown', Boolean(text))
-    }
+    style.textContent = '.village-offscreen { position: fixed; left: 50%; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; font-size: 16px; }'
+    const showHint = entries.say
 
     const page = () => scene.getObjectByName('notebook right page') as THREE.Mesh | undefined
     const book = () => scene.getObjectByName('notebook')
@@ -136,7 +118,6 @@ export default {
       input.value = ''
       input.blur()
       view.focus(null)
-      showHint(null)
       paint()
     }
 
@@ -150,24 +131,6 @@ export default {
       paint()
     }
 
-    // Picking: a click or tap on the book opens it; anywhere else closes it.
-    const raycaster = new THREE.Raycaster()
-    const ndc = new THREE.Vector2()
-    let down: { x: number; y: number } | null = null
-    const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY })
-    const onUp = (e: PointerEvent) => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) return
-      down = null
-      const rect = renderer.domElement.getBoundingClientRect()
-      ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
-      raycaster.setFromCamera(ndc, camera)
-      const target = book()
-      const hit = target ? raycaster.intersectObject(target, true).length > 0 : false
-      if (hit && !open) enter()
-      else if (hit && open) input.focus({ preventScroll: true })
-      else if (!hit && open) leave()
-    }
-
     const onInput = () => {
       draft = input.value
       caretOn = true
@@ -177,37 +140,26 @@ export default {
       if (e.key === 'Enter') {
         e.preventDefault()
         commit()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        leave()
-        button.focus({ preventScroll: true })
       }
+      // Escape bubbles to the entries layer, which leaves and refocuses the notebook's entry.
     }
-    const onButtonFocus = () => !open && showHint('Press Enter to write in the notebook')
-    const onButtonBlur = () => !open && showHint(null)
 
     ctx.effect(() => {
-      const canvas = renderer.domElement
       document.head.append(style)
-      document.body.append(button, input, hint)
-      button.addEventListener('click', enter)
-      button.addEventListener('focus', onButtonFocus)
-      button.addEventListener('blur', onButtonBlur)
+      document.body.append(input)
       input.addEventListener('input', onInput)
       input.addEventListener('keydown', onKey)
-      canvas.addEventListener('pointerdown', onDown)
-      canvas.addEventListener('pointerup', onUp)
       return () => {
-        canvas.removeEventListener('pointerdown', onDown)
-        canvas.removeEventListener('pointerup', onUp)
         if (open) view.focus(null)
         restore()
-        button.remove()
         input.remove()
-        hint.remove()
         style.remove()
       }
     }, 'notebook writing')
+
+    // Register once the table has made the book.
+    let removeEntry: (() => void) | null = null
+    ctx.effect(() => () => removeEntry?.(), 'notebook entry')
 
     // Show kept lines once the table's page exists, and blink the caret while writing.
     let painted = false
@@ -216,6 +168,7 @@ export default {
       if (!painted && page()) {
         painted = true
         paint()
+        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: book()!, select: enter, leave })
       }
       if (!open) return
       blink += dt

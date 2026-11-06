@@ -30,9 +30,14 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   const { context, page, ready } = await open('no-preference')
   check('page ready with notebook active', ready.ok && ready.active.includes('notebook'), ready)
   const seat = await cam(page)
-  await page.keyboard.press('Tab')
-  const hint = await page.evaluate(() => document.querySelector('.village-hint')?.textContent)
-  check('Tab reaches the notebook button', hint?.includes('Enter'), hint)
+  // The notebook is one entry among several; Tab cycles them in screen order.
+  const visited = []
+  for (let i = 0; i < 6 && visited.at(-1) !== 'notebook'; i++) {
+    await page.keyboard.press('Tab')
+    visited.push(await page.evaluate(() => document.activeElement?.dataset?.entry))
+  }
+  const label = await page.evaluate(() => document.querySelector('.village-label.shown')?.textContent)
+  check('Tab reaches the notebook entry and shows its label', visited.at(-1) === 'notebook' && label === 'Notebook', { visited, label })
   await page.keyboard.press('Enter')
   await page.waitForTimeout(150)
   const midway = await cam(page)
@@ -83,12 +88,13 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   const before = await page.evaluate(() => window.village.snapshot())
   await page.evaluate(() => window.village.unload('notebook'))
   await page.waitForTimeout(300)
-  const after = await page.evaluate(() => ({ s: window.village.snapshot(), dom: document.querySelectorAll('.village-hint, .village-offscreen').length }))
+  const controls = '.village-offscreen, [data-entry="notebook"]'
+  const after = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
   check('unload removes the notebook controls and frame hook', after.dom === 0 && after.s.frameHooks === before.frameHooks - 1 && !after.s.plugins.registered.includes('notebook'), { dom: after.dom, hooks: [before.frameHooks, after.s.frameHooks] })
   await page.evaluate(() => window.village.load('notebook'))
   await page.waitForTimeout(400)
-  const again = await page.evaluate(() => ({ s: window.village.snapshot(), dom: document.querySelectorAll('.village-hint, .village-offscreen').length }))
-  check('reload restores it', again.dom === 3 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
+  const again = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
+  check('reload restores it', again.dom === 2 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
   await context.close()
 }
 
