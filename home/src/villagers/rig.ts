@@ -52,6 +52,8 @@ export class Villager {
   state: State = 'work'
   /** Chosen by the person: stop, face them, talk. */
   chosen = false
+  /** Someone is standing just ahead on the path: wait for them. */
+  blocked = false
   /** Gait phase in cycles, and the blends the pose reads. */
   phase = 0
   walk = 0
@@ -107,8 +109,10 @@ export class Villager {
 
   private forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)) }
   private right() { return new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)) }
+  /** Root scale: figures are modelled in their own units and placed larger or smaller. */
+  private get k() { return this.fig.root.scale.x }
   private restFoot(i: number) {
-    return this.pos.clone().setY(0).addScaledVector(this.right(), (i ? -1 : 1) * this.fig.side)
+    return this.pos.clone().setY(0).addScaledVector(this.right(), (i ? -1 : 1) * this.fig.side * this.k)
   }
   private place() {
     const { root } = this.fig
@@ -159,8 +163,8 @@ export class Villager {
 
     if (this.state === 'walk' && this.curve) {
       const remaining = this.len - this.s
-      const cap = this.chosen ? 0 : Math.min(fig.speed, Math.sqrt(2 * 1.2 * remaining) + 0.04)
-      const accel = this.chosen ? 4 : 1.4
+      const cap = this.chosen || this.blocked ? 0 : Math.min(fig.speed * this.k, Math.sqrt(2 * 1.2 * remaining) + 0.04)
+      const accel = this.chosen || this.blocked ? 3 : 1.4
       this.v += Math.max(-accel * dt, Math.min(accel * dt, cap - this.v))
       this.v = Math.max(0, this.v)
       this.s = Math.min(this.len, this.s + this.v * dt)
@@ -212,13 +216,13 @@ export class Villager {
     if (this.state !== 'hop') this.yaw += wrap(goalYaw - this.yaw) * (1 - Math.exp(-dt * (this.state === 'walk' ? 6 : 5)))
     this.yawRate = THREE.MathUtils.lerp(this.yawRate, wrap(this.yaw - yaw0) / Math.max(dt, 1e-3), 1 - Math.exp(-dt * 8))
 
-    const walking = this.state === 'walk' ? Math.min(1, this.v / (fig.speed * 0.5)) : 0
+    const walking = this.state === 'walk' ? Math.min(1, this.v / (fig.speed * this.k * 0.5)) : 0
     this.walk = walking
     this.working += ((this.state === 'work' && !this.chosen && !this.idle ? 1 : 0) - this.working) * (1 - Math.exp(-dt * 4))
     this.talking += ((this.chosen ? 1 : 0) - this.talking) * (1 - Math.exp(-dt * 6))
     if (this.state === 'sit') this.seated = 1
     else if (this.state !== 'hop') this.seated = 0
-    this.phase += (this.v * dt) / fig.stride
+    this.phase += (this.v * dt) / (fig.stride * this.k)
     this.place()
     this.stepFeet(dt)
     this.pose(dt, t, toCamera)
@@ -230,7 +234,8 @@ export class Villager {
     const fig = this.fig
     if (fig.floats || !fig.feet.length) return
     const fwd = this.forward()
-    const lift = fig.stride * 0.16
+    const stride = fig.stride * this.k
+    const lift = stride * 0.16
     const airborne = this.state === 'hop' || this.state === 'sit'
     for (let i = 0; i < 2; i++) {
       const f = this.feet[i]
@@ -256,7 +261,7 @@ export class Villager {
           }
           let u = (q - 0.5) / 0.5
           if (fig.stepped) u = Math.floor(u * 4) / 4
-          const target = this.restFoot(i).addScaledVector(fwd, 0.5 * fig.stride * (1 - u) + 0.25 * fig.stride)
+          const target = this.restFoot(i).addScaledVector(fwd, 0.5 * stride * (1 - u) + 0.25 * stride)
           f.world.lerpVectors(f.from, target, smooth(u))
           f.world.y = Math.sin(u * Math.PI) * lift
         } else if (f.swing) {
@@ -271,7 +276,7 @@ export class Villager {
         }
         const rest = this.restFoot(i)
         const other = this.feet[1 - i]
-        if (f.settle < 0 && other.settle < 0 && f.world.distanceTo(rest) > 0.035) {
+        if (f.settle < 0 && other.settle < 0 && f.world.distanceTo(rest) > 0.035 * this.k) {
           f.settle = 0
           f.from.copy(f.world)
         }
@@ -318,7 +323,8 @@ export class Villager {
     }
     if (fig.floats) y += 0.09 + Math.sin(t * 1.7) * 0.025
     y += -fig.hip * this.seated
-    lean -= 0.06 * this.seated
+    lean += 0.05 * this.seated
+    roll += 0.04 * this.seated * Math.sin(t * 0.3)
     y += Math.abs(Math.sin(t * 8.5)) * 0.008 * this.talking
     pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
     pose.rotation.set(lean, 0, roll)
@@ -329,19 +335,22 @@ export class Villager {
       const rest = h.userData.rest as THREE.Vector3
       const s = i ? -1 : 1
       h.position.copy(rest)
+      h.position.z += 0.09 * this.seated
+      h.position.y += 0.07 * this.seated
       h.position.z += Math.sin(2 * Math.PI * p) * s * fig.stride * 0.18 * w
       h.position.y += (Math.sin(t * 5 + i * Math.PI) * 0.02 * this.working) + 0.03 * this.talking * (i ? 0 : 1) * (0.6 + 0.4 * Math.sin(t * 5))
     })
     // Glances around now and then, and at the person when chosen.
     this.nextGlance -= dt
     if (this.nextGlance <= 0) {
-      this.glanceGoal = (Math.random() - 0.5) * 1.0
+      this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
     const headGoal = this.chosen ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) - this.working * 0.15
+    head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)
     // Blink every few seconds.
     this.blinkAt -= dt
     const closed = this.blinkAt < 0.12

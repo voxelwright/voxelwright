@@ -28,8 +28,8 @@ export const SPOTS: Record<string, Spot> = {
   window: { at: [-0.85, -1.58], face: Math.PI, via: 'b0' },
   plant: { at: [0.5, -1.42], face: Math.PI * 0.8, via: 'b2' },
   fridge: { at: [1.42, -1.12], face: Math.PI + 0.12, via: 'r0' },
-  sink: { at: [2.3, -1.02], face: Math.PI, via: 'r2' },
-  counter: { at: [1.98, -0.42], face: Math.PI * 0.75, via: 'r2' },
+  sink: { at: [2.2, -1.08], face: Math.PI, via: 'r2' },
+  counter: { at: [1.85, -0.62], face: Math.PI * 0.8, via: 'r2' },
   // The middle chair faces the camera across the table; the right one is seen in profile.
   seatMid: { at: [0.63, -0.6], face: -Math.PI / 2, via: 'b2', seat: chairSeat(0.2, -0.49, 0) },
   seatRight: { at: [0.98, -0.5], face: -Math.PI * 0.7, via: 'b2', seat: chairSeat(1.05, -0.05, -Math.PI / 2 + 0.35) },

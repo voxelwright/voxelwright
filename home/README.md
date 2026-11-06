@@ -220,3 +220,66 @@ keep forgetting to water the plants": one `write_note` call created
 in and 17 out. Cost $0.0103. First text 5.3 s, whole turn 5.9 s, measured in
 the host from the start of the turn. Screenshot:
 `screenshots/villager-sonnet.jpg`.
+
+## Villagers (#42 prototype)
+
+Four art directions for villagers, on one procedural rig, in the real
+kitchen. Nothing loads without the flag; with no `?villager=` the plugin adds
+nothing.
+
+- `?villager=a` peg dolls (turned, lacquered wood, kin to the toy shelf),
+  `b` felt plush (fuzz and stitches painted in code, button eyes, posed on
+  twos), `c` paper cutouts (layered cards with brass fasteners, turned toward
+  the person), `d` soft-toon household spirits (toon ramp with a warm rim).
+  Each direction has a cook, a tidier and a gardener with their own
+  silhouettes, colours and props.
+- `?villager=lineup` puts one of each side by side in front of the table.
+- `&shot=near` moves the camera to a closer angle by the fridge.
+
+The rig (`src/villagers/rig.ts`) plans feet in world space, so planted feet
+don't slide. Walkers bob, squash on each footfall, sway over the standing foot
+and lean into speed and turns. They breathe, blink and glance while idle, and
+hop on and off two chairs (`src/villagers/world.ts` has the spots and the
+corridor paths around the furniture). A walker waits for anyone just ahead.
+Each villager is an entry: hover glows it, Tab and Enter or a click choose
+it, and the chosen one stops, turns to face you and says one synthetic line in
+a bubble over its head. Escape or a click elsewhere and it carries on.
+Unloading `villagers` three times in a row returned the scene objects,
+geometries (265), textures (59), frame hooks, DOM and entries to the no-flag
+values.
+
+Frame cost, headless Chrome, 1440x900, DPR 2 (`?q=high`) or 1 (`?q=low`),
+M1 Pro, WebGPU, `npm run measure -- '<url>' --perf --gpu`, one 6 s run each
+(GPU p50 varies 1 to 3 ms between runs of the same page):
+
+| Flag | Tier | Draw calls | Triangles | GPU p50 / p95 ms |
+| --- | --- | --- | --- | --- |
+| none | high | 482 | 52,124 | 10.5 / 17.0 |
+| a | high | 591 | 79,202 | 9.7 / 12.2 |
+| b | high | 615 | 88,858 | 10.6 / 17.1 |
+| c | high | 597 | 56,218 | 10.2 / 17.1 |
+| d | high | 609 | 83,642 | 11.2 / 17.6 |
+| none | low | 412 | 48,893 | 4.0 / 7.5 |
+| a | low | 521 | 75,971 | 3.8 / 6.6 |
+| b | low | 545 | 85,627 | 5.4 / 10.4 |
+| c | low | 527 | 52,987 | 4.3 / 8.2 |
+| d | low | 539 | 80,411 | 5.5 / 6.9 |
+
+Three villagers cost about 110 to 130 draw calls with shadows, mostly from
+separate meshes per part; ten families' worth would need instancing or merged
+figures.
+
+Look: a fresh Opus scorer per direction per round saw only the home view and
+the closer angle, with the ui-craft rubric plus character appeal, silhouette
+distinctness and fit with the room. Means over seven categories:
+
+| Direction | Round 1 | Round 2 | Round 3 |
+| --- | --- | --- | --- |
+| a peg dolls | 6.1 | 6.3 | 6.1 |
+| b felt plush | 6.6 | 6.9 | 6.4 |
+| c paper | 4.9 | stopped | |
+| d spirits | 6.0 | 6.0 | stopped |
+
+Every round asked for better grounding (contact shadows, warm rim light) and
+complained when furniture hid villagers from the seated view. Screenshots are
+in `screenshots/talk/`.

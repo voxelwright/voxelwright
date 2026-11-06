@@ -96,9 +96,9 @@ const BEECH: RGB = [226, 186, 138]
 
 interface PegSpec extends Spec { bodyH: number; baseR: number; headR: number; dress: string; trim: string; hair: string; pattern: 'apron' | 'stripes' | 'flowers'; hat: 'kerchief' | 'pompom' | 'straw'; prop: Prop }
 const PEGS: PegSpec[] = [
-  { name: 'Bramble, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", bodyH: 0.36, baseR: 0.13, headR: 0.092, dress: '#c8553d', trim: '#f4ead6', hair: '#5a3522', pattern: 'apron', hat: 'kerchief', prop: 'spoon' },
-  { name: 'Pip, the tidier', bark: 'I found three socks and a crayon under the sofa.', bodyH: 0.42, baseR: 0.1, headR: 0.084, dress: '#e3a92b', trim: '#3f6fa8', hair: '#2a1e18', pattern: 'stripes', hat: 'pompom', prop: 'duster' },
-  { name: 'Juniper, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', bodyH: 0.5, baseR: 0.092, headR: 0.08, dress: '#6f9a5b', trim: '#f2d36b', hair: '#b5793e', pattern: 'flowers', hat: 'straw', prop: 'can' },
+  { name: 'Bramble, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", bodyH: 0.31, baseR: 0.145, headR: 0.1, dress: '#c8553d', trim: '#f4ead6', hair: '#5a3522', pattern: 'apron', hat: 'kerchief', prop: 'spoon' },
+  { name: 'Pip, the tidier', bark: 'I found three socks and a crayon under the sofa.', bodyH: 0.42, baseR: 0.1, headR: 0.084, dress: '#e0a63a', trim: '#5b7fa6', hair: '#2a1e18', pattern: 'stripes', hat: 'pompom', prop: 'duster' },
+  { name: 'Juniper, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', bodyH: 0.56, baseR: 0.082, headR: 0.078, dress: '#6f9a5b', trim: '#f2d36b', hair: '#b5793e', pattern: 'flowers', hat: 'straw', prop: 'can' },
 ]
 
 function pegBodyTexture(s: PegSpec, seed: number) {
@@ -167,7 +167,7 @@ function faceTexture(skin: RGB, hair: string | null, seed: number, opts: { mouth
   g.fillStyle = opts.cheeks ?? 'rgba(232, 120, 110, 0.5)'
   for (const s of [-1, 1]) {
     g.beginPath()
-    g.ellipse(fx + s * W * 0.062, H * 0.6, 7, 5, 0, 0, Math.PI * 2)
+    g.ellipse(fx + s * W * 0.07, H * 0.6, 9, 6.5, 0, 0, Math.PI * 2)
     g.fill()
   }
   g.strokeStyle = '#3a241a'
@@ -180,7 +180,7 @@ function faceTexture(skin: RGB, hair: string | null, seed: number, opts: { mouth
       g.moveTo(x - 2, y - 2)
       g.lineTo(x + 2, y + 2)
     }
-  } else g.arc(fx, H * 0.6, 6, 0.25 * Math.PI, 0.75 * Math.PI)
+  } else g.arc(fx, H * 0.58, 8, 0.2 * Math.PI, 0.8 * Math.PI)
   g.stroke()
   return toTexture(c)
 }
@@ -202,7 +202,7 @@ function pegDoll(i: number, phys: boolean): Figure {
   head.position.set(0, hy, 0)
   part(head, mesh(new THREE.SphereGeometry(s.headR, 32, 20), lacquer(faceTexture(BEECH, s.hair, 50 + i))), 0, 0, 0)
   const eyes = [-1, 1].map((sx) => {
-    const e = part(head, mesh(new THREE.SphereGeometry(0.011, 10, 8), paint('#2b1d14', 0.25)), sx * s.headR * 0.33, s.headR * 0.12, s.headR * 0.93)
+    const e = part(head, mesh(new THREE.SphereGeometry(0.0145, 12, 8), paint('#2b1d14', 0.25)), sx * s.headR * 0.36, s.headR * 0.1, s.headR * 0.92)
     e.scale.z = 0.5
     return e
   })
@@ -217,7 +217,7 @@ function pegDoll(i: number, phys: boolean): Figure {
     }
     part(head, mesh(new THREE.SphereGeometry(0.05, 14, 10), paint(s.hair, 0.7)), 0, 0.02, -s.headR * 0.95).scale.set(1, 0.9, 0.7)
   } else if (s.hat === 'pompom') {
-    const knit = paint('#3f6fa8', 0.9)
+    const knit = paint('#5b7fa6', 0.9)
     part(head, mesh(new THREE.CylinderGeometry(0.03, s.headR * 1.03, 0.1, 20), knit), 0, s.headR * 0.6, -0.005).rotation.x = -0.12
     part(head, mesh(new THREE.TorusGeometry(s.headR * 0.98, 0.014, 8, 24), paint('#f4ead6', 0.9)), 0, s.headR * 0.18, -0.004).rotation.x = Math.PI / 2 - 0.12
     part(head, mesh(new THREE.SphereGeometry(0.03, 12, 10), paint('#f4ead6', 1)), 0, s.headR * 0.6 + 0.07, -0.016)
@@ -231,7 +231,13 @@ function pegDoll(i: number, phys: boolean): Figure {
     part(head, hat, 0, s.headR * 0.62, -0.005)
   }
   const handY = hip + k * 0.5
-  const hands = [-1, 1].map((sx) => hand(pose, mesh(new THREE.SphereGeometry(0.026, 14, 10), lacquer(null, '#e2ba8a', 0.45)), sx * (R * 0.8 + 0.02), handY, 0.015))
+  const hands = [-1, 1].map((sx) => {
+    const h = hand(pose, mesh(new THREE.SphereGeometry(0.026, 14, 10), lacquer(null, '#e2ba8a', 0.45)), sx * (R * 0.78 + 0.018), handY, 0.015)
+    // A painted sleeve peg joins the bead hand to the body.
+    const sleeve = part(h, mesh(new THREE.CylinderGeometry(0.017, 0.021, 0.07, 12), paint(s.dress, 0.5)), -sx * 0.004, 0.04, -0.004)
+    sleeve.rotation.z = sx * 0.18
+    return h
+  })
   part(hands[0], prop(s.prop, paint, 0.9), 0, 0, 0.01)
   const feet = [-1, 1].map((sx) => {
     const f = part(root, new THREE.Group(), sx * 0.05, 0, 0)
@@ -249,7 +255,7 @@ function fuzzFill(g: CanvasRenderingContext2D, w: number, h: number, seed: numbe
   const r = rng(seed)
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
-      const t = 0.92 + (n(x / 18, y / 18, 3) - 0.5) * 0.14 + (r() - 0.5) * 0.09
+      const t = 0.92 + (n(x / 14, y / 14, 3) - 0.5) * 0.2 + (r() - 0.5) * 0.14
       const i = (y * w + x) * 4
       img.data[i] = base[0] * t
       img.data[i + 1] = base[1] * t
@@ -272,9 +278,9 @@ function feltTexture(base: string, seed: number, opts: { belly?: string; band?: 
   if (opts.belly) {
     g.fillStyle = opts.belly
     g.beginPath()
-    g.ellipse(W * 0.25, H * 0.62, W * 0.11, H * 0.24, 0, 0, Math.PI * 2)
+    g.ellipse(W * 0.25, H * 0.5, W * 0.09, H * 0.2, 0, 0, Math.PI * 2)
     g.fill()
-    stitchPath(g, (t) => [W * 0.25 + Math.cos(t * Math.PI * 2) * W * 0.11, H * 0.62 + Math.sin(t * Math.PI * 2) * H * 0.24], 30)
+    stitchPath(g, (t) => [W * 0.25 + Math.cos(t * Math.PI * 2) * W * 0.09, H * 0.5 + Math.sin(t * Math.PI * 2) * H * 0.2], 30)
   }
   stitchPath(g, (t) => [W * 0.75, H * (0.08 + t * 0.84)], 12)
   if (opts.band !== false) stitchPath(g, (t) => [t * W, H * 0.5 + Math.sin(t * Math.PI * 4) * 1.5], 40)
@@ -297,8 +303,8 @@ function stitchPath(g: CanvasRenderingContext2D, at: (t: number) => [number, num
 interface PlushSpec extends Spec { felt: string; belly: string; inner: string; r: number; tall: number; ears: 'floppy' | 'tuft' | 'round'; prop: Prop }
 const PLUSH: PlushSpec[] = [
   { name: 'Dumpling, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", felt: '#e2b98a', belly: '#f6e6cc', inner: '#e8a3a0', r: 0.2, tall: 0.9, ears: 'floppy', prop: 'spoon' },
-  { name: 'Tuft, the tidier', bark: 'I found three socks and a crayon under the sofa.', felt: '#7d93b5', belly: '#c9d3e3', inner: '#e3a92b', r: 0.14, tall: 1.5, ears: 'tuft', prop: 'duster' },
-  { name: 'Moss, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', felt: '#7fa25a', belly: '#d9e3b8', inner: '#5f7f42', r: 0.17, tall: 1.1, ears: 'round', prop: 'can' },
+  { name: 'Tuft, the tidier', bark: 'I found three socks and a crayon under the sofa.', felt: '#8a9cba', belly: '#e6dccb', inner: '#e3a92b', r: 0.14, tall: 1.5, ears: 'tuft', prop: 'duster' },
+  { name: 'Moss, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', felt: '#97a85e', belly: '#ece3c0', inner: '#5f7f42', r: 0.17, tall: 1.1, ears: 'round', prop: 'can' },
 ]
 
 function plush(i: number, phys: boolean): Figure {
@@ -307,7 +313,7 @@ function plush(i: number, phys: boolean): Figure {
   const felt = (c: string, map: THREE.Texture | null = null) => phys
     ? new THREE.MeshPhysicalMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
     : new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : c, map, roughness: 1 })
-  const plain = (c: string) => felt(c)
+  const plain = (c: string) => felt(c, feltTexture(c, 95 + i, { band: false }))
   const hip = 0.035
   const R = s.r
   const bodyH = R * 2 * s.tall * 0.62
@@ -532,8 +538,8 @@ function paperDoll(i: number, _phys: boolean): Figure {
       g.fillRect(-rH * 0.72, hc + rH * 0.7, rH * 1.44, rH * 0.18)
     }, edge, 241), 0, 0, 0.004)
   } else if (s.hat === 'scarf') {
-    const capPts = circlePts(0, hc, rH * 1.1, 24, -0.25, Math.PI + 0.25)
-    const knotPts = circlePts(0, hc + rH * 1.25, rH * 0.5, 20)
+    const capPts = circlePts(0, hc + rH * 0.42, rH * 1.06, 24, -0.12, Math.PI + 0.12)
+    const knotPts = circlePts(0, hc + rH * 1.55, rH * 0.5, 20)
     const scarf = (g: CanvasRenderingContext2D, pts: Pt[], seed: number) => {
       wash(g, '#2f7f7a', () => pts.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))), seed)
       g.fillStyle = '#f2d36b'
