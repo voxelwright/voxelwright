@@ -25,7 +25,12 @@ export default {
     group.rotation.y = -0.12
 
     const brushed = paintBrushed(9)
-    const steel = new THREE.MeshPhysicalMaterial({ map: brushed, color: '#eef0f2', metalness: 0.3, roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.3 })
+    // Physical tier: an enamel-like lacquer over the brushed steel, picking up the sun.
+    const phys = ctx.stage.features().has('phys')
+    const steel = new THREE.MeshPhysicalMaterial({
+      map: brushed, color: '#eef0f2', metalness: 0.3, roughness: 0.42,
+      clearcoat: phys ? 1 : 0.4, clearcoatRoughness: phys ? 0.12 : 0.3,
+    })
     const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 4, 0.03), steel)
     body.position.y = H / 2 + 0.04
     body.castShadow = body.receiveShadow = true

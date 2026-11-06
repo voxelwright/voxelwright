@@ -4,13 +4,21 @@
 import { Context, type Fiber, type Plugin } from 'cordis'
 import type * as THREE from 'three/webgpu'
 
-export type Quality = 'high' | 'low'
+export type Quality = 'high' | 'medium' | 'low'
 
 export interface Stage {
   renderer: THREE.WebGPURenderer
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
+  /** The quality tier. Chosen from measured GPU time unless ?q= names one; may drop once after the first frames. */
   quality: Quality
+  /** Rendering features on at the current tier (csm, gtao, traa, phys, ssgi), or exactly ?fx= when given. */
+  features: () => Set<string>
+  /**
+   * Per frame, in ms: gpu is submit-to-done on the WebGPU queue, passSum the summed
+   * timestamp-query pass durations (?gpu=1 only), cpu the JS frame (hooks and draw).
+   */
+  timing: { gpu: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string }
   backend: 'WebGPU' | 'WebGL2'
   /** Draws one frame with the most recently added draw pass, or a plain render. */
   draw: () => void
@@ -30,6 +38,7 @@ declare module 'cordis' {
   interface Events {
     'village/frame'(dt: number, elapsed: number): void
     'village/plugin-error'(name: string, error: unknown): void
+    'village/tier'(quality: Quality): void
   }
 }
 
