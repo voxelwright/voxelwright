@@ -6,40 +6,84 @@ Node service built from Cordis plugins, like the home.
 ```sh
 npm install
 npm run typecheck
-npm run elder -- "put a small radio on the windowsill"                    # claude-code
-ELDER_CODEX_BIN=/path/to/codex npm run elder -- "..." --executor codex
+npm run elder -- "put a small radio on the windowsill"     # claude-code
 npm run elder -- "..." --timeout-ms 20000 --candidates ~/.village/candidates
+npm run regressions                                         # stub executors, no model calls
 ```
 
-Each run:
+Each run writes `result.json` in `~/.village/candidates/<id>/`, whatever
+fails: a missing check, the copy, the install, an executor that cannot start,
+a timeout or the commit.
 
 1. Copies the running checkout's current commit into
    `~/.village/candidates/<id>/repo` on branch `candidate/<id>` (a fresh
-   `git init` plus a fetch of that commit) and checks that no inode is shared
-   with the source. Uncommitted changes are not copied.
-2. Runs `npm ci` in the candidate's `home/`, then one executor plugin there
-   with the request and fixed instructions (new home plugin, kernel untouched,
-   follow `ui-craft`). Timeout: 6 minutes. No retry.
-3. Runs the controller's checks from `src/plugins/home-checks.ts`: `tsc` and
-   `vite build`; a headless Chrome screenshot of `vite preview` with no console
-   errors; and, for each plugin file the candidate added, unload then reload
-   in the page. Unloading must match a fresh page without the plugin, and
-   reloading must match the page before.
-4. Commits everything on `candidate/<id>` with hooks disabled and writes
-   `result.json` next to the repo. The run passes only if the executor
-   completed and every check passed. When the executor fails or times out,
-   checks are recorded as `not run`.
+   `git init` plus a fetch of that commit). Uncommitted changes are not copied.
+2. Runs `npm ci --ignore-scripts` from the base lockfile in the candidate's
+   `home/`, under `srt` with only `registry.npmjs.org` reachable, then checks
+   that no file in the candidate shares an inode with any file in the source.
+3. Records the base before the executor runs: a manifest of every file
+   (content hash and mode, `.git` and `node_modules` included, `home/dist`
+   left out), and a base build and screenshot of the unchanged home.
+4. Runs one executor in the candidate with the request and fixed
+   instructions (one new file in `home/src/plugins/`, nothing else). Timeout:
+   6 minutes. No retry.
+5. Runs the checks from `src/plugins/home-checks.ts` in a fixed order and
+   stops at the first failure. The run fails if any expected check is not
+   registered.
+   - `controller-files`: everything outside `home/src/plugins/` is unchanged,
+     and that folder holds only regular files. Any other change fails the run
+     and names the path. So the kernel, `main.ts`, configs, scripts and
+     `node_modules` that later checks run are the base versions. `main.ts`
+     loads any plugin file it does not list, so a new plugin needs no edit
+     there.
+   - `build`: `tsc --noEmit` and `vite build` exit 0, under `srt` with no
+     network.
+   - `screenshot`: headless Chrome on `vite preview` (preview under `srt`),
+     with no page errors seen through CDP, a screenshot that is not blank, and
+     more than 0.05% of pixels changed from the base render.
+   - `plugin-lifecycle`, labeled in-page evidence: for each added plugin,
+     unload then reload in the page. Unloading must match a fresh page without
+     the plugin, and reloading must match the page before. It reads
+     `window.village`, which plugin code can replace, so a failure fails the
+     run and a pass proves nothing by itself.
+6. Commits on `candidate/<id>` and records the result. If the executor
+   changed `.git`, nothing is committed and the run fails. Every git call
+   uses `core.hooksPath=/dev/null`, `core.fsmonitor=false`,
+   `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`.
+7. Deletes passed candidates beyond the newest five. Failed ones stay.
 
-Executors use the operator's existing login in place:
+## Sandbox
+
+Candidate-influenced Node tools run under Anthropic's sandbox runtime
+(`srt` 0.0.81, Seatbelt). Reads are denied under the home directory and the
+user temp directory except the candidate, the Node install and a per-run temp
+directory; keychains and `.env` files are denied everywhere. Writes go only
+to the candidate's `home/` (not `node_modules`) and the temp directory. There
+is no network except loopback for the preview, or the npm registry for the
+install. The environment is a fixed list with HOME set to the temp directory.
+Details and measured limits: `.agents/skills/sandbox-runtime/SKILL.md`.
+
+Chrome does not run under `srt`: the profile has no `mach-register`, and
+Chrome aborts without it. The check browser runs with Chrome's own sandbox on,
+a temporary profile, an allowlisted environment, and a proxy that refuses
+everything except the preview origin (other loopback ports included).
+
+Processes are killed by process group at the deadline. A run resolves without
+waiting for a descendant that left the group and still holds the output
+pipes. Each page visit, preview server and browser together, has a 60-second
+deadline and one cleanup scope.
+
+## Executors
+
+Both get the controller's environment reduced to PATH, HOME, USER, LOGNAME,
+SHELL, LANG, LC_ALL, TERM and TMPDIR.
 
 - `claude-code`: `claude -p --model sonnet --output-format json --restricted
   --permission-mode acceptEdits --permission-prompts none --tools
   Read,Edit,Write,Glob,Grep --no-session-persistence`. No Bash, because the
   model can rewrite `package.json` scripts that an allowed command would run.
-- `codex`: `codex exec -s workspace-write -C <candidate> --ignore-user-config
-  --ephemeral -m gpt-6.1-sol -c model_reasoning_effort="medium"`. The npm
-  installs of codex on the owner's Mac lack their native binary, so set
-  `ELDER_CODEX_BIN` to the ChatGPT app's bundled CLI.
+- `codex`: off. It registers only with `ELDER_ALLOW_CODEX=1`, because a lock file on the maintainer's machine can block the tool. Not run since
+  November 6. Its `workspace-write` sandbox limits writes, not reads.
 
 ## Measured (November 6, 2026)
 
@@ -58,9 +102,17 @@ the scene without `own()`: neither the unload nor the reload matched.
 
 ## Not yet
 
-- The page probe reads `window.village`, which the candidate's `main.ts`
-  defines. `result.json` records diffs to the kernel, scripts and build config,
-  but a candidate could still fake its snapshot.
-- Codex runs Node tools inside its sandbox; Claude Code cannot run commands.
-  Neither can look at the scene, so `ui-craft`'s screenshot loop is not run.
+- Chrome runs under its own sandbox, not `srt`. A custom `sandbox-exec`
+  profile for Chrome was not tried.
+- The install writes the Elder's npm cache, `~/.village/npm-cache`, outside
+  the candidate. The lockfile's integrity hashes guard what is read from it.
+- A descendant of an executor that leaves the process group survives the
+  timeout. The run no longer waits for it, but nothing kills it.
+- The trusted checkout is unreadable to sandboxed tools only because it lives
+  under the home directory.
+- The 0.05% screenshot threshold rests on one noise sample (0.008% between two
+  renders with nothing added). A plugin too small to change that many pixels
+  fails.
+- Neither executor can look at the scene, so `ui-craft`'s screenshot loop is
+  not run.
 - Promotion, hot-swap, rollback, review and a chat surface are later units.
