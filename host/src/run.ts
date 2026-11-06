@@ -18,7 +18,7 @@ export interface RunOptions {
 
 export function instructions(request: string, repo: string): string {
   const uiCraft = existsSync(join(repo, '.agents/skills/ui-craft/SKILL.md'))
-    ? 'Follow .agents/skills/ui-craft/SKILL.md for look and feel.\n'
+    ? 'Follow the rubric in .agents/skills/ui-craft/SKILL.md for look and feel. You cannot open a browser here;\n  the controller takes the screenshot, so judge the scene from the code and the existing plugins.\n'
     : ''
   return `You are changing a candidate copy of Village, a family home rendered as a 3D browser scene in home/
 (TypeScript, Vite, three.js on WebGPU, every piece a Cordis plugin). Someone in the family asked:
@@ -59,7 +59,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
   const checks: Record<string, CheckResult> = {}
   for (const [name, check] of elder.checks) {
     if (outcome.status !== 'completed') {
-      checks[name] = { pass: false, durationMs: 0, detail: `Not run: executor ${outcome.status}` }
+      checks[name] = { pass: false, ran: false, durationMs: 0, detail: `Not run: executor ${outcome.status}` }
       continue
     }
     const t = performance.now()
@@ -103,7 +103,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
       executorMs: outcome.durationMs,
       checksMs: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.durationMs])),
     },
-    checks: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.pass ? 'pass' : 'fail'])),
+    checks: Object.fromEntries(Object.entries(checks).map(([k, v]) => [k, v.ran === false ? 'not run' : v.pass ? 'pass' : 'fail'])),
     checkDetails: checks,
     screenshot: (checks.screenshot?.detail as { path?: string } | undefined)?.path ?? null,
   }

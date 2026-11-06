@@ -133,7 +133,10 @@ async function withPage(c: Candidate, query: string, fn: (page: Page, errors: st
     await waitForServer(url)
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
     const errors: string[] = []
-    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+    page.on('console', (m) => {
+      // The home ships no favicon; Chrome's own request for one is not an error in the candidate.
+      if (m.type() === 'error' && !m.location().url.endsWith('/favicon.ico')) errors.push(`${m.text()} (${m.location().url})`)
+    })
     page.on('pageerror', (e) => errors.push(String(e)))
     await page.goto(url)
     const ready = await page

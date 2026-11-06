@@ -35,6 +35,8 @@ export interface Executor {
 
 export interface CheckResult {
   pass: boolean
+  /** false when the check was skipped because the executor did not complete. */
+  ran?: boolean
   durationMs: number
   detail?: unknown
 }
