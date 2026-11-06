@@ -33,6 +33,13 @@ import { createSandbox } from '../sandbox.ts'
 const home = (c: Candidate) => join(c.repo, 'home')
 const bin = (c: Candidate, name: string) => join(home(c), 'node_modules', '.bin', name)
 
+/**
+ * Vite's default config loader bundles vite.config.ts into node_modules/.vite-temp,
+ * which the sandbox keeps read-only; since the villager proxy (#40) the config
+ * imports node modules and every build failed with EPERM. The runner loader
+ * evaluates the config in memory instead.
+ */
+const VITE_CONFIG_LOADER = ['--configLoader', 'runner']
 /** One page visit, preview server and browser included, must finish within this. */
 export const PAGE_DEADLINE_MS = 60_000
 /** A pixel counts as changed when a channel moves by more than this (0 to 255). */
@@ -148,7 +155,7 @@ async function build(c: Candidate, logFile: string): Promise<{ ok: boolean; deta
   const sandbox = await createSandbox({ repo: c.repo, network: 'none' })
   try {
     // Call the tools directly rather than `npm run build`, so package.json scripts never run.
-    for (const [tool, args] of [['tsc', ['--noEmit']], ['vite', ['build']]] as const) {
+    for (const [tool, args] of [['tsc', ['--noEmit']], ['vite', ['build', ...VITE_CONFIG_LOADER]]] as const) {
       const result = await sandbox.run(bin(c, tool), [...args], { cwd: home(c), timeoutMs: 120_000, logFile })
       if (result.code !== 0) return { ok: false, detail: { step: tool, exitCode: result.code, timedOut: result.timedOut, spawnError: result.spawnError, output: (result.stdout + result.stderr).slice(-3000) } }
     }
@@ -244,7 +251,7 @@ async function withPage(c: Candidate, query: string, fn: (page: Page, pageErrors
   const visit = async (): Promise<PageResult> => {
     const port = await freePort()
     const origin = `http://127.0.0.1:${port}`
-    server = sandbox.start(bin(c, 'vite'), ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], home(c))
+    server = sandbox.start(bin(c, 'vite'), ['preview', ...VITE_CONFIG_LOADER, '--host', '127.0.0.1', '--port', String(port), '--strictPort'], home(c))
     launching = browserLauncher.launch(`127.0.0.1:${port}`, sandbox.tmp)
     const browser = await launching
     await waitForServer(`${origin}/`)

@@ -12,7 +12,9 @@ async function authorized(path: string, init: RequestInit = {}): Promise<Respons
     if (!token) {
       const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
       if (!launch?.ok) return null
-      token = (await launch.json()).token
+      // A server without the launch route (vite preview) answers with the page itself.
+      token = ((await launch.json().catch(() => null)) as { token?: string } | null)?.token ?? null
+      if (!token) return null
     }
     const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
     if (!res || res.status >= 500) return null
