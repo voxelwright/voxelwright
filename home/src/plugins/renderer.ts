@@ -17,12 +17,17 @@ const fxParam = params.get('fx')
  * when the page steps down. Numbers come from the README's measured tables.
  */
 export const TIERS: Record<Quality, { dpr: number; fx: string[]; maxGpuMs: number }> = {
-  high: { dpr: 2, fx: [], maxGpuMs: Infinity },
-  medium: { dpr: 1.5, fx: [], maxGpuMs: Infinity },
+  // M1 Pro kitchen, 2880x1800: 7.9 ms bare, 9.1 ms with these three. 12 ms keeps a
+  // third of a 60 Hz frame spare. GTAO (+5 to 9 ms) and SSGI (+286 ms) stay opt-in.
+  high: { dpr: 2, fx: ['phys', 'csm', 'traa'], maxGpuMs: 12 },
+  medium: { dpr: 1.5, fx: ['phys', 'traa'], maxGpuMs: 12 },
   low: { dpr: 1, fx: [], maxGpuMs: Infinity },
 }
-const WARMUP_FRAMES = 30
+// Calibration skips shader-compile frames, then takes the median of 45 frames, or of
+// whatever arrived in 2 s (at least 8), so a very slow GPU steps down quickly.
+const WARMUP_FRAMES = 15
 const CALIBRATION_FRAMES = 45
+const CALIBRATION_MS = 2000
 
 export default {
   name: 'renderer',
@@ -93,6 +98,7 @@ export default {
     const device = backendState.device
     let settled = !calibrating
     let samples: number[] = []
+    let since = 0
     const settleTier = (median: number) => {
       const next = TIER_NAMES[TIER_NAMES.indexOf(quality) + 1]
       if (median <= TIERS[quality].maxGpuMs || !next) {
@@ -111,8 +117,10 @@ export default {
       timing.gpu.push(ms)
       if (timing.gpu.length > 4000) timing.gpu.splice(0, 2000)
       if (settled || ++frame <= WARMUP_FRAMES) return
+      if (!samples.length) since = performance.now()
       samples.push(ms)
-      if (samples.length < CALIBRATION_FRAMES) return
+      const enough = samples.length >= CALIBRATION_FRAMES || (samples.length >= 8 && performance.now() - since > CALIBRATION_MS)
+      if (!enough) return
       const sorted = [...samples].sort((a, b) => a - b)
       settleTier(sorted[Math.floor(sorted.length / 2)])
     }

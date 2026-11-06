@@ -19,7 +19,9 @@ export default {
     group.position.set(LIVING_X + 1.12, 0, LOUNGE.back + 0.42)
     const pale = new THREE.MeshStandardMaterial({ color: '#d8b98e', roughness: 0.6 })
     const white = new THREE.MeshStandardMaterial({ color: '#f4f2ee', roughness: 0.4 })
-    const ceramic = new THREE.MeshStandardMaterial({ map: paintCeramic(9), roughness: 0.35 })
+    const ceramic = ctx.stage.features().has('phys')
+      ? new THREE.MeshPhysicalMaterial({ map: paintCeramic(9), roughness: 0.45, clearcoat: 0.8, clearcoatRoughness: 0.1 })
+      : new THREE.MeshStandardMaterial({ map: paintCeramic(9), roughness: 0.35 })
     const blush = new THREE.MeshStandardMaterial({ color: '#d79b86', roughness: 0.55 })
 
     // Three trays climbing towards the corner, each on its own pair of legs.

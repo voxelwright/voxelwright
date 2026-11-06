@@ -3,6 +3,7 @@ import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
 import { paintGarden } from '../paint'
+import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js'
 
 export default {
   name: 'window',
@@ -84,6 +85,13 @@ export default {
     sun.shadow.bias = -0.0004
     sun.shadow.normalBias = 0.02
     sun.shadow.radius = 4
+    if (ctx.stage.features().has('csm')) {
+      // Three cascades over the room's depth only (the camera's far plane is 60 m;
+      // the kitchen is about 6 m deep), soft-filtered, so near shadows get the texels.
+      sun.shadow.mapSize.set(1024, 1024)
+      sun.shadow.radius = 6
+      sun.shadow.shadowNode = new CSMShadowNode(sun, { cascades: 3, maxFar: 9, mode: 'practical', lightMargin: 6 })
+    }
     own(ctx, sun)
     own(ctx, sun.target)
 

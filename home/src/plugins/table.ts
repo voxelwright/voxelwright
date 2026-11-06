@@ -107,7 +107,10 @@ export default {
     group.add(pencil)
 
     // A warm mug of tea, steam rising.
-    const mugMat = new THREE.MeshStandardMaterial({ color: '#e9dcc4', roughness: 0.35 })
+    // Physical tier: a glazed mug, a soft glaze sheen under a clear coat.
+    const mugMat = ctx.stage.features().has('phys')
+      ? new THREE.MeshPhysicalMaterial({ color: '#e9dcc4', roughness: 0.45, clearcoat: 0.9, clearcoatRoughness: 0.08, sheen: 0.4, sheenColor: '#fff1dc', sheenRoughness: 0.5 })
+      : new THREE.MeshStandardMaterial({ color: '#e9dcc4', roughness: 0.35 })
     const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.04, 0.1, 28, 1, true), mugMat)
     mug.material.side = THREE.DoubleSide
     mug.position.set(-0.52, top + 0.05, 0.02)

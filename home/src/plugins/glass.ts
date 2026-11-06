@@ -17,6 +17,17 @@ export default {
     pane.name = 'glass'
     pane.position.set((x0 + x1) / 2, (y0 + y1) / 2, WALL_Z - 0.11)
     own(ctx, pane)
+    if (ctx.stage.features().has('phys')) {
+      // Physical tier: a real transmissive pane behind the smudges, so the garden is
+      // seen through faintly tinted, reflective glass rather than open air.
+      const sheet = new THREE.Mesh(
+        new THREE.PlaneGeometry(x1 - x0, y1 - y0),
+        new THREE.MeshPhysicalMaterial({ transmission: 1, thickness: 0.006, ior: 1.5, roughness: 0.04, metalness: 0, color: '#f4fbf6', attenuationColor: '#e4f0e6', attenuationDistance: 0.4, specularIntensity: 1 }),
+      )
+      sheet.name = 'glass-sheet'
+      sheet.position.set(pane.position.x, pane.position.y, pane.position.z - 0.004)
+      own(ctx, sheet)
+    }
   },
 }
 
