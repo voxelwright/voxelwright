@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { paintPlaster, paintWood } from '../paint'
+import { canvas, paintPlaster, paintWood, toTexture } from '../paint'
 import { LIVING_X } from '../layout'
 
 /** Living room corner measurements, local to the room. */
@@ -23,7 +23,7 @@ export default {
 
     const floorTex = paintWood({ seed: 17, planks: 7, light: [214, 190, 160], dark: [178, 152, 122], knots: 1 })
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping
-    floorTex.repeat.set(2, 2.5)
+    floorTex.repeat.set(4, 5)
     floorTex.rotation = Math.PI / 2
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(right - left, 6), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }))
     floor.rotation.x = -Math.PI / 2
@@ -62,6 +62,23 @@ export default {
     const skirtSide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 6), trim)
     skirtSide.position.set(right - 0.01, 0.045, back + 3)
     room.add(skirtSide)
+
+    // A soft woven rug in front of the sideboard.
+    const [rc, rg] = canvas(512, 320)
+    rg.fillStyle = '#e9dccb'
+    rg.fillRect(0, 0, 512, 320)
+    for (let y = 18; y < 320; y += 22) {
+      rg.fillStyle = y % 44 < 22 ? 'rgba(176, 120, 92, 0.35)' : 'rgba(120, 140, 110, 0.25)'
+      rg.fillRect(14, y, 484, 6)
+    }
+    rg.strokeStyle = '#b0785c'
+    rg.lineWidth = 10
+    rg.strokeRect(8, 8, 496, 304)
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.4), new THREE.MeshStandardMaterial({ map: toTexture(rc), roughness: 1 }))
+    rug.rotation.x = -Math.PI / 2
+    rug.position.set(-0.6, 0.004, back + 1.6)
+    rug.receiveShadow = true
+    room.add(rug)
 
     // Evening light: a warm key from the lamp side, a soft fill, and a bounce.
     const fill = new THREE.HemisphereLight('#fff4e6', '#9a8068', 1.05)

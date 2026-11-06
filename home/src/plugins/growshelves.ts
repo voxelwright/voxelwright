@@ -37,9 +37,9 @@ export default {
       map: paintWood({ seed: 31, w: 512, h: 256, planks: 1, light: [128, 92, 64], dark: [86, 58, 40], knots: 1 }),
       roughness: 0.5,
     })
-    const strip = new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: '#ffe2ae', emissiveIntensity: 2.2 })
+    const strip = new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: '#ffe2ae', emissiveIntensity: 1.4 })
     const glowTex = paintGlow()
-    const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55 })
+    const glowMat = new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.32 })
     const ceramic = new THREE.MeshStandardMaterial({ map: paintCeramic(5), roughness: 0.35 })
     const stemMat = new THREE.MeshStandardMaterial({ color: '#5d7f33', roughness: 0.7 })
     const leaves = new Foliage('heart')

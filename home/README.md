@@ -33,7 +33,9 @@ the per-frame `village/frame` event. `camera` provides the `view` service,
 which eases the camera to a pose and back. Every other plugin injects `stage`:
 `room`, `window`, `glass`, `sunbeam`, `cabinets`, `table`, `chairs`,
 `highchair`, `fridge`, `toyshelf`, `botanical`, `plant`, `motes`, `lamp`,
-`rimlight` and `postfx`. `notebook` injects `stage` and `view`. Each one registers its
+`rimlight`, `postfx` and the living room's `lounge`, `sideboard`, `growshelves`,
+`plantstand` and `loungedoors`. `entries` is the interaction layer, `rooms` loads rooms,
+and `notebook`, `fridge`, `kitchendoor`, `growshelves` and `loungedoors` register entries. Each one registers its
 objects, listeners and atmosphere through Cordis effects, so `fiber.dispose()`
 reverses them. `own()` in `src/kernel.ts` also releases each object's
 geometries, materials and textures. In dev, every plugin file accepts Vite hot
@@ -41,12 +43,53 @@ updates by disposing the running fiber and loading the edited module.
 
 ## Notebook
 
-Click or tap the notebook, or press Tab then Enter, and the camera eases down
+Click or tap the notebook, or Tab to it and press Enter, and the camera eases down
 to the open page. Typing appears on the paper in handwriting. Enter keeps the
 line in this browser's local storage (`village.notebook.lines`). Escape or a
 click elsewhere eases back. With `prefers-reduced-motion` the camera moves
 without easing. `node scripts/check-notebook.mjs` proves the keyboard and
 pointer paths, storage, reduced motion and a clean unload and reload.
+
+## The home is the menu (#37)
+
+There is no menu bar. Meaningful objects are entries, registered through the
+`entries` plugin with a label, an object and an action. Pointer hover gives a
+soft warm glow and a handwritten label; click or tap chooses; Tab cycles the
+entries on screen from left to right and wraps, Enter chooses, Escape or a
+click elsewhere backs out. Touch skips hover. With `prefers-reduced-motion`
+glows, labels and camera moves are instant.
+
+Entries today: the notebook, the fridge (frames its door; family moments and
+what's coming up will live there), the kitchen doorway ("Living room"), and in
+the living room the plant shelves ("Idea garden", a placeholder for Plant a
+Seed), the doorway back ("Kitchen") and the closed "Workshop" door.
+
+Rooms are groups of plugins (`PLANS` in `src/plugins/rooms.ts`). Choosing a
+doorway eases the camera towards it, fades through warm dark, swaps rooms and
+eases in. `?room=living` starts in the living room. By default the
+neighbouring room stays loaded but hidden, because loading on entry stalled
+one frame for 0.5 to 2.2 s behind the fade; `?rooms=unload` loads on entry and
+unloads on leaving. `node scripts/check-entries.mjs` proves keyboard and
+pointer reach for every entry, the walks, reduced motion, and that leaving a
+room under `?rooms=unload` leaves no objects, plugins, frame hooks, geometries
+or DOM behind; `--keep` runs the walks with the default.
+
+Walk measurements, headless Chrome, 1440×900, DPR 1, four walks each:
+
+| Policy | Swap behind the fade | Worst frame during a walk |
+| --- | --- | --- |
+| unload on leaving | 0.63 to 1.11 s | 0.52 to 2.2 s |
+| keep neighbour loaded (default) | 0.09 s | 33 to 50 ms |
+
+Per room at rest, headless Chrome, 1440×900, WebGPU, holding 60 fps (the
+headless cap) in every mode:
+
+| Room | Mode | Draw calls | Triangles |
+| --- | --- | --- | --- |
+| kitchen | DPR 2 | 480 | 52,121 |
+| kitchen | `?q=low` | 412 | 48,893 |
+| living | DPR 2 | 143 | 23,731 |
+| living | `?q=low` | 140 | 22,003 |
 
 ## Measured, kitchen scene (November 6, 2026)
 
