@@ -169,3 +169,39 @@ With the sandbox and gates (November 6, 2026, same Mac):
 - Neither executor can look at the scene, so `ui-craft`'s screenshot loop is
   not run.
 - Promotion, hot-swap, rollback, review and a chat surface are later units.
+
+# Villager (#40)
+
+`npm run villager -- [--agent claude|stub] [--model sonnet] [--port 5190] [--root ~/.village]`
+serves a person's villager on 127.0.0.1 only. Each start writes a random
+token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
+on stop; every request needs `Authorization: Bearer <token>`.
+
+- `GET /people/<id>/conversation`: the last 40 lines on both sides.
+- `POST /people/<id>/messages {"text"}`: server-sent events, `text` pieces
+  then `done` with the reply, or `failed`. One turn at a time per person
+  (409), 3-minute deadline. A turn finishes and is recorded even if the page
+  leaves.
+
+Each turn runs the official Claude Code binary through the Claude Agent SDK
+(`src/villager-agent.ts`, pack `.agents/skills/claude-agent-sdk`) on the
+operator's existing login: no built-in tools, no settings files, strict MCP
+config, and only an in-process `notes` server with `list_notes`, `read_note`
+and `write_note`. The turn fails if `init` lists any other MCP server or
+tool. Note names must match `[a-z0-9][a-z0-9-]*.md`; symlinks are refused.
+Per person, `<root>/people/<id>/` holds `notes/`, `villager.json` (session
+id to resume and its running cost), `conversation.jsonl` and `usage.jsonl`
+(models, tokens, cost of the turn, first-text and total time). A failed turn
+records the line as unanswered and keeps the stored session.
+
+`npm run check-villager` (stub agent, no model): token, streaming, usage
+log, one turn at a time, launch-file cleanup, a new token per launch,
+resuming after a restart, failed turns, person ids, eight attempts to leave
+the notes folder (`../`, `a/../../`, absolute, symlinks, dotfiles) and the
+init guard. 34 of 34 passed (November 6, 2026).
+
+Not yet: session transcripts live in the operator's `~/.claude/projects/`,
+not the person's folder; every person shares the operator's subscription and
+OS user, so this is not family isolation; the dev-server token handoff
+trusts any same-origin page on localhost:5181; the villager cannot remind or
+act yet.
