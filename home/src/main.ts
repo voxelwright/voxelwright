@@ -1,4 +1,4 @@
-import { load, pluginStates, root, unload } from './kernel'
+import { load, pluginStates, replace, root, unload } from './kernel'
 import renderer from './plugins/renderer'
 import room from './plugins/room'
 import windowView from './plugins/window'
@@ -57,6 +57,10 @@ const only = params.get('plugins')?.split(',')
 if (only) for (const plan of Object.values(PLANS)) plan.plugins = plan.plugins.filter((n) => only.includes(n))
 for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
 const keepRooms = params.get('rooms') !== 'unload'
+// When calibration steps the tier down, the renderer has already lowered the pixel
+// ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
+// its load-time detail, so ?q=low remains the way to get the light scene everywhere.
+root.on('village/tier', () => void replace(postfx))
 
 /** What is registered right now: used by the unload proof and the perf run. */
 function snapshot() {
@@ -85,12 +89,17 @@ function snapshot() {
     textures: memory?.textures ?? 0,
     fog: Boolean(stage?.scene.fog),
     backend: stage?.backend,
+    quality: stage?.quality,
+    features: stage ? [...stage.features()] : [],
+    tierReason: stage?.timing.tierReason,
     render: stage ? { drawCalls: stage.renderer.info.render.drawCalls, triangles: stage.renderer.info.render.triangles } : null,
   }
 }
 
 const village = {
   snapshot,
+  /** GPU pass and CPU frame times recorded so far (see the renderer's timing notes). */
+  timing: () => root.get('stage')?.timing,
   load: (name: string) => load(plugins[name]),
   unload,
   /**
