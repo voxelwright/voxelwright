@@ -74,7 +74,7 @@ fan-in and required-scope exhaustion proof using standard Gas City 1.5.1 /
 Beads 1.3.2 / Dolt 2.2.0. It passed in 187.541 native seconds (188.903632305 outer),
 with 76 native commands, 20 Linux controls, zero model calls and clean teardown.
 Its replayable evidence payload and exact launch commands are archived separately
-from application code. Prior R1–R5 failures remain recorded, including R5's
+from application code. Prior attempts R1 through R5 remain recorded as failures, including R5's
 functional pass but overall cleanup failure. This does not qualify the complete
 issue 13 workflow, issue 15 comparison or family isolation.
 
