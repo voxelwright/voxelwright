@@ -11,7 +11,7 @@ export default {
   apply(ctx: Context) {
     const group = new THREE.Group()
     group.name = 'botanical'
-    group.position.set(-2.25, 1.75, WALL_Z + 0.015)
+    group.position.set(-1.95, 1.75, WALL_Z + 0.015)
     const w = 0.36, h = 0.48, f = 0.025
     const walnut = new THREE.MeshStandardMaterial({ color: '#5a3a26', roughness: 0.5 })
     for (const [bw, bh, x, y] of [[w + f * 2, f, 0, h / 2 + f / 2], [w + f * 2, f, 0, -h / 2 - f / 2], [f, h, -w / 2 - f / 2, 0], [f, h, w / 2 + f / 2, 0]]) {

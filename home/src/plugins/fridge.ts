@@ -15,7 +15,7 @@ const MAGNETS = ['#d9534f', '#f0ad4e', '#5bc0de', '#7cb35b', '#b388c9', '#f7e7c6
  */
 export default {
   name: 'fridge',
-  inject: ['stage'],
+  inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
     const low = ctx.stage.quality === 'low'
     const group = new THREE.Group()
@@ -101,6 +101,23 @@ export default {
       stick(photo, x, y, (r() - 0.5) * 0.3, 2 + (i % 3), r() < 0.6 ? MAGNETS[i % MAGNETS.length] : undefined)
     }
     own(ctx, group)
+
+    // An entry: choosing the fridge frames its door. Family moments and what's
+    // coming up will live here; for now it says so gently.
+    const { view, entries } = ctx
+    const facing = new THREE.Vector3(Math.sin(group.rotation.y), 0, Math.cos(group.rotation.y))
+    const centre = group.position.clone().setY(1.12)
+    const pose = { position: centre.clone().addScaledVector(facing, 1.75).setY(1.22), look: centre }
+    ctx.effect(() => entries.add({
+      id: 'fridge',
+      label: 'Fridge',
+      object: group,
+      select() {
+        view.focus(pose)
+        entries.say("Family moments and what's coming up will gather here soon")
+      },
+      leave: () => view.focus(null),
+    }), 'fridge entry')
   },
 }
 

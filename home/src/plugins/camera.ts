@@ -14,6 +14,11 @@ export interface View {
   focus(pose: Pose | null): void
   /** True while a focus pose is requested. */
   readonly focused: boolean
+  /**
+   * Move the seat itself: ease the resting pose to a new one over seconds, or
+   * jump with 0. Resolves on arrival. Instant when the person prefers reduced motion.
+   */
+  travel(pose: Pose, seconds: number): Promise<void>
 }
 
 declare module 'cordis' {
@@ -32,6 +37,7 @@ export default {
     const { camera } = ctx.stage
     const home = new THREE.Vector3(0.1, 1.45, 2.7)
     const look = new THREE.Vector3(0.12, 1.05, -0.9)
+    let trip: { from: Pose; to: Pose; u: number; seconds: number; done: () => void } | null = null
     const pointer = new THREE.Vector2()
     const eased = new THREE.Vector2()
     const onMove = (e: PointerEvent) => pointer.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1)
@@ -46,6 +52,7 @@ export default {
       const saved = { position: camera.position.clone(), quaternion: camera.quaternion.clone(), fov: camera.fov }
       addEventListener('pointermove', onMove)
       return () => {
+        trip?.done()
         removeEventListener('pointermove', onMove)
         camera.position.copy(saved.position)
         camera.quaternion.copy(saved.quaternion)
@@ -66,11 +73,35 @@ export default {
       get focused() {
         return target !== null
       },
+      travel(pose: Pose, seconds: number) {
+        trip?.done()
+        trip = null
+        if (seconds <= 0 || reducedMotion.matches) {
+          home.copy(pose.position)
+          look.copy(pose.look)
+          return Promise.resolve()
+        }
+        return new Promise<void>((done) => {
+          trip = { from: { position: home.clone(), look: look.clone() }, to: pose, u: 0, seconds, done }
+        })
+      },
     })
 
     camera.fov = 40
     camera.updateProjectionMatrix()
     ctx.on('village/frame', (dt, t) => {
+      if (trip) {
+        trip.u = Math.min(1, trip.u + dt / trip.seconds)
+        const u = trip.u
+        const k = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2
+        home.lerpVectors(trip.from.position, trip.to.position, k)
+        look.lerpVectors(trip.from.look, trip.to.look, k)
+        if (u === 1) {
+          const { done } = trip
+          trip = null
+          done()
+        }
+      }
       eased.lerp(pointer, 1 - Math.exp(-dt * 2.5))
       const goal = target ? 1 : 0
       blend += (goal - blend) * (1 - Math.exp(-dt * 3.2))

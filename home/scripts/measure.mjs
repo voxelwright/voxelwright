@@ -79,7 +79,8 @@ if (flag('unload')) {
     proof[name] = { before: b, unloaded: u, reloaded: r, sameObjectsAfterReload: before.objects === reloaded.objects }
   }
   // Unload every scene plugin and compare with a renderer-only baseline.
-  for (const n of ['postfx', 'camera', 'lamp', 'motes', 'fridge', 'table', 'window', 'room']) await page.evaluate((x) => window.village.unload(x), n)
+  const loaded = await page.evaluate(() => window.village.snapshot().plugins.active.filter((n) => n !== 'renderer'))
+  for (const n of loaded) await page.evaluate((x) => window.village.unload(x), n)
   await frame()
   const { objects, ...empty } = await page.evaluate(() => window.village.snapshot())
   proof.rendererOnly = { ...empty, objects }

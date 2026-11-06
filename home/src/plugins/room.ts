@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { WALL_Z, WINDOW } from '../layout'
+import { DOORWAY, WALL_Z, WINDOW } from '../layout'
 import { paintPlaster, paintWood } from '../paint'
 
 export default {
@@ -24,23 +24,26 @@ export default {
     floor.receiveShadow = true
     room.add(floor)
 
-    const plaster = paintPlaster(5, [246, 238, 224])
-    plaster.wrapS = plaster.wrapT = THREE.RepeatWrapping
+    // One plaster map stretched over the whole back wall, never repeated, so
+    // the blocks around the window and the doorway share it without seams.
+    const W0 = -3.4, W1 = 3.4, H = 3.0
+    const plaster = paintPlaster(5, [244, 239, 230], 1536, 768, 0.45)
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
     const T = 0.18
-    const H = 3.0
     const { x0, x1, y0, y1 } = WINDOW
+    const { x0: d0, x1: d1, top } = DOORWAY
     const block = (xa: number, xb: number, ya: number, yb: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, yb - ya, T), wallMat)
       m.position.set((xa + xb) / 2, (ya + yb) / 2, WALL_Z - T / 2)
-      // Keep painted plaster at a consistent scale across blocks
       const uv = m.geometry.attributes.uv as THREE.BufferAttribute
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa) / 2.2, (uv.getY(i) * (yb - ya) + ya) / 2.2)
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa - W0) / (W1 - W0), (uv.getY(i) * (yb - ya) + ya) / H)
       m.castShadow = m.receiveShadow = true
       room.add(m)
     }
-    block(-3.4, x0, 0, H)
-    block(x1, 3.4, 0, H)
+    block(W0, d0, 0, H)
+    block(d0, d1, top, H)
+    block(d1, x0, 0, H)
+    block(x1, W1, 0, H)
     block(x0, x1, 0, y0)
     block(x0, x1, y1, H)
 
@@ -50,12 +53,12 @@ export default {
     room.add(side)
 
     // Skirting board
-    const skirt = new THREE.Mesh(
-      new THREE.BoxGeometry(6.8, 0.1, 0.02),
-      new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 }),
-    )
-    skirt.position.set(0, 0.06, WALL_Z + 0.015)
-    room.add(skirt)
+    const trim = new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 })
+    for (const [xa, xb] of [[W0, d0], [d1, W1]]) {
+      const skirt = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, 0.1, 0.02), trim)
+      skirt.position.set((xa + xb) / 2, 0.06, WALL_Z + 0.015)
+      room.add(skirt)
+    }
 
     own(ctx, room)
 

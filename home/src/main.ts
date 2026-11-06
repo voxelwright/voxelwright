@@ -18,14 +18,31 @@ import chairs from './plugins/chairs'
 import highchair from './plugins/highchair'
 import toyshelf from './plugins/toyshelf'
 import botanical from './plugins/botanical'
+import entries from './plugins/entries'
+import kitchendoor from './plugins/kitchendoor'
+import lounge from './plugins/lounge'
+import sideboard from './plugins/sideboard'
+import growshelves from './plugins/growshelves'
+import plantstand from './plugins/plantstand'
+import loungedoors from './plugins/loungedoors'
+import { PLANS, rooms } from './plugins/rooms'
 
-const plugins = {
-  renderer, room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
-  toyshelf, botanical, plant, motes, lamp, rimlight, camera, notebook, postfx,
+const params = new URLSearchParams(location.search)
+const catalog = {
+  renderer, camera, entries, postfx,
+  room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
+  toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
+  lounge, sideboard, growshelves, plantstand, loungedoors,
 }
-// ?plugins=renderer,room loads a subset, used to measure baselines.
-const only = new URLSearchParams(location.search).get('plugins')?.split(',')
-for (const [name, plugin] of Object.entries(plugins)) if (!only || only.includes(name)) load(plugin)
+// ?room=living starts in another room.
+const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
+const plugins = { ...catalog, rooms: rooms(catalog, start) }
+/** Loaded for the whole visit; the rooms service loads and unloads the rest. */
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
+// ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
+const only = params.get('plugins')?.split(',')
+for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
+const keepRooms = params.get('rooms') !== 'unload'
 
 /** What is registered right now: used by the unload proof and the perf run. */
 function snapshot() {
@@ -43,6 +60,9 @@ function snapshot() {
       failed: Object.fromEntries(named('failed').map((n) => [n, states[n].error])),
     },
     services: { stage: Boolean(stage) },
+    room: root.get('rooms')?.current ?? null,
+    entries: root.get('entries')?.list() ?? [],
+    dom: document.body.querySelectorAll('*').length,
     sceneObjects: objects.length,
     objects: objects.sort(),
     frameHooks: hooks.length,
@@ -65,7 +85,8 @@ const village = {
    * every requested plugin is active.
    */
   ready: (timeoutMs = 15000) => new Promise<Readiness>((resolve) => {
-    const wanted = only ?? Object.keys(plugins)
+    const current = root.get('rooms')?.current ?? start
+    const wanted = only ?? [...GLOBAL, ...(keepRooms ? Object.values(PLANS).flatMap((p) => p.plugins) : PLANS[current].plugins)]
     const deadline = performance.now() + timeoutMs
     const check = () => {
       const states = pluginStates()
