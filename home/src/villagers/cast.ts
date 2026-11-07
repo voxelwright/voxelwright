@@ -30,7 +30,7 @@ export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number
   // Walkers wait for whoever is just ahead.
   villagers.forEach((v, i) => {
     v.blocked = villagers.some((o, j) => {
-      // Someone busy at a chore is stepped around, not waited for.
+      // Someone busy at a chore is walked past (and may be clipped), not waited for.
       if (o === v || o.seated > 0.5 || o.state === 'work') return false
       const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z
       const d = Math.hypot(dx, dz)

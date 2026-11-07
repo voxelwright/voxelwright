@@ -349,7 +349,7 @@ What works:
 - Life: they do chores on their own paths (Dumpling between the sink and the
   fridge photos, Tuft between the toy shelf and the counter, crossing the room
   in front of the table, Moss tending the big plant). Walkers yield to each
-  other and step around anyone busy at a chore. Hovering one makes it pause,
+  other and walk past (and may clip through) anyone busy at a chore. Hovering one makes it pause,
   so it is easy to click.
 - Talk in one step: hover glows it and shows its name; click, or Tab and
   Enter. It stops, hops, turns to you, and the camera eases (rate 7, about
