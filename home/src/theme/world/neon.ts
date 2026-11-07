@@ -19,8 +19,8 @@ const ROAD = YARD_TOP - 0.14
 const PAVE = 1.4 // house-side pavement width
 const LANES = 3.8
 const FAR_PAVE = 0.9
-/** Where the dollhouse camera looks from (yaw 0.6 in camera.ts): reflections stretch towards it. */
-const VIEW_TURN = 0.6
+/** Where the dollhouse camera looks from (the overview yaw in camera.ts): reflections stretch towards it. */
+const VIEW_TURN = 0.42
 
 const NEON: Array<[number, number, number]> = [
   [1.5, 0.18, 1.05], // magenta
@@ -220,7 +220,7 @@ export function neonCity(house: House): World {
   edge(hx0, hz0, hx1, hz0); edge(hx0, hz1, hx1, hz1); edge(hx0, hz0, hx0, hz1); edge(hx1, hz0, hx1, hz1)
   edge(cx - 60, z0 - ob, cx + 60, z0 - ob); edge(x0 - ol, z1 + PAVE, x0 - ol, cz + 60)
   edge(x0 - ol, z1 + o, cx + 60, z1 + o); edge(x1 + o, z0 - ob, x1 + o, z1 + o)
-  bin.mesh(kerbs, new THREE.MeshStandardMaterial({ color: '#6c6888', roughness: 0.5 }), { name: 'neon kerbs' })
+  bin.mesh(kerbs, new THREE.MeshStandardMaterial({ color: '#3c3a4c', roughness: 0.5 }), { name: 'neon kerbs' })
 
   // Lane dashes along the middle of the ring road.
   const dashes: THREE.BufferGeometry[] = []
@@ -232,7 +232,8 @@ export function neonCity(house: House): World {
     }
   }
   const mb = (PAVE + ob) / 2, m = PAVE + LANES / 2
-  lane(x0 - ol, z0 - mb, x1 + m, z0 - mb); lane(x0 - ol, z1 + m, x1 + m + 20, z1 + m)
+  // None along the front: the dollhouse view's bottom edge stays plain wet road.
+  lane(x0 - ol, z0 - mb, x1 + m, z0 - mb)
   lane(x1 + m, z0 - mb - 20, x1 + m, z1 + m + 20); lane(x1 + m, z0 - mb, x1 + m + 30, z0 - mb)
   bin.mesh(dashes, new THREE.MeshStandardMaterial({ color: '#a89c78', roughness: 0.4, emissive: '#1e1a12' }), { name: 'neon lane paint' })
 
@@ -262,11 +263,12 @@ export function neonCity(house: House): World {
       bodies[kind].push(cellBox(zAxis ? width : depth, h, zAxis ? depth : width, bx, ROAD, bz, cell, [Math.floor(r() * 8), 0]))
       // Point on the facade, `along` metres from the tower's middle, `off` metres out.
       const onFace = (along: number, off: number): [number, number] => zAxis ? [mid + along, line + out * off] : [line + out * off, mid + along]
-      const colour = NEON[Math.floor(r() * NEON.length)]
+      // Mostly the window card's two tubes, magenta and cyan, so seat and dollhouse show one city.
+      const colour = NEON[r() < 0.8 ? Math.floor(r() * 2) : 2 + Math.floor(r() * 2)]
       if (r() < (tall ? 0.6 : 0.45)) { // a lit shopfront on the ground floor
         const [sx, sz] = onFace(0, 0.03)
         const sw = width * 0.7, sh = tall ? 1.5 : Math.min(0.9, h - 0.2)
-        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, sh, zAxis ? 0.04 : sw).translate(sx, WALK + 0.05 + sh / 2, sz), 0.32, 0.22, 0.22), SHOP))
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, sh, zAxis ? 0.04 : sw).translate(sx, WALK + 0.05 + sh / 2, sz), 0.22, 0.15, 0.16), SHOP))
         streak(sx, sz, [1, 0.8, 0.6], sw * 0.5, 1.4, 0.1)
       }
       if (tall && r() < 0.6) { // a neon sign: a tall blade standing out from the wall (far row only), or a band over the shop
@@ -277,6 +279,11 @@ export function neonCity(house: House): World {
           : region(new THREE.BoxGeometry(zAxis ? Math.min(3.2, width * 0.6) : 0.1, Math.min(3.2, width * 0.6) / 4, zAxis ? 0.1 : Math.min(3.2, width * 0.6)), BAND).translate(sx, WALK + 2.1, sz)
         glows.push(tint(g, ...colour))
         streak(sx, sz, colour, blade ? 0.5 : 1.2, 2, 0.08)
+      }
+      if (tall && r() < 0.45) { // a plain vertical tube up the facade, like the card's magenta bar
+        const [sx, sz] = onFace((r() - 0.5) * width * 0.7, 0.03)
+        const len = Math.min(h - 2.5, 2 + r() * 3)
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? 0.09 : 0.04, len, zAxis ? 0.04 : 0.09).translate(sx, WALK + 2.4 + len / 2, sz), ...colour), PLAIN))
       }
       if (r() < 0.3) { // a tube along the roof edge
         const [sx, sz] = onFace(0, 0.02)

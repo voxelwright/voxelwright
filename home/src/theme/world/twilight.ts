@@ -4,7 +4,8 @@
 // and behind, and two warm streetlamps beside the side walls, where the dollhouse camera
 // sees them past the walls. The front stays plain lawn. The seated window shows the same street
 // painted at depth on a card. Nothing here is a real light: lamp heads and windows glow,
-// and the lamps' pools are additive cards. Out of the rooms' fog: dusk is clear, not hazy.
+// and the lamps' pools are additive cards. Out of the rooms' fog (dusk is clear, not hazy),
+// and nothing out here casts: the sun has set, so no long shadows cross the lawn.
 import * as THREE from 'three/webgpu'
 import { canvas, makeNoise, rng, toTexture } from '../../paint'
 import { YARD_TOP } from '../../diorama'
@@ -40,7 +41,7 @@ function paintLawn(seed: number) {
   const img = g.createImageData(256, 256)
   for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
     const v = n(x / 3, y / 3, 2) * 0.6 + n(x / 24, y / 24, 3) * 0.4
-    img.data.set([66 + v * 28, 100 + v * 36, 96 + v * 28, 255], (y * 256 + x) * 4)
+    img.data.set([62 + v * 34, 104 + v * 44, 84 + v * 30, 255], (y * 256 + x) * 4)
   }
   g.putImageData(img, 0, 0)
   const t = toTexture(c)
@@ -63,7 +64,7 @@ function paintFronts(seed: number) {
     const x = col * 64, y = row * 64
     g.fillStyle = '#d8d4cc'; g.fillRect(x + 16, y + 12, 32, 38)
     g.fillStyle = '#26304a'; g.fillRect(x + 19, y + 15, 26, 32)
-    if (r() < 0.36) {
+    if (r() < 0.26) {
       const glow = lg.createLinearGradient(0, y + 15, 0, y + 47)
       glow.addColorStop(0, '#ffc888')
       glow.addColorStop(1, '#c87840')
@@ -164,7 +165,7 @@ export function twilightStreet(house: House): World {
   // The lawn, and the street behind the house: pavement, road with kerbs, far pavement.
   const lawnMap = bin.keep(paintLawn(8))
   lawnMap.repeat.set(30, 30)
-  bin.mesh([flatQuad(SKY_R * 2, SKY_R * 2, cx, GROUND, cz)], new THREE.MeshStandardMaterial({ color: '#a4b8b8', map: lawnMap, roughness: 1, emissive: '#101a26', fog: false }), { receive: true, name: 'twilight lawn' })
+  bin.mesh([flatQuad(SKY_R * 2, SKY_R * 2, cx, GROUND, cz)], new THREE.MeshStandardMaterial({ color: '#a4b8b8', map: lawnMap, roughness: 1, emissive: '#14222a', fog: false }), { receive: true, name: 'twilight lawn' })
   const far = behindCard(house, z0 - ROAD[1] - STREET + 0.4, 0.3) // the neighbours' front line
   const ground: THREE.BufferGeometry[] = []
   ground.push(tint(flatQuad(80, ROAD[1] - ROAD[0], cx, GROUND + 0.004, z0 - (ROAD[0] + ROAD[1]) / 2), 0.13, 0.14, 0.19)) // road
@@ -179,14 +180,14 @@ export function twilightStreet(house: House): World {
   const bodies: THREE.BufferGeometry[] = []
   const roofs: THREE.BufferGeometry[] = []
   for (let at = cx - 22; at < cx + 22;) {
-    const w = 4.2 + r() * 2.2, h = 2.8 + r() * 0.8, d = 5
+    const w = 4.2 + r() * 2.2, h = 2.4 + r() * 0.5, d = 4.2
     const col = new THREE.Color(WALLS[Math.floor(r() * WALLS.length)])
     bodies.push(tint(cellBox(w, h, d, at + w / 2, GROUND, far - d / 2, [1.8, 1.5], [Math.floor(r() * 4), 0]), col.r, col.g, col.b))
     roofs.push(roof(w, d, 1.3 + r() * 0.5, at + w / 2, GROUND + h, far - d / 2))
-    at += w + 1.6 + r() * 1.4
+    at += w + 2.4 + r() * 1.8
   }
-  bin.mesh(bodies, new THREE.MeshStandardMaterial({ map: fronts.map, vertexColors: true, roughness: 0.9, emissiveMap: fronts.light, emissive: '#ffffff', emissiveIntensity: 1.1, fog: false }), { cast: true, receive: true, name: 'twilight houses' })
-  bin.mesh(roofs, new THREE.MeshStandardMaterial({ color: '#2c3044', roughness: 0.8, fog: false }), { cast: true, name: 'twilight roofs' })
+  bin.mesh(bodies, new THREE.MeshStandardMaterial({ map: fronts.map, vertexColors: true, roughness: 0.9, emissiveMap: fronts.light, emissive: '#ffffff', emissiveIntensity: 1.1, fog: false }), { receive: true, name: 'twilight houses' })
+  bin.mesh(roofs, new THREE.MeshStandardMaterial({ color: '#4a4c62', roughness: 0.8, fog: false }), { name: 'twilight roofs' })
 
   // Trees: dark rounded crowns at the left, behind the neighbours, and one at the back right.
   const crowns: THREE.BufferGeometry[] = []
@@ -199,8 +200,8 @@ export function twilightStreet(house: House): World {
   tree(x0 - 3.4, cz + 1.2, 0.75)
   tree(x1 + 2.8, z0 - 1.2, 0.9)
   for (let x = cx - 20; x < cx + 20; x += 5 + r() * 4) tree(x, far - 6.5 - r() * 2, 1.3 + r() * 0.5)
-  bin.mesh(trunks, new THREE.MeshStandardMaterial({ color: '#2a2630', roughness: 1, fog: false }), { cast: true, name: 'twilight trunks' })
-  bin.mesh(crowns, new THREE.MeshStandardMaterial({ color: '#46666a', roughness: 1, fog: false }), { cast: true, name: 'twilight crowns' })
+  bin.mesh(trunks, new THREE.MeshStandardMaterial({ color: '#2a2630', roughness: 1, fog: false }), { name: 'twilight trunks' })
+  bin.mesh(crowns, new THREE.MeshStandardMaterial({ color: '#46666a', roughness: 1, fog: false }), { name: 'twilight crowns' })
 
   // Two warm streetlamps on our pavement, at the back corners; heads glow, pools are cards.
   const poles: THREE.BufferGeometry[] = []

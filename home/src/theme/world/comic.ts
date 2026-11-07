@@ -162,7 +162,7 @@ function paintView() {
   sky.addColorStop(0, '#9fd2ec')
   sky.addColorStop(1, '#e8f2e8')
   g.fillStyle = sky; g.fillRect(0, 0, W, H)
-  dots(g, 0, 0, W, H * 0.5, '#86c2e2', 12, (_u, v) => 0.55 - v * 0.55)
+  dots(g, 0, 0, W, H * 0.5, '#86c2e2', 12, (_u, v) => 0.5 - v * 0.3)
   g.strokeStyle = FAR_LINE; g.lineWidth = 3; g.fillStyle = '#ffffff'
   for (const [cx, cy, s] of [[W * 0.52, H * 0.25, 0.5], [W * 0.25, H * 0.3, 1]] as const) {
     g.beginPath()
@@ -244,7 +244,7 @@ function paintView() {
   tree(W * 0.445, 0.9)
   tree(W * 0.3, 0.8)
   tree(W * 0.75, 1)
-  post(W * 0.575)
+  post(W * 0.6)
   post(W * 0.2)
   return toTexture(c)
 }
@@ -288,10 +288,10 @@ export function comicPage(house: House): World {
   const low = PAGE + 0.05
   const L = px0 - GUTTER, R = px1 + GUTTER, B = pz0 - GUTTER, F = pz1 + GUTTER
   const others: Array<[number, number, number, number, number]> = [
-    [L - 9, L, pz0, (pz0 + pz1) / 2 - GUTTER / 2, 0], // left, back half: sky and balloon
+    [L - 9, L, pz0, (pz0 + pz1) / 2 - GUTTER / 2, 2], // left, back half: skyline
     [L - 9, L, (pz0 + pz1) / 2 + GUTTER / 2, F + 8, 3], // left, front half: quiet
-    [L - 9, (px0 + px1) / 2 - GUTTER / 2, B - 9, B, 2], // back left: skyline
-    [(px0 + px1) / 2 + GUTTER / 2, R + 9, B - 9, B, 1], // back right: sunburst
+    [L - 9, (px0 + px1) / 2 - GUTTER / 2, B - 9, B, 0], // back left: sky and balloon, mostly under the houses
+    [(px0 + px1) / 2 + GUTTER / 2, R + 9, B - 9, B, 3], // back right: quiet
     [R, R + 9, pz0, F + 8, 3], // right: quiet
     [px0, R, F, F + 8, 3], // front: quiet
   ]
@@ -305,13 +305,16 @@ export function comicPage(house: House): World {
   for (let at = px0 + 0.3; at < px1 - 1.5;) {
     const w = 2.2 + r() * 1.6, h = 1.7 + r() * 1.1, d = Math.min(1.6, line - pz0 - 0.1)
     const col = new THREE.Color(FLAT[Math.floor(r() * FLAT.length)])
-    fronts.push(tint(cellBox(w, h, d, at + w / 2, GROUND, line - d / 2, [w, h], [0, 0], [0.01, 0.01]), col.r, col.g, col.b))
+    // The front maps the facade once (u 0 to 1 across its width); sides repeat it.
+    fronts.push(tint(cellBox(w, h, d, at + w / 2, GROUND, line - d / 2, [w, h], [-at / w, -GROUND / h], [0.01, 0.01]), col.r, col.g, col.b))
     // A flat roof slab in plum, so each house has a crisp top edge.
     fronts.push(tint(cellBox(w + 0.12, 0.14, d + 0.12, at + w / 2, GROUND + h, line - d / 2, [1, 1]), 0.3, 0.2, 0.26))
     at += w + 0.25
   }
   // Unlit: printed flat fills, so the low sun behind them never shades their fronts into dots.
-  bin.mesh(fronts, new THREE.MeshBasicMaterial({ map: bin.keep(paintFacade()), vertexColors: true, fog: false }), { name: 'comic houses' })
+  const facade = bin.keep(paintFacade())
+  facade.wrapS = facade.wrapT = THREE.RepeatWrapping
+  bin.mesh(fronts, new THREE.MeshBasicMaterial({ map: facade, vertexColors: true, fog: false }), { name: 'comic houses' })
 
   // Lollipop trees, lamp posts and a hydrant, flat colours for the ink to draw round.
   const props: THREE.BufferGeometry[] = []
@@ -337,7 +340,8 @@ export function comicPage(house: House): World {
   post(x1 + 1.0, z0 + 0.2)
   post((x0 + x1) / 2 - 1, pz0 + road[1] + 0.4)
   add(new THREE.CylinderGeometry(0.12, 0.14, 0.45, 10).translate(x0 - 1.0, GROUND + 0.22, z0 - 0.6), '#e07a62')
-  bin.mesh(props, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, fog: false }), { cast: true, name: 'comic street props' })
+  // No cast shadows: the low sun drew long grey bars across the front of the page.
+  bin.mesh(props, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, fog: false }), { name: 'comic street props' })
 
   seatCard(bin, house, paintView())
   return bin.world()
