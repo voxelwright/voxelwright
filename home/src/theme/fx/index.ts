@@ -5,6 +5,11 @@ import type * as THREE from 'three/webgpu'
 import type { Stage as VillageStage } from '../../kernel'
 import type { Stage } from '../tokens'
 import { pixel } from './pixel'
+import { halftone } from './halftone'
+import { ink } from './ink'
+import { chroma } from './chroma'
+import { brush } from './brush'
+import { paper } from './paper'
 
 export interface FxContext {
   stage: VillageStage
@@ -27,5 +32,10 @@ export interface Fx {
 export function makeFx(stage: Stage): Fx {
   switch (stage.kind) {
     case 'pixel': return pixel(stage)
+    case 'halftone': return halftone(stage)
+    case 'ink': return ink(stage)
+    case 'chroma': return chroma(stage)
+    case 'brush': return brush(stage)
+    case 'paper': return paper(stage)
   }
 }

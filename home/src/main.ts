@@ -69,6 +69,11 @@ const keepRooms = params.get('rooms') !== 'unload'
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
 root.on('village/tier', () => void replace(postfx))
+// A live theme change (src/theme setTheme): the theme plugin shifts the scene, and postfx is rebuilt from the new tokens.
+root.on('village/theme', () => {
+  load(themePlugin)
+  void replace(postfx)
+})
 
 /** What is registered right now: used by the unload proof and the perf run. */
 function snapshot() {

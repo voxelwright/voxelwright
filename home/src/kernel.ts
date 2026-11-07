@@ -43,6 +43,8 @@ declare module 'cordis' {
     'village/frame'(dt: number, elapsed: number): void
     'village/plugin-error'(name: string, error: unknown): void
     'village/tier'(quality: Quality): void
+    /** The theme changed (src/theme): previous and next, both checked Theme objects. */
+    'village/theme'(previous: unknown, next: unknown): void
   }
 }
 

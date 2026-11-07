@@ -100,6 +100,16 @@ export type Stage =
     /** MSAA samples on the low-resolution scene; 0 gives the hardest pixel edges. */
     samples?: number
   }
+  /** Comic-book halftone dots by tone, in display space. Implemented in ./fx/halftone.ts. */
+  | { kind: 'halftone'; cell: number; angle: number; strength: number; ink?: Hex; paper?: Hex }
+  /** Ink lines from depth and normal edges. Implemented in ./fx/ink.ts. */
+  | { kind: 'ink'; width: number; depth: number; normal: number; color?: Hex }
+  /** Mis-registered colour plates (chromatic offset). Implemented in ./fx/chroma.ts. */
+  | { kind: 'chroma'; offset: number; angle?: number }
+  /** Painterly smoothing (a Kuwahara-style filter): flattens texture into brush patches. Implemented in ./fx/brush.ts. */
+  | { kind: 'brush'; radius: number; strength: number }
+  /** Paper grain and pigment pooling at edges, for watercolour. Implemented in ./fx/paper.ts. */
+  | { kind: 'paper'; grain: number; edges: number; tint?: Hex }
 
 export interface Theme {
   /** Stable id, lowercase with dashes; also the ?theme= value. */
