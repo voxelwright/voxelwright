@@ -264,7 +264,22 @@ try {
     }
     await page.waitForTimeout(1200)
     await page.keyboard.press('Enter')
-    await page.waitForTimeout(2200)
+    // A look with a reveal (villageBuild.reveal, ?look=movein): the doorway step as the in-between shot, then its settled frame.
+    const reveal = () => B(page, () => window.villageBuild.reveal?.().phase ?? null)
+    if (variant && (await reveal()) !== null) {
+      const end = Date.now() + 25_000
+      let crossed = false
+      for (let p; (p = await reveal()) !== 'settled' && Date.now() < end;) {
+        if (p === 'crossing' && !crossed) {
+          crossed = true
+          await page.screenshot({ path: shot('reveal'), quality: 88, type: 'jpeg' })
+        }
+        await page.waitForTimeout(40)
+      }
+      const r = await B(page, () => window.villageBuild.reveal())
+      console.log(`reveal ${JSON.stringify(r)} crossed=${crossed}`)
+      await page.waitForTimeout(1600)
+    } else await page.waitForTimeout(2200)
     await page.screenshot({ path: shot('built'), quality: 88, type: 'jpeg' })
     await page.waitForTimeout(800)
     if (variant) {
