@@ -68,6 +68,17 @@ export function paintNightCity(seed: number) {
   row(0.7, 160, 340, '#2a1e4e', 0.18, 0.4, 6)
   row(0.78, 200, 440, '#181233', 0.14, 0.45, 8)
   row(0.9, 260, 520, '#0d0a1e', 0.0, 0.5, 11)
+  // Two signs placed where the kitchen window looks (about x 0.41 to 0.62, y 0.31 to 0.65),
+  // so the seated view always carries one magenta and one cyan tube.
+  const sign = (x: number, y: number, sw: number, sh: number, color: string) => {
+    g.fillStyle = color
+    g.shadowColor = color
+    g.shadowBlur = 30
+    g.fillRect(w * x, h * y, sw, sh)
+    g.shadowBlur = 0
+  }
+  sign(0.455, 0.4, 12, 190, '#ff3ab8')
+  sign(0.535, 0.52, 150, 10, '#2ef2ff')
 
   // Street glow at the bottom.
   const street = g.createLinearGradient(0, h * 0.84, 0, h)
@@ -584,6 +595,18 @@ export function paintPastoralSky(seed: number) {
   return toTexture(c)
 }
 
+/**
+ * Plaster for pixel art: one flat colour. The home's limewash mottle and brush strokes
+ * fall either side of a palette boundary and snap into blotches at 225 rows, so a pixel
+ * look paints the wall flat and lets the light alone make its ramp.
+ */
+export function paintPixelPlaster() {
+  const [c, g] = canvas(16, 16)
+  g.fillStyle = '#f2ede4'
+  g.fillRect(0, 0, 16, 16)
+  return toTexture(c)
+}
+
 /** Painters by name, as a theme's `paint` names them. */
 export const PAINTERS: Record<string, () => THREE.Texture> = {
   'night-city': () => paintNightCity(7),
@@ -593,4 +616,5 @@ export const PAINTERS: Record<string, () => THREE.Texture> = {
   'gouache-meadow': () => paintGouacheMeadow(21),
   'gouache-leaves': () => paintGouacheLeaves(4),
   'pastoral-sky': () => paintPastoralSky(13),
+  'pixel-plaster': paintPixelPlaster,
 }

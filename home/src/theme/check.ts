@@ -179,7 +179,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
         if (Array.isArray(raw) && raw.length > MAX_PALETTE) note(`${path}.palette`)
         const palette = [...new Set(list.map((p, j) => color(p, `${path}.palette[${j}]`)).filter((p): p is Hex => Boolean(p)))]
         if (palette.length < 2) return null
-        return extra({ kind: 'pixel', height: Math.round(n('height', 64, 720, 225)), palette, dither: n('dither', 0, 0.5, 0.04) },
+        return extra({ kind: 'pixel', height: Math.round(n('height', 64, 720, 225)), palette, dither: n('dither', 0, 0.5, 0.3) },
           { outline: opt('outline', 0, 1), crease: opt('crease', 0, 1), samples: own(s, 'samples') === undefined ? undefined : Math.round(n('samples', 0, 4, 0)) })
       }
       case 'halftone':

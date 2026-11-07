@@ -93,7 +93,7 @@ export type Stage =
     height: number
     /** Colours the frame is reduced to, matched by perceived difference (OKLab). */
     palette: Hex[]
-    /** Ordered-dither spread in display units (about 1 / colours per ramp). */
+    /** Width of the ordered-dither band where two palette colours meet, as a share of the gap between them (0 snaps hard, 0.5 dithers every blend). */
     dither: number
     /** Darkening of an object's outline where it stands in front of something (0 to 1). */
     outline?: number
