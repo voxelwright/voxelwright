@@ -84,8 +84,18 @@ export function draftEdits(plan: Plan, d: Draft): Edit[] {
   }]
   // The draft's bend is positive outward; the far wall runs the new room's loop backwards when the host does not.
   if (Math.abs(d.bend) > 1e-9) edits.push({ op: 'bendWall', wallId: `${d.roomId}.w2`, sagitta: hostForward(plan, d.wallId) ? d.bend : -d.bend })
+  // A window in the middle of the far wall (a curved window when it bends), so the room has daylight.
+  const shaped = edits.reduce(apply, plan)
+  const far = wallOf(shaped, `${d.roomId}.w2`)
+  const L = curveOf(shaped, far).length
+  const w = Math.min(WINDOW.most, round1(L * 0.42))
+  if (w >= WINDOW.least) edits.push({ op: 'addOpening', wallId: far.id, opening: { id: `${d.roomId}.window`, kind: 'window', from: L / 2 - w / 2, to: L / 2 + w / 2, sill: WINDOW.sill, head: WINDOW.head } })
   return edits
 }
+
+/** The window a new room gets in its far wall: as wide as 42% of the wall, within these. */
+export const WINDOW = { least: 0.9, most: 2.2, sill: 0.72, head: 1.98 }
+const round1 = (v: number) => Math.round(v * 10) / 10
 
 const applyDraft = (plan: Plan, d: Draft): Plan => draftEdits(plan, d).reduce(apply, plan)
 

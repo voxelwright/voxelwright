@@ -111,6 +111,8 @@ export type Edit =
   /** Set a wall's bulge. Snaps to 5 cm. */
   | { op: 'bendWall'; wallId: Id; sagitta: number }
   | { op: 'moveOpening'; openingId: Id; from: number; to: number }
+  /** Cut a new door or window into a wall; its id is new to the plan and it must fit (validate). */
+  | { op: 'addOpening'; wallId: Id; opening: Opening }
   /**
    * Attach a new rectangular room along a straight wall that bounds one room: from/to
    * are metres along that wall from its corner a, depth how far the new room reaches.
@@ -504,6 +506,7 @@ export function apply(plan: Plan, edit: Edit): Plan {
     case 'moveWall': return moveWall(plan, edit.wallId, edit.by)
     case 'bendWall': return bendWall(plan, edit.wallId, edit.sagitta)
     case 'moveOpening': return moveOpening(plan, edit.openingId, edit.from, edit.to)
+    case 'addOpening': return addOpening(plan, edit.wallId, edit.opening)
     case 'addRoom': return addRoom(plan, edit)
     case 'placeItem': return placeItem(plan, edit.furniture)
     case 'moveItem': return moveItem(plan, edit.furnitureId, edit.at)
@@ -559,6 +562,15 @@ function moveOpening(plan: Plan, openingId: Id, from: number, to: number): Plan 
     ...plan,
     walls: plan.walls.map((w) => (w === host ? { ...w, openings: w.openings.map((o) => (o.id === openingId ? { ...o, from, to } : o)) } : w)),
   }
+  const reasons = validate(next)
+  if (reasons.length) throw new PlanError(reasons)
+  return next
+}
+
+function addOpening(plan: Plan, wallId: Id, opening: Opening): Plan {
+  const host = wallOf(plan, wallId)
+  const o: Opening = { id: opening.id, kind: opening.kind, from: round(opening.from), to: round(opening.to), sill: round(opening.sill), head: round(opening.head), ...(opening.leaves ? { leaves: opening.leaves } : {}) }
+  const next: Plan = { ...plan, walls: plan.walls.map((w) => (w === host ? { ...w, openings: [...w.openings, o] } : w)) }
   const reasons = validate(next)
   if (reasons.length) throw new PlanError(reasons)
   return next

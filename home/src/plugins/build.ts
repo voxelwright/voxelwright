@@ -792,7 +792,7 @@ export default {
           sun.shadow.camera.updateProjectionMatrix()
         }
         restore()
-        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow]) {
+        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow, kit.glass, kit.daylight]) {
           m.map?.dispose()
           m.dispose()
         }
