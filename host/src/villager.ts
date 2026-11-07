@@ -6,7 +6,7 @@
 // Per person, under <root>/people/<id>/:
 //   notes/*.md          the villager's private notes (its only tools)
 //   villager.json       the Agent SDK session id to resume, and its running cost
-//   conversation.jsonl  what was written on each side of the notebook
+//   conversation.jsonl  what each side said (the person's own lines only, never context)
 //   usage.jsonl         one line per turn: model, tokens, cost, timings
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -106,7 +106,7 @@ export default {
       res.end(JSON.stringify(value))
     }
 
-    async function converse(id: string, text: string, res: ServerResponse) {
+    async function converse(id: string, text: string, context: string | undefined, res: ServerResponse) {
       const dir = personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
@@ -124,7 +124,7 @@ export default {
       const deadline = AbortSignal.timeout(config.turnTimeoutMs ?? 180_000)
       const started = Date.now()
       try {
-        const result = await config.agent({ name: people[id], text, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText: (t) => event('text', { t }) })
+        const result = await config.agent({ name: people[id], text, context, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText: (t) => event('text', { t }) })
         const totalMs = Date.now() - started
         const previous = result.sessionId === state.sessionId ? state.sessionCostUsd ?? 0 : 0
         const costUsd = result.sessionCostUsd === null ? null : Math.max(0, result.sessionCostUsd - previous)
@@ -153,16 +153,18 @@ export default {
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
       }
       if (what === 'messages' && req.method === 'POST') {
-        let text: unknown
+        let text: unknown, context: unknown
         try {
-          text = ((await body(req)) as { text?: unknown })?.text
+          ({ text, context } = ((await body(req)) ?? {}) as { text?: unknown; context?: unknown })
         } catch {
-          return send(res, 400, { error: 'expected JSON {"text": "..."}' })
+          return send(res, 400, { error: 'expected JSON {"text": "...", "context"?: "..."}' })
         }
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return send(res, 400, { error: `text is 1 to ${MAX_TEXT} characters` })
+        // Context (what others at the table said) reaches the villager's turn but is never stored as the person's line.
+        if (context !== undefined && (typeof context !== 'string' || context.length > MAX_TEXT)) return send(res, 400, { error: `context is a string of at most ${MAX_TEXT} characters` })
         if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
         busy.add(id)
-        const turn = converse(id, text.trim(), res).finally(() => {
+        const turn = converse(id, text.trim(), (context as string | undefined)?.trim() || undefined, res).finally(() => {
           busy.delete(id)
           turns.delete(turn)
         })

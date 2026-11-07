@@ -22,11 +22,11 @@ async function start(people?: Record<string, string>) {
 }
 
 interface Streamed { status: number; events: { name: string; data: any; at: number }[] }
-async function say(base: string, token: string | null, text: string, person = 'alex'): Promise<Streamed> {
+async function say(base: string, token: string | null, text: string, person = 'alex', context?: unknown): Promise<Streamed> {
   const res = await fetch(`${base}/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, context }),
   })
   const events: Streamed['events'] = []
   if (res.headers.get('content-type')?.startsWith('text/event-stream')) {
@@ -110,6 +110,16 @@ try {
   host = await start(listed)
   const samReply = (await say(host.base, host.token, 'hello from the table', 'sam')).events.find((e) => e.name === 'done')?.data.reply ?? ''
   check('a listed person is answered under their own name', /I hear you, Sam\. That makes 1 line/.test(samReply), samReply)
+  // Context reaches the turn but is never stored as the person's line.
+  const said = await say(host.base, host.token, 'what shall we cook?', 'sam', 'at the kitchen table just now, Dumpling said "Soup."')
+  const samLines = (await readFile(join(root, 'people', 'sam', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+  const personLines = samLines.filter((l) => l.from === 'person').map((l) => l.text)
+  const heard = await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8').catch(() => '')
+  check('context reaches the villager turn', said.events.at(-1)?.name === 'done' && heard.includes('Dumpling said "Soup."'), heard)
+  check("context is never stored as the person's line", personLines.at(-1) === 'what shall we cook?' && !samLines.some((l) => /Dumpling said|Context/.test(l.text ?? '')), personLines)
+  const readBack = await (await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })).json()
+  check('the conversation read back has no context in it', !JSON.stringify(readBack).includes("Dumpling said"), readBack.lines.length)
+  for (const bad of [42, 'x'.repeat(2001)]) check(`context ${typeof bad === 'number' ? 'that is not a string' : 'over 2000 characters'} is refused`, (await say(host.base, host.token, 'hi', 'sam', bad)).status === 400)
   check("a listed person's villager does not see another's lines", existsSync(join(root, 'people', 'sam', 'conversation.jsonl')) && !samReply.includes('water the plants'))
   check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 404)
   await host.fiber.dispose()
