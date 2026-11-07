@@ -9,12 +9,12 @@ import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
-import { OPENING_HEAD, draftEdits, draftGeometry, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
+import { OPENING_HEAD, draftEdits, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
 import { makeLot } from '../build/lot'
-import { LOOK } from '../build/look'
+import { firstPieces } from '../build/firstroom'
 import { MODE } from './camera'
 
 declare module 'cordis' {
@@ -91,16 +91,17 @@ export default {
       })
     }
 
-    // Until the yard follows the plan, its fence, flowers, stones and shrubs step aside from every added room and its walls, and from the sketch paper.
+    // The lot answers the plan: the lawn and fence grow to hold every room and the one being staked out,
+    // and the yard's flowers, stones and shrubs step aside from the rooms and the lawn round them.
     const yard = makeYard(scene)
-    // ?look=lot: the lawn and fence grow to hold every room and the one being staked out.
-    const lot = LOOK === 'lot' ? makeLot(scene, group) : null
+    const lot = makeLot(scene, group)
     let paper: P[] | null = null
     const tidyYard = () => {
       const p = builtPlan
       const areas = p ? p.rooms.filter((r) => r.id !== room).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
-      lot?.grow(paper ? [...areas, paper] : areas)
-      yard.hide(paper ? [...areas, paper] : areas)
+      const all = paper ? [...areas, paper] : areas
+      lot.grow(all)
+      yard.hide([...all, ...lot.clearings(all)])
     }
     /** A room just built rises from the paper: its new walls grow up from the floor (instant with reduced motion). */
     const RISE_MS = 700
@@ -121,6 +122,45 @@ export default {
         for (const m of built.rooms.children) delete m.userData.restY
         rising = null
       }
+    }
+    // The sun's shadow box covers the dollhouse kitchen (window.ts); a room built past it would be lit
+    // as if nothing stood in the sun, so the box grows to hold every room, and goes back on unload.
+    let sunWas: { left: number; right: number; top: number; bottom: number } | null = null
+    const fitSun = (p: Plan) => {
+      const sun = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined
+      if (MODE === 'seat' || !sun?.isDirectionalLight || !sun.castShadow) return
+      const cam = sun.shadow.camera
+      sunWas ??= { left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom }
+      const box = { ...sunWas }
+      if (p.rooms.length > 1) {
+        sun.updateMatrixWorld()
+        sun.target.updateMatrixWorld()
+        cam.position.setFromMatrixPosition(sun.matrixWorld)
+        cam.lookAt(new THREE.Vector3().setFromMatrixPosition(sun.target.matrixWorld))
+        cam.updateMatrixWorld()
+        const v = new THREE.Vector3()
+        for (const r of p.rooms) for (const [x, z] of ringOf(p, r, -0.6)) for (const y of [-0.1, 3.2]) {
+          v.set(x, y, z).applyMatrix4(cam.matrixWorldInverse)
+          box.left = Math.min(box.left, v.x - 0.3)
+          box.right = Math.max(box.right, v.x + 0.3)
+          box.bottom = Math.min(box.bottom, v.y - 0.3)
+          box.top = Math.max(box.top, v.y + 0.3)
+        }
+      }
+      if (cam.left === box.left && cam.right === box.right && cam.top === box.top && cam.bottom === box.bottom) return
+      Object.assign(cam, box)
+      cam.updateProjectionMatrix()
+    }
+    /** The new room's first pieces (placed things) grow in once its walls are up, with a small overshoot as if set down. */
+    const PIECES_AT = 600, PIECES_MS = 450
+    let settling: { room: string; at: number } | null = null
+    const settle = () => {
+      if (!settling) return
+      const things = scene.getObjectByName('placed things')
+      const t = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.max(0, Math.min(1, (performance.now() - settling.at - PIECES_AT) / PIECES_MS))
+      const e = t >= 1 ? 1 : Math.max(0.0001, 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2))
+      for (const o of things?.children ?? []) if (String(o.userData.furniture ?? '').startsWith(`${settling.room}.`)) o.scale.setScalar(e)
+      if (t >= 1) settling = null
     }
     const rebuild = (next: Plan, final: boolean) => {
       const start = performance.now()
@@ -147,6 +187,7 @@ export default {
       }
       builtPlan = next
       tidyYard()
+      fitSun(next)
       highlight()
       rebuildMs.push(performance.now() - start)
     }
@@ -519,10 +560,10 @@ export default {
         }
         const what = /^New room( \d+)?$/.test(draft.label) ? 'Added a room' : `Added the ${draft.label.toLowerCase()}`
         committing = true
-        const geo = lot && draftGeometry(h.plan, draft)
-        h.commit(draftEdits(h.plan, draft), what).then(() => {
-          rising = { room: draft.roomId, at: performance.now() }
-          if (lot && geo) lot.furnish(draft.roomId, (along, across) => geo.at(along, across), draft.from, draft.to, draft.depth, geo.dir)
+        // The room arrives with its first pieces, in the same version: one undo takes both away.
+        const pieces = firstPieces(h.plan, fitted.plan, draft, scene, [scene.getObjectByName('build outline')].filter((o): o is THREE.Object3D => Boolean(o)))
+        h.commit([...draftEdits(h.plan, draft), ...pieces.map((furniture): Edit => ({ op: 'placeItem', furniture }))], what).then(() => {
+          rising = settling = { room: draft.roomId, at: performance.now() }
           committing = false
           outline.close()
           selectWall(null)
@@ -621,10 +662,8 @@ export default {
       if (!roomGroup) return trySwap()
       if (plan !== builtPlan) rebuild(plan, false)
       raise()
-      if (lot) {
-        lot.frame(dt)
-        lot.framePieces(builtPlan?.rooms.map((r) => r.id) ?? [])
-      }
+      settle()
+      lot.frame(dt)
       if (built?.shell) {
         const c = curveOf(plan, wallOf(plan, WALL))
         const [x, z] = pointAt(c, c.length / 2)
@@ -729,7 +768,12 @@ export default {
         ;(mark.material as THREE.Material).dispose()
         for (const m of glowOf.values()) m.dispose()
         yard.restore()
-        lot?.dispose()
+        lot.dispose()
+        const sun = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined
+        if (sunWas && sun?.isDirectionalLight) {
+          Object.assign(sun.shadow.camera, sunWas)
+          sun.shadow.camera.updateProjectionMatrix()
+        }
         restore()
         for (const m of [kit.seatWall, kit.shellWall, kit.handleWall, kit.trim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.shadow]) {
           m.map?.dispose()

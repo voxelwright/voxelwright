@@ -1,31 +1,147 @@
-// The lot answers the plan (#48 look prototype, ?look=lot only): the lawn board, its
-// painted edge and the picket fence grow to hold every room and the room being staked
-// out, and shrink back exactly when it is let go. diorama.ts draws the yard; this
-// stretches the lawn and edge at runtime (keeping the grass where it was), hides the
-// old fence and runs a new one in the same paint around the grown boundary. A room
-// just built arrives with its first pieces: a braided rug, a reading chair and a lamp.
+// The lot answers the plan (#48): the lawn board, its painted edge, its soft shadow and the
+// picket fence grow to hold every room and the room being staked out, a margin of lawn
+// round each, and go back exactly as diorama.ts drew them when nothing reaches past the
+// old board. The grown lawn is the union of the old board and one rectangle per room
+// (its walls plus MARGIN), drawn as one flat shape with world-metre UVs on a grass that
+// tiles without seams; the fence runs round that shape, keeping the old gate where the
+// path still meets the fence.
 import * as THREE from 'three/webgpu'
 import { YARD_TOP } from '../diorama'
+import { canvas, makeNoise, rng, toTexture } from '../paint'
 import type { P } from './plan'
 
-/** Lawn beyond the outermost wall, before the fence. */
-const MARGIN = 1.1
+/** Lawn beyond a room's outermost wall, before its fence. */
+export const MARGIN = 1.0
 /** The fence stands this far inside the board's edge, as diorama.ts puts it. */
 const INSET = 0.22
 const PICKET_GAP = 0.14
 const GATE = 0.55
-/** How long the first pieces wait for the walls to rise, then how long they take to settle. */
-const PIECES_AT = 650, PIECES_MS = 450
+/** One grass tile is this many metres, as diorama.ts lays it. */
+const TILE = 3
 
-type Rect = { x0: number; x1: number; z0: number; z1: number }
-type Side = 'x0' | 'x1' | 'z0' | 'z1'
+export type Rect = { x0: number; x1: number; z0: number; z1: number }
+const same = (a: Rect, b: Rect, eps = 1e-3) => Math.abs(a.x0 - b.x0) < eps && Math.abs(a.x1 - b.x1) < eps && Math.abs(a.z0 - b.z0) < eps && Math.abs(a.z1 - b.z1) < eps
+const clampTo = (r: Rect, to: Rect): Rect => {
+  const cx = (v: number) => Math.min(to.x1, Math.max(to.x0, v)), cz = (v: number) => Math.min(to.z1, Math.max(to.z0, v))
+  return { x0: cx(r.x0), x1: cx(r.x1), z0: cz(r.z0), z1: cz(r.z1) }
+}
+
+/**
+ * The outline of a union of axis-aligned rectangles, counter-clockwise seen from above
+ * with x right and z down the page (the largest loop when the union has several).
+ */
+export function unionOutline(rects: Rect[]): P[] {
+  const live = rects.filter((r) => r.x1 - r.x0 > 1e-4 && r.z1 - r.z0 > 1e-4)
+  const xs = [...new Set(live.flatMap((r) => [r.x0, r.x1]))].sort((a, b) => a - b)
+  const zs = [...new Set(live.flatMap((r) => [r.z0, r.z1]))].sort((a, b) => a - b)
+  const nx = xs.length - 1, nz = zs.length - 1
+  const full = (i: number, j: number) => {
+    if (i < 0 || j < 0 || i >= nx || j >= nz) return false
+    const x = (xs[i] + xs[i + 1]) / 2, z = (zs[j] + zs[j + 1]) / 2
+    return live.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1)
+  }
+  // Boundary edges with the lawn on their left, as grid corner pairs.
+  const next = new Map<string, Array<[number, number]>>()
+  const edge = (a: [number, number], b: [number, number]) => {
+    const k = `${a[0]},${a[1]}`
+    next.set(k, [...(next.get(k) ?? []), b])
+  }
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    if (!full(i, j)) continue
+    if (!full(i, j - 1)) edge([i + 1, j], [i, j])
+    if (!full(i - 1, j)) edge([i, j], [i, j + 1])
+    if (!full(i, j + 1)) edge([i, j + 1], [i + 1, j + 1])
+    if (!full(i + 1, j)) edge([i + 1, j + 1], [i + 1, j])
+  }
+  let best: P[] = []
+  let bestArea = 0
+  while (next.size) {
+    const [k0] = next.keys()
+    const start = k0.split(',').map(Number) as [number, number]
+    const loop: Array<[number, number]> = []
+    let at = start
+    for (let guard = 0; guard < 10000; guard++) {
+      const k = `${at[0]},${at[1]}`
+      const outs = next.get(k)
+      if (!outs?.length) break
+      const to = outs.shift()!
+      if (!outs.length) next.delete(k)
+      loop.push(at)
+      at = to
+      if (at[0] === start[0] && at[1] === start[1]) break
+    }
+    // Drop the points where the outline runs straight on.
+    const pts = loop.filter((p, i) => {
+      const a = loop[(i + loop.length - 1) % loop.length], b = loop[(i + 1) % loop.length]
+      return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]))
+    }).map(([i, j]) => [xs[i], zs[j]] as P)
+    let area = 0
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length]
+      area += ax * bz - bx * az
+    }
+    if (Math.abs(area) > bestArea) {
+      bestArea = Math.abs(area)
+      best = pts
+    }
+  }
+  return best
+}
+
+/** An outline moved inward by d: each corner of a right-angled outline moves d along both of its edges' inward normals. */
+function insetOutline(pts: P[], d: number): P[] {
+  let area = 0
+  for (let i = 0; i < pts.length; i++) area += pts[i][0] * pts[(i + 1) % pts.length][1] - pts[(i + 1) % pts.length][0] * pts[i][1]
+  const s = Math.sign(area) || 1
+  const inward = (a: P, b: P): P => {
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    return [(-(b[1] - a[1]) / l) * s, ((b[0] - a[0]) / l) * s]
+  }
+  return pts.map((p, i) => {
+    const a = pts[(i + pts.length - 1) % pts.length], b = pts[(i + 1) % pts.length]
+    const n0 = inward(a, p), n1 = inward(p, b)
+    return [p[0] + (n0[0] + n1[0]) * d, p[1] + (n0[1] + n1[1]) * d] as P
+  })
+}
+
+/** diorama.ts's grass colours, painted so the tile wraps: noise on whole lattice periods and speckles drawn across the seams. */
+function paintTiledGrass(seed: number) {
+  const size = 512
+  const [c, g] = canvas(size, size)
+  const broad = makeNoise(seed, 8), blade = makeNoise(seed + 7, 128)
+  const img = g.createImageData(size, size)
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const v = broad(x / 64, y / 64, 4)
+    const b = blade(x / 4, y / 4, 2)
+    const stripe = Math.floor(x / (size / 2)) % 2 ? 1 : 0.96
+    const k = (0.84 + v * 0.3 + (b - 0.5) * 0.16) * stripe
+    const i = (y * size + x) * 4
+    img.data[i] = 102 * k + 22
+    img.data[i + 1] = 136 * k + 10
+    img.data[i + 2] = 56 * k
+    img.data[i + 3] = 255
+  }
+  g.putImageData(img, 0, 0)
+  const r = rng(seed + 1)
+  for (let i = 0; i < 70; i++) {
+    const fill = r() < 0.5 ? 'rgba(255, 246, 220, 0.75)' : 'rgba(242, 214, 110, 0.7)'
+    const x = r() * size, y = r() * size, rad = 1.6 + r() * 1.6
+    g.fillStyle = fill
+    for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) {
+      g.beginPath()
+      g.arc(x + ox, y + oy, rad, 0, Math.PI * 2)
+      g.fill()
+    }
+  }
+  const t = toTexture(c, { repeat: [1 / TILE, 1 / TILE] })
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return t
+}
 
 export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   let found: {
     lawn: THREE.Mesh; edge: THREE.Mesh | null; shadow: THREE.Mesh | null; fence: THREE.InstancedMesh; rail: THREE.Mesh | null
-    rect: Rect; repeat: THREE.Vector2; offset: THREE.Vector2
-    lawnScale: THREE.Vector3; lawnPos: THREE.Vector3; edgeScale: THREE.Vector3; edgePos: THREE.Vector3; shadowScale: THREE.Vector3; shadowPos: THREE.Vector3
-    gate: { side: Side; at: number } | null
+    rect: Rect; board: number; gate: P | null
   } | null = null
 
   const find = () => {
@@ -39,66 +155,74 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     const rail = (fence.parent?.children.find((c) => (c as THREE.Mesh).isMesh && c !== fence && (c as THREE.Mesh).material === fence.material) as THREE.Mesh | undefined) ?? null
     const { width: w, height: d } = (lawn.geometry as THREE.PlaneGeometry).parameters
     const rect = { x0: lawn.position.x - w / 2, x1: lawn.position.x + w / 2, z0: lawn.position.z - d / 2, z1: lawn.position.z + d / 2 }
-    const map = (lawn.material as THREE.MeshStandardMaterial).map!
+    const board = (edge?.geometry as THREE.BoxGeometry | undefined)?.parameters.height ?? 0.06
     // The gate: the widest gap between neighbouring pickets on one side of the old fence.
     const f = { x0: rect.x0 + INSET, x1: rect.x1 - INSET, z0: rect.z0 + INSET, z1: rect.z1 - INSET }
     const m4 = new THREE.Matrix4(), at = new THREE.Vector3()
-    const bySide: Record<Side, number[]> = { x0: [], x1: [], z0: [], z1: [] }
+    const bySide: Record<keyof Rect, number[]> = { x0: [], x1: [], z0: [], z1: [] }
     for (let i = 0; i < fence.count; i++) {
       fence.getMatrixAt(i, m4)
       at.setFromMatrixPosition(m4)
-      for (const s of ['x0', 'x1', 'z0', 'z1'] as Side[]) {
+      for (const s of ['x0', 'x1', 'z0', 'z1'] as const) {
         const onX = s[0] === 'x'
         if (Math.abs((onX ? at.x : at.z) - f[s]) < 0.03) bySide[s].push(onX ? at.z : at.x)
       }
     }
-    let gate: { side: Side; at: number } | null = null, widest = 0.3
-    for (const s of ['x0', 'x1', 'z0', 'z1'] as Side[]) {
+    let gate: P | null = null, widest = 0.3
+    for (const s of ['x0', 'x1', 'z0', 'z1'] as const) {
       const v = bySide[s].sort((a, b) => a - b)
       for (let i = 1; i < v.length; i++) if (v[i] - v[i - 1] > widest) {
         widest = v[i] - v[i - 1]
-        gate = { side: s, at: (v[i] + v[i - 1]) / 2 }
+        const mid = (v[i] + v[i - 1]) / 2
+        gate = s[0] === 'x' ? [f[s], mid] : [mid, f[s]]
       }
     }
-    found = {
-      lawn, edge, shadow, fence, rail, rect, gate, repeat: map.repeat.clone(), offset: map.offset.clone(),
-      lawnScale: lawn.scale.clone(), lawnPos: lawn.position.clone(),
-      edgeScale: edge?.scale.clone() ?? new THREE.Vector3(), edgePos: edge?.position.clone() ?? new THREE.Vector3(),
-      shadowScale: shadow?.scale.clone() ?? new THREE.Vector3(), shadowPos: shadow?.position.clone() ?? new THREE.Vector3(),
-    }
+    found = { lawn, edge, shadow, fence, rail, rect, board, gate }
     return found
   }
 
-  // The new fence: the old one's picket shape and paint, and rails as stretched unit boxes.
-  const fenceGroup = new THREE.Group()
-  fenceGroup.name = 'lot fence'
-  fenceGroup.visible = false
-  parent.add(fenceGroup)
+  // The grown lot: lawn, edge, shadow and fence, drawn while it reaches past the old board.
+  const grown = new THREE.Group()
+  grown.name = 'lot'
+  grown.visible = false
+  parent.add(grown)
+  const grass = paintTiledGrass(5)
+  const lawnMat = new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 })
+  const lawn = new THREE.Mesh(new THREE.BufferGeometry(), lawnMat)
+  lawn.name = 'lot lawn'
+  lawn.rotation.x = -Math.PI / 2
+  lawn.position.y = YARD_TOP
+  const edge = new THREE.Mesh(new THREE.BufferGeometry())
+  edge.name = 'lot edge'
+  edge.rotation.x = -Math.PI / 2
+  const [shadowCanvas, sg] = canvas(256, 256)
+  const shadowMap = toTexture(shadowCanvas)
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowMap, transparent: true, depthWrite: false, fog: false }))
+  shadow.name = 'lot shadow'
+  shadow.rotation.x = -Math.PI / 2
+  grown.add(lawn, edge, shadow)
   let pickets: THREE.InstancedMesh | null = null
   const railBox = new THREE.BoxGeometry(1, 0.035, 0.02)
   const rails: THREE.Mesh[] = []
 
-  const runFence = (r: Rect) => {
+  const runFence = (outline: P[]) => {
     const f = found!
     if (!pickets) {
-      pickets = new THREE.InstancedMesh(f.fence.geometry, f.fence.material, 1200)
+      pickets = new THREE.InstancedMesh(f.fence.geometry, f.fence.material, 1600)
       pickets.castShadow = pickets.receiveShadow = true
       pickets.frustumCulled = false
       pickets.name = 'lot pickets'
-      fenceGroup.add(pickets)
+      grown.add(pickets)
     }
-    const fx0 = r.x0 + INSET, fx1 = r.x1 - INSET, fz0 = r.z0 + INSET, fz1 = r.z1 - INSET
-    const gate = f.gate
-    // The gate stays where the path meets the fence, on the side it was on.
-    const gatePoint = (): [number, number] | null => {
-      if (!gate) return null
-      const s = gate.side
-      if (s === 'x0') return [fx0, gate.at]
-      if (s === 'x1') return [fx1, gate.at]
-      if (s === 'z0') return [gate.at, fz0]
-      return [gate.at, fz1]
-    }
-    const gp = gatePoint()
+    const line = insetOutline(outline, INSET)
+    // The gate stays only where the path still meets the fence.
+    const onLine = (p: P) => line.some((a, i) => {
+      const b = line[(i + 1) % line.length]
+      const l2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 || 1
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / l2))
+      return Math.hypot(p[0] - a[0] - (b[0] - a[0]) * t, p[1] - a[1] - (b[1] - a[1]) * t) < 0.05
+    })
+    const gp = f.gate && onLine(f.gate) ? f.gate : null
     let n = 0, railN = 0
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3()
     const rail = (ax: number, az: number, bx: number, bz: number, yaw: number) => {
@@ -110,7 +234,7 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
           m = new THREE.Mesh(railBox, f.fence.material)
           m.castShadow = true
           rails.push(m)
-          fenceGroup.add(m)
+          grown.add(m)
         }
         m.visible = true
         m.position.set((ax + bx) / 2, YARD_TOP + y, (az + bz) / 2)
@@ -125,7 +249,8 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
       const yaw = Math.atan2(bz - az, bx - ax)
       q.setFromAxisAngle(up, -yaw)
       let runFrom: number | null = 0
-      for (let i = 0; i <= count; i++) {
+      // The corner picket belongs to the side that ends there.
+      for (let i = 1; i <= count; i++) {
         const t = i / count, x = ax + (bx - ax) * t, z = az + (bz - az) * t
         if (gp && Math.hypot(x - gp[0], z - gp[1]) < GATE) {
           if (runFrom !== null && runFrom < t) rail(ax + (bx - ax) * runFrom, az + (bz - az) * runFrom, x, z, yaw)
@@ -137,207 +262,141 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
       }
       if (runFrom !== null) rail(ax + (bx - ax) * runFrom, az + (bz - az) * runFrom, bx, bz, yaw)
     }
-    side(fx0, fz0, fx1, fz0)
-    side(fx1, fz0, fx1, fz1)
-    side(fx1, fz1, fx0, fz1)
-    side(fx0, fz1, fx0, fz0)
+    line.forEach((a, i) => {
+      const b = line[(i + 1) % line.length]
+      side(a[0], a[1], b[0], b[1])
+    })
     pickets.count = n
     pickets.instanceMatrix.needsUpdate = true
     for (let i = railN; i < rails.length; i++) rails[i].visible = false
   }
 
-  let target: Rect | null = null
-  let shown: Rect | null = null
-  const same = (a: Rect, b: Rect, eps = 1e-3) => Math.abs(a.x0 - b.x0) < eps && Math.abs(a.x1 - b.x1) < eps && Math.abs(a.z0 - b.z0) < eps && Math.abs(a.z1 - b.z1) < eps
+  /** What is drawn now: the old board and one rectangle per grown room, each easing toward its goal. */
+  let shown: Rect[] = []
+  let goal: Rect[] = []
+  let outline: P[] = []
 
-  const lay = (r: Rect) => {
+  const lay = (rects: Rect[]) => {
     const f = found!
-    const w0 = f.rect.x1 - f.rect.x0, d0 = f.rect.z1 - f.rect.z0
-    const w = r.x1 - r.x0, d = r.z1 - r.z0, cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2
-    f.lawn.scale.set(f.lawnScale.x * w / w0, f.lawnScale.y * d / d0, f.lawnScale.z)
-    f.lawn.position.set(cx, f.lawnPos.y, cz)
-    // The grass stays put under the stretch: the texture repeats as often per metre and starts where it did.
-    const map = (f.lawn.material as THREE.MeshStandardMaterial).map!
-    map.repeat.set(f.repeat.x * w / w0, f.repeat.y * d / d0)
-    map.offset.set(f.offset.x + (r.x0 - f.rect.x0) * f.repeat.x / w0, f.offset.y + (f.rect.z1 - r.z1) * f.repeat.y / d0)
-    if (f.edge) {
-      f.edge.scale.set(f.edgeScale.x * (w + 0.04) / (w0 + 0.04), f.edgeScale.y, f.edgeScale.z * (d + 0.04) / (d0 + 0.04))
-      f.edge.position.set(cx, f.edgePos.y, cz)
-    }
-    if (f.shadow) {
-      // diorama.ts pads the yard's contact shadow by 0.9 m on each side.
-      f.shadow.scale.set(f.shadowScale.x * (w + 1.8) / (w0 + 1.8), f.shadowScale.y * (d + 1.8) / (d0 + 1.8), f.shadowScale.z)
-      f.shadow.position.set(cx, f.shadowPos.y, cz)
-    }
-    f.fence.visible = false
-    if (f.rail) f.rail.visible = false
-    fenceGroup.visible = true
-    runFence(r)
+    outline = unionOutline([f.rect, ...rects])
+    // The shape lies in (x, -z) and is turned flat, so its UVs are world metres.
+    const shape = new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x, -z)))
+    lawn.geometry.dispose()
+    lawn.geometry = new THREE.ShapeGeometry(shape)
+    edge.geometry.dispose()
+    edge.geometry = new THREE.ExtrudeGeometry(shape, { depth: f.board, bevelEnabled: false })
+    edge.material = f.edge?.material ?? lawnMat
+    edge.position.y = YARD_TOP - f.board - 0.002
+    // The board's soft shadow on the table, painted from the same rectangles.
+    const xs = outline.map((p) => p[0]), zs = outline.map((p) => p[1])
+    const pad = 0.9
+    const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, z0 = Math.min(...zs) - pad, z1 = Math.max(...zs) + pad
+    const sx = 256 / (x1 - x0), sz = 256 / (z1 - z0)
+    sg.clearRect(0, 0, 256, 256)
+    sg.filter = 'blur(18px)'
+    sg.fillStyle = 'rgba(70, 38, 20, 0.8)'
+    sg.beginPath()
+    outline.forEach(([x, z], i) => (i ? sg.lineTo((x - x0) * sx, (z - z0) * sz) : sg.moveTo((x - x0) * sx, (z - z0) * sz)))
+    sg.closePath()
+    sg.fill()
+    sg.filter = 'none'
+    shadowMap.needsUpdate = true
+    shadow.scale.set(x1 - x0, z1 - z0, 1)
+    shadow.position.set((x0 + x1) / 2, YARD_TOP - f.board + 0.001, (z0 + z1) / 2)
+    for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = false
+    grown.visible = true
+    runFence(outline)
   }
 
   /** Put the lot back exactly as diorama.ts drew it. */
   const restore = () => {
     const f = found
-    target = shown = null
-    fenceGroup.visible = false
+    shown = goal = []
+    outline = []
+    grown.visible = false
     if (!f) return
-    f.lawn.scale.copy(f.lawnScale)
-    f.lawn.position.copy(f.lawnPos)
-    const map = (f.lawn.material as THREE.MeshStandardMaterial).map!
-    map.repeat.copy(f.repeat)
-    map.offset.copy(f.offset)
-    if (f.edge) {
-      f.edge.scale.copy(f.edgeScale)
-      f.edge.position.copy(f.edgePos)
-    }
-    if (f.shadow) {
-      f.shadow.scale.copy(f.shadowScale)
-      f.shadow.position.copy(f.shadowPos)
-    }
-    f.fence.visible = true
-    if (f.rail) f.rail.visible = true
+    for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = true
   }
 
-  /** Grow the lot to hold these footprints (world x, z) with a margin of lawn; none puts it back. */
+  const rectOf = (poly: P[], m = MARGIN): Rect => {
+    const xs = poly.map((p) => p[0]), zs = poly.map((p) => p[1])
+    return { x0: Math.min(...xs) - m, x1: Math.max(...xs) + m, z0: Math.min(...zs) - m, z1: Math.max(...zs) + m }
+  }
+
+  /** Grow the lot to hold these footprints (world x, z) with a margin of lawn each; none puts it back. */
   const grow = (polys: P[][]) => {
     const f = find()
     if (!f) return
-    const r = { ...f.rect }
-    for (const poly of polys) for (const [x, z] of poly) {
-      r.x0 = Math.min(r.x0, x - MARGIN)
-      r.x1 = Math.max(r.x1, x + MARGIN)
-      r.z0 = Math.min(r.z0, z - MARGIN)
-      r.z1 = Math.max(r.z1, z + MARGIN)
-    }
-    target = r
-    shown ??= { ...f.rect }
+    goal = polys.map((p) => rectOf(p))
+    // A new rectangle grows out of the old board's edge; one let go shrinks back into it.
+    while (shown.length < goal.length) shown.push(clampTo(goal[shown.length], f.rect))
   }
 
   const frame = (dt: number) => {
-    if (!found || !target || !shown) return
-    if (same(shown, target, 1e-6)) return
+    const f = found
+    if (!f || (!shown.length && !goal.length)) return
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
     const e = reduce ? 1 : 1 - Math.exp(-dt * 7)
-    for (const k of ['x0', 'x1', 'z0', 'z1'] as const) shown[k] += (target[k] - shown[k]) * e
-    if (same(shown, target)) shown = { ...target }
-    if (same(shown, found.rect, 1e-6)) restore()
-    else lay(shown)
-  }
-
-  // ── The first pieces ─────────────────────────────────────────────────────
-  const pieces = new THREE.Group()
-  pieces.name = 'lot first pieces'
-  const velvet = new THREE.MeshStandardMaterial({ color: '#c4704f', roughness: 0.9 })
-  const pine = new THREE.MeshStandardMaterial({ color: '#c99a62', roughness: 0.7 })
-  const iron = new THREE.MeshStandardMaterial({ color: '#2b2420', roughness: 0.5, metalness: 0.2 })
-  const made: THREE.BufferGeometry[] = []
-  const geo = <G extends THREE.BufferGeometry>(g: G) => (made.push(g), g)
-  let furnished: { roomId: string; at: number; items: THREE.Object3D[] } | null = null
-
-  const chair = () => {
-    const g = new THREE.Group()
-    const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material, rx = 0) => {
-      const b = new THREE.Mesh(geo(new THREE.BoxGeometry(w, h, d)), m)
-      b.position.set(x, y, z)
-      b.rotation.x = rx
-      b.castShadow = b.receiveShadow = true
-      g.add(b)
+    let moving = false
+    shown = shown.map((r, i) => {
+      const to = goal[i] ?? clampTo(r, f.rect)
+      if (same(r, to, 1e-4)) return { ...to }
+      moving = true
+      return { x0: r.x0 + (to.x0 - r.x0) * e, x1: r.x1 + (to.x1 - r.x1) * e, z0: r.z0 + (to.z0 - r.z0) * e, z1: r.z1 + (to.z1 - r.z1) * e }
+    })
+    while (shown.length > goal.length && same(shown[shown.length - 1], clampTo(shown[shown.length - 1], f.rect), 1e-4)) shown.pop()
+    const reaches = shown.some((r) => !same(r, clampTo(r, f.rect), 1e-4))
+    if (!reaches) {
+      if (grown.visible) restore()
+      return
     }
-    box(0.8, 0.26, 0.78, 0, 0.27, 0, velvet)
-    box(0.58, 0.12, 0.6, 0, 0.46, 0.06, velvet)
-    box(0.8, 0.52, 0.18, 0, 0.62, -0.31, velvet, -0.12)
-    for (const s of [-1, 1]) box(0.14, 0.22, 0.74, s * 0.33, 0.5, 0.02, velvet)
-    for (const [x, z] of [[-0.34, -0.32], [0.34, -0.32], [-0.34, 0.32], [0.34, 0.32]]) {
-      const leg = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.022, 0.016, 0.14, 8)), pine)
-      leg.position.set(x, 0.07, z)
-      g.add(leg)
-    }
-    return g
-  }
-  const lamp = () => {
-    const g = new THREE.Group()
-    const pole = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 8)), iron)
-    pole.position.y = 0.7
-    const foot = new THREE.Mesh(geo(new THREE.CylinderGeometry(0.13, 0.14, 0.02, 20)), iron)
-    foot.position.y = 0.01
-    pole.castShadow = foot.castShadow = true
-    g.add(pole, foot)
-    const kitchenShade = scene.getObjectByName('reading lamp shade') as THREE.Mesh | undefined
-    const shade = kitchenShade ? kitchenShade.clone() : new THREE.Mesh(geo(new THREE.CylinderGeometry(0.13, 0.19, 0.24, 24, 1, true)), new THREE.MeshStandardMaterial({ color: '#f6e6c8', emissive: '#ffc98a', emissiveIntensity: 0.55, side: THREE.DoubleSide }))
-    shade.position.set(0, 1.46, 0)
-    shade.rotation.set(0, 0, 0)
-    g.add(shade)
-    return g
+    if (moving || !grown.visible) lay(shown)
   }
 
   /**
-   * Furnish a room just built: a rug in its middle, a reading chair turned to it from the far
-   * corner and a lamp beside the chair. `at(along, across)` is a floor point in the new room's
-   * frame (along the shared wall, out from it); they rise in once the walls are up.
+   * Where the yard's flowers, stones and shrubs should step aside: the lawn round each room,
+   * which would crowd it, and a strip along the old fence wherever the lot has grown past it.
    */
-  const furnish = (roomId: string, at: (along: number, across: number) => P, from: number, to: number, depth: number, dir: P) => {
-    clearPieces()
-    if (!pieces.parent) parent.add(pieces)
-    const yaw = -Math.atan2(dir[1], dir[0])
-    const mid = (from + to) / 2
-    const items: THREE.Object3D[] = []
-    const kitchenRug = scene.getObjectByName('braided rug') as THREE.Mesh | undefined
-    if (kitchenRug) {
-      const rug = kitchenRug.clone()
-      const [x, z] = at(mid, depth / 2 + 0.1)
-      const s = Math.min((to - from) * 0.3, depth * 0.4, 1.6)
-      rug.scale.set(s, 1, s * 0.72)
-      rug.position.set(x, 0.0025, z)
-      rug.rotation.set(0, yaw, 0)
-      rug.userData.rest = rug.scale.clone()
-      items.push(rug)
+  const clearings = (polys: P[][]): P[][] => {
+    const f = find()
+    if (!f) return []
+    const out: P[][] = []
+    const ring = (r: Rect): P[] => [[r.x0, r.z0], [r.x1, r.z0], [r.x1, r.z1], [r.x0, r.z1]]
+    for (const poly of polys) {
+      const r = rectOf(poly, MARGIN + 0.3)
+      if (same(r, clampTo(r, f.rect))) continue
+      out.push(ring(r))
+      // The old fence's side the room grew past: clear a strip along it, as wide as the room's reach.
+      const b = f.rect, s = 1.4
+      if (r.x0 < b.x0) out.push(ring({ x0: b.x0, x1: b.x0 + s, z0: r.z0, z1: r.z1 }))
+      if (r.x1 > b.x1) out.push(ring({ x0: b.x1 - s, x1: b.x1, z0: r.z0, z1: r.z1 }))
+      if (r.z0 < b.z0) out.push(ring({ x0: r.x0, x1: r.x1, z0: b.z0, z1: b.z0 + s }))
+      if (r.z1 > b.z1) out.push(ring({ x0: r.x0, x1: r.x1, z0: b.z1 - s, z1: b.z1 }))
     }
-    const c = chair()
-    const [cx, cz] = at(to - 0.75, depth - 0.8)
-    const [rx, rz] = at(mid, depth / 2)
-    c.position.set(cx, 0, cz)
-    c.rotation.y = Math.atan2(rx - cx, rz - cz)
-    c.userData.rest = c.scale.clone()
-    items.push(c)
-    const l = lamp()
-    const [lx, lz] = at(to - 0.35, depth - 0.3)
-    l.position.set(lx, 0, lz)
-    l.userData.rest = l.scale.clone()
-    items.push(l)
-    for (const o of items) {
-      o.scale.setScalar(0.0001)
-      pieces.add(o)
-    }
-    furnished = { roomId, at: performance.now(), items }
-  }
-  const clearPieces = () => {
-    for (const o of [...pieces.children]) o.removeFromParent()
-    furnished = null
-  }
-  /** The pieces grow in after the walls; they go with their room if it is undone. */
-  const framePieces = (rooms: string[]) => {
-    if (!furnished) return
-    if (!rooms.includes(furnished.roomId)) return clearPieces()
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
-    const t = reduce ? 1 : Math.max(0, Math.min(1, (performance.now() - furnished.at - PIECES_AT) / PIECES_MS))
-    // A small overshoot, as if set down.
-    const e = t >= 1 ? 1 : Math.max(0.0001, 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2))
-    for (const o of furnished.items) {
-      const rest = o.userData.rest as THREE.Vector3
-      o.scale.set(rest.x * e, rest.y * e, rest.z * e)
-    }
+    return out
   }
 
   const dispose = () => {
     restore()
-    clearPieces()
-    pieces.removeFromParent()
-    fenceGroup.removeFromParent()
+    grown.removeFromParent()
     pickets?.dispose()
     railBox.dispose()
-    for (const g of made) g.dispose()
-    for (const m of [velvet, pine, iron]) m.dispose()
+    lawn.geometry.dispose()
+    edge.geometry.dispose()
+    shadow.geometry.dispose()
+    ;(shadow.material as THREE.Material).dispose()
+    shadowMap.dispose()
+    lawnMat.dispose()
+    grass.dispose()
   }
 
-  return { grow, frame, restore, furnish, framePieces, dispose, rect: () => shown && { ...shown } }
+  return {
+    grow,
+    frame,
+    restore,
+    clearings,
+    dispose,
+    /** The lawn's outline as drawn (world x, z), or null while the old board stands. */
+    lawn: () => (grown.visible ? outline.map((p) => [...p] as P) : null),
+  }
 }

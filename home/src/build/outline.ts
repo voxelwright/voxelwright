@@ -1,36 +1,32 @@
-// The outline of a room being added (#48): a pencil sketch on paper laid on the
-// ground, the door's swing drawn in, wooden pegs on the walls they move, and
-// handwritten paper tags for the sizes and the choice. Trusted code draws it from
-// a draft (resolve.ts); the person adjusts it directly: drag a peg or a wall, pull
-// the sage peg to bend the far wall, slide the door, or click a size and type a
-// number. Enter builds it, Escape lets it go. Nothing here touches the plan:
+// The outline of a room being added (#48): the room staked out on the lawn, the way
+// one is marked out on grass. A flour line runs round the walls to be built (the far
+// wall as an arc when it bends) and along the shared wall, broken where the door goes,
+// with the door's leaves and their dashed swing; a taut string on stakes runs over the
+// flour; the room's first pieces stand inside as soft felt ghosts; wooden pegs sit on
+// the walls they move, and handwritten tags give the sizes and the choice. Trusted code
+// draws it from a draft (resolve.ts); the person adjusts it directly: drag a peg or a
+// wall, pull the sage peg to bend the far wall, slide the door, or click a size and
+// type a number. Enter builds it, Escape lets it go. Nothing here touches the plan:
 // applying is the caller's commit.
 import * as THREE from 'three/webgpu'
-import type { Stage } from '../kernel'
+import { releaseGpu, type Stage } from '../kernel'
 import { canvas, toTexture } from '../paint'
-import { CHALK_RED, HAND, drawPencil, drawTape, drawTapeMeasure, paintSoil, paperGrain, tagCss } from './sketch'
-import { BEND_SNAP, curveOf, outline as ringOf, pointAt, roomArea, type P, type Plan } from './plan'
+import { CHALK_RED, HAND, tagCss } from './sketch'
+import { BEND_SNAP, curveOf, outline as ringOf, pointAt, roomArea, roomsOf, type Furniture, type P, type Plan } from './plan'
 import { SNAP, blockerOf, draftGeometry, fit, placeDoor, type Draft } from './resolve'
-import { LOOK } from './look'
+import { KINDS, obstacles, poseOf, seat, setPose, type Obstacle } from './mount'
+import { firstPieces } from './firstroom'
 import { YARD_TOP } from '../diorama'
 
-/** ?look=lot: the room is staked out on the lawn (stakes, string, a flour line), not sketched on paper. */
-const LOT = LOOK === 'lot'
 /** Flour poured along the string, the way a room is marked out on grass. */
 const FLOUR = 'rgba(252, 248, 238, 0.96)'
-/** Where the drawing and pegs lie: on the paper over the floor, or on the lawn itself. */
-const GROUND = LOT ? YARD_TOP + 0.006 : 0.012
+/** The drawing and the pegs lie on the lawn. */
+const GROUND = YARD_TOP + 0.006
+/** The string's height over the flour, and the stakes' height. */
+const STRING_Y = 0.2, STAKE_H = 0.3
 
 const MIN = 1.5
-/** How high the unbuilt walls stand while sketched. */
 const PX = 1024
-const INK = 'rgba(78, 52, 34, 0.95)'
-/** Carpenter's red pencil, for the measurements. */
-const PENCIL = 'rgba(96, 62, 40, 0.8)'
-// Darker than it looks: the scene's exposure and bloom lift it to a warm tracing-paper cream.
-const PAPER = 'rgba(246, 236, 212, 0.9)'
-/** Soft graphite, for the walls drawn on the paper. */
-const GRAPHITE = 'rgba(62, 56, 52, 0.92)'
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
 
@@ -42,14 +38,27 @@ export interface OutlineHooks {
   say(text: string): void
   /** The camera's view direction on the floor. */
   view(): P
-  /** The paper's outline on the ground (null when it is put away): the yard steps aside under it. */
-  yard(paper: P[] | null): void
+  /** The staked-out room's footprint on the ground (null when it is let go): the lot grows round it. */
+  yard(footprint: P[] | null): void
 }
 
 const snap = (v: number, step = SNAP) => Math.round(Math.round(v / step) * step * 1e6) / 1e6
 const fmt = (v: number) => v.toFixed(1)
 const dot = (a: P, b: P) => a[0] * b[0] + a[1] * b[1]
 const add = (a: P, b: P, k = 1): P => [a[0] + b[0] * k, a[1] + b[1] * k]
+
+/** How big a room is next to another, in words. */
+export function sizeWords(area: number, than: number, label: string): string {
+  const r = area / (than || 1)
+  const the = `the ${label.toLowerCase()}`
+  if (r < 0.35) return `much smaller than ${the}`
+  if (r < 0.6) return `about half the size of ${the}`
+  if (r < 0.88) return `a bit smaller than ${the}`
+  if (r <= 1.14) return `about as big as ${the}`
+  if (r < 1.6) return `a bit bigger than ${the}`
+  if (r < 2.5) return `about twice ${the}`
+  return `much bigger than ${the}`
+}
 
 /** Distance from p to the polyline. */
 function toPath(p: P, path: P[]): number {
@@ -84,10 +93,10 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const group = new THREE.Group()
   group.name = 'build outline'
 
-  // The chalk sheet: one canvas on a plane laid on the floor, moved and scaled to fit the room.
+  // The flour: one canvas on a plane laid on the lawn, moved and scaled to fit the room.
   const [sheetCanvas, g] = canvas(PX, PX)
   const sheetMap = toTexture(sheetCanvas)
-  // Lit like the floor, so the house and the wall stubs cast their shadows across the plot.
+  // Lit like the lawn, so the house and the stakes cast their shadows across it.
   const sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({
     map: sheetMap, roughness: 1, metalness: 0, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   }))
@@ -95,8 +104,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   sheet.rotation.x = -Math.PI / 2
   sheet.renderOrder = 3
   sheet.name = 'build outline sheet'
-
-  // A proposal is drawn, not built: the paper carries the walls, and only "Build it" raises real ones (plugins/build.ts).
+  // A proposal is marked out, not built: only "Build it" raises real walls (plugins/build.ts).
   group.add(sheet)
   /** Wooden pegs standing on the walls they move: a turned body and a lighter head; the bend peg's head is sage. */
   const pegBody = new THREE.CylinderGeometry(0.11, 0.13, 0.1, 24)
@@ -119,57 +127,112 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     pegMeshes.set(h, { group: pg, head, top })
     group.add(pg)
   }
-  // ?look=lot: corner stakes and a taut mason's line round the walls to be built.
-  const stakeGeo = new THREE.BoxGeometry(0.045, 0.5, 0.045)
-  stakeGeo.translate(0, 0.25, 0)
-  const stringGeo = new THREE.CylinderGeometry(0.006, 0.006, 1, 5)
-  const stakeWood = new THREE.MeshStandardMaterial({ color: '#c9a274', roughness: 0.8 })
-  const stringMat = new THREE.MeshStandardMaterial({ color: '#f07a3e', roughness: 0.6, emissive: '#c04a14', emissiveIntensity: 0.35 })
-  const stakes: THREE.Mesh[] = [], strings: THREE.Mesh[] = []
+  // Stakes at the corners of the walls to be built, and a taut mason's string over the flour.
+  const stakeGeo = new THREE.BoxGeometry(0.06, STAKE_H, 0.06)
+  stakeGeo.translate(0, STAKE_H / 2, 0)
+  const stakeTip = new THREE.ConeGeometry(0.05, 0.05, 4)
+  stakeTip.rotateY(Math.PI / 4)
+  stakeTip.translate(0, STAKE_H + 0.025, 0)
+  const stringGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 6)
+  const stakeWood = new THREE.MeshStandardMaterial({ color: '#d2a873', roughness: 0.8 })
+  const stringMat = new THREE.MeshStandardMaterial({ color: '#f07a3e', roughness: 0.6, emissive: '#c04a14', emissiveIntensity: 0.45 })
+  const stakes: THREE.Group[] = [], strings: THREE.Mesh[] = []
   const stakeGroup = new THREE.Group()
   stakeGroup.name = 'build outline stakes'
-  if (LOT) group.add(stakeGroup)
-  const stakeOut = (line: P[]) => {
+  group.add(stakeGroup)
+  /** Stakes at the given points, and the string from stake to stake along `line`. */
+  const stakeOut = (line: P[], at: P[]) => {
     const yUp = new THREE.Vector3(0, 1, 0), a = new THREE.Vector3(), b = new THREE.Vector3()
-    // A stake at each end and wherever the line turns; along a curve, one every so often.
-    const at: P[] = []
-    line.forEach((p, i) => {
-      const prev = line[i - 1], next = line[i + 1]
-      if (!prev || !next) return at.push(p)
-      const u: P = [p[0] - prev[0], p[1] - prev[1]], v: P = [next[0] - p[0], next[1] - p[1]]
-      const turn = Math.acos(Math.max(-1, Math.min(1, dot(u, v) / ((Math.hypot(...u) * Math.hypot(...v)) || 1))))
-      const last = at[at.length - 1]
-      if (turn > 0.4 || (turn > 0.05 && Math.hypot(p[0] - last[0], p[1] - last[1]) > 1.1)) at.push(p)
-    })
     at.forEach((p, i) => {
-      if (!stakes[i]) stakeGroup.add(stakes[i] = new THREE.Mesh(stakeGeo, stakeWood))
+      if (!stakes[i]) {
+        const s = new THREE.Group()
+        const post = new THREE.Mesh(stakeGeo, stakeWood), tip = new THREE.Mesh(stakeTip, stakeWood)
+        post.castShadow = tip.castShadow = true
+        s.add(post, tip)
+        stakeGroup.add(stakes[i] = s)
+      }
       const m = stakes[i]
-      m.castShadow = true
       m.visible = true
       m.position.set(p[0], YARD_TOP, p[1])
-      m.rotation.set((i % 2 ? 1 : -1) * 0.04, i * 0.7, (i % 3 ? 1 : -1) * 0.035)
+      m.rotation.set((i % 2 ? 1 : -1) * 0.03, i * 0.7, (i % 3 ? 1 : -1) * 0.025)
     })
     for (let i = at.length; i < stakes.length; i++) stakes[i].visible = false
     for (let i = 0; i < line.length - 1; i++) {
-      if (!strings[i]) stakeGroup.add(strings[i] = new THREE.Mesh(stringGeo, stringMat))
+      if (!strings[i]) {
+        strings[i] = new THREE.Mesh(stringGeo, stringMat)
+        strings[i].castShadow = true
+        stakeGroup.add(strings[i])
+      }
       const m = strings[i]
       m.visible = true
-      a.set(line[i][0], YARD_TOP + 0.36, line[i][1])
-      b.set(line[i + 1][0], YARD_TOP + 0.36, line[i + 1][1])
+      a.set(line[i][0], YARD_TOP + STRING_Y, line[i][1])
+      b.set(line[i + 1][0], YARD_TOP + STRING_Y, line[i + 1][1])
       m.position.copy(a).add(b).multiplyScalar(0.5)
       m.scale.set(1, a.distanceTo(b), 1)
       m.quaternion.setFromUnitVectors(yUp, b.sub(a).normalize())
     }
     for (let i = line.length - 1; i < strings.length; i++) strings[i].visible = false
   }
-  /** Tracing-paper grain, painted once and laid over the paper on every redraw. */
-  const grain = paperGrain(512)
-  /** The plot's turned earth under the paper, painted once. */
-  const soil = paintSoil(256)
+
+  // ── The first pieces, as soft felt ghosts inside the flour ────────────────
+  const ghosts = new THREE.Group()
+  ghosts.name = 'build outline ghosts'
+  group.add(ghosts)
+  const ghostFelt = new THREE.MeshStandardMaterial({ color: '#f3e2c4', roughness: 1, transparent: true, opacity: 0.34, depthWrite: false })
+  const ghostRug = new THREE.MeshStandardMaterial({ roughness: 1, transparent: true, opacity: 0.45, depthWrite: false })
+  /** One ghost per kind, built on first need and kept while the outline lives. */
+  const ghostOf = new Map<string, THREE.Group>()
+  const ghost = (kind: string) => {
+    let h = ghostOf.get(kind)
+    if (!h) {
+      const k = KINDS[kind]
+      const made = seat(k.build(), k.mount)
+      h = made.holder
+      h.name = `build outline ghost ${kind}`
+      h.traverse((o) => {
+        const m = o as THREE.Mesh
+        if (!m.isMesh) return
+        const was = m.material as THREE.MeshStandardMaterial
+        // The rug keeps its braid, faintly; everything else is plain felt.
+        if (kind === 'rug' && was.map) {
+          ghostRug.map = was.map
+          m.material = ghostRug
+        } else {
+          was.map?.dispose()
+          m.material = ghostFelt
+        }
+        if (m.material !== was) was.dispose()
+        m.castShadow = m.receiveShadow = false
+        m.raycast = () => {}
+      })
+      ghostOf.set(kind, h)
+      ghosts.add(h)
+    }
+    return h
+  }
+  /** What is already in the house, looked at once per outline. */
+  let seen: Obstacle[] | null = null
+  let pieces: Furniture[] = []
+  const showGhosts = (base: Plan, made: Plan, d: Draft) => {
+    seen ??= obstacles(stage.scene, [group])
+    pieces = firstPieces(base, made, d, null, [], seen)
+    const shown = new Set<string>()
+    for (const f of pieces) {
+      // No walls stand yet, so nothing hangs: only what stands on the floor.
+      if (f.at.mount !== 'floor' || !('kind' in f.item)) continue
+      const h = ghost(f.item.kind)
+      const pose = poseOf(made, f.at)
+      if (!pose) continue
+      setPose(h, pose)
+      h.position.y = GROUND + 0.002
+      h.visible = true
+      shown.add(f.item.kind)
+    }
+    for (const [kind, h] of ghostOf) if (!shown.has(kind)) h.visible = false
+  }
+
   /** A refused drag flashes the walls chalk red for a moment. */
   let refusedAt = -Infinity
-
-  // The yard's fence and flowers step aside under the paper while it is out (the caller owns the yard: hooks.yard).
 
   // ── Paper tags: the two sizes, and the choice ────────────────────────────
   const style = document.createElement('style')
@@ -254,6 +317,12 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     return true
   }
 
+  /** The room's size next to the room it opens from, in words. */
+  const sizeLine = (base: Plan, m: Plan, d: Draft) => {
+    const host = roomsOf(base, d.wallId)[0]
+    return host ? sizeWords(roomArea(m, d.roomId), roomArea(base, host.id), host.label) : `${roomArea(m, d.roomId).toFixed(1)} m²`
+  }
+
   // ── Drawing ──────────────────────────────────────────────────────────────
   const draw = () => {
     if (!draft || !made) return
@@ -272,6 +341,9 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const side = Math.sign(dot([geo.out[0], geo.out[1]], [-geo.dir[1], geo.dir[0]])) || 1
     const wallIn = offsetPath(centre, (side > 0 ? -1 : 1) * T / 2)
     const wallOut = offsetPath(centre, (side > 0 ? 1 : -1) * T / 2)
+    // The outer line starts and ends on the host wall's outer face, where the new walls meet it.
+    wallOut[0] = add(wallOut[0], geo.out, T / 2)
+    wallOut[wallOut.length - 1] = add(wallOut[wallOut.length - 1], geo.out, T / 2)
     // Which side wall carries the depth: the one nearer the camera.
     const view = hooks.view()
     const depthAtTo = dot(geo.dir, view) < 0
@@ -303,7 +375,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       path.forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
       if (close) g.closePath()
     }
-    // A carpenter's pencil: each run bows a little and wanders slowly, overshoots its ends, and is gone over twice.
+    // Poured by hand: each run bows a little and wanders slowly, overshoots its ends, and is gone over twice.
     let seed = 7
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5
     const wander = (path: P[], over = 0): P[] => {
@@ -327,12 +399,12 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       return out
     }
     const refused = performance.now() - refusedAt < 600
-    const chalk = (path: P[], width: number, alpha = 1, colour = INK, dash: number[] = [], over = 0) => {
+    const flour = (path: P[], width: number, alpha = 1, colour = FLOUR, dash: number[] = [], over = 0) => {
       g.setLineDash(dash.map((v) => v * k))
       for (let pass = 0; pass < 2; pass++) {
         g.save()
         g.globalAlpha = alpha * (pass ? 0.45 : 0.85)
-        g.strokeStyle = refused && (colour === INK || colour === GRAPHITE) ? CHALK_RED : colour
+        g.strokeStyle = refused && colour === FLOUR ? CHALK_RED : colour
         g.lineWidth = width * k * (pass ? 0.55 : 1)
         if (pass) g.translate(0.006 * k, 0.004 * k)
         trace(wander(path, over * (pass ? 0.6 : 1)))
@@ -341,173 +413,48 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       }
       g.setLineDash([])
     }
-    /** Hatching by hand: uneven spacing, each stroke a little off the angle. */
-    const hatch = (gap: number, alpha: number, width: number, dir: 1 | -1, colour = INK) => {
-      g.strokeStyle = refused ? CHALK_RED : colour
-      g.lineWidth = width * k
-      for (let s = -PX; s < PX * 2; s += gap * k * (0.75 + Math.abs(rnd()))) {
-        g.globalAlpha = alpha * (0.7 + rnd() * 0.6)
-        const lean = rnd() * 0.08 * PX
-        g.beginPath()
-        g.moveTo(s, 0)
-        g.lineTo(s + dir * PX + lean, PX)
-        g.stroke()
-      }
-      g.globalAlpha = 1
-    }
 
-    // Tracing paper laid on the ground under the new room: a soft shadow, a slightly torn edge, and grain.
-    const sheetRing = wander([...ringOf(made, room, -T / 2 - 0.4), ringOf(made, room, -T / 2 - 0.4)[0]])
-    hooks.yard(offsetPath(sheetRing, 0.12))
-    if (!LOT) {
-    // The plot: a patch of turned earth staked out under the paper, its edge soft and tufted with grass.
-    const plot = wander([...ringOf(made, room, -T / 2 - 0.62), ringOf(made, room, -T / 2 - 0.62)[0]])
-    g.save()
-    g.filter = `blur(${Math.round(0.12 * k)}px)`
-    trace(plot, true)
-    g.fillStyle = 'rgba(120, 84, 52, 0.22)'
-    g.fill()
-    g.restore()
-    g.save()
-    g.filter = `blur(${Math.max(1, Math.round(0.03 * k))}px)`
-    trace(plot, true)
-    g.clip()
-    const soilPattern = g.createPattern(soil, 'repeat')!
-    soilPattern.setTransform(new DOMMatrix().scale((k * 0.9) / 256))
-    g.fillStyle = soilPattern
-    g.globalAlpha = 0.4
-    g.fillRect(0, 0, PX, PX)
-    g.restore()
+    hooks.yard(ringOf(made, room, -T / 2 - 0.08))
+    // Stakes at the outer corners (and along a bend), the string over the outer flour line.
     {
-      // Grass tufts along the plot's edge, leaning out.
-      const tuft = (p: P, lean: number) => {
-        const [x, y] = px(p)
-        g.strokeStyle = rnd() > 0 ? 'rgba(104, 134, 64, 0.95)' : 'rgba(128, 156, 78, 0.95)'
-        g.lineWidth = 0.012 * k
-        for (let b = -2; b <= 2; b++) {
-          g.beginPath()
-          g.moveTo(x + b * 0.012 * k, y)
-          g.quadraticCurveTo(x + (b * 0.02 + lean * 0.02) * k, y - 0.04 * k, x + (b * 0.035 + lean * 0.05) * k, y - (0.07 + Math.abs(rnd()) * 0.04) * k)
-          g.stroke()
-        }
-      }
-      for (let i = 0; i < plot.length; i += 2) tuft(plot[i], rnd() * 2)
-    }
-    g.save()
-    g.filter = `blur(${Math.round(0.08 * k)}px)`
-    g.translate(0.05 * k, 0.07 * k)
-    trace(sheetRing, true)
-    g.fillStyle = 'rgba(70, 40, 20, 0.3)'
-    g.fill()
-    g.restore()
-    g.save()
-    trace(sheetRing, true)
-    g.fillStyle = PAPER
-    g.fill()
-    g.clip()
-    g.globalCompositeOperation = 'multiply'
-    g.globalAlpha = 0.45
-    g.fillStyle = g.createPattern(grain, 'repeat')!
-    g.fillRect(0, 0, PX, PX)
-    g.restore()
-    // Taped down at the corners, a pencil left lying by the far wall.
-    const m = T / 2 + 0.4
-    const corners: P[] = [
-      add(add(geo.at(d.from, 0), geo.dir, -m), geo.out, m * 0.3), add(add(geo.at(d.from, d.depth), geo.dir, -m), geo.out, m),
-      add(add(geo.at(d.to, d.depth), geo.dir, m), geo.out, m), add(add(geo.at(d.to, 0), geo.dir, m), geo.out, m * 0.3),
-    ]
-    const cc = corners.reduce((s, p) => [s[0] + p[0] / corners.length, s[1] + p[1] / corners.length], [0, 0] as P)
-    const hues = ['#98ae74', '#d0805e', '#c39a46', '#7ea6b4']
-    corners.forEach((p, i) => {
-      const [x, y] = px(p), [cx2, cy2] = px(cc)
-      drawTape(g, x, y, 0.5 * k, 0.16 * k, Math.atan2(y - cy2, x - cx2) + Math.PI / 2 + (i % 2 ? 0.15 : -0.12), hues[i % hues.length])
-    })
-    // The floor is bare paper: only two faint construction lines through the middle, as a sketch has.
-    {
-      const mA = geo.at((d.from + d.to) / 2, 0.15), mB = geo.at((d.from + d.to) / 2, d.depth - 0.15)
-      const cA = geo.at(d.from + 0.15, d.depth / 2), cB = geo.at(d.to - 0.15, d.depth / 2)
-      chalk([mA, mB], 0.008, 0.28, GRAPHITE, [0.18, 0.1])
-      chalk([cA, cB], 0.008, 0.28, GRAPHITE, [0.18, 0.1])
+      const corners: P[] = [wallOut[0], wallOut[1], ...(n > 1 ? [wallOut[1 + n / 2]] : []), wallOut[wallOut.length - 2], wallOut[wallOut.length - 1]]
+      stakeOut(wallOut, corners)
     }
 
-    }
-    // A graphite smudge where the side of the pencil dragged along the walls.
-    if (!LOT) g.save()
-    if (LOT) {
-      // The string runs just outside the walls to be built, a stake at each corner; the flour lies under it.
-      const line = offsetPath(centre, (side > 0 ? 1 : -1) * (T / 2 + 0.2))
-      line[0] = add(line[0], geo.out, T / 2 + 0.16)
-      line[line.length - 1] = add(line[line.length - 1], geo.out, T / 2 + 0.16)
-      stakeOut(line)
-    } else {
-    g.filter = `blur(${Math.round(0.07 * k)}px)`
-    g.globalAlpha = 0.18
-    g.strokeStyle = 'rgb(70, 52, 40)'
-    g.lineWidth = T * 2.4 * k
-    trace(offsetPath(centre, (side > 0 ? -1 : 1) * T * 0.9))
-    g.stroke()
-    g.restore()
-    }
-
-    // The new walls: both faces in pencil, the band between them hatched closer.
+    // The walls to be built: a light band of flour between their two faces, a firm line on each.
     g.save()
     g.beginPath()
     ;[...wallOut, ...[...wallIn].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
     g.closePath()
-    g.fillStyle = refused ? 'rgba(214, 120, 96, 0.35)' : LOT ? 'rgba(252, 248, 238, 0.42)' : 'rgba(96, 88, 82, 0.16)'
+    g.fillStyle = refused ? 'rgba(214, 120, 96, 0.35)' : 'rgba(252, 248, 238, 0.42)'
     g.fill()
-    g.clip()
-    if (!LOT) hatch(0.045, 0.5, 0.009, -1, GRAPHITE)
     g.restore()
-    // Height, the way a sketch shows it: a light hatched band falling outside the walls, as their shadow on the paper.
-    if (!LOT) {
-      const fall = offsetPath(centre, (side > 0 ? 1 : -1) * (T / 2 + 0.16))
-      g.save()
-      g.beginPath()
-      ;[...fall, ...[...wallOut].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
-      g.closePath()
-      g.clip()
-      hatch(0.035, 0.22, 0.007, 1, GRAPHITE)
-      g.restore()
-    }
-    const ink = LOT ? FLOUR : INK
-    chalk(wallOut, LOT ? 0.06 : 0.03, 1, LOT ? FLOUR : GRAPHITE, [], 0.1)
-    chalk(wallIn, LOT ? 0.05 : 0.022, 0.9, LOT ? FLOUR : GRAPHITE, [], 0.08)
+    flour(wallOut, 0.06, 1, FLOUR, [], 0.1)
+    flour(wallIn, 0.05, 0.9, FLOUR, [], 0.08)
+    // Along the shared wall's new face, broken where the door goes, so the footprint closes.
+    const face = (t: number) => geo.at(t, T / 2 + 0.03)
+    if (d.door.from - d.from > T / 2 + 0.05) flour([face(d.from + T / 2), face(d.door.from)], 0.045, 0.9)
+    if (d.to - d.door.to > T / 2 + 0.05) flour([face(d.door.to), face(d.to - T / 2)], 0.045, 0.9)
 
-    // The door: jambs across the shared wall, and each leaf with its swing into the new room.
-    for (const t of [d.door.from, d.door.to]) chalk([geo.at(t, -T / 2 - 0.04), geo.at(t, T / 2 + 0.04)], 0.03, 1, ink)
+    // The door: jambs across the shared wall, each leaf as a firm line and its swing dashed into the new room.
+    for (const t of [d.door.from, d.door.to]) flour([geo.at(t, -T / 2 - 0.06), geo.at(t, T / 2 + 0.1)], 0.045, 1)
     const dw = d.door.to - d.door.from
     const hinges: Array<{ at: number; dir: 1 | -1; r: number }> = d.door.leaves === 2
       ? [{ at: d.door.from, dir: 1, r: dw / 2 }, { at: d.door.to, dir: -1, r: dw / 2 }]
       : d.door.leaves === 1 ? [{ at: d.door.from, dir: 1, r: dw }] : []
     for (const h of hinges) {
       const hinge = geo.at(h.at, T / 2)
-      const open = add(hinge, geo.out, h.r)
-      chalk([hinge, open], 0.024, 1, ink)
+      flour([hinge, add(hinge, geo.out, h.r)], 0.04, 1)
       const arcPts: P[] = Array.from({ length: 17 }, (_, i) => {
         const a = (i / 16) * Math.PI / 2
         return add(add(hinge, geo.dir, h.dir * h.r * Math.cos(a)), geo.out, h.r * Math.sin(a))
       })
-      chalk(arcPts, LOT ? 0.03 : 0.013, 0.7, ink, [0.06, 0.07])
+      flour(arcPts, 0.032, 0.9, FLOUR, [0.07, 0.08])
     }
-    if (!d.door.leaves) chalk([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.013, 0.7, ink, [0.06, 0.07])
+    if (!d.door.leaves) flour([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.032, 0.9, FLOUR, [0.07, 0.08])
 
-    // Sizes: a tape measure along each side; the number is the handwritten tag on it.
-    const dimension = (a: P, b: P) => {
-      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
-      const u: P = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], nrm: P = [-u[1], u[0]]
-      // A cloth tape measure laid along the side, with a pencil tick on the paper at each end.
-      drawTapeMeasure(g, px(a), px(b), 0.13 * k, k)
-      for (const p of [a, b]) chalk([add(add(p, nrm, -0.12), u, -0.015), add(add(p, nrm, 0.12), u, 0.015)], 0.016, 0.9, PENCIL)
-    }
-    if (!LOT) {
-      dimension(wA, wB)
-      dimension(dA, dB)
-    }
-
-    // Grips: a wooden peg standing on each wall it moves (and on the door), with arrows pencilled on the paper
-    // beside it for the way it goes. The sage peg bends the far wall: a dashed pencil curve runs from that wall's
-    // ends through it, the wall it would make.
+    // Grips: a wooden peg standing on each wall it moves (and on the door), with arrows in flour beside it
+    // for the way it goes. The sage peg bends the far wall: a dashed curve runs from that wall's ends through it.
     const active = drag?.handle ?? hover
     const pegs: Array<[Handle, P, P]> = [
       ['far', pointAt(far, far.length * 0.3), geo.out],
@@ -520,7 +467,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       const nrm: P = [-u[1], u[0]]
       g.save()
       g.globalAlpha = live ? 0.95 : 0.7
-      g.strokeStyle = live ? '#b8641e' : LOT ? FLOUR : PENCIL
+      g.strokeStyle = live ? '#b8641e' : FLOUR
       g.lineWidth = 0.022 * k
       g.lineCap = g.lineJoin = 'round'
       for (const sgn of [1, -1]) {
@@ -551,7 +498,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
         const t = i / 24
         return [(1 - t) ** 2 * a0[0] + 2 * (1 - t) * t * c[0] + t * t * a1[0], (1 - t) ** 2 * a0[1] + 2 * (1 - t) * t * c[1] + t * t * a1[1]]
       })
-      chalk(guide, LOT ? 0.022 : 0.014, active === 'bend' ? 0.9 : 0.55, active === 'bend' ? '#6f8a55' : LOT ? FLOUR : PENCIL, [0.08, 0.07])
+      flour(guide, 0.022, active === 'bend' ? 0.9 : 0.55, active === 'bend' ? '#6f8a55' : FLOUR, [0.08, 0.07])
       arrows(knobAt, geo.out, active === 'bend')
     }
     for (const [h, at] of [...pegs.map(([h, p]) => [h, p] as [Handle, P]), ['door', doorAt] as [Handle, P], ['bend', knobAt] as [Handle, P]]) {
@@ -561,23 +508,21 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       m.head.material = live ? pegLive : m.top
       m.group.scale.setScalar(live ? 1.18 : 1)
     }
-    // The pencil lies on the paper outside the walls, clear of every peg.
-    const tOther = depthAtTo ? d.from : d.to
-    const otherDir: P = depthAtTo ? [-geo.dir[0], -geo.dir[1]] : geo.dir
-    if (!LOT) drawPencil(g, ...px(add(geo.at(tOther, Math.min(d.depth * 0.75, d.depth - 0.5)), otherDir, T / 2 + 0.26)), 0.62 * k, Math.atan2(geo.out[1], geo.out[0]) + 0.12)
     sheetMap.needsUpdate = true
+    showGhosts(base, made, d)
 
     // Tags.
     anchors.w.set((wA[0] + wB[0]) / 2, 0.05, (wA[1] + wB[1]) / 2)
     anchors.d.set((dA[0] + dB[0]) / 2, 0.05, (dA[1] + dB[1]) / 2)
-    // Beyond the far wall, so the tag never sits over the sketch.
+    // Beyond the far wall, so the tag never sits over the room.
     const beyond = add(mid, geo.out, bulge + 1.1)
     anchors.title.set(beyond[0], 0.6, beyond[1])
     if (editing !== 'w') tags.w.textContent = `${fmt(d.to - d.from)} m`
     if (editing !== 'd') tags.d.textContent = `${fmt(d.depth)} m`
     titleName.textContent = /^New room( \d+)?$/.test(d.label) ? 'A new room' : `The new ${d.label.toLowerCase()}`
-    titleArea.textContent = ` · ${roomArea(made, d.roomId).toFixed(1)} m²`
+    titleArea.textContent = ` · ${sizeLine(base, made, d)}`
   }
+
 
   // ── Opening, closing, applying ────────────────────────────────────────────
   const open = (next: Draft) => {
@@ -591,6 +536,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   }
   const close = () => {
     draft = made = null
+    seen = null
+    pieces = []
     drag = null
     hover = null
     editing = null
@@ -723,7 +670,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
         const wanted = blockerOf(placeDoor(s.from, s.to, dw, v('door')), s.keepOut)
         next = { ...s, door: { ...s.door, ...placeDoor(s.from, s.to, dw, v('door'), s.keepOut) } }
         if (JSON.stringify(next) !== JSON.stringify(draft)) accept(next)
-        titleArea.textContent = wanted ? ` · the ${wanted.name} is in the way` : ` · ${roomArea(made!, draft.roomId).toFixed(1)} m²`
+        titleArea.textContent = wanted ? ` · the ${wanted.name} is in the way` : ` · ${sizeLine(hooks.base(), made!, draft)}`
         return
       }
     }
@@ -831,7 +778,10 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     sheet.geometry.dispose()
     ;(sheet.material as THREE.Material).dispose()
     sheetMap.dispose()
-    for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive, stakeGeo, stringGeo, stakeWood, stringMat]) x.dispose()
+    for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive, stakeGeo, stakeTip, stringGeo, stakeWood, stringMat]) x.dispose()
+    for (const h of ghostOf.values()) releaseGpu(h)
+    ghostRug.map?.dispose()
+    for (const m of [ghostFelt, ghostRug]) m.dispose()
   }
 
   /** Screen points (CSS px) of each grip, for the checks. */
@@ -869,16 +819,19 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     draft: () => draft,
     made: () => made,
     shownAt: () => shownAt,
+    /** The first pieces the room would arrive with, as the ghosts show them. */
+    pieces: () => pieces,
     grips,
     dispose,
   }
 }
 
 
+
 function css() {
   return `
   .build-dim, .build-choice, .build-dim-field { position: fixed; z-index: 6; left: 0; top: 0; opacity: 0; pointer-events: none; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.9; }
-  .build-dim { min-height: 44px; padding: 4px 10px 6px; border: 0; background: none; cursor: text; rotate: -3deg; color: #4f3322; font: 700 23px ${HAND};
+  .build-dim { min-height: 44px; padding: 4px 10px 6px; border: 0; background: none; cursor: text; rotate: -3deg; color: #5e4434; font: 600 18px ${HAND};
     text-shadow: 0 0 2px #fbf1dd, 0 0 5px #fbf1dd, 0 0 9px rgba(251, 241, 221, 0.9); }
   .build-dim[data-dim='d'] { rotate: 4deg; }
   .build-dim::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 8px; height: 2px; border-radius: 2px; opacity: 0.35;
@@ -886,6 +839,8 @@ function css() {
   .build-dim:hover::after, .build-dim:focus-visible::after { opacity: 0.8; }
   .build-dim:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; border-radius: 8px; }
   .build-dim.shown, .build-choice.shown, .build-dim-field.shown { opacity: 1; scale: 1; pointer-events: auto; }
+  .build-dim.shown { opacity: 0.72; }
+  .build-dim.shown:hover, .build-dim.shown:focus-visible { opacity: 1; }
   .build-dim.editing { opacity: 0; pointer-events: none; }
   .build-dim-field { width: 92px; padding: 3px 10px 5px; border: 1.5px dashed rgba(150, 100, 60, 0.5); border-radius: 9px; text-align: center;
     background: #fffaf0; color: #4a3428; font: 700 20px ${HAND}; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.22); outline: none; }

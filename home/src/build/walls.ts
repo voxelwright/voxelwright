@@ -378,8 +378,12 @@ function otherRooms(plan: Plan, first: Room, kit: Kit): THREE.Group | null {
         }
       }
     }
-    const base = new THREE.Mesh(new THREE.BoxGeometry(ox1 - ox0 + 0.08, BASE, oz1 - oz0 + 0.08), kit.cut)
-    base.position.set((ox0 + ox1) / 2, -BASE / 2 - 0.004, (oz0 + oz1) / 2)
+    // The base follows the walls' outside, round a bay too, so no corner of it sticks out past a curve.
+    const rim = outline(plan, room, -frames[0].wall.thickness / 2 - 0.04)
+    const baseGeo = new THREE.ExtrudeGeometry(new THREE.Shape(rim.map(([x, z]) => new THREE.Vector2(x, -z))), { depth: BASE, bevelEnabled: false, curveSegments: 1 })
+    baseGeo.rotateX(-Math.PI / 2)
+    const base = new THREE.Mesh(baseGeo, kit.cut)
+    base.position.y = -BASE - 0.004
     base.receiveShadow = true
     base.userData.room = room.id
     group.add(base)
