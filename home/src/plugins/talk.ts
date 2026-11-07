@@ -9,6 +9,7 @@ import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
+import type { PlacementService } from './place'
 import { mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
@@ -1242,7 +1243,6 @@ export default {
       placeCards(dt)
       input?.frame(dt, t)
       sketch?.frame(dt, t)
-      furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
         done()
@@ -1294,7 +1294,13 @@ export default {
     let routingText = ''
     /** Whom you last talked with: J opens the journal at their pages. */
     let lastTalked: Member | null = null
-    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text) }) : null
+    // Furnishing hands each piece to the house's placement (#56) while plugins/place.ts provides it.
+    let placement: PlacementService | null = null
+    if (INPUT) ctx.inject(['placement'], (inner) => {
+      placement = inner.placement
+      inner.effect(() => () => void (placement = null), 'talk placement')
+    })
+    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text), placement: () => placement }) : null
     const input = INPUT ? alwaysOn(stage, entries, {
       variant: INPUT,
       journal: 'notebook',

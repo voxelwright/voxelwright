@@ -36,6 +36,10 @@ export interface PlaceItem {
   label?: string
   /** What it is: a kind the home builds, or an item in a person's library. A thing still being made has none until swap(). */
   item?: ItemRef
+  /** The tag's words in place of "Place it" and "Not now", and one more action (furnishing's "Try another") while `shown()`. */
+  words?: { confirm?: string; cancel?: string; more?: { label: string; act: () => void; shown: () => boolean } }
+  /** Told when confirming is refused (it doesn't fit there) or the house did not take it; the tag says so too. */
+  failed?: (why: 'fit' | 'save', line: string) => void
 }
 
 export type Done = { status: 'confirmed'; pose: Pose; furnitureId: string } | { status: 'cancelled' }
@@ -45,11 +49,18 @@ export interface Placing {
   readonly done: Promise<Done>
   /**
    * Swap the ghost for the made prop in place, keeping the current pose and the
-   * session. `item` names what it is once it exists (the library item the maker saved).
+   * session. `item` names what it is once it exists (the library item the maker saved);
+   * null means it is not known any more (a new one is being made).
    */
-  swap(object: THREE.Object3D, size?: Size, item?: ItemRef): void
+  swap(object: THREE.Object3D, size?: Size, item?: ItemRef | null): void
   /** End from outside (e.g. making the prop failed): resolves done as cancelled and removes the ghost. */
   cancel(): void
+  /** Confirm from outside, as "Place it" does: refused where it doesn't fit. */
+  confirm(): void
+  /** Whether it fits where it is now. */
+  readonly fits: boolean
+  /** A line for the tag while it is placeable (e.g. who is making it); '' for the usual hint. */
+  note(text: string): void
 }
 
 export interface Placement {
@@ -112,8 +123,9 @@ interface Session {
   lift: number
   lifted: number
   message: string
+  note: string
   resolve: (d: Done) => void
-  dom: { tag: HTMLDivElement; hint: HTMLSpanElement; place: HTMLButtonElement; turn: HTMLButtonElement; guide: SVGSVGElement }
+  dom: { tag: HTMLDivElement; hint: HTMLSpanElement; place: HTMLButtonElement; more: HTMLButtonElement; turn: HTMLButtonElement; guide: SVGSVGElement }
 }
 
 export function placement(deps: PlaceDeps): Placement & {
@@ -358,6 +370,7 @@ export function placement(deps: PlaceDeps): Placement & {
     s.dom.tag.classList.toggle('bad', !good)
     s.dom.turn.classList.toggle('bad', !good)
     s.dom.place.setAttribute('aria-disabled', String(!good || s.state !== 'placing'))
+    s.dom.more.hidden = !(s.state === 'placing' && s.item.words?.more?.shown())
     hint(s)
   }
   /** The thing it bumps into: the union of the boxes of the same piece of furniture that the held thing overlaps. */
@@ -398,7 +411,7 @@ export function placement(deps: PlaceDeps): Placement & {
     const coarse = matchMedia('(pointer: coarse)').matches
     const text = s.message || (s.state === 'confirming'
       ? s.ref ? 'Placing it…' : 'It will go here as soon as it’s made'
-      : s.fit.ok ? coarse ? 'Drag to move · turn the ring' : 'Drag to move · Q E or the ring to turn' : s.fit.why ?? "It can't go there")
+      : s.fit.ok ? s.note || (coarse ? 'Drag to move · turn the ring' : 'Drag to move · Q E or the ring to turn') : s.fit.why ?? "It can't go there")
     if (s.dom.hint.dataset.text === text) return
     s.dom.hint.dataset.text = text
     // The keys as little keycaps, so Q and E read as keys in a hand that blurs letters.
@@ -696,7 +709,7 @@ export function placement(deps: PlaceDeps): Placement & {
   }
 
   // ── The tag: what it is, a hint or why not, Place it and Not now; the turn handle ──
-  const makeDom = (label: string): Session['dom'] => {
+  const makeDom = (label: string, words: PlaceItem['words']): Session['dom'] => {
     const tag = document.createElement('div')
     tag.className = 'place-tag'
     tag.setAttribute('role', 'group')
@@ -719,8 +732,10 @@ export function placement(deps: PlaceDeps): Placement & {
       })
       return b
     }
-    const placeBtn = button('Place it', 'confirm', () => session && void confirm(session))
-    row.append(button('Not now', 'cancel', () => session && end(session, { status: 'cancelled' })), placeBtn)
+    const placeBtn = button(words?.confirm ?? 'Place it', 'confirm', () => session && void confirm(session))
+    const more = button(words?.more?.label ?? '', 'more', () => session?.state === 'placing' && words?.more?.act())
+    more.hidden = true
+    row.append(button(words?.cancel ?? 'Not now', 'cancel', () => session && end(session, { status: 'cancelled' })), more, placeBtn)
     tag.append(name, hintEl, row)
     const turnBtn = document.createElement('button')
     turnBtn.type = 'button'
@@ -751,7 +766,7 @@ export function placement(deps: PlaceDeps): Placement & {
     guide.setAttribute('aria-hidden', 'true')
     guide.innerHTML = '<path class="arc"/><path class="heads"/><path class="stem"/>'
     document.body.append(guide, tag, turnBtn)
-    return { tag, hint: hintEl, place: placeBtn, turn: turnBtn, guide }
+    return { tag, hint: hintEl, place: placeBtn, more, turn: turnBtn, guide }
   }
 
   /** On a phone the tag docks to the bottom, in reach of a thumb, and the view frames the thing above it. */
@@ -920,12 +935,20 @@ export function placement(deps: PlaceDeps): Placement & {
     const s: Session = {
       placing: null as unknown as Placing, item, label, mount: item.mount, holder, object, size, moving,
       at: at ?? { mount: 'floor', x: 0, z: 0, yaw: 0 }, fit: { ok: false }, ref: item.item ?? null, waiting: null, state: 'placing',
-      looks: new Map(), obstacles: [], supports: [], lift: 0, lifted: 0, message: '', resolve, dom: makeDom(label),
+      looks: new Map(), obstacles: [], supports: [], lift: 0, lifted: 0, message: '', note: '', resolve, dom: makeDom(label, item.words),
     }
     s.placing = {
       done,
       swap: (next, size, ref) => swap(s, next, size, ref),
       cancel: () => end(s, { status: 'cancelled' }),
+      confirm: () => void confirm(s),
+      get fits() {
+        return s.fit.ok
+      },
+      note: (text) => {
+        s.note = text
+        if (s.state !== 'done') paint(s)
+      },
     }
     session = s
     // A hung thing hangs from its cord while it is placed, as it will once placed.
@@ -993,7 +1016,7 @@ export function placement(deps: PlaceDeps): Placement & {
     return candidates.find((c) => fitAt(s, c).ok) ?? candidates[0] ?? { mount: 'wall', wallId: plan.walls[0].id, roomId: room.id, along: 1, height: 1.5, spin: 0 }
   }
 
-  const swap = (s: Session, next: THREE.Object3D, size?: Size, item?: ItemRef) => {
+  const swap = (s: Session, next: THREE.Object3D, size?: Size, item?: ItemRef | null) => {
     if (s.state === 'done') return
     unghost(s)
     s.holder.remove(s.object)
@@ -1006,6 +1029,9 @@ export function placement(deps: PlaceDeps): Placement & {
     if (item) {
       s.item = { ...s.item, item }
       s.ref = item
+    } else if (item === null) {
+      s.item = { ...s.item, item: undefined }
+      s.ref = null
     }
     ghost(s)
     place(s, s.at)
@@ -1022,6 +1048,7 @@ export function placement(deps: PlaceDeps): Placement & {
       s.dom.tag.classList.remove('shake')
       void s.dom.tag.offsetWidth
       s.dom.tag.classList.add('shake')
+      s.item.failed?.('fit', s.fit.why ?? "It can't go there")
       return
     }
     s.state = 'confirming'
@@ -1066,6 +1093,7 @@ export function placement(deps: PlaceDeps): Placement & {
         ? 'The house changed while you were placing this. Place it again?'
         : error instanceof ReadOnly ? error.reasons[0] : "Couldn't place it just now. Try again?"
       paint(s)
+      s.item.failed?.('save', s.message)
     }
   }
 
@@ -1184,10 +1212,21 @@ export function placement(deps: PlaceDeps): Placement & {
   function anchorFor(mount: Mount, p: Pose): Anchor {
     const plan = deps.plan()
     if (mount === 'wall') {
-      const wall = plan.walls.find((w) => w.id === p.wallId) ?? plan.walls[0]
-      const along = alongOf(plan, wall, p.x, p.z)
-      const roomId = p.roomId ?? roomsOf(plan, wall.id)[0]?.id ?? plan.rooms[0].id
-      return { mount, wallId: wall.id, roomId, along: round(along), height: round(p.y), spin: p.spin ?? 0 }
+      const given = plan.walls.find((w) => w.id === p.wallId)
+      if (given) {
+        const roomId = p.roomId ?? roomsOf(plan, given.id)[0]?.id ?? plan.rooms[0].id
+        return { mount, wallId: given.id, roomId, along: round(alongOf(plan, given, p.x, p.z)), height: round(p.y), spin: p.spin ?? 0 }
+      }
+      // No wall named (furnishing's first pose): the nearest face whose room the pose faces into.
+      let best: Extract<Anchor, { mount: 'wall' }> | null = null, bestD = Infinity
+      for (const wall of plan.walls) for (const r of roomsOf(plan, wall.id)) {
+        const along = alongOf(plan, wall, p.x, p.z)
+        const f = faceOf(plan, wall.id, r.id, along)
+        if (!f || f.inward[0] * Math.sin(p.yaw) + f.inward[1] * Math.cos(p.yaw) < 0.7) continue
+        const d = Math.hypot(f.point[0] - p.x, f.point[1] - p.z)
+        if (d < bestD) [best, bestD] = [{ mount, wallId: wall.id, roomId: r.id, along: round(along), height: round(p.y), spin: p.spin ?? 0 }, d]
+      }
+      return best ?? { mount, wallId: plan.walls[0].id, roomId: roomsOf(plan, plan.walls[0].id)[0]?.id ?? plan.rooms[0].id, along: round(alongOf(plan, plan.walls[0], p.x, p.z)), height: round(p.y), spin: p.spin ?? 0 }
     }
     if (mount === 'surface') return { mount, x: round(p.x), y: round(p.y), z: round(p.z), yaw: p.yaw }
     return { mount, x: round(p.x), z: round(p.z), yaw: p.yaw }
@@ -1207,6 +1246,7 @@ function css() {
   .place-tag.bad .hint { color: #a63c2c; font-weight: 600; }
   .place-tag kbd { display: inline-block; min-width: 1.35em; margin: 0 2px; padding: 0 4px 1px; border-radius: 5px; font: 700 14px/1.35 ui-rounded, system-ui, sans-serif;
     text-align: center; color: #4a3428; background: #fffaf0; border: 1px solid rgba(122, 82, 54, 0.45); box-shadow: 0 1.5px 0 rgba(122, 82, 54, 0.45); font-style: normal; }
+  .place-tag button[hidden] { display: none; }
   .place-tag .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; position: relative; z-index: 1; }
   .place-tag.docked { left: 12px; right: 12px; top: auto; bottom: calc(14px + env(safe-area-inset-bottom)); max-width: none; transform: none; rotate: -0.6deg;
     grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 14px 16px 14px 20px; }
