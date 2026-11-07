@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import {
-  color as color3, diffuseColor, float, length, luminance, mix, mrt, normalView, output, packNormalToRGB, pass, pow,
-  renderOutput, sample, smoothstep, step, uniform, unpackRGBToNormal, uv, vec3, vec4, velocity,
+  color as color3, diffuseColor, float, length, luminance, metalness, mix, mrt, normalView, output, packNormalToRGB, pass, pow,
+  renderOutput, roughness, sample, smoothstep, step, uniform, unpackRGBToNormal, uv, vec2, vec3, vec4, velocity,
 } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { film } from 'three/addons/tsl/display/FilmNode.js'
@@ -9,6 +9,7 @@ import { fxaa } from 'three/addons/tsl/display/FXAANode.js'
 import { ao } from 'three/addons/tsl/display/GTAONode.js'
 import { traa } from 'three/addons/tsl/display/TRAANode.js'
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js'
+import { ssr } from 'three/addons/tsl/display/SSRNode.js'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { theme } from '../theme'
@@ -32,14 +33,20 @@ export default {
     const gi = fx.has('ssgi')
     // TRAA reprojects jittered frames and needs MSAA off; SSGI's denoising is temporal too.
     const temporal = fx.has('traa') || gi
+    // A theme's reflections (a wet floor) ride on a tier that already renders an MRT
+    // without MSAA; the low tier keeps its single colour target and goes without.
+    const reflect = temporal && look.reflect ? look.reflect : null
     const scenePass = pass(stage.scene, stage.camera, temporal ? { samples: 0 } : {})
     if (gtao || temporal) {
       scenePass.setMRT(mrt({
         output,
         ...(gi ? { diffuseColor } : {}),
-        ...(gtao || gi ? { normal: packNormalToRGB(normalView) } : {}),
+        ...(gtao || gi || reflect ? { normal: packNormalToRGB(normalView) } : {}),
         ...(temporal ? { velocity } : {}),
+        ...(reflect ? { metalrough: vec2(metalness, roughness) } : {}),
       }))
+      // One 8-bit target for both, so five targets stay within WebGPU's 32 bytes per sample.
+      if (reflect) scenePass.getTexture('metalrough').type = THREE.UnsignedByteType
     }
     const disposables: Array<{ dispose(): void }> = [scenePass]
     const depth = scenePass.getTextureNode('depth')
@@ -47,7 +54,7 @@ export default {
     const fxContext: FxContext = { stage, scenePass, depth }
     for (const s of stages) s.scene?.(fxContext)
     const quiet = (key: 'bloom' | 'grain' | 'vignette') => stages.some((s) => s.quiet?.[key])
-    const normalTexture = gtao || gi ? scenePass.getTextureNode('normal') : null
+    const normalTexture = gtao || gi || reflect ? scenePass.getTextureNode('normal') : null
     const normal = normalTexture && sample((at) => unpackRGBToNormal(normalTexture.sample(at)))
 
     let color: THREE.Node<'vec4'> = scenePass.getTextureNode()
@@ -65,6 +72,18 @@ export default {
       disposables.push(aoPass)
       // Soften the occlusion so creases darken without dirtying the painted textures.
       color = scenePass.getTextureNode().mul(mix(float(1), aoPass.getTextureNode().r, 0.75))
+    }
+    if (reflect && normal) {
+      const mirror = ssr(scenePass.getTextureNode(), depth, normal, {
+        metalnessNode: scenePass.getTextureNode('metalrough').r,
+        roughnessNode: scenePass.getTextureNode('metalrough').g,
+        camera: stage.camera,
+      })
+      mirror.resolutionScale = reflect.resolutionScale
+      mirror.maxDistance.value = reflect.maxDistance
+      mirror.thickness.value = reflect.thickness
+      disposables.push(mirror)
+      color = vec4(color.rgb.add(mirror.getTextureNode().rgb.mul(reflect.strength)), 1)
     }
     if (temporal) {
       const resolved = traa(color, depth, scenePass.getTextureNode('velocity'), stage.camera)

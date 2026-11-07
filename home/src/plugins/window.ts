@@ -30,6 +30,7 @@ export default {
       color: '#efe4cf',
       roughness: 0.55,
     })
+    frameMat.userData.themeRole = 'trim'
     const bar = (bw: number, bh: number, x: number, y: number, d = 0.06) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat)
       m.position.set(x, y, WALL_Z - 0.09)

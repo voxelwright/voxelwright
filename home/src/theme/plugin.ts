@@ -2,16 +2,18 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { theme } from './index'
+import { PAINTERS } from './paint'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
+const SURFACE_ROLES: ReadonlySet<string> = new Set<SurfaceRole>(['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop'])
 
 interface LightBase { role: LightRole; color: THREE.Color; ground?: THREE.Color }
-interface MaterialBase { role: SurfaceRole; color?: THREE.Color; emissive?: THREE.Color; roughness?: number; metalness?: number }
+interface MaterialBase { role: SurfaceRole; color?: THREE.Color; emissive?: THREE.Color; roughness?: number; metalness?: number; map?: THREE.Texture | null }
 
 type Lit = THREE.Light & { groundColor?: THREE.Color; castShadow: boolean }
-type Painted = THREE.Material & { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity?: number; roughness?: number; metalness?: number }
+type Painted = THREE.Material & { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity?: number; roughness?: number; metalness?: number; map?: THREE.Texture | null }
 
 /** How often (frames) the scene is walked for lights and materials added since. */
 const RESCAN = 15
@@ -26,9 +28,9 @@ function lightRole(light: Lit): LightRole | null {
   return null
 }
 
-function surfaceRole(material: Painted, roles: Surfaces): SurfaceRole {
+function surfaceRole(material: Painted): SurfaceRole {
   const tagged = material.userData.themeRole
-  if (typeof tagged === 'string' && Object.hasOwn(roles, tagged)) return tagged as SurfaceRole
+  if (typeof tagged === 'string' && SURFACE_ROLES.has(tagged)) return tagged as SurfaceRole
   const e = material.emissive
   if (e && (e.r + e.g + e.b) > 0.01 && (material.emissiveIntensity ?? 1) > 0) return 'glow'
   return 'other'
@@ -58,6 +60,13 @@ export default {
     const lights = new WeakMap<THREE.Light, LightBase>()
     const materials = new WeakMap<THREE.Material, MaterialBase>()
     const fogs = new WeakMap<THREE.Fog, THREE.Color>()
+    // Textures painted for a theme's `paint`, one per painter, disposed on unload.
+    const painted = new Map<string, THREE.Texture>()
+    const paint = (name: string) => {
+      let tex = painted.get(name)
+      if (!tex && Object.hasOwn(PAINTERS, name)) painted.set(name, (tex = PAINTERS[name]()))
+      return tex
+    }
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
 
@@ -82,15 +91,29 @@ export default {
       let base = materials.get(m)
       if (base && !force) return
       if (!base) {
-        base = { role: surfaceRole(m, t.surfaces), color: m.color?.clone(), emissive: m.emissive?.clone(), roughness: m.roughness, metalness: m.metalness }
+        base = { role: surfaceRole(m), color: m.color?.clone(), emissive: m.emissive?.clone(), roughness: m.roughness, metalness: m.metalness, map: m.map }
         materials.set(m, base)
       }
-      const s: Surface = t.surfaces[base.role]
+      // Optional roles (trim, backdrop) read as `other` in a theme that leaves them out.
+      const s: Surface = t.surfaces[base.role] ?? t.surfaces.other
       if (base.role === 'glow') {
         if (base.emissive && m.emissive) shifted(base.emissive, s, m.emissive)
-      } else if (base.color && m.color) shifted(base.color, s, m.color)
+      } else {
+        if (base.color && m.color) shifted(base.color, s, m.color)
+        if (base.emissive && m.emissive) {
+          if (s.emissive) m.emissive.set(s.emissive).multiplyScalar(s.glow ?? 1)
+          else m.emissive.copy(base.emissive)
+        }
+      }
       if (base.roughness !== undefined) m.roughness = s.roughness ?? base.roughness
       if (base.metalness !== undefined) m.metalness = s.metalness ?? base.metalness
+      if (base.map) {
+        const map = (s.paint && paint(s.paint)) || base.map
+        if (m.map !== map) {
+          m.map = map
+          m.needsUpdate = true
+        }
+      }
     }
 
     const walk = (t: Theme, force: boolean) => {
@@ -133,11 +156,17 @@ export default {
           if (mb.emissive && m.emissive) m.emissive.copy(mb.emissive)
           if (mb.roughness !== undefined) m.roughness = mb.roughness
           if (mb.metalness !== undefined) m.metalness = mb.metalness
+          if (mb.map && m.map !== mb.map) {
+            m.map = mb.map
+            m.needsUpdate = true
+          }
         }
       })
       const fog = scene.fog
       if (fog instanceof THREE.Fog && fogs.has(fog)) fog.color.copy(fogs.get(fog)!)
       renderer.toneMappingExposure = exposure
+      for (const tex of painted.values()) tex.dispose()
+      painted.clear()
     }, 'theme')
   },
 }

@@ -34,6 +34,11 @@ export interface Lighting {
 export interface Surface extends Shift {
   roughness?: number
   metalness?: number
+  /** Makes a lit role glow: its emissive becomes this colour times `glow` (neon trim). Unset leaves the emissive alone. */
+  emissive?: Hex
+  glow?: number
+  /** Repaints the role's texture with a painter from ../paint.ts by name, e.g. 'night-city' for the view. */
+  paint?: string
 }
 
 export interface Surfaces {
@@ -49,6 +54,10 @@ export interface Surfaces {
   glow: Surface
   /** Everything else: furniture, props, villagers' felt, the yard. */
   other: Surface
+  /** Thin edges of the house: skirting, window frames, the dollhouse's wall caps (tagged `'trim'`). Falls back to `other`. */
+  trim?: Surface
+  /** The unlit painted ground beyond the house, the worktable in the dollhouse view (tagged `'backdrop'`). Falls back to `other`. */
+  backdrop?: Surface
 }
 
 /**
@@ -67,6 +76,8 @@ export interface Post {
   grade: { saturation: number; contrast: number; lift: [number, number, number] }
   /** Replace what is seen at the far plane (the backdrop beyond the room) with this colour. */
   sky?: Hex
+  /** Screen-space reflections on metallic surfaces (a wet floor), on tiers that render normals and velocity. */
+  reflect?: { maxDistance: number; thickness: number; resolutionScale: number; strength: number }
   /** Features this look turns off whatever the tier, e.g. 'traa' for a pixel look. */
   veto: string[]
   stages: Stage[]

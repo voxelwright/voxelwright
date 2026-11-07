@@ -45,6 +45,7 @@ export function shell(spec: Shell): THREE.Group {
   const group = new THREE.Group()
   group.name = 'diorama shell'
   const cut = new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 })
+  cut.userData.themeRole = 'trim'
   // Outer extents: walls stand outside the inner faces, the base runs under them.
   const ox0 = x0 - T, ox1 = x1 + T, oz0 = z0 - T, oz1 = z1 + T
 
@@ -242,6 +243,7 @@ export function yard(spec: Yard): THREE.Group {
   table.rotation.x = -Math.PI / 2
   table.position.set(cx, YARD_TOP - BOARD - 0.004, cz)
   table.name = 'worktable'
+  table.material.userData.themeRole = 'backdrop'
   group.add(table)
   group.add(contactShadow(w, d, cx, cz, YARD_TOP - BOARD + 0.001, 0.9))
 
