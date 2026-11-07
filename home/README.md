@@ -414,6 +414,16 @@ draw calls, 250,010 triangles, GPU p50 9.4, 8.1 and 8.0 ms, p95 13.2, 10.4 and
 the high tier's 13 ms step-down and 16 ms p95, so nothing was trimmed. The 16.6 ms
 above was the old measure.
 
+The seated view (the perf gate's `home` scene) drew 566 calls after the merge, 84 over
+main and past the gate's limit: the other room's merged furniture has bounds that
+reach the view and the sun's shadow box. Seated, meshes wholly past the shared
+wall's centre now hide until you walk (`rooms.ts`), the signs are one mesh each and
+the doorway casts no shadow there: 526 calls, as on the talk branch before the
+merge. CPU p50 against main measured +0.3 to +0.6 ms over four gate runs with 4 to 6
+other headless Chromes running (the limit is +0.5); the talk branch before the merge
+measured +0.2 in the same runs. Open: confirm on a quiet machine, and if it holds,
+trim about 0.2 ms of seated CPU.
+
 Checks: `node scripts/check-entries.mjs` (rewritten for glides) and
 `node scripts/check-navigation.mjs` (keys, the input rule, drag, pan, zoom,
 double-click, clamping, reduced motion, flicker). Demo:
