@@ -108,8 +108,13 @@ const open = async (query) => {
   await p.waitForFunction(() => window.village.sound, null, { timeout: 5000 })
   return p
 }
-const render = (p, plays, seconds, seed = 1, solo) =>
-  p.evaluate(async ([plays, seconds, seed, solo]) => window.village.sound.render(plays, seconds, seed, solo), [plays, seconds, seed, solo])
+// `pre` taps the master before the limiter: the limiter caps everything at -1 dBFS, so a level check after it could never fail.
+const render = (p, plays, seconds, seed = 1, solo, pre = true) =>
+  p.evaluate(async ([plays, seconds, seed, solo, pre]) => window.village.sound.render(plays, seconds, seed, solo, pre), [plays, seconds, seed, solo, pre])
+/** The limiter is linear below 0.6 (-4.4 dBFS): under it, the limiter never touches a sound. */
+const LINEAR_DBFS = 20 * Math.log10(0.6)
+/** Each bus's loudness over a minute of use stays this far under the villagers' voices (about -29 LUFS short-term). */
+const BUS_LUFS_MAX = -32
 
 // ── the map and the palette ─────────────────────────────────────────────────
 const contract = readFileSync(join(here, '../src/sound/contract.ts'), 'utf8')
@@ -139,7 +144,7 @@ for (const [cue, variants] of Object.entries(meta.cues)) {
 }
 const silent = Object.entries(report.cues).filter(([, v]) => !(v.peakDbfs > -80)).map(([k]) => k)
 check('Every cue makes a sound offline (peak above -80 dBFS)', !silent.length, silent.join(', ') || `${Object.keys(report.cues).length} cue variants`)
-check('No cue clips at the master: peak under -1 dBFS', worstPeak < -1, `loudest ${worstPeak.toFixed(1)} dBFS`)
+check('No cue reaches the limiter: peak before it under -4.4 dBFS', worstPeak < LINEAR_DBFS, `loudest ${worstPeak.toFixed(1)} dBFS`)
 
 // ── offline: a minute of use, per bus ───────────────────────────────────────
 // A scripted minute: looking around, choosing things, writing two notes, the journal, a walk.
@@ -172,7 +177,8 @@ report.minute = { plays: minute.length }
     const r = await render(page, minute, 60, 7, bus)
     report.minute[`${bus}Lufs`] = +lufs(r.channels.map(decode)).toFixed(1)
   }
-  check('A minute of use stays under -1 dBFS at the master', report.minute.masterPeakDbfs < -1, `${report.minute.masterPeakDbfs} dBFS, ${report.minute.masterLufs} LUFS`)
+  check('A minute of use never reaches the limiter (peak before it under -4.4 dBFS)', report.minute.masterPeakDbfs < LINEAR_DBFS, `${report.minute.masterPeakDbfs} dBFS, ${report.minute.masterLufs} LUFS`)
+  check(`Each bus over the minute stays under ${BUS_LUFS_MAX} LUFS, below the voices`, report.minute.uiLufs < BUS_LUFS_MAX && report.minute.worldLufs < BUS_LUFS_MAX, `ui ${report.minute.uiLufs}, world ${report.minute.worldLufs} LUFS`)
   check('Rendering costs under 50 ms per audio second (offline, the whole mix)', report.minute.renderMsPerAudioSecond < 50, `${report.minute.renderMsPerAudioSecond} ms/s`)
 }
 

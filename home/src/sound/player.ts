@@ -77,16 +77,26 @@ export class Player {
     return [...names]
   }
 
-  /** Fetch and decode every sample (after the first gesture, never on first play). A sample that fails stays missing. */
+  /**
+   * Fetch and decode every sample (after the first gesture, never on first play). A sample
+   * that fails is tried again after 2 and 8 s (a dropped connection on a phone), then stays
+   * missing; its cue plays its synthesized stand-in meanwhile.
+   */
   load(base: string): Promise<void> {
+    const once = async (name: string) => {
+      const response = await fetch(`${base}${name}`)
+      if (!response.ok) throw new Error(`${response.status}`)
+      this.samples.set(name, await this.audio.decodeAudioData(await response.arrayBuffer()))
+    }
     this.loading ??= Promise.all(
       this.sampleNames().map(async (name) => {
-        try {
-          const response = await fetch(`${base}${name}`)
-          if (!response.ok) throw new Error(`${response.status}`)
-          this.samples.set(name, await this.audio.decodeAudioData(await response.arrayBuffer()))
-        } catch (error) {
-          console.warn(`sound: could not load ${name}`, error)
+        for (const wait of [0, 2000, 8000]) {
+          if (wait) await new Promise((r) => setTimeout(r, wait))
+          try {
+            return await once(name)
+          } catch (error) {
+            if (wait === 8000) console.warn(`sound: could not load ${name}`, error)
+          }
         }
       }),
     ).then(() => undefined)
@@ -126,13 +136,19 @@ export interface OfflinePlay extends PlayOptions { cue: CueName; t: number }
 
 /**
  * Render plays offline through the same bus, master and limiter chain, at 48 kHz stereo.
- * `solo` keeps one bus and silences the others, for per-bus loudness.
+ * `solo` keeps one bus and silences the others, for per-bus loudness (the shared room's tail
+ * joins at the master, so it stays in every solo). `pre` taps the master before the limiter,
+ * so a check can see a level the limiter would hide.
  */
-export async function renderOffline(palette: Palette, plays: OfflinePlay[], seconds: number, seed = 1, opts: { solo?: BusName; base?: string } = {}) {
+export async function renderOffline(palette: Palette, plays: OfflinePlay[], seconds: number, seed = 1, opts: { solo?: BusName; base?: string; pre?: boolean } = {}) {
   const off = new OfflineAudioContext(2, Math.ceil(seconds * 48000), 48000)
   const player = new Player(off, palette, seed)
   const mix = mixFor(off)
   mix.setMuted(false, 0)
+  if (opts.pre) {
+    mix.output.disconnect()
+    mix.master.connect(off.destination)
+  }
   if (opts.solo) for (const [name, bus] of Object.entries(mix.buses)) bus.gain.value = name === opts.solo ? 1 : 0
   if (opts.base) await player.load(opts.base)
   for (const p of plays) player.play(p.cue, { ...p, at: p.t })

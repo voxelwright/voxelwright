@@ -693,8 +693,13 @@ export default {
         quietLeave = false
       }
       m.v.thinking = m.v.speaking = false
+      // The chair sound lands with the hop, after the walk to the table (#52).
+      m.v.onHop = (onto) => {
+        if (!onto) return
+        m.v.onHop = undefined
+        ctx.emit('village/sat', { villager: m.person, seconds: 0.7, at: { x: SPOTS[seat].seat!.x, y: SEAT_Y, z: SPOTS[seat].seat!.z } })
+      }
       m.v.sendTo(seat)
-      ctx.emit('village/sat', { villager: m.person, seconds: 0.7, at: { x: SPOTS[seat].seat!.x, y: SEAT_Y, z: SPOTS[seat].seat!.z } })
       speak(m, 'Coming!')
       setTimeout(() => showing.get(m) && m.card.text === 'Coming!' && hide(m), 1600)
       toTable()
@@ -704,6 +709,7 @@ export default {
       if (seated.length) ctx.emit('village/farewell', { villagers: seated.map((m) => m.person) })
       for (const m of seated) {
         m.seat = null
+        m.v.onHop = undefined
         m.v.release(0.3 + Math.random() * 0.6)
         m.v.speaking = m.v.thinking = false
         m.v.listenTo = null

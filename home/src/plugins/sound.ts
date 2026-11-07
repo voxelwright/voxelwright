@@ -55,7 +55,9 @@ const CSS = `
 function readPicks(): Partial<Record<CueName, string>> {
   let picks: Partial<Record<CueName, string>> = {}
   try {
-    picks = JSON.parse(localStorage.getItem(PICKS) ?? '{}') ?? {}
+    const stored: unknown = JSON.parse(localStorage.getItem(PICKS) ?? '{}')
+    // Only a plain object of picks: a stored number or list is ignored, not written into.
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) picks = stored as typeof picks
   } catch {
     // No storage, or not JSON: no stored picks.
   }
@@ -173,6 +175,12 @@ export default {
         note.remove()
         style.remove()
         player = null
+        // The voices or the music may stay loaded without this plugin's button and `M`: never
+        // leave them silenced with no way back. The stored choice is kept for the next load.
+        if (muted) {
+          if (shared?.context) mixFor(shared.context).setMuted(false)
+          ctx.emit('village/muted', { muted: false })
+        }
         shared?.release()
         shared = null
       }
@@ -204,8 +212,8 @@ export default {
         get log() { return player?.log ?? [] },
         get handled() { return handled },
         play: (name, variant, opts = {}) => play(name, { ...opts, variant }),
-        async render(plays, seconds, seed = 1, solo) {
-          const r = await renderOffline(PALETTE, plays, seconds, seed, { solo, base: SFX })
+        async render(plays, seconds, seed = 1, solo, pre = false) {
+          const r = await renderOffline(PALETTE, plays, seconds, seed, { solo, base: SFX, pre })
           return { channels: r.channels.map(b64), ms: r.ms }
         },
       }

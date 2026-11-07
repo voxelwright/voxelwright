@@ -85,7 +85,7 @@ try {
   })
   check('After a reload the page shows the saved picks (round 1 and 2) and note', restored)
 
-  const post = (body, headers = {}) => page.evaluate(([body, headers]) => fetch('sound-lab/picks', { method: 'POST', headers, body }).then((r) => r.status), [body, headers])
+  const post = (body, headers = { 'content-type': 'application/json' }) => page.evaluate(([body, headers]) => fetch('sound-lab/picks', { method: 'POST', headers, body }).then((r) => r.status), [body, headers])
   const refused = {
     unknownCue: await post(JSON.stringify({ picks: { nope: 'a' } })),
     unknownVariant: await post(JSON.stringify({ picks: { chose: 'z' } })),
@@ -93,8 +93,12 @@ try {
     changeOnRound2Cue: await post(JSON.stringify({ picks: { hover: 'change' } })),
     longNote: await post(JSON.stringify({ notes: { chose: 'x'.repeat(2000) } })),
     notJson: await post('{'),
+    inherited: await post('{"picks":{"__proto__":"keep"},"notes":{"constructor":"x"}}'),
+    empty: await post('{}'),
+    array: await post('[]'),
+    notJsonType: await post(JSON.stringify({ picks: { chose: 'a' } }), { 'content-type': 'text/plain' }),
   }
-  check('Bad picks are refused (422 or 400) and leave picks.json alone', Object.values(refused).every((s) => s === 422 || s === 400) && JSON.parse(readFileSync(join(lab, 'picks.json'), 'utf8')).picks.farewell === 'c', JSON.stringify(refused))
+  check('Bad picks are refused (422, 400, or 415 for a non-JSON type) and leave picks.json alone', Object.entries(refused).every(([k, s]) => (k === 'notJsonType' ? s === 415 : s === 422 || s === 400)) && JSON.parse(readFileSync(join(lab, 'picks.json'), 'utf8')).picks.farewell === 'c', JSON.stringify(refused))
 
   // The videos the page offers exist. They live in public/sound-lab/ (gitignored, made
   // locally), so a fresh worktree has no manifest: then the check is skipped, not failed. The

@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { build, defineConfig, type Plugin } from 'vite'
@@ -79,18 +79,21 @@ const readBody = (req: IncomingMessage) =>
 
 /** The picks as sent, or the reason they are not acceptable. */
 function checkPicks(body: unknown, palette: Record<string, Record<string, unknown>>): { picks: Record<string, string>; notes: Record<string, string> } | string {
-  if (!body || typeof body !== 'object') return 'not an object'
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not an object'
   const { picks = {}, notes = {} } = body as Record<string, unknown>
   if (!picks || typeof picks !== 'object' || Array.isArray(picks)) return 'picks must be an object'
   if (!notes || typeof notes !== 'object' || Array.isArray(notes)) return 'notes must be an object'
+  // An empty round would overwrite the saved picks with nothing.
+  if (!Object.keys(picks).length && !Object.keys(notes).length) return 'no picks or notes'
   for (const [cue, value] of Object.entries(picks)) {
-    const variants = palette[cue]
+    // Own keys only: "__proto__" or "constructor" are not cues.
+    const variants = Object.hasOwn(palette, cue) ? palette[cue] : undefined
     if (!variants) return `unknown cue ${cue}`
     const allowed = Object.keys(variants).length > 1 ? [...Object.keys(variants), 'none'] : ['keep', 'change']
     if (typeof value !== 'string' || !allowed.includes(value)) return `${cue}: ${String(value)} is not one of ${allowed.join(', ')}`
   }
   for (const [cue, text] of Object.entries(notes)) {
-    if (!palette[cue]) return `unknown cue ${cue}`
+    if (!Object.hasOwn(palette, cue)) return `unknown cue ${cue}`
     if (typeof text !== 'string' || text.length >= NOTE_MAX) return `${cue}: a note must be text under ${NOTE_MAX} characters`
   }
   return { picks: picks as Record<string, string>, notes: notes as Record<string, string> }
@@ -120,6 +123,23 @@ const soundLab: Plugin = {
         res.statusCode = 405
         return res.end()
       }
+      // JSON only: a cross-site page cannot send application/json without a CORS preflight,
+      // which this server never answers, so a browser without Sec-Fetch-Site is covered too.
+      if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+        res.statusCode = 415
+        return res.end(JSON.stringify({ error: 'send application/json' }))
+      }
+      try {
+        await savePicks(req, res)
+      } catch (error) {
+        // Connect ignores a rejected promise: answer here, or the request hangs and Node may exit.
+        console.warn('sound-lab: could not save picks', error)
+        if (!res.headersSent) res.statusCode = 500
+        res.end(JSON.stringify({ error: 'could not save picks' }))
+      }
+    })
+    async function savePicks(req: IncomingMessage, res: ServerResponse) {
+      const file = join(LAB, 'picks.json')
       let body: unknown
       try {
         body = JSON.parse(await readBody(req))
@@ -138,7 +158,7 @@ const soundLab: Plugin = {
       await writeFile(file, `${JSON.stringify(round, null, 2)}\n`)
       await appendFile(join(LAB, 'history.jsonl'), `${JSON.stringify(round)}\n`)
       res.end(JSON.stringify(round))
-    })
+    }
   },
 }
 

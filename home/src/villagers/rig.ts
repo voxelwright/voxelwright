@@ -79,6 +79,8 @@ export class Villager {
   attending = false
   /** Called when a chore at a spot is finished, before moving on. */
   onDone?: (spot: string) => void
+  /** Called as a hop onto (true) or off (false) a seat starts; it lands 0.7 s later (#52 sound). */
+  onHop?: (onto: boolean) => void
   /** Gait phase in cycles, and the blends the pose reads. */
   phase = 0
   walk = 0
@@ -243,6 +245,7 @@ export class Villager {
     const yaw1 = onto ? seat.yaw : s.face
     this.hop = { from: this.pos.clone(), to, yaw0: this.yaw, yaw1: this.yaw + wrap(yaw1 - this.yaw), u: 0, onto }
     this.state = 'hop'
+    this.onHop?.(onto)
   }
 
   update(dt: number, t: number, camera: THREE.Vector3) {
