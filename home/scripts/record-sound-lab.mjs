@@ -12,7 +12,7 @@
 // (dev server running, 5491 by default; ffmpeg and ffprobe on PATH). Exits non-zero on a failed check.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -253,10 +253,12 @@ for (const clip of CLIPS) {
   const { stderr } = spawnSync('ffmpeg', ['-hide_banner', '-i', rec.webm, '-vf', 'blackdetect=d=0.1:pix_th=0.05', '-an', '-f', 'null', '-'], { encoding: 'utf8' })
   const blackEnd = Number(/black_end:([\d.]+)/.exec(stderr)?.[1] ?? NaN)
   if (!Number.isFinite(blackEnd)) throw new Error(`${clip.cue}: no black cover found in the video`)
-  const plays = await playsOf(render, rec)
+  // A clip longer than 8 s (slow typing on a busy machine) loses its start, not its end.
+  const skip = Math.max(0, rec.seconds - 8)
+  const plays = (await playsOf(render, rec)).map((p) => ({ ...p, t: p.t - skip })).filter((p) => p.t >= 0)
   if (process.env.DEBUG) console.log(JSON.stringify({ t0: rec.t0, log: rec.log.slice(-8), events: rec.events.slice(-8).map((e) => [e.name, e.t]) }))
-  const said = rec.said.filter((s) => s.t >= rec.t0 - 0.5).map((s) => ({ ...s, t: s.t - rec.t0 }))
-  const seconds = Math.min(8, rec.seconds)
+  const said = rec.said.filter((s) => s.t >= rec.t0 - 0.5).map((s) => ({ ...s, t: s.t - rec.t0 - skip }))
+  const seconds = rec.seconds - skip
   const target = plays.find((p) => p.cue === clip.cue)
   if (!target) throw new Error(`${clip.cue}: the interaction did not play ${clip.cue} (played ${plays.map((p) => p.cue).join(' ') || 'nothing'})`)
   // The first cue on its own (no music or voices), to find its onset exactly.
@@ -272,7 +274,7 @@ for (const clip of CLIPS) {
     wav(wavPath, chs)
     heardOnce.add(createHash('sha1').update(chs[0]).update(chs[1]).digest('hex'))
     const mp4 = join(out, `${clip.cue}-${variant}.mp4`)
-    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(blackEnd), '-i', rec.webm, '-i', wavPath, '-t', String(seconds),
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(blackEnd + skip), '-i', rec.webm, '-i', wavPath, '-t', String(seconds),
       '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-crf', '24', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', mp4])
     const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', mp4], { encoding: 'utf8' }))
     const hasAudio = probe.streams.some((s) => s.codec_type === 'audio' && s.codec_name === 'aac')
@@ -292,6 +294,9 @@ for (const clip of CLIPS) {
   console.log(`${clip.cue}: cover ends at ${blackEnd.toFixed(2)} s in the webm; played ${entry.played.join(' ')}; music ${rec.music}, voices ${entry.voices}`)
 }
 await browser.close()
+// --only re-records some clips and keeps the others' entries.
+const before = only && existsSync(join(out, 'manifest.json')) ? JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')).clips : []
+manifest.clips = CLIPS.map((c) => manifest.clips.find((x) => x.cue === c.cue) ?? before.find((x) => x.cue === c.cue)).filter(Boolean)
 writeFileSync(join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 rmSync(work, { recursive: true, force: true })
 if (errors.length) checks.push({ name: 'No page errors', pass: false, detail: errors.join(' | ') })
@@ -299,3 +304,4 @@ const total = readdirSync(out).filter((f) => f.endsWith('.mp4')).reduce((n, f) =
 for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}  (${c.detail})`)
 console.log(`\n${checks.filter((c) => c.pass).length}/${checks.length} pass; ${manifest.clips.length} clips, ${(total / 1048576).toFixed(1)} MB in public/sound-lab/`)
 process.exit(checks.every((c) => c.pass) ? 0 : 1)
+

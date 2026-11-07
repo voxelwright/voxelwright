@@ -20,7 +20,9 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+page.on('console', (m) => m.type() === 'error' && !m.text().startsWith('Failed to load resource') && errors.push(m.text()))
+// Failed requests by URL; the deliberate bad POSTs below are not errors.
+page.on('response', (r) => r.status() >= 400 && !(r.request().method() === 'POST' && r.url().endsWith('/sound-lab/picks')) && errors.push(`${r.status()} ${r.url()}`))
 try {
   await page.goto(`${base}sound-lab.html`)
   await page.click('#start')
