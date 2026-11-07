@@ -189,8 +189,9 @@ class Card {
   private count = 0
   /** Cut short: no more words are announced until fresh words start. */
   private muted = false
+  private page = 0
 
-  constructor(m: { name: string; colour: string; person: string }, private onWord: (word: string, index: number, last: boolean) => void, private onStop: () => void) {
+  constructor(m: { name: string; colour: string; person: string }, private onWord: (word: string, index: number, last: boolean) => void, private onStop: () => void, private onPage: (page: number) => void = () => {}) {
     this.el.className = 'talk-card'
     this.el.dataset.talkCard = m.person
     this.el.style.setProperty('--c', m.colour)
@@ -235,7 +236,7 @@ class Card {
     this.stop()
     this.muted = false
     this.el.classList.remove('beat')
-    this.count = this.told = 0
+    this.count = this.told = this.page = 0
     this.full = this.paged = ''
     this.from = this.shown = this.end = this.visible = 0
     this.said.textContent = ''
@@ -296,6 +297,7 @@ class Card {
   next() {
     this.reading = 0
     if (this.end >= this.full.length) return
+    this.onPage(++this.page)
     this.before.textContent = this.full.slice(this.from, this.end).trim()
     this.before.title = this.before.textContent
     this.before.hidden = false
@@ -379,7 +381,8 @@ export default {
       const m: Member = { ...p, name, role, entry: `villager-${p.person}`, v, seat: null, news: null, looked: 0, glyph, card: null!, tag: document.createElement('div'), fade: 1, glow: 0, mats }
       m.card = new Card(m,
         (word, index, last) => ctx.emit('village/said', { villager: p.person, word, index, last }),
-        () => ctx.emit('village/said-stop', { villager: p.person }))
+        () => ctx.emit('village/said-stop', { villager: p.person }),
+        (page) => ctx.emit('village/card', { villager: p.person, page, at: v.fig.head.getWorldPosition(new THREE.Vector3()) }))
       m.tag = nameTag(name, p.owner, p.colour)
       m.tag.classList.add('talk-tag')
       v.onDone = (spot) => {
@@ -491,6 +494,7 @@ export default {
       m.card.reset()
       m.card.set(text, done)
       show(m, 'speaking')
+      ctx.emit('village/card', { villager: m.person, page: 0, at: m.v.fig.head.getWorldPosition(new THREE.Vector3()) })
     }
     /** Suggestions already said, or whose topic the person already wrote about, per villager or for the table. */
     const used = new Set<string>()
@@ -620,6 +624,7 @@ export default {
       mode = 'talk'
       m.v.chosen = true
       m.v.beat()
+      ctx.emit('village/turned', { villager: m.person, at: m.v.fig.head.getWorldPosition(new THREE.Vector3()) })
       for (const o of showing.keys()) if (o !== m) hide(o)
       mine.classList.remove('shown')
       view.focus(twoShot(m), 7)
@@ -681,12 +686,14 @@ export default {
       }
       m.v.thinking = m.v.speaking = false
       m.v.sendTo(seat)
+      ctx.emit('village/sat', { villager: m.person, seconds: 0.7, at: { x: SPOTS[seat].seat!.x, y: SEAT_Y, z: SPOTS[seat].seat!.z } })
       speak(m, 'Coming!')
       setTimeout(() => showing.get(m) && m.card.text === 'Coming!' && hide(m), 1600)
       toTable()
     }
 
     const leaveTable = () => {
+      if (seated.length) ctx.emit('village/farewell', { villagers: seated.map((m) => m.person) })
       for (const m of seated) {
         m.seat = null
         m.v.release(0.3 + Math.random() * 0.6)
@@ -955,6 +962,7 @@ export default {
       m.news = NEWS[m.person] ?? 'I finished up. Nothing urgent.'
       m.looked = 0
       m.glyph.visible = true
+      ctx.emit('village/news', { villager: m.person, at: m.glyph.getWorldPosition(new THREE.Vector3()) })
     }
     const clearNews = (m: Member) => {
       told.add(m.person)
@@ -1170,7 +1178,8 @@ export default {
       if (entries.hovered !== hovered) {
         hovered = entries.hovered
         document.body.classList.toggle('talk-hovering', mode === 'room' && cast.some((m) => m.entry === hovered))
-        if (mode === 'room') cast.find((m) => m.entry === hovered)?.v.greet()
+        const greeter = mode === 'room' ? cast.find((m) => m.entry === hovered) : undefined
+        if (greeter) greeter.v.greet(), ctx.emit('village/greeted', { villager: greeter.person, at: greeter.v.fig.head.getWorldPosition(new THREE.Vector3()) })
       }
       stage.camera.getWorldPosition(eye)
       // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
@@ -1264,7 +1273,7 @@ export default {
     let routingText = ''
     /** Whom you last talked with: J opens the journal at their pages. */
     let lastTalked: Member | null = null
-    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text) }) : null
+    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text), emit: ctx.emit.bind(ctx) }) : null
     const input = INPUT ? alwaysOn(stage, entries, {
       variant: INPUT,
       journal: 'notebook',
@@ -1285,6 +1294,7 @@ export default {
       blocked: () => entries.active === 'notebook',
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
+      emit: ctx.emit.bind(ctx),
     }) : null
     ctx.effect(() => () => {
       input?.dispose()
@@ -1348,6 +1358,7 @@ export default {
 
     const didNotRoute = (text: string, guess: ReturnType<NonNullable<typeof furnish>['hint']>, why: string) => {
       const me = primary()
+      ctx.emit('village/routed', { route: 'none', ok: false })
       furnish!.dismiss(guess)
       keep(me.person, text)
       restoreLine(text)
@@ -1358,6 +1369,7 @@ export default {
     const act = async (routed: Routed, text: string, t0: number, guess: ReturnType<NonNullable<typeof furnish>['hint']>) => {
       const me = primary()
       const to = cast.find((m) => m.person === routed.to)
+      ctx.emit('village/routed', { route: routed.route, ok: true, villager: routed.to, at: to?.v.fig.head.getWorldPosition(new THREE.Vector3()) })
       switch (routed.route) {
         case 'talk':
           furnish!.dismiss(guess)

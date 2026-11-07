@@ -15,6 +15,7 @@
 // Both keep a tiny felt journal beside the input: one click (or J) opens the journal.
 // Keys reach this file only through `key(e)`, called from talk.ts's one keyboard path.
 import * as THREE from 'three/webgpu'
+import type { Context } from 'cordis'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
@@ -52,6 +53,8 @@ export interface InputHooks {
   journal: string
   /** Open the journal where it makes sense (the last conversation). */
   openJournal(): void
+  /** Announce what happened (sound/contract.ts): the pad, the writing, the send. */
+  emit: Context['emit']
 }
 
 export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
@@ -339,6 +342,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   /** Raised for writing: the field has the keyboard, or words are on the pad. */
   const writing = () => document.activeElement === field || text.length > 0
   const onInput = () => {
+    const added = field.value.length - text.length
+    if (added) hooks.emit('village/wrote', { added })
     text = field.value
     caretOn = true
     blink = 0
@@ -394,6 +399,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       requestAnimationFrame(() => requestAnimationFrame(() => ghost.classList.add('go')))
       setTimeout(() => ghost.remove(), 750)
     }
+    hooks.emit('village/sent', { seconds: reducedMotion.matches || !target ? 0 : hooks.variant === 'held' ? 1.25 : 0.75, at: target ?? undefined })
+    text = '' // the line left with the note: clearing the field is not writing
     field.value = ''
     onInput()
     hint.hidden = true
@@ -432,6 +439,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   let lift = 0
   /** 0 at rest, tucked small at the bottom edge; 1 raised to writing size. */
   let raise = 0
+  let padUp = false
   const screenBox = (o: THREE.Object3D) => {
     o.updateWorldMatrix(true, true)
     const box = new THREE.Box3().setFromObject(o)
@@ -462,6 +470,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     // Breathing, as a held thing does; it rises to writing size while you write and settles after.
     const ease = (goal: number, rate: number, v: number) => reducedMotion.matches ? goal : v + (goal - v) * (1 - Math.exp(-dt * rate))
     raise = ease(writing() ? 1 : 0, 9, raise)
+    if (writing() !== padUp) hooks.emit('village/pad', { up: (padUp = writing()) })
     lift = ease(text ? 1 : 0, 6, lift)
     const breathe = reducedMotion.matches ? 0 : Math.sin(t * 1.3) * 0.006
     // At rest about a third of its writing size, and mostly below the edge: only its top line, "to Dumpling", shows.

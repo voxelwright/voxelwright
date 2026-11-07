@@ -192,6 +192,8 @@ export default {
 
     ctx.provide('view', {
       focus(pose: Pose | null, speed = 3.2) {
+        // About 1 s at the default rate, 0.4 s at 7 (the ease is exponential); instant under reduced motion.
+        if (pose || target) ctx.emit('village/glide', { seconds: reducedMotion.matches ? 0 : 3.2 / speed, to: pose?.look })
         rate = speed
         if (pose) {
           last.position.copy(pose.position)

@@ -748,6 +748,7 @@ export default {
       writeJson(AT_KEY, { villager: v().id, section })
       focus = -1
       if (JSON.stringify([before.left, before.right, before.vi, before.section]) === JSON.stringify([leftView(), rightView(), vi, section])) return
+      if (open) ctx.emit('village/page', { leaves: n, dir, seconds: reducedMotion.matches ? 0 : TURN + STAGGER * (n - 1) })
       if (reducedMotion.matches || !open) {
         dirty = true
         return
@@ -966,6 +967,7 @@ export default {
     const enter = () => {
       if (open) return
       open = true
+      ctx.emit('village/book', { open: true, seconds: reducedMotion.matches ? 0 : 0.7 })
       if (JOURNAL && !talking) {
         saidBy.clear()
         void loadHistory()
@@ -981,6 +983,7 @@ export default {
     const leave = () => {
       if (!open) return
       open = false
+      ctx.emit('village/book', { open: false, seconds: reducedMotion.matches ? 0 : 0.7 })
       focus = -1
       input.blur()
       view.focus(null)

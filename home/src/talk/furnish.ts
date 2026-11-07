@@ -6,6 +6,7 @@
 // failure leaves nothing placed. Too-big things become projects: a wrapped parcel
 // with a stitched "being made" tag where they will go.
 import * as THREE from 'three/webgpu'
+import type { Context } from 'cordis'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
@@ -73,9 +74,12 @@ export interface FurnishHooks {
   person: string
   /** Your villager's name, who makes things. */
   maker: string
+  /** Announce what happened (sound/contract.ts). */
+  emit: Context['emit']
 }
 
 export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
+  const announce = (state: 'ghost' | 'placed' | 'kept' | 'undone' | 'failed', at?: Placement) => hooks.emit('village/furnish', { state, at })
   const group = new THREE.Group()
   group.name = 'talk furnishing'
   stage.scene.add(group)
@@ -188,6 +192,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const j: Job = { text, t0, routed: null, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
     job = j
     j.ghosts = list.map((p) => ghost(sizeOf(what), p))
+    announce('ghost', list[0])
     j.timing.ghostMs = performance.now() - t0
     showMaking(j)
     return j
@@ -245,6 +250,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const fail = (j: Job, why: string, line: string) => {
     choice.classList.remove('shown', 'busy')
     j.state = 'gone'
+    announce('failed', j.places[0])
     j.timing.ok = false
     j.timing.why = why
     clearGhosts(j)
@@ -267,6 +273,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       if (job?.state === 'placed') keep()
       j = { text, t0, routed, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
       job = j
+      announce('ghost', list[0])
     }
     j.routed = routed
     // The route knows better than the guess: re-place the ghosts at the right size and places.
@@ -346,6 +353,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     })
     j.grow = reducedMotion.matches ? 1 : 0
     j.state = 'placed'
+    announce('placed', j.places[0])
     lastPlaced = j.props[0]
     j.timing.ok = true
     j.timing.finalMs = performance.now() - j.t0
@@ -372,6 +380,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const j = job
     if (!j || j.state !== 'placed') return
     j.state = 'kept'
+    announce('kept', j.places[0])
     choice.classList.remove('shown')
     if (j.item && j.timing.source === 'made') void keepItem(hooks.person, j.item)
     job = null
@@ -386,6 +395,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     }
     j.hidden = []
     j.state = 'gone'
+    announce('undone', j.places[0])
     choice.classList.remove('shown')
     job = null
   }
@@ -401,6 +411,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.t0 = performance.now()
     j.timing = { text: `${j.text} (take ${j.variant + 1})`, ok: false, route: 'furnish' }
     j.ghosts = j.places.map((p) => ghost(sizeOf(j.routed!.what ?? '', j.routed!.size), p))
+    announce('ghost', j.places[0])
     j.ghostFade = 1
     j.timing.ghostMs = performance.now() - j.t0
     await realise(j)

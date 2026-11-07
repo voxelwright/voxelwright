@@ -162,6 +162,7 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           ctx.entries.back()
           ctx.entries.say(null)
           // Walk towards the door; the fade starts on the last part of the walk.
+          ctx.emit('village/walk', { phase: 'leave', from, to: name, seconds: reducedMotion.matches ? 0 : WALK, at: doorway.look })
           const walk = view.travel(doorway, WALK)
           if (!reducedMotion.matches) await new Promise((r) => setTimeout(r, WALK * 600))
           await fade(true)
@@ -176,6 +177,7 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           await frames(1)
           ctx.entries.sort()
           const t2 = performance.now()
+          ctx.emit('village/walk', { phase: 'arrive', from, to: name, seconds: reducedMotion.matches ? 0 : WALK })
           const walkIn = view.travel(PLANS[name].home, WALK)
           await fade(false)
           await walkIn

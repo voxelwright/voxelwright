@@ -46,6 +46,7 @@ export default {
       label: 'Workshop',
       object: workshop,
       select() {
+        ctx.emit('village/refused', { id: 'workshop', at: workshop.getWorldPosition(new THREE.Vector3()) })
         view.focus(atDoor)
         entries.say('The workshop door is closed for now. It opens later')
       },

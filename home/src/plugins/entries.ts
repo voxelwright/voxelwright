@@ -127,6 +127,7 @@ export default {
     const setHover = (next: Live | null) => {
       if (next === hovered) return
       hovered = next
+      if (next) ctx.emit('village/hover', { id: next.id, at: center(next) })
       if (next) label.textContent = next.label
       label.classList.toggle('shown', Boolean(next))
     }
@@ -151,12 +152,14 @@ export default {
       if (!was) return
       active = null
       say(null)
+      ctx.emit('village/backed', { id: was.id })
       was.leave?.()
     }
 
     const choose = (e: Live) => {
       if (active && active !== e) back()
       active = e
+      ctx.emit('village/chose', { id: e.id, at: center(e) })
       e.select()
     }
 
