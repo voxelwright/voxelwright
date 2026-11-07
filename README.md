@@ -1,119 +1,46 @@
 # Village
 
-A home for a family and its agents, with a software factory at its core.
-Village should help people care for each other, carry projects through, and
-grow new capabilities. The interface will draw from warm, lived-in rooms,
-workshops and growing plants. The home experience is not built yet.
+Village is a private home hub for a family and its agents. You walk through a
+3D home (a kitchen and a living room today) where each object is a way in: the
+notebook talks to a villager, a person's own helper that keeps notes. The
+Elder turns a one-line request ("put a small radio on the windowsill") into a
+checked change that you can promote into the live home or roll back. It is a
+personal project, tested with synthetic people only, and it is not safe for
+real family data yet.
 
-The first implementation is a local coding worker with independent command
-verification. It edits a separate candidate directory using the operator's
-existing Codex login. The controller chooses the check before the agent runs;
-a successful model turn alone cannot pass it. Passing checks produces
-`awaiting_review`, never an automatic merge or deployment.
+## Layout
 
-## Try the worker
+- `home/`: the 3D home (three.js, Cordis plugins). See `home/README.md`.
+- `host/`: the villager and the Elder, plus the live home. See `host/README.md`.
+- `docs/`: the handbook, published privately with Mintlify.
+- `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
-Requires Python 3.13+ and a Codex CLI supporting permission profiles,
-`exec --ignore-user-config`, and the features in `village/runner.py`.
-The measured runs used Codex `0.166.0-alpha.6` on macOS and `0.160.0` on Linux.
-There are no Python package dependencies.
-The standard `CODEX_HOME` environment variable may select an existing Codex
-login profile. Login files stay in that profile; Village does not copy them.
+## Run it
 
-Create a separate candidate directory. Supply the trusted task text on standard input. The candidate
-must be disjoint from the trusted Village checkout and contain no project Codex configuration. Start the controller from its trusted checkout.
-The output directory must be new and outside the candidate. Then run:
+You need a recent Node (measured on 25.1), Google Chrome and a signed-in
+Claude Code.
 
 ```sh
-printf '%s\n' 'Fix greet.sh to print Hello, Village!' | python3 -m village \
-  --workspace /absolute/path/to/candidate \
-  --output /absolute/path/to/new-evidence \
-  --codex /absolute/path/to/codex \
-  --model gpt-6.1-sol \
-  --check /bin/bash -o pipefail -c '/bin/sh greet.sh | /usr/bin/cmp -s - <(printf "Hello, Village!\n")'
+# The home, at http://localhost:5181
+cd home && npm install && npm run dev
+
+# The villager: prints one link per person, such as http://localhost:5181/#token=...
+# Open that link, not the plain address. --agent stub runs without a model.
+cd host && npm install && npm run villager
+
+# The Elder: writes a candidate under ~/.village/candidates/
+cd host && npm run elder -- "put a small radio on the windowsill"
 ```
 
-`--check` is the final option. Its arguments come from the trusted operator,
-not the model. Results, model events and command output stay in the evidence
-directory. Failed execution or verification exits nonzero. Startup errors
-raise an exception and leave any existing evidence intact. Interrupted jobs
-are not automatically resumed or replayed.
+Checks: `npm run typecheck`, `npm run build` and the `scripts/check-*.mjs`
+files in `home/`; `npm run regressions`, `npm run check-villager` and
+`npm run check-promote` in `host/`.
 
-## Verify changes
+## Handbook
 
-```sh
-python3 -m unittest discover -s tests -v
-python3 -m compileall -q village scripts
-git diff --check
-```
+`docs/` has the quickstart, current status, decisions and change log.
 
-The live proof uses the real CLI and existing login. It first demonstrates
-that the check rejects a broken program, asks the agent to repair it, runs the
-same check, and probes denied sibling access, protected configuration writes
-and local TCP access. Each denial probe first succeeds outside the sandbox;
-its synthetic sentinels are then reset and checked for changes:
+## History
 
-```sh
-python3 -m scripts.prove_runner --codex /absolute/path/to/codex
-```
-
-After green gates, use the supplied [reviewer skills](.agents/skills/reviewers/SKILL.md).
-Local measurements and review status live in [evidence](evidence/001-worker.md).
-
-For documentation and knowledge-upkeep changes, run `git diff --check`, the
-skill-creator `quick_validate.py` for changed packs, and `mint broken-links`
-from `docs/`. Freeze the exact page/config/skill payloads for independent
-Editor review before remote writes. The [bounded adoption evidence](evidence/008-knowledge-upkeep.json)
-records the Beads 1.3.2 task/dependency and issue-record recovery probes,
-Mintlify Base settings, source references and remaining limits. Base writes
-autocommit; Site publication requires a live deployment and content readback.
-
-The [native formula R6 evidence](evidence/017-native-formula.md) records an actual
-Ally Linux v2 retry/check, held pre-effect supervisor restart, explicit two-leaf
-fan-in and required-scope exhaustion proof using standard Gas City 1.5.1 /
-Beads 1.3.2 / Dolt 2.2.0. It passed in 187.541 native seconds (188.903632305 outer),
-with 76 native commands, 20 Linux controls, zero model calls and clean teardown.
-Its replayable evidence payload and exact launch commands are archived separately
-from application code. Prior attempts R1 through R5 remain recorded as failures, including R5's
-functional pass but overall cleanup failure. This does not qualify the complete
-issue 13 workflow, issue 15 comparison or family isolation.
-
-The [native worker capability R5/R6 evidence](evidence/019-codex-worker-requirements.md)
-records actual Codex 0.160.0 worker launches with explicit synthetic instrumentation.
-R5 distinguishes `exec --ignore-user-config` from its load-user control. R6 uses
-native requirements mounted read-only at both policy paths: absent policy starts
-all three servers, empty requirements starts none, exact executable/ordered-argument
-identity admits one, and either identity mismatch starts none. R6 passed 260 typed
-preflights, 54 mount checks and five namespace/device controls in 4.572 outer
-seconds. Five loopback HTTP 400 requests intentionally failed the workers;
-zero models were served and zero tools dispatched. R5 passed in 2.318 seconds
-with two requests. Earlier R1–R4 failures remain recorded, including R3's 11
-unauthenticated public OpenAI route/401 events. These probes add native expertise,
-not production admission, family isolation or real-provider integration.
-
-## Current boundary
-
-This is a synthetic-data development slice, tested on macOS arm64 and Linux
-x86_64. Family isolation, durable job recovery, richer runtime permissions and
-the family interface remain unproven.
-
-Worker commands receive workspace access, Codex's minimal OS runtime reads and
-read access to the exact trusted Codex executable, needed by Linux's sandbox.
-Sibling files, ordinary network access and protected control directories are
-denied by the named Codex permission profile. The runner filters environment
-variables and disables automatic instruction loading, connectors, hooks,
-host skill discovery and subagents for this role. System-managed Codex settings
-still belong to the operator; this does not sandbox the authenticated Codex
-host process or isolate one family member from another.
-
-Timeout/cancellation stops the worker's process group. A hostile program that
-creates a separate session is outside that cleanup guarantee. Logs have no
-disk quota yet. Do not run hostile code or real family data in this slice.
-Network administration and firmware work will need separately granted
-capabilities, verification and recovery suited to those actions.
-
-Work is tracked in [GitHub issues](https://github.com/voxelwright/voxelwright/issues).
-The earlier `specs/` files are historical proposals, superseded by the owner's
-November 4 request and [AGENTS.md](AGENTS.md).
-
-Use an exclusively owned candidate directory containing independent copies of files. A local Git clone must use `--no-hardlinks`. Village rejects pre-existing hard links before each phase; it assumes no other host process changes the candidate during a run.
+The earlier Python factory (Gas City workers and evidence records) is kept in
+the branch `archive/python-factory-2026-11`.
