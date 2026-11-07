@@ -189,6 +189,9 @@ export default {
       if (oldFloor) setAside(oldFloor)
       roomGroup = r
       swapped()
+      // The house's own materials are this kit's, not the plugins' that rooms.ts compiled at load: compile them now,
+      // so the first walk into the living room does not stall on new pipelines.
+      void renderer.compileAsync(group, camera, scene).catch(() => {})
     }
 
     // Handles: the right wall glows on hover; a glowing dot at its middle bends it.
@@ -276,6 +279,8 @@ export default {
         const t = alongOf(plan, wallOf(plan, WALL), p.x, p.z)
         const [x, z] = pointAt(c, t)
         if (Math.hypot(p.x - x, p.z - z) > 0.32) continue
+        // A door in the wall stays the door's to point at (the Workshop's is an entry), so the handle keeps clear of it.
+        if (wallOf(plan, WALL).openings.some((o) => y < o.head && t > o.from - 0.1 && t < o.to + 0.1)) return null
         return { kind: Math.abs(t - c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
       }
       return null
