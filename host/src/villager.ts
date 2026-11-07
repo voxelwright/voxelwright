@@ -395,7 +395,7 @@ export default {
           if (typeof from !== 'string' || !PERSON.test(from) || !Object.hasOwn(people, from) || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": a listed person, "id": a sketch id}' })
           const image = await loadSketch(personDir(from), sid)
           if (!image) return send(res, 404, { error: 'no such sketch' })
-          sketch = { from, id: sid, image }
+          sketch = { from, id: sid, image: { ...image, by: people[from] } }
         }
         if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
         busy.add(id)

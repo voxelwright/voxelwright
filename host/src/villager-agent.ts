@@ -101,7 +101,7 @@ export interface ModelSettings {
 }
 
 function turnPrompt(turn: Turn): string {
-  const context = [turn.context, turn.route && routeContext(turn.route), turn.image && sketchNote(turn.name)].filter(Boolean).join('\n\n')
+  const context = [turn.context, turn.route && routeContext(turn.route), turn.image && sketchNote(turn.image.by ?? turn.name)].filter(Boolean).join('\n\n')
   return context ? `${turn.text}\n\n(Context only, not part of ${turn.name}'s message: ${context})` : turn.text
 }
 

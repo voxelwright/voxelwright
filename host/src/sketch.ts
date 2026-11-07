@@ -21,7 +21,7 @@ export const MAX_SIDE = 1536
 const MAX_WORDS = 300
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
-export interface SketchImage { data: string; mediaType: 'image/png' }
+export interface SketchImage { data: string; mediaType: 'image/png'; /** Who drew it, by name, for the villager's note. */ by?: string }
 
 /**
  * A PNG as the page sent it, base64, checked before anything else reads it:
