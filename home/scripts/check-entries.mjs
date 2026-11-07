@@ -2,7 +2,7 @@
 // reachable by keyboard and by pointer in each room, the doorway's two entries
 // glide the view through the house with no fade, and going back and forth adds
 // nothing (objects, plugins, frame hooks, geometries, textures, DOM, entries).
-// Runs in the dollhouse (?cam=iso) and checks the seated view's walk through the doorway.
+// Runs in the dollhouse (?cam=iso), and walks the seated view through the doorway from its own signs.
 // Usage: node scripts/check-entries.mjs [base-url] [--shots=dir]   (dev server running)
 import { chromium } from 'playwright'
 
@@ -217,18 +217,46 @@ for (const room of ['kitchen', 'living']) {
   await context.close()
 }
 
-// The seated view walks through the real doorway: the camera crosses the shared wall
-// and arrives in the living room, with no jumps and no fade.
+// The seated view walks through the real doorway. The seat faces the back wall and the
+// doorway is beside it, off screen, so a sign on the back wall is the doorway's entry
+// there: from the default seat, the pointer chooses "Living room" and the camera
+// crosses the shared wall; from the living room's seat, Tab and Enter on "Kitchen" walk back.
 {
-  const { context, page } = await page2()
-  async function page2() { const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 }); const p = await c.newPage(); await p.goto(`${base}`); await p.evaluate(() => window.village.ready()); await p.waitForTimeout(800); return { context: c, page: p } }
-  // The seat faces the back wall, so the doorway in the right wall is off screen: the walk is started directly.
-  await page.evaluate(() => void window.village.kernel.root.get('rooms').go('living'))
-  await page.waitForTimeout(30)
-  const w = await watch(page)
-  await waitStill(page)
-  const s = await state(page)
-  check('seated view (walk started directly; the seat cannot see the doorway): it goes through the doorway, smoothly, with no fade', s.room === 'living' && w.covered === 0 && !w.veil && smooth(w.xs, 0.4) && w.xs[0] < 3.4 && w.xs.at(-1) > 3.58, { room: s.room, from: w.xs[0], to: w.xs.at(-1), frames: w.frames })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  await page.goto(base)
+  await page.evaluate(() => window.village.ready())
+  await page.waitForTimeout(800)
+  const seen = await entries(page)
+  const sign = seen.find((e) => e.id === 'sign-living')
+  check('seated view: the "Living room" sign is on screen from the default seat', sign && sign.label === 'Living room', seen.map((e) => e.id))
+  if (sign) {
+    const hover = await hoverOn(page, sign)
+    await page.mouse.click(sign.x, sign.y)
+    await page.waitForTimeout(30)
+    const w = await watch(page)
+    await waitStill(page)
+    const s = await state(page)
+    check('seated view: pointing at the sign labels it, and clicking walks through the doorway into the living room, smoothly, with no fade',
+      hover.hovered === 'sign-living' && hover.label === 'Living room' && s.room === 'living' && w.covered === 0 && !w.veil && smooth(w.xs, 0.4) && w.xs[0] < 3.4 && w.xs.at(-1) > 3.58,
+      { hover: [hover.hovered, hover.label], room: s.room, from: w.xs[0], to: w.xs.at(-1), frames: w.frames })
+    const list = await entries(page)
+    const visited = []
+    for (let i = 0; i < list.length && visited.at(-1) !== 'sign-kitchen'; i++) {
+      await page.keyboard.press('Tab')
+      visited.push((await state(page)).focus)
+    }
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(30)
+    const back = await watch(page)
+    await waitStill(page)
+    const s2 = await state(page)
+    check('seated view: Tab reaches the "Kitchen" sign in the living room, and Enter walks back through the doorway', visited.includes('sign-kitchen') && s2.room === 'kitchen' && back.covered === 0 && smooth(back.xs, 0.4) && back.xs[0] > 3.58 && back.xs.at(-1) < 3.4,
+      { visited, room: s2.room, from: back.xs[0], to: back.xs.at(-1) })
+  }
+  check('seated view: no page errors', errors.length === 0, errors)
   await context.close()
 }
 

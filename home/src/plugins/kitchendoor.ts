@@ -1,9 +1,9 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { DOORWAY, FRONT_Z, HOUSE_H, KITCHEN, WALL_T, WALL_Z } from '../layout'
+import { DOORWAY, FRONT_Z, HOUSE_H, KITCHEN, LIVING_X, WALL_T, WALL_Z } from '../layout'
 import { openDoorway } from '../doorway'
-import { paintPlaster } from '../paint'
+import { canvas, paintPlaster, toTexture } from '../paint'
 import { CUT } from '../diorama'
 import { MODE } from './camera'
 
@@ -76,6 +76,51 @@ export default {
       object: door.sides[1],
       select: () => void ctx.rooms.go('kitchen'),
     }), 'kitchen entry')
+
+    // The seated view faces each room's back wall, and the doorway is beside you, off
+    // screen. A painted sign on the back wall points the way and is the doorway's entry
+    // there: choosing it walks you through the real doorway.
+    if (MODE === 'seat') {
+      const signs = new THREE.Group()
+      signs.name = 'doorway signs'
+      const sign = (text: string, arrow: 'left' | 'right', x: number, y: number) => {
+        const [c, g] = canvas(512, 160)
+        g.fillStyle = '#c99a62'
+        g.fillRect(0, 0, 512, 160)
+        g.strokeStyle = 'rgba(92, 58, 30, 0.35)'
+        g.lineWidth = 2
+        for (let i = 0; i < 9; i++) {
+          g.beginPath()
+          g.moveTo(0, 12 + i * 17 + Math.sin(i * 1.7) * 4)
+          g.bezierCurveTo(170, 6 + i * 17, 340, 20 + i * 17, 512, 10 + i * 17 + Math.cos(i) * 4)
+          g.stroke()
+        }
+        g.fillStyle = '#3c2416'
+        g.font = '600 64px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
+        g.textBaseline = 'middle'
+        g.textAlign = 'center'
+        g.fillText(arrow === 'left' ? `\u2190 ${text}` : `${text} \u2192`, 256, 84)
+        const face = new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.75 })
+        const edge = new THREE.MeshStandardMaterial({ color: '#9a6c40', roughness: 0.8 })
+        const board = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.02), [edge, edge, edge, edge, face, edge])
+        board.position.set(x, y, WALL_Z + 0.012)
+        board.castShadow = true
+        board.name = `sign ${text}`
+        // Hung from a nail on a string.
+        const nail = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), new THREE.MeshStandardMaterial({ color: '#555', metalness: 0.6, roughness: 0.4 }))
+        nail.position.set(x, y + 0.15, WALL_Z + 0.01)
+        const pts = [new THREE.Vector3(x - 0.15, y + 0.065, WALL_Z + 0.012), nail.position.clone(), new THREE.Vector3(x + 0.15, y + 0.065, WALL_Z + 0.012)]
+        const string = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#6b4a2c' }))
+        signs.add(board, nail, string)
+        return board
+      }
+      // Above the fridge's right, clear of the clock; in the living room, the back wall's left, over the bookcase.
+      const toLiving = sign('Living room', 'right', 1.74, 2.4)
+      const toKitchen = sign('Kitchen', 'left', LIVING_X - 2.45, 2.35)
+      own(ctx, signs)
+      ctx.effect(() => ctx.entries.add({ id: 'sign-living', label: 'Living room', object: toLiving, select: () => void ctx.rooms.go('living') }), 'living room sign')
+      ctx.effect(() => ctx.entries.add({ id: 'sign-kitchen', label: 'Kitchen', object: toKitchen, select: () => void ctx.rooms.go('kitchen') }), 'kitchen sign')
+    }
   },
 }
 
