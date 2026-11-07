@@ -95,7 +95,7 @@ export type CueName =
   | 'hover' | 'chose' | 'backed' | 'glide' | 'turned' | 'card'
   | 'pad-up' | 'pad-down' | 'writing' | 'sent' | 'routed' | 'unrouted'
   | 'ghost' | 'placed' | 'kept' | 'undone' | 'failed'
-  | 'book-open' | 'book-close' | 'page' | 'sat' | 'news' | 'walk' | 'refused'
+  | 'book-open' | 'book-close' | 'page' | 'sat' | 'farewell' | 'news' | 'walk' | 'refused'
 
 /**
  * Every cue's variants; `a` is the default. `?sfx=chose:b,sent:c` (or the listening page's

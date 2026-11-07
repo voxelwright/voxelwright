@@ -4,6 +4,7 @@
 // automation curve. Times snap to whole samples so a cue renders the same at any start.
 
 import type { Kit } from '../contract'
+import { mixFor } from '../../voice/buses'
 
 /** The music bed is in C major / A minor at A = 440; tonal cues use its pentatonic notes (C D E G A). */
 export const NOTE = {
@@ -223,16 +224,27 @@ function roomResponse(ctx: BaseAudioContext): AudioBuffer {
   return ir
 }
 
+/** One room per context: a ConvolverNode on the shared response, feeding the master. */
+const sends = new WeakMap<BaseAudioContext, GainNode>()
+
 /**
- * A little wooden room for tonal cues: returns a node to play into that feeds `out` dry and,
- * through a ConvolverNode on the context's shared response, `wet` of a soft tail. One
- * convolver per play (a cue may not own a shared node, since each play has its own `out`).
+ * A little wooden room for tonal cues: returns a node to play into that feeds `out` dry and
+ * sends `wet` of it to the context's one shared room, which joins the mix at the master
+ * (so mute still covers the tail; the tail is centred, not panned). One convolver per
+ * context, not per play: Chrome prepares a convolver's kernel on the main thread when it
+ * gets its buffer, which cost about 1 ms per tonal cue and doubled the offline render cost.
  */
 export function room(ctx: BaseAudioContext, out: AudioNode, wet = 0.22): AudioNode {
+  let send = sends.get(ctx)
+  if (!send) {
+    send = new GainNode(ctx)
+    const conv = new ConvolverNode(ctx, { buffer: roomResponse(ctx), disableNormalization: true })
+    send.connect(conv).connect(mixFor(ctx).master)
+    sends.set(ctx, send)
+  }
   const input = new GainNode(ctx)
   input.connect(out)
-  const conv = new ConvolverNode(ctx, { buffer: roomResponse(ctx), disableNormalization: true })
-  input.connect(conv).connect(new GainNode(ctx, { gain: wet })).connect(out)
+  input.connect(new GainNode(ctx, { gain: wet })).connect(send)
   return input
 }
 

@@ -498,6 +498,21 @@ const sat = {
   }),
 }
 
+const farewell = {
+  a: cue({
+    bus: 'world', level: -19, gap: 0.6, length: 1.3, jitter: { cents: 2, db: 1 },
+    play(a, out, p, kit) {
+      // Everyone gets up from the table: two soft cushion lifts, then a kalimba E falling to C, left to ring.
+      for (const [i, dt] of [0, 0.14].entries()) {
+        thump(a, out, kit, p.at + dt, { from: 150 + 20 * i, to: 95, dur: 0.12, gain: p.gain * 0.45, random: p.random, puff: 0.6, cut: 600 })
+      }
+      const r = room(a, out, 0.28)
+      pluck(a, r, p.at + 0.3, NOTE.E5 * p.rate, BODY.kalimba, { gain: p.gain * 0.36, dur: 0.4 })
+      pluck(a, r, p.at + 0.48, NOTE.C5 * p.rate, BODY.kalimba, { gain: p.gain * 0.4, dur: 0.75 })
+    },
+  }),
+}
+
 const news = {
   a: cue({
     bus: 'world', level: -18, gap: 0.6, length: 1.2, jitter: { cents: 2, db: 1 },
@@ -572,7 +587,7 @@ export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, news, walk, refused,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused,
 }
 
 /** One line per variant for the listening page. */
@@ -618,6 +633,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
     c: 'A heavy, soft page: lower and slower, more air than paper.',
   },
   sat: { a: 'Cushioned chair as the hop lands: a round bump, a "pff" of air and a small wood creak.' },
+  farewell: { a: 'Everyone gets up: two soft cushion lifts, then a kalimba E falling to C.' },
   news: {
     a: 'Kalimba G then high C, the second left ringing.',
     b: 'Recorded: a real music-box note, retuned, played as G then high C.',

@@ -25,7 +25,7 @@ const lines = {
   'village/page': () => 'page',
   'village/sat': () => 'sat',
   // Leaving the table is the sit reversed: the same hop.
-  'village/farewell': () => 'sat',
+  'village/farewell': () => 'farewell',
   'village/news': () => 'news',
   // One sound for the walk, as the camera heads for the door; the arrival is part of it.
   'village/walk': (e) => (e.phase === 'leave' ? 'walk' : null),
