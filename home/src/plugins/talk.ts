@@ -14,6 +14,7 @@ import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import { navigation, type Pose } from './camera'
+import { LOOK, captionStrip, focus as lookFocus, lookCss, paperSlips } from '../talk/look'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -449,9 +450,10 @@ export default {
     voice.setAttribute('role', 'status')
     voice.setAttribute('aria-live', 'polite')
     const style = document.createElement('style')
-    style.textContent = css()
+    style.textContent = css() + lookCss(LOOK)
     ctx.effect(() => {
       document.head.append(style)
+      if (LOOK) document.body.classList.add(`look-${LOOK}`)
       document.body.append(slip, voice, ruler, ...cast.flatMap((m) => [m.card.el, m.tag]))
       return () => {
         for (const m of cast) {
@@ -461,7 +463,7 @@ export default {
         slip.remove()
         voice.remove()
         ruler.remove()
-        document.body.classList.remove('talk-hovering')
+        document.body.classList.remove('talk-hovering', `look-${LOOK}`, 'talk-close')
         style.remove()
       }
     }, 'talk page')
@@ -604,20 +606,46 @@ export default {
       const floor = m.v.seated > 0.5 ? m.v.seatY : 0
       const head = new THREE.Vector3(p.x, floor + m.v.fig.height * SCALE * 0.72, p.z)
       const body = head.clone().setY(floor + m.v.fig.height * SCALE * 0.35)
+      // On a wide screen the villager stands on the left third with room for its card on the right;
+      // on a tall one it stands in the middle, further back so it fits the width, with its card above.
+      const aspect = stage.camera.aspect
+      const side = THREE.MathUtils.clamp((aspect - 0.7) / 0.6, 0, 1)
+      const back = Math.max(1, 0.85 / aspect)
+      // Look b (#42 regroup): at the villager's eye level and closer, a film close-up.
+      const rise = LOOK === 'b' ? 0.1 : 0.42
+      const near = LOOK === 'b' ? 0.78 : 1
       const shot = (a: number, dist: number) => {
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a))
         const right = new THREE.Vector3(dir.z, 0, -dir.x)
         return {
-          position: head.clone().addScaledVector(dir, dist).addScaledVector(right, -0.15).setY(head.y + 0.42),
-          look: head.clone().setY(head.y - 0.06).addScaledVector(right, 0.3),
+          position: head.clone().addScaledVector(dir, dist * back * near).addScaledVector(right, -0.15 * side).setY(head.y + rise),
+          look: head.clone().setY(head.y - 0.06 - 0.12 * (1 - side) - (LOOK === 'b' ? 0.04 : 0)).addScaledVector(right, (LOOK === 'b' ? 0.24 : 0.3) * side),
         }
       }
+      // Clear both ways: from the camera to the head and body, and from the head back to the camera,
+      // which catches a camera standing inside furniture (a ray from inside a cushion hits nothing).
       for (const dist of [1.5, 1.15])
         for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
           const pose = shot(base + turn, dist)
-          if (clear(pose.position, head) && clear(pose.position, body)) return pose
+          if (clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position)) return pose
         }
       return shot(base, 1.5)
+    }
+
+    /**
+     * Look b (#42 regroup): a seated speaker from across the table, a little above its eyes,
+     * the table top in the lower third and its neighbours at the edges of the frame.
+     */
+    const speakerShot = (m: Member): Pose => {
+      subject = m.v.fig.root
+      const head = m.v.fig.head.getWorldPosition(new THREE.Vector3())
+      const across = new THREE.Vector3(TABLE_SHOT.look.x - head.x, 0, TABLE_SHOT.look.z - head.z).normalize()
+      for (const turn of [0, 0.35, -0.35, 0.7, -0.7]) {
+        const dir = across.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), turn)
+        const position = head.clone().addScaledVector(dir, 2.5).setY(head.y + 0.85)
+        if (clear(position, head) && clear(head, position)) return { position, look: head.clone().setY(head.y - 0.2) }
+      }
+      return TABLE_SHOT
     }
 
     // ── Talking with one villager ───────────────────────────────────────────
@@ -630,7 +658,9 @@ export default {
       m.v.beat()
       for (const o of showing.keys()) if (o !== m) hide(o)
       mine.classList.remove('shown')
-      view.focus(twoShot(m), 7)
+      // A note on its way lands before the camera turns to its reader, so the note is seen flying.
+      if (input?.flying) void input.landed().then(() => partner === m && mode === 'talk' && view.focus(twoShot(m), 7))
+      else view.focus(twoShot(m), 7)
       const news = m.news
       if (news) clearNews(m)
       if (greet || news) speak(m, news ?? m.hello)
@@ -936,6 +966,8 @@ export default {
           // The others turn their heads to whoever is speaking.
           o.v.listenTo = o === m ? null : m.v.pos
         }
+        // Look b (#42 regroup): the camera cuts to whoever speaks, with the table in front of them.
+        if (LOOK === 'b' && mode === 'table') view.focus(speakerShot(m), 4.5)
         const ok = await perform(m, speech, text)
         entry.card = timing.get(m)
         entry.finished = performance.now()
@@ -948,6 +980,7 @@ export default {
       }
       speaker = null
       timing = null
+      if (LOOK === 'b' && mode === 'table') view.focus(TABLE_SHOT, 3)
       for (const o of seated) {
         o.tag.classList.remove('lit')
         o.v.listenTo = null
@@ -1126,7 +1159,8 @@ export default {
         const right: Spot = { l: head.x1 + 24, t: mouth - 40, w, h, tail: 'left' }
         const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40, w, h, tail: 'right' }
         const above: Spot = { l: head.cx - w / 2, t: head.y0 - h - 22, w, h, tail: 'down' }
-        const ways = mode === 'talk' && partner === m ? [right, left, above] : [above, right, left]
+        // Beside the head in a talk on a wide screen; above it at the table and on a narrow screen, where beside cannot fit.
+        const ways = mode === 'talk' && partner === m && innerWidth >= 600 ? [right, left, above] : [above, right, left]
         // A card may slide along its side as long as its tail still reaches the head.
         const slides = (o: Spot) => [0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 })
         const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + 16 && mouth < o.t + o.h - 16
@@ -1240,6 +1274,9 @@ export default {
         blob.opacity *= m.fade
       }
       placeCards(dt)
+      slipsA?.frame(dt)
+      captions?.frame(dt, input?.writing ?? false)
+      if (LOOK === 'b') lookB(dt)
       input?.frame(dt, t)
       sketch?.frame(dt, t)
       furnish?.frame(dt, t)
@@ -1352,6 +1389,59 @@ export default {
       input?.dispose()
       furnish?.dispose()
     }, 'talk always-on input')
+    // ── The look being tried (#42 regroup, src/talk/look.ts) ─────────────────
+    const headOf = new THREE.Vector3()
+    const slipsA = LOOK === 'a' ? paperSlips(stage, (person) => {
+      const m = cast.find((c) => c.person === person)
+      return m ? { head: m.v.fig.head.getWorldPosition(headOf), colour: m.colour, name: m.name } : null
+    }) : null
+    const captions = LOOK === 'c' ? captionStrip() : null
+    // Look c: the pad lives on the table as a thing; choosing it starts writing, as any keypress does.
+    if (LOOK === 'c' && input) {
+      const thing = new THREE.Group()
+      thing.name = 'talk table pad'
+      const sheet = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.012, 0.1), new THREE.MeshStandardMaterial({ color: '#f7eedb', roughness: 0.95 }))
+      const spine = new THREE.Mesh(new THREE.BoxGeometry(0.155, 0.016, 0.014), new THREE.MeshStandardMaterial({ color: '#b84a36', roughness: 0.9 }))
+      spine.position.set(0, 0.002, -0.05)
+      const pencil = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.16, 8), new THREE.MeshStandardMaterial({ color: '#e0b040', roughness: 0.6 }))
+      pencil.rotation.set(Math.PI / 2, 0, 0.5)
+      pencil.position.set(0.02, 0.012, 0.005)
+      thing.add(sheet, spine, pencil)
+      thing.position.set(0.38, 0.768, 0.16)
+      thing.rotation.y = -0.35
+      thing.traverse((o) => (o.castShadow = o.receiveShadow = true))
+      own(ctx, thing)
+      ctx.effect(() => entries.add({
+        id: 'talk-table-pad',
+        label: 'Write a note',
+        object: thing,
+        select() {
+          input.focus()
+          queueMicrotask(() => entries.back())
+        },
+      }), 'talk table pad')
+    }
+    ctx.effect(() => () => {
+      slipsA?.dispose()
+      captions?.dispose()
+      lookFocus.amount.value = 0
+    }, 'talk look')
+    const focusAt = new THREE.Vector3()
+    const fwdB = new THREE.Vector3()
+    /** Look b: the vignette closes in during a conversation and the focus follows whoever matters. */
+    const lookB = (dt: number) => {
+      const close = mode !== 'room'
+      document.body.classList.toggle('talk-close', close)
+      const who = mode === 'talk' ? partner : speaker
+      const target = who ? who.v.fig.head.getWorldPosition(focusAt) : mode === 'table' ? focusAt.copy(TABLE_SHOT.look) : null
+      const k = 1 - Math.exp(-dt * 6)
+      if (target) {
+        stage.camera.getWorldDirection(fwdB)
+        const d = Math.max(0.3, target.sub(eye).dot(fwdB))
+        lookFocus.distance.value += (d - lookFocus.distance.value) * k
+      }
+      lookFocus.amount.value += ((close && view.focused ? 1 : 0) - lookFocus.amount.value) * k
+    }
     // Projects already being made stand where they will go, as wrapped parcels.
     if (INPUT) void listProjects(primary().person).then((r) => {
       if (r.ok) for (const p of r.projects) furnish?.parcel(p.what, p.where)

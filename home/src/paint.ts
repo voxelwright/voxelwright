@@ -643,15 +643,20 @@ export function paintLawn(seed: number) {
   return toTexture(c)
 }
 
-/** The warm card behind the iso diorama (#42): a soft pool of light on warm paper, darker toward the corners. */
-export function paintBackdrop(seed: number) {
+/**
+ * The card behind the iso diorama (#42): a soft pool of light on warm paper, darker toward the corners.
+ * The #42 talk regroup tries two more: `kraft` (brown kraft paper with long fibres, look a) and
+ * `dusk` (a dim room around the lit house, look b).
+ */
+export function paintBackdrop(seed: number, kind: 'warm' | 'kraft' | 'dusk' = 'warm') {
   const w = 512, h = 320
   const n = makeNoise(seed, 64)
+  const [mid, rim]: [RGB, RGB] = kind === 'kraft' ? [[204, 168, 124], [138, 100, 68]] : kind === 'dusk' ? [[112, 78, 66], [30, 20, 22]] : [[236, 208, 172], [186, 138, 102]]
   const [c] = pixels(w, h, (x, y) => {
     const dx = (x / w - 0.5) * 1.3, dy = y / h - 0.42
     const d = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 1.5)
-    const fibre = (n(x / 9, y / 9, 3) - 0.5) * 7
-    return mixRGB([236, 208, 172], [186, 138, 102], d * d).map((v) => v + fibre) as RGB
+    const fibre = kind === 'kraft' ? (n(x / 2.5, y / 14, 3) - 0.5) * 18 + (n(x / 11, y / 11, 2) - 0.5) * 8 : (n(x / 9, y / 9, 3) - 0.5) * 7
+    return mixRGB(mid, rim, d * d).map((v) => v + fibre) as RGB
   })
   return toTexture(c)
 }

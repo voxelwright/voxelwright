@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { paintBackdrop } from '../paint'
+import { LOOK } from '../talk/look'
 import { HOUSE } from '../layout'
 
 /** Where the camera stands and what it looks at. */
@@ -123,7 +124,7 @@ export default {
     const forward = new THREE.Vector3()
     const ground = new THREE.Vector3()
     // Iso sits the diorama on a painted warm card; third person looks out into a warm haze.
-    const backdrop = MODE === 'iso' ? paintBackdrop(7) : new THREE.Color('#c99d74')
+    const backdrop = MODE === 'iso' ? paintBackdrop(7, LOOK === 'a' ? 'kraft' : LOOK === 'b' ? 'dusk' : 'warm') : new THREE.Color('#c99d74')
     let roomBackground: THREE.Scene['background'] = null
     const fogs = new Map<THREE.Fog, [number, number]>()
     const cutaway = new Set<THREE.Object3D>()

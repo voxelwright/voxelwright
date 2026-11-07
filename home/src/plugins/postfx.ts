@@ -9,8 +9,10 @@ import { fxaa } from 'three/addons/tsl/display/FXAANode.js'
 import { ao } from 'three/addons/tsl/display/GTAONode.js'
 import { traa } from 'three/addons/tsl/display/TRAANode.js'
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js'
+import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
+import { LOOK, focus as lookFocus } from '../talk/look'
 
 /**
  * Bloom, a warm vignette and fine film grain, written as TSL nodes. The tier's
@@ -63,6 +65,12 @@ export default {
       color = resolved
     }
 
+    // Look b of the #42 talk regroup: shallow depth of field on a conversation (only with ?talk=npc&look=b).
+    if (LOOK === 'b' && !low) {
+      const soft = dof(color, scenePass.getViewZNode(), lookFocus.distance, float(0.55), lookFocus.amount.mul(3.2))
+      disposables.push(soft)
+      color = soft as unknown as THREE.Node<'vec4'>
+    }
     const glow = bloom(color, low ? 0.25 : 0.42, 0.55, 0.78)
     disposables.push(glow)
     const lit = color.add(glow)

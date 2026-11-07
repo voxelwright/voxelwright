@@ -19,6 +19,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
 import { canvas, paintLinen, toTexture } from '../paint'
+import { LOOK } from './look'
 
 export type Variant = 'held' | 'speech'
 /**
@@ -140,7 +141,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const PW = 1024, PH = 600
   const [paperCanvas, paper] = canvas(PW, PH)
   const paperTex = toTexture(paperCanvas)
-  const paperMat = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.92, emissive: '#ffffff', emissiveMap: paperTex, emissiveIntensity: 0.32 })
+  // Look a holds the pad in the room's light, so it glows less.
+  const paperMat = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.92, emissive: '#ffffff', emissiveMap: paperTex, emissiveIntensity: LOOK === 'a' ? 0.12 : 0.32 })
   const board = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 })
   const PADW = 1.0, PADH = 0.6
   const back = new THREE.Mesh(new RoundedBoxGeometry(PADW + 0.04, PADH + 0.05, 0.02, 2, 0.012), board)
@@ -171,11 +173,36 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   // The torn note on its way.
   // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
   const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
-  const flyer = new THREE.Mesh(new THREE.PlaneGeometry(PADW, PADH * 0.62), flyMat)
+  const NOTEH = PADH * 0.62
+  // Look a (#42 regroup): the note folds in three, like a letter, before it flies.
+  const third = (i: number) => {
+    const g = new THREE.PlaneGeometry(PADW / 3, NOTEH)
+    const uv = g.attributes.uv
+    for (let k = 0; k < uv.count; k++) uv.setX(k, (i + uv.getX(k)) / 3)
+    return new THREE.Mesh(g, flyMat)
+  }
+  const hingeL = new THREE.Group(), hingeR = new THREE.Group()
+  const flyer: THREE.Object3D = LOOK === 'a' ? new THREE.Group() : new THREE.Mesh(new THREE.PlaneGeometry(PADW, NOTEH), flyMat)
+  if (LOOK === 'a') {
+    const [l, mid, r] = [third(0), third(1), third(2)]
+    hingeL.position.x = -PADW / 6
+    l.position.x = -PADW / 6
+    hingeL.add(l)
+    hingeR.position.x = PADW / 6
+    r.position.x = PADW / 6
+    hingeR.add(r)
+    flyer.add(mid, hingeL, hingeR)
+  }
   flyer.name = 'talk note in flight'
   flyer.visible = false
   scene.add(mark(flyer))
   let flight: { t: number; from: THREE.Matrix4; to: THREE.Vector3 } | null = null
+  /** Waiting for the note in flight to land (talk.ts holds the camera until then). */
+  let landings: (() => void)[] = []
+  const land = () => {
+    for (const done of landings) done()
+    landings = []
+  }
   /** Where the pad's paper is on screen, so the villagers' cards keep clear of it. */
   let padRect = { left: 0, top: 0, width: 0, height: 0 }
 
@@ -265,7 +292,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const to = hooks.addressee()
     const resting = !writing()
     const name = to.label
-    const big = resting ? 96 : 58, small = resting ? 70 : 44
+    const big = resting ? (LOOK === 'a' ? 118 : 96) : 58, small = resting ? (LOOK === 'a' ? 74 : 70) : 44
     g.font = `700 ${big}px ${HAND}`
     const nameW = g.measureText(name).width
     g.font = `italic ${small}px ${HAND}`
@@ -278,6 +305,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.font = `700 ${big}px ${HAND}`
     g.fillStyle = to.colour
     g.fillText(name, x0 + toW, y0)
+    if (resting && LOOK === 'a') {
+      g.font = `italic 50px ${HAND}`
+      g.fillStyle = 'rgba(70, 50, 36, 0.5)'
+      g.fillText('just start typing…', 130, 272)
+    }
     if (resting) return
     g.textAlign = 'left'
     g.font = `56px ${HAND}`
@@ -481,9 +513,17 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     // At rest about a third of its writing size, and mostly below the edge: only its top line, "to Dumpling", shows.
     // Drawing (#42): nearly facing you, as large as fits, lower middle of the view.
     const big = Math.min(1.75, (2 * aspect * 0.92) / 1.04, 1.25 / 0.65)
-    pad.scale.setScalar(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.42, 1, raise), big, draw))
-    pad.position.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 0.05, raise), 0, draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.03, -0.93, raise) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
-    pad.rotation.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.42, -0.62, raise) + lift * 0.12, -0.1, draw), 0.02 * (1 - draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.05, 0.03, raise), 0, draw))
+    // Rest and writing poses: scale, x, y, tilt back, turn, roll. Look a (#42 regroup) holds the pad
+    // low on the right in perspective, as a hand would; the others hold it square to the view.
+    const [rest, up] = LOOK === 'a'
+      ? [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [1, 0.32, -0.66, -0.74, -0.2, 0.07]]
+      : [[0.42, 0.32, -1.03, -0.42, 0.02, -0.05], [1, 0.05, -0.93, -0.62, 0.02, 0.03]]
+    const pose = (i: number) => THREE.MathUtils.lerp(rest[i], up[i], raise)
+    pad.scale.setScalar(THREE.MathUtils.lerp(pose(0), big, draw))
+    pad.position.set(THREE.MathUtils.lerp(pose(1), 0, draw), THREE.MathUtils.lerp(pose(2) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
+    pad.rotation.set(THREE.MathUtils.lerp(pose(3) + lift * 0.12, -0.1, draw), pose(4) * (1 - draw), THREE.MathUtils.lerp(pose(5), 0, draw))
+    // Look c: no pad on screen until you write.
+    if (LOOK === 'c') pad.visible = hooks.variant === 'held' && raise > 0.04
     const jx = -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
     journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
@@ -500,6 +540,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     journalButton.style.width = `${Math.max(24, x1 - x0)}px`
     journalButton.style.height = `${Math.max(24, Math.min(innerHeight, y1) - y0)}px`
     journalButton.hidden = away
+    if (LOOK === 'c') journal.visible = false
     if (hooks.variant === 'held') {
       const p = screenBox(sheet)
       padRect = { left: p.x0, top: p.y0, width: p.x1 - p.x0, height: Math.max(0, p.y1 - p.y0) }
@@ -533,10 +574,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
     // The torn note: up off the pad, then a curve to the recipient, shrinking as it goes.
     if (flight) {
-      flight.t += dt / 1.25
+      flight.t += dt / (LOOK === 'a' ? 1.7 : 1.25)
       // First the note lifts off the pad and turns to face its way, then it flies.
       const lifted = Math.min(1, flight.t / 0.28)
-      const k = Math.max(0, Math.min(1, (flight.t - 0.28) / 0.72))
+      const k = Math.max(0, Math.min(1, (flight.t - (LOOK === 'a' ? 0.34 : 0.28)) / (LOOK === 'a' ? 0.66 : 0.72)))
       flight.from.decompose(tmp, q, scl)
       const start = tmp.clone()
       const end = flight.to
@@ -549,16 +590,27 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyer.rotateZ(Math.sin(k * 9) * 0.18 * (1 - k))
       flyer.rotateX(-0.5 * lifted - k * 0.6)
       flyer.scale.copy(scl).multiplyScalar(1 - 0.85 * e)
+      if (LOOK === 'a') {
+        // Folded while it lifts: the right third over, then the left third on top, then away.
+        const fold = (from: number, to: number) => THREE.MathUtils.smoothstep(flight!.t, from, to)
+        hingeR.rotation.y = -Math.PI * 0.985 * fold(0.04, 0.2)
+        hingeL.rotation.y = Math.PI * 0.97 * fold(0.14, 0.3)
+        hingeR.position.z = 0.002
+        hingeL.position.z = 0.004
+        flyer.scale.copy(scl).multiplyScalar(1 - 0.7 * e)
+      }
       flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
       flyer.visible = true
       if (flight.t >= 1) {
         flight = null
         flyer.visible = false
+        land()
       }
     }
   }
 
   const dispose = () => {
+    land()
     vv?.removeEventListener('resize', placeField)
     vv?.removeEventListener('scroll', placeField)
     field.remove()
@@ -579,6 +631,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     dispose,
     focus: () => field.focus({ preventScroll: true }),
     key,
+    /** A sent note is on its way; `landed()` resolves when it arrives (at once when none is). */
+    get flying() {
+      return flight !== null
+    },
+    landed: () => (flight ? new Promise<void>((done) => landings.push(done)) : Promise.resolve()),
     /** Words are being written, so navigation keys are for the line, not the room. */
     get writing() {
       return writing()
