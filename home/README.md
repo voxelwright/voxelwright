@@ -1412,11 +1412,14 @@ plan and the view, or into one line your villager says:
   room would run into another room, no stretch fits, the room or side is
   unclear, or the wall is too short.
 
-`src/build/outline.ts` draws the draft at once: pencil walls on tracing paper
-laid on the ground, squared half-metre paper inside, the door's swing dashed,
-translucent wall ghosts with pencil edges, and handwritten size tags. Drag a
-wall or the door, pull the pin inside the far wall to bend it, or click a size
-and type. Enter or "Build it" commits one version ("Added the study"); Escape
+`src/build/outline.ts` draws the draft at once: a plot of turned earth with
+taped-down tracing paper on it, hand-wobbled pencil walls with a graphite
+smudge, sketched floorboards, the door's swing dashed, low plaster wall stubs,
+tape measures along two sides with handwritten sizes, and wooden pegs with
+arrows (a sage one for the bend). The yard's fence and flowers step aside under
+the paper while it is out. Drag a peg or a wall, pull the sage peg inside the
+far wall to bend it, or click a size and type. A refused drag flashes the walls
+chalk red. Enter or "Build it" commits one version ("Added the study"); Escape
 or "Not now" leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through
 versions. Every room renders with its floor and base, and a shared wall is
 drawn once. In iso the view eases to the room being drawn, then to the house.
@@ -1554,9 +1557,14 @@ Undo and redo come from the versions.
   Collisions use the world boxes of meshes, and 10 cm columns for merged meshes (furnish.ts
   batches its things). Flat things such as rugs don't count.
 - Input: drag the thing (mouse, or one finger) and it snaps to 5 cm, then to the nearest
-  spot that fits within 30 cm. Where nothing fits, it turns red, shows through what it is
-  inside and says why. Q/E turn it 15°, Shift+Q/E 45° and Alt+Q/E 1°. The round handle turns
-  it in 15° steps (Alt: no steps), and a tap on the handle turns it 15°. Two fingers twist it.
+  spot that fits within 30 cm. Where nothing fits, its rim and footprint turn chalk red, it
+  shows through what it is inside, what it bumps into is outlined in red, and it says why.
+  Q/E turn it 15°, Shift+Q/E 45° and Alt+Q/E 1°. The knob on the turn ring turns it in 15°
+  steps (Alt: no steps), and a tap on it turns it 15°. Two fingers twist it.
+- The look (`src/build/sketch.ts`, shared with adding rooms): the held thing is see-through
+  with a chalk rim, a faint silhouette where furniture hides it, a contact shadow and a turn
+  ring; a hung thing shows a dotted thread down to a pool of its light. On a phone the tag
+  docks at the bottom and the view eases sideways so the thing sits above it.
   Alt while dragging means no grid and no pull. Enter or "Place it" confirms, and Escape or
   "Not now" cancels. In iso the pointer is taken from the camera only on the thing or its
   handle. While a placement is open, the canvas has `touch-action: none`.
@@ -1570,7 +1578,7 @@ Undo and redo come from the versions.
   built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
 
 ```sh
-cd home && node scripts/check-place.mjs           # 57/57: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
+cd home && node scripts/check-place.mjs           # 59/59: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
 cd home && node scripts/check-place.mjs --look    # also screenshots/build/place-*.jpg and place.mp4
 ```
 

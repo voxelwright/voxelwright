@@ -781,8 +781,13 @@ export function placement(deps: PlaceDeps): Placement & {
     const half = s.dom.turn.offsetWidth / 2 || 24
     // Never under the tag: mirror it to the ring's other side if the tag is there.
     const t = tag.getBoundingClientRect()
-    const under = (x: number, y: number) => x + half > t.left - 6 && x - half < t.right + 6 && y + half > t.top - 6 && y - half < t.bottom + 6
-    if (under(hx, hy) && !under(2 * rx - hx, hy)) hx = 2 * rx - hx
+    const under = (x: number, y: number) => x + half > t.left - 18 && x - half < t.right + 18 && y + half > t.top - 18 && y - half < t.bottom + 18
+    if (under(hx, hy)) {
+      // The ring's other side, or below the thing.
+      if (!under(2 * rx - hx, hy)) hx = 2 * rx - hx
+      else if (!under(hx, 2 * ry - hy)) hy = 2 * ry - hy
+      else [hx, hy] = [rx, Math.max(hy, y1 + half + 8)]
+    }
     s.dom.turn.style.transform = `translate(${Math.round(Math.min(Math.max(hx - half, 4), vw - 2 * half - 4))}px, ${Math.round(Math.min(Math.max(hy - half, 4), vh - 2 * half - 4))}px)`
   }
 
@@ -1133,9 +1138,9 @@ function css() {
   .place-tag.shake { animation: place-shake 0.36s ease; }
   @keyframes place-shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
   .place-turn { position: fixed; left: 0; top: 0; z-index: 40; width: 48px; height: 48px; padding: 0; border: 0; background: transparent; cursor: grab;
-    touch-action: none; color: #6a4630; will-change: transform; display: grid; place-items: center; }
-  .place-turn .knob { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #fbf3e2;
-    box-shadow: 0 4px 10px rgba(70, 40, 20, 0.28), 0 0 0 2.5px rgba(106, 70, 48, 0.85), 0 1px 0 rgba(255, 255, 255, 0.8) inset; transition: scale 140ms ease; }
+    touch-action: none; color: #3a2416; will-change: transform; display: grid; place-items: center; }
+  .place-turn .knob { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #e6cfa8, #cdb08a);
+    box-shadow: 0 4px 10px rgba(70, 40, 20, 0.3), 0 0 0 3px rgba(58, 36, 22, 0.95), 0 0 0 7px rgba(255, 246, 228, 0.0), inset 0 0 0 5px rgba(150, 110, 80, 0.25); transition: scale 140ms ease; }
   .place-turn svg { width: 20px; height: 20px; display: block; }
   .place-turn:hover .knob { scale: 1.08; }
   .place-turn.bad { color: #a63c2c; }

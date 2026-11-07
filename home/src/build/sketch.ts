@@ -222,7 +222,7 @@ export function paperGrain(size: number) {
 }
 
 /** A grip drawn on paper: a cream knob ringed in pencil, with a soft shadow; warmer while held or hovered. */
-export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: number, live: boolean, grip?: { angle: number; both: boolean }) {
+export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: number, live: boolean, grip?: { angle: number; both: boolean }, fill = '#b79a74') {
   g.save()
   g.filter = `blur(${Math.max(1, r * 0.25)}px)`
   g.fillStyle = 'rgba(60, 32, 14, 0.35)'
@@ -233,7 +233,7 @@ export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: n
   g.beginPath()
   g.arc(x, y, r, 0, Math.PI * 2)
   // Darker than it looks: the scene's exposure and bloom lift it to cream.
-  g.fillStyle = live ? '#c98c4c' : '#b79a74'
+  g.fillStyle = live ? '#c98c4c' : fill
   g.fill()
   g.lineWidth = r * 0.2
   g.strokeStyle = 'rgba(58, 36, 22, 1)'
@@ -371,7 +371,7 @@ export function tagCss(card: string, commit: string, leave: string, off: string)
   ${card}::before { content: ''; position: absolute; inset: 5px; border: 1.5px dashed rgba(150, 110, 80, 0.35); border-radius: 10px; pointer-events: none; }
   ${commit}, ${leave} { position: relative; z-index: 1; min-height: 44px; min-width: 44px; padding: 0 18px 2px; border-radius: 22px; font: 700 17px ${HAND};
     cursor: pointer; transition: translate 120ms ease, background 160ms ease, opacity 160ms ease; }
-  ${leave} { border: 1.5px solid rgba(122, 82, 54, 0.45); background: transparent; color: #5b3d2b; }
+  ${leave} { border: 1.5px solid rgba(106, 70, 48, 0.75); background: rgba(255, 250, 240, 0.6); color: #4f3322; }
   ${commit} { border: 1.5px solid #6a4630; background: #7a5236; color: #fff6e6; box-shadow: 0 2px 0 rgba(60, 34, 18, 0.35); }
   ${commit}${off} { background: transparent; border: 1.5px dashed rgba(122, 82, 54, 0.5); color: rgba(91, 61, 43, 0.55); box-shadow: none;
     cursor: not-allowed; opacity: 0.75; }

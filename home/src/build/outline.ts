@@ -215,7 +215,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   row.append(button('Not now', 'cancel', () => cancel()), button('Build it', 'apply', () => confirm()))
   const hintLine = document.createElement('span')
   hintLine.className = 'hint'
-  hintLine.textContent = matchMedia('(pointer: coarse)').matches ? 'Drag a peg to shape it · tap a size to type' : 'Drag a peg to shape it · click a size to type'
+  hintLine.textContent = 'Drag the pegs to shape it'
   choice.append(title, hintLine, row)
   document.body.append(choice)
 
@@ -510,7 +510,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
     knob(dc, 0.17, active === 'door', ang(geo.dir))
     // The bend knob carries a little bowed arrow: pull to curve the wall.
-    knob(knobAt, 0.2, active === 'bend')
+    // The bend peg is sage, not wood: it curves the wall rather than moving it.
+    drawKnob(g, ...px(knobAt), 0.22 * k, active === 'bend', undefined, '#8fa278')
     {
       const [x, y] = px(knobAt), r = 0.08 * k
       const [ux, uy] = [geo.out[0], geo.out[1]]
