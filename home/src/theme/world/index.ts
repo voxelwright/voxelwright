@@ -49,25 +49,45 @@ function measure(scene: THREE.Scene): House | null {
   return { x0: r(box.min.x), x1: r(box.max.x), z0: r(box.min.z), z1: r(box.max.z), top: r(box.max.y), view }
 }
 
+/**
+ * How long a world that left the scene waits before it is freed. A theme switch compiles the
+ * next look's chain with renderer.compileAsync over the scene as it stood when the switch
+ * began; freeing a world's geometry while that compile is in flight lets the compile upload
+ * it again, and nothing frees it after (check-themes saw exactly one neon world left over).
+ */
+const RETIRE_MS = 4000
+
 /** The theme plugin's hook: `place(t)` on every walk, `drop()` on unload. */
 export function worlds(scene: THREE.Scene) {
   let stood: { key: string; world: World } | null = null
   const hidden = new Set<THREE.Object3D>()
+  const retired: Array<{ world: World; timer: ReturnType<typeof setTimeout> }> = []
+  const free = (entry: { world: World; timer: ReturnType<typeof setTimeout> }) => {
+    clearTimeout(entry.timer)
+    retired.splice(retired.indexOf(entry), 1)
+    entry.world.dispose()
+  }
   const unstand = () => {
     if (!stood) return
     stood.world.group.removeFromParent()
-    stood.world.dispose()
+    const entry = { world: stood.world, timer: setTimeout(() => free(entry), RETIRE_MS) }
+    retired.push(entry)
     stood = null
   }
-  const drop = () => {
+  const clear = () => {
     unstand()
     for (const o of hidden) o.visible = true
     hidden.clear()
   }
+  /** On unload: put the yard back and free every world now. */
+  const drop = () => {
+    clear()
+    while (retired.length) free(retired[0])
+  }
   const place = (t: Theme) => {
     const name = OFF ? undefined : t.world
     const house = name && Object.hasOwn(WORLDS, name) ? measure(scene) : null
-    if (!name || !house) return drop()
+    if (!name || !house) return clear()
     const key = JSON.stringify([name, house])
     if (stood?.key !== key) {
       unstand()
