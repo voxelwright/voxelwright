@@ -11,6 +11,7 @@ import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
+import { tagVillager } from '../theme'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -359,6 +360,7 @@ export default {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
       fig.root.scale.setScalar(SCALE)
+      tagVillager(fig.root, `villager-${p.person}`)
       const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open', seatY: SEAT_Y + BOOSTER })
       const [name, role] = spec.name.split(', ')
       const glyph = new THREE.Sprite(new THREE.SpriteMaterial({ map: glyphMap, transparent: true, depthWrite: false, opacity: 0 }))

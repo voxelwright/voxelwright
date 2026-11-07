@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
-import { theme } from './index'
+import { costumeVersion, theme, tick } from './index'
 import { PAINTERS } from './paint'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 
@@ -116,12 +116,47 @@ export default {
       }
     }
 
+    /** Put one light's or material's own values back and forget them, so a later theme starts from them again. */
+    const restoreLight = (l: Lit) => {
+      const lb = lights.get(l)
+      if (!lb) return
+      l.color.copy(lb.color)
+      if (l.groundColor && lb.ground) l.groundColor.copy(lb.ground)
+      lights.delete(l)
+    }
+    const restoreMaterial = (m: Painted) => {
+      const mb = materials.get(m)
+      if (!mb) return
+      if (mb.color && m.color) m.color.copy(mb.color)
+      if (mb.emissive && m.emissive) m.emissive.copy(mb.emissive)
+      if (mb.roughness !== undefined) m.roughness = mb.roughness
+      if (mb.metalness !== undefined) m.metalness = mb.metalness
+      if (mb.map && m.map !== mb.map) {
+        m.map = mb.map
+        m.needsUpdate = true
+      }
+      materials.delete(m)
+    }
+
+    // A villager whose figure root carries userData.keepCostume keeps its own look: its
+    // whole subtree is left out, and anything themed in it before is put back. A material
+    // it shares with something else stays its own too, so the two never fight.
+    const keptLights: Lit[] = [], keptMats = new Set<Painted>(), themedLights: Lit[] = [], themedMats: Painted[] = []
+    const gather = (o: THREE.Object3D, keep: boolean) => {
+      const k = keep || o.userData.keepCostume === true
+      if ((o as THREE.Light).isLight) (k ? keptLights : themedLights).push(o as Lit)
+      const mats = (o as THREE.Mesh).material
+      if (mats) for (const m of ([] as Painted[]).concat(mats as Painted)) k ? keptMats.add(m) : themedMats.push(m)
+      for (const child of o.children) gather(child, k)
+    }
     const walk = (t: Theme, force: boolean) => {
-      scene.traverse((o) => {
-        if ((o as THREE.Light).isLight) light(o as Lit, t, force)
-        const mats = (o as THREE.Mesh).material
-        if (mats) for (const m of ([] as THREE.Material[]).concat(mats)) material(m as Painted, t, force)
-      })
+      gather(scene, false)
+      for (const l of keptLights) restoreLight(l)
+      for (const m of keptMats) restoreMaterial(m)
+      for (const l of themedLights) light(l, t, force)
+      for (const m of themedMats) if (!keptMats.has(m)) material(m, t, force)
+      keptLights.length = themedLights.length = themedMats.length = 0
+      keptMats.clear()
       const fog = scene.fog
       if (fog instanceof THREE.Fog) {
         if (!fogs.has(fog)) fogs.set(fog, fog.color.clone())
@@ -131,10 +166,13 @@ export default {
     }
 
     let frame = 0
-    ctx.on('village/frame', () => {
+    let costumes = costumeVersion()
+    ctx.on('village/frame', (dt) => {
+      tick(dt)
       const t = theme()
-      const changed = t !== applied
+      const changed = t !== applied || costumes !== costumeVersion()
       if (!changed && ++frame % RESCAN) return
+      costumes = costumeVersion()
       walk(t, changed)
       applied = t
     })
@@ -142,25 +180,9 @@ export default {
     ctx.effect(() => () => {
       // Put every plugin's own values back.
       scene.traverse((o) => {
-        const l = o as Lit
-        const lb = l.isLight ? lights.get(l) : undefined
-        if (lb) {
-          l.color.copy(lb.color)
-          if (l.groundColor && lb.ground) l.groundColor.copy(lb.ground)
-        }
+        if ((o as THREE.Light).isLight) restoreLight(o as Lit)
         const mats = (o as THREE.Mesh).material
-        if (mats) for (const m of ([] as Painted[]).concat(mats as Painted)) {
-          const mb = materials.get(m)
-          if (!mb) continue
-          if (mb.color && m.color) m.color.copy(mb.color)
-          if (mb.emissive && m.emissive) m.emissive.copy(mb.emissive)
-          if (mb.roughness !== undefined) m.roughness = mb.roughness
-          if (mb.metalness !== undefined) m.metalness = mb.metalness
-          if (mb.map && m.map !== mb.map) {
-            m.map = mb.map
-            m.needsUpdate = true
-          }
-        }
+        if (mats) for (const m of ([] as Painted[]).concat(mats as Painted)) restoreMaterial(m)
       })
       const fog = scene.fog
       if (fog instanceof THREE.Fog && fogs.has(fog)) fog.color.copy(fogs.get(fog)!)
