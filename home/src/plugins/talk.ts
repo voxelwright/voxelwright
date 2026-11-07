@@ -14,7 +14,7 @@ import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import { navigation, type Pose } from './camera'
-import { LOOK, captionStrip, focus as lookFocus, lookCss, paperNote, paperSlips } from '../talk/look'
+import { LOOK, captionStrip, focus as lookFocus, lookCss, paperSlips } from '../talk/look'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -363,7 +363,7 @@ export default {
     group.name = 'talk'
 
     // ── The cast ──────────────────────────────────────────────────────────
-    const glyphMap = LOOK === 'a' ? paperNote() : stitchedBang()
+    const glyphMap = stitchedBang()
     const cast: Member[] = PEOPLE.map((p, i) => {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
@@ -610,11 +610,12 @@ export default {
       return !hits.some((h) => solid(h.object))
     }
     /**
-     * How many of eighteen points spread across a pose's frame, at its subject's depth, have
-     * something in front of them: a door post or a chair at the edge of the shot counts against it.
+     * How many of eight points spread across a pose's frame, at its subject's depth, have something
+     * in front of them: a door post or a chair at the edge of the shot counts against it. Stops
+     * counting at `enough`.
      */
     const probeCam = new THREE.PerspectiveCamera()
-    const clutter = (pose: Pose, at: THREE.Vector3) => {
+    const clutter = (pose: Pose, at: THREE.Vector3, enough: number) => {
       probeCam.fov = 40
       probeCam.aspect = stage.camera.aspect
       probeCam.position.copy(pose.position)
@@ -624,10 +625,10 @@ export default {
       const fwd = probeCam.getWorldDirection(new THREE.Vector3())
       const depth = at.clone().sub(pose.position).dot(fwd) - 0.25
       let n = 0
-      for (const u of [-0.9, -0.6, -0.3, 0.3, 0.6, 0.9])
-        for (const v of [-0.7, -0.1, 0.5]) {
+      for (const u of [-0.85, -0.45, 0.45, 0.85])
+        for (const v of [-0.5, 0.4]) {
           const dir = new THREE.Vector3(u, v, 0.5).unproject(probeCam).sub(pose.position).normalize()
-          if (!clear(pose.position, pose.position.clone().addScaledVector(dir, depth / Math.max(0.2, dir.dot(fwd))))) n++
+          if (!clear(pose.position, pose.position.clone().addScaledVector(dir, depth / Math.max(0.2, dir.dot(fwd)))) && ++n >= enough) return n
         }
       return n
     }
@@ -662,22 +663,24 @@ export default {
       }
       // Clear both ways: from the camera to the head and body, and from the head back to the camera,
       // which catches a camera standing inside furniture (a ray from inside a cushion hits nothing).
-      // Of the clear poses, the first with nothing in front of the villager anywhere in the frame wins,
-      // or else the one with least (#42 regroup: a door post once filled a third of the shot).
+      // Of the first five clear poses, the first with nothing in front of the villager anywhere in the
+      // frame wins, or else the one with least (#42 regroup: a door post once filled a third of the shot).
       let best: Pose | null = null
       let least = Infinity
+      let scored = 0
       nearby = around(head, 3.5)
       try {
         for (const dist of [1.5, 1.15])
           for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
             const pose = shot(base + turn, dist)
             if (!(clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position))) continue
-            const n = clutter(pose, head)
+            const n = clutter(pose, head, least)
             if (n === 0) return pose
             if (n < least) {
               least = n
               best = pose
             }
+            if (++scored === 5) return best!
           }
       } finally {
         nearby = null
@@ -708,12 +711,19 @@ export default {
       lastTalked = m
       mode = 'talk'
       m.v.chosen = true
-      m.v.beat()
       for (const o of showing.keys()) if (o !== m) hide(o)
       mine.classList.remove('shown')
-      // A note on its way lands before the camera turns to its reader, so the note is seen flying.
-      if (input?.flying) void input.landed().then(() => partner === m && mode === 'talk' && view.focus(twoShot(m), 7))
-      else view.focus(twoShot(m), 7)
+      // A note on its way lands before the camera turns to its reader, so the note is seen flying;
+      // the reader hops as it arrives.
+      if (input?.flying) void input.landed().then(() => {
+        if (partner !== m || mode !== 'talk') return
+        m.v.beat()
+        view.focus(twoShot(m), 7)
+      })
+      else {
+        m.v.beat()
+        view.focus(twoShot(m), 7)
+      }
       const news = m.news
       if (news) clearNews(m)
       if (greet || news) speak(m, news ?? m.hello)
@@ -1450,11 +1460,7 @@ export default {
       furnish?.dispose()
     }, 'talk always-on input')
     // ── The look being tried (#42 regroup, src/talk/look.ts) ─────────────────
-    const headOf = new THREE.Vector3()
-    const slipsA = LOOK === 'a' ? paperSlips(stage, (person) => {
-      const m = cast.find((c) => c.person === person)
-      return m ? { head: m.v.fig.head.getWorldPosition(headOf), colour: m.colour, name: m.name } : null
-    }) : null
+    const slipsA = LOOK === 'a' ? paperSlips((person) => cast.find((c) => c.person === person) ?? null) : null
     const captions = LOOK === 'c' ? captionStrip() : null
     // Look c: the pad lives on the table as a thing; choosing it starts writing, as any keypress does.
     if (LOOK === 'c' && input) {

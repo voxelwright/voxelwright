@@ -422,7 +422,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     sent = 0
     const target = hooks.target()
     if (hooks.variant === 'held') {
+      // The note leaves without the caret.
+      const caret = caretOn
+      caretOn = false
       paintPad()
+      caretOn = caret
       flyMat.map?.dispose()
       const [c, g] = canvas(PW, Math.round(PH * 0.62))
       g.drawImage(paperCanvas, 0, 0, PW, PH * 0.62, 0, 0, PW, PH * 0.62)
@@ -535,7 +539,9 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     if (LOOK === 'c') pad.visible = hooks.variant === 'held' && raise > 0.04
     const jx = -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
-    journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
+    // Look a on a phone: the journal goes to the top left (the sound buttons to the top right), leaving the bottom to the pad.
+    const top = LOOK === 'a' && narrow
+    journal.position.set(top ? -aspect + 0.2 : jx, (top ? 0.76 : -0.8) + hover * 0.06, 0.02)
     journal.scale.setScalar(0.55 + hover * 0.04)
     // The real button sits over the felt journal on screen.
     journal.updateWorldMatrix(true, true)
@@ -550,11 +556,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     journalButton.style.height = `${Math.max(24, Math.min(innerHeight, y1) - y0)}px`
     journalButton.hidden = away
     if (LOOK === 'c') journal.visible = false
-    // Look a on a phone: the journal steps aside while the pad is up for writing.
-    if (LOOK === 'a' && narrow) {
-      journal.visible = raise < 0.5
-      journalButton.hidden ||= raise >= 0.5
-    }
+
     if (hooks.variant === 'held') {
       const p = screenBox(sheet)
       padRect = { left: p.x0, top: p.y0, width: p.x1 - p.x0, height: Math.max(0, p.y1 - p.y0) }

@@ -4,7 +4,6 @@
 import * as THREE from 'three/webgpu'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { canvas, paintGrass, paintWorktable, rng, toTexture } from './paint'
-import { LOOK } from './talk/look'
 
 export type Side = 'back' | 'front' | 'left' | 'right'
 
@@ -228,8 +227,7 @@ export function yard(spec: Yard): THREE.Group {
   group.add(edge)
 
   // The worktable it all stands on, painted unlit so it reads the same in every room, its edges lost in the fog.
-  // The #42 talk regroup tints it: kraft paper for look a, a dim room for look b.
-  const table = new THREE.Mesh(new THREE.PlaneGeometry(48, 48), new THREE.MeshBasicMaterial({ map: paintWorktable(spec.seed), color: LOOK === 'a' ? '#c89a6c' : LOOK === 'b' ? '#4a3631' : '#ffffff' }))
+  const table = new THREE.Mesh(new THREE.PlaneGeometry(48, 48), new THREE.MeshBasicMaterial({ map: paintWorktable(spec.seed) }))
   table.rotation.x = -Math.PI / 2
   table.position.set(cx, YARD_TOP - BOARD - 0.004, cz)
   table.name = 'worktable'

@@ -8,10 +8,8 @@
 // Without ?look= the current look. Nothing here runs without ?talk=npc.
 // The speech cards stay in the page in every look (the checks and the layout read them);
 // a look only changes how they are drawn.
-import * as THREE from 'three/webgpu'
 import { uniform } from 'three/tsl'
-import { releaseGpu, type Stage } from '../kernel'
-import { canvas, rng, toTexture } from '../paint'
+import { canvas, rng } from '../paint'
 
 export type Look = 'a' | 'b' | 'c' | null
 const query = new URLSearchParams(location.search)
@@ -25,15 +23,12 @@ const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 export const focus = { distance: uniform(3), amount: uniform(0) }
 
 /** What a look needs to know of a card's speaker. */
-export interface Speaker { head: THREE.Vector3; colour: string; name: string }
+export interface Speaker { colour: string; name: string }
 
-// ── a: paper slips in the room ─────────────────────────────────────────────
+// ── a: paper slips ─────────────────────────────────────────────────────────
 interface Slip {
-  mesh: THREE.Mesh
-  mat: THREE.MeshBasicMaterial
   c: HTMLCanvasElement
   g: CanvasRenderingContext2D
-  tex: THREE.CanvasTexture
   key: string
   fade: number
   tilt: number
@@ -44,33 +39,20 @@ const TAB = 16
 const SCALE = 2
 
 /**
- * Each villager's card drawn as a paper slip standing in the room at its speaker's depth,
- * where the card would be on screen and as big: lit by the room, a little crooked, with a
- * paper tab toward the speaker and its name on a strip of tape in the speaker's colour.
+ * Each villager's card drawn as a slip of torn paper where the card is, a little crooked and
+ * turned toward its speaker, with a paper tab toward them and the name on a strip of tape in
+ * their colour. Painted in a canvas on the page, over the room: as a mesh in the room, bloom
+ * bleached it under the lamp (round 1) and temporal anti-aliasing ghosted its words (round 2).
  */
-export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | null) {
-  const { scene, camera } = stage
-  const group = new THREE.Group()
-  group.name = 'talk paper slips'
-  scene.add(group)
+export function paperSlips(speaker: (person: string) => Speaker | null) {
   const slips = new Map<string, Slip>()
-  const geometry = new THREE.PlaneGeometry(1, 1)
   const make = (person: string): Slip => {
     const [c, g] = canvas(64, 64)
-    const tex = new THREE.CanvasTexture(c)
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = 4
-    // Drawn over the room, so a chair or the lamp in front never cuts the words, and unlit at a level
-    // under the bloom threshold, so the lamp over the table never bleaches them (round 1: the slip of
-    // whoever was speaking under the pendant was the faintest thing on screen).
-    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(0.8, 0.75, 0.65), transparent: true, depthWrite: false, depthTest: false, fog: false, side: THREE.DoubleSide })
-    const mesh = new THREE.Mesh(geometry, mat)
-    mesh.name = `talk slip ${person}`
-    mesh.renderOrder = 6
-    mesh.visible = false
-    group.add(mesh)
+    c.className = 'talk-paper'
+    c.setAttribute('aria-hidden', 'true')
+    document.body.append(c)
     const seed = [...person].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) % 997
-    const slip = { mesh, mat, c, g, tex, key: '', fade: 0, tilt: (rng(seed)() - 0.5) * 0.06, seed }
+    const slip = { c, g, key: '', fade: 0, tilt: (rng(seed)() - 0.5) * 0.06, seed }
     slips.set(person, slip)
     return slip
   }
@@ -93,13 +75,8 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
     if (slip.c.width !== W || slip.c.height !== H) {
       slip.c.width = W
       slip.c.height = H
-      // A new size needs a new GPU texture.
-      slip.tex.dispose()
-      slip.tex = new THREE.CanvasTexture(slip.c)
-      slip.tex.colorSpace = THREE.SRGBColorSpace
-      slip.tex.anisotropy = 4
-      slip.mat.map = slip.tex
-      slip.mat.needsUpdate = true
+      slip.c.style.width = `${w + TAB * 2}px`
+      slip.c.style.height = `${h + TAB * 2}px`
     }
     const g = slip.g
     g.setTransform(SCALE, 0, 0, SCALE, 0, 0)
@@ -207,16 +184,9 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
         g.fill()
       }
     }
-    slip.tex.needsUpdate = true
   }
 
-  const ray = new THREE.Vector3()
-  const fwd = new THREE.Vector3()
-  const eye = new THREE.Vector3()
   const frame = (dt: number) => {
-    camera.getWorldPosition(eye)
-    camera.getWorldDirection(fwd)
-    const fovY = THREE.MathUtils.degToRad(camera.fov)
     for (const el of document.querySelectorAll<HTMLElement>('.talk-card')) {
       const person = el.dataset.talkCard
       if (!person) continue
@@ -224,8 +194,9 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
       const shown = el.classList.contains('shown')
       slip.fade += ((shown ? 1 : 0) - slip.fade) * (1 - Math.exp(-dt * 12))
       const who = speaker(person)
-      if (slip.fade < 0.01 || !who) {
-        slip.mesh.visible = false
+      const m = /(-?[\d.]+)px (-?[\d.]+)px/.exec(el.style.translate)
+      if (slip.fade < 0.01 || !who || !m) {
+        slip.c.style.opacity = '0'
         continue
       }
       const w = el.offsetWidth, h = el.offsetHeight
@@ -236,75 +207,18 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
         slip.key = key
         paint(slip, el, who, w, h)
       }
-      // Where the card is on screen, at the speaker's depth, as big as the card.
-      const m = /(-?[\d.]+)px (-?[\d.]+)px/.exec(el.style.translate)
-      if (!m) continue
-      const cx = parseFloat(m[1]) + w / 2, cy = parseFloat(m[2]) + h / 2
-      const depth = Math.max(0.4, ray.copy(who.head).sub(eye).dot(fwd) - 0.12)
-      const ndcX = (cx / innerWidth) * 2 - 1, ndcY = 1 - (cy / innerHeight) * 2
-      ray.set(ndcX, ndcY, 0.5).unproject(camera).sub(eye).normalize()
-      const along = depth / Math.max(0.2, ray.dot(fwd))
-      slip.mesh.position.copy(eye).addScaledVector(ray, along)
-      const perPx = (2 * depth * Math.tan(fovY / 2)) / innerHeight
-      slip.mesh.scale.set((w + TAB * 2) * perPx, (h + TAB * 2) * perPx, 1)
-      slip.mesh.quaternion.copy(camera.quaternion)
-      slip.mesh.rotateZ(slip.tilt)
-      // Turned a little toward its speaker, so it stands in the room rather than on the glass.
+      // Turned a little toward its speaker, a little crooked, and tipping up into place as it appears.
       const toward = el.dataset.tail === 'left' ? -1 : el.dataset.tail === 'right' ? 1 : 0
-      slip.mesh.rotateY(toward * 0.32)
-      // Held, not pasted on the glass: it sways a hair, and settles as it appears.
-      slip.mesh.rotateX((1 - slip.fade) * 0.5)
+      slip.c.style.transformOrigin = toward < 0 ? '0 50%' : toward > 0 ? '100% 50%' : '50% 100%'
+      slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg)`
       // Whoever speaks now is full strength; what was said before steps back.
-      slip.mat.opacity = slip.fade * (el.classList.contains('said') ? 0.8 : 1)
-      slip.mesh.visible = true
+      slip.c.style.opacity = String(slip.fade * (el.classList.contains('said') ? 0.82 : 1))
     }
   }
   const dispose = () => {
-    group.removeFromParent()
-    for (const s of slips.values()) s.tex.dispose()
-    releaseGpu(group)
+    for (const s of slips.values()) s.c.remove()
   }
   return { frame, dispose }
-}
-
-/** Look a's "something for you" over a villager: a small folded note with a wax seal, not a felt "!". */
-export function paperNote() {
-  const [c, g] = canvas(128, 128)
-  g.translate(64, 66)
-  g.rotate(-0.12)
-  g.shadowColor = 'rgba(60, 30, 10, 0.35)'
-  g.shadowBlur = 6
-  g.shadowOffsetY = 3
-  g.fillStyle = '#fbf3e1'
-  g.beginPath()
-  g.roundRect(-48, -34, 96, 68, 4)
-  g.fill()
-  g.shadowColor = 'transparent'
-  // The flap's folds and the paper's edge.
-  g.strokeStyle = 'rgba(140, 100, 60, 0.5)'
-  g.lineWidth = 2
-  g.beginPath()
-  g.moveTo(-46, -32)
-  g.lineTo(0, 6)
-  g.lineTo(46, -32)
-  g.stroke()
-  g.strokeStyle = 'rgba(140, 100, 60, 0.3)'
-  g.beginPath()
-  g.moveTo(-46, 32)
-  g.lineTo(-10, 0)
-  g.moveTo(46, 32)
-  g.lineTo(10, 0)
-  g.stroke()
-  // A wax seal where the folds meet.
-  g.fillStyle = '#b8402e'
-  g.beginPath()
-  g.arc(0, 6, 13, 0, Math.PI * 2)
-  g.fill()
-  g.fillStyle = 'rgba(255, 220, 190, 0.45)'
-  g.beginPath()
-  g.arc(-4, 2, 4, 0, Math.PI * 2)
-  g.fill()
-  return toTexture(c)
 }
 
 // ── c: one felt caption strip ──────────────────────────────────────────────
@@ -344,9 +258,15 @@ export function captionStrip() {
 export function lookCss(look: Look) {
   if (look === 'a') return `
   body.look-a .talk-card { opacity: 0 !important; }
+  .talk-paper { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; opacity: 0;
+    filter: drop-shadow(0 6px 10px rgba(60, 30, 10, 0.22)) drop-shadow(0 1px 1px rgba(60, 30, 10, 0.18)); }
   body.look-a .talk-tag:not(.hover) { display: none; }
   body.look-a .babble-toggle, body.look-a .music-note { opacity: 0.55; }
-  @media (max-width: 600px) { body.look-a .babble-toggle, body.look-a .music-note { top: 14px; bottom: auto; } }
+  @media (max-width: 600px) {
+    body.look-a .babble-toggle, body.look-a .music-note { top: 14px; bottom: auto; left: auto; }
+    body.look-a .babble-toggle { right: 64px; }
+    body.look-a .music-note { right: 16px; }
+  }
   `
   if (look === 'b') return `
   body.look-b .talk-card { width: 340px; min-width: 340px; max-width: min(340px, calc(100vw - 32px)); border-radius: 48% 52% 46% 54% / 56% 50% 50% 44%;
