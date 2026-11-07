@@ -190,6 +190,18 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
         return extra({ kind: 'ink', width: n('width', 0.5, 6, 1.5), depth: n('depth', 0, 1, 0.5), normal: n('normal', 0, 1, 0.5) }, { color: c('color') })
       case 'chroma':
         return extra({ kind: 'chroma', offset: n('offset', 0, 8, 1.5) }, { angle: opt('angle', -180, 180) })
+      case 'print': {
+        const style = own(s, 'style')
+        if (style !== 'tones' && style !== 'plates' && style !== 'line') return null
+        const raw = own(s, 'palette')
+        let palette: Hex[] | undefined
+        if (Array.isArray(raw)) {
+          if (raw.length > MAX_PALETTE) note(`${path}.palette`)
+          palette = [...new Set(raw.slice(0, MAX_PALETTE).map((p, j) => color(p, `${path}.palette[${j}]`)).filter((p): p is Hex => Boolean(p)))]
+          if (palette.length < 2) palette = undefined
+        }
+        return extra({ kind: 'print', style, cell: n('cell', 40, 400, 120) }, { palette, ink: c('ink'), paper: c('paper') })
+      }
       case 'brush':
         return { kind: 'brush', radius: n('radius', 1, 10, 4), strength: n('strength', 0, 1, 0.7) }
       case 'paper':

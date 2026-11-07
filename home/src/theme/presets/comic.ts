@@ -39,7 +39,8 @@ const VARIANTS: Record<string, { stages: Stage[]; shade?: 'toon' }> = {
     ],
   },
 }
-const variant = VARIANTS[new URLSearchParams(location.search).get('comic') ?? '']
+// C1 won regroup 2 (council mean 7.0 against 6.0) and is the comic look; &comic=ref shows the look before it, c2 and c3 the other candidates.
+const variant = VARIANTS[new URLSearchParams(location.search).get('comic') ?? 'c1']
 
 /**
  * The kitchen as a printed, inked comic page come to life: a bright low sun with
