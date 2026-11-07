@@ -10,7 +10,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
 import { canvas, toTexture } from '../paint'
-import { DOORWAY, WALL_Z } from '../layout'
+import { DOORWAY, KITCHEN, WALL_Z } from '../layout'
 import { keepItem, libraryItem, makeProp, startProject, type Routed } from '../villager'
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -29,8 +29,8 @@ const ANCHORS: Record<string, Anchor> = {
   counter: { x: 2.75, y: 0.9, z: -1.85, ry: 0 },
   wall: { x: 0.45, y: 0, z: WALL_Z + 0.006, ry: 0, wall: true },
   table: { x: TABLE.x, y: 0, z: TABLE.z, ry: 0 },
-  // The living room is another room; until it can be furnished from here, its door stands in for it.
-  livingDoor: { x: (DOORWAY.x0 + DOORWAY.x1) / 2 + 0.35, y: 0, z: WALL_Z + 0.75, ry: 0.55 },
+  // Until the living room can be furnished from here, its doorway stands in for it (in the kitchen's right wall).
+  livingDoor: { x: KITCHEN.x1 - 0.75, y: 0, z: (DOORWAY.z0 + DOORWAY.z1) / 2 - 0.35, ry: -1.0 },
 }
 /** Rough sizes by kind, for the ghost when the router gave none. */
 const SIZES: [RegExp, [number, number, number]][] = [

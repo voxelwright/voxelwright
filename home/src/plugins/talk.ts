@@ -10,7 +10,7 @@ import { projects as listProjects, route, say as sayTo } from '../villager'
 import { alwaysOn, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { makeChair, pineMaterial } from './chairs'
-import type { Pose } from './camera'
+import { navigation, type Pose } from './camera'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -1161,7 +1161,7 @@ export default {
         const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
         return m ? m.v.fig.head.getWorldPosition(headAt) : null
       },
-      blocked: () => entries.active === 'notebook',
+      blocked: () => entries.active === 'notebook' || navigation.claims(),
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
     }) : null

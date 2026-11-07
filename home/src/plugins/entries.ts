@@ -182,6 +182,7 @@ export default {
     const solid = (object: THREE.Object3D) => {
       if (!(object as THREE.Mesh).isMesh) return false
       for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false
+      if (object.userData.pick) return true // an unseen pick slab, such as a doorway's opening
       return ([] as THREE.Material[]).concat((object as THREE.Mesh).material).some((m) => m.visible && m.depthWrite)
     }
     let down: { x: number; y: number } | null = null
