@@ -1138,10 +1138,12 @@ export default {
     }
     const headAt = new THREE.Vector3()
     /** In the room, a line that names another villager is on its way to them, even before your villager has routed it. */
-    const namedIn = (text: string) => mode === 'room' ? cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text)) ?? null : null
+    const namedIn = (text: string) => mode === 'room' ? cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text || (routing ? routingText : ''))) ?? null : null
+    /** The line being routed: it keeps its addressee on the input until the route is back. */
+    let routingText = ''
     /** Whom you last talked with: J opens the journal at their pages. */
     let lastTalked: Member | null = null
-    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, say: (text) => quip(primary(), text) }) : null
+    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text) }) : null
     const input = INPUT ? alwaysOn(stage, entries, {
       variant: INPUT,
       journal: 'notebook',
@@ -1181,10 +1183,12 @@ export default {
       if (elsewhere || (FAREWELL.test(text) && text.length <= 40 && mode !== 'room')) return send(text)
       const guess = furnish!.hint(text, t0)
       routing = true
+      routingText = text
       me.v.thinking = true
       const r = await route(me.person, text, me.name, cast.map((m) => ({ id: m.person, name: m.name, role: m.role })))
       me.v.thinking = false
       routing = false
+      routingText = ''
       routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, ms: Math.round(r.ms), ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
       if (!r.ok) {
         furnish!.dismiss(guess)

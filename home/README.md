@@ -820,3 +820,129 @@ as a chat widget (and its typing dots and "…"), villagers that clip into
 chairs or bunch at one spot after the table, a hovered walker that stays
 turned away, the room's empty floor and bare walls, and the hot spot on the
 table. Screenshots: `screenshots/talk/npc-*.jpg` (real replies).
+
+## Always-on input (#42 prototype)
+
+`?talk=npc&input=held` or `?talk=npc&input=speech` replaces the slip with an
+input that is always there. A keypress anywhere starts writing (a lowercase
+`j` with nothing written opens the journal instead; a capital J still starts a
+line). Lines go to your own villager (Dumpling) unless you have turned to
+someone: clicking a villager or sitting at the table re-addresses it, and in
+the room a line that names another villager ("chat with Moss") is addressed
+to them as you type.
+
+- **held**: your own notepad, held at the bottom of the view by a knitted
+  mitten. It is a 3D object riding with the camera (`src/talk/input.ts`), lit
+  by the room. Your words are written on it in your ink with the addressee in
+  their colour; Enter tears the note off and it flies to its recipient.
+- **speech**: nothing on screen until you type, apart from a pencilled hint
+  before the first line. Your words rise from the bottom centre as your own
+  card (a blue "You" tab, a "to Dumpling" tag), and Enter sends it flying
+  toward the recipient.
+- Both have a tiny felt journal with a stitched J at the bottom left: one click,
+  or `j`, opens the journal (the `talkbook`, now with a ribbon for each of
+  Dumpling, Tuft and Moss) at the last villager you talked with.
+
+Routing: a line to your own villager goes to `POST /people/:id/route` on the
+host, a tool-less model call (Sonnet by default, `--router-model haiku`) whose
+JSON answer the host checks field by field (`checkRouted` in
+`host/src/villager-input.ts`). Lines to someone else, typed farewells and
+"come sit with me" skip it. While it runs, your villager taps its chin.
+
+| Route | What happens in the room |
+| --- | --- |
+| talk | that villager turns to you and the camera eases to it; any message for it is sent |
+| answer | your villager turns to you and answers through its own session |
+| furnish | a translucent ghost of the right size at once, then the made prop in its place, with Keep, Undo and Try another on a paper tag |
+| project | your villager says so in one line; a kraft-paper parcel with a stitched "being made" tag stands where it will go; the host records it in `projects.jsonl`, and parcels come back after a reload |
+| journal | the journal opens at that villager or section |
+
+Furnishing (`src/talk/furnish.ts`): trusted code resolves the place from the
+words (around the table, by the window, in the corner, on the counter, the
+living room's door, or "here", the last thing clicked, only when the person said
+here). A line that starts like furnishing ("add", "put", "replace") shows the
+ghost before the route comes back; a different route dissolves it. The prop is
+made by `POST /people/:id/props` (Sonnet writing a plain-JS `build(api)`
+module), run in the prop sandbox, checked and rebuilt, then swapped in for the
+ghost. "Replace the table" hides the table and Undo shows it again. "Another
+one like that" clones what was pointed at or placed last, with no model call.
+Keep marks the module kept in the person's library
+(`people/<id>/library/<item>.json`, module text plus metadata), and the router
+is told the library's names, so "put the green armchair by the window" places
+a saved one again through the sandbox. A failed or rejected prop leaves
+nothing placed, and your villager says so. The host stores and returns module
+text only; it never imports or runs it. The sandbox is dev only, so in a
+production build furnishing fails honestly.
+
+New host endpoints, all behind the per-launch token and under one listed
+person: `POST /people/:id/route` `{text, primary, villagers}`,
+`POST /people/:id/props` `{what, size?, variant?}`, `GET /people/:id/library`,
+`GET /people/:id/library/:item`, `POST /people/:id/library/:item/keep`,
+`GET` and `POST /people/:id/projects`. Model failures answer 422, so the page
+can tell them from the host being away.
+
+`node scripts/check-talk-input.mjs` (stub host: keyword router, box maker)
+proves, headless, 39 checks: no input without the flag; the pad rides with
+the camera; a keypress anywhere writes; your villager turns to you; Escape
+clears; `j` and the felt journal open the journal and the input steps aside;
+each route's effect in the room (talk with Moss, an answer from Dumpling, the
+ghost within 400 ms then the prop through the sandbox, replace and undo, two
+around the table, Keep into the host library, a library placement, a copy with
+no generation, a parcel and its host record, the journal); a failed and a
+rejected prop leave nothing; a failing and a nonsense router keep the line;
+the parcel after a reload; three clean unloads with the table restored; the
+speech card, its live re-addressing and its flight. 39 of 39 passed (stub
+host, November 6, 2026). `--agent=claude --variant=held|speech
+[--shots=dir] [--video=file]` runs the real session, and `--agent=claude
+--furnish` times five furnishing requests.
+
+Routing, 15 written lines, `node test/route-bench.ts haiku sonnet` in `host/`
+(operator login, M1 Pro, one call at a time; wall time includes the CLI
+start):
+
+| Model | Correct | p50 | p90 | max | Output tokens p50 | Cost for 15 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Haiku | 15 of 15 | 2.2 s | 5.5 s | 6.1 s | 53 | $0.008 |
+| Sonnet | 15 of 15 | 2.0 s | 2.3 s | 5.2 s | 57 | $0.127 |
+
+Sonnet is the default for its steadier tail; Haiku is 15 times cheaper and as
+accurate on these lines. In the page, through the dev proxy, the furnishing run's routes took 2.9
+to 5.5 s; one took 12.9 s while other checks were running.
+
+Furnishing, real models (Sonnet router and maker), one request at a time,
+measured in the page from Enter:
+
+| Request | Enter to ghost | Enter to prop | Maker | Sandbox and rebuild | Cost (route + maker) |
+| --- | --- | --- | --- | --- | --- |
+| add a round oak table for four | 3 ms | 14.7 s | 10.4 s | 231 ms | $0.022 |
+| add a couple of chairs around the table | 2 ms | 15.8 s | 10.1 s | 88 ms | $0.030 |
+| replace the table with a round oak one | 2 ms | 12.4 s | 8.7 s | 85 ms | $0.021 |
+| put a tall reading lamp by the window | 2 ms | 15.9 s | 11.9 s | 50 ms | $0.032 |
+| a green velvet armchair in the corner | 2.9 s | 13.1 s | 10.2 s | 82 ms | $0.030 |
+
+The last line has no verb, so its ghost waited for the route. The first real
+run made a black table: the model passed the painters 0 to 1 colours. The
+maker's prompt now states the 0 to 255 range and carries the house chair
+example, and the next five were coloured.
+
+Look: a fresh Opus scorer per variant per round saw only the nine real-model
+screenshots and ten categories (the ui-craft rubric plus game not tool,
+friction, input part of the world, and each request visibly changing the
+world). Means over the ten: held 6.6 then 6.7, speech 6.3 then 6.8 (overall
+6, then 7 for both). Round 2 followed live re-addressing, a slower note
+flight, a labelled ghost, paper keep and undo and the journal at the last talk.
+Two small fixes came after round 2 and are unscored (the pad keeps "to Moss"
+while the line is routed; the ghost tag names its maker). Still named: the
+pad and the journal cut by the bottom edge read as on the screen rather than
+in the room, a sent line leaves no lasting trace, long replies are cut to a
+dimmed line, the parcel is small and far away by the door, the talk camera can
+frame a post in the foreground, and a red sheet floating by the door (in the
+scene before this branch). Claude only; no GPT reviewer this slice.
+
+Stubbed or missing: "messages from the school" has no data source (the
+villager says it cannot see any); projects are a record and a parcel, nobody
+builds them yet, and there is no static stand-in; the living room is not
+furnished from the kitchen (a request for it lands in the kitchen and the
+villager says so); placed props are not kept across a reload (the library is);
+no voice toggle and no context from where you are. Screenshots:
+`screenshots/talk/input-*.jpg` (real models).

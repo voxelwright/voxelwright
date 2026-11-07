@@ -71,6 +71,8 @@ export interface FurnishHooks {
   say(text: string): void
   /** The person the input belongs to: whose library and projects. */
   person: string
+  /** Your villager's name, who makes things. */
+  maker: string
 }
 
 export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
@@ -357,7 +359,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   /** While it is being made, the tag over the ghost says what, in pencil. */
   const showMaking = (j: Job) => {
     const what = (j.routed?.what ?? '').replace(/^(a|an|the|some) /i, '')
-    making.textContent = what ? `making ${what.length > 34 ? `${what.slice(0, 33)}…` : what}…` : 'thinking…'
+    making.textContent = what ? `${hooks.maker} is making ${what.length > 30 ? `${what.slice(0, 29)}…` : what}…` : `${hooks.maker} is thinking…`
     choice.classList.add('shown', 'busy')
   }
   const removeProps = (j: Job) => {

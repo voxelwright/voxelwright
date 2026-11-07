@@ -117,7 +117,7 @@ try {
       await page.keyboard.type('I want to chat with Moss', { delay: 70 })
       await shot('typing')
       await page.keyboard.press('Enter')
-      await page.waitForTimeout(250)
+      await page.waitForTimeout(450)
       await shot('sent')
       await until(page, (s) => s.mode === 'talk' && s.partner === 'mia', 30_000)
       await page.waitForTimeout(2500)
