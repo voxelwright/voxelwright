@@ -74,7 +74,21 @@ export interface Post {
 
 /** Extra post stages, implemented in ./fx. Each one is optional and named by what it does. */
 export type Stage =
-  | { kind: 'pixel'; height: number; palette: Hex[]; dither: number }
+  | {
+    kind: 'pixel'
+    /** Rows of art pixels wanted; the cell is a whole number of device pixels, so the real count is near this. */
+    height: number
+    /** Colours the frame is reduced to, matched by perceived difference (OKLab). */
+    palette: Hex[]
+    /** Ordered-dither spread in display units (about 1 / colours per ramp). */
+    dither: number
+    /** Darkening of an object's outline where it stands in front of something (0 to 1). */
+    outline?: number
+    /** Brightening of convex creases, where two faces of one object meet (0 to 1). */
+    crease?: number
+    /** MSAA samples on the low-resolution scene; 0 gives the hardest pixel edges. */
+    samples?: number
+  }
 
 export interface Theme {
   /** Stable id, lowercase with dashes; also the ?theme= value. */
