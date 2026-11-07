@@ -23,7 +23,7 @@ import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { curveOf, inside, normalAt, outline, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { paintPhoto } from '../paint'
-import { fixturesOf, type Fixture } from './fixtures'
+import { NEAR, fixturesOf, type Fixture } from './fixtures'
 
 export const SURFACE_MIN = 0.3
 /** How far below the ceiling a hung thing's top is. */
@@ -31,6 +31,10 @@ export const CORD = 0.75
 /** Clear floor in front of a door. */
 const DOOR_CLEAR = 0.6
 const LEVEL = 0.025
+/** How close a built-in comes to an opening (or to what already dresses it) to count as dressing it: a frame, a sill. */
+const DRESS = 0.06
+/** How far past its hole an opening's dressing may reach. */
+const DRESS_REACH = 0.4
 
 /** Where a thing stands in the world: the point its holder's origin sits on, and its turn. */
 export interface Pose {
@@ -352,7 +356,8 @@ function faceFixtures(list: Obstacle[], plan: Plan, wall: Wall): Fixture[] {
   let c = faceCache.get(list)
   if (!c || c.plan !== plan) faceCache.set(list, c = { plan, byWall: new Map() })
   let got = c.byWall.get(wall.id)
-  if (!got) c.byWall.set(wall.id, got = fixturesOf(curveOf(plan, wall), wall, list))
+  // A bay bent out behind a built-in still has it in front: reach across the bulge too.
+  if (!got) c.byWall.set(wall.id, got = fixturesOf(curveOf(plan, wall), wall, list, NEAR + Math.abs(wall.sagitta)))
   return got
 }
 
@@ -374,16 +379,32 @@ export function fit(ctx: FitContext, at: Anchor): Fit {
     const ww = w * c + h * s, hh = w * s + h * c
     if (at.along - ww / 2 < f.thickness / 2 || at.along + ww / 2 > f.length - f.thickness / 2) return { ok: false, why: 'It runs off the end of the wall' }
     if (at.height - hh / 2 < 0.05 || at.height + hh / 2 > f.wall.height - 0.02) return { ok: false, why: at.height < f.wall.height / 2 ? "It's too low to hang there" : "It won't fit under the ceiling" }
-    for (const o of f.wall.openings) {
-      if (at.along + ww / 2 > o.from - 0.03 && at.along - ww / 2 < o.to + 0.03 && at.height + hh / 2 > o.sill - 0.03 && at.height - hh / 2 < o.head + 0.03) {
-        return { ok: false, why: `It would cover the ${o.kind}` }
-      }
-    }
     // What stands against or hangs on this face, flattened onto it: a bay bent out past the shelf still has the shelf in front.
     const nrm = normalAt(curveOf(plan, f.wall), at.along)
     const side = f.inward[0] * nrm[0] + f.inward[1] * nrm[1] > 0 ? 1 : -1
     const lo = at.along - ww / 2, hi = at.along + ww / 2, y0 = at.height - hh / 2, y1 = at.height + hh / 2
-    const held = faceFixtures(ctx.obstacles, plan, f.wall).find((x) => x.side === side && !x.through && x.from < hi - 0.01 && x.to > lo + 0.01 && x.y0 < y1 - 0.01 && x.y1 > y0 + 0.01)
+    const onFace = faceFixtures(ctx.obstacles, plan, f.wall).filter((x) => x.side === side)
+    for (const o of f.wall.openings) {
+      // An opening is its hole plus the built-ins dressing it (frame, sill, trim): nothing hangs over any of it.
+      // Merged meshes come as 10 cm columns, so grow the rectangle until no more columns touch it.
+      // Only pieces of what touches the hole itself (the window's own sill, not the shelf beside it), and only near it.
+      const touches = (x: Fixture, a0: number, a1: number, s0: number, s1: number) => x.from <= a1 + DRESS && x.to >= a0 - DRESS && x.y0 <= s1 + DRESS && x.y1 >= s0 - DRESS
+      const names = new Set(onFace.filter((x) => x.name !== 'placed things' && touches(x, o.from, o.to, o.sill, o.head)).map((x) => x.name))
+      const rest = onFace.filter((x) => names.has(x.name) && x.from > o.from - DRESS_REACH && x.to < o.to + DRESS_REACH && x.y0 > o.sill - DRESS_REACH && x.y1 < o.head + DRESS_REACH)
+      let [a0, a1, s0, s1] = [o.from, o.to, o.sill, o.head]
+      for (let grew = true; grew;) {
+        grew = false
+        for (let i = rest.length - 1; i >= 0; i--) {
+          const x = rest[i]
+          if (!touches(x, a0, a1, s0, s1)) continue
+          a0 = Math.min(a0, x.from); a1 = Math.max(a1, x.to); s0 = Math.min(s0, x.y0); s1 = Math.max(s1, x.y1)
+          rest.splice(i, 1)
+          grew = true
+        }
+      }
+      if (hi > a0 - 0.03 && lo < a1 + 0.03 && y1 > s0 - 0.03 && y0 < s1 + 0.03) return { ok: false, why: `It would cover the ${o.kind}` }
+    }
+    const held = onFace.find((x) => !x.through && x.from < hi - 0.01 && x.to > lo + 0.01 && x.y0 < y1 - 0.01 && x.y1 > y0 + 0.01)
     if (held) return { ok: false, why: `It bumps into ${named(held.name)}` }
     const pose = poseOf(plan, at, ctx.size)!
     const back = f.thickness / 2 + 0.004 + standOff(f, ww)

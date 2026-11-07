@@ -46,8 +46,8 @@ function project(c: Curve, x: number, z: number): [along: number, off: number] {
   return [t, (x - px) * nx + (z - pz) * nz]
 }
 
-/** The built-ins on each face of one wall, from boxes. */
-export function fixturesOf(c: Curve, wall: Wall, boxes: Array<{ box: THREE.Box3; name: string }>): Fixture[] {
+/** The built-ins on each face of one wall, from boxes, up to `reach` metres off the face. */
+export function fixturesOf(c: Curve, wall: Wall, boxes: Array<{ box: THREE.Box3; name: string }>, reach = NEAR): Fixture[] {
   const out: Fixture[] = []
   const half = wall.thickness / 2
   for (const { box, name } of boxes) {
@@ -66,7 +66,7 @@ export function fixturesOf(c: Curve, wall: Wall, boxes: Array<{ box: THREE.Box3;
       const far = side > 0 ? o1 - half : -o0 - half
       if (far < -1e-3 && near < -1e-3) continue // wholly on the other side
       const gap = Math.max(0, near)
-      if (gap > NEAR) continue
+      if (gap > reach) continue
       out.push({ name, side, from, to, y0: box.min.y, y1: box.max.y, gap, through })
     }
   }

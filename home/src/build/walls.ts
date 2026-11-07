@@ -22,6 +22,8 @@ export interface Kit {
   /** The draggable wall's own copy of the plaster, so it can glow on hover. */
   handleWall: THREE.MeshStandardMaterial
   trim: THREE.MeshStandardMaterial
+  /** Timber casing round the doors build edits open. */
+  timber: THREE.MeshStandardMaterial
   cut: THREE.MeshStandardMaterial
   seatFloor: THREE.MeshStandardMaterial
   isoFloor: THREE.MeshStandardMaterial
@@ -43,6 +45,7 @@ export function makeKit(): Kit {
     seatWall, shellWall,
     handleWall: shellWall.clone(),
     trim: new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 }),
+    timber: new THREE.MeshStandardMaterial({ color: '#c8956a', roughness: 0.62 }),
     cut: new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 }),
     seatFloor: new THREE.MeshStandardMaterial({ map: seatPlanks, roughness: FLOOR_ROUGHNESS }),
     isoFloor: new THREE.MeshStandardMaterial({ map: isoPlanks, roughness: FLOOR_ROUGHNESS }),
@@ -143,6 +146,36 @@ function around(openings: Opening[], t0: number, t1: number, height: number): Ar
   return out
 }
 
+/** Openings the kitchen has always had (room.ts and its plugins dress those); any other was opened by a build edit. */
+const KITCHEN_OPENINGS = new Set(KITCHEN.walls.flatMap((w) => w.openings.map((o) => o.id)))
+const CASING = 0.075
+/**
+ * Timber round each door a build edit opened in this wall: a jamb each side and a head on both
+ * faces, and boards lining the reveal and the underside of the lintel, so the cut wall reads as a doorway.
+ */
+function doorTrim(f: Frame, kit: Kit): THREE.Mesh[] {
+  const out: THREE.Mesh[] = []
+  const T = f.wall.thickness
+  for (const o of f.wall.openings) {
+    if (o.kind !== 'door' || o.sill > 0.01 || KITCHEN_OPENINGS.has(o.id)) continue
+    for (const side of [1, -1]) {
+      const off = side * (T / 2 + 0.012)
+      out.push(
+        piece(f, o.from - CASING, o.from + 0.004, 0, o.head + CASING, 0.024, off, kit.timber),
+        piece(f, o.to - 0.004, o.to + CASING, 0, o.head + CASING, 0.024, off, kit.timber),
+        piece(f, o.from - CASING - 0.012, o.to + CASING + 0.012, o.head - 0.004, o.head + CASING + 0.012, 0.03, side * (T / 2 + 0.015), kit.timber),
+      )
+    }
+    out.push(
+      piece(f, o.from, o.from + 0.018, 0, o.head, T + 0.02, 0, kit.timber),
+      piece(f, o.to - 0.018, o.to, 0, o.head, T + 0.02, 0, kit.timber),
+      piece(f, o.from, o.to, o.head - 0.018, o.head, T + 0.02, 0, kit.timber),
+    )
+  }
+  for (const m of out) m.castShadow = m.receiveShadow = true
+  return out
+}
+
 /** Stretches between openings that come down to the floor below `below`. */
 function spans(openings: Opening[], t0: number, t1: number, below: number): Array<[number, number]> {
   const out: Array<[number, number]> = []
@@ -221,6 +254,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       }
     }
   }
+  for (const f of frames.filter((k) => SEATED.includes(sideOf(k)))) seat.add(...doorTrim(f, kit))
   // Skirting along the back wall, broken by doors.
   for (const f of frames.filter((k) => sideOf(k) === 'back')) {
     const T = f.wall.thickness
@@ -268,6 +302,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       shell.add(m, ...(y1 >= H ? [cap] : []))
       if (y1 < H) cap.geometry.dispose()
     }
+    if (!SEATED.includes(sideOf(f))) shell.add(...doorTrim(f, kit))
     for (const [a, b] of spans(doors, t0, t1, STUB)) {
       for (const m of run(a, b, 0, STUB)) {
         m.userData.cutaway = true
@@ -332,6 +367,7 @@ function otherRooms(plan: Plan, first: Room, kit: Kit): THREE.Group | null {
         return parts
       }
       for (const [a, b, y0, y1] of around(f.wall.openings, t0, t1, H)) group.add(...run(a, b, y0, y1, y1 >= H))
+      group.add(...doorTrim(f, kit))
       for (const [a, b] of spans(f.wall.openings.filter((o) => o.sill < STUB), t0, t1, STUB)) {
         for (const m of run(a, b, 0, STUB, true)) {
           m.userData.cutaway = true

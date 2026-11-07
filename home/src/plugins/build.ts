@@ -11,6 +11,7 @@ import { checkIntent } from '../build/intent'
 import { draftEdits, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
+import { makeYard } from '../build/yard'
 
 declare module 'cordis' {
   interface Events {
@@ -89,6 +90,34 @@ export default {
       })
     }
 
+    // Until the yard follows the plan, its fence, flowers, stones and shrubs step aside from every added room and its walls, and from the sketch paper.
+    const yard = makeYard(scene)
+    let paper: P[] | null = null
+    const tidyYard = () => {
+      const p = builtPlan
+      const areas = p ? p.rooms.filter((r) => r.id !== room).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
+      yard.hide(paper ? [...areas, paper] : areas)
+    }
+    /** A room just built rises from the paper: its new walls grow up from the floor (instant with reduced motion). */
+    const RISE_MS = 700
+    let rising: { room: string; at: number } | null = null
+    const raise = () => {
+      if (!rising || !built?.rooms) return
+      const t = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : Math.min(1, (performance.now() - rising.at) / RISE_MS)
+      // Ease out with a little settle at the top.
+      const e = t >= 1 ? 1 : 1 - Math.pow(1 - t, 3) * Math.cos(t * Math.PI * 0.5)
+      const walls = new Set(builtPlan ? roomWalls(builtPlan, builtPlan.rooms.find((r) => r.id === rising!.room) ?? builtPlan.rooms[0]).map(({ wall }) => wall.id) : [])
+      for (const m of built.rooms.children) {
+        if (!walls.has(m.userData.wall)) continue
+        m.userData.restY ??= m.position.y
+        m.scale.y = Math.max(0.02, e)
+        m.position.y = (m.userData.restY as number) * Math.max(0.02, e)
+      }
+      if (t >= 1) {
+        for (const m of built.rooms.children) delete m.userData.restY
+        rising = null
+      }
+    }
     const rebuild = (next: Plan, final: boolean) => {
       const start = performance.now()
       const fresh = build(next, next.rooms.find((r) => r.id === room)!, kit, { iso: MODE === 'iso', handle: WALL, final })
@@ -113,6 +142,7 @@ export default {
         if (before) copyState(before, meshes(fresh))
       }
       builtPlan = next
+      tidyYard()
       highlight()
       rebuildMs.push(performance.now() - start)
     }
@@ -457,6 +487,10 @@ export default {
       base: () => history?.plan ?? plan,
       say,
       view,
+      yard: (p) => {
+        paper = p
+        tidyYard()
+      },
       cancel: () => {},
       apply: (d: Draft) => {
         const h = history
@@ -464,6 +498,7 @@ export default {
         const note = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
         committing = true
         h.commit(draftEdits(h.plan, d), note).then(() => {
+          rising = { room: d.roomId, at: performance.now() }
           committing = false
           outline.close()
           selectWall(null)
@@ -563,6 +598,7 @@ export default {
       }
       if (!roomGroup) return trySwap()
       if (plan !== builtPlan) rebuild(plan, false)
+      raise()
       if (built?.shell) {
         const c = curveOf(plan, wallOf(plan, WALL))
         const [x, z] = pointAt(c, c.length / 2)
@@ -665,8 +701,9 @@ export default {
         mark.geometry.dispose()
         ;(mark.material as THREE.Material).dispose()
         for (const m of glowOf.values()) m.dispose()
+        yard.restore()
         restore()
-        for (const m of [kit.seatWall, kit.shellWall, kit.handleWall, kit.trim, kit.cut, kit.seatFloor, kit.isoFloor, kit.shadow]) {
+        for (const m of [kit.seatWall, kit.shellWall, kit.handleWall, kit.trim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.shadow]) {
           m.map?.dispose()
           m.dispose()
         }

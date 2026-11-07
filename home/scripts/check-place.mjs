@@ -240,9 +240,13 @@ try {
   await begin(page, 'picture')
   s = await S(page)
   check('wall: a new picture hangs on a wall at a sensible height', s.ok && s.at.mount === 'wall' && near(s.at.height, 1.5, 0.01), s.at)
-  const back = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 3.7, 1.5, 0.1))
+  // The window's sill runs past its frame to 3.5 m: a picture just right of the frame would hang over the sill's end.
+  // Alt: no pull to the nearest spot that fits, so the pose is where the pointer is.
+  s = await dragTo(page, await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 3.65, 1.3, 0.1)), { alt: true })
+  check('wall: over the end of the window sill it is red and names the window', !s.ok && s.at.wallId === 'kitchen.back' && /window/.test(s.why ?? '') && s.at.along - 0.25 < 3.53, { at: s.at, why: s.why })
+  const back = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 3.9, 1.5, 0.1))
   s = await dragTo(page, back)
-  check('wall: dragged along the back wall it stays on it', s.ok && s.at.wallId === 'kitchen.back' && near(s.at.along, 3.7, 0.15), s.at)
+  check('wall: dragged along the back wall it stays on it, clear of the window and its sill', s.ok && s.at.wallId === 'kitchen.back' && near(s.at.along, 3.9, 0.15) && s.at.along - 0.25 > 3.5 + 0.03, s.at)
   await shot(page, 'wall')
   const win = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 2.7, 1.6, 0.1))
   s = await dragTo(page, win)
@@ -258,9 +262,23 @@ try {
   await page.evaluate(async () => (await window.villageBuild.history()).commit([{ op: 'bendWall', wallId: 'kitchen.left', sagitta: 0.6 }], 'Bent the wall'))
   await page.waitForTimeout(600)
   await begin(page, 'picture')
-  // Clear of the shelf, which stays where furnish.ts put it when the wall bends out behind it.
-  const curved = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 4.4, 1.5, 0.1))
+  // The shelf stays where furnish.ts put it when the wall bends out behind it: up to 0.6 m in front of the bay, and still in front.
+  const shelfBand = await page.evaluate(async () => {
+    const M = await import('/src/build/mount.ts'), F = await import('/src/build/fixtures.ts'), P = await import('/src/build/plan.ts')
+    const scene = window.village.kernel.root.get('stage').scene
+    const plan = window.villagePlace.plan()
+    const w = plan.walls.find((k) => k.id === 'kitchen.left')
+    const list = M.obstacles(scene, [scene.getObjectByName('placement')])
+    const near = F.fixturesOf(P.curveOf(plan, w), w, list).filter((f) => f.name === 'shelf').length
+    const shelf = F.fixturesOf(P.curveOf(plan, w), w, list, F.NEAR + Math.abs(w.sagitta)).filter((f) => f.name === 'shelf')
+    return { near, all: shelf.length, from: Math.min(...shelf.map((f) => f.from)), to: Math.max(...shelf.map((f) => f.to)) }
+  })
+  check('wall: on the bent wall the whole shelf still counts (reach across the bay)', shelfBand.all >= 40 && shelfBand.all > shelfBand.near, shelfBand)
+  s = await dragTo(page, await page.evaluate((t) => window.villageBuild.wallPoint('kitchen.left', t, 1.9, 0.1), (shelfBand.from + shelfBand.to) / 2), { alt: true })
+  check('wall: on the bent wall, over the shelf’s books, it is red and names the shelf', !s.ok && s.at.wallId === 'kitchen.left' && /shelf/.test(s.why ?? ''), { at: s.at, why: s.why })
+  const curved = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 4.7, 1.5, 0.1))
   s = await dragTo(page, curved)
+  check('wall: the accepted curved pose clears the shelf by 10 cm or more', s.ok && s.at.along - 0.25 >= shelfBand.to + 0.1, { at: s.at, shelfBand })
   const facing = await page.evaluate((at) => {
     const plan = window.villagePlace.plan()
     const w = plan.walls.find((k) => k.id === 'kitchen.left')
@@ -406,11 +424,28 @@ try {
   }, [type, id, x, y])
   const a = await anchorOnScreen(tp)
   const at0 = s.at
-  const goal = await screenOf(tp, at0.x + 0.6, 0, at0.z + 0.3)
+  // Onto open floor left of the table, so the shot shows it standing on the boards, not tucked behind a chair.
+  const goal = await screenOf(tp, at0.x - 0.9, 0, at0.z + 0.6)
   await touch('pointerdown', 11, a[0], a[1])
   for (let i = 1; i <= 8; i++) await touch('pointermove', 11, a[0] + ((goal[0] - a[0]) * i) / 8, a[1] + ((goal[1] - a[1]) * i) / 8)
   s = await S(tp)
   check('phone: one finger drags the thing', Math.hypot(s.at.x - at0.x, s.at.z - at0.z) > 0.3, { at0, at: s.at })
+  const clearance = await tp.evaluate(async (s) => {
+    const M = await import('/src/build/mount.ts')
+    const scene = window.village.kernel.root.get('stage').scene
+    const fp = M.footprint(s.at.x, s.at.z, s.size[0], s.size[2], s.at.yaw)
+    const xs = fp.map((p) => p[0]), zs = fp.map((p) => p[1])
+    let nearest = Infinity, overlap = null
+    for (const o of M.obstacles(scene, [scene.getObjectByName('placement')])) {
+      if (o.box.min.y >= s.size[1] || o.box.max.y <= 0) continue
+      const dx = Math.max(o.box.min.x - Math.max(...xs), Math.min(...xs) - o.box.max.x, 0)
+      const dz = Math.max(o.box.min.z - Math.max(...zs), Math.min(...zs) - o.box.max.z, 0)
+      if (dx === 0 && dz === 0 && M.overlaps(fp, [[o.box.min.x, o.box.min.z], [o.box.max.x, o.box.min.z], [o.box.max.x, o.box.max.z], [o.box.min.x, o.box.max.z]], 0.01)) overlap = o.name
+      nearest = Math.min(nearest, Math.hypot(dx, dz))
+    }
+    return { nearest: +nearest.toFixed(3), overlap }
+  }, s)
+  check(`phone: the accepted crate overlaps nothing in its height (nearest ${clearance.nearest} m)`, s.ok && !clearance.overlap && clearance.nearest > 0.05, clearance)
   await tp.screenshot({ path: look ? join(OUT, 'place-phone-floor.jpg') : join(root, 'phone.jpg'), quality: 86 })
   const yawT = s.at.yaw
   await touch('pointerdown', 12, goal[0] + 80, goal[1])

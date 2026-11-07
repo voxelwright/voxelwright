@@ -2,7 +2,7 @@
 // Starts its own villager host (stub router and villagers by default) and dev
 // server on a throwaway VILLAGE_ROOT, and stops both at the end.
 // Usage: node scripts/check-build-addroom.mjs [--dev=5351] [--host=5352]
-//   --look: screenshots/build/addroom-*.jpg (dollhouse and close, 1440x900 and 390x844) and addroom.mp4.
+//   --look: screenshots/build/addroom-*.jpg (dollhouse, close and the new doorway seated, 1440x900 and 390x844) and addroom.mp4.
 //   --agent=claude: add-room lines through the real router (?route=separate, Sonnet),
 //     printing each routed intent, whether it matched, and Enter to outline (or to the question).
 import { spawn, execFileSync } from 'node:child_process'
@@ -109,6 +109,61 @@ async function drag(page, from, to, steps = 20) {
 }
 const grips = (page) => B(page, () => window.villageBuild.outline.grips() && (({ at, ...g }) => g)(window.villageBuild.outline.grips()))
 const floorPoint = (page, along, across) => B(page, ([a, c]) => window.villageBuild.outline.grips().at(a, c), [along, across])
+/** The yard as diorama.ts drew it, or now: each instanced mesh's matrices, and the triangles each merged yard mesh draws. */
+const yardNow = (page) => B(page, () => {
+  const scene = window.village.kernel.root.get('stage').scene
+  const fence = scene.getObjectByName('picket fence')
+  const rail = fence.parent.children.find((c) => c.isMesh && c !== fence && c.material === fence.material)
+  const out = {}
+  for (const name of ['picket fence', 'yard blooms', 'stepping stones']) out[name] = Array.from(scene.getObjectByName(name).instanceMatrix.array).join(',')
+  for (const [name, m] of [['rails', rail], ['yard plants', scene.getObjectByName('yard plants')]]) out[name] = m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count
+  return out
+})
+/** Yard things still drawn inside an added room or its walls: instance middles, and merged triangles by their middle. */
+const yardInside = (page) => B(page, async () => {
+  const P = await import('/src/build/plan.ts')
+  const scene = window.village.kernel.root.get('stage').scene
+  const p = window.villageBuild.plan()
+  const rings = p.rooms.filter((r) => r.id !== 'kitchen').map((r) => P.outline(p, r, -0.09))
+  const inRing = (x, z) => rings.some((poly) => {
+    let inn = false
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if ((poly[i][1] > z) !== (poly[j][1] > z) && x < ((poly[j][0] - poly[i][0]) * (z - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) inn = !inn
+    return inn
+  })
+  const fence = scene.getObjectByName('picket fence')
+  const M4 = fence.matrixWorld.constructor, V3 = fence.position.constructor
+  const m4 = new M4(), v = new V3(), sc = new V3()
+  const out = {}
+  for (const name of ['picket fence', 'yard blooms', 'stepping stones']) {
+    const m = scene.getObjectByName(name)
+    m.updateMatrixWorld()
+    let n = 0
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, m4)
+      sc.setFromMatrixScale(m4)
+      v.setFromMatrixPosition(m4).applyMatrix4(m.matrixWorld)
+      if (sc.x > 1e-6 && inRing(v.x, v.z)) n++
+    }
+    out[name] = n
+  }
+  const rail = fence.parent.children.find((c) => c.isMesh && c !== fence && c.material === fence.material)
+  for (const [name, m] of [['rails', rail], ['yard plants', scene.getObjectByName('yard plants')]]) {
+    const pos = m.geometry.attributes.position, idx = m.geometry.index
+    const count = idx ? idx.count : pos.count
+    let n = 0
+    for (let t = 0; t + 2 < count; t += 3) {
+      let x = 0, z = 0
+      for (let j = 0; j < 3; j++) {
+        v.fromBufferAttribute(pos, idx ? idx.getX(t + j) : t + j).applyMatrix4(m.matrixWorld)
+        x += v.x / 3
+        z += v.z / 3
+      }
+      if (inRing(x, z)) n++
+    }
+    out[name] = n
+  }
+  return { rooms: rings.length, out, total: Object.values(out).reduce((a, b) => a + b, 0) }
+})
 const LEFT = 'add a living room to the left side, connected by double doors, 2/3 the size of the current room'
 const STUDY = 'add a 4 by 3 metre study behind the living room'
 
@@ -210,6 +265,24 @@ try {
     rmSync(tmp, { recursive: true, force: true })
     console.log(`clip ${mp4} ${(statSync(mp4).size / 1e6).toFixed(2)} MB`)
 
+    // The new doorway from inside the kitchen (seated view), framed on it.
+    const doorContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    const { page: dp } = await open('?build=1&q=high', doorContext)
+    await B(dp, async () => {
+      const P = await import('/src/build/plan.ts')
+      const p = window.villageBuild.plan()
+      const w = p.walls.find((x) => x.openings.some((o) => o.kind === 'door' && !o.id.startsWith('kitchen.')))
+      const o = w.openings.find((x) => x.kind === 'door' && !x.id.startsWith('kitchen.'))
+      const c = P.curveOf(p, w)
+      const [x, z] = P.pointAt(c, (o.from + o.to) / 2)
+      const root = window.village.kernel.root
+      const V = root.get('stage').camera.position.constructor
+      root.get('view').focus({ position: new V(x + 2.7, 1.35, z + 0.7), look: new V(x, 1.15, z) }, 50)
+    })
+    await dp.waitForTimeout(1500)
+    await dp.screenshot({ path: join(OUT, 'addroom-door.jpg'), quality: 88, type: 'jpeg' })
+    await doorContext.close()
+
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, deviceScaleFactor: 2 })
     const { page: tp } = await open('?talk=npc&build=1&q=low', phone)
     await B(tp, () => window.villageBuild.intent({ op: 'addRoom', label: 'study', anchor: { room: 'kitchen', side: 'right' }, size: { w: 4, d: 3 }, connect: { kind: 'door', leaves: 2 } }))
@@ -282,6 +355,7 @@ try {
 
     // ── The notepad path ───────────────────────────────────────────────────
     const s0 = await state(page)
+    const yard0 = await yardNow(page)
     const v0 = await versions(page)
     const plan0 = await B(page, () => JSON.stringify(window.villageBuild.plan()))
     await say(page, LEFT)
@@ -292,7 +366,7 @@ try {
     check('notepad: a build line draws the outline within 400 ms of Enter (stub router)', s.draft && enterToOutline < 400, { enterToOutline: Math.round(enterToOutline), enterToRoute: routeMs, draft: s.draft })
     await page.waitForTimeout(150)
     s = await state(page)
-    check('notepad: double doors do not fit by the dresser, so your villager says it drew a single door', /dresser.*single door/i.test(s.card ?? '') && s.draft.door.leaves === 1, s.card)
+    check('notepad: double doors do not fit by the dresser, so your villager says it drew a single door, in one short line', /dresser.*single door/i.test(s.card ?? '') && s.card.length <= 60 && s.draft.door.leaves === 1, s.card)
     // The door against the kitchen's real built-ins, both faces of the shared wall, measured from the scene.
     const clear = await B(page, () => {
       const d = window.villageBuild.outline.draft()
@@ -373,6 +447,10 @@ try {
       const shared = p.walls.filter((w) => p.rooms.filter((r) => r.loop.includes(w.a) && r.loop.includes(w.b)).length === 2)
       return { shared: shared.map((w) => ({ id: w.id, openings: w.openings })), bent: p.walls.find((w) => w.id === 'living-room.w2')?.sagitta }
     })
+    // The yard does not follow the plan yet (diorama.ts), so what of it stands in the new room steps aside.
+    const yardBuilt = await yardInside(page)
+    const yardBuiltNow = await yardNow(page)
+    check('built: no fence picket or rail, flower, stone or shrub stands inside the new room or its walls (and some were moved aside)', yardBuilt.rooms === 1 && yardBuilt.total === 0 && Object.keys(yard0).some((k) => yardBuiltNow[k] !== yard0[k]), { yardBuilt, changed: Object.keys(yard0).filter((k) => yardBuiltNow[k] !== yard0[k]) })
     check('the shared wall is one wall with the door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.kind === 'door') && built.bent !== 0, built)
     // The door is a real gap in the generated walls: a level ray at 1 m through its middle, from 1 m inside one room
     // to 1 m inside the other, meets no wall; the same ray 0.3 m past a jamb meets the shared wall.
@@ -414,6 +492,10 @@ try {
       s = await until(page, (x) => x.rooms.length === 1)
       await frames(page, 4)
       const undone = (await state(page)).floors
+      if (i === 0) {
+        const back = await yardNow(page)
+        check('undo: with the room gone, the yard is exactly as diorama.ts drew it', Object.keys(yard0).every((k) => back[k] === yard0[k]), Object.keys(yard0).filter((k) => back[k] !== yard0[k]))
+      }
       await page.keyboard.press('Control+Shift+z')
       s = await until(page, (x) => x.rooms.length === 2)
       // The cutaway re-sorts walls every 30 frames, and a stub's geometry uploads the first time it shows.
@@ -460,6 +542,12 @@ try {
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 4 && x.floors === 4)
     check('and Enter builds it', s.rooms.length === 4 && s.floors === 4, s.rooms)
+    const yardThree = await yardInside(page)
+    check('with three rooms added, still nothing of the yard inside any of them', yardThree.rooms === 3 && yardThree.total === 0, yardThree)
+    await B(page, () => window.village.unload('build'))
+    await frames(page, 4)
+    const yardGone = await yardNow(page)
+    check('unloading build puts the whole yard back as diorama.ts drew it', Object.keys(yard0).every((k) => yardGone[k] === yard0[k]), Object.keys(yard0).filter((k) => yardGone[k] !== yard0[k]))
     check('no page errors', errors.length === 0, errors.slice(0, 3))
     await context.close()
   }
