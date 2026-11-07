@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import {
-  Fn, If, Loop, cbrt, clamp, dot, float, floor, int, max, mod, mrt, normalView, output, packNormalToRGB,
-  length, luminance, min, mix, perspectiveDepthToViewZ, sRGBTransferEOTF, screenCoordinate, screenSize, smoothstep, step, textureSize, uniform, uniformArray,
+  Fn, If, Loop, cbrt, clamp, diffuseColor, dot, exp2, float, floor, int, log2, max, mod, mrt, normalView, output, packNormalToRGB,
+  length, luminance, min, mix, perspectiveDepthToViewZ, round, sRGBTransferEOTF, screenCoordinate, screenSize, smoothstep, step, textureSize, uniform, uniformArray,
   unpackRGBToNormal, uv, vec2, vec3, vec4,
 } from 'three/tsl'
 import type { Fx } from './index'
@@ -47,6 +47,19 @@ export const oklab = (srgb: V3): V3 => oklabLinear(sRGBTransferEOTF(srgb) as unk
  * 0 keeps dither for silhouettes and shadow edges). `refit` re-sizes every live pixel stage.
  */
 export const pixelFit = { rows: 0, edge: uniform(0), flat: uniform(0.35), fits: new Set<() => void>(), refit: () => pixelFit.fits.forEach((f) => f()) }
+
+/**
+ * Light is drawn in bands, as pixel art paints it: the ratio of a pixel's colour to its
+ * surface's own colour is rounded to steps this many stops apart (about four bands from a
+ * room's shadow to its lamp-lit wall), so a lamp's soft falloff reads as a few clean rings
+ * instead of palette blotches. A surface this dark, a glow this many times its own colour,
+ * or the sky are left as they are.
+ */
+const LIGHT_STEP = 0.6
+const DARK_ALBEDO = 0.03
+const GLOW_RATIO = 4
+/** Outlines: a silhouette (a jump of a few of the look's steps) is drawn at full strength, a small step between parts at this share. */
+const SEAM = 0.3
 
 /** 4x4 ordered-dither thresholds, centred on zero. */
 const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5)
@@ -97,37 +110,49 @@ export function pixel(spec: Spec): Fx {
         pixelFit.fits.delete(fit)
       }
       ;(scenePass.options as { samples?: number }).samples = spec.samples ?? 0
-      if (outline || crease) {
-        const normal = mrt({ normal: packNormalToRGB(normalView) })
-        const had = scenePass.getMRT()
-        if (!had) scenePass.setMRT(mrt({ output }).merge(normal))
-        else if (!had.has('normal')) scenePass.setMRT(had.merge(normal))
-      }
+      // The surface's own colour, for banding the light, and its normal, for outlines.
+      const add = mrt({ diffuseColor, ...(outline || crease ? { normal: packNormalToRGB(normalView) } : {}) })
+      const had = scenePass.getMRT()
+      scenePass.setMRT(had ? had.merge(add) : mrt({ output }).merge(add))
+      scenePass.getTexture('diffuseColor').type = THREE.UnsignedByteType
       for (const tex of scenePass.renderTarget.textures) tex.minFilter = tex.magFilter = THREE.NearestFilter
     },
     hdr(color, { stage, scenePass }) {
-      if (!outline && !crease) return color
       const camera = stage.camera as THREE.PerspectiveCamera
       const near = uniform(camera.near).onRenderUpdate(() => camera.near)
       const far = uniform(camera.far).onRenderUpdate(() => camera.far)
       const depthTex = scenePass.getTextureNode('depth')
-      const normalTex = scenePass.getTextureNode('normal')
+      const albedoTex = scenePass.getTextureNode('diffuseColor')
+      const normalTex = outline || crease ? scenePass.getTextureNode('normal') : null
       return Fn(() => {
         const size = vec2(textureSize(depthTex) as unknown as THREE.Node<'ivec2'>)
         const at = floor(uv().mul(size)).add(0.5).toVar()
+        // The light, banded.
+        const albedo = luminance(albedoTex.sample(at.div(size)).rgb)
+        const ratio = luminance(color.rgb).div(albedo.max(1e-3)).max(1e-4).toVar()
+        const banded = exp2(round(log2(ratio).div(LIGHT_STEP)).mul(LIGHT_STEP))
+        const sky = step(0.99999, depthTex.sample(at.div(size)).x)
+        const keep = step(DARK_ALBEDO, albedo).mul(step(ratio, GLOW_RATIO)).mul(float(1).sub(sky))
+        const lit = color.rgb.mul(mix(float(1), banded.div(ratio), keep)).toVar()
+        if (!normalTex) return vec4(lit, color.a)
         // 1 / view distance is affine across a flat surface, so its Laplacian is zero
         // on walls and floors at any angle and large only where depth jumps.
         const inv = (dx: number, dy: number): F => {
           const d = depthTex.sample(at.add(vec2(dx, dy)).div(size)).x
           return float(-1).div(perspectiveDepthToViewZ(d, near, far)) as unknown as F
         }
-        const nrm = (dx: number, dy: number): V3 => unpackRGBToNormal(normalTex.sample(at.add(vec2(dx, dy)).div(size)).rgb).normalize() as unknown as V3
+        const nrm = (dx: number, dy: number): V3 => unpackRGBToNormal(normalTex!.sample(at.add(vec2(dx, dy)).div(size)).rgb).normalize() as unknown as V3
         const i0 = inv(0, 0).toVar(), iE = inv(1, 0), iW = inv(-1, 0), iN = inv(0, 1), iS = inv(0, -1)
         // Positive where this pixel is nearer than its neighbours on either axis: the near side of an edge.
         const jump = max(i0.mul(2).sub(iE).sub(iW), i0.mul(2).sub(iN).sub(iS)).div(i0)
         // With `pixelFit.edge` set, the jump is weighed in metres (jump times view distance).
         const metres = pixelFit.edge.max(1e-4)
-        const edge = mix(smoothstep(0.05, 0.12, jump), smoothstep(metres.mul(0.5), metres, jump.div(i0)), step(1e-4, pixelFit.edge))
+        // Selective: a silhouette (a chair against the floor, a shelf against the wall) at full
+        // strength, a small step between an object's own parts (a drawer, a seat) quiet.
+        const rel = max(smoothstep(0.02, 0.04, jump).mul(SEAM), smoothstep(0.06, 0.14, jump))
+        const jm = jump.div(i0)
+        const abs = max(smoothstep(metres.mul(0.3), metres.mul(0.5), jm).mul(SEAM), smoothstep(metres, metres.mul(2.2), jm))
+        const edge = mix(rel, abs, step(1e-4, pixelFit.edge))
         const n0 = nrm(0, 0).toVar()
         let bend: F = float(0)
         for (const [dx, dy, ik] of [[1, 0, iE], [-1, 0, iW], [0, 1, iN], [0, -1, iS]] as const) {
@@ -139,9 +164,9 @@ export function pixel(spec: Spec): Fx {
         }
         // A real crease also bends the depth; a normal change on flat depth is a transparent
         // shape (the sunbeam's shells write their normals but not their depth), not geometry.
-        const lit = step(0.15, bend).mul(step(edge, 0.001)).mul(step(0.0004, jump.abs()))
-        const k = float(1).sub(edge.mul(outline)).add(lit.mul(crease))
-        return vec4(color.rgb.mul(k), color.a)
+        const creased = step(0.15, bend).mul(step(edge, 0.001)).mul(step(0.0004, jump.abs()))
+        const k = float(1).sub(edge.mul(outline)).add(creased.mul(crease))
+        return vec4(lit.mul(k), color.a)
       })() as unknown as THREE.Node<'vec4'>
     },
     display(color, { scenePass }) {

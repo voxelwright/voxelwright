@@ -1,66 +1,92 @@
-// I1, a motivated light hierarchy (#50, regroup 3, `&pools=1`). A theme names warm practical
-// pools at the house's focal points (the dining table, the kitchen counter, the sofa, the
-// reading chair): each is a soft painted light decal on the floor or the table, plus at most
-// one real point light per room. The room's own lights are re-balanced around them, so the
-// room reads as one warm refuge in a cool house instead of an even wash.
+// I1, a motivated light hierarchy (#50, regroup 3, on by default; `&pools=0` turns it off).
+// A theme lights the house's own fixtures (the pendant, the light under the kitchen cabinets,
+// the lounge's floor lamp behind the sofa, the reading lamp by the armchair) with real point
+// lights that fall off tightly around each one, and lays a faint painted pool on the floor
+// under each. The room's own lights are re-balanced around them, so the room reads as one warm
+// refuge in a cool house instead of an even wash.
+//
+// Switching cost: the lights stand for as long as the theme plugin is loaded, dark in a look
+// that leaves them out. Adding or removing a light changes the light list every lit material is
+// compiled against, and a switch to a look with pools then recompiled the whole house in one
+// frame (8 s from Golden hour to Neon night). The painted pools share one small pipeline.
 import * as THREE from 'three/webgpu'
 import { glowTexture } from '../world/build'
 import type { Hex } from '../tokens'
 
-/** A painted pool of light lying on a surface at height y. `stretch` makes it oval along x and z. */
-export interface Pool { x: number; y: number; z: number; r: number; strength: number; color: Hex; stretch?: [number, number] }
-/** A real light the theme adds for a focal point. */
-export interface Lamp { x: number; y: number; z: number; color: Hex; intensity: number; distance: number }
-/** A plugin's light, found by its name or its parent's, pulled further after the theme has shifted it. */
-export interface Retint { light: string; color?: Hex; tint?: number; gain?: number; distance?: number }
-/** A glowing material (a bulb, a lamp shade) under a named group, its emissive pulled to match its pool. */
-export interface Glow { under: string; color: Hex; tint: number }
-export interface Pools { pools: Pool[]; lamps: Lamp[]; retint: Retint[]; glows?: Glow[] }
-
-/** Where the focal points stand in the connected house (measured from the plugins' groups). */
-const TABLE_TOP = 0.765
+/** The house's fixtures, measured from the plugins' groups: each light hangs just under its shade. */
+const FIXTURES = {
+  // Under the kitchen's wall cabinets, over the counter.
+  counter: [2.65, 1.45, -1.35],
+  // The lounge's floor lamp, behind the sofa's end (its shade at 3.88, 1.5, -0.45).
+  lounge: [3.88, 1.3, -0.45],
+  // The reading lamp by the armchair (its shade at 2.26, 1.46, 1.5).
+  reading: [2.26, 1.28, 1.5],
+} as const
+type Fixture = keyof typeof FIXTURES
+/** Where the painted pools lie: on the floor, under the pendant and each fixture. */
+const SPOTS = {
+  dining: [0.3, 0.3],
+  counter: [2.6, -1.05],
+  lounge: [4.05, -0.05],
+  reading: [2.15, 1.55],
+} as const
+type Spot = keyof typeof SPOTS
 const FLOOR = 0.012
 
-const warmPools = (color: Hex, k: number): Pool[] => [
-  // The dining table under the pendant, and the floor around it.
-  { x: 0.3, y: TABLE_TOP + 0.003, z: 0.3, r: 0.95, strength: 0.55 * k, color, stretch: [1.25, 1] },
-  { x: 0.05, y: FLOOR, z: 0.3, r: 2.0, strength: 0.32 * k, color, stretch: [1.25, 1] },
-  // The kitchen counter's floor, lit from under the cabinets.
-  { x: 2.65, y: FLOOR, z: -1.1, r: 1.1, strength: 0.3 * k, color, stretch: [1.4, 0.8] },
-  // The reading chair by the kitchen's standing lamp.
-  { x: 2.0, y: FLOOR, z: 1.75, r: 1.0, strength: 0.26 * k, color },
-  // The sofa's end, under the lounge lamp.
-  { x: 4.35, y: FLOOR, z: 0.1, r: 1.35, strength: 0.32 * k, color, stretch: [1, 1.3] },
-]
+/** A painted pool of light on the floor: radius, stretch along x and z, colour times strength. */
+export interface Pool { r: number; strength: number; color: Hex; stretch?: [number, number] }
+/** A fixture's light: decay 2 is physical, so the light gathers around the fixture. */
+export interface Lamp { color: Hex; intensity: number; distance: number; decay?: number }
+/** A plugin's light, found by its name or its parent's, pulled further after the theme has shifted it. */
+export interface Retint { light: string; color?: Hex; tint?: number; gain?: number; distance?: number; decay?: number }
+/** A glowing material (a bulb, a lamp shade) under a named group, its emissive pulled to match its pool. */
+export interface Glow { under: string; color: Hex; tint: number }
+export interface Pools { pools: Partial<Record<Spot, Pool>>; lamps: Partial<Record<Fixture, Lamp>>; retint: Retint[]; glows?: Glow[] }
 
 export const POOLS: Record<string, Pools> = {
   // Neon night: the kitchen must not fall to near-black and the lounge must not glow hot pink.
-  // The pendant turns amber and reaches the whole table; the lounge's glow goes cool and low;
-  // the magenta rim is halved. Warm pools are the refuge; the city outside stays neon.
+  // The pendant turns amber over the table; the counter, the sofa and the armchair each get
+  // their own lamp's light; the lounge's glow goes cool and low; the magenta rim is halved.
   'neon-night': {
-    pools: warmPools('#ff9a52', 1),
-    lamps: [
-      { x: 2.65, y: 1.45, z: -1.35, color: '#ffa860', intensity: 1.5, distance: 2.8 },
-      { x: 3.95, y: 1.35, z: -0.35, color: '#ffae68', intensity: 1.4, distance: 3 },
-    ],
+    pools: {
+      dining: { r: 1.45, strength: 0.34, color: '#ff9a52', stretch: [1.2, 1] },
+      counter: { r: 0.85, strength: 0.22, color: '#ff9a52', stretch: [1.3, 0.8] },
+      lounge: { r: 1.0, strength: 0.26, color: '#ff9a52', stretch: [1, 1.2] },
+      reading: { r: 0.8, strength: 0.26, color: '#ff9a52' },
+    },
+    lamps: {
+      counter: { color: '#ffa860', intensity: 1.6, distance: 2.4 },
+      lounge: { color: '#ffae68', intensity: 4, distance: 3 },
+      reading: { color: '#ffb066', intensity: 2.2, distance: 2.4 },
+    },
     retint: [
-      { light: 'lamp', color: '#ffae62', tint: 0.85, gain: 1.35, distance: 4.6 },
+      { light: 'lamp', color: '#ffae62', tint: 0.85, gain: 2.6, distance: 3.6, decay: 1.6 },
       { light: 'lounge glow', color: '#4a50ff', tint: 0.8, gain: 0.28 },
       { light: 'rim light', gain: 0.5 },
     ],
-    // The pendant's bulb and the reading lamp's shade glow amber over their pools, not magenta.
-    glows: [{ under: 'lamp', color: '#ffb066', tint: 0.85 }, { under: 'reading lamp shade', color: '#ffb066', tint: 0.85 }],
-  },
-  // Blue hour: the warm pendant pool against cool window fill. The lounge's warm glow cools,
-  // so the warmth gathers at the table, the counter and the sofa's lamp.
-  'blue-hour': {
-    pools: warmPools('#ffae60', 0.9),
-    lamps: [
-      { x: 2.65, y: 1.45, z: -1.35, color: '#ffb070', intensity: 1.1, distance: 2.6 },
-      { x: 3.95, y: 1.35, z: -0.35, color: '#ffb070', intensity: 1.2, distance: 3 },
+    // The bulbs and shades glow amber over their pools, not magenta.
+    glows: [
+      { under: 'lamp', color: '#ffb066', tint: 0.85 },
+      { under: 'reading lamp shade', color: '#ffb066', tint: 0.85 },
+      { under: 'lounge lamp shade', color: '#ffb066', tint: 0.85 },
     ],
+  },
+  // Blue hour: the dusk stays blue. Small warm pools gather at the table, the counter, the sofa
+  // and the armchair; between them the cool window light carries the room.
+  'blue-hour': {
+    pools: {
+      dining: { r: 1.2, strength: 0.16, color: '#ffae60', stretch: [1.2, 1] },
+      counter: { r: 0.8, strength: 0.14, color: '#ffae60', stretch: [1.3, 0.8] },
+      lounge: { r: 0.9, strength: 0.18, color: '#ffae60', stretch: [1, 1.2] },
+      reading: { r: 0.75, strength: 0.18, color: '#ffae60' },
+    },
+    lamps: {
+      counter: { color: '#ffb070', intensity: 1.0, distance: 2.2 },
+      lounge: { color: '#ffb070', intensity: 2.6, distance: 2.8 },
+      reading: { color: '#ffb070', intensity: 1.3, distance: 2.2 },
+    },
     retint: [
-      { light: 'lamp', color: '#ff9c48', tint: 0.35, gain: 1.15, distance: 4.4 },
+      { light: 'lamp', color: '#ff9c48', tint: 0.4, gain: 1.3, distance: 3.0, decay: 1.8 },
       { light: 'lounge glow', color: '#7088e0', tint: 0.6, gain: 0.55 },
       { light: 'sun', gain: 1.35 },
     ],
@@ -69,54 +95,67 @@ export const POOLS: Record<string, Pools> = {
 
 const named = (l: THREE.Object3D, name: string) => l.name === name || l.parent?.name === name
 
-/** Stands a theme's pools and lamps (`stand`), re-balances the room's lights after each theme walk. */
+/** Stands the fixtures' lights and pools once, lights them per theme, re-balances the room's lights after each theme walk. */
 export function pools(scene: THREE.Scene) {
-  let stood: { id: string; group: THREE.Group; dispose(): void } | null = null
-  // The colour this module last wrote into a light, and the light's own distance: a light whose
-  // colour differs has been re-shifted by the theme plugin and is pulled again.
-  const written = new Map<THREE.Light, { color: THREE.Color; distance?: number }>()
+  const group = new THREE.Group()
+  group.name = 'theme interior pools'
+  group.userData.themeOwned = true
+  const map = glowTexture()
+  const disc = new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2)
+  const owned: Array<{ dispose(): void }> = [map, disc]
+  const decals = {} as Record<Spot, THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>>
+  for (const spot of Object.keys(SPOTS) as Spot[]) {
+    const material = new THREE.MeshBasicMaterial({
+      map, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    })
+    const mesh = new THREE.Mesh(disc, material)
+    mesh.position.set(SPOTS[spot][0], FLOOR, SPOTS[spot][1])
+    mesh.renderOrder = 2
+    mesh.raycast = () => {}
+    mesh.name = 'light pool'
+    mesh.visible = false
+    group.add(mesh)
+    owned.push(material)
+    decals[spot] = mesh
+  }
+  const lamps = {} as Record<Fixture, THREE.PointLight>
+  for (const fixture of Object.keys(FIXTURES) as Fixture[]) {
+    const light = new THREE.PointLight(0xffffff, 0, 1, 2)
+    light.position.fromArray(FIXTURES[fixture])
+    light.name = 'pool lamp'
+    group.add(light)
+    owned.push(light)
+    lamps[fixture] = light
+  }
+  scene.add(group)
+  let lit: string | null = null
+
+  const light = (id: string | null, spec: Pools | null) => {
+    if (lit === id) return
+    lit = id
+    for (const spot of Object.keys(decals) as Spot[]) {
+      const p = spec?.pools[spot], mesh = decals[spot]
+      // Hidden in a look without it: additive blending reaches every target of the scene pass,
+      // so even a black pool would add to the floor's normal under it.
+      mesh.visible = Boolean(p)
+      if (!p) continue
+      mesh.material.color.set(p.color).multiplyScalar(p.strength)
+      mesh.scale.set(p.r * (p.stretch?.[0] ?? 1), 1, p.r * (p.stretch?.[1] ?? 1))
+    }
+    for (const fixture of Object.keys(lamps) as Fixture[]) {
+      const l = spec?.lamps[fixture], lamp = lamps[fixture]
+      lamp.intensity = l?.intensity ?? 0
+      if (!l) continue
+      lamp.color.set(l.color)
+      lamp.distance = l.distance
+      lamp.decay = l.decay ?? 2
+    }
+  }
+
+  // The colour this module last wrote into a light, and the light's own distance and decay: a
+  // light whose colour differs has been re-shifted by the theme plugin and is pulled again.
+  const written = new Map<THREE.Light, { color: THREE.Color; distance?: number; decay?: number }>()
   const target = new THREE.Color()
-
-  const unstand = () => {
-    if (!stood) return
-    stood.group.removeFromParent()
-    stood.dispose()
-    stood = null
-  }
-  const stand = (id: string, spec: Pools) => {
-    if (stood?.id === id) return
-    unstand()
-    const group = new THREE.Group()
-    group.name = 'theme interior pools'
-    group.userData.themeOwned = true
-    const owned: Array<{ dispose(): void }> = []
-    const map = glowTexture()
-    owned.push(map)
-    for (const p of spec.pools) {
-      const geo = new THREE.CircleGeometry(p.r, 40).rotateX(-Math.PI / 2).scale(...(p.stretch ? [p.stretch[0], 1, p.stretch[1]] as const : [1, 1, 1] as const))
-      const mat = new THREE.MeshBasicMaterial({
-        map, color: new THREE.Color(p.color).multiplyScalar(p.strength), transparent: true, blending: THREE.AdditiveBlending,
-        depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-      })
-      const mesh = new THREE.Mesh(geo, mat)
-      mesh.position.set(p.x, p.y, p.z)
-      mesh.renderOrder = 2
-      mesh.raycast = () => {}
-      mesh.name = 'light pool'
-      group.add(mesh)
-      owned.push(geo, mat)
-    }
-    for (const l of spec.lamps) {
-      const light = new THREE.PointLight(l.color, l.intensity, l.distance, 1.5)
-      light.position.set(l.x, l.y, l.z)
-      light.name = 'pool lamp'
-      group.add(light)
-      owned.push(light)
-    }
-    scene.add(group)
-    stood = { id, group, dispose: () => owned.forEach((o) => o.dispose()) }
-  }
-
   // Emissives likewise: the colour last written, so a re-shift by the theme plugin is pulled again.
   const glowed = new Map<THREE.MeshStandardMaterial, THREE.Color>()
   const glow = (spec: Pools | null) => {
@@ -149,9 +188,10 @@ export function pools(scene: THREE.Scene) {
       const rule = rules.find((r) => named(l, r.light))
       const last = written.get(l)
       if (!rule) {
-        // Not ours (any more): give back its distance; the theme plugin owns its colour.
+        // Not ours (any more): give back its distance and decay; the theme plugin owns its colour.
         if (last) {
           if (last.distance !== undefined) l.distance = last.distance
+          if (last.decay !== undefined) l.decay = last.decay
           written.delete(l)
         }
         return
@@ -160,21 +200,23 @@ export function pools(scene: THREE.Scene) {
       if (rule.color && rule.tint) l.color.lerp(target.set(rule.color), rule.tint)
       if (rule.gain !== undefined) l.color.multiplyScalar(rule.gain)
       const distance = last?.distance ?? (l.distance as number | undefined)
-      if (rule.distance !== undefined && distance !== undefined) l.distance = rule.distance
-      written.set(l, { color: l.color.clone(), distance })
+      const decay = last?.decay ?? (l.decay as number | undefined)
+      if (distance !== undefined) l.distance = rule.distance ?? distance
+      if (decay !== undefined) l.decay = rule.decay ?? decay
+      written.set(l, { color: l.color.clone(), distance, decay })
     })
   }
 
   return {
     place(id: string | null) {
       const spec = id && Object.hasOwn(POOLS, id) ? POOLS[id] : null
-      if (spec && id) stand(id, spec)
-      else unstand()
+      light(spec ? id : null, spec)
       retint(spec)
     },
     drop() {
-      unstand()
       retint(null)
+      group.removeFromParent()
+      owned.forEach((o) => o.dispose())
     },
   }
 }
