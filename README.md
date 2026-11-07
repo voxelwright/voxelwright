@@ -43,4 +43,6 @@ files in `home/`; `npm run regressions`, `npm run check-villager` and
 ## History
 
 The earlier Python factory (Gas City workers and evidence records) is kept in
-the branch `archive/python-factory-2026-11`.
+the branch `archive/python-factory-2026-11`. Everything removed in the November 6
+restart cleanup, including older evidence and skills, is kept at the tag
+`archive/pre-cleanup-2026-11`.
