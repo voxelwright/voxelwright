@@ -5,7 +5,8 @@ import { canvas, paintGlow, toTexture } from '../paint'
 import { MODE } from './camera'
 import { KITCHEN, apply, curveOf, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
 import { build, innerOutline, makeKit, type Built } from '../build/walls'
-import { ReadOnly, type PlanHistory } from '../build/history'
+import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
+import { tagCss } from '../build/sketch'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
 import { draftEdits, resolve, type Draft } from '../build/resolve'
@@ -60,8 +61,9 @@ export default {
     const opened = house().then((h) => {
       history = h
       plan = h.plan
-      // The host is there but the house could not be opened: say why once; every change is refused.
-      if (h.readOnly) say(h.readOnly)
+      // The host is there but the house could not be opened, or no host keeps it: say so once, on screen.
+      const line = h.readOnly ?? h.unsaved
+      if (line) note(line)
       offHistory = h.onChange((p) => {
         fixtures.invalidate()
         if (!drag) plan = p
@@ -73,7 +75,6 @@ export default {
     let builtPlan: Plan | null = null
     let built: Built | null = null
     const rebuildMs: number[] = []
-    const edits: Edit[] = []
 
     // What room.ts and diorama.ts built, set aside while the plan's version stands in.
     let stash: Array<{ object: THREE.Object3D; parent: THREE.Object3D; order: THREE.Object3D[] }> = []
@@ -261,7 +262,7 @@ export default {
       return Boolean(w && w.a === 'kitchen.back-right' && w.b === 'kitchen.front-right' && !plan.rooms.slice(1).some((r) => roomWalls(plan, r).some(({ wall }) => wall.id === WALL)))
     }
     const pick = (e: PointerEvent): Hit | null => {
-      if (!built?.shell || outline.draft() || !rightFree()) return null
+      if (!built?.shell || outline.draft() || !rightFree() || history?.readOnly) return null
       const c = curveOf(plan, wallOf(plan, WALL))
       for (const y of cut() ? [STUB] : [STUB, 1.2, 2.0, 2.8]) {
         const p = onPlane(e, y)
@@ -330,12 +331,10 @@ export default {
       if (cancel || !d.edit || plan === d.from || !h) plan = h?.plan ?? d.from
       else {
         const edit = { ...d.edit, ...(d.edit.op === 'moveWall' ? { by: moveAmount(d.from, plan) } : { sagitta: wallOf(plan, WALL).sagitta }) } as Edit
-        edits.push(edit)
         void h.commit([edit], d.kind === 'move' ? 'Moved the wall' : 'Bent the wall').catch((e) => {
-          edits.pop()
           plan = h.plan
           rebuild(plan, true)
-          if (e instanceof ReadOnly) say(e.reasons[0])
+          note(e instanceof ReadOnly ? e.reasons[0] : "That wall wouldn't stay put, so I put it back.")
         })
       }
       rebuild(plan, true)
@@ -459,6 +458,37 @@ export default {
       said.push(text)
       reply(text)
     }
+    // A line about the house itself (unsaved, read-only, a save that failed), on a paper note at the top:
+    // build mode has no villager to speak through until someone writes on the notepad.
+    const noteEl = document.createElement('div')
+    noteEl.className = 'build-note'
+    noteEl.setAttribute('role', 'status')
+    let noteTimer = 0
+    const note = (text: string) => {
+      said.push(text)
+      noteEl.textContent = text
+      noteEl.classList.add('shown')
+      clearTimeout(noteTimer)
+      noteTimer = window.setTimeout(() => noteEl.classList.remove('shown'), 9000)
+    }
+    noteEl.addEventListener('click', () => noteEl.classList.remove('shown'))
+    ctx.effect(() => {
+      const style = document.createElement('style')
+      style.textContent = `
+        .build-note { position: fixed; top: max(16px, env(safe-area-inset-top)); left: 50%; translate: -50% -8px; max-width: min(440px, calc(100vw - 32px));
+          padding: 14px 20px 15px; font-size: 17px; line-height: 1.35; opacity: 0; pointer-events: none; transition: opacity 220ms ease, translate 220ms ease; z-index: 20; }
+        .build-note.shown { opacity: 1; translate: -50% 0; pointer-events: auto; cursor: pointer; }
+        @media (prefers-reduced-motion: reduce) { .build-note { transition: none; } }
+        ${tagCss('.build-note', '.build-note-x', '.build-note-y', '.build-note-z')}
+      `
+      document.head.append(style)
+      document.body.append(noteEl)
+      return () => {
+        clearTimeout(noteTimer)
+        noteEl.remove()
+        style.remove()
+      }
+    }, 'build note')
     const view = (): P => {
       const f = camera.getWorldDirection(new THREE.Vector3())
       return Math.hypot(f.x, f.z) > 1e-3 ? [f.x, f.z] : [0, -1]
@@ -495,16 +525,17 @@ export default {
       apply: (d: Draft) => {
         const h = history
         if (!h) return
-        const note = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
+        const what = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
         committing = true
-        h.commit(draftEdits(h.plan, d), note).then(() => {
+        h.commit(draftEdits(h.plan, d), what).then(() => {
           rising = { room: d.roomId, at: performance.now() }
           committing = false
           outline.close()
           selectWall(null)
         }, (e) => {
           committing = false
-          say(e instanceof ReadOnly ? e.reasons[0] : 'Something moved while I was drawing that. Shall we try again?')
+          // Only a stale head means something moved; anything else is the house not being kept right now.
+          say(e instanceof ReadOnly ? e.reasons[0] : e instanceof StaleHead ? 'Something moved while I was drawing that. Shall we try again?' : "I couldn't save that just now. Shall we try again in a moment?")
         })
       },
     })
@@ -606,7 +637,7 @@ export default {
         dot.position.set(x, (cut() ? STUB + 0.025 : 0.02), z)
         if (!cut()) dot.position.set(x - nx * 0.45, 0.02, z - nz * 0.45)
         tag.position.set(x - nx * 1.6, 1.5, z - nz * 1.6)
-        dot.visible = rightFree() && !outline.draft()
+        dot.visible = rightFree() && !outline.draft() && !history?.readOnly
       }
       outline.frame()
     })
@@ -617,7 +648,8 @@ export default {
         /** Resolves with the plan history once it is open. */
         history: () => opened,
         plan: () => plan,
-        edits: () => edits,
+        /** The last line build mode put on screen by itself (not through the notepad). */
+        noted: () => noteEl.textContent,
         /** The room being drawn: its draft, grips on screen, typed sizes, build or let go. */
         outline: {
           draft: () => outline.draft(),

@@ -1,11 +1,11 @@
 // Placing things (#48): one placement system for build mode and #42's furnishing.
 //
-// A new thing, or a placed one being moved, shows at a proposed pose with a stitched
-// outline under it. Drag it (mouse, or one finger) and it follows within its mount:
+// A new thing, or a placed one being moved, shows at a proposed pose as a see-through
+// ghost with a chalk rim and a contact shadow. Drag it (mouse, or one finger) and it follows within its mount:
 // the floor, a surface, a wall or the ceiling (src/build/mount.ts has the rules). It
 // snaps to 5 cm and, near a spot it cannot take, to the nearest one it can; where
 // nothing fits it turns red and says why. Q/E turn it 15° (Shift 45°, Alt 1°); the
-// round handle beside it turns it freely in 15° steps (Alt: no steps), and two
+// knob on the turn ring turns it in 15° steps (Alt: no steps), and two
 // fingers twist it. Alt while dragging is free: no grid and no pull. Enter or the
 // tag's "Place it" confirms; Escape or "Not now" cancels.
 //
@@ -19,9 +19,9 @@
 import * as THREE from 'three/webgpu'
 import type { Stage } from '../kernel'
 import { ReadOnly, StaleHead, type PlanHistory } from './history'
-import { roomAt, type Anchor, type Furniture, type ItemRef, type Mount, type Plan } from './plan'
+import { angle, roomAt, type Anchor, type Furniture, type ItemRef, type Mount, type Plan } from './plan'
 import {
-  CORD, KINDS, SURFACE_MIN, cord, alongOf, ceilingOf, faceOf, fit, floorOf, obstacles, poseOf, roomsOf, seat, setPose, supports, wallHeight,
+  CORD, KINDS, SURFACE_MIN, cord, alongOf, faceOf, fit, floorOf, obstacles, poseOf, roomsOf, seat, setPose, supports, wallHeight,
   type Fit, type Obstacle, type Pose, type Size,
 } from './mount'
 import { CHALK, CHALK_RED, HAND, paintBlockOutline, paintCeilingMark, paintContact, paintDots, paintDrop, paintNoGo, paintRing, paintShadow, rimMaterial, rimOf, tagCss } from './sketch'
@@ -319,7 +319,7 @@ export function placement(deps: PlaceDeps): Placement & {
       for (let p: THREE.Object3D | null = m; p && p !== s.holder; p = p.parent) if (p.name === 'cord') cordPart = true
       if (!cordPart && !(m as THREE.InstancedMesh).isInstancedMesh && m.geometry?.attributes.position) {
         const scale = m.getWorldScale(new THREE.Vector3())
-        rim = rimOf(m, RIM, rimMaterial(CHALK, 0.85, RIM / Math.max(1e-3, (scale.x + scale.y + scale.z) / 3)))
+        rim = rimOf(m, RIM, rimMaterial(CHALK, 0.95, RIM / Math.max(1e-3, (scale.x + scale.y + scale.z) / 3)))
         m.add(rim)
       }
       s.looks.set(m, { original: m.material, ok, bad, rim, xray })
@@ -350,7 +350,6 @@ export function placement(deps: PlaceDeps): Placement & {
       if (look.rim) {
         const r = look.rim.material as THREE.MeshBasicNodeMaterial
         r.color.copy(good ? OK : BAD)
-        r.opacity = good ? 0.95 : 0.95
       }
     }
     ringMat.color.set(good ? '#e2d2b4' : '#e8907c')
@@ -470,7 +469,6 @@ export function placement(deps: PlaceDeps): Placement & {
         const bottom = b.min.y
         thread.position.set(p.x, bottom / 2, p.z)
         thread.scale.set(0.035, bottom, 1)
-        thread.quaternion.copy(camera.quaternion)
         thread.rotation.set(0, Math.atan2(camera.position.x - p.x, camera.position.z - p.z), 0)
         dotsMap.repeat.set(1, bottom / 0.07)
         flat(noGo, 0.007, w + 0.2, d + 0.2)
@@ -530,7 +528,7 @@ export function placement(deps: PlaceDeps): Placement & {
     e.preventDefault()
   }
   const yawOf = (at: Anchor) => (at.mount === 'wall' ? at.spin : at.yaw)
-  const withYaw = (at: Anchor, yaw: number): Anchor => (at.mount === 'wall' ? { ...at, spin: round(yaw) } : { ...at, yaw: round(yaw) })
+  const withYaw = (at: Anchor, yaw: number): Anchor => (at.mount === 'wall' ? { ...at, spin: angle(yaw) } : { ...at, yaw: angle(yaw) })
   const turn = (s: Session, yaw: number) => place(s, withYaw(s.at, yaw))
 
   /** Where the anchor would be for a pointer at (x, y), keeping the grab offset. */
@@ -1126,7 +1124,7 @@ export function placement(deps: PlaceDeps): Placement & {
     begin(item, at) {
       const seated = seat(item.object, item.mount)
       const size: Size = item.size ?? seated.size
-      return open(item, null, seated.holder, item.object, size, at ? anchorFor(item.mount, at, size) : null)
+      return open(item, null, seated.holder, item.object, size, at ? anchorFor(item.mount, at) : null)
     },
     move(furnitureId) {
       const plan = deps.plan()
@@ -1189,7 +1187,7 @@ export function placement(deps: PlaceDeps): Placement & {
   }
 
   /** An anchor for a pose a caller passed. */
-  function anchorFor(mount: Mount, p: Pose, size: Size): Anchor {
+  function anchorFor(mount: Mount, p: Pose): Anchor {
     const plan = deps.plan()
     if (mount === 'wall') {
       const wall = plan.walls.find((w) => w.id === p.wallId) ?? plan.walls[0]
@@ -1198,7 +1196,6 @@ export function placement(deps: PlaceDeps): Placement & {
       return { mount, wallId: wall.id, roomId, along: round(along), height: round(p.y), spin: p.spin ?? 0 }
     }
     if (mount === 'surface') return { mount, x: round(p.x), y: round(p.y), z: round(p.z), yaw: p.yaw }
-    void size
     return { mount, x: round(p.x), z: round(p.z), yaw: p.yaw }
   }
 }

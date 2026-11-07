@@ -337,9 +337,14 @@ try {
       out.clamped = I.checkIntent({ op: 'addRoom', label: 'x<script>', anchor: { side: 'up', room: 'this' }, size: { w: 400, d: -3 }, connect: { leaves: 7 }, extra: 1 })
       const snapped = go(K, { op: 'addRoom', anchor: { side: 'right' }, size: { w: 3.33, d: 2.77 } })
       out.snapped = snapped.draft
+      // A wall piece of exactly 0.5 m is a wall (validate allows rounding), and a sliver says so, not "a window".
+      out.front58 = go(K, { op: 'addRoom', anchor: { side: 'front' }, size: { w: 5.8, d: 3 } }, { view: [0, -1] })
+      out.front66 = go(K, { op: 'addRoom', anchor: { side: 'front' }, size: { w: 6.6, d: 3 } }, { view: [0, -1] }).ask
       return out
     })
     const L = unit.left
+    check('resolver: a 5.8 m room on the front wall is drawn, not refused', !('ask' in unit.front58) && unit.front58.draft, unit.front58.ask)
+    check('resolver: a width that leaves a sliver on a wall with no openings says so', /sliver/.test(unit.front66 ?? ''), unit.front66)
     check('resolver: "to the left, double doors, 2/3 the size" hangs on the left wall with a double door', L.draft?.wallId === 'kitchen.left' && L.draft.door.leaves === 2 && L.valid?.length === 0, L.draft)
     check('resolver: 2/3 of the kitchen floor area within 1%', Math.abs(L.area / L.target - 1) < 0.01, { area: +L.area?.toFixed(3), target: +L.target.toFixed(3), error: `${(100 * Math.abs(L.area / L.target - 1)).toFixed(2)}%` })
     check('resolver: "a 4 by 3 m study behind the living room" goes on the living room, 12 m²', unit.study.draft && unit.study.owner?.[0] === 'living-room' && Math.abs(unit.study.area - 12) < 1e-6 && unit.study.draft.to - unit.study.draft.from === 4, unit.study)

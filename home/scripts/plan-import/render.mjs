@@ -1,4 +1,4 @@
-// Renders the five synthetic plans to out/plans/<id>.png with <id>.truth.json beside them.
+// Renders the six synthetic plans to out/plans/<id>.png with <id>.truth.json beside them.
 // Usage: node scripts/plan-import/render.mjs
 import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'

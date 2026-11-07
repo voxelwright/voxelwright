@@ -173,19 +173,30 @@ export function memoryStore(): PlanStore {
  * token. The host sets `at` to its clock. Nobody is named: the host does not yet
  * know who is at the page.
  */
-export function hostStore(opts: { base: string; token: string; fetch?: typeof fetch }): PlanStore {
+export function hostStore(opts: { base: string; token: string; fetch?: typeof fetch; refresh?: () => Promise<string | null> }): PlanStore {
   const f = opts.fetch ?? fetch
+  let token = opts.token
   const root = `${opts.base.replace(/\/$/, '')}/house/plans`
-  async function call(path: string, body?: unknown): Promise<any> {
-    let res: Response
+  const send = async (path: string, body?: unknown): Promise<Response> => {
     try {
-      res = await f(root + path, {
+      return await f(root + path, {
         method: body === undefined ? 'GET' : 'POST',
-        headers: { authorization: `Bearer ${opts.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
         body: body === undefined ? undefined : JSON.stringify(body),
       })
     } catch (error) {
       throw new StoreError(0, `the host could not be reached: ${(error as Error).message}`)
+    }
+  }
+  async function call(path: string, body?: unknown): Promise<any> {
+    let res = await send(path, body)
+    // The host restarted with a new token: fetch it once and try again (as villager.ts does).
+    if (res.status === 401 && opts.refresh) {
+      const fresh = await opts.refresh()
+      if (fresh) {
+        token = fresh
+        res = await send(path, body)
+      }
     }
     const json = await res.json().catch(() => null)
     // Only a compare-and-set mismatch carries the head.
@@ -215,6 +226,7 @@ export class PlanHistory {
   #names: Record<string, string> = {}
   #head = ''
   #readOnly: { why: string; cause: unknown } | null = null
+  #unsaved: string | null = null
   /** Versions undo walked back from, nearest last. Session-level: any commit or checkout clears it. */
   #redo: string[] = []
   #listeners = new Set<Listener>()
@@ -227,8 +239,9 @@ export class PlanHistory {
   }
 
   /** Opens the house's history. The first open of an empty store saves `base` as the root; afterwards the stored root wins. */
-  static async open(store: PlanStore, base: Plan, opts: { upgrades?: Readonly<Record<number, Upgrade>> } = {}): Promise<PlanHistory> {
+  static async open(store: PlanStore, base: Plan, opts: { upgrades?: Readonly<Record<number, Upgrade>>; unsaved?: string } = {}): Promise<PlanHistory> {
     const history = new PlanHistory(store, opts.upgrades ?? UPGRADES)
+    history.#unsaved = opts.unsaved ?? null
     let state = await store.load()
     if (!state.versions.length) {
       const reasons = validate(base)
@@ -265,6 +278,11 @@ export class PlanHistory {
   /** Why the house cannot be changed on this page, as one line to show; null when it can. */
   get readOnly(): string | null {
     return this.#readOnly?.why ?? null
+  }
+
+  /** Why changes here will not outlast the page, as one line to show; null when they are saved. */
+  get unsaved(): string | null {
+    return this.#unsaved
   }
 
   /** The error behind readOnly, for the Workshop and the console. */
@@ -442,6 +460,9 @@ export class PlanHistory {
       seen.add(v.id)
       try {
         const plan = deepFreeze(upgrade(v.plan, this.#upgrades))
+        // The host checks shape only (host/src/plans.ts); a stored plan is held to the same rules as one this page made.
+        const reasons = validate(plan)
+        if (reasons.length) throw new Error(`the stored plan is not a valid house: ${reasons.join('; ')}`)
         plans.set(v.id, plan)
         return deepFreeze({ ...v, plan })
       } catch (error) {

@@ -1,4 +1,4 @@
-// Five synthetic ground-truth plans plus render hints. All data is invented.
+// Six synthetic ground-truth plans plus render hints. All data is invented.
 // Coordinates follow geom.mjs: x right, z down, metres.
 
 function build({ corners, walls, openings = [], rooms }) {

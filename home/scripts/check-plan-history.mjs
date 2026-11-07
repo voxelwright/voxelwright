@@ -185,6 +185,29 @@ try {
     globalThis.fetch = realFetch
   }
 
+  // ---- stored plans are held to the house's rules, and the history's shape is checked
+  {
+    const good = memoryStore()
+    await PlanHistory.open(good, KITCHEN)
+    const loaded = await good.load()
+    const broken = { ...loaded, versions: [{ ...loaded.versions[0], plan: { ...loaded.versions[0].plan, walls: loaded.versions[0].plan.walls.map((w, i) => (i === 1 ? { ...w, b: 'kitchen.nowhere' } : w)) } }] }
+    const invalid = await refusal(() => PlanHistory.open({ ...memoryStore(), load: async () => structuredClone(broken) }, KITCHEN))
+    check('a stored head that is not a valid house does not open as editable', invalid instanceof HistoryError && /not a valid house/.test(invalid.message), invalid?.message)
+    const twisted = memoryStore()
+    const tw = await PlanHistory.open({ ...twisted, commit: async (v) => { const st = await twisted.commit(v); return { ...st, plan: { ...st.plan, rooms: st.plan.rooms.map((r) => ({ ...r, label: r.label + '\uFFFD' })) } } } }, KITCHEN)
+    const twErr = await refusal(() => tw.commit([move]))
+    check('a store that returns a different plan is an error, not adopted', twErr instanceof StoreError && twErr.status === 500 && same(tw.plan, KITCHEN), twErr?.message)
+    const shaped = (edit) => refusal(() => PlanHistory.open({ ...memoryStore(), load: async () => edit(structuredClone(loaded)) }, KITCHEN))
+    const [twoRoots, childFirst, noHead] = await Promise.all([
+      shaped((st) => ({ ...st, versions: [...st.versions, { ...st.versions[0], id: 'f'.repeat(16) }] })),
+      shaped((st) => ({ ...st, versions: [{ ...st.versions[0], id: 'e'.repeat(16), parent: 'd'.repeat(16) }, ...st.versions] })),
+      shaped((st) => ({ ...st, head: 'e'.repeat(16) })),
+    ])
+    check('two roots, a child before its parent, or an unstored head does not open', twoRoots instanceof HistoryError && childFirst instanceof HistoryError && noHead instanceof HistoryError, [twoRoots, childFirst, noHead].map((e) => e?.message))
+    const turned = P.apply({ ...KITCHEN, furniture: [] }, { op: 'placeItem', furniture: { id: 'f.spin', item: { kind: 'box' }, at: { mount: 'floor', x: 0, z: 0.5, yaw: 17 * 2 * Math.PI + 0.25 } } })
+    check('a turn is stored within one full turn (the host bounds angles)', Math.abs(turned.furniture[0].at.yaw - 0.25) < 1e-6, turned.furniture[0].at)
+  }
+
   // ---- F3: things hung on walls move with them
   const W = P.wallOf
   const curve = (plan, id) => P.curveOf(plan, W(plan, id))

@@ -169,6 +169,8 @@ try {
     check('checkRouted refuses furnish without what', 'reason' in checkRouted('{"route":"furnish"}', ids, []))
     const extra = checkRouted('{"route":"furnish","what":"chair","count":99,"size":[0,9,1e9],"grant":"admin","library":"nope","copy":"yes","audience":"everyone"}', ids, ['abc'])
     check('checkRouted drops unknown fields, clamps numbers, ignores unknown library items', 'routed' in extra && JSON.stringify(extra.routed) === JSON.stringify({ route: 'furnish', what: 'chair', count: 6, size: [0.05, 3, 3] }), extra)
+    const build = checkRouted('{"route":"build","intent":{"op":"addRoom","run":"rm -rf","anchor":{"side":"left","x":1},"size":{"w":"4","d":3},"connect":{"kind":"door","leaves":2,"at":{"x":1}}}}', ids, [])
+    check('checkRouted keeps a build intent to known keys and plain values', 'routed' in build && JSON.stringify((build.routed as { intent?: unknown }).intent) === JSON.stringify({ op: 'addRoom', anchor: { side: 'left' }, size: { d: 3 }, connect: { kind: 'door', leaves: 2 } }), build)
     check('checkRouted reads JSON inside prose and cuts long text', 'routed' in checkRouted(`Sure! {"route":"answer","say":"${'a'.repeat(400)}"}`, ids, []) && (checkRouted(`{"route":"answer","say":"${'a'.repeat(400)}"}`, ids, []) as { routed: { say: string } }).routed.say.length === 160)
 
     // Props: module text comes back as data and is stored, never run.

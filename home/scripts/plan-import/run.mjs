@@ -1,6 +1,6 @@
 // Sends each plan image to a Claude model through the official CLI and keeps the validated result.
 // Usage: node scripts/plan-import/run.mjs <model> <tag> [plan ids...]
-//   e.g. node scripts/plan-import/run.mjs sonnet sonnet a b c d e
+//   e.g. node scripts/plan-import/run.mjs sonnet sonnet a b c d e f
 // Writes out/runs/<tag>/<plan>.json. One repair pass with the validator's reasons is allowed.
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -12,7 +12,7 @@ import { extractJson, validate } from './validate.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const [model, tag, ...ids] = process.argv.slice(2)
 if (!model || !tag) { console.error('usage: run.mjs <model> <tag> [plan ids]'); process.exit(2) }
-const plans = ids.length ? ids : ['a', 'b', 'c', 'd', 'e']
+const plans = ids.length ? ids : ['a', 'b', 'c', 'd', 'e', 'f']
 const outDir = join(here, 'out', 'runs', tag)
 await mkdir(outDir, { recursive: true })
 await writeFile(join(here, 'out', 'empty-mcp.json'), '{"mcpServers":{}}')

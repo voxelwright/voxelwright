@@ -1,10 +1,10 @@
 // Headless proof for the #48 build-mode experiment (?build=1).
 // Usage: node scripts/check-build-plan.mjs [base-url] [--skip-pixels] [--skip-drag]   (dev server running)
-// 1. Pixel-close: today's kitchen vs the plan-generated one, iso and seated, against
-//    the noise floor of two runs of today's code (fixed clock, seeded Math.random).
+// 1. Pixel-close: the kitchen without ?build=1 vs the plan-generated one, iso and seated,
+//    against the noise floor of two runs without the flag (fixed clock, seeded Math.random).
 // 2. The plan model: validate, JSON round trip, addRoom with a shared wall, rejections.
 // 3. Drag and bend the right wall in iso with the mouse: snapping, live rebuild,
-//    no geometry leak, Escape cancels, edits replay, unloading restores today's room.
+//    no geometry leak, Escape cancels, drags become versions, unloading restores room.ts's room.
 // Exits non-zero when any check fails. Writes screenshots/build/*.jpg and a clip.
 import { chromium } from 'playwright'
 import { execFileSync } from 'node:child_process'
@@ -122,6 +122,11 @@ if (!args.includes('--skip-pixels')) {
     const shots = []
     for (const q of [query, query, `${query}&build=1`]) {
       const { context, page, errors } = await open(q, { frozen: true })
+      // The scene is what is compared: build mode's paper note (no host is running here) is not part of it.
+      if (q.includes('build=1')) {
+        check(`${label}: with no host, build mode says once that nothing will be kept`, await page.evaluate(() => /goes when the page closes/.test(window.villageBuild.noted() ?? '')))
+        await page.addStyleTag({ content: '.build-note { display: none !important; }' })
+      }
       shots.push(await page.screenshot({ type: 'png' }))
       if (q.includes('build=1')) {
         check(`${label}: no console errors with build=1`, errors.length === 0, errors.slice(0, 3))
@@ -256,12 +261,11 @@ if (!args.includes('--skip-drag')) {
   const g2 = await stats()
   check('bend: sagitta snaps to 1.00 m and the floor grows by about the circular segment', Math.abs(bent.sagitta - 1) < 1e-6 && Math.abs(grew - expected.segment) / expected.segment < 0.1, { sagitta: bent.sagitta, floorGrowth: +grew.toFixed(3), segment: +expected.segment.toFixed(3), planGrowth: +expected.planGrowth.toFixed(3) })
   check('bend: geometries and textures flat', g2.geometries === g0.geometries && g2.textures === g0.textures, g2)
-  const replay = await page.evaluate(async () => {
-    const P = await import('/src/build/plan.ts')
-    const edits = window.villageBuild.edits()
-    return { edits, same: JSON.stringify(edits.reduce(P.apply, P.KITCHEN)) === JSON.stringify(window.villageBuild.plan()) }
+  const versions = await page.evaluate(async () => {
+    const h = await window.villageBuild.history()
+    return { count: h.versions().length, head: JSON.stringify(h.plan) === JSON.stringify(window.villageBuild.plan()) }
   })
-  check('edits: the recorded edits replay to the same plan', replay.same, replay.edits)
+  check('versions: each committed drag is a version, and the head is what is drawn', versions.count > 1 && versions.head, versions)
   const ms = await page.evaluate(() => window.villageBuild.rebuildMs().slice(1).sort((a, b) => a - b))
   check('rebuild time per change (ms, median / max)', true, [ms[Math.floor(ms.length / 2)], ms[ms.length - 1]].map((v) => +v.toFixed(2)))
 

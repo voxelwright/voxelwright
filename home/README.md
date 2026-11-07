@@ -12,6 +12,9 @@ npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5350/   # build mode (#48): pixels, plan model, drag and bend
+node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
+node scripts/check-place.mjs           # build mode: placing things
+node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"
@@ -1405,25 +1408,27 @@ The plan (`src/build/plan.ts`, pure, no three.js) is a JSON document,
   are measured in metres along the wall (arc length when curved).
 - `rooms` {id, label, loop}: a loop of corner ids. Walls are first-class, so
   one wall can bound two rooms.
-- `furniture` {id, kind, x, z, yaw, roomId}: empty for now.
+- `furniture` {id, item, at}: placed things (see "Placing items").
 
 An edit is a small JSON object, applied by `apply(plan, edit)` and returning a
-new plan: `moveWall`, `bendWall`, `moveOpening` and `addRoom`. `addRoom`
+new plan: `moveWall`, `bendWall`, `moveOpening`, `addRoom`, `placeItem`,
+`moveItem` and `removeItem`. `addRoom`
 attaches a rectangle along a straight wall. It splits that wall so the shared
 stretch is one wall in both loops, re-measures the openings on it, and can put a
 door (`leaves: 2` for double doors) on the shared wall. It refuses to split a
 curved wall. `validate(plan)` returns its reasons for rejecting a plan:
 dangling ids, duplicate ids, walls under 0.5 m, bulges beyond a half circle,
 openings that don't fit or that overlap, rooms that cross themselves or wind the
-wrong way. Drags record their edits, and replaying them from `KITCHEN` gives
-the same plan.
+wrong way, wall things off their wall, doors off the floor and windows with
+leaves. Each committed drag is a plan version (see "Plan versions").
 
 `src/build/walls.ts` builds one box per wall piece along a world axis and bends
 it onto the arc only when the wall is curved. A straight wall therefore matches
-today's geometry exactly. Its UVs and corner joinery copy today's, wall by wall.
+room.ts's geometry exactly. Its UVs and corner joinery copy room.ts's and
+diorama.ts's, wall by wall.
 The shell is a copy of `shell()` that handles arcs. A rebuild moves its new
 geometry into the meshes the camera already tracks and reuses one set of
-materials and textures. The plugin sets today's meshes aside while it runs and
+materials and textures. The plugin sets room.ts's and diorama.ts's meshes aside while it runs and
 puts them back when it unloads.
 
 ```sh
@@ -1431,18 +1436,18 @@ npx vite --port 5350 --strictPort &
 node scripts/check-build-plan.mjs http://localhost:5350/
 ```
 
-Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 28 checks pass.
+Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 29 checks pass.
 Captures run with a fixed `Date`, a seeded `Math.random`, and frames stepped
-by the script with synthetic rAF and `performance.now()` time. Two runs of
-today's code are then identical.
+by the script with synthetic rAF and `performance.now()` time. Two runs
+without `?build=1` are then identical.
 
-| Capture | Noise floor (today vs today) | Generated vs today |
+| Capture | Noise floor (two runs without the flag) | Generated vs without the flag |
 | --- | --- | --- |
 | `?cam=iso` | 0.000 | 0.001 mean, 3,762 px (0.29%), max 43/765 |
 | seated | 0.000 | 0.000 (identical) |
 
 The iso residual is scattered single pixels on the dollhouse floor only. The
-floor is now a triangulated polygon with UVs computed from world positions, so
+generated floor is a triangulated polygon with UVs computed from world positions, so
 texel rounding moves slightly. Walls, shell and the seated view are
 bit-identical.
 
@@ -1461,13 +1466,12 @@ Without the flag nothing changes. `check-kernel` passes 10/10. `check-entries`
 passes 25/27; its two failures (one extra geometry on the second room cycle)
 happen in the same way with `plugins/build.ts` removed.
 
-Still open or broken: furniture doesn't follow a moved wall (the stove and
-things hung on the right wall stay put, and the villagers' corridors are
-unchanged). The garden plot, passage and lamp arm from `diorama.ts` don't
+Still open or broken: the kitchen's built-in furniture doesn't follow a moved
+wall (the stove and the pans on the right wall stay put, and the villagers'
+corridors are unchanged). The garden plot, passage and lamp arm from `diorama.ts` don't
 follow the plan. Dragging works only in iso, because the seated room has never
 had a right wall, and the seated floor stays a fixed 9 m. The base stays a
-rectangle around a bay. Corners use today's butt joints, not mitres. The plan
-isn't saved, and there is no undo UI. Screenshots are in `screenshots/build/`:
+rectangle around a bay. Corners use room.ts's butt joints, not mitres. Screenshots are in `screenshots/build/`:
 `iso-` and `seat-` `baseline`, `generated` and `diff`, plus `drag-out`,
 `drag-in`, `bend-drag` and `bend` (jpg). The clip is `drag.mp4`.
 
@@ -1496,25 +1500,32 @@ plan and the view, or into one line your villager says:
   room would run into another room, no stretch fits, the room or side is
   unclear, or the wall is too short.
 
-`src/build/outline.ts` draws the draft at once, as a sketch rather than a building:
-taped-down cream paper on a light plot of earth, the walls as graphite strokes with
-close hatching and a lighter hatched band outside them for height, bare paper for the
-floor with two faint construction lines, the door's swing dashed, tape measures along
-two sides with handwritten sizes, and small wooden pegs standing on the walls they move,
-with pencilled arrows. The sage peg bends the far wall, and a dashed pencil curve runs
-from that wall's ends through it. Real walls appear only on "Build it", rising from the
-floor in 0.7 s (at once with reduced motion). The yard's fence, rails, flowers, stones
-and shrubs step aside under the paper and from every built room and its walls
-(`src/build/yard.ts`, runtime only, put back on unload) until the yard follows the plan.
-A door that a build edit opens gets a timber casing on both faces, lined reveals and a
-threshold board; the kitchen's own openings are left as room.ts draws them. Drag a peg or a wall, pull the sage peg inside the
-far wall to bend it, or click a size and type. A refused drag flashes the walls
-chalk red. Enter or "Build it" commits one version ("Added the study"); Escape
-or "Not now" leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through
-versions. Every room renders with its floor and base, and a shared wall is
-drawn once. In iso the view eases to the room being drawn, then to the house.
-The plan history is `src/build/house.ts`: the host's store when the host is
-running, memory otherwise.
+`src/build/outline.ts` draws the draft at once as a pencil sketch on paper; no
+walls are built. The paper is taped down on a light plot of earth. Walls are
+graphite strokes with close hatching, and a lighter hatched band outside them
+stands for their height. The floor is bare paper with two faint construction
+lines. The door's swing is dashed. Tape measures run along two sides with the
+sizes handwritten. Small wooden pegs stand on the walls they move, with
+pencilled arrows.
+
+To adjust it, drag a peg or a wall, or click a size and type. The sage peg
+bends the far wall, and a dashed pencil curve runs from that wall's ends
+through it. A refused drag flashes the walls chalk red. In iso the view eases
+to the room being drawn, then to the house.
+
+Enter or "Build it" commits one version ("Added the study"), and the real walls
+rise from the floor in 0.7 s (at once with reduced motion). Escape or "Not now"
+leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
+plan history is `src/build/house.ts`: the host's store when the host is
+running. Without a host it is kept in memory, and a paper note at the top says
+once that nothing built will outlast the page.
+
+Every room renders with its floor and base, and a shared wall is drawn once. A
+door that a build edit opens gets a timber casing on both faces, lined reveals
+and a threshold board. The kitchen's own openings stay as room.ts draws them.
+Until the yard follows the plan, `src/build/yard.ts` hides the fence, rails,
+flowers, stones and shrubs under the paper and inside every built room and its
+walls, at runtime only, and puts them back on unload.
 
 ```sh
 node scripts/check-build-addroom.mjs                  # stub host and router, 44 checks (yard clear of built rooms, put back on undo and unload)
@@ -1543,14 +1554,25 @@ on the first line of a fresh page. The router call, not the house, is the wait.
 | add a room | asks which side |
 | a 5 by 4 m office to the left, double doors | left wall, 5 x 4 m, double door |
 
-Look (Opus scorer, shots only, ui-craft rubric plus "a hand-drawn blueprint
-that feels part of a cozy home"): 4.5, 4.5 and 5 out of 10 over three rounds.
-It still finds the paper flat and the dimension lines too CAD-like.
-Look round 3 (November 7, Opus, ui-craft rubric plus "placing furniture and sketching a
-new room in a cozy dollhouse feels like a game, not a CAD tool"; warmth, material, light,
-text, consistency, affordance, phone, game feel): before A 8/7/7/6/7/6/7/6, B 6/5/5/6/6/7/7/5;
-round 1 A 8/7/7/8/7/8/7/7, B 7/6/6/7/6/7/7/6; round 2 A 8/7/7/8/8/8/7/7, B 6/6/6/7/6/7/6/6.
-Below the 9 bar. Still named: the built room is an empty shell hanging off the lot (the
+Look, first pass (Opus scorer, shots only, ui-craft rubric plus "a hand-drawn
+blueprint that feels part of a cozy home"): the room outline scored 4.5, 4.5
+and 5 out of 10 over three rounds. The scorer found the paper flat and the
+dimension lines too CAD-like.
+
+Look, later passes (November 7, shots only, ui-craft rubric plus "placing
+furniture and sketching a new room in a cozy dollhouse feels like a game, not
+a CAD tool"). Each score is out of 10, in this order: warmth, material, light,
+text, consistency, affordance, phone, game feel.
+
+| Round | Scorer | Placing a thing | Sketching a room |
+| --- | --- | --- | --- |
+| before | Opus | 8/7/7/6/7/6/7/6 | 6/5/5/6/6/7/7/5 |
+| 1 | Opus | 8/7/7/8/7/8/7/7 | 7/6/6/7/6/7/7/6 |
+| 2 | Opus | 8/7/7/8/8/8/7/7 | 6/6/6/7/6/7/6/6 |
+| 2 | GPT-6.1 Sol | 9/8/8/9/9/8/8/8 | 9/8/8/8/8/7/7/8 |
+
+Opus gives no 9; GPT-6.1 Sol gives 9 on three placing criteria and on warmth
+for the sketch. Still named: the built room is an empty shell hanging off the lot (the
 yard does not follow the plan), tape measures and m² still read as drafting, the kitchen's
 pendant wire across the window. `screenshots/build/look-before-after.jpg` pairs before and
 after for red, floor, wall, curved wall, ceiling, outline, adjusted, built and doorway, then
@@ -1560,7 +1582,6 @@ Missing or approximate: the new room lands on the yard's grass, past the
 board's edge, and the sun's shadow box doesn't cover it. The size tags edit
 width and depth only, not the bend. On a phone the view centres on the new room
 but can't take in the whole house. Rooms are rectangles on straight walls only.
-Furniture is left to the placement unit.
 
 ### Plan versions
 
@@ -1592,11 +1613,15 @@ removed and changed corners, walls, openings, rooms and furniture by id.
   changed; an added room keeps its outline. Redo is per page. The head is shared,
   so a reload keeps an undo.
 - `house()` (src/build/house.ts) opens the host's store when the host is running
-  and an in-memory one when it isn't. When the host is there but its plan can't be
+  and an in-memory one when it isn't; then `history.unsaved` is one line saying
+  nothing built will outlast the page. When the host is there but its plan can't be
   opened, the house is read-only: `history.readOnly` is one warm line to show,
-  every change is refused with `ReadOnly` carrying that line, and `history.failure`
-  keeps the error for the Workshop and the console. Placing shows the line; build
-  mode does not show it yet.
+  every change is refused with `ReadOnly` carrying that line, the wall handles are
+  not offered, and `history.failure` keeps the error for the Workshop and the
+  console. Build mode shows either line once on a paper note at the top; placing
+  shows the read-only line on its tag. A stored plan that is not a valid house
+  (`validate`) is unreadable like one from a newer page. After a host restart the
+  store fetches the new token once and retries.
 - Wall things move with walls: a wall move shifts a picture on a wall whose corner
   `a` moved, as it does openings, and stops early rather than push one off its
   wall; adding a room moves each picture to the split piece it is on. `validate`
@@ -1677,7 +1702,10 @@ Undo and redo come from the versions.
   The surface height is stored because supports have no plan id. `roomId` is stored only
   for walls, where it says which face. The other rooms follow from x and z. The
   ops check dangling walls and rooms, an anchor off its wall, and a point outside every
-  room. `validate()` checks only references.
+  room. `validate()` holds stored plans to the same rules: the walls and rooms an
+  anchor names, a wall thing on its wall and within its height, and an `on` that
+  names a support which does not stand on the thing. Turns are stored within one
+  full turn.
 - Dev: `window.villagePlace.begin('crate' | 'vase' | 'picture' | 'pendant')` places a
   built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
 
@@ -1688,7 +1716,20 @@ cd home && node scripts/check-place.mjs --look    # also screenshots/build/place
 
 Measured (M1, headless): `begin` takes 10 to 20 ms for floor, wall and ceiling, and about
 600 ms for surface (it scans the room's tops). 100 drag moves leave the geometry count flat.
-Missing: walls moving or splitting (`moveWall`, `addRoom`) don't carry wall
-things along yet. A thing whose wall shrinks is drawn at the wall's end. The kitchen's
+Missing: a thing whose wall shrinks is drawn at the wall's end. The kitchen's
 built-in furniture can't be moved: that needs a plan entry per named fixture and plugins
 that read their pose from it. A cut-away wall isn't offered for hanging.
+
+### Floor plan from an image (experiment)
+
+Synthetic plans only; images go only to Claude models. Run from `home/`:
+
+```sh
+node scripts/plan-import/render.mjs                  # the six synthetic plans to out/plans/<id>.png with <id>.truth.json beside them
+node scripts/plan-import/run.mjs <model> <tag> [ids] # each plan image to a Claude model through claude -p, one repair pass; out/runs/<tag>/
+node scripts/plan-import/score.mjs                   # every run against ground truth, contact sheets, out/results.md
+```
+
+Findings and per-plan tables are in `scripts/plan-import/out/results.md`. The
+experiment's output format is not yet `plan.ts`'s `Plan` (openings sit in one
+list with a `wall` field); an importer converts it before the correction overlay.

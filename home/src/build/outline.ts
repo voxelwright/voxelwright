@@ -1,19 +1,19 @@
-// The outline of a room being added (#48): a chalk blueprint on the ground,
-// translucent wall ghosts, the door's swing drawn in, and handwritten paper tags
-// for the sizes and the choice. Trusted code draws it from a draft (resolve.ts);
-// the person adjusts it directly: drag a wall, pull the dot to bend the far wall,
-// slide the door, or click a size and type a number. Enter builds it, Escape
-// lets it go. Nothing here touches the plan: applying is the caller's commit.
+// The outline of a room being added (#48): a pencil sketch on paper laid on the
+// ground, the door's swing drawn in, wooden pegs on the walls they move, and
+// handwritten paper tags for the sizes and the choice. Trusted code draws it from
+// a draft (resolve.ts); the person adjusts it directly: drag a peg or a wall, pull
+// the sage peg to bend the far wall, slide the door, or click a size and type a
+// number. Enter builds it, Escape lets it go. Nothing here touches the plan:
+// applying is the caller's commit.
 import * as THREE from 'three/webgpu'
 import type { Stage } from '../kernel'
 import { canvas, toTexture } from '../paint'
-import { CHALK_RED, HAND, drawKnob, drawPencil, drawTape, drawTapeMeasure, paintSoil, paperGrain, tagCss } from './sketch'
+import { CHALK_RED, HAND, drawPencil, drawTape, drawTapeMeasure, paintSoil, paperGrain, tagCss } from './sketch'
 import { BEND_SNAP, curveOf, outline as ringOf, pointAt, roomArea, type P, type Plan } from './plan'
 import { SNAP, blockerOf, draftGeometry, fit, placeDoor, type Draft } from './resolve'
 
 const MIN = 1.5
 /** How high the unbuilt walls stand while sketched. */
-const STUB = 0.24
 const PX = 1024
 const INK = 'rgba(78, 52, 34, 0.95)'
 /** Carpenter's red pencil, for the measurements. */
@@ -88,22 +88,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   sheet.renderOrder = 3
   sheet.name = 'build outline sheet'
 
-  // Translucent wall ghosts, warm like furnishing's.
-  // Walls not built yet: low stubs of fresh plaster, a little see-through, rising to full height once built.
-  const ghostMat = new THREE.MeshStandardMaterial({ color: '#efe1c6', emissive: '#ffe2b8', emissiveIntensity: 0.08, roughness: 0.95, transparent: true, opacity: 0.72, depthWrite: true, side: THREE.DoubleSide })
-  const ghosts = new THREE.Mesh(new THREE.BufferGeometry(), ghostMat)
-  ghosts.name = 'build outline walls'
-  ghosts.renderOrder = 2
-  ghosts.castShadow = ghosts.receiveShadow = true
-  // Their edges in pencil: tops and the far corners' uprights, so the walls read through the haze.
-  const edgeMat = new THREE.LineBasicMaterial({ color: '#7a5236', transparent: true, opacity: 0.6, depthWrite: false })
-  const edges = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMat)
-  edges.name = 'build outline edges'
-  edges.renderOrder = 2
-
   // A proposal is drawn, not built: the paper carries the walls, and only "Build it" raises real ones (plugins/build.ts).
-  ghosts.visible = edges.visible = false
-  group.add(sheet, ghosts, edges)
+  group.add(sheet)
   /** Wooden pegs standing on the walls they move: a turned body and a lighter head; the bend peg's head is sage. */
   const pegBody = new THREE.CylinderGeometry(0.11, 0.13, 0.1, 24)
   pegBody.translate(0, 0.05, 0)
@@ -230,7 +216,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const arc: P[] = Array.from({ length: n + 1 }, (_, i) => pointAt(far, (far.length * i) / n))
     const centre: P[] = [geo.p, ...arc, geo.q]
     const room = made.rooms.find((r) => r.id === d.roomId)!
-    const inner = ringOf(made, room, T / 2)
     const bulge = Math.max(0, d.bend)
     const dimOff = T / 2 + 0.7
     // The new room's inside is to the right of p → pf → qf → q when the room is on the host's left of travel, and so on: pick by area sign.
@@ -519,34 +504,9 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     drawPencil(g, ...px(add(geo.at(tOther, Math.min(d.depth * 0.75, d.depth - 0.5)), otherDir, T / 2 + 0.26)), 0.62 * k, Math.atan2(geo.out[1], geo.out[0]) + 0.12)
     sheetMap.needsUpdate = true
 
-    // Ghost walls: both faces and the top of each new wall.
-    const H = STUB
-    const position: number[] = []
-    const quad = (a: P, b: P, y0: number, y1: number) => position.push(a[0], y0, a[1], b[0], y0, b[1], b[0], y1, b[1], a[0], y0, a[1], b[0], y1, b[1], a[0], y1, a[1])
-    for (let i = 0; i < wallIn.length - 1; i++) {
-      quad(wallIn[i], wallIn[i + 1], 0, H)
-      quad(wallOut[i], wallOut[i + 1], 0, H)
-      const [a, b, c, e] = [wallIn[i], wallIn[i + 1], wallOut[i + 1], wallOut[i]]
-      position.push(a[0], H, a[1], b[0], H, b[1], c[0], H, c[1], a[0], H, a[1], c[0], H, c[1], e[0], H, e[1])
-    }
-    const ghostGeo = new THREE.BufferGeometry()
-    ghostGeo.setAttribute('position', new THREE.Float32BufferAttribute(position, 3))
-    ghostGeo.computeVertexNormals()
-    ghosts.geometry.dispose()
-    ghosts.geometry = ghostGeo
-    const line: number[] = []
-    for (const face of [wallIn, wallOut]) {
-      for (let i = 0; i < face.length - 1; i++) line.push(face[i][0], H, face[i][1], face[i + 1][0], H, face[i + 1][1])
-    }
-    const edgeGeo = new THREE.BufferGeometry()
-    edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(line, 3))
-    edges.geometry.dispose()
-    edges.geometry = edgeGeo
-
     // Tags.
     anchors.w.set((wA[0] + wB[0]) / 2, 0.05, (wA[1] + wB[1]) / 2)
     anchors.d.set((dA[0] + dB[0]) / 2, 0.05, (dA[1] + dB[1]) / 2)
-    const c = inner.reduce((s, p) => [s[0] + p[0] / inner.length, s[1] + p[1] / inner.length], [0, 0])
     // Beyond the far wall, so the tag never sits over the sketch.
     const beyond = add(mid, geo.out, bulge + 1.1)
     anchors.title.set(beyond[0], 0.6, beyond[1])
@@ -573,10 +533,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     editing = null
     group.removeFromParent()
     tidyYard(null)
-    ghosts.geometry.dispose()
-    ghosts.geometry = new THREE.BufferGeometry()
-    edges.geometry.dispose()
-    edges.geometry = new THREE.BufferGeometry()
     for (const el of [tags.w, tags.d, choice, field]) el.classList.remove('shown')
     stage.renderer.domElement.style.cursor = ''
   }
@@ -814,8 +770,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     sheet.geometry.dispose()
     ;(sheet.material as THREE.Material).dispose()
     sheetMap.dispose()
-    ghostMat.dispose()
-    edgeMat.dispose()
     for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive]) x.dispose()
   }
 

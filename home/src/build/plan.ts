@@ -5,7 +5,8 @@
 // (thickness, height, bulge, openings); a room is a loop of corner ids. Walls are
 // first-class, so one wall can bound two rooms (a shared wall with a door in it).
 // Every id is a stable string, never an array index. Edits are small JSON objects
-// applied by apply(plan, edit) -> plan, so a history can store, replay and diff them.
+// applied by apply(plan, edit) -> plan; a version keeps the edits that made it so
+// people and diff can see what was asked.
 import { DOORWAY, WALL_Z, WINDOW } from '../layout'
 
 export const PLAN_VERSION = 1
@@ -288,13 +289,7 @@ export function roomWalls(plan: Plan, room: Room): Array<{ wall: Wall; forward: 
 export function roomArea(plan: Plan, roomId: Id): number {
   const room = plan.rooms.find((r) => r.id === roomId)
   if (!room) throw new PlanError([`room ${roomId} does not exist`])
-  const pts = room.loop.map((id) => cornerOf(plan, id))
-  let area = 0
-  pts.forEach((p, i) => {
-    const q = pts[(i + 1) % pts.length]
-    area += p.x * q.z - q.x * p.z
-  })
-  area /= 2
+  let area = polygonArea(room.loop.map((id) => { const c = cornerOf(plan, id); return [c.x, c.z] as P }))
   for (const { wall, forward } of roomWalls(plan, room)) {
     const c = curveOf(plan, wall)
     area += segmentArea(c) * Math.sign(c.sagitta) * (forward ? 1 : -1)
@@ -380,17 +375,19 @@ export function validate(plan: Plan): string[] {
       continue
     }
     const c = curveOf(plan, w)
-    if (c.chord < MIN_WALL) reasons.push(`wall ${w.id} is ${c.chord.toFixed(2)} m, under ${MIN_WALL} m`)
+    if (c.chord < MIN_WALL - 1e-9) reasons.push(`wall ${w.id} is ${c.chord.toFixed(2)} m, under ${MIN_WALL} m`)
     if (Math.abs(w.sagitta) > c.chord / 2 + 1e-9) reasons.push(`wall ${w.id} bulges ${w.sagitta.toFixed(2)} m, beyond a half circle`)
     const sorted = [...w.openings].sort((p, q) => p.from - q.from)
     sorted.forEach((o, i) => {
       if (!(o.from >= -1e-9 && o.to <= c.length + 1e-9 && o.from < o.to)) reasons.push(`opening ${o.id} does not fit on wall ${w.id}`)
       if (!(o.sill >= 0 && o.sill < o.head && o.head <= w.height)) reasons.push(`opening ${o.id} has a bad sill or head`)
+      if (o.kind === 'door' ? o.sill !== 0 : o.leaves !== undefined) reasons.push(`opening ${o.id} is a door off the floor or a window with leaves`)
       if (i > 0 && o.from < sorted[i - 1].to) reasons.push(`opening ${o.id} overlaps ${sorted[i - 1].id}`)
     })
     goodWalls.add(w.id)
   }
   const bounding = new Map<Id, number>()
+  const goodRooms = new Set<Id>()
   for (const r of plan.rooms) {
     if (r.loop.length < 3) {
       reasons.push(`room ${r.id} has fewer than three corners`)
@@ -413,23 +410,20 @@ export function validate(plan: Plan): string[] {
     const ring = outline(plan, r)
     if (polygonArea(ring) <= 0) reasons.push(`room ${r.id} winds the wrong way or has no area`)
     if (selfIntersects(ring)) reasons.push(`room ${r.id} crosses itself`)
+    goodRooms.add(r.id)
   }
   for (const [id, n] of bounding) if (n > 2) reasons.push(`wall ${id} bounds ${n} rooms`)
   // A wall thing stays on its wall (moving and bending walls, and adding rooms, carry it or
   // stop before it falls off). A floor or ceiling thing a wall move leaves outside its room
   // is still a valid house (the home clamps it when drawing); the edits that place and move
   // things check the fit (anchorReasons).
-  const roomIds = new Set(plan.rooms.map((r) => r.id))
   for (const f of plan.furniture) {
-    if (f.at.mount === 'surface' && f.at.on !== undefined) reasons.push(...supportReasons(plan, f.id, f.at.on))
-    if (f.at.mount !== 'wall') continue
-    const wall = plan.walls.find((w) => w.id === (f.at as { wallId: Id }).wallId)
-    if (!wall) reasons.push(`furniture ${f.id} hangs on wall ${f.at.wallId}, which does not exist`)
-    else if (goodWalls.has(wall.id)) {
-      const { length } = curveOf(plan, wall)
-      if (!(f.at.along >= -1e-9 && f.at.along <= length + 1e-9)) reasons.push(`furniture ${f.id} is ${f.at.along.toFixed(2)} m along wall ${wall.id}, which is ${length.toFixed(2)} m long`)
-    }
-    if (!roomIds.has(f.at.roomId)) reasons.push(`furniture ${f.id} faces room ${f.at.roomId}, which does not exist`)
+    const { at } = f
+    if (at.mount === 'surface' && at.on !== undefined) reasons.push(...supportReasons(plan, f.id, at.on))
+    if (at.mount !== 'wall') continue
+    // The rules placing it obeyed (anchorReasons): its wall, a room that wall bounds, along it and up it.
+    if (goodWalls.has(at.wallId) && goodRooms.has(at.roomId)) reasons.push(...anchorReasons(plan, f.id, null, at))
+    else reasons.push(`furniture ${f.id} hangs on wall ${at.wallId} facing room ${at.roomId}, and one of them does not exist or is not valid`)
   }
   return reasons
 }
@@ -438,6 +432,8 @@ export function validate(plan: Plan): string[] {
 
 const snap = (v: number, step: number) => Math.round(v / step) * step
 const round = (v: number) => Math.round(v * 1e6) / 1e6
+/** An angle in (-π, π], so one orientation has one stored value (the host bounds angles, and a full turn is no change). */
+export const angle = (a: number) => round(Math.atan2(Math.sin(a), Math.cos(a)))
 
 /** Apply one edit. Moves and bends snap and stop at the nearest valid value; other invalid edits throw a PlanError. */
 export function apply(plan: Plan, edit: Edit): Plan {
@@ -488,7 +484,8 @@ function bendWall(plan: Plan, wallId: Id, sagitta: number): Plan {
   const limit = Math.floor((chord / 2) / BEND_SNAP + 1e-9) * BEND_SNAP
   for (let s = Math.max(-limit, Math.min(limit, snap(sagitta, BEND_SNAP))); ; s = round(s - Math.sign(s) * BEND_SNAP)) {
     const next: Plan = { ...plan, walls: plan.walls.map((w) => (w.id === wallId ? { ...w, sagitta: round(s) } : w)) }
-    if (!validate(next).length || Math.abs(s) < 1e-9) return validate(next).length ? plan : next
+    if (!validate(next).length) return next
+    if (Math.abs(s) < 1e-9) return plan
   }
 }
 
@@ -616,7 +613,7 @@ export function anchorReasons(plan: Plan, id: Id, item: ItemRef | null, at: Anch
     if (!finite(at.along, at.height, at.spin)) reasons.push(`furniture ${id} has a position that is not a number`)
     else {
       const { length } = curveOf(plan, wall)
-      if (at.along < 0 || at.along > length) reasons.push(`furniture ${id} is ${at.along.toFixed(2)} m along wall ${wall.id}, which is ${length.toFixed(2)} m long`)
+      if (!(at.along >= -1e-9 && at.along <= length + 1e-9)) reasons.push(`furniture ${id} is ${at.along.toFixed(2)} m along wall ${wall.id}, which is ${length.toFixed(2)} m long`)
       if (at.height < 0 || at.height > wall.height) reasons.push(`furniture ${id} hangs ${at.height.toFixed(2)} m up a ${wall.height} m wall`)
     }
     return reasons
@@ -647,10 +644,10 @@ function supportReasons(plan: Plan, id: Id, on: Id): string[] {
 const itemOf = (item: ItemRef): ItemRef => ('library' in item ? { library: item.library, person: item.person } : { kind: item.kind })
 function anchorOf(at: Anchor): Anchor {
   switch (at.mount) {
-    case 'floor': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
-    case 'surface': return { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: at.yaw, ...(at.on === undefined ? {} : { on: at.on }) }
-    case 'wall': return { mount: at.mount, wallId: at.wallId, roomId: at.roomId, along: at.along, height: at.height, spin: at.spin }
-    case 'ceiling': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
+    case 'floor': return { mount: at.mount, x: at.x, z: at.z, yaw: angle(at.yaw) }
+    case 'surface': return { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: angle(at.yaw), ...(at.on === undefined ? {} : { on: at.on }) }
+    case 'wall': return { mount: at.mount, wallId: at.wallId, roomId: at.roomId, along: at.along, height: at.height, spin: angle(at.spin) }
+    case 'ceiling': return { mount: at.mount, x: at.x, z: at.z, yaw: angle(at.yaw) }
   }
 }
 
@@ -683,7 +680,7 @@ function carry(plan: Plan, support: Furniture, to: Anchor, moved: Map<Id, Anchor
   for (const g of plan.furniture) {
     if (g.at.mount !== 'surface' || g.at.on !== support.id || moved.has(g.id)) continue
     const ox = g.at.x - from.x, oz = g.at.z - from.z
-    const next: Anchor = { ...g.at, x: round(to.x + ox * c + oz * s), y: round(g.at.y + dy), z: round(to.z - ox * s + oz * c), yaw: round(g.at.yaw + turn) }
+    const next: Anchor = { ...g.at, x: round(to.x + ox * c + oz * s), y: round(g.at.y + dy), z: round(to.z - ox * s + oz * c), yaw: angle(g.at.yaw + turn) }
     moved.set(g.id, next)
     carry(plan, g, next, moved)
   }

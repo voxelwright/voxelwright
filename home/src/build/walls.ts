@@ -2,11 +2,11 @@
 //
 // Every wall piece is a box built along a world axis, as room.ts and diorama.ts
 // build them, then bent onto the wall's arc when the wall is curved. A straight
-// wall is left as the plain box, so the untouched kitchen renders as today.
-// The UV mappings and corner joinery copy today's per wall on purpose (the seated
-// back wall's plaster stretched across it, the side wall's plain box UVs, the
-// shell's 8 m world scale, back and front walls running past their corners):
-// unifying them is a visible change and waits for the owner's eye.
+// wall is left as the plain box, so the untouched kitchen renders as room.ts and
+// diorama.ts draw it. The UV mappings and corner joinery copy theirs per wall (the
+// seated back wall's plaster stretched across it, the side wall's plain box UVs,
+// the shell's 8 m world scale, back and front walls running past their corners):
+// one mapping for every wall would change how the kitchen looks.
 import * as THREE from 'three/webgpu'
 import { CUT, FLOOR_ROUGHNESS, YARD_TOP } from '../diorama'
 import { canvas, floorPlanks, paintPlaster, toTexture } from '../paint'

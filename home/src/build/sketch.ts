@@ -13,7 +13,6 @@ import { canvas, makeNoise, rng, toTexture } from '../paint'
 export const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 export const CHALK = '#fff4dc'
 export const CHALK_RED = '#d2543f'
-export const PENCIL = 'rgba(74, 50, 34, 0.92)'
 
 // ── The ghost's chalk rim: an inverted hull drawn after the ghost ─────────────
 
@@ -282,55 +281,6 @@ export function paperGrain(size: number) {
   return c
 }
 
-/** A grip drawn on paper: a cream knob ringed in pencil, with a soft shadow; warmer while held or hovered. */
-export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: number, live: boolean, grip?: { angle: number; both: boolean }, fill = '#b79a74') {
-  g.save()
-  g.filter = `blur(${Math.max(1, r * 0.25)}px)`
-  g.fillStyle = 'rgba(60, 32, 14, 0.35)'
-  g.beginPath()
-  g.arc(x + r * 0.18, y + r * 0.28, r * 1.02, 0, Math.PI * 2)
-  g.fill()
-  g.restore()
-  g.beginPath()
-  g.arc(x, y, r, 0, Math.PI * 2)
-  // Darker than it looks: the scene's exposure and bloom lift it to cream.
-  g.fillStyle = live ? '#c98c4c' : fill
-  g.fill()
-  g.lineWidth = r * 0.2
-  g.strokeStyle = 'rgba(58, 36, 22, 1)'
-  g.stroke()
-  g.setLineDash([r * 0.22, r * 0.2])
-  g.lineWidth = r * 0.07
-  g.strokeStyle = 'rgba(150, 110, 80, 0.6)'
-  g.beginPath()
-  g.arc(x, y, r * 0.66, 0, Math.PI * 2)
-  g.stroke()
-  g.setLineDash([])
-  if (!grip) return
-  // Which way it moves: a small double arrow (or one way) pressed into the knob.
-  g.save()
-  g.translate(x, y)
-  g.rotate(grip.angle)
-  g.strokeStyle = 'rgba(62, 38, 24, 0.95)'
-  g.lineWidth = r * 0.14
-  g.lineCap = g.lineJoin = 'round'
-  const a = r * 0.5, h = r * 0.24
-  g.beginPath()
-  g.moveTo(grip.both ? -a : -a * 0.3, 0)
-  g.lineTo(a, 0)
-  g.moveTo(a - h, -h)
-  g.lineTo(a, 0)
-  g.lineTo(a - h, h)
-  if (grip.both) {
-    g.moveTo(-a + h, -h)
-    g.lineTo(-a, 0)
-    g.lineTo(-a + h, h)
-  }
-  g.stroke()
-  g.restore()
-}
-
-/** A strip of washi tape holding the paper down: translucent, striped, its ends torn. */
 export function drawTape(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, angle: number, hue: string) {
   g.save()
   g.translate(x, y)

@@ -1,6 +1,7 @@
 // Headless checks of the house plan store (#48) through the villager API: no model is called.
 // npm run check-plans
-import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from 'cordis'
@@ -119,19 +120,25 @@ try {
   }
   check('a name with a newline is refused', (await post('/names', { id: V2, name: 'a\nb' })).status === 400)
   check('a body over 256 KB is refused', (await api('/house/plans/versions', undefined, host.token, JSON.stringify({ pad: 'x'.repeat(300_000) }))).status === 413)
+  check('a body over 256 KB of three-byte text is refused (bytes, not characters)', (await api('/house/plans/versions', undefined, host.token, JSON.stringify({ pad: '€'.repeat(100_000) }))).status === 413)
+  check('a root that carries edits is refused', (await post('/versions', { version: { id: hex('3', 16), parent: null, edits: [move], plan: base } })).status === 400)
   check('malformed JSON is refused', (await api('/house/plans/versions', undefined, host.token, '{')).status === 400)
   check('GET on versions is not allowed', (await api('/house/plans/versions')).status === 405)
   check('refused requests store nothing', (await readdir(join(dir, 'events'))).length === before)
 
-  // An interrupted write leaves only a scratch file; another writer's event at the next number wins.
-  await writeFile(join(dir, 'tmp', 'torn.json'), '{"seq": 99, "kind": "vers', { mode: 0o600 })
+  // An event is written whole in tmp/ first: with tmp/ unwritable the write fails and nothing reaches events/.
+  await chmod(join(dir, 'tmp'), 0o500)
+  const blocked = await post('/versions', { version: { id: hex('8', 16), parent: (await (await api('/house/plans')).json()).head, edits: [move], plan: base } })
+  await chmod(join(dir, 'tmp'), 0o700)
+  check('a write that fails before its link leaves no event', blocked.status === 500 && (await readdir(join(dir, 'events'))).length === before, blocked)
+  // Another writer's event at the next number wins.
   const next = String(before + 1).padStart(8, '0')
   await writeFile(join(dir, 'tmp', 'other.json'), JSON.stringify({ seq: before + 1, kind: 'name', id: V3, name: 'From another host', at: new Date().toISOString() }), { mode: 0o600 })
   const head = (await (await api('/house/plans')).json()).head
   await link(join(dir, 'tmp', 'other.json'), join(dir, 'events', `${next}.json`))
   await rm(join(dir, 'tmp', 'other.json'))
   const after = await (await api('/house/plans')).json()
-  check('a torn scratch file is never an event', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
+  check('an event another writer linked is folded in', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
 
   // Placed things (placeItem, moveItem, removeItem): stored as sent, every field checked.
   const V5 = hex('5', 16), V6 = hex('6', 16), V7 = hex('7', 16)
@@ -175,18 +182,56 @@ try {
   }
   check('refused item edits store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
 
+  // Two hosts on one root racing one parent: the link() claim lets one in and refuses the other.
+  const twin = await start()
+  const asTwin = (path: string, body: unknown) => fetch(`${twin.base}/house/plans${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${twin.token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }))
+  const headNow = (await (await api('/house/plans')).json()).head
+  const [ra, rb] = await Promise.all([
+    post('/versions', { version: { id: hex('1', 16), parent: headNow, edits: [move], plan: base } }),
+    asTwin('/versions', { version: { id: hex('2', 16), parent: headNow, edits: [move], plan: base } }),
+  ])
+  const raced = await (await api('/house/plans')).json()
+  check('two hosts racing one parent: one saved, one stale, none lost', [ra.status, rb.status].sort().join() === '200,409' && raced.versions.filter((v: { id: string }) => v.id === hex('1', 16) || v.id === hex('2', 16)).length === 1, { ra: ra.status, rb: rb.status })
+  await twin.fiber.dispose()
+  const raceWinner = raced.head as string
+
+  // A multi-byte character split across two chunks of a body is stored whole.
+  const kueche = { ...base, rooms: [{ ...base.rooms[0], label: 'Küche' }] }
+  const bytes = Buffer.from(JSON.stringify({ version: { id: hex('4', 16), parent: raceWinner, edits: [{ op: 'moveWall', wallId: 'r.w2', by: 0.1 }], plan: kueche } }))
+  const cut = bytes.indexOf(Buffer.from('ü')) + 1
+  const split = await new Promise<{ status: number; body: string }>((done, fail) => {
+    const url = new URL(`${host.base}/house/plans/versions`)
+    const req = request({ hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': bytes.length, authorization: `Bearer ${host.token}` } }, (res) => {
+      let body = ''
+      res.setEncoding('utf8').on('data', (c) => (body += c)).on('end', () => done({ status: res.statusCode ?? 0, body }))
+    })
+    req.on('error', fail)
+    req.write(bytes.subarray(0, cut))
+    setTimeout(() => req.end(bytes.subarray(cut)), 100)
+  })
+  check('a character split across body chunks is stored whole', split.status === 200 && JSON.parse(split.body).version.plan.rooms[0].label === 'Küche', split)
+
   // Modes.
   const mode = async (p: string) => (await stat(p)).mode & 0o777
   const files = (await readdir(join(dir, 'events'))).map((f) => join(dir, 'events', f))
   const modes = { house: await mode(join(root, 'house')), plans: await mode(dir), events: await mode(join(dir, 'events')), files: [...new Set(await Promise.all(files.map(mode)))] }
-  check('dirs are 0700 and event files 0600', modes.plans === 0o700 && modes.events === 0o700 && modes.files.length === 1 && modes.files[0] === 0o600, Object.fromEntries(Object.entries(modes).map(([k, v]) => [k, Array.isArray(v) ? v.map((m) => m.toString(8)) : v.toString(8)])))
+  check('dirs are 0700 and event files 0600', modes.house === 0o700 && modes.plans === 0o700 && modes.events === 0o700 && modes.files.length === 1 && modes.files[0] === 0o600, Object.fromEntries(Object.entries(modes).map(([k, v]) => [k, Array.isArray(v) ? v.map((m) => m.toString(8)) : v.toString(8)])))
 
   // Reload: a new host process folds the same log to the same state.
   const snapshot = JSON.stringify(await (await api('/house/plans')).json())
   await host.fiber.dispose()
   host = await start()
   const reloaded = await (await api('/house/plans')).json()
-  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V7)
+  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === hex('4', 16))
+
+  // An event filed under the wrong number is an error (a fresh host, so nothing is folded yet).
+  await host.fiber.dispose()
+  const event2 = join(dir, 'events', '00000002.json')
+  const kept = await readFile(event2)
+  await writeFile(event2, await readFile(join(dir, 'events', '00000003.json')))
+  host = await start()
+  check('an event filed under the wrong number is an error', (await api('/house/plans')).status === 500)
+  await writeFile(event2, kept)
 
   // A damaged log fails loudly instead of folding around a gap.
   await rm(join(dir, 'events', '00000002.json'))

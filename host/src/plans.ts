@@ -220,13 +220,16 @@ function plan(v: unknown): Obj {
 // ---------------------------------------------------------------- store
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
-  let raw = ''
-  for await (const chunk of req) {
-    raw += chunk
-    if (raw.length > MAX_BODY) refuse(`a request is at most ${MAX_BODY} bytes`, 413)
+  // Bytes, not characters: a chunk may end inside a multi-byte character, so decode once at the end.
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length
+    if (size > MAX_BODY) refuse(`a request is at most ${MAX_BODY} bytes`, 413)
+    chunks.push(chunk)
   }
   try {
-    return JSON.parse(raw)
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
   } catch {
     return refuse('expected JSON')
   }
@@ -244,10 +247,15 @@ export function planStore(root: string) {
     return run
   }
 
+  // Events are immutable once linked, so each request folds only the ones past the last it read.
+  const fileOf = (seq: number) => `${String(seq).padStart(8, '0')}.json`
+  let folded: State = { versions: [], head: null, names: {}, seq: 0 }
   async function load(): Promise<State> {
     const files = (await readdir(events).catch((e) => (e.code === 'ENOENT' ? [] : Promise.reject(e)))).filter((f) => SEQ.test(f)).sort()
-    const state: State = { versions: [], head: null, names: {}, seq: 0 }
-    for (const f of files) {
+    // Events already folded must all still be there; a loss is a damaged store.
+    for (let i = 0; i < folded.seq; i++) if (files[i] !== fileOf(i + 1)) throw new Error(`plan event ${i + 1} is missing`)
+    const state: State = { versions: [...folded.versions], head: folded.head, names: { ...folded.names }, seq: folded.seq }
+    for (const f of files.slice(folded.seq)) {
       const seq = Number(SEQ.exec(f)![1])
       // A gap or an unreadable event is a damaged store: fail loudly, never fold around it.
       if (seq !== state.seq + 1) throw new Error(`plan event ${seq} follows ${state.seq}`)
@@ -261,6 +269,7 @@ export function planStore(root: string) {
       else throw new Error(`plan event ${seq} has an unknown kind`)
       state.seq = seq
     }
+    folded = state
     return state
   }
 
@@ -271,7 +280,7 @@ export function planStore(root: string) {
     const scratch = join(tmp, `${seq}-${randomBytes(6).toString('hex')}.json`)
     await writeFile(scratch, JSON.stringify({ seq, ...event }), { mode: 0o600, flush: true })
     try {
-      await link(scratch, join(events, `${String(seq).padStart(8, '0')}.json`))
+      await link(scratch, join(events, fileOf(seq)))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Stale('another writer saved first')
       throw error

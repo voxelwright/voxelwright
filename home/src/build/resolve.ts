@@ -25,8 +25,7 @@
 //   the nearest clear spot, sliding the room along the wall if it must. Double doors
 //   with no clear spot become a single door that has one, and the villager says so;
 //   when nothing fits, the resolver asks and names what is in the way.
-import { DOORWAY } from '../layout'
-import { MIN_WALL, PlanError, apply, curveOf, normalAt, outline, roomArea, roomWalls, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
+import { MIN_WALL, PlanError, apply, curveOf, normalAt, outline, roomArea, roomWalls, wallOf, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
 import type { Intent, Side } from './intent'
 
 export interface ResolveContext {
@@ -103,7 +102,7 @@ export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
     if (e instanceof PlanError) return { ask: "That doesn't fit. A bit smaller?" }
     throw e
   }
-  if (Math.abs(Math.abs(curveOf(next, next.walls.find((w) => w.id === `${d.roomId}.w2`)!).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "It can't bend that far. Gentler?" }
+  if (Math.abs(Math.abs(wallOf(next, `${d.roomId}.w2`).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "It can't bend that far. Gentler?" }
   const block = blockerOf(d.door, d.keepOut)
   if (block) return { ask: `The ${block.name}'s in the way of the door.` }
   const room = next.rooms.find((r) => r.id === d.roomId)!
@@ -183,7 +182,7 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
       if (from === null || Math.abs(f + w / 2 - centre) < Math.abs(from + w / 2 - centre) - 1e-9) from = f
     }
   }
-  if (from === null) return { ask: `A window or a door is in the way. Narrower than ${fmt(w)} m?` }
+  if (from === null) return { ask: host.openings.length ? `A window or a door is in the way. Narrower than ${fmt(w)} m?` : `That leaves a sliver of wall at the end. The whole wall, ${fmt(L)} m?` }
   let to = round(from + w)
 
   // The door, clear of what stands against the wall; the room slides along the wall if the door must.

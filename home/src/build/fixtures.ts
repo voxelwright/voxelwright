@@ -93,10 +93,9 @@ export function makeFixtures(scene: THREE.Scene, skip: () => THREE.Object3D[]) {
       const all = byWall.get(wallId) ?? []
       return side ? all.filter((f) => f.side === side) : all
     },
-    /** The plan changed (or furniture came or went): rescan on the next question. */
-    invalidate(furniture = false) {
+    /** The plan changed: rescan on the next question. Placed things are never fixtures, so the scene boxes stand. */
+    invalidate() {
       plan = null
-      if (furniture) boxes = null
     },
     /** Milliseconds each scan took. */
     times: () => times.slice(),
