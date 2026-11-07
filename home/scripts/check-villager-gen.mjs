@@ -17,6 +17,10 @@
 // toque, an off-centre toque, a plume over the head, a board on a stalk or floating over its cap, a pom-pom off
 // the tip, and round 5's own sheep (pom-pom on a needle point), ox (lens off its arm) and elephant (board on a
 // tall band) are refused, each naming the mark.
+// Round 7 (appeal): a mortarboard 1.2 head widths across and a sun hat 1.75 across, tilted back, pass with the face clear
+// 20 degrees steeper than the dollhouse view, and a duster of 5 feathers on a knot passes; a board or brim too wide or too
+// small, a hat that clears the eyes only 15 degrees steeper, a one-ball plume, and round 6's elephant (board 1.47), hippo
+// (brim 2.10) and hedgehog (one-ball plume) and round 5's giraffe (one-ball plume) are refused, each naming the mark.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -139,7 +143,7 @@ try {
   const capped = await trial(asRole(example.replace(toque, capRecipe), 'carer'), { mark: true, accent: '#3d7cc8' })
   check('the prompt\'s bent stocking cap is one piece, breaks the outline, and its pom-pom sits on its blunt end', capped.ok && capped.measures.pieces === 1 && capped.measures.mark.above >= 0.1 && capped.measures.ownerPx >= 100 && capped.measures.loose.length === 0, capped.ok ? { pieces: capped.measures.pieces, mark: capped.measures.mark, ownerPx: capped.measures.ownerPx, loose: capped.measures.loose } : capped.reason)
   const dyed = await trial(example, { mark: true, accent: '#3d7cc8' })
-  check('the marked toque is dyed in the owner\'s colour and shows from the dollhouse view', dyed.ok && dyed.fixes.includes("mark: 8 part(s) in the owner's colour") && dyed.measures.ownerPx >= 100, dyed.ok ? { fixes: dyed.fixes, ownerPx: dyed.measures.ownerPx } : dyed.reason)
+  check('the marked toque is dyed in the owner\'s colour and shows from the dollhouse view', dyed.ok && dyed.fixes.includes("mark: 9 part(s) in the owner's colour") && dyed.measures.ownerPx >= 100, dyed.ok ? { fixes: dyed.fixes, ownerPx: dyed.measures.ownerPx } : dyed.reason)
   const orange = await trial(example.replace("tan = felt('#e2b98a')", "tan = felt('#c9793c')"), { mark: true, accent: '#3d7cc8' })
   check('an orange body is moved off the owners\' colours (it is within 30 degrees of Alex\'s rust)', orange.ok && orange.fixes.some((f) => /^felt: #c9793c moved to #[0-9a-f]{6}, off the owners' colours$/.test(f)), orange.ok ? orange.fixes : orange.reason)
   check('a tan body and the wooden spoon are left as written', dyed.ok && !dyed.fixes.some((f) => f.startsWith('felt:')), dyed.fixes)
@@ -148,31 +152,55 @@ try {
   // board lies on the head, and every marked part sits on what holds it, surface to surface and across more than a point.
   const toqueAt = (x) => `  const shifted = new THREE.Group()\n  shifted.position.x = ${x}\n  head.add(shifted)\n${example.match(toque)[0].replaceAll('villager.mark(add(head,', 'villager.mark(add(shifted,')}`
   const pleated = await trial(example, { mark: true })
-  check('the prompt example\'s pleated toque is centred, taller than wide, and every part sits on the head', pleated.ok && pleated.measures.place.toque.offset <= 0.15 && pleated.measures.place.toque.ratio >= 1 && pleated.measures.loose.length === 0, pleated.ok ? pleated.measures.place : pleated.reason)
-  await refused('the example with round 5\'s toque (a short band and a wide puff)', example.replace(toque, `  // The cook's mark, round 5\n  villager.mark(add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01))\n  villager.mark(add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01)).scale.set(1, 0.85, 1)\n`), /the cook's toque rises only 0\.\d+ times its own width above the top of the head \(at least 1\); make it a tall, straight-sided pleated column/, { mark: true })
+  check('the prompt example\'s toque (band, column and puff) is centred, taller than wide, and every part sits on the head', pleated.ok && pleated.measures.place.toque.offset <= 0.15 && pleated.measures.place.toque.ratio >= 1 && pleated.measures.loose.length === 0, pleated.ok ? pleated.measures.place : pleated.reason)
+  await refused('the example with round 5\'s toque (a short band and a wide puff)', example.replace(toque, `  // The cook's mark, round 5\n  villager.mark(add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01))\n  villager.mark(add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01)).scale.set(1, 0.85, 1)\n`), /the cook's toque rises only 0\.\d+ times its own width above the top of the head \(at least 1\); make it a tall column on a snug band/, { mark: true })
   await refused('the example with its toque moved 0.1 to one side', example.replace(toque, toqueAt(0.1)), /the cook's toque sits \d+% of the head's width off the head's centre \(at most 15%\)/, { mark: true })
   await refused('round 5\'s badger cook (its toque a band and a wide puff)', fixture('round5-badger-toque.code.txt'), /the cook's toque rises only 0\.8\d times its own width/, { mark: true, species: true, accent: '#c8553d' })
   // A tidier: the example's spoon swapped for a duster on a long handle, the toque taken off.
-  const duster = (tilt, length) => asRole(example.replace(toque, '').replace(/  const spoon = villager\.tag[\s\S]*?\n  villager\.gait/, `  const duster = villager.tag(new THREE.Group(), 'held')
+  const duster = (tilt, length, tufts = true) => asRole(example.replace(toque, '').replace(/  const spoon = villager\.tag[\s\S]*?\n  villager\.gait/, `  const duster = villager.tag(new THREE.Group(), 'held')
   duster.position.set(-0.196, 0.158, 0.02)
   duster.rotation.z = ${tilt}
   villager.add(duster)
   add(duster, new THREE.CylinderGeometry(0.01, 0.012, ${length}, 8), felt('#a8703a'), 0, ${length / 2}, 0)
-  villager.mark(add(duster, new THREE.SphereGeometry(0.07, 18, 12), white, 0, ${length + 0.03}, 0))
+  villager.mark(add(duster, new THREE.SphereGeometry(0.03, 14, 10), white, 0, ${length}, 0))
+${tufts ? `  for (let k = 0; k < 5; k++) {
+    const a = (k - 2) * 0.35
+    villager.mark(add(duster, new THREE.CapsuleGeometry(0.022, 0.09, 6, 10), white, -0.055 * Math.sin(a), ${length} + 0.055 * Math.cos(a), 0)).rotation.z = a
+  }` : `  villager.mark(add(duster, new THREE.SphereGeometry(0.07, 18, 12), white, 0, ${length + 0.03}, 0))`}
   villager.gait`), 'tidier')
   const beside = await trial(duster(0.35, 0.3), { mark: true, accent: '#e0b53a' })
-  check('a duster held up beside the head passes, its plume well out from the head\'s centre', beside.ok && beside.measures.place.plume.offset >= 0.75 && beside.measures.loose.length === 0, beside.ok ? beside.measures.place : beside.reason)
+  check('a duster of 5 feathers fanned from a knot, held up beside the head, passes, its plume well out from the head\'s centre', beside.ok && beside.measures.place.plume.offset >= 0.75 && beside.measures.place.plume.parts === 6 && beside.measures.loose.length === 0, beside.ok ? beside.measures.place : beside.reason)
+  await refused('a duster whose plume is one ball on a knot (a lollipop)', duster(0.35, 0.3, false), /the tidier's feather duster plume is only 2 pieces, so it reads as a lollipop; make it 5 to 7 feathers/, { mark: true, accent: '#e0b53a' })
+  await refused('round 6\'s hedgehog tidier (its plume one ball)', fixture('round6-hedgehog-duster.code.txt'), /the tidier's feather duster plume is (one piece|only \d pieces), so it reads as a lollipop/, { mark: true, species: true, accent: '#e0b53a' })
   await refused('a duster held over the middle of the head', duster(-0.55, 0.45), /the tidier's feather duster plume's centre is only \d+% of the head's width out from the head's centre \(at least 75%\)/, { mark: true, accent: '#e0b53a' })
-  const giraffe = await trial(fixture('round5-giraffe-duster.code.txt'), { mark: true, species: true, accent: '#6a9a4a' })
-  check('round 5\'s giraffe tidier passes: its plume is held out beside the head', giraffe.ok && giraffe.measures.place.plume.offset >= 0.75, giraffe.ok ? giraffe.measures.place : giraffe.reason)
+  await refused('round 5\'s giraffe tidier (its plume held out beside the head, but one ball)', fixture('round5-giraffe-duster.code.txt'), /the tidier's feather duster plume is (one piece|only \d pieces), so it reads as a lollipop/, { mark: true, species: true, accent: '#6a9a4a' })
   // A tutor: a skullcap hugging the head, a board lying on it, a tassel off one corner.
-  const tutor = ({ cap = 0.04, capY = 0.14, boardY = 0.17 } = {}) => asRole(example.replace(toque, `  // The tutor's mark
+  const tutor = ({ cap = 0.04, capY = 0.14, boardY = 0.17, board = 0.42 } = {}) => asRole(example.replace(toque, `  // The tutor's mark
   villager.mark(add(head, new THREE.CylinderGeometry(0.12, 0.14, ${cap}, 24), white, 0, ${capY}, -0.01))
-  villager.mark(add(head, new THREE.BoxGeometry(0.5, 0.02, 0.5), white, 0, ${boardY}, -0.01))
-  villager.mark(add(head, new THREE.CylinderGeometry(0.008, 0.008, 0.1, 8), white, 0.24, ${boardY - 0.05}, 0.23))
+  villager.mark(add(head, new THREE.BoxGeometry(${board}, 0.02, ${board}), white, 0, ${boardY}, -0.01))
+  villager.mark(add(head, new THREE.CylinderGeometry(0.008, 0.008, 0.1, 8), white, ${board / 2 - 0.01}, ${boardY - 0.05}, ${board / 2 - 0.02}))
 `), 'tutor')
   const worn = await trial(tutor(), { mark: true, accent: '#6a9a4a' })
-  check('a mortarboard lying on a skullcap passes', worn.ok && worn.measures.place.board.lift <= 0.05 && worn.measures.loose.length === 0, worn.ok ? { place: worn.measures.place, loose: worn.measures.loose } : worn.reason)
+  check('a mortarboard 1.2 head widths across, lying on a skullcap, passes with the face clear from above', worn.ok && worn.measures.place.board.lift <= 0.05 && worn.measures.place.board.width >= 1.1 && worn.measures.place.board.width <= 1.3 && worn.measures.loose.length === 0 && Math.min(...worn.measures.faceMargin) >= 0.34, worn.ok ? { place: worn.measures.place, loose: worn.measures.loose, faceMargin: worn.measures.faceMargin } : worn.reason)
+  // Round 7: the board and the brim in proportion to the head, and the face clear of the mark with room to spare.
+  await refused('a mortarboard 1.7 head widths across (a slab over the head)', tutor({ board: 0.6 }), /the tutor's mortarboard's board is 1\.\d+ times the head's width across \(at most 1\.4\), a flat slab that hides the head from above/, { mark: true, accent: '#6a9a4a' })
+  await refused('a mortarboard 0.85 head widths across (a cap)', tutor({ board: 0.3 }), /the tutor's mortarboard's board is only 0\.\d+ times the head's width across \(at least 1\)/, { mark: true, accent: '#6a9a4a' })
+  await refused('round 6\'s elephant tutor (its board 1.47 head widths across)', fixture('round6-elephant-board.code.txt'), /the tutor's mortarboard's board is 1\.4\d times the head's width across \(at most 1\.4\)/, { mark: true, species: true, accent: '#6a9a4a' })
+  // A gardener: a sun hat on the back of the head, a low crown sunk in the head and a brim on it, tilted back.
+  const gardener = ({ r = 0.31, tilt = -0.44, y = 0.1, z = -0.05 } = {}) => asRole(example.replace(toque, `  // The gardener's mark
+  const hat = new THREE.Group()
+  hat.position.set(0, ${y}, ${z})
+  hat.rotation.x = ${tilt}
+  head.add(hat)
+  villager.mark(add(hat, new THREE.CylinderGeometry(${r}, ${r}, 0.016, 40), white, 0, 0.01, 0))
+  villager.mark(add(hat, new THREE.SphereGeometry(0.12, 24, 14), white, 0, 0.03, 0)).scale.set(1, 0.6, 1)
+`), 'gardener')
+  const hat = await trial(gardener(), { mark: true, accent: '#c8553d' })
+  check('a sun hat 1.75 head widths across, tilted back, passes with the face clear from above', hat.ok && hat.measures.place.brim.width >= 1.6 && hat.measures.place.brim.width <= 1.9 && Math.min(...hat.measures.faceMargin) >= 0.34, hat.ok ? { place: hat.measures.place, faceMargin: hat.measures.faceMargin } : hat.reason)
+  await refused('a sun hat 2.4 head widths across', gardener({ r: 0.425 }), /the gardener's sun hat's brim is 2\.\d+ times the head's width across \(at most 2\), a flat slab that hides the head from above/, { mark: true, accent: '#c8553d' })
+  await refused('a sun hat 1.2 head widths across', gardener({ r: 0.21 }), /the gardener's sun hat's brim is only 1\.\d+ times the head's width across \(at least 1\.45\)/, { mark: true, accent: '#c8553d' })
+  await refused(`a sun hat tilted back less and worn further forward, clearing the eyes at the dollhouse pitch but not 20 degrees steeper`, gardener({ tilt: -0.3, y: 0.1, z: 0 }), /the gardener's sun hat clears the eyes only up to \d+ degrees steeper than the dollhouse view \(at least 20\)/, { mark: true, accent: '#c8553d' })
+  await refused('round 6\'s hippo gardener (its brim 2.1 head widths across, the face clear only 15 degrees steeper)', fixture('round6-hippo-brim.code.txt'), /the gardener's sun hat's brim is 2\.\d+ times the head's width across[\s\S]*clears the eyes only up to 15 degrees steeper/, { mark: true, species: true, accent: '#3d7cc8' })
   await refused('a mortarboard on a tall band (a stalk)', tutor({ cap: 0.14, capY: 0.19, boardY: 0.27 }), /the tutor's mortarboard's board stands 0\.\d+ above the top of the head \(at most 0\.\d+, a twentieth of the height\)/, { mark: true, accent: '#6a9a4a' })
   await refused('a mortarboard floating 0.02 over its skullcap', tutor({ boardY: 0.19 }), /the tutor's mortarboard has a #f4efe4 head part near \(0\.00, 0\.\d+, -0\.01\) standing 0\.0\d+ clear of everything it could sit on \(at most 0\.005, surface to surface\), so it floats; rest the board's underside on the cap band/, { mark: true, accent: '#6a9a4a' })
   await refused('round 5\'s elephant tutor (its board on a band 0.115 of its height tall)', fixture('round5-elephant-board.code.txt'), /the tutor's mortarboard's board stands/, { mark: true, species: true, accent: '#6a9a4a' })

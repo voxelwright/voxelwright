@@ -21,6 +21,8 @@ export const LIMITS = {
   attach: 0.005,
   /** Where a marked part meets what holds it, the meeting must be at least this share of the thinner part's thinnest side wide: round 5's sound joints are 0.9 or more, its pom-poms on a cone's needle point 0.20 to 0.22, and the old prompt recipe's 0.30. */
   joint: 0.5,
+  /** Round 7: the eyes must also show past the role's mark from this much steeper than the dollhouse camera (radians, 20 degrees): round 6's hippo's sun hat cleared them only to 15 degrees steeper, and read as a slab over the head. */
+  faceMargin: 0.345,
 } as const
 
 export interface Measures {
@@ -33,6 +35,8 @@ export interface Measures {
   pieces: number
   /** Of 5 rays at each eye, how many reach it first, the fewer of the front and dollhouse views. */
   eyeRays: number[]
+  /** Round 7: per eye, how much steeper than the dollhouse view (radians) the eye still shows past the role's mark, checked in 5-degree steps up to 80 degrees. */
+  faceMargin: number[]
   /** Species features against the round template (./speciesFeatures); null without a head or body part. */
   species: Species | null
   /** How far the role mark breaks the outline (./markBreak); null when nothing is tagged with villager.mark(). */
@@ -85,6 +89,7 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   // dollhouse camera's pitch (in front and above); from both, the eye must be hit first.
   const ray = new THREE.Raycaster()
   const eyeRays: number[] = []
+  const faceMargin: number[] = []
   const views = [
     { name: 'the front', dir: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0), fix: 'keep everything at the neck, below the head' },
     { name: 'the dollhouse view (in front and above)', dir: new THREE.Vector3(0, -Math.sin(LIMITS.pitch), -Math.cos(LIMITS.pitch)), up: new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch)), fix: 'raise or tilt back any brim or hood so the eyes show from above' },
@@ -95,6 +100,7 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     const box = new THREE.Box3().setFromObject(eye, true)
     if (box.isEmpty()) {
       eyeRays.push(0)
+      faceMargin.push(0)
       return
     }
     const c = box.getCenter(new THREE.Vector3())
@@ -120,6 +126,22 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
       }
     }
     eyeRays.push(least)
+    // The margin: the steepest view, from the dollhouse pitch up in 5-degree steps, at which at least 3 of 5 rays reach
+    // the eye past every part of the mark. Only the mark counts as a blocker here (a snout or a tuft is the species' own business).
+    let steepest = 0
+    for (let pitch = LIMITS.pitch; pitch <= 1.4; pitch += Math.PI / 36) {
+      const dir = new THREE.Vector3(0, -Math.sin(pitch), -Math.cos(pitch)), up = new THREE.Vector3(0, Math.cos(pitch), -Math.sin(pitch))
+      let clear = 0
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const at = c.clone().add(new THREE.Vector3(dx * r.x, 0, 0)).addScaledVector(up, dy * r.y)
+        ray.set(at.addScaledVector(dir, -2), dir)
+        const hit = ray.intersectObjects(meshes, false)[0]
+        if (!hit || own.has(hit.object) || hit.object.userData.mark !== true) clear++
+      }
+      if (clear < 3) break
+      steepest = pitch
+    }
+    faceMargin.push(+(steepest - LIMITS.pitch).toFixed(3))
   })
 
   // Detached parts: meshes whose bounds touch (within the gap) are joined; everything must be one piece.
@@ -196,13 +218,26 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     if (place?.toque) {
       const { offset, ratio } = place.toque
       if (offset > TOQUE.offset) failures.push(`${name} sits ${Math.round(offset * 100)}% of the head's width off the head's centre (at most ${Math.round(TOQUE.offset * 100)}%); centre it on top of the head, so it is not read as a feather duster held to one side`)
-      if (ratio < TOQUE.ratio) failures.push(`${name} rises only ${ratio.toFixed(2)} times its own width above the top of the head (at least ${TOQUE.ratio}); make it a tall, straight-sided pleated column with a puff on top, taller than it is wide, so it is not read as a round puff like a duster's plume`)
+      if (ratio < TOQUE.ratio) failures.push(`${name} rises only ${ratio.toFixed(2)} times its own width above the top of the head (at least ${TOQUE.ratio}); make it a tall column on a snug band with a billowy puff of balls on top, taller than it is wide, so it is not read as a round puff like a duster's plume`)
     }
     if (place?.board && place.board.lift > BOARD.lift) failures.push(`${name}'s board stands ${(place.board.lift * height).toFixed(3)} above the top of the head (at most ${(BOARD.lift * height).toFixed(3)}, a twentieth of the height), so it reads as a sign held overhead; make the cap a shallow skullcap that hugs the top of the head and lay the board right on it, with no gap or stalk`)
+    if (place?.board && place.board.width < BOARD.width[0]) failures.push(`${name}'s board is only ${place.board.width.toFixed(2)} times the head's width across (at least ${BOARD.width[0]}); make it a square about 1.2 times the head's width so it reads as a mortarboard, not a cap`)
+    if (place?.board && place.board.width > BOARD.width[1]) failures.push(`${name}'s board is ${place.board.width.toFixed(2)} times the head's width across (at most ${BOARD.width[1]}), a flat slab that hides the head from above; make it a square about 1.2 times the head's width, on a skullcap that shows under it`)
+    if (place?.brim && place.brim.width < BRIM.width[0]) failures.push(`${name}'s brim is only ${place.brim.width.toFixed(2)} times the head's width across (at least ${BRIM.width[0]}); make it about 1.75 times the head's width so it reads as a sun hat`)
+    if (place?.brim && place.brim.width > BRIM.width[1]) failures.push(`${name}'s brim is ${place.brim.width.toFixed(2)} times the head's width across (at most ${BRIM.width[1]}), a flat slab that hides the head from above; make it about 1.75 times the head's width, worn on the back of the head and tilted back`)
+    const margin = Math.min(...faceMargin)
+    if (eyes.length && margin < LIMITS.faceMargin) failures.push(`${name} clears the eyes only up to ${Math.round((Math.max(0, margin) * 180) / Math.PI)} degrees steeper than the dollhouse view (at least ${Math.round((LIMITS.faceMargin * 180) / Math.PI)}), so it covers the face as the camera looks down; ${MARGIN_FIX[role] ?? 'keep it on the top or the back of the head, clear of the face from above'}`)
+    if (place?.plume && place.plume.parts < PLUME.tufts) failures.push(`${name} is ${place.plume.parts === 1 ? 'one piece' : `only ${place.plume.parts} pieces`}, so it reads as a lollipop; make it 5 to 7 feathers (long tufts) fanned up and out from a felt knot on the handle's top, each feather's base sunk in the knot, and mark them all`)
     if (place?.plume && place.plume.offset < PLUME.offset) failures.push(`${name}'s centre is only ${Math.round(place.plume.offset * 100)}% of the head's width out from the head's centre (at least ${Math.round(PLUME.offset * 100)}%); hold the duster up beside the head on a long handle, its plume clear of the head's side and never over the top of the head, so it is not read as a chef's toque`)
   }
 
-  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke, ownerPx, heldInHand, loose, place } }
+  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, faceMargin, species: features, mark: broke, ownerPx, heldInHand, loose, place } }
+}
+
+/** What to do when the mark covers the face from a little above the dollhouse view. */
+const MARGIN_FIX: Record<string, string> = {
+  gardener: 'make the brim smaller, about 1.75 times the head\'s width, set it on the back of the head and tilt it back so its front edge lifts clear of the eyes',
+  tutor: 'make the board smaller, about 1.2 times the head\'s width, and sit the skullcap on the crown, behind and above the eye line',
 }
 
 /** A marked part that does not sit on anything: its slot, the colour it was made in, its centre, how far its surface stands from the nearest part that could hold it, and how wide they meet over the thinner one's thinnest side. */
@@ -371,21 +406,34 @@ function thinnest(m: THREE.Mesh) {
   return Math.min(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z))
 }
 
+/** The longest side, in its own axes, of the widest marked part: a board's side or a brim's diameter, however it is turned or tilted. */
+function widest(marked: THREE.Mesh[]) {
+  return Math.max(...marked.map((m) => {
+    m.geometry.computeBoundingBox()
+    const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
+    return Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z))
+  }))
+}
+
 /** The cook's toque: its centre within this share of the head's width of the head's centre, and rising above the head's top at least `ratio` times its own width. */
 export const TOQUE = { offset: 0.15, ratio: 1 }
-/** The tidier's plume: its centre at least this share of the head's width out to the side from the head's centre (round 5's two: 1.11 and 1.54). */
-export const PLUME = { offset: 0.75 }
-/** The tutor's board: its underside at most this share of the villager's height above the head's top (round 5's two stood 0.097 and 0.115 up on their cap bands, read as signboards held overhead). */
-export const BOARD = { lift: 0.05 }
+/** The tidier's plume: made of at least `tufts` marked parts (round 6's two were one ball each, read as lollipops), its centre at least `offset` of the head's width out to the side from the head's centre (round 5's two: 1.11 and 1.54). */
+export const PLUME = { offset: 0.75, tufts: 4 }
+/** The tutor's board: its underside at most `lift` of the villager's height above the head's top (round 5's two stood 0.097 and 0.115 up on their cap bands, read as signboards held overhead), and across (its longest side in its own axes) `width` times the head's width (round 6's elephant: 1.47, a slab hiding the head; the prompt asks for 1.1 to 1.3). */
+export const BOARD = { lift: 0.05, width: [1.0, 1.4] as const }
+/** Round 7: the gardener's brim across, over the head's width. Round 6's three were 2.10 to 2.71, flat slabs hiding the head; the prompt asks for 1.6 to 1.9. */
+export const BRIM = { width: [1.45, 2.0] as const }
 
 /** Where the mark sits against the head core: the two round marks Sol confused in round 5 (the toque's puff and the duster's plume), and the board Opus read as a sign. */
 export interface MarkPlace {
   /** The cook's toque: centre off the head's centre in x over the head's width, and height above the head's top over its own width. */
   toque?: { offset: number; ratio: number }
   /** The tidier's plume: centre off the head's centre in x over the head's width. */
-  plume?: { offset: number }
+  plume?: { offset: number; parts: number }
   /** The tutor's board (its widest marked part): its underside over the head's top, over the villager's height. */
-  board?: { lift: number }
+  board?: { lift: number; width: number }
+  /** The gardener's brim (its widest marked part): across, in its own axes, over the head's width. */
+  brim?: { width: number }
 }
 
 /** Measured on the standing figure in world x (it faces +z), against the largest unmarked head part. */
@@ -400,12 +448,13 @@ export function markPlace(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: T
   const mc = mb.getCenter(new THREE.Vector3()), ms = mb.getSize(new THREE.Vector3())
   const offset = +(Math.abs(mc.x - hc.x) / hw).toFixed(3)
   if (role === 'cook') return { toque: { offset, ratio: +((mb.max.y - hb.max.y) / Math.max(1e-6, ms.x, ms.z)).toFixed(3) } }
-  if (role === 'tidier') return { plume: { offset } }
+  if (role === 'tidier') return { plume: { offset, parts: marked.length } }
   if (role === 'tutor') {
     const boxes = marked.map((m) => new THREE.Box3().setFromObject(m, true))
     const board = boxes.reduce((a, b) => ((b.max.x - b.min.x) * (b.max.z - b.min.z) > (a.max.x - a.min.x) * (a.max.z - a.min.z) ? b : a))
-    return { board: { lift: +((board.min.y - hb.max.y) / Math.max(1e-6, height)).toFixed(3) } }
+    return { board: { lift: +((board.min.y - hb.max.y) / Math.max(1e-6, height)).toFixed(3), width: +(widest(marked) / hw).toFixed(3) } }
   }
+  if (role === 'gardener') return { brim: { width: +(widest(marked) / hw).toFixed(3) } }
   return {}
 }
 

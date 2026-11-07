@@ -1063,6 +1063,58 @@ node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=50 --
 `node scripts/check-villager-gen.mjs` passes 56 of 56, `node scripts/check-prop-sandbox.mjs --port=5336` passes
 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck` passes.
 
+#### Round 7: appeal
+
+In round 6's blind test both models named every owner and role, but scored appeal 6 (Opus) and 8 (Sol):
+mortarboards and sun hats were flat slabs hiding the head, dusters looked like lollipops, and the toque's pleats
+did not show at dollhouse size. Round 7 resizes the marks and adds a short appeal paragraph to the prompt.
+
+- **Prompt** (`style.md`, `arm-code.md`): a soft-toy paragraph (a generous head, button eyes at or below the middle of
+  the face, joins that overlap by a third, every point a blunt felt cone, about 40 meshes at most). The board is 1.1
+  to 1.3 head widths on a skullcap above the eye line. The brim is 1.6 to 1.9 head widths, tilted back, and need no
+  longer be wider than the body. The duster is 5 to 7 feathers fanned from a felt knot. The toque is a band, a column
+  and a puff of 6 balls round a centre ball, 1.3 to 1.5 times the column's width, so its top is a cloud, not a top
+  hat's lid. Dumpling's example wears this toque, 9 marked parts.
+- **Checks** (`checks.ts markPlace`, `inspect`), measured in each part's own axes over the head core's width, each
+  reason naming the mark: board `BOARD.width` 1.0 to 1.4, brim `BRIM.width` 1.45 to 2.0, plume at least
+  `PLUME.tufts` = 4 marked parts. Face margin: the eyes must show past the mark (3 of 5 rays) from
+  `LIMITS.faceMargin` = 20 degrees steeper than the dollhouse view, swept in 5-degree steps; other parts never count
+  as blockers here. On round 6's 20 these refuse 5: all three brims (2.10 to 2.71 head widths), the elephant's board
+  (1.47) and both one-ball plumes. The hippo's hat also cleared the eyes only 15 degrees steeper.
+  `scripts/villagers/measure-marks.mjs <prefix>` prints these measures for a saved round.
+
+Real Sonnet through `claude -p`, code arm, concurrency 3, in `screenshots/villager-gen/round7/` (`repairs.md`, the
+colour sheet with its key, a fresh silhouette sheet with its key, seed 51, and closes of both tutors, a gardener,
+both tidiers and a cook).
+
+| Measure | Round 6 | Round 7 |
+| --- | --- | --- |
+| Usable, repaired | 20, 1 | 20, 3: r7-07 duster longer than the hedgehog was tall, r7-10 pencil-prop too short, r7-12 elephant's skullcap a whole sphere holding the eyes (taken for the head) |
+| Owner colour, min / median px (trusted) | 145 / 384 | 136 / 425 |
+| Board across, head widths | 1.47 (r6-12) | 1.27, 1.35 |
+| Brim across, head widths | 2.10 to 2.71 | 1.59 to 1.70 |
+| Face clear past the mark, degrees steeper than the camera | hippo 15, elephant 20 | 30 to 40 on the gardeners and tutors |
+| Plume parts | 1, 1 | 7, 8 |
+| Toque rise over width | 1.54 to 1.86 | 1.27 to 1.43 |
+| Nearest silhouette same role, mean IoU | 40%, 0.522 | 40%, 0.549 |
+| Cost | $2.08 | $2.29 |
+
+My eye on the sheets (not the council's): sun hats now frame the head, the toques read as chef's hats with a lumpy
+top, the dusters are feather fans, spines are blunt. Still weak: the elephant tutor's board is 1.35 times its head
+core but its ears make the head look narrower than the board, so from above it still reads as a slab. A check against
+the head's outline with its ears would catch it. The tassels are thick hanging capsules. The blind council on the
+round-7 sheets is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r7- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=51 --close=r7-11,r7-12,r7-04,r7-07,r7-08,r7-01
+node scripts/villagers/measure-marks.mjs r7-
+```
+
+`node scripts/check-villager-gen.mjs` passes 66 of 66, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+40 of 40 (one earlier run 39 of 40, not reproduced in two reruns), host `node test/villager-make.ts` passes 81 of 81
+(stub maker). `npm run typecheck` fails only in `setup-d.ts` (`sizeAt` missing from `setup-b`), builder N's files.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
