@@ -670,19 +670,19 @@ turns it off; without `?talk=npc` the plugin adds nothing.
   talk.ts's reveal pace, without talk.ts or a model.
 
 ```sh
-node scripts/check-babble.mjs [base-url]             # 26 headless checks
+node scripts/check-babble.mjs [base-url]             # 27 headless checks
 node scripts/demo-babble.mjs [base-url] --out=dir    # demo MP4 + WAV and cost; needs ffmpeg
 ```
 
-Measured November 6, 2026, headless Chrome 158 on an M1 Pro, 26 of 26
+Measured November 6, 2026, headless Chrome 158 on an M1 Pro, 27 of 27
 checks passed. On the same line, median fundamental and spectral centroid:
 Dumpling 161 Hz and 690 Hz, Moss 222 Hz and 1,303 Hz, Tuft 322 Hz and
 1,734 Hz (each pair at least 4.9 semitones and 33% apart). A question ends 20
 to 25% higher than it starts. The 16 s demo exchange: -30.5 LUFS integrated,
-peak -11.3 dBFS. A word to an idle voice is heard 0 to 12 ms later on the
+peak -11.3 dBFS. A word to an idle voice is heard 3 to 6 ms later on the
 audio clock (plus the device's output latency); a stop is silent (below -60
 dBFS) within 11 to 17 ms. The same word renders identically within -138 dBFS in two
-contexts and within -77 dBFS twice in one (two runs). Cost: 67 ms of offline rendering
+contexts and within -77 dBFS twice in one. Cost: 67 ms of offline rendering
 per second of babble (about 7% of one core), 0.19 ms of main thread per word,
 and no frame-time change (rAF median 16.7 ms and p95 16.7 ms with the voices
 playing, 16.8 ms with `?babble=off`).

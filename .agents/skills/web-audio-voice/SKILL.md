@@ -59,8 +59,10 @@ every source on that bus. Silent below -60 dBFS within 17 ms (measured).
 
 **Do not disconnect from `onended`.** It fires on the main thread at a moment
 that varies run to run, cutting filter tails at random points (renders then
-differed by 1e-3). Finished sources and the nodes after them are released by
-the browser; keep only a `Set` of live sources for stop and inspection.
+differed by 1e-3). The spec's informative node-lifetime notes let a browser
+collect finished sources and the silent nodes after them; we rely on that and
+have not measured memory over a long session. Keep only a `Set` of live sources
+for stop and inspection.
 
 **Limiter.** A `WaveShaperNode` soft clip (linear to 0.6, tanh shoulder to
 0.89 = -1 dBFS) is stateless. A `DynamicsCompressorNode` applies make-up gain
@@ -68,7 +70,9 @@ and an adaptive release, so a word's sound depended on the words before it.
 
 **Autoplay.** Create the `AudioContext` inside the first `pointerdown` or
 `keydown` (capture phase), or at load when `navigator.userActivation.hasBeenActive`
-is already true. Call `resume()`. Close it on unload and `pagehide`.
+is already true, and call `resume()`. Keep the listeners: not every gesture
+grants activation (a touch's `pointerdown`, Escape), so each later gesture
+resumes a context that is not `running`. Close it on unload and `pagehide`.
 
 **Testing without ears.** Render with `OfflineAudioContext(1, n, 48000)` from
 the page (Vite serves `/src/...ts` to `import()`), return samples as base64

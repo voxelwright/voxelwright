@@ -97,14 +97,16 @@ export default {
     show()
     button.addEventListener('click', () => setMuted(!muted))
 
-    // Browsers only let a page make sound after the person has touched it.
+    // Browsers only let a page make sound after the person has touched it, and not
+    // every touch counts (a tap's pointerdown or Escape does not), so every gesture
+    // resumes a context that is not running yet, or was suspended since.
     const start = () => {
-      if (audio) return
-      audio = new AudioContext({ latencyHint: 'interactive' })
-      babbler = new Babbler(audio, audio.destination, { muted })
+      if (audio?.state === 'running') return
+      if (!audio) {
+        audio = new AudioContext({ latencyHint: 'interactive' })
+        babbler = new Babbler(audio, audio.destination, { muted })
+      }
       void audio.resume()
-      removeEventListener('pointerdown', start, true)
-      removeEventListener('keydown', start, true)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'm' && e.key !== 'M') return
@@ -126,11 +128,9 @@ export default {
       addEventListener('keydown', onKey)
       addEventListener('pagehide', close)
       document.addEventListener('visibilitychange', onVisibility)
+      addEventListener('pointerdown', start, true)
+      addEventListener('keydown', start, true)
       if (navigator.userActivation?.hasBeenActive) start()
-      else {
-        addEventListener('pointerdown', start, true)
-        addEventListener('keydown', start, true)
-      }
       return () => {
         removeEventListener('pointerdown', start, true)
         removeEventListener('keydown', start, true)

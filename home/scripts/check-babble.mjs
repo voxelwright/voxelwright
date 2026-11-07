@@ -292,8 +292,9 @@ async function tap(p) {
 }
 const say = (p, villager, word, index = 0, last = true) =>
   p.evaluate(([villager, word, index, last]) => {
+    const t = window.village.babble.audio.currentTime
     window.village.kernel.root.emit('village/said', { villager, word, index, last })
-    return window.village.babble.audio.currentTime
+    return t
   }, [villager, word, index, last])
 const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => bt >= t), t)
 
@@ -312,6 +313,14 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
     return { state: a.state, base: a.baseLatency, output: a.outputLatency, sampleRate: a.sampleRate }
   })
   check('The first touch starts the AudioContext', state.state === 'running', JSON.stringify(state))
+  // A context that is not running (a first touch that did not count, or one suspended since) resumes on the next touch.
+  await live.evaluate(() => window.village.babble.audio.suspend())
+  await live.mouse.click(400, 300)
+  const resumed = await live.evaluate(async () => {
+    await new Promise((r) => setTimeout(r, 100))
+    return window.village.babble.audio.state
+  })
+  check('A later touch resumes a suspended AudioContext', resumed === 'running', resumed)
   await tap(live)
 
   // Latency: an idle voice, one word at a time.
@@ -320,8 +329,7 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
     const t = await say(live, v, w)
     await live.waitForTimeout(450)
     const first = (await blocksAfter(live, t - 0.01)).find(([, p]) => p > 1e-4)
-    if (!first) console.log('no sound for', v, w, 'blocks', (await blocksAfter(live, t - 0.01)).length)
-    latencies.push(first ? Math.max(0, first[0] - t) * 1000 : Infinity)
+    latencies.push(first ? (first[0] - t) * 1000 : Infinity)
   }
   report.latencyMs = latencies.map((l) => +l.toFixed(1))
   check('Each said word is heard within 20 ms (audio clock, idle voice)', latencies.every((l) => l <= 20), `${report.latencyMs.join(', ')} ms`)
@@ -353,8 +361,9 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
   const stopAt = await live.evaluate(() => {
     window.village.kernel.root.emit('village/said-stop', { villager: 'Moss' })
     const stillSpeaking = window.village.babble.babbler.speaking
+    const t = window.village.babble.audio.currentTime
     window.village.kernel.root.emit('village/said-stop', { villager: 'Dumpling' })
-    return { t: window.village.babble.audio.currentTime, stillSpeaking }
+    return { t, stillSpeaking }
   })
   check("A stop for someone else leaves the speaker talking", stopAt.stillSpeaking === 'dumpling', stopAt.stillSpeaking)
   await live.waitForTimeout(400)
