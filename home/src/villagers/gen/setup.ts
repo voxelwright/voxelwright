@@ -46,7 +46,7 @@ const FROM = params.get('from')
 const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : 'alex'
 const ACCENT = /^#[0-9a-f]{6}$/i.test(params.get('accent') ?? '') ? params.get('accent')! : '#c8553d'
 const OWNER = PERSON.charAt(0).toUpperCase() + PERSON.slice(1)
-/** #47 regroup: &setup=a|b|c tries a radically different way to tune (one tool at a time, a fitting mirror, talking); 1 is the bench. */
+/** #47 regroup: &setup=a|b|c|d|e tries a radically different way to tune (one tool at a time, a fitting mirror, talking, a mirror in the room, the bench with a phone mirror); 1 is the bench. */
 const STRATEGY = params.get('setup') ?? '1'
 /** Where it lands when it hops off the table: a spot the walk routes know. */
 const LANDING = 'seatNear'
@@ -95,7 +95,7 @@ export default {
         if (!made) return
         say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
         // A bigger or smaller villager: the camera eases to frame it again (never during the drag).
-        if (key === 'size' && state === 'tuning' && !S) atTable()
+        if (key === 'size' && state === 'tuning' && (!S || S.bench?.())) atTable()
       },
       locked: () => note(lockedNote()),
       grab: (key) => S?.grab?.(key) ?? false,
@@ -673,6 +673,11 @@ export default {
       body.min.y = Math.min(0, body.min.y)
       fitBench = true
       atTable()
+      const own = S?.fit?.(body)
+      if (own != null) {
+        bench = own
+        fitBench = false
+      }
       const at = standAt()
       // It turns to where the camera is going, not where it is on the way.
       const cam = lastPose?.position ?? stage.camera.position
@@ -1061,7 +1066,7 @@ export default {
       } else tools.under(null)
       // The tools come out once there is a villager to tune. Before that only a wide screen keeps them on the table, as
       // props beyond the slip; a tablet's or a phone's slip would lie over them, so the table shows only the start.
-      tools.group.visible = S?.toolsVisible ? S.toolsVisible() : (layout === 'wide' && innerWidth / innerHeight >= 1.5) || state === 'stitching' || state === 'tuning' || state === 'leaving'
+      tools.group.visible = S?.toolsVisible?.() ?? ((layout === 'wide' && innerWidth / innerHeight >= 1.5) || state === 'stitching' || state === 'tuning' || state === 'leaving')
       S?.frame?.(step, t)
       shop.frame(step, t)
       tools.frame(step, t)

@@ -1,4 +1,4 @@
-// #47 regroup, dev only: &setup=a|b|c swaps how a made villager is tuned, sharing everything
+// #47 regroup, dev only: &setup=a|b|c|d|e swaps how a made villager is tuned, sharing everything
 // else in setup.ts (the slip, the patterns, the waiting, the stitching, the persona, the host,
 // the voice and the send-off). A strategy only answers the questions setup.ts asks it: where the
 // camera goes, where the villager stands, which tools show, where the page's paper goes, and what
@@ -13,6 +13,8 @@ import type { Controls, Key, Layout } from './sliders'
 import { mirror } from './setup-b'
 import { tin } from './setup-a'
 import { talk } from './setup-c'
+import { fitting } from './setup-d'
+import { hybrid } from './setup-e'
 
 export type SetupState = 'empty' | 'waiting' | 'stitching' | 'tuning' | 'leaving' | 'failed'
 export interface Rect { left: number; top: number; right: number; bottom: number }
@@ -52,11 +54,19 @@ export interface Scene {
 }
 
 export interface Strategy {
-  id: 'a' | 'b' | 'c'
+  id: 'a' | 'b' | 'c' | 'd' | 'e'
+  /** Null from any of these: the bench's own answer. */
   pose?(state: SetupState): Pose | null
-  standAt?(): THREE.Vector3
-  turn?(): number
-  toolsVisible?(): boolean
+  standAt?(): THREE.Vector3 | null
+  turn?(): number | null
+  toolsVisible?(): boolean | null
+  /** True while the strategy shows the bench as it is (E on a wide screen): the bench reframes after a size change. */
+  bench?(): boolean
+  /**
+   * How much smaller to show a villager (its bounds in its own space, at scale 1) while it is being fitted, or null for
+   * the bench's own fit. Its tuned size is unchanged; it grows to it as it hops down.
+   */
+  fit?(body: THREE.Box3): number | null
   /** Tuning begins (the villager is stitched): show this strategy's surface. */
   tuning?(): void
   /** The send-off begins: hide it. */
@@ -77,5 +87,7 @@ export function strategyFor(id: string, scene: Scene): Strategy | null {
   if (id === 'a') return tin(scene)
   if (id === 'b') return mirror(scene)
   if (id === 'c') return talk(scene)
+  if (id === 'd') return fitting(scene)
+  if (id === 'e') return hybrid(scene)
   return null
 }

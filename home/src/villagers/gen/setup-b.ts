@@ -22,7 +22,20 @@ const DIAL: Record<'pitch' | 'pace' | 'energy', { name: string; ends: [string, s
   energy: { name: 'energy', ends: ['calm', 'lively'] },
 }
 
-export function mirror(scene: Scene): Strategy {
+/**
+ * `grounded` (E's phone): a lighter mirror that lets the kitchen show round it, an arched top with no
+ * rail, the tape along the glass's own edge, and the name tag left on the kitchen above it.
+ */
+/** The size for a head at page row y: the feet stay put, the height scales. Shared by every tape whose marker rides the head. */
+export function sizeAt(scene: Scene, y: number) {
+  const r = scene.villager()
+  const v = scene.tools.values.size
+  if (!r) return v
+  const s = (2 ** ((v - 0.5) * 0.64) * Math.max(10, r.bottom - y)) / Math.max(10, r.bottom - r.top)
+  return 0.5 + Math.log2(s) / 0.64
+}
+
+export function mirror(scene: Scene, opts: { grounded?: boolean } = {}): Strategy & { park(): void } {
   const { tools, patterns } = scene
   const el = (tag: string, cls: string, parent?: HTMLElement) => {
     const e = document.createElement(tag)
@@ -30,7 +43,7 @@ export function mirror(scene: Scene): Strategy {
     parent?.append(e)
     return e
   }
-  const frame = el('div', 'vs-mirror')
+  const frame = el('div', `vs-mirror${opts.grounded ? ' grounded' : ''}`)
   const top = el('div', 'rail top', frame)
   const left = el('div', 'rail left', frame)
   const glass = el('div', 'glass', frame)
@@ -93,14 +106,7 @@ export function mirror(scene: Scene): Strategy {
   el('b', 'rail-name', left).textContent = 'height'
   const marker = el('div', 'marker', tape)
   slider(marker, 'size', 'Size: drag the marker to their height')
-  /** The size for a head at page row y: the feet stay put, the height scales. */
-  const sizeFor = (y: number) => {
-    const r = scene.villager()
-    if (!r) return tools.values.size
-    const now = 2 ** ((tools.values.size - 0.5) * 0.64)
-    const s = (now * Math.max(10, r.bottom - y)) / Math.max(10, r.bottom - r.top)
-    return 0.5 + Math.log2(s) / 0.64
-  }
+  const sizeFor = (y: number) => sizeAt(scene, y)
   drag(tape, 'size', (ev) => sizeFor(ev.clientY))
 
   // ── Bottom: the felt colours ──
@@ -216,6 +222,12 @@ export function mirror(scene: Scene): Strategy {
 
   return {
     id: 'b',
+    /** Put away (E on a wide screen): the bench and its rack are back. */
+    park() {
+      frame.classList.remove('shown', 'tuning')
+      delete document.documentElement.dataset.vsMirror
+      patterns.group.visible = true
+    },
     standAt: () => new THREE.Vector3(MAT.x, TOP + 0.006, MAT.z - 0.04),
     // Square on to the mirror.
     turn: () => 0.05,
@@ -247,6 +259,7 @@ export function mirror(scene: Scene): Strategy {
       if (!showFrame()) return null
       const f = frame.getBoundingClientRect()
       if (what === 'name') {
+        if (opts.grounded) return null
         // A brass name plate on the frame's top rail.
         const t = top.getBoundingClientRect()
         return { x: t.left + t.width / 2 - w / 2, y: t.top + t.height / 2 - h / 2 }
@@ -260,6 +273,7 @@ export function mirror(scene: Scene): Strategy {
       const on = showFrame()
       frame.classList.toggle('shown', on)
       frame.classList.toggle('tuning', scene.state() === 'tuning' || scene.state() === 'stitching')
+      document.documentElement.dataset.vsMirror = ''
       patterns.group.visible = false
       if (!on) return
       drawSwatches()
@@ -304,6 +318,7 @@ export function mirror(scene: Scene): Strategy {
     dispose() {
       clearTimeout(lineTimer)
       patterns.group.visible = true
+      delete document.documentElement.dataset.vsMirror
       frame.remove()
       style.remove()
     },
@@ -313,7 +328,7 @@ export function mirror(scene: Scene): Strategy {
 function css() {
   const felt = 'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1.4px) 0 0 / 4px 4px, radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1.4px) 2px 2px / 5px 5px'
   return `
-  [data-vs-strategy=b] .vs-rack, [data-vs-strategy=b] .vs-saved { display: none !important; }
+  [data-vs-mirror] .vs-rack, [data-vs-mirror] .vs-saved { display: none !important; }
   .vs-mirror { position: fixed; z-index: 4; box-sizing: border-box; display: grid; opacity: 0; visibility: hidden; pointer-events: none;
     transition: opacity 320ms ease, visibility 0s linear 320ms;
     left: 50%; top: 20px; height: calc(100vh - 40px); translate: -50% 0;
@@ -411,6 +426,21 @@ function css() {
     .vs-swatch { width: calc(33% - 6px); min-height: 60px; padding: 10px 4px 12px; }
     .vs-swatch b { font-size: 14px; }
     .vs-mirror:not(.tuning) .bottom { display: none; }
+  }
+  /* E's phone: grounded. A thin arched frame of light wood with the kitchen round it; no top rail (the name tag
+     stays on the kitchen above); the tape lies along the glass's edge; the controls are the mirror's felt base. */
+  @media (max-aspect-ratio: 9/10) {
+    .vs-mirror.grounded { top: 96px; left: 14px; right: 14px; height: calc(100vh - 110px); border: 4px solid #c99a66;
+      border-radius: 150px 150px 16px 16px / 110px 110px 16px 16px; overflow: hidden; grid-template-rows: 0 minmax(0, 1fr) auto auto;
+      box-shadow: 0 10px 22px rgba(40, 22, 8, 0.26), 0 0 0 1px rgba(110, 70, 35, 0.35); }
+    .vs-mirror.grounded .top { display: none; }
+    .vs-mirror.grounded .left { background: none; }
+    .vs-mirror.grounded .left::after { display: none; }
+    .vs-mirror.grounded .left .rail-name { color: #4a3220; text-shadow: 0 1px 0 rgba(255, 245, 225, 0.8); }
+    .vs-mirror.grounded .glass { box-shadow: inset 0 0 0 1px rgba(255, 235, 200, 0.5), inset 0 0 30px rgba(20, 30, 40, 0.16); }
+    .vs-mirror.grounded .bottom, .vs-mirror.grounded .right { background: ${felt}, #56785f; }
+    .vs-mirror.grounded .bottom { border-top: 3px solid #c99a66; border-radius: 0; }
+    .vs-mirror.grounded .right { border-radius: 0 0 10px 10px; padding-bottom: 74px; }
   }
   @media (prefers-reduced-motion: reduce) { .vs-mirror, .vs-mirror .marker, .vs-swatch, .vs-mirror .dot { transition: none; } }
   `

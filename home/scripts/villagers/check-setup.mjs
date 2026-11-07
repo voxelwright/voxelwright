@@ -6,7 +6,7 @@
 // returning to baseline, the one repair pass (a refused module or a refused persona), the jokes dial as
 // the host's humourCeiling locks it, patterns from the host, and the send-off writing persona.json.
 // --live adds one real Sonnet make (and at most one remake) through the host and the page.
-// --strategy=a|b|c|1 runs only the #47 regroup's flow for that way of tuning (1 is the bench), at each of --viewports
+// --strategy=a|b|c|d|e|1 runs only the #47 regroup's flow for that way of tuning (1 is the bench), at each of --viewports
 // (default 1440x900,1024x768,390x844), with captures in <shots>/<wide|tablet|narrow>/.
 // Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900] [--strategy=a]
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -77,7 +77,9 @@ const until = (page, states, timeout = 30000) => page.waitForFunction((s) => s.i
  */
 const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done', '.vs-saved',
   // The regroup's strategies: A's held card, end words and tin hint; B's frame controls and swatches; C's examples and change notes.
-  '.vs-held', '.vs-heldend', '.vs-tinhint', '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch', '.vs-examples', '.vs-change']
+  '.vs-held', '.vs-heldend', '.vs-tinhint', '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch', '.vs-examples', '.vs-change',
+  // Regroup 2: D's mirror and box in the room (their parts, and the rails' words), E's head tape on the bench.
+  '.vs-fit .tape', '.vs-fit .tag', '.vs-fit .dot', '.vs-fit .dial', '.vs-fit .ribbon-row', '.vs-fit .jokes', '.vs-headtape']
 const layout = (page) => page.evaluate((selectors) => {
   const boxes = []
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
@@ -129,7 +131,9 @@ async function regroup(s) {
     await page.waitForTimeout(2200)
     await settle(page)
     await shot(page, '1-empty')
-    await page.click(s === 'b' ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
+    // B, D and E's phone hang the patterns as swatches in the glass; the bench and the rest stand them on the rack.
+    const glass = s === 'b' || s === 'd' || (s === 'e' && vw < vh)
+    await page.click(glass ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
     await page.waitForTimeout(700)
     check(`${tag}: picking a pattern shows it on the slip`, (await st(page)).rack.picked === 'coach' && (await page.textContent('.vs-slip .chip')).includes('Calm coach'))
     await shot(page, '1b-picked')
@@ -162,12 +166,33 @@ async function regroup(s) {
       const lockedNote = (await st(page)).note
       await page.keyboard.press('Escape')
       check(`${tag}: crude is refused with the household's admin note; Escape puts the tool back`, /household's admin/.test(lockedNote ?? '') && await page.evaluate(() => window.villagerSetup.out()) === null, lockedNote)
-    } else if (s === 'b') {
+    } else if (s === 'e' && vw >= vh) {
+      // E on a wide screen or a tablet is the bench, with a tape stood by the villager's head: drag its marker up.
+      check(`${tag}: a wide screen gets the bench, with the tape at the villager's head`, await page.evaluate(() => window.villagerSetup.surface()) === 'bench' && await page.evaluate(() => window.villagerSetup.headTape()) !== null)
+      const v = await page.evaluate(() => window.villagerSetup.bounds())
+      const t = await page.evaluate(() => window.villagerSetup.headTape())
+      check(`${tag}: the head tape's marker sits at the villager's head`, Math.abs(t.top - v.top) < 4, { tape: t.top, head: v.top })
+      await page.mouse.move(t.left + t.width / 2, t.top + 1)
+      await page.mouse.down()
+      await page.mouse.move(t.left + t.width / 2, t.top - 50, { steps: 5 })
+      await page.mouse.up()
+      await page.waitForTimeout(900)
+      await settle(page)
+      await shot(page, '3-tuning')
+      for (const [k, v] of [['hue', 0.2], ['pitch', 0.75], ['pace', 0.3], ['energy', 1], ['warmth', 0], ['playful', 0], ['chatty', 0], ['humour', 1]]) await page.evaluate(([k, v]) => window.villagerSetup.set(k, v), [k, v])
+      // And by keyboard: the head tape is a slider too.
+      await page.focus('.vs-headtape')
+      await page.keyboard.press('ArrowUp')
+    } else if (s === 'b' || s === 'd' || s === 'e') {
       // The frame: the size marker dragged up to a taller head, a colour dot, the dials turned, the ribbons and the jokes switch.
+      const box = s === 'd' ? '.vs-fit' : '.vs-mirror'
+      if (s === 'e') check(`${tag}: a phone gets the mirror`, await page.evaluate(() => window.villagerSetup.surface()) === 'mirror')
       const v = await page.evaluate(() => window.villagerSetup.bounds())
       const tape = await page.evaluate(() => window.villagerSetup.control('size'))
+      const mk = await page.evaluate((box) => document.querySelector(`${box} .marker`).getBoundingClientRect().toJSON(), box)
+      check(`${tag}: the tape's brass marker rides the villager's head`, Math.abs(mk.top + mk.height / 2 - v.top) < 6, { marker: mk.top + mk.height / 2, head: v.top })
       await page.mouse.click(tape.x, v.top - 50)
-      await page.click('.vs-mirror .dot:first-of-type')
+      await page.click(`${box} .dot:first-of-type`)
       for (const [key, dx] of [['pitch', 70], ['pace', -70], ['energy', 90]]) {
         const k = await page.evaluate((key) => window.villagerSetup.control(key), key)
         await page.mouse.move(k.x, k.y)
@@ -181,7 +206,7 @@ async function regroup(s) {
         const r = await page.evaluate((key) => window.villagerSetup.control(key), key)
         await page.mouse.click(r.x - r.w / 2 + 2, r.y)
       }
-      await page.click('.vs-mirror .step:last-of-type')
+      await page.click(`${box} .step:last-of-type`)
       check(`${tag}: crude on the jokes switch is refused with the household's admin note`, /household's admin/.test((await st(page)).note ?? ''), (await st(page)).note)
     } else if (s === 'c') {
       // Talking: phrases on the slip, Enter each; one is undone.
@@ -240,7 +265,8 @@ async function regroup(s) {
     await shot(page, '2-waiting')
     await until(page, ['tuning', 'failed'])
     slow = false
-    check(`${tag}: the stub host's villager is stitched after the wait`, (await st(page)).state === 'tuning')
+    const sw = await st(page)
+    check(`${tag}: the stub host's villager is stitched after the wait`, sw.state === 'tuning', { state: sw.state, failure: sw.failure, refusal: sw.refusal })
     check(`${tag} (waiting): no page errors`, errors.length === 0, errors)
     await context.close()
   }
