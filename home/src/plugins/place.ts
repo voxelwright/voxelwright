@@ -3,24 +3,32 @@ import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { house } from '../build/house'
 import type { PlanHistory } from '../build/history'
-import { HOUSE_PLAN, type Furniture, type Plan } from '../build/plan'
+import { HOUSE_PLAN, type Furniture, type ItemRef, type Plan } from '../build/plan'
 import { CORD, KINDS, cord, poseOf, seat, setPose, faceOf, type Size } from '../build/mount'
 import { placement, type Placement, type PlaceItem, type Shelf } from '../build/place'
 import { keepItem, libraryItem } from '../villager'
 
+/** The service: placing plus, for furnishing's "another one like that", what a placed thing is. */
+export interface PlacementService extends Placement {
+  /** The plan item of the placed thing `object` is part of, or null when it is not plan furniture. */
+  itemOf(object: THREE.Object3D): { furnitureId: string; item: ItemRef } | null
+}
+
 declare module 'cordis' {
   interface Context {
-    placement: Placement
+    placement: PlacementService
   }
 }
 
 /**
- * #48, ?build=1 only: placing things. Provides the `placement` service (src/build/place.ts)
- * that build mode and #42's furnishing both use, and draws the furniture in the house
- * plan: built-in kinds at once, library items rebuilt from their module text through the
- * prop sandbox (dev builds). Without the flag this plugin does nothing.
+ * #48, #56: placing things, in every house. Provides the `placement` service
+ * (src/build/place.ts) that build mode and #42's furnishing both use, and draws the
+ * furniture in the house plan: built-in kinds at once, library items rebuilt from their
+ * module text through the prop sandbox (dev builds). The placer itself (its decals,
+ * styles and listeners) is made on the first begin or move, so an idle house pays only
+ * for opening the plan and drawing what it holds. Wall editing stays behind ?build=1
+ * (plugins/build.ts).
  */
-const ENABLED = new URLSearchParams(location.search).get('build') === '1'
 
 interface Drawn { holder: THREE.Group; size: Size; label: string; key: string; held: boolean }
 
@@ -28,7 +36,6 @@ export default {
   name: 'place',
   inject: ['stage'],
   apply(ctx: Context) {
-    if (!ENABLED) return
     const ghosts = own(ctx, new THREE.Group())
     ghosts.name = 'placement'
     const things = own(ctx, new THREE.Group())
@@ -183,24 +190,34 @@ export default {
     }
 
     const keep = async (person: string, item: string) => (await keepItem(person, item)).ok
-    const placer = placement({ stage: ctx.stage, group: ghosts, history: () => opened, plan: () => plan, shelf, keep })
-    const service: Placement = {
+    let placer: ReturnType<typeof placement> | null = null
+    const placerNow = () => (placer ??= placement({ stage: ctx.stage, group: ghosts, history: () => opened, plan: () => plan, shelf, keep }))
+    const service: PlacementService = {
       begin: (item, at) => {
-        const p = placer.begin(item, at)
+        const p = placerNow().begin(item, at)
         void p.done.then(settleAdopted)
         return p
       },
       move: (id) => {
-        const p = placer.move(id)
+        const p = placerNow().move(id)
         void p.done.then(settleAdopted)
         return p
       },
       get active() {
-        return placer.active
+        return placer?.active ?? null
+      },
+      itemOf(object) {
+        for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+          const id = o.userData.furniture
+          if (typeof id !== 'string') continue
+          const f = plan.furniture.find((k) => k.id === id)
+          return f ? { furnitureId: id, item: f.item } : null
+        }
+        return null
       },
     }
     ctx.provide('placement', service)
-    ctx.on('village/frame', (dt: number) => placer.frame(dt))
+    ctx.on('village/frame', (dt: number) => placer?.frame(dt))
 
     // Dev and checks: begin placing a built-in thing of each mount without #42.
     ctx.effect(() => {
@@ -227,9 +244,9 @@ export default {
         /** A prop built from library module text, for swap(). */
         fromModule,
         move: (id: string) => service.move(id),
-        active: () => placer.active,
-        state: () => placer.state(),
-        project: (x: number, y: number, z: number) => placer.project(x, y, z),
+        active: () => placer?.active ?? null,
+        state: () => placer?.state() ?? null,
+        project: (x: number, y: number, z: number) => placerNow().project(x, y, z),
         plan: () => plan,
         history: () => history,
         drawn: () => [...drawn].map(([id, d]) => ({ id, label: d.label, held: d.held, at: d.holder.position.toArray().map((v) => Math.round(v * 1000) / 1000), yaw: Math.round(d.holder.rotation.y * 1000) / 1000 })),
@@ -239,7 +256,8 @@ export default {
       Object.assign(window, { villagePlace: demo })
       return () => {
         delete (window as unknown as { villagePlace?: unknown }).villagePlace
-        placer.dispose()
+        placer?.dispose()
+        placer = null
         box?.dispose()
         box = null
         for (const d of shelved.values()) releaseGpu(d.holder)

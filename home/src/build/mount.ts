@@ -167,7 +167,9 @@ export interface Obstacle {
 }
 
 /** Top-level groups that are the house, light, air or people rather than furniture. */
-const NOT_FURNITURE = /^(room|build|diorama|lounge diorama|villagers|talk|motes|sunbeam|glass|glass-sheet|furnish flat|lounge furnish flat|lamp pool|placement)$/
+const NOT_FURNITURE = /^(room|shared wall|build|diorama|lounge diorama|villagers|talk|motes|sunbeam|glass|glass-sheet|furnish flat|lounge furnish flat|lamp pool|placement)$/
+/** The living room's shell, which lounge.ts draws inside its furnished group (build mode sets it aside; the plain house keeps it, #56). */
+const SHELL = /^lounge (floor|wall|skirting)$/
 
 /** World boxes of everything solid the scene draws, except the house itself and `skip`. */
 export function obstacles(scene: THREE.Scene, skip: THREE.Object3D[] = []): Obstacle[] {
@@ -179,7 +181,7 @@ export function obstacles(scene: THREE.Scene, skip: THREE.Object3D[] = []): Obst
     const kits = new Set<THREE.Object3D>()
     top.traverse((o) => {
       const m = o as THREE.Mesh
-      if (!m.isMesh || !m.geometry || skipped.has(m)) return
+      if (!m.isMesh || !m.geometry || skipped.has(m) || SHELL.test(m.name)) return
       for (let p: THREE.Object3D | null = m; p; p = p.parent) if (!p.visible || skipped.has(p) || p.userData.seatOnly) return
       const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material
       if (mat && mat.transparent && !mat.depthWrite) return
