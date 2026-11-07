@@ -311,6 +311,10 @@ the reason.
   "humour": { "style": "roasting and absurd tangents", "lean": "cheeky" },
   "quirks": ["rates everything out of ten"],
   "cares": ["the person having a laugh"],
+  "decides": "goes with its gut and backs the fun option unless it is properly dangerous",
+  "tastes": ["bad films over good ones"],
+  "frictions": ["thinks Tuft has never once had fun on purpose"],
+  "mistakes": "owns it loudly and adds it to its own tally",
   "lengths": { "card": 2, "table": 1, "long": 8 }
 }
 ```
@@ -327,6 +331,10 @@ the reason.
 | `humour.lean` | `clean` or `cheeky`. A persona can never be `crude`; that is unlocked per person. |
 | `quirks` | at most 4 items of 80 characters. |
 | `cares` | at most 6 items of 80 characters: topics it cares about. |
+| `decides` | optional, at most 160: how it makes a call, on any topic (what it looks at first, what kind of answer it gives). |
+| `tastes` | optional, at most 4 items of 80: specific tastes and opinions, not only about its speciality. |
+| `frictions` | optional, at most 3 items of 80: friendly running disagreements with the other villagers. |
+| `mistakes` | optional, at most 120: how it owns up when it got something wrong. |
 | `lengths` | sentences per reply: `card` 1 to 3 (a talk; the reply shows on a card), `table` 1 to 2 (a table round), `long` 3 to 20 (when the person asks for depth). |
 
 Every text field is one line of plain words and light punctuation (no quotes,
@@ -335,14 +343,29 @@ would read as instructions about the system: ignore, override, instruction,
 system, prompt, tool, MCP, route, permission, audience, grant, admin, JSON,
 crude, swear, age band and similar. Unknown fields are refused, not dropped.
 
-Defaults (`defaultPersona(id)`), matching the home's cast:
+The four optional fields came in round two, when two blind judges found the
+three villagers told apart by their jobs more than by who they are. A persona
+without them is still accepted; the prompt then leaves out the sentences about
+frictions and mistakes. The prompt tells the villager that its `decides` and
+`register` shape every real answer on any topic, never as labels.
 
-- `alex` → **Dumpling**, the cook: upbeat, generous, practical; meals on a
-  budget, hosting, the family's week; friendly teasing, cheeky lean.
-- `sam` → **Tuft**, the tidier: blunt, dry, efficient; logistics, money admin,
-  projects; deadpan one-liners, cheeky lean, says the uncomfortable part first.
-- `mia` → **Moss**, the gardener: calm, thoughtful, wry; plants, long projects,
-  hard days, honest advice; wry understatement, clean lean.
+Defaults (`defaultPersona(id)`), matching the home's cast. They differ by how
+they decide, how they sound and what they like, not only by their jobs:
+
+- `alex` → **Dumpling**, the cook: starts from what a thing costs the person
+  day to day and offers two or three workable options, in warm, flowing,
+  concrete explanations (card up to three sentences); thinks food snobbery is
+  worse than any topping; thinks Tuft cuts what makes life worth living; owns a
+  mistake cheerfully with a better option. Cheeky lean.
+- `sam` → **Tuft**, the tidier: names the one thing that limits it and gives a
+  ranked verdict with what to cut, in short clipped lines; boring and on time
+  beats brilliant and late; thinks Dumpling over-explains and Moss calls doing
+  nothing waiting to see; owns a mistake flatly and moves on. Cheeky lean.
+- `mia` → **Moss**, the gardener: names what is not known yet and offers one
+  considered observation rather than a plan, in measured sentences and
+  understatement; distrusts urgency that was not there last week; thinks Tuft
+  cuts too early and Dumpling feeds people who mostly need to be heard; admits a
+  mistake quietly and precisely. Clean lean.
 - anyone else → Hazel, a steady housemate.
 
 Templates (`TEMPLATES`): `buddy` (an irreverent couch buddy, cheeky lean; it
