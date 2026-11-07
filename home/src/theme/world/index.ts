@@ -142,5 +142,32 @@ export function worlds(scene: THREE.Scene) {
     })
     return { house: want.house, group: stood!.world.group }
   }
-  return { ahead, place, drop }
+  /**
+   * For the next chain's compile (../ahead.ts): stand the world `t` will stand, ahead, in
+   * place of the current one, with the yard shown or hidden as `t` will have it; `on` false
+   * puts it all back. Returns the group stood ahead, if any.
+   */
+  let shown: Array<[THREE.Object3D, boolean]> = []
+  const preview = (t: Theme, on: boolean): THREE.Group | null => {
+    if (!on) {
+      for (const [o, v] of shown) o.visible = v
+      shown = []
+      next?.world.group.removeFromParent()
+      return null
+    }
+    ahead(t)
+    const want = wanted(t)
+    const same = want && stood?.key === want.key
+    const show = (o: THREE.Object3D, v: boolean) => {
+      shown.push([o, o.visible])
+      o.visible = v
+    }
+    if (stood && !same) show(stood.world.group, false)
+    if (!want) for (const o of hidden) show(o, true)
+    else if (!stood) scene.traverse((o) => { if (o.userData.exterior && o.visible) show(o, false) })
+    if (!next || same) return null
+    scene.add(next.world.group)
+    return next.world.group
+  }
+  return { ahead, place, preview, drop }
 }

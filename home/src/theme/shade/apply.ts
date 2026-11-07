@@ -15,9 +15,11 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { theme } from '../index'
+import type { Theme } from '../tokens'
 import { CLASSES, classify, type MaterialClass } from './classify'
 import { keyDirection, makeTwin, type Model, type Twin } from './models'
 import { gouache, repaintModel } from '../interior/repaint'
+import { onPreview } from '../ahead'
 
 const FLAG = new URLSearchParams(location.search).get('shade')
 
@@ -33,9 +35,15 @@ export function shade(ctx: Context) {
   let frame = 0
   let key: THREE.DirectionalLight | null = null
 
-  const modelFor = (): Model | 'gouache' | null => {
+  const modelFor = (t: Theme = theme()): Model | 'gouache' | null => {
     if (FLAG === 'class' || FLAG === 'toon' || FLAG === 'wet') return FLAG
-    return theme().shade ?? repaintModel(theme())
+    return t.shade ?? repaintModel(t)
+  }
+  /** Twins made ahead for the look a switch is heading to (../ahead.ts), taken over at its swap. */
+  let ahead: { look: Theme; model: Model | 'gouache'; twins: Map<THREE.Material, Twin> } | null = null
+  const dropAhead = () => {
+    if (ahead) for (const t of ahead.twins.values()) t.dispose()
+    ahead = null
   }
   const drop = (m: THREE.Material) => {
     twins.get(m)?.dispose()
@@ -46,7 +54,7 @@ export function shade(ctx: Context) {
     twins.clear()
   }
 
-  const walk = (sweep: boolean) => {
+  const walk = (sweep: boolean, into = twins, as: Model | 'gouache' | null = model, look = theme()) => {
     const seen = new Set<THREE.Material>()
     scene.traverse((o) => {
       if ((o as THREE.DirectionalLight).isDirectionalLight && (o as THREE.DirectionalLight).castShadow) key = o as THREE.DirectionalLight
@@ -60,12 +68,15 @@ export function shade(ctx: Context) {
           where.set(m, `${o.parent?.name ?? ''}/${o.name}`)
         }
         const cls = classes.get(m)
-        const old = twins.get(m)
+        const old = into.get(m)
         const map = (m as THREE.MeshStandardMaterial).map
-        if (old && old.map !== map) drop(m)
-        if (!cls || !model || twins.has(m)) continue
-        const twin = model === 'gouache' ? gouache(m as THREE.MeshStandardMaterial, cls, theme(), o) : makeTwin(model, m, cls)
-        if (twin) twins.set(m, twin)
+        if (old && old.map !== map) {
+          old.dispose()
+          into.delete(m)
+        }
+        if (!cls || !as || into.has(m)) continue
+        const twin = as === 'gouache' ? gouache(m as THREE.MeshStandardMaterial, cls, look, o) : makeTwin(as, m, cls)
+        if (twin) into.set(m, twin)
       }
     })
     if (!sweep) return
@@ -75,6 +86,26 @@ export function shade(ctx: Context) {
       where.delete(m)
     }
   }
+
+  const swapNext = (object: THREE.Object3D, s: THREE.Scene, camera: THREE.Camera, geometry: THREE.BufferGeometry, material: THREE.Material, group: unknown, lightsNode: unknown, clip: unknown, passId: unknown) =>
+    (renderer as unknown as { renderObject: (...a: unknown[]) => void }).renderObject(object, s, camera, geometry, ahead?.twins.get(material)?.material ?? material, group, lightsNode, clip, passId)
+  let routed: unknown = null
+  const preview = (next: Theme, on: boolean) => {
+    if (!on) {
+      renderer.setRenderObjectFunction(routed as never)
+      return
+    }
+    const as = modelFor(next)
+    if (ahead && (ahead.look !== next || ahead.model !== as)) dropAhead()
+    if (as && as !== model) {
+      ahead ??= { look: next, model: as, twins: new Map() }
+      walk(false, ahead.twins, as, next)
+    }
+    routed = renderer.getRenderObjectFunction()
+    // The next look draws its twins, the current model's or none.
+    renderer.setRenderObjectFunction((as === model ? routed : as ? swapNext : null) as never)
+  }
+  const unpreview = onPreview(preview)
 
   const swap = (object: THREE.Object3D, s: THREE.Scene, camera: THREE.Camera, geometry: THREE.BufferGeometry, material: THREE.Material, group: unknown, lightsNode: unknown, clip: unknown, passId: unknown) =>
     (renderer as unknown as { renderObject: (...a: unknown[]) => void }).renderObject(object, s, camera, geometry, twins.get(material)?.material ?? material, group, lightsNode, clip, passId)
@@ -91,6 +122,10 @@ export function shade(ctx: Context) {
     if (changed) {
       dropAll()
       model = next
+      // The twins made ahead for this look were compiled with the next chain: keep them.
+      if (ahead && ahead.model === model) for (const [m, t] of ahead.twins) twins.set(m, t)
+      else dropAhead()
+      ahead = null
       hook(model !== null)
     }
     if (!model) return
@@ -114,8 +149,10 @@ export function shade(ctx: Context) {
   ;(window as unknown as { villageShade?: unknown }).villageShade = { counts, list, twins: () => twins.size, twinOf: (m: THREE.Material) => twins.get(m)?.material, materials: () => [...classes.keys()], frames: () => frame }
 
   ctx.effect(() => () => {
+    unpreview()
     hook(false)
     dropAll()
+    dropAhead()
     classes.clear()
     where.clear()
     delete (window as unknown as { villageShade?: unknown }).villageShade

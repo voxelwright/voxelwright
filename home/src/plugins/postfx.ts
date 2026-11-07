@@ -16,9 +16,26 @@ import { replace, type Stage } from '../kernel'
 import { chosen, theme } from '../theme'
 import type { Post, Theme } from '../theme/tokens'
 import { makeFx, type FxContext } from '../theme/fx'
+import { asNext } from '../theme/ahead'
+
+// Each material's shader is built in one task. Inside compileAsync, three r187 builds a
+// material in stages and yields to the next frame between them (NodeBuilder.buildAsync).
+// Every material shares one reference node per property (MaterialNode's `map` and the
+// like), and the live chain's draws in those frames point it at their own map. A build that
+// resumed after them took its bindings from one texture and its shader from another: a map
+// read with NearestFilter (the 16-bit lot's) gets no sampler, a filtered one does, and the
+// pipeline failed ("Binding type in the shader (sampler) doesn't match the type in the
+// layout (texture)"). compileAsync still yields between materials.
+const builder = THREE.NodeBuilder.prototype as unknown as { buildAsync(yieldFn?: () => Promise<void>): Promise<unknown> }
+const buildAsync = builder.buildAsync
+builder.buildAsync = function (this: THREE.NodeBuilder) {
+  return buildAsync.call(this, async () => {})
+}
 
 /** One post chain, built for a look's shape. Its numbers follow theme() every frame. */
 export interface Chain {
+  /** The look it was built for. */
+  look: Theme
   render(): void
   /** Compile the chain's scene passes off screen, with async pipelines, while another chain draws. */
   compile(): Promise<void>
@@ -176,6 +193,7 @@ function build(stage: Stage, built: Theme): Chain {
   }
   const { renderer } = stage
   return {
+    look: built,
     render() {
       const now = theme()
       if (now !== synced) for (const sync of syncs) sync((synced = now).post)
@@ -196,7 +214,8 @@ function build(stage: Stage, built: Theme): Chain {
       // A stage's Fn may hide nodes from getChildren(), so the scene pass is named directly.
       const passes = new Set<THREE.PassNode>([scenePass])
       for (const n of nodes()) if ((n as THREE.Node & { isPassNode?: boolean }).isPassNode) passes.add(n as THREE.PassNode)
-      for (const p of passes) await p.compileAsync(renderer)
+      // compileAsync queues every object synchronously, so the scene stands as the look will draw it only for that call.
+      for (const p of passes) await asNext(built, () => p.compileAsync(renderer))
     },
     dispose() {
       pipeline.dispose()
@@ -224,18 +243,36 @@ type Pipelines = { updateForRender(o: unknown): void; getForRender(o: unknown, p
  * neither stalls nor shows anything: it runs before the live chain's draw in the same
  * frame, which clears the canvas. Compiling the quads of the post chain (its stages, bloom,
  * render-to-texture nodes) this way is what renderer.compileAsync does for a scene, which
- * cannot reach them. Resolves to how many pipelines were made.
+ * cannot reach them. Its shaders are still built synchronously (the comic print stage's
+ * take about 200 ms), so once a draw has spent WARM_MS building, it skips every material it
+ * has not drawn before and leaves it to the next frame's draw. Resolves to how many
+ * pipelines were made plus how many objects were skipped.
  */
+const WARM_MS = 12
+const warmed = new WeakSet<THREE.Material>()
+type Direct = (object: unknown, material: THREE.Material, ...rest: unknown[]) => void
 function warm(renderer: THREE.WebGPURenderer, chain: Chain): Promise<number> {
   const pipelines = (renderer as unknown as { _pipelines: Pipelines })._pipelines
+  const r = renderer as unknown as { _renderObjectDirect: Direct }
+  const direct = r._renderObjectDirect
   const pending: Promise<unknown>[] = []
+  let spent = 0, skipped = 0
   pipelines.updateForRender = (o) => pipelines.getForRender(o, pending)
+  r._renderObjectDirect = function (this: unknown, object, material, ...rest) {
+    if (spent > WARM_MS && !warmed.has(material)) return void skipped++
+    const t = performance.now()
+    direct.call(this, object, material, ...rest)
+    const dt = performance.now() - t
+    if (dt > 1) spent += dt
+    warmed.add(material)
+  }
   try {
-    chain.render()
+    asNext(chain.look, () => chain.render())
   } finally {
     delete (pipelines as Partial<Pipelines>).updateForRender
+    delete (r as Partial<typeof r>)._renderObjectDirect
   }
-  return Promise.all(pending).then(() => pending.length)
+  return Promise.all(pending).then(() => pending.length + skipped)
 }
 
 /** The loaded postfx: the chain it draws, and ways to warm and hand it the next one. */
@@ -254,7 +291,7 @@ export async function prepare(look: Theme): Promise<{ chain: Chain; take(): bool
   const chain = build(at.stage, look)
   await chain.compile()
   // A draw can reach objects only once those before them are ready, so warm until none are new.
-  for (let i = 0; i < 4 && live === at && (await at.warm(chain)) > 0; i++);
+  for (let i = 0; i < 40 && live === at && (await at.warm(chain)) > 0; i++);
   return { chain, take: () => live === at && (at.take(chain), true) }
 }
 
