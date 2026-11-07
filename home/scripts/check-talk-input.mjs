@@ -381,10 +381,13 @@ try {
         ['add a table to the interior with a cow', p('wooden table with black and white cow-spot print', 'the interior | add a table to the interior with a cow', 'floor')],
       ].map(([text, r]) => ({ text, mount: r.mount, anchor: r.poses[0].anchor, x: +r.poses[0].x.toFixed(2), y: +r.poses[0].y.toFixed(2), z: +r.poses[0].z.toFixed(2), size: r.size }))
     })
-    const want = [['wall', 'wall'], ['wall', 'wall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
+    const want = [['wall', 'livingWall'], ['wall', 'sofaWall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
     check('each line gets its expected mount and anchor (a TV the model put on the floor goes on the wall)', poses.every((p, i) => p.mount === want[i][0] && p.anchor === want[i][1]), poses)
-    const distinct = new Set(poses.filter((p) => p.anchor !== 'wall').map((p) => `${p.x},${p.y},${p.z}`))
-    check('distinct anchors give distinct poses', distinct.size === poses.filter((p) => p.anchor !== 'wall').length, poses)
+    const distinct = new Set(poses.map((p) => `${p.x},${p.y},${p.z}`))
+    check('distinct anchors give distinct poses', distinct.size === poses.length, poses)
+    // The living room (x 3.58 to 8.38 since #42's one house): the TV on its back wall, the picture on the wall behind the sofa.
+    check('the living room is furnishable: "a TV on the living room wall" lands on its back wall, "a picture above the sofa" on the wall behind the sofa',
+      poses[0].x > 3.7 && poses[0].x < 8.3 && Math.abs(poses[0].z + 2.2) < 0.05 && Math.abs(poses[1].x - 3.58) < 0.05 && poses[1].z > -0.1 && poses[1].z < 1.95, poses.slice(0, 2))
     const [tv, pic, lantern, cow, plant] = poses
     check('heights by mount: TV and picture up the wall, the lantern hanging, the cow on the table top, the plant on the floor', tv.y > 0.6 && tv.size[2] < tv.size[1] && pic.y > 1 && lantern.y > 1.5 && Math.abs(cow.y - 0.76) < 0.01 && plant.y === 0, poses)
     const stacked = await page.evaluate(() => {
