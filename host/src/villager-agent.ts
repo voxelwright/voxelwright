@@ -136,8 +136,15 @@ async function readTurn(next: () => Promise<IteratorResult<SDKMessage>>, turn: T
   /** Note tool calls this turn, and how many came before the first words (each is a model round trip the person waits through). */
   const tools: string[] = []
   let toolsBeforeText = 0
+  // A stopped turn ends at once, not when the closed process gets round to ending its stream.
+  const stopped = new Promise<never>((_, reject) => {
+    const stop = () => reject(new Error('The turn was stopped'))
+    if (turn.signal.aborted) stop()
+    else turn.signal.addEventListener('abort', stop, { once: true })
+  })
+  stopped.catch(() => {})
   for (;;) {
-    const { value: message, done } = await next()
+    const { value: message, done } = await Promise.race([next(), stopped])
     if (done) throw new Error('The villager stopped without a result')
     if (turn.signal.aborted) throw new Error('The turn was stopped')
     if (message.type === 'system' && message.subtype === 'init') {

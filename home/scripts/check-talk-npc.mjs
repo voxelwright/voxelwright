@@ -133,7 +133,7 @@ try {
 
   if (agent === 'claude') {
     // One real talk and one two-villager table exchange, recorded if asked.
-    await open(page, '?talk=npc&q=high')
+    await open(page, '?talk=npc&input=slip&q=high')
     await page.waitForTimeout(7000)
     await clickVillager(page, 'alex')
     await until(page, (s) => s.mode === 'talk')
