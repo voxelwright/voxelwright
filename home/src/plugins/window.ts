@@ -91,7 +91,7 @@ export default {
       // The wider views see the whole floor, so the shadow box covers the whole room
       // (outside it the sun lit the floor in hard wedges), and walls cut away from
       // the camera still throw their shadows (#42).
-      Object.assign(sun.shadow.camera, { left: -5.6, right: 5.6, top: 5.6, bottom: -5.6 })
+      Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, far: 22 })
       sun.shadow.radius = 6
       sun.shadow.camera.layers.enable(SHADOW_ONLY)
     }

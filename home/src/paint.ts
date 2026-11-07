@@ -79,7 +79,7 @@ function pixels(w: number, h: number, fn: (x: number, y: number) => RGB) {
 }
 
 /** Planked wood. Grain runs along x. Returns color and a roughness map. */
-export function paintWood(opts: { seed: number; w?: number; h?: number; planks: number; light: RGB; dark: RGB; knots?: number }) {
+export function paintWood(opts: { seed: number; w?: number; h?: number; planks: number; light: RGB; dark: RGB; knots?: number; joints?: number }) {
   const w = opts.w ?? 1024, h = opts.h ?? 1024
   const n = makeNoise(opts.seed, 128)
   const r = rng(opts.seed + 7)
@@ -87,6 +87,9 @@ export function paintWood(opts: { seed: number; w?: number; h?: number; planks: 
   const plankTone = Array.from({ length: opts.planks }, () => 0.75 + r() * 0.5)
   const plankShift = Array.from({ length: opts.planks }, () => r() * 1000)
   const knots = Array.from({ length: opts.knots ?? 6 }, () => [r() * w, r() * h, 6 + r() * 14] as const)
+  // Butt joints: each plank ends at its own staggered offsets, so a floor reads as laid boards, not stripes.
+  const joints = opts.joints ?? 0
+  const jointShift = Array.from({ length: opts.planks }, () => r() * w)
   const [c] = pixels(w, h, (x, y) => {
     const p = Math.floor(y / plankH)
     const py = y - p * plankH
@@ -101,7 +104,8 @@ export function paintWood(opts: { seed: number; w?: number; h?: number; planks: 
     const fine = n(x / 3, y / 0.9, 2)
     let t = 0.35 + grain * 0.45 + (fine - 0.5) * 0.25
     t *= plankTone[p]
-    const seam = py < 1.6 || py > plankH - 1.6 ? 0.45 : 1
+    const along = joints ? (x + jointShift[p]) % (w / joints) : Infinity
+    const seam = py < 1.6 || py > plankH - 1.6 || along < 1.4 ? 0.45 : 1
     const base = mixRGB(opts.dark, opts.light, Math.min(1, Math.max(0, t)))
     return [base[0] * seam, base[1] * seam, base[2] * seam]
   })
@@ -712,4 +716,146 @@ export function paintWallpaper(seed: number, pattern: 'plain' | 'stripes' | 'flo
     }
   }
   return toTexture(c, { repeat: [1, 1] })
+}
+
+/** A braided rag rug (#42 room): concentric oval braids in warm rag colours, tight at the rim. Fills an ellipse; the corners are never seen. */
+export function paintBraid(seed: number) {
+  const size = 1024
+  const r = rng(seed)
+  // Mostly oat and cream rag, with a few muted bands of rust, sage and camel; the rim darkest.
+  const oat: RGB[] = [[214, 194, 160], [226, 212, 186], [200, 176, 140]]
+  const accents: RGB[] = [[168, 104, 78], [140, 148, 112], [190, 150, 108], [150, 120, 100]]
+  const bands = Array.from({ length: 16 }, (_, i) => (i === 15 ? [150, 96, 72] as RGB : i % 3 === 2 ? accents[Math.floor(r() * accents.length)] : oat[Math.floor(r() * oat.length)]))
+  const n = makeNoise(seed, 64)
+  return toTexture(pixels(size, size, (x, y) => {
+    const u = x / size - 0.5, v = y / size - 0.5
+    const d = Math.sqrt(u * u + v * v) * 2 // 0 centre, 1 rim
+    const a = Math.atan2(v, u)
+    const band = Math.min(bands.length - 1, Math.floor(d * bands.length))
+    const f = d * bands.length - band
+    // Each coil is rounded (lighter on its crown) with a faint slanted stitch; a
+    // high-contrast pattern along the band shimmered from the dollhouse camera.
+    const strand = 0.95 + 0.05 * Math.sin(a * (160 + band * 30) + f * 9)
+    const edge = 0.8 + 0.2 * Math.sin(f * Math.PI)
+    const t = strand * edge * (0.94 + n(x / 4, y / 4, 2) * 0.12)
+    const c = bands[band]
+    return [c[0] * t, c[1] * t, c[2] * t]
+  })[0])
+}
+
+/** A woven kitchen runner: a flat weave with a striped border and a fringe-free hem. */
+export function paintRunner(seed: number) {
+  const w = 512, h = 192
+  const n = makeNoise(seed, 32)
+  return toTexture(pixels(w, h, (x, y) => {
+    const ey = Math.min(y, h - 1 - y), ex = Math.min(x, w - 1 - x)
+    let c: RGB = [214, 196, 160]
+    if (ey < 22 || ex < 22) c = [62, 88, 108]
+    if ((ey >= 26 && ey < 32) || (ex >= 26 && ex < 32)) c = [176, 86, 60]
+    if (ey >= 32 && ex >= 32 && Math.floor((x + y * 0.3) / 18) % 7 === 0) c = [196, 172, 132]
+    const weave = ((x >> 1) + (y >> 1)) & 1 ? 0.93 : 1
+    const t = weave * (0.9 + n(x / 10, y / 10, 3) * 0.2)
+    return [c[0] * t, c[1] * t, c[2] * t]
+  })[0])
+}
+
+/** Basket weave for planters and the toy box lid (#42 room): over-under rattan. */
+export function paintWicker(seed: number, base: RGB = [196, 150, 98]) {
+  const size = 256
+  const n = makeNoise(seed, 32)
+  return toTexture(pixels(size, size, (x, y) => {
+    const cell = 16
+    const cx = Math.floor(x / cell), cy = Math.floor(y / cell)
+    const fx = (x % cell) / cell, fy = (y % cell) / cell
+    const horizontal = (cx + cy) & 1
+    const across = horizontal ? fy : fx
+    const shade = 0.7 + 0.3 * Math.sin(across * Math.PI)
+    const t = shade * (0.88 + n(x / 4, y / 4, 2) * 0.24)
+    return [base[0] * t, base[1] * t, base[2] * t]
+  })[0], { repeat: [3, 1] })
+}
+
+/** A kitchen clock face: cream enamel, painted numerals and minute ticks. */
+export function paintClockFace() {
+  const [c, g] = canvas(256, 256)
+  g.fillStyle = '#f6efe0'
+  g.beginPath()
+  g.arc(128, 128, 128, 0, Math.PI * 2)
+  g.fill()
+  g.strokeStyle = '#3a2a20'
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * Math.PI * 2
+    const long = i % 5 === 0
+    g.lineWidth = long ? 5 : 2
+    g.beginPath()
+    g.moveTo(128 + Math.sin(a) * (long ? 98 : 106), 128 - Math.cos(a) * (long ? 98 : 106))
+    g.lineTo(128 + Math.sin(a) * 114, 128 - Math.cos(a) * 114)
+    g.stroke()
+  }
+  g.fillStyle = '#3a2a20'
+  g.font = '600 30px Georgia, serif'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  for (const [k, label] of [[0, '12'], [3, '3'], [6, '6'], [9, '9']] as const) {
+    const a = (k / 12) * Math.PI * 2
+    g.fillText(label, 128 + Math.sin(a) * 76, 130 - Math.cos(a) * 76)
+  }
+  return toTexture(c)
+}
+
+/** Mown grass for the yard around the dollhouse (#42 room), tiled: soft stripes and clover. */
+export function paintGrass(seed: number) {
+  const size = 512
+  const n = makeNoise(seed, 64)
+  const [c, g] = pixels(size, size, (x, y) => {
+    const v = n(x / 60, y / 60, 4)
+    const blade = n(x / 2.5, y / 5, 2)
+    const stripe = Math.floor(x / (size / 2)) % 2 ? 1 : 0.95
+    const k = (0.84 + v * 0.3 + (blade - 0.5) * 0.16) * stripe
+    return [102 * k + 22, 136 * k + 10, 56 * k]
+  })
+  const r = rng(seed + 1)
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = r() < 0.5 ? 'rgba(255, 246, 220, 0.75)' : 'rgba(242, 214, 110, 0.7)'
+    g.beginPath()
+    g.arc(r() * size, r() * size, 1.6 + r() * 1.6, 0, Math.PI * 2)
+    g.fill()
+  }
+  return toTexture(c, { repeat: [1, 1] })
+}
+
+/** A soft rounded-rectangle shadow for contact decals: dark at the footprint, gone at the edge. */
+export function paintContact() {
+  const [c, g] = canvas(128, 128)
+  g.filter = 'blur(13px)'
+  g.fillStyle = 'rgba(60, 32, 14, 0.62)'
+  g.beginPath()
+  g.roundRect(28, 28, 72, 72, 20)
+  g.fill()
+  return toTexture(c)
+}
+
+/** The kitchen's oak floor, shared by the seated room and the dollhouse so both read the same boards. */
+export function floorPlanks() {
+  const t = paintWood({ seed: 11, planks: 8, light: [222, 188, 144], dark: [198, 160, 116], knots: 3, joints: 2 })
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  t.rotation = Math.PI / 2
+  return t
+}
+
+/**
+ * The worktable under the dollhouse (#42 room): one soft painted oak top, long faint
+ * grain and a warm pool of lamplight in the middle that dims toward the edges, so the
+ * far table melts into the fog instead of reading as a giant floor.
+ */
+export function paintWorktable(seed: number) {
+  const size = 1024
+  const n = makeNoise(seed, 128)
+  return toTexture(pixels(size, size, (x, y) => {
+    const u = x / size - 0.5, v = y / size - 0.5
+    const d = Math.min(1, Math.sqrt(u * u + v * v) * 2.1)
+    const grain = n(x / 300, y / 16, 3)
+    const t = (0.94 + (grain - 0.5) * 0.06) * (1 - d * d * 0.3)
+    return mixRGB([170, 124, 86], [196, 150, 106], 1 - d).map((c) => c * t) as RGB
+  })[0])
 }

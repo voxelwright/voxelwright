@@ -42,14 +42,14 @@ const pose = (p: [number, number, number], l: [number, number, number]): Pose =>
 export const PLANS: Record<string, RoomPlan> = {
   kitchen: {
     plugins: ['room', 'window', 'glass', 'sunbeam', 'cabinets', 'table', 'chairs', 'highchair', 'fridge',
-      'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor',
+      'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor', 'furnish',
       ...(MODE === 'iso' ? ['diorama'] : [])],
     home: pose([0.1, 1.45, 2.7], [0.12, 1.05, -0.9]),
     arrive: pose([-0.9, 1.5, 0.6], [-0.4, 1.2, -1.6]),
     fog: ['#e8c49a', 6, 22],
   },
   living: {
-    plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors', ...(MODE === 'iso' ? ['loungediorama'] : [])],
+    plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors', 'loungefurnish', ...(MODE === 'iso' ? ['loungediorama'] : [])],
     // The plants and shelves are the subject; the workshop door is a quiet right edge.
     home: pose([LIVING_X + 0.6, 1.4, 2.35], [LIVING_X - 0.12, 1.28, -2.2]),
     arrive: pose([LIVING_X - 0.3, 1.45, 3.0], [LIVING_X - 0.6, 1.3, -2.2]),

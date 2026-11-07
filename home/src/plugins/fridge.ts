@@ -27,9 +27,12 @@ export default {
     const brushed = paintBrushed(9)
     // Physical tier: an enamel-like lacquer over the brushed steel, picking up the sun.
     const phys = ctx.stage.features().has('phys')
+    // Brushed steel (#42 room): the streaks drive the roughness too, and no clear coat,
+    // which made it read as grey plastic. A faint sheen across the grain stands in for
+    // the reflections a room without an environment map can't give it.
     const steel = new THREE.MeshPhysicalMaterial({
-      map: brushed, color: '#eef0f2', metalness: 0.3, roughness: 0.42,
-      clearcoat: phys ? 1 : 0.4, clearcoatRoughness: phys ? 0.12 : 0.3,
+      map: brushed, roughnessMap: brushed, color: '#e4e6e8', metalness: 0.55, roughness: 0.55,
+      sheen: phys ? 0.35 : 0, sheenColor: '#fff4e4', sheenRoughness: 0.35,
     })
     const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 4, 0.03), steel)
     body.position.y = H / 2 + 0.04

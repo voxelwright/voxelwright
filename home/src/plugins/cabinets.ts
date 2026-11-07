@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z } from '../layout'
-import { paintPlaster } from '../paint'
+import { paintPlaster, paintWood } from '../paint'
 
 /** White shaker cabinets with round knobs, a grey counter, a sink tap and an upper run. */
 export default {
@@ -11,9 +11,13 @@ export default {
   apply(ctx: Context) {
     const group = new THREE.Group()
     group.name = 'cabinets'
-    const paint = new THREE.MeshStandardMaterial({ color: '#f4f1ea', roughness: 0.55 })
-    const inset = new THREE.MeshStandardMaterial({ color: '#e9e5dc', roughness: 0.6 })
-    const knob = new THREE.MeshStandardMaterial({ color: '#c9c6bf', metalness: 0.9, roughness: 0.3 })
+    // Painted wood (#42 room): a faint grain under eggshell paint, and a carcass a shade
+    // darker than the doors so the gaps between them read as shadow lines.
+    const grain = paintWood({ seed: 31, w: 256, h: 256, planks: 1, light: [246, 242, 233], dark: [236, 230, 218], knots: 0 })
+    const paint = new THREE.MeshStandardMaterial({ map: grain, roughness: 0.68 })
+    const carcass = new THREE.MeshStandardMaterial({ color: '#d9d1c2', roughness: 0.75 })
+    const inset = new THREE.MeshStandardMaterial({ color: '#ece6da', roughness: 0.72 })
+    const knob = new THREE.MeshStandardMaterial({ color: '#b08a5a', metalness: 0.7, roughness: 0.4 })
     const stone = paintPlaster(29, [150, 150, 148], 512, 512)
     const counterMat = new THREE.MeshStandardMaterial({ map: stone, roughness: 0.7 })
     const x0 = 1.98, x1 = 3.4
@@ -31,7 +35,7 @@ export default {
       add(new THREE.SphereGeometry(0.014, 12, 8), knob, cx + knobX, cy + knobY, z + 0.025)
     }
     const baseD = 0.6, baseH = 0.88
-    add(new THREE.BoxGeometry(x1 - x0, baseH, baseD), paint, (x0 + x1) / 2, baseH / 2, WALL_Z + baseD / 2)
+    add(new THREE.BoxGeometry(x1 - x0, baseH, baseD), carcass, (x0 + x1) / 2, baseH / 2, WALL_Z + baseD / 2)
     const doorW = (x1 - x0) / 3
     for (let i = 0; i < 3; i++) {
       const cx = x0 + doorW * (i + 0.5)
@@ -42,7 +46,7 @@ export default {
 
     // Upper run.
     const upD = 0.33, upY0 = 1.5, upY1 = 2.32
-    add(new THREE.BoxGeometry(x1 - x0, upY1 - upY0, upD), paint, (x0 + x1) / 2, (upY0 + upY1) / 2, WALL_Z + upD / 2)
+    add(new THREE.BoxGeometry(x1 - x0, upY1 - upY0, upD), carcass, (x0 + x1) / 2, (upY0 + upY1) / 2, WALL_Z + upD / 2)
     for (let i = 0; i < 3; i++) {
       const cx = x0 + doorW * (i + 0.5)
       door(cx, (upY0 + upY1) / 2, doorW, upY1 - upY0, WALL_Z + upD + 0.01, i % 2 ? -doorW / 2 + 0.06 : doorW / 2 - 0.06, -(upY1 - upY0) / 2 + 0.08)
