@@ -354,9 +354,22 @@ export function paintGouacheWall(seed: number) {
   return toTexture(c)
 }
 
+/**
+ * Plaster for pixel art: one flat colour. The home's limewash mottle and brush strokes
+ * fall either side of a palette boundary and snap into blotches at 225 rows, so a pixel
+ * look paints the wall flat and lets the light alone make its ramp.
+ */
+export function paintPixelPlaster() {
+  const [c, g] = canvas(16, 16)
+  g.fillStyle = '#f2ede4'
+  g.fillRect(0, 0, 16, 16)
+  return toTexture(c)
+}
+
 /** Painters by name, as a theme's `paint` names them. */
 export const PAINTERS: Record<string, () => THREE.Texture> = {
   'night-city': () => paintNightCity(7),
   'pastoral-view': () => paintPastoralView(11),
   'gouache-wall': () => paintGouacheWall(5),
+  'pixel-plaster': paintPixelPlaster,
 }

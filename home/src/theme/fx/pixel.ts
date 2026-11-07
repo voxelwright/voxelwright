@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import {
   Fn, If, Loop, cbrt, clamp, dot, float, floor, int, max, mod, mrt, normalView, output, packNormalToRGB,
-  length, mix, perspectiveDepthToViewZ, sRGBTransferEOTF, screenCoordinate, screenSize, smoothstep, step, textureSize, uniform, uniformArray,
+  length, luminance, min, mix, perspectiveDepthToViewZ, sRGBTransferEOTF, screenCoordinate, screenSize, smoothstep, step, textureSize, uniform, uniformArray,
   unpackRGBToNormal, uv, vec2, vec3, vec4,
 } from 'three/tsl'
 import type { Fx } from './index'
@@ -45,8 +45,9 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) =>
  * number of device pixels (so every art pixel is the same size at DPR 1 and 2)
  * with nearest filtering. In linear colour, objects get a dark outline where they
  * stand in front of something (from the depth buffer) and a light edge on convex
- * creases (from normals), both one art pixel wide. In display colour, a 4x4
- * ordered dither aligned to the art pixels, then a snap to the palette by OKLab.
+ * creases (from normals), both one art pixel wide. In display colour, a snap to
+ * the nearest palette colour by OKLab, with a 4x4 ordered dither aligned to the art
+ * pixels only where a pixel sits near the boundary between its two nearest colours.
  */
 export function pixel(spec: Spec): Fx {
   const cell = uniform(1)
@@ -66,7 +67,8 @@ export function pixel(spec: Spec): Fx {
   let unfit: (() => void) | null = null
 
   return {
-    quiet: { bloom: true, grain: true, vignette: true, fxaa: true },
+    // Bloom stays: at the low resolution it rings the lamp in palette steps, as pixel art draws a glow.
+    quiet: { grain: true, vignette: true, fxaa: true },
     scene({ stage, scenePass }) {
       // Whole device pixels per art pixel; the row count follows from it.
       const size = new THREE.Vector2()
@@ -118,33 +120,66 @@ export function pixel(spec: Spec): Fx {
           const facing = clamp(smoothstep(-0.01, 0.01, dot(n0.sub(nk), vec3(1, 1, 1))), 0, 1)
           bend = bend.add(float(1).sub(dot(n0, nk)).mul(nearer).mul(facing)) as F
         }
-        const lit = step(0.15, bend).mul(step(edge, 0.001))
+        // A real crease also bends the depth; a normal change on flat depth is a transparent
+        // shape (the sunbeam's shells write their normals but not their depth), not geometry.
+        const lit = step(0.15, bend).mul(step(edge, 0.001)).mul(step(0.0004, jump.abs()))
         const k = float(1).sub(edge.mul(outline)).add(lit.mul(crease))
         return vec4(color.rgb.mul(k), color.a)
       })() as unknown as THREE.Node<'vec4'>
     },
-    display(color) {
+    display(color, { scenePass }) {
       const v = theme().post.vignette
+      const sceneTex = scenePass.getTextureNode()
       return Fn(() => {
+        // How much the light changes across this art pixel's neighbours, from the scene's own
+        // linear colour: high at shadow edges and silhouettes, near zero across a plaster wall.
+        const size = vec2(textureSize(sceneTex) as unknown as THREE.Node<'ivec2'>)
+        const here = floor(uv().mul(size)).add(0.5).toVar()
+        const lum = (dx: number, dy: number): F => luminance(sceneTex.sample(here.add(vec2(dx, dy)).div(size)).rgb) as unknown as F
+        const l0 = lum(0, 0), lE = lum(1, 0), lW = lum(-1, 0), lN = lum(0, 1), lS = lum(0, -1)
+        const hi = max(max(l0, lE), max(max(lW, lN), lS)), lo = min(min(l0, lE), min(min(lW, lN), lS))
+        const busy = smoothstep(0.08, 0.2, hi.sub(lo).div(hi.add(0.04)))
         const at = floor(screenCoordinate.xy.div(cell))
         // The theme's vignette, taken here once per art pixel so it cannot split one.
         const centre = at.add(0.5).mul(cell).div(screenSize)
         const d = length(centre.sub(0.5).mul(vec2(1.25, 1)))
         const shade = mix(float(1), float(1 - v.amount), smoothstep(v.inner, v.outer, d))
         const t = bayer.element(int(mod(at.x, 4).add(mod(at.y, 4).mul(4)))) as unknown as F
-        const c = clamp(color.rgb.mul(shade).add(t.mul(spread)), 0, 1)
+        const c = clamp(color.rgb.mul(shade), 0, 1)
         const lab = oklab(c as unknown as V3).toVar()
+        // The two nearest palette colours. A flat midtone snaps to its nearest; only a
+        // pixel near the boundary between two (a ramp step, a shadow edge) is dithered.
         const best = vec3(rgbs.element(0) as unknown as V3).toVar()
+        const next = vec3(rgbs.element(0) as unknown as V3).toVar()
+        const bestLab = vec3(labs.element(0) as unknown as V3).toVar()
+        const nextLab = vec3(labs.element(0) as unknown as V3).toVar()
         const bestD = float(1e9).toVar()
+        const nextD = float(1e9).toVar()
         Loop(count, ({ i }) => {
           const p = labs.element(i) as unknown as V3
           const d = dot(lab.sub(p), lab.sub(p))
           If(d.lessThan(bestD), () => {
+            nextD.assign(bestD)
+            next.assign(best)
+            nextLab.assign(bestLab)
             bestD.assign(d)
             best.assign(rgbs.element(i) as unknown as V3)
+            bestLab.assign(p)
+          }).ElseIf(d.lessThan(nextD), () => {
+            nextD.assign(d)
+            next.assign(rgbs.element(i) as unknown as V3)
+            nextLab.assign(p)
           })
         })
-        return vec4(best, 1)
+        // 0 on the boundary, 1 on the nearest colour; inside the band the share of the
+        // second colour rises to half, in a 4x4 ordered pattern.
+        const gap = length(nextLab.sub(bestLab)).max(1e-4)
+        const away = nextD.sqrt().sub(bestD.sqrt()).div(gap)
+        // Where the light changes fast the band is full width; across a flat midtone it narrows
+        // to a seam at the ramp step, so a wall shows clean bands instead of a dithered field.
+        const band = spread.max(1e-4).mul(mix(float(0.35), float(1), busy))
+        const share = clamp(float(1).sub(away.div(band)), 0, 1).mul(0.5)
+        return vec4(mix(best, next, step(t.add(0.5), share)), 1)
       })() as unknown as THREE.Node<'vec4'>
     },
     dispose() {
