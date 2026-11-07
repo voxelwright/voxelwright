@@ -202,6 +202,16 @@ try {
   const clean2 = await page.evaluate(() => ({ obj: ({}).polluted, arr: [].evil, keys: Object.getOwnPropertyNames(Object.prototype).length }))
   check('prototype pollution inside the worker does not reach the page', clean2.obj === undefined && clean2.arr === undefined && clean2.keys === before.protoKeys, { ok: workerPollution.ok, reason: workerPollution.reason, ...clean2 })
 
+  // GPU and fresh realms: the CSP does not cover WebGL or nested workers, so the worker removes them.
+  const gpu = await trial(wrap(`
+    prop.note('webgpu ' + typeof navigator.gpu)
+    try { prop.note('webgl2 ' + (new OffscreenCanvas(4, 4).getContext('webgl2') ? 'REACHED' : 'none')) } catch { prop.note('webgl2 blocked') }
+    try { prop.note('webgl ' + (new OffscreenCanvas(4, 4).getContext('webgl') ? 'REACHED' : 'none')) } catch { prop.note('webgl blocked') }
+    try { Object.defineProperty(OffscreenCanvas.prototype, 'getContext', { value: () => 'REACHED' }); prop.note('redefine REACHED') } catch { prop.note('redefine blocked') }
+    prop.note('Worker ' + typeof Worker + ', SharedWorker ' + typeof SharedWorker)
+    ${CUBE}`))
+  check('no WebGPU, no WebGL and no nested workers in the worker', gpu.ok && ['webgpu undefined', 'webgl2 blocked', 'webgl blocked', 'redefine blocked', 'Worker undefined, SharedWorker undefined'].every((n) => gpu.notes.includes(n)), gpu.notes)
+
   // 5. Runaway code.
   const loop = await trial(wrap('while (true) {}'), { timeoutMs: 1500 })
   check('an infinite loop is stopped and the home stays responsive', !loop.ok && /stopped/.test(loop.reason) && loop.gap < 150, { reason: loop.reason, maxGapMs: loop.gap })
@@ -242,7 +252,7 @@ try {
   await page.waitForTimeout(1800)
   await busy
   const relayGap = Math.round(await page.evaluate(() => window.__gap))
-  check('a busy iframe main thread does not stall the home (the box runs off the page's main thread)', relayGap < 150, { maxGapMs: relayGap })
+  check('a busy iframe main thread does not stall the home (Chrome runs the sandboxed frame in another process)', relayGap < 150, { maxGapMs: relayGap })
 
   // 9. After all that the box still works, the page is unchanged and no error leaked.
   const after = await trial(wrap(CUBE), { place: true })

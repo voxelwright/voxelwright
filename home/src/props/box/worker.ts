@@ -17,6 +17,21 @@ import { serialize } from '../wire'
 const post = self.postMessage.bind(self) as (message: unknown, transfer?: Transferable[]) => void
 const now = () => performance.now()
 
+// Narrow the worker before any model code runs. The CSP has no say over the GPU or
+// nested workers, so: 2D canvases only (no WebGL, so no GPU work from the box), and
+// no nested workers (a nested worker would start with fresh, unnarrowed globals).
+// WebGPU is already absent here (navigator.gpu is undefined in the sealed worker).
+const getContext = OffscreenCanvas.prototype.getContext as (this: OffscreenCanvas, ...args: unknown[]) => unknown
+Object.defineProperty(OffscreenCanvas.prototype, 'getContext', {
+  value(this: OffscreenCanvas, type: unknown, ...rest: unknown[]) {
+    if (type !== '2d') throw new Error('only 2d canvases are available in the prop sandbox')
+    return getContext.call(this, type, ...rest)
+  },
+  writable: false,
+  configurable: false,
+})
+for (const name of ['Worker', 'SharedWorker']) delete (self as unknown as Record<string, unknown>)[name]
+
 self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
   const { id, code } = event.data
   const notes: string[] = []
