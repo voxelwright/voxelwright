@@ -170,9 +170,9 @@ wall arm, and a soft pool on the table shows it is on. The kitchen's 9 m floor
 and the painted garden card are `userData.seatOnly`. `?cam=third` keeps the old
 fixes: walls cut away, fog slid back and a warm backdrop.
 
-Still open in iso: about 70% of the kitchen floor is bare from above; the
-lamp shade reads dark from above; the tabletop blooms to white when zoomed; the living
-room's walls are greyer than the kitchen's. In third person, walking to the
+Still open in iso: the lamp shade reads dark from above; the living room's
+walls are greyer than the kitchen's. (The bare floor and the tabletop bloom are
+fixed; see "The room as a home screen" below.) In third person, walking to the
 fridge leaves two entries on screen. `cam-third-fridge.jpg` was taken with the
 pointer still on the fridge, so its hover glow makes it look beige.
 
@@ -209,7 +209,74 @@ Dollhouse shell, same setup, one 6 s run each:
 | `?cam=iso&q=low`, after | 485 | 63,127 | 4.7 / 6.8 |
 | `?cam=iso&q=high&room=living`, after | 193 | 41,272 | 9.2 / 11.5 |
 
-Screenshots: `screenshots/talk/iso-*.jpg`.
+Screenshots: `screenshots/talk/iso-*.jpg`, since replaced by the furnished room below (`room-home-before.jpg` is this shell).
+
+## The room as a home screen (#42, November 6, 2026)
+
+The dollhouse view is the home screen, so the kitchen is furnished for it and
+the house stands in a yard. The seated view changed with it (fruit, flowers and
+a clock are on its table and wall); compare `room-seat-before.jpg` and
+`room-seat-after.jpg`.
+
+- Ground (`yard()` in `src/diorama.ts`, both dioramas): a lawn board a little
+  below the house floor, a picket fence with a gate, stepping stones, flower
+  clumps, shrubs and an orchard row, on an unlit painted worktable that fades
+  into the fog. Fence posts, stones and blooms are instanced; all trees in a
+  yard are merged into three meshes. The lawn takes no sun shadow (the low sun
+  laid the house's 8 m shadow across it in wedges); a soft decal grounds the
+  foundation. In iso the sun's shadow box is ±8 m.
+- Kitchen (`furnish`, all camera modes): braided rug under the table, runner by
+  the sink, a stove on the right wall with a towel on the oven bar and a kettle,
+  a pan rail, a framed print, a painted dresser with an open shelf of jars and
+  cookbooks, coat pegs and a bench with wellies by the doorway, a toy box, a
+  reading chair with a lamp and side table, a tall basket plant, fruit and a jug
+  of flowers on the table, and a wall clock that shows the real time. Living
+  room (`loungefurnish`): sofa, round rug, coffee table, bookcase, floor lamp,
+  reading chair, blanket basket, plant, pouf and board games, all left of or
+  behind the seated view's line.
+- Everything keeps clear of the corridors in `villagers/world.ts`; no waypoint
+  moved. Rugs are 3 mm thick so the villagers' 4 mm contact shadows stay on top.
+- Props are built with `src/kit.ts`: each part's transform and colour are baked
+  into vertices and parts merge by material, so the kitchen's furniture is
+  about a dozen draws. Things hung on the side walls sit in their own groups
+  tagged `inward`, so they hide with their wall when the camera stands outside it.
+- Contact shadows: one merged decal mesh per room (a wide and a tight quad per
+  footprint) under furniture, the same at `?q=low`.
+- Materials: floor roughness 0.86 and boards about 14 cm wide with staggered
+  joints (`floorPlanks()`, shared by the seated and dollhouse floors); tabletop
+  roughness 0.74 and the lamp's light pool at 55%, which removed the white
+  hotspot; cabinets in grained eggshell paint over a darker carcass, so door
+  gaps read; brushed steel fridge without the clear coat; the lamp arm painted
+  cream and thinner.
+
+Frame cost, headless Chrome, 1440x900, WebGPU, M1 Pro, `npm run measure --
+'<url>' --perf --gpu`, one 6 s run each while the villagers walked (GPU p50
+varies 1 to 3 ms between runs):
+
+| Page | Draw calls | Triangles | GPU p50 / p95 ms |
+| --- | --- | --- | --- |
+| `?talk=npc&q=high`, before | 734 | 113,708 | 9.6 / 15.2 |
+| `?talk=npc&q=high`, after | 781 | 184,116 | 10.2 / 17.2 |
+| `?talk=npc&q=low`, before | 665 | 110,478 | 5.2 / 6.1 |
+| `?talk=npc&q=low`, after | 712 | 180,886 | 4.9 / 7.5 |
+
+High stays under its 13 ms step-down. Most new triangles are the trees' lobed
+crowns and the fence, drawn again in the shadow pass.
+
+Look (ui-craft, a fresh `claude -p --model opus --strict-mcp-config` scorer
+each round, given the eight shots, the previous build's shots and the rubric
+plus "a finished, lived-in diorama" and "home screen every day"; overall /
+diorama / daily): round 1 6.2 / 6 / 6.5, round 2 7 / 7 / 7, round 3 7 / 7 / 7
+(low tier 8). Stopped at the time box after three rounds. Open findings: the
+lamp still hangs from a visible arm (no ceiling in the cutaway); the living
+room's hard key-light shadows differ from the kitchen's soft light; contact
+shadows under the villagers are still faint (`villagers/cast.ts`); the window's
+painted view doesn't match the yard; the high chair and the fridge baskets
+don't match the new props; fixed-height talk cards and Moss's floating limbs.
+
+Screenshots: `screenshots/talk/iso-*.jpg` (home, both orbit ends, the table,
+low tier, living room), `room-table-chat.jpg`, `room-home-before.jpg`,
+`room-seat-before.jpg` and `room-seat-after.jpg`.
 
 ## Generated props (#42 experiment, November 6, 2026)
 

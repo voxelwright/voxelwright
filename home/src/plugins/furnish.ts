@@ -214,7 +214,7 @@ export default {
 
     // A reading chair on the open floor in front of the kitchen, turned to the table, with a throw, a side table and a lamp.
     {
-      const x = 1.75, z = 2.75, ry = -2.52
+      const x = 1.95, z = 2.0, ry = -2.3
       const base = new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1))
       const local = (lx: number, ly: number, lz: number, rx = 0) => base.clone().multiply(at(lx, ly, lz, 0, rx))
       dress(box(0.8, 0.26, 0.78), velvet, local(0, 0.27, 0))
@@ -225,7 +225,7 @@ export default {
       dress(box(0.42, 0.02, 0.6), throwRug, local(0.36, 0.62, 0.02))
       dress(box(0.02, 0.3, 0.6), throwRug, local(0.42, 0.47, 0.02))
       // Side table with a book and a cup.
-      const t = base.clone().multiply(at(-0.62, 0, -0.12))
+      const t = base.clone().multiply(at(0.62, 0, 0.05))
       const st = (lx: number, ly: number, lz: number) => t.clone().multiply(at(lx, ly, lz))
       dress(cyl(0.2, 0.2, 0.03, 24), pine, st(0, 0.55, 0))
       dress(cyl(0.025, 0.03, 0.54, 10), pine, st(0, 0.27, 0))
@@ -234,15 +234,15 @@ export default {
       part(cyl(0.035, 0.03, 0.07, 14), '#e8dcc6', 'gloss', st(-0.1, 0.6, -0.06))
       // Floor lamp behind the chair, its linen shade lit from inside.
       const lamp = (lx: number, ly: number, lz: number) => base.clone().multiply(at(lx, ly, lz))
-      part(cyl(0.012, 0.012, 1.4, 8), '#2b2420', 'satin', lamp(-0.5, 0.7, -0.5))
-      part(cyl(0.13, 0.14, 0.02, 20), '#2b2420', 'satin', lamp(-0.5, 0.01, -0.5))
+      part(cyl(0.012, 0.012, 1.4, 8), '#2b2420', 'satin', lamp(-0.58, 0.7, 0.1))
+      part(cyl(0.13, 0.14, 0.02, 20), '#2b2420', 'satin', lamp(-0.58, 0.01, 0.1))
     }
     const shade = new THREE.Mesh(
       new THREE.CylinderGeometry(0.13, 0.19, 0.24, 24, 1, true),
       new THREE.MeshStandardMaterial({ color: '#f6e6c8', emissive: '#ffc98a', emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide }),
     )
     {
-      const p = new THREE.Vector3(-0.5, 1.46, -0.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), -2.52).add(new THREE.Vector3(1.75, 0, 2.75))
+      const p = new THREE.Vector3(-0.58, 1.46, 0.1).applyAxisAngle(new THREE.Vector3(0, 1, 0), -2.3).add(new THREE.Vector3(1.95, 0, 2.0))
       shade.position.copy(p)
       shade.castShadow = true
       shade.name = 'reading lamp shade'
@@ -310,7 +310,7 @@ export default {
       [LEFT + 0.22, 0.9, 0.62, 1.6, 0], // dresser
       [LEFT + 0.19, -1.53, 0.55, 1.05, 0], // bench
       [-2.55, 3.2, 0.95, 0.65, 0.15], // toy box
-      [1.75, 2.75, 1.05, 1.0, -2.52], // reading chair
+      [1.95, 2.0, 1.05, 1.0, -2.3], // reading chair
       [LEFT + 0.32, 2.05, 0.6, 0.6, 0], // basket
     ]
     if (talk) prints.push([NEAR_CHAIR.x, NEAR_CHAIR.z, 0.62, 0.62, NEAR_CHAIR.yaw])
