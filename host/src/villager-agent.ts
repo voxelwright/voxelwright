@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { listNotes, NoteError, readNote, writeNote } from './notes.ts'
 import { allowedEnv } from './proc.ts'
 import { routeContext, stubRoute, type RouteAsk } from './villager-input.ts'
-import { characterKey, fallbackCharacter, type Character } from './persona.ts'
+import { characterKey, fallbackCharacter, type Character, type Humour } from './persona.ts'
 import { voicePrompt } from './villager-voice.ts'
 
 export interface Turn {
@@ -22,6 +22,8 @@ export interface Turn {
   route?: Omit<RouteAsk, 'text' | 'signal'>
   /** Who the villager is and who it is talking to (#42): its persona, their profile, the humour ceiling and its notes on them. */
   character?: Character
+  /** Set by the host at a table where not everyone has crude (#42): the turn's humour is lowered to this. */
+  humourCap?: Humour
   sessionId?: string
   notesDir: string
   /** The person's own folder; the stub keeps its stand-in transcripts here. */
@@ -101,7 +103,8 @@ export interface ModelSettings {
 }
 
 function turnPrompt(turn: Turn): string {
-  const context = [turn.context, turn.route && routeContext(turn.route)].filter(Boolean).join('\n\n')
+  const cap = turn.humourCap && `Humour at this table, set by the home: keep it ${turn.humourCap} this turn.`
+  const context = [turn.context, cap, turn.route && routeContext(turn.route)].filter(Boolean).join('\n\n')
   return context ? `${turn.text}\n\n(Context only, not part of ${turn.name}'s message: ${context})` : turn.text
 }
 
@@ -316,7 +319,7 @@ export function stubAgent(delayMs = 40): Agent {
     // Proof for the checks that context reached the turn without becoming the person's line.
     if (turn.context) {
       await writeFile(join(turn.personDir, 'stub-last-context.txt'), turn.context)
-      await appendFile(join(turn.personDir, 'stub-contexts.jsonl'), JSON.stringify({ text: turn.text, context: turn.context }) + '\n')
+      await appendFile(join(turn.personDir, 'stub-contexts.jsonl'), JSON.stringify({ text: turn.text, context: turn.context, humourCap: turn.humourCap }) + '\n')
     }
     await writeNote(turn.notesDir, 'stub.md', history.map((l) => `- ${l}`).join('\n') + '\n')
     // Proof for the checks of what the villager was told (#42): the system prompt it would run with.

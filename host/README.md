@@ -389,10 +389,11 @@ needs an `adult` profile **and** an opt-in, either the profile's `humour:
 can swear with me", "be crude with me"), which the host matches and records
 in `<root>/people/<id>/preferences.json`. "Keep it clean" or "no more
 swearing" turns it down the same way. Child, teen and unknown profiles top out
-at cheeky. A line heard at a table round never opts anyone in, and a table
-turn is capped at the lowest ceiling among the listed people (the host adds
-"keep it cheeky this turn" to the context). The prompt says a turn's context
-may lower the ceiling and nothing can raise it. Without an opt-in, the
+at cheeky. A line heard at a table round never opts anyone in. At the table a
+crude villager is lowered to cheeky for the turn unless every listed person
+has crude (`humourCap` on the turn; the host adds "keep it cheeky this turn"
+beside the page's context, which itself is passed on unchanged). The prompt
+says a turn's context may lower the ceiling and nothing can raise it. Without an opt-in, the
 persona's `humour.lean` applies. The process's system prompt is rebuilt, on
 the same session, when the persona, profile or ceiling changes; a changed note
 does not restart it.

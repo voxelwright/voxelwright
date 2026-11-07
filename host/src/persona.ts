@@ -217,9 +217,6 @@ export async function writePreferences(personDir: string, prefs: Preferences) {
   await rename(temp, preferencesFile(personDir))
 }
 
-const RANK: Record<Humour, number> = { clean: 0, cheeky: 1, crude: 2 }
-export const lowest = (levels: Humour[]): Humour => levels.reduce((a, b) => (RANK[b] < RANK[a] ? b : a), 'crude' as Humour)
-
 /**
  * The humour a villager may use with this person. Crude needs both an adult
  * profile (trusted data) and an opt-in (the profile's setting or the person's

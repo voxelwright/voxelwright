@@ -21,7 +21,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
-import { checkProfile, humourWords, loadCharacter, lowest, writePreferences, type AgeBand, type Profile } from './persona.ts'
+import { checkProfile, humourWords, loadCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 
 export interface Config {
   root: string
@@ -160,10 +160,11 @@ export default {
       const asked = context === undefined ? humourWords(text) : null
       if (asked) await writePreferences(dir, { humour: asked, at: new Date().toISOString() })
       const { character, personaRefused } = await characterOf(id)
-      // At the table, crude only if everyone listed would get it on their own.
-      if (context !== undefined) {
-        const table = lowest(await Promise.all(Object.keys(people).map(async (p) => p === id ? character.humour : (await characterOf(p)).character.humour)))
-        if (table !== character.humour) context = `${context} Humour at this table, set by the home: keep it ${table} this turn.`
+      // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
+      let humourCap: Humour | undefined
+      if (context !== undefined && character.humour === 'crude') {
+        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map(async (p) => (await characterOf(p)).character.humour))
+        if (others.some((h) => h !== 'crude')) humourCap = 'cheeky'
       }
       const at = new Date().toISOString()
       await appendJsonl(join(dir, 'conversation.jsonl'), { at, from: 'person', text })
@@ -202,7 +203,7 @@ export default {
         }
       }
       try {
-        const result = await config.agent({ name: people[id], text, context, route, character, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
+        const result = await config.agent({ name: people[id], text, context, route, character, humourCap, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
         if (held !== null && !routed) {
           routed = routeInReply(held, ids, items)

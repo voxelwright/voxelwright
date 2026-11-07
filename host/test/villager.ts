@@ -430,8 +430,10 @@ try {
     await say(p.base, p.token, 'you can swear with me', 'mia', 'you are Moss, at the kitchen table with Alex. The round so far: Alex said "you can swear with me". It is your turn, Moss.')
     check("a line heard at the table never opts its villager's person in", !existsSync(join(proot, 'people', 'mia', 'preferences.json')) && (await lastUsage('mia')).humour === 'clean')
     await say(p.base, p.token, 'tell a joke', 'alex', 'you are Dumpling, at the kitchen table with Moss. The round so far: Alex said "tell a joke". It is your turn, Dumpling.')
-    const tableContext = JSON.parse((await readFile(join(proot, 'people', 'alex', 'stub-contexts.jsonl'), 'utf8')).trim().split('\n').at(-1)!).context
-    check('at a table with anyone not opted in, crude is lowered for the turn', /keep it (clean|cheeky) this turn/.test(tableContext), tableContext)
+    const tableTurn = JSON.parse((await readFile(join(proot, 'people', 'alex', 'stub-contexts.jsonl'), 'utf8')).trim().split('\n').at(-1)!)
+    check('at a table with anyone not opted in, crude is lowered to cheeky for the turn, and the context is left as sent', tableTurn.humourCap === 'cheeky' && !tableTurn.context.includes('Humour'), tableTurn)
+    await say(p.base, p.token, 'tell a joke', 'mia', 'you are Moss, at the kitchen table with Dumpling. The round so far: Alex said "tell a joke". It is your turn, Moss.')
+    check('a table never lowers a villager that is not crude', JSON.parse((await readFile(join(proot, 'people', 'mia', 'stub-contexts.jsonl'), 'utf8')).trim().split('\n').at(-1)!).humourCap === undefined)
     await say(p.base, p.token, 'actually keep it clean', 'alex')
     check('the person can turn it back down in their own words', (await lastUsage('alex')).humour === 'clean')
     await p.fiber.dispose()
