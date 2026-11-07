@@ -158,10 +158,10 @@ export default {
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
       const stateFile = join(dir, 'villager.json')
       const state = await readJson<SessionState>(stateFile, {})
-      // The humour dial (#42): only the person's own line to their own villager sets it, never a table round,
-      // where the line came from someone else, and never a reply. Crude still needs an adult profile.
+      // The humour dial (#42): words in a direct talk can only turn it down. The host cannot tell who is
+      // typing at a shared screen, so crude comes only from the operator's profile (Sentinel, #42).
       const asked = context === undefined ? humourWords(text) : null
-      if (asked) await writePreferences(dir, { humour: asked, at: new Date().toISOString() })
+      if (asked === 'clean') await writePreferences(dir, { humour: 'clean', at: new Date().toISOString() })
       const { character, personaRefused } = await characterOf(id)
       // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
       let humourCap: Humour | undefined

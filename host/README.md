@@ -407,15 +407,17 @@ restart or a lost session.
 ### The humour dial: clean, cheeky, crude
 
 The ceiling for a person is computed by host code (`humourCeiling`): crude
-needs an `adult` profile **and** an opt-in, either the profile's `humour:
-"crude"` setting or the person's own explicit words in a direct talk ("you
-can swear with me", "be crude with me"), which the host matches and records
-in `<root>/people/<id>/preferences.json`. "Keep it clean" or "no more
-swearing" turns it down the same way. The match is a pattern, not
-understanding: it needs the words aimed at the villager and refuses a
-negation just before them ("please don't be crude with me"), but reported
-speech ("he told her to be crude with me") still counts as an opt-in. Child, teen and unknown profiles top out
-at cheeky. A line heard at a table round never opts anyone in. At the table a
+needs an `adult` profile **and** the operator's `humour: "crude"` setting in
+that profile (a `VILLAGER_PROFILES` file). Words in a talk never
+raise it: the host cannot yet tell who is typing at a shared screen, so "you
+can swear with me" said to Sam's villager by someone else must not opt Sam in
+(Sentinel, #42). The person's own words can only turn it down: "keep it clean"
+or "no more swearing" in a direct talk is recorded in
+`<root>/people/<id>/preferences.json`, and preferences only ever lower the
+level. Child, teen and unknown profiles top out at cheeky, and a persona's
+`humour.style` is left out of their prompt entirely; for adults it reaches the
+prompt as quoted data, never as an instruction. A line heard at a table round
+never changes anyone's setting. At the table a
 crude villager is lowered to cheeky for the turn unless every listed person
 has crude (`humourCap` on the turn; the host adds "keep it cheeky this turn"
 beside the page's context, which itself is passed on unchanged). The prompt
@@ -515,6 +517,14 @@ process on the same session and a changed note does not; words after a note
 write are dropped). Each new rule was mutated once and a check failed.
 
 ## Sketches (#42 prototype, November 7, 2026)
+
+Drawings per person are capped at 200 (`MAX_SKETCHES`), and one upload at a
+time per person is accepted (409 otherwise). A drawing handed to a villager is
+also kept by the Claude Agent SDK in that villager's session transcript, under
+`~/.claude/projects/<escaped notes dir>/`, outside `VILLAGE_ROOT`, the same as
+conversation text (`persistSession` defaults to true). Decide where session
+files live (for example `CLAUDE_CONFIG_DIR` under `VILLAGE_ROOT`) before real
+family data arrives.
 
 `src/sketch.ts`. A drawing from the held notepad is a PNG. The host checks it
 before anything reads it: strict base64, at most 1 MB, the PNG signature, IHDR

@@ -267,11 +267,18 @@ export async function writePreferences(personDir: string, prefs: Preferences) {
  * profile (trusted data) and an opt-in (the profile's setting or the person's
  * own words). Child, teen and unknown profiles top out at cheeky.
  */
+const HUMOUR_RANK: Record<Humour, number> = { clean: 0, cheeky: 1, crude: 2 }
+
+/**
+ * Crude comes only from the operator's profile (trusted config) for an adult: the host cannot
+ * yet tell who is typing at a shared screen, so words in a talk never raise it (Sentinel, #42).
+ * Preferences, recorded from the person's own words, can only turn it down.
+ */
 export function humourCeiling(profile: Profile, prefs: Preferences, persona: Persona): Humour {
-  const chosen = prefs.humour ?? profile.humour
-  if (chosen === 'crude') return profile.age === 'adult' ? 'crude' : 'cheeky'
-  if (chosen) return chosen
-  return persona.humour.lean
+  let level: Humour = profile.humour ?? persona.humour.lean
+  if (level === 'crude' && profile.age !== 'adult') level = 'cheeky'
+  if (prefs.humour && prefs.humour !== 'crude' && HUMOUR_RANK[prefs.humour] < HUMOUR_RANK[level]) level = prefs.humour
+  return level
 }
 
 export const styleNote = (person: string) => `how-${person}-likes-to-talk.md`

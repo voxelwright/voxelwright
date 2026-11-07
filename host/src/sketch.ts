@@ -9,7 +9,7 @@
 //   sketches/<sid>.png   the drawing, at most 1536 px a side and 1 MB
 //   sketches.jsonl       one line per event: drawn (with the person's words), given (to whom), made (which item)
 import { randomBytes } from 'node:crypto'
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { extractModule, MAKER_PROMPT, oneShot, type Call } from './villager-input.ts'
@@ -74,24 +74,45 @@ type Send = (res: ServerResponse, status: number, value: unknown) => void
  * `/people/:id/sketches/:sid` (GET the PNG). The person is already checked by
  * the caller; only their own folder is read or written.
  */
+/** Drawings kept per person; past this the post is refused until some are cleared (Sentinel, #42). */
+export const MAX_SKETCHES = 200
+/** One drawing upload at a time per person, like the prop maker's busy guard (Sentinel, #42). */
+const drawing = new Set<string>()
+
 export async function sketchRoute(personDir: string, sid: string | undefined, req: IncomingMessage, res: ServerResponse, send: Send) {
   if (sid === undefined && req.method === 'POST') {
-    let b: { png?: unknown; words?: unknown }
+    if (drawing.has(personDir)) return send(res, 409, { error: 'already saving a drawing' })
+    drawing.add(personDir)
     try {
-      b = ((await bigBody(req, Math.ceil(MAX_PNG_BYTES / 3) * 4 + 4096)) ?? {}) as typeof b
-    } catch {
-      return send(res, 400, { error: 'expected JSON {"png": base64, "words"?} of at most 1 MB' })
+      return await saveSketch(personDir, req, res, send)
+    } finally {
+      drawing.delete(personDir)
     }
-    const checked = checkPng(b.png)
-    if ('reason' in checked) return send(res, 400, { error: checked.reason })
-    if (b.words !== undefined && (typeof b.words !== 'string' || b.words.length > MAX_WORDS)) return send(res, 400, { error: `words are at most ${MAX_WORDS} characters` })
-    const id = randomBytes(6).toString('hex')
-    await mkdir(sketchDir(personDir), { recursive: true, mode: 0o700 })
-    await writeFile(join(sketchDir(personDir), `${id}.png`), checked.png, { mode: 0o600 })
-    const words = typeof b.words === 'string' ? b.words.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : ''
-    await append(indexFile(personDir), { at: new Date().toISOString(), id, drawn: true, w: checked.w, h: checked.h, bytes: checked.png.length, ...(words ? { words } : {}) })
-    return send(res, 200, { id, w: checked.w, h: checked.h })
   }
+  return readSketches(personDir, sid, req, res, send)
+}
+
+async function saveSketch(personDir: string, req: IncomingMessage, res: ServerResponse, send: Send) {
+  const kept = await readdir(sketchDir(personDir)).then((f) => f.filter((n) => n.endsWith('.png')).length, () => 0)
+  if (kept >= MAX_SKETCHES) return send(res, 409, { error: `at most ${MAX_SKETCHES} drawings are kept` })
+  let b: { png?: unknown; words?: unknown }
+  try {
+    b = ((await bigBody(req, Math.ceil(MAX_PNG_BYTES / 3) * 4 + 4096)) ?? {}) as typeof b
+  } catch {
+    return send(res, 400, { error: 'expected JSON {"png": base64, "words"?} of at most 1 MB' })
+  }
+  const checked = checkPng(b.png)
+  if ('reason' in checked) return send(res, 400, { error: checked.reason })
+  if (b.words !== undefined && (typeof b.words !== 'string' || b.words.length > MAX_WORDS)) return send(res, 400, { error: `words are at most ${MAX_WORDS} characters` })
+  const id = randomBytes(6).toString('hex')
+  await mkdir(sketchDir(personDir), { recursive: true, mode: 0o700 })
+  await writeFile(join(sketchDir(personDir), `${id}.png`), checked.png, { mode: 0o600 })
+  const words = typeof b.words === 'string' ? b.words.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : ''
+  await append(indexFile(personDir), { at: new Date().toISOString(), id, drawn: true, w: checked.w, h: checked.h, bytes: checked.png.length, ...(words ? { words } : {}) })
+  return send(res, 200, { id, w: checked.w, h: checked.h })
+}
+
+async function readSketches(personDir: string, sid: string | undefined, req: IncomingMessage, res: ServerResponse, send: Send) {
   if (sid === undefined && req.method === 'GET') {
     // The index folded per drawing, newest first.
     const raw = await readFile(indexFile(personDir), 'utf8').catch(() => '')
