@@ -1305,8 +1305,8 @@ placement) is a later unit; the speech variant has no touch path.
 
 ## Themes (#50 prototype)
 
-`?theme=<id>` restyles the whole home: `sixteen-bit` (16-bit pixel art) or `neon-night`
-(a rain-soaked neon night). Without `?theme=` nothing changes: the theme plugin isn't loaded
+`?theme=<id>` restyles the whole home: `sixteen-bit` (16-bit pixel art), `neon-night`
+(a rain-soaked neon night) or `comic` (comic-book halftone). Without `?theme=` nothing changes: the theme plugin isn't loaded
 and postfx reads the default theme, whose values are its old literals. A seeded, clock-fixed
 `?q=low` capture against the code before themes differs by a mean of 0.30 to 0.34 (seat) and
 0.30 (iso), against 0.17 to 1.68 between two runs of the old code.
@@ -1372,9 +1372,23 @@ exterior and window still show a garden. Below the 9/10 bar; this round proves t
 `node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
 browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
 
+Comic-book halftone (`?theme=comic`): three stages in `src/theme/fx/`. `chroma` shifts the red
+and blue plates by 0.05% of the screen height (3 taps, no pass). `halftone` adds the surface
+colour (`diffuseColor`) to the scene pass, so lit over surface colour is the light on each
+pixel: the light snaps to whole stops (flat shadow shapes) and round dots print only below the
+room's ambient light, so a dark fridge in the sun stays clean. `ink` draws lines from the
+inverse-depth Laplacian and from normal folds that also bend the depth (which keeps out
+additive glows). `motion.characterFps: 12` holds every villager's pose for a twelfth of a
+second (`villagers/rig.ts`); camera, roots and motes stay at frame rate. `?drop=chroma,ink`
+leaves stages out to measure them. Measured GPU p50 / p95: seated high 7.4 / 11.4 (baseline
+7.8 / 11.1 in the same session), iso high 6.5 / 8.1 (6.5 / 8.6), seated low 3.7 / 4.9
+(3.1 / 4.7). Look, three fresh Opus rounds, category means 5.1, 5.3 and 5.6: the scorers still
+want flatter texture (wood grain, rug), less specular, lighter ink on thin geometry in iso,
+and no dots behind the steam. Known fault: halftone without ink (`?drop=ink`) renders at under
+1 fps on both tiers, reproducible; the preset always has both, and the cause is not found.
+
 Not built yet: switching themes live with a transition, saving, editing and deleting presets,
-the per-villager "keep my costume" toggle, characters on twos from `motion.characterFps`,
-and the comic-book and hand-painted looks.
+the per-villager "keep my costume" toggle, and remaking props and costumes in the new style.
 
 ### A theme written from a sentence
 
