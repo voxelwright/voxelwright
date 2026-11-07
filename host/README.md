@@ -469,7 +469,41 @@ mid-reply on a banned motif ("while the kettle... no, stop"), stage
 directions in asterisks still appear now and then, and first text on a
 process's first turn ran 4 to 20 s in these runs on a busy machine.
 
-`npm run check-villager`: 173 of 173 (new: four phrasings that are not opt-ins; the defaults and templates pass
+### Round two: distinct villagers (November 7, 2026)
+
+Two blind judges (Opus and GPT-6.1 Sol) found Dumpling, Tuft and Moss told
+apart by their jobs more than by who they are. Round two added `decides`,
+`tastes`, `frictions` and `mistakes` to the persona and rewrote each
+`register` for rhythm (see the defaults above). The prompt also dropped the
+"want the full plan?" closer that every villager copied. It now says to end
+on the last real point, never to use asterisk actions or correct a phrase out
+loud, never to invent the person's circumstances or police an adult's
+choices, to take a stated fact as a fact, to give conditional advice with
+what to check when fees or prices are unknown, to treat dietary needs as hard
+limits with separate pans or trays, and to answer a child's question as asked.
+
+`node test/persona-identify.ts --model haiku --out id.json` sends 12 everyday
+lines (quit my job, a forgotten birthday, pineapple on pizza, a tattoo, an
+ex) to all three through the real host. One fresh Opus judge per reply,
+with the names stripped, picks who said it from the persona descriptions.
+Chance is 33%.
+
+| Run | Accuracy | Dumpling | Tuft | Moss |
+| --- | --- | --- | --- | --- |
+| old prompt (7871cc0), Haiku | 52.8% | 4/12 | 6/12 | 9/12 |
+| round two, Haiku | 94.4% | 11/12 | 11/12 | 12/12 |
+| round two, Sonnet | 86.1% | 10/12 | 9/12 | 12/12 |
+
+A reply that names the villager's own trade was rare (7 and 6 of 36), and
+without those the judge was right 27 of 29 (Haiku) and 25 of 30 (Sonnet).
+The per-reply eval above, rerun on the same 47 turns, did not move: Haiku
+8.5, 6.9, 5.4, 6.9, 8.9, 8.4 and Sonnet 8.7, 7.3, 5.9, 7.5, 9.0, 9.0. That
+judge sees one reply and no persona, so it cannot see one villager differ
+from another. Haiku's adapts fell 0.4, mostly on cards it found long and on
+traits applied where they do not fit (Moss's caution in a silly counting
+game). The child turns rose with Haiku (8.0, 8.5, 5.8, 8.8, 9.8).
+
+`npm run check-villager`: 191 of 191 (round two: the cast differ in decides, register and mistakes; templates carry the new fields; a persona without them is accepted and its prompt leaves them out; eight malformed or instruction-like new fields refused; the new fields reach the prompt as quoted data; no offer-of-more closer; the grounding, diet and child-question rules are in the prompt). Round one: 173 of 173 (new: four phrasings that are not opt-ins; the defaults and templates pass
 their own check; 14 hostile or malformed personas refused; template fields
 overridden; profile parsing; persona and notes leave tools, MCP servers,
 settings and the context and route paragraphs unchanged; a note claiming the
