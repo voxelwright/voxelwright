@@ -1,4 +1,4 @@
-// npm run villager -- [--agent claude|stub] [--model sonnet] [--port 5190] [--root ~/.village]
+// npm run villager -- [--agent claude|stub] [--model sonnet] [--router-model sonnet] [--maker-model sonnet] [--port 5190] [--root ~/.village]
 // VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the synthetic people; the default is alex:Alex.
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -6,11 +6,14 @@ import { parseArgs } from 'node:util'
 import { Context } from 'cordis'
 import villager, { parsePeople } from './villager.ts'
 import { claudeAgent, stubAgent } from './villager-agent.ts'
+import { claudeMaker, claudeRouter, stubMaker, stubRouter } from './villager-input.ts'
 
 const { values } = parseArgs({
   options: {
     agent: { type: 'string', default: 'claude' },
     model: { type: 'string', default: 'sonnet' },
+    'router-model': { type: 'string', default: 'sonnet' },
+    'maker-model': { type: 'string', default: 'sonnet' },
     port: { type: 'string', default: '5190' },
     root: { type: 'string', default: join(homedir(), '.village') },
   },
@@ -34,6 +37,8 @@ const fiber = root.plugin(villager, {
   port: Number(values.port),
   people,
   agent: values.agent === 'stub' ? stubAgent() : claudeAgent(values.model),
+  router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
+  maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
 })
 await fiber.await()
 console.log(`villager (${values.agent}) for ${Object.keys(people ?? { alex: 1 }).join(', ')} listening on 127.0.0.1:${root.villager.port}`)

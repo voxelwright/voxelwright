@@ -46,7 +46,9 @@ export default {
   inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
     // ?talk=notebook: the richer notebook (talkbook.ts) takes the book instead (#42 prototype).
-    if (new URLSearchParams(location.search).get('talk') === 'notebook') return
+    // With the always-on input (?talk=npc&input=held|speech) the same book is the journal.
+    const q = new URLSearchParams(location.search)
+    if (q.get('talk') === 'notebook' || (q.get('talk') === 'npc' && ['held', 'speech'].includes(q.get('input') ?? ''))) return
     const { scene } = ctx.stage
     const { view, entries } = ctx
     const lines = readLines()

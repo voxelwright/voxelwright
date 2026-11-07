@@ -18,7 +18,14 @@ interface Villager { id: string; name: string; awake: boolean; ribbon: RGB; mark
 
 // Synthetic people until family isolation is proven (AGENTS.md). Only alex has
 // a villager on the host; June and Bram are painted placeholders that say so.
-const VILLAGERS: Villager[] = [
+const query = new URLSearchParams(location.search)
+/** With the always-on input (?talk=npc&input=held|speech, #42) this book is the journal: one ribbon per villager in the room, all awake. */
+const JOURNAL = query.get('talk') === 'npc' && (query.get('input') === 'held' || query.get('input') === 'speech')
+const VILLAGERS: Villager[] = JOURNAL ? [
+  { id: 'alex', name: 'Dumpling', awake: true, ribbon: [178, 74, 54], mark: 'sprig' },
+  { id: 'sam', name: 'Tuft', awake: true, ribbon: [196, 146, 40], mark: 'sun' },
+  { id: 'mia', name: 'Moss', awake: true, ribbon: [112, 86, 160], mark: 'moon' },
+] : [
   { id: 'alex', name: 'Alex', awake: true, ribbon: [46, 96, 66], mark: 'sprig' },
   { id: 'june', name: 'June', awake: false, ribbon: [190, 138, 44], mark: 'sun' },
   { id: 'bram', name: 'Bram', awake: false, ribbon: [64, 82, 138], mark: 'moon' },
@@ -262,7 +269,7 @@ export default {
   name: 'talkbook',
   inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
-    if (new URLSearchParams(location.search).get('talk') !== 'notebook') return
+    if (query.get('talk') !== 'notebook' && !JOURNAL) return
     const { scene, camera, renderer } = ctx.stage
     const { view, entries } = ctx
     const phys = ctx.stage.features().has('phys')
@@ -274,7 +281,9 @@ export default {
     let spread = -1 // talk spreads: -1 follows the latest
     const ticked = readJson<Record<string, boolean>>(TASKS_KEY, {})
     const unsent = readJson<{ person: string; text: string }[]>(UNSENT_KEY, [])
-    const said: Said[] = []
+    /** What was said, per villager. */
+    const saidBy = new Map<string, Said[]>()
+    const saidOf = (id: string) => saidBy.get(id) ?? saidBy.set(id, []).get(id)!
     let hostAway = false
     let draft = ''
     let caretOn = true
@@ -510,7 +519,7 @@ export default {
     const talkRows = (): Row[] => {
       const rows: Row[] = []
       const width = PW - 220
-      for (const line of said) {
+      for (const line of saidOf(v().id)) {
         if (line.from === 'person') {
           for (const text of wrap(line.text, PERSON_HAND, width)) rows.push({ text, font: PERSON_HAND, ink: INK, x: 120 })
           if (line.unsent) rows.push({ text: 'kept here, not sent', font: SMALL_PENCIL, ink: PENCIL_INK, x: 600 })
@@ -587,7 +596,7 @@ export default {
       g.textAlign = 'left'
       if (p.page === 0) title(g, 'Talk')
       else inkText(g, `Talk · ${v().name}'s villager`, side === 'left' ? 110 : 120, 150, SMALL_PENCIL, 'rgba(86, 80, 74, 0.55)')
-      if (p.page === 0 && hostAway && said.length === 0) inkText(g, AWAY.split('.')[0] + '.', 160, baseline(0), PENCIL, PENCIL_INK)
+      if (p.page === 0 && hostAway && saidOf(v().id).length === 0) inkText(g, AWAY.split('.')[0] + '.', 160, baseline(0), PENCIL, PENCIL_INK)
       page.forEach((row, i) => {
         inkText(g, row.text, row.x, baseline(i), row.font, row.ink, PW - row.x - 60)
         if (row.nib && !row.text) {
@@ -861,7 +870,7 @@ export default {
       input.value = ''
       const mine: Said = { from: 'person', text }
       const reply: Said = { from: 'villager', text: '', writing: true }
-      said.push(mine, reply)
+      saidOf(who.id).push(mine, reply)
       spread = -1
       writing = reply
       shown = 0
@@ -956,6 +965,10 @@ export default {
     const enter = () => {
       if (open) return
       open = true
+      if (JOURNAL && !talking) {
+        saidBy.clear()
+        void loadHistory()
+      }
       focus = -1
       view.focus(focusPose())
       updateInput()
@@ -1031,19 +1044,38 @@ export default {
       }
     }, 'talk notebook controls')
 
+    // The always-on input opens the journal at a villager or section (#42).
+    ctx.on('village/journal', ({ person, section: wanted }) => {
+      const index = VILLAGERS.findIndex((x) => x.id === person)
+      if (!open) {
+        // Closed: go straight to the page, no leaves to turn behind a shut cover.
+        if (index >= 0) vi = index
+        if (wanted) section = wanted
+        spread = -1
+        dirty = true
+      } else {
+        if (index >= 0) pickVillager(index)
+        if (wanted) pickSection(wanted)
+      }
+      if (!open) entries.choose('notebook')
+    })
+
     let removeEntry: (() => void) | null = null
     ctx.effect(() => () => removeEntry?.(), 'talk notebook entry')
 
     // History: what was said with Alex, then lines this browser kept but could not send.
     const loadHistory = async () => {
-      const lines = await conversation('alex')
-      hostAway = lines === null
-      for (const l of lines ?? []) {
-        if (l.from === 'person' && l.text) said.push({ from: 'person', text: l.text })
-        else if (l.from === 'villager') said.push(l.text ? { from: 'villager', text: l.text } : { from: 'note', text: 'No answer came that time.' })
+      for (const who of VILLAGERS.filter((x) => x.awake)) {
+        const lines = await conversation(who.id)
+        if (who.id === 'alex') hostAway = lines === null
+        const said = saidOf(who.id)
+        for (const l of lines ?? []) {
+          if (l.from === 'person' && l.text) said.push({ from: 'person', text: l.text })
+          else if (l.from === 'villager') said.push(l.text ? { from: 'villager', text: l.text } : { from: 'note', text: 'No answer came that time.' })
+        }
+        for (const u of unsent) if (u.person === who.id) said.push({ from: 'person', text: u.text, unsent: true })
       }
-      for (const u of unsent) if (u.person === 'alex') said.push({ from: 'person', text: u.text, unsent: true })
-      const last = said.filter((l) => l.from === 'villager').pop()
+      const last = saidOf('alex').filter((l) => l.from === 'villager').pop()
       if (last && voice.dataset.talk === 'quiet') {
         voice.dataset.talk = 'remembered'
         announce(last.text)
