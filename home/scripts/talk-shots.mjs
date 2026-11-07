@@ -88,6 +88,8 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 const base = `http://localhost:${devPort}/`
 const suffix = look ? `&look=${look}` : ''
 const timings = []
+/** When the "sent" frames were taken, by the page's clock. */
+const sent = []
 
 async function session(name, viewport, q, fn, extra = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, ...extra })
@@ -152,11 +154,24 @@ try {
     await page.keyboard.type("What's for dinner tonight?", { delay: 40 })
     await page.waitForTimeout(500)
     await shot('writing')
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(150)
-    await shot('sent')
-    await page.waitForTimeout(500)
+    // A screenshot can take a second or more on a loaded machine: shoot at once, check from the
+    // page's own clock that the note was still in flight, and send again if the frame missed it.
+    for (let attempt = 0; ; attempt++) {
+      await page.keyboard.press('Enter')
+      await shot('sent')
+      const s = await state(page)
+      sent.push({ attempt, flying: s.input.flying, sentAgo: +s.input.sentAgo.toFixed(2) })
+      if (s.input.flying || attempt === 3) break
+      await until(page, (x) => x.cards.alex?.finished && !x.pending)
+      await page.keyboard.press('Escape')
+      await until(page, (x) => x.mode === 'room', 5000)
+      await glide(page, KITCHEN)
+      await page.waitForTimeout(800)
+      await page.keyboard.type("What's for dinner tonight?", { delay: 20 })
+    }
+    await page.waitForTimeout(300)
     await shot('sent-late')
+    sent.push({ late: true, sentAgo: +(await state(page)).input.sentAgo.toFixed(2) })
     await until(page, (s) => s.cards.alex?.finished && s.cards.alex.text.length > 40)
     await page.waitForTimeout(800)
     await shot('reply')
@@ -199,7 +214,7 @@ try {
     await seatThree(page)
     await tableRound(page, shot)
   }, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
-  console.log(JSON.stringify({ look: look ?? 'current', out, timings }))
+  console.log(JSON.stringify({ look: look ?? 'current', out, timings, sent }))
 } finally {
   await browser.close().catch(() => {})
   for (const c of children) process.kill(-c.pid, 'SIGTERM')

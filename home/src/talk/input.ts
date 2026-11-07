@@ -141,8 +141,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const PW = 1024, PH = 600
   const [paperCanvas, paper] = canvas(PW, PH)
   const paperTex = toTexture(paperCanvas)
-  // Look a holds the pad in the room's light, so it glows less.
-  const paperMat = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.92, emissive: '#ffffff', emissiveMap: paperTex, emissiveIntensity: LOOK === 'a' ? 0.12 : 0.32 })
+  // Look a: the paper is unlit at the reply slips' level, so a lamp near the camera never bleaches the words (#42 regroup).
+  const paperMat: THREE.Material = LOOK === 'a'
+    ? new THREE.MeshBasicMaterial({ map: paperTex, color: new THREE.Color(0.8, 0.75, 0.65), fog: false })
+    : new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.92, emissive: '#ffffff', emissiveMap: paperTex, emissiveIntensity: 0.32 })
   const board = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 })
   const PADW = 1.0, PADH = 0.6
   const back = new THREE.Mesh(new RoundedBoxGeometry(PADW + 0.04, PADH + 0.05, 0.02, 2, 0.012), board)

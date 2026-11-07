@@ -189,7 +189,7 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
     const words = el.querySelector('.said')?.textContent ?? ''
     const px = said ? 16 : 19
     g.font = `${beat ? 'italic ' : ''}${px}px ${BOOK}`
-    g.fillStyle = said ? '#5a4434' : '#24170f'
+    g.fillStyle = said ? '#46321f' : '#24170f'
     g.textBaseline = 'alphabetic'
     let lines = wrap(g, words, w - 44)
     if (said && lines.length > 3) lines = [...lines.slice(0, 2), lines[2].replace(/\s*\S*$/, '') + ' …']
@@ -255,7 +255,7 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
       // Held, not pasted on the glass: it sways a hair, and settles as it appears.
       slip.mesh.rotateX((1 - slip.fade) * 0.5)
       // Whoever speaks now is full strength; what was said before steps back.
-      slip.mat.opacity = slip.fade * (el.classList.contains('said') ? 0.68 : 1)
+      slip.mat.opacity = slip.fade * (el.classList.contains('said') ? 0.8 : 1)
       slip.mesh.visible = true
     }
   }

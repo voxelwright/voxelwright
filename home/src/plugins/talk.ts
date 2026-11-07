@@ -587,12 +587,49 @@ export default {
       for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject || n.userData.hud) return false
       return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
     }
+    /** While a shot is searched, only the meshes near its subject are tested: far fewer rays to cast. */
+    let nearby: THREE.Object3D[] | null = null
+    const around = (at: THREE.Vector3, reach: number) => {
+      const found: THREE.Object3D[] = []
+      const sphere = new THREE.Sphere()
+      stage.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh || !solid(mesh)) return
+        if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere()
+        sphere.copy(mesh.geometry.boundingSphere!).applyMatrix4(mesh.matrixWorld)
+        if (sphere.center.distanceTo(at) - sphere.radius < reach) found.push(mesh)
+      })
+      return found
+    }
     const clear = (from: THREE.Vector3, to: THREE.Vector3) => {
       const d = to.clone().sub(from)
       raycaster.set(from, d.clone().normalize())
       raycaster.far = d.length()
       raycaster.camera = stage.camera
-      return !raycaster.intersectObject(stage.scene, true).some((h) => solid(h.object))
+      const hits = nearby ? raycaster.intersectObjects(nearby, false) : raycaster.intersectObject(stage.scene, true)
+      return !hits.some((h) => solid(h.object))
+    }
+    /**
+     * How many of eighteen points spread across a pose's frame, at its subject's depth, have
+     * something in front of them: a door post or a chair at the edge of the shot counts against it.
+     */
+    const probeCam = new THREE.PerspectiveCamera()
+    const clutter = (pose: Pose, at: THREE.Vector3) => {
+      probeCam.fov = 40
+      probeCam.aspect = stage.camera.aspect
+      probeCam.position.copy(pose.position)
+      probeCam.lookAt(pose.look)
+      probeCam.updateProjectionMatrix()
+      probeCam.updateMatrixWorld()
+      const fwd = probeCam.getWorldDirection(new THREE.Vector3())
+      const depth = at.clone().sub(pose.position).dot(fwd) - 0.25
+      let n = 0
+      for (const u of [-0.9, -0.6, -0.3, 0.3, 0.6, 0.9])
+        for (const v of [-0.7, -0.1, 0.5]) {
+          const dir = new THREE.Vector3(u, v, 0.5).unproject(probeCam).sub(pose.position).normalize()
+          if (!clear(pose.position, pose.position.clone().addScaledVector(dir, depth / Math.max(0.2, dir.dot(fwd))))) n++
+        }
+      return n
     }
     /**
      * A close two-shot: the villager on the left third, room for its card on the
@@ -625,12 +662,27 @@ export default {
       }
       // Clear both ways: from the camera to the head and body, and from the head back to the camera,
       // which catches a camera standing inside furniture (a ray from inside a cushion hits nothing).
-      for (const dist of [1.5, 1.15])
-        for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
-          const pose = shot(base + turn, dist)
-          if (clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position)) return pose
-        }
-      return shot(base, 1.5)
+      // Of the clear poses, the first with nothing in front of the villager anywhere in the frame wins,
+      // or else the one with least (#42 regroup: a door post once filled a third of the shot).
+      let best: Pose | null = null
+      let least = Infinity
+      nearby = around(head, 3.5)
+      try {
+        for (const dist of [1.5, 1.15])
+          for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
+            const pose = shot(base + turn, dist)
+            if (!(clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position))) continue
+            const n = clutter(pose, head)
+            if (n === 0) return pose
+            if (n < least) {
+              least = n
+              best = pose
+            }
+          }
+      } finally {
+        nearby = null
+      }
+      return best ?? shot(base, 1.5)
     }
 
     /**
