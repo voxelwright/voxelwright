@@ -24,6 +24,7 @@ export default {
     garden.position.set(cx - 1.5, 1.6, WALL_Z - 6)
     garden.material.userData.themeRole = 'view'
     garden.userData.seatOnly = true // a painted card: from above it shows over the wall (#42)
+    garden.userData.exterior = true // a theme's world hides it and stands its own (src/theme/world)
     group.add(garden)
 
     const frameMat = new THREE.MeshStandardMaterial({

@@ -3,6 +3,7 @@ import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { costumeVersion, theme, tick } from './index'
 import { PAINTERS } from './paint'
+import { worlds } from './world'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
@@ -139,6 +140,7 @@ export default {
       scene.add(mesh)
       sky = { painter, mesh }
     }
+    const world = worlds(scene)
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
 
@@ -249,6 +251,7 @@ export default {
       }
       renderer.toneMappingExposure = t.light.exposure
       placeSky(t)
+      world.place(t)
       if (force) sweep()
     }
 
@@ -277,6 +280,7 @@ export default {
       for (const m of [...worn.keys()]) unwear(m)
       sweep()
       dropSky()
+      world.drop()
     }, 'theme')
   },
 }

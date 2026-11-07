@@ -72,12 +72,14 @@ export default {
     lawn.position.set((plot.x0 + plot.x1) / 2, 0, (plot.z0 + plot.z1) / 2)
     lawn.receiveShadow = true
     lawn.name = 'diorama garden'
+    lawn.userData.exterior = true // a theme's world hides it (src/theme/world)
     lawn.material.userData.themeRole = 'backdrop'
     group.add(lawn)
     const cut = new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 })
     const plinth = new THREE.Mesh(new THREE.BoxGeometry(plot.x1 - plot.x0 + 0.08, 0.3, plot.z1 - plot.z0), cut)
     plinth.position.set(lawn.position.x, -0.152, lawn.position.z - 0.04)
     plinth.receiveShadow = true
+    plinth.userData.exterior = true
     group.add(plinth)
     const box = (w: number, h: number, d: number, x: number, y: number, z: number, m: THREE.Material) => {
       const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m)
