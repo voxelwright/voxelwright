@@ -75,7 +75,7 @@ export default {
       // Taking the camera (a drag, the wheel, an arrow key) ends the reveal's hold on the view; the villager stays a while.
       // A held WASD key lets go too, once camera.ts turns it into a pan (movein.ts sees the view move off its frame).
       const el = renderer.domElement
-      const onKeyTake = (e: KeyboardEvent) => e.key.startsWith('Arrow') && movein.letGo()
+      const onKeyTake = (e: KeyboardEvent) => e.key.startsWith('Arrow') && !typing() && movein.letGo()
       el.addEventListener('pointerdown', movein.letGo)
       el.addEventListener('wheel', movein.letGo, { passive: true })
       addEventListener('keydown', onKeyTake, true)

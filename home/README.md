@@ -1733,7 +1733,7 @@ drag, the wheel, a held WASD or arrow key ends the hold; the "Back to the house"
 top, or Escape, glides out to the whole house.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 66 checks (first pieces where the ghosts stood, the move-in through the door to a seat, the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 67 checks (first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg (outline, adjusted, close, reveal, built, door, phone), addroom.mp4
 node scripts/check-build-addroom.mjs --look --variant=<name>   # a look prototype (&look=<name>): addroom-{outline,reveal,built}-<name>.jpg
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate

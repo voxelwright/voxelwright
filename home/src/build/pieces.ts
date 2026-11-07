@@ -16,13 +16,15 @@ export const VILLAGER_SEAT_Y = SEAT_Y + 0.12
 
 /**
  * Where on a main piece a villager sits, in the piece's own frame (it faces +z): the seat's
- * middle and the way the sitter faces (a turn from +z). Each is cushioned to VILLAGER_SEAT_Y.
+ * middle, the way the sitter faces (a turn from +z), and the side it steps up from (-1 behind
+ * the seat, as at a table or desk; 1 in front, as at a sofa or a bed's edge). Each is cushioned
+ * to VILLAGER_SEAT_Y.
  */
-export const SEATS: Record<string, Array<{ x: number; z: number; turn: number }>> = {
-  'play-table': [{ x: -0.52, z: 0, turn: Math.PI / 2 }, { x: 0.52, z: 0, turn: -Math.PI / 2 }],
-  sofa: [{ x: -0.38, z: 0.06, turn: 0 }],
-  desk: [{ x: 0, z: 0.24, turn: Math.PI }],
-  bed: [{ x: 0.66, z: 0.45, turn: Math.PI / 2 }],
+export const SEATS: Record<string, Array<{ x: number; z: number; turn: number; from: -1 | 1 }>> = {
+  'play-table': [{ x: -0.52, z: 0, turn: Math.PI / 2, from: -1 }, { x: 0.52, z: 0, turn: -Math.PI / 2, from: -1 }],
+  sofa: [{ x: -0.38, z: 0.06, turn: 0, from: 1 }],
+  desk: [{ x: 0, z: 0.24, turn: Math.PI, from: -1 }],
+  bed: [{ x: 0.66, z: 0.45, turn: Math.PI / 2, from: 1 }],
 }
 
 type Build = () => THREE.Object3D

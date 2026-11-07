@@ -712,6 +712,23 @@ try {
     await page.click('.build-choice [data-choice="apply"]')
     s = await until(page, (x) => !x.draft && x.rooms.length === 4)
     check('"Build it" on the paper tag adds the study as a version', s.rooms.length === 4 && (await versions(page)).at(-1).note === 'Added the study', s.rooms)
+    // In a study the villager steps up to the desk chair from behind it and sits, standing inside the study, clear of the desk.
+    const study = await B(page, () => new Promise((done) => {
+      const t0 = performance.now()
+      const tick = async () => {
+        const w = window.village.talk.where('alex')
+        if (!(w?.state === 'sit' && w.spot === 'buildMovein') && performance.now() - t0 < 20000) return requestAnimationFrame(tick)
+        const P = await import('/src/build/plan.ts')
+        const p = window.villageBuild.plan(), r = window.villageBuild.reveal()
+        const desk = p.furniture.find((f) => f.id === 'study.desk')?.at
+        // The stand-point in the desk's own frame: outside its 1.2 × 0.6 m top.
+        const dx = r.spot[0] - desk.x, dz = r.spot[1] - desk.z, c = Math.cos(desk.yaw), s = Math.sin(desk.yaw)
+        const lx = dx * c - dz * s, lz = dx * s + dz * c
+        done({ seated: Boolean(w?.seated), y: w?.y, inStudy: P.inside(P.floorOf(p, p.rooms.find((x) => x.id === 'study')), r.spot), clearOfDesk: Math.abs(lx) > 0.6 || lz > 0.12 || lz < -0.48, local: [+lx.toFixed(2), +lz.toFixed(2)] })
+      }
+      tick()
+    }))
+    check('move-in: in the study they step up to the desk chair from behind it, inside the study and clear of the desk, and sit', study.seated && Math.abs(study.y - 0.635) < 0.01 && study.inStudy && study.clearOfDesk, study)
 
     // Clarifying lines.
     for (const [line, want] of [['add a room somewhere', /which side|which room/i], ['add a pantry behind the kitchen', /window or a door/i]]) {

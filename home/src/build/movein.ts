@@ -45,7 +45,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
   let label = ''
   let person: string | null = null
   let door: { mid: P; into: P; gap: [P, P] } | null = null
-  let seat: { x: number; z: number; yaw: number } | null = null
+  let seat: { x: number; z: number; yaw: number; from: -1 | 1 } | null = null
   let spot: P = [0, 0]
   let centre: P = [0, 0]
   let startAt = 0
@@ -95,13 +95,13 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
       const { x, z, yaw: py } = main.at
       const options = (SEATS[main.item.kind] ?? []).map((s) => {
         const sx = x + s.x * Math.cos(py) + s.z * Math.sin(py), sz = z - s.x * Math.sin(py) + s.z * Math.cos(py)
-        return { x: sx, z: sz, yaw: py + s.turn }
+        return { x: sx, z: sz, yaw: py + s.turn, from: s.from }
       })
       seat = options.sort((s, t) => (Math.sin(t.yaw) * toCam[0] + Math.cos(t.yaw) * toCam[1]) - (Math.sin(s.yaw) * toCam[0] + Math.cos(s.yaw) * toCam[1]))[0] ?? null
     }
-    // Stand just behind the seat (or short of the room's middle) and hop on.
-    const fwd: P = seat ? [Math.sin(seat.yaw), Math.cos(seat.yaw)] : [0, 0]
-    spot = seat ? [seat.x - fwd[0] * 0.42, seat.z - fwd[1] * 0.42] : [centre[0], centre[1]]
+    // Stand beside the seat on the side it is stepped onto from (behind a stool, in front of a sofa), or in the room's middle, and hop on.
+    const fwd: P = seat ? [Math.sin(seat.yaw) * seat.from, Math.cos(seat.yaw) * seat.from] : [0, 0]
+    spot = seat ? [seat.x + fwd[0] * 0.42, seat.z + fwd[1] * 0.42] : [centre[0], centre[1]]
     // The path: a step either side of the doorway, then, if the piece is in the way, round it.
     const outside: P = [mid[0] - into[0] * 0.45, mid[1] - into[1] * 0.45]
     const inside: P = [mid[0] + into[0] * 0.55, mid[1] + into[1] * 0.55]
@@ -116,7 +116,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
       }
     }
     const face = seat ? seat.yaw : Math.atan2(centre[0] - spot[0], centre[1] - spot[1])
-    setSpot(SPOT, { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, ...(seat ? { seat } : {}) })
+    setSpot(SPOT, { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, ...(seat ? { seat: { x: seat.x, z: seat.z, yaw: seat.yaw } } : {}) })
     room = d.roomId
     label = d.label
     person = who
