@@ -585,6 +585,14 @@ export default {
           const rect = renderer.domElement.getBoundingClientRect()
           return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height]
         },
+        /** The first generated wall piece a level ray meets within `far` metres, whatever the cutaway shows (full walls only). */
+        wallHit: (from: [number, number, number], dir: [number, number, number], far = 3) => {
+          if (!built) return null
+          const ray = new THREE.Raycaster(new THREE.Vector3(...from), new THREE.Vector3(...dir).normalize(), 0, far)
+          ray.layers.enableAll()
+          const hit = ray.intersectObjects(meshes(built).filter((m) => m.userData.wall && !m.userData.cutaway), false)[0]
+          return hit ? { wall: hit.object.userData.wall as string, distance: +hit.distance.toFixed(3), part: hit.object.parent?.name ?? '' } : null
+        },
         /** Floors drawn, one per room. */
         floors: () => (built ? meshes(built).filter((m) => m.name === 'build floor' || m.name === 'build room floor').length : 0),
         rebuildMs: () => rebuildMs,

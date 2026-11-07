@@ -339,6 +339,22 @@ try {
       return { shared: shared.map((w) => ({ id: w.id, openings: w.openings })), bent: p.walls.find((w) => w.id === 'living-room.w2')?.sagitta }
     })
     check('the shared wall is one wall with the double door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.leaves === 2) && built.bent !== 0, built)
+    // The door is a real gap in the generated walls: a level ray at 1 m through its middle, from 1 m inside one room
+    // to 1 m inside the other, meets no wall; the same ray 0.3 m past a jamb meets the shared wall.
+    const gap = await B(page, async () => {
+      const P = await import('/src/build/plan.ts')
+      const p = window.villageBuild.plan()
+      const w = p.walls.find((x) => x.openings.some((o) => o.leaves === 2))
+      const o = w.openings.find((x) => x.leaves === 2)
+      const c = P.curveOf(p, w)
+      const ray = (t, s) => {
+        const [x, z] = P.pointAt(c, t), [nx, nz] = P.normalAt(c, t)
+        return window.villageBuild.wallHit([x - nx * s, 1, z - nz * s], [nx * s, 0, nz * s], 2)
+      }
+      const mid = (o.from + o.to) / 2
+      return { door: [o.from, o.to], through: [ray(mid, 1), ray(mid, -1)], jamb: [ray(o.from - 0.3, 1), ray(o.to + 0.3, -1)] }
+    })
+    check('the doorway is open from both rooms (a ray through it hits no wall; 0.3 m past each jamb it hits the shared wall)', gap.through.every((h) => h === null) && gap.jamb.every((h) => h && built.shared.some((w) => w.id === h.wall)), gap)
 
     // Undo and redo, geometries flat.
     const counts = []
