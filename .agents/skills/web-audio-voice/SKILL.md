@@ -5,7 +5,7 @@ description: Synthesized character voices and short UI sounds with the Web Audio
 
 # Web Audio voices
 
-Version 3, November 7, 2026 (buses, cues, sample sprites and their costs). Version 2 added the shared context and the first-context cost. Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
+Version 3.1, November 7, 2026 (curves as plain arrays). Version 3 covered buses, cues, sample sprites and their costs. Version 2 added the shared context and the first-context cost. Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
 samples, no dependencies. Verified on headless Chrome 158 (Playwright 1.65,
 `channel: 'chrome'`) on macOS; Safari and Firefox are not verified.
 
@@ -50,6 +50,11 @@ t 3.8 kHz, k 2 kHz, p 0.9 kHz) for 12 to 35 ms.
 for the gain envelope (raised-cosine attack over 12%, decay, cosine release to
 0) and for the pitch contour (glide plus vibrato in one array). One automation
 event per parameter, deterministic, and no LFO nodes.
+Pass the curve as a plain packed array, not a typed array: the argument is a
+`sequence<float>`, and Chrome converts a `Float32Array` through its iterator at
+about 200 ns a point (0.8 ms for a 4000-point envelope, most of a cue's
+main-thread cost), a plain array about six times faster, with the same floats
+reaching the param (measured, #52).
 
 **Schedule ahead on the audio clock.** Start at `ctx.currentTime + 0.006`, keep
 a cursor so the next word starts after the last, and round every start and
