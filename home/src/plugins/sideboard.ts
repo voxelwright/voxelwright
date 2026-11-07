@@ -61,9 +61,8 @@ export default {
       new THREE.MeshStandardMaterial({ color: '#fbf3e3', emissive: '#ffd9a0', emissiveIntensity: 0.3, side: THREE.DoubleSide }),
     )
     shade.position.y = 0.22
-    const glow = new THREE.PointLight('#ffc98a', 0.4, 2.2, 1.8)
-    glow.position.y = 0.24
-    lamp.add(base, shade, glow)
+    // Its light is the living room's one lamp-light (lounge.ts): every point light costs every pixel of the house.
+    lamp.add(base, shade)
     group.add(lamp)
     // Framed family photos leaning at the back, and a stack of cookbooks.
     const frame = (kind: 'beach' | 'mountains', seed: number, w: number, h: number, x: number, colour: string) => {
