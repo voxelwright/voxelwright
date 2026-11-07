@@ -6,6 +6,8 @@ import * as THREE from 'three/webgpu'
 import type { Theme } from '../tokens'
 import { neonCity } from './neon'
 import { comicPage } from './comic'
+import { pastoralHills } from './pastoral'
+import { pixelLot } from './pixel'
 
 /** The house's outer bounds in world metres, measured from its walls. */
 export interface House { x0: number; x1: number; z0: number; z1: number; top: number }
@@ -13,7 +15,7 @@ export interface House { x0: number; x1: number; z0: number; z1: number; top: nu
 /** A stood world: its group (added by the manager) and what to free. */
 export interface World { group: THREE.Group; dispose(): void }
 
-const WORLDS: Record<string, (house: House) => World> = { 'neon-city': neonCity, 'comic-page': comicPage }
+const WORLDS: Record<string, (house: House) => World> = { 'neon-city': neonCity, 'comic-page': comicPage, 'pastoral-hills': pastoralHills, 'pixel-lot': pixelLot }
 /** Until presets carry `world` (and check.ts knows it), the flag picks each look's world by id. */
 const BY_THEME: Record<string, string> = { 'neon-night': 'neon-city', comic: 'comic-page' }
 const ON = new URLSearchParams(location.search).get('world') === '1'

@@ -22,12 +22,16 @@ export const SIXTEEN_BIT: Theme = {
   surfaces: {
     // Three value groups: greige plaster in the middle, darker honey wood below it, paint and paper on top.
     wall: { color: '#d4d4d4', tint: 0.4, paint: 'pixel-plaster' },
-    floor: { color: '#a8743e', tint: 0.2, gain: 0.7 },
+    // Broad boards in three values with one-pixel seams: the fine oak grain snaps to one flat brown at 225 rows.
+    floor: { color: '#a8743e', tint: 0.2, gain: 0.84, paint: 'pixel-planks' },
     view: {},
     beam: { gain: 0 },
     glow: {},
     other: {},
+    // A plum drop shadow under every piece, dense enough to survive the palette snap.
+    contact: { paint: 'contact-deep', color: '#3a2630', tint: 0.5 },
   },
+  world: 'pixel-lot',
   fog: { color: '#c8a890', tint: 0.3 },
   post: {
     bloom: { strength: 0.35, radius: 0.3, threshold: 0.95 },

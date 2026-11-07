@@ -24,6 +24,7 @@ export const BLUE_HOUR: Theme = {
     beam: { color: '#8aa0e8', tint: 0.85, gain: 0.3 },
     glow: { color: '#ffc27a', tint: 0.3, gain: 1.25 },
     other: {},
+    contact: { paint: 'contact-deep', color: '#2a3050', tint: 0.5 },
   },
   fog: { color: '#4a5280', tint: 0.6 },
   post: {

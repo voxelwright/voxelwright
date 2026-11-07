@@ -9,7 +9,7 @@ import { shade } from './shade/apply'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
-const SURFACE_ROLES: ReadonlySet<string> = new Set<SurfaceRole>(['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage'])
+const SURFACE_ROLES: ReadonlySet<string> = new Set<SurfaceRole>(['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage', 'contact'])
 
 /**
  * The painted sky stands on the worktable around the dollhouse's yard (x -6.2 to 6.2,
@@ -137,6 +137,7 @@ export default {
       mesh.position.set(SKY.x, SKY.base, SKY.z)
       mesh.name = 'theme sky'
       mesh.userData.themeOwned = true
+      mesh.userData.exterior = true // a theme's world stands its own sky (./world)
       mesh.raycast = () => {}
       scene.add(mesh)
       sky = { painter, mesh }
@@ -172,8 +173,8 @@ export default {
         base = { role: surfaceRole(m), color: m.color?.clone(), emissive: m.emissive?.clone(), roughness: m.roughness, metalness: m.metalness, map: m.map }
         materials.set(m, base)
       }
-      // Optional roles (trim, backdrop) read as `other` in a theme that leaves them out.
-      const s: Surface = t.surfaces[base.role] ?? t.surfaces.other
+      // Optional roles (trim, backdrop) read as `other` in a theme that leaves them out; a contact shadow stays as it is.
+      const s: Surface = t.surfaces[base.role] ?? (base.role === 'contact' ? {} : t.surfaces.other)
       if (base.role === 'glow') {
         if (base.emissive && m.emissive) shifted(base.emissive, s, m.emissive)
       } else {

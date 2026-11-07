@@ -18,6 +18,7 @@ export function contactShadows(villagers: Villager[]): THREE.Mesh[] {
   const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
   return villagers.map((v) => {
     const blob = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false }))
+    blob.material.userData.themeRole = 'contact'
     blob.name = `${v.fig.root.name} shadow`
     blob.renderOrder = -1
     return blob

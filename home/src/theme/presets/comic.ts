@@ -42,6 +42,7 @@ export const COMIC: Theme = {
     beam: { gain: 0.4 },
     glow: {},
     other: { roughness: 1 },
+    contact: { paint: 'contact-deep', color: '#22161c', tint: 0.6 },
     trim: { roughness: 1 },
     backdrop: { roughness: 1 },
   },

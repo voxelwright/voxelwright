@@ -28,6 +28,7 @@ export const NEON_NIGHT: Theme = {
     beam: { color: '#6a7cff', tint: 0.9, gain: 0 },
     glow: { color: '#ff3ab8', tint: 0.85, gain: 0.8 },
     other: { color: '#4a4a90', tint: 0.15, gain: 0.95 },
+    contact: { paint: 'contact-deep', color: '#1a1030', tint: 0.5 },
     // Edges (skirting, window frames, the dollhouse's wall caps and base) turn charcoal with a faint
     // cyan cast: brighter, the caps read as glowing paint bands and pull the eye from the table.
     trim: { color: '#181826', tint: 0.9, emissive: '#2ee8ff', glow: 0.12, roughness: 0.4 },

@@ -60,6 +60,8 @@ export interface Surfaces {
   backdrop?: Surface
   /** Leaves: the garden's trees and shrubs (tagged `'foliage'`). Falls back to `other`. A `paint` here lays a texture on maps the leaves never had. */
   foliage?: Surface
+  /** Soft contact shadows under furniture and villagers (tagged `'contact'`): `color` tints them, a denser `paint` (e.g. 'contact-deep') grounds them harder. Unset leaves them alone. */
+  contact?: Surface
 }
 
 /**

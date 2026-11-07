@@ -318,6 +318,7 @@ export default {
       [-2.55, 3.2, 0.95, 0.65, 0.15], // toy box
       [1.95, 2.0, 1.05, 1.0, -2.3], // reading chair
       [LEFT + 0.32, 2.05, 0.6, 0.6, 0], // basket
+      [1.5, 2.43, 0.42, 0.42, 0], [2.26, 1.5, 0.32, 0.32, 0], // the reading chair's side table and lamp
     ]
     if (talk) prints.push([NEAR_CHAIR.x, NEAR_CHAIR.z, 0.62, 0.62, NEAR_CHAIR.yaw])
     flat.add(contactDecals(prints))
