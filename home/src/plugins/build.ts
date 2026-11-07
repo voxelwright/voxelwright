@@ -5,7 +5,7 @@ import { canvas, paintGlow, toTexture } from '../paint'
 import { MODE } from './camera'
 import { KITCHEN, apply, curveOf, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
 import { build, innerOutline, makeKit, type Built } from '../build/walls'
-import type { PlanHistory } from '../build/history'
+import { ReadOnly, type PlanHistory } from '../build/history'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
 import { draftEdits, resolve, type Draft } from '../build/resolve'
@@ -56,6 +56,8 @@ export default {
     const opened = house().then((h) => {
       history = h
       plan = h.plan
+      // The host is there but the house could not be opened: say why once; every change is refused.
+      if (h.readOnly) say(h.readOnly)
       offHistory = h.onChange((p) => {
         if (!drag) plan = p
         // The outline's own commit is not a change under it.
@@ -295,9 +297,11 @@ export default {
       else {
         const edit = { ...d.edit, ...(d.edit.op === 'moveWall' ? { by: moveAmount(d.from, plan) } : { sagitta: wallOf(plan, WALL).sagitta }) } as Edit
         edits.push(edit)
-        void h.commit([edit], d.kind === 'move' ? 'Moved the wall' : 'Bent the wall').catch(() => {
+        void h.commit([edit], d.kind === 'move' ? 'Moved the wall' : 'Bent the wall').catch((e) => {
           edits.pop()
           plan = h.plan
+          rebuild(plan, true)
+          if (e instanceof ReadOnly) say(e.reasons[0])
         })
       }
       rebuild(plan, true)
@@ -446,9 +450,9 @@ export default {
           committing = false
           outline.close()
           selectWall(null)
-        }, () => {
+        }, (e) => {
           committing = false
-          say('Something moved while I was drawing that. Shall we try again?')
+          say(e instanceof ReadOnly ? e.reasons[0] : 'Something moved while I was drawing that. Shall we try again?')
         })
       },
     })
