@@ -33,7 +33,12 @@ declare module 'cordis' {
     'village/pad'(e: { up: boolean }): void
     /** Text changed on the notepad: `added` characters (negative for deletions). Sent per input event. */
     'village/wrote'(e: { added: number }): void
-    /** The slip was torn off and flies to `to` (a villager id), landing after `seconds`. */
+    /**
+     * Sketching on the pad: the pen or rubber moving (at most one per 75 ms while it moves),
+     * or a stroke undone or the page cleared (once each).
+     */
+    'village/sketched'(e: { tool: 'pen' | 'rubber' | 'undo' | 'clear' }): void
+    /** The slip, or a sketched page, was torn off and flies to `to` (a villager id), landing after `seconds`. */
     'village/sent'(e: Timed & { to?: string; from?: Where; at?: Where }): void
     /** A note found where it goes. `route` is talk.ts's route name; `ok` false when it found nowhere. */
     'village/routed'(e: { route: string; ok: boolean; villager?: string; at?: Where }): void
@@ -93,7 +98,7 @@ export interface Kit {
 /** The cues src/sound/map.ts can reach. A cue may have several variants ('a', 'b', ...) for listening rounds. */
 export type CueName =
   | 'hover' | 'chose' | 'backed' | 'glide' | 'turned' | 'card'
-  | 'pad-up' | 'pad-down' | 'writing' | 'sent' | 'routed' | 'unrouted'
+  | 'pad-up' | 'pad-down' | 'writing' | 'sketch' | 'sent' | 'routed' | 'unrouted'
   | 'ghost' | 'placed' | 'kept' | 'undone' | 'failed'
   | 'book-open' | 'book-close' | 'page' | 'sat' | 'farewell' | 'news' | 'walk' | 'refused'
 

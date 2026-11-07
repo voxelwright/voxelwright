@@ -1099,13 +1099,17 @@ sound; one map turns that into a cue; one player plays it into a bus of one mix.
 
 - **Events** (`src/sound/contract.ts`): `village/hover` (glow starts), `chose`, `backed`,
   `glide` (camera eases), `turned`, `greeted`, `card` (page 0 or the next page), `pad` (up or
-  down), `wrote` (`added` characters), `sent`, `routed` (`ok` false when a note found nowhere),
+  down), `wrote` (`added` characters), `sketched` (pen or rubber moving, at most one per 75 ms;
+  undo; clear), `sent` (a note or a sketched page torn off), `routed` (`ok` false when a note found nowhere),
   `furnish` (ghost, placed, kept, undone, failed), `book`, `page`, `sat`, `farewell`, `news`,
   `walk` (leave, arrive) and `refused` (the closed Workshop door). Each carries a world
   position `at` where one exists, and `seconds` (0 under reduced motion) for timed motions.
 - **Map** (`src/sound/map.ts`): one line per event. Choices to know: `greeted` plays `hover`
   (villagers are entries, so the hover fires with the wave and the cue's gap keeps one),
-  `farewell` plays `sat` (the hop reversed), and a walk sounds on `leave` only.
+  `farewell` plays `sat` (the hop reversed), and a walk sounds on `leave` only. A sketch given
+  to a villager or made into a prop flies like a note, so it sends `sent`; a sketch's prop
+  lands through furnishing (`furnish` placed). A villager's line waiting its turn is silent:
+  it sounds as `card` when it goes up, and a sound for something not yet on screen is noise.
 - **Buses** (`src/voice/buses.ts`): ui, world, voices and music, then the master (mute, a 20 ms
   ramp) and one stateless soft limiter (linear to 0.6, never above -1 dBFS), built lazily once
   per context. The voices duck the music: -6 dB, 80 ms down, back 0.6 s after the last word.

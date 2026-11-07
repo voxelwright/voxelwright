@@ -13,6 +13,7 @@
 //             no route, so nothing drawn on it can steer where lines go.
 // Every drawing is kept on the host under the person who drew it, for the journal.
 import * as THREE from 'three/webgpu'
+import type { Context } from 'cordis'
 import { releaseGpu, type Stage } from '../kernel'
 import { canvas, toTexture } from '../paint'
 import { authorized, call, type Outcome } from '../villager'
@@ -53,6 +54,8 @@ export interface SketchHooks {
   say(text: string): void
   /** Something else has the screen (the open journal). */
   blocked(): boolean
+  /** Announce what happened (sound/contract.ts): strokes, undo, a page torn off. */
+  emit: Context['emit']
 }
 
 // ── The host's side: /people/:id/sketches ─────────────────────────────────
@@ -273,13 +276,14 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   }
   const undo = () => {
     if (live) return
-    if (steps.pop()) redrawDone()
+    if (steps.pop()) redrawDone(), hooks.emit('village/sketched', { tool: 'undo' })
     input.setSketching(sketching, sketching && !inked() ? 'draw here, or write a few words' : '')
   }
   const clear = () => {
     if (!strokes().length) return
     steps.push({ kind: 'clear' })
     redrawDone()
+    hooks.emit('village/sketched', { tool: 'clear' })
     input.setSketching(sketching, sketching ? 'draw here, or write a few words' : '')
   }
   /** The page is on its way: a fresh one under it. */
@@ -310,6 +314,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   let down: { id: number; x: number; y: number; started: boolean } | null = null
   /** The pencil's tip on the page, in the layer's own space, while a pointer is over it. */
   let tip: THREE.Vector3 | null = null
+  /** When the last stroke sound was announced: at most one per 75 ms while the pen moves. */
+  let heard = 0
   const addPoints = (e: PointerEvent) => {
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : []
     for (const ev of events.length ? events : [e]) {
@@ -353,6 +359,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     if (down.started) {
       addPoints(e)
       dirty = true
+      if (live && e.timeStamp - heard >= 75) heard = e.timeStamp, hooks.emit('village/sketched', { tool: live.erase ? 'rubber' : 'pen' })
     }
   }
   const onUp = (e: PointerEvent) => {
@@ -557,6 +564,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       return true
     }
     if (!placeNow()) pin.to.set(0, 0.6, 0.8)
+    hooks.emit('village/sent', { seconds: reducedMotion.matches ? 0 : 0.9, at: pin.to })
     await job
     making = false
     const s = furnish.state()
@@ -593,6 +601,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     }
     const pin = tearOff(false)
     pin.held = hooks.figure(to.person) ?? undefined
+    hooks.emit('village/sent', { seconds: reducedMotion.matches ? 0 : 0.9, to: to.person, at: pin.held?.getWorldPosition(new THREE.Vector3()) })
     fresh()
     open(false)
     // Your words go with it as your line; with none, only a plain note that you handed it over.

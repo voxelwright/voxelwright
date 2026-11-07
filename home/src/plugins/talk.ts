@@ -1350,6 +1350,7 @@ export default {
       figure: (person) => cast.find((c) => c.person === person)?.v.fig.root ?? null,
       say: (text) => quip(primary(), text),
       blocked: () => entries.active === 'notebook',
+      emit: ctx.emit.bind(ctx),
     }) : null
     ctx.effect(() => () => {
       sketch?.dispose()
