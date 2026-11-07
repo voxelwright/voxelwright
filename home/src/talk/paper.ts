@@ -216,9 +216,12 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       // Turned a little toward its speaker, a little crooked, and tipping up into place as it appears.
       const toward = el.dataset.tail === 'left' ? -1 : el.dataset.tail === 'right' ? 1 : 0
       slip.c.style.transformOrigin = toward < 0 ? '0 50%' : toward > 0 ? '100% 50%' : '50% 100%'
-      slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg)`
-      // Whoever speaks now is in dark ink; what was said before steps back in lighter ink, still opaque
-      // (see-through, the lamp showed through its words).
+      // Whoever speaks now is in dark ink, full size; what was said before steps back: lighter ink, a little
+      // smaller, lower and paler, but opaque (see-through, the lamp showed through its words; fully alike,
+      // the round's order could not be read: the regroup's rounds 5 and 6).
+      const said = el.classList.contains('said')
+      slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB + (said ? 6 : 0)}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg) scale(${said ? 0.93 : 1})`
+      slip.c.style.filter = said ? 'saturate(0.5) brightness(0.95) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))' : ''
       slip.c.style.opacity = String(slip.fade)
     }
   }
