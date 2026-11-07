@@ -77,6 +77,17 @@ check(
 
 // ── offline renders ─────────────────────────────────────────────────────────
 const context = await browser.newContext()
+// Counts the AudioContexts a page makes, so the checks can tell one shared context from several.
+await context.addInitScript(() => {
+  const Native = window.AudioContext
+  window.audioContexts = 0
+  window.AudioContext = class extends Native {
+    constructor(...args) {
+      super(...args)
+      window.audioContexts++
+    }
+  }
+})
 const errors = []
 const page = await context.newPage()
 page.on('pageerror', (e) => errors.push(String(e)))
@@ -240,14 +251,34 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await live.goto(URL_ALL)
   await live.evaluate(() => window.village.ready(5000))
   await live.waitForTimeout(300)
-  const before = await live.evaluate(() => ({ audio: window.village.music?.audio ?? null, chip: Boolean(document.querySelector('.music-toggle')) }))
+  // The rule is no sound before a gesture, not no context. The one context (shared with the voices)
+  // is made at load, so the page's first-context cost (0.4 to 1.7 s) is not paid by the first key
+  // press. Suspended it renders nothing: its audio clock stands still, and a tap on its output would
+  // see no blocks, so that is the proof of silence. The loop is still fetched only on the first gesture.
+  const before = await live.evaluate(async () => {
+    const a = window.village.music?.audio ?? null
+    const t0 = a?.currentTime
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      made: Boolean(a),
+      state: a?.state,
+      clockMoved: a ? a.currentTime - t0 : null,
+      atZero: a?.currentTime === 0,
+      contexts: window.audioContexts,
+      shared: a === window.village.babble?.audio,
+      chip: Boolean(document.querySelector('.music-toggle')),
+      playing: Boolean(window.village.music?.bed?.playing),
+    }
+  })
+  const fetched = requests.some((u) => u.includes('groove-music'))
   check(
-    'No sound before a gesture: no AudioContext, the loop is not even fetched',
-    before.audio === null && before.chip && !requests.some((u) => u.includes('groove-music')),
-    JSON.stringify({ ...before, fetched: requests.some((u) => u.includes('groove-music')) }),
+    'No sound before a gesture: one context, shared with the voices, is suspended with its audio clock at 0, and the loop is not fetched',
+    before.made && before.state === 'suspended' && before.clockMoved === 0 && before.atZero && before.contexts === 1 && before.shared && before.chip && !before.playing && !fetched,
+    JSON.stringify({ ...before, fetched }),
   )
   await live.mouse.click(400, 300)
   await waitForBed(live)
+  await live.waitForFunction(() => window.village.music.audio.state === 'running', null, { timeout: 5000 }).catch(() => {})
   await tap(live)
   const t0 = await now(live)
   const state = await live.evaluate(() => ({ state: window.village.music.audio.state, loop: window.village.music.bed.loop, duration: window.village.music.bed.buffer.duration }))
@@ -378,24 +409,92 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   const focusShown = await live.evaluate(() => getComputedStyle(document.querySelector('.music-credit')).opacity)
   check('Tab reaches the note and the credit shows without a hover', focusShown === '1', `${tabs} Tab presses, opacity ${focusShown}`)
 
-  // Unload: stop, disconnect, close.
+  // Unload: the music stops and disconnects; the context is shared, so it stays open for the voices
+  // and closes only when both have left.
   const gone = await live.evaluate(async () => {
     const { audio, bed } = window.village.music
     await window.village.unload('music')
     await new Promise((r) => setTimeout(r, 150))
     const before = localStorage.getItem('village.music.muted')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'M', shiftKey: true }))
-    return {
-      state: audio.state,
+    const result = {
+      stateWhileVoicesLoaded: audio.state,
+      voicesStillHaveIt: window.village.babble?.audio === audio,
       stopped: !bed.playing,
       handle: 'music' in window.village,
       note: Boolean(document.querySelector('.music-note')),
       style: [...document.querySelectorAll('style')].some((s) => s.textContent.includes('.music-toggle')),
       shiftMInert: localStorage.getItem('village.music.muted') === before,
     }
+    await window.village.unload('babble')
+    await new Promise((r) => setTimeout(r, 150))
+    return { ...result, stateAfterBothLeft: audio.state }
   })
-  check('Unload stops the loop, closes the AudioContext, removes the note, credit and handle, and Shift+M goes inert', gone.state === 'closed' && gone.stopped && !gone.handle && !gone.note && !gone.style && gone.shiftMInert, JSON.stringify(gone))
+  check(
+    'Unload stops the loop and removes the note, credit and handle; the shared context stays open for the voices and closes when both have left',
+    gone.stateWhileVoicesLoaded !== 'closed' && gone.voicesStillHaveIt && gone.stateAfterBothLeft === 'closed' && gone.stopped && !gone.handle && !gone.note && !gone.style && gone.shiftMInert,
+    JSON.stringify(gone),
+  )
   await live.close()
+}
+
+// The first key press must not freeze the page. Creating the page's first AudioContext used to block the
+// main thread for 0.4 to 1.7 s inside this key press (the same key that starts writing in the always-on
+// input). Measured with long tasks (anything over 50 ms) and a 4 ms timer's largest gap, from the key
+// press until the loop has played for a second, on the whole scene with voices and music. The cost is
+// the browser's first audio device start-up, so this runs in a browser of its own: in the one above,
+// an earlier page has already paid it and the old code passes.
+{
+  const cold = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
+  const p = await (await cold.newContext()).newPage()
+  p.on('pageerror', (e) => errors.push(String(e)))
+  await p.addInitScript(() => {
+    const Native = window.AudioContext
+    window.audioContexts = 0
+    window.AudioContext = class extends Native {
+      constructor(...args) {
+        super(...args)
+        window.audioContexts++
+      }
+    }
+    window.longTasks = []
+    window.ticks = []
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) window.longTasks.push([e.startTime, e.duration])
+    }).observe({ type: 'longtask', buffered: true })
+    let last = performance.now()
+    setInterval(() => {
+      const now = performance.now()
+      window.ticks.push([now, now - last])
+      last = now
+    }, 4)
+    addEventListener('keydown', () => (window.keyAt = performance.now()), true)
+  })
+  await p.goto(`${base}?talk=npc`)
+  await p.evaluate(() => window.village.ready(15000))
+  await p.waitForTimeout(2500) // the scene has settled; the context was made while it loaded
+  await p.keyboard.press('a')
+  await p.waitForFunction(() => window.village.music.bed?.playing && window.village.music.audio.state === 'running', null, { timeout: 8000 }).catch(() => {})
+  await p.waitForTimeout(1000)
+  const key = await p.evaluate(() => {
+    const from = window.keyAt - 2
+    const tasks = window.longTasks.filter(([start, d]) => start + d >= from)
+    const gaps = window.ticks.filter(([t]) => t >= from).map(([, g]) => g)
+    return {
+      contexts: window.audioContexts,
+      state: window.village.music.audio.state,
+      playing: Boolean(window.village.music.bed?.playing),
+      longTasks: tasks.map(([start, d]) => [Math.round(start - window.keyAt), Math.round(d)]),
+      maxGapMs: Math.round(Math.max(0, ...gaps)),
+    }
+  })
+  report.firstKey = key
+  check(
+    'The first key press blocks the main thread for no more than 50 ms: no long task and no timer gap over 50 ms until the loop has played for a second',
+    key.contexts === 1 && key.state === 'running' && key.playing && key.longTasks.length === 0 && key.maxGapMs <= 50,
+    JSON.stringify(key),
+  )
+  await cold.close()
 }
 
 // ?babble=off: no voices to duck for and no speaker button, so the music takes M itself.

@@ -26,14 +26,19 @@ three 0.187.0, cordis 4.0.0-rc.12, vite 8.3.6, typescript 5.9.3, playwright 1.65
 - Frame stats: `renderer.info.render.drawCalls`, `.triangles`;
   memory: `renderer.info.memory.geometries`, `.textures`.
 
-- GPU time per frame (#41): `new WebGPURenderer({ trackTimestamp: true })`, then
-  every frame `renderer.resolveTimestampsAsync('render')` with one call in
-  flight (the pool holds 256 queries; a pending call returns the same promise).
-  It returns the summed pass durations of the latest frame. On the M1 Pro under
-  Metal these overlap (60 to 70 ms per frame at a steady 60 fps), so Village uses
-  `device.queue.onSubmittedWorkDone()` after the frame's submits as GPU ms and
-  keeps the sums as per-pass detail. Launch Chrome with
-  `--enable-webgpu-developer-features` to stop 100 us timestamp rounding.
+- GPU time per frame (#42, verified November 6, 2026): `src/gpu-time.js`
+  wraps `device.createCommandEncoder` so each render and compute pass gets
+  `timestampWrites` into one query set (set on three's reused descriptor for
+  the call only, then cleared); after the frame's submits, `endFrame()`
+  resolves the used queries into a pool of `MAP_READ` buffers. GPU ms is the
+  union of the frame's pass intervals. Do not use three's
+  `resolveTimestampsAsync`: it keeps only per-pass durations, and under Metal a
+  pass's begin is written while earlier passes still run, so sums reach 60 to
+  150 ms at 60 fps. Do not use submit-to-`onSubmittedWorkDone()`: it counts
+  main-thread delay (a 12 ms CPU loop read 16.7 ms p50, up to 31.5 ms p95; the union stayed at
+  8 ms). Verified: GPU-bound, GPU ms equals the frame interval within 0.2 ms.
+  `--enable-webgpu-developer-features` made no difference to quantization in
+  headless Chrome on the M1 Pro.
 - Feature cost on the M1 Pro, kitchen, DPR 2, GPU p50 (bare 7 to 8 ms): phys
   (clearcoat, sheen, glass transmission) +4 ms; csm +2 ms and +286 draw calls;
   gtao at half resolution +5 to 9 ms; traa alone +5 ms, but traa with phys and

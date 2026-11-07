@@ -30,6 +30,13 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   integration branch; confirmed findings are fixed forward. Nothing leaves the
   integration branch unreviewed. A mocked provider proves orchestration only, never a model
   integration. Say which one you ran.
+- Merge gate to main: before merging to main, `npm run perf-gate` in `home/`
+  must pass against main: a consistent 60 fps (under 1% of frames over 20 ms,
+  p99 at most 20 ms, no long task over 50 ms) in the gate scenes and no
+  regression beyond noise, plus GPU headroom at the high tier (GPU p50 under
+  the tier's 13 ms step-down, GPU p95 under 16 ms). It takes under 30 s once
+  the base build is cached. Run it on a quiet machine: other headless Chrome
+  runs share the GPU and move GPU ms (the gate warns when it sees them).
 - Use the seven-lens `.agents/skills/reviewers` review only for changes to
   privacy boundaries, authentication, the data model or migrations (always
   include Codd), network or device control, firmware, or the factory's own
