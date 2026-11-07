@@ -645,7 +645,7 @@ export default {
         const position = head.clone().addScaledVector(dir, 2.5).setY(head.y + 0.85)
         if (clear(position, head) && clear(head, position)) return { position, look: head.clone().setY(head.y - 0.2) }
       }
-      return TABLE_SHOT
+      return tableShot()
     }
 
     // ── Talking with one villager ───────────────────────────────────────────
@@ -690,9 +690,15 @@ export default {
       for (const m of cast) m.tag.classList.remove('shown', 'lit')
     }
 
+    /** The table shot, pulled back on a tall screen so everyone at the table stays in frame. */
+    const tableShot = (): Pose => {
+      const back = THREE.MathUtils.clamp(0.8 / stage.camera.aspect, 1, 1.7)
+      return { position: TABLE_SHOT.look.clone().lerp(TABLE_SHOT.position, back), look: TABLE_SHOT.look }
+    }
+
     const toTable = () => {
       mode = 'table'
-      view.focus(TABLE_SHOT, 5)
+      view.focus(tableShot(), 5)
       const names = seated.map((m) => m.name)
       openSlip(seated.length > 1 ? `Write to the table…` : `Write to ${names[0]}…`, tableChips(), seated.length > 1 ? 'table' : seated[0]!)
     }
@@ -975,12 +981,13 @@ export default {
         current = await upcoming
         if (current && mode === 'table') {
           await pause(0.45)
-          if (showing.get(m)) show(m, 'said')
+          // A narrow screen has room for one line at the table: the next speaker's.
+          if (showing.get(m)) innerWidth < 600 ? hide(m) : show(m, 'said')
         }
       }
       speaker = null
       timing = null
-      if (LOOK === 'b' && mode === 'table') view.focus(TABLE_SHOT, 3)
+      if (LOOK === 'b' && mode === 'table') view.focus(tableShot(), 3)
       for (const o of seated) {
         o.tag.classList.remove('lit')
         o.v.listenTo = null

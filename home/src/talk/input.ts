@@ -172,14 +172,18 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
   // The torn note on its way.
   // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
-  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
+  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: LOOK === 'a' ? THREE.FrontSide : THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
   const NOTEH = PADH * 0.62
   // Look a (#42 regroup): the note folds in three, like a letter, before it flies.
+  // The back of the paper is blank: a folded third shows paper, not mirrored words.
+  const backMat = new THREE.MeshStandardMaterial({ color: '#efe3c8', roughness: 0.95, side: THREE.BackSide, transparent: true, emissive: '#8a7a5a', emissiveIntensity: 0.25 })
   const third = (i: number) => {
     const g = new THREE.PlaneGeometry(PADW / 3, NOTEH)
     const uv = g.attributes.uv
     for (let k = 0; k < uv.count; k++) uv.setX(k, (i + uv.getX(k)) / 3)
-    return new THREE.Mesh(g, flyMat)
+    const face = new THREE.Mesh(g, flyMat)
+    face.add(new THREE.Mesh(g, backMat))
+    return face
   }
   const hingeL = new THREE.Group(), hingeR = new THREE.Group()
   const flyer: THREE.Object3D = LOOK === 'a' ? new THREE.Group() : new THREE.Mesh(new THREE.PlaneGeometry(PADW, NOTEH), flyMat)
@@ -515,8 +519,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const big = Math.min(1.75, (2 * aspect * 0.92) / 1.04, 1.25 / 0.65)
     // Rest and writing poses: scale, x, y, tilt back, turn, roll. Look a (#42 regroup) holds the pad
     // low on the right in perspective, as a hand would; the others hold it square to the view.
+    // On a tall (phone) screen the pad sits bottom right at rest, clear of the journal, and centred while writing.
+    const narrow = aspect < 0.8
     const [rest, up] = LOOK === 'a'
-      ? [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [1, 0.32, -0.66, -0.74, -0.2, 0.07]]
+      ? narrow ? [[0.5, aspect - 0.27, -0.88, -0.8, -0.3, 0.1], [0.86, 0, -0.64, -0.74, -0.12, 0.04]]
+        : [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [1, 0.32, -0.66, -0.74, -0.2, 0.07]]
       : [[0.42, 0.32, -1.03, -0.42, 0.02, -0.05], [1, 0.05, -0.93, -0.62, 0.02, 0.03]]
     const pose = (i: number) => THREE.MathUtils.lerp(rest[i], up[i], raise)
     pad.scale.setScalar(THREE.MathUtils.lerp(pose(0), big, draw))
@@ -541,6 +548,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     journalButton.style.height = `${Math.max(24, Math.min(innerHeight, y1) - y0)}px`
     journalButton.hidden = away
     if (LOOK === 'c') journal.visible = false
+    // Look a on a phone: the journal steps aside while the pad is up for writing.
+    if (LOOK === 'a' && narrow) {
+      journal.visible = raise < 0.5
+      journalButton.hidden ||= raise >= 0.5
+    }
     if (hooks.variant === 'held') {
       const p = screenBox(sheet)
       padRect = { left: p.x0, top: p.y0, width: p.x1 - p.x0, height: Math.max(0, p.y1 - p.y0) }
@@ -600,6 +612,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
         flyer.scale.copy(scl).multiplyScalar(1 - 0.7 * e)
       }
       flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
+      if (LOOK === 'a') backMat.opacity = flyMat.opacity
       flyer.visible = true
       if (flight.t >= 1) {
         flight = null

@@ -30,7 +30,7 @@ export interface Speaker { head: THREE.Vector3; colour: string; name: string }
 // ── a: paper slips in the room ─────────────────────────────────────────────
 interface Slip {
   mesh: THREE.Mesh
-  mat: THREE.MeshStandardMaterial
+  mat: THREE.MeshBasicMaterial
   c: HTMLCanvasElement
   g: CanvasRenderingContext2D
   tex: THREE.CanvasTexture
@@ -60,8 +60,10 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
     const tex = new THREE.CanvasTexture(c)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 4
-    // Lit by the room but drawn over it: a chair or the lamp in front must not cut the words.
-    const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false, roughness: 0.95, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.26, side: THREE.DoubleSide })
+    // Drawn over the room, so a chair or the lamp in front never cuts the words, and unlit at a level
+    // under the bloom threshold, so the lamp over the table never bleaches them (round 1: the slip of
+    // whoever was speaking under the pendant was the faintest thing on screen).
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(0.8, 0.75, 0.65), transparent: true, depthWrite: false, depthTest: false, fog: false, side: THREE.DoubleSide })
     const mesh = new THREE.Mesh(geometry, mat)
     mesh.name = `talk slip ${person}`
     mesh.renderOrder = 6
@@ -96,7 +98,7 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
       slip.tex = new THREE.CanvasTexture(slip.c)
       slip.tex.colorSpace = THREE.SRGBColorSpace
       slip.tex.anisotropy = 4
-      slip.mat.map = slip.mat.emissiveMap = slip.tex
+      slip.mat.map = slip.tex
       slip.mat.needsUpdate = true
     }
     const g = slip.g
@@ -159,19 +161,29 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
     g.stroke()
     // The name on a strip of tape in the speaker's colour, stuck across the top left.
     g.save()
-    g.translate(x0 + 14, y0 - 4)
-    g.rotate(-0.04 + slip.tilt)
-    g.font = `700 ${said ? 15 : 17}px ${HAND}`
-    const nw = g.measureText(who.name).width + 22
-    g.globalAlpha = 0.92
+    g.translate(x0 + 12, y0 - 9)
+    g.rotate(-0.035 + slip.tilt)
+    const th = said ? 24 : 29
+    g.font = `700 ${said ? 17 : 21}px ${HAND}`
+    const nw = g.measureText(who.name).width + 26
+    // Tape in the speaker's colour, a shade deeper so its light letters stand out.
     g.fillStyle = who.colour
-    g.fillRect(0, 0, nw, 22)
-    g.globalAlpha = 1
-    g.fillStyle = 'rgba(255, 248, 236, 0.28)'
-    for (let x = 2; x < nw; x += 5) g.fillRect(x, 0, 1.2, 22)
+    g.fillRect(0, 0, nw, th)
+    g.fillStyle = 'rgba(30, 14, 4, 0.22)'
+    g.fillRect(0, 0, nw, th)
+    g.fillStyle = 'rgba(255, 248, 236, 0.16)'
+    for (let x = 2; x < nw; x += 5) g.fillRect(x, 0, 1.2, th)
+    // Torn tape ends.
+    g.fillStyle = 'rgba(255, 248, 236, 0.0)'
+    g.globalCompositeOperation = 'destination-out'
+    for (let y = 0; y < th; y += 4) {
+      g.fillRect(0, y, 1 + r() * 2, 2)
+      g.fillRect(nw - 1 - r() * 2, y, 3, 2)
+    }
+    g.globalCompositeOperation = 'source-over'
     g.fillStyle = '#fffaf0'
     g.textBaseline = 'middle'
-    g.fillText(who.name, 11, 12)
+    g.fillText(who.name, 13, th / 2 + 1)
     g.restore()
     // The words, in ink, where the card has them.
     const words = el.querySelector('.said')?.textContent ?? ''
@@ -242,7 +254,8 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
       slip.mesh.rotateY(toward * 0.32)
       // Held, not pasted on the glass: it sways a hair, and settles as it appears.
       slip.mesh.rotateX((1 - slip.fade) * 0.5)
-      slip.mat.opacity = slip.fade
+      // Whoever speaks now is full strength; what was said before steps back.
+      slip.mat.opacity = slip.fade * (el.classList.contains('said') ? 0.68 : 1)
       slip.mesh.visible = true
     }
   }
@@ -293,6 +306,7 @@ export function lookCss(look: Look) {
   body.look-a .talk-card { opacity: 0 !important; }
   body.look-a .talk-tag:not(.hover) { display: none; }
   body.look-a .babble-toggle, body.look-a .music-note { opacity: 0.55; }
+  @media (max-width: 600px) { body.look-a .babble-toggle, body.look-a .music-note { top: 14px; bottom: auto; } }
   `
   if (look === 'b') return `
   body.look-b .talk-card { width: 340px; min-width: 340px; max-width: min(340px, calc(100vw - 32px)); border-radius: 48% 52% 46% 54% / 56% 50% 50% 44%;
