@@ -1387,6 +1387,20 @@ want flatter texture (wood grain, rug), less specular, lighter ink on thin geome
 and no dots behind the steam. Known fault: halftone without ink (`?drop=ink`) renders at under
 1 fps on both tiers, reproducible; the preset always has both, and the cause is not found.
 
+Hand-painted pastoral (`?theme=pastoral`): gouache painters (`src/theme/paint.ts`) for the walls,
+the window view, the floorboards (`gouache-planks`), the yard, garden and worktable (`gouache-meadow`)
+and the leaves (`gouache-leaves`, a new `foliage` role), plus the `paper` stage. A painter paints once
+per theme. Each material wears its own clone with its own repeat, offset, rotation and wrap, so a floor
+tiled eight times and a table tiled once can share one painter. A theme's optional `sky` stands a
+painted backdrop card (an open cylinder seen from inside, unlit, not pickable) round the yard, so the
+dollhouse view has a sky. `light.key.soften` widens the sun's shadow blur. Clones, unused painters
+and the sky are released on a theme change and on unload. Three pastoral and home round trips return
+geometries to the no-theme count. Textures grew by 2 per trip, as with sixteen-bit, from the rebuild
+path. Measured GPU p50 / p95: seated high 9.7 / 12.1, iso high 8.4 / 8.8, seated low 3.4 / 4.9.
+Look, a fresh Opus scorer per round, overall 6, 6 and 6 (the same scorer put the earlier pastoral at
+about 4.5). Still asked for: the fridge's brushed steel and the chairs' gloss painted flat, contact
+shadows and a sun patch in iso, and the same yard through the window from both cameras.
+
 Not built yet: remaking props and costumes in the new style ("redecorated over time").
 
 ### A theme written from a sentence

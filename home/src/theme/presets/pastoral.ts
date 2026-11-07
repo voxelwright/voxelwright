@@ -12,9 +12,9 @@ export const PASTORAL: Theme = {
   about: 'A summer afternoon in a painted countryside: soft high daylight, towering clouds and green hills through the window, watercolour on warm paper.',
   light: {
     // The low golden sun becomes high summer daylight, a little softer so shadows stay gentle.
-    key: { color: '#fff4dc', tint: 0.7, gain: 0.85 },
+    key: { color: '#fff4dc', tint: 0.7, gain: 0.75, soften: 2.5 },
     // The sky fills the shadows blue and the grass bounces green up from below.
-    fill: { color: '#e6eef0', tint: 0.45, gain: 1.35, ground: '#b4c27a' },
+    fill: { color: '#eef0e8', tint: 0.45, gain: 1.4, ground: '#b4c27a' },
     rim: { color: '#fff4dc', tint: 0.5, gain: 0.9 },
     // Daytime: the lamp is lit but no longer the brightest thing in the room.
     practical: { color: '#ffe2b0', tint: 0.4, gain: 0.7 },
@@ -22,14 +22,18 @@ export const PASTORAL: Theme = {
   },
   surfaces: {
     wall: { paint: 'gouache-wall', gain: 1.02 },
-    floor: { color: '#e2b47a', tint: 0.3, gain: 1.03 },
+    floor: { paint: 'gouache-planks', gain: 1.0, roughness: 0.95 },
     view: { paint: 'pastoral-view', gain: 0.9 },
     beam: { color: '#fff1d0', tint: 0.6, gain: 1.0 },
     glow: {},
-    other: { gain: 1.02 },
+    // Painted, not polished: metal reads as enamel, so the steel fridge takes the room's warm light. No roughness here:
+    // 'other' includes the window glass, which a high roughness frosts over.
+    other: { color: '#f6e0bc', tint: 0.12, gain: 1.03, metalness: 0.1 },
     // The yard and the worktable beyond it become lush summer meadow.
-    backdrop: { color: '#6fa646', tint: 0.7, gain: 1.0 },
+    backdrop: { paint: 'gouache-meadow', gain: 0.92 },
+    foliage: { paint: 'gouache-leaves', gain: 1.25 },
   },
+  sky: { paint: 'pastoral-sky' },
   // Unpainted paper: in the dollhouse view the meadow fades out to the sheet's margin, as a watercolour does.
   fog: { color: '#f4ecdc', tint: 1 },
   post: {
@@ -40,7 +44,7 @@ export const PASTORAL: Theme = {
     grade: { saturation: 1.15, contrast: 1.06, lift: [0.008, 0.008, 0.01] },
     veto: [],
     // Paper alone: the brush stage (Kuwahara) smeared the painted textures and photos into blocks.
-    stages: [{ kind: 'paper', grain: 0.7, edges: 0.9, tint: '#fdf7ea', shadow: '#7c84d6' }],
+    stages: [{ kind: 'paper', grain: 0.7, edges: 0.9, tint: '#fdf7ea', shadow: '#9a8ccc' }],
   },
   motion: {},
   costumes: { follow: true, hint: 'summer cotton and linen in faded indigo, cream and leaf green, straw hats, rolled sleeves' },

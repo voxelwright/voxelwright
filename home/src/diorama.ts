@@ -196,8 +196,8 @@ export function trees(spots: TreeSpot[], y = 0): THREE.Group {
     group.add(mesh)
   }
   merged(bark, new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 0.9 }))
-  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9 }))
-  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9 }))
+  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9, userData: { themeRole: 'foliage' } }))
+  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9, userData: { themeRole: 'foliage' } }))
   return group
 }
 
@@ -331,7 +331,7 @@ export function yard(spec: Yard): THREE.Group {
     if (Math.hypot(along[0] - gate[0], along[1] - gate[1]) < 1) continue
     beds.push([along[0], along[1], 0.35 + r() * 0.25])
   }
-  const leaf = new THREE.MeshStandardMaterial({ color: '#5d7d33', roughness: 0.9 })
+  const leaf = new THREE.MeshStandardMaterial({ color: '#5d7d33', roughness: 0.9, userData: { themeRole: 'foliage' } })
   const mounds: THREE.BufferGeometry[] = []
   const blooms: Array<[THREE.Matrix4, THREE.Color]> = []
   const petals = ['#f4d36b', '#fff4dc', '#f29a7a', '#e7849c', '#c9a2e0']

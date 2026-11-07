@@ -67,7 +67,7 @@ function mixPost(a: Post, b: Post, k: number): Post {
   }
 }
 
-const ROLES: (keyof Surfaces)[] = ['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop']
+const ROLES: (keyof Surfaces)[] = ['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage']
 
 /** The theme `k` of the way from a to b (0 is a, 1 is b). Names, hints and stages are b's. */
 export function blend(a: Theme, b: Theme, k: number): Theme {
@@ -83,7 +83,10 @@ export function blend(a: Theme, b: Theme, k: number): Theme {
   return {
     ...b,
     light: {
-      key: mixPull(a.light.key, b.light.key, k),
+      key: {
+        ...mixPull(a.light.key, b.light.key, k),
+        ...(a.light.key.soften !== undefined || b.light.key.soften !== undefined ? { soften: mix(a.light.key.soften ?? 1, b.light.key.soften ?? 1, k) } : {}),
+      },
       fill: { ...mixPull(a.light.fill, b.light.fill, k), ...(ga && gb ? { ground: mixHex(ga, gb, k) } : gb ? { ground: gb } : ga ? { ground: ga } : {}) },
       rim: mixPull(a.light.rim, b.light.rim, k),
       practical: mixPull(a.light.practical, b.light.practical, k),
@@ -93,5 +96,6 @@ export function blend(a: Theme, b: Theme, k: number): Theme {
     fog: mixPull(a.fog, b.fog, k),
     post: mixPost(a.post, b.post, k),
     motion: snap(a.motion, b.motion, k),
+    sky: snap(a.sky, b.sky, k),
   }
 }

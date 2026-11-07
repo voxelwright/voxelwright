@@ -18,8 +18,8 @@ export interface Shift {
 
 /** Lights by role. Each plugin's light keeps its own colour and level; the theme shifts them. */
 export interface Lighting {
-  /** The shadow-casting light: the sun through the window, the living room's key. */
-  key: Shift
+  /** The shadow-casting light: the sun through the window, the living room's key. `soften` scales its shadow's blur radius (unset keeps the plugin's). */
+  key: Shift & { soften?: number }
   /** Hemisphere fill. `ground` shifts the hemisphere's ground colour. */
   fill: Shift & { ground?: Hex }
   /** Directional lights without shadows: the rim behind the furniture. */
@@ -58,6 +58,8 @@ export interface Surfaces {
   trim?: Surface
   /** The ground beyond the house in the dollhouse view: the yard's lawn and the worktable (tagged `'backdrop'`). Falls back to `other`. */
   backdrop?: Surface
+  /** Leaves: the garden's trees and shrubs (tagged `'foliage'`). Falls back to `other`. A `paint` here lays a texture on maps the leaves never had. */
+  foliage?: Surface
 }
 
 /**
@@ -123,6 +125,11 @@ export interface Theme {
   /** Fog colour shift; the rooms keep their own distances. */
   fog: Shift
   post: Post
+  /**
+   * A painted sky the theme stands around the house, like a diorama's curved backdrop card,
+   * so the dollhouse view has a sky and a horizon. `paint` names a painter in ../paint.ts. Unset: none.
+   */
+  sky?: { paint: string }
   /** Character animation: poses per second for villagers (12 is "on twos"); unset keeps each direction's own. */
   motion: { characterFps?: number }
   /** Villagers follow the theme unless they keep their costume (per villager, later). */
