@@ -29,6 +29,7 @@ export default {
     floor.rotation.x = -Math.PI / 2
     floor.position.set((left + right) / 2, 0, back + 3)
     floor.receiveShadow = true
+    floor.name = 'lounge floor' // build mode (#53) stands its own in for the floor, walls and skirting
     room.add(floor)
 
     // Thick plaster walls, as the kitchen's: the back wall runs from the shared wall's
@@ -43,6 +44,7 @@ export default {
       for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 6, uv.getY(i))
       m.castShadow = m.receiveShadow = true
       m.userData.inward = inward // cut away when a camera stands behind it (#42)
+      m.name = 'lounge wall'
       room.add(m)
     }
     wall(left - T, right + T, back - T, back, new THREE.Vector3(0, 0, 1))
@@ -56,9 +58,11 @@ export default {
     const trim = new THREE.MeshStandardMaterial({ color: '#f3efe8', roughness: 0.6 })
     const skirt = new THREE.Mesh(new THREE.BoxGeometry(right - left, 0.09, 0.02), trim)
     skirt.position.set((left + right) / 2, 0.045, back + 0.01)
+    skirt.name = 'lounge skirting'
     room.add(skirt)
     const skirtSide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 6), trim)
     skirtSide.position.set(right - 0.01, 0.045, back + 3)
+    skirtSide.name = 'lounge skirting'
     room.add(skirtSide)
 
     // A soft woven rug in front of the sideboard: terracotta and honey bands on cream wool.
