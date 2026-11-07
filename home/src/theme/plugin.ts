@@ -179,7 +179,8 @@ export default {
           else m.emissive.copy(base.emissive)
         }
       }
-      if (base.roughness !== undefined) m.roughness = s.roughness ?? base.roughness
+      // A theme's roughness never frosts glass: a transmissive pane keeps its own.
+      if (base.roughness !== undefined) m.roughness = (m as { transmission?: number }).transmission ? base.roughness : s.roughness ?? base.roughness
       if (base.metalness !== undefined) m.metalness = s.metalness ?? base.metalness
       // A material with a map slot (`null` when empty) can wear a painter; without one, nothing to paint.
       if (base.map !== undefined) {

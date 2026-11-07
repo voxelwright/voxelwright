@@ -4,6 +4,7 @@ import {
   smoothstep, step, uniform, unpackRGBToNormal, uv, vec2, vec3, vec4,
 } from 'three/tsl'
 import type { Fx } from './index'
+import { OPAQUE_ONLY, opaque } from './halftone'
 import type { Stage } from '../tokens'
 
 type Spec = Extract<Stage, { kind: 'ink' }>
@@ -23,10 +24,13 @@ export function ink(spec: Spec): Fx {
   const { r, g, b } = new THREE.Color(spec.color ?? '#1c1418').getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
   return {
     scene({ scenePass }) {
-      const normal = mrt({ normal: packNormalToRGB(normalView) })
+      const normal = mrt({ normal: opaque(packNormalToRGB(normalView)) })
       const had = scenePass.getMRT()
       if (!had) scenePass.setMRT(mrt({ output }).merge(normal))
       else if (!had.has('normal')) scenePass.setMRT(had.merge(normal))
+      else return
+      // See-through things (the glass's smudges, steam) leave the normals behind them.
+      scenePass.getMRT()!.setBlendMode('normal', OPAQUE_ONLY)
     },
     display(color, { stage, scenePass }) {
       const camera = stage.camera as THREE.PerspectiveCamera
@@ -52,14 +56,21 @@ export function ink(spec: Spec): Fx {
         const lapX = i0.mul(2).sub(iE).sub(iW), lapY = i0.mul(2).sub(iN).sub(iS)
         const jump = max(lapX, lapY).div(i0)
         const silhouette = smoothstep(0.012, 0.05, jump)
+        // The far side of a depth step: its normal differs from the near side's, but the
+        // near side already carries the line, so no crease here (no doubled lines).
+        const farSide = smoothstep(0.008, 0.03, min(lapX, lapY).div(i0).negate())
         // Creases: how far the normal turns across the line. A real fold also bends the
         // depth, which keeps out normals smeared by additive glows (sunbeam, window glass)
         // that write no depth; never on the far plane.
         const bent = smoothstep(0.0015, 0.006, max(lapX.abs(), lapY.abs()).div(i0))
         const n0 = nrm(0, 0).toVar()
         const fold = min(min(dot(n0, nrm(1, 0)), dot(n0, nrm(-1, 0))), min(dot(n0, nrm(0, 1)), dot(n0, nrm(0, -1))))
-        const crease = smoothstep(0.72, 0.5, fold).mul(bent).mul(step(depth.sample(at).x, 0.99999))
-        const line = max(silhouette.mul(spec.depth), crease.mul(spec.normal))
+        const crease = smoothstep(0.72, 0.5, fold).mul(bent).mul(step(depth.sample(at).x, 0.99999)).mul(float(1).sub(farSide))
+        // A strip narrower than two line widths (a lamp cord, fence pickets far off) would
+        // be all ink: when both neighbours across it are farther, ink it at half strength.
+        const strip = (a: F, b: F) => smoothstep(0.012, 0.05, i0.sub(a).div(i0)).mul(smoothstep(0.012, 0.05, i0.sub(b).div(i0)))
+        const thin = max(strip(iE, iW), strip(iN, iS))
+        const line = max(silhouette.mul(spec.depth), crease.mul(spec.normal)).mul(float(1).sub(thin.mul(0.55)))
         return vec4(mix(color.rgb, vec3(r, g, b), line), color.a)
       })() as unknown as THREE.Node<'vec4'>
     },
