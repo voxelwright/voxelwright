@@ -1381,6 +1381,12 @@ then 6. Neon night: trim glow 1.0 to 0.12 so the table leads, warm floor bounce 
 moonlight 0.03 (no floor glare), floor roughness 0.42, two signs in the city view. Opus 6.5 and
 6.5. Thin neon tubes need geometry or a glow-map path; tokens can't draw them.
 
+GPT-6.1 Sol on the final captures (`screenshots/themes/final/`, overall out of 10): blue hour 7,
+pastoral 7, 16-bit 6, neon night 6, comic 6. Its one best fix each: blue hour, a slate-blue
+exterior in iso; 16-bit, broad plank divisions on the iso floor; neon night, an urban silhouette
+instead of the yard in iso (consistency 4); comic, lighter inner ink on chair slats in iso;
+pastoral, contact shadows under chairs and cabinets. All below the 9/10 bar.
+
 `node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
 browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
 
