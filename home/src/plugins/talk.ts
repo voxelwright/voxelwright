@@ -34,15 +34,16 @@ interface Person {
   tasks: Task[]
   hello: string
   chips: string[]
+  bye: string
 }
 /** Synthetic household. Colour is the owner's; the villager's silhouette is its role. */
 const PEOPLE: Person[] = [
   { person: 'alex', owner: 'Alex', colour: '#c4503a', start: 'sink', wait: 1, tasks: [{ spot: 'fridge', stay: 5 }, { spot: 'sink', stay: 7 }],
-    hello: "Oh! Hello. The soup can mind itself for a minute.", chips: ["What's for dinner?", 'How was your day?'] },
+    hello: "Oh! Hello. The soup can mind itself for a minute.", chips: ["What's for dinner?", 'How was your day?'], bye: 'Back to my soup, then. Bye for now!' },
   { person: 'sam', owner: 'Sam', colour: '#d29a26', start: 'shelf', wait: 2, tasks: [{ spot: 'counter', stay: 6 }, { spot: 'shelf', stay: 6 }],
-    hello: "Hi! Just putting the toys back. What's up?", chips: ['Anything need doing?', 'How was your day?'] },
+    hello: "Hi! Just putting the toys back. What's up?", chips: ['Anything need doing?', 'How was your day?'], bye: 'Off to tidy! See you soon.' },
   { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }],
-    hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'] },
+    hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'], bye: 'Bye! The basil is waiting for me.' },
 ]
 /** The synthetic "something for you" a villager carries after a chore. */
 const NEWS: Record<string, string> = { mia: 'The basil by the window has a new leaf. I thought you would like to know.' }
@@ -50,7 +51,10 @@ const NEWS: Record<string, string> = { mia: 'The basil by the window has a new l
 const SEATS = ['seatMid', 'seatLeft', 'seatRight', 'seatNear']
 const INVITE = 'Come sit with me'
 const THANKS = 'Thanks, everyone'
-/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
+/** A typed line that only says goodbye, so it is treated like the chip and not sent as a message. */
+const FAREWELL = /^\s*(?:(?:ok(?:ay)?|right|well)[\s,]+)?(?:thanks?(?: you)?(?: so much)?|thank you|cheers|ta|bye(?:-?bye)?|good ?bye|see (?:you|ya)(?: later| soon)?|good ?night|that'?s all)(?:[\s,!.]+(?:everyone|everybody|all|guys|folks|friends|bye|for now|then|again))*[\s!.]*$/i
+/** Booster cushions on the chairs, so a seated villager clears the table top. */
+const BOOSTER = 0.12/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
 const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
 const KEPT = 'village.talk.kept'
 
@@ -70,16 +74,37 @@ interface Member extends Person {
   tag: HTMLDivElement
 }
 
-/** A speech card anchored to a villager: a stitched paper card with a felt name tab in the owner's colour. */
+/** The one name tag every speaker wears: a felt ribbon in its colour, the name, and whose villager it is. */
+function nameTag(name: string, owner: string | null, colour: string) {
+  const tag = document.createElement('div')
+  tag.className = 'nametag'
+  tag.style.setProperty('--c', colour)
+  const b = document.createElement('b')
+  b.textContent = name
+  tag.append(b)
+  if (owner) {
+    const small = document.createElement('small')
+    small.textContent = `${owner}'s`
+    tag.append(small)
+  }
+  return tag
+}
+
+/** A speech card anchored to a villager: a stitched paper card wearing its name tag. */
 class Card {
   el = document.createElement('div')
   private words = document.createElement('p')
+  /** The current page's known words, invisible, so the card is sized for them before they are revealed. */
+  private sizer = document.createElement('p')
   private more = document.createElement('button')
+  /** Stitched dots while the speaker is still talking. */
+  private cue = document.createElement('span')
   private full = ''
   private done = true
   private from = 0
   private shown = 0
   private end = 0
+  private visible = 0
   /** Seconds since the words stopped changing; lets the table pass to the next speaker. */
   still = 0
   private reading = 0
@@ -88,25 +113,30 @@ class Card {
     this.el.className = 'talk-card'
     this.el.dataset.talkCard = m.person
     this.el.style.setProperty('--c', m.colour)
-    const tab = document.createElement('div')
-    tab.className = 'tab'
-    tab.innerHTML = `<b></b><small></small>`
-    tab.querySelector('b')!.textContent = m.name
-    tab.querySelector('small')!.textContent = `${m.owner}'s`
+    const tab = nameTag(m.name, m.owner, m.colour)
+    tab.classList.add('tab')
+    const page = document.createElement('div')
+    page.className = 'page'
     this.words.className = 'words'
+    this.sizer.className = 'sizer'
+    this.sizer.setAttribute('aria-hidden', 'true')
+    page.append(this.sizer, this.words)
     this.more.type = 'button'
     this.more.className = 'more'
     this.more.textContent = 'go on'
     this.more.hidden = true
     this.more.addEventListener('click', () => this.next())
-    this.el.append(tab, this.words, this.more)
+    this.cue.className = 'cue'
+    this.cue.setAttribute('aria-label', 'still talking')
+    this.cue.innerHTML = '<i></i><i></i><i></i>'
+    this.el.append(tab, page, this.more, this.cue)
   }
 
   /** Start fresh words. */
   reset() {
     this.full = ''
-    this.from = this.shown = this.end = 0
-    this.words.textContent = ''
+    this.from = this.shown = this.end = this.visible = 0
+    this.words.textContent = this.sizer.textContent = ''
   }
 
   /** The words so far, streaming or whole; `done` once the speaker has finished. */
@@ -123,7 +153,7 @@ class Card {
 
   /** Every word of the current page is on the card and the speaker has finished. */
   get finished() {
-    return this.done && this.shown >= this.end && !this.full.slice(this.end).trim()
+    return this.done && this.visible >= this.end && !this.full.slice(this.end).trim()
   }
 
   /** At most two sentences at a time; "go on" turns the page. */
@@ -140,19 +170,35 @@ class Card {
     if (this.end >= this.full.length) return
     this.from = this.end
     while (/\s/.test(this.full[this.from] ?? '')) this.from++
-    this.shown = this.from
+    this.shown = this.visible = this.from
     this.paginate()
   }
 
+  /** The "still talking" dots are showing. */
+  get talking() {
+    return !this.cue.hidden
+  }
+
   get hasMore() {
-    return this.shown >= this.end && this.full.slice(this.end).trim().length > 0
+    return this.visible >= this.end && this.full.slice(this.end).trim().length > 0
   }
 
   tick(dt: number) {
-    const before = this.shown
     this.shown = reducedMotion.matches ? this.end : Math.min(this.end, this.shown + dt * TYPE_RATE)
-    if (Math.floor(this.shown) !== Math.floor(before) || this.words.textContent === '') this.words.textContent = this.full.slice(this.from, Math.floor(this.shown))
+    // Whole words only: the page's last word is whole once the page is cut at a sentence or the speaker is done.
+    const whole = this.done || this.end < this.full.length
+    let v = Math.max(this.from, Math.floor(this.shown))
+    if (!(v >= this.end && whole)) while (v > this.from && !/\s/.test(this.full[v] ?? '')) v--
+    let known = this.end
+    if (!whole) while (known > v && !/\s/.test(this.full[known] ?? '')) known--
+    if (v !== this.visible || this.sizer.textContent === '') {
+      this.visible = v
+      this.words.textContent = this.full.slice(this.from, v)
+    }
+    const sized = this.full.slice(this.from, known)
+    if (this.sizer.textContent !== sized) this.sizer.textContent = sized
     this.more.hidden = !this.hasMore
+    this.cue.hidden = this.finished || this.hasMore
     // A finished page turns by itself once there has been time to read it.
     if (this.hasMore) {
       this.reading += dt
@@ -178,7 +224,7 @@ export default {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
       fig.root.scale.setScalar(SCALE)
-      const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open' })
+      const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open', seatY: SEAT_Y + BOOSTER })
       const [name, role] = spec.name.split(', ')
       const glyph = new THREE.Sprite(new THREE.SpriteMaterial({ map: glyphMap, transparent: true, depthWrite: false, opacity: 0 }))
       glyph.name = `${name} news glyph`
@@ -188,9 +234,8 @@ export default {
       group.add(fig.root, glyph)
       const m: Member = { ...p, name, role, entry: `villager-${p.person}`, v, seat: null, news: null, looked: 0, glyph, card: null!, tag: document.createElement('div') }
       m.card = new Card(m)
-      m.tag.className = 'talk-tag'
-      m.tag.style.setProperty('--c', p.colour)
-      m.tag.textContent = name
+      m.tag = nameTag(name, p.owner, p.colour)
+      m.tag.classList.add('talk-tag')
       v.onDone = (spot) => {
         // Synthetic trigger: finishing the first watering, the gardener has news.
         if (NEWS[p.person] && spot === 'plant' && !told.has(p.person)) notify(m)
@@ -207,6 +252,22 @@ export default {
     chair.position.set(NEAR_CHAIR.x, 0, NEAR_CHAIR.z)
     chair.rotation.y = NEAR_CHAIR.yaw
     group.add(chair)
+    // A plump felt booster on each chair the villagers use, buttoned in the middle.
+    const felt = new THREE.MeshStandardMaterial({ color: '#d8b98f', roughness: 1 })
+    const button = new THREE.MeshStandardMaterial({ color: '#8a5a3a', roughness: 0.8 })
+    const puff = new THREE.SphereGeometry(1, 24, 12)
+    for (const seat of SEATS) {
+      const at = SPOTS[seat].seat!
+      const cushion = new THREE.Mesh(puff, felt)
+      cushion.name = `talk booster ${seat}`
+      cushion.scale.set(0.17, BOOSTER * 0.55, 0.16)
+      cushion.position.set(at.x, SEAT_Y + BOOSTER * 0.42, at.z)
+      cushion.castShadow = cushion.receiveShadow = true
+      const knot = new THREE.Mesh(puff, button)
+      knot.scale.set(0.022, 0.012, 0.022)
+      knot.position.set(at.x, SEAT_Y + BOOSTER * 0.95, at.z)
+      group.add(cushion, knot)
+    }
     own(ctx, group)
 
     // ── The page: speech cards, the person's slip, name tags ───────────────
@@ -223,7 +284,12 @@ export default {
     line.setAttribute('aria-label', 'Say something')
     const mine = document.createElement('p')
     mine.className = 'mine'
-    slip.append(mine, chips, line)
+    const you = nameTag('You', null, '#3f5a7a')
+    you.classList.add('tab')
+    const ruled = document.createElement('label')
+    ruled.className = 'ruled'
+    ruled.append(line)
+    slip.append(you, mine, ruled, chips)
     const voice = document.createElement('div')
     voice.className = 'talk-voice'
     voice.setAttribute('role', 'status')
@@ -325,7 +391,7 @@ export default {
       subject = m.v.fig.root
       stage.camera.getWorldPosition(eye)
       const base = Math.atan2(eye.x - p.x, eye.z - p.z)
-      const floor = m.v.seated > 0.5 ? SEAT_Y : 0
+      const floor = m.v.seated > 0.5 ? m.v.seatY : 0
       const head = new THREE.Vector3(p.x, floor + m.v.fig.height * SCALE * 0.72, p.z)
       const body = head.clone().setY(floor + m.v.fig.height * SCALE * 0.35)
       const shot = (a: number, dist: number) => {
@@ -387,7 +453,7 @@ export default {
       mode = 'table'
       view.focus(TABLE_SHOT, 5)
       const names = seated.map((m) => m.name)
-      openSlip(seated.length > 1 ? `Say something to the table, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS])
+      openSlip(seated.length > 1 ? `Say something, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS])
     }
 
     const invite = (m: Member) => {
@@ -429,10 +495,40 @@ export default {
       toRoom()
     }
 
+    /** Everyone says a short goodbye in turn, then goes back to chores. */
+    const farewell = async () => {
+      if (mode === 'talk' && partner) {
+        const m = partner
+        m.v.speaking = true
+        speak(m, m.bye)
+        await pause(0.4)
+        while (showing.get(m) && !m.card.finished) await frame()
+        m.v.speaking = false
+        await pause(1.1)
+        if (partner === m) entries.back()
+        return
+      }
+      for (const m of seated) hide(m)
+      for (const [k, m] of [...seated].entries()) {
+        if (mode !== 'table') return
+        for (const o of seated) o.tag.classList.toggle('lit', o === m)
+        speaker = m
+        m.v.speaking = true
+        speak(m, m.bye)
+        await pause(0.3)
+        while (showing.get(m) && !m.card.finished) await frame()
+        await pause(0.7)
+        m.v.speaking = false
+        if (k < seated.length - 1) show(m, 'said')
+      }
+      speaker = null
+      await pause(0.6)
+      if (mode === 'table') leaveTable()
+    }
+
     const chip = (label: string) => {
       if (label === INVITE && partner) invite(partner)
-      else if (label === THANKS) leaveTable()
-      else send(label)
+      else void send(label)
     }
 
     // ── Sending lines ───────────────────────────────────────────────────────
@@ -451,9 +547,9 @@ export default {
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
-    const ask = (m: Member, text: string): Speech => {
+    const ask = (m: Member, text: string, context?: string): Speech => {
       const speech: Speech = { text: '', done: false }
-      void sayTo(m.person, text, (t) => (speech.text += t)).then((said) => {
+      void sayTo(m.person, text, (t) => (speech.text += t), context).then((said) => {
         if (said.ok) speech.text = said.reply
         else speech.away = said.why
         speech.done = true
@@ -470,7 +566,8 @@ export default {
       mine.classList.add('shown')
       slip.classList.add('waiting')
       try {
-        if (mode === 'talk' && partner) {
+        if (FAREWELL.test(text) && text.length <= 40 && (mode === 'table' || mode === 'talk')) await farewell()
+        else if (mode === 'talk' && partner) {
           const m = partner
           const ok = await perform(m, ask(m, text), text)
           if (!ok) line.value = text
@@ -481,7 +578,7 @@ export default {
         pending = false
         slip.classList.remove('waiting')
         if (mode === 'talk' && partner) line.placeholder = `Say something to ${partner.name}…`
-        else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Say something to the table, or start with a name…' : `Say something to ${seated[0]?.name ?? ''}…`
+        else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Say something, or start with a name…' : `Say something to ${seated[0]?.name ?? ''}…`
       }
     }
 
@@ -525,8 +622,8 @@ export default {
       // the person's line and, marked as context, what the others said last round.
       const asks = turn.map((m) => {
         const others = lastRound.filter((r) => r.name !== m.name)
-        const note = others.length ? `\n\n(Context only, not part of the message: at the kitchen table just now, ${others.map((r) => `${r.name} said "${r.text.slice(0, 160)}"`).join(' and ')}.)` : ''
-        return { m, speech: ask(m, text + note) }
+        const context = others.length ? `at the kitchen table just now, ${others.map((r) => `${r.name} said "${r.text.slice(0, 160)}"`).join(' and ')}.` : undefined
+        return { m, speech: ask(m, text, context) }
       })
       const round: { name: string; text: string }[] = []
       let failed = false
@@ -627,12 +724,26 @@ export default {
       const r = rect()
       return { x: r.left + ((at.x + 1) / 2) * r.width, y: r.top + ((1 - at.y) / 2) * r.height, behind: at.z > 1 }
     }
+    // While a talk is open the shot is locked: a walker about to step into it waits at the edge of frame.
+    const probe = new THREE.Vector3()
+    const inShot = (x: number, z: number, reach: number) => {
+      probe.set(x, 0.3, z)
+      const far = probe.distanceTo(eye)
+      probe.project(stage.camera)
+      return probe.z < 1 && far < reach && Math.abs(probe.x) < 1.15 && probe.y > -1.3 && probe.y < 1.15
+    }
+    const offstage = (m: Member) => {
+      if (mode !== 'talk' || !partner || m === partner || m.v.state !== 'walk') return false
+      const reach = partner.v.pos.distanceTo(eye) + 1.6
+      const ahead = 0.55
+      return inShot(m.v.pos.x + Math.sin(m.v.yaw) * ahead, m.v.pos.z + Math.cos(m.v.yaw) * ahead, reach) && !inShot(m.v.pos.x, m.v.pos.z, reach)
+    }
     ctx.on('village/frame', (dt, t) => {
       clock += dt
       stage.camera.getWorldPosition(eye)
       // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
       if (released && entries.hovered !== released.entry) released = null
-      for (const m of cast) m.v.paused = entries.hovered === m.entry && m !== released && mode === 'room'
+      for (const m of cast) m.v.paused = (entries.hovered === m.entry && m !== released && mode === 'room') || offstage(m)
       stepCrowd(crowd, blobs, Math.min(dt, 0.05), t, eye, SCALE)
       for (const m of cast) {
         // The glyph bobs over the head and fades once looked at for a second.
@@ -658,7 +769,7 @@ export default {
           if (mode === 'talk' && partner === m) {
             const w = card.offsetWidth, h = card.offsetHeight
             const left = Math.min(innerWidth - w - 16, Math.max(16, s.x + 70))
-            const top = Math.min(innerHeight - h - 150, Math.max(24, s.y - 10))
+            const top = Math.min(innerHeight - h - slip.offsetHeight - 40, Math.max(24, s.y - 10))
             card.style.transform = `translate(${left}px, ${top}px)`
             card.classList.add('beside')
             card.style.setProperty('--tail', `${Math.max(18, Math.min(h - 18, s.y + 30 - top))}px`)
@@ -696,7 +807,7 @@ export default {
           seated: seated.map((m) => m.person),
           pending,
           line: line.value,
-          cards: Object.fromEntries([...showing].map(([m, as]) => [m.person, { as, text: m.card.text, finished: m.card.finished }])),
+          cards: Object.fromEntries([...showing].map(([m, as]) => [m.person, { as, text: m.card.text, finished: m.card.finished, cue: m.card.talking }])),
           cast: Object.fromEntries(cast.map((m) => [m.person, {
             name: m.name, state: m.v.state, seated: m.v.seated > 0.5, seat: m.seat, spot: m.v.spot, thinking: m.v.thinking, speaking: m.v.speaking,
             news: Boolean(m.news), glyph: m.glyph.visible ? m.glyph.material.opacity : 0, x: m.v.pos.x, z: m.v.pos.z,
@@ -762,53 +873,68 @@ function stitchedBang() {
 }
 
 function css() {
+  const paper = `radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%)`
   return `
-  .talk-card { position: fixed; left: 0; top: 0; width: 330px; max-width: calc(100vw - 32px); box-sizing: border-box;
-    padding: 22px 22px 14px; border-radius: 16px; color: #46301f; font: 21px/1.32 ${HAND};
-    background: radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%);
-    box-shadow: 0 14px 34px rgba(60, 30, 10, 0.3), 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 -3px 0 rgba(150, 105, 60, 0.18) inset;
-    opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.94; transform-origin: 0 50%; }
-  .talk-card::before { content: ''; position: absolute; inset: 7px; border: 2px dashed rgba(150, 100, 60, 0.38); border-radius: 11px; pointer-events: none; }
+  .talk-card, .talk-slip { box-sizing: border-box; border-radius: 16px; color: #46301f; background: ${paper};
+    box-shadow: 0 14px 34px rgba(60, 30, 10, 0.3), 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 -3px 0 rgba(150, 105, 60, 0.18) inset; }
+  .talk-card::before, .talk-slip::before { content: ''; position: absolute; inset: 7px; border: 2px dashed rgba(150, 100, 60, 0.38); border-radius: 11px; pointer-events: none; }
+  .talk-card { position: fixed; left: 0; top: 0; width: 330px; max-width: calc(100vw - 32px); padding: 24px 22px 14px;
+    opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1), filter 300ms ease; scale: 0.94; transform-origin: 0 50%; }
   .talk-card.shown { opacity: 1; scale: 1; pointer-events: auto; }
-  .talk-card.said { scale: 0.82; filter: saturate(0.75) brightness(0.97); }
+  .talk-card.said { opacity: 0.72; scale: 0.8; filter: saturate(0.55) brightness(0.96); }
+  .talk-card.said .nametag { box-shadow: none; }
   .talk-card::after { content: ''; position: absolute; left: var(--tail, 50%); bottom: -10px; width: 20px; height: 20px; margin-left: -10px;
     background: #f5e7cb; rotate: 45deg; border-radius: 0 0 5px 0; box-shadow: 4px 4px 6px rgba(60, 30, 10, 0.14); }
   .talk-card.beside::after { left: -10px; top: var(--tail, 40px); bottom: auto; margin: -10px 0 0; background: #fcf4e3; border-radius: 0 0 0 5px; box-shadow: -3px 3px 5px rgba(60, 30, 10, 0.12); }
-  .talk-card .tab { position: absolute; left: 18px; top: -19px; padding: 4px 14px 5px; border-radius: 11px 11px 5px 5px;
-    background: var(--c); color: #fff8ec; font: 700 19px/1.15 ${HAND}; letter-spacing: 0.01em;
-    box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25), inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
-  .talk-card .tab::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.55); border-radius: 8px 8px 3px 3px; }
-  .talk-card .tab small { font-weight: 400; font-size: 14px; opacity: 0.85; margin-left: 7px; }
-  .talk-card .words { margin: 0; min-height: 1.4em; white-space: pre-wrap; font: 19px/1.42 ${BOOK}; color: #3d2a1c; }
+  .talk-card .page { display: grid; }
+  .talk-card .words, .talk-card .sizer { grid-area: 1 / 1; margin: 0; min-height: 1.4em; white-space: pre-wrap; font: 19px/1.42 ${BOOK}; color: #3d2a1c; }
+  .talk-card .sizer { visibility: hidden; }
   .talk-card .more { display: block; margin: 4px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
-    font: italic 700 17px ${HAND}; color: var(--c); }
+    font: italic 700 17px ${HAND}; color: color-mix(in oklab, var(--c) 80%, #2a1608); }
   .talk-card .more::after { content: ' \\25B8'; }
-  .talk-card .more[hidden] { display: none; }
-  .talk-slip { position: fixed; left: 50%; bottom: 22px; width: min(600px, calc(100vw - 32px)); display: flex; flex-direction: column;
-    align-items: center; gap: 12px; opacity: 0; translate: -50% 14px; pointer-events: none; transition: opacity 220ms ease, translate 240ms ease; }
-  .talk-slip.shown { opacity: 1; translate: -50% 0; pointer-events: auto; }
-  .talk-slip .chips { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  .talk-slip .chip { position: relative; padding: 7px 16px 8px; border: 0; border-radius: 999px; cursor: pointer;
-    background: #f6ead2; color: #553a26; font: 18px ${HAND}; box-shadow: 0 4px 12px rgba(60, 30, 10, 0.22), inset 0 -2px 0 rgba(150, 105, 60, 0.15);
-    transition: translate 120ms ease, background 120ms ease; }
-  .talk-slip .chip::before { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(150, 100, 60, 0.35); border-radius: 999px; }
-  .talk-slip .chip:hover, .talk-slip .chip:focus-visible { background: #fff6e4; translate: 0 -2px; outline: none; }
-  .talk-slip .line { box-sizing: border-box; width: 100%; padding: 12px 20px; border: 0; border-radius: 14px; outline: none;
-    background: linear-gradient(transparent 0 calc(100% - 14px), rgba(150, 100, 60, 0.28) calc(100% - 14px) calc(100% - 12.5px), transparent calc(100% - 12.5px)), #fbf3e2;
-    color: #46301f; font: 22px ${HAND}; box-shadow: 0 10px 28px rgba(60, 30, 10, 0.26); }
-  .talk-slip .line::placeholder { color: rgba(90, 64, 48, 0.5); font-style: italic; }
-  .talk-slip.waiting .line { opacity: 0.75; }
-  .talk-slip .mine { margin: 0; max-width: 100%; padding: 6px 16px 7px; border-radius: 10px; rotate: -0.6deg; display: none;
-    background: #fdf8ec; color: #2f4a6b; font: italic 20px/1.3 ${HAND}; box-shadow: 0 4px 12px rgba(60, 30, 10, 0.18); }
-  .talk-slip .mine::before { content: 'You: '; font-style: normal; font-weight: 700; color: #6b4b35; }
+  .talk-card .more[hidden], .talk-card .cue[hidden] { display: none; }
+  .talk-card .cue { display: flex; gap: 5px; justify-content: flex-end; height: 10px; margin: 6px 2px 0 auto; }
+  .talk-card .cue i { width: 7px; height: 7px; border-radius: 50%; background: color-mix(in oklab, var(--c) 75%, #2a1608);
+    box-shadow: 0 0 0 1.5px rgba(255, 248, 236, 0.7) inset; animation: talk-cue 1.1s ease-in-out infinite; }
+  .talk-card .cue i:nth-child(2) { animation-delay: 0.18s; }
+  .talk-card .cue i:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes talk-cue { 0%, 70%, 100% { translate: 0 0; opacity: 0.45; } 30% { translate: 0 -4px; opacity: 1; } }
+
+  .nametag { display: inline-flex; align-items: baseline; gap: 7px; padding: 4px 13px 5px; border-radius: 11px 11px 5px 5px; white-space: nowrap;
+    background: color-mix(in oklab, var(--c) 86%, #2a1608); color: #fffaf0; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35);
+    box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25), inset 0 0 0 2px rgba(255, 255, 255, 0.12); position: relative; }
+  .nametag::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.6); border-radius: 8px 8px 3px 3px; pointer-events: none; }
+  .nametag b { font: 700 19px/1.15 ${HAND}; letter-spacing: 0.01em; }
+  .nametag small { font: 700 15px/1.15 ${HAND}; color: #fff3df; }
+  .nametag small::before { content: '· '; opacity: 0.7; }
+  .talk-card .tab, .talk-slip .tab { position: absolute; left: 18px; top: -19px; }
+
+  .talk-tag { position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0; scale: 0.86; transform-origin: 50% 100%;
+    transition: opacity 200ms ease, scale 260ms cubic-bezier(.2, 1.5, .4, 1), filter 200ms ease; filter: saturate(0.7); }
+  .talk-tag.shown { opacity: 0.86; }
+  .talk-tag.shown.lit { opacity: 1; scale: 1.08; filter: none; box-shadow: 0 0 0 3px rgba(255, 244, 214, 0.85), 0 6px 16px rgba(60, 30, 10, 0.35); }
+
+  .talk-slip { position: fixed; right: 28px; bottom: 24px; width: min(410px, calc(100vw - 32px)); padding: 26px 22px 16px;
+    display: flex; flex-direction: column; gap: 8px; opacity: 0; translate: 0 14px; pointer-events: none; transition: opacity 220ms ease, translate 240ms ease; }
+  .talk-slip.shown { opacity: 1; translate: 0 0; pointer-events: auto; }
+  .talk-slip .mine { margin: 0 0 2px; display: none; color: #2f4a6b; font: italic 20px/1.3 ${HAND}; }
   .talk-slip .mine.shown { display: block; }
-  .talk-tag { position: fixed; left: 0; top: 0; padding: 3px 13px 4px; border-radius: 999px; pointer-events: none; opacity: 0;
-    background: rgba(251, 243, 226, 0.88); color: #6b4b35; font: 700 17px ${HAND}; box-shadow: 0 3px 10px rgba(60, 30, 10, 0.2);
-    transition: opacity 200ms ease, background 200ms ease, color 200ms ease; white-space: nowrap; }
-  .talk-tag.shown { opacity: 1; }
-  .talk-tag.lit { background: var(--c); color: #fff8ec; }
+  .talk-slip .ruled { display: block; position: relative; }
+  .talk-slip .ruled::after { content: ''; position: absolute; left: 0; right: 0; bottom: 3px; border-bottom: 1.5px solid rgba(120, 80, 50, 0.35); }
+  .talk-slip .line { box-sizing: border-box; width: 100%; padding: 4px 2px 6px; border: 0; outline: none; background: none;
+    color: #2f4a6b; font: 21px ${HAND}; caret-color: #2f4a6b; }
+  .talk-slip .line::placeholder { color: rgba(90, 64, 48, 0.55); font-style: italic; }
+  .talk-slip .line:focus-visible { outline: none; }
+  .talk-slip .ruled:focus-within::after { border-bottom-color: rgba(63, 90, 122, 0.7); }
+  .talk-slip.waiting .line { opacity: 0.6; }
+  .talk-slip .chips { display: flex; gap: 6px 8px; flex-wrap: wrap; }
+  .talk-slip .chip { position: relative; padding: 3px 11px 4px; border: 0; border-radius: 999px; cursor: pointer;
+    background: rgba(214, 186, 146, 0.32); color: #5a3d28; font: 16px ${HAND}; transition: background 120ms ease, translate 120ms ease; }
+  .talk-slip .chip::before { content: ''; position: absolute; inset: 2px; border: 1.2px dashed rgba(150, 100, 60, 0.4); border-radius: 999px; }
+  .talk-slip .chip:hover, .talk-slip .chip:focus-visible { background: rgba(214, 186, 146, 0.6); translate: 0 -1px; outline: none; }
   .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } }
+  @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; } }
+  @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }
   `
 }
 

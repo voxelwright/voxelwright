@@ -279,6 +279,8 @@ export default {
       to.position.copy(last.position)
       to.look.copy(last.look)
       camera.position.lerpVectors(from.position, to.position, k)
+      // Off the seat a focus move arcs up on the way, so it comes down onto its pose instead of through the furniture.
+      if (MODE !== 'seat') camera.position.y += Math.sin(Math.PI * k) * Math.min(1.2, 0.3 * from.position.distanceTo(to.position))
       camera.lookAt(from.look.lerp(to.look, k))
       if (MODE === 'seat') return
       // Focus poses were framed at the seat's field of view, so every rig blends back to it.

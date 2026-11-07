@@ -1,7 +1,7 @@
 // Headless proof of talking to villagers NPC-style (?talk=npc, #42).
 // Starts its own villager host for three synthetic people and its own dev
 // server, both on a throwaway VILLAGE_ROOT, and stops them at the end.
-// Usage: node scripts/check-talk-npc.mjs [--agent=claude] [--video=dir]
+// Usage: node scripts/check-talk-npc.mjs [--agent=claude] [--video=dir] [--dev=5295] [--host=5296]
 //   default: the stub agent (no model is called) and the checks below.
 //   --agent=claude: one real talk and one two-villager table exchange; prints timings and usage.
 //   --video=dir records the run (1280x800) into dir.
@@ -20,8 +20,8 @@ const video = opt('video')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-talk-'))
-const hostPort = 5296
-const devPort = 5295
+const hostPort = Number(opt('host') ?? 5296)
+const devPort = Number(opt('dev') ?? 5295)
 const base = `http://localhost:${devPort}/`
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })
@@ -101,6 +101,12 @@ async function watchTurn(page, ms = 240_000) {
   return samples
 }
 const chip = (page, name) => page.locator('.talk-slip .chip', { hasText: name }).click()
+/** Record every text the person sees on a villager's card, to prove words are revealed whole. */
+const recordWords = (page, person) => page.evaluate((who) => {
+  const el = document.querySelector(`[data-talk-card="${who}"] .words`)
+  window.__seen = []
+  new MutationObserver(() => window.__seen.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true })
+}, person)
 
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1, ...(video ? { recordVideo: { dir: video, size: { width: 1280, height: 800 } } } : {}) })
@@ -130,7 +136,9 @@ try {
     await typeLine(page, 'Shall we plant some herbs this weekend?')
     const group = await watchTurn(page)
     await page.waitForTimeout(3000)
-    await page.keyboard.press('Escape')
+    await typeLine(page, 'Thanks, everyone')
+    await watchTurn(page, 20_000)
+    await until(page, (s) => s.mode === 'room', 6000)
     await page.waitForTimeout(6000)
     const usage = { alex: await jsonl('alex', 'usage.jsonl'), mia: await jsonl('mia', 'usage.jsonl') }
     const order = [...new Set(group.filter((s) => s.speaker).map((s) => s.speaker))]
@@ -173,13 +181,27 @@ try {
     const focus = await page.evaluate(() => document.activeElement?.classList.contains('line'))
     check('a click starts a talk: the villager stops, the camera comes close, a card and the line appear', talking.partner === 'sam' && talking.focused && talking.cards.sam && focus, { talking: talking.partner, focused: talking.focused, card: talking.cards.sam, focus })
     await page.waitForTimeout(800)
+    const hello = (await state(page)).cards.sam?.text ?? ''
+    await recordWords(page, 'sam')
     await typeLine(page, 'Could you help me find my keys?')
     const turn = await watchTurn(page, 20_000)
+    const cued = turn.some((s) => s.cast.sam.speaking && s.cards.sam?.cue && !s.cards.sam.finished)
     const lengths = new Set(turn.map((s) => s.cards.sam?.text?.length ?? 0))
     const thought = turn.some((s) => s.cast.sam.thinking && !s.cards.sam)
     const reply = (await jsonl('sam', 'conversation.jsonl')).at(-1)
     const final = turn.at(-1).cards.sam
     check('the villager thinks with its body, then its reply streams onto the card', thought && lengths.size >= 3 && final?.text === reply?.text && reply?.from === 'villager', { thought, lengths: lengths.size, card: final?.text, reply })
+    const seen = (await page.evaluate(() => window.__seen)).filter((t) => t.trim())
+    const whole = (t, of) => {
+      const i = of.indexOf(t)
+      return i >= 0 && (i + t.length === of.length || /\s/.test(of[i + t.length]))
+    }
+    const broken = seen.filter((t) => !whole(t, reply.text) && !whole(t, hello))
+    const sized = await page.evaluate(() => {
+      const card = document.querySelector('[data-talk-card="sam"]')
+      return { cue: card.querySelector('.cue').hidden, sizer: card.querySelector('.sizer').textContent, words: card.querySelector('.words').textContent }
+    })
+    check('replies are revealed in whole words, with a "still talking" cue until done, on a card sized for the page', seen.length >= 3 && !broken.length && cued && sized.cue && sized.sizer === sized.words, { seen: seen.length, broken, cued, sized })
     const page1 = await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .words')?.textContent)
     check('the card shows at most two sentences, with "go on" for more', page1 && (page1.match(/[.!?](\s|$)/g)?.length ?? 0) <= 2, page1)
 
@@ -229,7 +251,9 @@ try {
     const samLines = (await jsonl('sam', 'conversation.jsonl')).slice(named.sam)
     const alexLines = (await jsonl('alex', 'conversation.jsonl')).slice(named.alex)
     check('starting with a name asks only that villager', alexLines.length === 0 && samLines.length === 2 && [...new Set(one.filter((s) => s.speaker).map((s) => s.speaker))].join() === 'sam', { alexLines, samLines })
-    check("the other villager's last words reach it only as marked context", /\(Context only, not part of the message: .*Dumpling said "/.test(samLines[0]?.text ?? ''), samLines[0]?.text)
+    const heard = await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8').catch(() => '')
+    const samAll = await jsonl('sam', 'conversation.jsonl')
+    check("the other villager's last words reach it only as context, never stored as the person's line", samLines[0]?.text === 'Tuft, can you tidy the counter after?' && /Dumpling said "/.test(heard) && !samAll.some((l) => /Context|Dumpling said/.test(l.text ?? '')), { stored: samLines[0]?.text, heard })
 
     // Host down: the villager says so in character and the line is kept.
     await stop(host)
@@ -241,14 +265,31 @@ try {
     check('with the host down the line is kept, in storage and on the slip', kept.at(-1)?.text === 'Tuft, are you there?' && kept.at(-1)?.person === 'sam' && line === 'Tuft, are you there?', { kept: kept.at(-1), line })
     host = await startHost()
 
-    // Escape at the table: everyone back to chores.
+    // A typed farewell: each says a short goodbye in turn, nothing is sent, and they go back to chores.
+    await page.locator('.talk-slip .line').fill('')
+    const quiet = { alex: (await jsonl('alex', 'conversation.jsonl')).length, sam: (await jsonl('sam', 'conversation.jsonl')).length }
+    await typeLine(page, 'thanks, bye!')
+    const byes = await watchTurn(page, 20_000)
+    const said = [...new Set(byes.filter((s) => s.speaker).map((s) => `${s.speaker}: ${s.cards[s.speaker]?.text}`))]
+    const gone = await until(page, (s) => s.mode === 'room', 4000)
+    const up = await until(page, (s) => !s.cast.alex.seated && !s.cast.sam.seated, 8000)
+    const sent = { alex: (await jsonl('alex', 'conversation.jsonl')).length - quiet.alex, sam: (await jsonl('sam', 'conversation.jsonl')).length - quiet.sam }
+    check('a typed farewell at the table: each says goodbye in turn, nothing is sent, all go back to chores', said.length === 2 && said.every((l) => /bye|see you/i.test(l)) && sent.alex === 0 && sent.sam === 0 && gone.mode === 'room' && !gone.focused && !up.cast.alex.seated && !up.cast.sam.seated, { said, sent, mode: gone.mode })
+
+    // Escape at the table: everyone back to chores at once.
+    await page.focus('[data-entry="villager-alex"]')
+    await page.keyboard.press('Enter')
+    await until(page, (s) => s.mode === 'talk' && s.partner === 'alex', 3000)
+    await chip(page, 'Come sit with me')
+    await until(page, (s) => s.mode === 'table', 3000)
+    await page.waitForTimeout(600)
     await page.keyboard.press('Escape')
     const left = await until(page, (s) => s.mode === 'room', 2000)
-    const up = await until(page, (s) => !s.cast.alex.seated && !s.cast.sam.seated, 8000)
-    check('Escape at the table sends everyone back to chores', left.mode === 'room' && !left.focused && left.seated.length === 0 && !up.cast.alex.seated && !up.cast.sam.seated, { mode: left.mode, seated: left.seated })
+    check('Escape at the table sends everyone back to chores', left.mode === 'room' && !left.focused && left.seated.length === 0, { mode: left.mode, seated: left.seated })
 
     // The "!" glyph: shows, fades after a second of looking, never comes back.
     await page.mouse.move(5, 5)
+    await page.waitForTimeout(2500) // the camera settles back over the room
     await page.evaluate(() => window.village.talk.notify('mia'))
     const shown = await until(page, (s) => s.cast.mia.glyph > 0.8, 3000)
     let m = await page.evaluate(() => window.village.talk.screen('mia'))

@@ -31,11 +31,12 @@ export async function conversation(person: string): Promise<Line[] | null> {
   return res?.ok ? (await res.json()).lines : null
 }
 
-export async function say(person: string, text: string, onText: (t: string) => void): Promise<Said> {
+/** `context` is background the person did not say (the table's last round): the villager hears it, the conversation never stores it. */
+export async function say(person: string, text: string, onText: (t: string) => void, context?: string): Promise<Said> {
   const res = await authorized(`/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
   })
   if (!res) return { ok: false, why: 'away' }
   if (res.status === 409) return { ok: false, why: 'busy' }

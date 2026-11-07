@@ -2,7 +2,6 @@
 // each one, and walkers that yield to whoever is just ahead.
 import * as THREE from 'three/webgpu'
 import { canvas, toTexture } from '../paint'
-import { SEAT_Y } from './world'
 import type { Villager } from './rig'
 
 /** A soft contact shadow per villager: a dark core where it touches and a wide falloff. */
@@ -46,8 +45,8 @@ export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number
     const sitting = v.seated > 0.5
     const r = v.fig.side * 3.0 * scale + 0.12
     const lift = v.fig.floats ? 0.12 + v.fig.hip : 0
-    const air = Math.max(0, v.pos.y - (sitting ? SEAT_Y : 0)) + lift
-    blob.position.set(v.pos.x, (sitting ? SEAT_Y + 0.045 : 0) + 0.004, v.pos.z)
+    const air = Math.max(0, v.pos.y - (sitting ? v.seatY : 0)) + lift
+    blob.position.set(v.pos.x, (sitting ? v.seatY + 0.045 : 0) + 0.004, v.pos.z)
     blob.scale.setScalar(r * (1 + air * 1.5) * (sitting ? 0.8 : 1))
     ;(blob.material as THREE.MeshBasicMaterial).opacity = Math.max(0.15, 1 - air * 3)
   })

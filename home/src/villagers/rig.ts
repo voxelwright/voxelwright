@@ -100,17 +100,20 @@ export class Villager {
   private pending: string | null = null
   /** Progress of the short "oh, hello" hop; 1 is at rest. */
   private beatU = 1
+  /** Height it sits at on a chair: the bare seat, or a booster cushion on it. */
+  readonly seatY: number
 
   /** `idle` villagers stay where they are put (the lineup). */
-  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number; paths?: Paths }) {
+  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number; paths?: Paths; seatY?: number }) {
     this.fig = fig
+    this.seatY = opts.seatY ?? SEAT_Y
     this.tasks = tasks
     this.spot = opts.start
     this.idle = Boolean(opts.idle)
     this.paths = opts.paths ?? 'kitchen'
     const s = SPOTS[opts.start]
     if (opts.seated && s.seat) {
-      this.pos.set(s.seat.x, SEAT_Y, s.seat.z)
+      this.pos.set(s.seat.x, this.seatY, s.seat.z)
       this.yaw = s.seat.yaw
       this.state = 'sit'
       this.seated = 1
@@ -210,7 +213,7 @@ export class Villager {
   private beginHop(onto: boolean) {
     const s = SPOTS[this.spot]
     const seat = s.seat!
-    const to = onto ? new THREE.Vector3(seat.x, SEAT_Y, seat.z) : new THREE.Vector3(s.at[0], 0, s.at[1])
+    const to = onto ? new THREE.Vector3(seat.x, this.seatY, seat.z) : new THREE.Vector3(s.at[0], 0, s.at[1])
     const yaw1 = onto ? seat.yaw : s.face
     this.hop = { from: this.pos.clone(), to, yaw0: this.yaw, yaw1: this.yaw + wrap(yaw1 - this.yaw), u: 0, onto }
     this.state = 'hop'
