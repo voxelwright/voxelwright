@@ -235,8 +235,8 @@ export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: n
   // Darker than it looks: the scene's exposure and bloom lift it to cream.
   g.fillStyle = live ? '#c98c4c' : '#b79a74'
   g.fill()
-  g.lineWidth = r * 0.16
-  g.strokeStyle = 'rgba(70, 44, 28, 0.95)'
+  g.lineWidth = r * 0.2
+  g.strokeStyle = 'rgba(58, 36, 22, 1)'
   g.stroke()
   g.setLineDash([r * 0.22, r * 0.2])
   g.lineWidth = r * 0.07

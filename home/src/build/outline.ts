@@ -13,13 +13,13 @@ import { SNAP, blockerOf, draftGeometry, fit, placeDoor, type Draft } from './re
 
 const MIN = 1.5
 /** How high the unbuilt walls stand while sketched. */
-const STUB = 0.3
+const STUB = 0.24
 const PX = 1024
 const INK = 'rgba(78, 52, 34, 0.95)'
 /** Carpenter's red pencil, for the measurements. */
 const PENCIL = 'rgba(96, 62, 40, 0.8)'
 // Darker than it looks: the scene's exposure and bloom lift it to a warm tracing-paper cream.
-const PAPER = 'rgba(218, 200, 168, 0.88)'
+const PAPER = 'rgba(238, 222, 186, 0.92)'
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
 
@@ -75,9 +75,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   // The chalk sheet: one canvas on a plane laid on the floor, moved and scaled to fit the room.
   const [sheetCanvas, g] = canvas(PX, PX)
   const sheetMap = toTexture(sheetCanvas)
-  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
-    map: sheetMap, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  // Lit like the floor, so the house and the wall stubs cast their shadows across the plot.
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({
+    map: sheetMap, roughness: 1, metalness: 0, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   }))
+  sheet.receiveShadow = true
   sheet.rotation.x = -Math.PI / 2
   sheet.renderOrder = 3
   sheet.name = 'build outline sheet'
@@ -88,6 +90,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const ghosts = new THREE.Mesh(new THREE.BufferGeometry(), ghostMat)
   ghosts.name = 'build outline walls'
   ghosts.renderOrder = 2
+  ghosts.castShadow = ghosts.receiveShadow = true
   // Their edges in pencil: tops and the far corners' uprights, so the walls read through the haze.
   const edgeMat = new THREE.LineBasicMaterial({ color: '#7a5236', transparent: true, opacity: 0.6, depthWrite: false })
   const edges = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMat)
@@ -226,7 +229,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   let shownAt = 0
   /** World points the tags hang from. */
   const anchors = { w: new THREE.Vector3(), d: new THREE.Vector3(), title: new THREE.Vector3() }
-  let paths: { far: P[]; from: P[]; to: P[]; door: P[]; knob: P } | null = null
+  let paths: { far: P[]; from: P[]; to: P[]; door: P[]; knob: P; pegs?: Array<[Handle, P]> } | null = null
 
   const accept = (next: Draft, quiet = true): boolean => {
     const fitted = fit(hooks.base(), next)
@@ -495,15 +498,19 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const ang = (v: P) => Math.atan2(v[1], v[0])
     const knob = (p: P, r: number, live: boolean, angle?: number) => drawKnob(g, ...px(p), r * k, live, angle === undefined ? undefined : { angle, both: true })
     // Just inside each wall, so the wall stubs never hide them (the wall itself is still what you grab).
-    const inset = T / 2 + 0.17
+    const inset = T / 2 + 0.3
     // The far wall's peg sits a third of the way along, clear of the bend peg at its middle.
-    knob(add(pointAt(far, far.length * 0.3), geo.out, -inset), 0.17, active === 'far', ang(geo.out))
-    knob(add(geo.at(d.from, d.depth / 2), geo.dir, inset), 0.17, active === 'from', ang(geo.dir))
-    knob(add(geo.at(d.to, d.depth / 2), geo.dir, -inset), 0.17, active === 'to', ang(geo.dir))
+    const pegs: Array<[Handle, P]> = [
+      ['far', add(pointAt(far, far.length * 0.3), geo.out, -inset)],
+      ['from', add(geo.at(d.from, d.depth / 2), geo.dir, inset)],
+      ['to', add(geo.at(d.to, d.depth / 2), geo.dir, -inset)],
+    ]
+    paths.pegs = pegs
+    for (const [h, p] of pegs) knob(p, 0.2, active === h, ang(h === 'far' ? geo.out : geo.dir))
     const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
-    knob(dc, 0.15, active === 'door', ang(geo.dir))
+    knob(dc, 0.17, active === 'door', ang(geo.dir))
     // The bend knob carries a little bowed arrow: pull to curve the wall.
-    knob(knobAt, 0.19, active === 'bend')
+    knob(knobAt, 0.2, active === 'bend')
     {
       const [x, y] = px(knobAt), r = 0.08 * k
       const [ux, uy] = [geo.out[0], geo.out[1]]
@@ -668,6 +675,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const pick = (p: P): Handle | null => {
     if (!paths) return null
     if (Math.hypot(p[0] - paths.knob[0], p[1] - paths.knob[1]) < 0.32) return 'bend'
+    for (const [h, q] of paths.pegs ?? []) if (Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.24) return h
     if (toPath(p, paths.door) < 0.3) return 'door'
     if (toPath(p, paths.far) < 0.3) return 'far'
     if (toPath(p, paths.from) < 0.3) return 'from'

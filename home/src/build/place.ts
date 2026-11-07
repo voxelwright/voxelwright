@@ -160,14 +160,22 @@ export function placement(deps: PlaceDeps): Placement & {
   /** What it bumps into, outlined in chalk red. */
   const blocker = new THREE.Group()
   blocker.name = 'placement blocker'
-  const blockFill = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.12, depthWrite: false, fog: false }))
-  const blockEdges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.95, depthWrite: false, fog: false }))
-  blockFill.raycast = blockEdges.raycast = () => {}
-  blockFill.renderOrder = blockEdges.renderOrder = 4
-  blocker.add(blockFill, blockEdges)
+  const blockFill = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.18, depthWrite: false, fog: false }))
+  blockFill.raycast = () => {}
+  blockFill.renderOrder = 4
+  // Its edges as chalk-red bars a couple of centimetres thick: a 1 px line is lost in a lit room.
+  const barGeo = new THREE.BoxGeometry(1, 1, 1)
+  const barMat = new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.9, fog: false })
+  const bars = Array.from({ length: 12 }, () => {
+    const m = new THREE.Mesh(barGeo, barMat)
+    m.raycast = () => {}
+    m.renderOrder = 4
+    return m
+  })
+  blocker.add(blockFill, ...bars)
   blocker.visible = false
   const decals = [shadow, noGo, ring, drop, thread]
-  const xrayMat = new THREE.MeshBasicMaterial({ color: '#a88a68', transparent: true, opacity: 0.32, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false })
+  const xrayMat = new THREE.MeshBasicMaterial({ color: '#cdb796', transparent: true, opacity: 0.42, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false })
   const ringMat = ring.material as THREE.MeshBasicMaterial
   const OK = new THREE.Color(CHALK), BAD = new THREE.Color(CHALK_RED)
   /** The phone view eases sideways and up so the thing sits above the docked tag; held while dragging. */
@@ -275,7 +283,7 @@ export function placement(deps: PlaceDeps): Placement & {
   }
 
   // ── Looks: the thing's own materials, see-through, with a chalk rim; red rim and footprint where it can't go ──
-  const RIM = 0.012
+  const RIM = 0.015
   const ghost = (s: Session) => {
     const meshes: THREE.Mesh[] = []
     s.holder.traverse((o) => {
@@ -288,7 +296,7 @@ export function placement(deps: PlaceDeps): Placement & {
       const ok = list.map((mat) => {
         const c = mat.clone()
         c.transparent = true
-        c.opacity = Math.min(mat.opacity, 0.58)
+        c.opacity = Math.min(mat.opacity, 0.66)
         c.depthWrite = true
         return c
       })
@@ -343,7 +351,7 @@ export function placement(deps: PlaceDeps): Placement & {
       if (look.rim) {
         const r = look.rim.material as THREE.MeshBasicNodeMaterial
         r.color.copy(good ? OK : BAD)
-        r.opacity = good ? 0.8 : 0.95
+        r.opacity = good ? 0.95 : 0.95
       }
     }
     ringMat.color.set(good ? '#e2d2b4' : '#e8907c')
@@ -373,7 +381,19 @@ export function placement(deps: PlaceDeps): Placement & {
     if (box.isEmpty()) return
     const size = box.getSize(new THREE.Vector3()).addScalar(0.03)
     box.getCenter(blocker.position)
-    blocker.scale.copy(size)
+    blockFill.scale.copy(size)
+    const t = 0.022
+    let i = 0
+    for (const axis of [0, 1, 2] as const) for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) {
+      const bar = bars[i++]
+      const [u, v] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1]
+      const pos = [0, 0, 0], scl = [t, t, t]
+      pos[u] = a * size.getComponent(u)
+      pos[v] = b * size.getComponent(v)
+      scl[axis] = size.getComponent(axis) + t
+      bar.position.fromArray(pos)
+      bar.scale.fromArray(scl)
+    }
     blocker.visible = true
   }
   const hint = (s: Session) => {
@@ -725,6 +745,13 @@ export function placement(deps: PlaceDeps): Placement & {
       const [sx, sy] = project(x, y, z)
       x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
     }
+    const span = Math.max(x1 - x0, y1 - y0)
+    if (s.mount === 'ceiling') {
+      // A hung thing's tag keeps clear of its thread and its spot on the floor too.
+      const [fx, fy] = project(drop.position.x, 0, drop.position.z)
+      const r = 40
+      x0 = Math.min(x0, fx - r); x1 = Math.max(x1, fx + r); y1 = Math.max(y1, fy + r * 0.5)
+    }
     const vw = innerWidth, vh = innerHeight
     const tag = s.dom.tag
     const docked = narrow()
@@ -749,7 +776,7 @@ export function placement(deps: PlaceDeps): Placement & {
     // A small thing's ring is small on screen: the handle stays clear of the thing, never on it.
     const [rx, ry] = project(ringAt.centre.x, ringAt.centre.y, ringAt.centre.z)
     const away = Math.hypot(hx - rx, hy - ry) || 1
-    const clear = Math.max(x1 - x0, y1 - y0) / 2 + 16
+    const clear = span / 2 + 16
     if (away < clear) [hx, hy] = [rx + ((hx - rx) / away) * clear, ry + ((hy - ry) / away) * clear]
     const half = s.dom.turn.offsetWidth / 2 || 24
     // Never under the tag: mirror it to the ring's other side if the tag is there.
@@ -1042,8 +1069,8 @@ export function placement(deps: PlaceDeps): Placement & {
       xrayMat.dispose()
       blockFill.geometry.dispose()
       ;(blockFill.material as THREE.Material).dispose()
-      blockEdges.geometry.dispose()
-      ;(blockEdges.material as THREE.Material).dispose()
+      barGeo.dispose()
+      barMat.dispose()
       for (const m of decals) {
         const mat = m.material as THREE.MeshBasicMaterial
         mat.map?.dispose()
