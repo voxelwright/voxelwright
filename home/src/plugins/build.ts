@@ -15,6 +15,7 @@ import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
 import { makeLot } from '../build/lot'
 import { firstPieces } from '../build/firstroom'
+import { makeMoveIn } from '../build/movein'
 import { MODE } from './camera'
 
 declare module 'cordis' {
@@ -40,6 +41,8 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
  * let go (src/build/outline.ts). Without the flag this plugin does nothing.
  */
 const ENABLED = new URLSearchParams(location.search).get('build') === '1'
+/** Regroup 2 look prototypes (?look=<name>); only `movein` lives here. */
+const LOOK = new URLSearchParams(location.search).get('look')
 /** The wall that drags and bends: the house's right wall, where the Workshop will go. */
 const WALL = 'living.right'
 /** What lounge.ts builds that the plan's walls and floor stand in for. */
@@ -48,10 +51,23 @@ const STUB = 0.42
 
 export default {
   name: 'build',
-  inject: ['stage'],
+  inject: ['stage', 'view'],
   apply(ctx: Context) {
     if (!ENABLED) return
     const { scene, camera, renderer } = ctx.stage
+    /** ?look=movein: the villager who drew the room walks into it and the view follows them in. */
+    const movein = LOOK === 'movein' ? makeMoveIn(ctx.view, camera) : null
+    if (movein) ctx.effect(() => {
+      // Taking the camera (a drag or the wheel) ends the reveal's hold on the view; the villager stays a while.
+      const el = renderer.domElement
+      el.addEventListener('pointerdown', movein.letGo)
+      el.addEventListener('wheel', movein.letGo, { passive: true })
+      return () => {
+        el.removeEventListener('pointerdown', movein.letGo)
+        el.removeEventListener('wheel', movein.letGo)
+        movein.release()
+      }
+    }, 'build move-in')
     const kit = makeKit()
     const group = own(ctx, new THREE.Group())
     group.name = 'build'
@@ -568,10 +584,12 @@ export default {
         }
         const what = /^New room( \d+)?$/.test(draft.label) ? 'Added a room' : `Added the ${draft.label.toLowerCase()}`
         committing = true
+        const base = h.plan
         // The room arrives with its first pieces, in the same version: one undo takes both away.
         const pieces = firstPieces(h.plan, fitted.plan, draft, scene, [scene.getObjectByName('build outline')].filter((o): o is THREE.Object3D => Boolean(o)))
         h.commit([...draftEdits(h.plan, draft), ...pieces.map((furniture): Edit => ({ op: 'placeItem', furniture }))], what).then(() => {
           rising = settling = { room: draft.roomId, at: performance.now() }
+          movein?.start(base, fitted.plan, draft, pieces, RISE_MS)
           committing = false
           outline.close()
           selectWall(null)
@@ -588,6 +606,7 @@ export default {
       if ('reason' in checked) return say("I didn't quite catch where the room should go. Could you say it another way?")
       const r = resolve(history?.plan ?? plan, checked.intent, { view: view(), selected: selected && { wallId: selected.wallId, t: selected.t }, current: inView(), occupied })
       if ('ask' in r) return say(r.ask)
+      movein?.release()
       if (!outline.open(r.draft)) return
       say(r.note ?? ack ?? 'Like this?')
     }
@@ -622,7 +641,9 @@ export default {
     const frameHouse = (dt: number) => {
       const shown = outline.made() ?? plan
       // The view holds still while something is being dragged, so the floor stays under the pointer.
+      const reveal = movein?.framing(dt)
       if (outline.dragging() || drag) goal = held
+      else if (reveal) goal = reveal
       else if (shown.rooms.some((r) => !BASE_ROOMS.has(r.id))) {
         // Fit every room's footprint, floor to wall top, in the camera as camera.ts posed it this frame.
         camera.updateMatrixWorld()
@@ -673,6 +694,12 @@ export default {
       if (!sunWas && builtPlan && builtPlan.rooms.length > 1) fitSun(builtPlan)
       raise()
       settle()
+      if (movein) {
+        const m = movein.state()
+        // The room was undone under the reveal: the villager goes back to their chores.
+        if (m.room && m.phase !== 'idle' && !plan.rooms.some((r) => r.id === m.room)) movein.release()
+        movein.frame()
+      }
       lot.frame(dt)
       if (built?.shell) {
         const c = curveOf(plan, wallOf(plan, WALL))
@@ -775,6 +802,8 @@ export default {
           return m?.position.x ?? null
         },
       }
+      // ?look=movein: how far the move-in has got, for the look check.
+      if (movein) Object.assign(api, { reveal: () => movein.state() })
       Object.assign(window, { villageBuild: api })
       return () => {
         delete (window as unknown as { villageBuild?: unknown }).villageBuild
