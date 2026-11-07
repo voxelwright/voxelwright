@@ -11,6 +11,8 @@ export interface Target {
   key: string
   /** What the maker is asked for, before the theme's style guide. Short: the host caps `what` at 200 characters. */
   what: string
+  /** A surface others stand on (the table): its widest part's top lands on the original's top, and anything the model stood on it goes. */
+  surface?: boolean
   /** The places it stands, or null while the original is not in the scene yet. */
   find(scene: THREE.Scene): Slot[] | null
 }
@@ -45,12 +47,13 @@ let armFrame: THREE.Group | null = null
 export const PROPS: Target[] = [
   {
     key: 'dining table',
+    surface: true,
     what: 'a rectangular dining table for four, top 1.8 m long (along x) and 1.0 m deep, top surface at 0.75 m, a bare top with nothing on it, open underneath',
     find(scene) {
       const table = named(scene, 'table')
       if (!table) return null
-      // The notebook on it stays: only the slab, legs and apron are the table.
-      const hide = meshes(table)
+      // The notebook, jug and flowers on it stay: only the slab, legs and apron (everything that starts below the top) are the table.
+      const hide = meshes(table).filter((m) => localBox(table, [m]).min.y < 0.74)
       return hide.length ? [{ frame: table, hide, box: grounded(localBox(table, hide)) }] : null
     },
   },

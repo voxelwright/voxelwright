@@ -1676,6 +1676,21 @@ sill that never covers the lamp; square matte chips; one arc for every card; the
 strip; a blank card that fills with colours while the look is written; a rebuild that starts
 changing the light at frame 0. Below the 9/10 bar.
 
+### Regroup S3: the theme redecorates (prototype, dev builds)
+
+`?theme=neon-night&redecorate=1` (or `comic`) has the theme remake the kitchen's dining table,
+chairs, fridge, pendant lamp and reading armchair, plus one headwear piece per felt villager
+(`?villager=b` or `?talk=npc`), in `src/theme/redecorate/`. Each piece is asked of the host's prop
+maker (`POST /people/:id/props` with `style`: the theme's label, about and `props.hint` or
+`costumes.hint`, replacing the house style paragraph of the maker prompt), run in the prop
+sandbox, checked, rebuilt and scaled into the original's box, so footprints, the table top and seat
+heights hold; the original is hidden under it. A table drops anything the model stood on its top.
+Pieces fade in one by one as they are ready; the home's look restores every original; a refused
+piece leaves its original. Made pieces are kept in the person's library as
+`<theme> redecoration, <key>: ...`, so a later visit loads them with no model call.
+`window.village.redecorate.status()` lists each piece with its source, host and sandbox ms and cost.
+Without `redecorate` nothing changes. Shots: `screenshots/themes/regroup1/s3-*.jpg`.
+
 ## Sketching on the notepad (#42 prototype, November 7, 2026)
 
 `src/talk/sketch.ts`, with the held notepad (`?talk=npc`). A pencil lies

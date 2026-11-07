@@ -55,7 +55,26 @@ const styleOf = (t: Theme, part: 'props' | 'costumes') =>
   `${t.label}. ${t.about} ${part === 'props' ? `Props: ${t.props.hint}` : `Villager accessories: ${t.costumes.hint}`}`.slice(0, 400)
 
 /** Scale `object` to fill `box` (frame space) exactly, standing in it: footprint, height and seat line follow. */
-function fit(object: THREE.Object3D, box: THREE.Box3, uniform = false): THREE.Group {
+/**
+ * A surface's top: the top of its widest part (a table's slab). Whatever the model stood on
+ * that top (a centrepiece) is dropped, so the home's own things on the table stay in view.
+ */
+function clearTop(object: THREE.Object3D): number | undefined {
+  const parts: { mesh: THREE.Mesh; box: THREE.Box3 }[] = []
+  object.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) parts.push({ mesh: o as THREE.Mesh, box: new THREE.Box3().setFromObject(o) })
+  })
+  const area = (b: THREE.Box3) => (b.max.x - b.min.x) * (b.max.z - b.min.z)
+  const widest = parts.reduce((a, p) => (area(p.box) > area(a.box) ? p : a), parts[0])
+  if (!widest) return undefined
+  const top = widest.box.max.y
+  // Thin insets and inlays lying on the top stay; anything standing up off it, or floating above it, goes.
+  for (const p of parts) if (p.box.min.y >= top - 0.01 && (p.box.max.y - p.box.min.y > 0.03 || p.box.min.y > top + 0.02)) p.mesh.removeFromParent()
+  return top
+}
+
+/** `top` (a surface): the height in the object that lands on the box's top, in place of its highest point. */
+function fit(object: THREE.Object3D, box: THREE.Box3, uniform = false, top?: number): THREE.Group {
   const b = new THREE.Box3().setFromObject(object)
   const s = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3())
   if (!Number.isFinite(s.x + s.y + s.z) || s.x * s.y * s.z === 0) throw new Error('it came out with no size')
@@ -66,7 +85,7 @@ function fit(object: THREE.Object3D, box: THREE.Box3, uniform = false): THREE.Gr
   const k = (a: number, b: number) => Math.min(3, Math.max(1 / 3, a / b))
   // Uniform (an accessory): the model's own proportions, as wide as the box allows.
   if (uniform) holder.scale.setScalar(Math.min(t.x / s.x, t.z / s.z))
-  else holder.scale.set(k(t.x, s.x), k(t.y, s.y), k(t.z, s.z))
+  else holder.scale.set(k(t.x, s.x), k(t.y, top === undefined ? s.y : top - b.min.y), k(t.z, s.z))
   holder.position.set(tc.x, box.min.y, tc.z)
   return holder
 }
@@ -201,9 +220,10 @@ export default {
     }
 
     /** Stand a theme piece in every slot, fading in; the originals go when it is solid. */
-    const standIn = (t: Theme, key: string, object: THREE.Group, slots: Slot[]) => {
+    const standIn = (t: Theme, key: string, object: THREE.Group, slots: Slot[], surface?: boolean) => {
+      const top = surface ? clearTop(object) : undefined
       slots.forEach((slot, i) => {
-        const holder = fit(i === 0 ? object : object.clone(true), slot.box)
+        const holder = fit(i === 0 ? object : object.clone(true), slot.box, false, top)
         holder.userData.themeOwned = true
         holder.name = `redecorate ${t.id} ${key}`
         holder.traverse((o) => {
@@ -229,10 +249,11 @@ export default {
         const made = pieces[i % pieces.length]
         if (!made || keep) return
         // The skull's box in the head's space: the accessory sits down over its crown.
-        const sb = new THREE.Box3().setFromObject(skull)
-        head.updateWorldMatrix(true, false)
-        const inv = head.matrixWorld.clone().invert()
-        sb.applyMatrix4(inv)
+        // From the skull's own transform, not world matrices: a villager may be mid-animation (or still popping in) when dressed.
+        const geo = (skull as THREE.Mesh).geometry
+        if (!geo.boundingBox) geo.computeBoundingBox()
+        skull.updateMatrix()
+        const sb = geo.boundingBox!.clone().applyMatrix4(skull.matrix)
         const s = sb.getSize(new THREE.Vector3())
         // Crown-sized and set down a little over the top, clear of the eyes.
         const target = new THREE.Box3(
@@ -278,7 +299,7 @@ export default {
           if (!made) continue
           if (made.status.readyMs === undefined) made.status.readyMs = Math.round(performance.now() - switchedAt)
           if (current !== t.id || placed.some((p) => p.theme === t.id && p.key === target.key)) continue
-          standIn(t, target.key, made.object, slots)
+          standIn(t, target.key, made.object, slots, target.surface)
         }
         if (!FELT) return
         let acc = accessoriesFor.get(t.id)
