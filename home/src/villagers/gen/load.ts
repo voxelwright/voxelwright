@@ -40,8 +40,10 @@ const LINE = { x: -0.25, z: 1.15 }
 let box: PropBox | null = null
 /** `&checks=off` shows a villager the checks would refuse, to look at what they caught. */
 const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
+/** `&kit=1` (look regroup 2): trusted code makes the face and the role's mark (./kit.ts); the model's eyes and mark are dropped. */
+const kitOn = new URLSearchParams(location.search).get('kit') === '1'
 
-async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true): Promise<Made> {
+async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn): Promise<Made> {
   box ??= new PropBox()
   const t0 = performance.now()
   const result = await box.run(code)
@@ -49,7 +51,7 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark)
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit)
   return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
 }
 
@@ -189,9 +191,9 @@ export default {
      * check-villager-gen.mjs. The species and role-mark checks are off unless asked for: the sandbox's
      * plumbing probe is a plain round figure on purpose, and the round 1 to 3 fixtures predate villager.mark().
      */
-    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean } = {}) => {
+    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean } = {}) => {
       try {
-        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false)
+        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn)
         const r = { ok: true, name: m.name, persona: m.persona, measures: m.measures, fixes: m.fixes, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
         releaseGpu(m.fig.root)
         return r

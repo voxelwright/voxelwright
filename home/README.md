@@ -1115,6 +1115,19 @@ node scripts/villagers/measure-marks.mjs r7-
 40 of 40 (one earlier run 39 of 40, not reproduced in two reruns), host `node test/villager-make.ts` passes 81 of 81
 (stub maker). `npm run typecheck` fails only in `setup-d.ts` (`sizeAt` missing from `setup-b`), builder N's files.
 
+### Look regroup 2: the trusted felt kit (behind `&kit=1`)
+
+`gen/kit.ts` makes the face (button eyes with a highlight, set on the felt along the model's own eye line, and
+cheeks) and the role's mark (toque, mortarboard, sun hat, duster plume, post flag, pencil, lens, stocking cap)
+in the owner's felt, sized against the head. The model's eyes and marked parts are dropped. It is off unless
+asked for: `?villager=gen&gen=<ids>&kit=1`, `readability.mjs ... --kit`, `measure-marks.mjs <prefix> --kit`.
+Numbers and sheets: `screenshots/villager-gen/LEARNING-look.md` and `screenshots/villager-gen/regroup-look-2/`.
+
+```sh
+node scripts/villagers/measure-marks.mjs r7- --kit
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --kit --seed=61 --close=r7-11,r7-12,r7-04,r7-07,r7-08,r7-01
+```
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,

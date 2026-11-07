@@ -12,6 +12,7 @@
 //   count), the felt moved off the owners' colours, and a blind colour sheet in its own shuffle with its own key
 //   (readability-colour-key.md), so its numbers say nothing about the silhouette sheet's.
 // Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47] [--close=<ids>]   (dev server running)
+// --kit applies the trusted felt kit (look regroup 2) to the same saved modules.
 // --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
 // --seed shuffles the blind sheet's numbering (47 gave round 3's order; round 4 used 48).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -21,6 +22,8 @@ import { chromium } from 'playwright'
 const out = resolve(process.argv[2])
 const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://localhost:5332/'
 const checksOff = process.argv.includes('--checks=off')
+/** --kit: the trusted felt kit (gen/kit.ts, look regroup 2) makes the face and the role's mark. */
+const kit = process.argv.includes('--kit')
 const seedArg = Number(process.argv.find((a) => a.startsWith('--seed='))?.slice(7) ?? 47)
 const close = process.argv.find((a) => a.startsWith('--close='))?.slice(8).split(',').filter(Boolean) ?? []
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
@@ -36,7 +39,7 @@ const TILE = 150
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 async function open(query) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}`)
+  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}${kit ? '&kit=1' : ''}`)
   await page.waitForFunction(() => window.village && window.villagerGen, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villagerGen.loaded)

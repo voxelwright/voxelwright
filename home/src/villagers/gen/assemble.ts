@@ -8,6 +8,7 @@ import * as THREE from 'three/webgpu'
 import { rebuild } from '../../props/rebuild'
 import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
+import { BLUSH, feltKit as makeKit } from './kit'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
 import { awayFromOwners, inspect, OWNER_ACCENTS, type Measures } from './checks'
@@ -42,7 +43,7 @@ const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obj
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
 /** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = false): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -60,15 +61,42 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
 
   // Trusted rebuild of the geometry; its materials are replaced below.
   const group = rebuild(prop)
-  const meshes = group.children as THREE.Mesh[]
-  meshes.forEach((mesh, i) => slots.get((prop.meshes[i].role ?? 'body') as Role)!.push(mesh))
+  // The model's meshes with their wire entries; the kit (./kit.ts) may drop some and add its own.
+  let model = (group.children as THREE.Mesh[]).map((mesh, i) => ({ mesh, w: prop.meshes[i] }))
 
   // Stand it on the floor.
   group.updateMatrixWorld(true)
   const all = new THREE.Box3().setFromObject(group)
   const height = all.max.y - all.min.y
   if (!(height >= HEIGHT[0] && height <= HEIGHT[1])) throw new Error(`the villager is ${height.toFixed(2)} tall; make it ${HEIGHT[0]} to ${HEIGHT[1]} model units`)
-  for (const mesh of meshes) mesh.position.y -= all.min.y
+  for (const { mesh } of model) mesh.position.y -= all.min.y
+  group.updateMatrixWorld(true)
+
+  // The felt look, from trusted code. Matte parts become felt; glossy or metal ones stay smooth beads.
+  const bodyMesh = model.find((m) => (m.w.role ?? 'body') === 'body')!
+  const bodyColour = hex(prop.materials[bodyMesh.w.material].color)
+  const lum = new THREE.Color(bodyColour).convertLinearToSRGB()
+  const rimStrength = THREE.MathUtils.clamp(0.28 + (0.75 - (0.299 * lum.r + 0.587 * lum.g + 0.114 * lum.b)) * 1.8, 0.22, 0.6)
+  const { felt, outline } = feltKit(phys, rimStrength, accent, seed + 25)
+  // Every owner's accent and this villager's own: body felt keeps off all of them.
+  const accents = { ...OWNER_ACCENTS, 'this owner': accent }
+
+  // Regroup 2: the trusted felt kit makes the face and the role's mark; the model's eyes and marked parts go.
+  const added: { mesh: THREE.Mesh; slot: Role }[] = []
+  if (kit) {
+    const k = makeKit({ meshes: model.map(({ mesh, w }) => ({ mesh, slot: (w.role ?? 'body') as Role, mark: w.mark === true })), role: checked.spec.role, accent, felt: (c, map) => felt(c, map ?? feltTexture(c, seed + 29, { band: false })), seed, blush: awayFromOwners(BLUSH, accents) })
+    for (const m of k.remove) m.removeFromParent()
+    model = model.filter(({ mesh }) => !k.remove.has(mesh))
+    for (const part of k.add) group.add(part.mesh)
+    added.push(...k.add)
+    fixes.push(...k.notes)
+  }
+  const meshes = [...model.map((m) => m.mesh), ...added.map((m) => m.mesh)]
+  for (const { mesh, w } of model) slots.get((w.role ?? 'body') as Role)!.push(mesh)
+  for (const { mesh, slot } of added) {
+    if (!slots.has(slot)) slots.set(slot, [])
+    slots.get(slot)!.push(mesh)
+  }
   group.updateMatrixWorld(true)
   // Every slot's bounds, measured once before anything is moved.
   const boxes = new Map<Role, THREE.Box3>()
@@ -79,24 +107,17 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   }
   const box = (role: Role) => boxes.get(role) ?? new THREE.Box3()
 
-  // The felt look, from trusted code. Matte parts become felt; glossy or metal ones stay smooth beads.
-  const bodyColour = hex(prop.materials[prop.meshes[meshes.indexOf(slots.get('body')![0])].material].color)
-  const lum = new THREE.Color(bodyColour).convertLinearToSRGB()
-  const rimStrength = THREE.MathUtils.clamp(0.28 + (0.75 - (0.299 * lum.r + 0.587 * lum.g + 0.114 * lum.b)) * 1.8, 0.22, 0.6)
-  const { felt, outline } = feltKit(phys, rimStrength, accent, seed + 25)
-  // Every owner's accent and this villager's own: body felt keeps off all of them.
-  const accents = { ...OWNER_ACCENTS, 'this owner': accent }
   const made = new Map<string, THREE.Material>()
   const nudged = new Map<string, string>()
   const replaced = new Set<THREE.Material>()
-  meshes.forEach((mesh, i) => {
-    const k = prop.meshes[i].material
+  model.forEach(({ mesh, w: wire }) => {
+    const k = wire.material
     const old = mesh.material as THREE.MeshStandardMaterial
     const w = prop.materials[k]
     const c = hex(w.color)
     const matte = w.roughness >= 0.5 && w.metalness < 0.5
-    const role = prop.meshes[i].role
-    const marked = prop.meshes[i].mark === true
+    const role = wire.role
+    const marked = wire.mark === true
     // The mark in the owner's felt; other felt off the owners' hues (not the eyes or the held prop: a wooden spoon stays wood).
     const shown = marked ? accent : matte && role !== 'held' && role !== 'eye-left' && role !== 'eye-right' ? awayFromOwners(c, accents) : c
     if (shown !== c && !marked) nudged.set(c, shown)
