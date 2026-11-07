@@ -36,9 +36,33 @@ export const NEUTRAL: VoiceProfile = { pitch: 240, range: 3, formant: 1.1, rate:
 /** talk.ts's synthetic people, each with their own villager. */
 const OWNERS: Record<string, string> = { alex: 'dumpling', sam: 'tuft', mia: 'moss' }
 
+const BUILT_IN = new Set(Object.keys(VOICES))
+
+/** The first word of a villager's name or id, lowercased and without "villager-": the key the registry uses. */
+export function keyWord(villager: string): string {
+  return villager.toLowerCase().replace(/^villager-/, '').split(/[,\s]/)[0]
+}
+
 /** The voice key for a villager named by name ("Dumpling", "Dumpling, the cook"), entry or person id; null if unknown. */
 export function voiceKey(villager: string): string | null {
-  const word = villager.toLowerCase().replace(/^villager-/, '').split(/[,\s]/)[0]
+  const word = keyWord(villager)
   if (word in VOICES) return word
   return OWNERS[word] ?? null
+}
+
+/**
+ * Gives a generated villager a voice. `villager` is any name or id that voiceKey() will later
+ * be asked about ("villager-gen-3", "Shelly, the keeper"); returns the key it registered.
+ * The three built-in voices cannot be replaced.
+ */
+export function registerVoice(villager: string, profile: VoiceProfile): string {
+  const key = keyWord(villager)
+  if (BUILT_IN.has(key) || key in OWNERS) throw new Error(`"${key}" is a built-in voice`)
+  VOICES[key] = profile
+  return key
+}
+
+export function unregisterVoice(villager: string): void {
+  const key = keyWord(villager)
+  if (!BUILT_IN.has(key)) delete VOICES[key]
 }
