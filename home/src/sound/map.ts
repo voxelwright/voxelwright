@@ -18,6 +18,7 @@ const lines = {
   'village/card': () => 'card',
   'village/pad': (e) => (e.up ? 'pad-up' : 'pad-down'),
   'village/wrote': () => 'writing',
+  'village/sketched': () => 'sketch',
   'village/sent': () => 'sent',
   'village/routed': (e) => (e.ok ? 'routed' : 'unrouted'),
   'village/furnish': (e) => e.state,

@@ -229,7 +229,7 @@ const emit = (p, name, e) =>
 const SAMPLE = {
   'village/hover': { id: 'notebook' }, 'village/chose': { id: 'notebook' }, 'village/backed': { id: 'notebook' },
   'village/glide': { seconds: 1 }, 'village/turned': { villager: 'mia' }, 'village/greeted': { villager: 'sam' },
-  'village/card': { villager: 'mia', page: 0 }, 'village/pad': { up: true }, 'village/wrote': { added: 1 },
+  'village/card': { villager: 'mia', page: 0 }, 'village/pad': { up: true }, 'village/wrote': { added: 1 }, 'village/sketched': { tool: 'pen' },
   'village/sent': { seconds: 1.25 }, 'village/routed': { route: 'talk', ok: true }, 'village/furnish': { state: 'placed' },
   'village/book': { open: true, seconds: 0.7 }, 'village/page': { leaves: 1, dir: 1, seconds: 0.42 }, 'village/sat': { villager: 'mia', seconds: 0.7 },
   'village/farewell': { villagers: ['mia'] }, 'village/news': { villager: 'mia' }, 'village/walk': { phase: 'leave', from: 'kitchen', to: 'living', seconds: 0.95 },

@@ -295,6 +295,27 @@ const writing = {
   }),
 }
 
+const sketch = {
+  a: cue({
+    bus: 'ui', level: -27, gap: 0.075, length: 0.3, jitter: { cents: 150, db: 2 },
+    play(a, out, p, kit) {
+      // Writing's pencil, drawing: sketch.ts announces the moving pen at most every 75 ms, so a
+      // stroke is overlapping grains of one scratch that stops when the pen does. The rubber is
+      // softer, lower and broader; an undo or a clear is one short rub.
+      const tool = String(p.event.tool ?? 'pen')
+      const pen = tool === 'pen'
+      const dur = pen ? 0.12 : tool === 'rubber' ? 0.15 : tool === 'clear' ? 0.26 : 0.18
+      const strokes = crackle(p.random, dur, pen ? 3 + Math.floor(p.random() * 3) : 2, pen ? 0.02 : 0.04)
+      const body = swell(0.4, 0.8)
+      noise(a, out, kit, p.at, {
+        dur, gain: p.gain * (pen ? 1 : 0.55), random: p.random, q: pen ? 1.1 : 0.6, top: pen ? 4500 : 2400,
+        freq: (pen ? 2500 : 1000) * p.rate,
+        env: (u) => body(u) * (0.4 + 0.6 * strokes(u)),
+      })
+    },
+  }),
+}
+
 /** The flight of a sent slip, shared by the three `sent` variants: `seconds` long, at least 0.25 s. */
 const flight = (p: Play) => Math.max(0.25, seconds(p.seconds, 0.7, 1.0))
 
@@ -720,7 +741,7 @@ const refused = {
 
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
-  'pad-up': padUp, 'pad-down': padDown, writing, sent, routed, unrouted,
+  'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
   'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused,
 }
@@ -764,6 +785,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
     b: 'Much softer: 7 dB down from round 1, a dull slide and a lighter felt landing.',
   },
   writing: { a: 'Pencil grains, at most one per 75 ms, overlapping into one scratch while typing; deleting is a softer rub.' },
+  sketch: { a: 'Pencil drawing: grains at most every 75 ms while the pen moves; the rubber, an undo or a clear is a softer, broader rub.' },
   sent: {
     a: 'Tear, a paper flutter across the flight, and a soft paper tap on landing.',
     b: 'Recorded: a real paper tear (four takes) and a sheet waved through the air (three takes), landing on felt.',
