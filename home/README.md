@@ -1131,6 +1131,22 @@ sound; one map turns that into a cue; one player plays it into a bus of one mix.
 node scripts/check-sound.mjs [base-url]   # 15 headless checks, dev server on 5490 by default
 ```
 
+**Listening room** (dev only): `/sound-lab.html` has a card per cue, a play button per variant
+(live, through a real Player and the mix, optionally over the music), a pick (A, B, C or none;
+keep or change for single cues) and a note. Picks save to `home/.sound-lab/picks.json` (each
+round also appended to `history.jsonl`) through `POST /sound-lab/picks` in `vite.config.ts`, and
+to `village.sfx.picks` for the home. Each interaction with variants also has a short video of the
+real home per variant, its sound rendered offline over the logged timeline (cues, voices, music).
+
+```sh
+npx vite --port 5491 --strictPort              # then open /sound-lab.html
+node scripts/record-sound-lab.mjs [base-url]   # videos into public/sound-lab/ (gitignored), checks audio and sync
+node scripts/check-sound-lab.mjs [base-url]    # the page: sound at the master, picks round trip, videos served
+```
+
+Behind `tailscale serve`, start Vite with `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=<tailnet host>`;
+the page uses only relative URLs.
+
 Measured with the stand-in palette (headless Chrome 158, M1 Pro, November 7, 2026): event to
 first audible sample 2.7 to 5.3 ms on the audio clock (baseLatency 10 ms); a scripted minute of
 use (112 plays) -40.8 LUFS at the master (ui -41.2, world -43.4), peak -22.5 dBFS; each cue -57 to
