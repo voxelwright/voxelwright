@@ -921,8 +921,6 @@ export default {
     const EDGE = 12
     /** How far a card's name tab sticks up above it. */
     const TAB = 22
-    const box = new THREE.Box3()
-    const ball = new THREE.Sphere()
     const camUp = new THREE.Vector3()
     const camRight = new THREE.Vector3()
     const edge = new THREE.Vector3()
@@ -931,16 +929,17 @@ export default {
       const r = rect()
       return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
     }
-    /** A villager's head on screen, in CSS pixels: the head's bounding sphere, seen from the camera. */
+    const centre = new THREE.Vector3()
+    /** A villager's head on screen, in CSS pixels: a ball round the head's centre, as big as the head (ears left out). */
     const headBox = (m: Member) => {
-      box.setFromObject(m.v.fig.head).getBoundingSphere(ball)
-      // Ears and leaves widen the box; most of the sphere is head.
-      const r = ball.radius * 0.8
+      const { head } = m.v.fig
+      const r = (m.v.fig.height - head.position.y) * SCALE * 1.05
+      head.getWorldPosition(centre)
       camUp.setFromMatrixColumn(stage.camera.matrixWorld, 1)
       camRight.setFromMatrixColumn(stage.camera.matrixWorld, 0)
-      const c = toPx(edge.copy(ball.center))
-      const top = toPx(edge.copy(ball.center).addScaledVector(camUp, r))
-      const side = toPx(edge.copy(ball.center).addScaledVector(camRight, r))
+      const c = toPx(edge.copy(centre))
+      const top = toPx(edge.copy(centre).addScaledVector(camUp, r))
+      const side = toPx(edge.copy(centre).addScaledVector(camRight, r))
       const ry = Math.abs(c.y - top.y), rx = Math.abs(side.x - c.x)
       return { x0: c.x - rx, y0: c.y - ry, x1: c.x + rx, y1: c.y + ry, cx: c.x }
     }
@@ -1257,7 +1256,7 @@ function css() {
   .talk-slip .ruled:focus-within::after { border-bottom-color: rgba(47, 74, 107, 0.85); }
   .talk-slip.waiting .line { opacity: 0.6; }
   .talk-slip .chips { display: flex; gap: 6px 8px; flex-wrap: wrap; }
-  .talk-slip .chips:empty { display: none; }
+  .talk-slip .chips:empty, .talk-slip.waiting .chips { display: none; }
   .talk-slip .chip { position: relative; padding: 3px 11px 4px; border: 0; border-radius: 999px; cursor: pointer;
     background: rgba(214, 186, 146, 0.3); color: #553a26; font: 16px ${HAND}; transition: background 120ms ease, translate 120ms ease; }
   .talk-slip .chip::before { content: ''; position: absolute; inset: 2px; border: 1.2px dashed rgba(150, 100, 60, 0.4); border-radius: 999px; }
