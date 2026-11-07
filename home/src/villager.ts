@@ -7,13 +7,17 @@ export interface Line { from: 'person' | 'villager'; text?: string; unanswered?:
 
 let token: string | null = null
 
+/** The host's per-launch token, from the dev server; null when the host isn't running. */
+export async function launchToken(): Promise<string | null> {
+  const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
+  if (!launch?.ok) return null
+  return ((await launch.json().catch(() => null)) as { token?: string } | null)?.token ?? null
+}
+
 export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (!token) {
-      const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
-      if (!launch?.ok) return null
-      token = (await launch.json()).token
-    }
+    token ??= await launchToken()
+    if (!token) return null
     const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
     if (!res || res.status >= 500) return null
     // The host restarted with a new token: fetch it once and try again.

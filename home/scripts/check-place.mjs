@@ -32,7 +32,7 @@ const check = (name, pass, detail) => {
 }
 const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
 
-// ---------------------------------------------------------------- plan ops, no page
+// ── Plan ops, no page ───────────────────────────────────────────────────────
 {
   const vite = await createServer({ root: homeDir, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true } })
   const P = await vite.ssrLoadModule('/src/build/plan.ts')
@@ -67,10 +67,15 @@ const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
   check('plan: removeItem of a missing thing is refused', /does not exist/.test(refused(() => apply(p4, { op: 'removeItem', furnitureId: 'f.pic' })) ?? ''))
   const dangling = { ...p2, walls: p2.walls.map((w) => (w.id === 'kitchen.back' ? { ...w, id: 'kitchen.back2' } : w)) }
   check('plan: validate reports a thing hung on a wall that is gone', validate(dangling).some((r) => /hangs on wall kitchen.back/.test(r)))
+  // The floor keeps 0.6 m in front of a door clear (the living-room door, back wall at x -3.0 to -2.3).
+  const M = await vite.ssrLoadModule('/src/build/mount.ts')
+  const crateAt = (z) => M.fit({ plan: KITCHEN, size: [0.4, 0.4, 0.4], obstacles: [], supportAt: () => null }, { mount: 'floor', x: -2.65, z, yaw: 0 })
+  const nearDoor = crateAt(-1.55), clearOfDoor = crateAt(-1.3)
+  check('floor: the 0.6 m in front of a door stays clear', nearDoor.why === "It's in the way of the door" && clearOfDoor.ok, { nearDoor, clearOfDoor })
   await vite.close()
 }
 
-// ---------------------------------------------------------------- the page
+// ── The page ────────────────────────────────────────────────────────────────
 const children = new Set()
 function run(cmd, argv, cwd, env, ready) {
   const child = spawn(cmd, argv, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
@@ -332,7 +337,7 @@ try {
   await page.evaluate(() => {
     window.villagePlace.history().commit = window.__commit
   })
-  // F7: another page changes the house first (a real second history on the same host store): StaleHead, then the history has the new head.
+  // another page changes the house first (a real second history on the same host store): StaleHead, then the history has the new head.
   const otherHead = await page.evaluate(async () => {
     const H = await import('/src/build/history.ts')
     const { token } = await (await fetch('/villager/launch')).json()
@@ -343,7 +348,7 @@ try {
   await page.waitForTimeout(600)
   s = await S(page)
   const headNow = await page.evaluate(() => window.villagePlace.history().head)
-  check('F7: when another page moved the house, the ghost stays, says so, and the page already has the new head', s.state === 'placing' && /house changed/.test(s.hint) && headNow === otherHead && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore, { s, headNow, otherHead })
+  check('when another page moved the house, the ghost stays, says so, and the page already has the new head', s.state === 'placing' && /house changed/.test(s.hint) && headNow === otherHead && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore, { s, headNow, otherHead })
   await page.keyboard.press('Enter')
   d = await done(page)
   check('after the failures, confirming again places it once, on the other page’s version', (await page.evaluate(() => window.villagePlace.history().versions().at(-1).parent)) === otherHead && d.status === 'confirmed' && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore + 1)

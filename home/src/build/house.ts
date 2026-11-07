@@ -7,6 +7,7 @@
 // page would look saved and be lost.
 import { KITCHEN } from './plan'
 import { PlanHistory, hostStore, memoryStore } from './history'
+import { launchToken } from '../villager'
 
 let opening: Promise<PlanHistory> | null = null
 
@@ -15,21 +16,15 @@ export const READ_ONLY_LINE = "I couldn't open the saved house just now, so I'll
 /** What a person sees in build mode when no host is running to keep the house. */
 export const UNSAVED_LINE = "The house keeper isn't running, so anything we build now goes when the page closes."
 
-async function hostToken(): Promise<string | null> {
-  const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
-  if (!launch?.ok) return null
-  return ((await launch.json().catch(() => null)) as { token?: string } | null)?.token ?? null
-}
-
 export function house(): Promise<PlanHistory> {
   opening ??= (async () => {
-    const token = await hostToken()
+    const token = await launchToken()
     if (!token) return PlanHistory.open(memoryStore(), KITCHEN, { unsaved: UNSAVED_LINE })
     try {
-      return await PlanHistory.open(hostStore({ base: '/villager/api', token, refresh: hostToken }), KITCHEN)
+      return await PlanHistory.open(hostStore({ base: '/villager/api', token, refresh: launchToken }), KITCHEN)
     } catch (error) {
       console.warn('the house plan on the host could not be opened; the house is read-only', error)
-      return PlanHistory.readOnly(KITCHEN, READ_ONLY_LINE, error)
+      return PlanHistory.readOnly(KITCHEN, READ_ONLY_LINE)
     }
   })()
   return opening

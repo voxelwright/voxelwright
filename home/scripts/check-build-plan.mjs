@@ -6,10 +6,10 @@
 // 3. Drag and bend the right wall in iso with the mouse: snapping, live rebuild,
 //    no geometry leak, Escape cancels, drags become versions, unloading restores room.ts's room.
 // Exits non-zero when any check fails. Writes screenshots/build/*.jpg and a clip.
-import { chromium } from 'playwright'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
 const base = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5350/'
@@ -116,7 +116,7 @@ async function diff(a, b, name) {
 
 const jpg = (page, name) => page.screenshot({ path: join(OUT, name), type: 'jpeg', quality: 85 })
 
-// ---------------------------------------------------------------- 1. pixels
+// ── 1. pixels ───────────────────────────────────────────────────────────────
 if (!args.includes('--skip-pixels')) {
   for (const [label, query] of [['iso', '?cam=iso&q=low&fx='], ['seat', '?q=low&fx=']]) {
     const shots = []
@@ -142,11 +142,13 @@ if (!args.includes('--skip-pixels')) {
     }
     const floor = await diff(shots[0], shots[1])
     const generated = await diff(shots[0], shots[2], `${label}-diff.jpg`)
-    check(`${label}: generated vs today within the noise floor`, generated.mean <= Math.max(floor.mean * 1.5, 0.15), { noiseFloor: floor, generated })
+    // The seated view is bit-identical; iso differs only in scattered floor pixels (UVs from world positions, about 3,800 px, max 43).
+    const exact = label === 'seat'
+    check(`${label}: generated vs without the flag ${exact ? 'bit-identical' : 'within the measured floor residual'}`, exact ? generated.differingPixels === 0 : generated.differingPixels <= 5000 && generated.maxChannelSum <= 60, { noiseFloor: floor, generated })
   }
 }
 
-// ---------------------------------------------------------------- 2 and 3. model, drag and bend
+// ── 2 and 3. model, drag and bend ───────────────────────────────────────────
 if (!args.includes('--skip-drag')) {
   const baseline = await open('?cam=iso&q=low&fx=')
   const today = await baseline.page.evaluate(() => window.village.snapshot())
@@ -240,6 +242,21 @@ if (!args.includes('--skip-drag')) {
   await frames()
   const cancelled = await where()
   check('drag: Escape puts the wall back', Math.abs(mid.x - w0.x - 0.5) < 1e-6 && Math.abs(cancelled.x - w0.x) < 1e-6, { during: mid.x, after: cancelled.x })
+
+  // A wall save that fails puts the wall back and says so.
+  await page.evaluate(async () => { (await window.villageBuild.history()).commit = async () => { throw new Error('store down') } })
+  const f0 = await where()
+  await page.mouse.move(...f0.at)
+  await frames()
+  await page.mouse.down()
+  await page.mouse.move(...f0.out, { steps: 25 })
+  await frames()
+  await page.mouse.up()
+  await frames(30)
+  const f1 = await where()
+  const failedNote = await page.evaluate(() => window.villageBuild.noted())
+  check('drag: a wall save that fails puts the wall back and says so', Math.abs(f1.x - f0.x) < 1e-6 && Math.abs(f1.wallX - f0.wallX) < 1e-6 && /put it back/.test(failedNote ?? ''), { f0: f0.wallX, f1: f1.wallX, failedNote })
+  await page.evaluate(async () => { delete (await window.villageBuild.history()).commit })
 
   // Bend the wall out by 1 m at its middle.
   await page.mouse.move(...w0.bend)

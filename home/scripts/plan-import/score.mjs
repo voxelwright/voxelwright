@@ -2,8 +2,8 @@
 // Usage: node scripts/plan-import/score.mjs
 // Alignment fits rotation + translation only (scale is not fitted, so scale error costs accuracy).
 import { readdir, readFile, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PLANS } from './plans.mjs'
 import { arcInfo, wallPolyline, indexPlan, openingEnds, dist } from './geom.mjs'
 import { openDrawPage } from './browser.mjs'
@@ -130,13 +130,6 @@ Plan f is plan b scaled by 1.087, so no coordinate lands on a round decimetre an
 
 Reproduce (from home/): \`node scripts/plan-import/render.mjs\`, \`node scripts/plan-import/run.mjs sonnet sonnet\`, \`node scripts/plan-import/run.mjs opus opus\`, \`node scripts/plan-import/run.mjs opus opus-rerun c d e\`, \`node scripts/plan-import/score.mjs\`.
 
-Findings (Nov 6 run, models claude-sonnet-5-5 and claude-opus-5-5): every output was valid on the first try, so the repair pass never ran. Clean drawings (a, b, d, e, f) came back near exact, curved bay and three-arc tower included.
-The only geometric error is the rotated, keystoned hand sketch (c): corners 0.11-0.14 m off and scale 1-3% off from the single written dimension. The other misses are window extents: Sonnet put one end of 3 windows 0.2-1.0 m off (worst: the sketch window, read 1 m short); Opus missed none.
-Caveat: these are clean synthetic renders with scale given; real estate-agent scans, photos of paper and plans without dimensions are untested here.
-
-Caveats: Sonnet and Opus ran concurrently (each sequential over its plans), so latencies are comparable, not absolute. The repair path never ran because nothing failed. The CLI's cost includes a small claude-haiku-5-5 side call.
-
-Shape vs home/src/build/plan.ts (landed during this run): plan.ts nests openings inside each wall (here a top-level list with a wall field); requires wall height and opening sill/head (optional leaves), which the prompt does not ask for; has no units field. Its validate() also checks room winding (positive shoelace area), opening overlap and at most two rooms per wall. All 49 model room loops wound positive, but the importer should normalise winding, nest openings and fill height/sill/head defaults in trusted code. Sagitta sign and the half-circle bound match.
 
 `
 const summary = {}

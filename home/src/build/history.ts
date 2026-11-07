@@ -1,8 +1,8 @@
 // Versioned house plans (#48): pure data and a store interface, no three.js.
 //
-// A version carries the plan it produced (`plan`, the fact) and the edits that
-// made it from its parent (`edits`, the description, for people and diff; empty on
-// the root). Opening a history reads each version's plan and replays nothing, so a
+// A version stores the plan it produced (`plan`) and a short note of what changed;
+// the edits that made it are applied and checked here, then not kept (the plan is
+// the one record, and diff() compares plans). Opening a history reads each version's plan, so a
 // change to plan.ts never changes a saved house. A plan saved under an older
 // PLAN_VERSION is brought forward by UPGRADES, keyed on plan.version. A version
 // whose plan cannot be read (no upgrade step, or saved by a newer page) is listed
@@ -21,8 +21,6 @@ import { apply, curveOf, PLAN_VERSION, PlanError, pointAt, validate, type Edit, 
 export interface Version {
   id: string
   parent: string | null
-  /** What changed from the parent, as asked; empty on the root. A description: the house is `plan`. */
-  edits: Edit[]
   /** Set by the store: the host's clock. */
   at: string
   note?: string
@@ -86,8 +84,10 @@ export class HistoryError extends Error {
 /** A house shown read-only because its store could not be opened; the reason is the one line to show. */
 export class ReadOnly extends PlanError {}
 
-export const VERSION_ID = /^[a-f0-9]{16}$/
 const NAME_MAX = 60
+const NOTE_MAX = 200
+/** Plain text as the host stores it (host/src/plans.ts text()): no control or format characters. */
+const plain = (s: string) => s.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()
 
 /** JSON with object keys sorted, so equal plans always give equal text. */
 export function canonical(value: unknown): string {
@@ -109,8 +109,7 @@ function deepFreeze<T>(value: T): T {
   return value
 }
 
-// ---------------------------------------------------------------- upgrades
-
+// ── Upgrades ────────────────────────────────────────────────────────────────
 /** One step: a stored plan at version n in, the same house at a later version out. */
 export type Upgrade = (plan: any) => unknown
 
@@ -133,8 +132,7 @@ export function upgrade(stored: unknown, steps: Readonly<Record<number, Upgrade>
   }
 }
 
-// ---------------------------------------------------------------- stores
-
+// ── Stores ──────────────────────────────────────────────────────────────────
 /** A store in memory, with the same compare-and-set and retry rules as the host. For checks and pages without a host. */
 export function memoryStore(): PlanStore {
   const state: StoreState = { versions: [], head: null, names: {} }
@@ -173,16 +171,15 @@ export function memoryStore(): PlanStore {
  * token. The host sets `at` to its clock. Nobody is named: the host does not yet
  * know who is at the page.
  */
-export function hostStore(opts: { base: string; token: string; fetch?: typeof fetch; refresh?: () => Promise<string | null> }): PlanStore {
-  const f = opts.fetch ?? fetch
+export function hostStore(opts: { base: string; token: string; refresh?: () => Promise<string | null> }): PlanStore {
   let token = opts.token
   const root = `${opts.base.replace(/\/$/, '')}/house/plans`
   const send = async (path: string, body?: unknown): Promise<Response> => {
     try {
-      return await f(root + path, {
+      return await fetch(root + path, {
         method: body === undefined ? 'GET' : 'POST',
         headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: JSON.stringify(body),
       })
     } catch (error) {
       throw new StoreError(0, `the host could not be reached: ${(error as Error).message}`)
@@ -190,7 +187,7 @@ export function hostStore(opts: { base: string; token: string; fetch?: typeof fe
   }
   async function call(path: string, body?: unknown): Promise<any> {
     let res = await send(path, body)
-    // The host restarted with a new token: fetch it once and try again (as villager.ts does).
+    // The host restarted with a new token: fetch it once and try again.
     if (res.status === 401 && opts.refresh) {
       const fresh = await opts.refresh()
       if (fresh) {
@@ -212,8 +209,7 @@ export function hostStore(opts: { base: string; token: string; fetch?: typeof fe
   }
 }
 
-// ---------------------------------------------------------------- history
-
+// ── History ─────────────────────────────────────────────────────────────────
 type Listener = (plan: Plan, head: string) => void
 
 export class PlanHistory {
@@ -225,7 +221,7 @@ export class PlanHistory {
   #unreadable = new Map<string, string>()
   #names: Record<string, string> = {}
   #head = ''
-  #readOnly: { why: string; cause: unknown } | null = null
+  #readOnly: string | null = null
   #unsaved: string | null = null
   /** Versions undo walked back from, nearest last. Session-level: any commit or checkout clears it. */
   #redo: string[] = []
@@ -248,7 +244,7 @@ export class PlanHistory {
       if (reasons.length) throw new PlanError(reasons)
       let failed: unknown = null
       try {
-        await store.commit({ id: newId(), parent: null, edits: [], plan: base })
+        await store.commit({ id: newId(), parent: null, plan: base })
       } catch (error) {
         failed = error
       }
@@ -264,30 +260,25 @@ export class PlanHistory {
    * A house that shows `plan` and refuses every change with ReadOnly(why): for a page
    * whose store is there but could not be opened, so nothing looks saved that is not.
    */
-  static readOnly(plan: Plan, why: string, cause?: unknown): PlanHistory {
+  static readOnly(plan: Plan, why: string): PlanHistory {
     const refuse = async (): Promise<never> => {
       throw new ReadOnly([why])
     }
-    const root: Version = { id: '0'.repeat(16), parent: null, edits: [], at: new Date().toISOString(), plan: structuredClone(plan) }
+    const root: Version = { id: '0'.repeat(16), parent: null, at: new Date().toISOString(), plan: structuredClone(plan) }
     const history = new PlanHistory({ load: async () => ({ versions: [root], head: root.id, names: {} }), commit: refuse, setHead: refuse, rename: refuse }, UPGRADES)
     history.#adopt({ versions: [root], head: root.id, names: {} })
-    history.#readOnly = { why, cause }
+    history.#readOnly = why
     return history
   }
 
   /** Why the house cannot be changed on this page, as one line to show; null when it can. */
   get readOnly(): string | null {
-    return this.#readOnly?.why ?? null
+    return this.#readOnly
   }
 
   /** Why changes here will not outlast the page, as one line to show; null when they are saved. */
   get unsaved(): string | null {
     return this.#unsaved
-  }
-
-  /** The error behind readOnly, for the Workshop and the console. */
-  get failure(): unknown {
-    return this.#readOnly?.cause
   }
 
   get plan(): Plan {
@@ -316,8 +307,7 @@ export class PlanHistory {
   }
 
   /**
-   * Applies the edits on top of the head and saves them, with the plan they give, as a
-   * new version. Throws PlanError with reasons when an edit fails, the result is invalid
+   * Applies the edits on top of the head and saves the plan they give as a new version. Throws PlanError with reasons when an edit fails, the result is invalid
    * or nothing changed; ReadOnly on a read-only house; StaleHead when someone else moved
    * the house (after reloading it); the store's error when the save fails. In every
    * failure no version of this page's is added.
@@ -332,8 +322,8 @@ export class PlanHistory {
       if (reasons.length) throw new PlanError(reasons)
       // A drag that snapped back to where it started is not a version.
       if (canonical(next) === canonical(this.plan)) throw new PlanError(['nothing changed'])
-      const trimmed = note?.trim()
-      const sent: NewVersion = { id: newId(), parent: this.#head, edits: structuredClone(edits), ...(trimmed ? { note: trimmed } : {}), plan: next }
+      const trimmed = note === undefined ? '' : plain(note).slice(0, NOTE_MAX)
+      const sent: NewVersion = { id: newId(), parent: this.#head, ...(trimmed ? { note: trimmed } : {}), plan: next }
       const stored = await this.#store.commit(sent)
       if (stored.id !== sent.id || stored.parent !== sent.parent || canonical(stored.plan) !== canonical(next)) throw new StoreError(500, 'the store returned a different version than it was sent')
       deepFreeze(stored)
@@ -389,7 +379,7 @@ export class PlanHistory {
     return this.#serial(async () => {
       this.#writable()
       this.#version(id)
-      const clean = name.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim()
+      const clean = plain(name)
       if (!clean || clean.length > NAME_MAX) throw new PlanError([`a name is 1 to ${NAME_MAX} characters`])
       await this.#store.rename(id, clean)
       this.#names = { ...this.#names, [id]: clean }
@@ -430,7 +420,7 @@ export class PlanHistory {
   }
 
   #writable() {
-    if (this.#readOnly) throw new ReadOnly([this.#readOnly.why])
+    if (this.#readOnly) throw new ReadOnly([this.#readOnly])
   }
 
   #version(id: string): Version {
@@ -482,8 +472,7 @@ export class PlanHistory {
   }
 }
 
-// ---------------------------------------------------------------- diff
-
+// ── Diff ────────────────────────────────────────────────────────────────────
 export interface IdDiff {
   added: Id[]
   removed: Id[]

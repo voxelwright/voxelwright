@@ -6,7 +6,7 @@
 //          of the 0.6 m in front of a door.
 // surface  stands on any upward face above SURFACE_MIN under the whole footprint:
 //          the face is found by casting rays down at the footprint's middle and
-//          four corners against what the room draws, so today's table, counters and
+//          four corners against what the room draws, so the built-in table, counters and
 //          shelves work without tags. Limits: a face must be within 2.5 cm level at
 //          all five points (a bowl's rim or a slatted top fails). A built-in support is
 //          not remembered (stored as a height); a placed one is named by `on` and
@@ -21,7 +21,7 @@
 // slanted leaf's box is bigger than the leaf), skipping flat things such as rugs.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { curveOf, inside, normalAt, outline, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
+import { curveOf, floorOf, inside, normalAt, segmentsCross, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { paintPhoto } from '../paint'
 import { NEAR, fixturesOf, type Fixture } from './fixtures'
 
@@ -52,8 +52,7 @@ export interface Pose {
 
 export type Size = [w: number, h: number, d: number]
 
-// ---------------------------------------------------------------- walls and rooms
-
+// ── Walls and rooms ─────────────────────────────────────────────────────────
 export interface WallFace {
   wall: Wall
   room: Room
@@ -86,14 +85,11 @@ export function faceOf(plan: Plan, wallId: Id, roomId: Id, along: number): WallF
   }
 }
 
-/** The rooms a wall bounds. */
-export const roomsOf = (plan: Plan, wallId: Id) => plan.rooms.filter((r) => roomWalls(plan, r).some(({ wall }) => wall.id === wallId))
+export { floorOf, roomsOf } from './plan'
 
 /** A room's ceiling: the top of its lowest wall. */
 export const ceilingOf = (plan: Plan, room: Room) => Math.min(...roomWalls(plan, room).map(({ wall }) => wall.height))
 
-/** The floor inside a room's walls. */
-export const floorOf = (plan: Plan, room: Room): P[] => outline(plan, room, Math.max(...roomWalls(plan, room).map(({ wall }) => wall.thickness)) / 2)
 
 /** Nearest point along a wall's centreline to (x, z), in metres from corner a. */
 export function alongOf(plan: Plan, wall: Wall, x: number, z: number): number {
@@ -114,8 +110,7 @@ export function alongOf(plan: Plan, wall: Wall, x: number, z: number): number {
 /** How far a flat thing w wide stands off a face that curves away from it. */
 const standOff = (f: WallFace, w: number) => (f.concave > 0 && Number.isFinite(f.radius) ? f.radius - Math.sqrt(Math.max(0, f.radius ** 2 - (w / 2) ** 2)) : 0)
 
-// ---------------------------------------------------------------- poses
-
+// ── Poses ───────────────────────────────────────────────────────────────────
 /** The pose an anchor stands for. Wall anchors off their wall's ends are drawn at the end. */
 export function poseOf(plan: Plan, at: Anchor, size: Size = [0, 0, 0]): Pose | null {
   switch (at.mount) {
@@ -163,8 +158,7 @@ export function seat(object: THREE.Object3D, mount: Mount): { holder: THREE.Grou
   return { holder, size: [size.x, size.y, size.z] }
 }
 
-// ---------------------------------------------------------------- obstacles
-
+// ── Obstacles ───────────────────────────────────────────────────────────────
 export interface Obstacle {
   box: THREE.Box3
   /** The top-level thing it belongs to ("fridge", "table"), for a reason a person can read. */
@@ -273,8 +267,7 @@ export function supports(scene: THREE.Scene, skip: THREE.Object3D[] = []): THREE
   return out
 }
 
-// ---------------------------------------------------------------- fit
-
+// ── Fit ─────────────────────────────────────────────────────────────────────
 /** The footprint's corners: a w × d rectangle about (x, z) turned by yaw. */
 export function footprint(x: number, z: number, w: number, d: number, yaw: number): P[] {
   const c = Math.cos(yaw), s = Math.sin(yaw)
@@ -298,12 +291,6 @@ export function overlaps(a: P[], b: P[], margin = 0): boolean {
     }
   }
   return true
-}
-
-const segmentsCross = (a: P, b: P, c: P, d: P) => {
-  const cross = (o: P, p: P, q: P) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
-  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d)
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
 }
 
 /** The polygon lies inside the ring: every corner in, and no edge crossing it. */
@@ -449,8 +436,7 @@ export function wallHeight(label = '', h = 0.4): number {
   return Math.max(1.5, h / 2 + 0.9)
 }
 
-// ---------------------------------------------------------------- built-in kinds
-
+// ── Built-in kinds ──────────────────────────────────────────────────────────
 export interface Kind { mount: Mount; label: string; build: () => THREE.Object3D }
 
 const wood = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.75 })

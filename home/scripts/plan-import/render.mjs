@@ -1,8 +1,8 @@
 // Renders the six synthetic plans to out/plans/<id>.png with <id>.truth.json beside them.
 // Usage: node scripts/plan-import/render.mjs
 import { mkdir, writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PLANS } from './plans.mjs'
 import { openDrawPage } from './browser.mjs'
 

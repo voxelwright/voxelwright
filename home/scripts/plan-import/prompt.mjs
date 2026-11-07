@@ -1,3 +1,4 @@
+// The instructions run.mjs sends with each plan image, and the repair prompt after a failed validation.
 export const SYSTEM = 'You convert floor-plan images into exact JSON plan data. Reply with one JSON object and nothing else.'
 
 export const PROMPT = `Convert this floor plan image into JSON with exactly this shape:

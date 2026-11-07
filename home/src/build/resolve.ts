@@ -25,7 +25,7 @@
 //   the nearest clear spot, sliding the room along the wall if it must. Double doors
 //   with no clear spot become a single door that has one, and the villager says so;
 //   when nothing fits, the resolver asks and names what is in the way.
-import { MIN_WALL, PlanError, apply, curveOf, normalAt, outline, roomArea, roomWalls, wallOf, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
+import { MIN_WALL, PlanError, apply, curveOf, normalAt, roomArea, roomWalls, roomsOf, runsForward, wallOf, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
 import type { Intent, Side } from './intent'
 
 export interface ResolveContext {
@@ -80,7 +80,7 @@ const lower = (label: string) => label.toLowerCase()
 export function draftEdits(plan: Plan, d: Draft): Edit[] {
   const edits: Edit[] = [{
     op: 'addRoom', room: { id: d.roomId, label: d.label }, wallId: d.wallId, from: d.from, to: d.to, depth: d.depth,
-    door: { id: `${d.roomId}.door`, from: d.door.from, to: d.door.to, ...(d.door.leaves ? { leaves: d.door.leaves } : { head: 2.3 }) },
+    door: { id: `${d.roomId}.door`, from: d.door.from, to: d.door.to, ...(d.door.leaves ? { leaves: d.door.leaves } : { head: OPENING_HEAD }) },
   }]
   // The draft's bend is positive outward; the far wall runs the new room's loop backwards when the host does not.
   if (Math.abs(d.bend) > 1e-9) edits.push({ op: 'bendWall', wallId: `${d.roomId}.w2`, sagitta: hostForward(plan, d.wallId) ? d.bend : -d.bend })
@@ -89,9 +89,10 @@ export function draftEdits(plan: Plan, d: Draft): Edit[] {
 
 const applyDraft = (plan: Plan, d: Draft): Plan => draftEdits(plan, d).reduce(apply, plan)
 
-const ownersOf = (plan: Plan, wallId: Id) => plan.rooms.filter((r) => roomWalls(plan, r).some(({ wall }) => wall.id === wallId))
 /** Does the one room on this wall run it a→b? */
-const hostForward = (plan: Plan, wallId: Id) => roomWalls(plan, ownersOf(plan, wallId)[0]).find(({ wall }) => wall.id === wallId)!.forward
+/** A plain opening's head: the tallest a new door gets, so built-ins below it keep clear of the door. */
+export const OPENING_HEAD = 2.3
+const hostForward = (plan: Plan, wallId: Id) => runsForward(plan, roomsOf(plan, wallId)[0], wallId)
 
 /** Does the draft make a valid house that runs into no other room? The plan it makes, or what to say. */
 export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
@@ -99,18 +100,13 @@ export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
   try {
     next = applyDraft(plan, d)
   } catch (e) {
-    if (e instanceof PlanError) return { ask: "That doesn't fit. A bit smaller?" }
-    throw e
+    if (!(e instanceof PlanError)) throw e
+    const hit = plan.rooms.find((r) => e.reasons.includes(`room ${d.roomId} overlaps room ${r.id}`))
+    return { ask: hit ? `That runs into the ${lower(hit.label)}. Smaller, or elsewhere?` : "That doesn't fit. A bit smaller?" }
   }
   if (Math.abs(Math.abs(wallOf(next, `${d.roomId}.w2`).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "It can't bend that far. Gentler?" }
   const block = blockerOf(d.door, d.keepOut)
   if (block) return { ask: `The ${block.name}'s in the way of the door.` }
-  const room = next.rooms.find((r) => r.id === d.roomId)!
-  const mine = outline(next, room, 0.05)
-  for (const other of next.rooms) {
-    if (other.id === d.roomId) continue
-    if (overlaps(mine, outline(next, other))) return { ask: `That runs into the ${lower(other.label)}. Smaller, or elsewhere?` }
-  }
   return { plan: next }
 }
 
@@ -124,7 +120,7 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
     if (!sel) return { ask: 'Which wall? Click one and tell me again.' }
     host = plan.walls.find((w) => w.id === sel.wallId)
     if (!host) return { ask: 'Which wall? Click one and tell me again.' }
-    const owners = ownersOf(plan, host.id)
+    const owners = roomsOf(plan, host.id)
     if (owners.length !== 1) return { ask: `That wall joins the ${owners.map((r) => lower(r.label)).join(' and the ')}. An outside wall?` }
     room = owners[0]
   } else {
@@ -293,9 +289,9 @@ function sideWall(plan: Plan, room: Room, side: Side, view: P): { wall: Wall } |
   const turned = face.some((k) => Math.abs(k.c.dir[0] * lead.c.dir[1] - k.c.dir[1] * lead.c.dir[0]) > 0.05)
   if (turned || best - other < TIE) return { ask: `I'm looking at a corner. Click the wall you mean?` }
   if (face.some((k) => k.c.radius !== Infinity)) return { ask: `That side curves. Rooms go on straight walls for now.` }
-  const outside = face.filter((k) => ownersOf(plan, k.wall.id).length === 1)
+  const outside = face.filter((k) => roomsOf(plan, k.wall.id).length === 1)
   if (!outside.length) {
-    const next = ownersOf(plan, face[0].wall.id).find((r) => r.id !== room.id)
+    const next = roomsOf(plan, face[0].wall.id).find((r) => r.id !== room.id)
     return { ask: `The ${lower(next?.label ?? 'room')} is already there. Elsewhere?` }
   }
   return { wall: outside.sort((p, q) => q.c.length - p.c.length)[0].wall }
@@ -322,26 +318,6 @@ function freshId(plan: Plan, label: string): Id {
   return id
 }
 
-// ---------------------------------------------------------------- overlap
-
-const cross = (o: P, a: P, b: P) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-function segmentsCross(a: P, b: P, c: P, d: P): boolean {
-  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d)
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
-}
-function inside(p: P, poly: P[]): boolean {
-  let hit = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, zi] = poly[i], [xj, zj] = poly[j]
-    if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) hit = !hit
-  }
-  return hit
-}
-/** Do two simple polygons share any area (edges crossing, or one inside the other)? */
-export function overlaps(a: P[], b: P[]): boolean {
-  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) if (segmentsCross(a[i], a[(i + 1) % a.length], b[j], b[(j + 1) % b.length])) return true
-  return inside(a[0], b) || inside(b[0], a)
-}
 
 /** Where a draft's pieces are on the floor, for drawing: corners, far wall, door, in world metres. */
 export function draftGeometry(plan: Plan, d: Draft) {

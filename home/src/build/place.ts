@@ -31,11 +31,11 @@ export type { Pose } from './mount'
 
 export interface PlaceItem {
   object: THREE.Object3D
-  size: [w: number, h: number, d: number]
+  size: Size
   mount: Mount
   label?: string
-  /** A library item needs the person whose library holds it. */
-  item?: { library?: string; kind?: string; person?: string }
+  /** What it is: a kind the home builds, or an item in a person's library. A thing still being made has none until swap(). */
+  item?: ItemRef
 }
 
 export type Done = { status: 'confirmed'; pose: Pose; furnitureId: string } | { status: 'cancelled' }
@@ -47,7 +47,7 @@ export interface Placing {
    * Swap the ghost for the made prop in place, keeping the current pose and the
    * session. `item` names what it is once it exists (the library item the maker saved).
    */
-  swap(object: THREE.Object3D, size?: [number, number, number], item?: PlaceItem['item']): void
+  swap(object: THREE.Object3D, size?: Size, item?: ItemRef): void
   /** End from outside (e.g. making the prop failed): resolves done as cancelled and removes the ghost. */
   cancel(): void
 }
@@ -90,9 +90,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const snap = (v: number, s: number) => Math.round(v / s) * s
 const round = (v: number) => Math.round(v * 1e4) / 1e4
 const newId = () => `f.${Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => b.toString(16).padStart(2, '0')).join('')}`
-const labelOf = (item: PlaceItem) => (item.label ?? (item.item?.kind && KINDS[item.item.kind]?.label) ?? 'thing').replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 60) || 'thing'
-const refOf = (item: PlaceItem['item']): ItemRef | null =>
-  item?.library && item.person ? { library: item.library, person: item.person } : item?.kind ? { kind: item.kind } : null
+const labelOf = (item: PlaceItem) => (item.label ?? (item.item && 'kind' in item.item ? KINDS[item.item.kind]?.label : undefined) ?? 'thing').replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 60) || 'thing'
 
 interface Session {
   placing: Placing
@@ -135,8 +133,8 @@ export function placement(deps: PlaceDeps): Placement & {
 
   // ── Shared drawing pieces (src/build/sketch.ts): made once, shown while a session runs ──
   const plane = new THREE.PlaneGeometry(1, 1)
-  const decal = (name: string, map: THREE.Texture, order: number, color = '#ffffff') => {
-    const m = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({ map, color, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }))
+  const decal = (name: string, map: THREE.Texture, order: number) => {
+    const m = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }))
     m.name = name
     m.renderOrder = order
     m.raycast = () => {}
@@ -154,7 +152,7 @@ export function placement(deps: PlaceDeps): Placement & {
   // A hung thing's drop line: a thread of dots from it to its spot on the floor.
   const dotsMap = paintDots()
   dotsMap.wrapS = dotsMap.wrapT = THREE.RepeatWrapping
-  const thread = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: dotsMap, color: '#8a5e3e', transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }))
+  const thread = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({ map: dotsMap, color: '#8a5e3e', transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }))
   thread.name = 'placement thread'
   thread.raycast = () => {}
   /** What it bumps into: a muted chalk-red dashed contour on its top, and a hatched patch where the two would meet. */
@@ -880,7 +878,7 @@ export function placement(deps: PlaceDeps): Placement & {
 
   /**
    * Phone framing: a sideways-and-up shift of the camera as camera.ts (and build's framing) posed it this
-   * frame, like build.ts's frameHouse. It eases in when a session opens or the thing leaves the clear
+   * frame. It eases in when a session opens or the thing leaves the clear
    * band above the tag, holds still while something is held, and eases out when the session ends.
    */
   const frameView = (s: Session | null, dt: number) => {
@@ -922,7 +920,7 @@ export function placement(deps: PlaceDeps): Placement & {
     const label = labelOf(item)
     const s: Session = {
       placing: null as unknown as Placing, item, label, mount: item.mount, holder, object, size, moving,
-      at: at ?? { mount: 'floor', x: 0, z: 0, yaw: 0 }, fit: { ok: false }, ref: refOf(item.item), waiting: null, state: 'placing',
+      at: at ?? { mount: 'floor', x: 0, z: 0, yaw: 0 }, fit: { ok: false }, ref: item.item ?? null, waiting: null, state: 'placing',
       looks: new Map(), obstacles: [], supports: [], lift: 0, lifted: 0, message: '', resolve, dom: makeDom(label),
     }
     s.placing = {
@@ -997,7 +995,7 @@ export function placement(deps: PlaceDeps): Placement & {
     return candidates.find((c) => fitAt(s, c).ok) ?? candidates[0] ?? { mount: 'wall', wallId: plan.walls[0].id, roomId: room.id, along: 1, height: 1.5, spin: 0 }
   }
 
-  const swap = (s: Session, next: THREE.Object3D, size?: Size, item?: PlaceItem['item']) => {
+  const swap = (s: Session, next: THREE.Object3D, size?: Size, item?: ItemRef) => {
     if (s.state === 'done') return
     unghost(s)
     s.holder.remove(s.object)
@@ -1009,7 +1007,7 @@ export function placement(deps: PlaceDeps): Placement & {
     s.size = size ?? seated.size
     if (item) {
       s.item = { ...s.item, item }
-      s.ref = refOf(item) ?? s.ref
+      s.ref = item
     }
     ghost(s)
     place(s, s.at)
@@ -1114,11 +1112,13 @@ export function placement(deps: PlaceDeps): Placement & {
     s.resolve(d)
   }
 
-  addEventListener('pointerdown', onDown, true)
-  addEventListener('pointermove', onMove, true)
-  addEventListener('pointerup', onUp, true)
-  addEventListener('pointercancel', onUp, true)
-  addEventListener('keydown', onKey, true)
+  const listening = new AbortController()
+  const listen = { capture: true, signal: listening.signal }
+  addEventListener('pointerdown', onDown, listen)
+  addEventListener('pointermove', onMove, listen)
+  addEventListener('pointerup', onUp, listen)
+  addEventListener('pointercancel', onUp, listen)
+  addEventListener('keydown', onKey, listen)
 
   return {
     begin(item, at) {
@@ -1132,7 +1132,7 @@ export function placement(deps: PlaceDeps): Placement & {
       const held = f && deps.shelf.hold(furnitureId)
       if (!f || !held) throw new Error(`furniture ${furnitureId} is not in the house`)
       const object = held.holder.children.find((c) => c.name !== 'cord') ?? held.holder
-      const item: PlaceItem = { object, size: held.size, mount: f.at.mount, label: held.label, item: 'library' in f.item ? { library: f.item.library, person: f.item.person } : { kind: f.item.kind } }
+      const item: PlaceItem = { object, size: held.size, mount: f.at.mount, label: held.label, item: f.item }
       return open(item, furnitureId, held.holder, object, held.size, f.at)
     },
     get active() {
@@ -1153,11 +1153,7 @@ export function placement(deps: PlaceDeps): Placement & {
     },
     dispose() {
       if (session) end(session, { status: 'cancelled' })
-      removeEventListener('pointerdown', onDown, true)
-      removeEventListener('pointermove', onMove, true)
-      removeEventListener('pointerup', onUp, true)
-      removeEventListener('pointercancel', onUp, true)
-      removeEventListener('keydown', onKey, true)
+      listening.abort()
       style.remove()
       plane.dispose()
       xrayMat.dispose()

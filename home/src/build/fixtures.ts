@@ -101,4 +101,3 @@ export function makeFixtures(scene: THREE.Scene, skip: () => THREE.Object3D[]) {
     times: () => times.slice(),
   }
 }
-export type Fixtures = ReturnType<typeof makeFixtures>

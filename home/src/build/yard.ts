@@ -1,24 +1,15 @@
 // The yard steps aside where the house grows (#48): fence pickets and rails, flowers,
 // stepping stones and shrubs that stand inside a built room, its walls, or the sketch
-// paper are left out at runtime. diorama.ts still draws the yard as before; this keeps
+// paper are left out at runtime. diorama.ts draws the yard; this keeps
 // each changed mesh's original instance matrices or index and puts them back on
 // restore(). One owner (plugins/build.ts) combines every area to clear into one call.
 import * as THREE from 'three/webgpu'
-import type { P } from './plan'
+import { inside, type P } from './plan'
 
 /** Instanced yard things, hidden whole by their middle. */
 const INSTANCED = ['picket fence', 'yard blooms', 'stepping stones']
 /** Merged yard meshes (the shrubs; the fence's rails are found next to its pickets), cut by triangle. */
 const MERGED = ['yard plants']
-
-const inside = (p: P, poly: P[]) => {
-  let inn = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, zi] = poly[i], [xj, zj] = poly[j]
-    if ((zi > p[1]) !== (zj > p[1]) && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) inn = !inn
-  }
-  return inn
-}
 
 export function makeYard(scene: THREE.Scene) {
   const instanced = new Map<THREE.InstancedMesh, Float32Array>()
@@ -43,7 +34,7 @@ export function makeYard(scene: THREE.Scene) {
   /** Leave out every yard thing inside any of these floor polygons (world x, z); an empty list puts everything back. */
   const hide = (polys: P[][]) => {
     if (polys.length) find()
-    const under = (x: number, z: number) => polys.some((poly) => inside([x, z], poly))
+    const under = (x: number, z: number) => polys.some((poly) => inside(poly, [x, z]))
     hiddenCount = 0
     for (const [m, saved] of instanced) {
       m.updateMatrixWorld()
@@ -93,4 +84,3 @@ export function makeYard(scene: THREE.Scene) {
     hidden: () => hiddenCount,
   }
 }
-export type YardHider = ReturnType<typeof makeYard>

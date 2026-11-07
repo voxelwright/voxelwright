@@ -43,7 +43,7 @@ try {
   h.onChange((plan, head) => heard.push({ head, plan }))
 
   const v1 = await h.commit([move], 'wider kitchen')
-  check('a commit moves the head and records edits, note, at and the plan it made, and no one by name', h.head === v1.id && v1.parent === root && v1.note === 'wider kitchen' && !('by' in v1) && same(v1.edits, [move]) && same(v1.plan, h.plan) && !same(h.plan, KITCHEN))
+  check('a commit moves the head and records the plan it made, its note and at, and no one by name', h.head === v1.id && v1.parent === root && v1.note === 'wider kitchen' && !('by' in v1) && !('edits' in v1) && same(v1.plan, h.plan) && !same(h.plan, KITCHEN))
   check('onChange hears the new plan and head', heard.length === 1 && heard[0].head === v1.id && heard[0].plan === h.plan)
 
   const before = snapshot(h)
@@ -83,9 +83,9 @@ try {
   let otherHeard = null
   other.onChange((plan, head) => (otherHeard = head))
   const stale = await refusal(() => other.commit([bend]))
-  check('F7: a page on a stale head is refused, saves nothing of its own, and has already taken the other head', stale instanceof StaleHead && stale.head === h.head && other.head === h.head && same(other.plan, h.plan) && other.versions().length === otherCount + 1 && otherHeard === h.head && other.versions().every((v) => h.versions().some((k) => k.id === v.id)))
+  check('a page on a stale head is refused, saves nothing of its own, and has already taken the other head', stale instanceof StaleHead && stale.head === h.head && other.head === h.head && same(other.plan, h.plan) && other.versions().length === otherCount + 1 && otherHeard === h.head && other.versions().every((v) => h.versions().some((k) => k.id === v.id)))
   const retried = await other.commit([bend])
-  check('F7: after a StaleHead the next try builds on the new head without a reload', retried.parent === h.versions().at(-1).id)
+  check('after a StaleHead the next try builds on the new head without a reload', retried.parent === h.versions().at(-1).id)
   await h.refresh()
   check('refresh adopts the other page’s head', h.head === other.head && same(other.plan, h.plan))
   await h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: -0.2 }])
@@ -117,27 +117,25 @@ try {
   const lostErr = await refusal(() => l.commit([move]))
   const nextErr = await refusal(() => l.commit([bend]))
   await l.refresh()
-  check('a lost answer: the commit fails, the next one is stale, refresh adopts the saved version once', lostErr instanceof StoreError && nextErr instanceof StaleHead && l.versions().length === 2 && snapshot(l) !== lBefore && same(l.versions()[1].edits, [move]))
+  check('a lost answer: the commit fails, the next one is stale, refresh adopts the saved version once', lostErr instanceof StoreError && nextErr instanceof StaleHead && l.versions().length === 2 && snapshot(l) !== lBefore && same(l.versions()[1].plan, P.apply(KITCHEN, move)))
 
-  // ---- F1: a version is the plan it saved; edits are never replayed
+  // ---- a version stores the plan it made; nothing is replayed
   const clamp = memoryStore()
   const ch = await PlanHistory.open(clamp, KITCHEN)
   const clamped = await ch.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: -6 }])
   const rightX = (plan) => plan.corners.find((c) => c.id === 'kitchen.back-right').x
   const movedBy = rightX(clamped.plan) - rightX(KITCHEN)
-  // Change what the edit says (as a change to snap or MIN_ROOM_SIDE would change what it does): the house stays the saved one.
-  const rewritten = { ...clamp, load: async () => { const st = await clamp.load(); st.versions[1].edits = [{ op: 'moveWall', wallId: 'kitchen.nope', by: 99 }]; return st } }
-  const reread = await PlanHistory.open(rewritten, KITCHEN)
-  check('F1: moveWall by -6 stops at the room side, and the version stores the house it made', Math.abs(movedBy + 3.6) < 1e-6 && same(clamped.plan, ch.plan), movedBy)
-  check('F1: open reads stored plans, so edits that would not replay change nothing', same(reread.plan, clamped.plan) && reread.head === clamped.id)
-  check('F1: a stored version has no hash or base', !('hash' in clamped) && !('base' in reread.versions()[0]) && same(reread.versions()[0].plan, KITCHEN))
+  const reread = await PlanHistory.open(clamp, KITCHEN)
+  check('moveWall by -6 stops at the room side, and the version stores the house it made', Math.abs(movedBy + 3.6) < 1e-6 && same(clamped.plan, ch.plan), movedBy)
+  check('reopening reads the stored plans and head', same(reread.plan, clamped.plan) && reread.head === clamped.id)
+  check('a stored version holds its plan and note only', !('hash' in clamped) && !('edits' in clamped) && !('base' in reread.versions()[0]) && same(reread.versions()[0].plan, KITCHEN))
 
-  // F1: the upgrade hook, keyed on plan.version (identity at v1; a fake v0 -> v1 step proves the path).
+  // the upgrade hook, keyed on plan.version (identity at v1; a fake v0 -> v1 step proves the path).
   const v0 = ({ furniture, ...rest }) => ({ ...rest, version: 0 })
   const toV1 = { 0: (p) => ({ ...p, version: 1, furniture: [] }) }
-  check('F1: upgrade is identity for a v1 plan', upgrade(KITCHEN) === KITCHEN)
-  check('F1: upgrade runs the v0 step', same(upgrade(v0(KITCHEN), toV1), KITCHEN))
-  check('F1: a plan from a newer home is refused with why', /newer home/.test((await refusal(async () => upgrade({ ...KITCHEN, version: 2 })))?.message ?? ''))
+  check('upgrade is identity for a v1 plan', upgrade(KITCHEN) === KITCHEN)
+  check('upgrade runs the v0 step', same(upgrade(v0(KITCHEN), toV1), KITCHEN))
+  check('a plan from a newer home is refused with why', /newer home/.test((await refusal(async () => upgrade({ ...KITCHEN, version: 2 })))?.message ?? ''))
   const old = memoryStore()
   const oh = await PlanHistory.open(old, KITCHEN)
   const ov1 = await oh.commit([move])
@@ -145,34 +143,34 @@ try {
   const withOld = (headAt) => ({ ...old, load: async () => { const st = await old.load(); st.versions[1].plan = v0(st.versions[1].plan); if (headAt) st.head = st.versions[1].id; return st } })
   const noStep = await PlanHistory.open(withOld(false), KITCHEN)
   const unreadable = await refusal(async () => noStep.planAt(ov1.id))
-  check('F1: an old version with no upgrade step is listed but unreadable, and the house still opens', noStep.versions().length === 3 && unreadable instanceof HistoryError && /no upgrade from plan version 0/.test(unreadable.message) && same(noStep.plan, oh.plan))
-  check('F1: an unreadable version cannot be checked out', (await refusal(() => noStep.checkout(ov1.id))) instanceof HistoryError && noStep.head === oh.head)
+  check('an old version with no upgrade step is listed but unreadable, and the house still opens', noStep.versions().length === 3 && unreadable instanceof HistoryError && /no upgrade from plan version 0/.test(unreadable.message) && same(noStep.plan, oh.plan))
+  check('an unreadable version cannot be checked out', (await refusal(() => noStep.checkout(ov1.id))) instanceof HistoryError && noStep.head === oh.head)
   const stepped = await PlanHistory.open(withOld(false), KITCHEN, { upgrades: toV1 })
-  check('F1: with the v0 step the old version reads as v1', same(stepped.planAt(ov1.id), { ...oh.planAt(ov1.id), furniture: [] }))
+  check('with the v0 step the old version reads as v1', same(stepped.planAt(ov1.id), { ...oh.planAt(ov1.id), furniture: [] }))
   const headOld = await refusal(() => PlanHistory.open(withOld(true), KITCHEN))
-  check('F1: only an unreadable head stops open, with the version and why', headOld instanceof HistoryError && headOld.versionId === ov1.id)
+  check('only an unreadable head stops open, with the version and why', headOld instanceof HistoryError && headOld.versionId === ov1.id)
 
-  // ---- F8: what the history hands out is frozen
+  // ---- what the history hands out is frozen
   const tryWrite = (fn) => { try { fn(); return false } catch (error) { return error instanceof TypeError } }
   const frozenBefore = snapshot(h)
-  check('F8: plan, planAt and versions() cannot be changed through what they hand out',
+  check('plan, planAt and versions() cannot be changed through what they hand out',
     tryWrite(() => { h.plan.corners[0].x = 99 }) && tryWrite(() => { h.planAt(root).walls[0].openings.push({}) }) &&
-    tryWrite(() => { h.versions()[1].edits[0].by = 99 }) && tryWrite(() => { h.versions()[0].plan.rooms[0].label = 'x' }) && snapshot(h) === frozenBefore)
+    tryWrite(() => { h.versions()[1].plan.corners[0].x = 99 }) && tryWrite(() => { h.versions()[0].plan.rooms[0].label = 'x' }) && snapshot(h) === frozenBefore)
 
-  // ---- F7: the store answers a retried version (same id, parent and content) with the stored one
+  // ---- the store answers a retried version (same id, parent and content) with the stored one
   const retryStore = memoryStore()
   await PlanHistory.open(retryStore, KITCHEN)
   const rs = await retryStore.load()
-  const sentAgain = { id: '1234567890abcdef', parent: rs.head, edits: [move], plan: P.apply(KITCHEN, move) }
+  const sentAgain = { id: '1234567890abcdef', parent: rs.head, plan: P.apply(KITCHEN, move) }
   const first = await retryStore.commit(sentAgain)
   const again2 = await retryStore.commit(sentAgain)
   const clash = await refusal(() => retryStore.commit({ ...sentAgain, note: 'other' }))
-  check('F7: a retried version is answered with the stored one; a different one with its id is a 409, not stale', same(first, again2) && (await retryStore.load()).versions.length === 2 && clash instanceof StoreError && clash.status === 409 && !(clash instanceof StaleHead))
+  check('a retried version is answered with the stored one; a different one with its id is a 409, not stale', same(first, again2) && (await retryStore.load()).versions.length === 2 && clash instanceof StoreError && clash.status === 409 && !(clash instanceof StaleHead))
 
-  // ---- F2: a host that is there but cannot be opened gives a read-only house that says why
-  const ro = PlanHistory.readOnly(KITCHEN, 'the saved house is away', new Error('500'))
+  // ---- a host that is there but cannot be opened gives a read-only house that says why
+  const ro = PlanHistory.readOnly(KITCHEN, 'the saved house is away')
   const roCommit = await refusal(() => ro.commit([move]))
-  check('F2: a read-only house shows the plan and refuses every change with its reason', same(ro.plan, KITCHEN) && ro.readOnly === 'the saved house is away' && ro.failure?.message === '500' && roCommit instanceof ReadOnly && roCommit.reasons[0] === 'the saved house is away' && (await refusal(() => ro.undo())) instanceof ReadOnly && ro.versions().length === 1)
+  check('a read-only house shows the plan and refuses every change with its reason', same(ro.plan, KITCHEN) && ro.readOnly === 'the saved house is away' && roCommit instanceof ReadOnly && roCommit.reasons[0] === 'the saved house is away' && (await refusal(() => ro.undo())) instanceof ReadOnly && ro.versions().length === 1)
   const realFetch = globalThis.fetch
   try {
     globalThis.fetch = async (url) => String(url) === '/villager/launch'
@@ -180,7 +178,7 @@ try {
       : new Response(JSON.stringify({ error: 'plan event 3 follows 1' }), { status: 500 })
     const { house, READ_ONLY_LINE } = await vite.ssrLoadModule('/src/build/house.ts')
     const hh = await house()
-    check('F2: house() with a host token and a failing store is read-only, not a page-only copy', hh.readOnly === READ_ONLY_LINE && hh.failure instanceof StoreError && (await refusal(() => hh.commit([move]))) instanceof ReadOnly)
+    check('house() with a host token and a failing store is read-only, not a page-only copy', hh.readOnly === READ_ONLY_LINE && (await refusal(() => hh.commit([move]))) instanceof ReadOnly)
   } finally {
     globalThis.fetch = realFetch
   }
@@ -208,7 +206,7 @@ try {
     check('a turn is stored within one full turn (the host bounds angles)', Math.abs(turned.furniture[0].at.yaw - 0.25) < 1e-6, turned.furniture[0].at)
   }
 
-  // ---- F3: things hung on walls move with them
+  // ---- things hung on walls move with them
   const W = P.wallOf
   const curve = (plan, id) => P.curveOf(plan, W(plan, id))
   const at = (plan, f) => P.pointAt(curve(plan, f.at.wallId), f.at.along).map((v) => Math.round(v * 1e4) / 1e4)
@@ -216,33 +214,33 @@ try {
   const hung = { ...KITCHEN, furniture: [hang('f.front', 'kitchen.front', 1), hang('f.back', 'kitchen.back', 6.5)] }
   const pic = (plan, id) => plan.furniture.find((f) => f.id === id)
   const wider = P.apply(hung, { op: 'moveWall', wallId: 'kitchen.right', by: 1 })
-  check('F3: moving a wall shifts a picture on a wall whose corner a moved, so it stays put in the room', Math.abs(pic(wider, 'f.front').at.along - 2) < 1e-6 && same(at(wider, pic(wider, 'f.front')), at(hung, pic(hung, 'f.front'))), pic(wider, 'f.front'))
+  check('moving a wall shifts a picture on a wall whose corner a moved, so it stays put in the room', Math.abs(pic(wider, 'f.front').at.along - 2) < 1e-6 && same(at(wider, pic(wider, 'f.front')), at(hung, pic(hung, 'f.front'))), pic(wider, 'f.front'))
   const narrower = P.apply(hung, { op: 'moveWall', wallId: 'kitchen.right', by: -3 })
   const backLen = curve(narrower, 'kitchen.back').length
-  check('F3: a wall move that would push a picture off its wall stops early', pic(narrower, 'f.back').at.along <= backLen && Math.abs(rightX(narrower) - rightX(hung) + 0.3) < 1e-6, { backLen, x: rightX(narrower) - rightX(hung) })
-  check('F3: validate refuses a picture off its wall', P.validate({ ...KITCHEN, furniture: [hang('f.off', 'kitchen.back', 99)] }).some((r) => /f\.off is 99\.00 m along/.test(r)))
+  check('a wall move that would push a picture off its wall stops early', pic(narrower, 'f.back').at.along <= backLen && Math.abs(rightX(narrower) - rightX(hung) + 0.3) < 1e-6, { backLen, x: rightX(narrower) - rightX(hung) })
+  check('validate refuses a picture off its wall', P.validate({ ...KITCHEN, furniture: [hang('f.off', 'kitchen.back', 99)] }).some((r) => /f\.off is 99\.00 m along/.test(r)))
   const onLeft = { ...KITCHEN, furniture: [hang('f.a', 'kitchen.left', 0.5), hang('f.b', 'kitchen.left', 4.5), hang('f.c', 'kitchen.left', 5.5)] }
   const split = P.apply(onLeft, pantry)
   const homes = ['f.a', 'f.b', 'f.c'].map((id) => [pic(split, id).at.wallId, pic(split, id).at.along])
-  check('F3: adding a room moves each picture to the piece it is on, measured from that piece', same(homes, [['kitchen.left', 0.5], ['pantry.shared', 3.5], ['pantry.rest', 0.5]]) && ['f.a', 'f.b', 'f.c'].every((id) => same(at(split, pic(split, id)), at(onLeft, pic(onLeft, id)))), homes)
+  check('adding a room moves each picture to the piece it is on, measured from that piece', same(homes, [['kitchen.left', 0.5], ['pantry.shared', 3.5], ['pantry.rest', 0.5]]) && ['f.a', 'f.b', 'f.c'].every((id) => same(at(split, pic(split, id)), at(onLeft, pic(onLeft, id)))), homes)
 
-  // ---- F5: a thing on a placed thing stands on it
+  // ---- a thing on a placed thing stands on it
   const [cx, cz] = [0, (KITCHEN.corners[0].z + KITCHEN.corners[2].z) / 2]
   const table = { id: 'f.table', item: { kind: 'table' }, at: { mount: 'floor', x: cx, z: cz, yaw: 0 } }
   const vase = { id: 'f.vase', item: { kind: 'vase' }, at: { mount: 'surface', x: cx + 0.3, y: 0.76, z: cz, yaw: 0, on: 'f.table' } }
   const cup = { id: 'f.cup', item: { kind: 'cup' }, at: { mount: 'surface', x: cx + 0.3, y: 0.9, z: cz, yaw: 0, on: 'f.vase' } }
   let set = [table, vase, cup].reduce((plan, f) => P.apply(plan, { op: 'placeItem', furniture: f }), KITCHEN)
-  check('F5: a surface anchor keeps `on` when placed on placed furniture', pic(set, 'f.vase').at.on === 'f.table' && pic(set, 'f.cup').at.on === 'f.vase')
+  check('a surface anchor keeps `on` when placed on placed furniture', pic(set, 'f.vase').at.on === 'f.table' && pic(set, 'f.cup').at.on === 'f.vase')
   const turned = P.apply(set, { op: 'moveItem', furnitureId: 'f.table', at: { mount: 'floor', x: cx + 1, z: cz, yaw: Math.PI / 2 } })
   const r4 = (a) => [a.x, a.y, a.z, a.yaw].map((v) => Math.round(v * 1e4) / 1e4)
-  check('F5: moving the table carries what stands on it (and on that), turned with it', same(r4(pic(turned, 'f.vase').at), r4({ x: cx + 1, y: 0.76, z: cz - 0.3, yaw: Math.PI / 2 })) && same(r4(pic(turned, 'f.cup').at), r4({ x: cx + 1, y: 0.9, z: cz - 0.3, yaw: Math.PI / 2 })), [pic(turned, 'f.vase').at, pic(turned, 'f.cup').at])
+  check('moving the table carries what stands on it (and on that), turned with it', same(r4(pic(turned, 'f.vase').at), r4({ x: cx + 1, y: 0.76, z: cz - 0.3, yaw: Math.PI / 2 })) && same(r4(pic(turned, 'f.cup').at), r4({ x: cx + 1, y: 0.9, z: cz - 0.3, yaw: Math.PI / 2 })), [pic(turned, 'f.vase').at, pic(turned, 'f.cup').at])
   const lifted = P.apply(set, { op: 'moveItem', furnitureId: 'f.vase', at: { ...vase.at, y: 0.9, on: undefined } })
-  check('F5: moving a surface support up carries what stands on it up too', Math.abs(pic(lifted, 'f.cup').at.y - 1.04) < 1e-6 && pic(lifted, 'f.vase').at.on === undefined, pic(lifted, 'f.cup').at)
+  check('moving a surface support up carries what stands on it up too', Math.abs(pic(lifted, 'f.cup').at.y - 1.04) < 1e-6 && pic(lifted, 'f.vase').at.on === undefined, pic(lifted, 'f.cup').at)
   const refusedRemove = await refusal(async () => P.apply(set, { op: 'removeItem', furnitureId: 'f.table' }))
-  check('F5: removing a thing something stands on is refused', refusedRemove instanceof PlanError && /f\.vase standing on it/.test(refusedRemove.message))
+  check('removing a thing something stands on is refused', refusedRemove instanceof PlanError && /f\.vase standing on it/.test(refusedRemove.message))
   const cycle = await refusal(async () => P.apply(set, { op: 'moveItem', furnitureId: 'f.vase', at: { ...vase.at, on: 'f.cup' } }))
-  check('F5: standing on something that stands on you is refused', cycle instanceof PlanError && /stands on it/.test(cycle.message))
-  check('F5: standing on a thing that is not in the house is refused', (await refusal(async () => P.apply(KITCHEN, { op: 'placeItem', furniture: vase }))) instanceof PlanError)
+  check('standing on something that stands on you is refused', cycle instanceof PlanError && /stands on it/.test(cycle.message))
+  check('standing on a thing that is not in the house is refused', (await refusal(async () => P.apply(KITCHEN, { op: 'placeItem', furniture: vase }))) instanceof PlanError)
 
   // ---- diff
   const K = KITCHEN
@@ -263,12 +261,12 @@ try {
   const villager = (await import('../../host/src/villager.ts')).default
   const { stubAgent } = await import('../../host/src/villager-agent.ts')
   const dataRoot = await mkdtemp(join(tmpdir(), 'plan-history-'))
-  const startHost = async () => {
+  const startHost = async (port = 0) => {
     const ctx = new Context()
-    const fiber = ctx.plugin(villager, { root: dataRoot, agent: stubAgent(0), port: 0, people: { alex: 'Alex', sam: 'Sam' } })
+    const fiber = ctx.plugin(villager, { root: dataRoot, agent: stubAgent(0), port, people: { alex: 'Alex', sam: 'Sam' } })
     await fiber.await()
     const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-    return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token }
+    return { fiber, port: launch.port, base: `http://127.0.0.1:${launch.port}`, token: launch.token, launchFile: ctx.villager.launchFile }
   }
   try {
     let host = await startHost()
@@ -289,6 +287,13 @@ try {
     host = await startHost()
     const reopened = await PlanHistory.open(hostStore({ base: host.base, token: host.token }), KITCHEN)
     check('host: a restarted host reopens to the same head, plans and names', reopened.head === expected.head && same(reopened.versions().map((v) => [v.id, canonical(reopened.planAt(v.id))]), expected.plans) && reopened.name(a1.id) === 'Wider kitchen')
+    // A host restart (same port, new token): the store fetches the new token once and saves.
+    let refreshes = 0
+    const kept = await PlanHistory.open(hostStore({ base: host.base, token: host.token, refresh: async () => (refreshes++, JSON.parse(await readFile(host.launchFile, 'utf8')).token) }), KITCHEN)
+    await host.fiber.dispose()
+    host = await startHost(host.port)
+    const afterRestart = await refusal(() => kept.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }]))
+    check('host: after a restart the store fetches the new token once and saves', afterRestart === null && refreshes === 1, afterRestart?.message)
     const noToken = await refusal(() => PlanHistory.open(hostStore({ base: host.base, token: 'f'.repeat(64) }), KITCHEN))
     check('host: a wrong token is a StoreError 401', noToken instanceof StoreError && noToken.status === 401)
     await host.fiber.dispose()

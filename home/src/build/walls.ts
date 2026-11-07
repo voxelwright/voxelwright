@@ -10,7 +10,7 @@
 import * as THREE from 'three/webgpu'
 import { CUT, FLOOR_ROUGHNESS, YARD_TOP } from '../diorama'
 import { canvas, floorPlanks, paintPlaster, toTexture } from '../paint'
-import { KITCHEN, curveOf, normalAt, outline, pointAt, roomWalls, segmentsOf, type Curve, type Opening, type P, type Plan, type Room, type Wall } from './plan'
+import { KITCHEN, curveOf, floorOf, normalAt, outline, pointAt, roomWalls, segmentsOf, type Curve, type Opening, type Plan, type Room, type Wall } from './plan'
 
 const STUB = 0.42
 const BASE = 0.3
@@ -146,7 +146,7 @@ function around(openings: Opening[], t0: number, t1: number, height: number): Ar
   return out
 }
 
-/** Openings the kitchen has always had (room.ts and its plugins dress those); any other was opened by a build edit. */
+/** The base kitchen's openings (KITCHEN), which room.ts and its plugins dress; any other was opened by a build edit. */
 const KITCHEN_OPENINGS = new Set(KITCHEN.walls.flatMap((w) => w.openings.map((o) => o.id)))
 const CASING = 0.075
 /**
@@ -197,12 +197,12 @@ const sideOf = (f: Frame): 'back' | 'front' | 'left' | 'right' => {
   return Math.abs(nx) > Math.abs(nz) ? (nx < 0 ? 'left' : 'right') : nz < 0 ? 'back' : 'front'
 }
 
-/** The walls the seated view has always had at full height; the shell adds caps and stubs only for these. */
+/** The walls the seated view draws at full height; the shell adds caps and stubs only for these. */
 const SEATED = ['back', 'left']
 
 // Board density of the dollhouse floor: diorama.ts laid 5.4 × 4.2 repeats over the 6 × 6.71 m kitchen.
 const KITCHEN_FLOOR = (() => {
-  const ring = outline(KITCHEN, KITCHEN.rooms[0], KITCHEN.walls[0].thickness / 2)
+  const ring = floorOf(KITCHEN, KITCHEN.rooms[0])
   const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1])
   return { w: Math.max(...xs) - Math.min(...xs), d: Math.max(...zs) - Math.min(...zs) }
 })()
@@ -393,7 +393,7 @@ function otherRooms(plan: Plan, first: Room, kit: Kit): THREE.Group | null {
 
 /** The plank floor inside the walls, curved walls and all; boards keep their size and stay put as walls move. */
 function floorMesh(plan: Plan, room: Room, kit: Kit): THREE.Mesh {
-  const ring = outline(plan, room, plan.walls[0].thickness / 2)
+  const ring = floorOf(plan, room)
   const x0 = Math.min(...ring.map((p) => p[0])), z1 = Math.max(...ring.map((p) => p[1]))
   const tris = THREE.ShapeUtils.triangulateShape(ring.map(([x, z]) => new THREE.Vector2(x, z)), [])
   const position: number[] = [], uv: number[] = [], normal: number[] = []
@@ -439,9 +439,4 @@ function contactShadow(kit: Kit, w: number, d: number, x: number, z: number, y: 
   m.position.set(x, y, z)
   m.name = 'build contact shadow'
   return m
-}
-
-/** Inside-floor polygon of a room, for the size label and checks. */
-export function innerOutline(plan: Plan, room: Room): P[] {
-  return outline(plan, room, plan.walls[0].thickness / 2)
 }

@@ -54,65 +54,62 @@ try {
   }
   const dir = join(root, 'house', 'plans')
 
-  // Token; the store is the house's, at /house/plans, not under a person (F4).
+  // Token; the store is the house's, at /house/plans, not under a person.
   check('reading plans needs the token', (await api('/house/plans', undefined, null)).status === 401)
   check('a wrong token is refused', (await api('/house/plans/versions', { version: {} }, 'f'.repeat(64))).status === 401)
-  check('F4: plans are not under a person any more', (await api('/people/alex/plans')).status === 404)
+  check('plans live at /house/plans, not under a person', (await api('/people/alex/plans')).status === 404)
   const empty = await (await api('/house/plans')).json()
   check('an empty house has no versions and no head', empty.versions.length === 0 && empty.head === null, empty)
 
   // Create the root.
-  const created = await post('/versions', { version: { id: ROOT, parent: null, edits: [], plan: base } })
-  check('F4: the root is created with at from the host and no one named', created.status === 200 && !('by' in created.json.version) && !Number.isNaN(Date.parse(created.json.version.at)) && JSON.stringify(created.json.version.plan) === JSON.stringify(base), created)
-  const second = await post('/versions', { version: { id: hex('d', 16), parent: null, edits: [], plan: base } })
+  const created = await post('/versions', { version: { id: ROOT, parent: null, plan: base } })
+  check('the root is created with at from the host and no one named', created.status === 200 && !('by' in created.json.version) && !Number.isNaN(Date.parse(created.json.version.at)) && JSON.stringify(created.json.version.plan) === JSON.stringify(base), created)
+  const second = await post('/versions', { version: { id: hex('d', 16), parent: null, plan: base } })
   check('a second root is refused as stale, with the head', second.status === 409 && second.json.head === ROOT, second)
 
-  // Append. Every version carries the plan it is (the host checks its shape, not whether it follows from the edits).
+  // Append. Every version carries the plan it is (the host checks its shape, not whether it is a valid house).
   const move = { op: 'moveWall', wallId: 'r.w2', by: 0.5 }
   const wider = { ...base, corners: base.corners.map((c) => (c.x === 4 ? { ...c, x: 4.5 } : c)) }
-  const v2 = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'wider', plan: wider } })
+  const v2 = await post('/versions', { version: { id: V2, parent: ROOT, note: 'wider', plan: wider } })
   check('a version appends on the head', v2.status === 200 && v2.json.version.parent === ROOT && JSON.stringify(v2.json.version.plan) === JSON.stringify(wider), v2)
-  check('F4: a body cannot set by', (await post('/versions', { version: { id: V3, parent: V2, edits: [move], plan: base, by: 'alex' } })).status === 400)
+  check('a body cannot set by', (await post('/versions', { version: { id: V3, parent: V2, plan: base, by: 'alex' } })).status === 400)
 
-  // F7: a retry of a saved version gets the same answer; another version with its id is a 409 without a head.
-  const retry = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'wider', plan: wider } })
-  check('F7: a retried version (same id, parent and content) answers 200 with the stored one', retry.status === 200 && JSON.stringify(retry.json.version) === JSON.stringify(v2.json.version), retry)
-  const clash = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'other', plan: wider } })
-  check('F7: a different version with a taken id is 409 without a head (not stale)', clash.status === 409 && !('head' in clash.json), clash)
+  // a retry of a saved version gets the same answer; another version with its id is a 409 without a head.
+  const retry = await post('/versions', { version: { id: V2, parent: ROOT, note: 'wider', plan: wider } })
+  check('a retried version (same id, parent and content) answers 200 with the stored one', retry.status === 200 && JSON.stringify(retry.json.version) === JSON.stringify(v2.json.version), retry)
+  const clash = await post('/versions', { version: { id: V2, parent: ROOT, note: 'other', plan: wider } })
+  check('a different version with a taken id is 409 without a head (not stale)', clash.status === 409 && !('head' in clash.json), clash)
 
   // Stale head: a page that still thinks the root is the head.
-  const stale = await post('/versions', { version: { id: V3, parent: ROOT, edits: [move], plan: base } })
+  const stale = await post('/versions', { version: { id: V3, parent: ROOT, plan: base } })
   check('a version on a stale head is refused with the current head', stale.status === 409 && stale.json.head === V2, stale)
   const staleHead = await post('/head', { head: ROOT, expect: ROOT })
   check('a head move on a stale head is refused', staleHead.status === 409 && staleHead.json.head === V2, staleHead)
   check('undo moves the head when it expects the right one', (await post('/head', { head: ROOT, expect: V2 })).status === 200)
-  const branch = await post('/versions', { version: { id: V3, parent: ROOT, edits: [{ op: 'bendWall', wallId: 'r.w2', sagitta: 0.5 }], plan: base } })
+  const branch = await post('/versions', { version: { id: V3, parent: ROOT, plan: base } })
   check('a commit after checkout branches from it', branch.status === 200 && branch.json.version.parent === ROOT)
-  const plain = { op: 'addRoom', room: { id: 'p', label: 'Pantry' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2 } }
-  const v4 = await post('/versions', { version: { id: V4, parent: V3, edits: [plain], plan: base } })
-  check('addRoom with a plain opening (no leaves) is stored as sent', v4.status === 200 && JSON.stringify(v4.json.version.edits[0]) === JSON.stringify(plain), v4)
+  const plainOpening = { ...base, walls: base.walls.map((w, i) => (i === 2 ? { ...w, openings: [{ id: 'r.arch', kind: 'door', from: 1.2, to: 2, sill: 0, head: 2.3 }] } : w)) }
+  const v4 = await post('/versions', { version: { id: V4, parent: V3, plan: plainOpening } })
+  check('a plain opening (a door with no leaves) is stored as sent', v4.status === 200 && JSON.stringify(v4.json.version.plan) === JSON.stringify(plainOpening), v4)
   check('a name is stored', (await post('/names', { id: V2, name: 'Wider room' })).status === 200)
   check('a name for a missing version is refused', (await post('/names', { id: hex('e', 16), name: 'x' })).status === 404)
 
   // Bad input: nothing is stored.
   const before = (await readdir(join(dir, 'events'))).length
   const bad: [string, unknown][] = [
-    ['an unknown op', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'deleteHouse' }], plan: base } }],
-    ['an unknown edit field', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, run: 'rm -rf' }], plan: base } }],
-    ['a number out of range', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: 1e9 }], plan: base } }],
-    ['a non-number', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: '1' }], plan: base } }],
-    ['a path in an id', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, wallId: '../x' }], plan: base } }],
-    ['a bad version id', { version: { id: '../../etc', parent: V4, edits: [move], plan: base } }],
-    ['a version with no plan', { version: { id: hex('f', 16), parent: V4, edits: [move] } }],
-    ['a plan with an unknown field', { version: { id: hex('f', 16), parent: V4, edits: [move], plan: { ...base, rooms: [{ ...base.rooms[0], owner: 'alex' }] } } }],
-    ['a hash (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, edits: [move], plan: base, hash: hex('4', 64) } }],
-    ['no edits', { version: { id: hex('f', 16), parent: V4, edits: [], plan: base } }],
-    ['too many edits', { version: { id: hex('f', 16), parent: V4, edits: Array(51).fill(move), plan: base } }],
-    ['a base (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, edits: [move], base, plan: base } }],
-    ['a control character in a note', { version: { id: hex('f', 16), parent: V4, edits: [move], note: 'a\u0000b', plan: base } }],
-    ['a door with three leaves', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'addRoom', room: { id: 'p', label: 'P' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2, leaves: 3 } }], plan: base } }],
-    ['a duplicate id', { version: { id: V2, parent: V4, edits: [move], plan: base } }],
-    ['a library item whose person is a path', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'placeItem', furniture: { id: 'f.x', item: { library: 'a1b2c3d4e5f6', person: '../alex' }, at: { mount: 'floor', x: 1, z: 1, yaw: 0 } } }], plan: base } }],
+    ['edits (a version stores its plan only)', { version: { id: hex('f', 16), parent: V4, edits: [move], plan: base } }],
+    ['a number out of range', { version: { id: hex('f', 16), parent: V4, plan: { ...base, corners: base.corners.map((c, i) => (i ? c : { ...c, x: 1e9 })) } } }],
+    ['a non-number', { version: { id: hex('f', 16), parent: V4, plan: { ...base, corners: base.corners.map((c, i) => (i ? c : { ...c, x: '1' })) } } }],
+    ['a path in an id', { version: { id: hex('f', 16), parent: V4, plan: { ...base, corners: base.corners.map((c, i) => (i ? c : { ...c, id: '../x' })) } } }],
+    ['a bad version id', { version: { id: '../../etc', parent: V4, plan: base } }],
+    ['a version with no plan', { version: { id: hex('f', 16), parent: V4 } }],
+    ['a plan with an unknown field', { version: { id: hex('f', 16), parent: V4, plan: { ...base, rooms: [{ ...base.rooms[0], owner: 'alex' }] } } }],
+    ['a hash (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, plan: base, hash: hex('4', 64) } }],
+    ['a base (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, base, plan: base } }],
+    ['a control character in a note', { version: { id: hex('f', 16), parent: V4, note: 'a\u0000b', plan: base } }],
+    ['a door with three leaves', { version: { id: hex('f', 16), parent: V4, plan: { ...base, walls: base.walls.map((w, i) => (i ? w : { ...w, openings: [{ ...w.openings[0], leaves: 3 }] })) } } }],
+    ['a duplicate id', { version: { id: V2, parent: V4, plan: base } }],
+    ['a library item whose person is a path', { version: { id: hex('f', 16), parent: V4, plan: { ...base, furniture: [{ id: 'f.x', item: { library: 'a1b2c3d4e5f6', person: '../alex' }, at: { mount: 'floor', x: 1, z: 1, yaw: 0 } }] } } }],
   ]
   for (const [what, body] of bad) {
     const r = await post('/versions', body)
@@ -121,14 +118,14 @@ try {
   check('a name with a newline is refused', (await post('/names', { id: V2, name: 'a\nb' })).status === 400)
   check('a body over 256 KB is refused', (await api('/house/plans/versions', undefined, host.token, JSON.stringify({ pad: 'x'.repeat(300_000) }))).status === 413)
   check('a body over 256 KB of three-byte text is refused (bytes, not characters)', (await api('/house/plans/versions', undefined, host.token, JSON.stringify({ pad: '€'.repeat(100_000) }))).status === 413)
-  check('a root that carries edits is refused', (await post('/versions', { version: { id: hex('3', 16), parent: null, edits: [move], plan: base } })).status === 400)
+  check('a root carrying edits is refused', (await post('/versions', { version: { id: hex('3', 16), parent: null, edits: [move], plan: base } })).status === 400)
   check('malformed JSON is refused', (await api('/house/plans/versions', undefined, host.token, '{')).status === 400)
   check('GET on versions is not allowed', (await api('/house/plans/versions')).status === 405)
   check('refused requests store nothing', (await readdir(join(dir, 'events'))).length === before)
 
   // An event is written whole in tmp/ first: with tmp/ unwritable the write fails and nothing reaches events/.
   await chmod(join(dir, 'tmp'), 0o500)
-  const blocked = await post('/versions', { version: { id: hex('8', 16), parent: (await (await api('/house/plans')).json()).head, edits: [move], plan: base } })
+  const blocked = await post('/versions', { version: { id: hex('8', 16), parent: (await (await api('/house/plans')).json()).head, plan: base } })
   await chmod(join(dir, 'tmp'), 0o700)
   check('a write that fails before its link leaves no event', blocked.status === 500 && (await readdir(join(dir, 'events'))).length === before, blocked)
   // Another writer's event at the next number wins.
@@ -140,55 +137,53 @@ try {
   const after = await (await api('/house/plans')).json()
   check('an event another writer linked is folded in', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
 
-  // Placed things (placeItem, moveItem, removeItem): stored as sent, every field checked.
+  // Placed things in the plan: stored as sent, every field checked.
   const V5 = hex('5', 16), V6 = hex('6', 16), V7 = hex('7', 16)
   const lamp = { id: 'f.lamp', item: { library: 'a1b2c3d4e5f6', person: 'alex' }, at: { mount: 'floor', x: 1, z: 2, yaw: 0.5 } }
   const picture = { id: 'f.picture', item: { kind: 'picture' }, at: { mount: 'wall', wallId: 'r.w3', roomId: 'r', along: 2, height: 1.5, spin: 0 } }
-  const placing = { id: V5, parent: V4, edits: [{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }], note: 'Placed the lamp', plan: { ...base, furniture: [lamp, picture] } }
-  // F6: the host refuses a placed library item that is missing or not kept.
+  const placing = { id: V5, parent: V4, note: 'Placed the lamp', plan: { ...base, furniture: [lamp, picture] } }
+  // The host refuses a placed library item that is missing or not kept.
   const eventsNow = (await readdir(join(dir, 'events'))).length
   const missingItem = await post('/versions', { version: placing })
   await library('alex', 'a1b2c3d4e5f6', false)
   const draftItem = await post('/versions', { version: placing })
-  const inPlanOnly = await post('/versions', { version: { ...placing, edits: [{ op: 'removeItem', furnitureId: 'f.other' }] } })
-  check('F6: placing a library item that is missing or not kept is refused 409, and nothing is stored', missingItem.status === 409 && draftItem.status === 409 && /not one alex has kept/.test(draftItem.json.error) && inPlanOnly.status === 409 && !('head' in draftItem.json) && (await readdir(join(dir, 'events'))).length === eventsNow, { missingItem, draftItem, inPlanOnly })
+  check('placing a library item that is missing or not kept is refused 409, and nothing is stored', missingItem.status === 409 && draftItem.status === 409 && /not one alex has kept/.test(draftItem.json.error) && !('head' in draftItem.json) && (await readdir(join(dir, 'events'))).length === eventsNow, { missingItem, draftItem })
   await library('alex', 'a1b2c3d4e5f6', true)
   const placed = await post('/versions', { version: placing })
-  check('placeItem is stored as sent (a library item on the floor, a kind on a wall)', placed.status === 200 && JSON.stringify(placed.json.version.edits) === JSON.stringify([{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }]), placed)
-  check('F6: once kept, it is placed', placed.status === 200, placed)
-  const moveTo = { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 0.76, z: 2, yaw: 0, on: 'f.table' } }
-  const moved = await post('/versions', { version: { id: V6, parent: V5, edits: [moveTo], plan: { ...base, furniture: [{ ...lamp, at: moveTo.at }, picture] } } })
-  check('F5: moveItem onto placed furniture (surface `on`) is stored as sent', moved.status === 200 && JSON.stringify(moved.json.version.edits[0]) === JSON.stringify(moveTo) && moved.json.version.plan.furniture[0].at.on === 'f.table', moved)
-  const removed = await post('/versions', { version: { id: V7, parent: V6, edits: [{ op: 'removeItem', furnitureId: 'f.picture' }], plan: { ...base, furniture: [{ ...lamp, at: moveTo.at }] } } })
-  check('removeItem is stored as sent', removed.status === 200, removed)
+  check('once kept, a library item on the floor and a kind on a wall are stored as sent', placed.status === 200 && JSON.stringify(placed.json.version.plan.furniture) === JSON.stringify([lamp, picture]), placed)
+  const onTable = { ...lamp, at: { mount: 'surface', x: 1, y: 0.76, z: 2, yaw: 0, on: 'f.table' } }
+  const moved = await post('/versions', { version: { id: V6, parent: V5, plan: { ...base, furniture: [onTable, picture] } } })
+  check('a thing on placed furniture (surface `on`) is stored as sent', moved.status === 200 && moved.json.version.plan.furniture[0].at.on === 'f.table', moved)
+  const removed = await post('/versions', { version: { id: V7, parent: V6, plan: { ...base, furniture: [onTable] } } })
+  check('a version without a thing is stored', removed.status === 200, removed)
   const itemsBefore = (await readdir(join(dir, 'events'))).length
   const badItems: [string, unknown][] = [
-    ['an unknown mount', { op: 'placeItem', furniture: { ...lamp, at: { ...lamp.at, mount: 'roof' } } }],
-    ['an extra anchor field', { op: 'placeItem', furniture: { ...lamp, at: { ...lamp.at, y: 3 } } }],
-    ['a wall anchor without a room', { op: 'placeItem', furniture: { ...picture, at: { mount: 'wall', wallId: 'r.w3', along: 2, height: 1.5, spin: 0 } } }],
-    ['a library item that is not 12 hex', { op: 'placeItem', furniture: { ...lamp, item: { library: '../secrets', person: 'alex' } } }],
-    ['a library item with no person', { op: 'placeItem', furniture: { ...lamp, item: { library: 'a1b2c3d4e5f6' } } }],
-    ['an item with both a kind and a library', { op: 'placeItem', furniture: { ...lamp, item: { library: 'a1b2c3d4e5f6', person: 'alex', kind: 'box' } } }],
-    ['a kind that is not a word', { op: 'placeItem', furniture: { ...picture, item: { kind: 'Big Box!' } } }],
-    ['a furniture id with a path', { op: 'placeItem', furniture: { ...lamp, id: '../x' } }],
-    ['a height out of range', { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 900, z: 2, yaw: 0 } }],
-    ['a non-number yaw', { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'floor', x: 1, z: 2, yaw: 'left' } }],
-    ['a moveItem with no anchor', { op: 'moveItem', furnitureId: 'f.lamp' }],
-    ['a removeItem with an extra field', { op: 'removeItem', furnitureId: 'f.lamp', all: true }],
+    ['an unknown mount', { ...lamp, at: { ...lamp.at, mount: 'roof' } }],
+    ['an extra anchor field', { ...lamp, at: { ...lamp.at, y: 3 } }],
+    ['a wall anchor without a room', { ...picture, at: { mount: 'wall', wallId: 'r.w3', along: 2, height: 1.5, spin: 0 } }],
+    ['a library item that is not 12 hex', { ...lamp, item: { library: '../secrets', person: 'alex' } }],
+    ['a library item with no person', { ...lamp, item: { library: 'a1b2c3d4e5f6' } }],
+    ['an item with both a kind and a library', { ...lamp, item: { library: 'a1b2c3d4e5f6', person: 'alex', kind: 'box' } }],
+    ['a kind that is not a word', { ...picture, item: { kind: 'Big Box!' } }],
+    ['a furniture id with a path', { ...lamp, id: '../x' }],
+    ['a height out of range', { ...lamp, at: { mount: 'surface', x: 1, y: 900, z: 2, yaw: 0 } }],
+    ['a non-number yaw', { ...lamp, at: { mount: 'floor', x: 1, z: 2, yaw: 'left' } }],
+    ['a thing with no anchor', { id: 'f.lamp', item: lamp.item }],
+    ['a thing with an extra field', { ...lamp, all: true }],
   ]
-  for (const [what, e] of badItems) {
-    const r = await post('/versions', { version: { id: hex('f', 16), parent: V7, edits: [e], plan: base } })
+  for (const [what, f] of badItems) {
+    const r = await post('/versions', { version: { id: hex('f', 16), parent: V7, plan: { ...base, furniture: [f] } } })
     check(`${what} is refused`, r.status === 400, r)
   }
-  check('refused item edits store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
+  check('refused things store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
 
   // Two hosts on one root racing one parent: the link() claim lets one in and refuses the other.
   const twin = await start()
   const asTwin = (path: string, body: unknown) => fetch(`${twin.base}/house/plans${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${twin.token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }))
   const headNow = (await (await api('/house/plans')).json()).head
   const [ra, rb] = await Promise.all([
-    post('/versions', { version: { id: hex('1', 16), parent: headNow, edits: [move], plan: base } }),
-    asTwin('/versions', { version: { id: hex('2', 16), parent: headNow, edits: [move], plan: base } }),
+    post('/versions', { version: { id: hex('1', 16), parent: headNow, plan: base } }),
+    asTwin('/versions', { version: { id: hex('2', 16), parent: headNow, plan: base } }),
   ])
   const raced = await (await api('/house/plans')).json()
   check('two hosts racing one parent: one saved, one stale, none lost', [ra.status, rb.status].sort().join() === '200,409' && raced.versions.filter((v: { id: string }) => v.id === hex('1', 16) || v.id === hex('2', 16)).length === 1, { ra: ra.status, rb: rb.status })
@@ -197,7 +192,7 @@ try {
 
   // A multi-byte character split across two chunks of a body is stored whole.
   const kueche = { ...base, rooms: [{ ...base.rooms[0], label: 'Küche' }] }
-  const bytes = Buffer.from(JSON.stringify({ version: { id: hex('4', 16), parent: raceWinner, edits: [{ op: 'moveWall', wallId: 'r.w2', by: 0.1 }], plan: kueche } }))
+  const bytes = Buffer.from(JSON.stringify({ version: { id: hex('4', 16), parent: raceWinner, plan: kueche } }))
   const cut = bytes.indexOf(Buffer.from('ü')) + 1
   const split = await new Promise<{ status: number; body: string }>((done, fail) => {
     const url = new URL(`${host.base}/house/plans/versions`)
@@ -223,6 +218,12 @@ try {
   host = await start()
   const reloaded = await (await api('/house/plans')).json()
   check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === hex('4', 16))
+  // The host has folded every event now; one that goes missing afterwards is a damaged store too.
+  const foldedEvent = join(dir, 'events', '00000002.json')
+  const foldedBytes = await readFile(foldedEvent)
+  await rm(foldedEvent)
+  check('an event already folded that goes missing is an error', (await api('/house/plans')).status === 500)
+  await writeFile(foldedEvent, foldedBytes)
 
   // An event filed under the wrong number is an error (a fresh host, so nothing is folded yet).
   await host.fiber.dispose()

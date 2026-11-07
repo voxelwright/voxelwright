@@ -19,8 +19,7 @@ export interface AddRoomIntent {
   }
   /** Metres: w along the shared wall, d away from it. Or a fraction of the anchor room's floor area. */
   size?: { w?: number; d?: number; fraction?: number }
-  connect?: { kind: 'door' | 'opening'; leaves?: 1 | 2; at?: 'selected-point' | 'middle' }
-  shape?: 'rect'
+  connect?: { kind: 'door' | 'opening'; leaves?: 1 | 2; at?: 'selected-point' }
 }
 
 export type Intent = AddRoomIntent
@@ -60,7 +59,7 @@ export function checkIntent(raw: unknown): { intent: Intent } | { reason: string
     const kind = connect.kind === 'opening' ? 'opening' : 'door'
     out.connect = { kind }
     if (kind === 'door') out.connect.leaves = connect.leaves === 2 ? 2 : 1
-    if (connect.at === 'selected-point' || connect.at === 'middle') out.connect.at = connect.at
+    if (connect.at === 'selected-point') out.connect.at = connect.at
   }
   if (v.shape !== undefined && v.shape !== 'rect') return { reason: 'only rectangular rooms for now' }
   return { intent: out }

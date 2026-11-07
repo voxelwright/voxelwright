@@ -380,7 +380,7 @@ export default {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
       const plansMatch = /^\/house\/plans(?:\/(versions|head|names))?$/.exec(path)
-      if (plansMatch) return plans(plansMatch[1], req, res)
+      if (plansMatch) return plans(plansMatch[1] as 'versions' | 'head' | 'names' | undefined, req, res)
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {

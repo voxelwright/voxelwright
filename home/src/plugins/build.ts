@@ -3,13 +3,14 @@ import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
 import { MODE } from './camera'
-import { KITCHEN, apply, curveOf, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
-import { build, innerOutline, makeKit, type Built } from '../build/walls'
+import { KITCHEN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
+import { build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
-import { tagCss } from '../build/sketch'
+import { HAND, tagCss } from '../build/sketch'
+import { alongOf } from '../build/mount'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
-import { draftEdits, resolve, type Draft } from '../build/resolve'
+import { OPENING_HEAD, draftEdits, fit, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
@@ -39,9 +40,6 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
 const ENABLED = new URLSearchParams(location.search).get('build') === '1'
 const WALL = 'kitchen.right'
 const STUB = 0.42
-const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
-/** A door keeps clear of built-ins that reach below this (the clock above a doorway is fine). */
-const DOOR_HEAD = 2.3
 
 export default {
   name: 'build',
@@ -208,7 +206,7 @@ export default {
     group.add(tag)
     let tagText = ''
     const paintTag = (p: Plan) => {
-      const ring = innerOutline(p, p.rooms[0])
+      const ring = floorOf(p, p.rooms[0])
       const xs = ring.map((q) => q[0]), zs = ring.map((q) => q[1])
       const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...zs) - Math.min(...zs)
       const bent = Math.abs(wallOf(p, WALL).sagitta) > 0
@@ -259,7 +257,7 @@ export default {
     /** The right wall drags only while it is still the kitchen's own whole side. */
     const rightFree = () => {
       const w = plan.walls.find((k) => k.id === WALL)
-      return Boolean(w && w.a === 'kitchen.back-right' && w.b === 'kitchen.front-right' && !plan.rooms.slice(1).some((r) => roomWalls(plan, r).some(({ wall }) => wall.id === WALL)))
+      return Boolean(w && w.a === 'kitchen.back-right' && w.b === 'kitchen.front-right' && roomsOf(plan, WALL).length === 1)
     }
     const pick = (e: PointerEvent): Hit | null => {
       if (!built?.shell || outline.draft() || !rightFree() || history?.readOnly) return null
@@ -267,15 +265,10 @@ export default {
       for (const y of cut() ? [STUB] : [STUB, 1.2, 2.0, 2.8]) {
         const p = onPlane(e, y)
         if (!p) continue
-        let best = Infinity, bestT = 0
-        for (let i = 0; i <= 64; i++) {
-          const t = (c.length * i) / 64
-          const [x, z] = pointAt(c, t)
-          const dist = Math.hypot(p.x - x, p.z - z)
-          if (dist < best) [best, bestT] = [dist, t]
-        }
-        if (best > 0.32) continue
-        return { kind: Math.abs(bestT - c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
+        const t = alongOf(plan, wallOf(plan, WALL), p.x, p.z)
+        const [x, z] = pointAt(c, t)
+        if (Math.hypot(p.x - x, p.z - z) > 0.32) continue
+        return { kind: Math.abs(t - c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
       }
       return null
     }
@@ -344,10 +337,9 @@ export default {
       if (!drag) return
       stop(e)
       const still = !drag.edit
-      const at = drag.at
       end(false)
       // A press on the wall that did not move it picks the wall.
-      if (still) selectAt(e, at)
+      if (still) selectWall(wallAt(e))
     }
     const typing = () => {
       const a = document.activeElement
@@ -403,8 +395,8 @@ export default {
         const c = curveOf(plan, wallOf(plan, next.wallId))
         const [x, z] = pointAt(c, next.t)
         const [nx, nz] = normalAt(c, next.t)
-        const owner = plan.rooms.find((r) => roomWalls(plan, r).some(({ wall }) => wall.id === next.wallId))
-        const forward = owner ? roomWalls(plan, owner).find(({ wall }) => wall.id === next.wallId)!.forward : true
+        const owner = roomsOf(plan, next.wallId)[0]
+        const forward = owner ? runsForward(plan, owner, next.wallId) : true
         const k = (forward ? -1 : 1) * 0.35
         mark.position.set(x + nx * k, 0.02, z + nz * k)
         group.add(mark)
@@ -425,19 +417,8 @@ export default {
       const hit = wallHits.intersectObjects(meshes(built).filter((m) => m.userData.wall), false).find((h) => shown(h.object))
       if (!hit) return null
       const wallId = hit.object.userData.wall as string
-      const c = curveOf(plan, wallOf(plan, wallId))
-      let best = Infinity, t = 0
-      for (let i = 0; i <= 128; i++) {
-        const u = (c.length * i) / 128
-        const [x, z] = pointAt(c, u)
-        const dist = Math.hypot(hit.point.x - x, hit.point.z - z)
-        if (dist < best) [best, t] = [dist, u]
-      }
+      const t = alongOf(plan, wallOf(plan, wallId), hit.point.x, hit.point.z)
       return { wallId, t: Math.round(t * 100) / 100, point: hit.point.clone() }
-    }
-    const selectAt = (e: PointerEvent, _at?: THREE.Vector3) => {
-      const w = wallAt(e)
-      selectWall(w)
     }
     let pressed: { x: number; y: number } | null = null
     const onPress = (e: PointerEvent) => {
@@ -498,7 +479,7 @@ export default {
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera)
       const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3())
       if (!p) return null
-      return plan.rooms.find((r) => contains(ringOf(plan, r), [p.x, p.z]))?.id ?? null
+      return roomAt(plan, p.x, p.z)?.id ?? null
     }
     // What the plugins' built-in furniture holds against each wall: placed things are in the plan, and the outline is ours.
     const fixtures = makeFixtures(scene, () => [scene.getObjectByName('placed things'), scene.getObjectByName('build outline')].filter((o): o is THREE.Object3D => Boolean(o)))
@@ -506,7 +487,7 @@ export default {
     const occupied = (wallId: string) => {
       // One stretch per built-in: its parts' stretches merged where they meet.
       const out: Array<{ from: number; to: number; name: string }> = []
-      for (const f of fixtures.on(history?.plan ?? plan, wallId).filter((k) => k.y0 < DOOR_HEAD).sort((p, q) => p.from - q.from)) {
+      for (const f of fixtures.on(history?.plan ?? plan, wallId).filter((k) => k.y0 < OPENING_HEAD).sort((p, q) => p.from - q.from)) {
         const same = out.find((o) => o.name === f.name && f.from <= o.to + 0.02)
         if (same) same.to = Math.max(same.to, f.to)
         else out.push({ from: f.from, to: f.to, name: f.name })
@@ -521,10 +502,15 @@ export default {
         paper = p
         tidyYard()
       },
-      cancel: () => {},
       apply: (d: Draft) => {
         const h = history
         if (!h) return
+        // The head can move after the outline was fitted (another page saved first): fit again on the house as it stands.
+        const fitted = fit(h.plan, d)
+        if ('ask' in fitted) {
+          outline.close()
+          return say(fitted.ask)
+        }
         const what = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
         committing = true
         h.commit(draftEdits(h.plan, d), what).then(() => {
@@ -556,19 +542,16 @@ export default {
     })
     if (MODE === 'iso') {
       ctx.effect(() => {
-        addEventListener('pointerdown', onDown, true)
-        addEventListener('pointermove', onMove, true)
-        addEventListener('pointerup', onUp, true)
-        addEventListener('keydown', onKey, true)
-        addEventListener('pointerdown', onPress, true)
-        addEventListener('pointerup', onRelease, true)
+        const listening = new AbortController()
+        const opts = { capture: true, signal: listening.signal }
+        addEventListener('pointerdown', onDown, opts)
+        addEventListener('pointermove', onMove, opts)
+        addEventListener('pointerup', onUp, opts)
+        addEventListener('keydown', onKey, opts)
+        addEventListener('pointerdown', onPress, opts)
+        addEventListener('pointerup', onRelease, opts)
         return () => {
-          removeEventListener('pointerdown', onPress, true)
-          removeEventListener('pointerup', onRelease, true)
-          removeEventListener('pointerdown', onDown, true)
-          removeEventListener('pointermove', onMove, true)
-          removeEventListener('pointerup', onUp, true)
-          removeEventListener('keydown', onKey, true)
+          listening.abort()
           renderer.domElement.style.cursor = ''
         }
       }, 'build handles')
@@ -671,8 +654,8 @@ export default {
           const c = curveOf(plan, wallOf(plan, wallId))
           const [x, z] = pointAt(c, t)
           const [nx, nz] = normalAt(c, t)
-          const owner = plan.rooms.find((r) => roomWalls(plan, r).some(({ wall }) => wall.id === wallId))
-          const k = (owner && !roomWalls(plan, owner).find(({ wall }) => wall.id === wallId)!.forward ? 1 : -1) * d
+          const owner = roomsOf(plan, wallId)[0]
+          const k = (owner && !runsForward(plan, owner, wallId) ? 1 : -1) * d
           const v = new THREE.Vector3(x + nx * k, y, z + nz * k).project(camera)
           const rect = renderer.domElement.getBoundingClientRect()
           return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height]
@@ -742,15 +725,6 @@ export default {
       }
     }, 'build swap')
   },
-}
-
-const contains = (poly: P[], p: P) => {
-  let hit = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, zi] = poly[i], [xj, zj] = poly[j]
-    if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) hit = !hit
-  }
-  return hit
 }
 
 /** How far a wall moved between two plans, along its normal. */

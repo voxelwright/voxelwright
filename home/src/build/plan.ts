@@ -5,8 +5,7 @@
 // (thickness, height, bulge, openings); a room is a loop of corner ids. Walls are
 // first-class, so one wall can bound two rooms (a shared wall with a door in it).
 // Every id is a stable string, never an array index. Edits are small JSON objects
-// applied by apply(plan, edit) -> plan; a version keeps the edits that made it so
-// people and diff can see what was asked.
+// applied by apply(plan, edit) -> plan; a version stores the plan that results.
 import { DOORWAY, WALL_Z, WINDOW } from '../layout'
 
 export const PLAN_VERSION = 1
@@ -72,7 +71,7 @@ export type ItemRef = { library: string; person: Id } | { kind: string }
  * floor:   the centre of its footprint on the floor; yaw turns it about the vertical.
  * surface: the centre of its footprint and the height of the top it stands on. The
  *          height is stored because supports are found by looking (any upward face
- *          above 0.3 m), and today's tables and counters have no id in the plan.
+ *          above 0.3 m), and the built-in tables and counters have no id in the plan.
  *          When the top is a placed thing, `on` names it: moving that thing carries
  *          this one with it (x, y, z and yaw by the same move), and it cannot be
  *          removed while this one stands on it.
@@ -147,7 +146,7 @@ export const MIN_ROOM_SIDE = 2
 export const MOVE_SNAP = 0.1
 export const BEND_SNAP = 0.05
 
-// Today's kitchen. The left wall is centred on x = -3.4 and the right wall's inner
+// The built-in kitchen. The left wall is centred on x = -3.4 and the right wall's inner
 // face is at x = 3.4 (room.ts and diorama.ts), so the centrelines are not symmetric.
 const T = 0.18
 const H = 3
@@ -180,8 +179,7 @@ export const KITCHEN: Plan = {
   furniture: [],
 }
 
-// ---------------------------------------------------------------- geometry
-
+// ── Geometry ────────────────────────────────────────────────────────────────
 export type P = [number, number]
 
 /** A wall's centreline, derived from its corners and sagitta. */
@@ -285,6 +283,14 @@ export function roomWalls(plan: Plan, room: Room): Array<{ wall: Wall; forward: 
   })
 }
 
+/** The floor inside a room's walls: its outline inset by half its thickest wall. */
+export const floorOf = (plan: Plan, room: Room): P[] => outline(plan, room, Math.max(...roomWalls(plan, room).map(({ wall }) => wall.thickness)) / 2)
+
+/** The rooms a wall bounds. */
+export const roomsOf = (plan: Plan, wallId: Id) => plan.rooms.filter((r) => roomWalls(plan, r).some(({ wall }) => wall.id === wallId))
+/** Whether the room's loop runs the wall a→b (its normal then points out of the room). */
+export const runsForward = (plan: Plan, room: Room, wallId: Id) => roomWalls(plan, room).find(({ wall }) => wall.id === wallId)!.forward
+
 /** Floor area inside the centrelines: the corner polygon plus or minus each wall's bulge. */
 export function roomArea(plan: Plan, roomId: Id): number {
   const room = plan.rooms.find((r) => r.id === roomId)
@@ -333,23 +339,31 @@ export function polygonArea(points: P[]): number {
   return a / 2
 }
 
+const cross = (o: P, a: P, b: P) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+/** Do segments ab and cd cross (touching ends do not count)? */
+export function segmentsCross(a: P, b: P, c: P, d: P): boolean {
+  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+
+/** Do two simple polygons share any area (edges crossing, or one inside the other)? */
+export function polygonsOverlap(a: P[], b: P[]): boolean {
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) if (segmentsCross(a[i], a[(i + 1) % a.length], b[j], b[(j + 1) % b.length])) return true
+  return inside(b, a[0]) || inside(a, b[0])
+}
+
 function selfIntersects(points: P[]): boolean {
   const n = points.length
-  const cross = (o: P, a: P, b: P) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
   for (let i = 0; i < n; i++) {
-    const a = points[i], b = points[(i + 1) % n]
     for (let j = i + 2; j < n; j++) {
       if (i === 0 && j === n - 1) continue // adjacent through the closing edge
-      const c = points[j], d = points[(j + 1) % n]
-      const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d)
-      if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true
+      if (segmentsCross(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) return true
     }
   }
   return false
 }
 
-// ---------------------------------------------------------------- validation
-
+// ── Validation ──────────────────────────────────────────────────────────────
 /** Every reason the plan is not a valid house; empty when it is. */
 export function validate(plan: Plan): string[] {
   const reasons: string[] = []
@@ -365,11 +379,16 @@ export function validate(plan: Plan): string[] {
   }
   const corners = new Set(plan.corners.map((c) => c.id))
   const goodWalls = new Set<Id>()
+  // Rooms find their walls by corner pair (roomWalls), so a pair names one wall.
+  const pairs = new Map<string, Id>()
   for (const w of plan.walls) {
     if (!corners.has(w.a) || !corners.has(w.b)) {
       reasons.push(`wall ${w.id} names a corner that does not exist`)
       continue
     }
+    const pair = [w.a, w.b].sort().join(' ')
+    if (pairs.has(pair)) reasons.push(`walls ${pairs.get(pair)} and ${w.id} join the same corners`)
+    else pairs.set(pair, w.id)
     if (w.a === w.b) {
       reasons.push(`wall ${w.id} starts and ends at the same corner`)
       continue
@@ -398,6 +417,10 @@ export function validate(plan: Plan): string[] {
       reasons.push(`room ${r.id} names corners that do not exist: ${missing.join(', ')}`)
       continue
     }
+    if (new Set(r.loop).size !== r.loop.length) {
+      reasons.push(`room ${r.id} names a corner twice`)
+      continue
+    }
     let walls: ReturnType<typeof roomWalls>
     try {
       walls = roomWalls(plan, r)
@@ -413,6 +436,11 @@ export function validate(plan: Plan): string[] {
     goodRooms.add(r.id)
   }
   for (const [id, n] of bounding) if (n > 2) reasons.push(`wall ${id} bounds ${n} rooms`)
+  // A floor thing's room follows from where it stands (roomAt), so no two rooms share floor.
+  const good = plan.rooms.filter((r) => goodRooms.has(r.id))
+  for (let i = 0; i < good.length; i++) for (let j = i + 1; j < good.length; j++) {
+    if (polygonsOverlap(outline(plan, good[i], 0.05), outline(plan, good[j]))) reasons.push(`room ${good[j].id} overlaps room ${good[i].id}`)
+  }
   // A wall thing stays on its wall (moving and bending walls, and adding rooms, carry it or
   // stop before it falls off). A floor or ceiling thing a wall move leaves outside its room
   // is still a valid house (the home clamps it when drawing); the edits that place and move
@@ -428,12 +456,14 @@ export function validate(plan: Plan): string[] {
   return reasons
 }
 
-// ---------------------------------------------------------------- edits
-
+// ── Edits ───────────────────────────────────────────────────────────────────
 const snap = (v: number, step: number) => Math.round(v / step) * step
 const round = (v: number) => Math.round(v * 1e6) / 1e6
 /** An angle in (-π, π], so one orientation has one stored value (the host bounds angles, and a full turn is no change). */
-export const angle = (a: number) => round(Math.atan2(Math.sin(a), Math.cos(a)))
+export const angle = (a: number) => {
+  const r = round(Math.atan2(Math.sin(a), Math.cos(a)))
+  return r <= -round(Math.PI) ? round(Math.PI) : r
+}
 
 /** Apply one edit. Moves and bends snap and stop at the nearest valid value; other invalid edits throw a PlanError. */
 export function apply(plan: Plan, edit: Edit): Plan {
@@ -505,10 +535,10 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
   const host = wallOf(plan, edit.wallId)
   const c = curveOf(plan, host)
   if (c.radius !== Infinity) throw new PlanError([`wall ${host.id} is curved; a room can only attach along a straight wall for now`])
-  const owners = plan.rooms.filter((r) => roomWalls(plan, r).some(({ wall }) => wall.id === host.id))
+  const owners = roomsOf(plan, host.id)
   if (owners.length !== 1) throw new PlanError([`wall ${host.id} bounds ${owners.length} rooms; a new room needs a wall with one room on it`])
   const owner = owners[0]
-  const forward = roomWalls(plan, owner).find(({ wall }) => wall.id === host.id)!.forward
+  const forward = runsForward(plan, owner, host.id)
   const { from, to, depth } = edit
   const L = c.length
   if (!(from >= 0 && to <= L + 1e-9 && to - from >= MIN_WALL && depth >= MIN_WALL)) throw new PlanError([`the new room does not fit along wall ${host.id}`])
@@ -574,8 +604,7 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
   return next
 }
 
-// ---------------------------------------------------------------- furniture
-
+// ── Furniture ───────────────────────────────────────────────────────────────
 const finite = (...v: number[]) => v.every(Number.isFinite)
 const ITEM_ID = /^[a-f0-9]{12}$/
 const KIND = /^[a-z][a-z0-9-]{0,31}$/
@@ -640,7 +669,7 @@ function supportReasons(plan: Plan, id: Id, on: Id): string[] {
   return []
 }
 
-// Rebuilt from their known fields, as the host stores them, so a replay hashes the same.
+// Rebuilt from their known fields, as the host stores them, so a retried version matches the stored one.
 const itemOf = (item: ItemRef): ItemRef => ('library' in item ? { library: item.library, person: item.person } : { kind: item.kind })
 function anchorOf(at: Anchor): Anchor {
   switch (at.mount) {

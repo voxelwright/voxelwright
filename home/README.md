@@ -11,7 +11,7 @@ npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
-node scripts/check-build-plan.mjs http://localhost:5350/   # build mode (#48): pixels, plan model, drag and bend
+node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels, plan model, drag and bend
 node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
@@ -1436,7 +1436,7 @@ npx vite --port 5350 --strictPort &
 node scripts/check-build-plan.mjs http://localhost:5350/
 ```
 
-Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 29 checks pass.
+Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 31 checks pass.
 Captures run with a fixed `Date`, a seeded `Math.random`, and frames stepped
 by the script with synthetic rAF and `performance.now()` time. Two runs
 without `?build=1` are then identical.
@@ -1457,7 +1457,9 @@ after 100 moves, geometries and textures are flat (329 / 78). Bending the wall
 out by 1 m adds 4.16 m² of floor, against a 4.21 m² circular segment on the
 centreline. A rebuild takes 1 ms median and 3 ms max. Unloading `build` gives a
 scene object list equal to a page without it (563 objects). There are no
-console errors; the 503 from `/villager/launch` is the same without the flag. In the model, adding a
+console errors; the 503 from `/villager/launch` is the same without the flag.
+
+In the model, adding a
 4 x 3 m pantry on the left wall with a double door validates. The shared wall
 is 4 m long, appears once and is in both loops, and the pantry measures
 12.00 m².
@@ -1528,12 +1530,12 @@ flowers, stones and shrubs under the paper and inside every built room and its
 walls, at runtime only, and puts them back on unload.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 44 checks (yard clear of built rooms, put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 46 checks (yard clear of built rooms, put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
 ```
 
-Stub (November 7, 2026): 44 of 44. Enter to outline is 209 ms with the stub
+Stub (November 7, 2026): 46 of 46. Enter to outline is 209 ms with the stub
 router on `?route=separate`; the outline is drawn in the same call that
 receives the route. On the default one-call path the stub villager streams its
 ROUTE reply six letters at a time, so it measures about 1.8 s there.
@@ -1554,29 +1556,21 @@ on the first line of a fresh page. The router call, not the house, is the wait.
 | add a room | asks which side |
 | a 5 by 4 m office to the left, double doors | left wall, 5 x 4 m, double door |
 
-Look, first pass (Opus scorer, shots only, ui-craft rubric plus "a hand-drawn
-blueprint that feels part of a cozy home"): the room outline scored 4.5, 4.5
-and 5 out of 10 over three rounds. The scorer found the paper flat and the
-dimension lines too CAD-like.
+Look (November 7, screenshots only, ui-craft rubric plus "placing furniture and
+sketching a new room in a cozy dollhouse feels like a game, not a CAD tool").
+Scores out of 10: warmth, material, light, text, consistency, affordance,
+phone, game feel.
 
-Look, later passes (November 7, shots only, ui-craft rubric plus "placing
-furniture and sketching a new room in a cozy dollhouse feels like a game, not
-a CAD tool"). Each score is out of 10, in this order: warmth, material, light,
-text, consistency, affordance, phone, game feel.
+| Scorer | Placing a thing | Sketching a room |
+| --- | --- | --- |
+| Opus | 8/7/7/8/8/8/7/7 | 6/6/6/7/6/7/6/6 |
+| GPT-6.1 Sol | 9/8/8/9/9/8/8/8 | 9/8/8/8/8/7/7/8 |
 
-| Round | Scorer | Placing a thing | Sketching a room |
-| --- | --- | --- | --- |
-| before | Opus | 8/7/7/6/7/6/7/6 | 6/5/5/6/6/7/7/5 |
-| 1 | Opus | 8/7/7/8/7/8/7/7 | 7/6/6/7/6/7/7/6 |
-| 2 | Opus | 8/7/7/8/8/8/7/7 | 6/6/6/7/6/7/6/6 |
-| 2 | GPT-6.1 Sol | 9/8/8/9/9/8/8/8 | 9/8/8/8/8/7/7/8 |
-
-Opus gives no 9; GPT-6.1 Sol gives 9 on three placing criteria and on warmth
-for the sketch. Still named: the built room is an empty shell hanging off the lot (the
-yard does not follow the plan), tape measures and m² still read as drafting, the kitchen's
-pendant wire across the window. `screenshots/build/look-before-after.jpg` pairs before and
-after for red, floor, wall, curved wall, ceiling, outline, adjusted, built and doorway, then
-the phone floor, wall and add-room shots.
+This misses the 9/10 cross-model bar: Opus gives no 9. Both scorers name the
+built room as an empty shell off the lot (the yard does not follow the plan,
+#53), tape measures and m² that still read as drafting, and the kitchen's
+pendant wire across the window. `screenshots/build/look-before-after.jpg`
+pairs before and after for each placing and add-room shot, desktop and phone.
 
 Missing or approximate: the new room lands on the yard's grass, past the
 board's edge, and the sun's shadow box doesn't cover it. The size tags edit
@@ -1592,10 +1586,11 @@ head, validates the result and saves it. `undo`, `redo`, `checkout` (branch from
 any version), `rename` and `refresh` cover the rest, and `diff(a, b)` lists added,
 removed and changed corners, walls, openings, rooms and furniture by id.
 
-- A version is the house it made. It holds `{id, parent, edits, at, note?, plan}`:
-  `plan` is the fact, and `edits` only say what was asked (for people and `diff`;
-  empty on the root). Open reads each stored plan and replays nothing, so a change
-  to plan.ts (snapping, `MIN_ROOM_SIDE`, a new rule) never changes a saved house.
+- A version stores the plan it produced: `{id, parent, at, note?, plan}`. The
+  edits that made it are applied and checked on the page, then not kept; `note`
+  says in a few words what changed, and `diff` compares plans. Open reads each
+  stored plan, so a change to plan.ts (snapping, `MIN_ROOM_SIDE`, a new rule)
+  never changes a saved house.
 - Migration hook: `UPGRADES[n]` in history.ts turns a version-`n` plan into the
   next version, and `upgrade(plan)` runs the steps up to `PLAN_VERSION` (identity
   at 1 today; add a step whenever `PLAN_VERSION` goes up). A version this page
@@ -1617,8 +1612,7 @@ removed and changed corners, walls, openings, rooms and furniture by id.
   nothing built will outlast the page. When the host is there but its plan can't be
   opened, the house is read-only: `history.readOnly` is one warm line to show,
   every change is refused with `ReadOnly` carrying that line, the wall handles are
-  not offered, and `history.failure` keeps the error for the Workshop and the
-  console. Build mode shows either line once on a paper note at the top; placing
+  not offered, and the error goes to the console. Build mode shows either line once on a paper note at the top; placing
   shows the read-only line on its tag. A stored plan that is not a valid house
   (`validate`) is unreadable like one from a newer page. After a host restart the
   store fetches the new token once and retries.
@@ -1646,8 +1640,8 @@ removed and changed corners, walls, openings, rooms and furniture by id.
   and `POST /house/plans/names {id, name}` cover the rest.
 
 ```sh
-cd host && npm ci && npm run check-plans          # 60/60: token, create, append, retry, stale head, bad input, kept items, placed things, torn write, modes, restart
-cd home && node scripts/check-plan-history.mjs    # 62/62: memory store, stored plans and upgrades, frozen history, read-only house, wall things, supports, diff, then hostStore on a real host (stub agent)
+cd host && npm ci && npm run check-plans          # 62/62: token, create, append, retry, stale head, bad input, kept items, placed things, a failed write, two hosts racing, split multi-byte body, modes, restart, misnumbered event, gap in the log
+cd home && node scripts/check-plan-history.mjs    # memory store, stored plans and upgrades, stored plans held to the house's rules, frozen history, read-only house, wall things, supports, diff, then hostStore on a real host (stub agent)
 ```
 
 The home check loads the TypeScript through Vite in-process, with no port and no browser.
@@ -1665,17 +1659,17 @@ one. Both return a `Placing`: `done` resolves `{status: 'confirmed', pose, furni
 `{status: 'cancelled'}`, `swap(object, size?, item?)` puts the made prop in place of the
 ghost and keeps the pose, and `cancel()` ends it from outside. `item` is
 `{library, person}` or `{kind}`. Confirming while the prop is still being made waits for
-`swap()` to name its library item. The library item is then kept on the host, so the drafts
-pruning leaves it, and one version (`placeItem` or `moveItem`) is committed through
+`swap()` to name its library item. The host then marks that item kept, so it is not
+pruned with unkept drafts after a day, and one version (`placeItem` or `moveItem`) is committed through
 `house()`, noted "Placed the …". If the commit fails, the ghost stays and says so.
 Undo and redo come from the versions.
 
-- Mounts (`src/build/mount.ts`). **floor** keeps clear of walls, other furniture and
-  0.6 m in front of doors. **surface** needs an upward face above 0.3 m under its middle
+- Mounts (`src/build/mount.ts`). `floor` keeps clear of walls, other furniture and
+  0.6 m in front of doors. `surface` needs an upward face above 0.3 m under its middle
   and four corners, level to 2.5 cm. Faces are found by casting rays at what the room
-  draws, so the table, counters and shelves need no tags. **wall** hangs flat on a wall the
+  draws, so the table, counters and shelves need no tags. `wall` hangs flat on a wall the
   camera sees whole, clear of doors, windows and what already hangs there. On a curved wall
-  it faces the normal and stands off the curve. **ceiling** hangs 0.75 m below the room's
+  it faces the normal and stands off the curve. `ceiling` hangs 0.75 m below the room's
   ceiling on a cord with a rose. While it is placed, a see-through timber joist runs wall to
   wall through the cord's top, with a pencil mark where the cord meets it.
   Collisions use the world boxes of meshes, and 10 cm columns for merged meshes (furnish.ts
@@ -1730,6 +1724,15 @@ node scripts/plan-import/run.mjs <model> <tag> [ids] # each plan image to a Clau
 node scripts/plan-import/score.mjs                   # every run against ground truth, contact sheets, out/results.md
 ```
 
-Findings and per-plan tables are in `scripts/plan-import/out/results.md`. The
-experiment's output format is not yet `plan.ts`'s `Plan` (openings sit in one
-list with a `wall` field); an importer converts it before the correction overlay.
+November 6 run (claude-sonnet-5-5, claude-opus-5-5): every output was valid
+on the first try, so the repair pass never ran. Clean drawings (a, b, d, e, f)
+came back near exact, the curved bay and three-arc tower included. The rotated,
+keystoned hand sketch (c) had corners 0.11 to 0.14 m off and scale 1 to 3% off.
+Sonnet put one end of 3 windows 0.2 to 1.0 m off; Opus missed none. Untested:
+real scans, photos of paper, plans without dimensions. The two models ran
+concurrently, so latencies compare with each other but are not absolute.
+
+Per-plan tables are in `scripts/plan-import/out/results.md`. The
+experiment's output is not `plan.ts`'s `Plan`: openings sit in one list with a
+`wall` field, walls carry no height and openings no sill or head. Nothing
+converts it yet.

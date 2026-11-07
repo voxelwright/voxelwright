@@ -1,8 +1,8 @@
 // Headless Chrome page that serves this directory at http://plan.local/ so draw.mjs can import geom.mjs.
-import { chromium } from 'playwright'
 import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import { dirname, join, normalize } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
 
 const here = dirname(fileURLToPath(import.meta.url))
 

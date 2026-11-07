@@ -81,7 +81,7 @@ const state = (page) => B(page, () => {
     objects: snap.objects, geometries: snap.geometries, textures: snap.textures, card: window.village.talk?.state().cards.alex?.text ?? null,
   }
 })
-const versions = (page) => B(page, async () => (await window.villageBuild.history()).versions().map((v) => ({ id: v.id, note: v.note, edits: v.edits.length })))
+const versions = (page) => B(page, async () => (await window.villageBuild.history()).versions().map((v) => ({ id: v.id, note: v.note })))
 async function until(page, test, ms = 5000, every = 16) {
   const end = Date.now() + ms
   let s
@@ -109,7 +109,7 @@ async function drag(page, from, to, steps = 20) {
 }
 const grips = (page) => B(page, () => window.villageBuild.outline.grips() && (({ at, ...g }) => g)(window.villageBuild.outline.grips()))
 const floorPoint = (page, along, across) => B(page, ([a, c]) => window.villageBuild.outline.grips().at(a, c), [along, across])
-/** The yard as diorama.ts drew it, or now: each instanced mesh's matrices, and the triangles each merged yard mesh draws. */
+/** The yard as drawn at this moment: each instanced mesh's matrices, and the triangles each merged yard mesh draws. */
 const yardNow = (page) => B(page, () => {
   const scene = window.village.kernel.root.get('stage').scene
   const fence = scene.getObjectByName('picket fence')
@@ -511,7 +511,7 @@ try {
     // The first round trip warms the room's pieces; from then on every rebuild returns to the same count.
     check('Ctrl+Z takes the room away and Shift+Ctrl+Z brings it back, geometries and textures flat', counts.every((c) => c.undone === 1 && c.floors === 2) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures), { gBefore, counts })
 
-    // The owner's second example, against the room just added.
+    // The README's second example, against the room just added.
     await say(page, STUDY)
     s = await until(page, (x) => x.draft)
     check('"a 4 by 3 metre study behind the living room" draws on the living room', s.draft?.label === 'Study' && Math.abs(s.draft.to - s.draft.from - 4) < 1e-6 && s.draft.depth === 3 && /^living-room/.test(s.draft.wallId), s.draft)
@@ -547,8 +547,25 @@ try {
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 4 && x.floors === 4)
     check('and Enter builds it', s.rooms.length === 4 && s.floors === 4, s.rooms)
+    // Another page builds on the floor an outline is drawn on, before "Build it": the room is not built into it.
+    await B(page, () => window.villageBuild.intent({ op: 'addRoom', label: 'den', anchor: { room: 'kitchen', side: 'front' }, size: { w: 3, d: 3 } }))
+    s = await until(page, (x) => x.draft || /\?/.test(x.said.at(-1) ?? ''))
+    const denDraft = s.draft
+    if (denDraft) {
+      await B(page, async (d) => {
+        const H = await import('/src/build/history.ts'), P = await import('/src/build/plan.ts')
+        const { token } = await (await fetch('/villager/launch')).json()
+        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.KITCHEN)
+        await other.commit([{ op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: d.wallId, from: d.from, to: d.to, depth: 2 }], 'Added the nook')
+      }, denDraft)
+      await B(page, () => window.villageBuild.outline.confirm())
+      await frames(page, 10)
+      await B(page, () => window.villageBuild.outline.confirm())
+      s = await until(page, (x) => !x.draft, 5000)
+    }
+    check('a room drawn before another page built on that floor is not built into it, and your villager says why', denDraft && !s.draft && !s.rooms.includes(denDraft.roomId) && s.rooms.includes('nook') && /runs into the nook|doesn't fit/i.test(s.said.at(-1) ?? ''), { draft: denDraft, rooms: s.rooms, said: s.said.at(-1) })
     const yardThree = await yardInside(page)
-    check('with three rooms added, still nothing of the yard inside any of them', yardThree.rooms === 3 && yardThree.total === 0, yardThree)
+    check('with the rooms added, still nothing of the yard inside any of them', yardThree.rooms >= 3 && yardThree.total === 0, yardThree)
     await B(page, () => window.village.unload('build'))
     await frames(page, 4)
     const yardGone = await yardNow(page)

@@ -29,13 +29,12 @@ export interface OutlineHooks {
   /** The plan the draft hangs on: the house as it stands. */
   base(): Plan
   apply(draft: Draft): void
-  cancel(): void
   /** One short line in the person's villager's voice. */
   say(text: string): void
   /** The camera's view direction on the floor. */
   view(): P
   /** The paper's outline on the ground (null when it is put away): the yard steps aside under it. */
-  yard?(paper: P[] | null): void
+  yard(paper: P[] | null): void
 }
 
 const snap = (v: number, step = SNAP) => Math.round(Math.round(v / step) * step * 1e6) / 1e6
@@ -119,7 +118,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   let refusedAt = -Infinity
 
   // The yard's fence and flowers step aside under the paper while it is out (the caller owns the yard: hooks.yard).
-  const tidyYard = (poly: P[] | null) => hooks.yard?.(poly)
 
   // ── Paper tags: the two sizes, and the choice ────────────────────────────
   const style = document.createElement('style')
@@ -308,7 +306,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
 
     // Tracing paper laid on the ground under the new room: a soft shadow, a slightly torn edge, and grain.
     const sheetRing = wander([...ringOf(made, room, -T / 2 - 0.4), ringOf(made, room, -T / 2 - 0.4)[0]])
-    tidyYard(offsetPath(sheetRing, 0.12))
+    hooks.yard(offsetPath(sheetRing, 0.12))
     // The plot: a patch of turned earth staked out under the paper, its edge soft and tufted with grass.
     const plot = wander([...ringOf(made, room, -T / 2 - 0.62), ringOf(made, room, -T / 2 - 0.62)[0]])
     g.save()
@@ -532,7 +530,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     hover = null
     editing = null
     group.removeFromParent()
-    tidyYard(null)
+    hooks.yard(null)
     for (const el of [tags.w, tags.d, choice, field]) el.classList.remove('shown')
     stage.renderer.domElement.style.cursor = ''
   }
@@ -544,7 +542,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const cancel = () => {
     if (!draft) return
     close()
-    hooks.cancel()
   }
 
   // ── Typing a size ────────────────────────────────────────────────────────
@@ -725,10 +722,12 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       confirm()
     }
   }
-  addEventListener('pointerdown', onDown, true)
-  addEventListener('pointermove', onMove, true)
-  addEventListener('pointerup', onUp, true)
-  addEventListener('keydown', onKey, true)
+  const listening = new AbortController()
+  const listen = { capture: true, signal: listening.signal }
+  addEventListener('pointerdown', onDown, listen)
+  addEventListener('pointermove', onMove, listen)
+  addEventListener('pointerup', onUp, listen)
+  addEventListener('keydown', onKey, listen)
 
   // ── Each frame: hang the tags on their world points ──────────────────────
   const v = new THREE.Vector3()
@@ -762,10 +761,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
 
   const dispose = () => {
     close()
-    removeEventListener('pointerdown', onDown, true)
-    removeEventListener('pointermove', onMove, true)
-    removeEventListener('pointerup', onUp, true)
-    removeEventListener('keydown', onKey, true)
+    listening.abort()
     for (const el of [tags.w, tags.d, field, choice, style]) el.remove()
     sheet.geometry.dispose()
     ;(sheet.material as THREE.Material).dispose()
@@ -813,7 +809,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   }
 }
 
-export type Outline = ReturnType<typeof makeOutline>
 
 function css() {
   return `
