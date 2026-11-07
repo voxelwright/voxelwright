@@ -177,7 +177,7 @@ Gates:
 | Gate | Rule |
 | --- | --- |
 | 60 fps (head, every scene) | under 1% of intervals over 20 ms; p99 at most 20 ms; no long task over 50 ms; at least 90% of 60 Hz frames measured |
-| Headroom (head, high tier) | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`) |
+| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). It warns and does not gate: submit-to-done GPU ms includes the main thread's delay delivering the callback (a 12 ms CPU loop read as 39 ms of GPU), so at the 60 Hz cap p95 settles near one frame on main too. It gates again once GPU ms is timed from the first pass start to the last pass end. |
 | Relative (head against base) | growth at most the larger of 10% and a floor: GPU p50 3 ms, GPU p95 8 ms, CPU p50 0.5 ms, draw calls 10 |
 
 Noise, base against base (`--base X --head X`), M1 Pro, with 3 to 8 other agents' headless

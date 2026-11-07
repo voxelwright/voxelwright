@@ -443,9 +443,11 @@ try {
   // ── Verdicts ─────────────────────────────────────────────────────────────────
   const rows = []
   const failures = []
-  const row = (scene, metric, base, head, limit, ok) => {
-    rows.push({ scene, metric, base, head, delta: base == null || head == null ? null : +(head - base).toFixed(2), limit, ok })
-    if (!ok) failures.push(`${scene} ${metric}: ${head} (limit ${limit}${base == null ? '' : `, base ${base}`})`)
+  const warnings = []
+  const row = (scene, metric, base, head, limit, ok, warnOnly = false) => {
+    rows.push({ scene, metric, base, head, delta: base == null || head == null ? null : +(head - base).toFixed(2), limit, ok, warnOnly })
+    const line = `${scene} ${metric}: ${head} (limit ${limit}${base == null ? '' : `, base ${base}`})`
+    if (!ok) (warnOnly ? warnings : failures).push(line)
   }
   for (const r of results) {
     const h = r.head, b = r.base
@@ -456,7 +458,10 @@ try {
     row(r.scene, 'dropped >20 ms', b?.dropped ?? null, h.dropped, `< ${MAX_DROPPED * 100}%`, h.frames > 0 && h.dropped < MAX_DROPPED)
     row(r.scene, 'frame p99 ms', b?.p99 ?? null, h.p99, `<= ${MAX_P99_MS}`, h.p99 != null && h.p99 <= MAX_P99_MS)
     row(r.scene, 'long tasks >50 ms', b?.longTasks ?? null, h.longTasks, '0', h.longTasks === 0)
-    if (r.tier === 'high') row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${tierHigh}`, h.gpuP95 != null && h.gpuP95 < tierHigh)
+    // Warning only until GPU ms measures GPU work: submit-to-done includes the main thread's
+    // delay delivering the callback, so at the 60 Hz cap p95 settles near one frame (16-17 ms)
+    // even on main. The owner's gate is consistent 60 fps plus no regression; headroom is ours.
+    if (r.tier === 'high') row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${tierHigh}`, h.gpuP95 != null && h.gpuP95 < tierHigh, true)
     if (b) for (const [key, g] of Object.entries(RELATIVE)) {
       if (b[key] == null || h[key] == null) continue
       const allowed = Math.max(g.share * b[key], g.floor)
@@ -469,7 +474,7 @@ try {
 
   // ── Report ───────────────────────────────────────────────────────────────────
   const fmt = (v) => (v == null ? 'n/a' : typeof v === 'number' ? String(+v.toFixed(2)) : String(v))
-  const table = [['scene', 'metric', 'base', 'head', 'delta', 'limit', 'verdict'], ...rows.map((x) => [x.scene, x.metric, fmt(x.base), fmt(x.head), fmt(x.delta), x.limit, x.ok ? 'pass' : 'FAIL'])]
+  const table = [['scene', 'metric', 'base', 'head', 'delta', 'limit', 'verdict'], ...rows.map((x) => [x.scene, x.metric, fmt(x.base), fmt(x.head), fmt(x.delta), x.limit, x.ok ? 'pass' : x.warnOnly ? 'warn' : 'FAIL'])]
   const widths = table[0].map((_, i) => Math.max(...table.map((r) => r[i].length)))
   console.log(`perf gate: base ${baseRef} ${baseSha.slice(0, 10)} against head ${headRef ?? 'working tree'} (${head.hash ?? ''})`)
   for (const r of table) console.log(r.map((c, i) => c.padEnd(widths[i])).join('  '))
@@ -484,7 +489,8 @@ try {
   if (contended) console.log(`warning: ${contended} other headless Chrome instance(s) ran during the gate and share the GPU; GPU ms is unreliable, rerun on a quiet machine before trusting a GPU verdict`)
   if (errors.head.length) console.log(`head page errors: ${errors.head.slice(0, 3).join(' | ')}`)
   const out = opt('json') ?? join(HOME, 'perf-gate.json')
-  await writeFile(out, JSON.stringify({ base: { ref: baseRef, sha: baseSha, build: baseBuild }, head: { ref: headRef ?? 'working tree', build: head }, settings: { seconds: SECONDS, windows: WINDOWS, viewport: VIEWPORT, dpr: DPR, tierHighMaxGpuMs: tierHigh, relative: RELATIVE }, times, loads, contended, skipped, results, rows, failures, errors }, null, 2))
+  await writeFile(out, JSON.stringify({ base: { ref: baseRef, sha: baseSha, build: baseBuild }, head: { ref: headRef ?? 'working tree', build: head }, settings: { seconds: SECONDS, windows: WINDOWS, viewport: VIEWPORT, dpr: DPR, tierHighMaxGpuMs: tierHigh, relative: RELATIVE }, times, loads, contended, skipped, results, rows, failures, warnings, errors }, null, 2))
+  if (warnings.length) console.log(`warn (${warnings.length}, not gating): ${warnings.join('; ')}`)
   console.log(`${failures.length ? `FAIL (${failures.length}): ${failures.join('; ')}` : 'PASS'}\njson: ${out}`)
 } catch (e) {
   console.error(`perf gate error: ${e.stack ?? e}`)
