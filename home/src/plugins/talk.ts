@@ -977,21 +977,29 @@ export default {
     const perform = async (m: Member, speech: Speech, said: string): Promise<boolean> => {
       replies++
       speaker = m
-      m.v.thinking = true
+      // With a note on its way it waits to read it before it thinks.
+      m.v.thinking = !input?.flying
       hide(m)
       // Your note lands in the reader's paws first, and is read for a moment, before the answer opens out of it.
       const reading = Boolean(input?.flying)
       if (reading) {
         await input!.landed()
-        const until = clock + 0.7
-        while (clock < until) await frame()
+        // It holds the note up in both paws and looks down at it, then thinks.
+        if (input!.heldBy() === m.v.fig.root) {
+          m.v.thinking = false
+          m.v.reading = true
+          const until = clock + 1.1
+          while (clock < until) await frame()
+          m.v.reading = false
+          m.v.thinking = true
+        }
       }
       // Even a quick answer gets its beat: eyes up, a tap of the chin, then words (shorter when they are already in).
       const beat = clock + (speech.text || speech.done || reading ? 0.3 : 0.5)
       while ((!speech.text && !speech.done) || clock < beat) await frame()
       // A reply that opens with "(" may be a pass: wait for the whole of it before showing anything.
       while (!speech.done && /^\s*\([^)]*$/.test(speech.text)) await frame()
-      m.v.thinking = false
+      m.v.thinking = m.v.reading = false
       openNote(m)
       if (speech.done && !speech.away && PASS.test(speech.text)) {
         m.v.nod()

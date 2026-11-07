@@ -306,7 +306,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       // the round's order could not be read: the regroup's rounds 5 and 6).
       const said = el.classList.contains('said')
       // Your line lies on the table: tipped back, as paper on a table top is seen from a chair.
-      const lying = el.classList.contains('mine') ? 22 : 0
+      const lying = el.classList.contains('mine') ? 32 : 0
       const x = parseFloat(m[1]) - TAB, y = parseFloat(m[2]) - TAB + (said ? 6 : 0)
       if (slip.from) {
         // Opening out of the landed note: from its size and place on screen, unfolding, to the slip's own.

@@ -202,7 +202,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
    * Landed: held in the reader's paws (following them) or lying on the table, folded, until it opens
    * (#42 paper climb: the note used to fade at the reader's head and the reply came from nowhere).
    */
-  let held: { holder: THREE.Object3D | null; local: THREE.Vector3; t: number; opening: number; size: number; flat: THREE.Quaternion } | null = null
+  let held: { holder: THREE.Object3D | null; local: THREE.Vector3; t: number; opening: number; size: number } | null = null
   /** Waiting for the note in flight to land (talk.ts holds the camera until then). */
   let landings: (() => void)[] = []
   const land = () => {
@@ -300,6 +300,9 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const to = hooks.addressee()
     const resting = !writing()
     g.textAlign = 'left'
+    // While the torn note is on its way the pad shows a fresh sheet: the address went with the note (#42 paper
+    // climb: "to Dumpling" on the note and again on the pad under it read as two labels for one thing).
+    if (flight && resting) return
     g.font = `italic 52px ${HAND}`
     const toW = g.measureText('to ').width
     g.fillStyle = 'rgba(70, 50, 36, 0.7)'
@@ -437,7 +440,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyer.visible = false
       const holder = hooks.holder?.() ?? null
       // Held: about a postcard to a villager; on the table, a little larger, so it reads from the table shot.
-      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone(), holder, local: holder ? holder.worldToLocal(target.clone()) : target.clone(), size: holder ? 0.17 : 0.3 }
+      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone(), holder, local: holder ? holder.worldToLocal(target.clone()) : target.clone(), size: holder ? 0.22 : 0.3 }
     } else if (target && !reducedMotion.matches) {
       const p = target.clone().project(camera)
       const r = stage.renderer.domElement.getBoundingClientRect()
@@ -619,8 +622,9 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyMat.opacity = backMat.opacity = 1
       flyer.visible = true
       if (flight.t >= 1) {
-        held = { holder: flight.holder, local: flight.local.clone(), t: 0, opening: -1, size: flight.size, flat: goal }
+        held = { holder: flight.holder, local: flight.local.clone(), t: 0, opening: -1, size: flight.size }
         flight = null
+        dirty = true
         land()
       }
     } else if (held) {
