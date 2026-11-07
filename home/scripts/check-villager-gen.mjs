@@ -5,7 +5,8 @@
 // too-wide body are refused with a plain reason. Also the spec checker cuts a huge untrusted name
 // before working on it (Sentinel, round 2). Round 3, species: round 1's tortoise and round 3's heron
 // pass; the prompt's own example, round 2's shell-less tortoise and its mouse-as-a-bear are refused
-// as the default round template.
+// as the default round template. Round 4, role mark: the example's toque (villager.mark()) and the setup
+// stub built from it pass; no mark, a mark inside the outline (a hip pouch) and a marked whole head are refused.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -89,6 +90,23 @@ try {
   await refused('the prompt example (the round template, with a toque)', example, template, { species: true })
   await refused('round 2 tortoise (no shell, head on top, ledger satchel)', fixture('round2-tortoise-noshell.code.txt'), template, { species: true })
   await refused('round 2 mouse (a bear in a cap with a mail bag)', fixture('round2-mouse-teddy.code.txt'), template, { species: true, accent: '#3d7cc8' })
+
+  // Role mark (round 4): tagged with villager.mark() and breaking the outline above or beside the head.
+  const toque = /  villager\.mark\(add\(head, new THREE\.CylinderGeometry[^\n]*\n  villager\.mark\(add\(head, new THREE\.SphereGeometry[^\n]*\n/
+  if (!toque.test(example)) throw new Error('arm-code.md example no longer marks its toque on two lines')
+  // host/src/villager-make.ts stubVillagerMaker: the example given a snout and tall ears, as the setup scene's stand-in.
+  const stub = example.replace('\n  villager.add(head)\n', `\n  villager.add(head)
+  add(head, new THREE.CapsuleGeometry(0.045, 0.06, 6, 10), felt('#f6e6cc'), 0, -0.06, 0.17).rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(head, new THREE.CapsuleGeometry(0.03, 0.12, 6, 10), felt('#e2b98a'), s * 0.1, 0.2, -0.02).rotation.z = -s * 0.2
+`)
+  for (const [name, code, opts] of [['the prompt example (its toque marked), mark on', example, { mark: true }], ['the setup stub (example, snout and tall ears), species and mark on', stub, { species: true, mark: true }]]) {
+    const r = await trial(code, opts)
+    check(`${name} passes`, r.ok && r.measures.mark.above >= 0.1, r.ok ? r.measures.mark : r.reason)
+  }
+  await refused('a sound probe cook with no marked part', plush(), /nothing is tagged as the cook's toque.*villager\.mark\(\)/, { mark: true })
+  const pouch = example.replace(toque, `  villager.mark(add(villager, new THREE.BoxGeometry(0.1, 0.08, 0.06), felt('#8a6a4a'), 0.12, 0.12, 0.12))\n`)
+  await refused('the example with a hip pouch as its mark (inside the outline)', pouch, /the cook's toque stays inside the outline seen from in front and above/, { mark: true })
+  await refused('the example with its whole head marked', example.replace("villager.tag(new THREE.Group(), 'head')", "villager.mark(villager.tag(new THREE.Group(), 'head'))"), /the head itself is tagged with villager\.mark\(\)/, { mark: true })
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

@@ -29,6 +29,8 @@ export interface Measures {
   eyeRays: number[]
   /** Species features against the round template (./speciesFeatures); null without a head or body part. */
   species: Species | null
+  /** How far the role mark breaks the outline (./markBreak); null when nothing is tagged with villager.mark(). */
+  mark: MarkBreak | null
 }
 
 /** The colour the part was made in (assemble.ts keeps it; the felt material shades its own). */
@@ -47,7 +49,7 @@ function slotOf(o: THREE.Object3D, root: THREE.Object3D): string {
  * the default round template. `held` is the prop's group, if any; `head` and `hands` are the
  * rig's groups, which the species measure needs.
  */
-export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THREE.Object3D | null, { head = null, hands = [], species = true }: { head?: THREE.Object3D | null; hands?: THREE.Object3D[]; species?: boolean } = {}): { failures: string[]; measures: Measures } {
+export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THREE.Object3D | null, { head = null, hands = [], species = true, mark = true, role = '' }: { head?: THREE.Object3D | null; hands?: THREE.Object3D[]; species?: boolean; mark?: boolean; role?: string } = {}): { failures: string[]; measures: Measures } {
   root.updateMatrixWorld(true)
   const meshes: THREE.Mesh[] = []
   root.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh) })
@@ -143,7 +145,89 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   const reads = features && (Object.keys(SPECIES) as (keyof Species)[]).filter((k) => features[k] >= SPECIES[k])
   if (species && features && !reads?.length) failures.push(`it is the default round body with a head on top and a hat, not its species: ${(Object.keys(SPECIES) as (keyof Species)[]).map((k) => FEATURE_WORDS[k]).join('; ')}. Start from the species' own body plan and give it the 2 or 3 features that say what animal it is, big enough to read from across the room`)
 
-  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features } }
+  // Role mark (round 4): tagged with villager.mark(), and it must change the outline seen from the dollhouse.
+  const broke = markBreak(meshes, inHeld, eyes, head, hands, height)
+  if (mark) {
+    const name = `the ${role && MARK_NAMES[role] ? `${role}'s ${MARK_NAMES[role]}` : 'role mark'}`
+    if (!broke) failures.push(`nothing is tagged as ${name}; build it as the role table says and pass it to villager.mark() so the home can check it`)
+    else if (broke.core) failures.push(`the ${broke.core} itself is tagged with villager.mark(); tag only ${name}`)
+    else if (Math.max(broke.above, broke.side) < MARK) failures.push(`${name} stays inside the outline seen from in front and above: it rises ${Math.max(0, broke.above * height).toFixed(2)} above the head and reaches ${Math.max(0, broke.side * height).toFixed(2)} past the body's side; make it rise at least ${(MARK * height).toFixed(2)} above the top of the head, or reach that far past the side of the head or body, so it changes the outline`)
+  }
+
+  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke } }
+}
+
+/** A role mark must reach this far (over the height) above the head or past the side, seen from the dollhouse. */
+export const MARK = 0.1
+
+/** Each role's mark, as scripts/villagers/style.md describes it, for failure reasons. */
+export const MARK_NAMES: Record<string, string> = {
+  cook: 'toque', gardener: 'sun hat', tidier: 'feather duster plume', keeper: 'pencil behind the ear',
+  tutor: 'mortarboard', messenger: 'post flag', maker: 'swung-up lens', carer: 'stocking cap',
+}
+
+/** How far the parts tagged with villager.mark() stand out of the outline, over the height. */
+export interface MarkBreak {
+  /** Above the top of the head (its largest part). */
+  above: number
+  /** Past the sides of the head and body (their largest parts). */
+  side: number
+  /** 'head' or 'body' when the core part itself is tagged, a dodge refused by inspect(). */
+  core: 'head' | 'body' | null
+}
+
+/**
+ * Measured from the dollhouse view (in front and LIMITS.pitch above, the eye check's view), on every
+ * vertex: a tilted brim or a board reaching back rises on screen, as it does in the silhouette sheet.
+ * The marked parts include the held prop (the tidier's plume is its duster).
+ */
+export function markBreak(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[], height: number): MarkBreak | null {
+  const marked = meshes.filter((m) => m.userData.mark)
+  if (!marked.length) return null
+  const cores = coresOf(meshes.filter((m) => !inHeld.has(m)), eyes, headGroup, handGroups)
+  if (!cores) return null
+  const up = new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch))
+  const v = new THREE.Vector3()
+  const span = (list: THREE.Mesh[]) => {
+    let top = -Infinity, left = Infinity, right = -Infinity
+    for (const m of list) {
+      const pos = m.geometry.attributes.position
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld)
+        top = Math.max(top, v.dot(up))
+        left = Math.min(left, v.x)
+        right = Math.max(right, v.x)
+      }
+    }
+    return { top, left, right }
+  }
+  const h = span([cores.head]), outline = span([cores.head, cores.body]), mk = span(marked)
+  return {
+    above: +((mk.top - h.top) / height).toFixed(3),
+    side: +(Math.max(mk.right - outline.right, outline.left - mk.left) / height).toFixed(3),
+    core: marked.includes(cores.head) ? 'head' : marked.includes(cores.body) ? 'body' : null,
+  }
+}
+
+/** The largest head part and the largest body part among `meshes`, leaving out the eyes and the hands. */
+function coresOf(meshes: THREE.Mesh[], eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[]) {
+  const under = (groups: THREE.Object3D[]) => {
+    const set = new Set<THREE.Object3D>()
+    for (const g of groups) g.traverse((o) => set.add(o))
+    return set
+  }
+  const inEye = under(eyes), inHead = under(headGroup ? [headGroup] : []), inHand = under(handGroups)
+  // Size in the part's own axes, so a tilted flat brim does not outweigh the head it sits on.
+  const volume = (m: THREE.Mesh) => {
+    m.geometry.computeBoundingBox()
+    const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
+    return Math.abs(s.x * s.y * s.z)
+  }
+  const largest = (list: THREE.Mesh[]) => list.reduce<THREE.Mesh | null>((a, m) => (!a || volume(m) > volume(a) ? m : a), null)
+  const parts = meshes.filter((m) => !inHand.has(m) && !inEye.has(m))
+  const body = largest(parts.filter((m) => !inHead.has(m)))
+  const head = largest(parts.filter((m) => inHead.has(m)))
+  return body && head ? { body, head, inHead, inEye, inHand } : null
 }
 
 /**
@@ -178,24 +262,13 @@ const FEATURE_WORDS: Record<keyof Species, string> = {
 }
 
 export function speciesFeatures(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[], height: number): Species | null {
-  const under = (groups: THREE.Object3D[]) => {
-    const set = new Set<THREE.Object3D>()
-    for (const g of groups) g.traverse((o) => set.add(o))
-    return set
-  }
-  const inEye = under(eyes), inHead = under(headGroup ? [headGroup] : []), inHand = under(handGroups)
+  // The role mark (villager.mark()) never counts: wherever it sits, a mark alone must not pass.
+  const cores = coresOf(meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !m.userData.mark), eyes, headGroup, handGroups)
+  if (!cores) return null
+  const { body, head, inHead, inEye, inHand } = cores
   const boxOf = new Map(meshes.map((m) => [m, new THREE.Box3().setFromObject(m, true)]))
-  // Size in the part's own axes, so a tilted flat brim does not outweigh the head it sits on.
-  const volume = (m: THREE.Mesh) => {
-    m.geometry.computeBoundingBox()
-    const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
-    return Math.abs(s.x * s.y * s.z)
-  }
-  const largest = (list: THREE.Mesh[]) => list.reduce<THREE.Mesh | null>((a, m) => (!a || volume(m) > volume(a) ? m : a), null)
-  const parts = meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !inHand.has(m))
-  const body = largest(parts.filter((m) => !inHead.has(m) && !inEye.has(m)))
-  const head = largest(parts.filter((m) => inHead.has(m) && !inEye.has(m)))
-  if (!body || !head) return null
+  // Eyes count here: a frog's sit on top of its head.
+  const parts = meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !m.userData.mark && !inHand.has(m))
   const hb = boxOf.get(head)!, bb = boxOf.get(body)!
   const hc = hb.getCenter(new THREE.Vector3()), bc = bb.getCenter(new THREE.Vector3())
   const hw = (hb.max.x - hb.min.x) / 2, hh = (hb.max.y - hb.min.y) / 2

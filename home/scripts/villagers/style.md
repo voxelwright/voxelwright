@@ -22,20 +22,20 @@ The home is seen from far away, like a dollhouse: a villager is about 70 pixels 
    | spiny (hedgehog) | a low teardrop body covered in spines on the back, a pointed snout |
 
    For an animal not listed, pick its closest row and name its features to yourself before you write any code.
-2. Role on top. The role adds one cue to the species, and only one: it never replaces the body. It must still be big: small details vanish at 70 pixels.
+2. Role on top. The role adds one mark to the species, and only one: it never replaces the body. Seen flat black from in front and above, the mark must break the outline above or beside the head, because anything inside the body's outline (a bag, a belt, goggles, a hood) disappears at 70 pixels. No two roles share a kind of shape, so each role reads from its outline alone:
 
-   | Role | The mark (sizes against the villager's height H) |
-   | --- | --- |
-   | cook | A tall, puffy chef's toque, at least 0.3 H tall above the head, wider at the top than at its band. |
-   | gardener | A wide-brimmed sun hat: the brim at least 1.7 times the head's width, with a low crown, worn on the back of the head and tilted back about 25 degrees so the whole face shows from above. |
-   | tidier | A feather duster held up so its big round plume sits above the head; plume at least 0.25 H across. |
-   | keeper | A boxy ledger satchel at the hip that sticks out past the body's side by at least 0.12 H, square-cornered, with a strap across the body. |
-   | tutor | A mortarboard: a flat square board, about 1.3 times the head's width, level on top of the head, with a tassel hanging off one corner. |
-   | messenger | A peaked cap with a short brim above the eyes (never over them), and a round-flapped mail bag on the hip opposite the held hand, bulging past the body's side. |
-   | maker | Big round goggles pushed up on top of the head (two short cylinders pointing forward and up), and a thick tool belt with pouches round the middle. |
-   | carer | A soft rounded hood that covers the top and back of the head and flows into a shawl over the shoulders, so head and body read as one dome. |
+   | Role | The mark (sizes against the villager's height H) | Kind of shape |
+   | --- | --- | --- |
+   | cook | A tall, puffy chef's toque: its top at least 0.25 H above the head, wider at the top than at its band. | a tall column with a puff, centred above the head |
+   | tutor | A mortarboard: a flat square board about 1.4 times the head's width, level on a short cap on top of the head, clear of the ears, with a tassel hanging off one corner. | a flat square plate with corners, centred above the head |
+   | gardener | A sun hat: a round brim at least twice the head's width and wider than the body, with a low crown, worn on the back of the head and tilted back about 25 degrees so the whole face shows from above. The only brim in the set. | a wide round disc framing the head, past both sides |
+   | tidier | A feather duster held up in one hand: a big round plume at least 0.25 H across, its top at least 0.2 H above the head, on that side. | a round ball on a handle, high on one side |
+   | messenger | A post flag: a thin pole fixed to the back, rising at least 0.3 H above the head, with a rectangular flag about 0.2 by 0.12 H standing out sideways at its top, like a letterbox flag raised for the post. No cap, no bag. | a pole with a flag to one side, high above the head |
+   | keeper | A long pencil tucked behind one ear, about 0.4 H long, slanting up and out at about 40 degrees, its point at least 0.2 H above the head. One pencil, one side. | a single slanted bar on one side of the head |
+   | maker | A big magnifying lens on a hinged arm from a headband, swung up beside one side of the head: an upright ring at least 0.2 H across with an open middle, its top at least 0.15 H above the head. | an open ring beside the head |
+   | carer | A long, soft knitted stocking cap that rises at least 0.15 H above the head and flops over to one side, ending in a pom-pom at least 0.1 H across hanging past the side of the head. Not a hood: it never covers the face. | a bent cone with a ball at its tip, flopping to one side |
 
-   No villager wears another role's mark (a gardener has no toque, a tutor no sun hat). Glasses, bows and flowers are fine as small extras.
+   No villager wears another role's mark (a gardener has no toque, a tutor no sun hat), and none wears a bag, a peaked cap, goggles, a tool belt or a hood. Glasses, bows and flowers are fine as small extras. Pass the mark's parts to villager.mark(): the home checks that, seen from in front and above, they rise at least 0.1 H above the top of the head or reach that far past the side of the head and body.
 3. Colour = owner. The owner's accent colour is given to you and is fixed. Wear it as a thick scarf round the neck (tube radius at least 0.028, two tails hanging in front) and, if you like, as one trim on the role's mark (a hat band, a bag flap). Nothing else is that colour, and the body felt is never that colour. The scarf sits at the neck, below the head: never across the face. The home is seen from in front and above, so no brim, hood or hat may hide the eyes from up there either.
 4. Prop = speciality. The held prop says what the villager does, and its longest side is at least a third of the villager's height so it reads from across the room.
 

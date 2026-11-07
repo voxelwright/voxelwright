@@ -41,6 +41,7 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
   // #47: a villager module tags its parts with slots and gives its gait and about as plain data.
   // Nothing here is trusted: the home checks every role against its closed list and clamps the data.
   const roles = new Map<THREE.Object3D, string>()
+  const marks = new Set<THREE.Object3D>()
   let villager: { gait?: unknown; about?: unknown } | null = null
   const plain = (v: unknown) => {
     const text = JSON.stringify(v ?? null)
@@ -57,6 +58,12 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
       tag: <T>(object: T, role: unknown): T => {
         if (!(object instanceof THREE.Object3D)) throw new Error('villager.tag() takes a three.js object')
         roles.set(object, String(role).slice(0, 40))
+        return object
+      },
+      /** #47 round 4: the role's mark (a hat, a plume, a flag); the home checks that it breaks the outline. */
+      mark: <T>(object: T): T => {
+        if (!(object instanceof THREE.Object3D)) throw new Error('villager.mark() takes a three.js object')
+        marks.add(object)
         return object
       },
       gait: (g: unknown) => void ((villager ??= {}).gait = plain(g)),
@@ -78,7 +85,7 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
     else throw new Error('the module exports neither build(api) nor a default function')
     if (root.children.length === 0) throw new Error('the module added nothing (call prop.add or return an object from build)')
     const t1 = now()
-    const { data, transfer } = await serialize(root, roles)
+    const { data, transfer } = await serialize(root, roles, marks)
     data.notes.push(...notes)
     if (villager) data.villager = villager
     const t2 = now()

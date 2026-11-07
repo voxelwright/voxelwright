@@ -57,6 +57,8 @@ export interface WireMesh {
   matrix: number[]
   /** #47: the villager slot this mesh belongs to, from villager.tag(); absent for props. */
   role?: string
+  /** #47 round 4: part of the villager's role mark, from villager.mark(); absent otherwise. */
+  mark?: true
 }
 
 export interface PropData {
@@ -81,7 +83,7 @@ type Image = HTMLCanvasElement | OffscreenCanvas | ImageBitmap | { width: number
  * that cannot be expressed in the wire format is skipped with a note, or thrown
  * for what would make the prop wrong (a multi-material mesh, a texture with no image).
  */
-export async function serialize(root: THREE.Object3D, roles?: Map<THREE.Object3D, string>): Promise<{ data: PropData; transfer: Transferable[] }> {
+export async function serialize(root: THREE.Object3D, roles?: Map<THREE.Object3D, string>, marks?: Set<THREE.Object3D>): Promise<{ data: PropData; transfer: Transferable[] }> {
   const data: PropData = { meshes: [], geometries: [], materials: [], textures: [], notes: [] }
   const transfer: Transferable[] = []
   const geometries = new Map<unknown, number>()
@@ -177,6 +179,10 @@ export async function serialize(root: THREE.Object3D, roles?: Map<THREE.Object3D
     // #47: the nearest tagged ancestor (or the mesh itself) names its villager slot.
     if (roles?.size) for (let o: THREE.Object3D | null = mesh; o && o !== root; o = o.parent) if (roles.has(o)) {
       wire.role = roles.get(o)
+      break
+    }
+    if (marks?.size) for (let o: THREE.Object3D | null = mesh; o && o !== root; o = o.parent) if (marks.has(o)) {
+      wire.mark = true
       break
     }
     data.meshes.push(wire)

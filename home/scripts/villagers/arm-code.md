@@ -17,6 +17,7 @@ Materials: only `new THREE.MeshStandardMaterial({ color: '#rrggbb', roughness })
   - hands: one small mitten each side of the body, about halfway up; they swing and bob.
   - feet: one on +x, one on -x, sitting on the floor under the body; the walk cycle places them. Legs, if any, belong to the feet.
   - held: the prop, placed in front of one hand; it moves with the nearest hand.
+- villager.mark(object) returns the object: marks a mesh or group (inside any slot) as the role's mark, the one cue from the role table. Mark all of the mark's parts and nothing else; the tidier marks its duster's plume.
 - villager.gait({ speed: 0.2..0.6 m/s, stride: 0.14..0.34 per two steps, bob: 0..0.08, stepped: true, fidget: 0..1 })
 - villager.about({ name, role, bark, voice, persona }): role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..560 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }; persona is { role, speciality, temperament, register, humour, quirks: [], topics: [], dials: { warmth, playful, chatty, humour } } as described above.
 Numbers outside these ranges are clamped.
@@ -30,11 +31,12 @@ The home checks the finished villager and refuses it, with the reason, when:
 - a part floats: every mesh must touch or overlap another (bounding boxes within 0.02), so a head sits on its neck and a hat on its head;
 - the held prop's longest side is under a third of the villager's height, or longer than its height;
 - it is under 0.3 or over 1.0 tall, or wider than 1.5 times its height;
-- it is the default round body with a head on top: besides the hat, the scarf and the prop, nothing reaches forward past the face (snout, muzzle, beak, or the head ahead of the body), the body sits on the floor (no legs), the head sits straight on the body (no neck), and no ears, horns or eyes rise above the head or stick out past its sides.
+- nothing is passed to villager.mark(), or the marked parts stay inside the outline: seen from in front and 33 degrees above, they must rise at least 0.1 of the height above the top of the head, or reach that far past the side of the head and body;
+- it is the default round body with a head on top: besides the hat, the role mark, the scarf and the prop, nothing reaches forward past the face (snout, muzzle, beak, or the head ahead of the body), the body sits on the floor (no legs), the head sits straight on the body (no neck), and no ears, horns or eyes rise above the head or stick out past its sides.
 
 Do not touch the scene, DOM, network or timers. Keep it under about 60 meshes.
 
-Example (Dumpling, the existing cook, accent #c8553d). It shows the API: slots, the scarf, the role mark, about(). Its round body and head on top are Dumpling's own; do not start from them. Build your species' body plan from the shapes it needs:
+Example (Dumpling, the existing cook, accent #c8553d). It shows the API: slots, the scarf, the role mark and villager.mark(), about(). Its round body and head on top are Dumpling's own; do not start from them. Build your species' body plan from the shapes it needs:
 
 export default function (villager, api) {
   const { THREE } = api
@@ -55,8 +57,8 @@ export default function (villager, api) {
   add(head, new THREE.SphereGeometry(0.016, 12, 8), new THREE.MeshStandardMaterial({ color: '#4a2e28', roughness: 0.3 }), 0, -0.016, 0.16)
   // The cook's mark: a tall puffy toque, a band and a wider puff on top.
   const white = felt('#f4efe4')
-  add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01)
-  add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01).scale.set(1, 0.85, 1)
+  villager.mark(add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01))
+  villager.mark(add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01)).scale.set(1, 0.85, 1)
   for (const s of [-1, 1]) {
     const ear = add(head, new THREE.CapsuleGeometry(0.033, 0.15, 6, 12), tan, s * 0.164, -0.016, -0.008)
     ear.rotation.z = s * 0.28

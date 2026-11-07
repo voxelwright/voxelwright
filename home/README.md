@@ -792,18 +792,86 @@ hip. Hats above the head (toque, mortarboard, duster plume) read; marks inside t
 role a mark that breaks the outline above or beside the head, and no two roles the same kind of
 shape.
 
+### Round 4 (November 7, 2026): role marks that break the outline
+
+Each role has a new mark, chosen so that it breaks the outline above or beside the head and no
+two roles share a kind of shape (`scripts/villagers/style.md` rule 2, copied to
+`round4/role-legend.md`): cook toque (a tall puffed column), tutor mortarboard (a flat square
+plate), gardener sun hat (a wide round brim, the only brim), tidier duster (a round plume on a
+handle), messenger post flag (a pole on the back with a flag to one side), keeper pencil behind
+one ear (a single slanted bar), maker magnifying lens swung up beside the head (an open ring),
+carer stocking cap (a bent cone with a pom-pom). The messenger cap and mail bag, keeper satchel,
+maker goggles and tool belt, and carer hood are gone, and no role wears a bag.
+
+- **Tag**: `villager.mark(object)` in the prop sandbox marks a mesh or group in any slot. The wire
+  carries `mark: true` per mesh (`wire.ts`), `rebuild.ts` refuses any other value, and `assemble.ts`
+  copies it to the mesh.
+- **Check** (`markBreak()` in `gen/checks.ts`): the marked parts are projected on every vertex from in
+  front and 33° above (the eye check's view, yaw 0). They must rise at least `MARK` = 0.1 of the
+  height above the top of the largest head part, or reach that far past the sides of the largest head
+  and body parts. With no marked part, a mark that stays inside the outline, or the head or body
+  core itself marked, the villager is refused with a reason that names the role's mark (for example,
+  "the cook's toque stays inside the outline seen from in front and above: ..."). Marked parts no
+  longer count as species features, so a mark alone never passes the species check. The check runs
+  for live results and the setup scene; `trial()` runs it only when asked (`mark: true`), and the
+  hand-made three are not checked against it. Earlier rounds have no marks, so view or re-measure
+  them with `&checks=off`.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r4-
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=48   # round 3 numbered with 47
+node scripts/villagers/voices.mjs <out>/voices.json http://localhost:5332/ --wav=<dir> --checks=scripts/villagers/readability-voices.json --rename=rd-:r4-
+```
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, in `round4/readability-*.jpg`.
+The silhouette sheet is reshuffled and renumbered, and `round4/readability-key.md` is its key.
+
+| Measure | Round 3 | Round 4 |
+| --- | --- | --- |
+| Usable, repaired | 20, 2 | 20, 1 (r4-11: a floating mortarboard and a short prop, fixed in one pass) |
+| Round template (species check) | 0 | 0 |
+| Mean pairwise IoU (lower is more varied) | 0.59 | 0.55 |
+| Mean IoU within / between roles | 0.61 / 0.58 | 0.57 / 0.54 |
+| Nearest silhouette has the same role | 25% | 15% (chance 8%) |
+| Mark break, min above or past the side (`MARK` 0.1) | | every one at 0.12 or more; median above 0.23 |
+| Visible accent, min / median | 53 / 275 px | 89 / 204 px |
+| Median latency, cost | 86 s, $2.30 | 91 s, $2.15 |
+| Voices too close / directional checks | 16 of 190, 9 of 9 | 12 of 190, 9 of 9 |
+| Model declared the requested role | | 20 of 20 |
+
+All 20 marks are in place and visible on the sheets. The flag, pencil, lens ring and stocking cap
+are new shapes in the outline. The nearest-silhouette measure fell again because the bodies vary
+more than the marks: it compares whole outlines, so it is not the role test. The weak marks are the
+hedgehog maker's small lens among its spines, the hedgehog tidier's plume against its spines, and
+the sheep carer's cap merging into its wool. Personas (`round4/personas-readability.md`) stay adult,
+with no exclamation marks, "yay" or "hehe". The blind silhouette test with Opus and Sol is next.
+`node scripts/check-villager-gen.mjs` passes 33 of 33, `node scripts/check-prop-sandbox.mjs --port=5336`
+passes 40 of 40, and `npm run typecheck` passes.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
 checked by grepping `dist/`) turns the kitchen table into a felt workshop. The camera
 leans over the table; the notebook and its pencil step aside. You write who the villager
-is on a paper slip, pick a personality pattern card from the rack at the back, or both.
-While the model works the needle stitches a scrap, the scissors snip and a cut pattern
-piece lands on the mat every few seconds; the slip counts the seconds. When the module
-arrives it runs in the prop sandbox, `gen/assemble.ts` makes the Figure, and it is
-stitched together on the mat in order (body, head, ears, eyes, hands, feet, accessories,
-prop), a needle pass each, about 3.5 s. It hops, looks at you and says its bark in its
-babble voice. A failure leaves the table tidy and says so on the slip.
+is on a paper slip lying on the cutting mat, pick a personality pattern card from the
+rack behind the mat, or both; the picked card stands up out of the rack and its felt card,
+big, is clipped to the slip. While the model works the slip moves to the near edge and
+the pattern is made on the mat: a piece is chalked on a felt sheet, cut out along the
+chalk and pinned in a row, one every 4.5 s, while the needle stitches a scrap; the slip
+counts the seconds. The pieces are scenery, never a percentage. When the module arrives
+it runs in the prop sandbox, `gen/assemble.ts` makes the Figure, the slip lifts away and
+it is stitched together on the mat in order (body, head, ears, eyes, hands, feet,
+accessories, prop), a needle pass each, about 3.5 s. It hops, looks at you and says its
+bark in its babble voice. A failure leaves the table tidy and says so on the slip.
+
+Layout follows the screen's shape. Wide (landscape, tablets included): the tools run
+along the near edge with their tags under them, quiet tags show on the empty table, and
+the save and send-off tags sit in the bottom corners. Narrow (a phone held upright): the
+tools sit in one row before three ribbons, their tags hang below the table's edge on
+threads in two columns, the name tag heads the screen, and before there is a villager the
+camera frames the rack and the mat with the slip on the near half of the table. Labels
+use one paper tag style and two typefaces: handwriting for tags and the slip, the book
+face for speech, status lines and the slip's printed example.
 
 - `&from=<run-id>` stitches a saved result from `generated/villagers/<run-id>/` with no
   model call (round-1 results skip assemble's later look checks; live results do not).
@@ -813,8 +881,11 @@ babble voice. A failure leaves the table tidy and says so on the slip.
   template with its own `VILLAGER_PROFILES`, so the page flag cannot unlock anything there.
 
 The tools, all on the table, each with a paper tag that is a real `role="slider"` (Tab,
-arrows, Page keys, Home and End); dragging changes the villager at once, and a short
-line is said on release. Nothing here calls a model.
+arrows, Page keys, Home and End). A tag says what the tool is and what its two ends do,
+with a bead on a stitch for where it is now (the colour tag shows the rail's two end
+threads; the jokes tag inks the current step and strikes out a locked one); each ribbon
+is labelled at both ends. Dragging changes the villager at once, and a short line is
+said on release. Nothing here calls a model.
 
 | Tool | Where | Changes |
 | --- | --- | --- |
@@ -830,8 +901,10 @@ The persona and the humour rule are builder A's (`gen/spec.ts`, `gen/build.ts` c
 `gen/templates.ts` `applyTemplate` and `gatePersona`); the scene only combines them. The
 persona shows as a pinned note on the pattern sheet and the villager's role on its tag.
 "Save as a pattern" keeps the tuned persona as a template; "share with the family" lists
-it for everyone. "Off you go" hops it off the table to walk the kitchen at its tuned size.
-The result is data: module text, persona and nine slider values.
+it for everyone; a villager made from a pattern names it on its tag. "Off you go" hops it
+off the table to walk the kitchen at its tuned size, and the camera follows it for about
+nine seconds before it comes back to the table. The result is data: module text, persona
+and nine slider values.
 
 Host (`host/src/villager-make.ts`, registered in `villager.ts` with one line), same token
 and person scoping as the props endpoints; model failures answer 422:
@@ -856,8 +929,13 @@ maker, then proves headless: the workshop, the stitch order and pace, focus on t
 tool, each tool changing scale, hue, pitch, rate and gait measurably by keyboard and by
 dragging, the crude lock and its note, templates alone and with words, the gated buddy,
 save and reload, a shared pattern reaching a child as cheeky in the host and the page,
-the send-off and its walk, reduced motion, failures leaving nothing placed, the stub
-host's waiting and 422, and three unload and reload cycles back to baseline.
+the send-off and its walk staying in view, reduced motion, failures leaving nothing
+placed, the stub host's waiting (a piece cut and pinned) and 422, and three unload and
+reload cycles back to baseline. At every captured moment (`1-empty`, `1b-picked`,
+`2-waiting`, `3-tuning`, `4-pattern`, `5-walking`) a layout gate checks that every
+visible label is on screen and overlaps no other; run it at `--viewport=390x844` and
+`1024x768` as well as the default. Captures: `screenshots/villager-gen/setup/round-N/`,
+scores and changes per round in its `NOTES.md`.
 
 ## Measured, kitchen scene (November 6, 2026)
 

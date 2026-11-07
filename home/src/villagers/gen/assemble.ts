@@ -36,7 +36,7 @@ const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obj
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
 /** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -94,6 +94,8 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     // The made colour, for check reasons, and the owner's accent, for measuring how much of it shows (load.ts silhouettes).
     mesh.userData.colour = hex(prop.materials[k].color)
     if (near(mesh.userData.colour, accent)) mesh.userData.accent = true
+    // The role mark (villager.mark()), for the check that it breaks the outline.
+    if (prop.meshes[i].mark) mesh.userData.mark = true
   })
   for (const m of replaced) m.dispose()
 
@@ -136,8 +138,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const hip = THREE.MathUtils.clamp(box('body').min.y, 0, 0.4)
   root.traverse((n) => { n.castShadow = n.receiveShadow = true })
   // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions,
-  // the default round body instead of the species (`species` false only for plumbing probes).
-  const { failures, measures } = inspect(root, eyes, held, { head, hands, species })
+  // the default round body instead of the species, a role mark inside the outline (`species` and `mark`
+  // false only for plumbing probes and results that predate them).
+  const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role: checked.spec.role })
   if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
   const g = checked.spec.gait

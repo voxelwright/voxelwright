@@ -7,8 +7,9 @@
 // - a blind sheet for model scorers (black, numbered in a shuffled order, no labels) and its key.
 // - round 3, species: mean pairwise IoU over all villagers (lower is more varied), and how many are the
 //   default round template by gen/checks.ts speciesFeatures (no feature at or over SPECIES).
-// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off]   (dev server running)
+// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47]   (dev server running)
 // --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
+// --seed shuffles the blind sheet's numbering (47 gave round 3's order; round 4 used 48).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { chromium } from 'playwright'
@@ -16,6 +17,7 @@ import { chromium } from 'playwright'
 const out = resolve(process.argv[2])
 const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://localhost:5332/'
 const checksOff = process.argv.includes('--checks=off')
+const seedArg = Number(process.argv.find((a) => a.startsWith('--seed='))?.slice(7) ?? 47)
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
 const shots = join(out, 'shots')
 mkdirSync(shots, { recursive: true })
@@ -109,7 +111,7 @@ const summary = {
 writeFileSync(join(out, 'readability.json'), JSON.stringify({ summary, rows, ids: black.map((m) => m.id), iou }, null, 1))
 
 // Sheets. The blind one is shuffled with a fixed seed so the numbering does not give the roles away.
-let seed = 47
+let seed = seedArg
 const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
 const order = black.map((_, i) => [i, rand()]).sort((a, b) => a[1] - b[1]).map(([i]) => i)
 const key = order.map((i, k) => ({ number: k + 1, id: black[i].id, role: rows[i].role, owner: rows[i].owner, description: rows[i].description }))

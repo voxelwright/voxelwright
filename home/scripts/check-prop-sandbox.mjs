@@ -193,6 +193,13 @@ try {
   const clean = await page.evaluate(() => ({ obj: ({}).polluted, arr: [].polluted, keys: Object.getOwnPropertyNames(Object.prototype).length }))
   check('prototype-pollution keys in a forged result do not reach the page', !polluted.ok && clean.obj === undefined && clean.arr === undefined && clean.keys === before.protoKeys, { reason: polluted.reason, ...clean })
   check('a forged but valid result with __proto__ keys is rebuilt from fresh objects, page still clean', pollutedValid.ok && clean.obj === undefined, { ok: pollutedValid.ok, reason: pollutedValid.reason })
+  // #47 round 4: a mesh's role-mark flag is only ever true.
+  const badMark = await forge(() => {
+    const data = JSON.parse('{"meshes": [{"geometry": 0, "material": 0, "matrix": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1], "mark": "yes"}], "geometries": [{"normal": null, "uv": null, "index": null}], "materials": [{"preset": "standard", "color": [1,0.5,0.2], "emissive": [0,0,0], "emissiveIntensity": 1, "roughness": 0.5, "metalness": 0, "opacity": 1, "transparent": false, "depthWrite": true, "flatShading": false, "side": "front", "map": null}], "textures": [], "notes": [] }')
+    data.geometries[0].position = new Float32Array([0, 0, 0, 0.3, 0, 0, 0, 0.3, 0])
+    for (let id = 1; id < 400; id++) port.postMessage({ type: 'result', id, data, timing: {} })
+  })
+  check('a forged mesh with a role-mark flag other than true is rejected', !badMark.ok && /mesh 0 mark is not true/.test(badMark.reason), badMark.reason)
 
   // Prototype pollution inside the worker, then a normal prop.
   const workerPollution = await trial(wrap(`
