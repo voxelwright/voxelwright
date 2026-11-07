@@ -25,37 +25,52 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 }
 const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, recordVideo: { dir, size } })
 const page = await context.newPage()
+const t0 = Date.now()
 await page.goto(`${base}?talk=npc&input=held&q=high`)
 await page.evaluate(() => window.village.ready())
-await page.waitForTimeout(2500)
-const entry = (id) => page.evaluate((id) => window.village.snapshot().entries.find((e) => e.id === id), id)
-const still = () => page.waitForFunction(() => !window.village.kernel.root.get('rooms').moving)
+await page.waitForTimeout(1500)
+// The clip starts here: the page load before it is cut.
+const start = (Date.now() - t0) / 1000
+const still = () => page.waitForFunction(() => !window.village.kernel.root.get('rooms').moving, null, { timeout: 15000 })
+const step = (what) => console.error(`${((Date.now() - t0) / 1000).toFixed(1)} s  ${what}`)
 
-// Orbit the whole house with a slow left drag, and back a little.
+step('orbit')
+// Orbit the whole house: hold E, then a short drag back with the mouse.
+// (Headless input is slow, about a second per mouse move with WebGPU busy, so moves are few.)
+await page.keyboard.down('e')
+await page.waitForTimeout(3200)
+await page.keyboard.up('e')
 await page.mouse.move(640, 300)
 await page.mouse.down()
-for (let i = 1; i <= 60; i++) await page.mouse.move(640 - i * 7, 300 + Math.sin(i / 10) * 20, { steps: 2 })
-for (let i = 1; i <= 40; i++) await page.mouse.move(220 + i * 9, 300, { steps: 2 })
+for (let i = 1; i <= 4; i++) await page.mouse.move(640 + i * 60, 300)
 await page.mouse.up()
-await page.waitForTimeout(800)
-
+await page.waitForTimeout(1200)
+step('mia')
 // Mia heads for the living room's plants, through the doorway.
 await page.evaluate(() => window.village.talk.walk('mia', 'loungePlants'))
 
+step('doorway glides')
 // Into the kitchen, then through the doorway to the living room and back, by pointer.
 await page.evaluate(() => window.village.kernel.root.get('rooms').go('kitchen'))
 await still()
 await page.waitForTimeout(700)
 for (const id of ['to-living', 'to-kitchen']) {
-  const e = await entry(id)
-  await page.mouse.move(e.x, e.y, { steps: 12 })
+  // High in the opening, above the furniture on either side, on that face's pick slab.
+  const at = await page.evaluate((x) => {
+    const { camera, renderer } = window.village.kernel.root.get('stage')
+    const p = camera.position.clone().set(x, 1.75, 2.8).project(camera)
+    const rect = renderer.domElement.getBoundingClientRect()
+    return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height }
+  }, id === 'to-living' ? 3.445 : 3.535)
+  await page.mouse.move(at.x, at.y)
   await page.waitForTimeout(500)
-  await page.mouse.click(e.x, e.y)
+  await page.mouse.click(at.x, at.y)
   await page.waitForTimeout(200)
   await still()
   await page.waitForTimeout(900)
 }
 
+step('keyboard')
 // Keyboard: pan right along the house, then a touch back.
 await page.keyboard.down('ArrowRight')
 await page.waitForTimeout(1600)
@@ -66,6 +81,7 @@ await page.waitForTimeout(500)
 await page.keyboard.up('ArrowLeft')
 await page.waitForTimeout(600)
 
+step('zoom')
 // Zoom into the living room with the wheel, where Mia is tending the plants.
 const living = await page.evaluate(async () => {
   const { camera, renderer } = window.village.kernel.root.get('stage')
@@ -76,22 +92,17 @@ const living = await page.evaluate(async () => {
 await page.mouse.dblclick(living.x, living.y)
 await page.waitForTimeout(1200)
 await page.mouse.move(640, 380)
-for (let i = 0; i < 6; i++) {
-  await page.mouse.wheel(0, -90)
-  await page.waitForTimeout(160)
-}
-await page.waitForTimeout(3500)
+for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -180)
+await page.waitForTimeout(3000)
+step('out')
 // And out to the whole house again.
-for (let i = 0; i < 12; i++) {
-  await page.mouse.wheel(0, 140)
-  await page.waitForTimeout(120)
-}
-await page.waitForTimeout(2200)
+for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 500)
+await page.waitForTimeout(1800)
 const video = page.video()
 await context.close()
 await browser.close()
 const webm = await video.path()
-execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-movflags', '+faststart', out])
+execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', start.toFixed(2), '-i', webm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-movflags', '+faststart', out])
 for (const f of readdirSync(dir)) rmSync(join(dir, f))
 rmSync(dir, { recursive: true })
 console.log(out)
