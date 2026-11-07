@@ -226,7 +226,10 @@ style from a line of text? Two arms, same five prompts, same style guide
   materials and any unknown shape or preset. The spec is never executed.
 
 `?props=<run-id>[,<run-id>]` loads results from `generated/props/` (git-ignored)
-into the kitchen; `&focus=1` frames them. `main.ts` imports the loader only in
+into the kitchen; `&focus=1` frames them. Since the prop sandbox (below), code
+modules run in the sandbox and both arms reach the home as the same checked
+data; `&run=direct` imports a module into the page as this experiment did, for
+comparison only. `main.ts` imports the loader only in
 dev builds with the flag, so without it nothing loads and the production build
 contains none of it. Run, with the dev server on 5302:
 
@@ -308,6 +311,152 @@ Fast path, for under 10 to 20 s: Sonnet writing a JSON spec, with the spec
 arm's presets extended (glass, a simple emissive, a lathe wood mapping). Spec
 results came back in 4 to 25 s. Opus and anything with many parts (the pinball
 machine, a scene of several pieces) go to a background project.
+
+## Prop sandbox (#42, November 6, 2026)
+
+Model-written prop code runs in a sealed box, and only data comes back.
+
+- **Box.** `src/props/sandbox.ts` adds a hidden iframe with
+  `sandbox="allow-scripts"` (no `allow-same-origin`, so its origin is opaque)
+  and a `srcdoc` whose first element is the CSP
+  `default-src 'none'; script-src 'nonce-<random>' blob:; worker-src blob:`.
+  Its one inline script, the relay, starts a classic Worker from a blob. The
+  worker is `src/props/box/worker.ts`, bundled into one script (three core
+  r187 with `three/webgpu` aliased to `three`, the `paint.ts` painters on
+  OffscreenCanvas, the spec presets, the serializer) by the dev-only
+  `prop-box` plugin in `vite.config.ts` and handed over as text. The box has
+  no network, so it cannot load anything itself.
+- **Run.** Each module gets a fresh worker. It imports the module text from a
+  blob and calls `build(api)` (the experiment's contract) or
+  `default(prop, api)`. `api` holds `THREE`, `RoundedBoxGeometry`, `paint` and
+  `prop`: `prop.add(object)`, `prop.material(preset, options)` (the spec arm's
+  wood, fabric, painted, metal, ceramic and wallpaper presets) and
+  `prop.note(text)`. Before the module runs, the worker allows only 2D
+  canvases and deletes `Worker` and `SharedWorker`. The relay terminates the
+  worker after the first message or at the wall-clock limit (5 s by default).
+  The page has its own limit, 3 s longer, and closes the whole box if the
+  relay stops answering.
+- **Data.** `src/props/wire.ts` turns the tree into plain data. Each mesh is
+  sent as positions, normals, uvs, an index and a matrix. Each material is
+  sent as a preset name and fixed parameters. Each texture is sent as an
+  ImageBitmap with its wrap, repeat and colour space. Only the `standard` preset
+  exists; any other material arrives under its type name and is rejected. No
+  shader code or functions are ever sent. The JSON spec arm is now another
+  producer: the trusted interpreter builds the spec in the page, then it is
+  serialized and goes through the same check and rebuild.
+- **Messages.** The page transfers one MessageChannel port once at startup and
+  never listens on `window`. The relay forwards only a result or an error for
+  the current run. It refuses anything over 64 MB (counting each typed array's
+  whole buffer and each bitmap's pixels), anything over 200,000 values, and
+  any object that is not a plain object, array, typed array or ImageBitmap.
+- **Home.** `src/props/rebuild.ts` treats the data as untrusted. It reads
+  fields by name from own properties only, copies every typed array, and
+  rejects the whole prop with a reason if any limit is broken: 300 meshes and
+  geometries, 64 materials, 16 textures, 200,000 drawn triangles, 400,000
+  vertices, 2048 px a side and 16 Mpx of textures, 64 MB, 4 m on any side once
+  placed, finite numbers only, and indexes inside their arrays. Colours,
+  roughness and the like are clamped. Only then does it build trusted
+  geometry, `MeshStandardMaterial`s and canvas textures (each bitmap is drawn
+  onto a page canvas, as `paint.ts` makes them). Nothing is half-placed.
+
+The working combination, found by a probe in headless Chrome 158 (Playwright
+1.65): a **classic** blob Worker created from the sandboxed `srcdoc` frame
+inherits the frame's CSP. fetch, XHR, WebSocket, `importScripts`, outside
+`import()`, `eval` and `new Function` are all blocked, and `import()` of a blob
+still works. A control run with `connect-src` left open reached the outside
+server, so the CSP is what blocks it. A module worker from a blob failed to
+start in this frame. A `data:` worker also inherits the CSP; it is not used.
+
+`node scripts/check-prop-sandbox.mjs` starts its own dev server on 5304
+(through Vite's API, counting requests) on a temporary `VILLAGE_ROOT` with a
+synthetic villager token, plus an "outside" server on a random port. It
+proves, headless, 33 checks: a plain module builds; fetch, XHR, WebSocket,
+`importScripts`, `import()`, EventSource and sendBeacon never reach the outside
+server; the villager token is never requested; the worker has no `document`,
+`window`, `parent`, `top`, storage, cookies, indexedDB or caches, and its origin
+is `null`; the iframe itself (probed with Playwright as if the relay were
+compromised) cannot reach the page, storage, cookies, network, top navigation
+or popups; a result forged by the module, a message to the parent window, and
+results forged on the box's own port (unknown preset, `__proto__` keys, a valid
+prop with `__proto__` keys) are rejected or rebuilt from fresh objects with
+`Object.prototype` untouched; pollution inside the worker stays there; no
+WebGPU, WebGL or nested workers; an infinite loop is stopped at its limit with
+the home's largest 10 ms tick gap at 15 ms; a typed-array flood fails with
+"Array buffer allocation failed"; a plain-object flood is stopped at its limit;
+5 million triangles and a 16384x16384 texture exceed 64 MB; 320,000
+triangles, NaN, Infinity, a prop 1,000 km wide, a 16384x64 texture and a
+ShaderMaterial are rejected by the home's checks; an empty module and a
+syntax error are rejected; `eval` and `new Function` are blocked; a busy
+iframe main thread does not stall the home; afterwards the box still works,
+the page's DOM, storage and cookies are unchanged, nothing hostile was
+placed, and no error reached the page. 33 of 33 passed (November 6, 2026).
+
+Parity and overhead, `node scripts/props/sandbox-parity.mjs <out> [base]`
+with the dev server on 5304, the five Sonnet free-code modules from the
+experiment, `?cam=iso&q=high&focus=1`, 1280x800 PNG. Changed pixels are those
+whose largest channel differs by more than 16 of 255. Direct against direct
+is the noise floor of the animated scene. Timings are the p50 of 3 cold runs (a
+fresh page each) and 7 warm runs (one page), in ms: box start / run in the
+box (import, build, painting) / serialize / transfer / check and rebuild /
+text to the second frame after placing.
+
+| Prompt | Triangles | Changed px box vs direct | Direct vs direct | Direct build ms | Cold | Warm |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2,672 | 0.08% | 0.03% | 41, 40 | 34 / 46 / 1.6 / 2.1 / 2.2 / 110 | 0 / 41 / 1.3 / 3.1 / 0.5 / 79 |
+| 2 | 13,032 | 0.06% | 0.05% | 42, 52 | 44 / 52 / 2.6 / 6.6 / 7.8 / 140 | 0 / 63 / 2.6 / 6.3 / 2.3 / 106 |
+| 3 | 9,208 | 0.04% | 0.03% | 46, 48 | 37 / 56 / 2.6 / 5.1 / 5.1 / 128 | 0 / 45 / 2.2 / 2.5 / 1.4 / 80 |
+| 4 | 1,188 | 0.12% | 0.01% | 38, 37 | 36 / 40 / 1.1 / 3.2 / 2.0 / 110 | 0 / 40 / 1.0 / 2.0 / 0.5 / 78 |
+| 5 | 8,044 | 0.01% | 0.00% | 62, 64 | 36 / 71 / 3.0 / 5.0 / 4.9 / 147 | 0 / 67 / 2.8 / 3.1 / 1.3 / 108 |
+
+All five render the same through the box: the mean absolute difference is
+3.2 to 3.3 against a 3.2 floor, and a diff image of prompt 4 shows the
+changed pixels on the sunlit sill, the lamp cord and the motes, not the prop.
+The box adds about 40 to 70 ms to a model call that takes 6 to 44 s. The
+worker bundle is 766 kB; a warm start is 0 because the relay starts the next
+worker as soon as a run ends. The first version of the rebuild hit a three.js
+r187 detail: a mesh with `matrixAutoUpdate = false` never refreshes `matrixWorld`
+in `updateWorldMatrix`, so meshes now take position, rotation and scale (a
+matrix with shear has it baked into its own copy of the geometry).
+
+What the box relies on:
+
+- Chrome's sandboxed iframes: an opaque origin with `allow-scripts` alone, a
+  `<meta>` CSP in `srcdoc` enforced before the inline script, and blob
+  workers inheriting their creator's CSP. Only Chrome 158 headless was
+  tested; Safari and Firefox were not.
+- Chrome runs the sandboxed frame in another process: a frame main thread
+  kept busy for 1.5 s did not stall the home (largest gap 14 ms). Model code
+  never runs on that thread anyway, only in the worker.
+- `script-src blob:` lets code in the worker import further blobs it makes.
+  That gives it no new reach: they run in the same worker under the same CSP.
+- The worker's narrowing (2D only, no nested workers) is done in the worker's
+  own realm before the module runs; the module cannot redefine `getContext`.
+  It relies on there being no other way to get a fresh realm in a worker.
+
+Not isolated, or unproven:
+
+- CPU and memory. The module shares the machine until its limit. A heap
+  flood fast enough to reach V8's limit (`new Array(1 << 20).fill(0)` in a
+  loop) kills the box frame's whole process in about 4.5 s. A one-off probe
+  showed the home survives: the page's heartbeats to the dev server
+  continued, the page's own limit closed the box at 15 + 3 s ("the sandbox
+  stopped answering"), and the next prop built in a fresh box. Two gaps
+  remain. The page waits for its limit instead of noticing the crash, and the
+  probe is not in the check, because Playwright reports an out-of-process
+  frame's crash as a page crash and stops driving the page.
+- Timing. `performance.now` and timers are available, so side channels inside
+  the frame's own process are not ruled out; with no network, nothing read
+  can leave except through the prop's own shape and pixels.
+- The prop itself is model output: the box limits its size and cost, not
+  whether it is offensive or misleading. Notes are shown only as text.
+- TypeScript is stripped by Vite's dev transform before the text reaches the
+  box. Outside dev, a trusted strip step or plain-JS prompts are needed.
+- Dev only. The box, its plugin and the trial hook load only with `?props=`
+  in a dev build; the production build contains none of them (checked).
+- If the frame navigated itself, the page would still post the init message
+  with `'*'` (an opaque origin cannot be named). That message carries only
+  the port and the public worker source, and anything coming back on the port
+  is still checked.
 
 ## Measured, kitchen scene (November 6, 2026)
 

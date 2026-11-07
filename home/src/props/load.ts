@@ -1,8 +1,13 @@
 // #42 experiment, dev only: ?props=<run-id>[,<run-id>] loads generated props from
 // home/generated/props/<run-id>/ (git-ignored) into the kitchen. main.ts loads this
 // plugin only when the flag is present in a dev build; without it nothing changes.
-// Arm "spec" files are JSON read by the trusted interpreter in spec.ts. Arm "code"
-// files are model-written modules: they run here only as this experiment's control.
+//
+// Both arms reach the home as the same data (wire.ts), checked and rebuilt by
+// trusted code (rebuild.ts). Arm "spec" files are JSON built by the trusted
+// interpreter in spec.ts and then serialized. Arm "code" files are model-written
+// modules: they run in the prop sandbox (sandbox.ts), never in this page.
+// &run=direct imports code modules into the page as the experiment did; it exists
+// only to compare the two paths and must never be used with untrusted code.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import type { Context } from 'cordis'
@@ -10,9 +15,12 @@ import { own, releaseGpu } from '../kernel'
 import { WALL_Z } from '../layout'
 import * as paint from '../paint'
 import { makeChair, pineMaterial } from '../plugins/chairs'
+import { rebuild, validate } from './rebuild'
+import { PropBox, type BoxTiming } from './sandbox'
 import { build as buildSpec, check as checkSpec } from './spec'
+import { serialize } from './wire'
 
-/** What a generated code module receives. It imports nothing itself. */
+/** What a generated code module receives in the direct comparison path. */
 export const api = { THREE, RoundedBoxGeometry, paint }
 
 interface Meta { arm: 'code' | 'spec'; prompt: number; file: string }
@@ -26,20 +34,48 @@ const ANCHORS: Record<number, { at: [number, number, number]; ry: number; wall?:
   5: { at: [2.75, 0.9, -1.85], ry: 0 },
 }
 
-async function make(meta: Meta, base: string): Promise<THREE.Object3D> {
+const direct = new URLSearchParams(location.search).get('run') === 'direct'
+let box: PropBox | null = null
+
+interface Made { object: THREE.Object3D; timing?: Partial<BoxTiming> & { validateMs: number; rebuildMs: number }; notes?: string[] }
+
+/** Untrusted wire data to a placed-ready object, or a thrown reason. Nothing is built unless all of it passes. */
+function fromData(data: unknown, timing?: Partial<BoxTiming>): Made {
+  const t0 = performance.now()
+  const checked = validate(data)
+  if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
+  const t1 = performance.now()
+  const object = rebuild(checked.prop)
+  return { object, notes: checked.prop.notes, timing: { ...timing, validateMs: t1 - t0, rebuildMs: performance.now() - t1 } }
+}
+
+/** Module text through the sandbox. */
+async function fromCode(code: string, timeoutMs?: number): Promise<Made> {
+  box ??= new PropBox()
+  const result = await box.run(code, timeoutMs)
+  if (!result.ok) throw new Error(`sandbox: ${result.reason}`)
+  return fromData(result.data, result.timing)
+}
+
+async function make(meta: Meta, base: string): Promise<Made> {
   const url = `${base}/${meta.file}`
   if (meta.arm === 'spec') {
     const checked = checkSpec(JSON.parse(await (await fetch(url)).text()))
     if (!checked.spec) throw new Error(checked.errors.join('; '))
-    return buildSpec(checked.spec, meta.prompt * 13)
+    const built = buildSpec(checked.spec, meta.prompt * 13)
+    const { data } = await serialize(built)
+    releaseGpu(built)
+    return fromData(data)
   }
+  // Vite strips the TypeScript; the text is then only data handed to the sandbox.
   const res = await fetch(url)
   if (!res.ok) throw new Error(`transform failed: ${(await res.text()).slice(0, 600)}`)
+  if (!direct) return fromCode(await res.text())
   const mod = await import(/* @vite-ignore */ `${url}?t=${Date.now()}`)
   if (typeof mod.build !== 'function') throw new Error('module does not export build(api)')
   const object = mod.build(api)
   if (!(object instanceof THREE.Object3D)) throw new Error('build(api) did not return a THREE.Object3D from api.THREE')
-  return object
+  return { object }
 }
 
 /** Ground the object, centre it on its anchor (a wall piece sits against the wall), and measure it. */
@@ -80,11 +116,12 @@ export default {
       try {
         const meta: Meta = await (await fetch(`${base}/meta.json`)).json()
         const t0 = performance.now()
-        const { holder, triangles, meshes, size } = seat(await make(meta, base), meta.prompt)
+        const made = await make(meta, base)
+        const { holder, triangles, meshes, size } = seat(made.object, meta.prompt)
         holder.name = `props ${id}`
         own(ctx, holder)
         placed.push(holder)
-        report[id] = { ok: true, triangles, meshes, size, buildMs: performance.now() - t0 }
+        report[id] = { ok: true, triangles, meshes, size, buildMs: performance.now() - t0, path: meta.arm === 'code' && direct ? 'direct' : 'data', timing: made.timing, notes: made.notes }
       } catch (error) {
         report[id] = { ok: false, error: String(error) }
       }
@@ -120,7 +157,7 @@ export default {
     /** Builds one generated file without placing it, for the runner's first-try and repair checks. */
     const checkFile = async (meta: Meta, base: string) => {
       try {
-        const { holder, triangles, meshes, size } = seat(await make(meta, base), meta.prompt)
+        const { holder, triangles, meshes, size } = seat((await make(meta, base)).object, meta.prompt)
         releaseGpu(holder)
         return { ok: true, triangles, meshes, size }
       } catch (error) {
@@ -128,9 +165,50 @@ export default {
       }
     }
 
+    /**
+     * Module text through the sandbox, for scripts/check-prop-sandbox.mjs and the overhead run.
+     * With place, the prop stands at prompt 1's anchor until the next trial, and toFrameMs
+     * runs from the text to the second frame after it was added.
+     */
+    let trialHolder: THREE.Object3D | null = null
+    const trial = async (code: string, opts: { place?: boolean; prompt?: number; timeoutMs?: number } = {}) => {
+      const t0 = performance.now()
+      if (trialHolder) {
+        trialHolder.removeFromParent()
+        releaseGpu(trialHolder)
+        trialHolder = null
+      }
+      try {
+        const made = await fromCode(code, opts.timeoutMs)
+        const { holder, triangles, meshes } = seat(made.object, opts.prompt ?? 1)
+        if (!opts.place) {
+          releaseGpu(holder)
+          return { ok: true, triangles, meshes, timing: made.timing, notes: made.notes }
+        }
+        holder.name = 'props trial'
+        ctx.stage.scene.add(holder)
+        trialHolder = holder
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        return { ok: true, triangles, meshes, timing: made.timing, notes: made.notes, toFrameMs: performance.now() - t0 }
+      } catch (error) {
+        return { ok: false, reason: String(error instanceof Error ? error.message : error) }
+      }
+    }
+    const trialPlaced = () => {
+      let n = 0
+      ctx.stage.scene.traverse((o) => void (o.name.startsWith('props') && n++))
+      return n
+    }
+
     ctx.effect(() => {
-      Object.assign(window, { villageProps: { loaded: loading, place, check: checkFile } })
-      return () => delete (window as { villageProps?: unknown }).villageProps
+      Object.assign(window, { villageProps: { loaded: loading, place, check: checkFile, trial, placed: trialPlaced } })
+      return () => {
+        delete (window as { villageProps?: unknown }).villageProps
+        trialHolder?.removeFromParent()
+        if (trialHolder) releaseGpu(trialHolder)
+        box?.dispose()
+        box = null
+      }
     })
   },
 }

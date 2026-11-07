@@ -36,8 +36,12 @@ export function makeNoise(seed: number, period = 64) {
   }
 }
 
+/**
+ * A 2D canvas. Inside the prop sandbox's worker (#42) there is no document, so it is an
+ * OffscreenCanvas typed as a canvas element: the painters only use what both share.
+ */
 export function canvas(w: number, h: number) {
-  const c = document.createElement('canvas')
+  const c = typeof document === 'undefined' ? new OffscreenCanvas(w, h) as unknown as HTMLCanvasElement : document.createElement('canvas')
   c.width = w
   c.height = h
   return [c, c.getContext('2d')!] as const
