@@ -143,7 +143,8 @@ const rgb = (hex: string | undefined, fallback: RGB): RGB => {
 }
 const ROUGH = { matte: 0.85, satin: 0.55, gloss: 0.25 }
 
-function material(m: Material, seed: number): THREE.MeshStandardMaterial {
+/** A spec material preset, also offered to sandboxed prop code as prop.material(). */
+export function material(m: Material, seed: number): THREE.MeshStandardMaterial {
   const color = (fallback: RGB) => rgb(m.color, fallback)
   switch (m.preset) {
     case 'wood': {
