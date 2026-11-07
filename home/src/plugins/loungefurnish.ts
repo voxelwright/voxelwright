@@ -117,14 +117,14 @@ export default {
       for (const [lx, lz] of [[-0.33, -0.31], [0.33, -0.31], [-0.33, 0.31], [0.33, 0.31]]) dress(cyl(0.022, 0.016, 0.14, 8), pine, local(lx, 0.07, lz))
     }
 
-    // A basket of blankets beside the sofa, and a plant in the front corner.
-    dress(cyl(0.24, 0.2, 0.4, 24), wicker, at(L + 0.32, 0.2, 2.45))
-    part(ball(0.2, 14, 8).scale(1, 0.45, 1), '#c2714f', 'matte', at(L + 0.32, 0.4, 2.42))
-    part(ball(0.18, 14, 8).scale(1, 0.4, 1), '#efe4cc', 'matte', at(L + 0.36, 0.46, 2.5))
-    basketPlant(kit, wicker, L + 0.35, 3.35, 1.1, 2.1)
+    // A basket of blankets beside the sofa (the doorway to the kitchen is just past it), and a plant in the front corner.
+    dress(cyl(0.24, 0.2, 0.4, 24), wicker, at(L + 0.32, 0.2, 2.18))
+    part(ball(0.2, 14, 8).scale(1, 0.45, 1), '#c2714f', 'matte', at(L + 0.32, 0.4, 2.15))
+    part(ball(0.18, 14, 8).scale(1, 0.4, 1), '#efe4cc', 'matte', at(L + 0.36, 0.46, 2.23))
+    basketPlant(kit, wicker, X + 1.22, 3.42, 1.1, 2.1)
     // A knitted pouf and a stack of board games behind the seated view, so the front of the room is not bare.
-    part(cyl(0.26, 0.26, 0.3, 24), '#d8a85a', 'matte', at(X + 0.9, 0.15, 3.1))
-    part(new THREE.TorusGeometry(0.24, 0.04, 8, 24).rotateX(Math.PI / 2), '#c8984a', 'matte', at(X + 0.9, 0.3, 3.1))
+    part(cyl(0.26, 0.26, 0.3, 24), '#d8a85a', 'matte', at(X + 0.55, 0.15, 2.8))
+    part(new THREE.TorusGeometry(0.24, 0.04, 8, 24).rotateX(Math.PI / 2), '#c8984a', 'matte', at(X + 0.55, 0.3, 2.8))
     for (const [i, c] of ['#4b5d7a', '#c2463a', '#e8dcc2'].entries()) part(box(0.4 - i * 0.04, 0.06, 0.28), c, 'satin', at(X + 0.1, 0.03 + i * 0.06, 3.35, 0.2 * i))
 
     flat.add(contactDecals([
@@ -132,7 +132,7 @@ export default {
       [X - 1.55, 0.95, 1.1, 0.85, 0], // coffee table
       [L + 0.16, -1.3, 0.5, 1.1, 0], // bookcase
       [X - 0.55, 2.2, 1.0, 1.0, -2.3], // reading chair
-      [L + 0.32, 2.45, 0.6, 0.6, 0], [L + 0.35, 3.35, 0.55, 0.55, 0], [L + 0.3, -0.45, 0.4, 0.4, 0], [X + 0.9, 3.1, 0.65, 0.65, 0], [X + 0.1, 3.35, 0.55, 0.42, 0.2],
+      [L + 0.32, 2.18, 0.6, 0.6, 0], [X + 1.22, 3.42, 0.55, 0.55, 0], [L + 0.3, -0.45, 0.4, 0.4, 0], [X + 0.55, 2.8, 0.65, 0.65, 0], [X + 0.1, 3.35, 0.55, 0.42, 0.2],
       [X + 0.3, LOUNGE.back + 0.22, 0.95, 0.55, 0], // the lounge's bench
     ]))
 

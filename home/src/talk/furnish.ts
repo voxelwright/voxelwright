@@ -418,7 +418,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const removers: (() => void)[] = []
   const parcel = (what: string, where: string | undefined) => {
     const lower = (where ?? '').toLowerCase()
-    const at = /living ?room|lounge/.test(lower) ? ANCHORS.livingDoor : /corner/.test(lower) ? ANCHORS.corner : /window/.test(lower) ? ANCHORS.window : ANCHORS.floor
+    const at = /living ?room|lounge/.test(lower) ? ANCHORS.livingFloor : /corner/.test(lower) ? ANCHORS.corner : /window/.test(lower) ? ANCHORS.window : ANCHORS.floor
     const p = makeParcel(what)
     p.scale.setScalar(1.25)
     p.position.set(at.x + parcels.length * 0.8, 0, at.z + parcels.length * 0.3)

@@ -18,7 +18,7 @@ export interface Shell {
   wall: THREE.Material
   /** Whether the shell's walls throw shadows (the kitchen's sun needs them; the living room never had them). */
   casts: boolean
-  /** Walls the room already builds at full height (tagged `inward`); the shell adds only their stubs and caps. */
+  /** Walls the rooms already build at full height (tagged `inward`), corner to corner; the shell adds only their stubs and caps. */
   existing: Side[]
   /** Door openings along a wall, as world x (back, front) or z (left, right) ranges. */
   openings?: Partial<Record<Side, Array<[number, number, number]>>>
@@ -64,7 +64,8 @@ export function shell(spec: Shell): THREE.Group {
     m.castShadow = spec.casts
     m.receiveShadow = true
     m.userData.inward = INWARD[side]
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(alongX ? len : T + 0.004, 0.02, alongX ? T + 0.004 : len), cut)
+    // Side caps stop 2 mm short of the back and front caps, so no two caps share a top face.
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(alongX ? len : T + 0.004, 0.02, alongX ? T + 0.004 : len - 0.004), cut)
     cap.position.set(m.position.x, y1 + 0.01, m.position.z)
     cap.userData.inward = INWARD[side]
     cap.castShadow = spec.casts
@@ -105,17 +106,6 @@ export function shell(spec: Shell): THREE.Group {
       }
     }
   }
-  // Corners the room's own walls leave open: fill to full height so the outside reads solid.
-  if (spec.existing.includes('back')) {
-    for (const x of [ox0 + T / 2, ox1 - T / 2]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(T, height, T), wall)
-      post.position.set(x, height / 2, oz0 + T / 2)
-      post.castShadow = true
-      post.userData.inward = INWARD.back
-      group.add(post)
-    }
-  }
-
   // The base: a painted slab under the floor and walls, with a soft contact shadow below.
   const base = new THREE.Mesh(new THREE.BoxGeometry(ox1 - ox0 + 0.08, BASE, oz1 - oz0 + 0.08), cut)
   base.position.set((ox0 + ox1) / 2, -BASE / 2 - 0.002, (oz0 + oz1) / 2)
@@ -179,6 +169,7 @@ export type TreeSpot = [number, number, number, number]
 export function trees(spots: TreeSpot[], y = 0): THREE.Group {
   const group = new THREE.Group()
   group.name = 'garden trees'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const bark: THREE.BufferGeometry[] = []
   const clumps: THREE.BufferGeometry[][] = [[], []]
   for (const [tx, tz, scale, turn] of spots) {
@@ -222,6 +213,7 @@ export function yard(spec: Yard): THREE.Group {
   const { x0, x1, z0, z1 } = spec
   const group = new THREE.Group()
   group.name = 'diorama yard'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const r = rng(spec.seed)
   const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2
 

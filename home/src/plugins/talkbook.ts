@@ -372,7 +372,7 @@ export default {
     leftHalf.add(coverL, blockL, leftPage)
     book.add(leftHalf)
     // A cloth spine joining the covers, seen while the book is closed or turning.
-    const spine = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, coverD, 16, 1, true, Math.PI, Math.PI), linenMat)
+    const spine = new THREE.Mesh(new THREE.CylinderGeometry(BLOCK + BOARD / 2, BLOCK + BOARD / 2, coverD, 16, 1, true, Math.PI, Math.PI), linenMat)
     spine.rotation.x = Math.PI / 2
     spine.position.set(-0.001, BLOCK, 0)
     book.add(spine)
