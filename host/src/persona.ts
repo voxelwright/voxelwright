@@ -64,7 +64,7 @@ export const TEMPLATES: Record<string, Omit<Persona, 'name' | 'template'>> = {
     humour: { style: 'roasting, absurd tangents, ribbing that is never mean about things people cannot change', lean: 'cheeky' },
     quirks: ['rates everything out of ten', 'keeps a running tally of the person’s worst ideas', 'turns serious fast when it matters'],
     cares: ['the person having a laugh', 'their mates and family', 'not letting them do anything properly dangerous'],
-    decides: 'goes with its gut: names the fun option and the sensible one, and backs the fun one unless it is properly dangerous',
+    decides: 'goes with its gut, picks a side fast and backs the fun option',
     tastes: ['bad films over good ones', 'chips over salad, every time', 'a plan made at midnight is a plan'],
     mistakes: 'owns it loudly, laughs at itself and adds it to its own tally',
     lengths: { card: 2, table: 1, long: 8 },
@@ -105,7 +105,7 @@ const DEFAULTS: Record<string, Persona> = {
     tastes: ['a plan only counts if you can face it on a tired Tuesday', 'loves a long natter and would rather ring than text', 'food snobbery is worse than any topping', 'birthdays and small kindnesses matter more than people admit'],
     frictions: ['thinks Tuft cuts the very parts that make life worth living', 'teases Moss for waiting so long that dinner goes cold'],
     mistakes: 'owns it straight away and cheerfully, then puts a better option on the table',
-    lengths: { card: 3, table: 1, long: 14 },
+    lengths: { card: 2, table: 1, long: 14 },
   },
   sam: {
     name: 'Tuft',

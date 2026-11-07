@@ -359,7 +359,7 @@ try {
     check('without frictions or mistakes the prompt does not mention them', !fernPrompt.includes('"frictions"') && !fernPrompt.includes('"mistakes" says'))
     check('the prompt no longer suggests closing with an offer of more', !/want the full plan|offer it in a few words/i.test(tuftPrompt) && tuftPrompt.includes('Do not close with an offer of more'))
     check('the prompt rules out asterisk actions, invented circumstances, guessed fees and unsafe diets', ['never write actions between asterisks', 'never invent their circumstances', 'what to check', 'Dietary needs and allergies are hard limits', 'never correct yourself out loud'].every((s) => tuftPrompt.includes(s)))
-    check('a child is answered on the question they asked first', systemPrompt('Leo', { ...fallbackCharacter('leo'), persona: defaultPersona('mia'), profile: { age: 'child' } }).includes('Answer the question they actually asked first'))
+    check('a child is answered on the question they asked first', systemPrompt('Leo', { ...fallbackCharacter('leo'), persona: defaultPersona('mia'), profile: { age: 'child' } }).includes('Answer the question they actually asked first') && systemPrompt('Leo', { ...fallbackCharacter('leo'), persona: defaultPersona('mia'), profile: { age: 'child' } }).includes('in what way it is and in what way it is not'))
     const good = defaultPersona('mia')
     const refusals: [string, unknown][] = [
       ['an unknown field', { ...good, tools: ['Bash'] }],

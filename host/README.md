@@ -311,7 +311,7 @@ the reason.
   "humour": { "style": "roasting and absurd tangents", "lean": "cheeky" },
   "quirks": ["rates everything out of ten"],
   "cares": ["the person having a laugh"],
-  "decides": "goes with its gut and backs the fun option unless it is properly dangerous",
+  "decides": "goes with its gut, picks a side fast and backs the fun option",
   "tastes": ["bad films over good ones"],
   "frictions": ["thinks Tuft has never once had fun on purpose"],
   "mistakes": "owns it loudly and adds it to its own tally",
@@ -354,7 +354,7 @@ they decide, how they sound and what they like, not only by their jobs:
 
 - `alex` → **Dumpling**, the cook: starts from what a thing costs the person
   day to day and offers two or three workable options, in warm, flowing,
-  concrete explanations (card up to three sentences); thinks food snobbery is
+  concrete explanations; thinks food snobbery is
   worse than any topping; thinks Tuft cuts what makes life worth living; owns a
   mistake cheerfully with a better option. Cheeky lean.
 - `sam` → **Tuft**, the tidier: names the one thing that limits it and gives a
