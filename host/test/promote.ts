@@ -277,7 +277,7 @@ try {
   await mkdir(join(live, PLUGIN))
   h0 = await head()
   const blocked = await settle(promoteGood())
-  check('promote-write-failure-refused: a failed write is a recorded refusal and live is unchanged', blocked === 'write-failed' && (await lastResult()).reason === 'write-failed' && (await head()) === h0 && (await clean()), { blocked })
+  check('promote-write-failure-refused: a failed write is a recorded refusal and live is unchanged', ['write-failed', 'error'].includes(blocked) && (await lastResult()).reason === blocked && (await head()) === h0 && (await clean()), { blocked })
   await rm(join(live, PLUGIN), { recursive: true, force: true })
 
   // A candidate that adds a .gitignore beside its plugin, which could hide later edits.

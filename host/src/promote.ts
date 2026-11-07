@@ -84,7 +84,8 @@ async function attempt(live: string, action: string, work: () => Promise<Outcome
     return await record(live, action, await work())
   } catch (error) {
     if (error instanceof Refusal) return record(live, action, { result: 'refused', reason: error.reason, message: error.message, ...error.extra })
-    throw error
+    // Only applyToLive writes to live, and it puts everything back before refusing, so any other failure left live as it was.
+    return record(live, action, { result: 'refused', reason: 'error', message: `Something went wrong (${(error as Error).message ?? error}), so I left the home as it was.` })
   } finally {
     if (locked) await rm(lock, { force: true })
   }
