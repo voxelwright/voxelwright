@@ -157,23 +157,35 @@ nothing changes. Both rigs hang off the resting pose that `travel()` moves, so
 room walks work, and focus poses blend the field of view back to 40°. Q/E are
 ignored while typing, so the notebook still takes the letter q.
 
-Cheap fixes so the views look meant: walls tagged `userData.inward` hide when
-the camera is behind them, the rooms' fog slides back with the camera's
-distance, a warm backdrop replaces the dark beyond the room, iso fades the
-floor's edge into it, and the window's painted garden (`userData.seatOnly`) is
-hidden in iso because it showed over the wall.
+Iso is a dollhouse cutaway. Only the iso plan loads `diorama` (kitchen) and
+`loungediorama` (living room); `src/diorama.ts` builds the shell: a base with
+a soft contact shadow, a floor clipped to the walls, thick walls with painted
+caps, and low cut stubs that take a wall's place when the camera stands
+outside it. Walls tagged `userData.inward` that face away move to a
+shadow-only layer (`SHADOW_ONLY`), so they keep casting; in both wider views the
+sun's shadow box covers the whole room, which removed the hard sun wedges.
+Behind the kitchen sits a garden plot with a tree, which the window looks down
+on, and the doorway passage has an outside. The pendant hangs from a braced
+wall arm, and a soft pool on the table shows it is on. The kitchen's 9 m floor
+and the painted garden card are `userData.seatOnly`. `?cam=third` keeps the old
+fixes: walls cut away, fog slid back and a warm backdrop.
 
-Still broken from these angles: the kitchen has no ceiling and only two walls,
-so the pendant cord hangs from nothing and the right side ends in haze; the
-kitchen floor is a 9 m square that runs past the walls; sunlight lands on the
-open floor as large hard-edged wedges; the base cabinets read as floating at
-the open end; hidden walls stop casting shadows; the living room's walls are
-one-sided planes that vanish from outside; in third person, walking to the
-fridge leaves only two entries on screen, so Tab reaches only those; with the
-garden hidden, the iso window shows the floor behind the wall (a garden card
-sized to the opening, or a floor clipped to the room, would fix both).
-`cam-third-fridge.jpg` was taken with the pointer still on the fridge, so its
-hover glow makes it look beige.
+Still open in iso: about 70% of the kitchen floor is bare from above; the
+lamp shade reads dark from above; the tabletop blooms to white when zoomed; the living
+room's walls are greyer than the kitchen's. In third person, walking to the
+fridge leaves two entries on screen. `cam-third-fridge.jpg` was taken with the
+pointer still on the fridge, so its hover glow makes it look beige.
+
+Look (ui-craft, a fresh `claude -p --model opus` scorer each round, given only
+the six iso shots, the seated view and the rubric), overall / diorama / daily:
+before 5 / 4 / 5, round 1 5 / 5 / 5, round 2 5 / 5 / 5, round 3 5 / 5 / 5.
+Stopped on the plateau; the remaining findings are mostly room content.
+
+The seated view is unchanged. Comparing seated captures from before and after
+(mocked clock, seeded `Math.random`): the kitchen at `?q=low` differs by
+a mean of 0.10, against 0.11 between two runs of the old code; the kitchen at
+`?q=high` differs by 2.69, against 2.67 at `?q=high&fx=` (film grain, run to
+run); the living room at `?q=low` is identical (0.00).
 
 Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
 (`npm run measure -- <url> --perf --gpu`):
@@ -186,6 +198,18 @@ Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
 
 The extra 9 draw calls are objects the wider views no longer cull.
 Screenshots: `screenshots/talk/cam-*.jpg`.
+
+Dollhouse shell, same setup, one 6 s run each:
+
+| Mode | Draw calls | Triangles | GPU p50 / p95 ms |
+| --- | --- | --- | --- |
+| `?cam=iso&q=high`, before | 491 | 52,856 | 8.8 / 16.7 |
+| `?cam=iso&q=high`, after | 555 | 66,358 | 9.8 / 16.7 |
+| `?cam=iso&q=low`, before | 421 | 49,625 | 4.1 / 5.0 |
+| `?cam=iso&q=low`, after | 485 | 63,127 | 4.7 / 6.8 |
+| `?cam=iso&q=high&room=living`, after | 193 | 41,272 | 9.2 / 11.5 |
+
+Screenshots: `screenshots/talk/iso-*.jpg`.
 
 ## Measured, kitchen scene (November 6, 2026)
 
