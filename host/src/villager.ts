@@ -284,7 +284,7 @@ export default {
       }
       if (what === 'props' && req.method === 'POST') {
         if (!config.maker) return send(res, 503, { error: 'no maker' })
-        let b: { what?: unknown; size?: unknown; variant?: unknown; sketch?: unknown }
+        let b: { what?: unknown; size?: unknown; variant?: unknown; sketch?: unknown; style?: unknown }
         try {
           b = ((await body(req)) ?? {}) as typeof b
         } catch {
@@ -301,6 +301,9 @@ export default {
         if (typeof b.what !== 'string' || !b.what.trim() || b.what.length > 200) return send(res, 400, { error: 'what is 1 to 200 characters' })
         const size = Array.isArray(b.size) && b.size.length === 3 && b.size.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 4) ? b.size as [number, number, number] : undefined
         if (b.size !== undefined && !size) return send(res, 400, { error: 'size is three numbers in metres, each at most 4' })
+        // A theme's style guide (#50 regroup S3) for a theme's version of a prop: plain text, quoted into the prompt as data.
+        if (b.style !== undefined && (typeof b.style !== 'string' || !b.style.trim() || b.style.length > 400)) return send(res, 400, { error: 'style is 1 to 400 characters' })
+        const style = typeof b.style === 'string' ? b.style.replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim() : undefined
         const variant = Number.isInteger(b.variant) && (b.variant as number) >= 0 && (b.variant as number) < 10 ? b.variant as number : 0
         if (making.has(id)) return send(res, 409, { error: 'already making something' })
         making.add(id)
@@ -308,7 +311,7 @@ export default {
         try {
           const made = image
             ? await config.sketchMaker!({ what: b.what.trim(), words: b.what.trim(), image, size, variant, signal: AbortSignal.timeout(120_000) })
-            : await config.maker({ what: b.what.trim(), size, variant, signal: AbortSignal.timeout(90_000) })
+            : await config.maker({ what: b.what.trim(), size, variant, ...(style ? { style } : {}), signal: AbortSignal.timeout(90_000) })
           const ms = Date.now() - started
           if (typeof made.module !== 'string' || !made.module.trim() || made.module.length > MAX_MODULE) return send(res, 422, { error: 'the maker returned no usable module', ms })
           // Stored as text for the home's sandbox; never imported, evaluated or run by the host.
