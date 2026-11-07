@@ -435,10 +435,15 @@ What the box relies on:
 
 Not isolated, or unproven:
 
-- CPU and memory. The module shares the machine until its limit; a
-  plain-object flood was stopped by the 4 s limit before it reached the heap
-  limit, so whether hitting V8's heap limit crashes only the worker or the
-  frame's whole process is unproven.
+- CPU and memory. The module shares the machine until its limit. A heap
+  flood fast enough to reach V8's limit (`new Array(1 << 20).fill(0)` in a
+  loop) kills the box frame's whole process in about 4.5 s. A one-off probe
+  showed the home survives: the page's heartbeats to the dev server
+  continued, the page's own limit closed the box at 15 + 3 s ("the sandbox
+  stopped answering"), and the next prop built in a fresh box. Two gaps
+  remain. The page waits for its limit instead of noticing the crash, and the
+  probe is not in the check, because Playwright reports an out-of-process
+  frame's crash as a page crash and stops driving the page.
 - Timing. `performance.now` and timers are available, so side channels inside
   the frame's own process are not ruled out; with no network, nothing read
   can leave except through the prop's own shape and pixels.
