@@ -576,7 +576,7 @@ export default {
       g.textAlign = 'center'
       paintMark(g, who.mark, 470, 420, 170, who.ribbon, 700 + vi)
       inkText(g, who.name, 470, 720, 'italic 120px "Snell Roundhand", "Apple Chancery", cursive', tint(who.ribbon, 0.6, 0.92))
-      inkText(g, `${who.name}'s villager`, 470, 800, PENCIL, PENCIL_INK)
+      inkText(g, JOURNAL ? `${({ alex: 'Alex', sam: 'Sam', mia: 'Mia' } as Record<string, string>)[who.id] ?? ''}'s villager` : `${who.name}'s villager`, 470, 800, PENCIL, PENCIL_INK)
       if (who.awake) {
         inkText(g, 'Write on the right-hand page.', 470, 920, PENCIL, PENCIL_INK)
         inkText(g, 'Answers come back in green ink.', 470, 972, PENCIL, PENCIL_INK)

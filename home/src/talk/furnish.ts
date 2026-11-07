@@ -30,7 +30,7 @@ const ANCHORS: Record<string, Anchor> = {
   wall: { x: 0.45, y: 0, z: WALL_Z + 0.006, ry: 0, wall: true },
   table: { x: TABLE.x, y: 0, z: TABLE.z, ry: 0 },
   // The living room is another room; until it can be furnished from here, its door stands in for it.
-  livingDoor: { x: (DOORWAY.x0 + DOORWAY.x1) / 2 + 0.15, y: 0, z: WALL_Z + 0.55, ry: 0.3 },
+  livingDoor: { x: (DOORWAY.x0 + DOORWAY.x1) / 2 + 0.35, y: 0, z: WALL_Z + 0.75, ry: 0.55 },
 }
 /** Rough sizes by kind, for the ghost when the router gave none. */
 const SIZES: [RegExp, [number, number, number]][] = [
@@ -102,7 +102,9 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     })
     return b
   }
-  choice.append(button('Keep', () => keep(), 'keep'), button('Undo', () => undo(), 'undo'), button('Try another', () => void again(), 'again'))
+  const making = document.createElement('span')
+  making.className = 'making'
+  choice.append(making, button('Keep', () => keep(), 'keep'), button('Undo', () => undo(), 'undo'), button('Try another', () => void again(), 'again'))
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
@@ -150,7 +152,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   // ── Ghosts ───────────────────────────────────────────────────────────────
   const ghost = (size: [number, number, number], at: Placement) => {
     const [w, h, d] = size
-    const g = new THREE.Mesh(new RoundedBoxGeometry(w, h, Math.max(d, 0.03), 3, Math.min(0.06, Math.min(w, h, d) / 3)), ghostMat)
+    const round = /\bround|circular|stool|lamp|plant|pot\b/i.test(job?.routed?.what ?? job?.text ?? '')
+    const g = new THREE.Mesh(round ? new THREE.CylinderGeometry(w / 2, w / 2, h, 40) : new RoundedBoxGeometry(w, h, Math.max(d, 0.03), 3, Math.min(0.06, Math.min(w, h, d) / 3)), ghostMat)
     g.name = 'talk furnishing ghost'
     g.position.set(at.x, at.y + h / 2, at.wall ? at.z + d / 2 : at.z)
     g.rotation.y = at.ry
@@ -181,15 +184,17 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const what = replacing ? 'table' : lower
     const { list } = places(where, what, count, replacing, text)
     const j: Job = { text, t0, routed: null, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
+    job = j
     j.ghosts = list.map((p) => ghost(sizeOf(what), p))
     j.timing.ghostMs = performance.now() - t0
-    job = j
+    showMaking(j)
     return j
   }
 
   /** The guess was wrong: the ghost dissolves. */
   const dismiss = (j: Job | null) => {
     if (!j || j.state !== 'ghost') return
+    choice.classList.remove('shown', 'busy')
     j.state = 'gone'
     j.timing.why = 'not furnishing'
     clearGhosts(j)
@@ -236,6 +241,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   }
 
   const fail = (j: Job, why: string, line: string) => {
+    choice.classList.remove('shown', 'busy')
     j.state = 'gone'
     j.timing.ok = false
     j.timing.why = why
@@ -266,6 +272,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.places = list
     j.ghosts = list.map((p) => ghost(sizeOf(what, routed.size), p))
     j.timing.ghostMs ??= performance.now() - t0
+    showMaking(j)
     j.timing.route = 'furnish'
     if (note) hooks.say(note)
     await realise(j)
@@ -342,10 +349,17 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.timing.finalMs = performance.now() - j.t0
     j.timing.makeMs ??= performance.now() - tm
     timings.push(j.timing)
+    choice.classList.remove('busy')
     choice.classList.add('shown')
     choice.dataset.again = String(j.timing.source === 'made')
   }
 
+  /** While it is being made, the tag over the ghost says what, in pencil. */
+  const showMaking = (j: Job) => {
+    const what = (j.routed?.what ?? '').replace(/^(a|an|the|some) /i, '')
+    making.textContent = what ? `making ${what.length > 34 ? `${what.slice(0, 33)}…` : what}…` : 'thinking…'
+    choice.classList.add('shown', 'busy')
+  }
   const removeProps = (j: Job) => {
     for (const o of j.props) o.removeFromParent()
     if (j.owned && j.props[0]) releaseGpu(j.props[0])
@@ -397,7 +411,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const lower = (where ?? '').toLowerCase()
     const at = /living ?room|lounge/.test(lower) ? ANCHORS.livingDoor : /corner/.test(lower) ? ANCHORS.corner : /window/.test(lower) ? ANCHORS.window : ANCHORS.floor
     const p = makeParcel(what)
-    p.position.set(at.x + parcels.length * 0.7, 0, at.z)
+    p.scale.setScalar(1.25)
+    p.position.set(at.x + parcels.length * 0.8, 0, at.z + parcels.length * 0.3)
     p.rotation.y = at.ry
     p.name = `talk project ${what}`
     group.add(p)
@@ -460,9 +475,9 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       ghostMat.opacity = 0.3 * (1 - k)
       if (k >= 1) clearGhosts(j)
     } else if (j?.state === 'placed' && j.ghosts.length) clearGhosts(j)
-    if (j?.state === 'placed' && j.props[0]) {
+    if ((j?.state === 'placed' && j.props[0]) || (j?.state === 'ghost' && j.ghosts[0])) {
       const b = new THREE.Box3()
-      for (const o of j.props) b.expandByObject(o)
+      for (const o of j.state === 'placed' ? j.props : j.ghosts) b.expandByObject(o)
       top.set((b.min.x + b.max.x) / 2, b.max.y + 0.08, (b.min.z + b.max.z) / 2).project(stage.camera)
       const r = stage.renderer.domElement.getBoundingClientRect()
       const x = THREE.MathUtils.clamp(r.left + ((top.x + 1) / 2) * r.width, 120, innerWidth - 120)
@@ -576,7 +591,7 @@ function makeParcel(what: string) {
   t.font = `40px ${HAND}`
   const label = what.replace(/^(a|an|the) /i, '')
   t.fillText(label.length > 22 ? `${label.slice(0, 21)}…` : label, 256, 214)
-  const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.176), new THREE.MeshStandardMaterial({ map: toTexture(tc), roughness: 0.95, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }))
+  const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.246), new THREE.MeshStandardMaterial({ map: toTexture(tc), roughness: 0.95, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }))
   tag.position.set(0.1, H * 0.62, D / 2 + 0.03)
   tag.rotation.set(-0.12, 0.08, 0.06)
   g.add(tag)
@@ -596,12 +611,16 @@ function css() {
   .furnish-choice::after { content: ''; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; margin-left: -8px; rotate: 45deg;
     background: #f5e7cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
   .furnish-choice.shown { opacity: 1; scale: 1; pointer-events: auto; }
-  .furnish-choice button { position: relative; padding: 4px 13px 5px; border: 0; border-radius: 999px; cursor: pointer;
-    background: rgba(214, 186, 146, 0.32); color: #553a26; font: 700 18px ${HAND}; transition: background 120ms ease, translate 120ms ease; }
-  .furnish-choice button[data-choice='keep'] { background: #5f7d4e; color: #fbf6ea; }
+  .furnish-choice button { position: relative; padding: 2px 8px 4px; border: 0; background: none; cursor: pointer;
+    color: #6a4a34; font: 700 21px ${HAND}; transition: translate 120ms ease, color 120ms ease; }
+  .furnish-choice button + button::before { content: '·'; position: absolute; left: -7px; color: rgba(120, 80, 50, 0.5); }
+  .furnish-choice button[data-choice='keep'] { color: #3f6a35; }
+  .furnish-choice button:hover, .furnish-choice button:focus-visible { translate: 0 -1px; outline: none; text-decoration: underline wavy rgba(120, 80, 50, 0.5); }
   .furnish-choice[data-again='false'] button[data-choice='again'] { display: none; }
-  .furnish-choice button:hover, .furnish-choice button:focus-visible { translate: 0 -1px; outline: none; background: rgba(214, 186, 146, 0.6); }
-  .furnish-choice button[data-choice='keep']:hover, .furnish-choice button[data-choice='keep']:focus-visible { background: #6e8f5b; }
+  .furnish-choice .making { display: none; padding: 2px 8px 4px; font: italic 20px ${HAND}; color: #6a4a34; }
+  .furnish-choice.busy .making { display: inline; }
+  .furnish-choice.busy button { display: none; }
+  .furnish-choice.busy { pointer-events: none; }
   @media (prefers-reduced-motion: reduce) { .furnish-choice { transition: none; } }
   `
 }

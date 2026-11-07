@@ -136,7 +136,32 @@ api holds everything you may use:
   - paintPlaster(seed, base: [r,g,b], 256, 256, 0.3)
   - paintBrushed(seed)
 
+Every [r,g,b] colour for the painters is 0 to 255 (e.g. [222, 180, 128]), never 0 to 1: fractions paint nearly black. Keep metalness at 0 except small brass or steel details (no environment map, so metal looks dark).
+
 Return a THREE.Group of meshes, centred on x and z, standing on y = 0. Set castShadow and receiveShadow on meshes. Keep it under about 40 meshes. Do not touch the scene, renderer, DOM, network or timers.
+
+Example in the house style (an existing chair):
+
+export function build(api) {
+  const { THREE, RoundedBoxGeometry, paint } = api
+  const pine = new THREE.MeshStandardMaterial({ map: paint.paintWood({ seed: 13, planks: 1, light: [232, 190, 132], dark: [196, 150, 98], knots: 1, w: 256, h: 256 }), roughness: 0.5 })
+  const cushion = new THREE.MeshStandardMaterial({ color: '#e3dccf', roughness: 0.95 })
+  const chair = new THREE.Group()
+  const seatY = 0.45, w = 0.42, d = 0.42
+  const part = (geo, x, y, z, mat = pine) => {
+    const m = new THREE.Mesh(geo, mat)
+    m.position.set(x, y, z)
+    m.castShadow = m.receiveShadow = true
+    chair.add(m)
+    return m
+  }
+  part(new THREE.BoxGeometry(w, 0.03, d), 0, seatY, 0)
+  for (const x of [-1, 1]) part(new THREE.BoxGeometry(0.035, seatY, 0.035), x * (w / 2 - 0.02), seatY / 2, d / 2 - 0.02)
+  for (const x of [-1, 1]) part(new THREE.BoxGeometry(0.035, 0.95, 0.035), x * (w / 2 - 0.02), 0.475, -d / 2 + 0.02)
+  part(new THREE.BoxGeometry(w, 0.07, 0.025), 0, 0.9, -d / 2 + 0.02)
+  part(new RoundedBoxGeometry(w - 0.04, 0.05, d - 0.04, 3, 0.02), 0, seatY + 0.04, 0.01, cushion)
+  return chair
+}
 
 Answer with the module only, in one \`\`\`js fenced block.`
 

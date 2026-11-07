@@ -336,7 +336,7 @@ try {
     await page.waitForTimeout(100)
     s = await state(page)
     const card = await page.evaluate(() => ({ text: document.querySelector('.talk-mine .mine-words')?.textContent, tab: document.querySelector('.talk-mine .mine-tab')?.textContent, to: document.querySelector('.talk-mine .mine-to')?.textContent }))
-    check('speech: your words rise as your own card, addressed to your villager', s.input.speechShown && card.text === 'I want to chat with Tuft' && card.tab === 'You' && card.to === 'to Dumpling', card)
+    check('speech: your words rise as your own card, and naming Tuft re-addresses it as you type', s.input.speechShown && card.text === 'I want to chat with Tuft' && card.tab === 'You' && card.to === 'to Tuft', card)
     await page.keyboard.press('Enter')
     await page.waitForTimeout(60)
     const flying = await page.locator('.talk-mine.flying').count()

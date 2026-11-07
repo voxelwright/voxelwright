@@ -38,6 +38,8 @@ export interface InputHooks {
   blocked(): boolean
   /** The journal entry's id, chosen by the felt book or J. */
   journal: string
+  /** Open the journal where it makes sense (the last conversation). */
+  openJournal(): void
 }
 
 export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
@@ -122,15 +124,18 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const binding = new THREE.Mesh(new RoundedBoxGeometry(PADW + 0.05, 0.075, 0.035, 2, 0.015), new THREE.MeshStandardMaterial({ map: toTexture(paintLinen(3, [178, 74, 54], 256)), roughness: 1 }))
   binding.position.set(0, PADH / 2 + 0.01, 0.006)
   const mitten = new THREE.MeshStandardMaterial({ map: toTexture(paintLinen(11, [60, 90, 138], 256)), roughness: 1, emissive: '#101828', emissiveIntensity: 0.2 })
-  const palm = new THREE.Mesh(new RoundedBoxGeometry(0.26, 0.34, 0.12, 4, 0.06), mitten)
-  palm.position.set(-PADW / 2 - 0.02, -0.12, -0.07)
-  palm.rotation.z = 0.25
-  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.12, 6, 12), mitten)
-  thumb.position.set(-PADW / 2 + 0.06, -0.06, 0.03)
-  thumb.rotation.z = -0.9
-  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.14, 0.12, 20), new THREE.MeshStandardMaterial({ color: '#e7dcc6', roughness: 1 }))
-  cuff.position.set(-PADW / 2 - 0.1, -0.33, -0.07)
-  cuff.rotation.z = 0.25
+  // A knitted mitten holding the pad from below: the palm behind, the thumb pressed on the front.
+  const palm = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), mitten)
+  palm.scale.set(0.17, 0.2, 0.09)
+  palm.position.set(-PADW / 2 + 0.06, -0.2, -0.08)
+  palm.rotation.z = 0.35
+  const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.1, 8, 16), mitten)
+  thumb.position.set(-PADW / 2 + 0.12, -0.13, 0.035)
+  thumb.rotation.z = -1.0
+  thumb.scale.z = 0.7
+  const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.045, 12, 28), new THREE.MeshStandardMaterial({ map: toTexture(paintLinen(12, [236, 226, 204], 256)), roughness: 1 }))
+  cuff.position.set(-PADW / 2 - 0.02, -0.38, -0.08)
+  cuff.rotation.set(1.3, 0, 0.35)
   pad.add(back, stack, sheet, binding, palm, thumb, cuff)
   pad.visible = hooks.variant === 'held'
   hud.add(mark(pad))
@@ -156,6 +161,12 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const caret = document.createElement('i')
   caret.className = 'mine-caret'
   speech.append(tab, toTag, words)
+  // Speech has no box at rest; until the first line, a pencilled hint says how to start.
+  const hint = document.createElement('div')
+  hint.className = 'talk-input-hint'
+  hint.textContent = 'just start typing · J opens your journal'
+  hint.hidden = hooks.variant !== 'speech'
+  document.body.append(hint)
   tab.textContent = 'You'
   document.body.append(speech)
   const journalButton = document.createElement('button')
@@ -226,7 +237,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.fillStyle = to.colour
     g.fillText(name, PW - 60, 92)
     g.textAlign = 'left'
-    g.font = `64px ${HAND}`
+    g.font = `56px ${HAND}`
     if (!text) {
       g.fillStyle = 'rgba(70, 50, 36, 0.42)'
       g.font = `italic 50px ${HAND}`
@@ -260,13 +271,13 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const t = e.target as HTMLElement | null
     if (t && t !== field && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
     if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return
-    if (document.activeElement === field) return
     // J (lowercase, nothing written yet) opens the journal; a capital J still starts a line.
-    if (e.key === 'j' && !text) {
+    if (e.key === 'j' && !field.value) {
       e.preventDefault()
       openJournal()
       return
     }
+    if (document.activeElement === field) return
     if (e.key === ' ') return
     e.preventDefault()
     field.focus({ preventScroll: true })
@@ -327,11 +338,12 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     }
     field.value = ''
     onInput()
+    hint.hidden = true
   }
 
   const openJournal = () => {
     field.blur()
-    entries.choose(hooks.journal)
+    hooks.openJournal()
   }
   journalButton.addEventListener('click', openJournal)
   field.addEventListener('input', onInput)
@@ -349,6 +361,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const away = hooks.blocked()
     hud.visible = !away
     if (away) speech.classList.remove('shown')
+    hint.classList.toggle('shown', !away && !text)
     // In front of the camera at 0.5 m, scaled to the view so it keeps its place on screen.
     const d = 0.5
     const h = d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
@@ -404,23 +417,25 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
     // The torn note: up off the pad, then a curve to the recipient, shrinking as it goes.
     if (flight) {
-      flight.t += dt / 0.8
-      const k = Math.min(1, flight.t)
+      flight.t += dt / 1.25
+      // First the note lifts off the pad and turns to face its way, then it flies.
+      const lifted = Math.min(1, flight.t / 0.28)
+      const k = Math.max(0, Math.min(1, (flight.t - 0.28) / 0.72))
       flight.from.decompose(tmp, q, scl)
       const start = tmp.clone()
       const end = flight.to
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q)
       const e = 1 - (1 - k) ** 2
-      const pos = start.clone().lerp(end, e).addScaledVector(up, Math.sin(k * Math.PI) * 0.25)
+      const pos = start.clone().addScaledVector(up, 0.05 * lifted).lerp(end, e).addScaledVector(up, Math.sin(k * Math.PI) * 0.25)
       flyer.matrixAutoUpdate = true
       flyer.position.copy(pos)
       flyer.quaternion.copy(q)
       flyer.rotateZ(Math.sin(k * 9) * 0.18 * (1 - k))
-      flyer.rotateX(-k * 0.8)
+      flyer.rotateX(-0.5 * lifted - k * 0.6)
       flyer.scale.copy(scl).multiplyScalar(1 - 0.85 * e)
       flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
       flyer.visible = true
-      if (k >= 1) {
+      if (flight.t >= 1) {
         flight = null
         flyer.visible = false
       }
@@ -432,6 +447,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     field.remove()
     speech.remove()
     journalButton.remove()
+    hint.remove()
     style.remove()
     for (const o of document.querySelectorAll('.talk-mine.flying')) o.remove()
     hud.removeFromParent()
@@ -462,6 +478,9 @@ function css() {
   const paper = `radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%)`
   return `
   .talk-input-field { position: fixed; left: -9999px; top: 0; width: 200px; opacity: 0; }
+  .talk-input-hint { position: fixed; z-index: 4; left: 50%; bottom: 30px; translate: -50% 0; pointer-events: none; opacity: 0; transition: opacity 400ms ease;
+    font: italic 22px ${HAND}; color: #fff8ec; text-shadow: 0 1px 2px rgba(60, 30, 10, 0.6), 0 0 14px rgba(60, 30, 10, 0.4); white-space: nowrap; }
+  .talk-input-hint.shown { opacity: 0.92; }
   .talk-journal { position: fixed; z-index: 5; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 10px; }
   .talk-journal:focus-visible { outline: 3px solid rgba(255, 236, 200, 0.9); outline-offset: 2px; }
   .talk-mine { position: fixed; z-index: 5; left: 50%; bottom: 26px; box-sizing: border-box; width: fit-content; min-width: 220px; max-width: min(520px, calc(100vw - 32px));

@@ -591,6 +591,7 @@ export default {
     const talk = (m: Member, greet = true) => {
       if (partner && partner !== m) endTalk(false)
       partner = m
+      lastTalked = m
       mode = 'talk'
       m.v.chosen = true
       m.v.beat()
@@ -1136,21 +1137,30 @@ export default {
       } else line.value = text
     }
     const headAt = new THREE.Vector3()
+    /** In the room, a line that names another villager is on its way to them, even before your villager has routed it. */
+    const namedIn = (text: string) => mode === 'room' ? cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text)) ?? null : null
+    /** Whom you last talked with: J opens the journal at their pages. */
+    let lastTalked: Member | null = null
     const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, say: (text) => quip(primary(), text) }) : null
     const input = INPUT ? alwaysOn(stage, entries, {
       variant: INPUT,
       journal: 'notebook',
       addressee: () => {
+        const named = namedIn(input?.text ?? '')
+        if (named) return { label: named.name, colour: named.colour }
         if (mode === 'table') return { label: seated.length > 1 ? 'the table' : seated[0]?.name ?? 'the table', colour: seated.length > 1 ? '#8a6a48' : seated[0]?.colour ?? '#8a6a48' }
         const m = mode === 'talk' && partner ? partner : primary()
         return { label: m.name, colour: m.colour }
       },
       target: () => {
+        const named = namedIn(input?.text ?? '')
+        if (named) return named.v.fig.head.getWorldPosition(headAt)
         if (mode === 'table' && seated.length > 1) return headAt.set(-0.25, 1.0, 0.15)
         const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
         return m ? m.v.fig.head.getWorldPosition(headAt) : null
       },
       blocked: () => entries.active === 'notebook',
+      openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
     }) : null
     ctx.effect(() => () => {
