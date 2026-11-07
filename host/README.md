@@ -403,3 +403,39 @@ does not restart it.
 Haiku sometimes said its piece, wrote a note, and then said it again after
 the tool result. `readTurn` now keeps the words said before the first note
 write and drops any text after it.
+
+### Measured (real models, operator login)
+
+`node test/persona-eval.ts --model haiku --out run.json` replays 47 turns in
+17 scenarios through the real host (temporary root, warm agent, thinking
+off): small talk, a hard day, a week of family dinners, a work project,
+money, a school question, a joke round at the table, three adaptation
+sequences with a reload (host restart and a fresh session) in the middle,
+the owner's November 7 play lines as regressions, four turns from a
+synthetic child, and the crude pair. `node test/persona-judge.ts run.json
+scores.json` scores each reply with a fresh blind Opus judge, 1 to 10:
+
+| Run | Adult register | Competence | Character | Adapts | Not twee | Capable adult |
+| --- | --- | --- | --- | --- | --- | --- |
+| before (136a43e), Haiku | 6.7 | 5.6 | 3.5 | 5.6 | 6.9 | 6.9 |
+| after, Haiku | 8.6 | 7.2 | 5.4 | 7.3 | 8.9 | 8.7 |
+| after, Sonnet | 8.7 | 7.5 | 5.9 | 7.7 | 9.0 | 9.1 |
+
+Child turns (n = 4, child rubric: age-appropriate, competence, character,
+respects intelligence, not twee): before 8.3, 6.5, 5.0, 7.8, 9.0; Haiku after
+7.8, 8.0, 5.5, 8.8, 9.5; Sonnet after 8.5, 8.5, 6.3, 9.0, 9.3. The owner's
+regression scenarios went from 3.2 to 6.4 to 7.7 (Haiku after). In all three
+adaptation sequences the villager wrote `how-<id>-likes-to-talk.md`, and the
+turns after the reload kept the register. With the opt-in, the buddy swore;
+the same line without it stayed a clean roast.
+
+First text, `test/turn-bench.ts`, 8 turns each, same machine and hour: old
+prompt Haiku p50 0.76 s; new prompt Haiku 1.32 s and 0.83 s, Sonnet 0.80 s
+and 1.42 s over two runs. The difference between the models is inside the
+noise. Haiku stays the default; Sonnet is about 0.3 to 0.5 better per
+criterion and is a `--model sonnet` away.
+
+Still weak: distinct character scores 5 to 6, Haiku once caught itself
+mid-reply on a banned motif ("while the kettle... no, stop"), stage
+directions in asterisks still appear now and then, and first text on a
+process's first turn ran 4 to 20 s in these runs on a busy machine.
