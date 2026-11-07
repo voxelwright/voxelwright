@@ -1694,9 +1694,13 @@ and the middle 10 cm at a time, and is left out if it never fits. Rooms whose
 name says pantry, store, bathroom, laundry, utility, garage or hall get none.
 The pieces are kinds (`src/build/pieces.ts`), each on a soft contact shadow
 inside its own footprint: `sofa`, `armchair`, `low-table`, `floor-lamp`, `rug`,
-`big-rug`, `low-bookcase`, `potted-plant`, `play-tent`, `play-table`,
-`toy-chest`, `desk`, `bed` and `side-table`. Escape or "Not now"
-leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
+`big-rug`, `low-bookcase`, `toy-shelf`, `potted-plant`, `play-tent`,
+`play-table` (a craft table and two stools), `toy-chest`, `play-wall` (bunting,
+two drawings and a low ledge of picture books on a playroom's back wall), `desk`,
+`bed` and `side-table`. Free-standing pieces keep 0.3 m inside the outline and
+clear of its pegs, and the built pieces are laid against the same scan of the
+house as the ghosts, so they stand exactly where the ghosts stood. Escape or "Not now"
+leaves no trace (the view glides back to where it was). Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
 plan history is `src/build/house.ts`: the host's store when the host is
 running. Without a host it is kept in memory, and a paper note at the top says
 once that nothing built will outlast the page.
@@ -1717,9 +1721,21 @@ old fence the lot grew past. All of it is runtime only and goes back when the
 rooms are undone or build mode unloads. The new room's base follows its walls
 round a bay, and the sun's shadow box grows to hold every room.
 
+The view answers the room (`src/build/frame.ts`, `src/build/movein.ts`; the dollhouse only).
+While the outline shows, the view glides to frame the outline, the shared wall and the
+door mark below the choice card, again after each change but never during a drag. Once
+built, the villager who asked walks from where they are through the new doorway (world.ts
+`setSpot` with the doorway's two faces as `through` points) and sits at the room's main
+piece: a stool at the play table, the sofa, the desk chair or the bed's edge, each cushioned
+to the villager's sitting height (0.635 m). They say one short line, and the view glides to
+a three-quarter view of the room, the shared wall cut to its stub, and follows them in. A
+drag, the wheel, a held WASD or arrow key ends the hold; the "Back to the house" tag at the
+top, or Escape, glides out to the whole house.
+
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 61 checks (first pieces, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
-node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
+node scripts/check-build-addroom.mjs                  # stub host and router, 66 checks (first pieces where the ghosts stood, the move-in through the door to a seat, the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg (outline, adjusted, close, reveal, built, door, phone), addroom.mp4
+node scripts/check-build-addroom.mjs --look --variant=<name>   # a look prototype (&look=<name>): addroom-{outline,reveal,built}-<name>.jpg
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
 ```
 
