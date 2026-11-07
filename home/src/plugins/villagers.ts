@@ -4,6 +4,7 @@ import { own, replace } from '../kernel'
 import { KINDS } from '../villagers/kinds'
 import { contactShadows, stepCrowd } from '../villagers/cast'
 import { Villager, type Task } from '../villagers/rig'
+import { tagVillager } from '../theme'
 
 // Prototype for #42: villager art directions in the kitchen, only with ?villager=a|b|c|d|lineup.
 // With ?talk=npc the talk plugin owns the cast instead.
@@ -54,6 +55,8 @@ export default {
       })
     }
     // A soft contact shadow under each one keeps them on the floor or the seat.
+    // The theme leaves a villager alone when the person asked it to keep its costume.
+    for (const { v, id } of villagers) tagVillager(v.fig.root, id)
     const crowd = villagers.map(({ v }) => v)
     const blobs = contactShadows(crowd)
     for (const v of crowd) group.add(v.fig.root)

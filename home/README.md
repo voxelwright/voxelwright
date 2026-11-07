@@ -1387,8 +1387,7 @@ want flatter texture (wood grain, rug), less specular, lighter ink on thin geome
 and no dots behind the steam. Known fault: halftone without ink (`?drop=ink`) renders at under
 1 fps on both tiers, reproducible; the preset always has both, and the cause is not found.
 
-Not built yet: switching themes live with a transition, saving, editing and deleting presets,
-the per-villager "keep my costume" toggle, and remaking props and costumes in the new style.
+Not built yet: remaking props and costumes in the new style ("redecorated over time").
 
 ### A theme written from a sentence
 
@@ -1429,3 +1428,69 @@ of it in the host's model call); the cause was not investigated, and other agent
 One run each, so these are single samples. Halftone, ink, brush and paper are still
 pass-through stubs, so the comic and pastoral results show only their tokens. Screenshots
 (Sonnet): `screenshots/themes/ask-cyberpunk.jpg`, `ask-cozier-autumn.jpg`, `ask-comic.jpg`.
+
+### Switching live, saved looks and the swatch book
+
+The swatch book is a paint fan deck on the window sill (an entry: hover, click, or Tab and
+Enter). It lays out one painted card per look; choosing a card switches the home live. Your own
+looks get "rename" and "tear out", the blank card saves the look on screen (a half-finished
+blend included) under a name, and the same name replaces it. The slip at the bottom takes a
+written request and calls `village.theme.ask(text)` when the theme writer provides it; until
+then it says it isn't there yet and sends nothing. Escape clears the slip, then closes the book.
+
+`setTheme()` picks one of two paths (`src/theme/switch.ts`):
+
+- Same post chain shape (the same stages with their settings, vetoes, and whether reflections
+  and a sky are in the chain; `shape()` in `src/theme/blend.ts`): the tokens blend over 1.5 s.
+  Postfx's numbers (bloom, vignette, warmth, grain, grade, sky colour, reflection strength) are
+  uniforms synced from `theme()` in its draw pass, so nothing is rebuilt. The grade is always in
+  the chain, written so its identity is exact. A value one look leaves unset (roughness, emissive,
+  a painted map) changes at the midpoint. Golden hour and the new Blue hour share a shape.
+- Any other pair: the last frame is copied to a canvas over the scene (a WebGPU canvas reads back
+  blank outside its frame, so the copy runs in a microtask after the draw), postfx is rebuilt, and
+  the copy stays until the new chain has drawn a frame and the GPU has finished it, then fades
+  over 0.6 s.
+
+With `prefers-reduced-motion` a blend is instant and the held frame is dropped without a fade.
+
+Looks you save live in `localStorage` (`village.themes`), the last chosen look in
+`village.theme.last` (`?theme=` wins over it) and costume choices in `village.theme.costumes`.
+Everything read back goes through `check()`; while that refuses everything, looks saved here come
+back through `revive()` in `src/theme/saved.ts`, which takes only colours and clamped numbers
+from storage and everything structural from the built-in the look was made from.
+
+Keep my costume: villager plugins tag each figure root with `tagVillager(root, id)`. A root with
+`userData.keepCostume` is skipped by the theme plugin with its whole subtree, and anything themed
+in it before is put back from the plugin's saved originals. `window.village.theme` exposes
+`list()`, `current()`, `get(id)`, `set(id)`, `save(name)`, `rename(id, name)`, `remove(id)`,
+`keepCostume(villagerId, on)`, `keepsCostume(id)`, `switching()` and `lastSwitch()`.
+
+`node scripts/check-themes.mjs [base-url] --before=<png>` proves both paths, the held frame,
+reduced motion, saved looks across reloads, keep my costume, the swatch book by keyboard and
+pointer, three theme and postfx load and unload cycles, and the no-op (the `--before` capture
+comes from `theme-shots.mjs` on the commit before; the swatch book is unloaded for the capture).
+
+Switch timing, headless Chrome, 1440x900, `?q=high`, M1 Pro shared with three other builders:
+
+| Switch | Worst frame | First frame of the new chain | Settled |
+| --- | --- | --- | --- |
+| Golden hour to Blue hour (blend) | 16.8 ms | none rebuilt | 1.50 s |
+| Blue hour to Neon night | 117 to 733 ms | 0.29 to 0.96 s | 0.92 to 1.59 s |
+| Neon night to 16-bit | 83 to 567 ms | 0.25 to 0.73 s | 0.90 to 1.37 s |
+| 16-bit to Golden hour | 100 ms | 0.15 s | 0.79 s |
+
+The worst frame is the new chain's shader compile; it happens under the held frame.
+`node scripts/theme-strip.mjs <out.png> <from> <to> <ms> ...` draws a real frame strip of a
+switch in the page (Playwright screenshots take 0.1 to 8 s each, too slow for a 1.5 s switch).
+Screenshots: `screenshots/themes/swatch-book-*.jpg` and `switch-*-strip.jpg`.
+
+Look (ui-craft, a fresh Opus scorer per round, overall out of 10): 6, then 6 after a dusk window
+for Blue hour, one mark for the current card and larger notes. Per category in round 2: warmth 7,
+materials 6, lighting 5, legibility 6, consistency 6, motion 6, the swatch book belongs 6, the
+room changing 6 (the blend alone "about 8", the rebuild "about 5"). Asked for next: open the
+cards from the fan on the sill instead of floating them over the table; compile the next chain
+before holding the frame, so the rebuild doesn't read as a freeze then a jump; let the lamp
+become the key light at dusk; fewer, smaller dust motes outside the beam. Below the 9/10 bar.
+
+Not built yet: characters on twos from `motion.characterFps`, a theme written from a sentence
+(the `check()` and `ask()` unit), and the comic-book and hand-painted looks.

@@ -31,8 +31,10 @@ import furnish from './plugins/furnish'
 import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
 import themePlugin from './theme/plugin'
-import { THEMED } from './theme'
+import { THEMED, themes } from './theme'
 import { attachAsk } from './theme/ask'
+import { ease } from './theme/switch'
+import type { Theme } from './theme/tokens'
 
 const params = new URLSearchParams(location.search)
 const listed = {
@@ -70,10 +72,11 @@ const keepRooms = params.get('rooms') !== 'unload'
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
 root.on('village/tier', () => void replace(postfx))
-// A live theme change (src/theme setTheme): the theme plugin shifts the scene, and postfx is rebuilt from the new tokens.
-root.on('village/theme', () => {
+// A live theme change (src/theme setTheme): the theme plugin shifts the scene; postfx blends
+// its uniforms, or is rebuilt behind a held frame when the post chain changes shape.
+root.on('village/theme', (previous, next) => {
   load(themePlugin)
-  void replace(postfx)
+  void ease(root.get('stage'), previous as Theme, next as Theme, () => replace(postfx))
 })
 
 /** What is registered right now: used by the unload proof and the perf run. */
@@ -114,6 +117,8 @@ const village = {
   snapshot,
   /** GPU pass and CPU frame times recorded so far (see the renderer's timing notes). */
   timing: () => root.get('stage')?.timing,
+  /** Looks: list, current, set, save, rename, remove, keepCostume (src/theme). */
+  theme: themes,
   load: (name: string) => load(plugins[name]),
   unload,
   /**

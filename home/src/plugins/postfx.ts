@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import {
   color as color3, diffuseColor, float, length, luminance, metalness, mix, mrt, normalView, output, packNormalToRGB, pass, pow,
-  renderOutput, roughness, sample, smoothstep, step, uniform, unpackRGBToNormal, uv, vec2, vec3, vec4, velocity,
+  renderOutput, roughness, sample, select, smoothstep, step, uniform, unpackRGBToNormal, uv, vec2, vec3, vec4, velocity,
 } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { film } from 'three/addons/tsl/display/FilmNode.js'
@@ -13,6 +13,7 @@ import { ssr } from 'three/addons/tsl/display/SSRNode.js'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { theme } from '../theme'
+import type { Post, Theme } from '../theme/tokens'
 import { makeFx, type FxContext } from '../theme/fx'
 
 /**
@@ -27,7 +28,8 @@ export default {
     const stage = ctx.stage
     const low = stage.quality === 'low'
     // The theme's tokens (src/theme): its default reproduces this chain's old literals exactly.
-    const look = theme().post
+    let synced: Theme = theme()
+    const look = synced.post
     const fx = new Set([...stage.features()].filter((f) => !look.veto.includes(f)))
     const gtao = fx.has('gtao')
     const gi = fx.has('ssgi')
@@ -49,6 +51,8 @@ export default {
       if (reflect) scenePass.getTexture('metalrough').type = THREE.UnsignedByteType
     }
     const disposables: Array<{ dispose(): void }> = [scenePass]
+    /** Write a theme's post numbers into the chain's uniforms. */
+    const syncs: Array<(p: Post) => void> = []
     const depth = scenePass.getTextureNode('depth')
     const stages = look.stages.map(makeFx)
     const fxContext: FxContext = { stage, scenePass, depth }
@@ -57,8 +61,12 @@ export default {
     const normalTexture = gtao || gi || reflect ? scenePass.getTextureNode('normal') : null
     const normal = normalTexture && sample((at) => unpackRGBToNormal(normalTexture.sample(at)))
 
+    // Every number below is a uniform, synced from theme() before each frame, so a theme
+    // blend that keeps the chain's shape (src/theme/blend.ts) never rebuilds it.
+    const sky = uniform(new THREE.Color(look.sky ?? '#000000'))
+    syncs.push((p) => p.sky && sky.value.set(p.sky))
     let color: THREE.Node<'vec4'> = scenePass.getTextureNode()
-    if (look.sky) color = mix(color, vec4(color3(look.sky), 1), step(0.99999, depth.x))
+    if (look.sky) color = mix(color, vec4(color3(sky), 1), step(0.99999, depth.x))
     if (gi && normal) {
       const giPass = ssgi(scenePass.getTextureNode(), depth, normal, stage.camera)
       giPass.sliceCount.value = 2
@@ -83,7 +91,15 @@ export default {
       mirror.maxDistance.value = reflect.maxDistance
       mirror.thickness.value = reflect.thickness
       disposables.push(mirror)
-      color = vec4(color.rgb.add(mirror.getTextureNode().rgb.mul(reflect.strength)), 1)
+      const mirrorStrength = uniform(reflect.strength)
+      syncs.push((p) => {
+        if (!p.reflect) return
+        mirror.resolutionScale = p.reflect.resolutionScale
+        mirror.maxDistance.value = p.reflect.maxDistance
+        mirror.thickness.value = p.reflect.thickness
+        mirrorStrength.value = p.reflect.strength
+      })
+      color = vec4(color.rgb.add(mirror.getTextureNode().rgb.mul(mirrorStrength)), 1)
     }
     if (temporal) {
       const resolved = traa(color, depth, scenePass.getTextureNode('velocity'), stage.camera)
@@ -96,21 +112,42 @@ export default {
     // The low tier keeps its softer bloom (0.25 where the home's is 0.42) in every theme.
     let lit: THREE.Node<'vec4'> = color
     if (!quiet('bloom')) {
-      const glow = bloom(color, look.bloom.strength * (low ? 0.25 / 0.42 : 1), look.bloom.radius, look.bloom.threshold)
+      const scale = low ? 0.25 / 0.42 : 1
+      const glow = bloom(color, look.bloom.strength * scale, look.bloom.radius, look.bloom.threshold)
       disposables.push(glow)
+      syncs.push((p) => {
+        glow.strength.value = p.bloom.strength * scale
+        glow.radius.value = p.bloom.radius
+        glow.threshold.value = p.bloom.threshold
+      })
       lit = color.add(glow)
     }
 
     const d = length(uv().sub(0.5).mul(vec3(1.25, 1.0, 1).xy))
-    const v = look.vignette
-    const vignette = mix(float(1), float(1 - (quiet('vignette') ? 0 : v.amount)), smoothstep(v.inner, v.outer, d))
-    const warm = vec3(...look.warm)
+    const darken = uniform(1 - (quiet('vignette') ? 0 : look.vignette.amount))
+    const inner = uniform(look.vignette.inner), outer = uniform(look.vignette.outer)
+    const vignette = mix(float(1), darken, smoothstep(inner, outer, d))
+    const warm = uniform(new THREE.Vector3(...look.warm))
     let graded: THREE.Node<'vec3'> = lit.rgb.mul(vignette).mul(warm)
-    const g = look.grade
-    if (g.saturation !== 1) graded = mix(vec3(luminance(graded)), graded, g.saturation)
-    if (g.contrast !== 1) graded = pow(graded.div(0.18).max(0), vec3(g.contrast)).mul(0.18)
-    if (g.lift.some((x) => x !== 0)) graded = graded.add(vec3(...g.lift))
+    // The grade is always in the chain, written so its identity (saturation 1, contrast 1,
+    // no lift) leaves every value exactly as it was: x + (x - l) * 0, a select, + 0.
+    const saturation = uniform(look.grade.saturation)
+    const contrast = uniform(look.grade.contrast)
+    const lift = uniform(new THREE.Vector3(...look.grade.lift))
+    graded = graded.add(graded.sub(vec3(luminance(graded))).mul(saturation.sub(1)))
+    graded = select(contrast.equal(1), graded, pow(graded.div(0.18).max(0), vec3(contrast)).mul(0.18))
+    graded = graded.add(lift)
     const grain = uniform(low || quiet('grain') ? 0 : look.grain)
+    syncs.push((p) => {
+      darken.value = 1 - (quiet('vignette') ? 0 : p.vignette.amount)
+      inner.value = p.vignette.inner
+      outer.value = p.vignette.outer
+      warm.value.set(...p.warm)
+      saturation.value = p.grade.saturation
+      contrast.value = p.grade.contrast
+      lift.value.set(...p.grade.lift)
+      grain.value = low || quiet('grain') ? 0 : p.grain
+    })
     const filmed = film(graded, grain)
     // The low tier has no MSAA, so FXAA softens stair-stepping on wall caps and silhouettes.
     // It reads display colours, so the tone mapping and colour space are applied before it.
@@ -127,11 +164,25 @@ export default {
     const pipeline = new THREE.RenderPipeline(stage.renderer, finalNode)
     if (smooth || displayStages.length) pipeline.outputColorTransform = false
     ctx.effect(() => {
-      const remove = stage.addDrawPass(() => pipeline.render())
+      const remove = stage.addDrawPass(() => {
+        const now = theme()
+        if (now !== synced) for (const sync of syncs) sync((synced = now).post)
+        pipeline.render()
+      })
       return () => {
         remove()
         pipeline.dispose()
         for (const d of disposables.reverse()) d.dispose()
+        // Render-to-texture nodes made inside other nodes (FXAA's input, a stage's) own a
+        // render target nothing else releases: each rebuild left two GPU textures behind.
+        const seen = new Set<THREE.Node>()
+        const walk = (n: THREE.Node) => {
+          if (seen.has(n)) return
+          seen.add(n)
+          if ((n as THREE.Node & { isRTTNode?: boolean }).isRTTNode) n.dispose()
+          for (const c of n.getChildren()) walk(c)
+        }
+        walk(finalNode)
         for (const s of stages) s.dispose?.()
       }
     }, 'post-processing')
