@@ -1008,7 +1008,9 @@ export default {
       const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(eye)))
       mid.project(stage.camera)
       const framed = mid.z < 1 && Math.abs(mid.x) < 1.25 && Math.abs(mid.y) < 1.25
-      return framed && d < nearest - (mode === 'talk' ? 0.3 : 0.5)
+      // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
+      const cut = Math.abs(mid.x) > 0.86 || mid.y < -0.8
+      return framed && (cut || d < nearest - (mode === 'talk' ? 0.3 : 0.5))
     }
     // Now and then one villager at its chore looks up and waves: an invitation to talk, in the room itself.
     let nextGreet = 6
@@ -1071,7 +1073,7 @@ export default {
         const addressed = SLIP_ALWAYS && mode === 'room' && slip.dataset.to === m.person
         const glowGoal = hover ? 1 : addressed ? 0.6 : 0
         m.glow += (glowGoal - m.glow) * (1 - Math.exp(-dt * 8))
-        if (m.v.fig.outline) m.v.fig.outline.value = m.glow * 1.3
+        if (m.v.fig.outline) m.v.fig.outline.value = m.glow * 0.8
         m.v.attending = addressed && (document.activeElement === line || line.value.length > 0)
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
@@ -1210,10 +1212,10 @@ function css() {
   .talk-card .cue i:nth-child(3) { animation-delay: 0.36s; }
   @keyframes talk-cue { 0%, 70%, 100% { translate: 0 0; opacity: 0.45; } 30% { translate: 0 -3px; opacity: 1; } }
   /* Said, while someone else speaks: one dimmed line, so it never covers the speaker. */
-  .talk-card.said { max-width: 250px; padding: 18px 18px 10px; opacity: 0.84; filter: saturate(0.55) brightness(0.96); box-shadow: 0 6px 14px rgba(60, 30, 10, 0.18); }
-  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; }
+  .talk-card.said { max-width: 280px; padding: 18px 18px 10px; opacity: 0.9; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.16); }
+  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; color: #6a5442; }
   .talk-card.said .before, .talk-card.said .more, .talk-card.said .cue { display: none; }
-  .talk-card.said .nametag { box-shadow: none; scale: 0.88; transform-origin: 0 100%; }
+  .talk-card.said .nametag { box-shadow: none; scale: 0.9; transform-origin: 0 100%; opacity: 0.85; }
   .talk-ruler { position: fixed; left: -9999px; top: 0; width: ${TEXT_WIDTH}px; margin: 0; visibility: hidden; pointer-events: none; white-space: pre-wrap; font: ${words}; }
 
   .nametag { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 13px 5px; border-radius: 11px 11px 5px 5px; white-space: nowrap;
