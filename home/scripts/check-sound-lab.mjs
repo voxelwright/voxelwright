@@ -16,6 +16,7 @@ const lab = join(here, '../.sound-lab')
 const keep = Object.fromEntries(['picks.json', 'history.jsonl'].map((f) => [f, existsSync(join(lab, f)) ? readFileSync(join(lab, f)) : null]))
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })
+const skip = (name, detail) => checks.push({ name, pass: true, skipped: true, detail })
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
@@ -95,18 +96,25 @@ try {
   }
   check('Bad picks are refused (422 or 400) and leave picks.json alone', Object.values(refused).every((s) => s === 422 || s === 400) && JSON.parse(readFileSync(join(lab, 'picks.json'), 'utf8')).picks.farewell === 'c', JSON.stringify(refused))
 
-  // The videos the page offers exist.
-  const manifest = await page.evaluate(() => fetch('sound-lab/manifest.json').then((r) => (r.ok ? r.json() : null)))
-  const videos = manifest ? manifest.clips.flatMap((c) => Object.values(c.videos)) : []
-  const missing = []
-  for (const v of videos) if (!(await page.evaluate((v) => fetch(v, { method: 'HEAD' }).then((r) => r.ok && r.headers.get('content-type')?.includes('mp4')), v))) missing.push(v)
-  check('Every video in the manifest is served', manifest && videos.length > 0 && !missing.length, `${videos.length} videos; missing ${missing.join(', ') || 'none'}`)
+  // The videos the page offers exist. They live in public/sound-lab/ (gitignored, made
+  // locally), so a fresh worktree has no manifest: then the check is skipped, not failed. The
+  // dev server answers a missing file with index.html, so a manifest is only one that parses.
+  const manifest = await page.evaluate(() => fetch('sound-lab/manifest.json').then((r) => r.text()).then((t) => { try { return JSON.parse(t) } catch { return null } }))
+  if (!existsSync(join(here, '../public/sound-lab/manifest.json')) && !manifest) {
+    skip('Every video in the manifest is served', 'public/sound-lab/manifest.json is not here (gitignored; the videos are made locally), so there are no videos to check')
+  } else {
+    const videos = manifest ? manifest.clips.flatMap((c) => Object.values(c.videos)) : []
+    const missing = []
+    for (const v of videos) if (!(await page.evaluate((v) => fetch(v, { method: 'HEAD' }).then((r) => r.ok && r.headers.get('content-type')?.includes('mp4')), v))) missing.push(v)
+    check('Every video in the manifest is served', manifest && videos.length > 0 && !missing.length, `${videos.length} videos; missing ${missing.join(', ') || 'none'}`)
+  }
   check('No page errors', !errors.length, errors.join(' | '))
 } finally {
   await browser.close()
   for (const [f, data] of Object.entries(keep)) data ? writeFileSync(join(lab, f), data) : rmSync(join(lab, f), { force: true })
 }
-for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)
+for (const c of checks) console.log(`${c.skipped ? 'SKIP' : c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  (${c.detail})` : ''}`)
 const failed = checks.filter((c) => !c.pass).length
-console.log(`\n${checks.length - failed}/${checks.length} checks pass`)
+const skipped = checks.filter((c) => c.skipped).length
+console.log(`\n${checks.length - failed - skipped}/${checks.length - skipped} checks pass${skipped ? `, ${skipped} skipped` : ''}`)
 process.exit(failed ? 1 : 0)
