@@ -91,6 +91,37 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
         }
       }, 'rooms')
 
+      // The seated view stands in one room and cannot see into the other, but the other
+      // room's merged furniture has bounds that reach the view and the sun's shadow box.
+      // While you sit, meshes wholly past the shared wall's centre are hidden; they show
+      // again for the walk. Lights stay (a light leaving would change every shader), and
+      // so does anything that moves on its own (villagers and the talk layer's things).
+      const culled: THREE.Object3D[] = []
+      const box = new THREE.Box3()
+      const show = () => {
+        for (const o of culled) o.visible = true
+        culled.length = 0
+      }
+      const cull = (room: string) => {
+        show()
+        if (MODE !== 'seat') return
+        const far = (x0: number, x1: number) => room === 'kitchen' ? x0 > SHARED_X : x1 < SHARED_X
+        const visit = (o: THREE.Object3D) => {
+          if (!o.visible || /^talk|villager/.test(o.name)) return
+          if ((o as THREE.Mesh).isMesh || (o as THREE.Line).isLine) {
+            box.setFromObject(o)
+            if (!box.isEmpty() && far(box.min.x, box.max.x)) {
+              o.visible = false
+              culled.push(o)
+              return
+            }
+          }
+          for (const c of o.children) visit(c)
+        }
+        for (const c of scene.children) visit(c)
+      }
+      ctx.effect(() => show, 'seated culling')
+
       const current = () => MODE === 'iso' ? (view.looking.x < SHARED_X ? 'kitchen' : 'living') : seated
 
       ctx.provide('rooms', {
@@ -112,11 +143,13 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           ctx.entries.say(null)
           if (MODE === 'iso') await view.glide(PLANS[name].frame, GLIDE)
           else {
+            show()
             // Through the real doorway: to this side of it, across, then into the room.
             await view.travel(SIDES[seated], STEP)
             await view.travel(SIDES[seated === 'kitchen' ? 'living' : 'kitchen'], STEP * 0.7)
             seated = name
             await view.travel(PLANS[name].home, STEP)
+            cull(name)
           }
           lastMove = { glide: Math.round(performance.now() - t0) }
           ctx.entries.sort()
@@ -152,6 +185,8 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
         } finally {
           camera.layers.disable(SHADOW_ONLY)
           for (const o of shown) o.visible = false
+          // After compiling, so the walk into the other room finds its pipelines ready.
+          if (!moving) cull(seated)
         }
       })()
     },

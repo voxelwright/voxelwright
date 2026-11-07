@@ -63,6 +63,9 @@ export default {
     door.position.set(xa, 0, (z0 + z1) / 2)
     // The trim goes with the wall when it is cut; the pick slabs and the threshold stay.
     for (const part of [...door.sides.map((s) => s.children[0]), door.getObjectByName('lining')!]) part.userData.interior = interior
+    // Seated, neither room's view can see the doorway or where its trim's shadow falls
+    // (the sun throws it towards +x, into the wall and the living room): skip its shadow draws.
+    if (MODE === 'seat') door.traverse((o) => void (o.castShadow = false))
     own(ctx, door)
     ctx.effect(() => ctx.entries.add({
       id: 'to-living',
@@ -100,18 +103,14 @@ export default {
         g.textBaseline = 'middle'
         g.textAlign = 'center'
         g.fillText(arrow === 'left' ? `\u2190 ${text}` : `${text} \u2192`, 256, 84)
-        const face = new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.75 })
-        const edge = new THREE.MeshStandardMaterial({ color: '#9a6c40', roughness: 0.8 })
-        const board = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.02), [edge, edge, edge, edge, face, edge])
+        // One material on the whole board: its thin edges take the painted wood too.
+        const board = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.13, 0.02), new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.75 }))
         board.position.set(x, y, WALL_Z + 0.012)
-        board.castShadow = true
         board.name = `sign ${text}`
-        // Hung from a nail on a string.
-        const nail = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), new THREE.MeshStandardMaterial({ color: '#555', metalness: 0.6, roughness: 0.4 }))
-        nail.position.set(x, y + 0.15, WALL_Z + 0.01)
-        const pts = [new THREE.Vector3(x - 0.15, y + 0.065, WALL_Z + 0.012), nail.position.clone(), new THREE.Vector3(x + 0.15, y + 0.065, WALL_Z + 0.012)]
+        // Hung on a string from a nail (the string's apex).
+        const pts = [new THREE.Vector3(x - 0.15, y + 0.065, WALL_Z + 0.012), new THREE.Vector3(x, y + 0.15, WALL_Z + 0.01), new THREE.Vector3(x + 0.15, y + 0.065, WALL_Z + 0.012)]
         const string = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#6b4a2c' }))
-        signs.add(board, nail, string)
+        signs.add(board, string)
         return board
       }
       // Above the fridge's right, clear of the clock; in the living room, the back wall's left, over the bookcase.
