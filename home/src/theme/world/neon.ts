@@ -78,7 +78,8 @@ const PLAIN: Region = [0.3, 0.77, 0.32, 0.79] // white: tubes and lamp heads
 
 /**
  * Neon tubes on dark boards, white so the vertex colour tints each sign (no letters): a
- * tall blade of stacked marks, a wide band with a running wave, and a lit shopfront.
+ * tall blade of stacked marks, a wide band with a running wave, and a lit shopfront with
+ * shelves of goods and someone at the till.
  */
 function paintSigns() {
   const S = 1024
@@ -115,6 +116,22 @@ function paintSigns() {
   pane.addColorStop(1, '#f0ecf4')
   g.fillStyle = pane
   g.fillRect(256, 330, 768, 694)
+  // Inside: a warm ceiling strip, shelves of goods in a few colours, a dark counter, a figure.
+  const r = rng(29)
+  g.fillStyle = 'rgba(255,236,200,0.9)'; g.fillRect(256, 338, 768, 14)
+  const goods = ['#e0605a', '#f0b040', '#58b8c8', '#8a70d0', '#e8e0d0', '#60a868']
+  for (const y of [450, 590, 730]) {
+    g.fillStyle = '#5a4a58'; g.fillRect(270, y, 740, 10)
+    for (let x = 276; x < 1000;) {
+      const w = 14 + r() * 26, h = 30 + r() * 60
+      g.fillStyle = goods[Math.floor(r() * goods.length)]
+      g.fillRect(x, y - h, w, h)
+      x += w + 4 + r() * 10
+    }
+  }
+  g.fillStyle = '#2a2030'; g.fillRect(256, 860, 768, 164) // the counter
+  g.fillStyle = '#1a1420'
+  g.beginPath(); g.arc(700, 780, 34, 0, Math.PI * 2); g.fill(); g.fillRect(660, 810, 80, 60) // someone at the till
   g.fillStyle = '#1a1424'
   g.fillRect(256, 256, 768, 74)
   for (let x = 256; x <= S; x += 128) g.fillRect(x - 4, 330, 8, 694)
@@ -197,7 +214,8 @@ export function neonCity(house: House): World {
   const asphalt = paintAsphalt(3)
   for (const t of [asphalt.map, asphalt.roughness]) t.repeat.set(18, 18)
   bin.keep(asphalt.map); bin.keep(asphalt.roughness)
-  const road = bin.mesh([flatQuad(100, 100, cx, ROAD, cz)], new THREE.MeshStandardMaterial({ color: '#8a84a8', map: asphalt.map, roughnessMap: asphalt.roughness, roughness: 0.5, metalness: 0 }), { receive: true, name: 'neon road' })
+  // Metallic enough that the screen-space reflections (gated by metalness) lay the signs on it.
+  const road = bin.mesh([flatQuad(100, 100, cx, ROAD, cz)], new THREE.MeshStandardMaterial({ color: '#8a84a8', map: asphalt.map, roughnessMap: asphalt.roughness, roughness: 0.5, metalness: 0.35 }), { receive: true, name: 'neon road' })
   road.renderOrder = -1
 
   // Pavements: the house's own ring and four city blocks across the road.
@@ -209,7 +227,7 @@ export function neonCity(house: House): World {
     slab(x0 - ol, cx + 60, z1 + o, z1 + o + 40, ROAD, WALK, 2), // front
     slab(x1 + o, x1 + o + 40, z0 - ob, z1 + o, ROAD, WALK, 2), // right
   ]
-  bin.mesh(blocks, new THREE.MeshStandardMaterial({ map: slabs, roughness: 0.38, metalness: 0 }), { receive: true, name: 'neon pavement' })
+  bin.mesh(blocks, new THREE.MeshStandardMaterial({ map: slabs, roughness: 0.38, metalness: 0.2 }), { receive: true, name: 'neon pavement' })
   // Kerbs: pale stone edges where each pavement meets the road.
   const kerbs: THREE.BufferGeometry[] = []
   const edge = (ax: number, az: number, bx: number, bz: number) => {
@@ -268,7 +286,9 @@ export function neonCity(house: House): World {
       if (r() < (tall ? 0.6 : 0.45)) { // a lit shopfront on the ground floor
         const [sx, sz] = onFace(0, 0.03)
         const sw = width * 0.7, sh = tall ? 1.5 : Math.min(0.9, h - 0.2)
-        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, sh, zAxis ? 0.04 : sw).translate(sx, WALK + 0.05 + sh / 2, sz), 0.22, 0.15, 0.16), SHOP))
+        // Warm or cool by where it stands (not by `r`, so the city's layout stays as it was).
+        const warmth = Math.round(sx * 7 + sz * 3) % 2 === 0 ? [0.34, 0.22, 0.16] : [0.2, 0.2, 0.3]
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, sh, zAxis ? 0.04 : sw).translate(sx, WALK + 0.05 + sh / 2, sz), warmth[0], warmth[1], warmth[2]), SHOP))
         streak(sx, sz, [1, 0.8, 0.6], sw * 0.5, 1.4, 0.1)
       }
       if (tall && r() < 0.6) { // a neon sign: a tall blade standing out from the wall (far row only), or a band over the shop
