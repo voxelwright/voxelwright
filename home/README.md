@@ -1253,7 +1253,7 @@ sound; one map turns that into a cue; one player plays it into a bus of one mix.
   the designed palette lands.
 
 ```sh
-node scripts/check-sound.mjs [base-url]   # 15 headless checks, dev server on 5490 by default
+node scripts/check-sound.mjs [base-url]   # 16 headless checks, dev server on 5490 by default
 ```
 
 **Listening room** (dev only): `/sound-lab.html` has a card per cue, a play button per variant
@@ -1276,13 +1276,17 @@ node scripts/check-sound-lab.mjs [base-url]    # the page: sound at the master, 
 Behind `tailscale serve`, start Vite with `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=<tailnet host>`;
 the page uses only relative URLs.
 
-Measured with the stand-in palette (headless Chrome 158, M1 Pro, November 7, 2026): event to
-first audible sample 2.7 to 5.3 ms on the audio clock (baseLatency 10 ms); a scripted minute of
-use (112 plays) -40.8 LUFS at the master (ui -41.2, world -43.4), peak -22.5 dBFS; each cue -57 to
--36 LUFS, loudest peak -23.6 dBFS; consecutive takes of every cue differ (closest -41 dBFS sample
-peak); offline render 15 to 41 ms per audio second (machine load varies); 0.2 ms median and
-about 1 ms worst main thread per event; `public/audio/sfx` 0 KB of a 400 KB budget. The shared
-context is now made on every page load (Chrome's silent sink): 0.4 to 0.8 ms in its constructor.
+Measured with the real palette after round 2 (headless Chrome 158, M1 Pro, November 7, 2026,
+machine load average 76 to 250): event to first audible sample 2.7 to 8 ms on the audio clock
+(baseLatency 10 ms); levels are checked before the limiter, which is linear below -4.4 dBFS and
+never acts: loudest cue -14.9 dBFS, a scripted minute of use (about 120 plays) -39.1 LUFS with a
+-13.3 dBFS peak (ui -40.9, world -35.9 LUFS; the voices are about -29 LUFS short-term); closest
+consecutive takes differ by -53 dBFS; offline render 40 ms per audio second (fastest of three);
+0.3 ms median and 1 ms slowest-event median of main thread per sound (plain-array curves; a
+`Float32Array` curve cost about 200 ns per point in Chrome); `public/audio/sfx` 137 KB of a 400 KB
+budget. The shared context is now made on every page load (Chrome's silent sink): 0.4 to 0.8 ms
+in its constructor. `npm run perf-gate -- --base origin/feature/village-talk`: every scene holds
+60 fps; CPU p50 in the talk scene +0.3 and -0.2 ms in two reruns (one run at load 155 read +0.6).
 
 ## Always-on input (#42 prototype)
 
