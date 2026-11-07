@@ -183,7 +183,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
           { outline: opt('outline', 0, 1), crease: opt('crease', 0, 1), samples: own(s, 'samples') === undefined ? undefined : Math.round(n('samples', 0, 4, 0)) })
       }
       case 'halftone':
-        return extra({ kind: 'halftone', cell: n('cell', 2, 32, 6), angle: n('angle', -180, 180, 45), strength: n('strength', 0, 1, 0.6) }, { ink: c('ink'), paper: c('paper') })
+        return extra({ kind: 'halftone', cell: n('cell', 40, 400, 150), angle: n('angle', -180, 180, 45), strength: n('strength', 0, 1, 0.6) }, { ink: c('ink'), paper: c('paper') })
       case 'ink':
         return extra({ kind: 'ink', width: n('width', 0.5, 6, 1.5), depth: n('depth', 0, 1, 0.5), normal: n('normal', 0, 1, 0.5) }, { color: c('color') })
       case 'chroma':

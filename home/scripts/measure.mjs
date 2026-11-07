@@ -26,8 +26,22 @@ page.on('pageerror', (e) => errors.push(String(e)))
 await page.goto(url)
 const readiness = await page.evaluate(() => window.village.ready())
 await page.waitForTimeout(2000)
+// Settle (#50): with several headless Chromes starting at once, the GPU process can still be
+// compiling startup shaders after 2 s, and a whole 6 s window then ran at 0.3 to 2 fps although
+// each frame's GPU and CPU time were normal. Wait for 30 frames in a row under 50 ms (at most 20 s).
+const settleMs = await page.evaluate(() => new Promise((resolve) => {
+  const start = performance.now()
+  let last = start, run = 0
+  const step = (now) => {
+    run = now - last < 50 ? run + 1 : 0
+    last = now
+    if (run >= 30 || now - start > 20000) resolve(Math.round(now - start))
+    else requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}))
 
-const result = { url, readiness }
+const result = { url, readiness, settleMs }
 result.loaded = await page.evaluate(() => {
   const { objects, ...rest } = window.village.snapshot()
   return rest

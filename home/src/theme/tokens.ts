@@ -103,6 +103,7 @@ export type Stage =
     samples?: number
   }
   /** Comic-book halftone dots by tone, in display space. Implemented in ./fx/halftone.ts. */
+  /** `cell` is rows of dots up the screen (about 150), so the screen is the same at any DPR. */
   | { kind: 'halftone'; cell: number; angle: number; strength: number; ink?: Hex; paper?: Hex }
   /** Ink lines from depth and normal edges. Implemented in ./fx/ink.ts. */
   | { kind: 'ink'; width: number; depth: number; normal: number; color?: Hex }

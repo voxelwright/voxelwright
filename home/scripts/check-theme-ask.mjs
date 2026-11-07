@@ -107,6 +107,9 @@ try {
       const { checkTheme, check } = await import('/src/theme/check.ts')
       const { HOME } = await import('/src/theme/presets/home.ts')
       const { NEON_NIGHT } = await import('/src/theme/presets/neon-night.ts')
+      const { COMIC } = await import('/src/theme/presets/comic.ts')
+      const { PASTORAL } = await import('/src/theme/presets/pastoral.ts')
+      const { BLUE_HOUR } = await import('/src/theme/presets/blue-hour.ts')
       const { SIXTEEN_BIT } = await import('/src/theme/presets/sixteen-bit.ts')
       const out = {}
       const strip = (t) => ({ ...t, id: '', label: '', about: '' })
@@ -131,19 +134,19 @@ try {
       const input = { light: { exposure: 1 } }
       const fromInput = check(input)
       out.notInput = fromInput !== input && fromInput.light !== input.light
-      out.presets = [NEON_NIGHT, SIXTEEN_BIT, HOME].map((p) => { const r = checkTheme(p); return same(r.theme, p) && r.clamped.length === 0 })
+      out.presets = [NEON_NIGHT, SIXTEEN_BIT, HOME, COMIC, PASTORAL, BLUE_HOUR].map((p) => { const r = checkTheme(p); return same(r.theme, p) && r.clamped.length === 0 })
       return out
     })
     check('check: __proto__ keys neither pollute nor survive', unit.proto.ok && unit.proto.polluted === undefined && unit.proto.protoOf && !unit.proto.own.includes('__proto__') && unit.proto.exposure === 1.1, unit.proto)
     check('check: NaN, Infinity, null and "NaN" fall back to the home and are noted', unit.nan.exposure === 1.25 && Object.keys(unit.nan.key).length === 0 && unit.nan.grain === 0.14 && unit.nan.bloom === 0.42 && unit.nan.clamped.length === 5, unit.nan)
     check('check: huge numbers clamp', unit.huge.exposure === 3 && unit.huge.gain === 4 && unit.huge.grade.saturation === 2.5 && unit.huge.grade.contrast === 0.5 && unit.huge.grade.lift.every((v) => v === 0.1) && unit.huge.fps === 60, unit.huge)
-    check('check: unknown stage kinds and keys dropped, stages capped at 6 before checking', unit.stages.kinds.length === 5 && !unit.stages.kinds.includes('eval') && unit.stages.halftone.cell === 32 && !('ink' in unit.stages.halftone) && !unit.stages.inkKeys.includes('onload') && unit.stages.clamped.includes('post.stages[0]'), unit.stages)
+    check('check: unknown stage kinds and keys dropped, stages capped at 6 before checking', unit.stages.kinds.length === 5 && !unit.stages.kinds.includes('eval') && unit.stages.halftone.cell === 400 && !('ink' in unit.stages.halftone) && !unit.stages.inkKeys.includes('onload') && unit.stages.clamped.includes('post.stages[0]'), unit.stages)
     check('check: a 10,000-colour palette is cut to 64', unit.palette === 64, unit.palette)
     check('check: strings one line and short, ids slugged, painters and vetoes from lists', /^[a-z][a-z0-9-]*$/.test(unit.words.id) && unit.words.label.length === 40 && !/[\u0000-\u001f\u2028]/.test(unit.words.about) && unit.words.costume && unit.words.props === 200 && !('paint' in unit.words.wall) && unit.words.wall.color === '#abcdef' && unit.words.view.paint === 'night-city' && !('color' in unit.words.floor) && JSON.stringify(unit.words.veto) === '["traa"]', unit.words)
     check('check: non-objects are refused with a reason', unit.refuse.every((t) => t === 'string'), unit.refuse)
     check('check: {} is the home, with nothing clamped', unit.emptyIsHome, unit)
     check('check: the output is fresh, sharing nothing with the input or HOME', unit.fresh && unit.notInput, unit)
-    check('check: the three presets pass through unchanged', unit.presets.every(Boolean), unit.presets)
+    check('check: every built-in look passes through unchanged', unit.presets.every(Boolean), unit.presets)
 
     // ── ask() in the page against the stub themer ──
     const before = await current(page)
