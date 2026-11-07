@@ -2,7 +2,8 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { DOORWAY, WALL_Z, WINDOW } from '../layout'
-import { paintPlaster, paintWood } from '../paint'
+import { floorPlanks, paintPlaster } from '../paint'
+import { FLOOR_ROUGHNESS } from '../diorama'
 
 export default {
   name: 'room',
@@ -11,13 +12,11 @@ export default {
     const room = new THREE.Group()
     room.name = 'room'
 
-    const floorTex = paintWood({ seed: 11, planks: 8, light: [222, 186, 140], dark: [176, 136, 96], knots: 2 })
-    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping
-    floorTex.repeat.set(2, 3)
-    floorTex.rotation = Math.PI / 2
+    const floorTex = floorPlanks()
+    floorTex.repeat.set(8.1, 6.3) // the dollhouse floor's board width and grain over 9 m
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(9, 9),
-      new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.62 }),
+      new THREE.MeshStandardMaterial({ map: floorTex, roughness: FLOOR_ROUGHNESS }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true

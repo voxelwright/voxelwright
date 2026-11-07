@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { LIVING_X } from '../layout'
 import { paintPlaster } from '../paint'
-import { shell } from '../diorama'
+import { YARD_TOP, shell, tree, yard } from '../diorama'
 import { LOUNGE } from './lounge'
 
 /**
@@ -27,6 +27,16 @@ export default {
       openings: { back: [[LIVING_X + door.x0, LIVING_X + door.x1, door.top]] },
     })
     group.name = 'lounge diorama'
+    // The same yard as the kitchen's: a lawn board on the worktable, a fence, stones to the gate.
+    const X = LIVING_X
+    group.add(yard({
+      x0: X + left - 2.2, x1: X + right + 2.2, z0: back - 2.6, z1: back + 8.4, seed: 33,
+      path: [[X + right + 0.9, back + 0.4], [X + right + 1.2, back + 3.4], [X + right + 0.4, back + 8.18]],
+    }))
+    const birch = tree(5)
+    birch.position.set(X - 1.2, YARD_TOP, back - 1.5)
+    birch.scale.setScalar(0.7)
+    group.add(birch)
     own(ctx, group)
   },
 }
