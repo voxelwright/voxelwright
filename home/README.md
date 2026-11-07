@@ -1135,8 +1135,12 @@ node scripts/check-sound.mjs [base-url]   # 15 headless checks, dev server on 54
 (live, through a real Player and the mix, optionally over the music), a pick (A, B, C or none;
 keep or change for single cues) and a note. Picks save to `home/.sound-lab/picks.json` (each
 round also appended to `history.jsonl`) through `POST /sound-lab/picks` in `vite.config.ts`, and
-to `village.sfx.picks` for the home. Each interaction with variants also has a short video of the
+to `village.sfx.picks` for the home; the palette's `CHOSEN` holds the owner's picks as every
+visit's defaults. The current round's cues come first with what the owner said last round; earlier
+rounds' cards stay below, folded. Several interactions also have a short video of the
 real home per variant, its sound rendered offline over the logged timeline (cues, voices, music).
+`node scripts/render-cues.mjs --only=news,hover` renders and measures some cues (loudness, peak,
+centroid, 2-5 kHz share, rise time) with WAVs and spectrograms.
 
 ```sh
 npx vite --port 5491 --strictPort              # then open /sound-lab.html
