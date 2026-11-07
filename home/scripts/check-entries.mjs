@@ -14,6 +14,9 @@ const keep = keepMode ? '' : 'rooms=unload'
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })
+// TRAA keeps a renderer-internal geometry that comes and goes between visits (measured:
+// 213 or 214, then back) without being a scene object. A room left behind is dozens of geometries.
+const SLACK = 1
 const DOORS = { 'to-living': 'living', 'to-kitchen': 'kitchen' }
 
 async function open(query = '', reducedMotion = 'no-preference') {
@@ -21,9 +24,12 @@ async function open(query = '', reducedMotion = 'no-preference') {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && errors.push(m.text()))
+  // The villager host is not running here; its launch request answers 503 on purpose.
+  page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && !m.location().url.includes('/villager/') && errors.push(m.text()))
   await page.goto(`${base}?${query}`)
   const ready = await page.evaluate(() => window.village.ready())
+  // Quality calibration may step the tier down and rebuild postfx; wait until it has settled.
+  await page.waitForFunction(() => window.village.snapshot().tierSettled, null, { timeout: 30000 })
   await page.waitForTimeout(800)
   return { context, page, ready, errors }
 }
@@ -200,11 +206,11 @@ for (const room of ['kitchen', 'living']) {
     const again = await residue(page)
     textures.push([again.textures, again.geometries])
     check(`cycle ${cycle + 1}: back in the kitchen, objects, plugins, frame hooks, geometries, DOM and entries match the first visit`,
-      again.objects === fresh.objects && again.plugins === fresh.plugins && again.frameHooks === fresh.frameHooks && (keepMode || again.geometries === fresh.geometries) && again.dom === fresh.dom && again.entries === fresh.entries,
+      again.objects === fresh.objects && again.plugins === fresh.plugins && again.frameHooks === fresh.frameHooks && (keepMode || Math.abs(again.geometries - fresh.geometries) <= SLACK) && again.dom === fresh.dom && again.entries === fresh.entries,
       Object.fromEntries(Object.keys(fresh).filter((k) => fresh[k] !== again[k]).map((k) => [k, k === 'objects' ? 'differ' : [fresh[k], again[k]]])))
   }
   // With rooms kept loaded, GPU memory gains the other room once it is first seen; it must not keep growing.
-  check('GPU textures and geometries do not grow across room cycles', textures[1][0] <= textures[0][0] && textures[1][1] <= textures[0][1], { first: [fresh.textures, fresh.geometries], textures })
+  check('GPU textures and geometries do not grow across room cycles', textures[1][0] <= textures[0][0] && textures[1][1] <= textures[0][1] + SLACK, { first: [fresh.textures, fresh.geometries], textures })
   console.log(JSON.stringify({ moves }))
   await context.close()
 }

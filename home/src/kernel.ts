@@ -18,7 +18,7 @@ export interface Stage {
    * Per frame, in ms: gpu is submit-to-done on the WebGPU queue, passSum the summed
    * timestamp-query pass durations (?gpu=1 only), cpu the JS frame (hooks and draw).
    */
-  timing: { gpu: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string }
+  timing: { gpu: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string; tierSettled: boolean }
   backend: 'WebGPU' | 'WebGL2'
   /** Draws one frame with the most recently added draw pass, or a plain render. */
   draw: () => void

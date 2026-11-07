@@ -92,6 +92,7 @@ function snapshot() {
     quality: stage?.quality,
     features: stage ? [...stage.features()] : [],
     tierReason: stage?.timing.tierReason,
+    tierSettled: stage?.timing.tierSettled ?? false,
     render: stage ? { drawCalls: stage.renderer.info.render.drawCalls, triangles: stage.renderer.info.render.triangles } : null,
   }
 }

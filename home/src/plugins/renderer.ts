@@ -54,7 +54,7 @@ export default {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)
     const backend = backendState.isWebGPUBackend ? 'WebGPU' : 'WebGL2'
-    const timing: Stage['timing'] = { gpu: [], passSum: [], cpu: [], tracking: backendState.trackTimestamp, tierReason: asked ? `?q=${asked}` : 'calibrating' }
+    const timing: Stage['timing'] = { gpu: [], passSum: [], cpu: [], tracking: backendState.trackTimestamp, tierReason: asked ? `?q=${asked}` : 'calibrating', tierSettled: !calibrating }
 
     const passes: Array<() => void> = []
     const stage: Stage = {
@@ -106,6 +106,7 @@ export default {
       if (median <= TIERS[quality].maxGpuMs || !next) {
         timing.tierReason = `measured ${median.toFixed(2)} ms GPU at ${quality}`
         settled = true
+        timing.tierSettled = true
         return
       }
       timing.tierReason = `${median.toFixed(2)} ms GPU at ${quality} > ${TIERS[quality].maxGpuMs} ms`
