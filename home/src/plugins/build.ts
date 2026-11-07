@@ -229,8 +229,8 @@ export default {
         const was = hover
         hover = e.target === renderer.domElement ? pick(e)?.kind ?? null : null
         if (hover !== was) show()
-        // Over a handle the wall owns the pointer, so nothing behind it lights up.
-        if (hover) e.stopImmediatePropagation()
+        // Over a handle the wall owns the pointer, so nothing behind it lights up; an orbit drag passes through.
+        if (hover && e.buttons === 0) e.stopImmediatePropagation()
         return
       }
       stop(e)
