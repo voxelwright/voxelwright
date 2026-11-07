@@ -78,9 +78,10 @@ export class Player {
   }
 
   /**
-   * Fetch and decode every sample (after the first gesture, never on first play). A sample
-   * that fails is tried again after 2 and 8 s (a dropped connection on a phone), then stays
-   * missing; its cue plays its synthesized stand-in meanwhile.
+   * Fetch and decode every sample (after the first gesture, never on first play). Resolves
+   * after the first attempt: a sample that failed plays its synthesized stand-in. Only a
+   * network failure (a dropped connection on a phone) is tried again, after 2 and 8 s, in the
+   * background; a missing or broken file is not. Retries stop once the context has closed.
    */
   load(base: string): Promise<void> {
     const once = async (name: string) => {
@@ -88,15 +89,25 @@ export class Player {
       if (!response.ok) throw new Error(`${response.status}`)
       this.samples.set(name, await this.audio.decodeAudioData(await response.arrayBuffer()))
     }
+    const retry = async (name: string) => {
+      for (const wait of [2000, 8000]) {
+        await new Promise((r) => setTimeout(r, wait))
+        if ((this.audio as AudioContext).state === 'closed') return
+        try {
+          return await once(name)
+        } catch {
+          // Still offline: try once more, then give up quietly.
+        }
+      }
+    }
     this.loading ??= Promise.all(
       this.sampleNames().map(async (name) => {
-        for (const wait of [0, 2000, 8000]) {
-          if (wait) await new Promise((r) => setTimeout(r, wait))
-          try {
-            return await once(name)
-          } catch (error) {
-            if (wait === 8000) console.warn(`sound: could not load ${name}`, error)
-          }
+        try {
+          await once(name)
+        } catch (error) {
+          console.warn(`sound: could not load ${name}`, error)
+          // fetch() rejects with a TypeError only when the network failed.
+          if (error instanceof TypeError) void retry(name)
         }
       }),
     ).then(() => undefined)
