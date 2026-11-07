@@ -113,6 +113,14 @@ export type Stage =
   | { kind: 'brush'; radius: number; strength: number }
   /** Paper grain and pigment pooling at edges, for watercolour. Implemented in ./fx/paper.ts. `shadow` cools the darks towards a pigment's hue. */
   | { kind: 'paper'; grain: number; edges: number; tint?: Hex; shadow?: Hex }
+  /**
+   * The frame as a printed comic (regroup 2, prototype behind `&comic=`). Implemented in ./fx/print.ts.
+   * 'tones': base colours snapped to `palette`, light in three flat steps with dots in the shade.
+   * 'plates': the frame separated into process-ink plates, solids and Ben-Day tints, on newsprint.
+   * 'line': paper and ink, spot colour only on saturated things, hatching for shadow.
+   * `cell` is rows of dots (or hatch lines) up the screen.
+   */
+  | { kind: 'print'; style: 'tones' | 'plates' | 'line'; cell: number; palette?: Hex[]; ink?: Hex; paper?: Hex }
 
 export interface Theme {
   /** Stable id, lowercase with dashes; also the ?theme= value. */

@@ -30,6 +30,17 @@ const RINGS: Array<[number, number]> = [[3, 0], [7, Math.PI / 6]]
 export const OPAQUE_ONLY = new THREE.BlendMode(THREE.NormalBlending)
 export const opaque = (rgb: THREE.Node<'vec3'>) => vec4(rgb, step(0.999, diffuseColor.a))
 
+/** Adds the surface's own colour (linear, opaque surfaces only) to the scene pass as 'albedo'. */
+export function withAlbedo(scenePass: THREE.PassNode) {
+  const albedo = mrt({ albedo: opaque(diffuseColor.rgb) })
+  const had = scenePass.getMRT()
+  if (!had) scenePass.setMRT(mrt({ output }).merge(albedo))
+  else if (!had.has('albedo')) scenePass.setMRT(had.merge(albedo))
+  scenePass.getMRT()!.setBlendMode('albedo', OPAQUE_ONLY)
+  // 8 bits is plenty for a ratio, and keeps the high tier's targets within 32 bytes a sample.
+  scenePass.getTexture('albedo').type = THREE.UnsignedByteType
+}
+
 /**
  * The frame as print, in display colour, driven by light rather than by how dark
  * a material is. The scene pass gains the surface's own colour (`diffuseColor`),
@@ -53,13 +64,7 @@ export function halftone(spec: Spec): Fx {
     // Film grain would muddy the dots.
     quiet: { grain: true },
     scene({ scenePass }) {
-      const albedo = mrt({ albedo: opaque(diffuseColor.rgb) })
-      const had = scenePass.getMRT()
-      if (!had) scenePass.setMRT(mrt({ output }).merge(albedo))
-      else if (!had.has('albedo')) scenePass.setMRT(had.merge(albedo))
-      scenePass.getMRT()!.setBlendMode('albedo', OPAQUE_ONLY)
-      // 8 bits is plenty for a ratio, and keeps the high tier's targets within 32 bytes a sample.
-      scenePass.getTexture('albedo').type = THREE.UnsignedByteType
+      withAlbedo(scenePass)
     },
     display(color, { stage, scenePass }) {
       const camera = stage.camera as THREE.PerspectiveCamera

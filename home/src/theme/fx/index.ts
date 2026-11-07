@@ -10,6 +10,7 @@ import { ink } from './ink'
 import { chroma } from './chroma'
 import { brush } from './brush'
 import { paper } from './paper'
+import { print } from './print'
 
 export interface FxContext {
   stage: VillageStage
@@ -37,5 +38,6 @@ export function makeFx(stage: Stage): Fx {
     case 'chroma': return chroma(stage)
     case 'brush': return brush(stage)
     case 'paper': return paper(stage)
+    case 'print': return print(stage)
   }
 }
