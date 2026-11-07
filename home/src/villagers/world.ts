@@ -9,8 +9,19 @@ const NODES: Record<string, [number, number]> = {
   l0: [-1.95, 0.5], l1: [-1.95, -0.55], l2: [-1.7, -1.15],
   b0: [-0.85, -1.15], b1: [0.1, -1.15], b2: [0.72, -1.02],
   r0: [1.55, -0.72], r1: [1.6, -0.3], r2: [2.2, -0.7],
+  // Open floor in front of the table (#42 talk prototype).
+  f0: [-1.75, 1.3], f1: [-0.3, 1.45], f2: [1.15, 1.3], f3: [1.85, 0.45],
 }
 const EDGES: [string, string][] = [['l0', 'l1'], ['l1', 'l2'], ['l2', 'b0'], ['b0', 'b1'], ['b1', 'b2'], ['b2', 'r0'], ['r0', 'r1'], ['r0', 'r2'], ['r1', 'r2']]
+/**
+ * #42 talk prototype: walkers cross the room in the open, in front of the table,
+ * instead of behind the far chairs where the room view loses them.
+ */
+const OPEN_EDGES: [string, string][] = [
+  ...EDGES.filter(([a, b]) => !(a === 'b0' && b === 'b1')),
+  ['l0', 'f0'], ['f0', 'f1'], ['f1', 'f2'], ['f2', 'f3'], ['f3', 'r1'],
+]
+export type Paths = 'kitchen' | 'open'
 
 export interface Spot {
   at: [number, number]
@@ -33,21 +44,33 @@ export const SPOTS: Record<string, Spot> = {
   // The middle chair faces the camera across the table; the right one is seen in profile.
   seatMid: { at: [0.63, -0.6], face: -Math.PI / 2, via: 'b2', seat: chairSeat(0.2, -0.49, 0) },
   seatRight: { at: [0.98, -0.5], face: -Math.PI * 0.7, via: 'b2', seat: chairSeat(1.05, -0.05, -Math.PI / 2 + 0.35) },
+  // The talk prototype's other seats: the far-left chair, and a fourth chair it adds on the near side.
+  seatLeft: { at: [-1.2, -0.62], face: Math.PI / 2, via: 'l1', seat: chairSeat(-0.7, -0.49, 0) },
+  plantSide: { at: [1.04, -1.48], face: -2.58, via: 'b2' },
+  seatNear: { at: [0.62, 1.05], face: -Math.PI / 2, via: 'f2', seat: chairSeat(0.2, 0.86, Math.PI) },
 }
+/** Where the talk prototype puts its fourth chair, facing the table. */
+export const NEAR_CHAIR = { x: 0.2, z: 0.86, yaw: Math.PI }
 export const SEAT_Y = SEAT_TOP
 
-/** Breadth-first route between two spots' corridor nodes. */
-function nodes(from: string, to: string): string[] {
+/** Shortest route between two spots' corridor nodes. */
+function nodes(from: string, to: string, paths: Paths): string[] {
+  const edges = paths === 'open' ? OPEN_EDGES : EDGES
   const prev = new Map<string, string | null>([[from, null]])
-  const queue = [from]
-  while (queue.length) {
-    const n = queue.shift()!
+  const cost = new Map<string, number>([[from, 0]])
+  const open = new Set([from])
+  while (open.size) {
+    const n = [...open].reduce((x, y) => (cost.get(x)! <= cost.get(y)! ? x : y))
+    open.delete(n)
     if (n === to) break
-    for (const [a, b] of EDGES) {
+    for (const [a, b] of edges) {
       const next = a === n ? b : b === n ? a : null
-      if (next && !prev.has(next)) {
+      if (!next) continue
+      const c = cost.get(n)! + Math.hypot(NODES[a][0] - NODES[b][0], NODES[a][1] - NODES[b][1])
+      if (c < (cost.get(next) ?? Infinity)) {
+        cost.set(next, c)
         prev.set(next, n)
-        queue.push(next)
+        open.add(next)
       }
     }
   }
@@ -57,10 +80,25 @@ function nodes(from: string, to: string): string[] {
 }
 
 /** A smooth floor path from one spot to another through the corridor. */
-export function route(from: string, to: string): THREE.CatmullRomCurve3 {
-  const a = SPOTS[from], b = SPOTS[to]
-  const points: [number, number][] = [a.at]
-  const via = nodes(a.via, b.via)
+export function route(from: string, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
+  return curve(SPOTS[from].at, SPOTS[from].via, to, paths)
+}
+
+/** A path from wherever a villager stands, through its nearest corridor node, to a spot. */
+export function routeFrom(x: number, z: number, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
+  const used = new Set((paths === 'open' ? OPEN_EDGES : EDGES).flat())
+  let near = SPOTS[to].via, best = Infinity
+  for (const n of used) {
+    const d = Math.hypot(NODES[n][0] - x, NODES[n][1] - z)
+    if (d < best) [near, best] = [n, d]
+  }
+  return curve([x, z], near, to, paths)
+}
+
+function curve(start: [number, number], via0: string, to: string, paths: Paths): THREE.CatmullRomCurve3 {
+  const b = SPOTS[to]
+  const points: [number, number][] = [start]
+  const via = nodes(via0, b.via, paths)
   for (const n of via) points.push(NODES[n])
   points.push(b.at)
   const clean = points.filter((p, i) => i === 0 || Math.hypot(p[0] - points[i - 1][0], p[1] - points[i - 1][1]) > 0.12)

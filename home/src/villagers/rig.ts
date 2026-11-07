@@ -3,7 +3,7 @@
 // walking villager never slides; the body bobs, squashes on footfalls, sways
 // over the standing foot and leans into speed and turns.
 import * as THREE from 'three/webgpu'
-import { route, SEAT_Y, SPOTS } from './world'
+import { route, routeFrom, SEAT_Y, SPOTS, type Paths } from './world'
 
 /** What an art direction builds. Characters face +z; the rig moves `root`. */
 export interface Figure {
@@ -43,6 +43,9 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 const smooth = (u: number) => u * u * (3 - 2 * u)
 const frac = (x: number) => x - Math.floor(x)
 
+const CHIN = new THREE.Vector3()
+const chin = new THREE.Vector3()
+
 interface Foot { world: THREE.Vector3; from: THREE.Vector3; swing: boolean; settle: number }
 
 export class Villager {
@@ -54,18 +57,31 @@ export class Villager {
   chosen = false
   /** Someone is standing just ahead on the path: wait for them. */
   blocked = false
+  /** The person's pointer is on it: pause, so it is easy to click. */
+  paused = false
+  /** Sent somewhere by the person (a chair at the table): stays there until released. */
+  held = false
+  /** Waiting on its own words: looks up and taps its chin. */
+  thinking = false
+  /** Saying something right now: leans in and nods. */
+  speaking = false
+  /** Called when a chore at a spot is finished, before moving on. */
+  onDone?: (spot: string) => void
   /** Gait phase in cycles, and the blends the pose reads. */
   phase = 0
   walk = 0
   seated = 0
   working = 0
   talking = 0
+  think = 0
+  speak = 0
   yawRate = 0
   t = 0
   camera = new THREE.Vector3()
   private tasks: Task[]
   private at = 0
-  private spot: string
+  /** The spot it is at or walking to. */
+  spot: string
   private curve: THREE.CatmullRomCurve3 | null = null
   private s = 0
   private len = 0
@@ -79,13 +95,19 @@ export class Villager {
   private blinkAt = 2
   private tick = -1
   private idle: boolean
+  private paths: Paths
+  /** Where to walk once a hop off a chair lands. */
+  private pending: string | null = null
+  /** Progress of the short "oh, hello" hop; 1 is at rest. */
+  private beatU = 1
 
   /** `idle` villagers stay where they are put (the lineup). */
-  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number }) {
+  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number; paths?: Paths }) {
     this.fig = fig
     this.tasks = tasks
     this.spot = opts.start
     this.idle = Boolean(opts.idle)
+    this.paths = opts.paths ?? 'kitchen'
     const s = SPOTS[opts.start]
     if (opts.seated && s.seat) {
       this.pos.set(s.seat.x, SEAT_Y, s.seat.z)
@@ -129,11 +151,52 @@ export class Villager {
       this.startAt(task)
       return
     }
-    this.curve = route(this.spot, task.spot)
+    this.curve = route(this.spot, task.spot, this.paths)
     this.len = this.curve.getLength()
     this.s = 0
     this.spot = task.spot
     this.timer = task.stay
+    this.state = 'walk'
+  }
+
+  /** Walk to a spot (a chair: sit on it) and stay there until released. */
+  sendTo(spot: string) {
+    this.held = true
+    this.chosen = false
+    if (this.spot === spot && this.state !== 'walk') {
+      if (SPOTS[spot].seat && this.state === 'work') this.beginHop(true)
+      return
+    }
+    if (this.state === 'sit' || this.state === 'hop') {
+      this.pending = spot
+      if (this.state === 'sit') this.beginHop(false)
+      return
+    }
+    this.walkTo(spot)
+  }
+
+  /** Back to its chores: off the chair after a moment, then the next task. */
+  release(delay = 0.4) {
+    this.held = false
+    this.pending = null
+    this.timer = Math.min(this.timer, delay)
+  }
+
+  /** A short hop of recognition when someone turns to it. */
+  beat() {
+    this.beatU = 0
+  }
+
+  /** How far it would walk to reach a spot from where it stands. */
+  distanceTo(spot: string) {
+    return this.spot === spot ? 0 : routeFrom(this.pos.x, this.pos.z, spot, this.paths).getLength()
+  }
+
+  private walkTo(spot: string) {
+    this.curve = routeFrom(this.pos.x, this.pos.z, spot, this.paths)
+    this.len = this.curve.getLength()
+    this.s = 0
+    this.spot = spot
     this.state = 'walk'
   }
 
@@ -163,8 +226,10 @@ export class Villager {
 
     if (this.state === 'walk' && this.curve) {
       const remaining = this.len - this.s
-      const cap = this.chosen || this.blocked ? 0 : Math.min(fig.speed * this.k, Math.sqrt(2 * 1.2 * remaining) + 0.04)
-      const accel = this.chosen || this.blocked ? 3 : 1.4
+      const stop = this.chosen || this.blocked || this.paused
+      // Sent for by the person, it hurries.
+      const cap = stop ? 0 : Math.min(fig.speed * this.k * (this.held ? 1.7 : 1), Math.sqrt(2 * 1.2 * remaining) + 0.04)
+      const accel = stop ? 3 : 1.4
       this.v += Math.max(-accel * dt, Math.min(accel * dt, cap - this.v))
       this.v = Math.max(0, this.v)
       this.s = Math.min(this.len, this.s + this.v * dt)
@@ -181,9 +246,12 @@ export class Villager {
       }
     } else if (this.state === 'work') {
       goalYaw = SPOTS[this.spot]?.face ?? this.yaw
-      if (!this.chosen && !this.idle) {
+      if (!this.chosen && !this.idle && !this.held) {
         this.timer -= dt
-        if (this.timer <= 0) this.next()
+        if (this.timer <= 0) {
+          this.onDone?.(this.spot)
+          this.next()
+        }
       }
     } else if (this.state === 'hop' && this.hop) {
       const h = this.hop
@@ -201,11 +269,16 @@ export class Villager {
         else {
           this.state = 'work'
           this.timer = 0.3
+          if (this.pending) {
+            const next = this.pending
+            this.pending = null
+            this.walkTo(next)
+          }
         }
       }
     } else if (this.state === 'sit') {
       goalYaw = SPOTS[this.spot]?.seat?.yaw ?? this.yaw
-      if (!this.chosen && !this.idle) {
+      if (!this.chosen && !this.idle && !this.held) {
         this.timer -= dt
         if (this.timer <= 0) this.beginHop(false)
       }
@@ -220,6 +293,9 @@ export class Villager {
     this.walk = walking
     this.working += ((this.state === 'work' && !this.chosen && !this.idle ? 1 : 0) - this.working) * (1 - Math.exp(-dt * 4))
     this.talking += ((this.chosen ? 1 : 0) - this.talking) * (1 - Math.exp(-dt * 6))
+    this.think += ((this.thinking ? 1 : 0) - this.think) * (1 - Math.exp(-dt * 7))
+    this.speak += ((this.speaking ? 1 : 0) - this.speak) * (1 - Math.exp(-dt * 6))
+    this.beatU = Math.min(1, this.beatU + dt / 0.42)
     if (this.state === 'sit') this.seated = 1
     else if (this.state !== 'hop') this.seated = 0
     this.phase += (this.v * dt) / (fig.stride * this.k)
@@ -325,7 +401,14 @@ export class Villager {
     y += -fig.hip * this.seated
     lean += 0.05 * this.seated
     roll += 0.04 * this.seated * Math.sin(t * 0.3)
-    y += Math.abs(Math.sin(t * 8.5)) * 0.008 * this.talking
+    y += Math.abs(Math.sin(t * 8.5)) * 0.008 * this.talking * (1 - this.think)
+    // Speaking leans in; the hop of recognition squashes, springs and lands.
+    lean += 0.11 * this.speak + 0.04 * this.speak * Math.sin(t * 3.1)
+    if (this.beatU < 1) {
+      const u = this.beatU
+      y += Math.sin(Math.min(1, u / 0.7) * Math.PI) * 0.045
+      sy *= 1 - 0.12 * Math.sin(Math.min(1, u / 0.18) * Math.PI) * (u < 0.18 ? 1 : 0) + 0.07 * Math.sin(Math.min(1, u / 0.7) * Math.PI) - 0.08 * (u > 0.7 ? Math.sin(((u - 0.7) / 0.3) * Math.PI) : 0)
+    }
     pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
     pose.rotation.set(lean, 0, roll)
     const sxz = 1 + (1 - sy) * 0.5
@@ -339,6 +422,14 @@ export class Villager {
       h.position.y += 0.07 * this.seated
       h.position.z += Math.sin(2 * Math.PI * p) * s * fig.stride * 0.18 * w
       h.position.y += (Math.sin(t * 5 + i * Math.PI) * 0.02 * this.working) + 0.03 * this.talking * (i ? 0 : 1) * (0.6 + 0.4 * Math.sin(t * 5))
+      // Speaking: the free hand opens out now and then.
+      h.position.y += 0.035 * this.speak * (i ? 1 : 0) * Math.max(0, Math.sin(t * 2.3))
+      // Thinking: the free hand comes up to the chin and taps.
+      if (i === 1 && this.think > 0.001) {
+        chin.copy(head.position).add(CHIN.set(0.03, -fig.height * 0.14, fig.height * 0.3))
+        chin.y += Math.max(0, Math.sin(t * 9)) * 0.012
+        h.position.lerp(chin, this.think)
+      }
     })
     // Glances around now and then, and at the person when chosen.
     this.nextGlance -= dt
@@ -346,10 +437,10 @@ export class Villager {
       this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
-    const headGoal = this.chosen ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
+    const headGoal = this.chosen || this.speak > 0.5 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
-    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) - this.working * 0.15
+    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2)
     head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)
     // Blink every few seconds.
     this.blinkAt -= dt

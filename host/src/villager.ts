@@ -34,6 +34,25 @@ interface SessionState {
 const PERSON = /^[a-z][a-z0-9-]{0,31}$/
 const MAX_TEXT = 2000
 
+/**
+ * Parses the operator's list of synthetic people, `alex:Alex,sam:Sam`, into
+ * `people`. Throws on a malformed entry or id, so a typo never starts a host
+ * that silently answers for the wrong people.
+ */
+export function parsePeople(spec: string): Record<string, string> {
+  const people: Record<string, string> = {}
+  for (const entry of spec.split(',').map((e) => e.trim()).filter(Boolean)) {
+    const at = entry.indexOf(':')
+    const id = at < 0 ? entry : entry.slice(0, at).trim()
+    const name = at < 0 ? '' : entry.slice(at + 1).trim()
+    if (!PERSON.test(id) || !name || name.length > 40) throw new Error(`"${entry}" is not id:Name with a lowercase id`)
+    if (Object.hasOwn(people, id)) throw new Error(`"${id}" is listed twice`)
+    people[id] = name
+  }
+  if (!Object.keys(people).length) throw new Error('no people listed')
+  return people
+}
+
 declare module 'cordis' {
   interface Context {
     villager: { port: number; launchFile: string }

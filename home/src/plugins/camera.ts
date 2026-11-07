@@ -10,8 +10,12 @@ export interface Pose {
 
 /** Lets other plugins ask the camera to frame something, and to come back. */
 export interface View {
-  /** Ease to a pose, or back to the seat with null. Instant when the person prefers reduced motion. */
-  focus(pose: Pose | null): void
+  /**
+   * Ease to a pose, or back to the seat with null. `rate` is the easing rate per
+   * second (3.2 settles in about a second, 7 in about 0.4 s). Instant when the
+   * person prefers reduced motion.
+   */
+  focus(pose: Pose | null, rate?: number): void
   /** True while a focus pose is requested. */
   readonly focused: boolean
   /**
@@ -37,7 +41,9 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
  * Both rigs hang off the resting pose that travel() moves, so room walks and
  * focus poses work in every mode.
  */
-const cam = new URLSearchParams(location.search).get('cam')
+const query = new URLSearchParams(location.search)
+// The #42 talk prototype looks at the room from above unless ?cam= says otherwise (?cam=seat is today's view).
+const cam = query.get('cam') ?? (query.get('talk') === 'npc' ? 'iso' : null)
 const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ? cam : 'seat'
 const SEAT_FOV = 40
 const ISO = { fov: 20, far: 16, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
@@ -59,6 +65,7 @@ export default {
 
     let target: Pose | null = null
     let blend = 0 // 0 at the seat, 1 at the focus pose
+    let rate = 3.2
     const from = { position: new THREE.Vector3(), look: new THREE.Vector3() }
     const to = { position: new THREE.Vector3(), look: new THREE.Vector3() }
     const last: Pose = { position: new THREE.Vector3(), look: new THREE.Vector3() }
@@ -185,7 +192,8 @@ export default {
     }, 'camera rig')
 
     ctx.provide('view', {
-      focus(pose: Pose | null) {
+      focus(pose: Pose | null, speed = 3.2) {
+        rate = speed
         if (pose) {
           last.position.copy(pose.position)
           last.look.copy(pose.look)
@@ -232,7 +240,7 @@ export default {
       }
       if (MODE === 'seat') eased.lerp(pointer, 1 - Math.exp(-dt * 2.5))
       const goal = target ? 1 : 0
-      blend += (goal - blend) * (1 - Math.exp(-dt * 3.2))
+      blend += (goal - blend) * (1 - Math.exp(-dt * rate))
       if (Math.abs(goal - blend) < 0.001) blend = goal
       const k = blend * blend * (3 - 2 * blend)
       const calm = 1 - k
