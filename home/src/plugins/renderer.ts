@@ -10,6 +10,8 @@ const asked = TIER_NAMES.find((t) => t === params.get('q'))
 const gpuMode = params.get('gpu') === '1'
 /** ?fx=csm,gtao names exactly the features to run, overriding the tier's set, so each one's cost is measured alone. */
 const fxParam = params.get('fx')
+/** ?webgl=1 runs three.js's WebGL2 backend even where WebGPU is available. */
+const forceWebGL = params.get('webgl') === '1'
 
 /**
  * Each tier: device pixel ratio cap and the features it runs. maxGpuMs is the
@@ -40,9 +42,15 @@ export default {
       antialias: quality !== 'low',
       powerPreference: 'high-performance',
       trackTimestamp: gpuMode,
+      forceWebGL,
     })
     await renderer.init()
     const backendState = renderer.backend as unknown as { isWebGPUBackend?: boolean; trackTimestamp: boolean; device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }
+    const device = backendState.device
+    // WebGL2 has no queue-done signal to time, and its frame interval is vsync, not
+    // GPU cost. Without a measurement the page takes the light tier instead of guessing.
+    const unmeasurable = calibrating && !device
+    if (unmeasurable) quality = 'low'
     const dpr = () => Math.min(devicePixelRatio, TIERS[quality].dpr)
     renderer.setPixelRatio(dpr())
     renderer.setSize(innerWidth, innerHeight)
@@ -54,9 +62,12 @@ export default {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)
     const backend = backendState.isWebGPUBackend ? 'WebGPU' : 'WebGL2'
-    const timing: Stage['timing'] = { gpu: [], passSum: [], cpu: [], tracking: backendState.trackTimestamp, tierReason: asked ? `?q=${asked}` : 'calibrating', tierSettled: !calibrating }
+    const timing: Stage['timing'] = { gpu: [], passSum: [], cpu: [], tracking: backendState.trackTimestamp, tierReason: asked ? `?q=${asked}` : unmeasurable ? 'WebGL2: no GPU timer, so the light tier' : 'calibrating', tierSettled: !calibrating || unmeasurable }
 
     const passes: Array<() => void> = []
+    // Calibration pauses while anything holds it, and drops a frame submitted before the last release.
+    let holds = 0
+    let releasedAt = 0
     const stage: Stage = {
       renderer,
       scene,
@@ -76,6 +87,16 @@ export default {
         }
       },
       drawPasses: () => passes.length,
+      hold: () => {
+        holds++
+        let held = true
+        return () => {
+          if (!held) return
+          held = false
+          holds--
+          releasedAt = performance.now()
+        }
+      },
     }
 
     const canvas = renderer.domElement
@@ -97,8 +118,7 @@ export default {
     let frame = 0
     let resolving = false
     let waiting = false
-    const device = backendState.device
-    let settled = !calibrating
+    let settled = !calibrating || unmeasurable
     let samples: number[] = []
     let since = 0
     const settleTier = (median: number) => {
@@ -116,10 +136,11 @@ export default {
       samples = []
       frame = 0
     }
-    const timed = (ms: number) => {
+    const timed = (ms: number, submitted: number) => {
       timing.gpu.push(ms)
       if (timing.gpu.length > 4000) timing.gpu.splice(0, 2000)
-      if (settled || ++frame <= WARMUP_FRAMES) return
+      if (settled || holds > 0 || submitted < releasedAt) return
+      if (++frame <= WARMUP_FRAMES) return
       if (!samples.length) since = performance.now()
       samples.push(ms)
       const enough = samples.length >= CALIBRATION_FRAMES || (samples.length >= 8 && performance.now() - since > CALIBRATION_MS)
@@ -141,7 +162,7 @@ export default {
         waiting = true
         device.queue.onSubmittedWorkDone().then(() => {
           waiting = false
-          timed(performance.now() - submitted)
+          timed(performance.now() - submitted, submitted)
         })
       }
       if (backendState.trackTimestamp && !resolving) {

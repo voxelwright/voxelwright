@@ -19,19 +19,27 @@ const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), d
 const SLACK = 1
 const DOORS = { 'to-living': 'living', 'to-kitchen': 'kitchen' }
 
-async function open(query = '', reducedMotion = 'no-preference') {
+// The villager host is not running here, so its launch request answers 503 on
+// purpose. That exact console error is the only one a section may show.
+const hostDown = (m) => m.text() === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)' && new URL(m.location().url).pathname === '/villager/launch'
+const opened = []
+async function open(query = '', reducedMotion = 'no-preference', { init, settle = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, reducedMotion })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  // The villager host is not running here; its launch request answers 503 on purpose.
-  page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && !m.location().url.includes('/villager/') && errors.push(m.text()))
+  page.on('console', (m) => m.type() === 'error' && !hostDown(m) && errors.push(`${m.text()} @ ${m.location().url}`))
+  const warnings = []
+  page.on('console', (m) => m.type() === 'warning' && warnings.push(m.text()))
+  if (init) await page.addInitScript(init)
   await page.goto(`${base}?${query}`)
+  opened.push({ query, errors })
+  if (!settle) return { context, page, errors, warnings }
   const ready = await page.evaluate(() => window.village.ready())
   // Quality calibration may step the tier down and rebuild postfx; wait until it has settled.
   await page.waitForFunction(() => window.village.snapshot().tierSettled, null, { timeout: 30000 })
   await page.waitForTimeout(800)
-  return { context, page, ready, errors }
+  return { context, page, ready, errors, warnings }
 }
 const state = (page) => page.evaluate(() => {
   const root = window.village.kernel.root
@@ -74,12 +82,24 @@ for (const room of ['kitchen', 'living']) {
   check(`${room}: page ready`, ready.ok, ready)
   const list = await entries(page)
   const visited = []
-  for (let i = 0; i < list.length + 1; i++) {
+  for (let i = 0; i < list.length + 2; i++) {
     await page.keyboard.press('Tab')
     visited.push((await state(page)).focus)
   }
   const expected = [...list].sort((a, b) => a.x - b.x).map((e) => e.id)
-  check(`${room}: Tab visits ${expected.join(', ')} left to right and wraps`, visited.slice(0, -1).join() === expected.join() && visited.at(-1) === expected[0], { visited, expected })
+  // Past the last entry Tab leaves the canvas (no keyboard trap); the next Tab comes back to the first.
+  check(`${room}: Tab visits ${expected.join(', ')} left to right, then leaves the entries, then returns`, visited.slice(0, expected.length).join() === expected.join() && visited[expected.length] === null && visited.at(-1) === expected[0], { visited, expected })
+  // Headless Chrome has no browser UI to move to, so it wraps focus inside the page; what
+  // matters is that the page lets the browser handle Tab at both ends.
+  const passedOn = (id, key) => page.evaluate(async ([id, key]) => {
+    document.querySelector(`[data-entry="${id}"]`).focus()
+    let prevented = null
+    addEventListener('keydown', (e) => (prevented = e.defaultPrevented), { once: true })
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: key === 'Shift+Tab', bubbles: true, cancelable: true }))
+    return prevented === false
+  }, [id, key])
+  const ends = { lastTab: await passedOn(expected.at(-1), 'Tab'), firstShiftTab: await passedOn(expected[0], 'Shift+Tab'), middleTab: !(await passedOn(expected[0], 'Tab')) }
+  check(`${room}: Tab on the last entry and Shift+Tab on the first are left to the browser; Tab inside stays spatial`, ends.lastTab && ends.firstShiftTab && ends.middleTab, ends)
   for (const id of expected.filter((id) => !DOORS[id])) {
     await page.evaluate((id) => document.querySelector(`[data-entry="${id}"]`).focus(), id)
     const focused = await state(page)
@@ -92,7 +112,6 @@ for (const room of ['kitchen', 'living']) {
     const left = await state(page)
     check(`${room}: Enter chooses ${id}, Escape backs out to it`, chosen.active === id && left.active === null && left.focus === id, { chosen, left })
   }
-  check(`${room}: no page errors`, errors.length === 0, errors)
   await context.close()
 }
 
@@ -226,6 +245,67 @@ for (const room of ['kitchen', 'living']) {
   await context.close()
 }
 
+// Room hiding follows ownership: an object a plugin adds after its room loaded is
+// hidden while another room is current (neighbouring rooms kept loaded).
+{
+  const { context, page } = await open('', 'reduce')
+  const visibleAfterReload = (name, object) => page.evaluate(async ([name, object]) => {
+    await window.village.unload(name)
+    window.village.load(name)
+    await new Promise((r) => setTimeout(r, 600))
+    const o = window.village.kernel.root.get('stage').scene.getObjectByName(object)
+    return o ? o.visible : 'missing'
+  }, [name, object])
+  const sideboard = await visibleAfterReload('sideboard', 'sideboard')
+  check('kept rooms: a living-room object added later stays hidden in the kitchen', sideboard === false, { sideboard })
+  await page.evaluate(() => document.querySelector('[data-entry="to-living"]').focus())
+  await page.keyboard.press('Enter')
+  await waitStill(page)
+  const table = await visibleAfterReload('table', 'table')
+  const lounge = await page.evaluate(() => window.village.kernel.root.get('stage').scene.getObjectByName('lounge')?.visible)
+  check('kept rooms: a kitchen object added later stays hidden in the living room, the living room shows', table === false && lounge === true, { table, lounge })
+  await context.close()
+}
+
+// A room plugin waiting forever for a missing service does not hold the walk:
+// the room opens without it and the page names it.
+{
+  const { context, page, warnings } = await open('rooms=unload', 'reduce')
+  await page.evaluate(() => window.village.kernel.load({ name: 'plantstand', inject: ['no-such-service'], apply() {} }))
+  const t0 = Date.now()
+  await page.evaluate(() => document.querySelector('[data-entry="to-living"]').focus())
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => !window.village.kernel.root.get('rooms').moving, null, { timeout: 30000, polling: 100 })
+  const ms = Date.now() - t0
+  const after = await page.evaluate(() => ({ room: window.village.kernel.root.get('rooms').current, lounge: window.village.snapshot().plugins.active.includes('lounge') }))
+  check('a plugin waiting forever does not hold the walk (living room within 3 s) and is named', ms < 3000 && after.room === 'living' && after.lounge && warnings.some((w) => w.includes('plantstand')), { ms, after, warnings })
+  await context.close()
+}
+
+// Unloading the rooms service while a room is still loading cancels it: no room
+// plugin comes back afterwards. A kitchen plugin that takes 2 s holds the first load.
+{
+  const init = () => {
+    Object.defineProperty(window, 'village', {
+      configurable: true,
+      set(v) {
+        Object.defineProperty(window, 'village', { value: v, configurable: true, writable: true })
+        v.kernel.load({ name: 'toyshelf', inject: ['stage'], apply: () => new Promise((r) => setTimeout(r, 2000)) })
+      },
+    })
+  }
+  const { context, page } = await open('', 'reduce', { init, settle: false })
+  await page.waitForFunction(() => window.village?.snapshot().plugins.active.includes('rooms'), null, { timeout: 30000, polling: 50 })
+  await page.evaluate(() => window.village.unload('rooms'))
+  // Past the old 15 s settle deadline, after which a stale load used to resume.
+  await page.waitForTimeout(16500)
+  const left = await page.evaluate(() => window.village.snapshot().plugins.registered)
+  const rooms = ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors', 'room', 'table', 'fridge', 'notebook']
+  check('unloading rooms mid-load leaves no room plugin loaded afterwards', !left.some((n) => rooms.includes(n)), left)
+  await context.close()
+}
+
+for (const [i, { query, errors }] of opened.entries()) check(`no page errors on page ${i + 1} (?${query})`, errors.length === 0, errors)
 await browser.close()
 for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.pass ? '' : `  ${JSON.stringify(c.detail)}`}`)
 const failures = checks.filter((c) => !c.pass).length

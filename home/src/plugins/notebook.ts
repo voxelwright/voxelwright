@@ -4,6 +4,9 @@ import { replace } from '../kernel'
 import { conversation, say } from '../villager'
 
 const STORAGE_KEY = 'village.notebook.lines'
+/** Lines kept but not yet delivered to the villager, oldest first. */
+const OUTBOX_KEY = 'village.notebook.outbox'
+const RETRY_S = 5 // seconds between attempts while the villager is away
 const HAND = 'italic 44px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 // Matches paintPage in paint.ts: lines are 52px apart and the page's own note uses the first two.
 const lineY = (i: number) => 140 + 52 * (i + 1) - 10
@@ -18,18 +21,18 @@ const WRITE_RATE = 32 // characters a second, so chunky arrivals still read as w
 const PERSON = 'alex'
 const AWAY = 'Your villager is out for a moment. Your line is kept here, and they will read it when they are back.'
 
-function readLines(): string[] {
+function readLines(key = STORAGE_KEY): string[] {
   try {
-    const lines = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    const lines = JSON.parse(localStorage.getItem(key) ?? '[]')
     return Array.isArray(lines) ? lines.filter((l) => typeof l === 'string') : []
   } catch {
     return []
   }
 }
 
-function saveLines(lines: string[]): boolean {
+function saveLines(lines: string[], key = STORAGE_KEY): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(lines))
+    localStorage.setItem(key, JSON.stringify(lines))
     return true
   } catch {
     return false
@@ -58,6 +61,8 @@ export default {
     input.type = 'text'
     input.maxLength = 48
     input.autocomplete = 'off'
+    // Focused only by choosing the notebook, so Tab never lands in an invisible field.
+    input.tabIndex = -1
     input.setAttribute('aria-label', 'A line for the notebook')
     input.className = 'village-offscreen'
     const style = document.createElement('style')
@@ -185,9 +190,19 @@ export default {
       paint()
     }
 
+    // Each kept line goes to an outbox in local storage first and leaves it once the
+    // villager has it. Lines typed while it answers wait their turn; while it is away
+    // they are tried again every RETRY_S seconds and on the next visit. A reply cut
+    // off mid-stream is not resent: the host already has that line.
+    const outbox = readLines(OUTBOX_KEY)
     let talking = false
-    const talk = async (text: string) => {
+    let retryIn = 0
+    let aborter: AbortController | null = null
+    const talk = async () => {
+      const text = outbox[0]
+      if (talking || text === undefined) return
       talking = true
+      aborter = new AbortController()
       voice.dataset.villager = 'writing'
       let heard = ''
       shown = 0
@@ -195,25 +210,36 @@ export default {
       const said = await say(PERSON, text, (t) => {
         heard += t
         showReply(heard)
-      })
+      }, aborter.signal)
+      aborter = null
       talking = false
+      if (disposed) return
       voice.dataset.villager = said.ok ? 'answered' : said.why
+      if (said.ok || said.why !== 'away') {
+        outbox.shift()
+        saveLines(outbox, OUTBOX_KEY)
+      }
       if (said.ok) showReply(said.reply)
       else if (said.why === 'busy') showHint('Your villager is still writing')
       else if (said.why === 'away') showReply(AWAY, { note: true, instant: true })
+      else if (said.why === 'cut') showReply('Your villager was interrupted partway through. Your line is kept; try me again in a moment.', { note: true, instant: true })
       else showReply('I could not quite answer that one. Your line is kept; try me again in a moment.', { note: true, instant: true })
       voice.textContent = reply
+      if (said.ok || said.why !== 'away') void talk()
+      else retryIn = RETRY_S
     }
 
     const commit = () => {
       const text = draft.trim()
       if (!text) return
       lines.push(text)
+      outbox.push(text)
       draft = ''
       input.value = ''
-      showHint(saveLines(lines) ? 'Kept on the page' : 'Written, but this browser could not save it')
+      showHint(saveLines(lines) && saveLines(outbox, OUTBOX_KEY) ? 'Kept on the page' : 'Written, but this browser could not save it')
       paint()
-      if (!talking) void talk(text)
+      retryIn = 0
+      void talk()
     }
 
     const onInput = () => {
@@ -235,6 +261,8 @@ export default {
       input.addEventListener('input', onInput)
       input.addEventListener('keydown', onKey)
       return () => {
+        disposed = true
+        aborter?.abort()
         if (open) view.focus(null)
         restore()
         input.remove()
@@ -244,26 +272,49 @@ export default {
     }, 'notebook writing')
 
     // Register once the table has made the book.
+    // The table owns the book, so when the table reloads the entry follows the new one.
     let removeEntry: (() => void) | null = null
+    let registered: THREE.Object3D | null = null
+    let disposed = false
     ctx.effect(() => () => removeEntry?.(), 'notebook entry')
+    const inScene = (o: THREE.Object3D) => {
+      while (o.parent) o = o.parent
+      return o === scene
+    }
 
     // Show kept lines once the table's page exists, and blink the caret while writing.
     let painted = false
+    let asked = false
     let blink = 0
     ctx.on('village/frame', (dt) => {
+      if (registered && !inScene(registered)) {
+        if (open) leave()
+        removeEntry?.()
+        removeEntry = null
+        registered = null
+        painted = false
+      }
       if (!painted && page()) {
         painted = true
         paint()
-        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: book()!, select: enter, leave })
-        // The last answer is on the page when you come back, written already.
-        void conversation(PERSON).then((history) => {
-          const last = history?.filter((l) => l.from === 'villager' && l.text).pop()
-          if (!last?.text || talking || reply) return
-          showReply(last.text, { instant: true })
-          voice.dataset.villager = 'remembered'
-          voice.textContent = last.text
-        })
+        paintReply()
+        registered = book()!
+        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: registered, select: enter, leave })
+        if (!asked) {
+          asked = true
+          // The last answer is on the page when you come back, written already.
+          void conversation(PERSON).then((history) => {
+            const last = history?.filter((l) => l.from === 'villager' && l.text).pop()
+            if (disposed || !last?.text || talking || reply) return
+            showReply(last.text, { instant: true })
+            voice.dataset.villager = 'remembered'
+            voice.textContent = last.text
+          })
+          // Lines kept while the villager was away go now.
+          void talk()
+        }
       }
+      if (retryIn > 0 && !talking && (retryIn -= dt) <= 0) void talk()
       if (shown < reply.length) {
         pen += WRITE_RATE * dt
         const step = Math.floor(pen)

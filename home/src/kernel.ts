@@ -29,6 +29,11 @@ export interface Stage {
   addDrawPass: (pass: () => void) => () => void
   /** How many draw passes are present, for inspection. */
   drawPasses: () => number
+  /**
+   * Pause tier calibration while the main thread is busy (room loads, walks), so
+   * a stall is not read as GPU time. Returns the release.
+   */
+  hold: () => () => void
 }
 
 declare module 'cordis' {
@@ -39,6 +44,8 @@ declare module 'cordis' {
     'village/frame'(dt: number, elapsed: number): void
     'village/plugin-error'(name: string, error: unknown): void
     'village/tier'(quality: Quality): void
+    /** An object own() just added; the rooms service hides it when its plugin's room is not the current one. */
+    'village/owned'(object: THREE.Object3D, plugin: string): void
   }
 }
 
@@ -104,13 +111,20 @@ export function loadedNames(): string[] {
   return [...fibers.keys()]
 }
 
+/** The plugin that owns a scene object through own(), if any. */
+export const ownerOf = (object: THREE.Object3D): string | undefined => object.userData.villagePlugin
+
 /**
  * Add an object to a parent for the lifetime of ctx. On unload the object is
- * removed and every geometry, material and texture under it is released.
+ * removed and every geometry, material and texture under it is released. The
+ * object is tagged with its plugin, so the rooms service can hide it.
  */
 export function own<T extends THREE.Object3D>(ctx: Context, object: T, parent?: THREE.Object3D): T {
   ctx.effect(() => {
+    const plugin = ctx.fiber.name
+    object.userData.villagePlugin = plugin
     ;(parent ?? ctx.stage.scene).add(object)
+    ctx.emit('village/owned', object, plugin)
     return () => {
       object.removeFromParent()
       releaseGpu(object)
