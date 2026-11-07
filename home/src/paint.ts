@@ -659,3 +659,53 @@ export function paintGlow() {
   g.fillRect(0, 0, 128, 128)
   return toTexture(c)
 }
+
+/** Woven cloth for generated props (#42 experiment): linen weave with an optional stripe or check, or a soft velvet nap. */
+export function paintFabric(seed: number, base: RGB, pattern: 'plain' | 'stripes' | 'check' | 'velvet', accent: RGB, size = 256) {
+  const n = makeNoise(seed, 32)
+  return toTexture(pixels(size, size, (x, y) => {
+    const weave = ((x + y) & 1) ? 0.96 : 1
+    let c: RGB = base
+    if (pattern === 'stripes' && Math.floor(x / (size / 8)) % 2) c = accent
+    if (pattern === 'check') {
+      const k = (Math.floor(x / (size / 8)) % 2) + (Math.floor(y / (size / 8)) % 2)
+      c = mixRGB(base, accent, k * 0.5)
+    }
+    const nap = pattern === 'velvet' ? 0.82 + n(x / 40, y / 40, 4) * 0.36 : 0.9 + n(x / 12, y / 12, 3) * 0.2
+    const t = weave * nap
+    return [c[0] * t, c[1] * t, c[2] * t]
+  })[0], { repeat: [2, 2] })
+}
+
+/** Painted wallpaper for generated props (#42 experiment): stripes, small florals, a diamond trellis or plain, with a paper grain. */
+export function paintWallpaper(seed: number, pattern: 'plain' | 'stripes' | 'floral' | 'trellis', ground: RGB, ink: RGB, stripe = 0.08) {
+  const w = 512, h = 512
+  const n = makeNoise(seed, 64)
+  const period = Math.max(16, Math.round(stripe * 2 * w))
+  const [c, g] = pixels(w, h, (x, y) => {
+    let c: RGB = ground
+    if (pattern === 'stripes' && (x % period) < period / 2) c = ink
+    if (pattern === 'trellis') {
+      const u = ((x + y) % 64), v = ((x - y + 4096) % 64)
+      if (u < 3 || v < 3) c = mixRGB(ground, ink, 0.8)
+    }
+    const t = 0.93 + n(x / 50, y / 50, 4) * 0.1
+    return [c[0] * t, c[1] * t, c[2] * t]
+  })
+  if (pattern === 'floral') {
+    const r = rng(seed + 9)
+    const fill = `rgb(${ink.join(',')})`
+    for (let i = 0; i < 42; i++) {
+      const x = r() * w, y = r() * h
+      g.fillStyle = fill
+      g.globalAlpha = 0.85
+      for (let p = 0; p < 5; p++) {
+        const a = (p / 5) * Math.PI * 2
+        g.beginPath()
+        g.ellipse(x + Math.cos(a) * 6, y + Math.sin(a) * 6, 5, 3, a, 0, Math.PI * 2)
+        g.fill()
+      }
+    }
+  }
+  return toTexture(c, { repeat: [1, 1] })
+}

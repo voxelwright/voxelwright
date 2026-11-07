@@ -58,6 +58,8 @@ const only = params.get('plugins')?.split(',')
 // lifecycle baseline (every active plugin but one) really leaves that one out.
 if (only) for (const plan of Object.values(PLANS)) plan.plugins = plan.plugins.filter((n) => only.includes(n))
 for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
+// #42 experiment: ?props=<run-id> places generated props in the kitchen, in dev builds only.
+if (import.meta.env.DEV && params.has('props')) void import('./props/load').then((m) => load(m.default))
 const keepRooms = params.get('rooms') !== 'unload'
 // When calibration steps the tier down, the renderer has already lowered the pixel
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
