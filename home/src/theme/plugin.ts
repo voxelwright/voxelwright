@@ -6,6 +6,7 @@ import { PAINTERS } from './paint'
 import { worlds } from './world'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 import { shade } from './shade/apply'
+import { interior } from './interior'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
@@ -143,6 +144,7 @@ export default {
       sky = { painter, mesh }
     }
     const world = worlds(scene)
+    const inside = interior(ctx)
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
     shade(ctx)
@@ -254,7 +256,7 @@ export default {
       }
       renderer.toneMappingExposure = t.light.exposure
       placeSky(t)
-      world.place(t)
+      inside.place(t, world.place(t))
       if (force) sweep()
     }
 
@@ -284,6 +286,7 @@ export default {
       sweep()
       dropSky()
       world.drop()
+      inside.drop()
     }, 'theme')
   },
 }

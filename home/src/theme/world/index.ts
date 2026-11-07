@@ -88,10 +88,14 @@ export function worlds(scene: THREE.Scene) {
     clear()
     while (retired.length) free(retired[0])
   }
-  const place = (t: Theme) => {
+  /** Stands the theme's world (or puts the yard back) and returns what stands, for ../interior/sun.ts. */
+  const place = (t: Theme): { house: House; group: THREE.Group } | null => {
     const name = OFF ? undefined : t.world
     const house = name && Object.hasOwn(WORLDS, name) ? measure(scene) : null
-    if (!name || !house) return clear()
+    if (!name || !house) {
+      clear()
+      return null
+    }
     const key = JSON.stringify([name, house])
     if (stood?.key !== key) {
       unstand()
@@ -107,6 +111,7 @@ export function worlds(scene: THREE.Scene) {
         hidden.add(o)
       }
     })
+    return { house, group: stood.world.group }
   }
   return { place, drop }
 }

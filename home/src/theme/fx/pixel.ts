@@ -39,6 +39,15 @@ export const oklabLinear = (lin: V3): V3 => {
 /** Display (sRGB) colour to OKLab on the GPU. */
 export const oklab = (srgb: V3): V3 => oklabLinear(sRGBTransferEOTF(srgb) as unknown as V3)
 
+/**
+ * The dollhouse view's own sizing (#50 regroup 3, I2), set by ../interior/isofit.ts. `rows`
+ * replaces the spec's height when above 0; `edge` above 0 finds outlines by a depth jump of
+ * about that many metres (so a chair reads against the floor 15 m away) instead of by a
+ * share of the view distance; `flat` is how much dither a flat midtone keeps (0.35 as before,
+ * 0 keeps dither for silhouettes and shadow edges). `refit` re-sizes every live pixel stage.
+ */
+export const pixelFit = { rows: 0, edge: uniform(0), flat: uniform(0.35), fits: new Set<() => void>(), refit: () => pixelFit.fits.forEach((f) => f()) }
+
 /** 4x4 ordered-dither thresholds, centred on zero. */
 const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5)
 
@@ -76,13 +85,17 @@ export function pixel(spec: Spec): Fx {
       const size = new THREE.Vector2()
       const fit = () => {
         const physical = stage.renderer.getDrawingBufferSize(size).y
-        const c = Math.max(1, Math.round(physical / spec.height))
+        const c = Math.max(1, Math.round(physical / (pixelFit.rows || spec.height)))
         scenePass.setResolutionScale(1 / c)
         cell.value = c
       }
       fit()
       addEventListener('resize', fit)
-      unfit = () => removeEventListener('resize', fit)
+      pixelFit.fits.add(fit)
+      unfit = () => {
+        removeEventListener('resize', fit)
+        pixelFit.fits.delete(fit)
+      }
       ;(scenePass.options as { samples?: number }).samples = spec.samples ?? 0
       if (outline || crease) {
         const normal = mrt({ normal: packNormalToRGB(normalView) })
@@ -112,7 +125,9 @@ export function pixel(spec: Spec): Fx {
         const i0 = inv(0, 0).toVar(), iE = inv(1, 0), iW = inv(-1, 0), iN = inv(0, 1), iS = inv(0, -1)
         // Positive where this pixel is nearer than its neighbours on either axis: the near side of an edge.
         const jump = max(i0.mul(2).sub(iE).sub(iW), i0.mul(2).sub(iN).sub(iS)).div(i0)
-        const edge = smoothstep(0.05, 0.12, jump)
+        // With `pixelFit.edge` set, the jump is weighed in metres (jump times view distance).
+        const metres = pixelFit.edge.max(1e-4)
+        const edge = mix(smoothstep(0.05, 0.12, jump), smoothstep(metres.mul(0.5), metres, jump.div(i0)), step(1e-4, pixelFit.edge))
         const n0 = nrm(0, 0).toVar()
         let bend: F = float(0)
         for (const [dx, dy, ik] of [[1, 0, iE], [-1, 0, iW], [0, 1, iN], [0, -1, iS]] as const) {
@@ -179,7 +194,7 @@ export function pixel(spec: Spec): Fx {
         const away = nextD.sqrt().sub(bestD.sqrt()).div(gap)
         // Where the light changes fast the band is full width; across a flat midtone it narrows
         // to a seam at the ramp step, so a wall shows clean bands instead of a dithered field.
-        const band = spread.max(1e-4).mul(mix(float(0.35), float(1), busy))
+        const band = spread.max(1e-4).mul(mix(pixelFit.flat, float(1), busy))
         const share = clamp(float(1).sub(away.div(band)), 0, 1).mul(0.5)
         return vec4(mix(best, next, step(t.add(0.5), share)), 1)
       })() as unknown as THREE.Node<'vec4'>

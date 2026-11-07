@@ -17,6 +17,7 @@ import type { Context } from 'cordis'
 import { theme } from '../index'
 import { CLASSES, classify, type MaterialClass } from './classify'
 import { keyDirection, makeTwin, type Model, type Twin } from './models'
+import { gouache, repaintModel } from '../interior/repaint'
 
 const FLAG = new URLSearchParams(location.search).get('shade')
 
@@ -28,13 +29,13 @@ export function shade(ctx: Context) {
   const classes = new Map<THREE.Material, MaterialClass | null>()
   const where = new Map<THREE.Material, string>()
   const twins = new Map<THREE.Material, Twin>()
-  let model: Model | null = null
+  let model: Model | 'gouache' | null = null
   let frame = 0
   let key: THREE.DirectionalLight | null = null
 
-  const modelFor = (): Model | null => {
+  const modelFor = (): Model | 'gouache' | null => {
     if (FLAG === 'class' || FLAG === 'toon' || FLAG === 'wet') return FLAG
-    return theme().shade ?? null
+    return theme().shade ?? repaintModel(theme())
   }
   const drop = (m: THREE.Material) => {
     twins.get(m)?.dispose()
@@ -63,7 +64,7 @@ export function shade(ctx: Context) {
         const map = (m as THREE.MeshStandardMaterial).map
         if (old && old.map !== map) drop(m)
         if (!cls || !model || twins.has(m)) continue
-        const twin = makeTwin(model, m, cls)
+        const twin = model === 'gouache' ? gouache(m as THREE.MeshStandardMaterial, cls, theme(), o) : makeTwin(model, m, cls)
         if (twin) twins.set(m, twin)
       }
     })
