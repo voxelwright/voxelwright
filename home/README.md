@@ -990,7 +990,7 @@ node scripts/check-music.mjs [base-url]   # 30 headless checks, dev server on 53
 The first key press does not freeze the page (checked in `check-music`, in a browser of its
 own because only the browser's first audio start-up is slow). Before: the old create-on-gesture
 code showed a single 3.1 s long task in the key press, in a cold browser with the whole scene.
-Now: no long task and a largest timer gap of 26 ms from the key press until the loop has played
+Now: no long task and a largest timer gap of 20 to 26 ms (two runs) from the key press until the loop has played
 for a second; at load the context costs 0.5 to 1.3 ms of main thread, with the device opening
 off the main thread over 0.6 to 5.9 s (the dev scene's own load is slow). Not heard: the output
 after `setSinkId('')` was verified for state and a running clock, not by ear on a device.
