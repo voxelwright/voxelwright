@@ -36,7 +36,7 @@ const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obj
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
 /** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -135,8 +135,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const side = THREE.MathUtils.clamp((Math.abs(footPivots[0].c.x) + Math.abs(footPivots[1].c.x)) / 2, 0.02, 0.25)
   const hip = THREE.MathUtils.clamp(box('body').min.y, 0, 0.4)
   root.traverse((n) => { n.castShadow = n.receiveShadow = true })
-  // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions.
-  const { failures, measures } = inspect(root, eyes, held)
+  // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions,
+  // the default round body instead of the species (`species` false only for plumbing probes).
+  const { failures, measures } = inspect(root, eyes, held, { head, hands, species })
   if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
   const g = checked.spec.gait

@@ -3,7 +3,9 @@
 // across the face (round 1's bear and a synthetic one), a sun-hat brim hiding the eyes from the
 // dollhouse camera (round 2's first frog), a floating head, a speck of a prop and a
 // too-wide body are refused with a plain reason. Also the spec checker cuts a huge untrusted name
-// before working on it (Sentinel, round 2).
+// before working on it (Sentinel, round 2). Round 3, species: round 1's tortoise and round 3's heron
+// pass; the prompt's own example, round 2's shell-less tortoise and its mouse-as-a-bear are refused
+// as the default round template.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -58,22 +60,22 @@ try {
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)))
   await page.goto(`${base}?plugins=renderer,camera&q=low&villager=gen&gen=none`)
   await page.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
-  const trial = (code) => page.evaluate((c) => window.villagerGen.trial(c), code)
+  const trial = (code, opts = {}) => page.evaluate(([c, o]) => window.villagerGen.trial(c, o), [code, opts])
 
   // Passing: the hand-made plush, their specs, the prompt's example, a sound probe and a round-1 frog.
   for (const id of ['hand:dumpling', 'hand:tuft', 'hand:moss', 'spec:dumpling', 'spec:tuft', 'spec:moss']) {
     const r = await page.evaluate((i) => window.villagerGen.audit(i), id)
-    check(`${id} passes every check`, r.failures.length === 0, r.failures.length ? r.failures : r.measures)
+    check(`${id} passes every check (species measured, not applied: they are the round template)`, r.failures.length === 0 && r.measures.species, r.failures.length ? r.failures : r.measures.species)
   }
-  for (const [name, code] of [['the prompt example (Dumpling with a toque)', example], ['a sound probe cook', plush()], ['round 1 frog (code-5)', fixture('round1-frog.code.txt')]]) {
-    const r = await trial(code)
+  for (const [name, code, opts] of [['the prompt example (Dumpling with a toque), species off', example], ['a sound probe cook, species off', plush()], ['round 1 frog (code-5)', fixture('round1-frog.code.txt'), { species: true, accent: '#3d7cc8' }], ['round 1 tortoise (code-1)', fixture('round1-tortoise.code.txt'), { species: true }], ['round 3 heron (a probe before the final prompt)', fixture('round3-heron.code.txt'), { species: true, accent: '#e0b53a' }]]) {
+    const r = await trial(code, opts)
     check(`${name} passes`, r.ok, r.ok ? r.measures : r.reason)
     if (code === example) check('the prompt example comes back with a whole persona', r.persona?.temperament === 'warm' && r.persona.quirks.length === 2 && r.persona.topics.length === 3 && r.persona.dials.warmth === 0.8, r.persona)
   }
 
   // Failing, each with a reason a model can act on.
-  const refused = async (name, code, pattern) => {
-    const r = await trial(code)
+  const refused = async (name, code, pattern, opts) => {
+    const r = await trial(code, opts)
     check(`${name} is refused`, !r.ok && pattern.test(r.reason), r.reason ?? r.measures)
   }
   await refused('round 1 bear (code-3, scarf ring across the face)', fixture('round1-bear.code.txt'), /eye is hidden from the front/)
@@ -82,6 +84,11 @@ try {
   await refused('a head lifted 0.12 off the body', plush({ lift: 0.12 }), /float.* free of the rest/)
   await refused('a spoon at a fifth of its size', plush({ prop: 0.2 }), /held prop .* too small to read/)
   await refused('a body stretched three times as wide', plush({ wide: 3 }), /wide and only .* tall/)
+  // Species (round 3): the default round body with a head on top is refused, whatever hat or bag it wears.
+  const template = /default round body with a head on top.*no snout, muzzle or beak.*no legs.*no neck/
+  await refused('the prompt example (the round template, with a toque)', example, template, { species: true })
+  await refused('round 2 tortoise (no shell, head on top, ledger satchel)', fixture('round2-tortoise-noshell.code.txt'), template, { species: true })
+  await refused('round 2 mouse (a bear in a cap with a mail bag)', fixture('round2-mouse-teddy.code.txt'), template, { species: true, accent: '#3d7cc8' })
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

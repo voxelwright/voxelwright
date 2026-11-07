@@ -3,7 +3,8 @@
 // shoot both arms and the schema-coverage pairs in rows, render flat silhouettes and
 // their pairwise IoU, and write <out>/results.md.
 // Usage: node scripts/villagers/capture.mjs <out-dir> [base-url] [--compare=<earlier-out-dir>]   (dev server running)
-// --compare adds the earlier run's code row to the lineup sheet (round 2 against round 1, like for like).
+// --compare adds the earlier run's code row to the lineup sheet (round 2 against round 1, like for like);
+// several runs, comma-separated, add a row each. --labels=<a>,<b>,... names the rows, earlier runs first.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { chromium } from 'playwright'
@@ -11,7 +12,8 @@ import { chromium } from 'playwright'
 const args = process.argv.slice(2)
 const out = resolve(args[0])
 const base = args.find((a, i) => i > 0 && /^https?:/.test(a)) ?? 'http://localhost:5330/'
-const compare = args.find((a) => a.startsWith('--compare='))?.slice(10)
+const compare = args.find((a) => a.startsWith('--compare='))?.slice(10).split(',') ?? []
+const labels = args.find((a) => a.startsWith('--labels='))?.slice(9).split(',')
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
 const shots = join(out, 'shots')
 mkdirSync(shots, { recursive: true })
@@ -119,10 +121,11 @@ const tile = (id, rs = results, dir = shots) => {
   return `<div class="cell"><img src="file://${join(dir, `${id}-close.jpg`)}"><p><b>${c.name ?? ''}</b> &middot; ${id}<br>${s(r.first.wallMs + (r.repair?.wallMs ?? 0))} s &middot; ${r.repair ? 'repaired' : 'first try'} &middot; ${c.triangles ?? ''} tris &middot; ${c.drawCalls ?? ''} draws</p></div>`
 }
 const DESC = Object.fromEntries(ids.map((id) => [String(results[id].n), results[id].description]))
-const earlier = compare ? JSON.parse(readFileSync(join(resolve(compare), 'results.json'), 'utf8')) : null
+const earlier = compare.map((dir) => ({ dir: resolve(dir), rs: JSON.parse(readFileSync(join(resolve(dir), 'results.json'), 'utf8')) }))
+const rowLabel = (k, fallback) => labels?.[k] ?? fallback
 const sheetRows = [
-  ...(earlier ? [['Round 1 code', (n) => tile(idOf(earlier, 'code', n), earlier, join(resolve(compare), 'shots'))]] : []),
-  ...ARMS.map((arm) => [earlier ? `Round 2 ${arm}` : arm === 'spec' ? 'Spec (JSON)' : 'Code (sandbox)', (n) => tile(idOf(results, arm, n))]),
+  ...earlier.map(({ dir, rs }, k) => [rowLabel(k, `Round ${k + 1} code`), (n) => tile(idOf(rs, 'code', n), rs, join(dir, 'shots'))]),
+  ...ARMS.map((arm, k) => [earlier.length ? rowLabel(earlier.length + k, `Round ${earlier.length + 1} ${arm}`) : arm === 'spec' ? 'Spec (JSON)' : 'Code (sandbox)', (n) => tile(idOf(results, arm, n))]),
 ]
 const sheet = `<html><head><style>
   body { margin: 0; padding: 20px; background: #f4ece0; font: 14px/1.3 Georgia, serif; color: #3a2a1e; width: 2060px }

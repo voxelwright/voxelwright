@@ -4,6 +4,7 @@
 // Usage: node scripts/villagers/voices.mjs <voices.json> [base-url] --wav=<dir> [--checks=<file.json>]   (dev server running)
 // --checks: [{ "a": id, "b": id, "metric": "f0Hz" | "centroidHz" | "syllablesPerSec", "why": text }], each meaning a's metric is
 // above b's, run per arm; without it the round-1 mouse, tortoise and bear checks run.
+// --rename=<from>:<to> swaps an id prefix in the checks file, to reuse a round's checks (--rename=rd-:r3-).
 // Exits non-zero when a directional check fails. Models cannot listen: these are numbers, not taste.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,6 +16,8 @@ const file = args.find((a) => !a.startsWith('--') && a.endsWith('.json'))
 const base = args.find((a) => /^https?:/.test(a)) ?? 'http://localhost:5331/'
 const wavDir = args.find((a) => a.startsWith('--wav='))?.slice(6)
 const checksFile = args.find((a) => a.startsWith('--checks='))?.slice(9)
+const [renameFrom, renameTo] = args.find((a) => a.startsWith('--rename='))?.slice(9).split(':') ?? []
+const renamed = (id) => (renameFrom && id.startsWith(renameFrom) ? renameTo + id.slice(renameFrom.length) : id)
 if (!file || !wavDir) {
   console.error('usage: node scripts/villagers/voices.mjs <voices.json> [base-url] --wav=<dir>')
   process.exit(2)
@@ -101,8 +104,8 @@ for (const arm of arms) {
 const checks = []
 const UNIT = { f0Hz: 'Hz', centroidHz: 'Hz', syllablesPerSec: 'syl/s' }
 if (checksFile) for (const arm of arms) for (const { a, b, metric, why } of JSON.parse(readFileSync(checksFile, 'utf8'))) {
-  const [x, y] = [a, b].map((id) => rows.find((r) => r.arm === arm && r.id === id))
-  if (!x || !y) continue
+  const [x, y] = [a, b].map((id) => rows.find((r) => r.arm === arm && r.id === renamed(id)))
+  if (!x || !y) { checks.push({ arm, name: `${a} and ${b} are both in this run`, pass: false, detail: 'missing' }); continue }
   checks.push({ arm, name: `${a} ${metric} > ${b} ${metric} (${why})`, pass: x[metric] > y[metric], detail: `${x[metric]} vs ${y[metric]} ${UNIT[metric]}` })
 }
 for (const arm of checksFile ? [] : arms) {

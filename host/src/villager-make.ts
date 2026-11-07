@@ -152,10 +152,18 @@ export function claudeVillagerMaker(model = 'sonnet'): VillagerMaker {
   }
 }
 
-/** Stand-in for checks: the Dumpling example from arm-code.md, verbatim, in the asked accent. "[stub-fail]" fails. */
+/**
+ * Stand-in for checks: the Dumpling example from arm-code.md in the asked accent, given a pup's
+ * snout and tall ears so it passes the home's species check (gen/checks.ts: the example alone is
+ * the round template the check refuses). "[stub-fail]" fails.
+ */
 export function stubVillagerMaker(delayMs = 200): VillagerMaker {
-  const example = /^export default function \(villager, api\) \{\n[\s\S]*?\n\}$/m.exec(readFileSync(join(prompts, 'arm-code.md'), 'utf8').split(/^Example\b/m)[1] ?? '')?.[0]
-  if (!example) throw new Error('arm-code.md has no example module')
+  const found = /^export default function \(villager, api\) \{\n[\s\S]*?\n\}$/m.exec(readFileSync(join(prompts, 'arm-code.md'), 'utf8').split(/^Example\b/m)[1] ?? '')?.[0]
+  if (!found || !found.includes('\n  villager.add(head)\n')) throw new Error('arm-code.md has no example module with a head group')
+  const example = found.replace('\n  villager.add(head)\n', `\n  villager.add(head)
+  add(head, new THREE.CapsuleGeometry(0.045, 0.06, 6, 10), felt('#f6e6cc'), 0, -0.06, 0.17).rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(head, new THREE.CapsuleGeometry(0.03, 0.12, 6, 10), felt('#e2b98a'), s * 0.1, 0.2, -0.02).rotation.z = -s * 0.2
+`)
   return async (ask) => {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(resolve, delayMs)

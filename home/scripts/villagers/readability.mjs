@@ -5,13 +5,17 @@
 //   villager's closest silhouette one of the same role? Within-role against between-role mean IoU;
 // - the owner's accent: the same render with accent parts red, counting the accent pixels that show;
 // - a blind sheet for model scorers (black, numbered in a shuffled order, no labels) and its key.
-// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url]   (dev server running)
+// - round 3, species: mean pairwise IoU over all villagers (lower is more varied), and how many are the
+//   default round template by gen/checks.ts speciesFeatures (no feature at or over SPECIES).
+// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off]   (dev server running)
+// --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { chromium } from 'playwright'
 
 const out = resolve(process.argv[2])
-const base = process.argv[3] ?? 'http://localhost:5332/'
+const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://localhost:5332/'
+const checksOff = process.argv.includes('--checks=off')
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
 const shots = join(out, 'shots')
 mkdirSync(shots, { recursive: true })
@@ -25,7 +29,7 @@ const TILE = 150
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 async function open(query) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}`)
+  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}`)
   await page.waitForFunction(() => window.village && window.villagerGen, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villagerGen.loaded)
@@ -53,7 +57,10 @@ const page = await open(`gen=${ids.join(',')}&lineup=1`)
 const black = await page.evaluate((s) => window.villagerGen.silhouettes(s), SIZE)
 const accent = await page.evaluate((s) => window.villagerGen.silhouettes(s, true), SIZE)
 const report = await page.evaluate(() => window.villagerGen.report)
+const SPECIES = await page.evaluate(async () => (await import('/src/villagers/gen/checks.ts')).SPECIES)
 await page.close()
+/** The default round template: no species feature at or over its threshold. */
+const isTemplate = (f) => !!f && !Object.keys(SPECIES).some((k) => f[k] >= SPECIES[k])
 
 function aligned({ w, h, mask }) {
   let x0 = w, x1 = -1, y1 = -1
@@ -82,6 +89,7 @@ const rows = black.map((m, i) => {
     id: m.id, name: m.name, role: r.role, declaredRole: report[m.id]?.role ?? null, owner: r.owner, accent: r.accent, description: r.description,
     nearest: black[nearest.j].id, nearestRole: role(nearest.j), nearestIoU: +nearest.v.toFixed(3), sameRole: role(nearest.j) === r.role,
     accentPx, figurePx, accentShare: +(accentPx / figurePx).toFixed(3), screenH: screenH[m.id],
+    species: report[m.id]?.measures?.species ?? null, template: isTemplate(report[m.id]?.measures?.species),
   }
 })
 const mean = (xs) => xs.reduce((t, x) => t + x, 0) / xs.length
@@ -92,6 +100,7 @@ const summary = {
   roleReadability: +(rows.filter((r) => r.sameRole).length / rows.length).toFixed(3),
   chance: +mean(rows.map((r) => (rows.filter((o) => o.role === r.role).length - 1) / (rows.length - 1))).toFixed(3),
   withinRoleIoU: +mean(within).toFixed(3), betweenRoleIoU: +mean(between).toFixed(3),
+  meanIoU: +mean([...within, ...between]).toFixed(3), roundTemplate: rows.filter((r) => r.template).length,
   declaredRoleAgrees: rows.filter((r) => r.declaredRole === r.role).length,
   minAccentPx: Math.min(...rows.map((r) => r.accentPx)), medianAccentPx: rows.map((r) => r.accentPx).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
   minAccentShare: Math.min(...rows.map((r) => r.accentShare)),
@@ -130,10 +139,11 @@ const md = [
   `Silhouettes: ${SIZE} px framing 1.4 m from the dollhouse heading (fov 20), bottom- and centre-aligned IoU. Colour tiles: ?cam=iso at 1280x800, a villager about ${summary.medianScreenH} px tall.`, '',
   `- Role readability (nearest silhouette has the same role): ${(summary.roleReadability * 100).toFixed(0)}% (chance about ${(summary.chance * 100).toFixed(0)}%)`,
   `- Mean IoU within a role ${summary.withinRoleIoU}, between roles ${summary.betweenRoleIoU}`,
+  `- Species: mean pairwise IoU ${summary.meanIoU} (lower is more varied); ${summary.roundTemplate} of ${rows.length} are the default round template`,
   `- Model declared the requested role: ${summary.declaredRoleAgrees} of ${rows.length}`,
   `- Visible accent: min ${summary.minAccentPx} px, median ${summary.medianAccentPx} px of the ${SIZE} px render; min share of the figure ${(summary.minAccentShare * 100).toFixed(1)}%`, '',
-  '| id | name | role | nearest | its role | IoU | accent px | accent share | owner |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${(r.accentShare * 100).toFixed(1)}% | ${r.owner} |`),
+  '| id | name | role | nearest | its role | IoU | accent px | accent share | owner | round template | species features |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${(r.accentShare * 100).toFixed(1)}% | ${r.owner} | ${r.template ? 'yes' : ''} | ${r.species ? Object.entries(r.species).map(([k, v]) => `${k} ${v}`).join(', ') : ''} |`),
 ].join('\n')
 writeFileSync(join(out, 'readability.md'), md + '\n')
 console.log(md)

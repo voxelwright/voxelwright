@@ -69,17 +69,28 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 const page = await browser.newPage({ viewport: { width: 640, height: 400 } })
 await page.goto(`${base}?plugins=renderer,camera&q=low&villager=gen&gen=none`)
 await page.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
+// Vite reloads every open page when it re-optimises dependencies for another page; wait the reload out and retry once.
+async function inPage(fn, arg) {
+  try {
+    await page.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
+    return await page.evaluate(fn, arg)
+  } catch (error) {
+    if (!/villagerGen|context was destroyed|navigation/i.test(String(error))) throw error
+    await page.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
+    return page.evaluate(fn, arg)
+  }
+}
 
 async function verify(id, meta) {
   const dir = join(home, 'generated/villagers', id)
   writeFileSync(join(dir, 'meta.json'), JSON.stringify(meta))
   const t0 = performance.now()
-  const r = await page.evaluate(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${id}`])
+  const r = await inPage(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${id}`])
   return { ...r, checkMs: performance.now() - t0 }
 }
 
 // The description's mapped voice (src/voice/gen.ts), given to the model as its starting voice.
-const mapVoice = (text) => page.evaluate(async (t) => (await import('/src/voice/gen.ts')).voiceFromDescription(t), text)
+const mapVoice = (text) => inPage(async (t) => (await import('/src/voice/gen.ts')).voiceFromDescription(t), text)
 const round = (v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Math.round(x * 100) / 100]))
 
 async function job({ arm, n }) {
@@ -131,7 +142,7 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
 const voices = []
 for (const row of Object.values(results).sort((a, b) => a.id.localeCompare(b.id))) {
   const meta = JSON.parse(readFileSync(join(home, 'generated/villagers', row.id, 'meta.json'), 'utf8'))
-  const v = await page.evaluate(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${row.id}`])
+  const v = await inPage(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${row.id}`])
   voices.push({ id: row.id, arm: row.arm, description: row.description, role: row.role, declaredRole: v.role ?? null, name: v.name ?? null, voice: v.voice ?? null })
   row.persona = v.persona ?? null
   row.bark = v.bark ?? null

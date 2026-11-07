@@ -2,7 +2,7 @@ Write a JavaScript module with no imports that exports exactly:
 
 export default function (villager, api) { ... }
 
-It runs in a sealed sandbox. You build the villager from three.js meshes; only the meshes, their slots and your plain data come back to the home. Units: the villager stands on y = 0, faces +z, and is 0.4 to 0.7 tall (Dumpling 0.52, Tuft 0.48); anything under 0.25 or over 1.1 is rejected.
+It runs in a sealed sandbox. You build the villager from three.js meshes; only the meshes, their slots and your plain data come back to the home. Units: the villager stands on y = 0, faces +z, and is 0.4 to 0.7 tall (Dumpling 0.52, Tuft 0.48; a heron or giraffe up to 0.9); anything under 0.25 or over 1.1 is rejected.
 
 `api` holds:
 - api.THREE: three.js core r187. Use Group, Mesh, SphereGeometry, CapsuleGeometry, CylinderGeometry, ConeGeometry, TorusGeometry, BoxGeometry, LatheGeometry, CircleGeometry, Vector2, MeshStandardMaterial.
@@ -29,11 +29,12 @@ The home checks the finished villager and refuses it, with the reason, when:
 - an eye is hidden: rays from straight in front of each eye, and from in front and 33 degrees above (where the home is seen from), must reach the eye first, so no scarf, hat brim, hood or prop may cover the face from either;
 - a part floats: every mesh must touch or overlap another (bounding boxes within 0.02), so a head sits on its neck and a hat on its head;
 - the held prop's longest side is under a third of the villager's height, or longer than its height;
-- it is under 0.3 or over 0.95 tall, or wider than 1.5 times its height.
+- it is under 0.3 or over 1.0 tall, or wider than 1.5 times its height;
+- it is the default round body with a head on top: besides the hat, the scarf and the prop, nothing reaches forward past the face (snout, muzzle, beak, or the head ahead of the body), the body sits on the floor (no legs), the head sits straight on the body (no neck), and no ears, horns or eyes rise above the head or stick out past its sides.
 
 Do not touch the scene, DOM, network or timers. Keep it under about 60 meshes.
 
-Example (Dumpling, the existing cook, given its role's toque, accent #c8553d):
+Example (Dumpling, the existing cook, accent #c8553d). It shows the API: slots, the scarf, the role mark, about(). Its round body and head on top are Dumpling's own; do not start from them. Build your species' body plan from the shapes it needs:
 
 export default function (villager, api) {
   const { THREE } = api
