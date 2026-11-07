@@ -196,7 +196,7 @@ try {
       const head = window.village.talk.screen('sam', 1)
       return { x: r.left + r.width / 2, bottom: r.bottom, top: r.top, left: r.left, right: r.right, headX: head.x, headTop: head.y, w: innerWidth, glow: window.village.talk.state().cast.sam.glow }
     })
-    const overHead = Math.abs(tagAt.x - tagAt.headX) < 40 && tagAt.bottom <= tagAt.headTop + 4 && tagAt.bottom >= tagAt.headTop - 40 && tagAt.top >= 0 && tagAt.left >= 0 && tagAt.right <= tagAt.w
+    const overHead = Math.abs(tagAt.x - tagAt.headX) < 40 && tagAt.bottom <= tagAt.headTop + 16 && tagAt.bottom >= tagAt.headTop - 40 && tagAt.top >= 0 && tagAt.left >= 0 && tagAt.right <= tagAt.w
     check('hover shows "Sam\'s Tuft" just over Tuft\'s own head, inside the window, and outlines Tuft', hover.hovered === 'villager-sam' && hover.tags.join() === "Sam'sTuft" && overHead && tagAt.glow > 0.5, { hover, tagAt })
     await clickVillager(page, 'sam')
     const talking = await until(page, (s) => s.mode === 'talk' && s.cards.sam, 3000)
@@ -246,7 +246,7 @@ try {
     await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .more').click())
     await page.waitForTimeout(300)
     const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).opacity, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
-    check('a long reply turns its page only when it would overflow, and keeps the first page as a dimmed line above', firstPage.cards.sam && shown1.more && shown1.lines <= 6 && shown1.lines >= 4 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && Number(shown2.before) < 0.9 && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
+    check('a long reply turns its page only when it would overflow, and keeps the first page as a dimmed line above', firstPage.cards.sam && shown1.more && shown1.lines <= 7 && shown1.lines >= 5 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && Number(shown2.before) < 0.9 && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
 
     // Escape: back to chores and the room.
     await page.keyboard.press('Escape')

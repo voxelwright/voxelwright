@@ -318,7 +318,7 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   // A soft outline in the owner's colour, raised when the villager is pointed at or written to.
   const outline = uniform(0)
   const outlineColour = color(look.accent ?? s.felt)
-  const edge = () => outlineColour.mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 1.8)).mul(outline)
+  const edge = () => outlineColour.mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 1.4)).mul(outline)
   const felt = (c: string, map: THREE.Texture | null = null) => {
     const m = phys
       ? new THREE.MeshPhysicalNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })

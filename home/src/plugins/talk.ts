@@ -112,10 +112,10 @@ function nameTag(name: string, owner: string | null, colour: string) {
 }
 
 /** Words on a card: the width a full line of text takes, its type, and how many lines a page may hold. */
-const TEXT_WIDTH = 318
+const TEXT_WIDTH = 330
 const TEXT_PX = 19
 const LEADING = 1.42
-const PAGE_LINES = 6
+const PAGE_LINES = 7
 /** One hidden paragraph that every card measures with, to turn a page only when it would overflow. */
 const ruler = document.createElement('p')
 ruler.className = 'talk-ruler'
@@ -878,18 +878,27 @@ export default {
     /** How far a card's name tab sticks up above it. */
     const TAB = 22
     const box = new THREE.Box3()
-    const corner = new THREE.Vector3()
-    /** A villager's head on screen, in CSS pixels. */
-    const headBox = (m: Member) => {
-      box.setFromObject(m.v.fig.head)
+    const ball = new THREE.Sphere()
+    const camUp = new THREE.Vector3()
+    const camRight = new THREE.Vector3()
+    const edge = new THREE.Vector3()
+    const toPx = (v: THREE.Vector3) => {
+      v.project(stage.camera)
       const r = rect()
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
-      for (let i = 0; i < 8; i++) {
-        corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).project(stage.camera)
-        const x = r.left + ((corner.x + 1) / 2) * r.width, y = r.top + ((1 - corner.y) / 2) * r.height
-        x0 = Math.min(x0, x), x1 = Math.max(x1, x), y0 = Math.min(y0, y), y1 = Math.max(y1, y)
-      }
-      return { x0, y0, x1, y1, cx: (x0 + x1) / 2 }
+      return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
+    }
+    /** A villager's head on screen, in CSS pixels: the head's bounding sphere, seen from the camera. */
+    const headBox = (m: Member) => {
+      box.setFromObject(m.v.fig.head).getBoundingSphere(ball)
+      // Ears and leaves widen the box; most of the sphere is head.
+      const r = ball.radius * 0.8
+      camUp.setFromMatrixColumn(stage.camera.matrixWorld, 1)
+      camRight.setFromMatrixColumn(stage.camera.matrixWorld, 0)
+      const c = toPx(edge.copy(ball.center))
+      const top = toPx(edge.copy(ball.center).addScaledVector(camUp, r))
+      const side = toPx(edge.copy(ball.center).addScaledVector(camRight, r))
+      const ry = Math.abs(c.y - top.y), rx = Math.abs(side.x - c.x)
+      return { x0: c.x - rx, y0: c.y - ry, x1: c.x + rx, y1: c.y + ry, cx: c.x }
     }
     type Spot = { l: number; t: number; w: number; h: number; tail: 'down' | 'left' | 'right' }
     const overlaps = (a: Spot, b: Omit<Spot, 'tail'>) => a.l < b.l + b.w + 8 && b.l < a.l + a.w + 8 && a.t - TAB < b.t + b.h + 8 && b.t < a.t + a.h + 8
@@ -903,6 +912,12 @@ export default {
       if (slip.classList.contains('shown')) {
         const r = slip.getBoundingClientRect()
         taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
+      }
+      // Cards never cover the face of anyone else in the conversation.
+      const faces = new Map<Member, Omit<Spot, 'tail'>>()
+      for (const o of mode === 'talk' && partner ? [partner] : seated) {
+        const f = headBox(o)
+        faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
       }
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
       for (const m of order) {
@@ -919,7 +934,9 @@ export default {
         const slides = (o: Spot) => [0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 })
         const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + 16 && mouth < o.t + o.h - 16
         const inside = (o: Spot) => o.l >= EDGE && o.l + o.w <= innerWidth - EDGE && o.t >= EDGE + TAB && o.t + o.h <= innerHeight - EDGE
-        let spot = ways.flatMap(slides).find((o) => inside(o) && reaches(o) && !taken.some((t) => overlaps(o, t)))
+        const blocked = [...taken, ...[...faces].filter(([o]) => o !== m).map(([, f]) => f)]
+        let spot = ways.flatMap(slides).find((o) => inside(o) && reaches(o) && !blocked.some((t) => overlaps(o, t)))
+          ?? ways.flatMap(slides).find((o) => inside(o) && reaches(o) && !taken.some((t) => overlaps(o, t)))
         if (!spot) {
           const o = ways[0]
           spot = { ...o, l: THREE.MathUtils.clamp(o.l, EDGE, innerWidth - EDGE - w), t: THREE.MathUtils.clamp(o.t, EDGE + TAB, innerHeight - EDGE - h) }
@@ -1011,7 +1028,7 @@ export default {
         const addressed = SLIP_ALWAYS && mode === 'room' && slip.dataset.to === m.person
         const glowGoal = hover ? 1 : addressed ? 0.6 : 0
         m.glow += (glowGoal - m.glow) * (1 - Math.exp(-dt * 8))
-        if (m.v.fig.outline) m.v.fig.outline.value = m.glow * 0.85
+        if (m.v.fig.outline) m.v.fig.outline.value = m.glow * 1.3
         m.v.attending = addressed && (document.activeElement === line || line.value.length > 0)
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
