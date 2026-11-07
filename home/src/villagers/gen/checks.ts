@@ -17,6 +17,10 @@ export const LIMITS = {
   held: [0.3, 1.1],
   /** The dollhouse camera looks down about this far (radians, load.ts silhouettes); the face must show from there too. */
   pitch: 0.58,
+  /** Every marked part must come this close, surface to surface, to the part it sits on (round 6: floating pom-poms and boards). */
+  attach: 0.005,
+  /** Where a marked part meets what holds it, the meeting must be at least this share of the thinner part's thinnest side wide: round 5's sound joints are 0.9 or more, its pom-poms on a cone's needle point 0.20 to 0.22, and the old prompt recipe's 0.30. */
+  joint: 0.5,
 } as const
 
 export interface Measures {
@@ -37,6 +41,10 @@ export interface Measures {
   ownerPx: number
   /** Whether the held prop touches a hand; null when nothing is held. */
   heldInHand: boolean | null
+  /** Marked parts not joined, surface to surface within LIMITS.attach and through other marked parts, to an unmarked part (./markAttachment). */
+  loose: Loose[]
+  /** Where the role's mark sits against the head (./markPlace); null without a mark or a head. */
+  place: MarkPlace | null
 }
 
 /** The colour the part was made in (assemble.ts keeps it; the felt material shades its own). */
@@ -164,6 +172,7 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   const broke = markBreak(meshes, inHeld, eyes, head, hands, height)
   // Owner colour (the look regroup's C): assemble.ts dyes the marked parts in the owner's felt.
   const ownerPx = ownerArea(meshes, (m) => m.userData.mark === true)
+  const markFailures = failures.length
   if (mark) {
     const name = `the ${role && MARK_NAMES[role] ? `${role}'s ${MARK_NAMES[role]}` : 'role mark'}`
     if (!broke) failures.push(`nothing is tagged as ${name}; build it as the role table says and pass it to villager.mark() so the home can check it`)
@@ -172,8 +181,232 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     else if (Math.max(broke.above, broke.side) < MARK) failures.push(`${name} stays inside the outline seen from in front and above: it rises ${Math.max(0, broke.above * height).toFixed(2)} above the head and reaches ${Math.max(0, broke.side * height).toFixed(2)} past the body's side; make it rise at least ${(MARK * height).toFixed(2)} above the top of the head, or reach that far past the side of the head or body, so it changes the outline`)
     else if (ownerPx < OWNER_PX) failures.push(`${name} shows only ${ownerPx} pixels of the owner's colour from the dollhouse view (at least ${OWNER_PX}): the home dyes the mark in the owner's colour, so a thin mark says too little about whose villager it is. Make it bigger or thicker, ${THICKER[role] ?? 'with more felt in it'}`)
   }
+  // Round 6: the mark sits on what holds it (no gap), and the round marks are told apart by place as well as shape.
+  const loose = broke && !broke.core ? markAttachment(meshes, root) : []
+  const place = broke && !broke.core ? markPlace(meshes, inHeld, eyes, head, hands, role, height) : null
+  // Only once the mark itself passes, so a model gets one mark problem at a time.
+  if (mark && broke && !broke.core && failures.length === markFailures) {
+    const name = `the ${role && MARK_NAMES[role] ? `${role}'s ${MARK_NAMES[role]}` : 'role mark'}`
+    for (const l of loose.slice(0, 2)) {
+      const where = `a ${l.colour} ${l.slot} part near (${l.at.map((x) => x.toFixed(2)).join(', ')})`
+      failures.push(l.gap > LIMITS.attach
+        ? `${name} has ${where} standing ${l.gap.toFixed(3)} clear of everything it could sit on (at most ${LIMITS.attach}, surface to surface), so it floats; ${ATTACH[role] ?? 'make each of its parts touch or overlap the part it hangs from'}`
+        : `${name} has ${where} that meets what holds it only at a point (${Math.round(l.joint * 100)}% of its thickness, at least ${Math.round(LIMITS.joint * 100)}%), so it reads as floating; ${ATTACH[role] ?? 'make each of its parts overlap the part it hangs from where that part is thick'}`)
+    }
+    if (place?.toque) {
+      const { offset, ratio } = place.toque
+      if (offset > TOQUE.offset) failures.push(`${name} sits ${Math.round(offset * 100)}% of the head's width off the head's centre (at most ${Math.round(TOQUE.offset * 100)}%); centre it on top of the head, so it is not read as a feather duster held to one side`)
+      if (ratio < TOQUE.ratio) failures.push(`${name} rises only ${ratio.toFixed(2)} times its own width above the top of the head (at least ${TOQUE.ratio}); make it a tall, straight-sided pleated column with a puff on top, taller than it is wide, so it is not read as a round puff like a duster's plume`)
+    }
+    if (place?.board && place.board.lift > BOARD.lift) failures.push(`${name}'s board stands ${(place.board.lift * height).toFixed(3)} above the top of the head (at most ${(BOARD.lift * height).toFixed(3)}, a twentieth of the height), so it reads as a sign held overhead; make the cap a shallow skullcap that hugs the top of the head and lay the board right on it, with no gap or stalk`)
+    if (place?.plume && place.plume.offset < PLUME.offset) failures.push(`${name}'s centre is only ${Math.round(place.plume.offset * 100)}% of the head's width out from the head's centre (at least ${Math.round(PLUME.offset * 100)}%); hold the duster up beside the head on a long handle, its plume clear of the head's side and never over the top of the head, so it is not read as a chef's toque`)
+  }
 
-  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke, ownerPx, heldInHand } }
+  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke, ownerPx, heldInHand, loose, place } }
+}
+
+/** A marked part that does not sit on anything: its slot, the colour it was made in, its centre, how far its surface stands from the nearest part that could hold it, and how wide they meet over the thinner one's thinnest side. */
+export interface Loose { slot: string; colour: string; at: [number, number, number]; gap: number; joint: number }
+
+/** What to do when a role's mark has a part standing clear of what should hold it. */
+const ATTACH: Record<string, string> = {
+  cook: 'stand the toque\'s band on the top of the head and the puff on the band, overlapping a little',
+  tutor: 'rest the board\'s underside on the cap band and the band on the top of the head, with no gap and no stalk between them',
+  carer: 'end the cap before its point, where it is still thick, and set the pom-pom over that end so it swallows the tip, and the cap\'s rim on the head',
+  tidier: 'put the plume on the top of the duster\'s handle so they overlap',
+  messenger: 'fix the pole to the back and the flag to the pole, overlapping',
+  keeper: 'tuck the pencil against the head or the ear so they overlap',
+  maker: 'join the lens ring to its arm and the arm to the headband or the head, overlapping',
+  gardener: 'set the hat\'s crown on the head and the brim on the crown, overlapping',
+}
+
+/**
+ * Marked parts that sit on nothing. A marked part is held when its surface comes within LIMITS.attach of an
+ * unmarked part (the head, the duster's handle, the body), or of a marked part that is held (a pom-pom on a cap on
+ * a head, a board on a cap band on a head), and they meet across at least LIMITS.joint of the thinner part's
+ * thinnest side. Measured on the parts' own triangles (./surfaceContact), not their boxes: a bent cap's box covers
+ * the air around its tip, and a pom-pom on the cap's needle-thin tip touches it but reads as floating.
+ */
+export function markAttachment(meshes: THREE.Mesh[], root: THREE.Object3D): Loose[] {
+  const marked = meshes.filter((m) => m.userData.mark)
+  const anchors = meshes.filter((m) => !m.userData.mark)
+  const cache = new Map<THREE.Mesh, Surface>()
+  const contacts = new Map<string, Contact>()
+  const contact = (a: THREE.Mesh, b: THREE.Mesh) => {
+    const k = `${a.id}:${b.id}`
+    if (!contacts.has(k)) contacts.set(k, surfaceContact(a, b, LIMITS.attach, cache))
+    return contacts.get(k)!
+  }
+  const joined = (a: THREE.Mesh, b: THREE.Mesh) => {
+    const c = contact(a, b)
+    return c.gap <= LIMITS.attach && c.width >= LIMITS.joint * Math.min(thinnest(a), thinnest(b))
+  }
+  const held = new Set<THREE.Mesh>()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const m of marked) {
+      if (held.has(m)) continue
+      if (anchors.some((o) => joined(m, o)) || [...held].some((o) => joined(m, o))) {
+        held.add(m)
+        grew = true
+      }
+    }
+  }
+  return marked.filter((m) => !held.has(m)).map((m) => {
+    const c = new THREE.Box3().setFromObject(m, true).getCenter(new THREE.Vector3())
+    // The closest it comes to anything that could hold it, and how wide that meeting is.
+    let best = { gap: Infinity, joint: 0 }
+    for (const o of meshes) {
+      if (o === m || (o.userData.mark && !held.has(o))) continue
+      const k = contact(m, o), joint = k.width / Math.max(1e-6, Math.min(thinnest(m), thinnest(o)))
+      if (k.gap < best.gap || (k.gap === best.gap && joint > best.joint)) best = { gap: k.gap, joint }
+    }
+    return { slot: slotOf(m, root), colour: hexOf(m), at: [+c.x.toFixed(3), +c.y.toFixed(3), +c.z.toFixed(3)] as [number, number, number], gap: +best.gap.toFixed(4), joint: +best.joint.toFixed(3) }
+  })
+}
+
+/** A mesh's triangles in world space (nine numbers each) and their box. */
+interface Surface { tris: Float32Array; box: THREE.Box3 }
+function surfaceOf(m: THREE.Mesh, cache: Map<THREE.Mesh, Surface>): Surface {
+  const had = cache.get(m)
+  if (had) return had
+  const pos = m.geometry.attributes.position, index = m.geometry.index
+  const n = Math.floor((index ? index.count : pos.count) / 3) * 3
+  const tris = new Float32Array(n * 3)
+  const box = new THREE.Box3()
+  const v = new THREE.Vector3()
+  for (let k = 0; k < n; k++) {
+    v.fromBufferAttribute(pos, index ? index.getX(k) : k).applyMatrix4(m.matrixWorld)
+    tris[k * 3] = v.x; tris[k * 3 + 1] = v.y; tris[k * 3 + 2] = v.z
+    box.expandByPoint(v)
+  }
+  const s = { tris, box }
+  cache.set(m, s)
+  return s
+}
+
+/** Where two meshes meet: the smallest distance between their surfaces (0 when they cross or one holds the other), and how wide the meeting is. */
+export interface Contact { gap: number; width: number }
+
+/**
+ * Two meshes' surfaces against each other, on their own triangles: vertices measured against the other's
+ * triangles, edges tested for crossing them, and a part wholly inside a closed part (a band sunk in a head)
+ * counted as joined across its whole size. `width` is the largest side of the box around the points where they
+ * meet (crossings and vertices within `limit`): a pom-pom on a cone's needle tip meets it across a few
+ * millimetres, a band sunk in a head across its whole rim. A gap beyond `limit` comes back as `limit` or more.
+ */
+export function surfaceContact(a: THREE.Mesh, b: THREE.Mesh, limit: number, cache = new Map<THREE.Mesh, Surface>()): Contact {
+  const { tris: ta, box: ba } = surfaceOf(a, cache), { tris: tb, box: bb } = surfaceOf(b, cache)
+  if (!ba.clone().expandByScalar(limit).intersectsBox(bb)) {
+    const d = (i: 'x' | 'y' | 'z') => Math.max(0, bb.min[i] - ba.max[i], ba.min[i] - bb.max[i])
+    return { gap: Math.max(limit, Math.hypot(d('x'), d('y'), d('z'))), width: 0 }
+  }
+  const tri = new THREE.Triangle(), box = new THREE.Box3(), p = new THREE.Vector3(), q = new THREE.Vector3(), c = new THREE.Vector3()
+  const ray = new THREE.Ray()
+  const setTri = (t: Float32Array, i: number) => {
+    tri.a.set(t[i], t[i + 1], t[i + 2]); tri.b.set(t[i + 3], t[i + 4], t[i + 5]); tri.c.set(t[i + 6], t[i + 7], t[i + 8])
+  }
+  // One inside the other: a ray from a vertex crosses the closed outer part an odd number of times.
+  for (const [inner, ib, outer, ob] of [[ta, ba, tb, bb], [tb, bb, ta, ba]] as const) {
+    if (!ob.containsBox(ib) || inner.length < 3) continue
+    ray.set(p.set(inner[0], inner[1], inner[2]), new THREE.Vector3(0.577, 0.578, 0.577).normalize())
+    let crossings = 0
+    for (let j = 0; j < outer.length; j += 9) {
+      setTri(outer, j)
+      if (ray.intersectTriangle(tri.a, tri.b, tri.c, false, c)) crossings++
+    }
+    if (crossings % 2 === 1) {
+      const s = ib.getSize(new THREE.Vector3())
+      return { gap: 0, width: Math.max(s.x, s.y, s.z) }
+    }
+  }
+  const region = ba.clone().expandByScalar(limit).intersect(bb.clone().expandByScalar(limit))
+  const near = (t: Float32Array) => {
+    const list: number[] = []
+    for (let i = 0; i < t.length; i += 9) {
+      setTri(t, i)
+      if (box.setFromPoints([tri.a, tri.b, tri.c]).intersectsBox(region)) list.push(i)
+    }
+    return list
+  }
+  const na = near(ta), nb = near(tb)
+  let gap = Infinity
+  const met = new THREE.Box3()
+  for (const [from, fl, into, il] of [[ta, na, tb, nb], [tb, nb, ta, na]] as const) {
+    for (const i of fl) {
+      for (let e = 0; e < 3; e++) {
+        p.set(from[i + e * 3], from[i + e * 3 + 1], from[i + e * 3 + 2])
+        q.set(from[i + ((e + 1) % 3) * 3], from[i + ((e + 1) % 3) * 3 + 1], from[i + ((e + 1) % 3) * 3 + 2])
+        const len = p.distanceTo(q)
+        const inRegion = region.containsPoint(p)
+        for (const j of il) {
+          setTri(into, j)
+          // Edges crossing the other's triangles: a handle through a plume, a band through a head.
+          if (len > 1e-9) {
+            ray.set(p, q.clone().sub(p).divideScalar(len))
+            if (ray.intersectTriangle(tri.a, tri.b, tri.c, false, c) && c.distanceTo(p) <= len) {
+              gap = 0
+              met.expandByPoint(c)
+            }
+          }
+          // The edge's first vertex against the triangle (every vertex starts some edge).
+          if (inRegion) {
+            const d = tri.closestPointToPoint(p, c).distanceTo(p)
+            if (d < gap) gap = d
+            if (d <= limit) met.expandByPoint(p)
+          }
+        }
+      }
+    }
+  }
+  const s = met.isEmpty() ? new THREE.Vector3() : met.getSize(new THREE.Vector3())
+  return { gap: Math.max(0, Math.min(gap, Math.max(limit, gap))), width: Math.max(s.x, s.y, s.z) }
+}
+
+/** A part's thinnest side in its own axes (a pole's thickness, a board's thickness, a ball's diameter). */
+function thinnest(m: THREE.Mesh) {
+  m.geometry.computeBoundingBox()
+  const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
+  return Math.min(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z))
+}
+
+/** The cook's toque: its centre within this share of the head's width of the head's centre, and rising above the head's top at least `ratio` times its own width. */
+export const TOQUE = { offset: 0.15, ratio: 1 }
+/** The tidier's plume: its centre at least this share of the head's width out to the side from the head's centre (round 5's two: 1.11 and 1.54). */
+export const PLUME = { offset: 0.75 }
+/** The tutor's board: its underside at most this share of the villager's height above the head's top (round 5's two stood 0.097 and 0.115 up on their cap bands, read as signboards held overhead). */
+export const BOARD = { lift: 0.05 }
+
+/** Where the mark sits against the head core: the two round marks Sol confused in round 5 (the toque's puff and the duster's plume), and the board Opus read as a sign. */
+export interface MarkPlace {
+  /** The cook's toque: centre off the head's centre in x over the head's width, and height above the head's top over its own width. */
+  toque?: { offset: number; ratio: number }
+  /** The tidier's plume: centre off the head's centre in x over the head's width. */
+  plume?: { offset: number }
+  /** The tutor's board (its widest marked part): its underside over the head's top, over the villager's height. */
+  board?: { lift: number }
+}
+
+/** Measured on the standing figure in world x (it faces +z), against the largest unmarked head part. */
+export function markPlace(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[], role: string, height: number): MarkPlace | null {
+  const marked = meshes.filter((m) => m.userData.mark)
+  const { head } = coresOf(meshes.filter((m) => !inHeld.has(m) && !m.userData.mark), eyes, headGroup, handGroups)
+  if (!marked.length || !head) return null
+  const hb = new THREE.Box3().setFromObject(head, true)
+  const hc = hb.getCenter(new THREE.Vector3()), hw = Math.max(1e-6, hb.max.x - hb.min.x)
+  const mb = new THREE.Box3()
+  for (const m of marked) mb.expandByObject(m, true)
+  const mc = mb.getCenter(new THREE.Vector3()), ms = mb.getSize(new THREE.Vector3())
+  const offset = +(Math.abs(mc.x - hc.x) / hw).toFixed(3)
+  if (role === 'cook') return { toque: { offset, ratio: +((mb.max.y - hb.max.y) / Math.max(1e-6, ms.x, ms.z)).toFixed(3) } }
+  if (role === 'tidier') return { plume: { offset } }
+  if (role === 'tutor') {
+    const boxes = marked.map((m) => new THREE.Box3().setFromObject(m, true))
+    const board = boxes.reduce((a, b) => ((b.max.x - b.min.x) * (b.max.z - b.min.z) > (a.max.x - a.min.x) * (a.max.z - a.min.z) ? b : a))
+    return { board: { lift: +((board.min.y - hb.max.y) / Math.max(1e-6, height)).toFixed(3) } }
+  }
+  return {}
 }
 
 /**

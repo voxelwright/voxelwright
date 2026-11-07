@@ -12,6 +12,11 @@
 // Round 5 (the mark is the owner's colour): a thin pencil mark is refused for too little owner colour, a prop
 // beside the hand is refused, the prompt's bent-cone cap is one piece, the marked toque is dyed in the accent,
 // and an orange body under a blue owner is moved off the owners' colours while a tan one is left alone.
+// Round 6 (marks told apart by place, and sitting on what holds them): the example's pleated toque, a duster held
+// out beside the head, a mortarboard lying on a skullcap and the prompt's blunt-ended cap pass; round 5's squat
+// toque, an off-centre toque, a plume over the head, a board on a stalk or floating over its cap, a pom-pom off
+// the tip, and round 5's own sheep (pom-pom on a needle point), ox (lens off its arm) and elephant (board on a
+// tall band) are refused, each naming the mark.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -97,8 +102,9 @@ try {
   await refused('round 2 mouse (a bear in a cap with a mail bag)', fixture('round2-mouse-teddy.code.txt'), template, { species: true, accent: '#3d7cc8' })
 
   // Role mark (round 4): tagged with villager.mark() and breaking the outline above or beside the head.
-  const toque = /  villager\.mark\(add\(head, new THREE\.CylinderGeometry[^\n]*\n  villager\.mark\(add\(head, new THREE\.SphereGeometry[^\n]*\n/
-  if (!toque.test(example)) throw new Error('arm-code.md example no longer marks its toque on two lines')
+  const toque = /  \/\/ The cook's mark[^\n]*\n(?:  [^\n]*\n)*?  villager\.mark\(add\(head, new THREE\.SphereGeometry[^\n]*\n/
+  if (!toque.test(example)) throw new Error('arm-code.md example no longer marks its toque as a block from "// The cook\'s mark" to its puff')
+  const asRole = (code, role) => code.replace("role: 'cook'", `role: '${role}'`)
   // host/src/villager-make.ts stubVillagerMaker: the example given a snout and tall ears, as the setup scene's stand-in.
   const stub = example.replace('\n  villager.add(head)\n', `\n  villager.add(head)
   add(head, new THREE.CapsuleGeometry(0.045, 0.06, 6, 10), felt('#f6e6cc'), 0, -0.06, 0.17).rotation.x = Math.PI / 2
@@ -118,7 +124,7 @@ try {
   const bodySphere = 'add(villager, new THREE.SphereGeometry(0.2, 32, 20), tan, 0, 0.146, 0)'
   if (!example.includes(headSphere) || !example.includes(bodySphere)) throw new Error('arm-code.md example no longer has its head and body spheres as written here')
   const bigCap = example.replace(toque, `  villager.mark(add(head, new THREE.ConeGeometry(0.2, 0.25, 24), white, 0, 0.2, -0.01))\n`)
-  const big = await trial(bigCap, { mark: true })
+  const big = await trial(asRole(bigCap, 'carer'), { mark: true })
   check('a tall stocking cap bigger than the head it sits on passes the mark check (it is a hat, not the head)', big.ok && big.measures.mark.core === null && big.measures.mark.above >= 0.1, big.ok ? big.measures.mark : big.reason)
   await refused('the example with only its head sphere marked (it holds the eyes)', example.replace(headSphere, `villager.mark(${headSphere})`), /the head itself is tagged with villager\.mark\(\); tag only the cook's toque, not the head/, { mark: true })
   await refused('the example with its body marked', example.replace(bodySphere, `villager.mark(${bodySphere})`), /the body itself is tagged with villager\.mark\(\); tag only the cook's toque, not the body/, { mark: true })
@@ -128,15 +134,54 @@ try {
   const pencil = example.replace(toque, `  villager.mark(add(head, new THREE.CylinderGeometry(0.006, 0.006, 0.26, 8), white, 0.14, 0.2, 0)).rotation.z = -0.7\n`)
   await refused('the example with a thin pencil as its mark (too little owner colour)', pencil, /the cook's toque shows only \d+ pixels of the owner's colour from the dollhouse view \(at least 100\)/, { mark: true })
   await refused('a spoon held 6 cm in front of the mitten (it touches the body, not the hand)', plush({ off: 0.06 }), /the held prop near .* does not touch either hand/)
-  const capRecipe = /A bent cone in one piece[^\n]*\n\n```js\n([\s\S]*?)```/.exec(readFileSync(join(here, 'villagers/arm-code.md'), 'utf8'))?.[1]
-  if (!capRecipe) throw new Error('arm-code.md has no bent-cone recipe block')
-  const capped = await trial(example.replace(toque, capRecipe), { mark: true, accent: '#3d7cc8' })
-  check('the prompt\'s bent-cone stocking cap is one piece and breaks the outline', capped.ok && capped.measures.pieces === 1 && capped.measures.mark.above >= 0.1 && capped.measures.ownerPx >= 100, capped.ok ? { pieces: capped.measures.pieces, mark: capped.measures.mark, ownerPx: capped.measures.ownerPx } : capped.reason)
+  const capRecipe = /A bent cap in one piece[^\n]*\n\n```js\n([\s\S]*?)```/.exec(readFileSync(join(here, 'villagers/arm-code.md'), 'utf8'))?.[1]
+  if (!capRecipe) throw new Error('arm-code.md has no bent-cap recipe block')
+  const capped = await trial(asRole(example.replace(toque, capRecipe), 'carer'), { mark: true, accent: '#3d7cc8' })
+  check('the prompt\'s bent stocking cap is one piece, breaks the outline, and its pom-pom sits on its blunt end', capped.ok && capped.measures.pieces === 1 && capped.measures.mark.above >= 0.1 && capped.measures.ownerPx >= 100 && capped.measures.loose.length === 0, capped.ok ? { pieces: capped.measures.pieces, mark: capped.measures.mark, ownerPx: capped.measures.ownerPx, loose: capped.measures.loose } : capped.reason)
   const dyed = await trial(example, { mark: true, accent: '#3d7cc8' })
-  check('the marked toque is dyed in the owner\'s colour and shows from the dollhouse view', dyed.ok && dyed.fixes.includes("mark: 2 part(s) in the owner's colour") && dyed.measures.ownerPx >= 100, dyed.ok ? { fixes: dyed.fixes, ownerPx: dyed.measures.ownerPx } : dyed.reason)
+  check('the marked toque is dyed in the owner\'s colour and shows from the dollhouse view', dyed.ok && dyed.fixes.includes("mark: 8 part(s) in the owner's colour") && dyed.measures.ownerPx >= 100, dyed.ok ? { fixes: dyed.fixes, ownerPx: dyed.measures.ownerPx } : dyed.reason)
   const orange = await trial(example.replace("tan = felt('#e2b98a')", "tan = felt('#c9793c')"), { mark: true, accent: '#3d7cc8' })
   check('an orange body is moved off the owners\' colours (it is within 30 degrees of Alex\'s rust)', orange.ok && orange.fixes.some((f) => /^felt: #c9793c moved to #[0-9a-f]{6}, off the owners' colours$/.test(f)), orange.ok ? orange.fixes : orange.reason)
   check('a tan body and the wooden spoon are left as written', dyed.ok && !dyed.fixes.some((f) => f.startsWith('felt:')), dyed.fixes)
+
+  // Round 6: the round marks are told apart by place (the toque centred and tall, the plume out beside the head), the
+  // board lies on the head, and every marked part sits on what holds it, surface to surface and across more than a point.
+  const toqueAt = (x) => `  const shifted = new THREE.Group()\n  shifted.position.x = ${x}\n  head.add(shifted)\n${example.match(toque)[0].replaceAll('villager.mark(add(head,', 'villager.mark(add(shifted,')}`
+  const pleated = await trial(example, { mark: true })
+  check('the prompt example\'s pleated toque is centred, taller than wide, and every part sits on the head', pleated.ok && pleated.measures.place.toque.offset <= 0.15 && pleated.measures.place.toque.ratio >= 1 && pleated.measures.loose.length === 0, pleated.ok ? pleated.measures.place : pleated.reason)
+  await refused('the example with round 5\'s toque (a short band and a wide puff)', example.replace(toque, `  // The cook's mark, round 5\n  villager.mark(add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01))\n  villager.mark(add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01)).scale.set(1, 0.85, 1)\n`), /the cook's toque rises only 0\.\d+ times its own width above the top of the head \(at least 1\); make it a tall, straight-sided pleated column/, { mark: true })
+  await refused('the example with its toque moved 0.1 to one side', example.replace(toque, toqueAt(0.1)), /the cook's toque sits \d+% of the head's width off the head's centre \(at most 15%\)/, { mark: true })
+  await refused('round 5\'s badger cook (its toque a band and a wide puff)', fixture('round5-badger-toque.code.txt'), /the cook's toque rises only 0\.8\d times its own width/, { mark: true, species: true, accent: '#c8553d' })
+  // A tidier: the example's spoon swapped for a duster on a long handle, the toque taken off.
+  const duster = (tilt, length) => asRole(example.replace(toque, '').replace(/  const spoon = villager\.tag[\s\S]*?\n  villager\.gait/, `  const duster = villager.tag(new THREE.Group(), 'held')
+  duster.position.set(-0.196, 0.158, 0.02)
+  duster.rotation.z = ${tilt}
+  villager.add(duster)
+  add(duster, new THREE.CylinderGeometry(0.01, 0.012, ${length}, 8), felt('#a8703a'), 0, ${length / 2}, 0)
+  villager.mark(add(duster, new THREE.SphereGeometry(0.07, 18, 12), white, 0, ${length + 0.03}, 0))
+  villager.gait`), 'tidier')
+  const beside = await trial(duster(0.35, 0.3), { mark: true, accent: '#e0b53a' })
+  check('a duster held up beside the head passes, its plume well out from the head\'s centre', beside.ok && beside.measures.place.plume.offset >= 0.75 && beside.measures.loose.length === 0, beside.ok ? beside.measures.place : beside.reason)
+  await refused('a duster held over the middle of the head', duster(-0.55, 0.45), /the tidier's feather duster plume's centre is only \d+% of the head's width out from the head's centre \(at least 75%\)/, { mark: true, accent: '#e0b53a' })
+  const giraffe = await trial(fixture('round5-giraffe-duster.code.txt'), { mark: true, species: true, accent: '#6a9a4a' })
+  check('round 5\'s giraffe tidier passes: its plume is held out beside the head', giraffe.ok && giraffe.measures.place.plume.offset >= 0.75, giraffe.ok ? giraffe.measures.place : giraffe.reason)
+  // A tutor: a skullcap hugging the head, a board lying on it, a tassel off one corner.
+  const tutor = ({ cap = 0.04, capY = 0.14, boardY = 0.17 } = {}) => asRole(example.replace(toque, `  // The tutor's mark
+  villager.mark(add(head, new THREE.CylinderGeometry(0.12, 0.14, ${cap}, 24), white, 0, ${capY}, -0.01))
+  villager.mark(add(head, new THREE.BoxGeometry(0.5, 0.02, 0.5), white, 0, ${boardY}, -0.01))
+  villager.mark(add(head, new THREE.CylinderGeometry(0.008, 0.008, 0.1, 8), white, 0.24, ${boardY - 0.05}, 0.23))
+`), 'tutor')
+  const worn = await trial(tutor(), { mark: true, accent: '#6a9a4a' })
+  check('a mortarboard lying on a skullcap passes', worn.ok && worn.measures.place.board.lift <= 0.05 && worn.measures.loose.length === 0, worn.ok ? { place: worn.measures.place, loose: worn.measures.loose } : worn.reason)
+  await refused('a mortarboard on a tall band (a stalk)', tutor({ cap: 0.14, capY: 0.19, boardY: 0.27 }), /the tutor's mortarboard's board stands 0\.\d+ above the top of the head \(at most 0\.\d+, a twentieth of the height\)/, { mark: true, accent: '#6a9a4a' })
+  await refused('a mortarboard floating 0.02 over its skullcap', tutor({ boardY: 0.19 }), /the tutor's mortarboard has a #f4efe4 head part near \(0\.00, 0\.\d+, -0\.01\) standing 0\.0\d+ clear of everything it could sit on \(at most 0\.005, surface to surface\), so it floats; rest the board's underside on the cap band/, { mark: true, accent: '#6a9a4a' })
+  await refused('round 5\'s elephant tutor (its board on a band 0.115 of its height tall)', fixture('round5-elephant-board.code.txt'), /the tutor's mortarboard's board stands/, { mark: true, species: true, accent: '#6a9a4a' })
+  // The carer: the old recipe's pom-pom on a cone's needle point, the new one's moved off the tip, and round 5's sheep.
+  const needle = capRecipe.replace('CylinderGeometry(0.035, 0.1, 0.3, 20, 12)', 'ConeGeometry(0.1, 0.3, 20, 12)').replace('SphereGeometry(0.055,', 'SphereGeometry(0.05,')
+  await refused('the round 5 recipe\'s pom-pom on a cone\'s needle point', asRole(example.replace(toque, needle), 'carer'), /the carer's stocking cap has a #9a8a7a head part near \(0\.17, [\d.]+, -0\.02\) that meets what holds it only at a point \(\d+% of its thickness, at least 50%\), so it reads as floating; end the cap before its point/, { mark: true, accent: '#3d7cc8' })
+  await refused('the prompt\'s pom-pom moved 0.14 off the cap\'s end', asRole(example.replace(toque, capRecipe.replace('0.17, 0.31, -0.02))', '0.3, 0.36, -0.02))')), 'carer'), /the carer's stocking cap has a #9a8a7a head part near \(0\.30, [\d.]+, -0\.02\) standing 0\.0\d+ clear of everything it could sit on/, { mark: true, accent: '#3d7cc8' })
+  await refused('round 5\'s sheep carer (its pom-pom on the cone\'s needle point)', fixture('round5-sheep-pompom.code.txt'), /the carer's stocking cap has a #9a8a7a head part near .* meets what holds it only at a point/, { mark: true, species: true, accent: '#3d7cc8' })
+  await refused('round 5\'s ox maker (its lens ring 0.01 off its arm)', fixture('round5-ox-lens.code.txt'), /the maker's swung-up lens has a #ecdfc6 head part near .* standing 0\.0\d+ clear of everything it could sit on.*join the lens ring to its arm/, { mark: true, species: true, accent: '#6a9a4a' })
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

@@ -1010,6 +1010,59 @@ towards oatmeal, so their old sheets will not render the same again.
 passes 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck`
 passes.
 
+#### Round 6: told apart by place, and sitting on the head
+
+In round 5's blind test, both models named every owner (20 of 20). Sol read 4 cooks as tidiers, because the
+toque's puff and the duster's plume were both a round puff above the head. Opus read the mortarboards as
+signboards held overhead, and the pom-poms floated off their caps. Round 6 makes the round marks differ in
+place as well as shape, and makes every mark sit on what holds it.
+
+- **Prompt** (`style.md` rule 2, `arm-code.md`): the toque is a tall, straight-sided pleated column centred on
+  the head. The duster is held out beside the head, never over it. The mortarboard lies on a shallow skullcap,
+  at most 0.05 H above the head. The stocking cap is a narrowing tube that ends blunt, with the pom-pom over that
+  end. The example Dumpling wears the new toque, so the host's stub and the setup scene get it too.
+- **Attachment** (`checks.ts markAttachment`, `surfaceContact`): every marked part must come within
+  `LIMITS.attach` = 0.005 of an unmarked part, or of a marked part that does, measured on the triangles (vertex to
+  triangle, edge crossings, one part inside another). The two parts must also meet across at least `LIMITS.joint` =
+  0.5 of the thinner part's thinnest side. The round-5 pom-poms touched their caps only at the cone's needle
+  point (0.20 to 0.22); every sound joint in round 5 measures 0.9 or more.
+- **Place** (`markPlace`): the toque's centre within `TOQUE.offset` = 15% of the head's width of the head's
+  centre, and its rise above the head at least `TOQUE.ratio` = 1 times its width. The plume's centre at least
+  `PLUME.offset` = 75% of the head's width out from the head's centre. The board's underside at most `BOARD.lift`
+  = 0.05 H above the head's top. These run only once the mark passes the round-5 checks, so a model gets one
+  mark problem at a time. Each reason names the mark.
+
+On round 5's 20, the new checks refuse 10: all 3 toques (rise 0.84 to 0.91 times their width), both boards
+(0.097 and 0.115 H up), all 3 pom-poms, the snail's sun hat (3 cm behind the head) and the ox's lens (1 cm off
+its arm). Both round-5 plumes already sat 1.1 and 1.5 head widths out, so the cook/tidier confusion came from the
+toque's round puff, not from the duster's place.
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
+`screenshots/villager-gen/round6/` (`repairs.md`, the colour sheet with its own key, the silhouette sheet with its key).
+
+| Measure | Round 5 | Round 6 |
+| --- | --- | --- |
+| Usable, repaired | 20, 1 | 20, 1 (r6-11 rabbit tutor: its skullcap held an eye's centre, so it was taken for the head) |
+| Owner colour, min / median px (trusted) | 161 / 422 | 145 / 384 |
+| Toque rise over width | 0.84 to 0.91 | 1.54 to 1.86 |
+| Board underside over the head | 0.097, 0.115 H | 0.013, 0.014 H |
+| Plume out from the head's centre | 1.11, 1.54 head widths | 1.08, 1.47 |
+| Loose marked parts | 5 villagers | 0 |
+| Nearest silhouette same role, mean IoU | 25%, 0.553 | 40%, 0.522 |
+| Felt moved off the owners' colours | 1 on 1 | 1 on 1 |
+| Cost | $2.26 | $2.08 |
+
+From above, the board on its skullcap still reads as a large flat plate. The blind owner and role test on the
+round-6 sheets is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r6- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=50 --close=r6-01,r6-07,r6-12,r6-18
+```
+
+`node scripts/check-villager-gen.mjs` passes 56 of 56, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck` passes.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,

@@ -19,11 +19,11 @@ Materials: only `new THREE.MeshStandardMaterial({ color: '#rrggbb', roughness })
   - held: the prop, placed in front of one hand; it moves with the nearest hand.
 - villager.mark(object) returns the object: marks a mesh or group (inside any slot) as the role's mark, the one cue from the role table. Mark all of the mark's parts and nothing else; the tidier marks its duster's plume.
 
-A bent cone in one piece (the carer's stocking cap), by bending a cone's own vertices:
+A bent cap in one piece (the carer's stocking cap), by bending a narrowing tube's own vertices. It ends blunt, not in a cone's needle point: a pom-pom on a needle point reads as a ball floating off the cap.
 
 ```js
-  // The carer's stocking cap: one cone with rings to bend, flopping to +x, a pom-pom on its tip.
-  const cap = new THREE.ConeGeometry(0.1, 0.3, 20, 12)
+  // The carer's stocking cap: one tube with rings to bend, narrowing to a blunt end, flopping to +x.
+  const cap = new THREE.CylinderGeometry(0.035, 0.1, 0.3, 20, 12)
   const p = cap.attributes.position
   for (let i = 0; i < p.count; i++) {
     const t = (p.getY(i) + 0.15) / 0.3
@@ -31,8 +31,8 @@ A bent cone in one piece (the carer's stocking cap), by bending a cone's own ver
   }
   cap.computeVertexNormals()
   villager.mark(add(head, cap, felt('#9a8a7a'), 0, 0.25, -0.02))
-  // The pom-pom sits on the bent tip, not near it: x 0 + 0.17, y 0.25 + 0.15 - 0.09.
-  villager.mark(add(head, new THREE.SphereGeometry(0.05, 16, 12), felt('#9a8a7a'), 0.17, 0.31, -0.02))
+  // The pom-pom swallows the blunt end: its centre on the end, x 0 + 0.17, y 0.25 + 0.15 - 0.09, and wider than the end.
+  villager.mark(add(head, new THREE.SphereGeometry(0.055, 16, 12), felt('#9a8a7a'), 0.17, 0.31, -0.02))
 ```
 - villager.gait({ speed: 0.2..0.6 m/s, stride: 0.14..0.34 per two steps, bob: 0..0.08, stepped: true, fidget: 0..1 })
 - villager.about({ name, role, bark, voice }): name is the persona's name; role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..560 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }.
@@ -50,6 +50,10 @@ The home checks the finished villager and refuses it, with the reason, when:
 - the head or the body itself is passed to villager.mark() (tag the hat's own parts, not the head group), or the marked parts are more than 40% of the villager;
 - nothing is passed to villager.mark(), or the marked parts stay inside the outline: seen from in front and 33 degrees above, they must rise at least 0.1 of the height above the top of the head, or reach that far past the side of the head and body;
 - the mark, dyed in the owner's colour, shows less than 100 pixels of it in the 128-pixel dollhouse render (a villager there is about 90 pixels tall), so a thin pencil, wire or ring is refused;
+- a part of the mark does not sit on what holds it, measured on the parts' own surfaces: each marked part must come within 0.005 of the head, the duster's handle, the body or another marked part that does, and meet it across at least half of the thinner part's thickness, so a board above its cap, a lens beside its arm or a pom-pom on a needle point is refused;
+- the cook's toque is off the middle of the head (more than 15% of the head's width), or rises above the head less than it is wide;
+- the tidier's plume is centred less than three quarters of the head's width out from the head's centre;
+- the tutor's board's underside stands more than 0.05 of the height above the top of the head;
 - it is the default round body with a head on top: besides the hat, the role mark and the prop, nothing reaches forward past the face (snout, muzzle, beak, or the head ahead of the body), the body sits on the floor (no legs), the head sits straight on the body (no neck), and no ears, horns or eyes rise above the head or stick out past its sides.
 
 Do not touch the scene, DOM, network or timers. Keep it under about 60 meshes.
@@ -70,10 +74,11 @@ export default function (villager, api) {
   add(head, new THREE.SphereGeometry(0.164, 32, 20), tan, 0, 0, 0).scale.set(1.08, 0.92, 0.95)
   add(head, new THREE.SphereGeometry(0.07, 20, 12), cream, 0, -0.04, 0.12).scale.set(1.15, 0.75, 0.6)
   add(head, new THREE.SphereGeometry(0.016, 12, 8), new THREE.MeshStandardMaterial({ color: '#4a2e28', roughness: 0.3 }), 0, -0.016, 0.16)
-  // The cook's mark: a tall puffy toque, a band and a wider puff on top. The home dyes it in the owner's colour.
   const white = felt('#f4efe4')
-  villager.mark(add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01))
-  villager.mark(add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01)).scale.set(1, 0.85, 1)
+  // The cook's mark: a tall pleated toque standing straight up in the middle of the head, its foot sunk in the head, a low puff on top. The home dyes it in the owner's colour.
+  villager.mark(add(head, new THREE.CylinderGeometry(0.075, 0.075, 0.22, 24), white, 0, 0.23, -0.01))
+  for (let k = 0; k < 6; k++) villager.mark(add(head, new THREE.BoxGeometry(0.02, 0.2, 0.02), white, 0.075 * Math.sin(k * Math.PI / 3), 0.23, -0.01 + 0.075 * Math.cos(k * Math.PI / 3))).rotation.y = k * Math.PI / 3
+  villager.mark(add(head, new THREE.SphereGeometry(0.09, 24, 16), white, 0, 0.35, -0.01)).scale.set(1, 0.55, 1)
   for (const s of [-1, 1]) {
     const ear = add(head, new THREE.CapsuleGeometry(0.033, 0.15, 6, 12), tan, s * 0.164, -0.016, -0.008)
     ear.rotation.z = s * 0.28
