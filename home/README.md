@@ -183,9 +183,9 @@ Stopped on the plateau; the remaining findings are mostly room content.
 
 The seated view is unchanged. Comparing seated captures from before and after
 (mocked clock, seeded `Math.random`): the kitchen at `?q=low` differs by
-a mean of 0.10, against 0.11 between two runs of the old code; the kitchen at
-`?q=high` differs by 2.69, against 2.67 at `?q=high&fx=` (film grain, run to
-run); the living room at `?q=low` is identical (0.00).
+a mean of 0.10, against 0.11 between two runs of the old code; at
+`?q=high&fx=` it differs by 2.67, the same as between two runs (film grain);
+the living room at `?q=low` is identical (0.00).
 
 Headless Chrome, 1440x900, DPR 2, WebGPU, `?q=high`, kitchen, one 6 s run each
 (`npm run measure -- <url> --perf --gpu`):
