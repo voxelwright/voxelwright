@@ -29,6 +29,8 @@ const IW = 1280, IH = 768
 const OUT_W = 768, OUT_H = 461
 /** The client's own cap on the PNG, base64 characters (the host checks again). */
 const MAX_PNG = 1_000_000
+/** The pinned page's scale beside the ghost: large enough to read from the room view. */
+const PINNED = 1.5
 
 type Pt = { x: number; y: number; p: number }
 interface Stroke { pts: Pt[]; erase: boolean; size: number }
@@ -57,7 +59,7 @@ export interface SketchHooks {
 export const saveSketch = (person: string, png: string, words: string) =>
   call<{ id: string; w: number; h: number }>(`/people/${person}/sketches`, { png, ...(words ? { words } : {}) })
 export const listSketches = (person: string) =>
-  call<{ sketches: { id: string; at: string; words?: string; given?: string[]; made?: string[] }[] }>(`/people/${person}/sketches`)
+  call<{ sketches: { id: string; at: string; words?: string; given: string[]; made: string[] }[] }>(`/people/${person}/sketches`)
 export async function sketchImage(person: string, id: string): Promise<ImageBitmap | null> {
   const res = await authorized(`/people/${person}/sketches/${id}`)
   if (!res?.ok || res.headers.get('content-type') !== 'image/png') return null
@@ -286,6 +288,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     live = null
     redrawDone()
     input.clearText()
+    // The pad settles back: nothing is being written now.
+    if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur()
   }
 
   // ── Pointer: drawing with a mouse, a finger or a pencil ───────────────────
@@ -468,7 +472,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     const g = new THREE.Group()
     const tex = toTexture(png)
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, side: THREE.DoubleSide, transparent: true, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.22 })
-    const W = 0.5, H = W * (OUT_H / OUT_W)
+    const W = 0.7, H = W * (OUT_H / OUT_W)
     const sheet = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat)
     sheet.position.y = H / 2
     g.add(sheet)
@@ -548,8 +552,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       const p = s.job?.places[0]
       if (!p) return false
       const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize()
-      pin.to.set(p.x, p.y, p.z).addScaledVector(right, size[0] / 2 + 0.38)
-      pin.to.y = p.y + Math.max(0.25, size[1] * 0.45)
+      pin.to.set(p.x, p.y, p.z).addScaledVector(right, size[0] / 2 + 0.62)
+      pin.to.y = p.y + Math.max(0.3, size[1] * 0.45)
       return true
     }
     if (!placeNow()) pin.to.set(0, 0.6, 0.8)
@@ -610,7 +614,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   const scl = new THREE.Vector3()
   const camPos = new THREE.Vector3()
   // At rest the pencil lies across the top of the pad, over the binding, where it shows even when the pad is tucked away.
-  const rest = new THREE.Vector3(PADW * 0.08, PADH / 2 + 0.06, 0.03)
+  const rest = new THREE.Vector3(-PADW * 0.27, PADH / 2 + 0.06, 0.03)
   const tipAt = new THREE.Vector3().copy(rest)
   const place = (el: HTMLElement, x0: number, y0: number, x1: number, y1: number) => {
     el.style.left = `${Math.round(x0)}px`
@@ -709,8 +713,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
         const faceCam = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.atan2(camPos.x - pos.x, camPos.z - pos.z), 0))
         p.card.quaternion.copy(q).slerp(faceCam, e)
         p.card.rotateZ(Math.sin(k * 7) * 0.15 * (1 - k))
-        const s0 = scl.x * PADW / 0.5
-        p.card.scale.setScalar(THREE.MathUtils.lerp(s0, p.held ? 0.55 : 1, e))
+        const s0 = scl.x * PADW / 0.7
+        p.card.scale.setScalar(THREE.MathUtils.lerp(s0, p.held ? 0.4 : PINNED, e))
         if (k >= 1) {
           p.state = 'pinned'
           p.t = 0
@@ -718,7 +722,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
             p.held.add(p.card)
             p.card.position.set(0, 0.2, 0.16)
             p.card.rotation.set(-0.15, 0, 0)
-            p.card.scale.setScalar(0.55 / p.held.getWorldScale(scl).x)
+            p.card.scale.setScalar(0.4 / p.held.getWorldScale(scl).x)
           }
         }
       }
@@ -728,15 +732,16 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
         p.card.rotation.set(0, Math.atan2(camPos.x - p.to.x, camPos.z - p.to.z), reducedMotion.matches ? 0 : Math.sin(t * 1.4) * 0.02)
         const stake = p.card.getObjectByName('stake')
         if (stake) {
-          stake.scale.y = Math.max(0.01, p.to.y)
-          stake.position.y = -p.to.y / 2
+          // The card is scaled; the stake still reaches the floor.
+          stake.scale.y = Math.max(0.01, p.to.y / PINNED)
+          stake.position.y = -p.to.y / PINNED / 2
         }
       }
       if (p.state === 'melting' && p.into) {
         // The drawing goes into the thing it became.
         const k = Math.min(1, p.t / (reducedMotion.matches ? 0.01 : 0.7))
         p.card.position.lerpVectors(p.to, p.into, k * k)
-        p.card.scale.setScalar(1 - 0.9 * k)
+        p.card.scale.setScalar(PINNED * (1 - 0.9 * k))
         p.mat.opacity = 1 - k
         if (k >= 1) drop(p)
       }

@@ -52,7 +52,7 @@ declare module 'cordis' {
     /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
     'village/said-stop'(stop: { villager: string }): void
     /** Open the journal, at a villager's pages or a section (the always-on input, #42). */
-    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' }): void
+    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' | 'sketches' }): void
   }
 }
 
