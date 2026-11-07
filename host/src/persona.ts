@@ -190,13 +190,20 @@ export function checkProfile(raw: unknown): Profile {
   }
 }
 
-/** The person's own explicit words about humour, read by host code from their line (never from a reply). */
-const OPT_IN = /\b(?:you can|you may|feel free to|go ahead and|please|i want you to|i'?d like you to)\s+(?:swear|curse|cuss)\b|\bbe (?:as )?(?:crude|filthy|vulgar|foul[- ]mouthed|rude)\b|\bswear (?:all you (?:want|like)|away|at me)\b|\b(?:i don'?t|i do not) mind (?:swearing|cursing|crude)/i
+/**
+ * The person's own explicit words about humour, read by host code from their line (never from a reply).
+ * An opt-in is said to the villager ("you can swear", "be crude with me", "swear all you like"); any
+ * negation a few words before it, or anywhere a turn-down phrase, makes it an opt-out or nothing.
+ */
+const OPT_IN = /\b(?:you (?:can|may|could)|feel free to|go ahead and|i want you to|i'?d like you to)\s+(?:swear|curse|cuss|be (?:as )?(?:crude|filthy|vulgar|foul[- ]mouthed))\b|\bbe (?:as )?(?:crude|filthy|vulgar|foul[- ]mouthed)(?: as you (?:like|want))? (?:with|to|around) me\b|\bswear (?:all you (?:want|like)|away)\b|\bi (?:don'?t|do not) mind (?:swearing|cursing|crude)/i
 const OPT_OUT = /\b(?:no|stop|don'?t|do not|less|without(?: the)?)\s+(?:more\s+)?(?:swear(?:ing)?|curs(?:e|ing)|crude(?:ness)?|vulgar(?:ity)?|filth)\b|\bkeep it clean\b|\bclean it up\b/i
+const NEGATED = /\b(?:don'?t|do not|never|not|no|stop|without|can'?t|cannot|won'?t)\b(?:\W+\w+){0,3}\W*$/i
 export function humourWords(text: string): Humour | null {
   if (OPT_OUT.test(text)) return 'clean'
-  if (OPT_IN.test(text)) return 'crude'
-  return null
+  const opt = OPT_IN.exec(text)
+  if (!opt) return null
+  if (NEGATED.test(text.slice(0, opt.index))) return 'clean'
+  return 'crude'
 }
 
 /** What the person has said themselves, kept by the host (never by the model). */

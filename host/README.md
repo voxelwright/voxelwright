@@ -388,7 +388,10 @@ needs an `adult` profile **and** an opt-in, either the profile's `humour:
 "crude"` setting or the person's own explicit words in a direct talk ("you
 can swear with me", "be crude with me"), which the host matches and records
 in `<root>/people/<id>/preferences.json`. "Keep it clean" or "no more
-swearing" turns it down the same way. Child, teen and unknown profiles top out
+swearing" turns it down the same way. The match is a pattern, not
+understanding: it needs the words aimed at the villager and refuses a
+negation just before them ("please don't be crude with me"), but reported
+speech ("he told her to be crude with me") still counts as an opt-in. Child, teen and unknown profiles top out
 at cheeky. A line heard at a table round never opts anyone in. At the table a
 crude villager is lowered to cheeky for the turn unless every listed person
 has crude (`humourCap` on the turn; the host adds "keep it cheeky this turn"
@@ -402,7 +405,9 @@ does not restart it.
 
 Haiku sometimes said its piece, wrote a note, and then said it again after
 the tool result. `readTurn` now keeps the words said before the first note
-write and drops any text after it.
+write and drops any text after it, and `usage.jsonl` records
+`droppedAfterNote: true` when it did, so a lead-in, a note read and then the
+real answer would show up there rather than vanish unseen.
 
 ### Measured (real models, operator login)
 
@@ -441,7 +446,7 @@ mid-reply on a banned motif ("while the kettle... no, stop"), stage
 directions in asterisks still appear now and then, and first text on a
 process's first turn ran 4 to 20 s in these runs on a busy machine.
 
-`npm run check-villager`: 169 of 169 (new: the defaults and templates pass
+`npm run check-villager`: 173 of 173 (new: four phrasings that are not opt-ins; the defaults and templates pass
 their own check; 14 hostile or malformed personas refused; template fields
 overridden; profile parsing; persona and notes leave tools, MCP servers,
 settings and the context and route paragraphs unchanged; a note claiming the

@@ -148,6 +148,7 @@ async function readTurn(next: () => Promise<IteratorResult<SDKMessage>>, turn: T
    * itself there in two of five probe turns that wrote a note (#42).
    */
   let sealed = false
+  let droppedAfterNote = false
   // A stopped turn ends at once, not when the closed process gets round to ending its stream.
   const stopped = new Promise<never>((_, reject) => {
     const stop = () => reject(new Error('The turn was stopped'))
@@ -169,7 +170,8 @@ async function readTurn(next: () => Promise<IteratorResult<SDKMessage>>, turn: T
         tools.push(event.content_block.name.replace(`mcp__${NOTES_SERVER}__`, ''))
         if (!reply) toolsBeforeText++
       }
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && !sealed) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && sealed) droppedAfterNote = true
+      else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
         ttftMs ??= Date.now() - started
         reply += event.delta.text
         turn.onText(event.delta.text)
@@ -183,7 +185,7 @@ async function readTurn(next: () => Promise<IteratorResult<SDKMessage>>, turn: T
         reply: reply.trim() || message.result.trim(),
         sessionId: message.session_id,
         models: Object.keys(message.modelUsage ?? {}),
-        usage: { ...message.usage, modelUsage: message.modelUsage, tools, toolsBeforeText, apiMs: message.duration_api_ms },
+        usage: { ...message.usage, modelUsage: message.modelUsage, tools, toolsBeforeText, apiMs: message.duration_api_ms, ...(droppedAfterNote ? { droppedAfterNote } : {}) },
         sessionCostUsd: message.total_cost_usd,
         ttftMs,
       }
