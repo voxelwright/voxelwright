@@ -47,6 +47,11 @@
       textarea { width: 100%; min-height: 48px; font: 16px/1.4 var(--serif); color: var(--ink); background: #fffaf1; border: 1.5px solid var(--line);
         border-radius: 12px; padding: 10px 12px; resize: vertical; }
       .watch { font-size: 14px; min-height: 40px; padding: 6px 12px; }
+      .before { font-size: 15px; color: var(--soft); background: #f6ecdb; border-radius: 10px; padding: 8px 12px; margin: 0 0 6px; }
+      details.round1 { margin-top: 28px; }
+      details.round1 > summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; padding: 10px 16px; border: 1.5px dashed var(--line);
+        border-radius: 14px; color: var(--soft); list-style-position: inside; }
+      details.round1[open] > summary { margin-bottom: 8px; }
       .divider { margin: 28px 0 14px; font-size: 15px; color: var(--soft); text-transform: uppercase; letter-spacing: 1.5px; }
       footer { margin-top: 32px; font-size: 14px; color: var(--soft); }
       footer li { margin-bottom: 4px; }
@@ -59,7 +64,7 @@
   <body>
     <main>
       <h1>Listening room</h1>
-      <p class="lede">Each card is one moment in the home. Play the versions, pick the one you like, and add a note if something feels off. Your picks save as you go.</p>
+      <p class="lede">Each card is one moment in the home. Play the versions, pick the one you like, and add a note if something feels off. Your picks save as you go, and the home plays them.</p>
       <button class="start" id="start" type="button">Start listening</button>
       <p class="small" id="hint">Headphones help. On an iPhone, turn off silent mode first: it mutes web audio.</p>
       <div id="lab" hidden>

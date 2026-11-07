@@ -6,7 +6,9 @@
 // Variants: CHOSEN (below) names the owner's pick per cue, else `a` plays. chose, sent, card, news, placed and page have b and c for a
 // listening round (`?sfx=chose:b`): each `b` is recorded or hybrid (Freesound CC0 takes in
 // public/audio/sfx/, with the synthesized sound as a stand-in until the file has loaded), and
-// `a` and `c` are two different synthesized characters.
+// `a` and `c` are two different synthesized characters. Round 2 (the owner's notes on round 1)
+// adds news d and e, hover d to f, farewell b to d, and a much softer b for turned and the pad;
+// turned and the pad's `a` were softened in place.
 
 import type { CueName, Cue, Palette, Play, Kit } from '../contract'
 import { BODY, NOTE, crackle, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
@@ -16,6 +18,7 @@ import { SPRITES } from './sprites'
 const S = {
   click: SPRITES['wood-clicks'], kalimba: SPRITES['kalimba-g5'], musicBox: SPRITES['music-box-g5'], tear: SPRITES.tears,
   swish: SPRITES['paper-swish'], slide: SPRITES['paper-slide'], cushion: SPRITES.cushion, page: SPRITES['page-turn'],
+  chair: SPRITES['chair-lift'], steps: SPRITES['sock-steps'],
 }
 
 type Ctx = BaseAudioContext
@@ -29,11 +32,11 @@ const pick = <T>(p: Play, xs: readonly T[]): T => xs[p.index % xs.length]
 // ── paper and cloth shapes ──────────────────────────────────────────────────
 
 /** A paper slide: noise whose band moves `from` -> `to` Hz, with a fibrous grain. */
-function slide(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, o: { dur: number; from: number; to: number; gain: number; peak?: number; q?: number }) {
+function slide(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, o: { dur: number; from: number; to: number; gain: number; peak?: number; q?: number; top?: number }) {
   const grain = wobble(p.random, 70, o.dur)
   const body = swell(o.peak ?? 0.35, 1.4)
   noise(a, out, kit, t, {
-    dur: o.dur, gain: o.gain, random: p.random, q: o.q ?? 0.9, top: 5000,
+    dur: o.dur, gain: o.gain, random: p.random, q: o.q ?? 0.9, top: o.top ?? 5000,
     freq: (u) => (o.from + (o.to - o.from) * u) * p.rate,
     env: (u) => body(u) * (0.55 + 0.45 * grain(u)),
   })
@@ -59,13 +62,14 @@ function tear(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, gain: number
   })
 }
 
-/** Cloth: two overlapping soft rustles in the low mids. */
-function rustle(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, o: { dur: number; gain: number }) {
+/** Cloth: two overlapping soft rustles in the low mids; `low` scales their bands down, `top` rounds them, `peak` delays the swell. */
+function rustle(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, o: { dur: number; gain: number; low?: number; top?: number; peak?: number }) {
+  const low = o.low ?? 1
   for (const [delay, f, g] of [[0, 1300, 1], [o.dur * 0.3, 900, 0.7]] as const) {
     const dur = o.dur * (0.75 + 0.2 * p.random())
     const grain = wobble(p.random, 45, dur)
-    const body = swell(0.3 + 0.2 * p.random(), 1.3)
-    noise(a, out, kit, t + delay, { dur, gain: o.gain * g, random: p.random, freq: f * p.rate, q: 0.7, top: 3800, env: (u) => body(u) * (0.4 + 0.6 * grain(u)) })
+    const body = swell((o.peak ?? 0.3) + 0.2 * p.random(), 1.3)
+    noise(a, out, kit, t + delay, { dur, gain: o.gain * g, random: p.random, freq: f * low * p.rate, q: 0.7, top: o.top ?? 3800, env: (u) => body(u) * (0.4 + 0.6 * grain(u)) })
   }
 }
 
@@ -94,6 +98,40 @@ const hover = {
       pluck(a, out, p.at, NOTE.G5 * p.rate, BODY.kalimba, { gain: p.gain * 0.35, attack: 0.004, dur: 0.1 })
     },
   }),
+  d: cue({
+    bus: 'ui', level: -10, gap: 0.12, length: 0.12, jitter: { cents: 60, db: 1.5 },
+    samples: [S.click.file],
+    play(a, out, p, kit) {
+      // A felt-wrapped wooden tap: the first 60 ms of a recorded click (six takes) through two lowpasses (1.2 kHz, then 900 Hz).
+      const felt = new BiquadFilterNode(a, { type: 'lowpass', frequency: 900, Q: 0.5 })
+      felt.connect(out)
+      const tapped = sample(a, felt, kit.sample(S.click.file), p.at, pick(p, S.click.takes), { gain: p.gain * 2.2, rate: p.rate * (0.9 + 0.08 * p.random()), len: 0.06, top: 1200 })
+      if (!tapped) feltTap(a, out, kit, p, p.gain * 0.09)
+    },
+  }),
+  e: cue({
+    bus: 'ui', level: -18.5, gap: 0.12, length: 0.12, jitter: { cents: 30, db: 1.5 },
+    play(a, out, p, kit) {
+      // A breathy felt "pff" tuned to G (a narrow band of air) with a faint pitched body under it.
+      const dur = 0.08
+      noise(a, out, kit, p.at, { dur, gain: p.gain * 0.9, random: p.random, freq: NOTE.G5 * p.rate, q: 5, top: 1600, env: strike(dur, 0.012, 0.02) })
+      noise(a, out, kit, p.at, { dur: 0.05, gain: p.gain * 0.3, random: p.random, type: 'lowpass', freq: 500, q: 0.6, env: strike(0.05, 0.006, 0.012) })
+      pluck(a, out, p.at + 0.004, NOTE.G4 * p.rate, [{ ratio: 1, amp: 1, tau: 0.03 }], { gain: p.gain * 0.25, attack: 0.01, dur: 0.1 })
+    },
+  }),
+  f: cue({
+    bus: 'ui', level: -25.5, gap: 0.12, length: 0.2, jitter: { cents: 3, db: 1.5 },
+    play(a, out, p) {
+      // A fingertip on a small glass: a pure tone that blooms over 15 ms and fades, stepping G, E, A, G.
+      pluck(a, out, p.at, pick(p, [NOTE.G5, NOTE.E5, NOTE.A5, NOTE.G5]) * p.rate, [{ ratio: 1, amp: 1, tau: 0.045 }, { ratio: 2.32, amp: 0.05, tau: 0.02 }], { gain: p.gain * 0.5, attack: 0.015, dur: 0.18 })
+    },
+  }),
+}
+
+/** A synthesized felt tap (hover d's stand-in while its click loads): a short low wood body and a puff. */
+function feltTap(a: Ctx, out: AudioNode, kit: Kit, p: Play, gain: number) {
+  pluck(a, out, p.at, 420 * p.rate, BODY.wood, { gain: gain * 0.5, attack: 0.003 })
+  noise(a, out, kit, p.at, { dur: 0.03, gain: gain * 0.3, random: p.random, type: 'lowpass', freq: 900, q: 0.6, env: strike(0.03, 0.002, 0.007) })
 }
 
 const chose = {
@@ -155,10 +193,17 @@ const glide = {
 
 const turned = {
   a: cue({
-    bus: 'world', level: -12.5, gap: 0.2, length: 0.4, jitter: { cents: 150, db: 1.5 },
+    bus: 'world', level: -15.5, gap: 0.2, length: 0.4, jitter: { cents: 150, db: 1.5 },
     play(a, out, p, kit) {
-      // Felt clothes turning: two soft rustles.
-      rustle(a, out, kit, p.at, p, { dur: 0.3, gain: p.gain * 0.6 })
+      // Felt clothes turning: two soft rustles, lower and rounder than round 1 (3 dB down, top 2.6 kHz, slower swell).
+      rustle(a, out, kit, p.at, p, { dur: 0.32, gain: p.gain * 0.6, low: 0.8, top: 2600, peak: 0.42 })
+    },
+  }),
+  b: cue({
+    bus: 'world', level: -19.5, gap: 0.2, length: 0.45, jitter: { cents: 150, db: 1.5 },
+    play(a, out, p, kit) {
+      // Much softer: the same rustles 7 dB under round 1, darker still (top 1.8 kHz) and slower.
+      rustle(a, out, kit, p.at, p, { dur: 0.36, gain: p.gain * 0.6, low: 0.65, top: 1800, peak: 0.5 })
     },
   }),
 }
@@ -194,21 +239,36 @@ const card = {
 
 const padUp = {
   a: cue({
-    bus: 'ui', level: -14.5, gap: 0.15, length: 0.4, jitter: { cents: 100, db: 1 },
+    bus: 'ui', level: -17.5, gap: 0.15, length: 0.4, jitter: { cents: 100, db: 1 },
     play(a, out, p, kit) {
-      // The notepad rising: a paper slide that brightens.
-      slide(a, out, kit, p.at, p, { dur: 0.32, from: 700, to: 1900, gain: p.gain * 0.7, peak: 0.55 })
+      // The notepad rising: a paper slide that brightens, softer than round 1 (3 dB down, lower band, top 3.2 kHz, later swell).
+      slide(a, out, kit, p.at, p, { dur: 0.32, from: 600, to: 1500, gain: p.gain * 0.7, peak: 0.62, top: 3200 })
+    },
+  }),
+  b: cue({
+    bus: 'ui', level: -21.5, gap: 0.15, length: 0.4, jitter: { cents: 100, db: 1 },
+    play(a, out, p, kit) {
+      // Much softer: 7 dB under round 1, a duller slide (500 to 1100 Hz, top 2.2 kHz) that swells late.
+      slide(a, out, kit, p.at, p, { dur: 0.34, from: 500, to: 1100, gain: p.gain * 0.7, peak: 0.68, top: 2200, q: 0.7 })
     },
   }),
 }
 
 const padDown = {
   a: cue({
-    bus: 'ui', level: -16.5, gap: 0.15, length: 0.45, jitter: { cents: 100, db: 1 },
+    bus: 'ui', level: -19.5, gap: 0.15, length: 0.45, jitter: { cents: 100, db: 1 },
     play(a, out, p, kit) {
-      // Lowering it: a darkening slide that settles on felt.
-      slide(a, out, kit, p.at, p, { dur: 0.3, from: 1700, to: 600, gain: p.gain * 0.7, peak: 0.3 })
-      thump(a, out, kit, p.at + 0.27, { from: 180, to: 110, dur: 0.08, gain: p.gain * 0.35, random: p.random, puff: 0.6, cut: 700 })
+      // Lowering it: a darkening slide that settles on felt, softer than round 1 (3 dB down, lower band, top 3 kHz, later swell).
+      slide(a, out, kit, p.at, p, { dur: 0.3, from: 1400, to: 550, gain: p.gain * 0.7, peak: 0.4, top: 3000 })
+      thump(a, out, kit, p.at + 0.27, { from: 170, to: 105, dur: 0.08, gain: p.gain * 0.35, random: p.random, puff: 0.5, cut: 600 })
+    },
+  }),
+  b: cue({
+    bus: 'ui', level: -23.5, gap: 0.15, length: 0.45, jitter: { cents: 100, db: 1 },
+    play(a, out, p, kit) {
+      // Much softer: 7 dB under round 1, a dull slide (1100 to 450 Hz, top 2 kHz) and a lighter felt landing.
+      slide(a, out, kit, p.at, p, { dur: 0.32, from: 1100, to: 450, gain: p.gain * 0.7, peak: 0.45, top: 2000, q: 0.7 })
+      thump(a, out, kit, p.at + 0.29, { from: 160, to: 100, dur: 0.08, gain: p.gain * 0.28, random: p.random, puff: 0.4, cut: 500 })
     },
   }),
 }
@@ -500,7 +560,7 @@ const sat = {
 
 const farewell = {
   a: cue({
-    bus: 'world', level: -19, gap: 0.6, length: 1.3, jitter: { cents: 2, db: 1 },
+    bus: 'world', level: -19, gap: 0.6, length: 1.4, jitter: { cents: 2, db: 1 },
     play(a, out, p, kit) {
       // Everyone gets up from the table: two soft cushion lifts, then a kalimba E falling to C, left to ring.
       for (const [i, dt] of [0, 0.14].entries()) {
@@ -511,6 +571,56 @@ const farewell = {
       pluck(a, r, p.at + 0.48, NOTE.C5 * p.rate, BODY.kalimba, { gain: p.gain * 0.4, dur: 0.75 })
     },
   }),
+  b: cue({
+    bus: 'world', level: -16, gap: 0.6, length: 1.2, jitter: { cents: 40, db: 1 },
+    samples: [S.chair.file],
+    play(a, out, p, kit) {
+      // Chairs pushed back: two recorded wooden-chair lifts (a sit, reversed), staggered, with a cloth rustle between.
+      const buffer = kit.sample(S.chair.file)
+      const first = sample(a, out, buffer, p.at, S.chair.takes[p.index % 2], { gain: p.gain * 1.4, rate: p.rate, top: 2400 })
+      const second = sample(a, out, buffer, p.at + 0.22, S.chair.takes[(p.index + 1) % 2], { gain: p.gain * 1.1, rate: p.rate * 0.9, top: 2000 })
+      if (!first || !second) {
+        lift(a, out, kit, p.at, p, p.gain * 1.75)
+        lift(a, out, kit, p.at + 0.22, p, p.gain * 1.4)
+      }
+      rustle(a, out, kit, p.at + 0.45, p, { dur: 0.3, gain: p.gain * 0.3, low: 0.7, top: 2200, peak: 0.4 })
+    },
+  }),
+  c: cue({
+    bus: 'world', level: -16.5, gap: 0.6, length: 1.7, jitter: { cents: 40, db: 1 },
+    samples: [S.chair.file, S.steps.file],
+    play(a, out, p, kit) {
+      // Getting up and going: a recorded chair lift, then three sock steps on wood that fade and darken as they leave.
+      const chair = kit.sample(S.chair.file)
+      const steps = kit.sample(S.steps.file)
+      const lifted = sample(a, out, chair, p.at, S.chair.takes[1], { gain: p.gain * 1.3, rate: p.rate, top: 2400 })
+      if (!lifted) lift(a, out, kit, p.at, p, p.gain * 0.85)
+      for (let i = 0; i < 3; i++) {
+        const t = p.at + 0.5 + i * 0.34
+        const stepped = sample(a, out, steps, t, pick({ ...p, index: p.index * 3 + i }, S.steps.takes), { gain: p.gain * 1.6 * 0.62 ** i, rate: p.rate * (0.96 + 0.08 * p.random()), top: 2400 - 550 * i })
+        if (!stepped) thump(a, out, kit, t, { from: 150, to: 85, dur: 0.09, gain: p.gain * 0.85 * 0.62 ** i, random: p.random, puff: 0.9, cut: 700 - 120 * i })
+      }
+    },
+  }),
+  d: cue({
+    bus: 'world', level: -14, gap: 0.6, length: 1.3, jitter: { cents: 40, db: 1 },
+    play(a, out, p, kit) {
+      // Synthesized foley: two cushions breathing out as people rise, a cloth rustle, and two soft felt steps away.
+      lift(a, out, kit, p.at, p, p.gain * 0.5)
+      lift(a, out, kit, p.at + 0.18, p, p.gain * 0.38)
+      rustle(a, out, kit, p.at + 0.3, p, { dur: 0.3, gain: p.gain * 0.35, low: 0.75, top: 2400, peak: 0.4 })
+      for (const [i, dt] of [0.66, 0.99].entries()) {
+        thump(a, out, kit, p.at + dt, { from: 150 * p.rate, to: 85, dur: 0.09, gain: p.gain * (0.45 - 0.15 * i), random: p.random, puff: 0.9, cut: 650 - 100 * i })
+      }
+    },
+  }),
+}
+
+/** A cushion as someone rises: low air drawn up and let go, with a faint creak of the seat. */
+function lift(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, gain: number) {
+  const dur = 0.26
+  noise(a, out, kit, t, { dur, gain, random: p.random, type: 'lowpass', freq: (u) => (260 + 380 * u) * p.rate, q: 0.8, env: swell(0.7, 1.6) })
+  noise(a, out, kit, t + 0.06, { dur: 0.12, gain: gain * 0.25, random: p.random, freq: (u) => (480 + 120 * u) * p.rate, q: 8, env: swell(0.5, 1) })
 }
 
 const news = {
@@ -546,6 +656,29 @@ const news = {
       pluck(a, r, p.at + 0.09, NOTE.E5 * p.rate, BODY.marimba, { gain: p.gain * 0.3 })
       pluck(a, r, p.at + 0.22, NOTE.A5 * p.rate, [{ ratio: 1, amp: 1, tau: 0.35 }, ...BODY.marimba.slice(1)], { gain: p.gain * 0.5 })
       pluck(a, r, p.at + 0.24, NOTE.E6 * p.rate, BODY.glass, { gain: p.gain * 0.1, attack: 0.05, dur: 0.9 })
+    },
+  }),
+  d: cue({
+    bus: 'world', level: -20, gap: 0.6, length: 1.2, jitter: { cents: 2, db: 1 },
+    play(a, out, p) {
+      // a, rounder: the same kalimba G then high C, struck over 12 ms instead of 4, half the octave
+      // partial and nothing above 2 kHz, less room, 2 dB quieter.
+      const r = room(a, out, 0.18)
+      const round = [{ ratio: 1, amp: 1, tau: 0.32 }, { ratio: 2.01, amp: 0.04, tau: 0.1 }]
+      pluck(a, r, p.at, NOTE.G5 * p.rate, round, { gain: p.gain * 0.42, attack: 0.012, dur: 0.5, ceiling: 2000 })
+      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, [{ ratio: 1, amp: 1, tau: 0.42 }, round[1]], { gain: p.gain * 0.46, attack: 0.012, dur: 0.85, ceiling: 2000 })
+    },
+  }),
+  e: cue({
+    bus: 'world', level: -20, gap: 0.6, length: 1.2, jitter: { cents: 2, db: 1 },
+    play(a, out, p, kit) {
+      // a, an octave lower with a felt mallet: G4 then C5, a 9 ms strike with a soft thud of felt,
+      // a little warmth from a quiet octave, less room, 2 dB quieter.
+      const r = room(a, out, 0.2)
+      const felt = [{ ratio: 1, amp: 1, tau: 0.36 }, { ratio: 2.0, amp: 0.1, tau: 0.12 }]
+      noise(a, out, kit, p.at, { dur: 0.04, gain: p.gain * 0.15, random: p.random, type: 'lowpass', freq: 500, q: 0.6, env: strike(0.04, 0.004, 0.01) })
+      pluck(a, r, p.at, NOTE.G4 * p.rate, felt, { gain: p.gain * 0.5, attack: 0.009, dur: 0.55, ceiling: 1600 })
+      pluck(a, r, p.at + 0.16, NOTE.C5 * p.rate, [{ ratio: 1, amp: 1, tau: 0.46 }, felt[1]], { gain: p.gain * 0.55, attack: 0.009, dur: 0.9, ceiling: 1600 })
     },
   }),
 }
@@ -598,7 +731,12 @@ export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c',
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
-  hover: { a: 'A breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.' },
+  hover: {
+    a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',
+    d: 'A felt-wrapped wooden tap: a real wooden click (six takes), cut to 60 ms with its top rolled off, so it is a soft "tok".',
+    e: 'A breathy felt "pff" tuned to G, with a faint pitched body under it.',
+    f: 'A fingertip on a small glass: a pure tone that blooms and fades, stepping G, E, A as you point at things.',
+  },
   chose: {
     a: 'Wooden tock with a small kalimba G (A every third play).',
     b: 'Recorded: a wooden click (six takes) and a real kalimba G, short.',
@@ -606,14 +744,23 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   },
   backed: { a: 'A lower, duller tock and a kalimba C that sags a few cents: chose in reverse.' },
   glide: { a: 'Air that swells and fades with the camera move; silent when the move is instant.' },
-  turned: { a: 'Two soft cloth rustles.' },
+  turned: {
+    a: 'Softer: two cloth rustles, 3 dB down from round 1, lower and rounder, swelling more slowly.',
+    b: 'Much softer: 7 dB down from round 1, darker still and slower; barely there.',
+  },
   card: {
     a: 'A paper flick; a later page is higher and shorter.',
     b: 'Hybrid: a recorded sheet sliding (three takes), with a quiet synthesized glass E on a new reply.',
     c: 'A quick rising "fwip" of a card sliding in.',
   },
-  'pad-up': { a: 'A paper slide that brightens as the pad rises.' },
-  'pad-down': { a: 'A darkening paper slide that settles on felt.' },
+  'pad-up': {
+    a: 'Softer: the paper slide that brightens as the pad rises, 3 dB down from round 1, duller and with a later swell.',
+    b: 'Much softer: 7 dB down from round 1, a dull short slide that swells late.',
+  },
+  'pad-down': {
+    a: 'Softer: the darkening slide that settles on felt, 3 dB down from round 1, duller and gentler.',
+    b: 'Much softer: 7 dB down from round 1, a dull slide and a lighter felt landing.',
+  },
   writing: { a: 'Pencil grains, at most one per 75 ms, overlapping into one scratch while typing; deleting is a softer rub.' },
   sent: {
     a: 'Tear, a paper flutter across the flight, and a soft paper tap on landing.',
@@ -639,11 +786,18 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
     c: 'A heavy, soft page: lower and slower, more air than paper.',
   },
   sat: { a: 'Cushioned chair as the hop lands: a round bump, a "pff" of air and a small wood creak.' },
-  farewell: { a: 'Everyone gets up: two soft cushion lifts, then a kalimba E falling to C.' },
+  farewell: {
+    a: 'Round 1: two soft cushion lifts, then a kalimba E falling to C.',
+    b: 'Chairs pushed back: two recorded wooden-chair lifts (a sit, played backwards), one after the other, and a cloth rustle.',
+    c: 'Getting up and going: one recorded chair lift, then three sock steps on wood that fade and darken as they leave.',
+    d: 'Synthesized foley: two cushions breathing out as people rise, a cloth rustle and two soft felt steps away.',
+  },
   news: {
     a: 'Kalimba G then high C, the second left ringing.',
     b: 'Recorded: a real music-box note, retuned, played as G then high C.',
     c: 'Marimba E-E then A with a ghost shimmer.',
+    d: 'A, rounder: the same kalimba G then high C with a slower strike, nothing above 2 kHz, less room, 2 dB quieter.',
+    e: 'A, an octave lower with a felt mallet: G then C, warmer and rounder, less room, 2 dB quieter.',
   },
   walk: { a: 'Soft felt steps on the music\'s eighth notes: two to five leaving, two arriving.' },
   refused: { a: 'Two soft wooden knocks and a small latch rattle at the closed door.' },
@@ -659,4 +813,6 @@ export const SAMPLE_CREDITS: { title: string; author: string; source: string; li
   ['Paper sheets (sliding).wav', 'Pipelenisf', 'https://freesound.org/s/560352/'],
   ['Cushion Impacts.wav', 'mincedbeats', 'https://freesound.org/s/593948/'],
   ['Page Turn', 'davidbain', 'https://freesound.org/s/136778/'],
+  ['18-sentandose silla de madera.wav', 'Tomycatts', 'https://freesound.org/s/429327/'],
+  ['01-32 Footsteps, Wood, Socks, Slow Pace.wav', 'SpliceSound', 'https://freesound.org/s/369837/'],
 ].map(([title, author, source]) => ({ title, author, source, licence: 'CC0 1.0', licenceUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' }))

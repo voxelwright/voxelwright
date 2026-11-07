@@ -23,7 +23,8 @@ const GAP = 0.08
 
 /**
  * The takes, in seconds of each original, picked from measured event windows (not by ear).
- * `rate` retunes a tonal sample to the palette's key before encoding.
+ * `cents` retunes a tonal sample to the palette's key before encoding; `reverse` plays a take
+ * backwards (cut, then reversed, then faded, so its fade-out lands on the reversed end).
  */
 const SPRITES = {
   'wood-clicks': { id: '565027', takes: [[0.19, 0.38], [0.57, 0.76], [1.39, 1.58], [1.81, 2.0], [2.27, 2.46], [2.71, 2.9]] },
@@ -34,6 +35,9 @@ const SPRITES = {
   'paper-slide': { id: '560352', takes: [[0.22, 0.74], [0.72, 1.0], [1.4, 1.85]] },
   cushion: { id: '593948', takes: [[0.14, 0.44], [1.38, 1.68], [2.66, 2.96], [3.72, 4.02], [7.02, 7.32]] },
   'page-turn': { id: '136778', takes: [[0.06, 1.66]] },
+  // A wooden chair sat on, reversed: the seat's creak and thump become a lift.
+  'chair-lift': { id: '429327', takes: [[0.97, 1.75], [0.97, 1.45]], reverse: true },
+  'sock-steps': { id: '369837', takes: [[0.88, 1.25], [1.43, 1.8], [1.93, 2.3], [2.48, 2.85], [2.98, 3.35], [3.53, 3.9]] },
 }
 
 const kWeight = (x) => {
@@ -91,6 +95,7 @@ for (const [name, spec] of Object.entries(SPRITES)) {
     const a = Math.round((from / rate) * SR)
     const b = Math.min(x.length, Math.round((to / rate) * SR))
     const t = Float32Array.from(x.subarray(a, b))
+    if (spec.reverse) t.reverse()
     const fadeIn = Math.round(0.004 * SR)
     const fadeOut = Math.min(Math.round(0.06 * SR), Math.floor(t.length / 3))
     for (let i = 0; i < fadeIn; i++) t[i] *= cos(i / fadeIn)
@@ -116,7 +121,7 @@ for (const [name, spec] of Object.entries(SPRITES)) {
   const kb = statSync(ogg).size / 1024
   total += kb
   table[name] = { file: `${name}.ogg`, takes }
-  used.push({ name, id: spec.id, file, meta, takes: spec.takes, cents: spec.cents ?? 0 })
+  used.push({ name, id: spec.id, file, meta, takes: spec.takes, cents: spec.cents ?? 0, reverse: Boolean(spec.reverse) })
   console.log(`${name}.ogg  ${spec.takes.length} takes  ${(n / SR).toFixed(2)} s  ${kb.toFixed(1)} KB  from ${spec.id} (${meta.author})`)
 }
 rmSync(tmp, { recursive: true, force: true })

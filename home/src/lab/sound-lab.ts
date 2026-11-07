@@ -3,6 +3,8 @@
 // page's own AudioContext and the real mix (voice/buses.ts); "with music underneath" adds
 // the bed at its real level. Picks save to the dev server (POST /sound-lab/picks, see
 // vite.config.ts) and to localStorage `village.sfx.picks`, which the home's player reads.
+// Round 2 sits at the top with the cues the owner asked to change; round 1's cards stay below,
+// folded, with the current picks selected. .sound-lab/history.jsonl keeps every round's save.
 import type { CueName } from '../sound/contract'
 import { Player } from '../sound/player'
 import { DESCRIPTIONS, PALETTE, SAMPLE_CREDITS } from '../sound/palette'
@@ -56,6 +58,22 @@ const EVENT: Partial<Record<CueName, { seconds?: number; event?: Record<string, 
   walk: { seconds: 0.95, event: { phase: 'leave' } },
 }
 
+/** What the owner said about each cue in round 1 (November 7), as saved in .sound-lab/picks.json then. */
+const ROUND1_NOTES: Partial<Record<CueName, string>> = {
+  news: 'Sounds a bit harsh still', hover: 'Sounds bland and cheap', turned: 'Softer', 'pad-up': 'Softer', 'pad-down': 'Softer',
+  farewell: 'This sounds like notification. No need for a kalimba there',
+}
+
+/** Round 2: the cues that changed, the versions to compare (round 1's first), and what changed since. */
+const ROUND2: { cue: CueName; variants: string[]; before: string }[] = [
+  { cue: 'news', variants: ['a', 'd', 'e'], before: 'Round 1: you picked A and said “Sounds a bit harsh still”. A is unchanged, to compare; D and E are softened.' },
+  { cue: 'hover', variants: ['a', 'd', 'e', 'f'], before: 'Round 1: you asked for a change: “Sounds bland and cheap”. A is the round-1 sound; D, E and F are new.' },
+  { cue: 'farewell', variants: ['a', 'b', 'c', 'd'], before: 'Round 1: you asked for a change: “This sounds like notification. No need for a kalimba there”. A is the round-1 sound; B, C and D are only people getting up.' },
+  { cue: 'turned', variants: ['a', 'b'], before: 'Round 1: you kept it and said “Softer”. A is now softer; B is much softer.' },
+  { cue: 'pad-up', variants: ['a', 'b'], before: 'Round 1: you kept it and said “Softer”. A is now softer; B is much softer.' },
+  { cue: 'pad-down', variants: ['a', 'b'], before: 'Round 1: you kept it and said “Softer”. A is now softer; B is much softer.' },
+]
+
 interface Clip { cue: CueName; how: 'real' | 'emitted'; note: string; videos: Record<string, string> }
 interface Manifest { audio: string; clips: Clip[] }
 interface Saved { picks: Record<string, string>; notes: Record<string, string>; savedAt?: string }
@@ -71,6 +89,9 @@ const names = Object.keys(PALETTE) as CueName[]
 const variantsOf = (cue: CueName) => Object.keys(PALETTE[cue]).sort()
 const choosing = names.filter((c) => variantsOf(c).length > 1)
 const keeping = names.filter((c) => variantsOf(c).length === 1)
+const inRound2 = new Set(ROUND2.map((r) => r.cue))
+/** What the server takes for a cue: a variant or 'none' when it has several, else keep or change. */
+const allowed = (cue: CueName) => (variantsOf(cue).length > 1 ? [...variantsOf(cue), 'none'] : ['keep', 'change'])
 
 let audio: AudioContext | null = null
 let player: Player | null = null
@@ -171,12 +192,12 @@ async function setMusic(on: boolean) {
 }
 
 // ── the cards ───────────────────────────────────────────────────────────────
-function card(cue: CueName): HTMLElement {
-  const variants = variantsOf(cue)
+function card(cue: CueName, variants = variantsOf(cue), before?: string): HTMLElement {
   const clip = manifest?.clips.find((c) => c.cue === cue)
   const section = el('section', { className: 'cue' })
   section.dataset.cue = cue
   section.append(el('header', {}, el('h2', {}, MOMENT[cue] ?? cue), el('span', { className: 'name' }, cue)))
+  if (before) section.append(el('p', { className: 'before' }, before))
 
   for (const v of variants) {
     const row = el('div', { className: 'variant' })
@@ -254,13 +275,23 @@ async function load() {
       // Nothing stored.
     }
   }
+  // A pick round 2 has made impossible (keep or change on a cue that now has versions) would make
+  // the server refuse the whole save: drop it here; history.jsonl still holds round 1.
+  for (const [cue, value] of Object.entries(state.picks)) if (!(cue in PALETTE) || !allowed(cue as CueName).includes(value)) delete state.picks[cue]
+  // Round 1's notes are quoted on the round-2 cards; the boxes start empty for new notes.
+  for (const { cue } of ROUND2) if (state.notes[cue] === ROUND1_NOTES[cue]) delete state.notes[cue]
   manifest = found
   const cues = $('cues')
-  cues.append(el('p', { className: 'divider' }, 'Pick one'))
-  for (const cue of choosing) cues.append(card(cue))
+  cues.append(el('p', { className: 'divider' }, 'Round 2'))
+  cues.append(el('p', { className: 'lede' }, 'The six sounds you asked to change. Each card says what you said last time; pick the version you like.'))
+  for (const { cue, variants, before } of ROUND2) cues.append(card(cue, variants, before))
   if (manifest) cues.append(el('p', { className: 'small' }, `The videos are the real home recorded headless; their sound is rendered offline over the same timeline (${manifest.audio}).`))
-  cues.append(el('p', { className: 'divider' }, 'Keep or change'))
-  for (const cue of keeping) cues.append(card(cue))
+  const round1 = el('details', { className: 'round1' }, el('summary', {}, `Round 1: the other ${names.length - ROUND2.length} sounds, with your picks`))
+  round1.append(el('p', { className: 'divider' }, 'Pick one'))
+  for (const cue of choosing) if (!inRound2.has(cue)) round1.append(card(cue))
+  round1.append(el('p', { className: 'divider' }, 'Keep or change'))
+  for (const cue of keeping) if (!inRound2.has(cue)) round1.append(card(cue))
+  cues.append(round1)
   $('credits').append(credits())
   if (saved?.savedAt) say(`Last saved ${new Date(saved.savedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`, true)
 }

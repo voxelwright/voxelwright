@@ -9,6 +9,8 @@ export const SPRITES = {
   'paper-slide': { file: 'paper-slide.ogg', takes: [[0.08, 0.52], [0.68, 0.28], [1.04, 0.45]] },
   'cushion': { file: 'cushion.ogg', takes: [[0.08, 0.3], [0.46, 0.3], [0.84, 0.3], [1.22, 0.3], [1.6, 0.3]] },
   'page-turn': { file: 'page-turn.ogg', takes: [[0.08, 1.6]] },
+  'chair-lift': { file: 'chair-lift.ogg', takes: [[0.08, 0.78], [0.94, 0.48]] },
+  'sock-steps': { file: 'sock-steps.ogg', takes: [[0.08, 0.37], [0.53, 0.37], [0.98, 0.37], [1.43, 0.37], [1.88, 0.37], [2.33, 0.37]] },
 } as const
 
 export type SpriteName = keyof typeof SPRITES
