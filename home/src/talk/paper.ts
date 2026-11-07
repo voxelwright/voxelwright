@@ -3,6 +3,9 @@
 import { canvas, rng } from '../paint'
 
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
+/** Your ink and your pad's paper (input.ts): what you wrote looks the same wherever it goes. */
+const INK = '#23395a'
+const PAD = '#fbf3e1'
 const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 
 /** Who a slip belongs to. */
@@ -15,6 +18,9 @@ interface Slip {
   fade: number
   tilt: number
   seed: number
+  /** Opening out of the note that landed (screen point and width), and how far: 0 to 1. */
+  from: { x: number; y: number; w: number } | null
+  open: number
 }
 /** Room around the paper for its tab, in CSS pixels. */
 const TAB = 16
@@ -36,7 +42,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     c.setAttribute('aria-hidden', 'true')
     document.body.append(c)
     const seed = [...person].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) % 997
-    const slip = { c, g, key: '', fade: 0, tilt: (rng(seed)() - 0.5) * 0.06, seed }
+    const slip: Slip = { c, g, key: '', fade: 0, tilt: (rng(seed)() - 0.5) * 0.06, seed, from: null, open: 1 }
     slips.set(person, slip)
     return slip
   }
@@ -55,19 +61,23 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
   }
 
   const paint = (slip: Slip, el: HTMLElement, who: Speaker, w: number, h: number) => {
-    const W = (w + TAB * 2) * SCALE, H = (h + TAB * 2) * SCALE
+    const mine = el.classList.contains('mine')
+    const tail = el.dataset.tail ?? 'down'
+    // A slip lifted clear of a face stretches its tab down to the speaker's head.
+    const reach = tail === 'down' && !mine ? parseFloat(el.style.getPropertyValue('--reach')) || 0 : 0
+    const W = (w + TAB * 2) * SCALE, H = (h + TAB * 2 + reach) * SCALE
     if (slip.c.width !== W || slip.c.height !== H) {
       slip.c.width = W
       slip.c.height = H
       slip.c.style.width = `${w + TAB * 2}px`
-      slip.c.style.height = `${h + TAB * 2}px`
+      slip.c.style.height = `${h + TAB * 2 + reach}px`
     }
     const g = slip.g
     g.setTransform(SCALE, 0, 0, SCALE, 0, 0)
-    g.clearRect(0, 0, w + TAB * 2, h + TAB * 2)
+    g.clearRect(0, 0, w + TAB * 2, h + TAB * 2 + reach)
+    if (mine) return paintMine(slip, el, w, h)
     const said = el.classList.contains('said')
     const beat = el.classList.contains('beat')
-    const tail = el.dataset.tail ?? 'down'
     const at = parseFloat(el.style.getPropertyValue('--tail')) || (tail === 'down' ? w / 2 : 40)
     const r = rng(slip.seed)
     // The paper: a torn, slightly uneven sheet with a cut tab toward the speaker.
@@ -85,9 +95,11 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.lineTo(x1 + jag(), y1 - 3)
     g.lineTo(x1 - 3, y1)
     if (tail === 'down') {
-      g.lineTo(x0 + at + 9, y1 + jag())
-      g.lineTo(x0 + at - 3, y1 + TAB - 2)
-      g.lineTo(x0 + at - 10, y1 + jag())
+      // Wider at the root when it has further to reach.
+      const root = Math.min(16, 9 + reach / 14)
+      g.lineTo(x0 + at + root, y1 + jag())
+      g.lineTo(x0 + at - 3, y1 + TAB - 2 + reach)
+      g.lineTo(x0 + at - root - 1, y1 + jag())
     }
     for (let x = x1 - 14; x > x0 + 6; x -= 14) g.lineTo(x, y1 + jag())
     g.lineTo(x0 + 3, y1)
@@ -139,6 +151,23 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.textBaseline = 'middle'
     g.fillText(who.name, 13, th / 2 + 1)
     g.restore()
+    // Your line, at the head of the slip in your hand and ink, over a ruled line of your pad: the note opened out.
+    const asked = el.querySelector<HTMLElement>('.asked')
+    if (asked && !asked.hidden && !said) {
+      g.font = `19px ${HAND}`
+      g.fillStyle = INK
+      let kept = wrap(g, asked.textContent ?? '', w - 44)
+      if (kept.length > 2) kept = [kept[0], kept[1].replace(/\s*\S*$/, '') + ' …']
+      kept.forEach((l, i) => g.fillText(l, x0 + 22, y0 + asked.offsetTop + 19 + i * 24.7))
+      const ruleY = y0 + asked.offsetTop + asked.offsetHeight + 1
+      g.strokeStyle = 'rgba(120, 150, 190, 0.55)'
+      g.lineWidth = 1.2
+      g.beginPath()
+      g.moveTo(x0 + 14, ruleY)
+      g.lineTo(x1 - 14, ruleY)
+      g.stroke()
+      g.lineWidth = 0.8
+    }
     // The page before, if one has turned: one dimmed italic line over a pencilled rule (all of it once opened).
     const before = el.querySelector<HTMLElement>('.before')
     g.textBaseline = 'alphabetic'
@@ -162,9 +191,12 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     const top = el.querySelector<HTMLElement>('.words')?.offsetTop ?? 22
     const px = said ? 16 : 19
     g.font = `${beat ? 'italic ' : ''}${px}px ${BOOK}`
-    g.fillStyle = said ? '#6e5642' : '#24170f'
+    // What was said steps back by its paper, size and place, not its ink: pale ink made it hard to read (#42 paper climb).
+    g.fillStyle = said ? '#3f2d20' : '#24170f'
     let lines = wrap(g, words, w - 44)
-    if (said && lines.length > 3) lines = [...lines.slice(0, 2), lines[2].replace(/\s*\S*$/, '') + ' …']
+    // What was said keeps three lines; one on a phone, where the round so far has to fit above the table.
+    const keep = innerWidth < 600 ? 1 : 3
+    if (said && lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
     const lead = px * 1.42
     lines.forEach((l, i) => g.fillText(l, x0 + 22, y0 + top + px + i * lead - 2))
     // "go on", where the card's button is (the invisible card under the slip takes the click).
@@ -190,6 +222,57 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     }
   }
 
+  /** Your line lying on the table: a page torn off your pad, ruled, in your hand, addressed at its head. */
+  const paintMine = (slip: Slip, el: HTMLElement, w: number, h: number) => {
+    const g = slip.g
+    const r = rng(slip.seed)
+    const x0 = TAB, y0 = TAB, x1 = TAB + w, y1 = TAB + h
+    g.beginPath()
+    // Torn along the top, where it came off the pad; cut clean on the other three sides.
+    g.moveTo(x0, y0 + 2)
+    for (let x = x0 + 6; x < x1; x += 6) g.lineTo(x, y0 + (r() - 0.5) * 3.2)
+    g.lineTo(x1, y0 + 2)
+    g.lineTo(x1, y1)
+    g.lineTo(x0, y1)
+    g.closePath()
+    g.fillStyle = PAD
+    g.fill()
+    g.save()
+    g.clip()
+    g.strokeStyle = 'rgba(120, 150, 190, 0.45)'
+    g.lineWidth = 1
+    const words = el.querySelector<HTMLElement>('.words')
+    const top = words?.offsetTop ?? 30
+    for (let y = y0 + top + 22; y < y1; y += 26) {
+      g.beginPath()
+      g.moveTo(x0, y)
+      g.lineTo(x1, y)
+      g.stroke()
+    }
+    g.strokeStyle = 'rgba(200, 90, 80, 0.4)'
+    g.beginPath()
+    g.moveTo(x0 + 12, y0)
+    g.lineTo(x0 + 12, y1)
+    g.stroke()
+    g.restore()
+    g.strokeStyle = 'rgba(120, 85, 50, 0.3)'
+    g.lineWidth = 0.8
+    g.stroke()
+    const to = el.querySelector<HTMLElement>('.to-line')
+    g.textBaseline = 'alphabetic'
+    if (to) {
+      g.font = `italic 15px ${HAND}`
+      g.fillStyle = 'rgba(70, 50, 36, 0.75)'
+      g.fillText(to.textContent ?? '', x0 + 20, y0 + to.offsetTop + 15)
+    }
+    g.font = `20px ${HAND}`
+    g.fillStyle = INK
+    let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', w - 40)
+    const keep = innerWidth < 600 ? 1 : 3
+    if (lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
+    lines.forEach((l, i) => g.fillText(l, x0 + 20, y0 + top + 19 + i * 26))
+  }
+
   const frame = (dt: number) => {
     for (const el of document.querySelectorAll<HTMLElement>('.talk-card')) {
       const person = el.dataset.talkCard
@@ -201,6 +284,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const m = /(-?[\d.]+)px (-?[\d.]+)px/.exec(el.style.translate)
       if (slip.fade < 0.01 || !who || !m) {
         slip.c.style.opacity = '0'
+        if (!shown) slip.from = null
         continue
       }
       const w = el.offsetWidth, h = el.offsetHeight
@@ -208,27 +292,48 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const cue = (el.querySelector('.cue') as HTMLElement | null)?.hidden
       const before = el.querySelector<HTMLElement>('.before')
       const more = (el.querySelector('.more') as HTMLElement | null)?.hidden
-      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, el.className, el.dataset.tail, el.style.getPropertyValue('--tail')].join('|')
+      const asked = el.querySelector<HTMLElement>('.asked')
+      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, asked?.textContent, el.className, el.dataset.tail, el.style.getPropertyValue('--tail'), el.style.getPropertyValue('--reach')].join('|')
       if (key !== slip.key) {
         slip.key = key
         paint(slip, el, who, w, h)
       }
-      // Turned a little toward its speaker, a little crooked, and tipping up into place as it appears.
+      // Turned a little toward its speaker (square with no tail), a little crooked, and tipping up into place as it appears.
       const toward = el.dataset.tail === 'left' ? -1 : el.dataset.tail === 'right' ? 1 : 0
       slip.c.style.transformOrigin = toward < 0 ? '0 50%' : toward > 0 ? '100% 50%' : '50% 100%'
-      // Whoever speaks now is in dark ink, full size; what was said before steps back: lighter ink, a little
-      // smaller, lower and paler, but opaque (see-through, the lamp showed through its words; fully alike,
+      // Whoever speaks now is full size on bright paper; what was said before steps back: a little
+      // smaller, lower and on paler paper, but opaque (see-through, the lamp showed through its words; fully alike,
       // the round's order could not be read: the regroup's rounds 5 and 6).
       const said = el.classList.contains('said')
-      slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB + (said ? 6 : 0)}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg) scale(${said ? 0.93 : 1})`
-      slip.c.style.filter = said ? 'saturate(0.5) brightness(0.95) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))' : ''
-      slip.c.style.opacity = String(slip.fade)
+      // Your line lies on the table: tipped back, as paper on a table top is seen from a chair.
+      const lying = el.classList.contains('mine') ? 22 : 0
+      const x = parseFloat(m[1]) - TAB, y = parseFloat(m[2]) - TAB + (said ? 6 : 0)
+      if (slip.from) {
+        // Opening out of the landed note: from its size and place on screen, unfolding, to the slip's own.
+        slip.open = Math.min(1, slip.open + dt / 0.5)
+        const p = 1 - (1 - slip.open) ** 3
+        const W = w + TAB * 2, H = h + TAB * 2
+        const s0 = Math.min(0.6, Math.max(0.1, slip.from.w / W))
+        const sc = s0 + (1 - s0) * p
+        const fx = slip.from.x - (W * s0) / 2, fy = slip.from.y - (H * s0) / 2
+        slip.c.style.transformOrigin = '0 0'
+        slip.c.style.transform = `translate(${fx + (x - fx) * p}px, ${fy + (y - fy) * p}px) perspective(900px) rotateX(${(1 - p) * 70 + lying}deg) scale(${sc})`
+        if (slip.open >= 1) slip.from = null
+      } else slip.c.style.transform = `translate(${x}px, ${y}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28 + lying}deg) scale(${said ? 0.93 : 1})`
+      slip.c.style.filter = said ? 'saturate(0.6) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))' : ''
+      slip.c.style.opacity = String(slip.from ? Math.min(1, slip.fade * 1.6) : slip.fade)
     }
+  }
+  /** A slip about to show opens out of the note that landed at `at` (screen point and width). */
+  const from = (person: string, at: { x: number; y: number; w: number }) => {
+    const slip = slips.get(person) ?? make(person)
+    slip.from = { ...at }
+    slip.open = 0
   }
   const dispose = () => {
     for (const s of slips.values()) s.c.remove()
   }
-  return { frame, dispose }
+  return { frame, dispose, from }
 }
 
 /** The slips' styles: the card stays in the page unseen, and the name ribbons give way to the slips' tape. */
