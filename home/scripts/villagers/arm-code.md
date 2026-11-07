@@ -31,6 +31,7 @@ The home checks the finished villager and refuses it, with the reason, when:
 - a part floats: every mesh must touch or overlap another (bounding boxes within 0.02), so a head sits on its neck and a hat on its head;
 - the held prop's longest side is under a third of the villager's height, or longer than its height;
 - it is under 0.3 or over 1.0 tall, or wider than 1.5 times its height;
+- the head or the body itself is passed to villager.mark() (tag the hat's own parts, not the head group), or the marked parts are more than 40% of the villager;
 - nothing is passed to villager.mark(), or the marked parts stay inside the outline: seen from in front and 33 degrees above, they must rise at least 0.1 of the height above the top of the head, or reach that far past the side of the head and body;
 - it is the default round body with a head on top: besides the hat, the role mark, the scarf and the prop, nothing reaches forward past the face (snout, muzzle, beak, or the head ahead of the body), the body sits on the floor (no legs), the head sits straight on the body (no neck), and no ears, horns or eyes rise above the head or stick out past its sides.
 
@@ -48,7 +49,8 @@ export default function (villager, api) {
   add(villager, new THREE.SphereGeometry(0.09, 20, 12), cream, 0, 0.15, 0.13).scale.set(0.9, 0.9, 0.35)
   const scarf = add(villager, new THREE.TorusGeometry(0.15, 0.03, 10, 28), felt('#c8553d'), 0, 0.24, 0)
   scarf.rotation.x = Math.PI / 2
-  for (const s of [-1, 1]) add(villager, new THREE.CapsuleGeometry(0.026, 0.07, 6, 10), felt('#c8553d'), s * 0.04, 0.19, 0.15).rotation.z = s * 0.15
+  // The tails hang off to one side of the chest: down the middle they read as a tongue.
+  for (const s of [-1, 1]) add(villager, new THREE.CapsuleGeometry(0.026, 0.07, 6, 10), felt('#c8553d'), 0.09 + s * 0.035, 0.19, 0.13).rotation.z = 0.25 + s * 0.12
   const head = villager.tag(new THREE.Group(), 'head')
   head.position.set(0, 0.36, 0)
   villager.add(head)

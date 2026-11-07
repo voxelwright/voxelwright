@@ -141,14 +141,20 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
       if (picked && !cards.some((c) => c.card.template.id === picked!.template.id)) api.pick(null)
       else api.pick(picked)
     },
-    pick(card: RackCard | null) {
+    pick(card: RackCard | null, notify = true) {
       picked = card
+      const last = (cards.length - 1) / 2
       for (const c of cards) {
         const on = c.card.template.id === card?.template.id
+        const i = cards.indexOf(c) - last
         // The picked card stands up out of the rack, a little bigger, facing you; the others sit back.
-        c.mesh.position.y = H / 2 + 0.014 + (on ? 0.045 : 0)
-        c.mesh.position.z = on ? 0.03 : 0
-        c.mesh.rotation.x = on ? -0.08 : -0.28
+        // While a villager is on the mat (off), the others lie down in the ledge, out of its way, and the
+        // one it was made from stands at the rack's right end, its name painted on, beside the villager.
+        const down = mode === 'off' && !on
+        c.mesh.position.x = mode === 'off' && on ? (last + 0.6) * GAP : i * GAP
+        c.mesh.position.y = down ? 0.02 : H / 2 + 0.014 + (on ? 0.045 : 0)
+        c.mesh.position.z = on ? 0.03 : down ? -0.05 : 0
+        c.mesh.rotation.x = on ? -0.08 : down ? -1.45 : -0.28
         c.mesh.scale.setScalar(on ? 1.12 : 1)
         const m = c.mesh.material as THREE.MeshStandardMaterial
         m.emissive.set('#ffcf8a')
@@ -157,7 +163,7 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
         c.button.setAttribute('aria-pressed', String(on))
         c.button.classList.toggle('on', on)
       }
-      onPick(card)
+      if (notify) onPick(card)
     },
     get picked() {
       return picked
@@ -174,7 +180,9 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
       group.position.set(MAT.x, TOP, layout === 'wide' ? -0.285 : -0.305)
     },
     enable(next: 'on' | 'quiet' | 'off') {
+      const was = mode
       mode = next
+      if ((was === 'off') !== (next === 'off')) api.pick(picked, false)
       shelf.classList.toggle('shown', next === 'on')
       shelf.classList.toggle('quiet', next === 'quiet')
       for (const c of cards) {

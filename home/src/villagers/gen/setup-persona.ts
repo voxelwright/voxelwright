@@ -2,25 +2,15 @@
 // checks are builder A's (./spec.ts Persona, ./build.ts check()), templates and the one
 // crude-humour rule are A's too (./templates.ts applyTemplate, gatePersona). This file
 // only puts them together for the scene and writes the scene's own lines. The felt is an
-// art style, not a mental age.
+// art style, not a mental age. The profile these take is the host's, read from GET
+// persona-templates (setup.ts); until it answers, it is null and crude stays locked. The host
+// gates every persona and tuning it stores or serves with the same rule, so the page cannot
+// unlock anything there either.
 import { check } from './build'
 import type { Persona } from './spec'
 import { applyTemplate, gatePersona, type PersonaProfile, type PersonaTemplate } from './templates'
 
 export type { Persona, PersonaProfile, PersonaTemplate }
-
-/**
- * The synthetic profile from &profile=adult-optin|adult|child; anything else is unknown (null).
- * The real one should come from the person's own record on the host, never from the page:
- * the host gates every template it stores or serves with its own profile, so this flag cannot
- * unlock anything there.
- */
-export function profileFrom(flag: string | null): PersonaProfile {
-  if (flag === 'adult-optin') return { adult: true, crudeOptIn: true }
-  if (flag === 'adult') return { adult: true, crudeOptIn: false }
-  if (flag === 'child') return { adult: false, crudeOptIn: false }
-  return null
-}
 
 /** Untrusted persona data through A's checker; null when there is none. */
 export function checked(raw: unknown): Persona | null {

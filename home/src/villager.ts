@@ -124,7 +124,18 @@ export const tuneVillager = (person: string, item: string, tuning: Record<string
   call<{ ok: true }>(`/people/${person}/villagers/${item}/tuning`, tuning)
 /** Persona templates (#47): the person's own saved patterns and their profile, the family's shared ones, and saving one. All data, gated by the host. */
 export interface SavedTemplate { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child'; shared: boolean; maker: string }
-export const personaTemplates = (person: string) => call<{ templates: SavedTemplate[] }>(`/people/${person}/persona-templates`)
+export const personaTemplates = async (person: string) => {
+  const r = await call<{ templates: SavedTemplate[]; profile?: unknown }>(`/people/${person}/persona-templates`)
+  return r.ok ? { ...r, profile: profileOf(r.profile) } : r
+}
+/** The host's profile of a person as plain data: two booleans, or null (unknown) for anything else. */
+const profileOf = (v: unknown): { adult: boolean; crudeOptIn: boolean } | null =>
+  v !== null && typeof v === 'object' && typeof (v as { adult?: unknown }).adult === 'boolean' && typeof (v as { crudeOptIn?: unknown }).crudeOptIn === 'boolean'
+    ? { adult: (v as { adult: boolean }).adult, crudeOptIn: (v as { crudeOptIn: boolean }).crudeOptIn }
+    : null
+/** A made villager the home's checks refused, made again once with the reason. Module text for the sandbox, as makeVillager. */
+export const remakeVillager = (person: string, item: string, reason: string) =>
+  call<{ item: string; module: string; persona: unknown; models: string[]; costUsd: number | null; outputTokens: number | null }>(`/people/${person}/villagers/${item}/remake`, { reason })
 export const familyTemplates = (person: string) => call<{ templates: SavedTemplate[] }>(`/family/persona-templates?for=${person}`)
 export const saveTemplate = (person: string, name: string, persona: unknown, shared: boolean) =>
   call<{ template: SavedTemplate }>(`/people/${person}/persona-templates`, { name, persona, shared })

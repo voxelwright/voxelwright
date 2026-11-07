@@ -15,7 +15,7 @@ import { own } from '../../kernel'
 import { ROUTINES, SCALE } from '../../plugins/villagers'
 import { validate } from '../../props/rebuild'
 import { PropBox } from '../../props/sandbox'
-import { familyTemplates, makeVillager, personaTemplates, saveTemplate, tuneVillager } from '../../villager'
+import { familyTemplates, makeVillager, personaTemplates, remakeVillager, saveTemplate, tuneVillager } from '../../villager'
 import { Babbler } from '../../voice/engine'
 import { clampVoice, voiceFromDescription } from '../../voice/gen'
 import { registerVoice, unregisterVoice, VOICES, type VoiceProfile } from '../../voice/profiles'
@@ -27,7 +27,7 @@ import { assemble } from './assemble'
 import { build, check } from './build'
 import { accentMeshes, hueTurn, pieces, Puppet, type Piece } from './setup-stitch'
 import { controls, HUE_SPAN, HUMOUR, KEYS, TAG_CSS, type Key, type Layout } from './sliders'
-import { checked, crudeAllowed, fallbackPersona, personaFor, personaNotes, profileFrom, tunedLine, type Persona, type PersonaTemplate } from './setup-persona'
+import { checked, crudeAllowed, fallbackPersona, personaFor, personaNotes, tunedLine, type Persona, type PersonaProfile, type PersonaTemplate } from './setup-persona'
 import { footFor, rack, type RackCard } from './setup-rack'
 import { templatesFor } from './templates'
 import { HAND, MAT, TOP, workshop } from './workshop'
@@ -45,8 +45,6 @@ const FROM = params.get('from')
 const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : 'alex'
 const ACCENT = /^#[0-9a-f]{6}$/i.test(params.get('accent') ?? '') ? params.get('accent')! : '#c8553d'
 const OWNER = PERSON.charAt(0).toUpperCase() + PERSON.slice(1)
-/** Synthetic until people have real profiles on the host (see setup-persona.ts profileFrom). */
-const PROFILE = profileFrom(params.get('profile'))
 /** Where it lands when it hops off the table: a spot the walk routes know. */
 const LANDING = 'seatNear'
 
@@ -82,6 +80,8 @@ export default {
     const kept: Made[] = []
     const timings: Record<string, number> = {}
     let box: PropBox | null = null
+    /** The host's profile of this person (GET persona-templates), the only input to the crude gate. Null, and crude locked, until it answers. */
+    let PROFILE: PersonaProfile = null
 
     const tools = controls(stage, {
       input: (key, v) => applyTuning(key, v),
@@ -89,7 +89,7 @@ export default {
       locked: () => note('Crude jokes stay locked here. They need a grown-up profile that has opted in.'),
     })
     group.add(tools.group)
-    tools.lock('humour', !crudeAllowed(PROFILE))
+    tools.lock('humour', true)
     const patterns = rack(stage, (card) => onPattern(card))
     group.add(patterns.group)
     own(ctx, group)
@@ -124,24 +124,28 @@ export default {
         // Narrow, before there is a villager: the rack and the mat (where the pattern is made), with the slip on the near half of the table.
         lens(56)
         const h = Math.atan(Math.tan(THREE.MathUtils.degToRad(28)) * aspect)
-        const look = new THREE.Vector3(MAT.x, TOP, MAT.z + 0.18)
+        // Looking at the mat's back half, so the table runs down to the slip instead of a band of rug.
+        const look = new THREE.Vector3(MAT.x, TOP, MAT.z - 0.02)
         return { position: look.clone().addScaledVector(new THREE.Vector3(0, 1.0, 1).normalize(), Math.max(0.42, patterns.width() / 2 + 0.04) / Math.tan(h)), look }
       }
       const fov = narrow ? 56 : seatFov
       lens(fov)
       const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * aspect)
-      const dist = narrow ? 0.45 / Math.tan(half) : THREE.MathUtils.clamp(1.08 / Math.tan(half), 1.85, 4.4)
-      // Narrow: the table sits in the upper half, leaving the lower half for the tags that hang from its edge.
-      const look = narrow ? new THREE.Vector3(-0.21, TOP, MAT.z + 0.36) : new THREE.Vector3(-0.17, TOP + 0.1, MAT.z - 0.02)
-      return { position: look.clone().addScaledVector(new THREE.Vector3(0, narrow ? 1.1 : 0.5, 1).normalize(), dist), look }
+      const dist = narrow ? 0.42 / Math.tan(half) : THREE.MathUtils.clamp(1.08 / Math.tan(half), 1.85, 4.4)
+      // Narrow: the villager at the top, then the ribbons, then the two rows of tools down to the table's edge.
+      const look = narrow ? new THREE.Vector3(-0.21, TOP, MAT.z + 0.07) : new THREE.Vector3(-0.17, TOP + 0.1, MAT.z - 0.02)
+      // Narrow looks at the villager's feet, so the table's front edge falls near the bottom and the tools fill the lower screen.
+      return { position: look.clone().addScaledVector(new THREE.Vector3(0, narrow ? 1.25 : 0.5, 1).normalize(), dist), look }
     }
+    /** Where the villager stands on the mat: narrow, further back, so the ribbons before it stay clear. */
+    const standAt = () => new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - (layout === 'narrow' ? 0.19 : 0.07))
     const arrange = () => {
       layout = layoutFor()
       shop.arrange(layout)
       tools.arrange(layout)
       patterns.arrange(layout)
       document.documentElement.dataset.vsLayout = layout
-      if (puppet && state !== 'leaving') puppet.at.set(MAT.x - 0.1, TOP + 0.006, MAT.z - 0.07)
+      if (puppet && state !== 'leaving') puppet.at.copy(standAt())
     }
     const atTable = () => {
       watching = null
@@ -155,7 +159,7 @@ export default {
       }
     }
     /** Where the slip lies: on the empty mat, or at the near edge while the mat is busy or the camera is away. */
-    let slipAt: 'mat' | 'edge' = 'mat'
+    let slipAt: 'mat' | 'edge' | 'front' = 'mat'
     // After the send-off the camera watches the new villager walk off for a while, then comes back.
     let watching: { walker: Villager; until: number } | null = null
     const watchPose = (p: THREE.Vector3) => {
@@ -273,7 +277,8 @@ export default {
       status.textContent = text
       status.dataset.tone = tone
     }
-    setStatus('Write who they are, then Enter.')
+    const READY = 'Describe them, or pick a pattern card. You tune them once they are sewn.'
+    setStatus(READY)
 
     // ── Saying things: a paper card over the villager, and its babble ──────
     let sayTimers: number[] = []
@@ -352,11 +357,13 @@ export default {
         line.focus()
         return
       }
+      slip.classList.remove('invite')
       patterns.enable('quiet')
       state = 'waiting'
       atTable()
       tools.mode('off')
-      slipAt = 'edge'
+      // The progress is a paper tag on the bench, at the mat's front edge; the words are on the pattern sheet.
+      slipAt = 'front'
       slip.classList.add('waiting')
       line.readOnly = true
       sew.disabled = true
@@ -364,7 +371,8 @@ export default {
       shop.activity('working')
       const t0 = performance.now()
       const elapsed = () => Math.round((performance.now() - t0) / 1000)
-      const clock = window.setInterval(() => setStatus(`Drafting the pattern from your words… ${elapsed()} s`, 'warm'), 1000)
+      let repairing = false
+      const clock = window.setInterval(() => setStatus(repairing ? `One piece didn't sit right, so it's being re-cut… ${elapsed()} s` : `Drafting the pattern from your words… ${elapsed()} s`, 'warm'), 1000)
       setStatus(FROM ? 'Unfolding a saved pattern…' : 'Drafting the pattern from your words… usually about a minute.', 'warm')
       let fail: string | null = null
       try {
@@ -386,7 +394,29 @@ export default {
           source = { item: answer.item }
           timings.costUsd = answer.costUsd ?? NaN
         }
-        const got = await figureFrom(arm, text, ACCENT)
+        let got: Awaited<ReturnType<typeof figureFrom>>
+        try {
+          got = await figureFrom(arm, text, ACCENT)
+        } catch (error) {
+          if (FROM || !source.item) throw error
+          // The home's checks refused it: one repair, with the reason, and the clock still counting.
+          const reason = String(error instanceof Error ? error.message : error)
+          lastRefusal = reason
+          repairing = true
+          setStatus(`One piece didn't sit right, so it's being re-cut… ${elapsed()} s`, 'warm')
+          const again = await remakeVillager(PERSON, source.item, reason)
+          timings.remakeMs = again.ms
+          if (!again.ok) {
+            fail = again.why === 'away' ? 'away' : 'model'
+            throw new Error(`remake: ${again.why} (first: ${reason})`)
+          }
+          text = again.module
+          hostPersona = again.persona ?? hostPersona
+          timings.costUsd = (timings.costUsd || 0) + (again.costUsd ?? NaN)
+          got = await figureFrom(arm, text, ACCENT)
+          timings.repaired = 1
+        }
+        await patternsReady
         // The persona: the host's (checked again here), else the module's own, else a plain one from
         // the words; then the picked pattern over it; then the gate for this profile.
         const base = checked(hostPersona) ?? checked(got.persona) ?? fallbackPersona(description, got.role)
@@ -429,6 +459,8 @@ export default {
       line.focus({ preventScroll: true })
     }
     let lastFailure = ''
+    /** The home's checks' reason for refusing the first live module, sent with the one repair request. */
+    let lastRefusal = ''
 
     // ── Stitching, part by part, with a needle pass for each ───────────────
     const stitch = async (made_: Figure, name: string, bark: string, rawVoice: VoiceProfile) => {
@@ -451,7 +483,7 @@ export default {
       slip.inert = true
       patterns.enable('off')
       atTable()
-      const at = new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - 0.07)
+      const at = standAt()
       const cam = stage.camera.position
       puppet = new Puppet(fig, at, Math.atan2(cam.x - at.x, cam.z - at.z) - 0.35)
       fig.root.scale.setScalar(SCALE)
@@ -474,13 +506,17 @@ export default {
       nametag.append(b)
       if (made!.persona.role) {
         const small = document.createElement('small')
-        small.textContent = made!.persona.role
+        const role = made!.persona.role
+        small.textContent = role.length > 30 ? `${role.slice(0, 30).replace(/\s+\S*$/, '')}…` : role
         nametag.append(' ', small)
       }
       // Made from a pattern: the pattern's name rides on the tag, so you can see it took.
       if (made!.template) {
         const from = document.createElement('i')
         from.textContent = `${made!.template} pattern`
+        // A strip of the pattern card's own felt, so it matches the card standing at the rack's end.
+        const used = patterns.picked
+        if (used) from.style.setProperty('--felt', patterns.feltOf(used))
         nametag.append(from)
       }
       nametag.classList.add('shown')
@@ -558,6 +594,9 @@ export default {
       saveTag.classList.remove('shown')
       nametag.classList.remove('shown')
       card.classList.remove('shown')
+      // A note belongs to the tuning it explained; the walk-off has the screen to itself.
+      clearTimeout(noteTimer)
+      noteEl.classList.remove('shown')
       const record: Made = { ...made, tuning: { ...made.tuning } }
       kept.push(record)
       if (record.source.item) void tuneVillager(PERSON, record.source.item, { ...record.tuning })
@@ -586,9 +625,11 @@ export default {
       sew.textContent = 'Start sewing'
       line.value = ''
       shop.pattern('')
-      setStatus(`${record.name} is off to help. Write another, or watch them go.`, 'warm')
+      setStatus(`${record.name} is off to help.`, 'warm')
       slipAt = 'edge'
-      slip.classList.add('shown')
+      // The departure owns the moment: only a small "make another" tag, which opens the slip.
+      slip.classList.add('shown', 'invite')
+      sew.textContent = 'Make another'
       slip.inert = false
     }
 
@@ -596,8 +637,10 @@ export default {
     let lastSaved: string | null = null
     const asTemplate = (t: { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child' }): PersonaTemplate => ({ id: t.id, name: t.name, persona: t.persona as PersonaTemplate['persona'], audience: t.audience })
     const loadPatterns = async () => {
-      const list: RackCard[] = templatesFor(PROFILE).map((template) => ({ template, source: 'built-in' }))
       const [mine, family] = await Promise.all([personaTemplates(PERSON), familyTemplates(PERSON)])
+      PROFILE = mine.ok ? mine.profile : null
+      tools.lock('humour', !crudeAllowed(PROFILE))
+      const list: RackCard[] = templatesFor(PROFILE).map((template) => ({ template, source: 'built-in' }))
       if (mine.ok) list.push(...mine.templates.map((t) => ({ template: asTemplate(t), source: 'mine' as const })))
       if (family.ok) list.push(...family.templates.filter((t) => t.maker !== PERSON).map((t) => ({ template: asTemplate(t), source: 'family' as const, maker: t.maker.charAt(0).toUpperCase() + t.maker.slice(1) })))
       // Newest saved patterns first after the built-in ones, so a fresh save is on the rack.
@@ -613,17 +656,19 @@ export default {
       chip.textContent = ''
       if (card) {
         const p = card.template.persona
-        const head = document.createElement('small')
-        head.textContent = 'pattern'
         const name = document.createElement('b')
         name.textContent = card.template.name
         const about = document.createElement('span')
         about.textContent = [p.temperament, p.humour && p.humour !== 'none' ? `${p.humour} humour` : null, footFor(card) || null].filter(Boolean).join(' · ')
         const back = document.createElement('i')
-        back.textContent = 'put back ✕'
-        chip.append(head, name, about, back)
+        back.textContent = '✕'
+        back.setAttribute('aria-hidden', 'true')
+        chip.append(name, about, back)
         chip.style.setProperty('--felt', patterns.feltOf(card))
       }
+      // How the two combine: the words say who they are, the pattern how they talk.
+      line.placeholder = card ? 'Who are they? e.g. a hedgehog who bakes bread' : 'e.g. a sleepy hedgehog who bakes bread before dawn'
+      if (state === 'empty' || state === 'failed') setStatus(card ? `Your words say who they are; ${card.template.name} sets how they talk.` : READY)
       chip.setAttribute('aria-label', card ? `Pattern ${card.template.name}. Click to put it back.` : '')
       if (card && card.template.persona.dials?.humour === 'crude' && !crudeAllowed(PROFILE)) note(`${card.template.name} will be cheeky here, not crude. Crude jokes need a grown-up profile that has opted in.`)
     }
@@ -643,8 +688,19 @@ export default {
     saveButton.addEventListener('click', () => void saveAsPattern())
 
     // ── Wiring ─────────────────────────────────────────────────────────────
+    /** The slip opens out of the "make another" tag. */
+    const openSlip = () => {
+      if (!slip.classList.contains('invite')) return false
+      slip.classList.remove('invite')
+      if (state === 'empty') atTable()
+      sew.textContent = 'Start sewing'
+      setStatus(READY)
+      line.focus({ preventScroll: true })
+      return true
+    }
     const onSubmit = (e: SubmitEvent) => {
       e.preventDefault()
+      if (openSlip()) return
       void start(line.value)
     }
     const onLineKey = (e: KeyboardEvent) => {
@@ -703,7 +759,10 @@ export default {
     ctx.on('village/frame', (dt, t) => {
       const step = Math.min(dt, 0.05)
       if (watching) {
-        if (performance.now() > watching.until && state === 'empty') atTable()
+        if (performance.now() > watching.until && state === 'empty') {
+          atTable()
+          openSlip()
+        }
         else view.focus(watchPose(watching.walker.pos), 1.6)
       }
       if (slip.classList.contains('shown')) {
@@ -720,6 +779,11 @@ export default {
           x = ((matAt.x + 1) / 2) * innerWidth
           // Centred on the mat, but never over the rack's cards behind it.
           y = Math.max(((1 - matAt.y) / 2) * innerHeight, patterns.bottom + 12 + h / 2)
+        } else if (slipAt === 'front') {
+          if (slip.style.width) slip.style.width = ''
+          matAt.set(MAT.x, TOP, MAT.z + MAT.d / 2).project(stage.camera)
+          x = ((matAt.x + 1) / 2) * innerWidth
+          y = ((1 - matAt.y) / 2) * innerHeight + h / 2 + 10
         } else if (slip.style.width) slip.style.width = ''
         // On the mat it keeps clear of the ribbons' tags to its right.
         const right = slipAt === 'mat' ? Math.min(innerWidth - 16, tools.ribbonsLeft() - 10) : innerWidth - 16
@@ -729,6 +793,8 @@ export default {
         if (slip.style.translate !== at) slip.style.translate = at
         tools.under(new DOMRect(x - w / 2, y - h / 2, w, h))
       } else tools.under(null)
+      // Narrow, the tools come out once there is a villager to tune: before that, the phone shows only the start.
+      tools.group.visible = layout === 'wide' || state === 'stitching' || state === 'tuning' || state === 'leaving'
       shop.frame(step, t)
       tools.frame(step, t)
       patterns.frame()
@@ -742,7 +808,8 @@ export default {
         const r = stage.renderer.domElement.getBoundingClientRect()
         const cw = card.offsetWidth / 2 + 12
         const x = Math.round(THREE.MathUtils.clamp(r.left + ((head.x + 1) / 2) * r.width, cw, innerWidth - cw))
-        const y = Math.round(THREE.MathUtils.clamp(r.top + ((1 - head.y) / 2) * r.height, card.offsetHeight + (layout === 'narrow' ? 84 : 24), innerHeight - 120))
+        // Narrow, the name tag heads the screen: the card stays below it.
+        const y = Math.round(THREE.MathUtils.clamp(r.top + ((1 - head.y) / 2) * r.height, card.offsetHeight + (layout === 'narrow' ? 16 + nametag.offsetHeight + 22 : 24), innerHeight - 120))
         const at = `calc(${x}px - 50%) calc(${y}px - 100%)`
         if (card.style.translate !== at) card.style.translate = at
         // The name tag lies on the mat just in front of its feet; narrow, it heads the screen at the top left.
@@ -800,6 +867,7 @@ export default {
           cut: shop.cut,
           status: status.textContent,
           failure: lastFailure,
+          refusal: lastRefusal,
           timings: { ...timings },
           kept: kept.map((k) => ({ ...k, module: `${k.module.length} chars` })),
         }),
@@ -862,34 +930,42 @@ function css() {
   .vs-slip .sew::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 245, 230, 0.6); border-radius: 3px 7px 7px 3px; pointer-events: none; }
   .vs-slip .sew:hover, .vs-slip .sew:focus-visible { translate: 0 -1px; background: #b04a35; outline: none; }
   .vs-slip .sew:focus-visible { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6); }
-  .vs-slip.waiting { width: min(400px, calc(100vw - 32px)); padding-top: 22px; }
-  .vs-slip.waiting .sew { display: none; }
-  .vs-slip.waiting .line { color: #2f4a6b; font-size: 19px; }
+  /* Waiting: a small progress tag on the bench, the words already on the pattern sheet. */
+  .vs-slip.waiting { width: auto; max-width: calc(100vw - 32px); padding: 9px 16px 9px; border-radius: 6px; rotate: 0.6deg; }
+  .vs-slip.waiting::before { inset: 4px; border-radius: 4px; }
+  .vs-slip.waiting .tab, .vs-slip.waiting .ruled, .vs-slip.waiting .chip, .vs-slip.waiting .sew { display: none; }
+  .vs-slip.waiting .foot { min-height: 0; }
+  /* After a send-off: only a small tag to make another, until it is opened (or the camera comes back). */
+  .vs-slip.invite { width: auto; padding: 10px 12px 10px 16px; border-radius: 8px; }
+  .vs-slip.invite::before { inset: 4px; border-radius: 6px; }
+  .vs-slip.invite .tab, .vs-slip.invite .ruled, .vs-slip.invite .chip { display: none; }
   .vs-slip.waiting .status::after { content: ''; display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: -2px;
     border: 2px dotted rgba(122, 59, 42, 0.6); border-radius: 50%; animation: vs-spin 2.4s linear infinite; }
   @keyframes vs-spin { to { rotate: 1turn; } }
 
   /* The picked pattern: its felt card, stitched across the top of the slip. */
-  .vs-slip .chip { position: relative; display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 10px; margin: 2px -4px 4px; box-sizing: border-box;
-    padding: 9px 14px 9px 16px; border: 0; border-radius: 6px; cursor: pointer; rotate: 0.8deg; text-align: left;
+  .vs-slip .chip { position: relative; display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; column-gap: 10px; margin: 0 -4px 2px; box-sizing: border-box;
+    padding: 6px 12px 6px 14px; border: 0; border-radius: 6px; cursor: pointer; rotate: 0.8deg; text-align: left;
     background: var(--felt, #7b9a6e); color: #fffaf0; box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); text-shadow: 0 1px 0 rgba(40, 20, 8, 0.3); }
   .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed rgba(255, 250, 235, 0.7); border-radius: 4px; pointer-events: none; }
-  .vs-slip .chip small { grid-column: 1 / -1; font: 700 13px/1.1 ${HAND}; opacity: 0.85; }
-  .vs-slip .chip b { font: 700 23px/1.15 ${HAND}; }
-  .vs-slip .chip span { grid-column: 1; font: italic 14px/1.3 ${BOOK}; }
-  .vs-slip .chip i { grid-column: 2; grid-row: 2 / 4; align-self: center; font: 700 14px/1 ${HAND}; font-style: normal; opacity: 0.9; white-space: nowrap; }
+  .vs-slip .chip b { font: 700 19px/1.15 ${HAND}; white-space: nowrap; }
+  .vs-slip .chip span { font: italic 13.5px/1.3 ${BOOK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vs-slip .chip i { align-self: center; font: 700 15px/1 ${HAND}; font-style: normal; opacity: 0.9; }
   .vs-slip .chip[hidden] { display: none; }
   .vs-slip .chip:hover i, .vs-slip .chip:focus-visible i { opacity: 1; text-decoration: underline; }
   .vs-slip .chip:focus-visible { outline: none; box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.7); }
 
-  .vs-card { position: fixed; z-index: 6; left: 0; top: 0; max-width: min(360px, calc(100vw - 32px)); padding: 18px 20px 13px; margin-top: -14px;
-    box-shadow: 0 12px 28px rgba(60, 30, 10, 0.26), 0 2px 0 rgba(255, 255, 255, 0.7) inset; font: 19px/1.42 ${BOOK}; color: #3d2a1c;
+  /* What it says: a small torn-off paper note, as wide as its words, pencilled faintly first and inked word by word. */
+  .vs-card { position: fixed; z-index: 6; left: 0; top: 0; width: max-content; max-width: min(280px, calc(100vw - 48px)); padding: 12px 16px 10px; margin-top: -14px;
+    border-radius: 3px 10px 4px 9px; rotate: -1.2deg; background: linear-gradient(180deg, #fffaf0, #f6e9cf);
+    box-shadow: 0 8px 18px rgba(60, 30, 10, 0.22), 0 1px 0 rgba(255, 255, 255, 0.7) inset; font: 17px/1.38 ${BOOK}; color: #3d2a1c;
     opacity: 0; scale: 0.94; transform-origin: 50% 100%; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1); }
+  .vs-card::before { inset: 4px; border-radius: 2px 7px 2px 6px; }
   .vs-card.shown { opacity: 1; scale: 1; }
-  .vs-card.short { font-size: 18px; padding: 15px 18px 11px; }
-  .vs-card::after { content: ''; position: absolute; left: 50%; bottom: -10px; width: 20px; height: 20px; margin-left: -10px; background: #f5e7cb; rotate: 45deg;
-    border-radius: 0 0 5px 0; box-shadow: 4px 4px 6px rgba(60, 30, 10, 0.14); }
-  .vs-card span { opacity: 0; transition: opacity 90ms ease; }
+  .vs-card.short { font-size: 17px; padding: 10px 14px 8px; }
+  .vs-card::after { content: ''; position: absolute; left: 50%; bottom: -7px; width: 14px; height: 14px; margin-left: -7px; background: #f6e9cf; rotate: 45deg;
+    border-radius: 0 0 4px 0; box-shadow: 3px 3px 4px rgba(60, 30, 10, 0.12); }
+  .vs-card span { opacity: 0.16; transition: opacity 90ms ease; }
   .vs-card span.in { opacity: 1; }
 
   /* The name tag, the save tag and the send-off tag are the same paper tag as the tools; colour says what each is for. */
@@ -898,7 +974,8 @@ function css() {
   .vs-name::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.6); border-radius: 3px 7px 7px 3px; }
   .vs-name.shown { opacity: 1; }
   .vs-name small { font: 700 15px/1.15 ${HAND}; opacity: 0.85; }
-  .vs-name i { display: block; font: 700 14px/1.2 ${HAND}; font-style: normal; opacity: 0.85; }
+  .vs-name i { display: block; width: fit-content; margin: 5px -4px 0; padding: 3px 9px 4px; border-radius: 3px; font: 700 15px/1.2 ${HAND}; font-style: normal;
+    background: var(--felt, rgba(255, 248, 236, 0.18)); box-shadow: inset 0 0 0 1.5px rgba(255, 250, 235, 0.55), 0 2px 4px rgba(40, 20, 8, 0.25); }
 
   .vs-done { position: fixed; z-index: 6; left: 0; top: 0; cursor: pointer; opacity: 0; pointer-events: none; border: 0;
     padding: 9px 20px 10px 30px; background: #6f8f62; color: #fffaf0; font-size: 22px; text-shadow: 0 1px 0 rgba(30, 50, 20, 0.4);
@@ -921,7 +998,7 @@ function css() {
   .vs-save input { margin: 0; accent-color: #6f8f62; }
 
   .vs-note { position: fixed; z-index: 7; left: 50%; top: 18px; max-width: min(460px, calc(100vw - 32px)); margin: 0; padding: 10px 16px 11px; translate: -50% -8px;
-    border-radius: 4px; background: #fdf6df; color: #4a3220; font: italic 16px/1.4 ${BOOK}; rotate: -0.8deg;
+    border-radius: 4px; background: linear-gradient(180deg, #fffaf0, #f4e6c9); color: #4a3220; font: italic 16px/1.4 ${BOOK}; rotate: -0.8deg;
     box-shadow: 0 6px 14px rgba(60, 30, 10, 0.2); opacity: 0; pointer-events: none; transition: opacity 220ms ease, translate 220ms ease; }
   .vs-note::before { content: ''; position: absolute; left: 50%; top: -6px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #c4553f;
     box-shadow: 0 2px 3px rgba(60, 30, 10, 0.35); }
@@ -932,10 +1009,10 @@ function css() {
     .vs-slip .line { font-size: 19px; line-height: 29px; background-image: repeating-linear-gradient(transparent 0 27px, rgba(90, 60, 38, 0.32) 27px 29px); }
     .vs-slip .line::placeholder { font-size: 15px; line-height: 29px; }
     .vs-slip .status { font-size: 15px; }
-    .vs-slip .chip b { font-size: 21px; }
+    .vs-slip .chip b { font-size: 18px; }
     .vs-done { font-size: 19px; padding: 8px 16px 9px 26px; }
     .vs-save button { font-size: 17px; }
-    .vs-card { font-size: 17px; }
+    .vs-card { font-size: 15.5px; max-width: min(250px, calc(100vw - 48px)); }
   }
   @media (prefers-reduced-motion: reduce) { .vs-slip, .vs-card, .vs-name, .vs-done, .vs-card span, .vs-note, .vs-save { transition: none; } .vs-slip.waiting .status::after { animation: none; } }
   `

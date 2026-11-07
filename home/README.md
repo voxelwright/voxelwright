@@ -861,30 +861,37 @@ checked by grepping `dist/`) turns the kitchen table into a felt workshop. The c
 leans over the table; the notebook and its pencil step aside. You write who the villager
 is on a paper slip lying on the cutting mat, pick a personality pattern card from the
 rack behind the mat, or both; the picked card stands up out of the rack and its felt card,
-big, is clipped to the slip. While the model works the slip moves to the near edge and
-the pattern is made on the mat: a piece is chalked on a felt sheet, cut out along the
-chalk and pinned in a row, one every 4.5 s, while the needle stitches a scrap; the slip
-counts the seconds. The pieces are scenery, never a percentage. When the module arrives
+big, is clipped to the slip: your words say who they are, the pattern how they talk. While
+the model works, the tissue pattern sheet with your words lies on the mat and the pattern
+is made beside it: a piece is chalked on a felt sheet, cut out along the chalk and pinned in
+a row, one every 4.5 s, while the needle stitches a scrap; a small paper tag at the mat's
+front counts the seconds. The pieces are scenery, never a percentage. If the home's checks
+refuse a live module, the tag says one piece is being re-cut and the host is asked once for
+a repair with the refusal's reason; a second refusal is a failure. When the module arrives
 it runs in the prop sandbox, `gen/assemble.ts` makes the Figure, the slip lifts away and
 it is stitched together on the mat in order (body, head, ears, eyes, hands, feet,
-accessories, prop), a needle pass each, about 3.5 s. It hops, looks at you and says its
-bark in its babble voice. A failure leaves the table tidy and says so on the slip.
+accessories, prop), a needle pass each, about 3.5 s. The other pattern cards lie down in
+the rack; the one it was made from stands at the rack's end, and its felt strip is on the
+name tag. It hops, looks at you and says its bark on a small paper note, inked word by word
+with its babble voice. A failure leaves the table tidy and says so on the slip.
 
 Layout follows the screen's shape. Wide (landscape, tablets included): the tools run
 along the near edge with their tags under them, quiet tags show on the empty table, and
 the save and send-off tags sit in the bottom corners. Narrow (a phone held upright): the
-tools sit in one row before three ribbons, their tags hang below the table's edge on
-threads in two columns, the name tag heads the screen, and before there is a villager the
-camera frames the rack and the mat with the slip on the near half of the table. Labels
+villager stands at the back of the mat, then three ribbons, then two rows of three tools,
+each tag lying just under its own tool; the name tag heads the screen. Before there is a
+villager the tools stay off the table and the camera frames the rack, the mat and the slip.
+After the send-off only a small "Make another" tag shows until it is opened or the camera
+comes back. Labels
 use one paper tag style and two typefaces: handwriting for tags and the slip, the book
 face for speech, status lines and the slip's printed example.
 
 - `&from=<run-id>` stitches a saved result from `generated/villagers/<run-id>/` with no
   model call (round-1 results skip assemble's later look checks; live results do not).
 - `&person=<id>` (default alex), `&accent=#rrggbb` (default `#c8553d`).
-- `&profile=adult-optin|adult|child` is a synthetic stand-in. The real profile should
-  come from the person's record on the host; the host already gates every persona and
-  template with its own `VILLAGER_PROFILES`, so the page flag cannot unlock anything there.
+- The person's profile comes only from the host (`VILLAGER_PROFILES`, synthetic, e.g.
+  `alex:adult-optin,sam:child`), read with `GET persona-templates`. Until it answers the
+  page treats the person as unknown and crude stays locked. The page has no profile flag.
 
 The tools, all on the table, each with a paper tag that is a real `role="slider"` (Tab,
 arrows, Page keys, Home and End). A tag says what the tool is and what its two ends do,
@@ -919,14 +926,21 @@ and person scoping as the props endpoints; model failures answer 422:
   from `scripts/villagers/style.md` and `arm-code.md` (read, not copied). The host stores
   it as text under `people/<id>/villagers/` and never imports or runs it. A persona in a
   ```json block of the answer is kept to known fields with every length capped.
-- `GET /people/:id/villagers/:item`, `POST /people/:id/villagers/:item/tuning`.
+- `POST /people/:id/villagers/:item/remake` `{reason}`: once per villager, when the
+  home's checks refused its module. The model gets its previous module and the reason (the
+  runner's repair prompt); the record keeps the new module, the reason and the previous one.
+- `GET /people/:id/villagers/:item`, `POST /people/:id/villagers/:item/tuning`. The
+  humour knob at crude (0.75 and up) is stored and served as cheeky (0.5) unless
+  `gatePersona` keeps crude for the host's profile of the person.
+- Every record and template is written to a temporary file in the same directory and
+  renamed over the old one; a failed write answers 500 and leaves the old file whole.
 - `GET` and `POST /people/:id/persona-templates`, `GET /family/persona-templates?for=<id>`:
   templates as data files under `people/<id>/persona-templates/`, gated with
   `gatePersona` on save and on every read for the reader's profile, so no stored, shared
   or model-written template gives a child or an unknown profile crude humour.
 
 ```sh
-node test/villager-make.ts [--live]                 # in host/: 42 checks, stub maker; --live adds one Sonnet call
+node test/villager-make.ts [--live]                 # in host/: 55 checks, stub maker; --live adds one Sonnet call
 node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
 ```
 
@@ -936,7 +950,8 @@ tool, each tool changing scale, hue, pitch, rate and gait measurably by keyboard
 dragging, the crude lock and its note, templates alone and with words, the gated buddy,
 save and reload, a shared pattern reaching a child as cheeky in the host and the page,
 the send-off and its walk staying in view, reduced motion, failures leaving nothing
-placed, the stub host's waiting (a piece cut and pinned) and 422, and three unload and
+placed, the stub host's waiting (a piece cut and pinned) and 422, the profile taken from
+the host whatever the URL says, one repair after a refused module, and three unload and
 reload cycles back to baseline. At every captured moment (`1-empty`, `1b-picked`,
 `2-waiting`, `3-tuning`, `4-pattern`, `5-walking`) a layout gate checks that every
 visible label is on screen and overlaps no other; run it at `--viewport=390x844` and

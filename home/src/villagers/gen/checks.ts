@@ -150,7 +150,8 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   if (mark) {
     const name = `the ${role && MARK_NAMES[role] ? `${role}'s ${MARK_NAMES[role]}` : 'role mark'}`
     if (!broke) failures.push(`nothing is tagged as ${name}; build it as the role table says and pass it to villager.mark() so the home can check it`)
-    else if (broke.core) failures.push(`the ${broke.core} itself is tagged with villager.mark(); tag only ${name}`)
+    else if (broke.core) failures.push(`the ${broke.core} itself is tagged with villager.mark(); tag only ${name}, not the ${broke.core} it sits on`)
+    else if (broke.share > MARK_SHARE) failures.push(`the parts tagged with villager.mark() are ${Math.round(broke.share * 100)}% of the villager; tag only ${name}, at most ${Math.round(MARK_SHARE * 100)}% of it`)
     else if (Math.max(broke.above, broke.side) < MARK) failures.push(`${name} stays inside the outline seen from in front and above: it rises ${Math.max(0, broke.above * height).toFixed(2)} above the head and reaches ${Math.max(0, broke.side * height).toFixed(2)} past the body's side; make it rise at least ${(MARK * height).toFixed(2)} above the top of the head, or reach that far past the side of the head or body, so it changes the outline`)
   }
 
@@ -159,6 +160,8 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
 
 /** A role mark must reach this far (over the height) above the head or past the side, seen from the dollhouse. */
 export const MARK = 0.1
+/** The marked parts may be at most this share of the villager's volume (held prop left out): a mark, not the villager. */
+export const MARK_SHARE = 0.4
 
 /** Each role's mark, as scripts/villagers/style.md describes it, for failure reasons. */
 export const MARK_NAMES: Record<string, string> = {
@@ -168,24 +171,40 @@ export const MARK_NAMES: Record<string, string> = {
 
 /** How far the parts tagged with villager.mark() stand out of the outline, over the height. */
 export interface MarkBreak {
-  /** Above the top of the head (its largest part). */
+  /** Above the top of the head (its largest unmarked part). */
   above: number
-  /** Past the sides of the head and body (their largest parts). */
+  /** Past the sides of the head and body (their largest unmarked parts). */
   side: number
   /** 'head' or 'body' when the core part itself is tagged, a dodge refused by inspect(). */
   core: 'head' | 'body' | null
+  /** The marked parts' share of the villager's volume, held prop left out. */
+  share: number
 }
 
 /**
  * Measured from the dollhouse view (in front and LIMITS.pitch above, the eye check's view), on every
  * vertex: a tilted brim or a board reaching back rises on screen, as it does in the silhouette sheet.
  * The marked parts include the held prop (the tidier's plume is its duster).
+ *
+ * The head and body it measures against are the largest unmarked parts, so a big stocking cap on a
+ * small head is a hat, not the head. The head itself counts as marked when no unmarked head part is
+ * left or a marked part holds an eye's centre; the body when a marked body part outweighs every
+ * unmarked one.
  */
 export function markBreak(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[], height: number): MarkBreak | null {
   const marked = meshes.filter((m) => m.userData.mark)
   if (!marked.length) return null
-  const cores = coresOf(meshes.filter((m) => !inHeld.has(m)), eyes, headGroup, handGroups)
-  if (!cores) return null
+  const figure = meshes.filter((m) => !inHeld.has(m))
+  const total = figure.reduce((a, m) => a + volumeOf(m), 0)
+  const share = +(marked.filter((m) => !inHeld.has(m)).reduce((a, m) => a + volumeOf(m), 0) / Math.max(total, 1e-9)).toFixed(3)
+  const all = coresOf(figure, eyes, headGroup, handGroups)
+  const cores = coresOf(figure.filter((m) => !m.userData.mark), eyes, headGroup, handGroups)
+  const eyeAt = eyes.map((e) => e.getWorldPosition(new THREE.Vector3()))
+  const holdsEye = (m: THREE.Mesh) => all.inHead.has(m) && !all.inEye.has(m) && eyeAt.some((p) => new THREE.Box3().setFromObject(m, true).expandByScalar(0.005).containsPoint(p))
+  const unmarkedBody = cores.body
+  const headMarked = !cores.head || marked.some(holdsEye)
+  const bodyMarked = !unmarkedBody || marked.some((m) => !all.inHead.has(m) && !all.inHand.has(m) && !all.inEye.has(m) && !inHeld.has(m) && volumeOf(m) > volumeOf(unmarkedBody))
+  if (headMarked || bodyMarked || !cores.head || !cores.body) return { above: 0, side: 0, core: headMarked ? 'head' : 'body', share }
   const up = new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch))
   const v = new THREE.Vector3()
   const span = (list: THREE.Mesh[]) => {
@@ -205,11 +224,19 @@ export function markBreak(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: T
   return {
     above: +((mk.top - h.top) / height).toFixed(3),
     side: +(Math.max(mk.right - outline.right, outline.left - mk.left) / height).toFixed(3),
-    core: marked.includes(cores.head) ? 'head' : marked.includes(cores.body) ? 'body' : null,
+    core: null,
+    share,
   }
 }
 
-/** The largest head part and the largest body part among `meshes`, leaving out the eyes and the hands. */
+/** A part's size in its own axes, so a tilted flat brim does not outweigh the head it sits on. */
+function volumeOf(m: THREE.Mesh) {
+  m.geometry.computeBoundingBox()
+  const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
+  return Math.abs(s.x * s.y * s.z)
+}
+
+/** The largest head part and the largest body part among `meshes` (null when there is none), leaving out the eyes and the hands. */
 function coresOf(meshes: THREE.Mesh[], eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[]) {
   const under = (groups: THREE.Object3D[]) => {
     const set = new Set<THREE.Object3D>()
@@ -217,17 +244,11 @@ function coresOf(meshes: THREE.Mesh[], eyes: THREE.Object3D[], headGroup: THREE.
     return set
   }
   const inEye = under(eyes), inHead = under(headGroup ? [headGroup] : []), inHand = under(handGroups)
-  // Size in the part's own axes, so a tilted flat brim does not outweigh the head it sits on.
-  const volume = (m: THREE.Mesh) => {
-    m.geometry.computeBoundingBox()
-    const s = m.geometry.boundingBox!.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(m.matrixWorld))
-    return Math.abs(s.x * s.y * s.z)
-  }
-  const largest = (list: THREE.Mesh[]) => list.reduce<THREE.Mesh | null>((a, m) => (!a || volume(m) > volume(a) ? m : a), null)
+  const largest = (list: THREE.Mesh[]) => list.reduce<THREE.Mesh | null>((a, m) => (!a || volumeOf(m) > volumeOf(a) ? m : a), null)
   const parts = meshes.filter((m) => !inHand.has(m) && !inEye.has(m))
   const body = largest(parts.filter((m) => !inHead.has(m)))
   const head = largest(parts.filter((m) => inHead.has(m)))
-  return body && head ? { body, head, inHead, inEye, inHand } : null
+  return { body, head, inHead, inEye, inHand }
 }
 
 /**
@@ -264,8 +285,8 @@ const FEATURE_WORDS: Record<keyof Species, string> = {
 export function speciesFeatures(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[], height: number): Species | null {
   // The role mark (villager.mark()) never counts: wherever it sits, a mark alone must not pass.
   const cores = coresOf(meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !m.userData.mark), eyes, headGroup, handGroups)
-  if (!cores) return null
   const { body, head, inHead, inEye, inHand } = cores
+  if (!body || !head) return null
   const boxOf = new Map(meshes.map((m) => [m, new THREE.Box3().setFromObject(m, true)]))
   // Eyes count here: a frog's sit on top of its head.
   const parts = meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !m.userData.mark && !inHand.has(m))

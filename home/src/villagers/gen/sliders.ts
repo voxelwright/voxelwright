@@ -440,8 +440,9 @@ export type Layout = 'wide' | 'narrow'
 
 /**
  * Where each tool sits, in world space: [x, z, turn, scale]. Wide: one row along the near edge, the
- * ribbons right of the mat and the stitch dial by the mug. Narrow (a phone held upright): two rows of
- * three before the mat and the three ribbons across the front, each labelled at both ends.
+ * ribbons right of the mat and the stitch dial by the mug. Narrow (a phone held upright): the three
+ * ribbons before the mat, each labelled at both ends, then two rows of three tools, each tag lying just
+ * under its own tool.
  */
 const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
   wide: {
@@ -456,22 +457,21 @@ const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
     humour: [-0.98, 0.25, 0.15, 1],
   },
   narrow: {
-    size: [-0.6, 0.575, 0.1, 0.6],
-    hue: [-0.405, 0.585, 0, 0.56],
-    pitch: [-0.2, 0.575, 0, 0.56],
-    energy: [-0.05, 0.575, -0.5, 0.66],
-    humour: [0.07, 0.565, 0, 0.48],
-    pace: [0.18, 0.555, -0.25, 0.66],
-    warmth: [-0.21, 0.27, 0, 0.62],
-    playful: [-0.21, 0.365, 0, 0.62],
-    chatty: [-0.21, 0.46, 0, 0.62],
+    size: [-0.46, 0.43, 0.1, 0.7],
+    hue: [-0.21, 0.43, 0, 0.62],
+    pitch: [0.04, 0.43, 0, 0.62],
+    pace: [-0.43, 0.585, -0.2, 0.72],
+    humour: [-0.21, 0.59, 0, 0.62],
+    energy: [0.01, 0.585, -0.4, 0.72],
+    warmth: [-0.21, 0.13, 0, 0.62],
+    playful: [-0.21, 0.22, 0, 0.62],
+    chatty: [-0.21, 0.31, 0, 0.62],
   },
 }
 
-/** The kitchen table's near edge (table.ts: centred at z 0.15, a metre deep). Narrow tags hang from it on threads. */
-const NEAR_EDGE = 0.65
-/** Narrow: where each tool's tag hangs below the edge, [column, row]; the outer tools on the shortest threads. */
-const HANG: Partial<Record<Key, [0 | 1, number]>> = { size: [0, 0], hue: [0, 1], pitch: [0, 2], pace: [1, 0], humour: [1, 1], energy: [1, 2] }
+
+/** Narrow: the stitch dial's tag lies in front of it, as every grid tool's does. */
+const DIAL_FRONT = new THREE.Vector3(0, 0, 0.13)
 
 export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void }): Controls {
   const group = new THREE.Group()
@@ -581,17 +581,6 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
   // The right-hand ribbon ends after every slider, so Tab order stays tool by tool.
   for (const end of ends.values()) shelf.append(end)
-  // Narrow: the threads the tags hang by, from each tool over the table's edge.
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.classList.add('vs-threads')
-  svg.setAttribute('aria-hidden', 'true')
-  const threads = new Map<Key, SVGPathElement>()
-  for (const key of Object.keys(HANG) as Key[]) {
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    svg.append(path)
-    threads.set(key, path)
-  }
-  shelf.prepend(svg)
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
@@ -736,22 +725,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     const t = el.classList.contains('lo') ? `calc(${x}px - 100%) calc(${y}px - 50%)` : el.classList.contains('hi') ? `${x}px calc(${y}px - 50%)` : el.classList.contains('up') ? `calc(${x}px - 50%) calc(${y}px - 100%)` : `calc(${x}px - 50%) ${y}px`
     if (el.style.translate !== t) el.style.translate = t
   }
-  const screenOf = (p: THREE.Vector3, r: DOMRect) => {
-    p.project(stage.camera)
-    return [Math.round(r.left + ((p.x + 1) / 2) * r.width), Math.round(r.top + ((1 - p.y) / 2) * r.height)]
-  }
-  /** Narrow: the tag hangs below the table's near edge on a thread that runs from the tool over the edge. */
-  const hang = (el: HTMLElement, thread: SVGPathElement, tool: Tool, [col, row]: [0 | 1, number], r: DOMRect) => {
-    const [tx, ty] = screenOf(anchor.set(0, 0.01, 0).applyMatrix4(tool.group.matrixWorld), r)
-    const [ex, ey] = screenOf(anchor.set(tool.group.position.x, TOP, NEAR_EDGE), r)
-    const w = el.offsetWidth
-    const x = Math.round(r.width * (col ? 0.73 : 0.27))
-    const y = ey + 18 + row * 52
-    const t = `${x - w / 2}px ${y}px`
-    if (el.style.translate !== t) el.style.translate = t
-    const d = `M${tx} ${ty} L${ex} ${ey} L${x} ${y + 4}`
-    if (thread.getAttribute('d') !== d) thread.setAttribute('d', d)
-  }
+
   return {
     group,
     values,
@@ -774,6 +748,8 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     arrange(next) {
       layout = next
       shelf.dataset.layout = next
+      // Narrow, the dial sits in the grid like the rest, so its tag lies under it too.
+      tags.get('humour')!.classList.toggle('up', next === 'wide')
       place()
     },
     felt(main) {
@@ -816,9 +792,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       const r = canvas.getBoundingClientRect()
       for (const tool of tools) {
         tool.group.updateMatrixWorld()
-        const row = layout === 'narrow' ? HANG[tool.key] : undefined
-        if (row === undefined) pin(tags.get(tool.key)!, tool.tagAt, tool, r)
-        else hang(tags.get(tool.key)!, threads.get(tool.key)!, tool, row, r)
+        pin(tags.get(tool.key)!, layout === 'narrow' && tool.key === 'humour' ? DIAL_FRONT : tool.tagAt, tool, r)
         const end = ends.get(tool.key)
         if (end && tool.endAt) pin(end, tool.endAt, tool, r)
       }
@@ -860,11 +834,6 @@ function css() {
   return `
   ${TAG_CSS}
   .vs-tools { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  .vs-threads { position: absolute; inset: 0; width: 100%; height: 100%; display: none; overflow: visible; }
-  .vs-tools[data-layout=narrow] .vs-threads { display: block; }
-  .vs-threads path { fill: none; stroke: #f8eedb; stroke-width: 1.6; stroke-dasharray: 5 3; opacity: 0; transition: opacity 260ms ease; filter: drop-shadow(0 1px 0.5px rgba(60, 30, 10, 0.45)); }
-  .vs-tools.shown .vs-threads path { opacity: 1; }
-  .vs-tools.preview .vs-threads path { opacity: 0.5; }
   .vs-tool, .vs-end { position: absolute; left: 0; top: 0; cursor: grab; touch-action: none; user-select: none;
     opacity: 0; pointer-events: none; transition: opacity 260ms ease; }
   .vs-tool { display: flex; flex-direction: column; align-items: center; gap: 1px; padding-left: 13px; }
@@ -885,8 +854,8 @@ function css() {
   .vs-tools.shown .vs-tool, .vs-tools.shown .vs-end { opacity: 1; pointer-events: auto; }
   .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { opacity: 0.6; }
   .vs-tools.preview .under { opacity: 0; }
-  /* Narrow, before there is a villager: the slip covers where the tool tags hang, so only the ribbon ends preview. */
-  .vs-tools.preview[data-layout=narrow] .vs-tool:not(.end), .vs-tools.preview[data-layout=narrow] .vs-threads { display: none; }
+  /* Narrow, before there is a villager, the tools wait off the table (setup.ts); nothing to label. */
+  .vs-tools.preview[data-layout=narrow] .vs-tool, .vs-tools.preview[data-layout=narrow] .vs-end { display: none; }
   .vs-tools.shown .vs-tag:hover { transform: translateY(-1px); }
   .vs-tools[data-layout=narrow] .vs-tag { font-size: 15px; padding: 3px 8px 4px; }
   .vs-tools[data-layout=narrow] .vs-tool { padding-left: 11px; }

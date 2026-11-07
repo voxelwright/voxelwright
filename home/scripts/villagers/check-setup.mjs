@@ -3,9 +3,10 @@
 // (orchestration only, no model), then drives ?villager=gen&setup=1 in headless Chrome:
 // &from= stitching, the five tools by keyboard and pointer, the send-off, reduced motion,
 // failures leaving nothing placed, the stub host's waiting and 422 paths, and unloads
-// returning to baseline. --live adds one real Sonnet call through the host and the page.
+// returning to baseline, the one repair pass, and the crude gate taken from the host's profile.
+// --live adds one real Sonnet make (and at most one remake) through the host and the page.
 // Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900]
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +22,8 @@ const [vw, vh] = arg('viewport', '1440x900').split('x').map(Number)
 const root = await mkdtemp(join(tmpdir(), 'villager-setup-'))
 
 // The host, in this process: the real routes and token, a stub villager maker that takes 3 s.
+// Profiles live on the host only (the page has no profile flag): Alex is an adult who opted in to
+// crude humour, Jo an adult who did not, Sam a child, and Kit has no profile (unknown).
 const { Context } = await import(join(homeDir, '../host/node_modules/cordis/lib/index.mjs')).catch(() => import('cordis'))
 const { default: villager } = await import(join(homeDir, '../host/src/villager.ts'))
 const { stubAgent } = await import(join(homeDir, '../host/src/villager-agent.ts'))
@@ -33,7 +36,7 @@ let slow = false
 let useLive = false
 const realMaker = live ? claudeVillagerMaker('sonnet') : null
 const { parseProfiles } = await import(join(homeDir, '../host/src/villager-make.ts'))
-const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam' }, profiles: parseProfiles('alex:adult-optin,sam:child'), villagerMaker: (ask) => (useLive ? realMaker(ask) : slow ? slowStub(ask) : stub(ask)) })
+const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam', jo: 'Jo', kit: 'Kit' }, profiles: parseProfiles('alex:adult-optin,sam:child,jo:adult'), villagerMaker: (ask) => (useLive ? realMaker(ask) : slow ? slowStub(ask) : stub(ask)) })
 await host.await()
 const hostPort = hostCtx.villager.port
 
@@ -88,12 +91,18 @@ const shot = async (page, name) => {
   if (shots) await page.screenshot({ path: join(shots, `${name}.jpg`), type: 'jpeg', quality: 82 })
 }
 const seat = [0.1, 1.45, 2.7]
+/** Write on the slip; after a send-off it is a small "make another" tag first, opened by its button. */
+const write = async (page, text) => {
+  if (await page.evaluate(() => document.querySelector('.vs-slip')?.classList.contains('invite'))) await page.click('.vs-slip .sew')
+  await page.locator('.vs-slip .line').fill(text)
+}
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 try {
   // ── &from=: the whole scene without a model ────────────────────────────
   {
-    const { context, page, errors } = await open(`&from=${FROM}`)
+    // As Jo, so every capture shows the same five pattern cards an adult sees.
+    const { context, page, errors } = await open(`&from=${FROM}&person=jo`)
     await page.waitForTimeout(2200)
     const p0 = await pg(page)
     const objects = await page.evaluate(() => window.village.snapshot().objects)
@@ -147,7 +156,7 @@ try {
     await page.keyboard.press('Tab')
     await page.keyboard.press('End')
     const locked = await st(page)
-    check('humour: crude is locked for an unknown profile; the dial stops at cheeky and says why', locked.values.humour === 0.5 && /locked/.test(locked.note ?? ''), { humour: locked.values.humour, note: locked.note })
+    check('humour: crude is locked for an adult who has not opted in (the host\'s profile); the dial stops at cheeky and says why', locked.values.humour === 0.5 && /locked/.test(locked.note ?? ''), { humour: locked.values.humour, note: locked.note })
     await page.keyboard.press('Home')
     await page.waitForTimeout(700)
     const after = await st(page)
@@ -193,7 +202,8 @@ try {
     check('the camera follows it as it walks off: it stays in view', w0.seen && w1.seen, { w0, w1 })
     check('the tuned result is kept as data: module text, persona and nine values', s3.kept.length === 1 && s3.kept[0].source.from === FROM && Math.abs(s3.kept[0].tuning.size - after.values.size) < 1e-9 && s3.kept[0].tuning.warmth === 0 && s3.kept[0].persona?.role && /chars$/.test(s3.kept[0].module), s3.kept[0])
     const p3 = await pg(page)
-    check('the slip is back, ready for another', p3.slip && !p3.slipReadOnly, p3)
+    const invite = await page.evaluate(() => ({ invite: document.querySelector('.vs-slip').classList.contains('invite'), button: document.querySelector('.vs-slip .sew').textContent, note: document.querySelector('.vs-note').classList.contains('shown') }))
+    check('after the send-off only a small "Make another" tag shows, and no note from the tuning', p3.slip && !p3.slipReadOnly && invite.invite && invite.button === 'Make another' && !invite.note, { p3, invite })
     await shot(page, '5-walking')
     check('no page errors', errors.length === 0, errors)
 
@@ -226,7 +236,7 @@ try {
 
   // ── Patterns: a template alone or with words; the humour gate in the page ──
   {
-    const { context, page, errors } = await open(`&from=${FROM}&profile=adult`)
+    const { context, page, errors } = await open(`&from=${FROM}&person=jo`)
     const rackState = await page.evaluate(() => window.villagerSetup.patterns())
     check('patterns: the rack offers the built-in templates for this profile', ['organiser', 'coach', 'grandparent', 'craftsperson', 'buddy'].every((id) => rackState.cards.some((c) => c.id === id)) && !rackState.cards.some((c) => c.id === 'companion'), rackState.cards.map((c) => c.id))
     await page.click('.vs-pattern[data-template=coach]')
@@ -245,7 +255,7 @@ try {
   }
   {
     // Irreverent buddy for an adult who has not opted in: cheeky, with a short note why.
-    const { context, page } = await open(`&from=${FROM}&profile=adult`)
+    const { context, page } = await open(`&from=${FROM}&person=jo`)
     await page.evaluate(() => window.villagerSetup.patterns())
     await page.click('.vs-pattern[data-template=buddy]')
     const picked = await st(page)
@@ -258,7 +268,7 @@ try {
   }
   {
     // A template alone, no words: allowed (the saved description stands in for &from=).
-    const { context, page } = await open(`&from=${FROM}&profile=adult-optin`)
+    const { context, page } = await open(`&from=${FROM}`)
     await page.evaluate(() => window.villagerSetup.patterns())
     await page.click('.vs-pattern[data-template=buddy]')
     await page.locator('.vs-slip .line').fill('')
@@ -297,7 +307,7 @@ try {
 
   // ── Through the host (stub maker): waiting, then stitch; and a 422 ─────
   {
-    const { context, page, errors } = await open('&profile=adult-optin')
+    const { context, page, errors } = await open('')
     await page.locator('.vs-slip .line').fill('a sleepy hedgehog who bakes bread before dawn')
     slow = true
     await page.keyboard.press('Enter')
@@ -325,7 +335,7 @@ try {
     check('host: the send-off keeps the tuning beside the module, on the host', files.length === 1 && stored.tuning?.size === 0.8 && stored.module.includes('villager.tag('), stored.tuning)
 
     // Save a tuned pattern, shared: it reloads, and Sam (a child) sees it as cheeky.
-    await page.locator('.vs-slip .line').fill('a wry badger who fixes the bikes')
+    await write(page, 'a wry badger who fixes the bikes')
     await page.keyboard.press('Enter')
     await until(page, ['tuning', 'failed'])
     await page.evaluate(() => window.villagerSetup.set('warmth', 0.2))
@@ -339,7 +349,7 @@ try {
     await page.evaluate(() => window.villagerSetup.sendOff())
     await until(page, ['empty'])
 
-    await page.locator('.vs-slip .line').fill('a [stub-fail] fox')
+    await write(page, 'a [stub-fail] fox')
     await page.keyboard.press('Enter')
     await until(page, ['failed'])
     const f = await st(page)
@@ -349,12 +359,14 @@ try {
   }
   {
     // It reloads for its maker, and is shared with Sam, a child, as cheeky in the host and the page.
-    const again = await open('&profile=adult-optin')
+    const again = await open('')
     const mine = await again.page.evaluate(() => window.villagerSetup.patterns())
     check('save: after a reload the saved pattern is back on the rack', mine.cards.some((c) => c.source === 'mine' && c.humour === 'crude'), mine.cards)
     await again.context.close()
-    const sam = await open(`&from=${FROM}&person=sam&profile=child`)
+    // The URL asks for an opted-in adult; the page has no such flag and takes Sam's profile from the host.
+    const sam = await open(`&from=${FROM}&person=sam&profile=adult-optin`)
     const seen = await sam.page.evaluate(() => window.villagerSetup.patterns())
+    check('profile: the page takes the person\'s profile from the host, whatever the URL says', JSON.stringify((await st(sam.page)).profile) === JSON.stringify({ adult: false, crudeOptIn: false }), (await st(sam.page)).profile)
     const shared = seen.cards.find((c) => c.source === 'family')
     check('family: the shared pattern appears for another person, cheeky from the host', shared && shared.humour === 'cheeky', seen.cards)
     check('family: built-in templates for a child leave out the adults-only one', !seen.cards.some((c) => c.id === 'buddy') && seen.cards.some((c) => c.id === 'companion'), seen.cards.map((c) => c.id))
@@ -365,8 +377,39 @@ try {
     const s = await st(sam.page)
     check('family: Sam\'s villager from it is cheeky in the page, and the dial is locked', s.persona.dials.humour === 'cheeky' && s.values.humour === 0.5 && Math.abs(s.values.warmth - 0.2) < 1e-9, { dials: s.persona.dials, values: s.values })
     await sam.page.evaluate(() => window.villagerSetup.set('humour', 1))
-    check('family: pushing the dial to crude for a child stays cheeky', (await st(sam.page)).values.humour === 0.5)
+    check('family: pushing the dial to crude for a child stays cheeky, with &profile=adult-optin in the URL', (await st(sam.page)).values.humour === 0.5)
+    await sam.page.evaluate(() => window.villagerSetup.sendOff())
+    await until(sam.page, ['empty'])
     await sam.context.close()
+  }
+  {
+    // Kit has no profile on the host: unknown, so crude stays locked.
+    const kit = await open(`&from=${FROM}&person=kit&profile=adult-optin`)
+    await kit.page.evaluate(() => window.villagerSetup.patterns())
+    await kit.page.evaluate(() => window.villagerSetup.start(''))
+    await until(kit.page, ['tuning'])
+    await kit.page.evaluate(() => window.villagerSetup.set('humour', 1))
+    const k = await st(kit.page)
+    check('profile: a person the host has no profile for is unknown, and the dial stops at cheeky', k.profile === null && k.values.humour === 0.5, { profile: k.profile, humour: k.values.humour })
+    await kit.context.close()
+  }
+
+  // ── Repair: the home's checks refuse the first module; one remake with the reason ──
+  {
+    const { context, page, errors } = await open('')
+    await page.locator('.vs-slip .line').fill('a [stub-mark-head] giraffe who reads bedtime stories')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => /re-cut/.test(window.villagerSetup.state().status), null, { timeout: 15000 })
+    const r = await st(page)
+    check('repair: when the checks refuse a live module, the table says a piece is being re-cut, still counting', r.state === 'waiting' && /One piece didn't sit right, so it's being re-cut… \d+ s/.test(r.status) && /head itself is tagged with villager\.mark\(\)/.test(r.refusal), { status: r.status, refusal: r.refusal })
+    await until(page, ['tuning', 'failed'])
+    const s = await st(page)
+    const files = await readdir(join(root, 'people', 'alex', 'villagers'))
+    const records = await Promise.all(files.map(async (f) => JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', f), 'utf8'))))
+    const record = records.find((x) => x.description.includes('giraffe'))
+    check('repair: the remade module is stitched, and the host keeps the reason and the first module', s.state === 'tuning' && s.timings.repaired === 1 && record?.repair?.reason === r.refusal && record.repair.previous.includes("villager.mark(villager.tag(new THREE.Group(), 'head'))") && !record.module.includes('villager.mark(villager.tag'), { state: s.state, failure: s.failure, repair: record?.repair?.reason })
+    check('repair: no page errors', errors.length === 0, errors)
+    await context.close()
   }
 
   // ── Live: one real Sonnet call through the host and the page ───────────
@@ -379,11 +422,21 @@ try {
     await page.keyboard.press('Enter')
     await page.waitForTimeout(20000)
     await shot(page, 'live-waiting')
-    await until(page, ['tuning', 'failed'], 200000)
+    // Up to two model calls (the make and, if the checks refuse it, one remake) and the stitching.
+    await until(page, ['tuning', 'failed'], 420000)
     const s = await st(page)
+    // Keep what the model wrote and why it was refused before the throwaway root goes.
+    const liveDir = join(root, 'people', 'alex', 'villagers')
+    const liveRecords = await Promise.all((await readdir(liveDir)).map(async (f) => JSON.parse(await readFile(join(liveDir, f), 'utf8'))))
+    const liveRecord = liveRecords.find((x) => x.description === text)
+    if (liveRecord) {
+      const keep = shots ?? join(homeDir, 'generated/villagers')
+      await writeFile(join(keep, 'live-record.json'), JSON.stringify({ ...liveRecord, wallMs: Date.now() - t0, state: s.state, failure: s.failure, refusal: s.refusal, timings: s.timings }, null, 1))
+      console.log(`live record kept in ${join(keep, 'live-record.json')}`)
+    }
     await page.waitForTimeout(1500)
     await shot(page, 'live-tuning')
-    check('live: Sonnet writes the villager, it is stitched on the table', s.state === 'tuning', { text, wallMs: Date.now() - t0, state: s.state, name: s.name, failure: s.failure, timings: s.timings, pieces: s.pieces })
+    check('live: Sonnet writes the villager, it is stitched on the table (after at most one remake)', s.state === 'tuning', { text, wallMs: Date.now() - t0, state: s.state, name: s.name, failure: s.failure, refusal: s.refusal, timings: s.timings, pieces: s.pieces, firstCostUsd: liveRecord?.costUsd, firstMs: liveRecord?.ms, remake: liveRecord?.repair ? { ms: liveRecord.repair.ms, costUsd: liveRecord.repair.costUsd, outputTokens: liveRecord.repair.outputTokens } : null })
     check('live: no page errors', errors.length === 0, errors)
     await context.close()
   }

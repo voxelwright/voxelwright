@@ -1,13 +1,13 @@
 // Headless checks of the #47 villager-making endpoints with a stub maker: orchestration
 // only, no model is called. node test/villager-make.ts
 // With --live, one real Sonnet call through the same endpoint (operator login).
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from 'cordis'
 import villager from '../src/villager.ts'
 import { stubAgent } from '../src/villager-agent.ts'
-import { checkPersona, claudeVillagerMaker, extractPersona, parseProfiles, stubVillagerMaker, villagerAsk, villagerPrompt, type VillagerMaker } from '../src/villager-make.ts'
+import { checkPersona, claudeVillagerMaker, extractPersona, parseProfiles, repairAsk, stubVillagerMaker, villagerAsk, villagerPrompt, type VillagerMaker } from '../src/villager-make.ts'
 
 const live = process.argv.includes('--live')
 const root = await mkdtemp(join(tmpdir(), 'villager-make-check-'))
@@ -43,10 +43,10 @@ try {
   const crude = { role: 'buddy', dials: { humour: 'crude' } }
   check('persona: model output never grants crude to a child or an unknown profile', checkPersona(crude, { adult: false, crudeOptIn: false })?.dials.humour === 'cheeky' && checkPersona(crude)?.dials.humour === 'cheeky' && checkPersona(crude, { adult: true, crudeOptIn: false })?.dials.humour === 'cheeky' && checkPersona(crude, { adult: true, crudeOptIn: true })?.dials.humour === 'crude')
 
-  let calls: { description: string; owner: string; accent: string }[] = []
+  let calls: { description: string; owner: string; accent: string; repair?: { module: string; reason: string } }[] = []
   const stub = stubVillagerMaker(60)
   const counting: VillagerMaker = async (ask) => {
-    calls.push({ description: ask.description, owner: ask.owner, accent: ask.accent })
+    calls.push({ description: ask.description, owner: ask.owner, accent: ask.accent, ...(ask.repair ? { repair: ask.repair } : {}) })
     return stub(ask)
   }
   let host = await start(counting)
@@ -94,6 +94,19 @@ try {
   const got = await (await api(`/people/alex/villagers/${made.item}`)).json() as { module: string; tuning: Record<string, number> }
   check('tuning is kept with the module and read back', tuned.status === 200 && got.module === made.module && got.tuning.size === 0.7 && got.tuning.pitch === 0.9 && got.tuning.chatty === 0.1, got.tuning)
   check('tuning never calls the model', calls.length === n)
+  // The humour knob's crude end is decided by the host's profile only, on save and on serve.
+  const knobs = { size: 0.5, hue: 0.5, pitch: 0.5, pace: 0.5, energy: 0.5, warmth: 0.5, playful: 0.5, chatty: 0.5, humour: 1 }
+  const samMade = await (await api('/people/sam/villagers', { body: { description: 'a gentle owl', accent: '#c8553d' } })).json() as { item: string }
+  const joMade = await (await api('/people/jo/villagers', { body: { description: 'a quiet mole', accent: '#c8553d' } })).json() as { item: string }
+  const storedHumour = async (person: string, item: string) => JSON.parse(await readFile(join(root, 'people', person, 'villagers', `${item}.json`), 'utf8')).tuning.humour
+  const tunedSam = await api(`/people/sam/villagers/${samMade.item}/tuning`, { body: knobs })
+  const tunedJo = await api(`/people/jo/villagers/${joMade.item}/tuning`, { body: knobs })
+  await api(`/people/alex/villagers/${made.item}/tuning`, { body: knobs })
+  check('tuning: humour 1 for a child or an unknown profile is stored as cheeky (0.5); an opted-in adult keeps crude', tunedSam.status === 200 && tunedJo.status === 200 && await storedHumour('sam', samMade.item) === 0.5 && await storedHumour('jo', joMade.item) === 0.5 && await storedHumour('alex', made.item) === 1)
+  const samFile = join(root, 'people', 'sam', 'villagers', `${samMade.item}.json`)
+  await writeFile(samFile, JSON.stringify({ ...JSON.parse(await readFile(samFile, 'utf8')), tuning: knobs }))
+  const samServed = await (await api(`/people/sam/villagers/${samMade.item}`)).json() as { tuning: { humour: number } }
+  check('tuning: a stored file edited to crude is served to a child as cheeky', samServed.tuning.humour === 0.5, samServed.tuning)
   check('tuning out of range is refused', (await api(`/people/alex/villagers/${made.item}/tuning`, { body: { size: 2, hue: 0.4, pitch: 0.9, pace: 0.2, energy: 0.5, warmth: 0.5, playful: 0.5, chatty: 0.5, humour: 0.5 } })).status === 400)
   check('tuning with a missing knob is refused', (await api(`/people/alex/villagers/${made.item}/tuning`, { body: { size: 0.5 } })).status === 400)
   check('another person cannot read it', (await api(`/people/sam/villagers/${made.item}`)).status === 404)
@@ -125,6 +138,41 @@ try {
   await mkdir(join(root, 'people', 'sam', 'persona-templates'), { recursive: true })
   await writeFile(join(root, 'people', 'sam', 'persona-templates', 'junk.json'), '{')
   check('templates: a stray file is ignored', (await (await api('/people/sam/persona-templates')).json() as { templates: unknown[] }).templates.length === 1)
+
+  check('templates: the person\'s own list says their profile, from the host', JSON.stringify((await (await api('/people/sam/persona-templates')).json() as { profile: unknown }).profile) === JSON.stringify({ adult: false, crudeOptIn: false }) && (await (await api('/people/jo/persona-templates')).json() as { profile: unknown }).profile === null)
+
+  // Remake: once, with the home's refusal reason; the model sees its previous module and the reason.
+  calls = []
+  const first = await (await api('/people/alex/villagers', { body: { description: 'a [stub-mark-head] giraffe', accent: '#c8553d' } })).json() as { item: string; module: string }
+  check('remake: the stub\'s first module marks its whole head', first.module.includes("villager.mark(villager.tag(new THREE.Group(), 'head'))"))
+  check('remake: a reason is required', (await api(`/people/alex/villagers/${first.item}/remake`, { body: { reason: '  ' } })).status === 400)
+  const reason = 'check: the head itself is tagged with villager.mark(); tag only the carer\'s stocking cap ' + 'x'.repeat(2000)
+  const remade = await api(`/people/alex/villagers/${first.item}/remake`, { body: { reason } })
+  const second = await remade.json() as { item: string; module: string }
+  const record = JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', `${first.item}.json`), 'utf8'))
+  check('remake: the model gets its previous module and the capped reason, and the new module comes back', remade.status === 200 && second.item === first.item && !second.module.includes('villager.mark(villager.tag') && calls.length === 2 && calls[1].repair?.module === first.module && calls[1].repair?.reason.length === 600 && calls[1].repair?.reason.startsWith('check: the head itself'), { status: remade.status, calls: calls.length, reason: calls[1]?.repair?.reason.length })
+  check('remake: the record keeps the new module, the reason and the previous module', record.module === second.module && record.repair?.previous === first.module && record.repair?.reason.length === 600 && typeof record.repair?.ms === 'number')
+  check('remake: only once per villager (409), and never for another person\'s or an unknown villager', (await api(`/people/alex/villagers/${first.item}/remake`, { body: { reason: 'again' } })).status === 409 && (await api(`/people/sam/villagers/${first.item}/remake`, { body: { reason: 'x' } })).status === 404 && (await api('/people/alex/villagers/aaaaaaaaaaaa/remake', { body: { reason: 'x' } })).status === 404 && calls.length === 2)
+  check('remake: the repair prompt is the runner\'s', repairAsk('ASK', 'MOD', 'WHY') === 'ASK\n\nYour previous file:\n```js\nMOD\n```\n\nIt failed with this error:\nWHY\n\nReturn the corrected complete file.')
+
+  // Storage: every write goes to a temporary file and is renamed over the record.
+  const vdir = join(root, 'people', 'alex', 'villagers')
+  const good = await readFile(join(vdir, `${made.item}.json`), 'utf8')
+  await writeFile(join(vdir, `${made.item}.json.deadbeef.tmp`), good.slice(0, 40))
+  check('storage: a partial temporary file left by a crash never replaces the good record', (await api(`/people/alex/villagers/${made.item}`)).status === 200 && await readFile(join(vdir, `${made.item}.json`), 'utf8') === good)
+  await rm(join(vdir, `${made.item}.json.deadbeef.tmp`))
+  const count = (await readdir(vdir)).length
+  await chmod(vdir, 0o500)
+  try {
+    const failedTune = await api(`/people/alex/villagers/${made.item}/tuning`, { body: { ...knobs, size: 0.9 } })
+    const failedMake = await api('/people/alex/villagers', { body: { description: 'a badger', accent: '#c8553d' } })
+    const after = await api(`/people/alex/villagers/${made.item}`)
+    check('storage: a failed write answers 500 (not the maker\'s 422) and leaves the record whole and readable', failedTune.status === 500 && failedMake.status === 500 && after.status === 200 && await readFile(join(vdir, `${made.item}.json`), 'utf8') === good, { tune: failedTune.status, make: failedMake.status, get: after.status })
+    check('storage: the making lock is released after a storage failure (500 again, not 409)', (await api('/people/alex/villagers', { body: { description: 'a badger', accent: '#c8553d' } })).status === 500)
+  } finally {
+    await chmod(vdir, 0o700)
+  }
+  check('storage: no temporary file is left behind', (await readdir(vdir)).length === count && (await readdir(vdir)).every((f) => f.endsWith('.json')))
 
   await host.fiber.dispose()
   // Without a maker the endpoint answers 503 (the host is up, the feature is not).

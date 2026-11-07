@@ -428,8 +428,13 @@ export function workshop(): Workshop {
   let since = 0
   let cut = 0
   /** The felt sheet and scissors: on the middle of the mat while working, else back at the front right. */
+  const sheetRest = new THREE.Vector3()
   const lay = () => {
     const working = state === 'working'
+    // While the pattern is drafted, its tissue sheet (the words, then the name) lies on the mat's back left, by the cutting.
+    sheet.position.copy(working ? new THREE.Vector3(MAT.x - 0.19, y + 0.0045, MAT.z - 0.1) : sheetRest)
+    sheet.scale.setScalar(working ? 0.68 : 1)
+    sheet.rotation.z = working ? -0.06 : 0.1
     sheetFelt.position.copy(working ? workAt : new THREE.Vector3(MAT.x + 0.26, y + 0.009, MAT.z + 0.16))
     sheetFelt.rotation.y = working ? 0 : 0.25
     scissors.position.set(MAT.x + 0.28, y + 0.015, MAT.z + 0.15)
@@ -444,7 +449,7 @@ export function workshop(): Workshop {
     MAT.z = MAT_Z[layout]
     matMesh.position.set(MAT.x, y + 0.003, MAT.z)
     const wide = layout === 'wide'
-    sheet.position.set(wide ? -0.63 : -0.98, y + 0.0035, wide ? -0.16 : -0.1)
+    sheetRest.set(wide ? -0.63 : -0.98, y + 0.0035, wide ? -0.16 : -0.1)
     pencil.position.set(wide ? -0.4 : -0.75, y + 0.009, wide ? -0.02 : 0.05)
     cushionAt.position.set(wide ? -0.82 : -0.95, y, wide ? -0.27 : 0.25)
     reel.group.position.set(wide ? 0.1 : 0.2, y, wide ? 0.42 : 0.12)

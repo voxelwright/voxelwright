@@ -7,6 +7,8 @@
 // pass; the prompt's own example, round 2's shell-less tortoise and its mouse-as-a-bear are refused
 // as the default round template. Round 4, role mark: the example's toque (villager.mark()) and the setup
 // stub built from it pass; no mark, a mark inside the outline (a hip pouch) and a marked whole head are refused.
+// Setup fix (live giraffe): a stocking cap bigger than its head passes; a marked head sphere, a marked body and a
+// mark bigger than the rest of the villager are refused, each naming the role's mark.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -106,7 +108,18 @@ try {
   await refused('a sound probe cook with no marked part', plush(), /nothing is tagged as the cook's toque.*villager\.mark\(\)/, { mark: true })
   const pouch = example.replace(toque, `  villager.mark(add(villager, new THREE.BoxGeometry(0.1, 0.08, 0.06), felt('#8a6a4a'), 0.12, 0.12, 0.12))\n`)
   await refused('the example with a hip pouch as its mark (inside the outline)', pouch, /the cook's toque stays inside the outline seen from in front and above/, { mark: true })
-  await refused('the example with its whole head marked', example.replace("villager.tag(new THREE.Group(), 'head')", "villager.mark(villager.tag(new THREE.Group(), 'head'))"), /the head itself is tagged with villager\.mark\(\)/, { mark: true })
+  await refused('the example with its whole head marked', example.replace("villager.tag(new THREE.Group(), 'head')", "villager.mark(villager.tag(new THREE.Group(), 'head'))"), /the head itself is tagged with villager\.mark\(\); tag only the cook's toque/, { mark: true })
+  // Setup's live run (giraffe, carer): the largest head part was taken to be the head even when it was the hat.
+  // The head is now the largest unmarked head part; a marked part is the head when it holds an eye's centre.
+  const headSphere = 'add(head, new THREE.SphereGeometry(0.164, 32, 20), tan, 0, 0, 0)'
+  const bodySphere = 'add(villager, new THREE.SphereGeometry(0.2, 32, 20), tan, 0, 0.146, 0)'
+  if (!example.includes(headSphere) || !example.includes(bodySphere)) throw new Error('arm-code.md example no longer has its head and body spheres as written here')
+  const bigCap = example.replace(toque, `  villager.mark(add(head, new THREE.ConeGeometry(0.2, 0.25, 24), white, 0, 0.2, -0.01))\n`)
+  const big = await trial(bigCap, { mark: true })
+  check('a tall stocking cap bigger than the head it sits on passes the mark check (it is a hat, not the head)', big.ok && big.measures.mark.core === null && big.measures.mark.above >= 0.1, big.ok ? big.measures.mark : big.reason)
+  await refused('the example with only its head sphere marked (it holds the eyes)', example.replace(headSphere, `villager.mark(${headSphere})`), /the head itself is tagged with villager\.mark\(\); tag only the cook's toque, not the head/, { mark: true })
+  await refused('the example with its body marked', example.replace(bodySphere, `villager.mark(${bodySphere})`), /the body itself is tagged with villager\.mark\(\); tag only the cook's toque, not the body/, { mark: true })
+  await refused('a marked cap bigger than the rest of the villager', example.replace(toque, `  villager.mark(add(head, new THREE.ConeGeometry(0.3, 0.3, 24), white, 0, 0.2, -0.25))\n`).replace('CylinderGeometry(0.008, 0.01, 0.2, 8)', 'CylinderGeometry(0.008, 0.01, 0.3, 8)'), /^check: the parts tagged with villager\.mark\(\) are \d+% of the villager; tag only the cook's toque, at most 40% of it$/, { mark: true })
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {
