@@ -108,8 +108,8 @@ export type Stage =
   | { kind: 'chroma'; offset: number; angle?: number }
   /** Painterly smoothing (a Kuwahara-style filter): flattens texture into brush patches. Implemented in ./fx/brush.ts. */
   | { kind: 'brush'; radius: number; strength: number }
-  /** Paper grain and pigment pooling at edges, for watercolour. Implemented in ./fx/paper.ts. */
-  | { kind: 'paper'; grain: number; edges: number; tint?: Hex }
+  /** Paper grain and pigment pooling at edges, for watercolour. Implemented in ./fx/paper.ts. `shadow` cools the darks towards a pigment's hue. */
+  | { kind: 'paper'; grain: number; edges: number; tint?: Hex; shadow?: Hex }
 
 export interface Theme {
   /** Stable id, lowercase with dashes; also the ?theme= value. */
