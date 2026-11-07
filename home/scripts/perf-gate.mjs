@@ -359,7 +359,9 @@ function summarize(windows) {
 function otherHeadlessChromes() {
   try {
     const ps = execFileSync('ps', ['-Ao', 'pid,command'], { encoding: 'utf8' })
-    return ps.split('\n').filter((l) => /Google Chrome(?! Helper).*--headless/.test(l) && !l.includes(String(process.pid))).length
+    // Browser processes only: a helper's path also contains "Google Chrome" (the GPU helper
+    // matched, so the gate's own browser counted twice); helpers carry --type= or "Helper".
+    return ps.split('\n').filter((l) => /Google Chrome.*--headless/.test(l) && !/--type=|Helper/.test(l)).length
   } catch {
     return 0
   }
@@ -478,10 +480,10 @@ try {
     row(r.scene, 'dropped >20 ms', b?.dropped ?? null, h.dropped, `< ${MAX_DROPPED * 100}%`, h.frames > 0 && h.dropped < MAX_DROPPED)
     row(r.scene, 'frame p99 ms', b?.p99 ?? null, h.p99, `<= ${MAX_P99_MS}`, h.p99 != null && h.p99 <= MAX_P99_MS)
     row(r.scene, 'long tasks >50 ms', b?.longTasks ?? null, h.longTasks, '0', h.longTasks === 0)
-    // Warning only: GPU ms now measures GPU work (src/gpu-time.js), and the kitchen's GPU p95
-    // at high is 13.6 to 14.3 ms on main and 12.2 to 14.5 ms on the head (November 6, 2026), so gating it
-    // would block every merge. It gates again once the kitchen is under 13 ms or the limit is
-    // reset. The owner's gate is consistent 60 fps plus no regression; headroom is ours.
+    // Warning only: GPU ms now measures GPU work (src/gpu-time.js), but the kitchen's GPU p95
+    // at high varies from 9.8 to 14.3 ms between runs on main (November 6, 2026), so it would
+    // fail main against itself. It gates again once the kitchen's tail is under the limit or
+    // headroom gets its own p95 limit (maxGpuMs is a median threshold for calibration). The owner's gate is consistent 60 fps plus no regression; headroom is ours.
     if (r.tier === 'high') row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${tierHigh}`, h.gpuP95 != null && h.gpuP95 < tierHigh, true)
     if (b) for (const [key, g] of Object.entries(RELATIVE)) {
       if (b[key] == null || h[key] == null) continue

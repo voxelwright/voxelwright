@@ -200,7 +200,7 @@ Gates:
 | Gate | Rule |
 | --- | --- |
 | 60 fps (head, every scene) | under 1% of intervals over 20 ms; p99 at most 20 ms; no long task over 50 ms; at least 90% of 60 Hz frames measured |
-| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). GPU ms measures GPU work since #42, but the kitchen's p95 is 13.6 to 14.3 ms on main and 12.2 to 14.5 ms on the head, so this warns rather than blocking every merge. |
+| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). GPU ms measures GPU work since #42, but between runs the kitchen's p95 is 9.8 to 14.3 ms on main and 12.2 to 14.5 ms on this branch, so it warns. `maxGpuMs` is a median threshold for calibration (kitchen medians are 8 to 10 ms); applied to p95 it catches a 4 to 5 ms tail. |
 | Relative (head against base) | growth at most the larger of 10% and a floor: GPU p50 3 ms, GPU p95 8 ms, CPU p50 0.5 ms, draw calls 10 |
 
 Noise, base against base (`--base X --head X`), M1 Pro, with 3 to 8 other agents' headless
@@ -225,11 +225,14 @@ Deliberate regressions, not committed: a 5 ms busy loop per frame in the rendere
 `home` CPU p50 (+5.2 ms against +0.5) while frames still held 60 fps; a 12 ms loop failed
 `villagers` with 17% of frames over 20 ms and p99 33.4 ms. Both exited 1.
 
-With GPU busy ms (#42), against cb1d565, five runs, 1 to 2 other headless Chrome instances
-running: GPU p50 / p95 at high, `home` head 7.8 to 10.0 / 12.2 to 14.5 ms, main 8.7 to 9.9 /
-13.6 to 14.3 ms; `villagers` 7.8 to 9.2 / 9.5 to 13.3 ms; `talk` 8.3 to 9.7 / 9.9 to 14.4 ms.
-Submit-to-done p95 on the same frames was 14.7 to 17.8 ms. Every run passed. The kitchen's
-cost, by the ms each pass adds to GPU ms (p50 / p95, `?q=high`, 240 frames, 28 passes):
+With GPU busy ms (#42), against cb1d565 (main), four runs on a quiet machine, GPU p95 at
+high: `home` main 10.2, 10.4, 9.8, 13.4 ms, head 13.7, 12.5, 13.6, 13.8 ms (p50 8.0 to 10.0
+on main, 8.3 to 10.4 on the head); `villagers` 12.4 to 13.7 ms; `talk` 11.6 to 14.0 ms.
+Submit-to-done p95 on the same frames was 11.4 to 17.8 ms. Five earlier runs, with 0 to 1
+other headless Chrome instances, read main 13.6 to 14.3 and head 12.2 to 14.5 ms (the gate's
+count of other instances was one too high until #42). Every run passed every gating rule.
+The kitchen's typical cost, by the ms each pass adds to GPU ms (p50 / p95 per pass; the
+p95s do not fall in the same frames; `?q=high`, 240 frames, 28 passes):
 the first scene render context 2.7 / 4.5, the first post pass after `output` 2.1 / 3.3,
 the full-resolution `output` pass 1.1 / 1.9, the next post pass 0.8 / 1.1, the first
 full-resolution pass 0.6 / 1.0; the 13 bloom mips together under 0.2.

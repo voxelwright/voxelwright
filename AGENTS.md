@@ -34,8 +34,8 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   must pass against main: a consistent 60 fps (under 1% of frames over 20 ms,
   p99 at most 20 ms, no long task over 50 ms) in the gate scenes and no
   regression beyond noise. GPU headroom (GPU p95 under 13 ms at the high tier)
-  is reported as a warning: GPU ms now measures GPU work, and the kitchen reads
-  13.6 to 14.3 ms on main too. It takes under 30 s once
+  is reported as a warning: GPU ms now measures GPU work, but the kitchen's
+  p95 varies from 10 to 14 ms between runs on main. It takes under 30 s once
   the base build is cached. Run it on a quiet machine: other headless Chrome
   runs share the GPU and move GPU ms (the gate warns when it sees them).
 - Use the seven-lens `.agents/skills/reviewers` review only for changes to
