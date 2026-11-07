@@ -401,7 +401,9 @@ export default {
       },
       glide(frame: Frame, seconds: number) {
         takeOver()
-        const end = { x: frame.x, z: frame.z, zoom: frame.zoom, yaw: frame.yaw ?? goal.yaw, tilt: goal.tilt }
+        // A frame's turn is reached the short way round, however many times the view has been turned.
+        const yaw = frame.yaw === undefined ? goal.yaw : rig.yaw + THREE.MathUtils.euclideanModulo(frame.yaw - rig.yaw + Math.PI, Math.PI * 2) - Math.PI
+        const end = { x: frame.x, z: frame.z, zoom: frame.zoom, yaw, tilt: goal.tilt }
         Object.assign(goal, end)
         clampGoal()
         if (seconds <= 0 || reducedMotion.matches) {

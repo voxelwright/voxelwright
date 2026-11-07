@@ -45,7 +45,7 @@ export const PLANS: Record<string, RoomPlan> = {
       'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor', 'furnish',
       ...(MODE === 'iso' ? ['diorama'] : [])],
     home: pose([0.1, 1.45, 2.7], [0.12, 1.05, -0.9]),
-    frame: { x: 0.25, z: 0.8, zoom: 0.42 },
+    frame: { x: 0.25, z: 0.8, zoom: 0.42, yaw: 0.42 },
   },
   living: {
     plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors', 'loungefurnish'],
