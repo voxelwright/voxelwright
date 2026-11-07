@@ -240,18 +240,18 @@ try {
     s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text), 15_000)
     check('answer route: your own villager turns to you and replies', s.mode === 'talk' && s.partner === 'alex' && s.input.routes.at(-1).route === 'answer', s.input.routes.at(-1))
     const answerUsage = (await jsonl('alex', 'usage.jsonl')).at(-1)
-    check('an answer costs one model call: no separate route call, and the pad settled after sending', s.input.routes.at(-1).calls === 1 && answerUsage?.route === 'answer' && !existsSync(join(root, 'people', 'alex', 'routes.jsonl')) && s.input.raise < 0.05, { route: s.input.routes.at(-1), answerUsage, raise: s.input.raise })
+    check('plain chat costs one model call: no route context, no router call, and the pad settled after sending', s.input.routes.at(-1).calls === 1 && s.input.routes.at(-1).path === 'chat' && answerUsage && answerUsage.route === undefined && (await jsonl('alex', 'routes.jsonl')).every((r) => r.text !== 'How are you today?') && s.input.raise < 0.05, { route: s.input.routes.at(-1), answerUsage, raise: s.input.raise })
     await back(page)
 
     // A route that tries to send your words to someone you did not name is not followed (Sentinel, #42):
     // they go to your own villager, in your own words, and Sam's villager hears nothing.
     const samBefore = (await jsonl('sam', 'conversation.jsonl')).length
     const alexBefore = (await jsonl('alex', 'conversation.jsonl')).length
-    await write(page, 'my secret worry [stub-route-redirect]')
+    await write(page, 'put my secret worry away [stub-route-redirect]')
     s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text) && !x.pending, 15_000)
     const samAfter = (await jsonl('sam', 'conversation.jsonl')).slice(samBefore)
     const alexAfter = (await jsonl('alex', 'conversation.jsonl')).slice(alexBefore)
-    check("a model's talk route to a villager the line does not name is not followed", s.mode === 'talk' && s.partner === 'alex' && samAfter.length === 0 && alexAfter.filter((l) => l.from === 'person').every((l) => l.text === 'my secret worry [stub-route-redirect]') && !JSON.stringify(alexAfter).includes('paraphrase'), { mode: s.mode, partner: s.partner, samAfter, alexAfter })
+    check("a model's talk route to a villager the line does not name is not followed", s.mode === 'talk' && s.partner === 'alex' && samAfter.length === 0 && alexAfter.filter((l) => l.from === 'person').every((l) => l.text === 'put my secret worry away [stub-route-redirect]') && !JSON.stringify(alexAfter).includes('paraphrase'), { mode: s.mode, partner: s.partner, samAfter, alexAfter })
     await back(page)
 
     // furnish: ghost at once, then the final prop in its place, then undo.
@@ -303,15 +303,13 @@ try {
       const placedBefore = (await state(page)).input.furnish.placed
       await write(page, text)
       await until(page, (x) => x.input.furnish.job?.ghosts > 0, 3000, 10)
-      s = await until(page, (x) => x.input.furnish.job === null && !x.input.routing, 20_000)
-      await page.waitForTimeout(200)
-      s = await state(page)
+      s = await until(page, (x) => x.input.furnish.job === null && !x.input.routing && /nothing|didn't come out/i.test(x.cards.alex?.text ?? ''), 20_000)
       check(`a generation that ${label} leaves no ghost and no prop, and says so`, s.input.furnish.placed === placedBefore && s.input.furnish.job === null && /nothing|didn't come out/i.test(s.cards.alex?.text ?? ''), { placed: s.input.furnish.placed, card: s.cards.alex?.text })
     }
 
     // project: a parcel where it will go, and a record on the host.
     await write(page, "let's add a playable pinball machine in the living room")
-    s = await until(page, (x) => x.input.furnish.parcels.length > 0)
+    s = await until(page, (x) => x.input.furnish.parcels.length > 0 && /project/i.test(x.cards.alex?.text ?? ''))
     const records = await jsonl('alex', 'projects.jsonl')
     check('project route: a wrapped parcel marks the place and your villager says so', s.input.furnish.parcels.length === 1 && /project/i.test(s.cards.alex?.text ?? ''), { parcels: s.input.furnish.parcels, card: s.cards.alex?.text })
     check('the project is saved by the host under the person', records.length === 1 && records[0].state === 'being made' && /pinball/.test(records[0].what), records)
@@ -324,14 +322,77 @@ try {
     await page.waitForTimeout(400)
 
     // The router failing or answering nonsense keeps the line and says so in character.
-    for (const [label, text] of [['fails', 'hello [stub-route-fail]'], ['names no known route', 'hello [stub-route-junk]']]) {
+    for (const [label, text] of [['fails', 'add a lamp [stub-route-fail]'], ['names no known route', 'add a lamp [stub-route-junk]']]) {
       await write(page, text)
-      s = await until(page, (x) => !x.input.routing && x.input.routes.at(-1)?.text === text)
-      await page.waitForTimeout(100)
+      s = await until(page, (x) => !x.input.routing && x.input.routes.at(-1)?.text === text && /didn't quite follow/i.test(x.cards.alex?.text ?? ''))
+      check(`a router that ${label} keeps the line on the input and your villager says so`, s.input.text === text && s.mode === 'room' && s.input.routes.at(-1).path === 'router', { text: s.input.text, card: s.cards.alex?.text })
+      // Never a flash: the line is still up to read three seconds later.
+      await page.waitForTimeout(3000)
       s = await state(page)
-      check(`a router that ${label} keeps the line on the input and your villager says so`, s.input.text === text && /didn't quite follow/i.test(s.cards.alex?.text ?? '') && s.mode === 'room', { text: s.input.text, card: s.cards.alex?.text })
+      check(`  ...and that line stays up to be read (3 s later it is still showing)`, /didn't quite follow/i.test(s.cards.alex?.text ?? '') && s.cards.alex?.as, s.cards.alex)
       await page.keyboard.press('Escape')
     }
+
+    // The path a line takes (#42): the page's own check, before any model. Plain chat is one call to the
+    // villager; a line that may change the room goes to the router, even with no verb at all.
+    const routerCalls = async () => (await jsonl('alex', 'routes.jsonl')).length
+    let calls0 = await routerCalls()
+    await write(page, 'what should I cook tonight?')
+    s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text) && !x.pending, 15_000)
+    check('plain chat goes straight to your villager: one call, no router', s.input.routes.at(-1).path === 'chat' && s.input.routes.at(-1).calls === 1 && (await routerCalls()) === calls0, s.input.routes.at(-1))
+    await back(page)
+    for (const text of ['a toy cow on the table', 'add a cattle']) {
+      calls0 = await routerCalls()
+      await write(page, text)
+      s = await until(page, (x) => x.input.routes.at(-1)?.text === text && x.input.furnish.job?.state === 'placed', 20_000)
+      check(`"${text}" goes to the router and is furnished`, s.input.routes.at(-1).path === 'router' && s.input.routes.at(-1).route === 'furnish' && (await routerCalls()) === calls0 + 1, s.input.routes.at(-1))
+      await page.click('.furnish-choice [data-choice="keep"]', { timeout: 3000 }).catch(() => {})
+    }
+    // A guessed ghost the router turns into an answer fades out (never blinks), and the answer stays to be read.
+    await write(page, 'bring me some cheer')
+    s = await until(page, (x) => x.input.routes.at(-1)?.text === 'bring me some cheer' && x.input.furnish.job === null, 15_000, 10)
+    check('a guessed ghost the router answers instead fades away rather than blinking out', s.input.routes.at(-1).route === 'answer' && s.input.furnish.fading === 1, { route: s.input.routes.at(-1), fading: s.input.furnish.fading })
+    s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text) && !x.pending, 15_000)
+    await page.waitForTimeout(2000)
+    s = await state(page)
+    check('  ...and your villager answers in a talk that stays open', s.mode === 'talk' && s.partner === 'alex' && /I hear you, Alex/.test(s.cards.alex?.text ?? '') && s.input.furnish.fading === 0, { mode: s.mode, card: s.cards.alex?.text })
+    await back(page)
+    // Lines from your villager queue: the route's own line stays up before the living-room note replaces it.
+    await write(page, 'add a picture above the sofa')
+    s = await until(page, (x) => x.input.quips.some((q) => /living room/.test(q.text)), 15_000)
+    const [sayQ, noteQ] = s.input.quips.slice(-2)
+    check("your villager's lines queue: each stays up 2.5 s or more before the next", /let me see/.test(sayQ.text) && /living room/.test(noteQ.text) && noteQ.at - sayQ.at >= 2500, s.input.quips.slice(-3))
+    s = await until(page, (x) => x.input.furnish.job?.state === 'placed', 20_000)
+    const picture = s.input.furnish.job.places[0]
+    check('"a picture above the sofa" goes on a wall, upright, at picture height', picture.mount === 'wall' && picture.wall && picture.y > 1 && picture.y < 2, picture)
+    await page.click('.furnish-choice [data-choice="keep"]', { timeout: 3000 }).catch(() => {})
+
+    // Placement (#42): distinct anchors give distinct poses, each on its mount.
+    const poses = await page.evaluate(() => {
+      const p = window.village.talk.placeFor
+      return [
+        ['put a 65 inch TV on the living room wall', p('65 inch flat screen TV, black', 'on the living room wall | put a 65 inch TV on the living room wall', 'floor')],
+        ['add a picture above the sofa', p('picture', 'above the sofa | add a picture above the sofa', 'wall')],
+        ['hang a paper lantern from the ceiling', p('paper lantern', 'from the ceiling | hang a paper lantern from the ceiling', 'ceiling')],
+        ['a toy cow on the table', p('toy cow', 'on the table | a toy cow on the table', 'surface')],
+        ['a plant by the window', p('plant', 'by the window | a plant by the window', 'floor')],
+        ['add a lamp in the corner', p('lamp', 'in the corner', 'floor')],
+        ['a mug on the counter', p('mug', 'on the counter', 'surface')],
+        ['add a table to the interior with a cow', p('wooden table with black and white cow-spot print', 'the interior | add a table to the interior with a cow', 'floor')],
+      ].map(([text, r]) => ({ text, mount: r.mount, anchor: r.poses[0].anchor, x: +r.poses[0].x.toFixed(2), y: +r.poses[0].y.toFixed(2), z: +r.poses[0].z.toFixed(2), size: r.size }))
+    })
+    const want = [['wall', 'wall'], ['wall', 'wall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
+    check('each line gets its expected mount and anchor (a TV the model put on the floor goes on the wall)', poses.every((p, i) => p.mount === want[i][0] && p.anchor === want[i][1]), poses)
+    const distinct = new Set(poses.filter((p) => p.anchor !== 'wall').map((p) => `${p.x},${p.y},${p.z}`))
+    check('distinct anchors give distinct poses', distinct.size === poses.filter((p) => p.anchor !== 'wall').length, poses)
+    const [tv, pic, lantern, cow, plant] = poses
+    check('heights by mount: TV and picture up the wall, the lantern hanging, the cow on the table top, the plant on the floor', tv.y > 0.6 && tv.size[2] < tv.size[1] && pic.y > 1 && lantern.y > 1.5 && Math.abs(cow.y - 0.76) < 0.01 && plant.y === 0, poses)
+    const stacked = await page.evaluate(() => {
+      const p = window.village.talk.placeFor
+      const cow = p('cow', 'on the table', 'surface').poses[0]
+      return { cow, second: p('cow', 'on the table', 'surface', { taken: [cow] }).poses[0], tv: p('65 inch TV', 'on a wall', 'floor', { taken: [cow] }).poses[0] }
+    })
+    check('a second piece on the same anchor slides clear of the first, and a TV never lands on the cow', Math.hypot(stacked.second.x - stacked.cow.x, stacked.second.z - stacked.cow.z) > 0.25 && stacked.tv.mount === 'wall' && Math.hypot(stacked.tv.x - stacked.cow.x, stacked.tv.z - stacked.cow.z) > 0.5, stacked)
 
     // The parcel is there again after a reload: the project is read back from the host.
     await open(page, '?talk=npc&input=held&q=low')

@@ -9,6 +9,9 @@ import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
+import { mayRoute } from '../talk/route-check'
+import { placeFor } from '../talk/place'
+import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
 
@@ -25,8 +28,13 @@ const SLIP_ALWAYS = params.get('slip') === 'always'
  * ?input=slip for the paper slip that shows only during a talk. Lines to your own villager are routed by it.
  */
 const INPUT: Variant | null = inputVariant(params)
-/** ?route=separate: route a line with its own model call first, then answer (two calls). By default one call answers or routes. */
-const ROUTE_SEPARATE = params.get('route') === 'separate'
+/**
+ * Which path a line to your own villager takes (#42). By default a trusted check on the page
+ * (route-check.ts) sends lines that may change the room to the router and plain chat straight to
+ * the villager (one call). ?route=separate routes every line first; ?route=reply asks the villager
+ * to route in its own reply (one call, unreliable on Haiku: it answered "I can't add furniture").
+ */
+const ROUTE_MODE = params.get('route') === 'separate' ? 'separate' : params.get('route') === 'reply' ? 'reply' : 'check'
 /** After your line at the table, the villagers carry it for at most this many turns, then wait for you. */
 const MAX_ROUND = 4
 /** A reply that is only a short action in parentheses: a pass, shown as a nod, not words. */
@@ -51,7 +59,7 @@ declare module 'cordis' {
     /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
     'village/said-stop'(stop: { villager: string }): void
     /** Open the journal, at a villager's pages or a section (the always-on input, #42). */
-    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' }): void
+    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' | 'sketches' }): void
   }
 }
 
@@ -760,12 +768,12 @@ export default {
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
-    const ask = (m: Member, text: string, context?: string, routing?: Routing): Speech => {
+    const ask = (m: Member, text: string, context?: string, routing?: Routing, sketch?: SketchRef): Speech => {
       const speech: Speech = { text: '', done: false, asked: performance.now() }
       void sayTo(m.person, text, (t) => {
         speech.first ??= performance.now()
         speech.text += t
-      }, context, routing).then((said) => {
+      }, context, routing, sketch).then((said) => {
         if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true
@@ -1240,6 +1248,7 @@ export default {
       }
       placeCards(dt)
       input?.frame(dt, t)
+      sketch?.frame(dt, t)
       furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
@@ -1250,16 +1259,35 @@ export default {
     // ── The always-on input (#42): routed by your own villager ───────────────
     let routing = false
     /** Each line your own villager routed: the route, ms from Enter to the decision, and how many model calls it took. */
-    const routes: { text: string; route: string; ms: number; calls: number; models?: string[]; costUsd?: number | null }[] = []
-    /** A short line from a villager in the room, which folds away a little after it has been read. */
+    const routes: { text: string; route: string; /** chat (the page's check said plain chat), router, or reply (?route=reply). */ path: string; ms: number; calls: number; models?: string[]; costUsd?: number | null }[] = []
+    /**
+     * A short line from a villager in the room, which folds away once it has been read. Lines
+     * queue: each stays up long enough to read before the next one replaces it, so a route's
+     * line, a note and a failure never flash past one another.
+     */
+    let quips = Promise.resolve()
+    /** When each quip went up, for the checks. */
+    const quipLog: { text: string; at: number }[] = []
+    const wait = (seconds: number) => new Promise<void>((r) => setTimeout(r, seconds * 1000))
+    let quipCount = 0
     const quip = (m: Member, text: string) => {
-      speak(m, text)
-      voice.textContent = `${m.name}: ${text}`
-      void (async () => {
+      let mine = 0
+      const shown = quips.then(async () => {
+        mine = ++quipCount
+        quipLog.push({ text, at: Math.round(performance.now()) })
+        speak(m, text)
+        voice.textContent = `${m.name}: ${text}`
         while (showing.get(m) && m.card.text === text && !m.card.finished) await frame()
-        await pause(3.5)
-        if (showing.get(m) && m.card.text === text && mode === 'room') hide(m)
-      })()
+        // About a third of a second a word, and never under three seconds.
+        // Wall-clock time, since reading takes real seconds whatever the frame rate.
+        await wait(Math.max(3, 1 + text.split(/\s+/).length * 0.3))
+      })
+      quips = shown.then(() => {}, () => {})
+      void shown.then(async () => {
+        await wait(1.5)
+        // Only if nothing has been said since: the same words said again keep their own time.
+        if (showing.get(m) && m.card.text === text && quipCount === mine && mode === 'room') hide(m)
+      }, () => {})
     }
     const restoreLine = (text: string) => {
       if (INPUT) {
@@ -1295,8 +1323,36 @@ export default {
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
       emit: ctx.emit.bind(ctx),
+      enter: (): boolean => sketch?.enter() ?? false,
+    }) : null
+    // ── Sketching on the held notepad (#42, src/talk/sketch.ts) ──────────────
+    /** Whom the pad is addressed to, as a villager (the table counts as the first seated). */
+    const padTo = () => (mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] ?? primary() : primary())
+    const sketch: Sketcher | null = INPUT === 'held' && input && furnish ? sketcher(stage, input, furnish, {
+      person: primary().person,
+      maker: primary().name,
+      to: () => {
+        const m = padTo()
+        return { person: m.person, name: m.name, colour: m.colour }
+      },
+      // A drawing goes with no route: nothing drawn on it can choose who hears what.
+      give: async (person, text, ref) => {
+        const m = cast.find((c) => c.person === person)
+        if (!m || pending || routing) return false
+        if (!(mode === 'talk' && partner === m)) choose(m, false)
+        pending = true
+        try {
+          return await perform(m, ask(m, text, undefined, undefined, ref), text)
+        } finally {
+          pending = false
+        }
+      },
+      figure: (person) => cast.find((c) => c.person === person)?.v.fig.root ?? null,
+      say: (text) => quip(primary(), text),
+      blocked: () => entries.active === 'notebook',
     }) : null
     ctx.effect(() => () => {
+      sketch?.dispose()
       input?.dispose()
       furnish?.dispose()
     }, 'talk always-on input')
@@ -1320,12 +1376,17 @@ export default {
       const elsewhere = (mode === 'talk' && partner && partner !== me) || mode === 'table'
       if (mode === 'talk' && partner && SIT.test(text)) return invite(partner)
       if (elsewhere || (FAREWELL.test(text) && text.length <= 40 && mode !== 'room')) return send(text)
+      const villagers = cast.map((m) => ({ id: m.person, name: m.name, role: m.role }))
+      // Plain chat: one call, straight to your villager. Only the router acts on the room.
+      if (ROUTE_MODE === 'check' && !mayRoute({ text, others: cast.filter((m) => m !== me).map((m) => m.name) })) {
+        routes.push({ text, route: 'answer', path: 'chat', ms: 0, calls: 1 })
+        return send(text)
+      }
       const guess = furnish!.hint(text, t0)
       routing = true
       routingText = text
       me.v.thinking = true
-      const villagers = cast.map((m) => ({ id: m.person, name: m.name, role: m.role }))
-      if (!ROUTE_SEPARATE) {
+      if (ROUTE_MODE === 'reply') {
         let routed: Routed | null = null
         const speech = ask(me, text, undefined, { route: { primary: me.name, villagers }, onRoute: (r) => (routed = r) })
         // The first words, a route or the end decide.
@@ -1335,15 +1396,15 @@ export default {
         const ms = Math.round(performance.now() - t0)
         if (routed) {
           me.v.thinking = false
-          routes.push({ text, route: (routed as Routed).route, ms, calls: 1 })
+          routes.push({ text, route: (routed as Routed).route, path: 'reply', ms, calls: 1 })
           return act(routed, text, t0, guess)
         }
         if (speech.away) {
           me.v.thinking = false
-          routes.push({ text, route: `failed (${speech.away})`, ms, calls: 1 })
+          routes.push({ text, route: `failed (${speech.away})`, path: 'reply', ms, calls: 1 })
           return didNotRoute(text, guess, speech.away)
         }
-        routes.push({ text, route: 'answer', ms, calls: 1 })
+        routes.push({ text, route: 'answer', path: 'reply', ms, calls: 1 })
         furnish!.dismiss(guess)
         return send(text, speech)
       }
@@ -1351,7 +1412,7 @@ export default {
       me.v.thinking = false
       routing = false
       routingText = ''
-      routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, ms: Math.round(r.ms), calls: r.ok && r.routed.route === 'answer' ? 2 : 1, ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
+      routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, path: 'router', ms: Math.round(r.ms), calls: r.ok && r.routed.route === 'answer' ? 2 : 1, ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
       if (!r.ok) return didNotRoute(text, guess, r.why)
       return act(r.routed, text, t0, guess)
     }
@@ -1362,7 +1423,7 @@ export default {
       furnish!.dismiss(guess)
       keep(me.person, text)
       restoreLine(text)
-      quip(me, why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+      quip(me, why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
     }
 
     /** What a route does in the room. The model's route is data: it never chooses who hears the person's words. */
@@ -1417,12 +1478,18 @@ export default {
           }])),
           lit: seated.filter((m) => m.tag.classList.contains('lit')).map((m) => m.person),
           focused: view.focused,
-          input: input ? { ...input.state(), routing, routes: routes.slice(), furnish: furnish!.state(), journalRect: input.journalRect(), padRect: input.padRect() } : null,
+          input: input ? { ...input.state(), routing, routes: routes.slice(), quips: quipLog.slice(), furnish: furnish!.state(), journalRect: input.journalRect(), padRect: input.padRect() } : null,
+          sketch: sketch?.state() ?? null,
           round: roundLog.map((r) => ({ ...r })),
         }),
         /** For the checks: what "here" and "that" point at, as a click on the room would set it. */
         pickAt: (x: number, y: number, z: number, name?: string) => furnish?.pickAt(x, y, z, name),
+        /** The trusted first placement (place.ts), for the checks and for build mode. */
+        placeFor,
+        mayRoute,
         keep: () => furnish?.keep(),
+        /** Sketching (#42): the page's tools, and where a page point is on screen, for the checks. */
+        sketch: sketch ? { open: sketch.open, undo: sketch.undo, clear: sketch.clear, tool: sketch.setTool, make: sketch.make, give: sketch.give, at: sketch.screenAt } : null,
         undo: () => furnish?.undo(),
         again: () => furnish?.again(),
         notify: (person: string) => {

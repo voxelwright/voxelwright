@@ -5,11 +5,13 @@
 // is checked field by field here, and the maker's module text is stored and
 // returned, never imported or run by the host (the home runs it in its prop
 // sandbox). `stub` versions stand in for both in checks.
-import { query, type SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKSystemMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { initProblem } from './villager-agent.ts'
 import { allowedEnv } from './proc.ts'
 
 export const ROUTES = ['talk', 'answer', 'furnish', 'project', 'journal'] as const
+export const MOUNTS = ['floor', 'surface', 'wall', 'ceiling'] as const
+export type Mount = (typeof MOUNTS)[number]
 export type RouteName = (typeof ROUTES)[number]
 
 /** What the person meant, checked. Every field but `route` is optional and plain. */
@@ -29,6 +31,8 @@ export interface Routed {
   count?: number
   /** furnish: rough size in metres, width, height, depth. */
   size?: [number, number, number]
+  /** furnish: how it is mounted, a proposal the home checks against the words: floor, surface, wall or ceiling. */
+  mount?: Mount
   /** furnish: a thing in the room it replaces ("table"). */
   replace?: string
   /** furnish: a copy of what was last pointed at, with no new making. */
@@ -92,6 +96,7 @@ export function checkRouted(raw: string, villagers: string[], library: string[])
     if (typeof v.count === 'number' && Number.isFinite(v.count)) out.count = Math.max(1, Math.min(6, Math.round(v.count)))
     if (Array.isArray(v.size) && v.size.length === 3 && v.size.every((n) => typeof n === 'number' && Number.isFinite(n)))
       out.size = v.size.map((n: number) => Math.max(0.05, Math.min(3, n))) as [number, number, number]
+    if ((MOUNTS as readonly unknown[]).includes(v.mount)) out.mount = v.mount as Mount
     const replace = short(v.replace, 40)
     if (replace) out.replace = replace
     if (v.copy === true) out.copy = true
@@ -106,7 +111,7 @@ export function checkRouted(raw: string, villagers: string[], library: string[])
 function routeRules(ask: Omit<RouteAsk, 'text' | 'signal'>): string[] {
   return [
     '- "talk": they want to talk with another villager. Give "to" (an id below) and, if the line carries something to pass on, "message".',
-    '- "furnish": a quick change to the room: add, place, replace or copy furniture or decor that can be made at once as a simple static object. Give "what" (a few words: kind, material, colour), "where" as they said it (or "here"), "count", "size" [width, height, depth] in metres, "replace" if it replaces something in the room (e.g. "table"), "copy": true for "another one like that", "library" if it names a saved item below.',
+    '- "furnish": a quick change to the room: add, place, replace or copy furniture or decor that can be made at once as a simple static object. Give "what" (a few words: kind, material, colour), "where" as they said it (or "here"), "mount": "floor" (stands on the floor), "surface" (sits on a table, counter or sill), "wall" (pictures, shelves, a TV, a clock) or "ceiling" (lanterns, mobiles, pendant lamps), "count", "size" [width, height, depth] in metres, "replace" if it replaces something in the room (e.g. "table"), "copy": true for "another one like that", "library" if it names a saved item below.',
     '- "project": something too big, interactive or working to make at once (a playable machine, a whole room makeover, anything that moves or does something). Give "what" and "where".',
     '- "journal": they want to see conversations or tasks. Give "to" if they name a villager and "section": "talk" or "tasks".',
     `Always add "say": one short warm line from you, ${ask.primary}, out loud (under 15 words), except for "talk" where it may be omitted. Never claim something is done.`,
@@ -209,13 +214,15 @@ export function build(api) {
 
 Answer with the module only, in one \`\`\`js fenced block.`
 
-/** One tool-less model call. Text out, timings and cost alongside. */
-async function oneShot(model: string, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<{ text: string } & Call> {
+/** One tool-less model call. Text out, timings and cost alongside. A prompt of content blocks (an image, #42 sketch.ts) goes as one streamed user message. */
+export async function oneShot(model: string, systemPrompt: string, prompt: string | Exclude<SDKUserMessage['message']['content'], string>, signal: AbortSignal, effort: 'low' | 'medium' | 'high' = 'low'): Promise<{ text: string } & Call> {
   const abortController = new AbortController()
   signal.addEventListener('abort', () => abortController.abort(), { once: true })
   let init: SDKSystemMessage | undefined
   const stream = query({
-    prompt,
+    prompt: typeof prompt === 'string' ? prompt : (async function* () {
+      yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null } as SDKUserMessage
+    })(),
     options: {
       abortController,
       model,
@@ -228,7 +235,7 @@ async function oneShot(model: string, systemPrompt: string, prompt: string, sign
       permissionMode: 'dontAsk',
       persistSession: false,
       maxTurns: 1,
-      effort: 'low',
+      effort,
     },
   })
   try {
@@ -289,10 +296,10 @@ export function stubRoute(ask: Pick<RouteAsk, 'text' | 'primary' | 'villagers' |
   if (t.includes('[stub-route-redirect]')) return '{"route": "talk", "to": "sam", "message": "a paraphrase the person never wrote"}'
   if (/journal|notebook|tasks/.test(t)) routed = { route: 'journal', to: named?.id, section: /tasks/.test(t) ? 'tasks' : 'talk', say: 'Here are your pages.' }
   else if (/pinball|playable|machine/.test(t)) routed = { route: 'project', what: t.replace(/^.*?(a |an )/, '').slice(0, 60), where: /living room/.test(t) ? 'living room' : 'here', say: "That's a proper project. I'll start on it." }
-  else if (/^(add|put|place|replace|another|wallpaper)/.test(t)) {
+  else if (/^(add|put|place|replace|another|wallpaper|hang)/.test(t) || /^(a|an|some) [a-z ]+ (on|by|near|in|above|from) the /.test(t)) {
     const size = NOUNS.find(([re]) => re.test(t))?.[1]
     const saved = ask.library.find((l) => t.includes(l.name.toLowerCase()))
-    routed = { route: 'furnish', what: t.replace(/^(add|put|place|replace the \w+ with)\s+(a |an |another |the )?(couple of |two )?/, '').replace(/\s+(around|by|in|on|here).*$/, '') || 'thing', where: /around the table/.test(t) ? 'around the table' : /window/.test(t) ? 'by the window' : /corner/.test(t) ? 'in the corner' : /counter/.test(t) ? 'on the counter' : 'here', count: /couple|two/.test(t) ? 2 : 1, size, replace: /^replace the table/.test(t) ? 'table' : undefined, copy: /like that|another one/.test(t) || undefined, library: saved?.id, say: 'Ooh, let me see.' }
+    routed = { route: 'furnish', what: t.replace(/^(add|put|place|replace the \w+ with)\s+(a |an |another |the )?(couple of |two )?/, '').replace(/\s+(around|by|in|on|here).*$/, '') || 'thing', where: /\b(?:around|by|near|in|on|at|above|from) (?:the |a )?[a-z' ]+$/.exec(t)?.[0] ?? 'here', count: /couple|two/.test(t) ? 2 : 1, size, replace: /^replace the table/.test(t) ? 'table' : undefined, mount: /\bwall\b|\b(tv|picture|painting|clock)\b/.test(t) ? 'wall' : /ceiling|lantern/.test(t) ? 'ceiling' : /\bon the (table|counter|sill)\b/.test(t) ? 'surface' : 'floor', copy: /like that|another one/.test(t) || undefined, library: saved?.id, say: 'Ooh, let me see.' }
   } else if (named && /chat|talk|ask|tell/.test(t)) routed = { route: 'talk', to: named.id }
   else routed = { route: 'answer' }
   return JSON.stringify(routed)
