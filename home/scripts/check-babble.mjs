@@ -165,6 +165,17 @@ function wav(x, path) {
 
 // ── offline renders (page side) ─────────────────────────────────────────────
 const context = await browser.newContext()
+// Counts the AudioContexts a page makes, so the checks can tell one shared context from several.
+await context.addInitScript(() => {
+  const Native = window.AudioContext
+  window.audioContexts = 0
+  window.AudioContext = class extends Native {
+    constructor(...args) {
+      super(...args)
+      window.audioContexts++
+    }
+  }
+})
 const page = await context.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
@@ -304,22 +315,36 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
   await live.goto(`${base}?talk=npc&plugins=babble`)
   await live.evaluate(() => window.village.ready(5000))
   await live.waitForTimeout(150)
-  const before = await live.evaluate(() => ({ audio: window.village.babble?.audio ?? null, toggle: Boolean(document.querySelector('.babble-toggle')) }))
-  check('No sound until a gesture: no AudioContext before the first touch', before.audio === null && before.toggle, JSON.stringify(before))
-  await live.mouse.click(400, 300)
-  const state = await live.evaluate(async () => {
-    await new Promise((r) => setTimeout(r, 100))
-    const a = window.village.babble.audio
-    return { state: a.state, base: a.baseLatency, output: a.outputLatency, sampleRate: a.sampleRate }
+  // The rule is no sound before a gesture, not no context: the context is made at load so its
+  // device start-up (0.4 to 1.7 s on the main thread when made late) is not paid by a key press.
+  // A suspended context renders nothing: its audio clock stands still, and a tap on its output
+  // sees no blocks, so that is the proof of silence.
+  const idleAt = (p) => p.evaluate(async () => {
+    const a = window.village.babble?.audio ?? null
+    const t0 = a?.currentTime
+    await new Promise((r) => setTimeout(r, 300))
+    return { made: Boolean(a), state: a?.state, clockMoved: a ? a.currentTime - t0 : null, atZero: a?.currentTime === 0, contexts: window.audioContexts, toggle: Boolean(document.querySelector('.babble-toggle')) }
   })
-  check('The first touch starts the AudioContext', state.state === 'running', JSON.stringify(state))
+  const before = await idleAt(live)
+  check('No sound before a gesture: one context exists but is suspended, its audio clock stands still at 0', before.made && before.state === 'suspended' && before.clockMoved === 0 && before.atZero && before.contexts === 1 && before.toggle, JSON.stringify(before))
+  const quiet = await live.evaluate(() => {
+    const babbler = window.village.babble.babbler
+    window.village.kernel.root.emit('village/said', { villager: 'Moss', word: 'hello', index: 0, last: true })
+    return { graph: Boolean(babbler), sources: babbler.active }
+  })
+  check('A word said before a gesture makes no sound: nothing is scheduled', quiet.graph && quiet.sources === 0, JSON.stringify(quiet))
+  await live.mouse.click(400, 300)
+  const running = (p) => p.waitForFunction(() => window.village.babble.audio.state === 'running', null, { timeout: 5000 }).then(() => 'running', () => 'never ran')
+  const first = await running(live)
+  const detail = await live.evaluate(() => {
+    const a = window.village.babble.audio
+    return { base: a.baseLatency, output: a.outputLatency, sampleRate: a.sampleRate, contexts: window.audioContexts }
+  })
+  check('The first touch resumes the one AudioContext', first === 'running' && detail.contexts === 1, JSON.stringify({ first, ...detail }))
   // A context that is not running (a first touch that did not count, or one suspended since) resumes on the next touch.
   await live.evaluate(() => window.village.babble.audio.suspend())
   await live.mouse.click(400, 300)
-  const resumed = await live.evaluate(async () => {
-    await new Promise((r) => setTimeout(r, 100))
-    return window.village.babble.audio.state
-  })
+  const resumed = await running(live)
   check('A later touch resumes a suspended AudioContext', resumed === 'running', resumed)
   await tap(live)
 

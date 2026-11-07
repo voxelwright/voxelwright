@@ -1,9 +1,11 @@
 import type { Context } from 'cordis'
 import { Bed } from '../voice/bed'
+import { acquireAudio, type SharedAudio } from '../voice/context'
 import { ALL_MUTED, MUSIC_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 
 // #42: a quiet looped bed under the villagers' voices. On with ?talk=npc; ?music=off
-// turns it off. It starts on the first touch or key press, like the voices, fades in over
+// turns it off. It starts on the first touch or key press, like the voices (on the one
+// AudioContext they share, voice/context.ts), fades in over
 // two seconds, drops 6 dB while a villager speaks and comes back 0.6 s after the last word.
 // `M` and the felt speaker button (babble.ts) mute everything; Shift+M or the note beside
 // the speaker mutes the music alone. The recording is CC BY 4.0: public/audio/CREDITS.md.
@@ -59,6 +61,7 @@ export default {
   name: 'music',
   apply(ctx: Context) {
     if (!ON) return
+    let shared: SharedAudio | null = null
     let audio: AudioContext | null = null
     let bed: Bed | null = null
     let allMuted = storedFlag(ALL_MUTED)
@@ -119,16 +122,7 @@ export default {
         console.warn('music: could not load the loop', error)
       }
     }
-    // Same rule as the voices: nothing until the person touches the page, and every later
-    // touch resumes a context that is not running yet, or was suspended since.
-    const start = () => {
-      if (audio?.state === 'running' || document.hidden) return
-      if (!audio) {
-        audio = new AudioContext({ latencyHint: 'playback' })
-        void load(audio)
-      }
-      void audio.resume()
-    }
+    // The context exists from page load but silent; the loop is fetched on the first gesture.
     const onKey = (e: KeyboardEvent) => {
       if (isMuteKey(e, true)) setMusicMuted(!musicMuted)
       else if (!VOICES && isMuteKey(e, false)) {
@@ -137,39 +131,34 @@ export default {
         apply()
       }
     }
-    // A background tab plays nothing: the context sleeps and wakes with the page.
-    const onVisibility = () => {
-      if (!audio) return
-      if (document.hidden) void audio.suspend()
-      else void audio.resume()
-    }
     const close = () => {
       clearTimeout(release)
       bed?.dispose()
       bed = null
-      const a = audio
-      audio = null
-      if (a && a.state !== 'closed') void a.close()
     }
 
     ctx.effect(() => {
       document.head.append(style)
       document.body.append(wrap)
       addEventListener('keydown', onKey)
-      addEventListener('pagehide', close)
-      document.addEventListener('visibilitychange', onVisibility)
-      addEventListener('pointerdown', start, true)
-      addEventListener('keydown', start, true)
-      if (navigator.userActivation?.hasBeenActive) start()
+      shared = acquireAudio({
+        ready: (a) => {
+          audio = a
+        },
+        gesture: (a) => void load(a),
+        closed: () => {
+          close()
+          audio = null
+        },
+      })
       return () => {
-        removeEventListener('pointerdown', start, true)
-        removeEventListener('keydown', start, true)
         removeEventListener('keydown', onKey)
-        removeEventListener('pagehide', close)
-        document.removeEventListener('visibilitychange', onVisibility)
         wrap.remove()
         style.remove()
         close()
+        audio = null
+        shared?.release()
+        shared = null
       }
     }, 'music audio and toggle')
 

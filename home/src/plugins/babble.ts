@@ -1,5 +1,6 @@
 import type { Context } from 'cordis'
 import { Babbler, type Said } from '../voice/engine'
+import { acquireAudio, type SharedAudio } from '../voice/context'
 import { voiceKey } from '../voice/profiles'
 import { runDemo } from '../voice/demo'
 import { ALL_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
@@ -53,7 +54,7 @@ export default {
   name: 'babble',
   apply(ctx: Context) {
     if (!ON) return
-    let audio: AudioContext | null = null
+    let shared: SharedAudio | null = null
     let babbler: Babbler | null = null
     let muted = storedFlag(ALL_MUTED)
 
@@ -78,52 +79,41 @@ export default {
     show()
     button.addEventListener('click', () => setMuted(!muted))
 
-    // Browsers only let a page make sound after the person has touched it, and not
-    // every touch counts (a tap's pointerdown or Escape does not), so every gesture
-    // resumes a context that is not running yet, or was suspended since.
-    const start = () => {
-      if (audio?.state === 'running') return
-      if (!audio) {
-        audio = new AudioContext({ latencyHint: 'interactive' })
-        babbler = new Babbler(audio, audio.destination, { muted })
-      }
-      void audio.resume()
-    }
+    // The context is shared with the music (voice/context.ts): made at load, suspended, and
+    // resumed by the first gesture. The voices only build their graph on it.
     const onKey = (e: KeyboardEvent) => {
       if (isMuteKey(e, false)) setMuted(!muted)
     }
     const onVisibility = () => document.hidden && babbler?.stop()
-    const close = () => {
+    const drop = () => {
       babbler?.dispose()
       babbler = null
-      const a = audio
-      audio = null
-      if (a && a.state !== 'closed') void a.close()
     }
 
     ctx.effect(() => {
       document.head.append(style)
       document.body.append(button)
       addEventListener('keydown', onKey)
-      addEventListener('pagehide', close)
       document.addEventListener('visibilitychange', onVisibility)
-      addEventListener('pointerdown', start, true)
-      addEventListener('keydown', start, true)
-      if (navigator.userActivation?.hasBeenActive) start()
+      shared = acquireAudio({
+        ready: (a) => {
+          babbler = new Babbler(a, a.destination, { muted })
+        },
+        closed: drop,
+      })
       return () => {
-        removeEventListener('pointerdown', start, true)
-        removeEventListener('keydown', start, true)
         removeEventListener('keydown', onKey)
-        removeEventListener('pagehide', close)
         document.removeEventListener('visibilitychange', onVisibility)
         button.remove()
         style.remove()
-        close()
+        drop()
+        shared?.release()
+        shared = null
       }
     }, 'babble audio and toggle')
 
     ctx.on('village/said', (e: Said) => {
-      if (!babbler || audio?.state !== 'running' || document.hidden) return
+      if (!babbler || shared?.context?.state !== 'running' || document.hidden) return
       babbler.said(e)
     })
     // A stop for someone who is not speaking leaves the speaker alone.
@@ -134,7 +124,7 @@ export default {
     if (import.meta.env.DEV) {
       const api: BabbleApi = {
         get babbler() { return babbler },
-        get audio() { return audio },
+        get audio() { return shared?.context ?? null },
         get muted() { return muted },
         setMuted,
       }

@@ -53,6 +53,26 @@ Peer dependency `zod` 4.6.7. The source is the installed `sdk.d.ts` and
   call appears in `modelUsage` even then.
 - The real villager turn is recorded in `home/README.md` (Villager).
 
+## Warm sessions (#42, November 7, 2026, read from `sdk.d.ts` and measured)
+
+- Streaming input: `query({ prompt: asyncIterable<SDKUserMessage> })` keeps one
+  process; push `{ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null }`
+  per line and read until each `result`. An `init` event comes with every
+  turn. `maxTurns` counts per user message (eight turns ran in one process
+  with `maxTurns: 6`).
+- Waiting on `stream.next()` before the first line deadlocks: nothing is
+  emitted until a message arrives. `await q.initializationResult()` starts
+  the process without a line.
+- `thinking: { type: 'disabled' }` removed thinking from Haiku turns without
+  tools, but thinking blocks still came on some turns with the notes tools,
+  and on Sonnet.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in `env` removes the Haiku
+  helper call from `modelUsage`.
+- `prewarm()` and `startup()` exist (alpha) but were not used; a warm
+  streaming query per person was enough.
+- First text, warm Haiku, thinking off: p50 0.41 s against 0.86 s per-turn
+  (`host/test/turn-bench.ts`; full table in `host/README.md`).
+
 ## Known limits
 
 - Every session transcript lands in the operator's `~/.claude/projects/`,

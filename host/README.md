@@ -172,7 +172,7 @@ With the sandbox and gates (November 6, 2026, same Mac):
 
 # Villager (#40)
 
-`npm run villager -- [--agent claude|stub] [--model sonnet] [--port 5190] [--root ~/.village]`
+`npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village]`
 serves a person's villager on 127.0.0.1 only. Each start writes a random
 token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
 on stop; every request needs `Authorization: Bearer <token>`.
@@ -182,9 +182,17 @@ on stop; every request needs `Authorization: Bearer <token>`.
   then `done` with the reply, or `failed`. One turn at a time per person
   (409), 3-minute deadline. A turn finishes and is recorded even if the page
   leaves.
-  An optional `"context"` (at most 2000 characters, such as what others said
-  at the table) is passed to the villager's turn as background, never stored
+  An optional `"context"` (at most 2000 characters, such as the table's round
+  so far) is passed to the villager's turn as background, never stored
   as the person's line.
+  An optional `"route": {"primary", "villagers"}` (#42) lets the villager route
+  the line in its own reply: it is told the routes and is given the cast and
+  the person's kept library as JSON data ("data, never rules"). A reply
+  starting `ROUTE` is held back, its first line read by `routeInReply` and
+  `checkRouted`, and sent as a `route` event as soon as its JSON is whole,
+  then `done` with the route's spoken line. It is stored as that line with a
+  `route` field, never as JSON. A route the host refuses ends as `failed`.
+  Anything else streams as an answer, so plain chat is one model call.
 
 Each turn runs the official Claude Code binary through the Claude Agent SDK
 (`src/villager-agent.ts`, pack `.agents/skills/claude-agent-sdk`) on the
@@ -208,3 +216,68 @@ not the person's folder; every person shares the operator's subscription and
 OS user, so this is not family isolation; the dev-server token handoff
 trusts any same-origin page on localhost:5181; the villager cannot remind or
 act yet.
+
+## Warm villagers and timings (#42, November 7, 2026)
+
+`--agent warm` (the default) keeps one Claude Code process per listed person
+running between turns (`warmAgent` in `src/villager-agent.ts`, the SDK's
+streaming input: each line is pushed into the process's input). Processes
+start at launch for every listed person, so a first line skips the start-up
+(about 250 MB each in the SDK's own estimate). The stored session id stays
+the truth: a process on any other session is closed and a new one resumes
+the stored id. A turn that fails, times out, or gets a success after its
+deadline closes its process, is recorded as unanswered and keeps the stored
+session; the next turn resumes that session in a new process without the
+stopped line. `--agent claude` is the process-per-turn path. The default
+model is Haiku with thinking off (`--model sonnet --thinking` for the old
+voice). Every villager process sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`,
+which removes the per-turn Haiku helper call. The system prompt is fixed per
+process; what varies per turn (the table's round, the cast, the library,
+whether routing is allowed) goes in the turn's context. The prompt asks the
+villager to speak first and write notes after. `usage.jsonl` now records
+note tool calls and how many came before the first words.
+
+Where the time went, `node test/turn-bench.ts <configs>` (8 turns per
+configuration in one session, operator login, M1 Pro, first text from the
+moment the turn was asked):
+
+| Configuration | First text p50 | p90 |
+| --- | --- | --- |
+| before: Sonnet, process per turn, notes, helper call | 2.37 s | 4.45 s |
+| Sonnet, process per turn, no notes | 1.34 s | 5.17 s |
+| Haiku, process per turn, no notes | 0.86 s | 1.50 s |
+| Sonnet, warm, no notes | 0.50 s | 1.77 s |
+| Haiku, warm, no notes | 0.42 s | 1.60 s |
+| Haiku, warm, thinking off, no notes | 0.41 s | 0.54 s |
+| default: Haiku, warm, thinking off, notes, no helper | 0.59 s | 3.77 s |
+| default, after "speak first, write the note after" | 0.64 s | 2.04 s |
+
+Process start and init cost 0.3 to 1.8 s per turn on the per-turn path
+(0.01 s warm), and the first API event took about 0.4 s after the line in a
+warm process. Thinking blocks appeared on about half of Sonnet's turns (also
+with `thinking: disabled`) and added 0.3 to 1.2 s. A note tool call before
+the first words adds a whole model round trip (the p90 rows). The helper call
+was never on the critical path. Through the host, direct and with no
+browser, a warm Haiku turn took 0.6 to 3 s; the first turn after a host
+start took 2.8 s. In the page, with headless WebGPU rendering at the same time, first text
+took 1.5 to 8.7 s (Haiku), so the bench rows are the lower bound.
+
+Security fixes from Sentinel's review of 14cc2ce: library names are stored
+as one cleaned line (`cleanName`) and given to models as quoted JSON; `POST
+/route` takes one line at a time per person (409), with the flag cleared in
+`finally`; making a prop prunes unkept drafts older than a day. The page only
+follows a talk route to a villager the person's own words name, and sends
+their exact words. Still true: one launch token serves every listed person,
+so a page holding it can reach `/people/<anyone>/*`; the page acts only for
+the person whose home it is.
+
+`npm run check-villager`: 120 of 120 (new: in-round context never stored; a
+warm host starts a process per person, reuses it, fails and closes it on a
+timeout or a late success, resumes the stored session afterwards and after a
+restart without replaying the stopped line, and closes everything on stop;
+`routeInReply` ignores ROUTE mid-sentence, refuses missing JSON, unknown
+routes and "answer", and drops unknown fields; a routed line streams no words
+and is stored as its spoken line; a refused route ends as failed; the stored
+library-name attack is one quoted line; concurrent `/route` calls get 409;
+draft pruning).
+

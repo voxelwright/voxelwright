@@ -5,7 +5,7 @@ description: Synthesized character voices and short UI sounds with the Web Audio
 
 # Web Audio voices
 
-Version 1, November 6, 2026. Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
+Version 2, November 6, 2026 (the shared context and the first-context cost). Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
 samples, no dependencies. Verified on headless Chrome 158 (Playwright 1.65,
 `channel: 'chrome'`) on macOS; Safari and Firefox are not verified.
 
@@ -16,7 +16,11 @@ Primary sources:
 - MDN: https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API,
   `AudioParam.setValueCurveAtTime`, `BaseAudioContext.createPeriodicWave`,
   `OfflineAudioContext.startRendering`, and the autoplay guide
-  https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay.
+  https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay,
+  `AudioContext.setSinkId` and the constructor's `sinkId` option, and
+  https://developer.mozilla.org/en-US/docs/Web/Security/User_activation.
+- Chrome's autoplay policy for Web Audio: https://developer.chrome.com/blog/autoplay.
+- HTML spec, user activation: https://html.spec.whatwg.org/multipage/interaction.html.
 - Vowel formants: Peterson and Barney (1952) and Hillenbrand et al. (1995)
   averages, rounded and scaled per voice.
 
@@ -68,11 +72,51 @@ for stop and inspection.
 0.89 = -1 dBFS) is stateless. A `DynamicsCompressorNode` applies make-up gain
 and an adaptive release, so a word's sound depended on the words before it.
 
-**Autoplay.** Create the `AudioContext` inside the first `pointerdown` or
-`keydown` (capture phase), or at load when `navigator.userActivation.hasBeenActive`
-is already true, and call `resume()`. Keep the listeners: not every gesture
-grants activation (a touch's `pointerdown`, Escape), so each later gesture
-resumes a context that is not `running`. Close it on unload and `pagehide`.
+**One context, made at load, resumed by a gesture.** The rule is "no sound before a
+gesture", not "no context". Browsers let a page create an `AudioContext` any time;
+only starting sound needs user activation. `home/src/voice/context.ts` owns the one
+context the voices and the music share (`acquireAudio()` / `release()`, closed when the
+last user leaves or on `pagehide`):
+
+1. The page's first context opens the audio device and **blocks the main thread**: 0.6 to
+   0.9 s on a blank page, 0.4 to 1.7 s in the real scene (Chrome 158, M1 Pro, five runs),
+   whenever it runs. A second context takes 3 to 47 ms. Creating it in `requestIdleCallback`
+   only moves the stall: one run froze the finished scene for 1.7 s. In a cold browser the
+   old create-on-first-key-press path measured one 3.1 s long task.
+2. In Chrome, make it with `new AudioContext({ sinkId: { type: 'none' } })` (0.5 to 1.3 ms),
+   `suspend()` it, and attach the real device with `await ctx.setSinkId('')`. That call is
+   asynchronous: 0.6 to 5.9 s to finish (under load), and no main-thread gap over 13 ms
+   while it did. The context stays `suspended` through the swap.
+3. Feature-detect with `'setSinkId' in AudioContext.prototype`. MDN lists it as limited
+   availability and experimental (Chrome and Edge); where it is missing, make the context
+   when the page has loaded and the browser is idle, or on the first gesture if idle never
+   comes. That path still pays the stall (not measured outside Chrome).
+4. Headless Chrome starts a context `running`, not `suspended`, so `suspend()` it right
+   after creating it unless a gesture has happened.
+5. On a gesture (`pointerdown`, `pointerup`, `keydown`, capture phase) call `resume()` and
+   nothing else. It takes under 1 ms on the main thread. A `resume()` made while the device
+   is still opening settles when it is open (the context runs on the silent sink, pauses
+   about 0.2 s during the swap, then recovers by itself). Keep every later gesture resuming
+   a context that is not `running`: a touch's `pointerdown` and Escape grant no activation.
+6. `visibilitychange`: `suspend()` when hidden, `resume()` when visible again (only after a
+   gesture has happened).
+7. One `latencyHint`: `'interactive'` (voices speak within 20 ms of their word; the music
+   does not mind).
+
+What each browser requires to `resume()` (primary sources, not all verified by us):
+- Chrome (71 and later): a context created before the document has a user gesture starts
+  `suspended`; call `resume()` after a gesture (Chrome blog). We did not prove transient
+  versus sticky activation: headless Chrome 158 ignores the policy and starts contexts
+  `running`.
+- Firefox: `media.autoplay.block-webaudio` (default true) lets a context play only after
+  sticky activation (MDN autoplay guide). Not tested by us.
+- Safari / WebKit: no primary Web Audio source found. WebKit's published policy post covers
+  `<video>`; the Web Audio rule, `resume()` from inside a user gesture (`touchend` on iOS),
+  is the common report and is not verified. The gesture listeners call `resume()`
+  synchronously inside the event for that reason, and include `pointerup` for touch.
+- The activation-triggering events (HTML spec, MDN User activation): trusted `keydown`
+  (not Esc), `mousedown`, `pointerdown` for a mouse, `pointerup` for touch and pen,
+  `touchend`. Sticky activation lasts for the session; transient lasts a few seconds.
 
 **Testing without ears.** Render with `OfflineAudioContext(1, n, 48000)` from
 the page (Vite serves `/src/...ts` to `import()`), return samples as base64
@@ -92,9 +136,14 @@ in black until the sound starts, find the cover's end with ffmpeg
 
 ## Limits
 
-- Headless Chrome 158 starts an `AudioContext` without a gesture, so a
-  headless test cannot prove the browser's autoplay block; it can only prove
-  the plugin creates no context before one.
+- Headless Chrome 158 starts an `AudioContext` running without a gesture (a flag
+  `--autoplay-policy=document-user-activation-required` did not change that), so a
+  headless test cannot prove the browser's autoplay block. It can prove the context is
+  suspended with its audio clock at 0 before a gesture, so nothing is rendered.
+- A cold-start stall only shows in a browser that has not made a context yet:
+  in one that has, the old code also passes. Run a stall check in its own browser.
+- The real device after `setSinkId('')` was verified only for state and clock (running,
+  advancing), not heard.
 - `outputLatency` was 0 to 32 ms headless; real devices add their own.
   Measured latencies are on the audio clock, before the device.
 - Renders are identical within -138 dBFS across contexts, not bit-exact.
@@ -102,7 +151,7 @@ in black until the sound starts, find the cover's end with ffmpeg
   (13 to 16 nodes per syllable). Fine for one speaker; measure before
   letting several voices overlap.
 - Not verified: Safari (`webkitAudioContext` era quirks), Firefox, mobile
-  autoplay, Bluetooth output latency.
+  autoplay, Bluetooth output latency, the first-context cost outside Chrome.
 
 Refresh when Chrome changes autoplay or AudioParam behaviour, when another
 browser becomes a target, or when a probe contradicts a value above.
