@@ -3,6 +3,7 @@
 // server on a throwaway VILLAGE_ROOT, and stops both at the end.
 // Usage: node scripts/check-build-addroom.mjs [--dev=5351] [--host=5352]
 //   --look: screenshots/build/addroom-*.jpg (dollhouse, close and the new doorway seated, 1440x900 and 390x844) and addroom.mp4.
+//   --look --variant=<name>: the outline and built shots only, with &look=<name>, as addroom-outline-<name>.jpg and addroom-built-<name>.jpg.
 //   --agent=claude: add-room lines through the real router (?route=separate, Sonnet),
 //     printing each routed intent, whether it matched, and Enter to outline (or to the question).
 import { spawn, execFileSync } from 'node:child_process'
@@ -17,6 +18,9 @@ const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const agent = opt('agent') ?? 'stub'
 const look = args.includes('--look')
+/** --variant=<name>: a look prototype (?look=<name>), shot to addroom-outline-<name>.jpg and addroom-built-<name>.jpg only. */
+const variant = opt('variant')
+const shot = (name) => join(OUT, variant ? `addroom-${name}-${variant}.jpg` : `addroom-${name}.jpg`)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const OUT = join(homeDir, 'screenshots', 'build')
@@ -213,13 +217,13 @@ try {
     // ── The look: screenshots and a clip ────────────────────────────────────
     const tmp = join(OUT, 'addroom-video-tmp')
     rmSync(tmp, { recursive: true, force: true })
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: tmp, size: { width: 960, height: 600 } } })
-    const { page } = await open('?talk=npc&build=1&q=high', context)
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(variant ? {} : { recordVideo: { dir: tmp, size: { width: 960, height: 600 } } }) })
+    const { page } = await open(`?talk=npc&build=1&q=high${variant ? `&look=${encodeURIComponent(variant)}` : ''}`, context)
     await page.waitForTimeout(1200)
     await say(page, LEFT, 35)
     await until(page, (x) => x.draft, 10_000)
     await page.waitForTimeout(1800)
-    await page.screenshot({ path: join(OUT, 'addroom-outline.jpg'), quality: 88, type: 'jpeg' })
+    await page.screenshot({ path: shot('outline'), quality: 88, type: 'jpeg' })
     let g = await grips(page)
     const d0 = (await state(page)).draft
     await drag(page, g.far, await floorPoint(page, (d0.from + d0.to) / 2, d0.depth - 1), 40)
@@ -239,8 +243,9 @@ try {
     const d2 = (await state(page)).draft
     await drag(page, g.bend, await floorPoint(page, (d2.from + d2.to) / 2, d2.depth - 0.55 + 0.8), 40)
     await page.waitForTimeout(900)
-    await page.screenshot({ path: join(OUT, 'addroom-adjusted.jpg'), quality: 88, type: 'jpeg' })
+    if (!variant) await page.screenshot({ path: join(OUT, 'addroom-adjusted.jpg'), quality: 88, type: 'jpeg' })
     // Close: the wheel zooms the dollhouse in.
+    if (!variant) {
     await page.mouse.move(520, 420)
     for (let i = 0; i < 6; i++) {
       await page.mouse.wheel(0, -240)
@@ -252,11 +257,16 @@ try {
       await page.mouse.wheel(0, 240)
       await page.waitForTimeout(60)
     }
+    }
     await page.waitForTimeout(1200)
     await page.keyboard.press('Enter')
     await page.waitForTimeout(2200)
-    await page.screenshot({ path: join(OUT, 'addroom-built.jpg'), quality: 88, type: 'jpeg' })
+    await page.screenshot({ path: shot('built'), quality: 88, type: 'jpeg' })
     await page.waitForTimeout(800)
+    if (variant) {
+      await context.close()
+      console.log(`shots ${shot('outline')} ${shot('built')}`)
+    } else {
     const video = page.video()
     await context.close()
     const webm = await video.path()
@@ -289,6 +299,7 @@ try {
     await tp.waitForTimeout(2200)
     await tp.screenshot({ path: join(OUT, 'addroom-phone.jpg'), quality: 88, type: 'jpeg' })
     await phone.close()
+    }
   } else {
     // ── Unit checks for the resolver, in the page's own modules ─────────────
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
