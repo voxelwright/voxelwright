@@ -605,6 +605,34 @@ Findings:
 - Build time in the page is noisy (60 ms to 4.7 s with two pages loading at
   once); the code arm includes a cold sandbox start of about 0.4 to 1.3 s.
 
+Look, scored blind from `screenshots/villager-gen/` (lineup, rows, close
+views) by Opus and GPT-6.1 Sol (via T3), 1 to 10, means over the five:
+
+| Arm | Scorer | Belongs | Matches description | Appeal | Row distinct |
+| --- | --- | --- | --- | --- | --- |
+| spec | Opus | 6.8 | 3.2 | 5.2 | 4 |
+| spec | Sol | 8.4 | 4.6 | 7.4 | 6 |
+| code | Opus | 7.0 | 7.2 | 6.4 | 8 |
+| code | Sol | 7.4 | 8.0 | 7.4 | 9 |
+
+Both say the spec arm is one round template, so the tortoise, mouse, heron and
+frog lose their species. The code arm gets species and props right in four of
+five; the bear (scarf across its face) pulls its means down. Sol rates the
+spec arm's finish higher.
+
+Voices, `node scripts/villagers/voices.mjs <voices.json> [base] --wav=<dir>`:
+every voice renders the same line offline with the real `Babbler`, once with
+the model's chosen voice and once with `voiceFromDescription()` in
+`src/voice/gen.ts` (a handmade trait mapping). Generated villagers' voices
+reach the engine through `registerVoice()` in `src/voice/profiles.ts`. Both arms
+pass the directional checks (mouse higher and quicker than tortoise and bear,
+bear darker than mouse, tortoise slowest). Median f0 / centroid, model voices:
+tortoise 106 to 111 Hz / 947 to 1,192 Hz, mouse 440 / 1,924 to 2,010, bear 117 to 127 / 881 to 892,
+heron 144 to 145 / 731 to 817, frog 157 to 333 / 539 to 932. The model crowds the low end
+(three of five under 150 Hz): spec tortoise and bear are 0.9 semitones and
+6% apart, code bear and heron 2.3 semitones and 8%. The mapping spreads
+wider but pins the mouse at the 480 Hz ceiling. check-babble still passes 27 of 27.
+
 ## Measured, kitchen scene (November 6, 2026)
 
 Headless Chrome through Playwright 1.65 (`--enable-unsafe-webgpu
