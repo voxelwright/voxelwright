@@ -1504,21 +1504,36 @@ plan and the view, or into one line your villager says:
   room would run into another room, no stretch fits, the room or side is
   unclear, or the wall is too short.
 
-`src/build/outline.ts` draws the draft at once as a pencil sketch on paper; no
-walls are built. The paper is taped down on a light plot of earth. Walls are
-graphite strokes with close hatching, and a lighter hatched band outside them
-stands for their height. The floor is bare paper with two faint construction
-lines. The door's swing is dashed. Tape measures run along two sides with the
-sizes handwritten. Small wooden pegs stand on the walls they move, with
-pencilled arrows.
+`src/build/outline.ts` stakes the draft out on the lawn at once; no walls are
+built. A flour line runs along both faces of the walls to be built (the far
+wall as an arc when it bends) and along the shared wall, broken where the door
+goes; the door's jambs and leaves are firm lines and its swing is dashed. An
+orange string on corner stakes runs over the outer line. The room's first
+pieces stand inside as soft felt ghosts. The bubble gives the size in words
+("a bit smaller than the kitchen"); the width and depth tags in metres are
+quieter, and still editable. Wooden pegs stand on the walls they move, with
+arrows in flour.
 
 To adjust it, drag a peg or a wall, or click a size and type. The sage peg
-bends the far wall, and a dashed pencil curve runs from that wall's ends
-through it. A refused drag flashes the walls chalk red. In iso the view eases
-to the room being drawn, then to the house.
+bends the far wall, and a dashed curve runs from that wall's ends through it.
+A refused drag flashes the walls chalk red. In iso the view eases to the room
+being drawn, then to the house.
 
 Enter or "Build it" commits one version ("Added the study"), and the real walls
-rise from the floor in 0.7 s (at once with reduced motion). Escape or "Not now"
+rise from the floor in 0.7 s (at once with reduced motion). The room arrives
+with its first pieces (`src/build/firstroom.ts`): a sofa against the far wall
+(into a bay if it bends) facing a low table on a braided rug, an armchair
+turned to the table on the side away from the door, a floor lamp at the sofa's
+end and a picture over it; a room under 14 m² keeps to the sofa, table, rug
+and picture. They are `placeItem` edits in the room's own
+version, so one undo takes both away, and placing draws them from the plan, so
+they come back on reload. Each is checked by placing's fit rules
+(`src/build/mount.ts`) against the new house, what is already in the scene and
+the pieces laid before it; one that will not fit moves toward the shared wall
+and the middle 10 cm at a time, and is left out if it never fits. Rooms whose
+name says pantry, store, bathroom, laundry, utility, garage or hall get none.
+The pieces are kinds (`src/build/pieces.ts`): `sofa`, `armchair`, `low-table`,
+`floor-lamp` and `rug`. Escape or "Not now"
 leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
 plan history is `src/build/house.ts`: the host's store when the host is
 running. Without a host it is kept in memory, and a paper note at the top says
@@ -1527,17 +1542,25 @@ once that nothing built will outlast the page.
 Every room renders with its floor and base, and a shared wall is drawn once. A
 door that a build edit opens gets a timber casing on both faces, lined reveals
 and a threshold board. The kitchen's own openings stay as room.ts draws them.
-Until the yard follows the plan, `src/build/yard.ts` hides the fence, rails,
-flowers, stones and shrubs under the paper and inside every built room and its
-walls, at runtime only, and puts them back on unload.
+The lot answers the plan (`src/build/lot.ts`): while any room or the staked-out
+room reaches past diorama.ts's lawn board, the lawn, its edge, its shadow and
+the picket fence are redrawn as the old board plus a rectangle round each room
+(its walls plus 1 m), on a grass that tiles without seams, and the fence keeps
+its gate where the path still meets it. `src/build/yard.ts` hides the flowers,
+stones and shrubs inside a room, on the lawn round it, and along the stretch of
+old fence the lot grew past. All of it is runtime only and goes back when the
+rooms are undone or build mode unloads. The new room's base follows its walls
+round a bay, and the sun's shadow box grows to hold every room.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 46 checks (yard clear of built rooms, put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 54 checks (first pieces, lawn round every room, yard put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
 ```
 
-Stub (November 7, 2026): 46 of 46. Enter to outline is 209 ms with the stub
+Stub (November 7, 2026): 54 of 54, including the first pieces (in the room's
+version, all drawn, not overlapping, inside the room, back after a reload and
+gone with one undo) and the lawn holding every room. Enter to outline is 229 ms with the stub
 router on `?route=separate`; the outline is drawn in the same call that
 receives the route. On the default one-call path the stub villager streams its
 ROUTE reply six letters at a time, so it measures about 1.8 s there.
@@ -1574,8 +1597,9 @@ built room as an empty shell off the lot (the yard does not follow the plan,
 pendant wire across the window. `screenshots/build/look-before-after.jpg`
 pairs before and after for each placing and add-room shot, desktop and phone.
 
-Missing or approximate: the new room lands on the yard's grass, past the
-board's edge, and the sun's shadow box doesn't cover it. The size tags edit
+Missing or approximate: the first pieces are one living-room set whatever the
+room is called (pantries and the like get none). The ghosts are built the
+first time a room is staked out, which costs one slow frame. The size tags edit
 width and depth only, not the bend. On a phone the view centres on the new room
 but can't take in the whole house. Rooms are rectangles on straight walls only.
 
@@ -1706,7 +1730,8 @@ Undo and redo come from the versions.
   names a support which does not stand on the thing. Turns are stored within one
   full turn.
 - Dev: `window.villagePlace.begin('crate' | 'vase' | 'picture' | 'pendant')` places a
-  built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
+  built-in thing, as do the first pieces' kinds (`sofa`, `armchair`, `low-table`,
+  `floor-lamp`, `rug`). `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
 
 ```sh
 cd home && node scripts/check-place.mjs           # 64/64: plan ops, each mount dragged, red and refused (a sill's end, a shelf in front of a bay), Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload

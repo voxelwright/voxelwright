@@ -8,11 +8,14 @@
 import * as THREE from 'three/webgpu'
 import { releaseGpu } from '../kernel'
 import { KINDS, fit, footprint, obstacles, seat, type Obstacle, type Size } from './mount'
-import { curveOf, type Anchor, type Furniture, type P, type Plan } from './plan'
+import { curveOf, roomArea, type Anchor, type Furniture, type P, type Plan } from './plan'
 import { draftGeometry, type Draft } from './resolve'
 
 /** Rooms that get no sofa: a pantry or a bathroom is furnished by hand. */
 const BARE = /\b(pantry|larder|stor(e|age)|closet|cupboard|bath(room)?|toilet|wc|laundry|utility|garage|hall(way)?|corridor|kitchen)\b/i
+
+/** Below this floor area (m²) a room gets no armchair or lamp. */
+const SMALL = 14
 
 const sizes = new Map<string, Size>()
 /** A kind's measured size, built once and thrown away. */
@@ -78,8 +81,11 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
   const tableAt = sc - sd / 2 - 0.42 - td / 2
   lay('low-table', sa, tableAt, facing)
   lay('rug', sa, tableAt + 0.08, facing)
-  lay('armchair', sa + side * (tw / 2 + 0.38 + ad / 2), tableAt + 0.05, yawTo([-side * geo.dir[0], -side * geo.dir[1]]))
-  lay('floor-lamp', sa - side * (sw / 2 + 0.1 + lw / 2), sc + sd / 2 - ld / 2, facing)
+  // A small room (a study, a nook) keeps to the sofa, the table and the rug.
+  if (roomArea(made, d.roomId) >= SMALL) {
+    lay('armchair', sa + side * (tw / 2 + 0.38 + ad / 2), tableAt + 0.05, yawTo([-side * geo.dir[0], -side * geo.dir[1]]))
+    lay('floor-lamp', sa - side * (sw / 2 + 0.1 + lw / 2), sc + sd / 2 - ld / 2, facing)
+  }
   // A picture over the sofa, in the middle of the far wall (arc length when it bends).
   const far = made.walls.find((w) => w.id === `${d.roomId}.w2`)
   if (far) {
