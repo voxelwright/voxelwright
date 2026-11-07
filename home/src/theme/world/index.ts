@@ -61,9 +61,10 @@ function measure(scene: THREE.Scene): House | null {
  */
 const RETIRE_MS = 4000
 
-/** The theme plugin's hook: `place(t)` on every walk, `drop()` on unload. */
+/** The theme plugin's hook: `ahead(t)` while a switch heads to `t`, `place(t)` on every walk, `drop()` on unload. */
 export function worlds(scene: THREE.Scene) {
   let stood: { key: string; world: World } | null = null
+  let next: { key: string; world: World } | null = null
   const hidden = new Set<THREE.Object3D>()
   const retired: Array<{ world: World; timer: ReturnType<typeof setTimeout> }> = []
   const free = (entry: { world: World; timer: ReturnType<typeof setTimeout> }) => {
@@ -86,20 +87,48 @@ export function worlds(scene: THREE.Scene) {
   /** On unload: put the yard back and free every world now. */
   const drop = () => {
     clear()
+    next?.world.dispose()
+    next = null
     while (retired.length) free(retired[0])
   }
-  const place = (t: Theme) => {
+  /**
+   * The world `t` stands and its key. Keyed on the walls only: the window card sways a
+   * couple of centimetres in the wind (../../plugins/window.ts), and keyed on it too the
+   * world was rebuilt every few walks, 15 to 40 ms each time. No world reads `view`.
+   */
+  const wanted = (t: Theme) => {
     const name = OFF ? undefined : t.world
     const house = name && Object.hasOwn(WORLDS, name) ? measure(scene) : null
-    if (!name || !house) return clear()
-    const key = JSON.stringify([name, house])
-    if (stood?.key !== key) {
+    if (!name || !house) return null
+    return { name, house, key: JSON.stringify([name, house.x0, house.x1, house.z0, house.z1, house.top]) }
+  }
+  const build = (name: string, house: House) => {
+    const world = WORLDS[name](house)
+    world.group.name = `theme world ${name}`
+    world.group.userData.themeOwned = true
+    return world
+  }
+  /**
+   * Build the world a switch is heading to on a frame while the current look still draws,
+   * so the frame that swaps the look in does not build it too (30 to 40 ms for the neon city).
+   * It was never in the scene, so one no switch takes is freed at once.
+   */
+  const ahead = (t: Theme) => {
+    const want = wanted(t)
+    if (want && (stood?.key === want.key || next?.key === want.key)) return
+    next?.world.dispose()
+    next = want && { key: want.key, world: build(want.name, want.house) }
+  }
+  const place = (t: Theme) => {
+    const want = wanted(t)
+    if (!want) return clear()
+    if (stood?.key !== want.key) {
       unstand()
-      const world = WORLDS[name](house)
-      world.group.name = `theme world ${name}`
-      world.group.userData.themeOwned = true
+      let world = next?.key === want.key ? next.world : null
+      if (world) next = null
+      else world = build(want.name, want.house)
       scene.add(world.group)
-      stood = { key, world }
+      stood = { key: want.key, world }
     }
     scene.traverse((o) => {
       if (o.userData.exterior && o.visible) {
@@ -108,5 +137,5 @@ export function worlds(scene: THREE.Scene) {
       }
     })
   }
-  return { place, drop }
+  return { ahead, place, drop }
 }

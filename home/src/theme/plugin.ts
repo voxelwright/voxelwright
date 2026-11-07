@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
-import { costumeVersion, theme, tick } from './index'
+import { chosen, costumeVersion, theme, tick } from './index'
 import { PAINTERS } from './paint'
 import { worlds } from './world'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
@@ -260,9 +260,14 @@ export default {
 
     let frame = 0
     let costumes = costumeVersion()
+    let heading: Theme | null = null
     ctx.on('village/frame', () => {
       tick()
       const t = theme()
+      // While a switch is under way, stand up the world it is heading to ahead of its swap frame.
+      const next = chosen()
+      if (next !== t && next !== heading) world.ahead(next)
+      heading = next
       const changed = t !== applied || costumes !== costumeVersion()
       if (!changed && ++frame % RESCAN) return
       costumes = costumeVersion()
