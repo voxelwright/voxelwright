@@ -1,8 +1,8 @@
-// The talk look's shot list (#42 regroup), the same for every ?look=: the notepad at rest,
-// writing and sent, a one-villager talk, the table mid-round, the dollhouse, ?q=low, and a
-// phone width. Replies are scripted (Playwright answers the villager API), so every look
-// gets the same words with the same timing; no host runs. Headless only.
-// Usage: node scripts/talk-shots.mjs <out-dir> [--look=a] [--dev=5580] [--only=desktop|phone|low]
+// The talk look's shot list (#42 regroup): the notepad at rest, writing and sent, a one-villager
+// talk, the table mid-round, the dollhouse, ?q=low, and a phone width. Replies are scripted
+// (Playwright answers the villager API), so every run gets the same words with the same timing;
+// no host runs. Headless only. `--query=` adds to the page's query (for a variant under test).
+// Usage: node scripts/talk-shots.mjs <out-dir> [--query=a=b] [--dev=5580] [--only=desktop|phone|low]
 import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -12,8 +12,8 @@ import { chromium } from 'playwright'
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const out = args.find((a) => !a.startsWith('--'))
-if (!out) throw new Error('usage: talk-shots.mjs <out-dir> [--look=a] [--dev=5580]')
-const look = opt('look')
+if (!out) throw new Error('usage: talk-shots.mjs <out-dir> [--query=a=b] [--dev=5580]')
+const extra = opt('query')
 const only = opt('only')
 const devPort = Number(opt('dev') ?? 5580)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -86,7 +86,7 @@ async function scripted(context) {
 const dev = await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, /Local:/)
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const base = `http://localhost:${devPort}/`
-const suffix = look ? `&look=${look}` : ''
+const suffix = extra ? `&${extra}` : ''
 const timings = []
 /** When the "sent" frames were taken, by the page's clock. */
 const sent = []
@@ -214,7 +214,7 @@ try {
     await seatThree(page)
     await tableRound(page, shot)
   }, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
-  console.log(JSON.stringify({ look: look ?? 'current', out, timings, sent }))
+  console.log(JSON.stringify({ out, timings, sent }))
 } finally {
   await browser.close().catch(() => {})
   for (const c of children) process.kill(-c.pid, 'SIGTERM')

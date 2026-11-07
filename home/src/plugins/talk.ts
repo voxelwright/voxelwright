@@ -659,15 +659,16 @@ export default {
       }
       // Clear both ways: from the camera to the head and body, and from the head back to the camera,
       // which catches a camera standing inside furniture (a ray from inside a cushion hits nothing).
-      // Of the first five clear poses, the first with nothing in front of the villager anywhere in the
+      // Of the first six clear poses, the first with nothing in front of the villager anywhere in the
       // frame wins, or else the one with least (#42 regroup: a door post once filled a third of the shot).
       let best: Pose | null = null
       let least = Infinity
       let scored = 0
       nearby = around(head, 3.5)
       try {
-        for (const dist of [1.5, 1.15])
-          for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
+        // Each turn at both distances before the next turn: closer leaves less room for anything in front.
+        for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4])
+          for (const dist of [1.5, 1.15]) {
             const pose = shot(base + turn, dist)
             if (!(clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position))) continue
             const n = clutter(pose, head, least)
@@ -676,7 +677,7 @@ export default {
               least = n
               best = pose
             }
-            if (++scored === 5) return best!
+            if (++scored === 6) return best!
           }
       } finally {
         nearby = null
