@@ -925,6 +925,7 @@ export default {
      * Resolves when the words are on the card. False if the host could not answer.
      */
     const perform = async (m: Member, speech: Speech, said: string): Promise<boolean> => {
+      replies++
       speaker = m
       m.v.thinking = true
       hide(m)
@@ -1384,9 +1385,16 @@ export default {
     const quipLog: { text: string; at: number }[] = []
     const wait = (seconds: number) => new Promise<void>((r) => setTimeout(r, seconds * 1000))
     let quipCount = 0
+    /** Replies performed so far: a quip queued before the latest one is stale. */
+    let replies = 0
     const quip = (m: Member, text: string) => {
       let mine = 0
+      // Queued behind earlier lines, a quip can come due after the villager has begun answering a newer
+      // line; it is dropped then, rather than written over the answer (#42 regroup: "Ooh, let me see."
+      // from an earlier request replaced an answer on the card).
+      const asked = replies
       const shown = quips.then(async () => {
+        if (replies !== asked) return
         mine = ++quipCount
         quipLog.push({ text, at: Math.round(performance.now()) })
         speak(m, text)

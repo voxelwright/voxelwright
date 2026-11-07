@@ -140,7 +140,7 @@ Details and scores are in `home/README.md`, "Talk regroup".
   dollhouse cutaway hid the very wall the new pose would show. Test rays across
   the frame and predict what the cutaway will draw from there.
 - **Keep the current best in every round as a shuffled reference.** The unchanged
-  reference moved 0.5 between rounds, so compare within a round, not across.
+  reference moved up to 0.7 between rounds, so compare within a round, not across.
 - **Read the split, not only the mean.** GPT-6.1 Sol rewarded legibility and
   consistency; Opus rewarded the input and the words being things in the world. A
   direction that wins the structural categories and loses on fixable rendering

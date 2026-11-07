@@ -1216,6 +1216,9 @@ after `setSinkId('')` was verified for state and a running clock, not by ear on 
 
 ## Always-on input (#42 prototype)
 
+The pad's look and the reply cards below were replaced by paper (see "Talk regroup: paper"):
+the pad is now held low on the right in perspective, and replies are torn paper slips.
+
 `?talk=npc` now has the held notepad by default (`?input=speech` for the
 speech card, `?input=slip` for the old slip): an input that is always there. A keypress anywhere starts writing (a lowercase
 `j` with nothing written opens the journal instead; a capital J still starts a
@@ -1341,6 +1344,8 @@ no voice toggle and no context from where you are. Screenshots:
 `screenshots/talk/input-*.jpg` (real models).
 
 ## Table rounds, faster replies and the compact notepad (#42, November 7, 2026)
+
+The compact notepad below was replaced the same day by the held pad of "Talk regroup: paper".
 
 Table rounds (`table()` in `src/plugins/talk.ts`): a line to the table starts
 a round. The villager it names first speaks first; otherwise the opener
@@ -1566,21 +1571,25 @@ low tier, input in the world, conversation clarity, phone):
 | --- | --- | --- | --- |
 | 1 | paper / cinematic / no interface / current | 7.5 / 5.5 / 6.7 / 7.0 | 7.5 / 6.8 / 7.9 / 8.1 |
 | 2 | paper after round 1 / current | 7.0 / 7.0 | 7.9 / 7.9 |
-| 3 | paper adopted / current | 7.2 / 7.1 | GPT3 |
+| 3 | paper adopted / current | 7.2 / 7.1 | 8.4 / 7.6 |
 | 4 | paper / current | 7.6 / 7.1 | not run |
-| 5 | paper / current | 7.6 / 6.9 | GPT5 |
+| 5 | paper / current | 7.6 / 6.9 | 8.4 / 7.7 |
 | 6 | paper / current | 7.2 / 7.1 | not run |
+| 7 | paper as pushed / current | 7.3 / 6.4 | not run |
 
 Screenshots (scripted replies): `screenshots/talk/paper-*.jpg`, the same frames as the
 scorers saw (rest, writing, sent, talk, table, house, low tier, phone talk and table).
 
 Paper won the round-1 categories that tuning had not moved: input in the world (9 and 9 to
 10) and motion (9 and 9), with material at 9. The current look won legibility and
-consistency (8 to 9). Opus chose paper in every round; GPT-6.1 Sol chose the current look
-in rounds 1 and 2, both times naming washed-out reply text as paper's fault, which rounds 2
-and 3 fixed. The unchanged reference moved by up to 0.4 between rounds, so compare within a
-round. Paper after round 6, Opus: warmth 8, material 8, lighting 8, legibility 7,
-consistency 6, motion 6, low tier 8, input 8, conversation 6, phone 7.
+consistency (8 to 9). Opus chose paper in every round. GPT-6.1 Sol chose the current look
+in rounds 1 and 2, both times naming washed-out reply text as paper's fault; once rounds 2
+and 3 fixed that, it chose paper (8.4 against 7.6 and 7.7). The unchanged reference moved by up
+to 0.7 between rounds, so compare within a
+round. GPT-6.1 Sol's last round (5): warmth 9, material 9, lighting 8, legibility 8,
+consistency 9, motion 8, low tier 9, input 9, conversation 8, phone 7. Opus's last round
+(7, the code as pushed): warmth 8, material 8, lighting 7, legibility 7, consistency 8,
+motion 7, low tier 7, input 8, conversation 7, phone 6.
 
 Learning log:
 
@@ -1606,6 +1615,12 @@ Learning log:
   to the subject, from the cutaway hiding walls the new pose would show, and from judging
   a passer-by by its middle while its head was in frame.
 
+**The ceiling.** Neither model reached 9 in every category. Opus's means for paper went
+7.6, 7.6, 7.2 over rounds 4 to 6, the plateau trigger; one regroup of the three allowed was
+run, and polishing stopped there on time. A second regroup would target what tuning has not
+moved: your own line pinned on the table during a round, the note landing in the addressee's
+paws and opening into the reply, one address label in one place, and the felt "!" marker.
+
 Still under 9, and why:
 
 - Conversation clarity at the table (6 to 7): your own line vanishes during a round; Opus
@@ -1616,28 +1631,35 @@ Still under 9, and why:
   felt "!" news marker is a second visual language.
 - Lighting (7 to 8): the fridge handle's bloom streak and the warm haze are the scene's
   materials and post stack, outside this unit.
-- Phone (7 to 8): a slip above a seated villager can cover the villager behind it.
+- Phone (6 to 7): at the table a slip above the speaker can cover a listener's head, and the
+  bottom corners hold the journal, the sound buttons and the pad together.
 
 Cost: the talk two-shot now casts up to about 70 rays against the meshes within 3.5 m of the
 villager when a talk opens. Measured around the whole talk-open call in headless Chrome,
 18 opens: p50 9.5 ms before, 31 ms after at load 66 and 84 ms at load 160 (max 150 and 409
 ms), paid once per talk, not per frame. Slips cost a 2D canvas repaint when their words
-change. `npm run perf-gate` against main (cb1d565), two runs with 6 and 7 other headless
-Chromes running (so GPU ms is indicative): both pass; `home` CPU p50 +0.3 and +0.1 ms (limit
-+0.5), draw calls 526 against 482 (unchanged by this unit); GPU p50 / p95 at high: `home`
-5.8 / 7.0 and 6.8 / 9.5 ms, `villagers` 7.3 / 8.5 and 6.2 / 8.4, `talk` 9.0 / 11.1 and 6.6 /
-7.7; no frame over 20 ms in any scene.
+change. `npm run perf-gate` against main (cb1d565), three runs with 6 to 7 other headless
+Chromes running (so GPU ms is indicative): every scene holds 60 fps (no frame over 20 ms, p99
+16.8 ms); GPU p50 / p95 at high 5.8 to 7.3 / 7.0 to 11.1 ms in `home`, `villagers` and `talk`;
+`home` CPU p50 +0.3, +0.1 and +0.7 ms against the +0.5 limit, so two passes and one fail on
+that rule. The `home` scene does not load the talk (`talk.ts` returns without `?talk=npc`),
+and against this branch's start (40faf49), two runs, `home` CPU p50 was +0.3 and -0.1 ms with
+draw calls identical (526): the margin against main is the branch's, not this unit's, and
+needs a quiet-machine run before main.
 
-Checks (stub host, one at a time, load average 150 to 250): `check-kernel` 10/10,
-`check-entries` 33/33, `check-navigation` 18/18, `check-notebook` 10/10 (9/10 in the suite
-run: the reduced-motion return landed 0.13 m off; 10/10 alone), `check-babble` 28/28,
-`check-music` 30/30, `check-talk-npc` 39/39, `check-talk-notebook` 16/16, `check-sketch`
-35/35, `check-prop-sandbox` 35/35, host `check-villager` 225/225, `tsc --noEmit` in `home/`
-and `host/`. `check-talk-input` 56/64 then 60/64 with different failures each run, every
-check passing in one of the two: the furnishing lines that start with "a" lost their first
-letter to the camera's held-key pan (the key was held past 170 ms by the loaded machine) and
-went to chat, a ghost came at 546 ms against the 400 ms limit, and one Undo click timed out.
-Changed for the new behaviour: `check-talk-input` now expects the resting pad held low on the
-right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it was 3),
-and checks that the camera waits for the sent note to land before turning to its reader; its
-Undo click reports why it missed instead of passing silently.
+Checks (stub host, one at a time, load average 45 to 250): `check-kernel` 10/10,
+`check-entries` 33/33, `check-navigation` 18/18, `check-notebook` 10/10 (9/10 once in the
+suite: the reduced-motion return landed 0.13 m off; 10/10 alone), `check-babble` 28/28,
+`check-music` 30/30, `check-talk-npc` 39/39, `check-talk-input` 64/64, `check-talk-notebook`
+16/16, `check-sketch` 35/35, `check-prop-sandbox` 35/35, host `check-villager` 225/225, and
+`tsc --noEmit` in `home/` and `host/`. Earlier `check-talk-input` runs failed on load timing:
+furnishing lines that start with "a" lost their first letter to the camera's held-key pan
+(the key stayed down past 170 ms on the loaded machine, so the line went to chat; on a
+stalled machine any first W, A, S, D, Q or E can be lost this way), and a ghost came at
+546 ms against the 400 ms limit. One failure was real and is fixed: a quip queued behind
+earlier lines ("Ooh, let me see.") could come due after the villager had begun answering a
+newer line and replace the answer on its card; a quip is now dropped once a newer reply has
+started. Changed for the new behaviour: `check-talk-input` expects the resting pad held low
+on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
+was 3), and checks that the camera waits for the sent note to land before turning to its
+reader; its Undo click reports why it missed instead of passing silently.
