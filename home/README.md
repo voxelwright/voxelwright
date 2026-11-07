@@ -662,7 +662,7 @@ turns it off; without `?talk=npc` the plugin adds nothing.
   Moss breathy and slower, Tuft quick, bright and higher.
 - `src/plugins/babble.ts` listens for `village/said` (`{ villager, word, index,
   last }`, sent by talk.ts as each word appears) and `village/said-stop`
-  (`{ villager }`). The AudioContext starts on the first touch or key press.
+  (`{ villager }`). The AudioContext starts on the first touch or key press, and a later touch resumes it if the browser held it back.
   `M` or the felt speaker button at the bottom left mutes; the choice is kept
   in `localStorage` (`village.babble.muted`). Hidden tabs, `pagehide` and
   unloading the plugin stop the voice; unloading closes the context.
