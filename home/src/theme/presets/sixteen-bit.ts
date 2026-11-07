@@ -17,7 +17,8 @@ export const SIXTEEN_BIT: Theme = {
     practical: { color: '#ffc070', tint: 0.2 },
     exposure: 1.3,
   },
-  // The additive light shafts would quantise into stray diagonal lines, so they go dark (invisible).
+  // The additive light shafts quantise into stray diagonal lines, so their colour goes to zero. Thin
+  // lines along the shafts still show (seen November 6); likely the crease pass reading blended normals.
   surfaces: { wall: {}, floor: {}, view: {}, beam: { gain: 0 }, glow: {}, other: {} },
   fog: { color: '#c8a890', tint: 0.3 },
   post: {
