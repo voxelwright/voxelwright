@@ -919,17 +919,28 @@ turns it off; without `?talk=npc` the plugin adds nothing.
   text skips words until it catches up.
 - `src/voice/profiles.ts` holds the voices: Dumpling round, warm and mid-low,
   Moss breathy and slower, Tuft quick, bright and higher.
+- `src/voice/context.ts` owns the one AudioContext the voices and the music share. The rule
+  is no sound before a gesture, not no context: the page's first `new AudioContext()` blocks the
+  main thread for 0.4 to 1.7 s (Chrome 158, M1 Pro) whenever it runs, so a context made in the
+  first key press froze the page just as someone started writing. In Chrome the context is made
+  at load on a silent sink (`sinkId: { type: 'none' }`, about 1 ms), suspended, and the real
+  device is attached by the asynchronous `setSinkId('')`, so the 0.9 s of start-up happens off
+  the main thread (no gap over 13 ms). Without `setSinkId` it is made when the page has loaded
+  and the browser is idle, or on the first gesture. A gesture (`pointerdown`, `pointerup`,
+  `keydown`) only calls `resume()`, and every later gesture resumes a context that is not
+  running. A hidden tab suspends it. It closes when the last of the voices and the music has
+  unloaded, and on `pagehide`. See `.agents/skills/web-audio-voice/SKILL.md`.
 - `src/plugins/babble.ts` listens for `village/said` (`{ villager, word, index,
   last }`, sent by talk.ts as each word appears) and `village/said-stop`
-  (`{ villager }`). The AudioContext starts on the first touch or key press, and a later touch resumes it if the browser held it back.
+  (`{ villager }`) and builds the voices on the shared context.
   `M` or the felt speaker button at the bottom left mutes all sound (the voices and the
-  music); the choice is kept in `localStorage` (`village.babble.muted`). Hidden tabs, `pagehide` and
-  unloading the plugin stop the voice; unloading closes the context.
+  music); the choice is kept in `localStorage` (`village.babble.muted`). Hidden tabs,
+  `pagehide` and unloading the plugin stop the voice.
 - `?babble=demo` (dev only) plays a scripted exchange between the three at
   talk.ts's reveal pace, without talk.ts or a model.
 
 ```sh
-node scripts/check-babble.mjs [base-url]             # 27 headless checks
+node scripts/check-babble.mjs [base-url]             # 28 headless checks
 node scripts/demo-babble.mjs [base-url] --out=dir    # demo MP4 + WAV and cost; needs ffmpeg
 ```
 
@@ -962,17 +973,27 @@ note beside the speaker button, and is in `CREDITS.md` and `public/audio/CREDITS
   -65 dBFS, about twice the median step of the music itself.
 - `src/voice/bed.ts` plays it through Web Audio on any context (source, level, duck, mute), at
   a gain of 0.26: -32 LUFS integrated (the file alone is -20.3), peak -15.8 dBFS. It fades in over
-  2 s, and drops 6 dB (80 ms down) while a villager speaks. `src/plugins/music.ts` starts it on
-  the first touch or key press, like the voices, and listens for `village/said` and
-  `village/said-stop`: the duck is released 0.6 s after the last word (250 ms time constant back).
-  A hidden tab suspends it; unloading stops, disconnects and closes its own AudioContext.
+  2 s, and drops 6 dB (80 ms down) while a villager speaks. `src/plugins/music.ts` shares the
+  voices' AudioContext (`src/voice/context.ts`: made at load, suspended, silent until a gesture
+  resumes it), fetches the loop on the first touch or key press, and listens for `village/said`
+  and `village/said-stop`: the duck is released 0.6 s after the last word (250 ms time constant
+  back). A hidden tab suspends the context; unloading the music stops and disconnects the bed, and
+  the context closes once the voices have unloaded too.
 - Switches: `M` and the speaker button (babble.ts) mute everything and tell the music with
   `village/muted`; Shift+M or the note mutes the music alone (`village.music.muted`). Both survive a
   reload. With `?babble=off` there are no voices, so nothing ducks and the music takes `M` itself.
 
 ```sh
-node scripts/check-music.mjs [base-url]   # 29 headless checks, dev server on 5322 by default
+node scripts/check-music.mjs [base-url]   # 30 headless checks, dev server on 5322 by default
 ```
+
+The first key press does not freeze the page (checked in `check-music`, in a browser of its
+own because only the browser's first audio start-up is slow). Before: the old create-on-gesture
+code showed a single 3.1 s long task in the key press, in a cold browser with the whole scene.
+Now: no long task and a largest timer gap of 26 ms from the key press until the loop has played
+for a second; at load the context costs 0.5 to 1.3 ms of main thread, with the device opening
+off the main thread over 0.6 to 5.9 s (the dev scene's own load is slow). Not heard: the output
+after `setSinkId('')` was verified for state and a running clock, not by ear on a device.
 
 ## Always-on input (#42 prototype)
 
