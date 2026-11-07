@@ -12,6 +12,35 @@ const STAGES: Stage[] = [
 // ?drop=halftone,ink measures a stage's cost by leaving it out (debug only).
 const drop = new Set((new URLSearchParams(location.search).get('drop') ?? '').split(','))
 
+// Regroup 2 prototypes (#50), side by side: &comic=c1|c2|c3 replaces the stages (./fx/print.ts).
+const VARIANTS: Record<string, { stages: Stage[]; shade?: 'toon' }> = {
+  // C1: toon on every surface, one shared set of inks, three light steps with dots in the shade, heavy ink.
+  c1: {
+    shade: 'toon',
+    stages: [
+      { kind: 'chroma', offset: 0.0005, angle: 35 },
+      { kind: 'print', style: 'tones', cell: 120 },
+      { kind: 'ink', width: 3, depth: 1, normal: 0.85, color: '#1a1014' },
+    ],
+  },
+  // C2: the frame as a printed page: process-ink plates, Ben-Day tints, misregistration, newsprint.
+  c2: {
+    stages: [
+      { kind: 'chroma', offset: 0.0016, angle: 35 },
+      { kind: 'print', style: 'plates', cell: 90, paper: '#f6eedb' },
+      { kind: 'ink', width: 2.4, depth: 1, normal: 0.7, color: '#221d20' },
+    ],
+  },
+  // C3: line art on paper, spot colour on a few saturated things, hatching for shade.
+  c3: {
+    stages: [
+      { kind: 'print', style: 'line', cell: 210, paper: '#fbf5e6', ink: '#16110f' },
+      { kind: 'ink', width: 2.6, depth: 1, normal: 1, color: '#16110f' },
+    ],
+  },
+}
+const variant = VARIANTS[new URLSearchParams(location.search).get('comic') ?? '']
+
 /**
  * The kitchen as a printed, inked comic page come to life: a bright low sun with
  * crisp shadow shapes, cool violet shade, saturated flat colour, round halftone
@@ -54,8 +83,9 @@ export const COMIC: Theme = {
     grain: 0,
     grade: { saturation: 1.22, contrast: 1.08, lift: [0, 0, 0.008] },
     veto: [],
-    stages: STAGES.filter((s) => !drop.has(s.kind)),
+    stages: (variant?.stages ?? STAGES).filter((s) => !drop.has(s.kind)),
   },
+  ...(variant?.shade ? { shade: variant.shade } : {}),
   // The house stands in one panel of a printed page (./world/comic.ts).
   world: 'comic-page',
   motion: { characterFps: 12 },

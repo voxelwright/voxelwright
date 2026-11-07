@@ -17,15 +17,14 @@ type F = THREE.Node<'float'>
 const LMS = [0.4122214708, 0.5363325363, 0.0514459929, 0.2119034982, 0.6806995451, 0.1073969566, 0.0883024619, 0.2817188376, 0.6299787005]
 const LAB = [0.2104542553, 0.7936177850, -0.0040720468, 1.9779984951, -2.4285922050, 0.4505937099, 0.0259040371, 0.7827717662, -0.8086757660]
 
-function oklabCpu(c: THREE.Color): THREE.Vector3 {
+export function oklabCpu(c: THREE.Color): THREE.Vector3 {
   const l = [c.r, c.g, c.b] // THREE.Color holds linear values
   const m = [0, 1, 2].map((i) => Math.cbrt(LMS[i * 3] * l[0] + LMS[i * 3 + 1] * l[1] + LMS[i * 3 + 2] * l[2]))
   return new THREE.Vector3(...[0, 1, 2].map((i) => LAB[i * 3] * m[0] + LAB[i * 3 + 1] * m[1] + LAB[i * 3 + 2] * m[2]))
 }
 
-/** Display (sRGB) colour to OKLab on the GPU. */
-const oklab = (srgb: V3): V3 => {
-  const lin = sRGBTransferEOTF(srgb) as unknown as V3
+/** Linear colour to OKLab on the GPU. */
+export const oklabLinear = (lin: V3): V3 => {
   const r = lin.x, g = lin.y, b = lin.z
   const l = cbrt(r.mul(LMS[0]).add(g.mul(LMS[1])).add(b.mul(LMS[2])).max(0))
   const m = cbrt(r.mul(LMS[3]).add(g.mul(LMS[4])).add(b.mul(LMS[5])).max(0))
@@ -36,6 +35,9 @@ const oklab = (srgb: V3): V3 => {
     l.mul(LAB[6]).add(m.mul(LAB[7])).add(s.mul(LAB[8])),
   )
 }
+
+/** Display (sRGB) colour to OKLab on the GPU. */
+export const oklab = (srgb: V3): V3 => oklabLinear(sRGBTransferEOTF(srgb) as unknown as V3)
 
 /** 4x4 ordered-dither thresholds, centred on zero. */
 const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5)
