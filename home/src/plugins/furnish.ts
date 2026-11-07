@@ -291,8 +291,14 @@ export default {
     const clock = new THREE.Group()
     clock.name = 'wall clock'
     clock.position.set(1.25, 2.36, WALL_Z)
-    part(new THREE.TorusGeometry(0.15, 0.018, 10, 40), '#8a5a3a', 'satin', at(1.25, 2.36, WALL_Z + 0.03))
-    part(cyl(0.15, 0.15, 0.03, 32).rotateX(Math.PI / 2), '#8a5a3a', 'satin', at(1.25, 2.36, WALL_Z + 0.015))
+    // Its own meshes, not merged into the kit, so the whole clock leaves with the back wall when the dollhouse cuts it (#42).
+    const rimMat = new THREE.MeshStandardMaterial({ color: '#8a5a3a', roughness: 0.45 })
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.018, 10, 40), rimMat)
+    rim.position.z = 0.03
+    const body = new THREE.Mesh(cyl(0.15, 0.15, 0.03, 32).rotateX(Math.PI / 2), rimMat)
+    body.position.z = 0.015
+    clock.add(rim, body)
+    clock.userData.inward = new THREE.Vector3(0, 0, 1)
     const face = new THREE.Mesh(new THREE.CircleGeometry(0.142, 40), new THREE.MeshStandardMaterial({ map: paintClockFace(), roughness: 0.6 }))
     face.position.z = 0.032
     const handMat = new THREE.MeshStandardMaterial({ color: '#2b2420', roughness: 0.5 })

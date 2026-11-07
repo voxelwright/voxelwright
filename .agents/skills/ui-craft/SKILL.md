@@ -72,11 +72,55 @@ smeared), hierarchy and legibility of any text, consistency, motion polish, and
 low-quality mode still looking intentional on a weak GPU. Penalize corporate
 dashboards, generic gradients and neon.
 
+## Plateau: regroup, then go bolder (owner, November 7, 2026)
+
+Polishing rounds flatten after 3 or 4 rounds. Stopping the polish is right; stopping
+the climb is not. The owner wants a move to a bolder strategy that can swing the score,
+not more of the same.
+
+**Plateau trigger:** the cross-model mean rose by less than 0.3 over the last two
+rounds, or the same top complaint survived two rounds.
+
+**Regroup, in this order:**
+
+1. **Name the ceiling.** List the complaints reviewers repeat across rounds and models.
+   For each one, say why the current approach cannot fix it with more tuning. Examples
+   from November 7:
+   - "iso shows a suburban yard" in a neon theme needs a theme-owned exterior, not
+     post-processing;
+   - "villagers sound alike" needed decision style and rhythm, not more words in the
+     prompt;
+   - "the corner composer reads as a chat widget" needed a held notepad, not a lighter
+     panel.
+2. **Generate 2 or 3 radically different strategies** that change the approach, not its
+   parameters. Examples:
+   - a different camera or composition;
+   - a different technique: baked lighting, painterly shading, toon ramps, geometry
+     instead of textures, a sprite or card instead of a mesh;
+   - a different art direction or reference;
+   - a different interaction model;
+   - removing the thing entirely.
+
+   At least one should feel too bold.
+3. **Prototype each one cheaply,** behind a flag and in parallel where possible. A
+   rough version is enough to show the swing.
+4. **Score them side by side.** Give the same rubric to the same cross-model council
+   (Opus plus GPT-6.1 Sol), and add the current best as a reference.
+5. **Adopt the winner,** even if it means throwing work away. Then resume polishing
+   from the winner.
+6. **Write it down.** Keep a learning log next to the round scores: what moved the
+   score, what didn't, and why. Read it before every round. Copy lessons that
+   generalise into this skill, so other threads benefit.
+
+Run at most about three regroups per prototype. If a regroup still can't reach 9,
+report the ceiling plainly, with the strongest candidate and what it would take (an
+asset, a dependency, a decision). Don't pretend.
+
 ## Do not
 
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.
 - Do not accept the first 9 from a reviewer that saw one screenshot or angle.
-- Do not run unbounded. Set a round cap and a spend note; his full effort was
+- Do not run unbounded. Set a round cap and a spend note (a regroup restarts the cap for the new strategy); his full effort was
   about 17.6 agent-hours and roughly $250 to $400 (21:14-22:00). Village
   slices should stop at 3 to 5 rounds unless the owner asks for more.
 - Do not treat a reviewer that hallucinates (invents line numbers, files) as
