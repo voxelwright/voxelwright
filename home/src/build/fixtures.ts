@@ -73,7 +73,7 @@ export function fixturesOf(c: Curve, wall: Wall, boxes: Array<{ box: THREE.Box3;
   return out
 }
 
-/** One owner per scan: the fixtures of every wall of a plan, cached until the plan or the scene's furniture changes. */
+/** The fixtures of every wall of a plan, scanned once and cached until the plan or the scene's furniture changes. */
 export function makeFixtures(scene: THREE.Scene, skip: () => THREE.Object3D[]) {
   let plan: Plan | null = null
   let byWall = new Map<Id, Fixture[]>()
@@ -87,11 +87,10 @@ export function makeFixtures(scene: THREE.Scene, skip: () => THREE.Object3D[]) {
     times.push(performance.now() - start)
   }
   return {
-    /** The built-ins against a wall's faces, in that plan; `side` picks one face. */
-    on(p: Plan, wallId: Id, side?: 1 | -1): Fixture[] {
+    /** The built-ins against a wall's faces, in that plan. */
+    on(p: Plan, wallId: Id): Fixture[] {
       if (p !== plan) scan(p)
-      const all = byWall.get(wallId) ?? []
-      return side ? all.filter((f) => f.side === side) : all
+      return byWall.get(wallId) ?? []
     },
     /** The plan changed: rescan on the next question. Placed things are never fixtures, so the scene boxes stand. */
     invalidate() {

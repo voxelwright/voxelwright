@@ -332,6 +332,29 @@ if (!args.includes('--skip-drag')) {
   }
 }
 
+// ── 4. A read-only house (its store answers but cannot be opened) ───────────
+if (!args.includes('--skip-drag')) {
+  const ro = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+  const rp = await ro.newPage()
+  await rp.route('**/villager/launch', (r) => r.fulfill({ json: { token: 't' } }))
+  await rp.route('**/villager/api/house/plans', (r) => r.fulfill({ status: 500, json: { error: 'plan event 3 follows 1' } }))
+  await rp.goto(`${base}?cam=iso&q=low&fx=&build=1`)
+  await rp.evaluate(() => window.village.ready())
+  await rp.evaluate(() => window.villageBuild.history())
+  await rp.waitForTimeout(1500)
+  const at = await rp.evaluate(() => {
+    const p = window.villageBuild.plan()
+    const br = p.corners.find((c) => c.id === 'kitchen.back-right'), fr = p.corners.find((c) => c.id === 'kitchen.front-right')
+    return window.villageBuild.project(br.x, 0.42, br.z + (fr.z - br.z) * 0.2)
+  })
+  await rp.mouse.move(...at)
+  await rp.evaluate(() => new Promise((r) => { let n = 12; const s = () => (--n ? requestAnimationFrame(s) : r()); requestAnimationFrame(s) }))
+  const roCursor = await rp.evaluate(() => document.querySelector('canvas').style.cursor)
+  const roNote = await rp.evaluate(() => window.villageBuild.noted())
+  check('a read-only house says so and offers no wall handle', roCursor !== 'grab' && /couldn't open the saved house/.test(roNote ?? ''), { roCursor, roNote })
+  await ro.close()
+}
+
 console.log(JSON.stringify({ passed: checks.filter((c) => c.pass).length, failed: checks.filter((c) => !c.pass).map((c) => c.name) }))
 await browser.close()
 if (checks.some((c) => !c.pass)) process.exitCode = 1

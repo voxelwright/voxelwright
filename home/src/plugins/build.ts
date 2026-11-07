@@ -2,7 +2,6 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
-import { MODE } from './camera'
 import { KITCHEN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
 import { build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
@@ -10,10 +9,11 @@ import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
-import { OPENING_HEAD, draftEdits, fit, resolve, type Draft } from '../build/resolve'
+import { OPENING_HEAD, draftEdits, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
+import { MODE } from './camera'
 
 declare module 'cordis' {
   interface Events {
@@ -505,16 +505,17 @@ export default {
       apply: (d: Draft) => {
         const h = history
         if (!h) return
-        // The head can move after the outline was fitted (another page saved first): fit again on the house as it stands.
-        const fitted = fit(h.plan, d)
+        // The head can move after the outline was fitted (another page saved first): fit again on the house as it stands, under an id still free in it.
+        const draft = { ...d, roomId: freshId(h.plan, d.roomId), label: freshLabel(h.plan, d.label) }
+        const fitted = fit(h.plan, draft)
         if ('ask' in fitted) {
           outline.close()
           return say(fitted.ask)
         }
-        const what = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
+        const what = /^New room( \d+)?$/.test(draft.label) ? 'Added a room' : `Added the ${draft.label.toLowerCase()}`
         committing = true
-        h.commit(draftEdits(h.plan, d), what).then(() => {
-          rising = { room: d.roomId, at: performance.now() }
+        h.commit(draftEdits(h.plan, draft), what).then(() => {
+          rising = { room: draft.roomId, at: performance.now() }
           committing = false
           outline.close()
           selectWall(null)
@@ -617,8 +618,8 @@ export default {
         const c = curveOf(plan, wallOf(plan, WALL))
         const [x, z] = pointAt(c, c.length / 2)
         const [nx, nz] = normalAt(c, c.length / 2)
-        dot.position.set(x, (cut() ? STUB + 0.025 : 0.02), z)
-        if (!cut()) dot.position.set(x - nx * 0.45, 0.02, z - nz * 0.45)
+        if (cut()) dot.position.set(x, STUB + 0.025, z)
+        else dot.position.set(x - nx * 0.45, 0.02, z - nz * 0.45)
         tag.position.set(x - nx * 1.6, 1.5, z - nz * 1.6)
         dot.visible = rightFree() && !outline.draft() && !history?.readOnly
       }

@@ -510,7 +510,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     anchors.title.set(beyond[0], 0.6, beyond[1])
     if (editing !== 'w') tags.w.textContent = `${fmt(d.to - d.from)} m`
     if (editing !== 'd') tags.d.textContent = `${fmt(d.depth)} m`
-    titleName.textContent = d.label === 'New room' ? 'A new room' : `The new ${d.label.toLowerCase()}`
+    titleName.textContent = /^New room( \d+)?$/.test(d.label) ? 'A new room' : `The new ${d.label.toLowerCase()}`
     titleArea.textContent = ` · ${roomArea(made, d.roomId).toFixed(1)} m²`
   }
 

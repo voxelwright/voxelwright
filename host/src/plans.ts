@@ -126,10 +126,10 @@ function anchor(v: unknown, at: string): Obj {
 
 /** A whole plan (every version's), rebuilt from its known fields. Whether it is a valid house is plan.ts's call, on the page. */
 function plan(v: unknown): Obj {
-  const p = only(v, 'plan', ['version', 'corners', 'walls', 'rooms', 'furniture'])
-  if (!Number.isInteger(p.version) || (p.version as number) < 1 || (p.version as number) > 1000) refuse('plan.version is a positive integer')
+  const p = only(v, 'plan', ['schema', 'corners', 'walls', 'rooms', 'furniture'])
+  if (!Number.isInteger(p.schema) || (p.schema as number) < 1 || (p.schema as number) > 1000) refuse('plan.schema is a positive integer')
   return {
-    version: p.version,
+    schema: p.schema,
     corners: list(p.corners, 'plan.corners').map((c, i) => {
       const o = only(c, `plan.corners[${i}]`, ['id', 'x', 'z'])
       return { id: id(o.id, 'corner id'), x: num(o.x, 'corner x'), z: num(o.z, 'corner z') }
@@ -172,7 +172,8 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-export function planStore(root: string) {
+/** `kept(person, item)`: whether that listed person's library holds the item, kept. The villager service owns the library. */
+export function planStore(root: string, kept: (person: string, item: string) => Promise<boolean>) {
   const dir = join(root, 'house', 'plans')
   const events = join(dir, 'events')
   const tmp = join(dir, 'tmp')
@@ -239,14 +240,7 @@ export function planStore(root: string) {
       if (typeof item.library === 'string') refs.set(`${item.person}/${item.library}`, item as { library: string; person: string })
     }
     for (const f of house.furniture as unknown[]) add(f)
-    for (const { library, person } of refs.values()) {
-      const raw = await readFile(join(root, 'people', person, 'library', `${library}.json`), 'utf8').catch(() => null)
-      let kept = false
-      try {
-        kept = raw !== null && (JSON.parse(raw) as { kept?: unknown }).kept === true
-      } catch {}
-      if (!kept) refuse(`library item ${library} is not one ${person} has kept`, 409)
-    }
+    for (const { library, person } of refs.values()) if (!(await kept(person, library))) refuse(`library item ${library} is not one ${person} has kept`, 409)
   }
 
   /** /house/plans[/<what>]; the caller has checked the token. */

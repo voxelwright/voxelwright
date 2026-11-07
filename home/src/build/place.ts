@@ -382,7 +382,6 @@ export function placement(deps: PlaceDeps): Placement & {
       m.rotation.set(-Math.PI / 2, 0, 0)
       m.scale.set(sx, sz, 1)
     }
-    blocker.position.set(0, 0, 0)
     lay(blockOutline, c.x, box.max.y + 0.006, c.z, size.x, size.z)
     // The meeting patch: where the two footprints overlap, at the held thing's base (or the blocker's top for hung things).
     const o = mine.clone().intersect(box)
@@ -795,7 +794,7 @@ export function placement(deps: PlaceDeps): Placement & {
         if (left) tx = thing.x0 - 26 - tw
         const ty = Math.min(Math.max(cy - th / 2, 12), vh - th - 12)
         tag.classList.remove('below')
-        tag.classList.toggle('side', true)
+        tag.classList.add('side')
         tag.classList.toggle('left', left)
         tag.style.setProperty('--tail-y', `${Math.round(Math.min(Math.max(cy - ty, 20), th - 20))}px`)
         tag.style.transform = `translate(${Math.round(tx)}px, ${Math.round(ty)}px) rotate(-1.2deg)`
@@ -936,8 +935,7 @@ export function placement(deps: PlaceDeps): Placement & {
     pan.fresh = true
     s.obstacles = obstacles(scene, [holder, group])
     s.supports = supports(scene, [holder, group])
-    s.at = at ?? start(s)
-    if (at) s.at = nearestFit(s, at, 0.5) ?? at
+    s.at = at ? nearestFit(s, at, 0.5) ?? at : start(s)
     ghost(s)
     place(s, s.at)
     touchAction = renderer.domElement.style.touchAction

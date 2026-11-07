@@ -210,7 +210,7 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
   to = round(from + w)
   const door = found.door
 
-  const label = intent.label ? intent.label.replace(/^\p{Ll}/u, (ch) => ch.toUpperCase()) : 'New room'
+  const label = freshLabel(plan, intent.label ? intent.label.replace(/^\p{Ll}/u, (ch) => ch.toUpperCase()) : 'New room')
   const draft: Draft = { roomId: freshId(plan, intent.label ?? 'room'), label, wallId: host.id, from, to, depth: d, bend: 0, door: { ...door, ...(leaves ? { leaves } : {}) }, ...(keepOut.length ? { keepOut } : {}) }
   const fitted = fit(plan, draft)
   if ('ask' in fitted) return fitted
@@ -309,7 +309,15 @@ function freeStretches(wall: Wall, L: number): Array<[number, number]> {
   return out.filter(([a, b]) => b - a >= MIN_WALL)
 }
 
-function freshId(plan: Plan, label: string): Id {
+/** Room names are unique in a house (people find rooms by name): a second "Study" becomes "Study 2". */
+export function freshLabel(plan: Plan, said: string): string {
+  const taken = new Set(plan.rooms.map((r) => r.label.toLowerCase()))
+  let label = said
+  for (let n = 2; taken.has(label.toLowerCase()); n++) label = `${said} ${n}`
+  return label
+}
+
+export function freshId(plan: Plan, label: string): Id {
   const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'room'
   const taken = new Set([...plan.rooms.map((r) => r.id), ...plan.corners.map((c) => c.id), ...plan.walls.map((w) => w.id)])
   const used = (id: string) => taken.has(id) || [...taken].some((t) => t.startsWith(`${id}.`))

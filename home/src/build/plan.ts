@@ -8,7 +8,7 @@
 // applied by apply(plan, edit) -> plan; a version stores the plan that results.
 import { DOORWAY, WALL_Z, WINDOW } from '../layout'
 
-export const PLAN_VERSION = 1
+export const PLAN_SCHEMA = 1
 
 export type Id = string
 
@@ -97,7 +97,7 @@ export interface Furniture {
 }
 
 export interface Plan {
-  version: typeof PLAN_VERSION
+  schema: typeof PLAN_SCHEMA
   corners: Corner[]
   walls: Wall[]
   rooms: Room[]
@@ -156,7 +156,7 @@ const left = -3.4
 const right = 3.4 + T / 2
 
 export const KITCHEN: Plan = {
-  version: PLAN_VERSION,
+  schema: PLAN_SCHEMA,
   corners: [
     { id: 'kitchen.back-left', x: left, z: back },
     { id: 'kitchen.back-right', x: right, z: back },
@@ -367,7 +367,7 @@ function selfIntersects(points: P[]): boolean {
 /** Every reason the plan is not a valid house; empty when it is. */
 export function validate(plan: Plan): string[] {
   const reasons: string[] = []
-  if (plan.version !== PLAN_VERSION) reasons.push(`version ${plan.version} is not ${PLAN_VERSION}`)
+  if (plan.schema !== PLAN_SCHEMA) reasons.push(`schema ${plan.schema} is not ${PLAN_SCHEMA}`)
   const seen = new Set<Id>()
   const ids = [
     ...plan.corners.map((c) => c.id), ...plan.walls.map((w) => w.id), ...plan.walls.flatMap((w) => w.openings.map((o) => o.id)),
@@ -405,6 +405,15 @@ export function validate(plan: Plan): string[] {
     })
     goodWalls.add(w.id)
   }
+  // Two straight walls along one stretch are one wall drawn twice.
+  const straight = plan.walls.filter((w) => goodWalls.has(w.id) && Math.abs(w.sagitta) < 1e-9)
+  for (let i = 0; i < straight.length; i++) for (let j = i + 1; j < straight.length; j++) {
+    const a = curveOf(plan, straight[i]), b = curveOf(plan, straight[j])
+    const off = (p: P) => (p[0] - a.a[0]) * a.normal[0] + (p[1] - a.a[1]) * a.normal[1]
+    if (Math.abs(off(b.a)) > 1e-6 || Math.abs(off(b.b)) > 1e-6) continue
+    const t = (p: P) => (p[0] - a.a[0]) * a.dir[0] + (p[1] - a.a[1]) * a.dir[1]
+    if (Math.min(Math.max(t(b.a), t(b.b)), a.length) - Math.max(Math.min(t(b.a), t(b.b)), 0) > 1e-6) reasons.push(`walls ${straight[i].id} and ${straight[j].id} run along the same stretch`)
+  }
   const bounding = new Map<Id, number>()
   const goodRooms = new Set<Id>()
   for (const r of plan.rooms) {
@@ -436,7 +445,14 @@ export function validate(plan: Plan): string[] {
     goodRooms.add(r.id)
   }
   for (const [id, n] of bounding) if (n > 2) reasons.push(`wall ${id} bounds ${n} rooms`)
-  // A floor thing's room follows from where it stands (roomAt), so no two rooms share floor.
+  // People find rooms by name, so two rooms may not share one.
+  const labels = new Map<string, Id>()
+  for (const r of plan.rooms) {
+    const key = r.label.toLowerCase()
+    if (labels.has(key)) reasons.push(`rooms ${labels.get(key)} and ${r.id} are both called ${r.label}`)
+    else labels.set(key, r.id)
+  }
+  // roomAt finds a floor thing's room from where it stands, so two rooms may not share floor.
   const good = plan.rooms.filter((r) => goodRooms.has(r.id))
   for (let i = 0; i < good.length; i++) for (let j = i + 1; j < good.length; j++) {
     if (polygonsOverlap(outline(plan, good[i], 0.05), outline(plan, good[j]))) reasons.push(`room ${good[j].id} overlaps room ${good[i].id}`)
@@ -462,7 +478,8 @@ const round = (v: number) => Math.round(v * 1e6) / 1e6
 /** An angle in (-π, π], so one orientation has one stored value (the host bounds angles, and a full turn is no change). */
 export const angle = (a: number) => {
   const r = round(Math.atan2(Math.sin(a), Math.cos(a)))
-  return r <= -round(Math.PI) ? round(Math.PI) : r
+  // Both ends of the range round to the half turn, so angle(angle(a)) === angle(a).
+  return Math.abs(r) > Math.PI - 1e-6 ? round(Math.PI) : r
 }
 
 /** Apply one edit. Moves and bends snap and stop at the nearest valid value; other invalid edits throw a PlanError. */

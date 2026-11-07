@@ -321,7 +321,7 @@ try {
         overlap: (() => {
           // A den on the kitchen's right wall, a nook in front of the den, then a room on the rest of the right wall runs into the nook.
           const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.right', t: 1.8 } })
-          const nook = go(den.plan, { op: 'addRoom', label: 'nook', anchor: { wall: 'selected' }, size: { w: 3, d: 4 } }, { selected: { wallId: 'den.w3', t: 1.5 } })
+          const nook = go(den.plan, { op: 'addRoom', label: 'nook', anchor: { wall: 'selected' }, size: { w: 2, d: 4 } }, { selected: { wallId: 'den.w3', t: 1 } })
           return go(nook.plan, { op: 'addRoom', anchor: { wall: 'selected' }, size: { w: 2, d: 3 } }, { selected: { wallId: 'den.rest', t: 1.3 } }).ask
         })(),
         corner: go(K, { op: 'addRoom', anchor: { side: 'left' } }, { view: [-1, -1] }).ask,
@@ -338,11 +338,19 @@ try {
       const snapped = go(K, { op: 'addRoom', anchor: { side: 'right' }, size: { w: 3.33, d: 2.77 } })
       out.snapped = snapped.draft
       // A wall piece of exactly 0.5 m is a wall (validate allows rounding), and a sliver says so, not "a window".
+      out.overtaken = (() => {
+        // This page draws a room on den.rest; another page then builds a nook on den.w3 across its floor.
+        const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.right', t: 1.8 } })
+        const drawn = go(den.plan, { op: 'addRoom', label: 'study', anchor: { wall: 'selected' }, size: { w: 2, d: 3 } }, { selected: { wallId: 'den.rest', t: 1.3 } })
+        const nook = go(den.plan, { op: 'addRoom', label: 'nook', anchor: { wall: 'selected' }, size: { w: 2, d: 4 } }, { selected: { wallId: 'den.w3', t: 1 } })
+        return R.fit(nook.plan, drawn.draft).ask
+      })()
       out.front58 = go(K, { op: 'addRoom', anchor: { side: 'front' }, size: { w: 5.8, d: 3 } }, { view: [0, -1] })
       out.front66 = go(K, { op: 'addRoom', anchor: { side: 'front' }, size: { w: 6.6, d: 3 } }, { view: [0, -1] }).ask
       return out
     })
     const L = unit.left
+    check("fit: a drawn room that another page's room now overlaps is refused as running into it", /runs into the nook/.test(unit.overtaken ?? ''), unit.overtaken)
     check('resolver: a 5.8 m room on the front wall is drawn, not refused', !('ask' in unit.front58) && unit.front58.draft, unit.front58.ask)
     check('resolver: a width that leaves a sliver on a wall with no openings says so', /sliver/.test(unit.front66 ?? ''), unit.front66)
     check('resolver: "to the left, double doors, 2/3 the size" hangs on the left wall with a double door', L.draft?.wallId === 'kitchen.left' && L.draft.door.leaves === 2 && L.valid?.length === 0, L.draft)
@@ -563,7 +571,7 @@ try {
       await B(page, () => window.villageBuild.outline.confirm())
       s = await until(page, (x) => !x.draft, 5000)
     }
-    check('a room drawn before another page built on that floor is not built into it, and your villager says why', denDraft && !s.draft && !s.rooms.includes(denDraft.roomId) && s.rooms.includes('nook') && /runs into the nook|doesn't fit/i.test(s.said.at(-1) ?? ''), { draft: denDraft, rooms: s.rooms, said: s.said.at(-1) })
+    check('a room drawn on a stretch another page then built on is not built, and your villager says so', denDraft && !s.draft && !s.rooms.includes(denDraft.roomId) && s.rooms.includes('nook') && /runs into the nook|doesn't fit/i.test(s.said.at(-1) ?? ''), { draft: denDraft, rooms: s.rooms, said: s.said.at(-1) })
     const yardThree = await yardInside(page)
     check('with the rooms added, still nothing of the yard inside any of them', yardThree.rooms >= 3 && yardThree.total === 0, yardThree)
     await B(page, () => window.village.unload('build'))

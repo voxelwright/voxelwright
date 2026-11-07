@@ -2,7 +2,7 @@
 // stepping stones and shrubs that stand inside a built room, its walls, or the sketch
 // paper are left out at runtime. diorama.ts draws the yard; this keeps
 // each changed mesh's original instance matrices or index and puts them back on
-// restore(). One owner (plugins/build.ts) combines every area to clear into one call.
+// restore(). Each hide() replaces the last, so pass every area to clear in one call.
 import * as THREE from 'three/webgpu'
 import { inside, type P } from './plan'
 

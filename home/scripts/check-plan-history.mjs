@@ -72,7 +72,7 @@ try {
   const queued = await Promise.all([h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }]), h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }])])
   check('commits sent together are saved one after the other', queued[1].parent === queued[0].id && h.head === queued[1].id)
 
-  // ---- replay equals the cached plans
+  // ---- reopening reads the same plans and head
   const again = await PlanHistory.open(store, KITCHEN)
   check('reopening reads every version to the same plans and head', again.head === h.head && h.versions().every((v) => same(again.planAt(v.id), h.planAt(v.id))) && again.name(v2.id) === 'Bay window')
 
@@ -130,12 +130,12 @@ try {
   check('reopening reads the stored plans and head', same(reread.plan, clamped.plan) && reread.head === clamped.id)
   check('a stored version holds its plan and note only', !('hash' in clamped) && !('edits' in clamped) && !('base' in reread.versions()[0]) && same(reread.versions()[0].plan, KITCHEN))
 
-  // the upgrade hook, keyed on plan.version (identity at v1; a fake v0 -> v1 step proves the path).
-  const v0 = ({ furniture, ...rest }) => ({ ...rest, version: 0 })
-  const toV1 = { 0: (p) => ({ ...p, version: 1, furniture: [] }) }
+  // the upgrade hook, keyed on plan.schema (identity at 1; a fake 0 -> 1 step proves the path).
+  const v0 = ({ furniture, ...rest }) => ({ ...rest, schema: 0 })
+  const toV1 = { 0: (p) => ({ ...p, schema: 1, furniture: [] }) }
   check('upgrade is identity for a v1 plan', upgrade(KITCHEN) === KITCHEN)
   check('upgrade runs the v0 step', same(upgrade(v0(KITCHEN), toV1), KITCHEN))
-  check('a plan from a newer home is refused with why', /newer home/.test((await refusal(async () => upgrade({ ...KITCHEN, version: 2 })))?.message ?? ''))
+  check('a plan from a newer home is refused with why', /newer home/.test((await refusal(async () => upgrade({ ...KITCHEN, schema: 2 })))?.message ?? ''))
   const old = memoryStore()
   const oh = await PlanHistory.open(old, KITCHEN)
   const ov1 = await oh.commit([move])
@@ -143,12 +143,14 @@ try {
   const withOld = (headAt) => ({ ...old, load: async () => { const st = await old.load(); st.versions[1].plan = v0(st.versions[1].plan); if (headAt) st.head = st.versions[1].id; return st } })
   const noStep = await PlanHistory.open(withOld(false), KITCHEN)
   const unreadable = await refusal(async () => noStep.planAt(ov1.id))
-  check('an old version with no upgrade step is listed but unreadable, and the house still opens', noStep.versions().length === 3 && unreadable instanceof HistoryError && /no upgrade from plan version 0/.test(unreadable.message) && same(noStep.plan, oh.plan))
+  check('an old version with no upgrade step is listed but unreadable, and the house still opens', noStep.versions().length === 3 && unreadable instanceof HistoryError && /no upgrade from plan schema 0/.test(unreadable.message) && same(noStep.plan, oh.plan))
   check('an unreadable version cannot be checked out', (await refusal(() => noStep.checkout(ov1.id))) instanceof HistoryError && noStep.head === oh.head)
   const stepped = await PlanHistory.open(withOld(false), KITCHEN, { upgrades: toV1 })
   check('with the v0 step the old version reads as v1', same(stepped.planAt(ov1.id), { ...oh.planAt(ov1.id), furniture: [] }))
-  const headOld = await refusal(() => PlanHistory.open(withOld(true), KITCHEN))
-  check('only an unreadable head stops open, with the version and why', headOld instanceof HistoryError && headOld.versionId === ov1.id)
+  // An unreadable head shows its nearest readable ancestor and refuses commits on top of it (undo or checkout moves it).
+  const headOld = await PlanHistory.open(withOld(true), KITCHEN)
+  const onBad = await refusal(() => headOld.commit([bend]))
+  check('an unreadable head opens on its nearest readable ancestor and refuses commits', headOld.head === ov1.id && same(headOld.plan, KITCHEN) && onBad instanceof HistoryError && onBad.versionId === ov1.id, onBad?.message)
 
   // ---- what the history hands out is frozen
   const tryWrite = (fn) => { try { fn(); return false } catch (error) { return error instanceof TypeError } }
@@ -241,6 +243,22 @@ try {
   const cycle = await refusal(async () => P.apply(set, { op: 'moveItem', furnitureId: 'f.vase', at: { ...vase.at, on: 'f.cup' } }))
   check('standing on something that stands on you is refused', cycle instanceof PlanError && /stands on it/.test(cycle.message))
   check('standing on a thing that is not in the house is refused', (await refusal(async () => P.apply(KITCHEN, { op: 'placeItem', furniture: vase }))) instanceof PlanError)
+
+  // ---- the rules a stored plan is held to
+  const twinWall = { ...KITCHEN, walls: [...KITCHEN.walls, { ...KITCHEN.walls[1], id: 'kitchen.right2', a: KITCHEN.walls[1].b, b: KITCHEN.walls[1].a }] }
+  check('validate refuses two walls on the same corners', P.validate(twinWall).includes('walls kitchen.right and kitchen.right2 join the same corners'), P.validate(twinWall))
+  const twice = { ...KITCHEN, rooms: [{ ...KITCHEN.rooms[0], loop: [...KITCHEN.rooms[0].loop, 'kitchen.back-right'] }] }
+  check('validate refuses a room naming a corner twice', P.validate(twice).includes('room kitchen names a corner twice'))
+  const looped = { ...KITCHEN, furniture: [{ ...vase, at: { ...vase.at, on: 'f.cup' } }, cup] }
+  check('validate refuses a stored plan whose things stand on each other', P.validate(looped).some((r) => /stands on it/.test(r)))
+  const trimmedRoom = P.apply(KITCHEN, { ...pantry, room: { id: 'pantry', label: ' Pantry ' } })
+  check("an added room's label is stored trimmed, as the host stores it", trimmedRoom.rooms.find((r) => r.id === 'pantry').label === 'Pantry')
+  const noted = await (await PlanHistory.open(memoryStore(), KITCHEN)).commit([move], ' Moved\nthe\u200bwall ')
+  check('a note is stored as plain text the host accepts', noted.note === 'Moved the wall', noted.note)
+  const halfTurned = await PlanHistory.open(memoryStore(), KITCHEN)
+  await halfTurned.commit([{ op: 'placeItem', furniture: { id: 'f.crate', item: { kind: 'crate' }, at: { mount: 'floor', x: 0, z: 1.5, yaw: Math.PI } } }])
+  const putBack = await refusal(() => halfTurned.commit([{ op: 'moveItem', furnitureId: 'f.crate', at: { ...halfTurned.plan.furniture[0].at } }]))
+  check('a half turn has one stored value: putting a half-turned thing back is not a version', putBack instanceof PlanError && putBack.reasons[0] === 'nothing changed' && halfTurned.versions().length === 2, putBack?.message)
 
   // ---- diff
   const K = KITCHEN

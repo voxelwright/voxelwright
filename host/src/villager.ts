@@ -142,7 +142,8 @@ export default {
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
-    const plans = planStore(config.root)
+    // The library is this service's: a placed item must belong to a listed person and be kept (unparseable counts as not kept).
+    const plans = planStore(config.root, async (person, item) => Object.hasOwn(people, person) && (await readItem(person, item).catch(() => null))?.kept === true)
 
     const authorized = (req: IncomingMessage) => {
       const given = Buffer.from(req.headers.authorization ?? '')

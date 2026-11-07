@@ -1399,7 +1399,7 @@ handwritten paper tag while you drag. Escape cancels a drag. Without the flag,
 `plugins/build.ts` does nothing.
 
 The plan (`src/build/plan.ts`, pure, no three.js) is a JSON document,
-`version: 1`, with stable string ids:
+`schema: 1`, with stable string ids:
 
 - `corners` {id, x, z}: where wall centrelines meet. A position is stored only here.
 - `walls` {id, a, b, thickness, height, sagitta, openings}. `sagitta` is how
@@ -1417,10 +1417,12 @@ attaches a rectangle along a straight wall. It splits that wall so the shared
 stretch is one wall in both loops, re-measures the openings on it, and can put a
 door (`leaves: 2` for double doors) on the shared wall. It refuses to split a
 curved wall. `validate(plan)` returns its reasons for rejecting a plan:
-dangling ids, duplicate ids, walls under 0.5 m, bulges beyond a half circle,
-openings that don't fit or that overlap, rooms that cross themselves or wind the
-wrong way, wall things off their wall, doors off the floor and windows with
-leaves. Each committed drag is a plan version (see "Plan versions").
+dangling or duplicate ids, two walls on the same pair of corners, walls under
+0.5 m, bulges beyond a half circle, openings that don't fit or that overlap,
+doors off the floor and windows with leaves, rooms that name a corner twice,
+cross themselves, wind the wrong way, share floor with another room or share
+another room's name, a wall bounding more than two rooms, wall things off their
+wall, and a thing standing on a support that stands on it. Each committed drag is a plan version (see "Plan versions").
 
 `src/build/walls.ts` builds one box per wall piece along a world axis and bends
 it onto the arc only when the wall is curved. A straight wall therefore matches
@@ -1443,7 +1445,7 @@ without `?build=1` are then identical.
 
 | Capture | Noise floor (two runs without the flag) | Generated vs without the flag |
 | --- | --- | --- |
-| `?cam=iso` | 0.000 | 0.001 mean, 3,762 px (0.29%), max 43/765 |
+| `?cam=iso` | 0.000 | 0.001 mean per channel; 3,762 px (0.29%) differ, the largest by 43 of 765 (R+G+B) |
 | seated | 0.000 | 0.000 (identical) |
 
 The iso residual is scattered single pixels on the dollhouse floor only. The
@@ -1453,7 +1455,7 @@ bit-identical.
 
 Dragging the right wall 1 m out moves the plan corners and the wall by 1.00 m.
 The floor goes from 40.26 to 46.26 m². 1 m in gives 34.26 m². Back at the start
-after 100 moves, geometries and textures are flat (329 / 78). Bending the wall
+after 100 moves, the geometry and texture counts are flat (329 and 78). Bending the wall
 out by 1 m adds 4.16 m² of floor, against a 4.21 m² circular segment on the
 centreline. A rebuild takes 1 ms median and 3 ms max. Unloading `build` gives a
 scene object list equal to a page without it (563 objects). There are no
@@ -1589,13 +1591,16 @@ removed and changed corners, walls, openings, rooms and furniture by id.
 - A version stores the plan it produced: `{id, parent, at, note?, plan}`. The
   edits that made it are applied and checked on the page, then not kept; `note`
   says in a few words what changed, and `diff` compares plans. Open reads each
-  stored plan, so a change to plan.ts (snapping, `MIN_ROOM_SIDE`, a new rule)
-  never changes a saved house.
-- Migration hook: `UPGRADES[n]` in history.ts turns a version-`n` plan into the
-  next version, and `upgrade(plan)` runs the steps up to `PLAN_VERSION` (identity
-  at 1 today; add a step whenever `PLAN_VERSION` goes up). A version this page
-  cannot read (no step, or saved by a newer home) is listed but cannot be shown
-  or checked out. Only an unreadable head stops open with a `HistoryError`.
+  stored plan, so a change to plan.ts (snapping, `MIN_ROOM_SIDE`) never changes
+  a saved house.
+- Migration hook: `UPGRADES[n]` in history.ts turns a schema-`n` plan into the
+  next schema, and `upgrade(plan)` runs the steps up to `PLAN_SCHEMA` (identity
+  at 1 today). `validate()` is a contract on stored plans: a change that refuses
+  a plan the previous rules accepted bumps `PLAN_SCHEMA` and adds a step. A
+  version this page cannot read (no step, saved by a newer home, or invalid) is
+  listed but cannot be shown or checked out. While the head is one, the house
+  shows its nearest readable ancestor and refuses commits until undo or
+  checkout moves the head.
 - Plans and versions the history hands out are deep-frozen.
 - A version exists only once the store has accepted it. A failed save throws
   and leaves the head, the versions and the plan as they were. Resending the
@@ -1632,7 +1637,7 @@ removed and changed corners, walls, openings, rooms and furniture by id.
   A gap or an unreadable event makes reads fail rather than fold around it. The host sets
   `at` from its clock and names no one: every page shares one token, so it cannot
   yet know who is at the page. It checks every field and every plan's shape, at
-  most 50 edits and 256 KB per request, refuses 409 a version that places a library
+  most 256 KB per request, refuses 409 a version that places a library
   item the person has not kept, and never runs a plan.
 - Endpoints, behind the per-launch token: `GET /house/plans` returns
   `{versions, head, names}`. `POST /house/plans/versions {version}` answers 409

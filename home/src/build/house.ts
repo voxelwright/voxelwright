@@ -5,9 +5,9 @@
 // built will outlast the page. When the host is there but its plan cannot be
 // opened, the house is read-only and says why: an edit that only lived in this
 // page would look saved and be lost.
+import { launchToken } from '../villager'
 import { KITCHEN } from './plan'
 import { PlanHistory, hostStore, memoryStore } from './history'
-import { launchToken } from '../villager'
 
 let opening: Promise<PlanHistory> | null = null
 

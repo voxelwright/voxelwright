@@ -22,7 +22,7 @@ async function start() {
 
 // Synthetic plan: a 4 x 4 m square room.
 const base = {
-  version: 1,
+  schema: 1,
   corners: [{ id: 'r.a', x: 0, z: 0 }, { id: 'r.b', x: 4, z: 0 }, { id: 'r.c', x: 4, z: 4 }, { id: 'r.d', x: 0, z: 4 }],
   walls: [
     { id: 'r.w1', a: 'r.a', b: 'r.b', thickness: 0.18, height: 3, sagitta: 0, openings: [{ id: 'r.door', kind: 'door', from: 1, to: 2, sill: 0, head: 2.1, leaves: 1 }] },

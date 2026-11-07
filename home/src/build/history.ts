@@ -2,11 +2,13 @@
 //
 // A version stores the plan it produced (`plan`) and a short note of what changed;
 // the edits that made it are applied and checked here, then not kept (the plan is
-// the one record, and diff() compares plans). Opening a history reads each version's plan, so a
-// change to plan.ts never changes a saved house. A plan saved under an older
-// PLAN_VERSION is brought forward by UPGRADES, keyed on plan.version. A version
-// whose plan cannot be read (no upgrade step, or saved by a newer page) is listed
-// but cannot be shown or checked out; only an unreadable head stops open().
+// the one record, and diff() compares plans). Opening a history reads each version's plan
+// and replays nothing. validate() is a contract on stored plans: a change that refuses a
+// plan the previous rules accepted bumps PLAN_SCHEMA and adds an UPGRADES step that brings
+// older plans within it. A version whose plan cannot be read (no upgrade step, saved by a
+// newer page, or invalid) is listed but cannot be shown or checked out; while the head is
+// one, the house shows its nearest readable ancestor, refuses commits, and only undo or
+// checkout moves it.
 //
 // The head (which version the house is at) and version names live in the store.
 // Every head move is a compare-and-set: a commit names its parent, which must be
@@ -16,7 +18,7 @@
 // new head. A version exists only once the store has accepted it; until then
 // head, versions and plan stay as they were. Plans and versions handed out are
 // frozen: they are history, not scratch space.
-import { apply, curveOf, PLAN_VERSION, PlanError, pointAt, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
+import { apply, curveOf, PLAN_SCHEMA, PlanError, pointAt, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
 
 export interface Version {
   id: string
@@ -110,24 +112,24 @@ function deepFreeze<T>(value: T): T {
 }
 
 // ── Upgrades ────────────────────────────────────────────────────────────────
-/** One step: a stored plan at version n in, the same house at a later version out. */
-export type Upgrade = (plan: any) => unknown
+/** One step: a stored plan at schema n in, the same house at a later schema out. */
+export type Upgrade = (plan: unknown) => unknown
 
-/** UPGRADES[n] brings a version-n plan forward. Add a step whenever PLAN_VERSION goes up. */
+/** UPGRADES[n] brings a schema-n plan forward. Add a step whenever PLAN_SCHEMA goes up, and bump it whenever validate() starts refusing plans it accepted. */
 export const UPGRADES: Readonly<Record<number, Upgrade>> = Object.freeze({})
 
-/** A stored plan at this page's PLAN_VERSION, or an Error saying why it cannot be. */
+/** A stored plan at this page's PLAN_SCHEMA, or an Error saying why it cannot be. */
 export function upgrade(stored: unknown, steps: Readonly<Record<number, Upgrade>> = UPGRADES): Plan {
-  let plan = stored as { version?: unknown } | null
+  let plan = stored as { schema?: unknown } | null
   for (;;) {
-    const v = plan?.version
-    if (v === PLAN_VERSION) return plan as Plan
-    if (typeof v !== 'number' || !Number.isInteger(v)) throw new Error('the plan has no version')
-    if (v > PLAN_VERSION) throw new Error(`the plan was saved by a newer home (plan version ${v}, this page knows ${PLAN_VERSION})`)
+    const v = plan?.schema
+    if (v === PLAN_SCHEMA) return plan as Plan
+    if (typeof v !== 'number' || !Number.isInteger(v)) throw new Error('the plan has no schema')
+    if (v > PLAN_SCHEMA) throw new Error(`the plan was saved by a newer home (plan schema ${v}, this page knows ${PLAN_SCHEMA})`)
     const step = steps[v]
-    if (!step) throw new Error(`no upgrade from plan version ${v}`)
-    const next = step(plan) as { version?: unknown } | null
-    if (!(typeof next?.version === 'number' && next.version > v)) throw new Error(`the upgrade from plan version ${v} did not move it forward`)
+    if (!step) throw new Error(`no upgrade from plan schema ${v}`)
+    const next = step(plan) as { schema?: unknown } | null
+    if (!(typeof next?.schema === 'number' && next.schema > v)) throw new Error(`the upgrade from plan schema ${v} did not move it forward`)
     plan = next
   }
 }
@@ -185,7 +187,7 @@ export function hostStore(opts: { base: string; token: string; refresh?: () => P
       throw new StoreError(0, `the host could not be reached: ${(error as Error).message}`)
     }
   }
-  async function call(path: string, body?: unknown): Promise<any> {
+  async function call<T>(path: string, body?: unknown): Promise<T> {
     let res = await send(path, body)
     // The host restarted with a new token: fetch it once and try again.
     if (res.status === 401 && opts.refresh) {
@@ -199,13 +201,13 @@ export function hostStore(opts: { base: string; token: string; refresh?: () => P
     // Only a compare-and-set mismatch carries the head.
     if (res.status === 409 && json && 'head' in json) throw new StaleHead(json.head)
     if (!res.ok) throw new StoreError(res.status, json?.error ?? `the host answered ${res.status}`)
-    return json
+    return json as T
   }
   return {
-    load: () => call(''),
-    commit: async (version) => (await call('/versions', { version })).version,
-    setHead: async (head, expect) => void (await call('/head', { head, expect })),
-    rename: async (id, name) => void (await call('/names', { id, name })),
+    load: () => call<StoreState>(''),
+    commit: async (version) => (await call<{ version: Version }>('/versions', { version })).version,
+    setHead: async (head, expect) => void (await call<unknown>('/head', { head, expect })),
+    rename: async (id, name) => void (await call<unknown>('/names', { id, name })),
   }
 }
 
@@ -281,8 +283,13 @@ export class PlanHistory {
     return this.#unsaved
   }
 
+  /** The house at the head, or at its nearest readable ancestor while the head cannot be read. */
   get plan(): Plan {
-    return this.#plans.get(this.#head)!
+    for (let id: string | null = this.#head; id !== null; id = this.#version(id).parent) {
+      const plan = this.#plans.get(id)
+      if (plan) return plan
+    }
+    throw new HistoryError(this.#head, ['no version on the way to the root can be read'])
   }
 
   get head(): string {
@@ -315,6 +322,8 @@ export class PlanHistory {
   commit(edits: Edit[], note?: string): Promise<Version> {
     return this.#serial(async () => {
       this.#writable()
+      const unreadable = this.#unreadable.get(this.#head)
+      if (unreadable) throw new HistoryError(this.#head, [unreadable])
       if (!edits.length) throw new PlanError(['no edits'])
       let next = this.plan
       for (const edit of edits) next = apply(next, edit)
@@ -462,8 +471,10 @@ export class PlanHistory {
     })
     if (roots !== 1) throw new HistoryError(state.versions[0]?.id ?? '', [`${roots} roots; a house has one`])
     if (state.head === null || !seen.has(state.head)) throw new HistoryError(state.head ?? '', ['the head is not a stored version'])
-    const why = unreadable.get(state.head)
-    if (why) throw new HistoryError(state.head, [why])
+    // An unreadable head shows its nearest readable ancestor; only when none is readable does open fail.
+    let readable: string | null = state.head
+    while (readable !== null && !plans.has(readable)) readable = state.versions.find((v) => v.id === readable)!.parent
+    if (readable === null) throw new HistoryError(state.head, [unreadable.get(state.head)!])
     this.#versions = versions
     this.#plans = plans
     this.#unreadable = unreadable

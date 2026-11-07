@@ -21,8 +21,8 @@
 // slanted leaf's box is bigger than the leaf), skipping flat things such as rugs.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import { curveOf, floorOf, inside, normalAt, segmentsCross, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { paintPhoto } from '../paint'
+import { curveOf, floorOf, inside, normalAt, segmentsCross, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { NEAR, fixturesOf, type Fixture } from './fixtures'
 
 export const SURFACE_MIN = 0.3
@@ -510,7 +510,6 @@ export const KINDS: Record<string, Kind> = {
       shade.scale.y = 0.85
       shade.position.y = -0.17
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.03, 16), new THREE.MeshStandardMaterial({ color: '#3a2d25', roughness: 0.5 }))
-      cap.position.y = 0.0
       g.add(shade, cap)
       return g
     },
