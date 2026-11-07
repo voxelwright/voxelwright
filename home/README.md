@@ -11,6 +11,7 @@ npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
+node scripts/check-build-plan.mjs http://localhost:5350/   # build mode (#48): pixels, plan model, drag and bend
 npm run typecheck
 npm run build
 ```
@@ -1099,3 +1100,88 @@ furnished from the kitchen (a request for it lands in the kitchen and the
 villager says so); placed props are not kept across a reload (the library is);
 no voice toggle and no context from where you are. Screenshots:
 `screenshots/talk/input-*.jpg` (real models).
+
+## Build mode (#48 experiment, November 6, 2026)
+
+`?build=1` builds the kitchen's walls, floor and dollhouse shell from a floor
+plan instead of `room.ts` and `diorama.ts`. With `?cam=iso` you can drag the
+right wall to move it (snaps to 10 cm) or pull the glowing dot at its middle to
+bend it into a bay (snaps to 5 cm of bulge). The size and floor area show on a
+handwritten paper tag while you drag. Escape cancels a drag. Without the flag,
+`plugins/build.ts` does nothing.
+
+The plan (`src/build/plan.ts`, pure, no three.js) is a JSON document,
+`version: 1`, with stable string ids:
+
+- `corners` {id, x, z}: where wall centrelines meet. A position is stored only here.
+- `walls` {id, a, b, thickness, height, sagitta, openings}. `sagitta` is how
+  far the wall's middle bulges off the chord (0 means straight, and it is capped at
+  a half circle). Openings {id, kind door|window, from, to, sill, head, leaves?}
+  are measured in metres along the wall (arc length when curved).
+- `rooms` {id, label, loop}: a loop of corner ids. Walls are first-class, so
+  one wall can bound two rooms.
+- `furniture` {id, kind, x, z, yaw, roomId}: empty for now.
+
+An edit is a small JSON object, applied by `apply(plan, edit)` and returning a
+new plan: `moveWall`, `bendWall`, `moveOpening` and `addRoom`. `addRoom`
+attaches a rectangle along a straight wall. It splits that wall so the shared
+stretch is one wall in both loops, re-measures the openings on it, and can put a
+door (`leaves: 2` for double doors) on the shared wall. It refuses to split a
+curved wall. `validate(plan)` returns its reasons for rejecting a plan:
+dangling ids, duplicate ids, walls under 0.5 m, bulges beyond a half circle,
+openings that don't fit or that overlap, rooms that cross themselves or wind the
+wrong way. Drags record their edits, and replaying them from `KITCHEN` gives
+the same plan.
+
+`src/build/walls.ts` builds one box per wall piece along a world axis and bends
+it onto the arc only when the wall is curved. A straight wall therefore matches
+today's geometry exactly. Its UVs and corner joinery copy today's, wall by wall.
+The shell is a copy of `shell()` that handles arcs. A rebuild moves its new
+geometry into the meshes the camera already tracks and reuses one set of
+materials and textures. The plugin sets today's meshes aside while it runs and
+puts them back when it unloads.
+
+```sh
+npx vite --port 5350 --strictPort &
+node scripts/check-build-plan.mjs http://localhost:5350/
+```
+
+Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 28 checks pass.
+Captures run with a fixed `Date`, a seeded `Math.random`, and frames stepped
+by the script with synthetic rAF and `performance.now()` time. Two runs of
+today's code are then identical.
+
+| Capture | Noise floor (today vs today) | Generated vs today |
+| --- | --- | --- |
+| `?cam=iso` | 0.000 | 0.001 mean, 3,762 px (0.29%), max 43/765 |
+| seated | 0.000 | 0.000 (identical) |
+
+The iso residual is scattered single pixels on the dollhouse floor only. The
+floor is now a triangulated polygon with UVs computed from world positions, so
+texel rounding moves slightly. Walls, shell and the seated view are
+bit-identical.
+
+Dragging the right wall 1 m out moves the plan corners and the wall by 1.00 m.
+The floor goes from 40.26 to 46.26 m². 1 m in gives 34.26 m². Back at the start
+after 100 moves, geometries and textures are flat (329 / 78). Bending the wall
+out by 1 m adds 4.16 m² of floor, against a 4.21 m² circular segment on the
+centreline. A rebuild takes 1 ms median and 3 ms max. Unloading `build` gives a
+scene object list equal to a page without it (563 objects). There are no
+console errors; the 503 from `/villager/launch` is the same without the flag. In the model, adding a
+4 x 3 m pantry on the left wall with a double door validates. The shared wall
+is 4 m long, appears once and is in both loops, and the pantry measures
+12.00 m².
+
+Without the flag nothing changes. `check-kernel` passes 10/10. `check-entries`
+passes 25/27; its two failures (one extra geometry on the second room cycle)
+happen in the same way with `plugins/build.ts` removed.
+
+Still open or broken: furniture doesn't follow a moved wall (the stove and
+things hung on the right wall stay put, and the villagers' corridors are
+unchanged). The garden plot, passage and lamp arm from `diorama.ts` don't
+follow the plan. Dragging works only in iso, because the seated room has never
+had a right wall, and the seated floor stays a fixed 9 m. The base stays a
+rectangle around a bay. Corners use today's butt joints, not mitres. The plan
+isn't saved, and there is no undo UI. Screenshots are in `screenshots/build/`:
+`iso-` and `seat-` `baseline`, `generated` and `diff`, plus `drag-out`,
+`drag-in`, `bend-drag` and `bend` (jpg). The clip is `drag.mp4`.

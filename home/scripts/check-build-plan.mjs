@@ -8,7 +8,7 @@
 // Exits non-zero when any check fails. Writes screenshots/build/*.jpg and a clip.
 import { chromium } from 'playwright'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const args = process.argv.slice(2)
@@ -88,11 +88,18 @@ async function diff(a, b, name) {
     g.drawImage(ib, 0, 0)
     const db = g.getImageData(0, 0, c.width, c.height)
     const out = g.createImageData(c.width, c.height)
-    let sum = 0, changed = 0
+    let sum = 0, changed = 0, max = 0, differing = 0
+    const box = [Infinity, Infinity, -1, -1]
     for (let i = 0; i < da.data.length; i += 4) {
       const d = Math.abs(da.data[i] - db.data[i]) + Math.abs(da.data[i + 1] - db.data[i + 1]) + Math.abs(da.data[i + 2] - db.data[i + 2])
       sum += d
       if (d > 24) changed++
+      if (d > 0) {
+        differing++
+        max = Math.max(max, d)
+        const p = i / 4, x = p % c.width, y = Math.floor(p / c.width)
+        box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y)
+      }
       const v = Math.min(255, d * 8)
       out.data[i] = 20 + v
       out.data[i + 1] = 16 + v * 0.7
@@ -100,11 +107,11 @@ async function diff(a, b, name) {
       out.data[i + 3] = 255
     }
     g.putImageData(out, 0, 0)
-    return { mean: sum / (da.data.length / 4) / 3, changedPct: (100 * changed) / (da.data.length / 4), image: c.toDataURL('image/jpeg', 0.85) }
+    return { mean: sum / (da.data.length / 4) / 3, changedPct: (100 * changed) / (da.data.length / 4), differing, max, box: differing ? box : null, image: c.toDataURL('image/jpeg', 0.85) }
   }, [a, b].map((buf) => `data:image/png;base64,${buf.toString('base64')}`))
   await page.close()
   if (name) writeFileSync(join(OUT, name), Buffer.from(result.image.split(',')[1], 'base64'))
-  return { mean: +result.mean.toFixed(3), changedPct: +result.changedPct.toFixed(3) }
+  return { mean: +result.mean.toFixed(3), changedPct: +result.changedPct.toFixed(3), differingPixels: result.differing, maxChannelSum: result.max, box: result.box }
 }
 
 const jpg = (page, name) => page.screenshot({ path: join(OUT, name), type: 'jpeg', quality: 85 })
@@ -131,6 +138,152 @@ if (!args.includes('--skip-pixels')) {
     const floor = await diff(shots[0], shots[1])
     const generated = await diff(shots[0], shots[2], `${label}-diff.jpg`)
     check(`${label}: generated vs today within the noise floor`, generated.mean <= Math.max(floor.mean * 1.5, 0.15), { noiseFloor: floor, generated })
+  }
+}
+
+// ---------------------------------------------------------------- 2 and 3. model, drag and bend
+if (!args.includes('--skip-drag')) {
+  const baseline = await open('?cam=iso&q=low&fx=')
+  const today = await baseline.page.evaluate(() => window.village.snapshot())
+  await baseline.context.close()
+
+  const videoDir = join(OUT, 'video-tmp')
+  rmSync(videoDir, { recursive: true, force: true })
+  const { context, page, errors } = await open('?cam=iso&q=low&fx=&build=1', { video: videoDir })
+  const stats = () => page.evaluate(() => {
+    const s = window.village.snapshot()
+    return { geometries: s.geometries, textures: s.textures }
+  })
+
+  // The model, imported straight from the dev server.
+  const model = await page.evaluate(async () => {
+    const P = await import('/src/build/plan.ts')
+    const K = P.KITCHEN
+    const out = { kitchen: P.validate(K), roundTrip: JSON.stringify(JSON.parse(JSON.stringify(K))) === JSON.stringify(K) }
+    out.kitchenArea = +P.roomArea(K, 'kitchen').toFixed(4)
+    const added = P.apply(K, { op: 'addRoom', room: { id: 'pantry', label: 'Pantry' }, wallId: 'kitchen.left', from: 1, to: 5, depth: 3, door: { id: 'pantry.door', from: 2.25, to: 3.75, leaves: 2 } })
+    const joined = (loop, a, b) => loop.some((c, i) => { const n = loop[(i + 1) % loop.length]; return (c === a && n === b) || (c === b && n === a) })
+    const shared = added.walls.filter((w) => added.rooms.every((r) => joined(r.loop, w.a, w.b)))
+    out.added = {
+      valid: P.validate(added), walls: added.walls.length, shared: shared.map((w) => ({ id: w.id, length: +P.curveOf(added, w).length.toFixed(3), openings: w.openings })),
+      pantryArea: +P.roomArea(added, 'pantry').toFixed(4), kitchenArea: +P.roomArea(added, 'kitchen').toFixed(4), kitchenLoop: added.rooms[0].loop.length,
+    }
+    out.moveOpening = P.wallOf(P.apply(K, { op: 'moveOpening', openingId: 'kitchen.window', from: 2.05, to: 3.45 }), 'kitchen.back').openings.find((o) => o.id === 'kitchen.window')
+    try { P.apply(K, { op: 'moveOpening', openingId: 'kitchen.window', from: 0.5, to: 1.9 }); out.overlapRejected = [] } catch (e) { out.overlapRejected = e.reasons }
+    const withWalls = (extra, corners = []) => ({ ...K, corners: [...K.corners, ...corners], walls: [...K.walls, ...extra] })
+    const bare = (id, a, b) => ({ id, a, b, thickness: 0.18, height: 3, sagitta: 0, openings: [] })
+    out.rejects = {
+      dangling: P.validate({ ...K, walls: K.walls.map((w) => (w.id === 'kitchen.front' ? { ...w, b: 'nowhere' } : w)) }),
+      short: P.validate(withWalls([bare('tiny', 'x1', 'x2')], [{ id: 'x1', x: 0, z: 0 }, { id: 'x2', x: 0.3, z: 0 }])),
+      halfCircle: P.validate({ ...K, walls: K.walls.map((w) => (w.id === 'kitchen.right' ? { ...w, sagitta: 3.2 } : w)) }),
+      crossing: P.validate({ ...withWalls([bare('d1', 'kitchen.back-right', 'kitchen.front-left'), bare('d2', 'kitchen.front-right', 'kitchen.back-left')]), rooms: [...K.rooms, { id: 'bow', label: 'Bow', loop: ['kitchen.back-left', 'kitchen.back-right', 'kitchen.front-left', 'kitchen.front-right'] }] }),
+    }
+    try { P.apply(P.apply(K, { op: 'bendWall', wallId: 'kitchen.left', sagitta: 0.5 }), { op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: 'kitchen.left', from: 1, to: 3, depth: 2 }); out.curvedSplit = [] } catch (e) { out.curvedSplit = e.reasons }
+    return out
+  })
+  check('model: the kitchen plan validates and survives a JSON round trip', model.kitchen.length === 0 && model.roundTrip, { reasons: model.kitchen, area: model.kitchenArea })
+  const shared = model.added.shared
+  check('model: addRoom 4 x 3 m on the left wall with a double door validates', model.added.valid.length === 0, model.added.valid)
+  check('model: the shared wall exists once, in both loops, and carries the double door', shared.length === 1 && shared[0].length === 4 && shared[0].openings.some((o) => o.leaves === 2 && o.kind === 'door'), shared)
+  check('model: the new room is 12 m² and the kitchen keeps its area', Math.abs(model.added.pantryArea - 12) < 1e-6 && Math.abs(model.added.kitchenArea - model.kitchenArea) < 1e-6, model.added)
+  check('model: moveOpening moves the window; an overlap with the door is rejected', model.moveOpening.from === 2.05 && model.overlapRejected.length > 0, { window: model.moveOpening, rejected: model.overlapRejected })
+  for (const [name, reasons] of Object.entries(model.rejects)) check(`model: validate rejects ${name}`, reasons.length > 0, reasons)
+  check('model: addRoom refuses to split a curved wall, with a reason', model.curvedSplit.length > 0, model.curvedSplit)
+
+  // Drag the right wall with the mouse.
+  const where = () => page.evaluate(() => {
+    const p = window.villageBuild.plan()
+    const br = p.corners.find((c) => c.id === 'kitchen.back-right'), fr = p.corners.find((c) => c.id === 'kitchen.front-right')
+    const z = br.z + (fr.z - br.z) * 0.2, mid = (br.z + fr.z) / 2
+    const pr = (x, zz) => window.villageBuild.project(x, 0.42, zz)
+    return { x: br.x, at: pr(br.x, z), out: pr(br.x + 1, z), in: pr(br.x - 1, z), bend: pr(br.x, mid), bendOut: pr(br.x + 1, mid), floor: window.villageBuild.floorArea(), wallX: window.villageBuild.wallX(), sagitta: p.walls.find((w) => w.id === 'kitchen.right').sagitta }
+  })
+  const frames = (n = 12) => page.evaluate((n) => new Promise((r) => { const s = () => (--n ? requestAnimationFrame(s) : r()); requestAnimationFrame(s) }), n)
+  const w0 = await where()
+  await page.mouse.move(...w0.at)
+  await frames()
+  const cursor = await page.evaluate(() => document.querySelector('canvas').style.cursor)
+  check('drag: hovering the right wall shows the grab handle', cursor === 'grab', cursor)
+  await page.mouse.down()
+  await page.mouse.move(...w0.out, { steps: 25 })
+  await frames()
+  // The size tag is drawn for the first time now (one geometry, one texture), so the leak check counts from here.
+  const g0 = await stats()
+  const out = await where()
+  await jpg(page, 'drag-out.jpg')
+  check('drag: 1 m out moves the plan by the snapped 1.0 m, and the wall and floor follow', Math.abs(out.x - w0.x - 1) < 1e-6 && Math.abs(out.wallX - w0.wallX - 1) < 1e-6 && Math.abs(out.floor - w0.floor - 6) < 0.01, { planX: [w0.x, out.x], wallX: [w0.wallX, out.wallX], floor: [+w0.floor.toFixed(3), +out.floor.toFixed(3)] })
+  await page.mouse.move(...w0.in, { steps: 50 })
+  await frames()
+  const inn = await where()
+  await jpg(page, 'drag-in.jpg')
+  check('drag: 1 m in moves it by -1.0 m', Math.abs(inn.x - w0.x + 1) < 1e-6, { planX: inn.x, floor: +inn.floor.toFixed(3) })
+  await page.mouse.move(...w0.at, { steps: 25 })
+  await page.mouse.up()
+  await frames(30)
+  const back = await where()
+  const g1 = await stats()
+  check('drag: back at the start after 100 moves, geometries and textures flat since the first move', Math.abs(back.x - w0.x) < 1e-6 && g1.geometries === g0.geometries && g1.textures === g0.textures, { before: g0, after: g1 })
+
+  // Escape cancels.
+  await page.mouse.move(...w0.at)
+  await page.mouse.down()
+  await page.mouse.move((w0.at[0] + w0.out[0]) / 2, (w0.at[1] + w0.out[1]) / 2, { steps: 10 })
+  await frames()
+  const mid = await where()
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await frames()
+  const cancelled = await where()
+  check('drag: Escape puts the wall back', Math.abs(mid.x - w0.x - 0.5) < 1e-6 && Math.abs(cancelled.x - w0.x) < 1e-6, { during: mid.x, after: cancelled.x })
+
+  // Bend the wall out by 1 m at its middle.
+  await page.mouse.move(...w0.bend)
+  await frames()
+  await page.mouse.down()
+  await page.mouse.move(...w0.bendOut, { steps: 30 })
+  await frames()
+  await jpg(page, 'bend-drag.jpg')
+  await page.mouse.up()
+  await frames(30)
+  const bent = await where()
+  const expected = await page.evaluate(async () => {
+    const P = await import('/src/build/plan.ts')
+    const p = window.villageBuild.plan()
+    return { segment: P.segmentArea(P.curveOf(p, P.wallOf(p, 'kitchen.right'))), planGrowth: P.roomArea(p, 'kitchen') - P.roomArea(P.KITCHEN, 'kitchen') }
+  })
+  const grew = bent.floor - w0.floor
+  await jpg(page, 'bend.jpg')
+  const g2 = await stats()
+  check('bend: sagitta snaps to 1.00 m and the floor grows by about the circular segment', Math.abs(bent.sagitta - 1) < 1e-6 && Math.abs(grew - expected.segment) / expected.segment < 0.1, { sagitta: bent.sagitta, floorGrowth: +grew.toFixed(3), segment: +expected.segment.toFixed(3), planGrowth: +expected.planGrowth.toFixed(3) })
+  check('bend: geometries and textures flat', g2.geometries === g0.geometries && g2.textures === g0.textures, g2)
+  const replay = await page.evaluate(async () => {
+    const P = await import('/src/build/plan.ts')
+    const edits = window.villageBuild.edits()
+    return { edits, same: JSON.stringify(edits.reduce(P.apply, P.KITCHEN)) === JSON.stringify(window.villageBuild.plan()) }
+  })
+  check('edits: the recorded edits replay to the same plan', replay.same, replay.edits)
+  const ms = await page.evaluate(() => window.villageBuild.rebuildMs().slice(1).sort((a, b) => a - b))
+  check('rebuild time per change (ms, median / max)', true, [ms[Math.floor(ms.length / 2)], ms[ms.length - 1]].map((v) => +v.toFixed(2)))
+
+  await page.evaluate(() => window.village.unload('build'))
+  await frames()
+  const after = await page.evaluate(() => window.village.snapshot())
+  const sameObjects = JSON.stringify(after.objects) === JSON.stringify(today.objects)
+  check('unload: today\'s room is back (scene object list equal to a page without build)', sameObjects, { objects: [today.objects.length, after.objects.length], geometries: [today.geometries, after.geometries] })
+  check('drag page: no console errors', errors.length === 0, errors.slice(0, 3))
+  const video = page.video()
+  await context.close()
+  if (video) {
+    const webm = await video.path()
+    const mp4 = join(OUT, 'drag.mp4')
+    try {
+      execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm, '-vf', 'scale=960:-2', '-c:v', 'libx264', '-crf', '28', '-pix_fmt', 'yuv420p', mp4])
+      check('clip written', true, `${mp4}, ${(statSync(mp4).size / 1e6).toFixed(2)} MB`)
+    } catch {
+      renameSync(webm, join(OUT, 'drag.webm'))
+      check('clip written', true, join(OUT, 'drag.webm'))
+    }
+    rmSync(videoDir, { recursive: true, force: true })
   }
 }
 

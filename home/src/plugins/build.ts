@@ -127,7 +127,7 @@ export default {
     // The size, handwritten on a paper tag that hangs in the room while a wall moves.
     const [tagCanvas, g] = canvas(512, 224)
     const tagMap = toTexture(tagCanvas)
-    const tag = new THREE.Sprite(new THREE.SpriteNodeMaterial({ map: tagMap, transparent: true, depthTest: false, fog: false }))
+    const tag = new THREE.Sprite(new THREE.SpriteNodeMaterial({ map: tagMap, transparent: true, depthTest: false, fog: false, toneMapped: false }))
     tag.scale.set(1.9, 1.9 * 224 / 512, 1)
     tag.renderOrder = 3
     tag.visible = false
@@ -229,6 +229,8 @@ export default {
         const was = hover
         hover = e.target === renderer.domElement ? pick(e)?.kind ?? null : null
         if (hover !== was) show()
+        // Over a handle the wall owns the pointer, so nothing behind it lights up.
+        if (hover) e.stopImmediatePropagation()
         return
       }
       stop(e)
