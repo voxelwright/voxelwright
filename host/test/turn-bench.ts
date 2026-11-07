@@ -1,6 +1,6 @@
 // Where a villager turn's time goes (#42). Real model calls on the operator's login.
 // node test/turn-bench.ts <config>... > out.json
-//   configs: cold-sonnet cold-haiku cold-sonnet-quiet warm-sonnet warm-haiku cold-sonnet-notools
+//   configs: before default, and cold-*/warm-* variants (see RUNS)
 // Each config runs 8 turns in one session and records, from the moment the turn
 // is asked: the init event (process start), the first stream event, the first
 // text, the result, thinking blocks seen, tool calls and every model used.
@@ -85,7 +85,7 @@ async function cold(model: string, extra: Partial<Options> = {}, env: Record<str
 
 const withNotes = (cwd: string): Partial<Options> => ({ mcpServers: { notes: notesServer(cwd) }, allowedTools: NOTE_TOOLS })
 
-async function warm(model: string, notes = false, extra: Partial<Options> = {}): Promise<Turn[]> {
+async function warm(model: string, notes = false, extra: Partial<Options> = {}, env: Record<string, string> = {}): Promise<Turn[]> {
   const cwd = await mkdtemp(join(tmpdir(), 'turn-bench-'))
   // One process for the whole conversation: each line is pushed into its input.
   let push: ((m: SDKUserMessage) => void) | null = null
@@ -97,7 +97,7 @@ async function warm(model: string, notes = false, extra: Partial<Options> = {}):
     }
   }
   const startedAt = performance.now()
-  const stream = query({ prompt: input(), options: options(model, cwd, { ...(notes ? withNotes(cwd) : {}), ...extra }) })
+  const stream = query({ prompt: input(), options: options(model, cwd, { ...(notes ? withNotes(cwd) : {}), ...extra }, env) })
   const out: Turn[] = []
   // Let the process start before the first line, as a host would at launch.
   await stream.initializationResult()
@@ -134,6 +134,10 @@ const RUNS: Record<string, () => Promise<Turn[]>> = {
   'warm-haiku-notes': () => warm('haiku', true),
   'warm-sonnet-nothink': () => warm('sonnet', false, { thinking: { type: 'disabled' } }),
   'warm-haiku-nothink': () => warm('haiku', false, { thinking: { type: 'disabled' } }),
+  // The default since #42: warm, Haiku, thinking off, notes on, no helper call.
+  'default': () => warm('haiku', true, { thinking: { type: 'disabled' } }, { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }),
+  // The default before #42: a process per turn, Sonnet, notes on, the helper call.
+  'before': () => cold('sonnet', {}, {}, true),
   'warm-haiku': () => warm('haiku'),
 }
 

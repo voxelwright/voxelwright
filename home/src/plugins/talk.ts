@@ -691,6 +691,7 @@ export default {
         m.seat = null
         m.v.release(0.3 + Math.random() * 0.6)
         m.v.speaking = m.v.thinking = false
+        m.v.listenTo = null
       }
       seated.length = 0
       lastRound = []
@@ -862,7 +863,7 @@ export default {
     /** Who opens the next round when nobody is named: it rotates round the table. */
     let opener = 0
     /** The last round as the checks see it: who spoke, what they heard as context, whether they passed, and when. */
-    let roundLog: { speaker: string; context: string; pass?: boolean; asked: number; first?: number; done?: number; card?: number; finished?: number }[] = []
+    let roundLog: { speaker: string; context: string; text?: string; pass?: boolean; asked: number; first?: number; done?: number; card?: number; finished?: number }[] = []
     /** When each speaker's card started, for the round's timings. */
     let timing: Map<Member, number> | null = null
     /** What a villager hears at the table: who is there, the round so far (your line and the replies), and that it is their turn. */
@@ -909,6 +910,7 @@ export default {
           if (speech.away) return null
           const pass = PASS.test(speech.text)
           entry.pass = pass
+          entry.text = speech.text.trim()
           round.push({ m, name: m.name, text: speech.text.trim(), pass })
           if (round.length >= MAX_ROUND) return null
           // Turned to by name: that villager is next, even if it already spoke.
@@ -921,7 +923,11 @@ export default {
           const next = queue.shift()
           return next && mode === 'table' ? start(next) : null
         })()
-        for (const o of seated) o.tag.classList.toggle('lit', o === m)
+        for (const o of seated) {
+          o.tag.classList.toggle('lit', o === m)
+          // The others turn their heads to whoever is speaking.
+          o.v.listenTo = o === m ? null : m.v.pos
+        }
         const ok = await perform(m, speech, text)
         entry.card = timing.get(m)
         entry.finished = performance.now()
@@ -934,7 +940,10 @@ export default {
       }
       speaker = null
       timing = null
-      for (const o of seated) o.tag.classList.remove('lit')
+      for (const o of seated) {
+        o.tag.classList.remove('lit')
+        o.v.listenTo = null
+      }
       const spoken = round.filter((r) => !r.pass).map((r) => ({ name: r.name, text: r.text }))
       if (spoken.length) lastRound = spoken
       if (failed && !line.value) restoreLine(text)
@@ -1504,8 +1513,10 @@ function css() {
   .talk-card .cue i:nth-child(3) { animation-delay: 0.36s; }
   @keyframes talk-cue { 0%, 70%, 100% { translate: 0 0; opacity: 0.45; } 30% { translate: 0 -3px; opacity: 1; } }
   /* Said, while someone else speaks: one dimmed line, so it never covers the speaker. */
-  .talk-card.said { max-width: 280px; padding: 18px 18px 10px; opacity: 0.9; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.16); }
-  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; color: #6a5442; }
+  /* A pass: an action, not words. */
+  .talk-card.beat .words { font-style: italic; font-size: 17px; color: #6a5442; }
+  .talk-card.said { max-width: 300px; padding: 18px 18px 10px; opacity: 0.9; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.16); }
+  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; color: #6a5442; }
   .talk-card.said .before, .talk-card.said .more, .talk-card.said .cue { display: none; }
   .talk-card.said .nametag { box-shadow: none; scale: 0.9; transform-origin: 0 100%; opacity: 0.85; }
   .talk-ruler { position: fixed; left: -9999px; top: 0; width: ${TEXT_WIDTH}px; margin: 0; visibility: hidden; pointer-events: none; white-space: pre-wrap; font: ${words}; }

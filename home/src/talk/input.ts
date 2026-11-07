@@ -167,7 +167,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   hud.add(mark(pad))
 
   // The torn note on its way.
-  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#ffffff', emissiveIntensity: 0.3 })
+  // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
+  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
   const flyer = new THREE.Mesh(new THREE.PlaneGeometry(PADW, PADH * 0.62), flyMat)
   flyer.name = 'talk note in flight'
   flyer.visible = false

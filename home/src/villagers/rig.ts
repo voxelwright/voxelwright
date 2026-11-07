@@ -73,6 +73,8 @@ export class Villager {
   thinking = false
   /** Saying something right now: leans in and nods. */
   speaking = false
+  /** Someone else at the table is speaking: where they are, so it turns its head to listen (#42). */
+  listenTo: THREE.Vector3 | null = null
   /** Being written to from across the room: turns part way to the person and looks up. */
   attending = false
   /** Called when a chore at a spot is finished, before moving on. */
@@ -481,7 +483,9 @@ export class Villager {
       this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
-    const headGoal = this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
+    const listening = this.listenTo && this.state === 'sit' && this.speak < 0.5 ? Math.atan2(this.listenTo.x - this.pos.x, this.listenTo.z - this.pos.z) : null
+    const headGoal = listening !== null ? THREE.MathUtils.clamp(wrap(listening - this.yaw), -1.1, 1.1)
+      : this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
