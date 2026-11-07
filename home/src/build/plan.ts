@@ -55,14 +55,42 @@ export interface Room {
   loop: Id[]
 }
 
-/** Placeholder: placements belong to the plan (filled by a later unit). */
+/** How a thing is held up: standing on the floor, on top of other furniture, hung on a wall or from the ceiling. */
+export type Mount = 'floor' | 'surface' | 'wall' | 'ceiling'
+export const MOUNTS: readonly Mount[] = ['floor', 'surface', 'wall', 'ceiling']
+
+/**
+ * What a placed thing is. A library item is a prop someone's villager made, kept in
+ * that person's library on the host (its module text, name and size live there, not
+ * here). A kind is a thing the home builds itself (src/build/mount.ts KINDS).
+ */
+export type ItemRef = { library: string; person: Id } | { kind: string }
+
+/**
+ * Where a placed thing is, by mount. Angles are radians. Positions are world metres.
+ * floor:   the centre of its footprint on the floor; yaw turns it about the vertical.
+ * surface: the centre of its footprint and the height of the top it stands on. The
+ *          height is stored because supports are found by looking (any upward face
+ *          above 0.3 m), and today's tables and counters have no id in the plan.
+ * wall:    the centre of its back on the face of wallId that looks into roomId:
+ *          `along` metres from the wall's corner a (arc length when curved), `height`
+ *          metres above the floor. It always faces into the room; `spin` turns it
+ *          in the wall's plane (a picture hung askew). roomId says which face, which
+ *          the wall alone cannot (a wall can bound two rooms).
+ * ceiling: the centre of its top, hung from the room's ceiling on a cord; yaw as floor.
+ * Which room a floor, surface or ceiling thing is in follows from x and z, so it is not stored.
+ */
+export type Anchor =
+  | { mount: 'floor'; x: number; z: number; yaw: number }
+  | { mount: 'surface'; x: number; y: number; z: number; yaw: number }
+  | { mount: 'wall'; wallId: Id; roomId: Id; along: number; height: number; spin: number }
+  | { mount: 'ceiling'; x: number; z: number; yaw: number }
+
+/** A placed thing. Its label and size are the item's, not the placement's: the version note names it. */
 export interface Furniture {
   id: Id
-  kind: string
-  x: number
-  z: number
-  yaw: number
-  roomId: Id
+  item: ItemRef
+  at: Anchor
 }
 
 export interface Plan {
@@ -96,6 +124,11 @@ export type Edit =
       depth: number
       door?: { id: Id; from: number; to: number; leaves: 1 | 2; head?: number }
     }
+  /** Place a new thing. Its id is new to the plan; the anchor must be in a room (wall: on the wall, facing a room it bounds). */
+  | { op: 'placeItem'; furniture: Furniture }
+  /** Move a placed thing. It keeps its mount: a picture stays on walls. */
+  | { op: 'moveItem'; furnitureId: Id; at: Anchor }
+  | { op: 'removeItem'; furnitureId: Id }
 
 export class PlanError extends Error {
   constructor(readonly reasons: string[]) {
@@ -378,8 +411,15 @@ export function validate(plan: Plan): string[] {
     if (selfIntersects(ring)) reasons.push(`room ${r.id} crosses itself`)
   }
   for (const [id, n] of bounding) if (n > 2) reasons.push(`wall ${id} bounds ${n} rooms`)
-  const rooms = new Set(plan.rooms.map((r) => r.id))
-  for (const f of plan.furniture) if (!rooms.has(f.roomId)) reasons.push(`furniture ${f.id} is in room ${f.roomId}, which does not exist`)
+  // Only references here: a wall that moves later may leave a thing off its wall or outside
+  // its room, and the house is still valid (the home clamps it when drawing). The edits that
+  // place and move things check the fit (anchorReasons).
+  const roomIds = new Set(plan.rooms.map((r) => r.id))
+  for (const f of plan.furniture) {
+    if (f.at.mount !== 'wall') continue
+    if (!plan.walls.some((w) => w.id === (f.at as { wallId: Id }).wallId)) reasons.push(`furniture ${f.id} hangs on wall ${f.at.wallId}, which does not exist`)
+    if (!roomIds.has(f.at.roomId)) reasons.push(`furniture ${f.id} faces room ${f.at.roomId}, which does not exist`)
+  }
   return reasons
 }
 
@@ -395,6 +435,9 @@ export function apply(plan: Plan, edit: Edit): Plan {
     case 'bendWall': return bendWall(plan, edit.wallId, edit.sagitta)
     case 'moveOpening': return moveOpening(plan, edit.openingId, edit.from, edit.to)
     case 'addRoom': return addRoom(plan, edit)
+    case 'placeItem': return placeItem(plan, edit.furniture)
+    case 'moveItem': return moveItem(plan, edit.furnitureId, edit.at)
+    case 'removeItem': return removeItem(plan, edit.furnitureId)
   }
 }
 
@@ -507,4 +550,88 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
   reasons.push(...validate(next))
   if (reasons.length) throw new PlanError(reasons)
   return next
+}
+
+// ---------------------------------------------------------------- furniture
+
+const finite = (...v: number[]) => v.every(Number.isFinite)
+const ITEM_ID = /^[a-f0-9]{12}$/
+const KIND = /^[a-z][a-z0-9-]{0,31}$/
+
+/** Inside a ring (even-odd). */
+export function inside(ring: P[], p: P): boolean {
+  let hit = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i], [xj, zj] = ring[j]
+    if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) hit = !hit
+  }
+  return hit
+}
+
+/** The room whose floor (inside its walls' centrelines) holds the point, if any. */
+export function roomAt(plan: Plan, x: number, z: number): Room | null {
+  return plan.rooms.find((r) => inside(outline(plan, r), [x, z])) ?? null
+}
+
+/** Why an item reference or anchor cannot be placed in this plan; empty when it can. */
+export function anchorReasons(plan: Plan, id: Id, item: ItemRef | null, at: Anchor): string[] {
+  const reasons: string[] = []
+  if (item) {
+    if ('library' in item) {
+      if (!ITEM_ID.test(item.library) || typeof item.person !== 'string' || !item.person) reasons.push(`furniture ${id} names a library item that is not 12 hex characters of a person's library`)
+    } else if (!('kind' in item) || !KIND.test(item.kind)) reasons.push(`furniture ${id} names no library item or kind`)
+  }
+  if (!MOUNTS.includes(at.mount)) return [...reasons, `furniture ${id} has no mount`]
+  if (at.mount === 'wall') {
+    const wall = plan.walls.find((w) => w.id === at.wallId)
+    if (!wall) return [...reasons, `furniture ${id} hangs on wall ${at.wallId}, which does not exist`]
+    const room = plan.rooms.find((r) => r.id === at.roomId)
+    if (!room) return [...reasons, `furniture ${id} faces room ${at.roomId}, which does not exist`]
+    if (!roomWalls(plan, room).some(({ wall: w }) => w.id === wall.id)) reasons.push(`wall ${wall.id} does not bound room ${room.id}`)
+    if (!finite(at.along, at.height, at.spin)) reasons.push(`furniture ${id} has a position that is not a number`)
+    else {
+      const { length } = curveOf(plan, wall)
+      if (at.along < 0 || at.along > length) reasons.push(`furniture ${id} is ${at.along.toFixed(2)} m along wall ${wall.id}, which is ${length.toFixed(2)} m long`)
+      if (at.height < 0 || at.height > wall.height) reasons.push(`furniture ${id} hangs ${at.height.toFixed(2)} m up a ${wall.height} m wall`)
+    }
+    return reasons
+  }
+  const y = at.mount === 'surface' ? at.y : 0
+  if (!finite(at.x, at.z, at.yaw, y)) return [...reasons, `furniture ${id} has a position that is not a number`]
+  if (at.mount === 'surface' && (y < 0 || y > 3)) reasons.push(`furniture ${id} stands on a top ${y.toFixed(2)} m up`)
+  if (!roomAt(plan, at.x, at.z)) reasons.push(`furniture ${id} at ${at.x.toFixed(2)}, ${at.z.toFixed(2)} is not in a room`)
+  return reasons
+}
+
+// Rebuilt from their known fields, as the host stores them, so a replay hashes the same.
+const itemOf = (item: ItemRef): ItemRef => ('library' in item ? { library: item.library, person: item.person } : { kind: item.kind })
+function anchorOf(at: Anchor): Anchor {
+  switch (at.mount) {
+    case 'floor': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
+    case 'surface': return { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: at.yaw }
+    case 'wall': return { mount: at.mount, wallId: at.wallId, roomId: at.roomId, along: at.along, height: at.height, spin: at.spin }
+    case 'ceiling': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
+  }
+}
+
+function placeItem(plan: Plan, f: Furniture): Plan {
+  const ids = [...plan.corners, ...plan.walls, ...plan.walls.flatMap((w) => w.openings), ...plan.rooms, ...plan.furniture].map((k) => k.id)
+  const reasons = ids.includes(f.id) ? [`id ${f.id} is used`] : []
+  reasons.push(...anchorReasons(plan, f.id, f.item, f.at))
+  if (reasons.length) throw new PlanError(reasons)
+  return { ...plan, furniture: [...plan.furniture, { id: f.id, item: itemOf(f.item), at: anchorOf(f.at) }] }
+}
+
+function moveItem(plan: Plan, furnitureId: Id, at: Anchor): Plan {
+  const f = plan.furniture.find((k) => k.id === furnitureId)
+  if (!f) throw new PlanError([`furniture ${furnitureId} does not exist`])
+  if (f.at.mount !== at.mount) throw new PlanError([`furniture ${furnitureId} is mounted on the ${f.at.mount}, not the ${at.mount}`])
+  const reasons = anchorReasons(plan, furnitureId, null, at)
+  if (reasons.length) throw new PlanError(reasons)
+  return { ...plan, furniture: plan.furniture.map((k) => (k === f ? { ...k, at: anchorOf(at) } : k)) }
+}
+
+function removeItem(plan: Plan, furnitureId: Id): Plan {
+  if (!plan.furniture.some((k) => k.id === furnitureId)) throw new PlanError([`furniture ${furnitureId} does not exist`])
+  return { ...plan, furniture: plan.furniture.filter((k) => k.id !== furnitureId) }
 }

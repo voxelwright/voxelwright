@@ -118,6 +118,38 @@ try {
   const after = await (await api('/people/alex/plans')).json()
   check('a torn scratch file is never an event', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
 
+  // Placed things (placeItem, moveItem, removeItem): stored as sent, every field checked.
+  const V5 = hex('5', 16), V6 = hex('6', 16), V7 = hex('7', 16)
+  const lamp = { id: 'f.lamp', item: { library: 'a1b2c3d4e5f6', person: 'alex' }, at: { mount: 'floor', x: 1, z: 2, yaw: 0.5 } }
+  const picture = { id: 'f.picture', item: { kind: 'picture' }, at: { mount: 'wall', wallId: 'r.w3', roomId: 'r', along: 2, height: 1.5, spin: 0 } }
+  const placed = await post('/versions', { version: { id: V5, parent: V4, edits: [{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }], note: 'Placed the lamp', hash: hex('6', 64) } })
+  check('placeItem is stored as sent (a library item on the floor, a kind on a wall)', placed.status === 200 && JSON.stringify(placed.json.version.edits) === JSON.stringify([{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }]), placed)
+  const moveTo = { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 0.76, z: 2, yaw: 0 } }
+  const moved = await post('/versions', { version: { id: V6, parent: V5, edits: [moveTo], hash: hex('7', 64) } })
+  check('moveItem is stored as sent', moved.status === 200 && JSON.stringify(moved.json.version.edits[0]) === JSON.stringify(moveTo), moved)
+  const removed = await post('/versions', { version: { id: V7, parent: V6, edits: [{ op: 'removeItem', furnitureId: 'f.picture' }], hash: hex('8', 64) } })
+  check('removeItem is stored as sent', removed.status === 200, removed)
+  const itemsBefore = (await readdir(join(dir, 'events'))).length
+  const badItems: [string, unknown][] = [
+    ['an unknown mount', { op: 'placeItem', furniture: { ...lamp, at: { ...lamp.at, mount: 'roof' } } }],
+    ['an extra anchor field', { op: 'placeItem', furniture: { ...lamp, at: { ...lamp.at, y: 3 } } }],
+    ['a wall anchor without a room', { op: 'placeItem', furniture: { ...picture, at: { mount: 'wall', wallId: 'r.w3', along: 2, height: 1.5, spin: 0 } } }],
+    ['a library item that is not 12 hex', { op: 'placeItem', furniture: { ...lamp, item: { library: '../secrets', person: 'alex' } } }],
+    ['a library item with no person', { op: 'placeItem', furniture: { ...lamp, item: { library: 'a1b2c3d4e5f6' } } }],
+    ['an item with both a kind and a library', { op: 'placeItem', furniture: { ...lamp, item: { library: 'a1b2c3d4e5f6', person: 'alex', kind: 'box' } } }],
+    ['a kind that is not a word', { op: 'placeItem', furniture: { ...picture, item: { kind: 'Big Box!' } } }],
+    ['a furniture id with a path', { op: 'placeItem', furniture: { ...lamp, id: '../x' } }],
+    ['a height out of range', { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 900, z: 2, yaw: 0 } }],
+    ['a non-number yaw', { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'floor', x: 1, z: 2, yaw: 'left' } }],
+    ['a moveItem with no anchor', { op: 'moveItem', furnitureId: 'f.lamp' }],
+    ['a removeItem with an extra field', { op: 'removeItem', furnitureId: 'f.lamp', all: true }],
+  ]
+  for (const [what, e] of badItems) {
+    const r = await post('/versions', { version: { id: hex('f', 16), parent: V7, edits: [e], hash: hex('4', 64) } })
+    check(`${what} is refused`, r.status === 400, r)
+  }
+  check('refused item edits store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
+
   // Modes.
   const mode = async (p: string) => (await stat(p)).mode & 0o777
   const files = (await readdir(join(dir, 'events'))).map((f) => join(dir, 'events', f))
@@ -125,11 +157,11 @@ try {
   check('dirs are 0700 and event files 0600', modes.plans === 0o700 && modes.events === 0o700 && modes.files.length === 1 && modes.files[0] === 0o600, Object.fromEntries(Object.entries(modes).map(([k, v]) => [k, Array.isArray(v) ? v.map((m) => m.toString(8)) : v.toString(8)])))
 
   // Reload: a new host process folds the same log to the same state.
-  const snapshot = JSON.stringify(after)
+  const snapshot = JSON.stringify(await (await api('/people/alex/plans')).json())
   await host.fiber.dispose()
   host = await start()
   const reloaded = await (await api('/people/alex/plans')).json()
-  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V4)
+  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V7)
 
   // A damaged log fails loudly instead of folding around a gap.
   await rm(join(dir, 'events', '00000002.json'))

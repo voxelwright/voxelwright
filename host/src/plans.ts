@@ -103,8 +103,65 @@ function edit(v: unknown, at: string): Obj {
       }
       return out
     }
+    case 'placeItem': {
+      const e = only(v, at, ['op', 'furniture'])
+      return { op: e.op, furniture: furniture(e.furniture, `${at}.furniture`) }
+    }
+    case 'moveItem': {
+      const e = only(v, at, ['op', 'furnitureId', 'at'])
+      return { op: e.op, furnitureId: id(e.furnitureId, `${at}.furnitureId`), at: anchor(e.at, `${at}.at`) }
+    }
+    case 'removeItem': {
+      const e = only(v, at, ['op', 'furnitureId'])
+      return { op: e.op, furnitureId: id(e.furnitureId, `${at}.furnitureId`) }
+    }
     default:
-      return refuse(`${at}.op is one of moveWall, bendWall, moveOpening, addRoom`)
+      return refuse(`${at}.op is one of moveWall, bendWall, moveOpening, addRoom, placeItem, moveItem, removeItem`)
+  }
+}
+
+/** A library item is 12 hex characters in one person's library; a kind is one the home builds itself. */
+const LIBRARY_ITEM = /^[a-f0-9]{12}$/
+const KIND = /^[a-z][a-z0-9-]{0,31}$/
+const ANGLE = 100
+
+/** A placed thing (plan.ts Furniture): an id, what it is, and where (one anchor per mount). */
+function furniture(v: unknown, at: string): Obj {
+  const f = only(v, at, ['id', 'item', 'at'])
+  const item = isObj(f.item) && 'library' in f.item ? only(f.item, `${at}.item`, ['library', 'person']) : only(f.item, `${at}.item`, ['kind'])
+  return {
+    id: id(f.id, `${at}.id`),
+    item: item.library !== undefined
+      ? {
+          library: typeof item.library === 'string' && LIBRARY_ITEM.test(item.library) ? item.library : refuse(`${at}.item.library is 12 hex characters`),
+          person: id(item.person, `${at}.item.person`),
+        }
+      : { kind: typeof item.kind === 'string' && KIND.test(item.kind) ? item.kind : refuse(`${at}.item.kind is a lowercase word`) },
+    at: anchor(f.at, `${at}.at`),
+  }
+}
+
+function anchor(v: unknown, at: string): Obj {
+  if (!isObj(v)) return refuse(`${at} is an object`)
+  switch (v.mount) {
+    case 'floor':
+    case 'ceiling': {
+      const a = only(v, at, ['mount', 'x', 'z', 'yaw'])
+      return { mount: a.mount, x: num(a.x, `${at}.x`), z: num(a.z, `${at}.z`), yaw: num(a.yaw, `${at}.yaw`, ANGLE) }
+    }
+    case 'surface': {
+      const a = only(v, at, ['mount', 'x', 'y', 'z', 'yaw'])
+      return { mount: a.mount, x: num(a.x, `${at}.x`), y: num(a.y, `${at}.y`, 50), z: num(a.z, `${at}.z`), yaw: num(a.yaw, `${at}.yaw`, ANGLE) }
+    }
+    case 'wall': {
+      const a = only(v, at, ['mount', 'wallId', 'roomId', 'along', 'height', 'spin'])
+      return {
+        mount: a.mount, wallId: id(a.wallId, `${at}.wallId`), roomId: id(a.roomId, `${at}.roomId`),
+        along: num(a.along, `${at}.along`), height: num(a.height, `${at}.height`, 50), spin: num(a.spin, `${at}.spin`, ANGLE),
+      }
+    }
+    default:
+      return refuse(`${at}.mount is one of floor, surface, wall, ceiling`)
   }
 }
 
@@ -135,10 +192,7 @@ function plan(v: unknown): Obj {
       const o = only(r, `base.rooms[${i}]`, ['id', 'label', 'loop'])
       return { id: id(o.id, 'room id'), label: text(o.label, 'room label', MAX_LABEL), loop: list(o.loop, 'loop', 200).map((c) => id(c, 'loop corner')) }
     }),
-    furniture: list(p.furniture, 'base.furniture').map((f, i) => {
-      const o = only(f, `base.furniture[${i}]`, ['id', 'kind', 'x', 'z', 'yaw', 'roomId'])
-      return { id: id(o.id, 'furniture id'), kind: id(o.kind, 'furniture kind'), x: num(o.x, 'x'), z: num(o.z, 'z'), yaw: num(o.yaw, 'yaw', 10), roomId: id(o.roomId, 'roomId') }
-    }),
+    furniture: list(p.furniture, 'base.furniture').map((f, i) => furniture(f, `base.furniture[${i}]`)),
   }
 }
 
