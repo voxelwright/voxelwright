@@ -63,7 +63,7 @@ const PEOPLE: Person[] = [
     hello: "Oh! Hello. The soup can mind itself for a minute.", chips: ["What's for dinner?", 'How was your day?'], bye: 'Back to my soup, then. Bye for now!' },
   { person: 'sam', owner: 'Sam', colour: '#d29a26', start: 'shelf', wait: 2, tasks: [{ spot: 'counter', stay: 6 }, { spot: 'shelf', stay: 6 }],
     hello: "Hi! Just putting the toys back. What's up?", chips: ['Anything need doing?', 'How was your day?'], bye: 'Off to tidy! See you soon.' },
-  { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }],
+  { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }, { spot: 'loungePlants', stay: 6 }],
     hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'], bye: 'Bye! The basil is waiting for me.' },
 ]
 /** The synthetic "something for you" a villager carries after a chore. */

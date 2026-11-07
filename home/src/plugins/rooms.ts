@@ -1,8 +1,8 @@
 import * as THREE from 'three/webgpu'
 import type { Context, Plugin } from 'cordis'
-import { load, loadedNames, unload } from '../kernel'
+import { load, loadedNames, pluginStates, unload } from '../kernel'
 import { DOORWAY, KITCHEN, LIVING_X, WALL_T } from '../layout'
-import { MODE, OVERVIEW, type Frame, type Pose } from './camera'
+import { MODE, OVERVIEW, SHADOW_ONLY, type Frame, type Pose } from './camera'
 
 export interface RoomPlan {
   /** Plugins that make up the room. Every room's plugins load at the start and stay. */
@@ -45,13 +45,14 @@ export const PLANS: Record<string, RoomPlan> = {
       'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor', 'furnish',
       ...(MODE === 'iso' ? ['diorama'] : [])],
     home: pose([0.1, 1.45, 2.7], [0.12, 1.05, -0.9]),
-    frame: { x: 0.05, z: 0.75, zoom: 0.62 },
+    frame: { x: 0.25, z: 0.8, zoom: 0.42 },
   },
   living: {
     plugins: ['lounge', 'sideboard', 'growshelves', 'plantstand', 'loungedoors', 'loungefurnish'],
     // The plants and shelves are the subject; the workshop door is a quiet right edge.
     home: pose([LIVING_X + 0.6, 1.4, 2.35], [LIVING_X - 0.12, 1.28, -2.2]),
-    frame: { x: LIVING_X - 0.75, z: 0.75, zoom: 0.62 },
+    // Turned a little the other way, so the Workshop's door in the right wall faces you.
+    frame: { x: LIVING_X - 0.6, z: 0.8, zoom: 0.5, yaw: -0.3 },
   },
 }
 
@@ -129,7 +130,30 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
       const asked = new URLSearchParams(location.search).get('room')
       if (MODE === 'iso') void view.glide(asked && PLANS[asked] ? PLANS[asked].frame : OVERVIEW, 0)
       else void view.travel(PLANS[seated].home, 0)
-      for (const name of [seated, ...Object.keys(PLANS).filter((n) => n !== seated)]) for (const n of PLANS[name].plugins) load(catalog[n])
+      const all = [seated, ...Object.keys(PLANS).filter((n) => n !== seated)].flatMap((name) => PLANS[name].plugins)
+      for (const n of all) load(catalog[n])
+      // Walls the dollhouse cuts away are drawn only into the sun's shadow until you come
+      // close, and their stubs only once you stand behind them. Compile all of it now, so
+      // the first glide into a room does not stall on new pipelines (450 ms, #42).
+      void (async () => {
+        const deadline = performance.now() + 15000
+        while (!all.every((n) => ['active', 'failed'].includes(pluginStates()[n]?.state ?? '')) && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50))
+        const { renderer, camera } = ctx.stage
+        const shown: THREE.Object3D[] = []
+        scene.traverse((o) => {
+          if (!o.visible && o.userData.cutaway) {
+            o.visible = true
+            shown.push(o)
+          }
+        })
+        camera.layers.enable(SHADOW_ONLY)
+        try {
+          await renderer.compileAsync(scene, camera)
+        } finally {
+          camera.layers.disable(SHADOW_ONLY)
+          for (const o of shown) o.visible = false
+        }
+      })()
     },
   }
 }
