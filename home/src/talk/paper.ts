@@ -218,7 +218,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       slip.c.style.transformOrigin = toward < 0 ? '0 50%' : toward > 0 ? '100% 50%' : '50% 100%'
       slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg)`
       // Whoever speaks now is full strength; what was said before steps back.
-      slip.c.style.opacity = String(slip.fade * (el.classList.contains('said') ? 0.82 : 1))
+      slip.c.style.opacity = String(slip.fade * (el.classList.contains('said') ? 0.72 : 1))
     }
   }
   const dispose = () => {

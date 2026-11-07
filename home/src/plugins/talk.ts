@@ -1266,6 +1266,7 @@ export default {
     }
     const mid = new THREE.Vector3()
     /** Not part of the conversation, in the frame, and well in front of everyone who is. */
+    const top = new THREE.Vector3()
     const crowding = (m: Member) => {
       if (mode === 'room' || m === partner || m.seat) return false
       const subjects = mode === 'talk' && partner ? [partner] : seated
@@ -1273,8 +1274,12 @@ export default {
       mid.set(m.v.pos.x, m.v.fig.height * SCALE * 0.5, m.v.pos.z)
       const d = mid.distanceTo(eye)
       const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(eye)))
+      // Its middle or its head in the frame: close to the camera, a head can fill a corner while the body is below it.
+      m.v.fig.head.getWorldPosition(top).project(stage.camera)
       mid.project(stage.camera)
-      const framed = mid.z < 1 && Math.abs(mid.x) < 1.25 && Math.abs(mid.y) < 1.25
+      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame.
+      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < 1.5 && Math.abs(p.y) < 1.25
+      const framed = inFrame(mid) || inFrame(top)
       // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
       const cut = Math.abs(mid.x) > 0.86 || mid.y < -0.8
       return framed && (cut || d < nearest - (mode === 'talk' ? 0.3 : 0.5))
@@ -1316,7 +1321,8 @@ export default {
           const mat = m.glyph.material
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
-          const goal = m.news ? 1 : 0
+          // It steps aside while you write or a note is on its way, so it never competes with whom the note is to.
+          const goal = m.news && !input?.writing && !input?.flying ? 1 : 0
           mat.opacity += (goal - mat.opacity) * (1 - Math.exp(-dt * (goal ? 5 : 3)))
           if (!m.news && mat.opacity < 0.02) m.glyph.visible = false
         }

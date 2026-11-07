@@ -303,9 +303,9 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.fillStyle = to.colour
     g.fillText(name, x0 + toW, y0)
     if (resting) {
-      g.font = `italic 50px ${HAND}`
-      g.fillStyle = 'rgba(70, 50, 36, 0.7)'
-      g.fillText('just start typing…', 130, 272)
+      g.font = `italic 58px ${HAND}`
+      g.fillStyle = 'rgba(70, 50, 36, 0.8)'
+      g.fillText('just start typing…', 130, 278)
     }
     if (resting) return
     g.textAlign = 'left'
@@ -519,8 +519,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     // (phone) screen it sits bottom right at rest and centred while writing.
     const narrow = aspect < 0.8
     const [rest, up] = narrow
-      ? [[0.5, aspect - 0.27, -0.88, -0.8, -0.3, 0.1], [0.86, 0, -0.64, -0.74, -0.12, 0.04]]
-      : [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [1, 0.32, -0.66, -0.74, -0.2, 0.07]]
+      ? [[0.46, aspect - 0.24, -0.88, -0.8, -0.3, 0.1], [0.86, 0, -0.64, -0.74, -0.12, 0.04]]
+      : [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [0.9, 0.42, -0.68, -0.74, -0.22, 0.07]]
     const pose = (i: number) => THREE.MathUtils.lerp(rest[i], up[i], raise)
     pad.scale.setScalar(THREE.MathUtils.lerp(pose(0), big, draw))
     pad.position.set(THREE.MathUtils.lerp(pose(1), 0, draw), THREE.MathUtils.lerp(pose(2) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
@@ -590,7 +590,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyer.quaternion.copy(q)
       flyer.rotateZ(Math.sin(k * 9) * 0.18 * (1 - k))
       flyer.rotateX(-0.5 * lifted - k * 0.6)
-      flyer.scale.copy(scl).multiplyScalar(1 - 0.7 * e)
+      // Half its size by the time it has folded and lifted, then smaller still as it goes.
+      flyer.scale.copy(scl).multiplyScalar(THREE.MathUtils.lerp(1, 0.55, lifted) * (1 - 0.6 * e))
       // Folded once while it lifts, the right third over, so the words still show on its way.
       hinge.rotation.y = -Math.PI * 0.985 * THREE.MathUtils.smoothstep(flight.t, 0.04, 0.22)
       flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
