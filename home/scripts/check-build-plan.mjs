@@ -1,9 +1,9 @@
 // Headless proof for the #48 build-mode experiment (?build=1).
 // Usage: node scripts/check-build-plan.mjs [base-url] [--skip-pixels] [--skip-drag]   (dev server running)
-// 1. Pixel-close: the kitchen without ?build=1 vs the plan-generated one, iso and seated,
+// 1. Pixel-close: the house without ?build=1 vs the plan-generated one, iso and seated in both rooms,
 //    against the noise floor of two runs without the flag (fixed clock, seeded Math.random).
 // 2. The plan model: validate, JSON round trip, addRoom with a shared wall, rejections.
-// 3. Drag and bend the right wall in iso with the mouse: snapping, live rebuild,
+// 3. Drag and bend the house's right wall (the living room's) in iso with the mouse: snapping, live rebuild,
 //    no geometry leak, Escape cancels, drags become versions, unloading restores room.ts's room.
 // Exits non-zero when any check fails. Writes screenshots/build/*.jpg and a clip.
 import { execFileSync } from 'node:child_process'
@@ -118,7 +118,7 @@ const jpg = (page, name) => page.screenshot({ path: join(OUT, name), type: 'jpeg
 
 // ── 1. pixels ───────────────────────────────────────────────────────────────
 if (!args.includes('--skip-pixels')) {
-  for (const [label, query] of [['iso', '?cam=iso&q=low&fx='], ['seat', '?q=low&fx=']]) {
+  for (const [label, query] of [['iso', '?cam=iso&q=low&fx='], ['seat', '?q=low&fx='], ['seat-living', '?q=low&fx=&room=living']]) {
     const shots = []
     for (const q of [query, query, `${query}&build=1`]) {
       const { context, page, errors } = await open(q, { frozen: true })
@@ -133,18 +133,22 @@ if (!args.includes('--skip-pixels')) {
         const swap = await page.evaluate(() => {
           const s = window.village.snapshot().objects
           const scene = window.village.kernel.root.get('stage').scene
-          return { todayRoomChildren: scene.getObjectByName('room').children.length, todayShell: Boolean(scene.getObjectByName('diorama shell')), generated: s.filter((o) => o.endsWith(':build seat') || o.endsWith(':build shell') || o.endsWith(':build floor')).length }
+          const lounge = scene.getObjectByName('lounge').children.filter((o) => /^lounge (floor|wall|skirting)$/.test(o.name)).length
+          return { todayRoomChildren: scene.getObjectByName('room').children.length, todayShell: Boolean(scene.getObjectByName('diorama shell')), todaySharedWall: Boolean(scene.getObjectByName('shared wall')), todayLounge: lounge, generated: s.filter((o) => o.endsWith(':build seat') || o.endsWith(':build shell') || o.endsWith(':build floor')).length }
         })
-        check(`${label}: the capture shows generated walls, today's are set aside`, swap.todayRoomChildren === 0 && !swap.todayShell && swap.generated === (label === 'iso' ? 3 : 1), swap)
+        // Generated: the seat group and the living room's floor, plus in iso the shell and the kitchen's dollhouse floor.
+        check(`${label}: the capture shows generated walls and floors, today's are set aside`, swap.todayRoomChildren === 0 && !swap.todayShell && !swap.todaySharedWall && swap.todayLounge === 0 && swap.generated === (label === 'iso' ? 4 : 2), swap)
         await jpg(page, `${label}-generated.jpg`)
       } else if (shots.length === 1) await jpg(page, `${label}-baseline.jpg`)
       await context.close()
     }
     const floor = await diff(shots[0], shots[1])
     const generated = await diff(shots[0], shots[2], `${label}-diff.jpg`)
-    // The seated view is bit-identical; iso differs only in scattered floor pixels (UVs from world positions, about 3,800 px, max 43).
-    const exact = label === 'seat'
-    check(`${label}: generated vs without the flag ${exact ? 'bit-identical' : 'within the measured floor residual'}`, exact ? generated.differingPixels === 0 : generated.differingPixels <= 5000 && generated.maxChannelSum <= 60, { noiseFloor: floor, generated })
+    // Both seated views are bit-identical. In iso the meshes match the house's one for one except that the back and front
+    // run as one box per wall where diorama.ts lays one box per side of the house: about 140 edge pixels along the back
+    // cap and the front stub's corner flip (max channel sum about 150), fewer than 0.005% by more than 24.
+    const exact = label !== 'iso'
+    check(`${label}: generated vs without the flag ${exact ? 'bit-identical' : 'within the measured edge residual'}`, exact ? generated.differingPixels === 0 : generated.differingPixels <= 5000 && generated.changedPct <= 0.005, { noiseFloor: floor, generated })
   }
 }
 
@@ -165,18 +169,23 @@ if (!args.includes('--skip-drag')) {
   // The model, imported straight from the dev server.
   const model = await page.evaluate(async () => {
     const P = await import('/src/build/plan.ts')
-    const K = P.KITCHEN
+    const K = P.HOUSE_PLAN
     const out = { kitchen: P.validate(K), roundTrip: JSON.stringify(JSON.parse(JSON.stringify(K))) === JSON.stringify(K) }
     out.kitchenArea = +P.roomArea(K, 'kitchen').toFixed(4)
     const added = P.apply(K, { op: 'addRoom', room: { id: 'pantry', label: 'Pantry' }, wallId: 'kitchen.left', from: 1, to: 5, depth: 3, door: { id: 'pantry.door', from: 2.25, to: 3.75, leaves: 2 } })
     const joined = (loop, a, b) => loop.some((c, i) => { const n = loop[(i + 1) % loop.length]; return (c === a && n === b) || (c === b && n === a) })
-    const shared = added.walls.filter((w) => added.rooms.every((r) => joined(r.loop, w.a, w.b)))
+    const shared = added.walls.filter((w) => ['kitchen', 'pantry'].every((id) => joined(added.rooms.find((r) => r.id === id).loop, w.a, w.b)))
     out.added = {
       valid: P.validate(added), walls: added.walls.length, shared: shared.map((w) => ({ id: w.id, length: +P.curveOf(added, w).length.toFixed(3), openings: w.openings })),
       pantryArea: +P.roomArea(added, 'pantry').toFixed(4), kitchenArea: +P.roomArea(added, 'kitchen').toFixed(4), kitchenLoop: added.rooms[0].loop.length,
     }
+    out.house = {
+      rooms: K.rooms.map((r) => r.id), sharedRooms: P.roomsOf(K, 'kitchen.right').map((r) => r.id),
+      doorway: P.wallOf(K, 'kitchen.right').openings.map((o) => o.id), workshop: P.wallOf(K, 'living.right').openings.map((o) => o.id),
+      livingArea: +P.roomArea(K, 'living').toFixed(4),
+    }
     out.moveOpening = P.wallOf(P.apply(K, { op: 'moveOpening', openingId: 'kitchen.window', from: 2.05, to: 3.45 }), 'kitchen.back').openings.find((o) => o.id === 'kitchen.window')
-    try { P.apply(K, { op: 'moveOpening', openingId: 'kitchen.window', from: 0.5, to: 1.9 }); out.overlapRejected = [] } catch (e) { out.overlapRejected = e.reasons }
+    try { P.apply(K, { op: 'moveOpening', openingId: 'kitchen.door-living', from: 5.8, to: 6.5 }); out.overlapRejected = [] } catch (e) { out.overlapRejected = e.reasons }
     const withWalls = (extra, corners = []) => ({ ...K, corners: [...K.corners, ...corners], walls: [...K.walls, ...extra] })
     const bare = (id, a, b) => ({ id, a, b, thickness: 0.18, height: 3, sagitta: 0, openings: [] })
     out.rejects = {
@@ -188,22 +197,36 @@ if (!args.includes('--skip-drag')) {
     try { P.apply(P.apply(K, { op: 'bendWall', wallId: 'kitchen.left', sagitta: 0.5 }), { op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: 'kitchen.left', from: 1, to: 3, depth: 2 }); out.curvedSplit = [] } catch (e) { out.curvedSplit = e.reasons }
     return out
   })
-  check('model: the kitchen plan validates and survives a JSON round trip', model.kitchen.length === 0 && model.roundTrip, { reasons: model.kitchen, area: model.kitchenArea })
+  check('model: the house plan validates and survives a JSON round trip', model.kitchen.length === 0 && model.roundTrip, { reasons: model.kitchen, area: model.kitchenArea })
+  check('model: the house is the kitchen and living room on one shared wall, the doorway in it and the Workshop door in the living room\'s right wall', JSON.stringify(model.house.rooms) === '["kitchen","living"]' && model.house.sharedRooms.length === 2 && model.house.doorway[0] === 'kitchen.door-living' && model.house.workshop[0] === 'living.door-workshop', model.house)
   const shared = model.added.shared
   check('model: addRoom 4 x 3 m on the left wall with a double door validates', model.added.valid.length === 0, model.added.valid)
   check('model: the shared wall exists once, in both loops, and carries the double door', shared.length === 1 && shared[0].length === 4 && shared[0].openings.some((o) => o.leaves === 2 && o.kind === 'door'), shared)
   check('model: the new room is 12 m² and the kitchen keeps its area', Math.abs(model.added.pantryArea - 12) < 1e-6 && Math.abs(model.added.kitchenArea - model.kitchenArea) < 1e-6, model.added)
-  check('model: moveOpening moves the window; an overlap with the door is rejected', model.moveOpening.from === 2.05 && model.overlapRejected.length > 0, { window: model.moveOpening, rejected: model.overlapRejected })
+  check('model: moveOpening moves the window; a doorway moved off its wall is rejected', model.moveOpening.from === 2.05 && model.overlapRejected.length > 0, { window: model.moveOpening, rejected: model.overlapRejected })
   for (const [name, reasons] of Object.entries(model.rejects)) check(`model: validate rejects ${name}`, reasons.length > 0, reasons)
   check('model: addRoom refuses to split a curved wall, with a reason', model.curvedSplit.length > 0, model.curvedSplit)
+
+  // The doorway in the shared wall is open: a level ray through it meets no wall; one beside it meets the shared wall.
+  const rays = await page.evaluate(async () => {
+    const { DOORWAY, KITCHEN } = await import('/src/layout.ts')
+    const doorZ = (DOORWAY.z0 + DOORWAY.z1) / 2
+    return {
+      through: window.villageBuild.wallHit([KITCHEN.x1 - 0.5, 1.0, doorZ], [1, 0, 0], 1.5),
+      back: window.villageBuild.wallHit([KITCHEN.x1 + 0.7, 1.0, doorZ], [-1, 0, 0], 1.5),
+      beside: window.villageBuild.wallHit([KITCHEN.x1 - 0.5, 1.0, DOORWAY.z0 - 0.5], [1, 0, 0], 1.5),
+      lintel: window.villageBuild.wallHit([KITCHEN.x1 - 0.5, DOORWAY.top + 0.3, doorZ], [1, 0, 0], 1.5),
+    }
+  })
+  check('doorway: a ray through it is clear both ways; beside it and over its head it meets the shared wall', !rays.through && !rays.back && rays.beside?.wall === 'kitchen.right' && rays.lintel?.wall === 'kitchen.right', rays)
 
   // Drag the right wall with the mouse.
   const where = () => page.evaluate(() => {
     const p = window.villageBuild.plan()
-    const br = p.corners.find((c) => c.id === 'kitchen.back-right'), fr = p.corners.find((c) => c.id === 'kitchen.front-right')
+    const br = p.corners.find((c) => c.id === 'living.back-right'), fr = p.corners.find((c) => c.id === 'living.front-right')
     const z = br.z + (fr.z - br.z) * 0.2, mid = (br.z + fr.z) / 2
     const pr = (x, zz) => window.villageBuild.project(x, 0.42, zz)
-    return { x: br.x, at: pr(br.x, z), out: pr(br.x + 1, z), in: pr(br.x - 1, z), bend: pr(br.x, mid), bendOut: pr(br.x + 1, mid), floor: window.villageBuild.floorArea(), wallX: window.villageBuild.wallX(), sagitta: p.walls.find((w) => w.id === 'kitchen.right').sagitta }
+    return { x: br.x, at: pr(br.x, z), out: pr(br.x + 1, z), in: pr(br.x - 1, z), bend: pr(br.x, mid), bendOut: pr(br.x + 1, mid), floor: window.villageBuild.floorArea(), wallX: window.villageBuild.wallX(), sagitta: p.walls.find((w) => w.id === 'living.right').sagitta }
   })
   const frames = (n = 12) => page.evaluate((n) => new Promise((r) => { const s = () => (--n ? requestAnimationFrame(s) : r()); requestAnimationFrame(s) }), n)
   const w0 = await where()
@@ -271,7 +294,7 @@ if (!args.includes('--skip-drag')) {
   const expected = await page.evaluate(async () => {
     const P = await import('/src/build/plan.ts')
     const p = window.villageBuild.plan()
-    return { segment: P.segmentArea(P.curveOf(p, P.wallOf(p, 'kitchen.right'))), planGrowth: P.roomArea(p, 'kitchen') - P.roomArea(P.KITCHEN, 'kitchen') }
+    return { segment: P.segmentArea(P.curveOf(p, P.wallOf(p, 'living.right'))), planGrowth: P.roomArea(p, 'living') - P.roomArea(P.HOUSE_PLAN, 'living') }
   })
   const grew = bent.floor - w0.floor
   await jpg(page, 'bend.jpg')
@@ -305,7 +328,7 @@ if (!args.includes('--skip-drag')) {
     })
     return { rooms: p.rooms.map((r) => r.id), floors: window.villageBuild.floors(), shared, drawn }
   })
-  check('two rooms: each has its floor, and the shared wall is drawn by one room only', multi.rooms.length === 2 && multi.floors === 2 && multi.shared.length === 1 && Object.keys(multi.drawn).length === 1, multi)
+  check('three rooms: each has its floor, and the shared walls are drawn once, by the house', multi.rooms.length === 3 && multi.floors === 3 && multi.shared.length === 2 && Object.keys(multi.drawn).length === 1, multi)
   await jpg(page, 'two-rooms.jpg')
 
   await page.evaluate(() => window.village.unload('build'))
@@ -344,7 +367,7 @@ if (!args.includes('--skip-drag')) {
   await rp.waitForTimeout(1500)
   const at = await rp.evaluate(() => {
     const p = window.villageBuild.plan()
-    const br = p.corners.find((c) => c.id === 'kitchen.back-right'), fr = p.corners.find((c) => c.id === 'kitchen.front-right')
+    const br = p.corners.find((c) => c.id === 'living.back-right'), fr = p.corners.find((c) => c.id === 'living.front-right')
     return window.villageBuild.project(br.x, 0.42, br.z + (fr.z - br.z) * 0.2)
   })
   await rp.mouse.move(...at)

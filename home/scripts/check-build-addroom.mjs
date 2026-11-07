@@ -128,7 +128,8 @@ const yardInside = (page) => B(page, async () => {
   const P = await import('/src/build/plan.ts')
   const scene = window.village.kernel.root.get('stage').scene
   const p = window.villageBuild.plan()
-  const rings = p.rooms.filter((r) => r.id !== 'kitchen').map((r) => P.outline(p, r, -0.09))
+  // The house's own rooms stand where diorama.ts drew no yard; only added rooms push it aside.
+  const rings = p.rooms.filter((r) => r.id !== 'kitchen' && r.id !== 'living').map((r) => P.outline(p, r, -0.09))
   const inRing = (x, z) => rings.some((poly) => {
     let inn = false
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) if ((poly[i][1] > z) !== (poly[j][1] > z) && x < ((poly[j][0] - poly[i][0]) * (z - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) inn = !inn
@@ -168,7 +169,7 @@ const yardInside = (page) => B(page, async () => {
   }
   return { rooms: rings.length, out, total: Object.values(out).reduce((a, b) => a + b, 0) }
 })
-const LEFT = 'add a living room to the left side, connected by double doors, 2/3 the size of the current room'
+const LEFT = 'add a playroom to the left side, connected by double doors, 2/3 the size of the current room'
 const STUDY = 'add a 4 by 3 metre study behind the living room'
 
 try {
@@ -308,30 +309,32 @@ try {
     const { page, errors } = await open('?talk=npc&build=1&route=separate&q=low', context)
     const unit = await B(page, async () => {
       const P = await import('/src/build/plan.ts'), R = await import('/src/build/resolve.ts'), I = await import('/src/build/intent.ts')
-      const K = P.KITCHEN
+      const K = P.HOUSE_PLAN
       // The default dollhouse view: yaw 0.6 rad off looking down -z.
       const view = [-Math.sin(0.6), -Math.cos(0.6)]
       const go = (plan, raw, ctx = {}) => {
         const c = I.checkIntent(raw)
         if ('reason' in c) return { reason: c.reason }
-        return R.resolve(plan, c.intent, { view, ...ctx })
+        // Looking into the kitchen, so "this room" is the kitchen (the house has two rooms).
+        return R.resolve(plan, c.intent, { view, current: 'kitchen', ...ctx })
       }
       const out = {}
       const left = go(K, { op: 'addRoom', anchor: { room: 'this', side: 'left' }, size: { fraction: 2 / 3 }, connect: { kind: 'door', leaves: 2 } })
       out.left = { draft: left.draft, area: left.plan && P.roomArea(left.plan, left.draft.roomId), target: (2 / 3) * P.roomArea(K, 'kitchen'), valid: left.plan && P.validate(left.plan) }
-      const living = go(K, { op: 'addRoom', label: 'living room', anchor: { side: 'left' }, size: { fraction: 2 / 3 }, connect: { kind: 'door', leaves: 2 } })
-      const study = go(living.plan, { op: 'addRoom', label: 'study', anchor: { room: 'living room', side: 'behind' }, size: { w: 4, d: 3 } })
+      const study = go(K, { op: 'addRoom', label: 'study', anchor: { room: 'living room', side: 'behind' }, size: { w: 4, d: 3 } })
       out.study = { draft: study.draft, ask: study.ask, area: study.plan && P.roomArea(study.plan, 'study'), owner: study.draft && study.plan.rooms.filter((r) => P.roomWalls(study.plan, r).some(({ wall }) => wall.id === study.draft.wallId)).map((r) => r.id) }
-      const sel = go(K, { op: 'addRoom', anchor: { wall: 'selected' }, connect: { kind: 'door', at: 'selected-point' } }, { selected: { wallId: 'kitchen.right', t: 2.0 } })
+      const sel = go(K, { op: 'addRoom', anchor: { wall: 'selected' }, connect: { kind: 'door', at: 'selected-point' } }, { selected: { wallId: 'kitchen.left', t: 2.0 } })
       out.selected = { ask: sel.ask, draft: sel.draft, doorCentre: sel.draft && (sel.draft.door.from + sel.draft.door.to) / 2 }
       out.asks = {
         noSide: go(K, { op: 'addRoom', anchor: {} }).ask,
-        unknownRoom: go(K, { op: 'addRoom', anchor: { room: 'living room', side: 'behind' }, size: { w: 4, d: 3 } }).ask,
+        unknownRoom: go(K, { op: 'addRoom', anchor: { room: 'study', side: 'behind' }, size: { w: 4, d: 3 } }).ask,
+        sharedWall: go(K, { op: 'addRoom', anchor: { side: 'right' } }).ask,
+        sharedSelected: go(K, { op: 'addRoom', anchor: { wall: 'selected' } }, { selected: { wallId: 'kitchen.right', t: 1 } }).ask,
         windowInTheWay: go(K, { op: 'addRoom', label: 'pantry', anchor: { room: 'kitchen', side: 'behind' }, size: { w: 4, d: 3 } }).ask,
-        curved: go(P.apply(K, { op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.6 }), { op: 'addRoom', anchor: { side: 'right' } }).ask,
+        curved: go(P.apply(K, { op: 'bendWall', wallId: 'kitchen.left', sagitta: 0.6 }), { op: 'addRoom', anchor: { side: 'left' } }).ask,
         overlap: (() => {
-          // A den on the kitchen's right wall, a nook in front of the den, then a room on the rest of the right wall runs into the nook.
-          const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.right', t: 1.8 } })
+          // A den on the kitchen's left wall, a nook in front of the den, then a room on the rest of the left wall runs into the nook.
+          const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.left', t: 1.8 } })
           const nook = go(den.plan, { op: 'addRoom', label: 'nook', anchor: { wall: 'selected' }, size: { w: 2, d: 4 } }, { selected: { wallId: 'den.w3', t: 1 } })
           return go(nook.plan, { op: 'addRoom', anchor: { wall: 'selected' }, size: { w: 2, d: 3 } }, { selected: { wallId: 'den.rest', t: 1.3 } }).ask
         })(),
@@ -346,12 +349,12 @@ try {
       out.single = { door: gap.draft?.door, note: gap.note }
       out.refused = { op: I.checkIntent({ op: 'deleteHouse' }), shape: I.checkIntent({ op: 'addRoom', anchor: {}, shape: 'L' }) }
       out.clamped = I.checkIntent({ op: 'addRoom', label: 'x<script>', anchor: { side: 'up', room: 'this' }, size: { w: 400, d: -3 }, connect: { leaves: 7 }, extra: 1 })
-      const snapped = go(K, { op: 'addRoom', anchor: { side: 'right' }, size: { w: 3.33, d: 2.77 } })
+      const snapped = go(K, { op: 'addRoom', anchor: { side: 'left' }, size: { w: 3.33, d: 2.77 } })
       out.snapped = snapped.draft
       // A wall piece of exactly 0.5 m is a wall (validate allows rounding), and a sliver says so, not "a window".
       out.overtaken = (() => {
         // This page draws a room on den.rest; another page then builds a nook on den.w3 across its floor.
-        const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.right', t: 1.8 } })
+        const den = go(K, { op: 'addRoom', label: 'den', anchor: { wall: 'selected' }, size: { w: 3.6, d: 3 } }, { selected: { wallId: 'kitchen.left', t: 1.8 } })
         const drawn = go(den.plan, { op: 'addRoom', label: 'study', anchor: { wall: 'selected' }, size: { w: 2, d: 3 } }, { selected: { wallId: 'den.rest', t: 1.3 } })
         const nook = go(den.plan, { op: 'addRoom', label: 'nook', anchor: { wall: 'selected' }, size: { w: 2, d: 4 } }, { selected: { wallId: 'den.w3', t: 1 } })
         return R.fit(nook.plan, drawn.draft).ask
@@ -366,8 +369,9 @@ try {
     check('resolver: a width that leaves a sliver on a wall with no openings says so', /sliver/.test(unit.front66 ?? ''), unit.front66)
     check('resolver: "to the left, double doors, 2/3 the size" hangs on the left wall with a double door', L.draft?.wallId === 'kitchen.left' && L.draft.door.leaves === 2 && L.valid?.length === 0, L.draft)
     check('resolver: 2/3 of the kitchen floor area within 1%', Math.abs(L.area / L.target - 1) < 0.01, { area: +L.area?.toFixed(3), target: +L.target.toFixed(3), error: `${(100 * Math.abs(L.area / L.target - 1)).toFixed(2)}%` })
-    check('resolver: "a 4 by 3 m study behind the living room" goes on the living room, 12 m²', unit.study.draft && unit.study.owner?.[0] === 'living-room' && Math.abs(unit.study.area - 12) < 1e-6 && unit.study.draft.to - unit.study.draft.from === 4, unit.study)
-    check('resolver: "this wall" and the clicked point: the room and its door centre on that point', unit.selected.draft?.wallId === 'kitchen.right' && Math.abs(unit.selected.doorCentre - 2.0) < 0.06, unit.selected)
+    check('resolver: "a 4 by 3 m study behind the living room" goes on the living room, 12 m²', unit.study.draft && unit.study.owner?.[0] === 'living' && Math.abs(unit.study.area - 12) < 1e-6 && unit.study.draft.to - unit.study.draft.from === 4, unit.study)
+    check('resolver: "this wall" and the clicked point: the room and its door centre on that point', unit.selected.draft?.wallId === 'kitchen.left' && Math.abs(unit.selected.doorCentre - 2.0) < 0.06, unit.selected)
+    check('resolver: the wall the kitchen shares with the living room takes no new room, and says the living room is there', /living room/i.test(unit.asks.sharedWall ?? '') && /living room/i.test(unit.asks.sharedSelected ?? ''), [unit.asks.sharedWall, unit.asks.sharedSelected])
     for (const [name, ask] of Object.entries(unit.asks)) check(`resolver asks, one line: ${name}`, typeof ask === 'string' && ask.length < 140 && !ask.includes('\n'), ask)
     check('resolver: a wall blocked end to end gets one line naming what is in the way, and no outline', /^The dresser is in the way there/.test(unit.blocked ?? '') && !unit.blocked.includes('\n'), unit.blocked)
     check('resolver: double doors with only a single door\'s gap become a single door in the gap, and the villager says so', unit.single.door?.leaves === 1 && unit.single.door.from >= 3.8 - 1e-9 && unit.single.door.to <= 4.85 + 1e-9 && /dresser.*single door/.test(unit.single.note ?? ''), unit.single)
@@ -467,15 +471,16 @@ try {
     // Enter builds it: one version, the room drawn.
     const gBefore = (await state(page)).geometries
     await page.keyboard.press('Enter')
-    s = await until(page, (x) => !x.draft && x.rooms.length === 2)
+    s = await until(page, (x) => !x.draft && x.rooms.length === 3)
     await frames(page, 6)
     s = await state(page)
     const v2 = await versions(page)
-    check('Enter: one new version, "Added the living room", and the room is drawn with its floor (and nobody says it does not fit)', v2.length === v0.length + 1 && v2.at(-1).note === 'Added the living room' && s.floors === 2 && !/fit/.test(s.said.at(-1)), { versions: v2, floors: s.floors, said: s.said.at(-1) })
+    check('Enter: one new version, "Added the playroom", and the room is drawn with its floor (and nobody says it does not fit)', v2.length === v0.length + 1 && v2.at(-1).note === 'Added the playroom' && s.floors === 3 && !/fit/.test(s.said.at(-1)), { versions: v2, floors: s.floors, said: s.said.at(-1) })
     const built = await B(page, () => {
       const p = window.villageBuild.plan()
-      const shared = p.walls.filter((w) => p.rooms.filter((r) => r.loop.includes(w.a) && r.loop.includes(w.b)).length === 2)
-      return { shared: shared.map((w) => ({ id: w.id, openings: w.openings })), bent: p.walls.find((w) => w.id === 'living-room.w2')?.sagitta }
+      // The wall the playroom shares (the kitchen and living room share theirs already).
+      const shared = p.walls.filter((w) => { const rs = p.rooms.filter((r) => r.loop.includes(w.a) && r.loop.includes(w.b)); return rs.length === 2 && rs.some((r) => r.id === 'playroom') })
+      return { shared: shared.map((w) => ({ id: w.id, openings: w.openings })), bent: p.walls.find((w) => w.id === 'playroom.w2')?.sagitta }
     })
     // The yard does not follow the plan yet (diorama.ts), so what of it stands in the new room steps aside.
     const yardBuilt = await yardInside(page)
@@ -535,8 +540,8 @@ try {
       const P = await import('/src/build/plan.ts')
       const p = window.villageBuild.plan()
       const M = await import('/src/build/mount.ts')
-      const w = p.walls.find((x) => x.openings.some((o) => o.id === 'living-room.door'))
-      const o = w.openings.find((x) => x.id === 'living-room.door')
+      const w = p.walls.find((x) => x.openings.some((o) => o.id === 'playroom.door'))
+      const o = w.openings.find((x) => x.id === 'playroom.door')
       const c = P.curveOf(p, w)
       const ray = (t, s) => {
         const [x, z] = P.pointAt(c, t), [nx, nz] = P.normalAt(c, t)
@@ -566,7 +571,7 @@ try {
     const counts = []
     for (let i = 0; i < 4; i++) {
       await page.keyboard.press('Control+z')
-      s = await until(page, (x) => x.rooms.length === 1)
+      s = await until(page, (x) => x.rooms.length === 2)
       await frames(page, 4)
       const undone = (await state(page)).floors
       if (i === 0) {
@@ -576,14 +581,14 @@ try {
         check('one undo takes the room and its first pieces away together', gone.ids.length === 0 && gone.drawn.length === 0, gone)
       }
       await page.keyboard.press('Control+Shift+z')
-      s = await until(page, (x) => x.rooms.length === 2)
+      s = await until(page, (x) => x.rooms.length === 3)
       // The cutaway re-sorts walls every 30 frames, and a stub's geometry uploads the first time it shows.
       await frames(page, 45)
       s = await state(page)
       counts.push({ undone, floors: s.floors, geometries: s.geometries, textures: s.textures })
     }
     // The first round trip warms the room's pieces; from then on every rebuild returns to the same count.
-    check('Ctrl+Z takes the room away and Shift+Ctrl+Z brings it back, geometries and textures flat', counts.every((c) => c.undone === 1 && c.floors === 2) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures), { gBefore, counts })
+    check('Ctrl+Z takes the room away and Shift+Ctrl+Z brings it back, geometries and textures flat', counts.every((c) => c.undone === 2 && c.floors === 3) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures), { gBefore, counts })
 
     // A reload draws the first pieces again from the stored plan.
     {
@@ -600,10 +605,10 @@ try {
     // The README's second example, against the room just added.
     await say(page, STUDY)
     s = await until(page, (x) => x.draft)
-    check('"a 4 by 3 metre study behind the living room" draws on the living room', s.draft?.label === 'Study' && Math.abs(s.draft.to - s.draft.from - 4) < 1e-6 && s.draft.depth === 3 && /^living-room/.test(s.draft.wallId), s.draft)
+    check('"a 4 by 3 metre study behind the living room" draws on the living room', s.draft?.label === 'Study' && Math.abs(s.draft.to - s.draft.from - 4) < 1e-6 && s.draft.depth === 3 && /^living\./.test(s.draft.wallId), s.draft)
     await page.click('.build-choice [data-choice="apply"]')
-    s = await until(page, (x) => !x.draft && x.rooms.length === 3)
-    check('"Build it" on the paper tag adds the study as a version', s.rooms.length === 3 && (await versions(page)).at(-1).note === 'Added the study', s.rooms)
+    s = await until(page, (x) => !x.draft && x.rooms.length === 4)
+    check('"Build it" on the paper tag adds the study as a version', s.rooms.length === 4 && (await versions(page)).at(-1).note === 'Added the study', s.rooms)
 
     // Clarifying lines.
     for (const [line, want] of [['add a room somewhere', /which side|which room/i], ['add a pantry behind the kitchen', /window or a door/i]]) {
@@ -617,22 +622,22 @@ try {
 
     // The selection path: click a wall, then "open a door here into a new room".
     await page.waitForTimeout(1500)
-    const at = await B(page, () => window.villageBuild.wallPoint('kitchen.right', 2.0, 0.43, 0))
+    const at = await B(page, () => window.villageBuild.wallPoint('living.right', 4.0, 0.43, 0))
     await page.mouse.click(...at)
     await frames(page, 3)
     s = await state(page)
-    check('clicking a wall selects it and remembers the point', s.selected?.wallId === 'kitchen.right' && Math.abs(s.selected.t - 2.0) < 0.15, s.selected)
+    check('clicking a wall selects it and remembers the point', s.selected?.wallId === 'living.right' && Math.abs(s.selected.t - 4.0) < 0.15, s.selected)
     await say(page, 'open a door here into a new room')
     s = await until(page, (x) => x.draft)
-    // The cupboard by the stove reaches to about 1.9 m along: the door takes the nearest clear spot past it.
+    // On the living room's right wall, past the Workshop's door: the door takes the nearest clear spot to the point.
     const rightClear = await B(page, () => {
       const d = window.villageBuild.outline.draft()
-      return d && window.villageBuild.fixtures('kitchen.right').filter((f) => f.y0 < 2.3 && d.door.from < f.to + 0.1 - 1e-6 && d.door.to > f.from - 0.1 + 1e-6).map((f) => f.name)
+      return d && window.villageBuild.fixtures('living.right').filter((f) => f.y0 < 2.3 && d.door.from < f.to + 0.1 - 1e-6 && d.door.to > f.from - 0.1 + 1e-6).map((f) => f.name)
     })
-    check('"open a door here into a new room" hangs the room on that wall, the door at the nearest clear spot to that point', s.draft?.wallId === 'kitchen.right' && rightClear?.length === 0 && Math.abs((s.draft.door.from + s.draft.door.to) / 2 - (await state(page)).selected.t) < 0.7, { draft: s.draft, selected: s.selected, rightClear })
+    check('"open a door here into a new room" hangs the room on that wall, the door at the nearest clear spot to that point', s.draft?.wallId === 'living.right' && rightClear?.length === 0 && Math.abs((s.draft.door.from + s.draft.door.to) / 2 - (await state(page)).selected.t) < 0.7, { draft: s.draft, selected: s.selected, rightClear })
     await page.keyboard.press('Enter')
-    s = await until(page, (x) => !x.draft && x.rooms.length === 4 && x.floors === 4)
-    check('and Enter builds it', s.rooms.length === 4 && s.floors === 4, s.rooms)
+    s = await until(page, (x) => !x.draft && x.rooms.length === 5 && x.floors === 5)
+    check('and Enter builds it', s.rooms.length === 5 && s.floors === 5, s.rooms)
     // Another page builds on the floor an outline is drawn on, before "Build it": the room is not built into it.
     await B(page, () => window.villageBuild.intent({ op: 'addRoom', label: 'den', anchor: { room: 'kitchen', side: 'front' }, size: { w: 3, d: 3 } }))
     s = await until(page, (x) => x.draft || /\?/.test(x.said.at(-1) ?? ''))
@@ -641,7 +646,7 @@ try {
       await B(page, async (d) => {
         const H = await import('/src/build/history.ts'), P = await import('/src/build/plan.ts')
         const { token } = await (await fetch('/villager/launch')).json()
-        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.KITCHEN)
+        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.HOUSE_PLAN)
         await other.commit([{ op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: d.wallId, from: d.from, to: d.to, depth: 2 }], 'Added the nook')
       }, denDraft)
       await B(page, () => window.villageBuild.outline.confirm())

@@ -2,8 +2,8 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
-import { KITCHEN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
-import { build, makeKit, type Built } from '../build/walls'
+import { HOUSE_PLAN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
+import { BASE_ROOMS, build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
 import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
@@ -40,7 +40,10 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
  * let go (src/build/outline.ts). Without the flag this plugin does nothing.
  */
 const ENABLED = new URLSearchParams(location.search).get('build') === '1'
-const WALL = 'kitchen.right'
+/** The wall that drags and bends: the house's right wall, where the Workshop will go. */
+const WALL = 'living.right'
+/** What lounge.ts builds that the plan's walls and floor stand in for. */
+const LOUNGE_PARTS = new Set(['lounge floor', 'lounge wall', 'lounge skirting'])
 const STUB = 0.42
 
 export default {
@@ -52,9 +55,8 @@ export default {
     const kit = makeKit()
     const group = own(ctx, new THREE.Group())
     group.name = 'build'
-    const room = KITCHEN.rooms[0].id
     /** What is drawn: the history's head, or a drag's live preview on top of it. */
-    let plan: Plan = KITCHEN
+    let plan: Plan = HOUSE_PLAN
     let history: PlanHistory | null = null
     let offHistory = () => {}
     let committing = false
@@ -98,7 +100,7 @@ export default {
     let paper: P[] | null = null
     const tidyYard = () => {
       const p = builtPlan
-      const areas = p ? p.rooms.filter((r) => r.id !== room).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
+      const areas = p ? p.rooms.filter((r) => !BASE_ROOMS.has(r.id)).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
       const all = paper ? [...areas, paper] : areas
       lot.grow(all)
       yard.hide([...all, ...lot.clearings(all)])
@@ -132,7 +134,7 @@ export default {
       const cam = sun.shadow.camera
       sunWas ??= { left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom }
       const box = { ...sunWas }
-      if (p.rooms.length > 1) {
+      if (p.rooms.some((r) => !BASE_ROOMS.has(r.id))) {
         sun.updateMatrixWorld()
         sun.target.updateMatrixWorld()
         cam.position.setFromMatrixPosition(sun.matrixWorld)
@@ -164,7 +166,7 @@ export default {
     }
     const rebuild = (next: Plan, final: boolean) => {
       const start = performance.now()
-      const fresh = build(next, next.rooms.find((r) => r.id === room)!, kit, { iso: MODE === 'iso', handle: WALL, final })
+      const fresh = build(next, kit, { iso: MODE === 'iso', handle: WALL, final })
       if (built && meshes(built).length === meshes(fresh).length) {
         // Same pieces: move the new geometry into the meshes the camera already tracks, so cutaway state holds.
         const old = meshes(built)
@@ -213,20 +215,24 @@ export default {
       stash = []
     }
     const trySwap = () => {
+      // The house's walls and floors: room.ts's, the shared wall (kitchendoor.ts), lounge.ts's and, in iso, diorama.ts's shell and floor.
       const r = scene.getObjectByName('room')
+      const shared = scene.getObjectByName('shared wall')
+      const lounge = scene.getObjectByName('lounge')
       const d = MODE === 'iso' ? scene.getObjectByName('diorama') : null
-      if (!r || (MODE === 'iso' && !d)) return
+      if (!r || !shared || !lounge || (MODE === 'iso' && !d)) return
       const oldShell = d?.children.find((o) => o.name === 'diorama shell')
       const oldFloor = d?.children.find((o) => o.name === 'diorama floor')
       if (MODE === 'iso' && (!oldShell || !oldFloor)) return
       rebuild(plan, true)
-      copyState(r.children, built!.seat.children)
-      if (oldShell) copyState(oldShell.children, built!.shell!.children)
-      for (const o of [...r.children]) setAside(o)
+      for (const o of [...r.children, shared, ...lounge.children.filter((o) => LOUNGE_PARTS.has(o.name))]) setAside(o)
       if (oldShell) setAside(oldShell)
       if (oldFloor) setAside(oldFloor)
       roomGroup = r
       swapped()
+      // The house's own materials are this kit's, not the plugins' that rooms.ts compiled at load: compile them now,
+      // so the first walk into the living room does not stall on new pipelines.
+      void renderer.compileAsync(group, camera, scene).catch(() => {})
     }
 
     // Handles: the right wall glows on hover; a glowing dot at its middle bends it.
@@ -252,7 +258,7 @@ export default {
     group.add(tag)
     let tagText = ''
     const paintTag = (p: Plan) => {
-      const ring = floorOf(p, p.rooms[0])
+      const ring = floorOf(p, roomsOf(p, WALL)[0] ?? p.rooms[0])
       const xs = ring.map((q) => q[0]), zs = ring.map((q) => q[1])
       const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...zs) - Math.min(...zs)
       const bent = Math.abs(wallOf(p, WALL).sagitta) > 0
@@ -303,7 +309,7 @@ export default {
     /** The right wall drags only while it is still the kitchen's own whole side. */
     const rightFree = () => {
       const w = plan.walls.find((k) => k.id === WALL)
-      return Boolean(w && w.a === 'kitchen.back-right' && w.b === 'kitchen.front-right' && roomsOf(plan, WALL).length === 1)
+      return Boolean(w && w.a === 'living.back-right' && w.b === 'living.front-right' && roomsOf(plan, WALL).length === 1)
     }
     const pick = (e: PointerEvent): Hit | null => {
       if (!built?.shell || outline.draft() || !rightFree() || history?.readOnly) return null
@@ -314,6 +320,8 @@ export default {
         const t = alongOf(plan, wallOf(plan, WALL), p.x, p.z)
         const [x, z] = pointAt(c, t)
         if (Math.hypot(p.x - x, p.z - z) > 0.32) continue
+        // A door in the wall stays the door's to point at (the Workshop's is an entry), so the handle keeps clear of it.
+        if (wallOf(plan, WALL).openings.some((o) => y < o.head && t > o.from - 0.1 && t < o.to + 0.1)) return null
         return { kind: Math.abs(t - c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
       }
       return null
@@ -615,7 +623,7 @@ export default {
       const shown = outline.made() ?? plan
       // The view holds still while something is being dragged, so the floor stays under the pointer.
       if (outline.dragging() || drag) goal = held
-      else if (shown.rooms.length > 1) {
+      else if (shown.rooms.some((r) => !BASE_ROOMS.has(r.id))) {
         // Fit every room's footprint, floor to wall top, in the camera as camera.ts posed it this frame.
         camera.updateMatrixWorld()
         const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
@@ -747,19 +755,23 @@ export default {
         },
         /** Area of the generated dollhouse floor mesh, in square metres. */
         floorArea: () => {
-          const geo = built?.floor?.geometry
-          if (!geo) return 0
-          const p = geo.attributes.position as THREE.BufferAttribute
-          const idx = geo.index!.array
           let a = 0
-          for (let i = 0; i < idx.length; i += 3) {
-            const [i0, i1, i2] = [idx[i], idx[i + 1], idx[i + 2]]
-            a += Math.abs((p.getX(i1) - p.getX(i0)) * (p.getZ(i2) - p.getZ(i0)) - (p.getX(i2) - p.getX(i0)) * (p.getZ(i1) - p.getZ(i0))) / 2
+          const [p0, p1, p2] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+          for (const m of built ? meshes(built).filter((k) => k.name === 'build floor') : []) {
+            m.updateWorldMatrix(true, false)
+            const p = m.geometry.attributes.position as THREE.BufferAttribute
+            const idx = m.geometry.index!.array
+            for (let i = 0; i < idx.length; i += 3) {
+              p0.fromBufferAttribute(p, idx[i]).applyMatrix4(m.matrixWorld)
+              p1.fromBufferAttribute(p, idx[i + 1]).applyMatrix4(m.matrixWorld)
+              p2.fromBufferAttribute(p, idx[i + 2]).applyMatrix4(m.matrixWorld)
+              a += Math.abs((p1.x - p0.x) * (p2.z - p0.z) - (p2.x - p0.x) * (p1.z - p0.z)) / 2
+            }
           }
           return a
         },
         wallX: () => {
-          const m = built?.shell?.children.find((o) => o.userData.wall === WALL && !o.userData.cutaway && (o as THREE.Mesh).material === kit.handleWall)
+          const m = built && meshes(built).find((o) => o.userData.wall === WALL && !o.userData.cutaway && o.material === kit.handleWall)
           return m?.position.x ?? null
         },
       }
@@ -780,7 +792,7 @@ export default {
           sun.shadow.camera.updateProjectionMatrix()
         }
         restore()
-        for (const m of [kit.seatWall, kit.shellWall, kit.handleWall, kit.trim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.shadow]) {
+        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow]) {
           m.map?.dispose()
           m.dispose()
         }

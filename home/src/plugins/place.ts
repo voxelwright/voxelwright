@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { house } from '../build/house'
 import type { PlanHistory } from '../build/history'
-import { KITCHEN, type Furniture, type Plan } from '../build/plan'
+import { HOUSE_PLAN, type Furniture, type Plan } from '../build/plan'
 import { CORD, KINDS, cord, poseOf, seat, setPose, faceOf, type Size } from '../build/mount'
 import { placement, type Placement, type PlaceItem, type Shelf } from '../build/place'
 import { keepItem, libraryItem } from '../villager'
@@ -33,7 +33,7 @@ export default {
     ghosts.name = 'placement'
     const things = own(ctx, new THREE.Group())
     things.name = 'placed things'
-    let plan: Plan = KITCHEN
+    let plan: Plan = HOUSE_PLAN
     let history: PlanHistory | null = null
     const opened = house()
     const drawn = new Map<string, Drawn>()

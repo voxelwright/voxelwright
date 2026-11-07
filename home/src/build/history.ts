@@ -18,7 +18,7 @@
 // new head. A version exists only once the store has accepted it; until then
 // head, versions and plan stay as they were. Plans and versions handed out are
 // frozen: they are history, not scratch space.
-import { apply, curveOf, PLAN_SCHEMA, PlanError, pointAt, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
+import { apply, curveOf, HOUSE_PLAN, PLAN_SCHEMA, PlanError, pointAt, round, roomWalls, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
 
 export interface Version {
   id: string
@@ -115,8 +115,45 @@ function deepFreeze<T>(value: T): T {
 /** One step: a stored plan at schema n in, the same house at a later schema out. */
 export type Upgrade = (plan: unknown) => unknown
 
+/**
+ * Schema 1 was the kitchen alone, its doorway in the back wall to a living room kept
+ * elsewhere. Schema 2 is the whole house (HOUSE_PLAN): the living room stands beside
+ * the kitchen, and the doorway is in the wall they share, the kitchen's right wall. The
+ * step keeps the kitchen as it was shaped (moved or bent walls, added rooms, things
+ * placed), moves the doorway onto that wall and builds the living room against it.
+ * When the kitchen's right side no longer allows that (a room added on it, or one
+ * where the living room stands) it says why, and that version cannot be shown.
+ */
+function houseFromKitchen(stored: unknown): unknown {
+  const plan = structuredClone(stored) as Plan
+  const base = HOUSE_PLAN
+  const door = base.walls.flatMap((w) => w.openings).find((o) => o.id === 'kitchen.door-living')!
+  const shared = plan.walls.find((w) => w.id === 'kitchen.right')
+  if (!shared || shared.a !== 'kitchen.back-right' || shared.b !== 'kitchen.front-right') {
+    throw new Error("a room was added on the kitchen's right wall, where the living room now stands")
+  }
+  const living = base.rooms.find((r) => r.id === 'living')!
+  const ours = new Set(base.rooms.find((r) => r.id === 'kitchen')!.loop)
+  const next: Plan = {
+    ...plan,
+    schema: PLAN_SCHEMA,
+    corners: [...plan.corners.map((c) => ({ ...c, x: round(c.x), z: round(c.z) })), ...base.corners.filter((c) => !ours.has(c.id))],
+    walls: [
+      ...plan.walls.map((w) => {
+        const openings = w.openings.filter((o) => o.id !== door.id).map((o) => ({ ...o, from: round(o.from), to: round(o.to) }))
+        return w.id === shared.id ? { ...w, openings: [...openings, door].sort((p, q) => p.from - q.from) } : { ...w, openings }
+      }),
+      ...base.walls.filter((w) => roomWalls(base, living).some(({ wall }) => wall.id === w.id) && w.id !== shared.id),
+    ],
+    rooms: [...plan.rooms, living],
+  }
+  const reasons = validate(next)
+  if (reasons.length) throw new Error(`the kitchen's right side no longer leaves room for the living room: ${reasons.join('; ')}`)
+  return next
+}
+
 /** UPGRADES[n] brings a schema-n plan forward. Add a step whenever PLAN_SCHEMA goes up, and bump it whenever validate() starts refusing plans it accepted. */
-export const UPGRADES: Readonly<Record<number, Upgrade>> = Object.freeze({})
+export const UPGRADES: Readonly<Record<number, Upgrade>> = Object.freeze({ 1: houseFromKitchen })
 
 /** A stored plan at this page's PLAN_SCHEMA, or an Error saying why it cannot be. */
 export function upgrade(stored: unknown, steps: Readonly<Record<number, Upgrade>> = UPGRADES): Plan {

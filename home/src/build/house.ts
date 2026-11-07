@@ -1,12 +1,12 @@
 // The house's one plan history (#48), shared by everything that changes the plan
 // (build mode, placing things). Opened once: on the villager host when it is
 // running (the same per-launch token talk uses), else in memory for this page
-// only, with the built-in kitchen (KITCHEN) as the base, saying once that nothing
+// only, with the built-in house (HOUSE_PLAN) as the base, saying once that nothing
 // built will outlast the page. When the host is there but its plan cannot be
 // opened, the house is read-only and says why: an edit that only lived in this
 // page would look saved and be lost.
 import { launchToken } from '../villager'
-import { KITCHEN } from './plan'
+import { HOUSE_PLAN } from './plan'
 import { PlanHistory, hostStore, memoryStore } from './history'
 
 let opening: Promise<PlanHistory> | null = null
@@ -19,12 +19,12 @@ export const UNSAVED_LINE = "The house keeper isn't running, so anything we buil
 export function house(): Promise<PlanHistory> {
   opening ??= (async () => {
     const token = await launchToken()
-    if (!token) return PlanHistory.open(memoryStore(), KITCHEN, { unsaved: UNSAVED_LINE })
+    if (!token) return PlanHistory.open(memoryStore(), HOUSE_PLAN, { unsaved: UNSAVED_LINE })
     try {
-      return await PlanHistory.open(hostStore({ base: '/villager/api', token, refresh: launchToken }), KITCHEN)
+      return await PlanHistory.open(hostStore({ base: '/villager/api', token, refresh: launchToken }), HOUSE_PLAN)
     } catch (error) {
       console.warn('the house plan on the host could not be opened; the house is read-only', error)
-      return PlanHistory.readOnly(KITCHEN, READ_ONLY_LINE)
+      return PlanHistory.readOnly(HOUSE_PLAN, READ_ONLY_LINE)
     }
   })()
   return opening
