@@ -8,7 +8,7 @@
 //   villager.json       the Agent SDK session id to resume, and its running cost
 //   conversation.jsonl  what each side said (the person's own lines only, never context)
 //   usage.jsonl         one line per turn: model, tokens, cost, timings
-//   routes.jsonl        the always-on input (#42): each line routed, the checked route, timings
+//   routes.jsonl        the separate router (#42, ?route=separate): each line routed, the checked route, timings
 //   library/<item>.json props made for them: module text (never run here) and metadata
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -18,7 +18,7 @@ import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
-import { checkRouted, type Maker, type Router } from './villager-input.ts'
+import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
 
 export interface Config {
   root: string
@@ -92,6 +92,17 @@ async function readJsonl(path: string): Promise<unknown[]> {
 
 const appendJsonl = (path: string, value: unknown) => appendFile(path, JSON.stringify(value) + '\n', { mode: 0o600 })
 
+type Cast = { id: string; name: string; role: string }[]
+/** The page's cast for routing: villagers of listed people with plain names, at most 8. Null when any entry is not. */
+function castOf(villagers: unknown, people: Record<string, string>): Cast | null {
+  const cast = Array.isArray(villagers) ? villagers.slice(0, 8) : []
+  const known = cast.filter((v): v is Cast[number] =>
+    v && typeof v === 'object' && typeof v.id === 'string' && Object.hasOwn(people, v.id) && typeof v.name === 'string' && VILLAGER_NAME.test(v.name) && typeof v.role === 'string' && VILLAGER_NAME.test(v.role))
+  return known.length && known.length === cast.length ? known : null
+}
+
+const DAY_MS = 86_400_000
+
 async function body(req: IncomingMessage): Promise<unknown> {
   let raw = ''
   for await (const chunk of req) {
@@ -120,7 +131,7 @@ export default {
       res.end(JSON.stringify(value))
     }
 
-    async function converse(id: string, text: string, context: string | undefined, res: ServerResponse) {
+    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse) {
       const dir = personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
@@ -137,15 +148,49 @@ export default {
       // The turn finishes and is recorded even if the page goes away mid-reply.
       const deadline = AbortSignal.timeout(config.turnTimeoutMs ?? 180_000)
       const started = Date.now()
+      // A line that may be routed (#42): the first words decide. A reply starting with ROUTE is
+      // held back and read as a route, never shown as words; anything else streams as usual.
+      const ids = route?.villagers.map((v) => v.id) ?? []
+      const items = route?.library.map((l) => l.id) ?? []
+      let held = route ? '' : null
+      let routed: { routed: Routed } | { reason: string } | null = null
+      const onText = (t: string) => {
+        if (held === null) return event('text', { t })
+        held += t
+        const head = held.trimStart()
+        if (head.length < ROUTE_PREFIX.length && ROUTE_PREFIX.startsWith(head)) return
+        if (!head.startsWith(ROUTE_PREFIX)) {
+          event('text', { t: held })
+          held = null
+          return
+        }
+        // Act on the route as soon as its JSON is whole, before the turn's result.
+        if (!routed && head.includes('}')) {
+          const read = routeInReply(head, ids, items)
+          if (read && 'routed' in read) {
+            routed = read
+            event('route', { routed: read.routed, ms: Date.now() - started })
+          }
+        }
+      }
       try {
-        const result = await config.agent({ name: people[id], text, context, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText: (t) => event('text', { t }) })
+        const result = await config.agent({ name: people[id], text, context, route, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
+        if (held !== null && !routed) {
+          routed = routeInReply(held, ids, items)
+          // A reply too short to decide on is words after all.
+          if (!routed && held) event('text', { t: held })
+        }
         const previous = result.sessionId === state.sessionId ? state.sessionCostUsd ?? 0 : 0
         const costUsd = result.sessionCostUsd === null ? null : Math.max(0, result.sessionCostUsd - previous)
         await writeFile(stateFile, JSON.stringify({ sessionId: result.sessionId, sessionCostUsd: result.sessionCostUsd ?? state.sessionCostUsd } satisfies SessionState), { mode: 0o600 })
-        await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', text: result.reply })
-        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId) })
-        event('done', { reply: result.reply, ttftMs: result.ttftMs, totalMs })
+        const r = routed as { routed: Routed } | { reason: string } | null
+        // A routed line is stored with the route's spoken line, never the JSON; a refused route is not acted on.
+        const said = r && 'routed' in r ? r.routed.say ?? `(${r.routed.route})` : r ? '' : result.reply
+        await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', ...(r && 'reason' in r ? { unanswered: true } : { text: said }), ...(r && 'routed' in r ? { route: r.routed.route } : {}) })
+        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
+        if (r && 'reason' in r) event('failed', { reason: 'route' })
+        else event('done', { reply: said, ttftMs: result.ttftMs, totalMs, ...(r ? { routed: r.routed } : {}) })
       } catch (error) {
         // The stored session id is left as it was; the person's line stays recorded as unanswered.
         await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', unanswered: true })
@@ -157,6 +202,7 @@ export default {
     }
 
     const making = new Set<string>()
+    const routing = new Set<string>()
     const libraryDir = (id: string) => join(personDir(id), 'library')
     const readItem = (id: string, item: string) => readJson<LibraryItem | null>(join(libraryDir(id), `${item}.json`), null)
 
@@ -175,15 +221,17 @@ export default {
         const { text, primary, villagers } = b
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return send(res, 400, { error: `text is 1 to ${MAX_TEXT} characters` })
         if (typeof primary !== 'string' || !VILLAGER_NAME.test(primary)) return send(res, 400, { error: 'primary is a villager name' })
-        const cast = Array.isArray(villagers) ? villagers.slice(0, 8) : []
-        const known = cast.filter((v): v is { id: string; name: string; role: string } =>
-          v && typeof v === 'object' && typeof v.id === 'string' && Object.hasOwn(people, v.id) && typeof v.name === 'string' && VILLAGER_NAME.test(v.name) && typeof v.role === 'string' && VILLAGER_NAME.test(v.role))
-        if (!known.length || known.length !== cast.length) return send(res, 400, { error: 'villagers are {id, name, role} for listed people' })
-        await mkdir(dir, { recursive: true, mode: 0o700 })
-        const library = await listLibrary(id)
+        const known = castOf(villagers, people)
+        if (!known) return send(res, 400, { error: 'villagers are {id, name, role} for listed people' })
+        // One route at a time per person: each call starts a billed model process (Sentinel, #42).
+        if (routing.has(id)) return send(res, 409, { error: 'already routing a line' })
+        routing.add(id)
         const started = Date.now()
         const at = new Date().toISOString()
+        let library: LibraryItem[] = []
         try {
+          await mkdir(dir, { recursive: true, mode: 0o700 })
+          library = await listLibrary(id)
           const call = await config.router({ name: people[id], primary, text: text.trim(), villagers: known, library: library.map((l) => ({ id: l.id, name: l.name })), signal: AbortSignal.timeout(30_000) })
           const ms = Date.now() - started
           const checked = checkRouted(call.raw, known.map((v) => v.id), library.map((l) => l.id))
@@ -191,8 +239,10 @@ export default {
           if ('reason' in checked) return send(res, 422, { error: checked.reason, ms })
           return send(res, 200, { routed: checked.routed, ms, models: call.models, costUsd: call.costUsd })
         } catch (error) {
-          await appendJsonl(join(dir, 'routes.jsonl'), { at, text: text.trim(), failed: String((error as Error).message ?? error).slice(0, 300), ms: Date.now() - started })
+          await appendJsonl(join(dir, 'routes.jsonl'), { at, text: text.trim(), failed: String((error as Error).message ?? error).slice(0, 300), ms: Date.now() - started }).catch(() => {})
           return send(res, 422, { error: 'the router failed', ms: Date.now() - started })
+        } finally {
+          routing.delete(id)
         }
       }
       if (what === 'props' && req.method === 'POST') {
@@ -215,9 +265,10 @@ export default {
           const ms = Date.now() - started
           if (typeof made.module !== 'string' || !made.module.trim() || made.module.length > MAX_MODULE) return send(res, 422, { error: 'the maker returned no usable module', ms })
           // Stored as text for the home's sandbox; never imported, evaluated or run by the host.
-          const entry: LibraryItem = { id: randomBytes(6).toString('hex'), name: b.what.trim().slice(0, 80), module: made.module, size, models: made.models, costUsd: made.costUsd, ms, at: new Date().toISOString(), kept: false }
+          const entry: LibraryItem = { id: randomBytes(6).toString('hex'), name: cleanName(b.what), module: made.module, size, models: made.models, costUsd: made.costUsd, ms, at: new Date().toISOString(), kept: false }
           await mkdir(libraryDir(id), { recursive: true, mode: 0o700 })
           await writeFile(join(libraryDir(id), `${entry.id}.json`), JSON.stringify(entry), { mode: 0o600 })
+          await pruneDrafts(id, entry.id)
           return send(res, 200, { item: entry.id, name: entry.name, module: entry.module, ms, models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens })
         } catch {
           return send(res, 422, { error: 'the maker failed', ms: Date.now() - started })
@@ -261,11 +312,19 @@ export default {
       return send(res, 405, { error: 'method not allowed' })
     }
 
-    /** Kept items, newest first. Drafts (made but not kept) stay on disk but are not offered. */
+    const itemIds = async (id: string) => (await readdir(libraryDir(id)).catch(() => [] as string[])).filter((f) => f.endsWith('.json') && ITEM.test(f.slice(0, -5))).map((f) => f.slice(0, -5))
+    /** Kept items, newest first. Drafts (made but not kept) are not offered, and are pruned after a day. */
     async function listLibrary(id: string): Promise<LibraryItem[]> {
-      const files = await readdir(libraryDir(id)).catch(() => [] as string[])
-      const items = await Promise.all(files.filter((f) => ITEM.test(f.replace(/\.json$/, '')) && f.endsWith('.json')).map((f) => readItem(id, f.replace(/\.json$/, ''))))
+      const items = await Promise.all((await itemIds(id)).map((item) => readItem(id, item)))
       return items.filter((i): i is LibraryItem => Boolean(i?.kept)).sort((a, b) => b.at.localeCompare(a.at))
+    }
+    /** Unkept drafts older than a day go when a new one is written (Sentinel, #42), so listing never reads a pile of them. */
+    async function pruneDrafts(id: string, keep: string) {
+      for (const item of await itemIds(id)) {
+        if (item === keep) continue
+        const old = await readItem(id, item).catch(() => null)
+        if (old && !old.kept && Date.now() - Date.parse(old.at) > DAY_MS) await rm(join(libraryDir(id), `${item}.json`), { force: true })
+      }
     }
 
     async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -287,18 +346,29 @@ export default {
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
       }
       if (what === 'messages' && req.method === 'POST') {
-        let text: unknown, context: unknown
+        let text: unknown, context: unknown, route: unknown
         try {
-          ({ text, context } = ((await body(req)) ?? {}) as { text?: unknown; context?: unknown })
+          ({ text, context, route } = ((await body(req)) ?? {}) as { text?: unknown; context?: unknown; route?: unknown })
         } catch {
-          return send(res, 400, { error: 'expected JSON {"text": "...", "context"?: "..."}' })
+          return send(res, 400, { error: 'expected JSON {"text": "...", "context"?: "...", "route"?: {"primary", "villagers"}}' })
         }
         if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return send(res, 400, { error: `text is 1 to ${MAX_TEXT} characters` })
         // Context (what others at the table said) reaches the villager's turn but is never stored as the person's line.
         if (context !== undefined && (typeof context !== 'string' || context.length > MAX_TEXT)) return send(res, 400, { error: `context is a string of at most ${MAX_TEXT} characters` })
+        // The always-on input (#42): the line may be routed in the villager's own reply.
+        let ask: Omit<RouteAsk, 'text' | 'signal'> | undefined
+        if (route !== undefined) {
+          const { primary, villagers } = (route ?? {}) as { primary?: unknown; villagers?: unknown }
+          const known = castOf(villagers, people)
+          if (typeof primary !== 'string' || !VILLAGER_NAME.test(primary) || !known) return send(res, 400, { error: 'route is {"primary": a villager name, "villagers": [{id, name, role}] of listed people}' })
+          ask = { name: people[id], primary, villagers: known, library: [] }
+        }
         if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
         busy.add(id)
-        const turn = converse(id, text.trim(), (context as string | undefined)?.trim() || undefined, res).finally(() => {
+        const turn = (async () => {
+          if (ask) ask.library = (await listLibrary(id)).map((l) => ({ id: l.id, name: cleanName(l.name) }))
+          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res)
+        })().finally(() => {
           busy.delete(id)
           turns.delete(turn)
         })
@@ -323,12 +393,20 @@ export default {
     await mkdir(join(config.root, 'villager'), { recursive: true, mode: 0o700 })
     await writeFile(launchFile, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 })
     ctx.provide('villager', { port, launchFile })
+    // Warm agents start each listed person's process now, so their first line skips the start-up.
+    if (config.agent.warm) for (const id of Object.keys(people)) {
+      const dir = personDir(id)
+      await mkdir(join(dir, 'notes'), { recursive: true, mode: 0o700 })
+      const { sessionId } = await readJson<SessionState>(join(dir, 'villager.json'), {})
+      config.agent.warm({ name: people[id], notesDir: join(dir, 'notes'), personDir: dir, sessionId })
+    }
 
     ctx.effect(() => async () => {
       await rm(launchFile, { force: true })
       server.close()
       server.closeAllConnections()
       await Promise.allSettled(turns)
+      config.agent.close?.()
     }, 'villager server')
   },
 }

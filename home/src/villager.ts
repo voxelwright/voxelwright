@@ -2,7 +2,7 @@
 // the dev server: /villager/launch gives the per-launch token and
 // /villager/api/* is forwarded to the host on 127.0.0.1.
 
-export type Said = { ok: true; reply: string } | { ok: false; why: 'away' | 'busy' | 'failed' }
+export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'route' }
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
 let token: string | null = null
@@ -31,13 +31,29 @@ export async function conversation(person: string): Promise<Line[] | null> {
   return res?.ok ? (await res.json()).lines : null
 }
 
-/** `context` is background the person did not say (the table's last round): the villager hears it, the conversation never stores it. */
-export async function say(person: string, text: string, onText: (t: string) => void, context?: string): Promise<Said> {
+export interface Routing {
+  /** Your own villager's name and the cast: the line may be routed in its reply (#42). */
+  route: { primary: string; villagers: { id: string; name: string; role: string }[] }
+  /** Called once, as soon as the host has read a route in the reply. */
+  onRoute(routed: Routed): void
+}
+
+/**
+ * `context` is background the person did not say (the table's round so far): the villager hears it, the conversation never stores it.
+ * With `routing`, one call either answers (text streams) or names a route (`onRoute`, no text).
+ */
+export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing): Promise<Said> {
   const res = await authorized(`/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}) }),
   })
+  let routed: Routed | undefined
+  const onRoute = (r: Routed) => {
+    if (routed) return
+    routed = r
+    routing?.onRoute(r)
+  }
   if (!res) return { ok: false, why: 'away' }
   if (res.status === 409) return { ok: false, why: 'busy' }
   if (!res.ok || !res.body) return { ok: false, why: 'failed' }
@@ -55,8 +71,11 @@ export async function say(person: string, text: string, onText: (t: string) => v
         const name = /^event: (.*)$/m.exec(block)?.[1]
         const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
         if (name === 'text') onText(data.t)
-        else if (name === 'done') return { ok: true, reply: data.reply }
-        else if (name === 'failed') return { ok: false, why: 'failed' }
+        else if (name === 'route' && routing) onRoute(data.routed)
+        else if (name === 'done') {
+          if (data.routed && routing) onRoute(data.routed)
+          return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
+        } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
       }
     }
   } catch {

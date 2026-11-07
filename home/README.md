@@ -777,18 +777,19 @@ What works:
 - The table: "Come sit with me" walks the villager (hurrying) to the nearest
   free chair, far side first; the talk prototype adds a fourth chair on the
   near side and a felt booster cushion on each chair, so a seated villager
-  clears the table top. Every seated villager answers in turn: their requests
-  start together, they speak one at a time with a lit name tag and a lean-in;
+  clears the table top. A line to the table starts a round (see "Table
+  rounds" below): they speak one at a time with a lit name tag and a lean-in;
   cards that have finished fold to two dimmed lines and move aside for the
-  speaker, and only the speaker's tag shows while someone speaks. Starting a line with a name ("Tuft, ...") asks only
-  that one; clicking a seated villager fills in its name.
+  speaker, and only the speaker's tag shows while someone speaks. A line that
+  names a villager ("Tuft, ...") has that one speak first; clicking a seated
+  villager fills in its name.
 - Goodbyes: "Thanks, everyone", or a typed farewell ("thanks, bye", "see you
   later"; the whole line, at most 40 letters), makes each villager say a short
   goodbye in turn and go back to chores. In a one-to-one talk the villager says
   goodbye and goes back. The goodbyes are written per villager, not model
   turns, and nothing is sent to the host. Escape still leaves at once.
 - Villagers do not share memory with each other. At the table each one gets
-  your line, and what the others said in the previous round as a separate
+  your line, and the round so far (and the previous round) as a separate
   `context` field (`POST /people/:id/messages` with `{"text", "context"}`).
   The host passes context to the villager's turn, marked as not the person's
   words, and never stores it in `conversation.jsonl`, so the notebook never
@@ -976,8 +977,8 @@ node scripts/check-music.mjs [base-url]   # 29 headless checks, dev server on 53
 
 ## Always-on input (#42 prototype)
 
-`?talk=npc&input=held` or `?talk=npc&input=speech` replaces the slip with an
-input that is always there. A keypress anywhere starts writing (a lowercase
+`?talk=npc` now has the held notepad by default (`?input=speech` for the
+speech card, `?input=slip` for the old slip): an input that is always there. A keypress anywhere starts writing (a lowercase
 `j` with nothing written opens the journal instead; a capital J still starts a
 line). Lines go to your own villager (Dumpling) unless you have turned to
 someone: clicking a villager or sitting at the table re-addresses it, and in
@@ -1099,3 +1100,86 @@ furnished from the kitchen (a request for it lands in the kitchen and the
 villager says so); placed props are not kept across a reload (the library is);
 no voice toggle and no context from where you are. Screenshots:
 `screenshots/talk/input-*.jpg` (real models).
+
+## Table rounds, faster replies and the compact notepad (#42, November 7, 2026)
+
+Table rounds (`table()` in `src/plugins/talk.ts`): a line to the table starts
+a round. The villager it names first speaks first; otherwise the opener
+rotates round the table. Each speaker gets your line and every reply so far
+in the round (and the last round) in `context`, never stored as anyone's
+line. A villager may turn to another by name, who then speaks next, even if
+it already spoke; one with nothing to add answers with a short action in
+parentheses, such as "(nods)", shown as a nod and an italic beat with no
+voice. A round stops after four turns (`MAX_ROUND`) and waits for you. The
+next speaker is asked the moment the previous reply is complete, while its
+card is still being revealed. The host prompt tells a villager at the table
+to build on the last line, and to add one line to a game going round the
+table (a joke, a story) rather than restart it.
+
+Real joke round, Haiku, three seated, "Let's make a joke together. Each one
+continue from the other one:":
+
+> Moss: Why did the mug keep telling jokes at breakfast? It figured a little steam always helps a good punchline rise.
+> Tuft: Then the toaster heard it and popped up, saying it could never let a joke like that go to waste.
+> Dumpling: The butter dish slid across the table, looked at the toast, and said it would spread the good news to everyone who had just burned their fingers.
+
+In that run the next speaker was asked 0 ms after the reply before it was
+complete. Its first words still came 1.8 to 2.0 s after the previous card
+finished, because first text in the page took 2.5 to 3.4 s while headless
+WebGPU was rendering.
+
+One call per line: a line to your own villager goes to `POST
+/people/:id/messages` with `route`. The villager either answers (words
+stream) or replies `ROUTE {json}`, which the host checks and sends as a
+`route` event (see `host/README.md`). Plain chat costs one model call;
+`?route=separate` keeps the router-then-answer path (two calls). A talk route
+moves the line to another villager only when your own words name that
+villager, and it sends your exact words, never the model's paraphrase.
+
+Compact notepad (`src/talk/input.ts`): at rest the pad is about 0.42 of its
+writing size, tucked mostly below the bottom edge, showing only "to
+Dumpling". The first keypress, or a click on it, raises it to writing size
+(eased); it settles after sending or Escape. It is a button for clicks and
+taps. The villagers' cards keep clear of its screen box. On a touch screen a
+tap on it shows the field as a real line just above the keyboard (at least
+48 px tall, `enterkeyhint="send"`, placed from `visualViewport`) and focuses
+it inside the tap, so the phone keyboard comes up.
+
+Keys: `talk.ts` has the one keyboard listener (`onKey`). In order: the
+input's `key()` (any key while a line has the keyboard; `j` opens the
+journal; a printable key starts a line; Escape clears a restored line);
+then the slot for room navigation, for arrows and WASD only while nothing is
+being written (`input.writing`); then Escape at the table leaves it.
+
+Checks, stub host: `check-talk-npc` 39 of 39 (new: named first speaks first,
+a pass is a nod with no voice, the second speaker hears your line and the
+first reply, the context sent is what the villager heard, hand-offs by name
+stop at four turns, the next speaker is asked under 150 ms after the reply
+before it and before its card ends, `village/said` words in order and never
+interleaved). `check-talk-input` 49 of 49 (new: held is the default; at rest
+under 4% of the screen at the bottom edge; rises to over three times that
+on a keypress, settles on Escape; a click raises it; an answer is one call
+with no router entry; a model's talk route to an unnamed villager is not
+followed on either path; `?route=separate` makes two calls; on a phone in
+touch emulation a tap focuses a visible 44 px line with a send key, and the
+line typed is sent). Also passing: `check-talk-notebook` 15, `check-villager`
+13, `check-kernel` 10, `check-entries` 27, `check-babble` 27. The check
+scripts take `--host=` and `--dev=` (5319 and 5318 in these runs).
+
+Look: a fresh Opus scorer per round saw only the real-model screenshots
+(the notepad at rest, rising, writing and sent, the Moss talk, the table mid-round
+and after, `?q=low`) and nine categories (the ui-craft rubric plus "the input
+feels part of the world" and "the table reads as a conversation"). Round 1: mean 5.7
+(input 5, table 5). The fixes after it: the flying note glows warm paper instead
+of blooming white, finished turns at the table keep three lines, a pass is
+italic, and seated villagers turn their heads to whoever speaks. Round 2: mean 5.8
+(input 6, table 6). Stopped on the time box. Still named: the sent note
+neither folds nor reads as paper, bubble sizes vary, the notepad is a flat card
+facing the camera, "to Dumpling" is faint at rest, and the tan void and the
+round sound button look like an app. Claude only; no GPT reviewer.
+
+Not done: the round has a pause of about 2 s between speakers while first
+text is slow; thinking still appears on some Haiku turns despite
+`thinking: disabled`; the phone layout (field of view, tap areas, card
+placement) is a later unit; the speech variant has no touch path.
+

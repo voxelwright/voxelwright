@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { conversation, say } from '../villager'
+import { inputVariant } from '../talk/input'
 
 const STORAGE_KEY = 'village.notebook.lines'
 const HAND = 'italic 44px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
@@ -48,7 +49,7 @@ export default {
     // ?talk=notebook: the richer notebook (talkbook.ts) takes the book instead (#42 prototype).
     // With the always-on input (?talk=npc&input=held|speech) the same book is the journal.
     const q = new URLSearchParams(location.search)
-    if (q.get('talk') === 'notebook' || (q.get('talk') === 'npc' && ['held', 'speech'].includes(q.get('input') ?? ''))) return
+    if (q.get('talk') === 'notebook' || inputVariant(q)) return
     const { scene } = ctx.stage
     const { view, entries } = ctx
     const lines = readLines()
