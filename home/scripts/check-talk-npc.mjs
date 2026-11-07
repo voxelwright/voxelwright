@@ -206,6 +206,13 @@ try {
     await page.waitForTimeout(800)
     const hello = (await state(page)).cards.sam?.text ?? ''
     await recordWords(page, 'sam')
+    // The voice hook: every word as it appears, and a stop when a reply is cut short.
+    await page.evaluate(() => {
+      window.__said = []
+      const root = window.village.kernel.root
+      root.on('village/said', (e) => window.__said.push({ ...e }))
+      root.on('village/said-stop', (e) => window.__said.push({ stop: e.villager }))
+    })
     await typeLine(page, 'Could you help me find my keys?')
     const turn = await watchTurn(page, 20_000)
     const cued = turn.some((s) => s.cast.sam.speaking && s.cards.sam?.cue && !s.cards.sam.finished)
@@ -250,6 +257,11 @@ try {
 
     // Escape: back to chores and the room.
     await page.keyboard.press('Escape')
+    await page.waitForTimeout(100)
+    const heardWords = await page.evaluate(() => window.__said)
+    const replyWords = heardWords.filter((e) => e.villager === 'sam').slice(0, reply.text.split(/\s+/).length)
+    const inOrder = replyWords.map((e) => e.word).join(' ') === reply.text.trim().split(/\s+/).join(' ') && replyWords.every((e, i) => e.index === i && e.last === (i === replyWords.length - 1))
+    check('each word fires "village/said" as it appears, in order, with "last" on the final word; Escape mid-reply fires "village/said-stop"', inOrder && heardWords.at(-1)?.stop === 'sam', { words: replyWords.length, inOrder, end: heardWords.slice(-2) })
     const back = await until(page, (s) => s.mode === 'room', 2000)
     const was = back.cast.sam
     await page.waitForTimeout(8000)

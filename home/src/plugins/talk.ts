@@ -27,6 +27,17 @@ const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 const TYPE_RATE = 58
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
+/** One word as it appears on a villager's card: its id, the word with any trailing punctuation, its place in the reply, and whether it ends the reply. */
+export interface Said { villager: string; word: string; index: number; last: boolean }
+declare module 'cordis' {
+  interface Events {
+    /** A word appeared on a villager's card, on the card's own reveal clock (for voices). */
+    'village/said'(said: Said): void
+    /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
+    'village/said-stop'(stop: { villager: string }): void
+  }
+}
+
 interface Person {
   person: string
   owner: string
@@ -149,8 +160,13 @@ class Card {
   x = 0
   y = 0
   placed = false
+  /** How far into the reply words have been announced, and how many. */
+  private told = 0
+  private count = 0
+  /** Cut short: no more words are announced until fresh words start. */
+  private muted = false
 
-  constructor(m: { name: string; colour: string; person: string }) {
+  constructor(m: { name: string; colour: string; person: string }, private onWord: (word: string, index: number, last: boolean) => void, private onStop: () => void) {
     this.el.className = 'talk-card'
     this.el.dataset.talkCard = m.person
     this.el.style.setProperty('--c', m.colour)
@@ -176,8 +192,17 @@ class Card {
     this.el.append(tab, page, this.more)
   }
 
+  /** The words stop where they are: a reply cut short says so once. */
+  stop() {
+    if (this.count && !this.finished && !this.muted) this.onStop()
+    this.muted = true
+  }
+
   /** Start fresh words. */
   reset() {
+    this.stop()
+    this.muted = false
+    this.count = this.told = 0
     this.full = this.paged = ''
     this.from = this.shown = this.end = this.visible = 0
     this.said.textContent = ''
@@ -266,6 +291,13 @@ class Card {
     if (v !== this.visible || (v > this.from && !this.said.textContent)) {
       this.visible = v
       this.said.textContent = this.full.slice(this.from, v).trimEnd()
+      // Each newly shown word, in order, on the same clock that shows it.
+      const end = this.full.trimEnd().length
+      if (!this.muted) for (const w of this.full.slice(this.told, v).matchAll(/\S+/g)) {
+        const at = this.told + w.index + w[0].length
+        this.onWord(w[0], this.count++, this.done && at >= end)
+      }
+      this.told = Math.max(this.told, v)
     }
     this.more.hidden = !this.hasMore
     this.cue.hidden = this.finished || this.hasMore
@@ -312,7 +344,9 @@ export default {
         }
       })
       const m: Member = { ...p, name, role, entry: `villager-${p.person}`, v, seat: null, news: null, looked: 0, glyph, card: null!, tag: document.createElement('div'), fade: 1, glow: 0, mats }
-      m.card = new Card(m)
+      m.card = new Card(m,
+        (word, index, last) => ctx.emit('village/said', { villager: p.person, word, index, last }),
+        () => ctx.emit('village/said-stop', { villager: p.person }))
       m.tag = nameTag(name, p.owner, p.colour)
       m.tag.classList.add('talk-tag')
       v.onDone = (spot) => {
@@ -412,6 +446,7 @@ export default {
       m.card.el.classList.toggle('said', as === 'said')
     }
     const hide = (m: Member) => {
+      m.card.stop()
       showing.delete(m)
       m.card.placed = false
       m.card.el.classList.remove('shown', 'said')
@@ -746,8 +781,17 @@ export default {
         return false
       }
       m.v.speaking = true
-      speak(m, speech.text, speech.done)
+      speak(m, speech.text, speech.done && !speech.away)
       while (!speech.done || !m.card.finished) {
+        // The host failing mid-reply cuts the words short where they are.
+        if (speech.away) {
+          m.v.speaking = false
+          keep(m.person, said)
+          speak(m, inCharacter(speech.away))
+          voice.textContent = `${m.name}: ${m.card.text}`
+          while (!m.card.finished) await frame()
+          return false
+        }
         m.card.set(speech.text, speech.done)
         await frame()
       }
