@@ -131,7 +131,7 @@ export interface Theme {
    * so the dollhouse view has a sky and a horizon. `paint` names a painter in ../paint.ts. Unset: none.
    */
   sky?: { paint: string }
-  /** A world the theme stands around the house in place of the yard (./world, regroup S1 prototype, `&world=1`). Unset: the yard. */
+  /** A world the theme stands around the house in place of the yard: a key of WORLDS in ./world. Unset: the yard. */
   world?: string
   /** Character animation: poses per second for villagers (12 is "on twos"); unset keeps each direction's own. */
   motion: { characterFps?: number }
@@ -139,6 +139,6 @@ export interface Theme {
   costumes: { follow: boolean; hint: string }
   /** What newly made props should look like, handed to the prop maker's prompt. */
   props: { hint: string }
-  /** Shading model by material class (./shade, regroup S2, behind ?shade=1): 'toon' or 'wet'. Unset uses the preset's default. */
+  /** Shading model by material class (./shade): 'toon' or 'wet'. Unset: the materials' own. `?shade=0` turns it off. */
   shade?: 'toon' | 'wet'
 }

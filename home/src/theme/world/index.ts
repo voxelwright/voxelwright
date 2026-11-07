@@ -1,58 +1,93 @@
-// Regroup S1 (#50): the theme owns the world outside. A world hides the default exterior
-// (objects tagged `userData.exterior`: the yard, its fence and stones, the trees, the garden
-// plot, the worktable and the window's painted card) and stands its own, built in code around
-// the house's measured bounds. Prototype: on only with `&world=1`.
+// The theme owns the world outside (#50, regroup S1). A theme's `world` token names one of
+// WORLDS; it hides the default exterior (objects tagged `userData.exterior`: the yard, its
+// fence and stones, the trees, the garden plot, the worktable and the window's painted card)
+// and stands its own, built in code around the house's measured bounds. `&world=0` turns
+// worlds off, for comparisons.
 import * as THREE from 'three/webgpu'
 import type { Theme } from '../tokens'
 import { neonCity } from './neon'
 import { comicPage } from './comic'
+import { twilightStreet } from './twilight'
 
-/** The house's outer bounds in world metres, measured from its walls. */
-export interface House { x0: number; x1: number; z0: number; z1: number; top: number }
+/** Where the window's own painted card hung: its centre and size, so a world can hang its own there. */
+export interface View { x: number; y: number; z: number; w: number; h: number }
+/** The house's outer bounds in world metres, measured from its walls, and the window card. */
+export interface House { x0: number; x1: number; z0: number; z1: number; top: number; view: View | null }
 
 /** A stood world: its group (added by the manager) and what to free. */
 export interface World { group: THREE.Group; dispose(): void }
 
-const WORLDS: Record<string, (house: House) => World> = { 'neon-city': neonCity, 'comic-page': comicPage }
-/** Until presets carry `world` (and check.ts knows it), the flag picks each look's world by id. */
-const BY_THEME: Record<string, string> = { 'neon-night': 'neon-city', comic: 'comic-page' }
-const ON = new URLSearchParams(location.search).get('world') === '1'
+/** Every world a theme may name. check.ts accepts exactly these keys. One line per world. */
+export const WORLDS: Record<string, (house: House) => World> = {
+  'neon-city': neonCity,
+  'comic-page': comicPage,
+  'twilight-street': twilightStreet,
+}
+const OFF = new URLSearchParams(location.search).get('world') === '0'
 
 const box = new THREE.Box3()
 const part = new THREE.Box3()
-/** The union of every wall's bounds (the role lives on the material). Null before a room has walls. */
+const card = new THREE.Box3()
+/** The union of every wall's bounds (the role lives on the material), and the window card's. Null before a room has walls. */
 function measure(scene: THREE.Scene): House | null {
   box.makeEmpty()
+  card.makeEmpty()
   scene.traverse((o) => {
     const mesh = o as THREE.Mesh
-    if (!mesh.isMesh || (mesh.material as THREE.Material).userData?.themeRole !== 'wall') return
+    const role = mesh.isMesh ? (mesh.material as THREE.Material).userData?.themeRole : undefined
+    if (role !== 'wall' && !(role === 'view' && o.userData.exterior)) return
     mesh.geometry.computeBoundingBox()
-    box.union(part.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld))
+    part.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld)
+    ;(role === 'wall' ? box : card).union(part)
   })
   if (box.isEmpty()) return null
   const r = (v: number) => Math.round(v * 100) / 100
-  return { x0: r(box.min.x), x1: r(box.max.x), z0: r(box.min.z), z1: r(box.max.z), top: r(box.max.y) }
+  const view = card.isEmpty() ? null : {
+    x: r((card.min.x + card.max.x) / 2), y: r((card.min.y + card.max.y) / 2), z: r((card.min.z + card.max.z) / 2),
+    w: r(card.max.x - card.min.x), h: r(card.max.y - card.min.y),
+  }
+  return { x0: r(box.min.x), x1: r(box.max.x), z0: r(box.min.z), z1: r(box.max.z), top: r(box.max.y), view }
 }
+
+/**
+ * How long a world that left the scene waits before it is freed. A theme switch compiles the
+ * next look's chain with renderer.compileAsync over the scene as it stood when the switch
+ * began; freeing a world's geometry while that compile is in flight lets the compile upload
+ * it again, and nothing frees it after (check-themes saw exactly one neon world left over).
+ */
+const RETIRE_MS = 4000
 
 /** The theme plugin's hook: `place(t)` on every walk, `drop()` on unload. */
 export function worlds(scene: THREE.Scene) {
   let stood: { key: string; world: World } | null = null
   const hidden = new Set<THREE.Object3D>()
+  const retired: Array<{ world: World; timer: ReturnType<typeof setTimeout> }> = []
+  const free = (entry: { world: World; timer: ReturnType<typeof setTimeout> }) => {
+    clearTimeout(entry.timer)
+    retired.splice(retired.indexOf(entry), 1)
+    entry.world.dispose()
+  }
   const unstand = () => {
     if (!stood) return
     stood.world.group.removeFromParent()
-    stood.world.dispose()
+    const entry = { world: stood.world, timer: setTimeout(() => free(entry), RETIRE_MS) }
+    retired.push(entry)
     stood = null
   }
-  const drop = () => {
+  const clear = () => {
     unstand()
     for (const o of hidden) o.visible = true
     hidden.clear()
   }
+  /** On unload: put the yard back and free every world now. */
+  const drop = () => {
+    clear()
+    while (retired.length) free(retired[0])
+  }
   const place = (t: Theme) => {
-    const name = ON ? t.world ?? BY_THEME[t.id] : undefined
+    const name = OFF ? undefined : t.world
     const house = name && Object.hasOwn(WORLDS, name) ? measure(scene) : null
-    if (!name || !house) return drop()
+    if (!name || !house) return clear()
     const key = JSON.stringify([name, house])
     if (stood?.key !== key) {
       unstand()

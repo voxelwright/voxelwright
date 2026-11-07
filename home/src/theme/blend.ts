@@ -97,5 +97,7 @@ export function blend(a: Theme, b: Theme, k: number): Theme {
     post: mixPost(a.post, b.post, k),
     motion: snap(a.motion, b.motion, k),
     sky: snap(a.sky, b.sky, k),
+    world: snap(a.world, b.world, k),
+    shade: snap(a.shade, b.shade, k),
   }
 }

@@ -3,7 +3,7 @@
 import * as THREE from 'three/webgpu'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { canvas, toTexture } from '../../paint'
-import type { World } from './index'
+import type { House, World } from './index'
 
 /** Collects what a world makes so `dispose()` frees all of it. */
 export class Bin {
@@ -71,3 +71,19 @@ export function glowTexture() {
 export function flatQuad(w: number, d: number, x: number, y: number, z: number, turn = 0) {
   return new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).rotateY(turn).translate(x, y, z)
 }
+
+/**
+ * The world's painted view for the seated window, hung where the window's own card hung
+ * (measured into `house.view`) and seen only from the seat. A card painted to the garden's
+ * layout shows its band x 0.41 to 0.62, y 0.31 to 0.65 through the window. `gain` lifts it.
+ */
+export function seatCard(bin: Bin, house: House, map: THREE.Texture, gain = 1) {
+  const v = house.view
+  if (!v) return null
+  const card = bin.mesh([new THREE.PlaneGeometry(v.w, v.h).translate(v.x, v.y, v.z)], new THREE.MeshBasicMaterial({ map: bin.keep(map), color: new THREE.Color(gain, gain, gain), fog: false }), { name: 'world seat view' })
+  card.userData.seatOnly = true
+  return card
+}
+
+/** Where a world's far row must stand so nothing of it pokes in front of the seat card. */
+export const behindCard = (house: House, z: number, margin = 0.6) => (house.view ? Math.min(z, house.view.z - margin) : z)

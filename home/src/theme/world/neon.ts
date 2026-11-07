@@ -1,100 +1,134 @@
-// Neon night's world (regroup S1): the house stands on a wet city block at night. A pavement
-// ring with kerbs, a ring road of wet asphalt with lane dashes, and blocks of towers across the
-// road with lit window grids, neon signs and shopfronts; streetlights with light cones and
-// pools, fake reflection streaks under the signs, and rain. Tall blocks stand only behind and
-// left of the house, where the dollhouse camera (front right) never looks through them.
+// Neon night's world (#50): the house stands on a wet city block at night. A pavement ring
+// with kerbs, a ring road of wet asphalt with lane dashes, and towers across the road with
+// dim, varied window grids, neon tube signs and shopfronts; streetlights with light cones and
+// pools, faint reflection streaks under the signs, and rain. Tall blocks stand only behind and
+// left of the house, where the dollhouse camera (front right) sees them over the walls; the
+// right side is cut low and the front left open, so the room stays the subject. The seated
+// window shows the same city painted at depth (../paint.ts night-city) on a card hung in
+// front of the far towers, with the 3D rain falling between.
 import * as THREE from 'three/webgpu'
 import { attribute, mod, positionLocal, time, vec3 } from 'three/tsl'
 import { canvas, makeNoise, rng, toTexture } from '../../paint'
 import { YARD_TOP } from '../../diorama'
+import { paintNightCity } from '../paint'
 import type { House, World } from './index'
-import { Bin, cellBox, flatQuad, glowTexture, tint } from './build'
+import { Bin, behindCard, cellBox, flatQuad, glowTexture, seatCard, tint } from './build'
 
 const WALK = YARD_TOP // pavement top: the house's contact shadow lies on it
 const ROAD = YARD_TOP - 0.14
 const PAVE = 1.4 // house-side pavement width
 const LANES = 3.8
 const FAR_PAVE = 0.9
-const CELL: [number, number] = [1.5, 1.25] // one window bay, one storey
-/** Where the dollhouse camera looks from (yaw 0.6 in camera.ts): reflections stretch towards it. */
-const VIEW_TURN = 0.6
+/** Where the dollhouse camera looks from (the overview yaw in camera.ts): reflections stretch towards it. */
+const VIEW_TURN = 0.42
 
 const NEON: Array<[number, number, number]> = [
-  [2.0, 0.22, 1.4], // magenta
-  [0.22, 1.6, 2.0], // cyan
-  [2.1, 1.0, 0.25], // amber
-  [1.0, 0.4, 2.1], // violet
-  [1.9, 0.3, 0.55], // hot red-pink
+  [1.5, 0.18, 1.05], // magenta
+  [0.18, 1.2, 1.5], // cyan
+  [1.5, 0.7, 0.2], // amber
+  [0.75, 0.3, 1.55], // violet
 ]
 
-/** Window grids: 8 by 8 bays, about four in ten lit in warm, cool or pink light. */
-function paintWindows(seed: number) {
+/**
+ * A window grid, one storey and bay a cell: most windows dark glass, a few lit, mostly
+ * warm, some behind a half-drawn blind. `ribbon` paints office strips instead of punched
+ * windows. Several seeds and densities so no two blocks repeat.
+ */
+function paintWindows(seed: number, lit: number, ribbon = false) {
   const r = rng(seed)
   const [c, g] = canvas(512, 512)
-  g.fillStyle = '#0c0a18'
+  g.fillStyle = '#0a0914'
   g.fillRect(0, 0, 512, 512)
-  const lit = ['#ffcf7a', '#ffdf9e', '#ffc066', '#9fe8ff', '#c9f2ff', '#ff8ad8']
-  for (let row = 0; row < 8; row++) for (let col = 0; col < 8; col++) {
-    const x = col * 64, y = row * 64
-    if (row === 7 && col === 0) continue // the dark cell roofs sample
-    const on = r() < 0.42
-    if (on) {
-      const tone = lit[Math.floor(r() * lit.length)]
-      const grad = g.createLinearGradient(0, y + 14, 0, y + 52)
-      grad.addColorStop(0, tone)
-      grad.addColorStop(1, r() < 0.5 ? tone : '#6a3a5a')
-      g.fillStyle = grad
-    } else g.fillStyle = r() < 0.5 ? '#141a34' : '#1a1430'
-    g.fillRect(x + 12, y + 14, 40, 38)
-    if (on && r() < 0.4) { // half-drawn blind
-      g.fillStyle = 'rgba(20,10,30,0.7)'
-      g.fillRect(x + 12, y + 14, 40, 8 + r() * 18)
+  const warm = ['#f2c27a', '#f6d49a', '#e8a868'], cool = ['#8fd0e6', '#d890c4']
+  for (let row = 0; row < 8; row++) {
+    // Some floors are busier than others.
+    const floor = lit * (0.4 + r() * 1.4)
+    for (let col = 0; col < 8; col++) {
+      const x = col * 64, y = row * 64
+      if (row === 7 && col === 0) continue // the dark cell roofs sample
+      const on = r() < floor
+      const [wx, wy, ww, wh] = ribbon ? [x, y + 20, 64, 26] : [x + 10, y + 12, 44, 40]
+      if (on) {
+        const tone = r() < 0.8 ? warm[Math.floor(r() * warm.length)] : cool[Math.floor(r() * cool.length)]
+        const grad = g.createLinearGradient(0, wy, 0, wy + wh)
+        grad.addColorStop(0, tone)
+        grad.addColorStop(1, '#6a4436')
+        g.fillStyle = grad
+      } else g.fillStyle = r() < 0.5 ? '#111426' : '#151024'
+      g.fillRect(wx, wy, ww, wh)
+      if (on && r() < 0.5) { // a half-drawn blind
+        g.fillStyle = 'rgba(14,8,20,0.75)'
+        g.fillRect(wx, wy, ww, 6 + r() * (wh - 10))
+      }
+      g.fillStyle = 'rgba(0,0,0,0.6)' // mullion
+      g.fillRect(ribbon ? x + 62 : x + 31, wy, 2, wh)
     }
-    g.fillStyle = 'rgba(0,0,0,0.6)' // mullion
-    g.fillRect(x + 31, y + 14, 2, 38)
   }
   const t = toTexture(c)
   t.wrapS = t.wrapT = THREE.RepeatWrapping
   return t
 }
 
-/** Left half: an abstract neon tube mark (no letters). Right half: a lit shopfront. */
+/** Where each sign kind sits in the atlas (u0, v0, u1, v1), proportioned to its board. */
+type Region = [number, number, number, number]
+const BLADE: Region = [0, 0, 0.25, 1] // 1:4, a tall board
+const BAND: Region = [0.25, 0.8125, 1, 1] // 4:1, a wide board
+const SHOP: Region = [0.25, 0, 1, 0.75] // a lit shop window
+const PLAIN: Region = [0.3, 0.77, 0.32, 0.79] // white: tubes and lamp heads
+
+/**
+ * Neon tubes on dark boards, white so the vertex colour tints each sign (no letters): a
+ * tall blade of stacked marks, a wide band with a running wave, and a lit shopfront.
+ */
 function paintSigns() {
-  const [c, g] = canvas(512, 256)
-  g.fillStyle = '#050308'
-  g.fillRect(0, 0, 512, 256)
+  const S = 1024
+  const [c, g] = canvas(S, S)
+  g.fillStyle = '#060409'
+  g.fillRect(0, 0, S, S)
   g.strokeStyle = '#ffffff'
   g.lineCap = g.lineJoin = 'round'
   g.shadowColor = '#ffffff'
-  g.shadowBlur = 14
+  g.shadowBlur = 12
+  // Blade: x 0..256, y 0..1024 (the canvas top is v 1).
   g.lineWidth = 9
-  g.beginPath()
-  g.roundRect(18, 18, 220, 220, 26)
-  g.stroke()
+  g.beginPath(); g.roundRect(22, 22, 212, 980, 30); g.stroke()
+  g.lineWidth = 12
+  // A level meter: bars of falling length, read as a mark, never as letters.
+  for (let i = 0; i < 6; i++) {
+    const y = 130 + i * 150, half = 30 + ((i * 37) % 5) * 16
+    g.beginPath(); g.moveTo(128 - half, y); g.lineTo(128 + half, y); g.stroke()
+  }
+  // Band: x 256..1024, y 0..192.
+  g.lineWidth = 9
+  g.beginPath(); g.roundRect(274, 18, 732, 156, 26); g.stroke()
   g.lineWidth = 11
   g.beginPath()
-  g.arc(128, 92, 34, 0, Math.PI * 2)
+  for (let x = 320; x <= 960; x += 8) g.lineTo(x, 96 + Math.sin((x - 320) / 40) * 30)
   g.stroke()
-  g.beginPath()
-  g.moveTo(70, 196); g.lineTo(128, 150); g.lineTo(186, 196)
-  g.stroke()
-  g.beginPath()
-  g.moveTo(64, 140); g.lineTo(192, 140)
-  g.stroke()
-  // Shopfront: a lit pane under a dark fascia, with mullions and a warm floor glow.
-  const pane = g.createLinearGradient(0, 40, 0, 256)
-  pane.addColorStop(0, '#c8c0d8')
-  pane.addColorStop(1, '#ffffff')
+  // Plain white: x 256..1024, y 192..256.
   g.shadowBlur = 0
+  g.fillStyle = '#ffffff'
+  g.fillRect(256, 200, 768, 48)
+  // Shopfront: x 256..1024, y 256..1024: a lit pane under a dark fascia, with mullions.
+  const pane = g.createLinearGradient(0, 330, 0, S)
+  pane.addColorStop(0, '#a8a0b8')
+  pane.addColorStop(1, '#f0ecf4')
   g.fillStyle = pane
-  g.fillRect(256, 40, 256, 216)
+  g.fillRect(256, 330, 768, 694)
   g.fillStyle = '#1a1424'
-  g.fillRect(256, 0, 256, 40)
-  for (let x = 256; x <= 512; x += 64) g.fillRect(x - 3, 40, 6, 216)
+  g.fillRect(256, 256, 768, 74)
+  for (let x = 256; x <= S; x += 128) g.fillRect(x - 4, 330, 8, 694)
   return toTexture(c)
 }
 
-/** Wet asphalt: grain in the colour, puddles as smooth patches in the roughness (green channel). */
+/** Fits every face's UVs into one region of the sign atlas. */
+function region<T extends THREE.BufferGeometry>(g: T, [u0, v0, u1, v1]: Region): T {
+  const uv = g.attributes.uv
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), v0 + uv.getY(i) * (v1 - v0))
+  return g
+}
+
+/** Wet asphalt: grain in the colour and, softly, in the roughness (green channel). */
 function paintAsphalt(seed: number) {
   const n = makeNoise(seed, 32)
   const [c, g] = canvas(256, 256)
@@ -102,10 +136,10 @@ function paintAsphalt(seed: number) {
   const img = g.createImageData(256, 256), rough = rg.createImageData(256, 256)
   for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
     const i = (y * 256 + x) * 4
-    const grain = n(x / 2, y / 2, 2), puddle = n(x / 40, y / 40, 3)
+    const grain = n(x / 2, y / 2, 2), puddle = n(x / 14, y / 14, 3)
     const v = 26 + grain * 30
     img.data.set([v, v * 0.95, v * 1.15, 255], i)
-    const rr = puddle > 0.56 ? 70 : 140 + grain * 70
+    const rr = 120 + grain * 60 + puddle * 30
     rough.data.set([rr, rr, rr, 255], i)
   }
   g.putImageData(img, 0, 0)
@@ -139,6 +173,14 @@ function slab(x0: number, x1: number, z0: number, z1: number, y0: number, y1: nu
   return g
 }
 
+/** Window kinds: a texture, its cell (bay by storey, metres) and how brightly it glows. */
+const KINDS: Array<{ seed: number; lit: number; ribbon?: boolean; cell: [number, number] }> = [
+  { seed: 9, lit: 0.16, cell: [1.5, 1.25] },
+  { seed: 14, lit: 0.08, cell: [1.2, 1.1] },
+  { seed: 21, lit: 0.12, ribbon: true, cell: [2.4, 1.3] },
+  { seed: 33, lit: 0.22, cell: [1.8, 1.4] },
+]
+
 export function neonCity(house: House): World {
   const bin = new Bin()
   const r = rng(41)
@@ -146,6 +188,9 @@ export function neonCity(house: House): World {
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2
   // From the house's walls to the far kerb: a street behind, in front and to the right; on the
   // left the next block starts at the pavement, so its towers stand close behind the left wall.
+  // The far row behind stands behind the seat card, so its signs never poke in front of it.
+  const back = behindCard(house, z0 - PAVE - LANES - FAR_PAVE, 0.7)
+  const ob = z0 - back - FAR_PAVE // pavement plus road behind the house
   const o = PAVE + LANES, ol = PAVE
 
   // Ground: one wide road plane under everything, glossy and dark; SSR makes it wet on high.
@@ -159,10 +204,10 @@ export function neonCity(house: House): World {
   const slabs = bin.keep(paintSlabs(5))
   const blocks = [
     slab(x0 - PAVE, x1 + PAVE, z0 - PAVE, z1 + PAVE, ROAD, WALK, 2),
-    slab(cx - 60, cx + 60, z0 - o - 40, z0 - o, ROAD, WALK, 2), // back
-    slab(x0 - ol - 40, x0 - ol, z0 - o, cz + 60, ROAD, WALK, 2), // left
+    slab(cx - 60, cx + 60, z0 - ob - 40, z0 - ob, ROAD, WALK, 2), // back
+    slab(x0 - ol - 40, x0 - ol, z0 - ob, cz + 60, ROAD, WALK, 2), // left
     slab(x0 - ol, cx + 60, z1 + o, z1 + o + 40, ROAD, WALK, 2), // front
-    slab(x1 + o, x1 + o + 40, z0 - o, z1 + o, ROAD, WALK, 2), // right
+    slab(x1 + o, x1 + o + 40, z0 - ob, z1 + o, ROAD, WALK, 2), // right
   ]
   bin.mesh(blocks, new THREE.MeshStandardMaterial({ map: slabs, roughness: 0.38, metalness: 0 }), { receive: true, name: 'neon pavement' })
   // Kerbs: pale stone edges where each pavement meets the road.
@@ -173,9 +218,9 @@ export function neonCity(house: House): World {
   }
   const hx0 = x0 - PAVE, hx1 = x1 + PAVE, hz0 = z0 - PAVE, hz1 = z1 + PAVE
   edge(hx0, hz0, hx1, hz0); edge(hx0, hz1, hx1, hz1); edge(hx0, hz0, hx0, hz1); edge(hx1, hz0, hx1, hz1)
-  edge(cx - 60, z0 - o, cx + 60, z0 - o); edge(x0 - ol, z1 + PAVE, x0 - ol, cz + 60)
-  edge(x0 - ol, z1 + o, cx + 60, z1 + o); edge(x1 + o, z0 - o, x1 + o, z1 + o)
-  bin.mesh(kerbs, new THREE.MeshStandardMaterial({ color: '#8c88a8', roughness: 0.5 }), { name: 'neon kerbs' })
+  edge(cx - 60, z0 - ob, cx + 60, z0 - ob); edge(x0 - ol, z1 + PAVE, x0 - ol, cz + 60)
+  edge(x0 - ol, z1 + o, cx + 60, z1 + o); edge(x1 + o, z0 - ob, x1 + o, z1 + o)
+  bin.mesh(kerbs, new THREE.MeshStandardMaterial({ color: '#3c3a4c', roughness: 0.5 }), { name: 'neon kerbs' })
 
   // Lane dashes along the middle of the ring road.
   const dashes: THREE.BufferGeometry[] = []
@@ -186,22 +231,16 @@ export function neonCity(house: House): World {
       dashes.push(flatQuad(along ? 1.2 : 0.12, along ? 0.12 : 1.2, ax + (bx - ax) * t, ROAD + 0.006, az + (bz - az) * t))
     }
   }
-  const m = PAVE + LANES / 2
-  lane(x0 - ol, z0 - m, x1 + m, z0 - m); lane(x0 - ol, z1 + m, x1 + m + 20, z1 + m)
-  lane(x1 + m, z0 - m - 20, x1 + m, z1 + m + 20); lane(x1 + m, z0 - m, x1 + m + 30, z0 - m)
-  bin.mesh(dashes, new THREE.MeshStandardMaterial({ color: '#d8c890', roughness: 0.4, emissive: '#3a3020' }), { name: 'neon lane paint' })
+  const mb = (PAVE + ob) / 2, m = PAVE + LANES / 2
+  // None along the front: the dollhouse view's bottom edge stays plain wet road.
+  lane(x0 - ol, z0 - mb, x1 + m, z0 - mb)
+  lane(x1 + m, z0 - mb - 20, x1 + m, z1 + m + 20); lane(x1 + m, z0 - mb, x1 + m + 30, z0 - mb)
+  bin.mesh(dashes, new THREE.MeshStandardMaterial({ color: '#a89c78', roughness: 0.4, emissive: '#1e1a12' }), { name: 'neon lane paint' })
 
-  // Towers across the road. Bodies share one window-grid texture laid out in metres.
-  const windows = bin.keep(paintWindows(9))
-  const bodies: THREE.BufferGeometry[] = []
+  // Towers across the road, each wearing one of several window kinds laid out in metres.
+  const bodies: THREE.BufferGeometry[][] = KINDS.map(() => [])
   const glows: THREE.BufferGeometry[] = [] // signs, shopfronts, lamp heads, roof tubes: one unlit mesh
   const pools: THREE.BufferGeometry[] = [] // additive ground light
-  const shift = (): [number, number] => [Math.floor(r() * 8) / 8 * 8, 0]
-  const signUV = (g: THREE.BufferGeometry, shop: boolean) => {
-    const uv = g.attributes.uv
-    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 0.5 + (shop ? 0.5 : 0))
-    return g
-  }
   const streak = (x: number, z: number, c: [number, number, number], w: number, len: number, k: number) => {
     pools.push(tint(new THREE.PlaneGeometry(w, len).rotateX(-Math.PI / 2).translate(0, 0, len / 2).rotateY(VIEW_TURN).translate(x, ROAD + 0.01, z), c[0] * k, c[1] * k, c[2] * k))
   }
@@ -219,38 +258,49 @@ export function neonCity(house: House): World {
       const out = face === 'z+' || face === 'x+' ? 1 : -1
       const bx = zAxis ? mid : line - (out * depth) / 2
       const bz = zAxis ? line - (out * depth) / 2 : mid
-      bodies.push(cellBox(zAxis ? width : depth, h, zAxis ? depth : width, bx, ROAD, bz, CELL, shift()))
+      const kind = Math.floor(r() * KINDS.length)
+      const cell = KINDS[kind].cell
+      bodies[kind].push(cellBox(zAxis ? width : depth, h, zAxis ? depth : width, bx, ROAD, bz, cell, [Math.floor(r() * 8), 0]))
       // Point on the facade, `along` metres from the tower's middle, `off` metres out.
       const onFace = (along: number, off: number): [number, number] => zAxis ? [mid + along, line + out * off] : [line + out * off, mid + along]
-      const colour = NEON[Math.floor(r() * NEON.length)]
-      if (tall && r() < 0.65) { // a lit shopfront on the ground floor
+      // Mostly the window card's two tubes, magenta and cyan, so seat and dollhouse show one city.
+      const colour = NEON[r() < 0.8 ? Math.floor(r() * 2) : 2 + Math.floor(r() * 2)]
+      if (r() < (tall ? 0.6 : 0.45)) { // a lit shopfront on the ground floor
         const [sx, sz] = onFace(0, 0.03)
-        const sw = width * 0.7
-        glows.push(signUV(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, 1.5, zAxis ? 0.04 : sw).translate(sx, WALK + 0.8, sz), 0.95, 0.62, 0.5), true))
-        streak(sx, sz, [1, 0.8, 0.6], sw * 0.6, 2.2, 0.35)
+        const sw = width * 0.7, sh = tall ? 1.5 : Math.min(0.9, h - 0.2)
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? sw : 0.04, sh, zAxis ? 0.04 : sw).translate(sx, WALK + 0.05 + sh / 2, sz), 0.22, 0.15, 0.16), SHOP))
+        streak(sx, sz, [1, 0.8, 0.6], sw * 0.5, 1.4, 0.1)
       }
-      if (tall && r() < 0.7) { // a neon sign: a vertical blade or a band over the shop
-        const blade = r() < 0.55
-        const [sx, sz] = onFace((r() - 0.5) * width * 0.5, blade ? 0.45 : 0.06)
-        const y = blade ? WALK + 2.4 + r() * 2 : WALK + 2.1
+      if (tall && r() < 0.6) { // a neon sign: a tall blade standing out from the wall (far row only), or a band over the shop
+        const blade = face === 'z+' && r() < 0.55
+        const [sx, sz] = onFace((r() - 0.5) * width * 0.5, blade ? 0.38 : 0.06)
         const g = blade
-          ? new THREE.BoxGeometry(zAxis ? 0.12 : 0.8, 2.6, zAxis ? 0.8 : 0.12).translate(sx, y + 1.3, sz)
-          : new THREE.BoxGeometry(zAxis ? width * 0.6 : 0.1, 0.7, zAxis ? 0.1 : width * 0.6).translate(sx, y + 0.35, sz)
-        glows.push(signUV(tint(g, ...colour), false))
-        streak(sx, sz, colour, blade ? 0.9 : width * 0.5, 4.5, 0.32)
+          ? region(new THREE.BoxGeometry(zAxis ? 0.1 : 0.6, 2.4, zAxis ? 0.6 : 0.1), BLADE).translate(sx, WALK + 3 + r() * 1.6, sz)
+          : region(new THREE.BoxGeometry(zAxis ? Math.min(3.2, width * 0.6) : 0.1, Math.min(3.2, width * 0.6) / 4, zAxis ? 0.1 : Math.min(3.2, width * 0.6)), BAND).translate(sx, WALK + 2.1, sz)
+        glows.push(tint(g, ...colour))
+        streak(sx, sz, colour, blade ? 0.5 : 1.2, 2, 0.08)
       }
-      if (tall && r() < 0.35) { // a tube along the roof edge
+      if (tall && r() < 0.45) { // a plain vertical tube up the facade, like the card's magenta bar
+        const [sx, sz] = onFace((r() - 0.5) * width * 0.7, 0.03)
+        const len = Math.min(h - 2.5, 2 + r() * 3)
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? 0.09 : 0.04, len, zAxis ? 0.04 : 0.09).translate(sx, WALK + 2.4 + len / 2, sz), ...colour), PLAIN))
+      }
+      if (r() < 0.3) { // a tube along the roof edge
         const [sx, sz] = onFace(0, 0.02)
-        glows.push(signUV(tint(new THREE.BoxGeometry(zAxis ? width : 0.06, 0.06, zAxis ? 0.06 : width).translate(sx, ROAD + h - 0.15, sz), ...colour), false))
+        glows.push(region(tint(new THREE.BoxGeometry(zAxis ? width : 0.05, 0.05, zAxis ? 0.05 : width).translate(sx, ROAD + h - 0.15, sz), colour[0] * 0.7, colour[1] * 0.7, colour[2] * 0.7), PLAIN))
       }
       at += width + (r() < 0.3 ? 0.6 + r() * 0.8 : 0.02)
     }
   }
-  row(cx - 34, cx + 34, z0 - o - FAR_PAVE, 'z+', true) // behind the house: what the window sees
-  row(z0 - o - FAR_PAVE + 0.1, z1 + PAVE, x0 - ol - FAR_PAVE, 'x+', true) // left, beside the house
-  row(x0 - ol - FAR_PAVE, cx + 30, z1 + o + FAR_PAVE, 'z-', false) // in front: cut low
-  row(z0 - o - FAR_PAVE, z1 + o + FAR_PAVE, x1 + o + FAR_PAVE, 'x-', false) // right: cut low
-  bin.mesh(bodies, new THREE.MeshStandardMaterial({ color: '#1c1830', roughness: 0.75, metalness: 0.1, emissiveMap: windows, emissive: '#ffffff', emissiveIntensity: 1.7 }), { name: 'neon towers' })
+  row(cx - 34, cx + 34, back, 'z+', true) // behind the house: the top band of the dollhouse view
+  row(z0 - ob + 0.1, z1 + PAVE, x0 - ol - FAR_PAVE, 'x+', true) // left, beside the house
+  row(z0 - ob, z1 + o + FAR_PAVE, x1 + o + FAR_PAVE, 'x-', false) // right: cut low
+  KINDS.forEach((k, i) => {
+    if (!bodies[i].length) return
+    // Dim: the windows are the frame's texture, not its light; only the signs reach the bloom.
+    const windows = bin.keep(paintWindows(k.seed, k.lit, k.ribbon))
+    bin.mesh(bodies[i], new THREE.MeshStandardMaterial({ color: '#1a1628', roughness: 0.75, metalness: 0.1, emissiveMap: windows, emissive: '#ffffff', emissiveIntensity: 0.8 }), { name: `neon towers ${i}` })
+  })
 
   // Streetlights on the house's pavement, arms over the road (none at the front-right corner,
   // where they would stand between the dollhouse camera and the room).
@@ -261,19 +311,18 @@ export function neonCity(house: House): World {
     poles.push(new THREE.CylinderGeometry(0.045, 0.06, H, 8).translate(x, WALK + H / 2, z))
     poles.push(new THREE.BoxGeometry(Math.abs(dx) * arm + 0.06, 0.06, Math.abs(dz) * arm + 0.06).translate(x + (dx * arm) / 2, WALK + H, z + (dz * arm) / 2))
     const hx = x + dx * arm, hz = z + dz * arm
-    glows.push(signUV(tint(new THREE.BoxGeometry(0.34, 0.05, 0.34).translate(hx, WALK + H - 0.06, hz), colour[0] * 1.4, colour[1] * 1.4, colour[2] * 1.4), true))
+    glows.push(region(tint(new THREE.BoxGeometry(0.34, 0.05, 0.34).translate(hx, WALK + H - 0.06, hz), colour[0] * 1.2, colour[1] * 1.2, colour[2] * 1.2), PLAIN))
     const cone = new THREE.ConeGeometry(0.95, H - 0.1, 24, 1, true).translate(hx, WALK + (H - 0.1) / 2, hz)
     const p = cone.attributes.position, c = new Float32Array(p.count * 3)
     for (let i = 0; i < p.count; i++) {
-      const k = Math.max(0, (p.getY(i) - WALK) / (H - 0.1)) ** 2 * 0.06
+      const k = Math.max(0, (p.getY(i) - WALK) / (H - 0.1)) ** 2 * 0.012
       c.set([colour[0] * k, colour[1] * k, colour[2] * k], i * 3)
     }
     cone.setAttribute('color', new THREE.BufferAttribute(c, 3))
     cones.push(cone)
-    pools.push(tint(flatQuad(3.4, 3.4, hx, WALK + 0.012, hz), colour[0] * 0.12, colour[1] * 0.12, colour[2] * 0.12))
-    streak(hx, hz, colour, 0.7, 3, 0.25)
+    pools.push(tint(flatQuad(3.2, 3.2, hx, WALK + 0.012, hz), colour[0] * 0.1, colour[1] * 0.1, colour[2] * 0.1))
   }
-  const cool: [number, number, number] = [0.85, 0.8, 1.2], pink: [number, number, number] = [1.3, 0.55, 1.0]
+  const cool: [number, number, number] = [0.85, 0.8, 1.2], pink: [number, number, number] = [1.1, 0.5, 0.9]
   const k = PAVE - 0.3
   lamp(x0 - k, z0 - k, -0.7, -0.7, cool)
   lamp(cx, z0 - k, 0, -1, cool)
@@ -286,6 +335,8 @@ export function neonCity(house: House): World {
   bin.mesh(cones, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }), { name: 'neon light cones' })
   bin.mesh(pools, new THREE.MeshBasicMaterial({ map: glowMap, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }), { name: 'neon pools and reflections' })
 
+  // The seated window: the same city painted at depth, lifted a little so its tubes bloom.
+  seatCard(bin, house, paintNightCity(7), 1.45)
   bin.group.add(rain(house, bin))
   return bin.world()
 }

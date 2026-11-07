@@ -6,11 +6,13 @@
 import type { Hex, Lighting, Post, Shift, Stage, Surface, Surfaces, Theme } from './tokens'
 import { HOME } from './presets/home'
 import { PAINTERS } from './paint'
+import { WORLDS } from './world'
 
 type Obj = Record<string, unknown>
 
 /** Features a theme may turn off (renderer.ts tiers plus the opt-in ?fx= ones). Vetoing only removes work. */
 const VETOES = ['phys', 'traa', 'csm', 'gtao', 'ssgi']
+const SHADES = ['toon', 'wet'] as const
 const MAX_PALETTE = 64
 const MAX_STAGES = 6
 const HEX = /^#[0-9a-f]{6}$/
@@ -206,6 +208,9 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
   }
   const skyPaint = own(own(data, 'sky'), 'paint')
   if (own(data, 'sky') !== undefined && !(typeof skyPaint === 'string' && Object.hasOwn(PAINTERS, skyPaint))) note('sky')
+  const world = own(data, 'world'), shading = own(data, 'shade')
+  if (world !== undefined && !(typeof world === 'string' && Object.hasOwn(WORLDS, world))) note('world')
+  if (shading !== undefined && !(SHADES as readonly unknown[]).includes(shading)) note('shade')
   const fps = own(own(data, 'motion'), 'characterFps')
   const costumes = own(data, 'costumes'), props = own(data, 'props')
   const theme: Theme = {
@@ -217,6 +222,8 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     fog: shift(own(data, 'fog'), 'fog'),
     post,
     ...(typeof skyPaint === 'string' && Object.hasOwn(PAINTERS, skyPaint) ? { sky: { paint: skyPaint } } : {}),
+    ...(typeof world === 'string' && Object.hasOwn(WORLDS, world) ? { world } : {}),
+    ...((SHADES as readonly unknown[]).includes(shading) ? { shade: shading as Theme['shade'] } : {}),
     motion: fps === undefined ? {} : { characterFps: Math.round(num(fps, 'motion.characterFps', 4, 60, 12)) },
     costumes: {
       follow: own(costumes, 'follow') === false ? false : true,

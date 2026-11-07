@@ -35,6 +35,8 @@ export const BLUE_HOUR: Theme = {
     veto: [],
     stages: [],
   },
+  // A street at dusk: neighbours' lit windows, warm streetlamps, a blue lawn (./world/twilight.ts).
+  world: 'twilight-street',
   motion: {},
   costumes: { follow: true, hint: 'felt plush in dusk colours: slate blue, plum, a warm mustard scarf' },
   props: { hint: 'painterly, hand-made, the same warm kitchen things seen in the evening' },
