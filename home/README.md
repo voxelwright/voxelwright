@@ -637,3 +637,55 @@ not the talk: tube-like scarves, plastic-looking cabinets and fridge, the
 pendant's hot spot on the table, small villagers in the room view, empty
 floor, and a low mode that looks like a degraded high mode rather than its own
 look. Screenshots: `screenshots/talk/npc-*.jpg` (real replies).
+
+## Villager voices (#42)
+
+With `?talk=npc`, each felt villager babbles as its words appear: a few soft
+synthesized syllables per word, in the genre of game character voices but all
+our own sound, made in code with Web Audio (nothing sampled). `?babble=off`
+turns it off; without `?talk=npc` the plugin adds nothing.
+
+- `src/voice/text.ts` turns a word into syllables (vowel groups with their
+  consonant onsets) and prosody: a question rises at the end, `!` lifts and is
+  louder, `…` trails off, a comma pauses, a full stop falls, CAPITALS are
+  louder, and later words in a sentence sit slightly lower. Every random choice
+  is seeded from the word's letters, so the same word in the same voice and the
+  same place in a sentence always sounds the same.
+- `src/voice/engine.ts` renders each syllable as a glottal-like tone (all
+  harmonics, rolling off by 1/n^tilt) through three formant band-passes for its
+  vowel, with breath noise and a short noise burst for the consonant, under a
+  soft envelope. A master gain sets a quiet level; a stateless soft clip keeps
+  peaks under -1 dBFS. One speaker at a time: a word from someone else fades
+  the previous voice in 12 ms. A voice that falls more than 0.3 s behind its
+  text skips words until it catches up.
+- `src/voice/profiles.ts` holds the voices: Dumpling round, warm and mid-low,
+  Moss breathy and slower, Tuft quick, bright and higher.
+- `src/plugins/babble.ts` listens for `village/said` (`{ villager, word, index,
+  last }`, sent by talk.ts as each word appears) and `village/said-stop`
+  (`{ villager }`). The AudioContext starts on the first touch or key press.
+  `M` or the felt speaker button at the bottom left mutes; the choice is kept
+  in `localStorage` (`village.babble.muted`). Hidden tabs, `pagehide` and
+  unloading the plugin stop the voice; unloading closes the context.
+- `?babble=demo` (dev only) plays a scripted exchange between the three at
+  talk.ts's reveal pace, without talk.ts or a model.
+
+```sh
+node scripts/check-babble.mjs [base-url]             # 26 headless checks
+node scripts/demo-babble.mjs [base-url] --out=dir    # demo MP4 + WAV and cost; needs ffmpeg
+```
+
+Measured November 6, 2026, headless Chrome 158 on an M1 Pro, 26 of 26
+checks passed. On the same line, median fundamental and spectral centroid:
+Dumpling 161 Hz and 690 Hz, Moss 222 Hz and 1,303 Hz, Tuft 322 Hz and
+1,734 Hz (each pair at least 4.9 semitones and 33% apart). A question ends 20
+to 25% higher than it starts. The 16 s demo exchange: -30.5 LUFS integrated,
+peak -11.3 dBFS. A word to an idle voice is heard 0 to 12 ms later on the
+audio clock (plus the device's output latency); a stop is silent (below -60
+dBFS) within 11 to 17 ms. The same word renders identically within -138 dBFS in two
+contexts and within -77 dBFS twice in one (two runs). Cost: 67 ms of offline rendering
+per second of babble (about 7% of one core), 0.19 ms of main thread per word,
+and no frame-time change (rAF median 16.7 ms and p95 16.7 ms with the voices
+playing, 16.8 ms with `?babble=off`).
+
+Not done: talk.ts does not send `village/said` yet (another branch adds it);
+the voices have only been measured, not listened to by a person.
