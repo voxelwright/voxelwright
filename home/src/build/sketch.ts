@@ -82,64 +82,113 @@ export function paintNoGo() {
 }
 
 /**
- * The turn ring: a thin chalk circle drawn twice by hand, with a notch every 15°
- * (a longer one every 90°) so a turn reads as steps. White, tinted by the material.
+ * The turn ring: a cream band edged in pencil, laid on the floor with a soft shadow, with a
+ * notch at each quarter so a turn reads. White-cream, tinted by the material (red where it can't go).
  */
 export function paintRing() {
-  const S = 512, R = 236
+  const S = 512, R = 226
   const [c, g] = canvas(S, S)
   const r = rng(31)
-  g.lineCap = 'round'
-  g.strokeStyle = '#ffffff'
-  for (let pass = 0; pass < 2; pass++) {
-    g.globalAlpha = pass ? 0.45 : 0.9
-    g.lineWidth = pass ? 3 : 5
+  const loop = (rr: number, wob: number) => {
     g.beginPath()
     for (let i = 0; i <= 120; i++) {
-      const a = (i / 120) * Math.PI * 2 + pass * 0.03
-      const rr = R - 6 + Math.sin(a * 3 + pass) * 1.6 + (r() - 0.5) * 1.2 - pass * 3
-      const [x, y] = [S / 2 + Math.cos(a) * rr, S / 2 + Math.sin(a) * rr]
+      const a = (i / 120) * Math.PI * 2
+      const q = rr + Math.sin(a * 3) * wob + (r() - 0.5) * wob * 0.6
+      const [x, y] = [S / 2 + Math.cos(a) * q, S / 2 + Math.sin(a) * q]
       if (i) g.lineTo(x, y)
       else g.moveTo(x, y)
     }
-    g.stroke()
+    g.closePath()
   }
-  g.globalAlpha = 0.85
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2
-    const long = i % 6 === 0
-    g.lineWidth = long ? 5 : 3.5
-    const r0 = R - (long ? 30 : 20), r1 = R - 10
+  // Shadow, a little down and soft.
+  g.save()
+  g.filter = 'blur(6px)'
+  g.translate(3, 6)
+  g.lineWidth = 22
+  g.strokeStyle = 'rgba(60, 32, 14, 0.38)'
+  loop(R, 1)
+  g.stroke()
+  g.restore()
+  // The band: cream, edged in brown pencil on both sides.
+  g.lineWidth = 18
+  g.strokeStyle = 'rgb(250, 238, 214)'
+  loop(R, 1.2)
+  g.stroke()
+  g.lineWidth = 3.5
+  g.strokeStyle = 'rgba(116, 76, 50, 0.95)'
+  loop(R + 9, 1.4)
+  g.stroke()
+  g.lineWidth = 2.5
+  loop(R - 9, 1.4)
+  g.stroke()
+  // Quarter notches across the band.
+  g.lineCap = 'round'
+  g.lineWidth = 4
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4
     g.beginPath()
-    g.moveTo(S / 2 + Math.cos(a) * r0, S / 2 + Math.sin(a) * r0)
-    g.lineTo(S / 2 + Math.cos(a) * r1, S / 2 + Math.sin(a) * r1)
+    g.moveTo(S / 2 + Math.cos(a) * (R - 8), S / 2 + Math.sin(a) * (R - 8))
+    g.lineTo(S / 2 + Math.cos(a) * (R + 8), S / 2 + Math.sin(a) * (R + 8))
     g.stroke()
   }
   return toTexture(c)
 }
 
-/** A hung thing's spot on the floor: a faint dotted chalk circle with a cross at its middle. */
+/** A thread of dots, repeated down a hung thing's drop line. */
+export function paintDots() {
+  const [c, g] = canvas(16, 64)
+  g.fillStyle = '#ffffff'
+  g.beginPath()
+  g.arc(8, 16, 6, 0, Math.PI * 2)
+  g.fill()
+  const t = toTexture(c, { repeat: [1, 1] })
+  return t
+}
+
+/** A hung thing's spot on the floor: a warm pool of its light with a dotted chalk circle round it. */
 export function paintDrop() {
   const S = 256
   const [c, g] = canvas(S, S)
-  g.strokeStyle = '#ffffff'
+  const pool = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
+  pool.addColorStop(0, 'rgba(255, 214, 150, 0.75)')
+  pool.addColorStop(0.55, 'rgba(255, 206, 140, 0.35)')
+  pool.addColorStop(1, 'rgba(255, 200, 130, 0)')
+  g.fillStyle = pool
+  g.fillRect(0, 0, S, S)
+  g.strokeStyle = 'rgba(122, 82, 54, 0.85)'
   g.lineCap = 'round'
-  g.lineWidth = 6
-  g.setLineDash([2, 16])
-  g.globalAlpha = 0.9
+  g.lineWidth = 5
+  g.setLineDash([1, 13])
   g.beginPath()
-  g.arc(S / 2, S / 2, S / 2 - 12, 0, Math.PI * 2)
+  g.arc(S / 2, S / 2, S / 2 - 26, 0, Math.PI * 2)
   g.stroke()
   g.setLineDash([])
-  g.lineWidth = 4
-  g.globalAlpha = 0.7
-  for (const [dx, dy] of [[1, 0], [0, 1]]) {
-    g.beginPath()
-    g.moveTo(S / 2 - dx * 16, S / 2 - dy * 16)
-    g.lineTo(S / 2 + dx * 16, S / 2 + dy * 16)
-    g.stroke()
-  }
   return toTexture(c)
+}
+
+/** Turned earth for a plot being staked out: warm soil, crumbs and a few pebbles. Tiles. */
+export function paintSoil(size: number) {
+  const [c, g] = canvas(size, size)
+  const n = makeNoise(17, 32)
+  const img = g.createImageData(size, size)
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const v = n((x / size) * 32, (y / size) * 32, 4) * 0.7 + n((x / size) * 128 % 32, (y / size) * 128 % 32, 2) * 0.3
+    const i = (y * size + x) * 4
+    img.data[i] = 104 + v * 58
+    img.data[i + 1] = 74 + v * 42
+    img.data[i + 2] = 50 + v * 30
+    img.data[i + 3] = 255
+  }
+  g.putImageData(img, 0, 0)
+  const r = rng(23)
+  for (let i = 0; i < 70; i++) {
+    const x = r() * size, y = r() * size, rr = 1.5 + r() * 3.5
+    g.fillStyle = r() > 0.5 ? 'rgba(205, 190, 170, 0.9)' : 'rgba(96, 70, 48, 0.55)'
+    g.beginPath()
+    g.ellipse(x, y, rr, rr * (0.6 + r() * 0.4), r() * 3, 0, Math.PI * 2)
+    g.fill()
+  }
+  return c
 }
 
 /** Tracing-paper grain: long soft fibres and a fine tooth, for multiplying over the paper. */
@@ -173,7 +222,7 @@ export function paperGrain(size: number) {
 }
 
 /** A grip drawn on paper: a cream knob ringed in pencil, with a soft shadow; warmer while held or hovered. */
-export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: number, live: boolean) {
+export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: number, live: boolean, grip?: { angle: number; both: boolean }) {
   g.save()
   g.filter = `blur(${Math.max(1, r * 0.25)}px)`
   g.fillStyle = 'rgba(60, 32, 14, 0.35)'
@@ -196,6 +245,116 @@ export function drawKnob(g: CanvasRenderingContext2D, x: number, y: number, r: n
   g.arc(x, y, r * 0.66, 0, Math.PI * 2)
   g.stroke()
   g.setLineDash([])
+  if (!grip) return
+  // Which way it moves: a small double arrow (or one way) pressed into the knob.
+  g.save()
+  g.translate(x, y)
+  g.rotate(grip.angle)
+  g.strokeStyle = 'rgba(62, 38, 24, 0.95)'
+  g.lineWidth = r * 0.14
+  g.lineCap = g.lineJoin = 'round'
+  const a = r * 0.5, h = r * 0.24
+  g.beginPath()
+  g.moveTo(grip.both ? -a : -a * 0.3, 0)
+  g.lineTo(a, 0)
+  g.moveTo(a - h, -h)
+  g.lineTo(a, 0)
+  g.lineTo(a - h, h)
+  if (grip.both) {
+    g.moveTo(-a + h, -h)
+    g.lineTo(-a, 0)
+    g.lineTo(-a + h, h)
+  }
+  g.stroke()
+  g.restore()
+}
+
+/** A strip of washi tape holding the paper down: translucent, striped, its ends torn. */
+export function drawTape(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, angle: number, hue: string) {
+  g.save()
+  g.translate(x, y)
+  g.rotate(angle)
+  g.beginPath()
+  const r = rng(Math.round(x * 7 + y * 13))
+  g.moveTo(-w / 2, -h / 2)
+  g.lineTo(w / 2, -h / 2)
+  for (let i = 1; i <= 6; i++) g.lineTo(w / 2 + (r() - 0.5) * h * 0.18, -h / 2 + (h * i) / 6)
+  g.lineTo(-w / 2, h / 2)
+  for (let i = 5; i >= 0; i--) g.lineTo(-w / 2 + (r() - 0.5) * h * 0.18, -h / 2 + (h * i) / 6)
+  g.closePath()
+  g.fillStyle = hue
+  g.globalAlpha = 0.78
+  g.fill()
+  g.clip()
+  g.globalAlpha = 0.25
+  g.fillStyle = '#ffffff'
+  for (let s = -w; s < w; s += h * 0.45) g.fillRect(s, -h / 2, h * 0.18, h)
+  g.restore()
+}
+
+/** A carpenter's pencil lying on the paper: flat red body, bare wood at the sharpened end, a graphite point. */
+export function drawPencil(g: CanvasRenderingContext2D, x: number, y: number, len: number, angle: number) {
+  const w = len * 0.085
+  g.save()
+  g.translate(x, y)
+  g.rotate(angle)
+  g.save()
+  g.filter = `blur(${Math.max(1, w * 0.35)}px)`
+  g.fillStyle = 'rgba(50, 28, 12, 0.35)'
+  g.fillRect(-len / 2 + w * 0.3, -w / 2 + w * 0.5, len, w)
+  g.restore()
+  const body = len * 0.8
+  g.fillStyle = '#b5452e'
+  g.fillRect(-len / 2, -w / 2, body, w)
+  g.fillStyle = 'rgba(255, 220, 200, 0.35)'
+  g.fillRect(-len / 2, -w / 2, body, w * 0.28)
+  g.fillStyle = '#e2bf8c'
+  g.beginPath()
+  g.moveTo(-len / 2 + body, -w / 2)
+  g.lineTo(len / 2 - w * 0.4, -w * 0.12)
+  g.lineTo(len / 2 - w * 0.4, w * 0.12)
+  g.lineTo(-len / 2 + body, w / 2)
+  g.closePath()
+  g.fill()
+  g.fillStyle = '#3a3330'
+  g.fillRect(len / 2 - w * 0.55, -w * 0.12, w * 0.55, w * 0.24)
+  g.font = `700 ${w * 0.55}px sans-serif`
+  g.fillStyle = 'rgba(255, 236, 200, 0.7)'
+  g.fillText('VILLAGE', -len / 2 + w, w * 0.2)
+  g.restore()
+}
+
+/** A cloth tape measure laid along a run: mustard, inked every 10 cm, a longer mark every half metre. */
+export function drawTapeMeasure(g: CanvasRenderingContext2D, a: [number, number], b: [number, number], width: number, perMetre: number) {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1])
+  g.save()
+  g.translate(a[0], a[1])
+  g.rotate(Math.atan2(b[1] - a[1], b[0] - a[0]))
+  g.save()
+  g.filter = `blur(${Math.max(1, width * 0.2)}px)`
+  g.fillStyle = 'rgba(60, 34, 14, 0.3)'
+  g.fillRect(width * 0.1, -width / 2 + width * 0.25, L, width)
+  g.restore()
+  g.fillStyle = '#dcae52'
+  g.fillRect(0, -width / 2, L, width)
+  g.fillStyle = 'rgba(255, 246, 220, 0.3)'
+  g.fillRect(0, -width / 2, L, width * 0.3)
+  g.strokeStyle = 'rgba(52, 34, 20, 0.85)'
+  g.lineCap = 'butt'
+  const step = perMetre / 10
+  for (let i = 0, d = 0; d <= L + 0.5; i++, d = i * step) {
+    const long = i % 5 === 0
+    g.lineWidth = long ? width * 0.09 : width * 0.06
+    g.beginPath()
+    g.moveTo(d, -width / 2)
+    g.lineTo(d, -width / 2 + width * (long ? 0.5 : 0.28))
+    g.stroke()
+  }
+  // Brass ends.
+  g.fillStyle = '#9c7a3c'
+  g.fillRect(-width * 0.12, -width / 2, width * 0.22, width)
+  g.fillRect(L - width * 0.1, -width / 2, width * 0.22, width)
+  g.restore()
 }
 
 // ── The paper tag both features use ─────────────────────────────────────────
@@ -215,7 +374,8 @@ export function tagCss(card: string, commit: string, leave: string, off: string)
   ${leave} { border: 1.5px solid rgba(122, 82, 54, 0.45); background: transparent; color: #5b3d2b; }
   ${commit} { border: 1.5px solid #6a4630; background: #7a5236; color: #fff6e6; box-shadow: 0 2px 0 rgba(60, 34, 18, 0.35); }
   ${commit}${off} { background: transparent; border: 1.5px dashed rgba(122, 82, 54, 0.5); color: rgba(91, 61, 43, 0.55); box-shadow: none;
-    cursor: not-allowed; opacity: 0.7; text-decoration: line-through rgba(166, 60, 44, 0.55) 1.5px; }
+    cursor: not-allowed; opacity: 0.75; }
+  ${commit}${off}::before { content: '✕'; margin-right: 6px; color: #b8432f; font: 700 15px ui-rounded, system-ui, sans-serif; text-decoration: none; display: inline-block; }
   ${commit}:not(${off}):hover, ${leave}:hover { translate: 0 -1px; }
   ${commit}:focus-visible, ${leave}:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; }
   `

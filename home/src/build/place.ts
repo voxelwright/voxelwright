@@ -24,7 +24,7 @@ import {
   CORD, KINDS, SURFACE_MIN, cord, alongOf, ceilingOf, faceOf, fit, floorOf, obstacles, poseOf, roomsOf, seat, setPose, supports, wallHeight,
   type Fit, type Obstacle, type Pose, type Size,
 } from './mount'
-import { CHALK, CHALK_RED, HAND, paintDrop, paintNoGo, paintRing, paintShadow, rimMaterial, rimOf, tagCss } from './sketch'
+import { CHALK, CHALK_RED, HAND, paintDots, paintDrop, paintNoGo, paintRing, paintShadow, rimMaterial, rimOf, tagCss } from './sketch'
 
 export type { Mount } from './plan'
 export type { Pose } from './mount'
@@ -145,14 +145,29 @@ export function placement(deps: PlaceDeps): Placement & {
   /** A soft contact shadow under (or behind) the held thing. */
   const shadow = decal('placement shadow', paintShadow(), 1)
   /** Where it can't go: a red wash on its footprint, seen through whatever it is inside. */
-  const noGo = decal('placement no-go', paintNoGo(), 5)
+  const noGo = decal('placement no-go', paintNoGo(), 1)
   ;(noGo.material as THREE.Material).depthTest = false
   /** The turn ring around the footprint, with the handle on it. */
-  const ring = decal('placement ring', paintRing(), 2, CHALK)
+  const ring = decal('placement ring', paintRing(), 2)
   /** Under a hung thing: its spot on the floor. */
-  const drop = decal('placement drop', paintDrop(), 1, CHALK)
-  const decals = [shadow, noGo, ring, drop]
-  const xrayMat = new THREE.MeshBasicMaterial({ color: CHALK, transparent: true, opacity: 0.3, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false })
+  const drop = decal('placement drop', paintDrop(), 1)
+  // A hung thing's drop line: a thread of dots from it to its spot on the floor.
+  const dotsMap = paintDots()
+  dotsMap.wrapS = dotsMap.wrapT = THREE.RepeatWrapping
+  const thread = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: dotsMap, color: '#8a5e3e', transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }))
+  thread.name = 'placement thread'
+  thread.raycast = () => {}
+  /** What it bumps into, outlined in chalk red. */
+  const blocker = new THREE.Group()
+  blocker.name = 'placement blocker'
+  const blockFill = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.12, depthWrite: false, fog: false }))
+  const blockEdges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.95, depthWrite: false, fog: false }))
+  blockFill.raycast = blockEdges.raycast = () => {}
+  blockFill.renderOrder = blockEdges.renderOrder = 4
+  blocker.add(blockFill, blockEdges)
+  blocker.visible = false
+  const decals = [shadow, noGo, ring, drop, thread]
+  const xrayMat = new THREE.MeshBasicMaterial({ color: '#a88a68', transparent: true, opacity: 0.32, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false })
   const ringMat = ring.material as THREE.MeshBasicMaterial
   const OK = new THREE.Color(CHALK), BAD = new THREE.Color(CHALK_RED)
   /** The phone view eases sideways and up so the thing sits above the docked tag; held while dragging. */
@@ -331,14 +346,35 @@ export function placement(deps: PlaceDeps): Placement & {
         r.opacity = good ? 0.8 : 0.95
       }
     }
-    ringMat.color.copy(good ? OK : BAD)
-    ringMat.opacity = good ? 0.85 : 0.7
+    ringMat.color.set(good ? '#e2d2b4' : '#e8907c')
+    ringMat.opacity = good ? 0.95 : 0.8
+    showBlocker(s)
     noGo.visible = !good
     shadow.visible = good && s.mount !== 'ceiling'
     s.dom.tag.classList.toggle('bad', !good)
     s.dom.turn.classList.toggle('bad', !good)
     s.dom.place.setAttribute('aria-disabled', String(!good || s.state !== 'placing'))
     hint(s)
+  }
+  /** The thing it bumps into: the union of the boxes of the same piece of furniture that the held thing overlaps. */
+  const showBlocker = (s: Session) => {
+    blocker.visible = false
+    if (s.fit.ok || !/bumps into/.test(s.fit.why ?? '')) return
+    const p = pose(s)
+    if (!p) return
+    const [w, h, d] = s.size
+    const mine = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(p.x, s.mount === 'ceiling' ? p.y - h / 2 : s.mount === 'wall' ? p.y : p.y + h / 2, p.z), new THREE.Vector3(Math.max(w, d), h, Math.max(w, d))).expandByScalar(-0.01)
+    const hit = s.obstacles.filter((o) => o.box.intersectsBox(mine))
+    if (!hit.length) return
+    const name = hit[0].name
+    const near = mine.clone().expandByScalar(0.6)
+    const box = new THREE.Box3()
+    for (const o of s.obstacles) if (o.name === name && o.box.intersectsBox(near)) box.union(o.box)
+    if (box.isEmpty()) return
+    const size = box.getSize(new THREE.Vector3()).addScalar(0.03)
+    box.getCenter(blocker.position)
+    blocker.scale.copy(size)
+    blocker.visible = true
   }
   const hint = (s: Session) => {
     const coarse = matchMedia('(pointer: coarse)').matches
@@ -407,7 +443,14 @@ export function placement(deps: PlaceDeps): Placement & {
         const b = new THREE.Box3().setFromObject(s.object)
         const y = (b.min.y + b.max.y) / 2
         const R = Math.hypot(w, d) / 2 + 0.12
-        flat(drop, 0.006, w + 0.2, w + 0.2, 0)
+        flat(drop, 0.006, w + 0.5, w + 0.5, 0)
+        // The thread runs from the bottom of the thing to the floor, facing the camera.
+        const bottom = b.min.y
+        thread.position.set(p.x, bottom / 2, p.z)
+        thread.scale.set(0.035, bottom, 1)
+        thread.quaternion.copy(camera.quaternion)
+        thread.rotation.set(0, Math.atan2(camera.position.x - p.x, camera.position.z - p.z), 0)
+        dotsMap.repeat.set(1, bottom / 0.07)
         flat(noGo, 0.007, w + 0.2, d + 0.2)
         flat(ring, y, R * 2, R * 2)
         ringAt.centre.set(p.x, y, p.z)
@@ -706,9 +749,13 @@ export function placement(deps: PlaceDeps): Placement & {
     // A small thing's ring is small on screen: the handle stays clear of the thing, never on it.
     const [rx, ry] = project(ringAt.centre.x, ringAt.centre.y, ringAt.centre.z)
     const away = Math.hypot(hx - rx, hy - ry) || 1
-    const clear = Math.max(x1 - x0, y1 - y0) / 2 + 28
+    const clear = Math.max(x1 - x0, y1 - y0) / 2 + 16
     if (away < clear) [hx, hy] = [rx + ((hx - rx) / away) * clear, ry + ((hy - ry) / away) * clear]
     const half = s.dom.turn.offsetWidth / 2 || 24
+    // Never under the tag: mirror it to the ring's other side if the tag is there.
+    const t = tag.getBoundingClientRect()
+    const under = (x: number, y: number) => x + half > t.left - 6 && x - half < t.right + 6 && y + half > t.top - 6 && y - half < t.bottom + 6
+    if (under(hx, hy) && !under(2 * rx - hx, hy)) hx = 2 * rx - hx
     s.dom.turn.style.transform = `translate(${Math.round(Math.min(Math.max(hx - half, 4), vw - 2 * half - 4))}px, ${Math.round(Math.min(Math.max(hy - half, 4), vh - 2 * half - 4))}px)`
   }
 
@@ -768,7 +815,7 @@ export function placement(deps: PlaceDeps): Placement & {
     // A hung thing hangs from its cord while it is placed, as it will once placed.
     if (s.mount === 'ceiling' && !holder.getObjectByName('cord')) holder.add(cord(CORD))
     if (!holder.parent) group.add(holder)
-    group.add(noGo, ring, s.mount === 'ceiling' ? drop : shadow)
+    group.add(noGo, ring, blocker, ...(s.mount === 'ceiling' ? [drop, thread] : [shadow]))
     pan.fresh = true
     s.obstacles = obstacles(scene, [holder, group])
     s.supports = supports(scene, [holder, group])
@@ -920,6 +967,7 @@ export function placement(deps: PlaceDeps): Placement & {
     s.dom.tag.remove()
     s.dom.turn.remove()
     for (const m of decals) m.removeFromParent()
+    blocker.removeFromParent()
     drag = null
     twist = null
     turning = null
@@ -992,6 +1040,10 @@ export function placement(deps: PlaceDeps): Placement & {
       style.remove()
       plane.dispose()
       xrayMat.dispose()
+      blockFill.geometry.dispose()
+      ;(blockFill.material as THREE.Material).dispose()
+      blockEdges.geometry.dispose()
+      ;(blockEdges.material as THREE.Material).dispose()
       for (const m of decals) {
         const mat = m.material as THREE.MeshBasicMaterial
         mat.map?.dispose()
@@ -1039,8 +1091,8 @@ function css() {
     background: #f4e6cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
   .place-tag.below::after { bottom: auto; top: -8px; background: #fffaf0; border-radius: 4px 0 0 0; box-shadow: -2px -2px 4px rgba(60, 30, 10, 0.06); }
   .place-tag strong { font: 700 20px/1.1 ${HAND}; letter-spacing: 0.01em; }
-  .place-tag .hint { font: italic 600 17px/1.3 ${HAND}; color: #5e4434; min-height: 1.3em; }
-  .place-tag.bad .hint { color: #a63c2c; }
+  .place-tag .hint { font: 500 15px/1.4 ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: #5e4434; min-height: 1.4em; }
+  .place-tag.bad .hint { color: #a63c2c; font-weight: 600; }
   .place-tag kbd { display: inline-block; min-width: 1.35em; margin: 0 2px; padding: 0 4px 1px; border-radius: 5px; font: 700 14px/1.35 ui-rounded, system-ui, sans-serif;
     text-align: center; color: #4a3428; background: #fffaf0; border: 1px solid rgba(122, 82, 54, 0.45); box-shadow: 0 1.5px 0 rgba(122, 82, 54, 0.45); font-style: normal; }
   .place-tag .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; position: relative; z-index: 1; }
@@ -1048,7 +1100,7 @@ function css() {
     grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 14px 16px 14px 20px; }
   .place-tag.docked::after { display: none; }
   .place-tag.docked strong { grid-column: 1; }
-  .place-tag.docked .hint { grid-column: 1; font-size: 16px; }
+  .place-tag.docked .hint { grid-column: 1; font-size: 15px; }
   .place-tag.docked .row { grid-column: 1 / -1; justify-content: stretch; }
   .place-tag.docked .row button { flex: 1; min-height: 48px; font-size: 18px; }
   .place-tag.shake { animation: place-shake 0.36s ease; }
