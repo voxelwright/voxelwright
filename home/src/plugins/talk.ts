@@ -1268,7 +1268,8 @@ export default {
     /** Not part of the conversation, in the frame, and well in front of everyone who is. */
     const top = new THREE.Vector3()
     const crowding = (m: Member) => {
-      if (mode === 'room' || m === partner || m.seat) return false
+      // Only once the camera is on the conversation: while it waits wide for a sent note, nobody is in its way.
+      if (mode === 'room' || !view.focused || m === partner || m.seat) return false
       const subjects = mode === 'talk' && partner ? [partner] : seated
       if (!subjects.length) return false
       mid.set(m.v.pos.x, m.v.fig.height * SCALE * 0.5, m.v.pos.z)

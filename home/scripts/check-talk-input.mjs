@@ -179,10 +179,10 @@ try {
     await page.waitForTimeout(600)
     let s = await state(page)
     check('held is the default: the notepad is in view, addressed to your own villager', s.input.variant === 'held' && s.input.padVisible && s.input.to === 'Dumpling' && s.mode === 'room', s.input)
-    // At rest: small and tucked at the bottom edge, showing whom it is to.
+    // At rest: held low on the right in perspective, showing whom it is to (#42 regroup: it was a strip at the bottom edge).
     const area = (r) => r.width * r.height
     const rest = s.input.padRect
-    check('at rest the pad is small and tucked at the bottom edge', s.input.raise < 0.05 && area(rest) < 0.04 * 1280 * 800 && rest.top > 800 * 0.86 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
+    check('at rest the pad is held low on the right, under 9% of the screen, reaching the bottom edge', s.input.raise < 0.05 && area(rest) < 0.09 * 1280 * 800 && rest.left > 1280 * 0.55 && rest.top > 800 * 0.6 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
     check('held: the pad and journal ride with the camera as scene objects', baseline.objects.some((o) => o.endsWith(':talk input')) && baseline.objects.some((o) => o.endsWith(':talk notepad')) && baseline.objects.some((o) => o.endsWith(':talk journal button')))
 
     // A keypress anywhere starts writing, and the pad rises to writing size.
@@ -193,7 +193,7 @@ try {
     const attending = (await state(page)).cast.alex.attending
     check('your villager turns to you while you write', attending, attending)
     const risen = await until(page, (x) => x.input.raise > 0.97, 2000, 30)
-    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 3 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
+    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 1.5 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
     await page.keyboard.press('Escape')
     s = await state(page)
     const settled = await until(page, (x) => x.input.raise < 0.03, 2000, 30)
@@ -271,8 +271,9 @@ try {
     s = await state(page)
     check('the ghost is gone once the prop has settled', s.input.furnish.job?.ghosts === 0, s.input.furnish)
     check('your villager acknowledged it in the room', /let me see/i.test(s.cards.alex?.text ?? ''), s.cards.alex)
-    await page.click('.furnish-choice [data-choice="undo"]', { timeout: 3000 }).catch(() => {})
+    const undoMiss = await page.click('.furnish-choice [data-choice="undo"]', { timeout: 3000 }).then(() => null, (e) => String(e).split('\n').slice(0, 12).join(' | '))
     s = await state(page)
+    if (undoMiss) console.error('Undo click:', undoMiss.slice(0, 900))
     check('Undo takes it away again', s.input.furnish.placed === 0 && !s.input.furnish.choice && s.input.furnish.job === null, s.input.furnish)
 
     // Replacing the table hides it, and undo brings it back.
