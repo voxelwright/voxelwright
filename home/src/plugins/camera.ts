@@ -49,7 +49,7 @@ export const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ?
 /** Layer for walls cut away from the camera: the sun's shadow camera still sees them, the view does not. */
 export const SHADOW_ONLY = 1
 const SEAT_FOV = 40
-const ISO = { fov: 20, far: 18.5, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
+const ISO = { fov: 20, far: 19.6, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
 const THIRD = { fov: 50, ahead: 1.3, back: 2.4, up: 2.2, lookAhead: 1.6, lookUp: 0.7, reach: 3.2 }
 const UP = new THREE.Vector3(0, 1, 0)
 

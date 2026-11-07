@@ -27,6 +27,8 @@ import plantstand from './plugins/plantstand'
 import loungedoors from './plugins/loungedoors'
 import diorama from './plugins/diorama'
 import loungediorama from './plugins/loungediorama'
+import furnish from './plugins/furnish'
+import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
 
 const params = new URLSearchParams(location.search)
@@ -34,7 +36,7 @@ const listed = {
   renderer, camera, entries, postfx,
   room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
   toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
-  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, loungediorama,
+  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, loungediorama, furnish, loungefurnish,
 }
 // Any other file in plugins/ joins the catalog under its declared name, so adding a plugin
 // never means editing this file. The Elder relies on that: candidates may change only plugins/.

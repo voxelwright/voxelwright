@@ -716,7 +716,7 @@ export function paintWallpaper(seed: number, pattern: 'plain' | 'stripes' | 'flo
 
 /** A braided rag rug (#42 room): concentric oval braids in warm rag colours, tight at the rim. Fills an ellipse; the corners are never seen. */
 export function paintBraid(seed: number) {
-  const size = 512
+  const size = 1024
   const r = rng(seed)
   // Mostly oat and cream rag, with a few muted bands of rust, sage and camel; the rim darkest.
   const oat: RGB[] = [[214, 194, 160], [226, 212, 186], [200, 176, 140]]
@@ -731,9 +731,9 @@ export function paintBraid(seed: number) {
     const f = d * bands.length - band
     // Each coil is rounded (lighter on its crown) with a faint slanted stitch; a
     // high-contrast pattern along the band shimmered from the dollhouse camera.
-    const strand = 0.97 + 0.03 * Math.sin(a * (60 + band * 14) + f * 5)
+    const strand = 0.95 + 0.05 * Math.sin(a * (160 + band * 30) + f * 9)
     const edge = 0.8 + 0.2 * Math.sin(f * Math.PI)
-    const t = strand * edge * (0.92 + n(x / 6, y / 6, 2) * 0.16)
+    const t = strand * edge * (0.94 + n(x / 4, y / 4, 2) * 0.12)
     const c = bands[band]
     return [c[0] * t, c[1] * t, c[2] * t]
   })[0])
@@ -823,10 +823,10 @@ export function paintGrass(seed: number) {
 /** A soft rounded-rectangle shadow for contact decals: dark at the footprint, gone at the edge. */
 export function paintContact() {
   const [c, g] = canvas(128, 128)
-  g.filter = 'blur(12px)'
-  g.fillStyle = 'rgba(50, 26, 12, 1)'
+  g.filter = 'blur(13px)'
+  g.fillStyle = 'rgba(60, 32, 14, 0.62)'
   g.beginPath()
-  g.roundRect(26, 26, 76, 76, 18)
+  g.roundRect(28, 28, 72, 72, 20)
   g.fill()
   return toTexture(c)
 }
@@ -852,6 +852,6 @@ export function paintWorktable(seed: number) {
     const d = Math.min(1, Math.sqrt(u * u + v * v) * 2.1)
     const grain = n(x / 300, y / 16, 3)
     const t = (0.94 + (grain - 0.5) * 0.06) * (1 - d * d * 0.3)
-    return mixRGB([206, 162, 118], [226, 186, 140], 1 - d).map((c) => c * t) as RGB
+    return mixRGB([170, 124, 86], [196, 150, 106], 1 - d).map((c) => c * t) as RGB
   })[0])
 }

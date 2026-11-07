@@ -167,26 +167,35 @@ export function lumpy(r: number, seed: number, detail: [number, number] = [28, 1
   return geo
 }
 
-/** A small garden tree: a trunk and a lobed crown, crown clumps merged per shade. */
-export function tree(seed: number): THREE.Group {
-  const bark = new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 0.9 })
-  const shades = ['#6c8c3c', '#86a347']
+/** Where a tree stands: x, z, scale, turn. */
+export type TreeSpot = [number, number, number, number]
+
+/**
+ * Small garden trees, each a trunk and a lobed crown. All the trees in one call are
+ * merged into three meshes (bark and two leaf shades), so an orchard costs three draws.
+ */
+export function trees(spots: TreeSpot[], y = 0): THREE.Group {
   const group = new THREE.Group()
-  group.name = 'garden tree'
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 2.6, 8), bark)
-  trunk.position.y = 1.3
-  trunk.castShadow = true
-  group.add(trunk)
+  group.name = 'garden trees'
+  const bark: THREE.BufferGeometry[] = []
   const clumps: THREE.BufferGeometry[][] = [[], []]
-  for (const [x, y, z, r, k] of [[0, 3.0, 0, 0.85, 0], [0.55, 2.6, 0.2, 0.6, 1], [-0.5, 2.7, -0.1, 0.62, 1], [0.1, 3.5, -0.2, 0.55, 1], [-0.2, 2.45, 0.45, 0.5, 0]] as const) {
-    clumps[k].push(lumpy(r, x * 7 + y + seed).translate(x, y, z))
+  for (const [tx, tz, scale, turn] of spots) {
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(tx, y, tz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), turn), new THREE.Vector3(scale, scale, scale))
+    bark.push(new THREE.CylinderGeometry(0.07, 0.11, 2.6, 8).translate(0, 1.3, 0).applyMatrix4(m))
+    const seed = Math.round(turn * 10)
+    for (const [x, cy, z, r, k] of [[0, 3.0, 0, 0.85, 0], [0.55, 2.6, 0.2, 0.6, 1], [-0.5, 2.7, -0.1, 0.62, 1], [0.1, 3.5, -0.2, 0.55, 1], [-0.2, 2.45, 0.45, 0.5, 0]] as const) {
+      clumps[k].push(lumpy(r, x * 7 + cy + seed, [20, 14]).translate(x, cy, z).applyMatrix4(m))
+    }
   }
-  clumps.forEach((list, k) => {
-    const crown = new THREE.Mesh(mergeGeometries(list), new THREE.MeshStandardMaterial({ color: shades[k], roughness: 0.9 }))
+  const merged = (list: THREE.BufferGeometry[], material: THREE.Material) => {
+    const mesh = new THREE.Mesh(mergeGeometries(list), material)
     for (const g of list) g.dispose()
-    crown.castShadow = crown.receiveShadow = true
-    group.add(crown)
-  })
+    mesh.castShadow = mesh.receiveShadow = true
+    group.add(mesh)
+  }
+  merged(bark, new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 0.9 }))
+  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9 }))
+  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9 }))
   return group
 }
 
@@ -219,7 +228,8 @@ export function yard(spec: Yard): THREE.Group {
   const lawn = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }))
   lawn.rotation.x = -Math.PI / 2
   lawn.position.set(cx, YARD_TOP, cz)
-  lawn.receiveShadow = true
+  // The low sun would lay the house's 8 m shadow across the lawn in hard wedges; the
+  // foundation's soft contact shadow grounds it instead.
   lawn.name = 'yard lawn'
   group.add(lawn)
   const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, BOARD, d + 0.04), new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 }))

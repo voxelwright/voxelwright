@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { LIVING_X } from '../layout'
 import { paintPlaster } from '../paint'
-import { YARD_TOP, shell, tree, yard } from '../diorama'
+import { YARD_TOP, shell, trees, yard } from '../diorama'
 import { LOUNGE } from './lounge'
 
 /**
@@ -33,10 +33,7 @@ export default {
       x0: X + left - 2.2, x1: X + right + 2.2, z0: back - 2.6, z1: back + 8.4, seed: 33,
       path: [[X + right + 0.9, back + 0.4], [X + right + 1.2, back + 3.4], [X + right + 0.4, back + 8.18]],
     }))
-    const birch = tree(5)
-    birch.position.set(X - 1.2, YARD_TOP, back - 1.5)
-    birch.scale.setScalar(0.7)
-    group.add(birch)
+    group.add(trees([[X - 1.2, back - 1.5, 0.7, 0.5], [X + 2.9, back - 1.9, 0.55, 2.8]], YARD_TOP))
     own(ctx, group)
   },
 }

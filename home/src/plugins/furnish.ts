@@ -24,7 +24,12 @@ export default {
   apply(ctx: Context) {
     const phys = ctx.stage.features().has('phys')
     const kit = new Kit(phys)
-    const { part, dress } = { part: kit.part.bind(kit), dress: kit.dress.bind(kit) }
+    // Things hung on the side walls go in their own kits, hidden with their wall when the
+    // dollhouse camera stands outside it (camera.ts cuts away anything tagged inward).
+    const leftWall = new Kit(phys), rightWall = new Kit(phys)
+    let k = kit
+    const part: Kit['part'] = (...a) => k.part(...a)
+    const dress: Kit['dress'] = (...a) => k.dress(...a)
     const flat = new THREE.Group()
     flat.name = 'furnish flat'
 
@@ -83,6 +88,7 @@ export default {
     }
 
     // Over the stove on the right wall: a brass rail with copper pans and utensils, and a framed print further along.
+    k = rightWall
     {
       const y = 1.62, z0 = -1.6, z1 = -0.7
       part(cyl(0.01, 0.01, z1 - z0, 8).rotateX(Math.PI / 2), '#b08a5a', 'metal', at(RIGHT - 0.06, y, (z0 + z1) / 2))
@@ -94,14 +100,13 @@ export default {
         part(box(0.012, 0.16, 0.02), '#2b2420', 'satin', at(RIGHT - 0.05, y - 0.09, z))
       }
       for (let i = 0; i < 3; i++) part(box(0.01, 0.24, 0.035), i === 1 ? '#c9a46a' : '#3a302a', 'satin', at(RIGHT - 0.04, y - 0.12, z1 - 0.1 - i * 0.07))
-      // A framed botanical print and a small calendar on the right wall, above the reading chair.
+      // A framed botanical print further along the wall.
       part(box(0.03, 0.56, 0.44), '#8a5a3a', 'satin', at(RIGHT - 0.015, 1.72, 1.15))
       part(box(0.01, 0.48, 0.36), '#f3ead8', 'matte', at(RIGHT - 0.032, 1.72, 1.15))
       for (let i = 0; i < 5; i++) part(ball(0.05, 8, 6).scale(0.2, 1.4, 0.6), i % 2 ? '#6b8a3e' : '#86a347', 'matte', at(RIGHT - 0.04, 1.62 + i * 0.05, 1.15 + (i - 2) * 0.04, 0, 0, 0))
       part(box(0.012, 0.18, 0.04), '#c2714f', 'matte', at(RIGHT - 0.04, 1.84, 1.15))
-      part(box(0.02, 0.32, 0.24), '#f6efe0', 'matte', at(RIGHT - 0.012, 1.55, 0.4))
-      part(box(0.022, 0.12, 0.24), '#c2463a', 'matte', at(RIGHT - 0.014, 1.65, 0.4))
     }
+    k = kit
 
     // Painted dresser on the left wall, an open shelf of jars and cookbooks above it.
     {
@@ -121,6 +126,7 @@ export default {
       dress(box(0.3, 0.14, 0.4), pine, at(x + 0.02, H + 0.07, z1 - 0.32))
       for (let i = 0; i < 6; i++) part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1))
       // Two shelves on iron brackets.
+      k = leftWall
       for (const y of [1.42, 1.82]) {
         dress(box(0.24, 0.028, 1.3), pine, at(LEFT + 0.12, y, cz))
         for (const bz of [z0 + 0.15, z1 - 0.15]) part(box(0.18, 0.018, 0.018), '#2b2420', 'satin', at(LEFT + 0.09, y - 0.08, bz, 0, 0, -0.75))
@@ -151,11 +157,13 @@ export default {
         part(ball(0.035, 8, 6), i % 2 ? '#5d8a3a' : '#79a34a', 'matte', at(LEFT + 0.12 + Math.cos(a) * 0.05, 1.93 - (i % 3) * 0.06, z1 - 0.2 + Math.sin(a) * 0.05, 0, 0, 0, [1, 0.6, 1]))
       }
       for (let i = 0; i < 4; i++) part(ball(0.026, 8, 6), '#6b9640', 'matte', at(LEFT + 0.2, 1.8 - i * 0.07, z1 - 0.16 + (i % 2) * 0.03, 0, 0, 0, [0.8, 1, 0.8]))
+      k = kit
     }
 
     // Coat pegs by the doorway with a coat, a scarf and a tote; a bench with wellies under it.
     {
       const z0 = -1.95, z1 = -1.12, cz = (z0 + z1) / 2
+      k = leftWall
       dress(box(0.03, 0.1, z1 - z0), pine, at(LEFT + 0.015, 1.64, cz))
       const pegs = [z0 + 0.1, z0 + 0.32, z0 + 0.52, z1 - 0.1]
       for (const z of pegs) part(cyl(0.012, 0.012, 0.08, 10), '#8a6a4a', 'satin', at(LEFT + 0.07, 1.64, z, 0, 0, Math.PI / 2 - 0.25))
@@ -169,6 +177,7 @@ export default {
       // A canvas tote.
       dress(box(0.08, 0.32, 0.28), throwRug, at(LEFT + 0.07, 1.36, pegs[3] - 0.05))
       part(new THREE.TorusGeometry(0.08, 0.008, 6, 14, Math.PI), '#8a6a4a', 'matte', at(LEFT + 0.07, 1.52, pegs[3] - 0.05, Math.PI / 2))
+      k = kit
       // The bench.
       const bx = LEFT + 0.19
       dress(box(0.36, 0.04, z1 - z0 + 0.1), pine, at(bx, 0.44, cz))
@@ -203,9 +212,9 @@ export default {
       part(new THREE.TorusGeometry(0.09, 0.012, 6, 24).rotateX(Math.PI / 2), '#f2ece0', 'satin', at(-1.62, 0.09, 2.62, 0, 0.3))
     }
 
-    // A reading chair in the front-right corner, turned to the table, with a throw, a side table and a lamp.
+    // A reading chair on the open floor in front of the kitchen, turned to the table, with a throw, a side table and a lamp.
     {
-      const x = 2.82, z = 1.2, ry = -1.95
+      const x = 1.75, z = 2.75, ry = -2.52
       const base = new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1))
       const local = (lx: number, ly: number, lz: number, rx = 0) => base.clone().multiply(at(lx, ly, lz, 0, rx))
       dress(box(0.8, 0.26, 0.78), velvet, local(0, 0.27, 0))
@@ -233,15 +242,14 @@ export default {
       new THREE.MeshStandardMaterial({ color: '#f6e6c8', emissive: '#ffc98a', emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide }),
     )
     {
-      const p = new THREE.Vector3(-0.5, 1.46, -0.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), -1.95).add(new THREE.Vector3(2.82, 0, 1.2))
+      const p = new THREE.Vector3(-0.5, 1.46, -0.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), -2.52).add(new THREE.Vector3(1.75, 0, 2.75))
       shade.position.copy(p)
       shade.castShadow = true
       shade.name = 'reading lamp shade'
     }
 
-    // Plants in woven baskets: a tall one by the dresser and one beside the reading chair.
+    // A tall plant in a woven basket by the dresser.
     basketPlant(kit, wicker, LEFT + 0.32, 2.05, 1.15, 0)
-    basketPlant(kit, wicker, 3.05, 2.1, 0.9, 1.3)
 
     // Fruit in a blue bowl and a jug of flowers on the table.
     {
@@ -292,7 +300,7 @@ export default {
     // ?q=low too, where sun shadows are coarser.
     const prints: Array<[number, number, number, number, number]> = [
       // x, z, width, depth, yaw
-      [-0.25, 0.15, 2.0, 1.2, 0], // table
+      [-0.25, 0.15, 1.9, 1.05, 0], // table
       [-0.7, -0.5, 0.62, 0.62, 0], [0.2, -0.5, 0.62, 0.62, 0], [1.05, -0.05, 0.62, 0.62, -Math.PI / 2 + 0.35], // chairs
       [-1.28, 0, 0.62, 0.62, Math.PI / 2 - 0.2], // high chair
       [1.5 - 0.04, WALL_Z + 0.36, 0.95, 0.9, -0.12], // fridge
@@ -302,13 +310,23 @@ export default {
       [LEFT + 0.22, 0.9, 0.62, 1.6, 0], // dresser
       [LEFT + 0.19, -1.53, 0.55, 1.05, 0], // bench
       [-2.55, 3.2, 0.95, 0.65, 0.15], // toy box
-      [2.82, 1.2, 1.05, 1.0, -1.95], // reading chair
-      [LEFT + 0.32, 2.05, 0.6, 0.6, 0], [3.05, 2.1, 0.5, 0.5, 0], // baskets
+      [1.75, 2.75, 1.05, 1.0, -2.52], // reading chair
+      [LEFT + 0.32, 2.05, 0.6, 0.6, 0], // basket
     ]
     if (talk) prints.push([NEAR_CHAIR.x, NEAR_CHAIR.z, 0.62, 0.62, NEAR_CHAIR.yaw])
     flat.add(contactDecals(prints))
 
-    const all = [kit.build('furnish'), flat, clock, shade]
+    const onWall = (wallKit: Kit, x: number, inward: THREE.Vector3, name: string) => {
+      const hung = new THREE.Group()
+      hung.name = name
+      hung.position.x = x // the cutaway test reads this group's position as the wall's
+      hung.userData.inward = inward
+      const built = wallKit.build(name)
+      built.position.x = -x
+      hung.add(built)
+      return hung
+    }
+    const all = [kit.build('furnish'), onWall(leftWall, LEFT, new THREE.Vector3(1, 0, 0), 'left wall things'), onWall(rightWall, RIGHT, new THREE.Vector3(-1, 0, 0), 'right wall things'), flat, clock, shade]
     // Small separate pieces would otherwise reach the GPU only when a camera first
     // turns to them, so a room walk could add memory the first visit never showed.
     for (const o of all) o.traverse((n) => (n.frustumCulled = false))

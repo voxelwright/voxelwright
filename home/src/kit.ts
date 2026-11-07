@@ -93,7 +93,9 @@ export function basketPlant(kit: Kit, wicker: THREE.Material, x: number, z: numb
  * they hold at ?q=low, where sun shadows are coarser.
  */
 export function contactDecals(prints: Array<[number, number, number, number, number]>, y = 0.0035): THREE.Mesh {
-  const quads = prints.map(([x, z, w, d, yaw]) => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).scale(w, 1, d).rotateY(yaw).translate(x, y, z))
+  // Each footprint gets a wide soft decal and a tight one at its base, so the shadow deepens where things touch.
+  const quads = prints.flatMap(([x, z, w, d, yaw]) => [[w, d], [w * 0.78, d * 0.78]].map(([qw, qd]) =>
+    new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).scale(qw, 1, qd).rotateY(yaw).translate(x, y, z)))
   const mesh = new THREE.Mesh(mergeGeometries(quads), new THREE.MeshBasicMaterial({ map: paintContact(), transparent: true, depthWrite: false }))
   for (const q of quads) q.dispose()
   mesh.renderOrder = -2
