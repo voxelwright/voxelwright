@@ -3,11 +3,20 @@
 // key (C major / A minor at A = 440, measured by chroma), using its pentatonic notes so they
 // sit over any of the bed's chords. Most cues end within 0.6 s, rewards within 1.2 s.
 //
-// Variants: `a` is the default. chose, sent, card, news, placed and page have b and c, honestly
-// different characters for a listening round (`?sfx=chose:b`).
+// Variants: `a` is the default. chose, sent, card, news, placed and page have b and c for a
+// listening round (`?sfx=chose:b`): each `b` is recorded or hybrid (Freesound CC0 takes in
+// public/audio/sfx/, with the synthesized sound as a stand-in until the file has loaded), and
+// `a` and `c` are two different synthesized characters.
 
 import type { CueName, Cue, Palette, Play, Kit } from '../contract'
-import { BODY, NOTE, crackle, noise, pluck, room, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
+import { BODY, NOTE, crackle, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
+import { SPRITES } from './sprites'
+
+/** The recorded sprites (public/audio/sfx/, made by scripts/make-sfx.mjs), by what they hold. */
+const S = {
+  click: SPRITES['wood-clicks'], kalimba: SPRITES['kalimba-g5'], musicBox: SPRITES['music-box-g5'], tear: SPRITES.tears,
+  swish: SPRITES['paper-swish'], slide: SPRITES['paper-slide'], cushion: SPRITES.cushion, page: SPRITES['page-turn'],
+}
 
 type Ctx = BaseAudioContext
 
@@ -97,11 +106,13 @@ const chose = {
     },
   }),
   b: cue({
-    bus: 'ui', level: -16, gap: 0.05, length: 0.6, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -20.5, gap: 0.05, length: 0.5, jitter: { cents: 3, db: 1 },
+    samples: [S.click.file, S.kalimba.file],
     play(a, out, p, kit) {
-      // A soft felt press and a music-box E high above it.
-      thump(a, out, kit, p.at, { from: 240, to: 130, dur: 0.07, gain: p.gain * 0.8, random: p.random, puff: 0.5, cut: 900 })
-      pluck(a, room(a, out, 0.2), p.at + 0.012, NOTE.E6 * p.rate, BODY.musicBox, { gain: p.gain * 0.22, dur: 0.5 })
+      // Recorded: one of six wooden clicks and a real kalimba G, played short.
+      const clicked = sample(a, out, kit.sample(S.click.file), p.at, pick(p, S.click.takes), { gain: p.gain * 4, rate: p.rate * (0.97 + 0.06 * p.random()), top: 3200 })
+      const rang = sample(a, out, kit.sample(S.kalimba.file), p.at + 0.006, S.kalimba.takes[0], { gain: p.gain * 3.3, rate: p.rate, len: 0.35 })
+      if (!clicked || !rang) chose.a.play(a, out, p, kit)
     },
   }),
   c: cue({
@@ -163,9 +174,11 @@ const card = {
   }),
   b: cue({
     bus: 'ui', level: -17, gap: 0.06, length: 0.6, jitter: { cents: 3, db: 1 },
+    samples: [S.slide.file],
     play(a, out, p, kit) {
-      // The flick, and on a new reply a quiet glass E: something arrived.
-      flick(a, out, kit, p.at, p, { gain: p.gain * 0.7, freq: 2500 * p.rate, dur: 0.09 })
+      // Hybrid: a recorded sheet sliding (three takes, cut short), and on a new reply a quiet glass E.
+      const slid = sample(a, out, kit.sample(S.slide.file), p.at, pick(p, S.slide.takes), { gain: p.gain * 0.6, rate: p.rate * (0.95 + 0.1 * p.random()), len: 0.3 })
+      if (!slid) flick(a, out, kit, p.at, p, { gain: p.gain * 0.7, freq: 2500, dur: 0.09 })
       if (Number(p.event.page ?? 0) === 0) pluck(a, room(a, out, 0.25), p.at + 0.03, NOTE.E6 * p.rate, BODY.glass, { gain: p.gain * 0.18, attack: 0.012, dur: 0.5 })
     },
   }),
@@ -239,13 +252,23 @@ const sent = {
     },
   }),
   b: cue({
-    bus: 'world', level: -11.5, length: 1.2, jitter: { cents: 100, db: 1 },
+    bus: 'world', level: -16, length: 1.3, jitter: { cents: 100, db: 1 },
+    samples: [S.tear.file, S.swish.file],
     play(a, out, p, kit) {
-      // Torn off, then one airy whoosh that passes and lands on felt.
-      tear(a, out, kit, p.at, p, p.gain * 0.8)
+      // Recorded: a real paper tear (four takes, cut short) and a sheet waved through the air
+      // (three takes) that ends as the slip lands on felt.
       const fly = flight(p)
-      noise(a, out, kit, p.at + 0.1, { dur: fly, gain: p.gain * 0.5, random: p.random, q: 0.7, top: 3000, freq: (u) => (500 + 900 * Math.sin(Math.PI * u)) * p.rate, env: swell(0.55, 1.8) })
-      thump(a, out, kit, p.at + 0.1 + fly - 0.03, { from: 200, to: 120, dur: 0.07, gain: p.gain * 0.35, random: p.random, puff: 0.7, cut: 900 })
+      const swish = pick(p, S.swish.takes)
+      const tore = sample(a, out, kit.sample(S.tear.file), p.at, pick(p, S.tear.takes), { gain: p.gain * 1.5, rate: p.rate, len: 0.32 })
+      const flew = sample(a, out, kit.sample(S.swish.file), p.at + 0.1 + Math.max(0, fly - swish[1]), swish, { gain: p.gain * 2.1, rate: p.rate })
+      if (tore && flew) {
+        thump(a, out, kit, p.at + 0.1 + fly - 0.02, { from: 200, to: 120, dur: 0.07, gain: p.gain * 0.35, random: p.random, puff: 0.7, cut: 900 })
+        return
+      }
+      // Stand-in while the files load: the synthesized tear, whoosh and felt landing.
+      tear(a, out, kit, p.at, p, p.gain * 1.35)
+      noise(a, out, kit, p.at + 0.1, { dur: fly, gain: p.gain * 0.85, random: p.random, q: 0.7, top: 3000, freq: (u) => (500 + 900 * Math.sin(Math.PI * u)) * p.rate, env: swell(0.55, 1.8) })
+      thump(a, out, kit, p.at + 0.1 + fly - 0.03, { from: 200, to: 120, dur: 0.07, gain: p.gain * 0.6, random: p.random, puff: 0.7, cut: 900 })
     },
   }),
   c: cue({
@@ -326,21 +349,22 @@ const placed = {
     },
   }),
   b: cue({
+    bus: 'world', level: -17, gap: 0.1, length: 0.8, jitter: { cents: 3, db: 1 },
+    samples: [S.cushion.file],
+    play(a, out, p, kit) {
+      // Hybrid: a recorded cushion impact (five takes) and the synthesized music-box sparkle.
+      const landed = sample(a, out, kit.sample(S.cushion.file), p.at, pick(p, S.cushion.takes), { gain: p.gain * 1.8, rate: p.rate * (0.92 + 0.12 * p.random()) })
+      if (!landed) thump(a, out, kit, p.at, { from: 210, to: 110, dur: 0.16, gain: p.gain * 0.9, random: p.random, puff: 0.6, cut: 700 })
+      sparkle(a, out, p.at + 0.07, p, p.gain * 0.16)
+    },
+  }),
+  c: cue({
     bus: 'world', level: -14.5, gap: 0.1, length: 0.8, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // A wooden set-down: a low wood knock with a glass E ringing over it.
       tock(a, out, kit, p.at, { freq: NOTE.C4 * p.rate, gain: p.gain * 0.75, random: p.random, click: 0.35, band: 800 })
-      thump(a, out, kit, p.at, { from: 130, to: 80, dur: 0.1, gain: p.gain * 0.4, random: p.random, puff: 0.2 })
+      thump(a, out, kit, p.at, { from: 160, to: 100, dur: 0.1, gain: p.gain * 0.4, random: p.random, puff: 0.2 })
       pluck(a, room(a, out, 0.25), p.at + 0.05, NOTE.E6 * p.rate, BODY.glass, { gain: p.gain * 0.15, attack: 0.01, dur: 0.6 })
-    },
-  }),
-  c: cue({
-    bus: 'world', level: -14, gap: 0.1, length: 0.7, jitter: { cents: 3, db: 1 },
-    play(a, out, p, kit) {
-      // A cushion "pomf": a slow, round puff of air and one kalimba C.
-      noise(a, out, kit, p.at, { dur: 0.22, gain: p.gain * 0.7, random: p.random, type: 'lowpass', freq: 550 * p.rate, q: 0.7, env: strike(0.22, 0.018, 0.05) })
-      thump(a, out, kit, p.at + 0.005, { from: 170, to: 100, dur: 0.14, gain: p.gain * 0.55, random: p.random, puff: 0 })
-      pluck(a, room(a, out, 0.22), p.at + 0.09, NOTE.C6 * p.rate, BODY.kalimba, { gain: p.gain * 0.2, dur: 0.45 })
     },
   }),
 }
@@ -424,14 +448,27 @@ const page = {
     },
   }),
   b: cue({
-    bus: 'ui', level: -15, gap: 0.05, length: 0.9, jitter: { cents: 100, db: 1 },
+    bus: 'ui', level: -18, gap: 0.05, length: 0.9, jitter: { cents: 100, db: 1 },
+    samples: [S.page.file],
     play(a, out, p, kit) {
-      // A crisper leaf: brighter and quicker, landing with a small paper snap.
+      // Recorded: a real page turn, its flip only; earlier leaves of a riffle are short slices of it.
       const leaves = Math.min(5, Math.max(1, Number(p.event.leaves ?? 1)))
       const span = seconds(p.seconds, 0.3, 0.6)
+      const buffer = kit.sample(S.page.file)
+      if (buffer) {
+        for (let i = 0; i < leaves; i++) {
+          const last = i === leaves - 1
+          const t = p.at + (leaves > 1 ? (span * i) / leaves : 0)
+          sample(a, out, buffer, t, S.page.takes[0], last
+            ? { gain: p.gain * 1.7, rate: p.rate, from: 0.46, len: 0.75 }
+            : { gain: p.gain, rate: p.rate * (0.95 + 0.1 * p.random()), from: 0.5 + 0.3 * p.random(), len: 0.18 })
+        }
+        return
+      }
+      // Stand-in while the file loads: a crisp synthesized leaf with a small snap.
       for (let i = 0; i < leaves; i++) {
         const last = i === leaves - 1
-        leaf(a, out, kit, p.at + (leaves > 1 ? (span * i) / leaves : 0), p, { dur: 0.16, gain: p.gain * (last ? 0.65 : 0.45), low: 1400, high: 3200, snapAt: last ? 0.85 : undefined })
+        leaf(a, out, kit, p.at + (leaves > 1 ? (span * i) / leaves : 0), p, { dur: 0.16, gain: p.gain * (last ? 0.9 : 0.6), low: 1400, high: 3200, snapAt: last ? 0.85 : undefined })
       }
     },
   }),
@@ -473,12 +510,16 @@ const news = {
   }),
   b: cue({
     bus: 'world', level: -18, gap: 0.6, length: 1.2, jitter: { cents: 2, db: 1 },
-    play(a, out, p) {
-      // A music-box call, E then A high up, with a glass bloom under the second note.
-      const r = room(a, out, 0.32)
-      pluck(a, r, p.at, NOTE.E6 * p.rate, BODY.musicBox, { gain: p.gain * 0.3, dur: 0.5 })
-      pluck(a, r, p.at + 0.15, NOTE.A6 * p.rate, BODY.musicBox, { gain: p.gain * 0.3, dur: 0.9 })
-      pluck(a, r, p.at + 0.15, NOTE.A5 * p.rate, BODY.glass, { gain: p.gain * 0.18, attack: 0.03, dur: 0.95 })
+    samples: [S.musicBox.file],
+    play(a, out, p, kit) {
+      // Recorded: a real music-box G (retuned from +28 cents) played as G then the C above it.
+      const r = room(a, out, 0.3)
+      const box = kit.sample(S.musicBox.file)
+      const first = sample(a, r, box, p.at, S.musicBox.takes[0], { gain: p.gain * 2.4, rate: p.rate, len: 0.45 })
+      const second = sample(a, r, box, p.at + 0.16, S.musicBox.takes[0], { gain: p.gain * 2.7, rate: p.rate * 2 ** (5 / 12), len: 0.95 * 2 ** (5 / 12) })
+      if (first && second) return
+      pluck(a, r, p.at, NOTE.G5 * p.rate, BODY.musicBox, { gain: p.gain * 0.35, dur: 0.45 })
+      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, BODY.musicBox, { gain: p.gain * 0.4, dur: 0.95 })
     },
   }),
   c: cue({
@@ -539,7 +580,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   hover: { a: 'A breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.' },
   chose: {
     a: 'Wooden tock with a small kalimba G (A every third play).',
-    b: 'Soft felt press with a high music-box E.',
+    b: 'Recorded: a wooden click (six takes) and a real kalimba G, short.',
     c: 'Soft-mallet marimba C, a tuned bar with a breath of felt.',
   },
   backed: { a: 'A lower, duller tock and a kalimba C that sags a few cents: chose in reverse.' },
@@ -547,7 +588,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   turned: { a: 'Two soft cloth rustles.' },
   card: {
     a: 'A paper flick; a later page is higher and shorter.',
-    b: 'The paper flick, with a quiet glass E when a new reply arrives.',
+    b: 'Hybrid: a recorded sheet sliding (three takes), with a quiet synthesized glass E on a new reply.',
     c: 'A quick rising "fwip" of a card sliding in.',
   },
   'pad-up': { a: 'A paper slide that brightens as the pad rises.' },
@@ -555,7 +596,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   writing: { a: 'Pencil grains, at most one per 75 ms, overlapping into one scratch while typing; deleting is a softer rub.' },
   sent: {
     a: 'Tear, a paper flutter across the flight, and a soft paper tap on landing.',
-    b: 'Tear, one airy whoosh that passes, and a felt landing.',
+    b: 'Recorded: a real paper tear (four takes) and a sheet waved through the air (three takes), landing on felt.',
     c: 'Tear, then a kalimba run C-E-G across the flight landing on high C.',
   },
   routed: { a: 'Kalimba G then C, a fourth up: found its place.' },
@@ -563,8 +604,8 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   ghost: { a: 'Three slow-blooming, trembling glass tones (E G A).' },
   placed: {
     a: 'Felt thump and a two-note music-box sparkle.',
-    b: 'A low wooden set-down with a glass E ringing over it.',
-    c: 'A round cushion "pomf" and one kalimba C.',
+    b: 'Hybrid: a recorded cushion impact (five takes) and the synthesized music-box sparkle.',
+    c: 'A low wooden set-down with a glass E ringing over it.',
   },
   kept: { a: 'Kalimba C E G rolled quickly, the G left ringing: a small reward.' },
   undone: { a: 'A breath drawn in and a kalimba G that swells instead of striking.' },
@@ -573,13 +614,13 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   'book-close': { a: 'Pages fold in with a swish and the cover meets them with a soft clap.' },
   page: {
     a: 'A leaf turning; several leaves riffle over the turn.',
-    b: 'A crisper, brighter leaf that lands with a small snap.',
+    b: 'Recorded: a real page turn (its flip); a riffle adds short slices of it.',
     c: 'A heavy, soft page: lower and slower, more air than paper.',
   },
   sat: { a: 'Cushioned chair as the hop lands: a round bump, a "pff" of air and a small wood creak.' },
   news: {
     a: 'Kalimba G then high C, the second left ringing.',
-    b: 'Music-box E then high A with a glass bloom.',
+    b: 'Recorded: a real music-box note, retuned, played as G then high C.',
     c: 'Marimba E-E then A with a ghost shimmer.',
   },
   walk: { a: 'Soft felt steps on the music\'s eighth notes: two to five leaving, two arriving.' },
@@ -587,4 +628,13 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
 }
 
 /** Third-party samples the palette plays, for the in-app credit. */
-export const SAMPLE_CREDITS: { title: string; author: string; source: string; licence: string; licenceUrl: string }[] = []
+export const SAMPLE_CREDITS: { title: string; author: string; source: string; licence: string; licenceUrl: string }[] = [
+  ['Wooden clicks.wav', 'Anzbot', 'https://freesound.org/s/565027/'],
+  ['G4 soft - kalimba', 'hollandm', 'https://freesound.org/s/691805/'],
+  ['Hand Crank Music Box [G5 Note]', 'moodyfingers', 'https://freesound.org/s/732943/'],
+  ['Tearing paper - 5', 'Valerie-Vivegnis', 'https://freesound.org/s/759322/'],
+  ['Waving Paper in the Air.wav', 'krnash', 'https://freesound.org/s/389809/'],
+  ['Paper sheets (sliding).wav', 'Pipelenisf', 'https://freesound.org/s/560352/'],
+  ['Cushion Impacts.wav', 'mincedbeats', 'https://freesound.org/s/593948/'],
+  ['Page Turn', 'davidbain', 'https://freesound.org/s/136778/'],
+].map(([title, author, source]) => ({ title, author, source, licence: 'CC0 1.0', licenceUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' }))

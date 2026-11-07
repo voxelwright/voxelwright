@@ -177,19 +177,33 @@ try {
       for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1, a = Math.abs(x); c[i] = Math.sign(x) * (a <= 0.6 ? a : 0.6 + 0.29 * Math.tanh((a - 0.6) / 0.29)) }
       return c
     })()
-    window.cueList = () => Object.entries(PALETTE).flatMap(([name, vs]) => Object.keys(vs).map((v) => ({ name, v, length: vs[v].length, bus: vs[v].bus, level: vs[v].level, gap: vs[v].gap, description: DESCRIPTIONS[name]?.[v] ?? '' })))
+    // The palette's sample files, decoded once, as the player's kit would hand them over.
+    const decoded = new Map()
+    const names = [...new Set(Object.values(PALETTE).flatMap((vs) => Object.values(vs).flatMap((c) => c.samples ?? [])))]
+    const decoder = new OfflineAudioContext(1, 1, SR)
+    for (const n of names) decoded.set(n, await decoder.decodeAudioData(await (await fetch(`/audio/sfx/${n}`)).arrayBuffer()))
+    const { SPRITES } = await import('/src/sound/palette/sprites.ts')
+    /** Where each sprite's first take really starts after decoding, against the table (Opus pre-skip). */
+    window.spriteAlignment = () => Object.values(SPRITES).map(({ file, takes }) => {
+      const d = decoded.get(file)?.getChannelData(0)
+      if (!d) return { file, missing: true }
+      let i = 0
+      while (i < d.length && Math.abs(d[i]) < 1e-3) i++
+      return { file, tableStart: takes[0][0], firstSoundS: +(i / SR).toFixed(4), seconds: +(d.length / SR).toFixed(3) }
+    })
+    window.cueList = () => Object.entries(PALETTE).flatMap(([name, vs]) => Object.keys(vs).map((v) => ({ name, v, length: vs[v].length, bus: vs[v].bus, level: vs[v].level, gap: vs[v].gap, sampled: Boolean(vs[v].samples?.length), description: DESCRIPTIONS[name]?.[v] ?? '' })))
     /**
      * Renders plays of one cue variant as the player would hand them over: gain from the level
      * with seeded volume jitter, rate from seeded pitch jitter, round-robin index, seeded random.
      * Channel 0 is before the limiter, channel 1 after it.
      */
-    window.renderCue = async (name, v, plays, seconds) => {
+    window.renderCue = async (name, v, plays, seconds, standIn = false) => {
       const c = PALETTE[name][v]
       const off = new OfflineAudioContext(2, Math.ceil(seconds * SR), SR)
       const noise = new AudioBuffer({ length: SR, sampleRate: SR, numberOfChannels: 1 })
       const nr = seededRandom(hash('village sfx noise'))
       noise.getChannelData(0).forEach((_, i, d) => { d[i] = nr() * 2 - 1 })
-      const kit = { noise, sample: () => undefined }
+      const kit = { noise, sample: (n) => (standIn ? undefined : decoded.get(n)) }
       const merge = new ChannelMergerNode(off, { numberOfInputs: 2 })
       const pre = new GainNode(off)
       const limiter = new WaveShaperNode(off, { curve: clip })
@@ -233,7 +247,9 @@ try {
   wav(babble, join(out, 'babble-reference.wav'))
 
   const rows = []
-  for (const { name, v, length, bus, level, description } of await page.evaluate(() => window.cueList())) {
+  const alignment = await page.evaluate(() => window.spriteAlignment())
+  const standIns = []
+  for (const { name, v, length, bus, level, description, sampled } of await page.evaluate(() => window.cueList())) {
     if (only && name !== only) continue
     const event = EVENTS[name] ?? {}
     const span = Math.max(3.5, length + 0.5)
@@ -273,6 +289,12 @@ try {
     if (row.momentaryMax > voice.momentaryMax) fails.push(`louder than the voices (${row.momentaryMax} > ${voice.momentaryMax.toFixed(1)} LUFS momentary)`)
     if (rr < 1e-4) fails.push('consecutive plays identical')
     row.fails = fails
+    if (sampled) {
+      // The synthesized stand-in that plays until the files have loaded: its level beside the recording's.
+      const r = await page.evaluate(([n, v, e, s]) => window.renderCue(n, v, [{ at: 0.05, index: 0, event: e }], s, true), [name, v, event, span])
+      const y = decode(r.pre)
+      standIns.push({ cue: `${name}:${v}`, momentaryMax: +loudness(y).momentaryMax.toFixed(1), peakDbfs: +db(peakOf(y)).toFixed(1), recordedMomentaryMax: row.momentaryMax })
+    }
     failed += fails.length ? 1 : 0
     rows.push(row)
   }
@@ -305,6 +327,8 @@ try {
     voices: { momentaryMax: +voice.momentaryMax.toFixed(1), shortMax: +voice.shortMax.toFixed(1), integrated: +voice.integrated.toFixed(1) },
     medianMomentary: { ui: ui ?? null, world: world ?? null }, uiUnderWorld: ui === undefined || world === undefined || ui < world,
     typing,
+    standIns,
+    alignment,
     errors,
   }
   if (!summary.uiUnderWorld) failed++

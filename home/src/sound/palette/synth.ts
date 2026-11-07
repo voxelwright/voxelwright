@@ -236,6 +236,33 @@ export function room(ctx: BaseAudioContext, out: AudioNode, wet = 0.22): AudioNo
   return input
 }
 
+/**
+ * Plays one take of a sprite: `take` is [start, length] in the file's seconds; `from` skips into
+ * it and `len` cuts it shorter (with a cosine fade). Returns false when the file has not loaded
+ * yet, so the cue can play its synthesized stand-in instead.
+ */
+export function sample(ctx: BaseAudioContext, out: AudioNode, buffer: AudioBuffer | undefined, t: number,
+  take: readonly [number, number], o: { gain: number; rate?: number; from?: number; len?: number; /** A lowpass that rounds the top, in Hz. */ top?: number }): boolean {
+  if (!buffer) return false
+  const at = snap(ctx, t)
+  const rate = o.rate ?? 1
+  const skip = o.from ?? 0
+  const len = Math.min(take[1] - skip, o.len ?? Infinity)
+  const dur = snap(ctx, len / rate)
+  const src = new AudioBufferSourceNode(ctx, { buffer, playbackRate: rate })
+  const g = new GainNode(ctx, { gain: 0 })
+  const fade = Math.min(0.04, dur / 3)
+  const head = skip ? Math.min(0.006, dur / 4) : 0
+  g.gain.setValueCurveAtTime(curve(dur, (u) => {
+    const s = u * dur
+    return o.gain * (head && s < head ? cosRise(s / head) : 1) * (s > dur - fade ? cosRise((dur - s) / fade) : 1)
+  }), at, dur)
+  ;(o.top ? src.connect(new BiquadFilterNode(ctx, { type: 'lowpass', frequency: o.top, Q: 0.5 })) : src).connect(g).connect(out)
+  src.start(at, take[0] + skip, len)
+  src.stop(at + dur)
+  return true
+}
+
 /** The event's `seconds`, a default when it has none, clamped to what the cue can ring. */
 export function seconds(s: number, fallback: number, max: number) {
   return Math.min(max, Number.isFinite(s) ? Math.max(0, s) : fallback)
