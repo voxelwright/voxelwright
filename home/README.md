@@ -1251,7 +1251,7 @@ JSON answer the host checks field by field (`checkRouted` in
 | --- | --- |
 | talk | that villager turns to you and the camera eases to it; any message for it is sent |
 | answer | your villager turns to you and answers through its own session |
-| furnish | a translucent ghost of the right size at once, then the made prop in its place, with Keep, Undo and Try another on a paper tag |
+| furnish | a ghost of the right size at once, placed through the house's placement (see "Placing items"), then the made prop swapped into it, with Keep, Undo and Try another on the placement's tag |
 | project | your villager says so in one line; a kraft-paper parcel with a stitched "being made" tag stands where it will go; the host records it in `projects.jsonl`, and parcels come back after a reload |
 | journal | the journal opens at that villager or section |
 
@@ -1260,17 +1260,30 @@ words (around the table, by the window, in the corner, on the counter, or
 "here", the last thing clicked, only when the person said here). Words naming
 the living room, the sofa, the plants or the sideboard pick its anchors: its
 back wall, the wall above the sofa, by the plants, its floor, the sideboard and
-its ceiling (`src/talk/place.ts`), and your villager says it is going next door. A line that starts like furnishing ("add", "put", "replace") shows the
-ghost before the route comes back; a different route dissolves it. The prop is
-made by `POST /people/:id/props` (Sonnet writing a plain-JS `build(api)`
-module), run in the prop sandbox, checked and rebuilt, then swapped in for the
-ghost. "Replace the table" hides the table and Undo shows it again. "Another
-one like that" clones what was pointed at or placed last, with no model call.
-Keep marks the module kept in the person's library
-(`people/<id>/library/<item>.json`, module text plus metadata), and the router
-is told the library's names, so "put the green armchair by the window" places
-a saved one again through the sandbox. A failed or rejected prop leaves
-nothing placed, and your villager says so. The host stores and returns module
+its ceiling (`src/talk/place.ts`), and your villager says it is going next door.
+That is only the first pose (#56): each piece is handed to the house's one
+placement (`placement.begin`), which owns everything after it: drag with snap
+and collision, red where it can't go, the turn ring, Q/E, Alt, touch. A line
+that starts like furnishing ("add", "put", "replace") begins the ghost's
+placement before the route comes back; a different route cancels it and
+leaves nothing. The prop is made by `POST /people/:id/props` (Sonnet writing a
+plain-JS `build(api)` module), run in the prop sandbox, checked and rebuilt,
+then swapped into the placement (`swap`) at the pose it has. Keep confirms the
+placement: the host marks the library item kept and the house plan gets a
+version with the piece as furniture `{library, person}`, so it is there after
+a reload and build mode can move it. Undo (or Escape) cancels it. Try another
+swaps a new prop into the same placement. Several pieces ("a couple of chairs")
+are placed one after another: Keep on one begins the next at its own first
+pose. "Replace the table" hides the table while the new one is placed and Undo
+shows it again (the old table comes back after a reload: it is not plan
+furniture). "Another one like that" copies the plan furniture pointed at or
+placed last, with no model call; something that is not plan furniture can't
+be copied, and your villager says so. The router is told the library's names,
+so "put the green armchair by the window" places a saved one again through the
+sandbox. A failed or rejected prop leaves nothing placed, and your villager
+says so. Where it doesn't fit, your villager says so once and Keep places
+nothing until it is somewhere it fits; a save that fails after Keep is said
+too, and the piece stays a ghost. The host stores and returns module
 text only; it never imports or runs it. The sandbox is dev only, so in a
 production build furnishing fails honestly.
 
@@ -1282,7 +1295,11 @@ person: `POST /people/:id/route` `{text, primary, villagers}`,
 can tell them from the host being away.
 
 `node scripts/check-talk-input.mjs` (stub host: keyword router, box maker)
-proves, headless, 39 checks: no input without the flag; the pad rides with
+proves, headless, 70 checks (#56 rewrote the furnishing ones for placement:
+the ghost as a placement, the prop swapped in with its library item, Try
+another in the same placement, Undo and a dismissed guess leaving no trace,
+two pieces one after another, Keep surviving a reload, nowhere-fits and a
+failed save each said once). Earlier, 39 checks: no input without the flag; the pad rides with
 the camera; a keypress anywhere writes; your villager turns to you; Escape
 clears; `j` and the felt journal open the journal and the input steps aside;
 each route's effect in the room (talk with Moss, an answer from Dumpling, the
@@ -1294,7 +1311,8 @@ the parcel after a reload; three clean unloads with the table restored; the
 speech card, its live re-addressing and its flight. 39 of 39 passed (stub
 host, November 6, 2026). `--agent=claude --variant=held|speech
 [--shots=dir] [--video=file]` runs the real session, and `--agent=claude
---furnish` times five furnishing requests.
+--furnish` times five furnishing requests. 70 of 70 passed (stub host,
+November 7, 2026, `--dev=5353 --host=5354`).
 
 Routing, 15 written lines, `node test/route-bench.ts haiku sonnet` in `host/`
 (operator login, M1 Pro, one call at a time; wall time includes the CLI
@@ -1813,14 +1831,20 @@ to the same head, plans and names. `diff` reports the host wall that
 
 ### Placing items
 
-`?build=1` only. `plugins/place.ts` provides the Cordis service `placement` (typed in
-`src/build/place.ts`) for build mode and #42's furnishing, and draws the furniture in the
-house plan. `begin(item, pose?)` places a new thing and `move(furnitureId)` moves a placed
+In every house since #56 (wall editing stays behind `?build=1`). `plugins/place.ts`
+provides the Cordis service `placement` (typed in `src/build/place.ts`) for build mode and
+#42's furnishing, and draws the furniture in the house plan. The placer itself (decals,
+styles, listeners) is made on the first `begin` or `move`, so an idle house only opens the
+plan and draws what it holds. `begin(item, pose?)` places a new thing and `move(furnitureId)` moves a placed
 one. Both return a `Placing`: `done` resolves `{status: 'confirmed', pose, furnitureId}` or
 `{status: 'cancelled'}`, `swap(object, size?, item?)` puts the made prop in place of the
 ghost and keeps the pose, and `cancel()` ends it from outside. `item` is
 `{library, person}` or `{kind}`. Confirming while the prop is still being made waits for
-`swap()` to name its library item. The host then marks that item kept, so it is not
+`swap()` to name its library item (`swap(object, size, null)` forgets it while a new one
+is made). `PlaceItem.words` relabels the tag's buttons and adds one more action;
+`failed(why, line)` hears a refused confirm or a failed save; `Placing.confirm()`,
+`fits` and `note(text)` let a caller drive it. A pose with no `wallId` hangs on the
+nearest wall face it looks out of. The host then marks that item kept, so it is not
 pruned with unkept drafts after a day, and one version (`placeItem` or `moveItem`) is committed through
 `house()`, noted "Placed the …". If the commit fails, the ghost stays and says so.
 Undo and redo come from the versions.

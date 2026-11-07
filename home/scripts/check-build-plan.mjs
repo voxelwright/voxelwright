@@ -334,9 +334,9 @@ if (!args.includes('--skip-drag')) {
   await page.evaluate(() => window.village.unload('build'))
   await frames()
   const after = await page.evaluate(() => window.village.snapshot())
-  // Other plugins that load only under ?build=1 (placing things, #48) keep their own objects; compare the rest.
+  // Placing things (#48, in every house since #56) keeps its own groups; compare the rest.
   const others = /^Group:(placed things|placement)$/
-  const sameObjects = JSON.stringify(after.objects.filter((o) => !others.test(o))) === JSON.stringify(today.objects)
+  const sameObjects = JSON.stringify(after.objects.filter((o) => !others.test(o))) === JSON.stringify(today.objects.filter((o) => !others.test(o)))
   check('unload: today\'s room is back (scene object list equal to a page without build)', sameObjects, { objects: [today.objects.length, after.objects.length], geometries: [today.geometries, after.geometries] })
   check('drag page: no console errors', errors.length === 0, errors.slice(0, 3))
   const video = page.video()
