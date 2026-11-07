@@ -98,7 +98,7 @@ try {
   check('a made villager comes back as module text with an item id', res.status === 200 && /^[a-f0-9]{12}$/.test(made.item) && made.module.includes('export default function (villager, api)'), { status: res.status, item: made.item })
   check('its persona comes back checked, with the dials\' starting positions beside it', made.persona?.name === 'Biscuit' && JSON.stringify(made.dials) === JSON.stringify(dialsOf(STUB_PERSONA)), { persona: made.persona, dials: made.dials })
   check('the maker saw the tidied description, the person\'s name and the accent', calls.length === 1 && calls[0].description === 'a sleepy hedgehog who bakes bread' && calls[0].owner === 'Alex' && calls[0].accent === '#3d7cc8', calls)
-  check('the stub module wears the asked accent', made.module.includes("felt('#3d7cc8')") && !made.module.includes('#c8553d'))
+  check('the stub module wears no owner colour: the home dyes its marked toque in the accent', !made.module.includes('#3d7cc8') && !made.module.includes('#c8553d') && made.module.includes('villager.mark('))
   const stored = JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', `${made.item}.json`), 'utf8'))
   check('it is stored under the person, as text', stored.module === made.module && stored.description === 'a sleepy hedgehog who bakes bread' && stored.accent === '#3d7cc8' && typeof stored.ms === 'number', { ms: Date.now() - t0 })
   check('nothing is stored under another person', !(await readdir(join(root, 'people')).catch((): string[] => [])).includes('sam'))

@@ -226,7 +226,7 @@ export const STUB_PERSONA: Persona = {
 }
 
 /**
- * Stand-in for checks: the Dumpling example from arm-code.md in the asked accent, given a pup's
+ * Stand-in for checks: the Dumpling example from arm-code.md (no owner colour: the home dyes its toque), given a pup's
  * snout and tall ears so it passes the home's species check (gen/checks.ts: the example alone is
  * the round template the check refuses). "[stub-fail]" fails. "[stub-mark-head]" first returns it with
  * the whole head tagged as the role mark (the home's mark check refuses it), and the plain one on repair.
@@ -251,7 +251,7 @@ export function stubVillagerMaker(delayMs = 200): VillagerMaker {
     // "[stub-bad-persona]" first writes a persona the check refuses (a crude lean), and a good one on repair.
     const persona = ask.description.includes('[stub-bad-persona]') && !ask.repair ? { ...STUB_PERSONA, humour: { style: 'filthy', lean: 'crude' } } : STUB_PERSONA
     const text = `\`\`\`js\n${module}\n\`\`\`\n\`\`\`json\n${JSON.stringify(persona)}\n\`\`\``
-    return { module: module.replaceAll('#c8553d', ask.accent), text, models: ['stub'], costUsd: 0, outputTokens: 0, apiMs: 0 }
+    return { module, text, models: ['stub'], costUsd: 0, outputTokens: 0, apiMs: 0 }
   }
 }
 

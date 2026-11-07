@@ -9,6 +9,9 @@
 // stub built from it pass; no mark, a mark inside the outline (a hip pouch) and a marked whole head are refused.
 // Setup fix (live giraffe): a stocking cap bigger than its head passes; a marked head sphere, a marked body and a
 // mark bigger than the rest of the villager are refused, each naming the role's mark.
+// Round 5 (the mark is the owner's colour): a thin pencil mark is refused for too little owner colour, a prop
+// beside the hand is refused, the prompt's bent-cone cap is one piece, the marked toque is dyed in the accent,
+// and an orange body under a blue owner is moved off the owners' colours while a tan one is left alone.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -30,9 +33,9 @@ const check = (name, pass, detail) => {
 /**
  * A small plush cook, sound by default. Options break one thing each:
  * scarfY moves the scarf ring (0.43 is across the eyes), lift raises the head and eyes,
- * prop scales the held spoon, wide stretches the body sideways.
+ * prop scales the held spoon, wide stretches the body sideways, off moves the spoon forward out of the hand.
  */
-const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1 } = {}) => `export default function (villager, { THREE }) {
+const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1, off = 0 } = {}) => `export default function (villager, { THREE }) {
   const felt = (c, r = 1) => new THREE.MeshStandardMaterial({ color: c, roughness: r })
   const at = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
   at(villager, new THREE.SphereGeometry(0.17, 20, 12), felt('#c9a27a'), 0, 0.17, 0).scale.set(${wide}, 1, 1)
@@ -48,7 +51,7 @@ const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1 } = {}) => `export 
     villager.tag(at(villager, new THREE.SphereGeometry(0.04, 12, 8), felt('#c9a27a'), s * 0.08, 0.03, 0.02), s < 0 ? 'foot-left' : 'foot-right')
   }
   const spoon = villager.tag(new THREE.Group(), 'held')
-  spoon.position.set(-0.17 * ${wide}, 0.16, 0.06)
+  spoon.position.set(-0.17 * ${wide}, 0.16, ${0.06 + off})
   spoon.scale.setScalar(${prop})
   villager.add(spoon)
   at(spoon, new THREE.CylinderGeometry(0.01, 0.012, 0.2, 8), felt('#a8703a'), 0, 0.06, 0)
@@ -120,6 +123,20 @@ try {
   await refused('the example with only its head sphere marked (it holds the eyes)', example.replace(headSphere, `villager.mark(${headSphere})`), /the head itself is tagged with villager\.mark\(\); tag only the cook's toque, not the head/, { mark: true })
   await refused('the example with its body marked', example.replace(bodySphere, `villager.mark(${bodySphere})`), /the body itself is tagged with villager\.mark\(\); tag only the cook's toque, not the body/, { mark: true })
   await refused('a marked cap bigger than the rest of the villager', example.replace(toque, `  villager.mark(add(head, new THREE.ConeGeometry(0.3, 0.3, 24), white, 0, 0.2, -0.25))\n`).replace('CylinderGeometry(0.008, 0.01, 0.2, 8)', 'CylinderGeometry(0.008, 0.01, 0.3, 8)'), /^check: the parts tagged with villager\.mark\(\) are \d+% of the villager; tag only the cook's toque, at most 40% of it$/, { mark: true })
+
+  // Round 5: the mark is the owner's colour, so it must carry enough of it; props are held; body felt keeps off the owners' hues.
+  const pencil = example.replace(toque, `  villager.mark(add(head, new THREE.CylinderGeometry(0.006, 0.006, 0.26, 8), white, 0.14, 0.2, 0)).rotation.z = -0.7\n`)
+  await refused('the example with a thin pencil as its mark (too little owner colour)', pencil, /the cook's toque shows only \d+ pixels of the owner's colour from the dollhouse view \(at least 100\)/, { mark: true })
+  await refused('a spoon held 6 cm in front of the mitten (it touches the body, not the hand)', plush({ off: 0.06 }), /the held prop near .* does not touch either hand/)
+  const capRecipe = /A bent cone in one piece[^\n]*\n\n```js\n([\s\S]*?)```/.exec(readFileSync(join(here, 'villagers/arm-code.md'), 'utf8'))?.[1]
+  if (!capRecipe) throw new Error('arm-code.md has no bent-cone recipe block')
+  const capped = await trial(example.replace(toque, capRecipe), { mark: true, accent: '#3d7cc8' })
+  check('the prompt\'s bent-cone stocking cap is one piece and breaks the outline', capped.ok && capped.measures.pieces === 1 && capped.measures.mark.above >= 0.1 && capped.measures.ownerPx >= 100, capped.ok ? { pieces: capped.measures.pieces, mark: capped.measures.mark, ownerPx: capped.measures.ownerPx } : capped.reason)
+  const dyed = await trial(example, { mark: true, accent: '#3d7cc8' })
+  check('the marked toque is dyed in the owner\'s colour and shows from the dollhouse view', dyed.ok && dyed.fixes.includes("mark: 2 part(s) in the owner's colour") && dyed.measures.ownerPx >= 100, dyed.ok ? { fixes: dyed.fixes, ownerPx: dyed.measures.ownerPx } : dyed.reason)
+  const orange = await trial(example.replace("tan = felt('#e2b98a')", "tan = felt('#c9793c')"), { mark: true, accent: '#3d7cc8' })
+  check('an orange body is moved off the owners\' colours (it is within 30 degrees of Alex\'s rust)', orange.ok && orange.fixes.some((f) => /^felt: #c9793c moved to #[0-9a-f]{6}, off the owners' colours$/.test(f)), orange.ok ? orange.fixes : orange.reason)
+  check('a tan body and the wooden spoon are left as written', dyed.ok && !dyed.fixes.some((f) => f.startsWith('felt:')), dyed.fixes)
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

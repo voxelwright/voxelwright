@@ -10,34 +10,15 @@ import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
-import { accentTails, inspect, MARK, type Measures } from './checks'
+import { awayFromOwners, inspect, OWNER_ACCENTS, type Measures } from './checks'
 import type { VillagerSpec } from './spec'
 
 /**
- * #47 regroup on the owner colour and the role mark (screenshots/villager-gen/LEARNING-look.md). Unset is today's look.
- * - a: a tidy owner band (collar or armband); trusted code trims any owner-colour part hanging in front of the
- *   face (./checks.ts accentTails), and the mark must break the outline by MARK_A rather than MARK.
- * - b: an owner badge on the chest, no scarf; the mark is recoloured to the CONTRAST tone farthest from the body.
- * - c: the mark is the owner colour: trusted code recolours every villager.mark() part to the owner's felt.
+ * Owner colour (#47 look regroup, screenshots/villager-gen/LEARNING-look.md, strategy C): shape says the role,
+ * colour says whose villager it is. Trusted code dyes every villager.mark() part in the owner's felt, and pulls
+ * any other felt that competes with an owner's hue towards oatmeal (./checks.ts OWNER_CLASH), so the mark wins.
+ * The model never wears the accent itself.
  */
-export type Strategy = 'a' | 'b' | 'c'
-const MARK_A = 0.15
-/** Strategy b's mark tones: kept clear of the owners' accent hues (rust, blue, mustard, green). */
-const CONTRAST = ['#f4ede0', '#3a302c', '#7d4b6a']
-
-/** OKLab distance between two #rrggbb colours (about 0 to 1; 0.1 is a clear step). */
-function oklabDistance(a: string, b: string) {
-  const lab = (h: string) => {
-    const c = new THREE.Color(h) // linear sRGB
-    const l = Math.cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b)
-    const m = Math.cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b)
-    const s = Math.cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b)
-    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s]
-  }
-  const x = lab(a), y = lab(b)
-  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])
-}
-
 const REQUIRED: Role[] = ['head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right']
 /** Model units: a villager stands 0.25 to 1.1 tall (Dumpling about 0.45, before the room's 1.3 scale). */
 const HEIGHT: [number, number] = [0.25, 1.1]
@@ -61,7 +42,7 @@ const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'obj
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
 /** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, strategy?: Strategy): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -103,54 +84,38 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const lum = new THREE.Color(bodyColour).convertLinearToSRGB()
   const rimStrength = THREE.MathUtils.clamp(0.28 + (0.75 - (0.299 * lum.r + 0.587 * lum.g + 0.114 * lum.b)) * 1.8, 0.22, 0.6)
   const { felt, outline } = feltKit(phys, rimStrength, accent, seed + 25)
-  const made = new Map<number, THREE.Material>()
+  // Every owner's accent and this villager's own: body felt keeps off all of them.
+  const accents = { ...OWNER_ACCENTS, 'this owner': accent }
+  const made = new Map<string, THREE.Material>()
+  const nudged = new Map<string, string>()
   const replaced = new Set<THREE.Material>()
   meshes.forEach((mesh, i) => {
     const k = prop.meshes[i].material
     const old = mesh.material as THREE.MeshStandardMaterial
-    if (!made.has(k)) {
-      const w = prop.materials[k]
-      const c = hex(w.color)
-      const matte = w.roughness >= 0.5 && w.metalness < 0.5
-      made.set(k, matte ? felt(c, old.map ?? feltTexture(c, seed + k, { band: false })) : new THREE.MeshStandardMaterial({ color: c, roughness: Math.max(0.2, w.roughness), metalness: w.metalness, map: old.map }))
+    const w = prop.materials[k]
+    const c = hex(w.color)
+    const matte = w.roughness >= 0.5 && w.metalness < 0.5
+    const role = prop.meshes[i].role
+    const marked = prop.meshes[i].mark === true
+    // The mark in the owner's felt; other felt off the owners' hues (not the eyes or the held prop: a wooden spoon stays wood).
+    const shown = marked ? accent : matte && role !== 'held' && role !== 'eye-left' && role !== 'eye-right' ? awayFromOwners(c, accents) : c
+    if (shown !== c && !marked) nudged.set(c, shown)
+    const key = `${k}|${shown}`
+    if (!made.has(key)) {
+      made.set(key, marked ? felt(accent, feltTexture(accent, seed + 7, { band: false })) : matte ? felt(shown, shown === c && old.map ? old.map : feltTexture(shown, seed + k, { band: false })) : new THREE.MeshStandardMaterial({ color: c, roughness: Math.max(0.2, w.roughness), metalness: w.metalness, map: old.map }))
     }
     replaced.add(old)
-    mesh.material = made.get(k)!
-    // The made colour, for check reasons, and the owner's accent, for measuring how much of it shows (load.ts silhouettes).
-    mesh.userData.colour = hex(prop.materials[k].color)
-    if (near(mesh.userData.colour, accent)) mesh.userData.accent = true
-    // The role mark (villager.mark()), for the check that it breaks the outline.
-    if (prop.meshes[i].mark) mesh.userData.mark = true
+    mesh.material = made.get(key)!
+    // The colour the model wrote, for check reasons; the owner's colour, for measuring how much of it shows (load.ts silhouettes).
+    mesh.userData.colour = c
+    if (marked || near(shown, accent)) mesh.userData.accent = true
+    // The role mark (villager.mark()), for the check that it breaks the outline and carries enough colour.
+    if (marked) mesh.userData.mark = true
   })
   for (const m of replaced) m.dispose()
-
-  // Regroup strategies b and c: the mark's colour is decided here, never by the model. Each marked part gets
-  // its own material, so a mark that shared a colour with the body does not recolour the body too.
-  const marked = meshes.filter((m) => m.userData.mark)
-  if (strategy === 'c') {
-    for (const m of marked) {
-      m.material = felt(accent, feltTexture(accent, seed + 7, { band: false }))
-      m.userData.colour = accent
-      m.userData.accent = true
-    }
-    if (marked.length) fixes.push(`mark: ${marked.length} part(s) in the owner's colour`)
-  } else if (strategy === 'b' && marked.length) {
-    // Against the two colours that cover most of the villager (the body and a shell, spines or wool).
-    const area = new Map<string, number>()
-    meshes.forEach((m, i) => {
-      if (m.userData.mark || m.userData.accent || prop.meshes[i].role === 'held') return
-      const s = new THREE.Box3().setFromObject(m).getSize(new THREE.Vector3())
-      area.set(m.userData.colour, (area.get(m.userData.colour) ?? 0) + s.x * s.y * s.z)
-    })
-    const busy = [...area.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([c]) => c)
-    const tone = CONTRAST.map((c) => ({ c, d: Math.min(...busy.map((b) => oklabDistance(c, b))) })).sort((a, b) => b.d - a.d)[0].c
-    for (const m of marked) {
-      if (m.userData.accent) continue // the owner's one trim on the mark stays
-      m.material = felt(tone, feltTexture(tone, seed + 7, { band: false }))
-      m.userData.colour = tone
-    }
-    fixes.push(`mark: recoloured ${tone} against ${busy.join(', ')}`)
-  }
+  const marks = meshes.filter((m) => m.userData.mark).length
+  if (marks) fixes.push(`mark: ${marks} part(s) in the owner's colour`)
+  for (const [from, to] of nudged) fixes.push(`felt: ${from} moved to ${to}, off the owners' colours`)
 
   // Slots: pose (body, hands), head under pose, eyes under head, feet under root, held under hand 0.
   const root = new THREE.Group()
@@ -190,21 +155,10 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const side = THREE.MathUtils.clamp((Math.abs(footPivots[0].c.x) + Math.abs(footPivots[1].c.x)) / 2, 0.02, 0.25)
   const hip = THREE.MathUtils.clamp(box('body').min.y, 0, 0.4)
   root.traverse((n) => { n.castShadow = n.receiveShadow = true })
-  // Strategy a: no owner-colour part may hang in front of the face; trim it rather than ask again.
-  if (strategy === 'a') {
-    root.updateMatrixWorld(true)
-    const all: THREE.Mesh[] = []
-    root.traverse((o) => { if ((o as THREE.Mesh).isMesh) all.push(o as THREE.Mesh) })
-    const inHeld = new Set<THREE.Mesh>()
-    held?.traverse((o) => { if ((o as THREE.Mesh).isMesh) inHeld.add(o as THREE.Mesh) })
-    const tails = accentTails(all, inHeld, eyes, head, hands)
-    for (const t of tails) t.removeFromParent()
-    if (tails.length) fixes.push(`owner band: trimmed ${tails.length} hanging part(s) in front of the face`)
-  }
   // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions,
   // the default round body instead of the species, a role mark inside the outline (`species` and `mark`
   // false only for plumbing probes and results that predate them).
-  const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role: checked.spec.role, markMin: strategy === 'a' ? MARK_A : MARK })
+  const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role: checked.spec.role })
   if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
   const g = checked.spec.gait

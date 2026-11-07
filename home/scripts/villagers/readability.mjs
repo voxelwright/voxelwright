@@ -7,8 +7,10 @@
 // - a blind sheet for model scorers (black, numbered in a shuffled order, no labels) and its key.
 // - round 3, species: mean pairwise IoU over all villagers (lower is more varied), and how many are the
 //   default round template by gen/checks.ts speciesFeatures (no feature at or over SPECIES).
-// - the look regroup: owner-colour parts hanging in front of the face (gen/checks.ts accentTails), and with
-//   --close=<id>,<id> a close view of each named villager (shots/<id>-close.jpg).
+// - with --close=<id>,<id> a close view of each named villager (shots/<id>-close.jpg).
+// - round 5 (the mark is the owner colour): the trusted owner area (gen/checks.ts ownerArea, beside the render's
+//   count), the felt moved off the owners' colours, and a blind colour sheet in its own shuffle with its own key
+//   (readability-colour-key.md), so its numbers say nothing about the silhouette sheet's.
 // Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47] [--close=<ids>]   (dev server running)
 // --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
 // --seed shuffles the blind sheet's numbering (47 gave round 3's order; round 4 used 48).
@@ -101,7 +103,8 @@ const rows = black.map((m, i) => {
     nearest: black[nearest.j].id, nearestRole: role(nearest.j), nearestIoU: +nearest.v.toFixed(3), sameRole: role(nearest.j) === r.role,
     accentPx, figurePx, accentShare: +(accentPx / figurePx).toFixed(3), screenH: screenH[m.id],
     species: report[m.id]?.measures?.species ?? null, template: isTemplate(report[m.id]?.measures?.species),
-    tails: report[m.id]?.measures?.tails ?? null, fixes: report[m.id]?.fixes ?? [],
+    ownerPx: report[m.id]?.measures?.ownerPx ?? null, nudged: (report[m.id]?.fixes ?? []).filter((f) => f.startsWith('felt:')),
+    fixes: report[m.id]?.fixes ?? [],
   }
 })
 const mean = (xs) => xs.reduce((t, x) => t + x, 0) / xs.length
@@ -117,7 +120,8 @@ const summary = {
   minAccentPx: Math.min(...rows.map((r) => r.accentPx)), medianAccentPx: rows.map((r) => r.accentPx).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
   minAccentShare: Math.min(...rows.map((r) => r.accentShare)),
   medianAccentShare: rows.map((r) => r.accentShare).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
-  withTails: rows.filter((r) => r.tails).length,
+  minOwnerPx: Math.min(...rows.map((r) => r.ownerPx ?? 0)), medianOwnerPx: rows.map((r) => r.ownerPx ?? 0).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
+  nudgedVillagers: rows.filter((r) => r.nudged.length).length, nudgedColours: rows.reduce((t, r) => t + r.nudged.length, 0),
   medianScreenH: Object.values(screenH).sort((a, b) => a - b)[Math.floor(ids.length / 2)],
 }
 writeFileSync(join(out, 'readability.json'), JSON.stringify({ summary, rows, ids: black.map((m) => m.id), iou }, null, 1))
@@ -129,6 +133,11 @@ const order = black.map((_, i) => [i, rand()]).sort((a, b) => a[1] - b[1]).map((
 const key = order.map((i, k) => ({ number: k + 1, id: black[i].id, role: rows[i].role, owner: rows[i].owner, description: rows[i].description }))
 writeFileSync(join(out, 'readability-key.json'), JSON.stringify(key, null, 1))
 writeFileSync(join(out, 'readability-key.md'), ['| # | id | role | owner | description |', '| --- | --- | --- | --- | --- |', ...key.map((k) => `| ${k.number} | ${k.id} | ${k.role} | ${k.owner} | ${k.description} |`)].join('\n') + '\n')
+// The blind colour sheet's own order and key: shuffled again, so its numbers do not match the silhouette sheet's.
+const colourOrder = black.map((_, i) => [i, rand()]).sort((a, b) => a[1] - b[1]).map(([i]) => i)
+const colourKey = colourOrder.map((i, k) => ({ number: k + 1, id: black[i].id, role: rows[i].role, owner: rows[i].owner, accent: rows[i].accent, description: rows[i].description }))
+writeFileSync(join(out, 'readability-colour-key.json'), JSON.stringify(colourKey, null, 1))
+writeFileSync(join(out, 'readability-colour-key.md'), ['| # | id | role | owner | accent | description |', '| --- | --- | --- | --- | --- | --- |', ...colourKey.map((k) => `| ${k.number} | ${k.id} | ${k.role} | ${k.owner} | ${k.accent} | ${k.description} |`)].join('\n') + '\n')
 const canvas = (list, colour) => `<script>const M = ${JSON.stringify(list.map((m) => ({ w: m.w, h: m.h, mask: m.mask })))}
 M.forEach((m, i) => { const g = document.getElementById('c' + i).getContext('2d'); const img = g.createImageData(m.w, m.h)
   for (let k = 0; k < m.w * m.h; k++) img.data.set(${colour}[m.mask[k]], k * 4); g.putImageData(img, 0, 0) })</script>`
@@ -145,7 +154,7 @@ await sheet('readability-silhouettes.jpg', `<html><head><style>${css}</style></h
 ${canvas(order.map((i) => black[i]), "({ '0': [255, 255, 255, 255], '1': [0, 0, 0, 255], '2': [0, 0, 0, 255] })")}</body></html>`, 5 * (SIZE + 18) + 40)
 await sheet('readability-accent.jpg', `<html><head><style>${css}</style></head><body><div class="g">${order.map((i, k) => `<div class="c"><canvas id="c${k}" width="${SIZE}" height="${SIZE}"></canvas>${k + 1} &middot; ${rows[i].accentPx} px</div>`).join('')}</div>
 ${canvas(order.map((i) => accent[i]), "({ '0': [255, 255, 255, 255], '1': [40, 40, 40, 255], '2': [255, 0, 0, 255] })")}</body></html>`, 5 * (SIZE + 18) + 40)
-await sheet('readability-colour.jpg', `<html><head><style>${css} img { display: block; width: ${TILE}px; height: ${TILE}px }</style></head><body><div class="g">${order.map((i, k) => `<div class="c"><img src="file://${join(shots, `${black[i].id}-tile.png`)}">${k + 1}</div>`).join('')}</div></body></html>`, 5 * (TILE + 18) + 40)
+await sheet('readability-colour.jpg', `<html><head><style>${css} img { display: block; width: ${TILE}px; height: ${TILE}px }</style></head><body><div class="g">${colourOrder.map((i, k) => `<div class="c"><img src="file://${join(shots, `${black[i].id}-tile.png`)}">${k + 1}</div>`).join('')}</div></body></html>`, 5 * (TILE + 18) + 40)
 await browser.close()
 
 const md = [
@@ -156,9 +165,11 @@ const md = [
   `- Species: mean pairwise IoU ${summary.meanIoU} (lower is more varied); ${summary.roundTemplate} of ${rows.length} are the default round template`,
   `- Model declared the requested role: ${summary.declaredRoleAgrees} of ${rows.length}`,
   `- Visible accent: min ${summary.minAccentPx} px, median ${summary.medianAccentPx} px of the ${SIZE} px render; share of the figure min ${(summary.minAccentShare * 100).toFixed(1)}%, median ${(summary.medianAccentShare * 100).toFixed(1)}%`,
-  `- Owner-colour parts hanging in front of the face: ${summary.withTails} of ${rows.length} villagers`, '',
-  '| id | name | role | nearest | its role | IoU | accent px | accent share | hanging | owner | round template | species features |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${(r.accentShare * 100).toFixed(1)}% | ${r.tails ?? ''} | ${r.owner} | ${r.template ? 'yes' : ''} | ${r.species ? Object.entries(r.species).map(([k, v]) => `${k} ${v}`).join(', ') : ''} |`),
+  `- Owner colour by the trusted check (gen/checks.ts ownerArea, CPU): min ${summary.minOwnerPx} px, median ${summary.medianOwnerPx} px`,
+  `- Felt moved off the owners' colours: ${summary.nudgedColours} colours on ${summary.nudgedVillagers} of ${rows.length} villagers`, '',
+  'Blind colour sheet: readability-colour.jpg, its key in readability-colour-key.md (a different order from the silhouettes).', '',
+  '| id | name | role | nearest | its role | IoU | accent px | trusted px | accent share | owner | round template | felt moved | species features |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${r.ownerPx ?? ''} | ${(r.accentShare * 100).toFixed(1)}% | ${r.owner} | ${r.template ? 'yes' : ''} | ${r.nudged.map((f) => f.slice(6, 30).replace(" moved to ", " to ")).join('; ')} | ${r.species ? Object.entries(r.species).map(([k, v]) => `${k} ${v}`).join(', ') : ''} |`),
 ].join('\n')
 writeFileSync(join(out, 'readability.md'), md + '\n')
 console.log(md)

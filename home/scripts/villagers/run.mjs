@@ -1,18 +1,17 @@
 // #47 experiment runner: generate felt villagers from a description with `claude -p`,
 // check each in headless Chrome against the dev server, allow one repair pass fed the error.
 // Usage: node scripts/villagers/run.mjs <out-dir> [base-url] [--set round1|readability] [--arms spec,code] [--prefix r2-]
-//        [--only spec-1,code-3] [--concurrency 5] [--model sonnet] [--strategy=a|b|c]
+//        [--only spec-1,code-3] [--concurrency 5] [--model sonnet]
 // Writes home/generated/villagers/<prefix><run-id>/ (git-ignored), <out-dir>/results.json and <out-dir>/voices.json.
 // Round 2: the role is given with the request, the description's mapped voice is the starting voice,
 // and assemble.ts's checks (gen/checks.ts) refuse a hidden face, a floating part, a tiny prop or odd proportions.
-// --strategy (the look regroup, look-strategies.mjs and gen/assemble.ts Strategy) swaps the owner colour's
-// prompt and its trusted handling for the code arm; unset is today's scarf.
+// The persona is the ```json block after the module, read and checked as the host does (host/src/villager-make.ts
+// personaFrom, #42's checkPersona); a refused one is kept with its reason.
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { withStrategy } from './look-strategies.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const home = resolve(here, '../..')
@@ -26,7 +25,6 @@ const model = flag('--model', 'sonnet')
 const set = flag('--set', 'round1')
 const arms = flag('--arms', 'spec,code').split(',')
 const prefix = flag('--prefix', '')
-const strategy = args.find((a) => a.startsWith('--strategy='))?.slice(11) || undefined
 const cwd = flag('--cwd', join(out, 'claude-cwd'))
 mkdirSync(cwd, { recursive: true })
 
@@ -38,10 +36,11 @@ const PROFILES = SETS.profiles ?? {}
 // Templates for the ask, read from the source so the prompt and the merge use the same data.
 // The personality patterns are the host's (host/src/persona.ts TEMPLATES and their card labels).
 const personas = await import('../../../host/src/persona.ts').catch(() => null)
+const { personaFrom } = await import('../../../host/src/villager-make.ts')
 const TEMPLATES = Object.fromEntries(Object.entries(personas?.TEMPLATE_CARDS ?? {}).map(([id, c]) => [id, { id, name: c.label, persona: personas.TEMPLATES[id] }]))
 if (!DESCRIPTIONS) throw new Error(`no description set "${set}"`)
 const style = readFileSync(join(here, 'style.md'), 'utf8')
-const system = { code: withStrategy(`${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, strategy), spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }
+const system = { code: `${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }
 // The code arm's module is saved as text: it is only handed to the sandbox, and a fetched .js would join Vite's module graph and reload the page when rewritten.
 const FILE = { spec: 'villager.json', code: 'villager.code.txt' }
 
@@ -110,13 +109,13 @@ async function job({ arm, n }) {
   if (d.template && !template) throw new Error(`no template "${d.template}"`)
   const ask = `Make a villager: ${d.text}.\n\nIts role is ${d.role}. Its owner is ${d.owner}; the owner's accent colour is ${d.accent}.\n\nStarting voice, from the description: ${JSON.stringify(mapped)}`
     + (template ? `\n\nPersonality template "${template.name}": ${JSON.stringify(template.persona)}` : '')
-  const meta = { arm, file, accent: d.accent, owner: d.owner, role: d.role, description: d.text, profile: PROFILES[d.owner] ?? null, ...(d.template ? { template: d.template } : {}), ...(strategy && arm === 'code' ? { strategy } : {}) }
+  const meta = { arm, file, accent: d.accent, owner: d.owner, role: d.role, description: d.text, profile: PROFILES[d.owner] ?? null, ...(d.template ? { template: d.template } : {}) }
   const first = await claude(system[arm], ask)
   writeFileSync(join(dir, 'raw.txt'), first.text)
   const body = extract(first.text, arm)
   writeFileSync(join(dir, file), body)
   const firstCheck = await verify(id, meta)
-  const row = { id, arm, n, strategy: strategy ?? null, description: d.text, owner: d.owner, accent: d.accent, role: d.role, template: d.template ?? null, profile: meta.profile, mappedVoice: mapped, model, first: { ...first, text: undefined, check: firstCheck } }
+  const row = { id, arm, n, description: d.text, owner: d.owner, accent: d.accent, role: d.role, template: d.template ?? null, profile: meta.profile, mappedVoice: mapped, model, first: { ...first, text: undefined, check: firstCheck } }
   if (!firstCheck.ok) {
     const repairAsk = `${ask}\n\nYour previous file:\n\`\`\`${arm === 'code' ? 'js' : 'json'}\n${body}\n\`\`\`\n\nIt failed with this error:\n${firstCheck.error}\n\nReturn the corrected complete file.`
     const repair = await claude(system[arm], repairAsk)
@@ -126,6 +125,12 @@ async function job({ arm, n }) {
     const repairCheck = await verify(id, { ...meta, file: repairFile })
     row.repair = { ...repair, text: undefined, check: repairCheck }
     if (!repairCheck.ok) writeFileSync(join(dir, 'meta.json'), JSON.stringify({ ...meta, file: repairFile, failed: true }))
+  }
+  // The code arm's persona: the last ```json block of the answer that was kept, through the host's check.
+  if (arm === 'code') {
+    const found = personaFrom(readFileSync(join(dir, row.repair ? 'raw.repair.txt' : 'raw.txt'), 'utf8'))
+    row.persona = 'persona' in found ? found.persona : null
+    row.personaRefused = 'refused' in found ? found.refused : null
   }
   console.log(id, (row.first.wallMs / 1000).toFixed(1), firstCheck.ok, row.repair ? `repair ${(row.repair.wallMs / 1000).toFixed(1)} ${row.repair.check.ok}` : '', firstCheck.error ?? '')
   return row
@@ -150,7 +155,7 @@ for (const row of Object.values(results).sort((a, b) => a.id.localeCompare(b.id)
   const meta = JSON.parse(readFileSync(join(home, 'generated/villagers', row.id, 'meta.json'), 'utf8'))
   const v = await inPage(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${row.id}`])
   voices.push({ id: row.id, arm: row.arm, description: row.description, role: row.role, declaredRole: v.role ?? null, name: v.name ?? null, voice: v.voice ?? null })
-  row.persona = v.persona ?? null
+  if (row.arm !== 'code') row.persona = v.persona ?? null
   row.bark = v.bark ?? null
 }
 writeFileSync(join(out, 'voices.json'), JSON.stringify(voices, null, 1))
@@ -158,13 +163,14 @@ writeFileSync(resultsFile, JSON.stringify(results, null, 1))
 // Personas, for checking that every one is adult, specific and different.
 const cell = (x) => String(x ?? '').replace(/\|/g, '/')
 writeFileSync(join(out, 'personas.md'), [
-  '| id | name | role | template / profile | persona role | speciality | temperament | register | humour | warmth / playful / chatty | humour dial | quirks | topics | bark |',
-  '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+  '| id | name | role | template / profile | persona role | speciality | temperament | register | humour (lean) | decides | quirks | cares | tastes | frictions | mistakes | lengths | bark |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
   ...Object.values(results).sort((a, b) => a.id.localeCompare(b.id)).map((r) => {
     const p = r.persona
     const who = `${r.template ?? '-'} / ${r.profile ? (r.profile.adult ? `adult${r.profile.crudeOptIn ? ', crude opt-in' : ''}` : 'child') : 'unknown'}`
-    if (!p) return `| ${r.id} | | ${r.role ?? ''} | ${who} | (no persona) | | | | | | | | | ${cell(r.bark)} |`
-    return `| ${r.id} | ${cell(voices.find((v) => v.id === r.id)?.name)} | ${r.role ?? ''} | ${who} | ${cell(p.role)} | ${cell(p.speciality)} | ${p.temperament} | ${p.register} | ${p.humour} | ${p.dials.warmth} / ${p.dials.playful} / ${p.dials.chatty} | ${p.dials.humour} | ${p.quirks.map(cell).join('; ')} | ${p.topics.map(cell).join('; ')} | ${cell(r.bark)} |`
+    if (!p) return `| ${r.id} | | ${r.role ?? ''} | ${who} | (no persona${r.personaRefused ? `: ${cell(r.personaRefused)}` : ''}) | | | | | | | | | | | | ${cell(r.bark)} |`
+    const list = (xs) => (xs ?? []).map(cell).join('; ')
+    return `| ${r.id} | ${cell(p.name)} | ${r.role ?? ''} | ${who} | ${cell(p.role)} | ${cell(p.speciality)} | ${cell(p.temperament)} | ${cell(p.register)} | ${cell(p.humour.style)} (${p.humour.lean}) | ${cell(p.decides)} | ${list(p.quirks)} | ${list(p.cares)} | ${list(p.tastes)} | ${list(p.frictions)} | ${cell(p.mistakes)} | ${p.lengths.card} / ${p.lengths.table} / ${p.lengths.long} | ${cell(r.bark)} |`
   }),
 ].join('\n') + '\n')
 await browser.close()

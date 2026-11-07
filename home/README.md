@@ -950,6 +950,66 @@ keeper and messenger. Both missed the same three, each a mark lost against the s
 outline: the hedgehog maker's lens among its spines, the snail gardener's sun hat against its
 shell, and the sheep carer's stocking cap against its wool.
 
+### Look regroup and round 5 (November 7, 2026): the role mark is the owner's colour
+
+Round 4's scarf tail read as a tongue on all 8 reference villagers, and marks got lost on busy
+bodies. The regroup (`screenshots/villager-gen/LEARNING-look.md`) tried three ways to show the owner:
+a tidy band (A), a chest badge (B), and the role mark dyed in the owner's colour (C). Opus and GPT-6.1
+Sol both picked C in a blind test. C is now the only look. The A and B code is gone and stays in Git
+at c1a54c6.
+
+- **Prompt** (`style.md` rule 3, `arm-code.md`): there is no scarf, and the model never uses the accent.
+  It makes the mark in any colour and passes every part to `villager.mark()`. The host's live maker
+  (`host/src/villager-make.ts`) reads the same files, and the setup scene uses the same `assemble()`, so
+  both get C without a flag. The keeper's pencil is now fat (at least 0.08 H) with an eraser. The
+  maker's lens has a thick rim. Eye stalks stand in front of the sun hat's brim. `arm-code.md` gives a
+  one-piece bent-cone recipe for the carer's cap (cone vertices bent, no separate segments).
+- **Dye** (`gen/assemble.ts`): every marked part gets the owner's felt.
+- **Body felt** (`gen/checks.ts` `OWNER_CLASH`, the one threshold): a felt colour with OKLCh chroma of
+  at least 0.085 within 30° of the hue of any owner accent (`OWNER_ACCENTS`) or the villager's own
+  accent has its hue and chroma pulled towards oatmeal, with its lightness kept. Eyes and the held prop
+  are left alone, because a wooden spoon is chroma 0.10 in mustard's band. Each move is a fix line,
+  `felt: #from moved to #to`.
+- **Owner area** (`ownerArea`): the camera of `load.ts silhouettes()` drawn into a depth buffer on the
+  CPU. It is within 4% of the GPU render on the regroup's eight (the tortoise's pencil: 48 against 49 px).
+  A mark under `OWNER_PX` = 100 px is refused with a reason that names it and asks for a fatter one.
+  B's badges read at 100 to 121 px.
+- **Held prop**: it must come within 0.005 of a hand's own box (`LIMITS.grip`, triangle edges sampled in
+  the hand's axes). Before, it only had to come within 0.02 of any part's box. This refuses round 4's
+  owl (its book stands 2 cm off) and walrus. Round 3's heron passes; its slate sits 1.5 mm in front of
+  the mitten.
+- `run.mjs` reads the persona from the ```json block after the module with the host's `personaFrom`
+  (#42's `checkPersona`) and keeps `personaRefused`. `readability.mjs` adds the trusted owner area, the
+  moved felt, and a blind colour sheet in its own shuffle with `readability-colour-key.md`.
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
+`screenshots/villager-gen/round5/` (`repairs.md`, `personas-readability.md`).
+
+| Measure | Round 4 (scarf) | Regroup C (8) | Round 5 (20) |
+| --- | --- | --- | --- |
+| Usable, repaired | 20, 1 | 8, 0 | 20, 1 (r5-17 mouse: its own head part hid the eyes from above) |
+| Owner colour, min / median px | 89 / 204 (scarf) | 44 / 544 | 161 / 422 (trusted check; render 170 / 421) |
+| Refused for too little owner colour, or a prop not in hand | | | 0, 0 |
+| Felt moved off the owners' colours | | | 1 colour on 1 villager (a fox, a step past the gate) |
+| Nearest silhouette same role, mean IoU | 15%, 0.55 | | 25%, 0.553 |
+| Round template, declared role | 0, 20 of 20 | 0, 8 of 8 | 0, 20 of 20 |
+| Cost | $2.15 | $0.70 | $2.26 |
+
+The lowest marks are the two keepers' pencils, at 161 and 186 px; the regroup's thin pencil had 44.
+With the prompt asking for muted felt away from the owners' hues, Sonnet kept off them by itself: one
+colour was moved. The blind owner and role test on `readability-colour.jpg` is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r5- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=49 --close=r5-05,r5-18
+```
+
+Earlier rounds still load with `&checks=off`, but their marks are now dyed and their scarves moved
+towards oatmeal, so their old sheets will not render the same again.
+`node scripts/check-villager-gen.mjs` passes 41 of 41, `node scripts/check-prop-sandbox.mjs --port=5336`
+passes 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck`
+passes.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
