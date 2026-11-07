@@ -11,7 +11,8 @@ export const BLUE_HOUR: Theme = {
   about: 'The kitchen just after sunset: cool blue light through the window, the lamp glowing warm, the room settling down for the evening.',
   light: {
     key: { color: '#8aa2e8', tint: 0.75, gain: 0.32 },
-    fill: { color: '#6f86d8', tint: 0.6, gain: 0.8, ground: '#4c4466' },
+    // The sky fill cooler and lower, so the walls fall off into blue-grey away from the lamp.
+    fill: { color: '#6a80d8', tint: 0.7, gain: 0.64, ground: '#4c4466' },
     rim: { color: '#a0b0ff', tint: 0.6, gain: 0.75 },
     practical: { color: '#ffa850', tint: 0.4, gain: 2.1 },
     exposure: 1.18,
