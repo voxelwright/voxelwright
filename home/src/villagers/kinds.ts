@@ -1,7 +1,7 @@
 // Four art directions for villagers on one rig. Every texture is painted here in code.
 // Each villager gets its own materials, so the entries glow lights only the one under the pointer.
 import * as THREE from 'three/webgpu'
-import { color, dot, float, materialEmissive, max, mix, normalView, positionLocal, positionViewDirection, pow, smoothstep } from 'three/tsl'
+import { color, dot, float, materialEmissive, max, mix, normalView, positionLocal, positionViewDirection, pow, smoothstep, uniform } from 'three/tsl'
 import { canvas, makeNoise, rng, toTexture } from '../paint'
 import type { Figure, Villager } from './rig'
 
@@ -315,11 +315,15 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   const { root, pose, head } = skeleton(s.name)
   // A warm rim on every felt part, added to emissive so the entries glow still works.
   const rim = () => color('#ffc58a').mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.5)).mul(s.rim)
+  // A soft outline in the owner's colour, raised when the villager is pointed at or written to.
+  const outline = uniform(0)
+  const outlineColour = color(look.accent ?? s.felt)
+  const edge = () => outlineColour.mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 1.8)).mul(outline)
   const felt = (c: string, map: THREE.Texture | null = null) => {
     const m = phys
       ? new THREE.MeshPhysicalNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
       : new THREE.MeshStandardNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1 })
-    m.emissiveNode = materialEmissive.add(rim())
+    m.emissiveNode = materialEmissive.add(rim()).add(edge())
     // The entries hover glow lifts emissive; on soft felt half of it reads as a glow rather than a bleach.
     m.emissiveIntensity = 0.5
     return m
@@ -393,7 +397,7 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
     part(f, mesh(new THREE.SphereGeometry(0.048, 16, 10), felt(s.felt)), 0, 0.03, 0.02).scale.set(1, 0.65, 1.3)
     return f
   })
-  return { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, stepped: true }
+  return { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, stepped: true, outline }
 }
 
 // ─── c: paper cutouts ──────────────────────────────────────────────────────

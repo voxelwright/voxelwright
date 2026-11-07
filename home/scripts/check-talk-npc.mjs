@@ -100,12 +100,29 @@ async function watchTurn(page, ms = 240_000) {
   } while ((s.pending || Object.values(s.cast).some((c) => c.speaking || c.thinking)) && Date.now() - started < ms)
   return samples
 }
-const chip = (page, name) => page.locator('.talk-slip .chip', { hasText: name }).click()
+/** Click a suggestion, opening the folded "…" first if the suggestions are folded away. */
+async function chip(page, name) {
+  if (await page.locator('.talk-slip .chip.ideas').count()) await page.locator('.talk-slip .chip.ideas').click()
+  await page.locator('.talk-slip .chip', { hasText: name }).click()
+}
+/** The suggestions on the slip as shown, and all of them once the "…" is opened. */
+async function chipsOf(page) {
+  const shown = await page.locator('.talk-slip .chip').allTextContents()
+  if (shown.join() === '…') await page.locator('.talk-slip .chip.ideas').click()
+  const all = await page.locator('.talk-slip .chip').allTextContents()
+  await page.locator('.talk-slip .line').focus()
+  return { shown, all }
+}
 /** Record every text the person sees on a villager's card, to prove words are revealed whole. */
 const recordWords = (page, person) => page.evaluate((who) => {
   const el = document.querySelector(`[data-talk-card="${who}"] .words`)
+  const card = el.closest('.talk-card')
   window.__seen = []
-  new MutationObserver(() => window.__seen.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true })
+  window.__heights = []
+  new MutationObserver(() => {
+    window.__seen.push(el.textContent)
+    window.__heights.push({ words: el.textContent.length, h: card.offsetHeight })
+  }).observe(el, { childList: true, characterData: true, subtree: true })
 }, person)
 
 try {
@@ -174,7 +191,13 @@ try {
     await page.mouse.move(p.x, p.y)
     await page.waitForTimeout(500)
     const hover = await page.evaluate(() => ({ hovered: window.village.kernel.root.get('entries').hovered, tags: [...document.querySelectorAll('.talk-tag.shown')].map((t) => t.textContent) }))
-    check('hover shows the villager\'s name tag', hover.hovered === 'villager-sam' && hover.tags.join() === "TuftSam's", hover)
+    const tagAt = await page.evaluate(() => {
+      const r = document.querySelector('.talk-tag.shown').getBoundingClientRect()
+      const head = window.village.talk.screen('sam', 1)
+      return { x: r.left + r.width / 2, bottom: r.bottom, top: r.top, left: r.left, right: r.right, headX: head.x, headTop: head.y, w: innerWidth, glow: window.village.talk.state().cast.sam.glow }
+    })
+    const overHead = Math.abs(tagAt.x - tagAt.headX) < 40 && tagAt.bottom <= tagAt.headTop + 4 && tagAt.bottom >= tagAt.headTop - 40 && tagAt.top >= 0 && tagAt.left >= 0 && tagAt.right <= tagAt.w
+    check('hover shows "Sam\'s Tuft" just over Tuft\'s own head, inside the window, and outlines Tuft', hover.hovered === 'villager-sam' && hover.tags.join() === "Sam'sTuft" && overHead && tagAt.glow > 0.5, { hover, tagAt })
     await clickVillager(page, 'sam')
     const talking = await until(page, (s) => s.mode === 'talk' && s.cards.sam, 3000)
     await page.waitForTimeout(300)
@@ -197,13 +220,33 @@ try {
       return i >= 0 && (i + t.length === of.length || /\s/.test(of[i + t.length]))
     }
     const broken = seen.filter((t) => !whole(t, reply.text) && !whole(t, hello))
-    const sized = await page.evaluate(() => {
+    const ended = await page.evaluate(() => {
       const card = document.querySelector('[data-talk-card="sam"]')
-      return { cue: card.querySelector('.cue').hidden, sizer: card.querySelector('.sizer').textContent, words: card.querySelector('.words').textContent }
+      return { cue: card.querySelector('.cue').hidden, sizer: Boolean(card.querySelector('.sizer')), words: card.querySelector('.words').textContent, more: !card.querySelector('.more').hidden, kept: window.village.talk.state().cards.sam?.kept }
     })
-    check('replies are revealed in whole words, with a "still talking" cue until done, on a card sized for the page', seen.length >= 3 && !broken.length && cued && sized.cue && sized.sizer === sized.words, { seen: seen.length, broken, cued, sized })
-    const page1 = await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .words')?.textContent)
-    check('the card shows at most two sentences, with "go on" for more', page1 && (page1.match(/[.!?](\s|$)/g)?.length ?? 0) <= 2, page1)
+    check('replies are revealed in whole words, with a "still talking" cue until done', seen.length >= 3 && !broken.length && cued && ended.cue, { seen: seen.length, broken, cued, ended })
+    // The card grows with the words: no hidden sizer, short at the first words and taller as lines arrive, never shrinking within a page.
+    const heights = (await page.evaluate(() => window.__heights)).filter((x) => x.words > 0)
+    const replyHeights = heights.slice(heights.findIndex((x, i) => i > 0 && x.words < heights[i - 1].words) + 1)
+    const grows = replyHeights.length >= 3 && replyHeights.at(-1).h > replyHeights[0].h + 20 && replyHeights.every((x, i) => i === 0 || x.h >= replyHeights[i - 1].h)
+    check('the card grows as words arrive, with no empty pre-sized card', !ended.sizer && grows, { first: replyHeights[0], last: replyHeights.at(-1), samples: replyHeights.length })
+    check('a short reply stays whole on one page, with no "go on"', ended.words === reply.text && !ended.more && ended.kept === '', ended)
+
+    // A long reply turns its page only when the next sentence would overflow, keeping the first page as a dimmed line above.
+    const long = 'The first thing is the soup, which wants another hour on the stove. Then the bread needs shaping, and the oven needs to be warm before that. After that we could set the table together, with the blue plates. The candles are in the second drawer, by the matches. And someone should call Grandma to say dinner is at seven. She likes to know early so she can bring the pie.'
+    await page.evaluate((t) => window.village.talk.say('sam', t), long)
+    await page.waitForFunction(() => !document.querySelector('[data-talk-card="sam"] .more').hidden, null, { timeout: 8000, polling: 50 })
+    const firstPage = await state(page)
+    const shown1 = await page.evaluate(() => {
+      const card = document.querySelector('[data-talk-card="sam"]')
+      const words = card.querySelector('.words')
+      return { text: words.textContent, lines: Math.round(words.getBoundingClientRect().height / (19 * 1.42)), more: !card.querySelector('.more').hidden }
+    })
+    // "go on" turns the page (the card is still gliding, so the click is dispatched rather than aimed).
+    await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .more').click())
+    await page.waitForTimeout(300)
+    const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).opacity, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
+    check('a long reply turns its page only when it would overflow, and keeps the first page as a dimmed line above', firstPage.cards.sam && shown1.more && shown1.lines <= 6 && shown1.lines >= 4 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && Number(shown2.before) < 0.9 && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
 
     // Escape: back to chores and the room.
     await page.keyboard.press('Escape')
@@ -222,6 +265,8 @@ try {
     await watchTurn(page, 20_000)
     const alexReply = (await jsonl('alex', 'conversation.jsonl')).at(-1)
     check('Tab and Enter start a talk, and typing and Enter get a reply', kb.partner === 'alex' && alexReply?.from === 'villager' && (await state(page)).cards.alex?.text === alexReply.text, { partner: kb.partner, alexReply })
+    const afterDinner = await chipsOf(page)
+    check('after the first exchange the suggestions fold behind "…", and a typed dinner question drops "What\'s for dinner?"', afterDinner.shown.join() === '…' && !afterDinner.all.includes("What's for dinner?") && afterDinner.all.includes('Come sit with me'), afterDinner)
 
     // Invite two to the table.
     await chip(page, 'Come sit with me')
@@ -243,6 +288,24 @@ try {
     const litRight = round.filter((s) => s.speaker && s.lit.length).every((s) => s.lit.length === 1 && s.lit[0] === s.speaker)
     const answered = { alex: (await jsonl('alex', 'conversation.jsonl')).slice(before.alex), sam: (await jsonl('sam', 'conversation.jsonl')).slice(before.sam) }
     check('a line to the table is answered by both in turn, one speaker at a time with a lit name tag', order.length === 2 && !overlap && litRight && answered.alex.length === 2 && answered.sam.length === 2, { order, overlap, litRight, answered })
+    const tableChips = await chipsOf(page)
+    check('at the table a line about the weekend drops "What\'s everyone up to?"; the rest fold behind "…"', tableChips.shown.join() === '…' && tableChips.all.join() === 'Thanks, everyone', tableChips)
+    // Every card and tag on screen sits inside the window, and each tail points at its own villager's head.
+    const layout = await page.evaluate(() => [...document.querySelectorAll('.talk-card.shown, .talk-tag.shown')].map((el) => {
+      const r = el.getBoundingClientRect()
+      const who = el.dataset.talkCard
+      const head = who ? window.village.talk.screen(who, 0.85) : null
+      const tail = el.dataset.tail === 'down' ? r.left + parseFloat(getComputedStyle(el).getPropertyValue('--tail')) : null
+      return { who, inside: r.top >= 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, tailOff: tail === null || !head ? 0 : Math.abs(tail - head.x) }
+    }))
+    check('at the table every card and tag is inside the window, with each tail over its own villager', layout.length >= 1 && layout.every((l) => l.inside && l.tailOff < 40), layout)
+
+    // A walker brought close to the camera in the table shot fades out, and comes back once it leaves.
+    await page.evaluate(() => window.village.talk.walk('mia', 'seatNear'))
+    const crowded = await until(page, (s) => s.cast.mia.crowding && s.cast.mia.fade < 0.05, 25_000)
+    await page.evaluate(() => window.village.talk.walk('mia', null))
+    const returned = await until(page, (s) => !s.cast.mia.crowding && s.cast.mia.fade > 0.95, 25_000)
+    check('a walker that comes between the camera and the table fades out, then back in once clear', crowded.cast.mia.crowding && crowded.cast.mia.fade < 0.05 && returned.cast.mia.fade > 0.95, { crowded: crowded.cast.mia, returned: { fade: returned.cast.mia.fade, crowding: returned.cast.mia.crowding } })
 
     // Starting with a name addresses only that villager, with last round as marked context.
     const named = { alex: (await jsonl('alex', 'conversation.jsonl')).length, sam: (await jsonl('sam', 'conversation.jsonl')).length }
@@ -317,6 +380,10 @@ try {
       return { shown: el.classList.contains('shown'), to: el.dataset.to, tab: el.querySelector('.tab')?.textContent, placeholder: el.querySelector('.line').placeholder }
     })
     const idle = await slipOf()
+    await page2.locator('.talk-slip .line').focus()
+    const marked = await until(page2, (s) => s.cast.alex.glow > 0.5 && s.cast.alex.attending, 3000)
+    check('?slip=always marks the villager written to: a soft outline, and it turns to you while you write', marked.cast.alex.glow > 0.5 && marked.cast.alex.attending && marked.cast.sam.glow < 0.1, { alex: marked.cast.alex, sam: marked.cast.sam.glow })
+    await page2.locator('.talk-slip .line').blur()
     await page2.focus('[data-entry="villager-sam"]')
     await page2.keyboard.press('Enter')
     await until(page2, (s) => s.mode === 'talk' && s.partner === 'sam', 3000)
@@ -330,7 +397,7 @@ try {
     const direct = await until(page2, (s) => s.mode === 'talk' && s.partner === 'alex' && !s.pending && s.cards.alex?.finished, 20_000)
     const toAlex = (await jsonl('alex', 'conversation.jsonl')).slice(before2)
     check('without ?slip=always the slip is hidden in the room', !roomSlip, roomSlip)
-    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "toDumplingAlex's" && idle.placeholder === 'Write to Dumpling…' && toSam.to === 'sam' && toSam.tab === "toTuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
+    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === 'toDumpling' && idle.placeholder === 'Write to Dumpling…' && toSam.to === 'sam' && toSam.tab === 'toTuft' && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
     await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.

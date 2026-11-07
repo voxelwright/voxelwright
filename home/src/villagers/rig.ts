@@ -34,6 +34,8 @@ export interface Figure {
   stepped?: boolean
   /** Per-frame touches particular to a direction (paper legs, card facing). */
   touch?(v: Villager): void
+  /** Strength of a soft outline in the owner's colour, 0 to 1, where the direction has one. */
+  outline?: { value: number }
 }
 
 export interface Task { spot: string; stay: number }
@@ -71,6 +73,8 @@ export class Villager {
   thinking = false
   /** Saying something right now: leans in and nods. */
   speaking = false
+  /** Being written to from across the room: turns part way to the person and looks up. */
+  attending = false
   /** Called when a chore at a spot is finished, before moving on. */
   onDone?: (spot: string) => void
   /** Gait phase in cycles, and the blends the pose reads. */
@@ -305,6 +309,7 @@ export class Villager {
     // A chosen villager turns to the person; seated ones only turn their head.
     const greeting = this.greetU < 1 && this.state === 'work' ? Math.sin(Math.PI * Math.min(1, this.greetU * 1.25)) : 0
     if (greeting) goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.8, 0.8) * 0.7 * greeting
+    else if (this.attending && this.state === 'work') goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.9, 0.9) * 0.6
     if (this.chosen && this.state !== 'sit' && this.state !== 'hop') goalYaw = toCamera
     // Speaking from a chair, it turns part way round to the person.
     else if (this.speaking && this.state === 'sit') goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.7, 0.7) * 0.8
@@ -468,7 +473,7 @@ export class Villager {
       this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
-    const headGoal = this.chosen || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
+    const headGoal = this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2)
