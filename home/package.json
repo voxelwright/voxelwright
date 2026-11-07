@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "measure": "node scripts/measure.mjs"
+    "measure": "node scripts/measure.mjs",
+    "perf-gate": "node scripts/perf-gate.mjs"
   },
   "dependencies": {
     "cordis": "4.0.0-rc.12",
