@@ -44,6 +44,8 @@ export interface Glow { under: string; color: Hex; tint: number }
 export interface Pools { pools: Partial<Record<Spot, Pool>>; lamps: Partial<Record<Fixture, Lamp>>; retint: Retint[]; glows?: Glow[] }
 
 export const POOLS: Record<string, Pools> = {
+  // Interiors polish (#50): the scorer found the warm pools weakened after the haze fix, so the
+  // neon pendant is back to a strong amber (gain 3.4) and blue hour's pools are 1.5 times stronger.
   // Neon night: the kitchen must not fall to near-black and the lounge must not glow hot pink.
   // The pendant turns amber over the table; the counter, the sofa and the armchair each get
   // their own lamp's light; the lounge's glow goes cool and low; the magenta rim is halved.
@@ -60,7 +62,7 @@ export const POOLS: Record<string, Pools> = {
       reading: { color: '#ffb066', intensity: 2.2, distance: 2.4 },
     },
     retint: [
-      { light: 'lamp', color: '#ffae62', tint: 0.85, gain: 2.6, distance: 3.6, decay: 1.6 },
+      { light: 'lamp', color: '#ffae62', tint: 0.85, gain: 3.4, distance: 3.6, decay: 1.6 },
       { light: 'lounge glow', color: '#4a50ff', tint: 0.8, gain: 0.28 },
       { light: 'rim light', gain: 0.5 },
     ],
@@ -75,10 +77,10 @@ export const POOLS: Record<string, Pools> = {
   // and the armchair; between them the cool window light carries the room.
   'blue-hour': {
     pools: {
-      dining: { r: 1.2, strength: 0.16, color: '#ffae60', stretch: [1.2, 1] },
-      counter: { r: 0.8, strength: 0.14, color: '#ffae60', stretch: [1.3, 0.8] },
-      lounge: { r: 0.9, strength: 0.18, color: '#ffae60', stretch: [1, 1.2] },
-      reading: { r: 0.75, strength: 0.18, color: '#ffae60' },
+      dining: { r: 1.2, strength: 0.24, color: '#ffae60', stretch: [1.2, 1] },
+      counter: { r: 0.8, strength: 0.21, color: '#ffae60', stretch: [1.3, 0.8] },
+      lounge: { r: 0.9, strength: 0.27, color: '#ffae60', stretch: [1, 1.2] },
+      reading: { r: 0.75, strength: 0.27, color: '#ffae60' },
     },
     lamps: {
       counter: { color: '#ffb070', intensity: 1.0, distance: 2.2 },
@@ -90,6 +92,12 @@ export const POOLS: Record<string, Pools> = {
       { light: 'lounge glow', color: '#7088e0', tint: 0.6, gain: 0.55 },
       { light: 'sun', gain: 1.35 },
     ],
+  },
+  // 16-bit: no pools; the lounge's own glow banded into a hard disc on the right wall at 0.6-stop light steps.
+  'sixteen-bit': {
+    pools: {},
+    lamps: {},
+    retint: [{ light: 'lounge glow', gain: 0.5 }],
   },
 }
 
