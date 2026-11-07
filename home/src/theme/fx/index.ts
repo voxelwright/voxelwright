@@ -19,8 +19,8 @@ export interface Fx {
   hdr?(color: THREE.Node<'vec4'>, ctx: FxContext): THREE.Node<'vec4'>
   /** Display colour (tone mapped, sRGB) at the end of the chain. */
   display?(color: THREE.Node<'vec4'>, ctx: FxContext): THREE.Node<'vec4'>
-  /** Replaces bloom, vignette and grain settings this stage cannot live with. */
-  quiet?: { bloom?: boolean; grain?: boolean; vignette?: boolean }
+  /** Replaces bloom, vignette, grain and the low tier's FXAA where this stage cannot live with them. */
+  quiet?: { bloom?: boolean; grain?: boolean; vignette?: boolean; fxaa?: boolean }
   dispose?(): void
 }
 

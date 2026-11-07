@@ -46,7 +46,7 @@ export default {
     const stages = look.stages.map(makeFx)
     const fxContext: FxContext = { stage, scenePass, depth }
     for (const s of stages) s.scene?.(fxContext)
-    const quiet = (key: 'bloom' | 'grain' | 'vignette') => stages.some((s) => s.quiet?.[key])
+    const quiet = (key: 'bloom' | 'grain' | 'vignette' | 'fxaa') => stages.some((s) => s.quiet?.[key])
     const normalTexture = gtao || gi ? scenePass.getTextureNode('normal') : null
     const normal = normalTexture && sample((at) => unpackRGBToNormal(normalTexture.sample(at)))
 
@@ -96,15 +96,17 @@ export default {
     // The low tier has no MSAA, so FXAA softens stair-stepping on wall caps and silhouettes.
     // It reads display colours, so the tone mapping and colour space are applied before it.
     // Theme stages that work in display space (palettes, dithering) take the same route.
+    // A pixel-art stage quiets FXAA: it would smear every art-pixel boundary.
     const displayStages = stages.filter((s) => s.display)
-    let finalNode = (low ? fxaa(renderOutput(filmed)) : filmed) as unknown as THREE.Node<'vec4'>
+    const smooth = low && !quiet('fxaa')
+    let finalNode = (smooth ? fxaa(renderOutput(filmed)) : filmed) as unknown as THREE.Node<'vec4'>
     if (displayStages.length) {
-      finalNode = low ? finalNode : renderOutput(filmed)
+      finalNode = smooth ? finalNode : renderOutput(filmed)
       for (const s of displayStages) finalNode = s.display!(finalNode, fxContext)
     }
 
     const pipeline = new THREE.RenderPipeline(stage.renderer, finalNode)
-    if (low || displayStages.length) pipeline.outputColorTransform = false
+    if (smooth || displayStages.length) pipeline.outputColorTransform = false
     ctx.effect(() => {
       const remove = stage.addDrawPass(() => pipeline.render())
       return () => {
