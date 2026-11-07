@@ -91,7 +91,18 @@ try {
     await settle(page)
     const s = await page.evaluate(() => {
       const scene = window.village.kernel.root.get('stage').scene
-      return { talk: Boolean(scene.getObjectByName('talk notebook')), table: scene.getObjectByName('notebook')?.visible, entries: document.querySelectorAll('[data-entry="notebook"]').length, offscreen: document.querySelectorAll('.village-offscreen').length }
+      // The closed book's extent, every visible part: its cloth spine once had a 1 m radius and drew a red arc through the table (#42).
+    const book = scene.getObjectByName('talk notebook')
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    book?.updateWorldMatrix(true, true)
+    book?.traverse((o) => {
+      if (!o.isMesh) return
+      for (let x = o; x; x = x.parent) if (!x.visible) return
+      o.geometry.computeBoundingBox()
+      const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)
+      for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], b.min.getComponent(i)); hi[i] = Math.max(hi[i], b.max.getComponent(i)) }
+    })
+    return { size: hi.map((h, i) => +(h - lo[i]).toFixed(3)), talk: Boolean(book), table: scene.getObjectByName('notebook')?.visible, entries: document.querySelectorAll('[data-entry="notebook"]').length, offscreen: document.querySelectorAll('.village-offscreen').length }
     })
     check('without the flag the table notebook is unchanged and the talk plugin adds nothing', ready.ok && !s.talk && s.table === true && s.entries === 1 && s.offscreen === 2, s)
     await context.close()
@@ -108,9 +119,21 @@ try {
   await settle(page, 1200)
   const scene0 = await page.evaluate(() => {
     const scene = window.village.kernel.root.get('stage').scene
-    return { talk: Boolean(scene.getObjectByName('talk notebook')), table: scene.getObjectByName('notebook')?.visible, entries: document.querySelectorAll('[data-entry="notebook"]').length, closed: scene.getObjectByName('talk left half').rotation.z }
+    // The closed book's extent, every visible part: its cloth spine once had a 1 m radius and drew a red arc through the table (#42).
+    const book = scene.getObjectByName('talk notebook')
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    book?.updateWorldMatrix(true, true)
+    book?.traverse((o) => {
+      if (!o.isMesh) return
+      for (let x = o; x; x = x.parent) if (!x.visible) return
+      o.geometry.computeBoundingBox()
+      const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)
+      for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], b.min.getComponent(i)); hi[i] = Math.max(hi[i], b.max.getComponent(i)) }
+    })
+    return { size: hi.map((h, i) => +(h - lo[i]).toFixed(3)), talk: Boolean(book), table: scene.getObjectByName('notebook')?.visible, entries: document.querySelectorAll('[data-entry="notebook"]').length, closed: scene.getObjectByName('talk left half').rotation.z }
   })
   check('with the flag the talk notebook takes the table book\'s place, closed, as the one notebook entry', ready.ok && scene0.talk && scene0.table === false && scene0.entries === 1 && Math.abs(scene0.closed + Math.PI) < 0.01, { ready: ready.ok, ...scene0 })
+  check('the closed book is book-sized: no part reaches past its covers (under 0.8 m across, 0.1 m tall)', scene0.size[0] < 0.8 && scene0.size[1] < 0.1 && scene0.size[2] < 0.8, scene0.size)
 
   // Open with the keyboard: Tab to the notebook, Enter.
   const seat = await cam(page)
@@ -209,7 +232,18 @@ try {
   await settle(page)
   const again = await page.evaluate(() => {
     const scene = window.village.kernel.root.get('stage').scene
-    return { talk: Boolean(scene.getObjectByName('talk notebook')), table: scene.getObjectByName('notebook')?.visible, frameHooks: window.village.snapshot().frameHooks, entries: document.querySelectorAll('[data-entry="notebook"]').length }
+    // The closed book's extent, every visible part: its cloth spine once had a 1 m radius and drew a red arc through the table (#42).
+    const book = scene.getObjectByName('talk notebook')
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    book?.updateWorldMatrix(true, true)
+    book?.traverse((o) => {
+      if (!o.isMesh) return
+      for (let x = o; x; x = x.parent) if (!x.visible) return
+      o.geometry.computeBoundingBox()
+      const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)
+      for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], b.min.getComponent(i)); hi[i] = Math.max(hi[i], b.max.getComponent(i)) }
+    })
+    return { size: hi.map((h, i) => +(h - lo[i]).toFixed(3)), talk: Boolean(book), table: scene.getObjectByName('notebook')?.visible, frameHooks: window.village.snapshot().frameHooks, entries: document.querySelectorAll('[data-entry="notebook"]').length }
   })
   check('loading it again restores it', again.talk && again.table === false && again.frameHooks === snap.frameHooks && again.entries === 1, again)
   check('no page errors', errors.length === 0, errors)

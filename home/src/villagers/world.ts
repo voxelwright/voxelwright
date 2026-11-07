@@ -1,6 +1,10 @@
-// Where villagers can stand in the kitchen and how they get between places.
-// Hand-placed against the furniture in layout.ts, cabinets, chairs, table and fridge.
+// Where villagers can stand in the house and how they get between places.
+// Hand-placed against the furniture in layout.ts, cabinets, chairs, table and fridge,
+// and, past the doorway, the living room's sofa, coffee table and reading chair.
 import * as THREE from 'three/webgpu'
+import { DOORWAY, KITCHEN, LIVING_X, WALL_T } from '../layout'
+
+const DOOR_Z = (DOORWAY.z0 + DOORWAY.z1) / 2
 
 const SEAT_TOP = 0.515 // chair seat 0.45 plus its cushion
 
@@ -11,6 +15,11 @@ const NODES: Record<string, [number, number]> = {
   r0: [1.55, -0.72], r1: [1.6, -0.3], r2: [2.2, -0.7],
   // Open floor in front of the table (#42 talk prototype).
   f0: [-1.75, 1.3], f1: [-0.3, 1.45], f2: [1.15, 1.3], f3: [1.85, 0.45],
+  // Through the doorway in the shared wall (#42 one house): along the kitchen's right wall
+  // behind the reading chair, a step either side of the doorway, then round the basket
+  // and the coffee table to the living room's plant corner.
+  k0: [KITCHEN.x1 - 0.55, 1.05], d0: [KITCHEN.x1 - 0.4, DOOR_Z], d1: [KITCHEN.x1 + WALL_T + 0.55, DOOR_Z],
+  m0: [LIVING_X - 1.6, 2.15], m1: [LIVING_X - 0.65, 1.15], m2: [LIVING_X + 0.4, -0.75],
 }
 const EDGES: [string, string][] = [['l0', 'l1'], ['l1', 'l2'], ['l2', 'b0'], ['b0', 'b1'], ['b1', 'b2'], ['b2', 'r0'], ['r0', 'r1'], ['r0', 'r2'], ['r1', 'r2']]
 /**
@@ -20,6 +29,7 @@ const EDGES: [string, string][] = [['l0', 'l1'], ['l1', 'l2'], ['l2', 'b0'], ['b
 const OPEN_EDGES: [string, string][] = [
   ...EDGES.filter(([a, b]) => !(a === 'b0' && b === 'b1')),
   ['l0', 'f0'], ['f0', 'f1'], ['f1', 'f2'], ['f2', 'f3'], ['f3', 'r1'],
+  ['f3', 'k0'], ['k0', 'd0'], ['d0', 'd1'], ['d1', 'm0'], ['m0', 'm1'], ['m1', 'm2'],
 ]
 export type Paths = 'kitchen' | 'open'
 /** On open paths some spots are reached from a different node, so the walk avoids others' workplaces. */
@@ -51,6 +61,8 @@ export const SPOTS: Record<string, Spot> = {
   seatLeft: { at: [-1.2, -0.62], face: Math.PI / 2, via: 'l1', seat: chairSeat(-0.7, -0.49, 0) },
   plantSide: { at: [1.04, -1.48], face: -2.58, via: 'b2' },
   seatNear: { at: [0.62, 1.05], face: -Math.PI / 2, via: 'f2', seat: chairSeat(0.2, 0.86, Math.PI) },
+  // The living room's plant stand and grow shelves, reached through the doorway (open paths only).
+  loungePlants: { at: [LIVING_X + 0.75, -1.3], face: Math.PI * 0.85, via: 'm2' },
 }
 /** Where the talk prototype puts its fourth chair, facing the table. */
 export const NEAR_CHAIR = { x: 0.2, z: 0.86, yaw: Math.PI }
