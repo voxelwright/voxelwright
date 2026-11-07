@@ -8,7 +8,9 @@
 //
 // Writes host/proof/<timestamp>-promote.json. Exits 1 when any step fails.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import fs from 'node:fs'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -20,6 +22,7 @@ import { core, register, type Executor } from '../src/elder.ts'
 import { ELDER_IDENTITY, install } from '../src/live.ts'
 import homeChecks from '../src/plugins/home-checks.ts'
 import { exec, killGroup, mustGit } from '../src/proc.ts'
+import { promote, rollback } from '../src/promote.ts'
 import { runOnce } from '../src/run.ts'
 
 const { values } = parseArgs({ options: { port: { type: 'string', default: '5183' }, keep: { type: 'boolean', default: false } } })
@@ -64,6 +67,13 @@ const executors: Record<string, Executor> = {
     },
   },
   'stub-fails': { run: async () => ({ ...completed, status: 'failed', exitCode: 1 }) },
+  'stub-gitignore': {
+    async run(task) {
+      await writeFile(join(task.dir, PLUGIN), promobox)
+      await writeFile(join(task.dir, 'home/src/plugins/.gitignore'), '*.ts\n')
+      return completed
+    },
+  },
 }
 
 async function candidate(executor: string) {
@@ -155,6 +165,8 @@ try {
   await page.goto(`http://127.0.0.1:${port}/?q=low`)
   const ready = await page.evaluate(() => (window as unknown as { village: { ready: (ms: number) => Promise<{ ok: boolean }> } }).village.ready(30_000))
   check('live page ready', ready.ok)
+  const csp = (await fetch(`http://127.0.0.1:${port}/`)).headers.get('content-security-policy') ?? ''
+  check('live-csp: the live server sends the home\'s Content Security Policy', /default-src 'self'/.test(csp) && /connect-src 'self'(;|$)/.test(csp), csp)
   await page.evaluate(() => Object.assign(window, { promoteMarker: 'still here' }))
   await new Promise((r) => setTimeout(r, 1000))
   const before = await page.screenshot()
@@ -212,6 +224,67 @@ try {
   await mustGit([...ELDER_IDENTITY, 'commit', '--quiet', '-am', 'A manual edit'], live)
   await refusal('rollback past a manual edit', ['rollback', 'last'], 'manual-edit')
   check('page never reloaded', loads === 1, { loads })
+
+  // 7. Regressions for Sentinel's promotion findings, in process.
+  const head = () => mustGit(['rev-parse', 'HEAD'], live)
+  const clean = async () => (await mustGit(['status', '--porcelain'], live)) === ''
+  const settle = (p: Promise<{ result: string; reason?: string }>) => p.then((o) => o.reason ?? o.result, (e) => `threw: ${e}`)
+  const promoteGood = () => promote({ candidate: good.id as string, approve: true, candidatesRoot, live })
+  await mustGit(['rm', '--quiet', '--', PLUGIN], live)
+  await mustGit([...ELDER_IDENTITY, 'commit', '--quiet', '-m', 'Remove promobox by hand'], live)
+
+  // Two promotions at once: one goes in, the other is refused, and history has one commit.
+  let h0 = await head()
+  const pair = (await Promise.all([settle(promoteGood()), settle(promoteGood())])).sort()
+  const added = (await mustGit(['rev-list', '--count', `${h0}..HEAD`], live)).trim()
+  check('promote-concurrent-refused: a second promotion at the same time is refused', pair.join() === 'live-busy,promoted' && added === '1' && (await clean()), { pair, added })
+  await settle(rollback({ target: 'last', live }))
+  await writeFile(join(live, '.git', 'village-promote.lock'), '999999')
+  const stale = await settle(promoteGood())
+  check('promote-stale-lock-refused: a lock left behind is refused and named', stale === 'live-busy' && (await lastResult()).message.includes('village-promote.lock'), { stale })
+  await rm(join(live, '.git', 'village-promote.lock'))
+
+  // The candidate file is swapped right after its hash is checked: only the committed bytes may reach live.
+  const swappedText = 'export default { name: "swapped", apply() { fetch("https://example.invalid") } }\n'
+  const realStream = fs.createReadStream
+  let swapped = false
+  fs.createReadStream = ((path: fs.PathLike, ...rest: unknown[]) => {
+    const stream = (realStream as (...a: unknown[]) => fs.ReadStream)(path, ...rest)
+    if (!swapped && String(path) === candidateFile)
+      stream.once('end', () => {
+        swapped = true
+        fs.writeFileSync(candidateFile, swappedText)
+      })
+    return stream
+  }) as typeof fs.createReadStream
+  syncBuiltinESMExports()
+  h0 = await head()
+  const results0 = (await readFile(join(live, 'results.jsonl'), 'utf8')).split('\n').length
+  const swapOutcome = await settle(promoteGood())
+  fs.createReadStream = realStream
+  syncBuiltinESMExports()
+  const liveText = await readFile(join(live, PLUGIN), 'utf8').catch(() => null)
+  const recordedSwap = (await readFile(join(live, 'results.jsonl'), 'utf8')).split('\n').length > results0
+  check(
+    'promote-swap-after-check: a file swapped after its check never reaches live; live gets the committed bytes or stays unchanged, and the attempt is recorded',
+    swapped && !swapOutcome.startsWith('threw') && recordedSwap && (await clean()) && liveText !== swappedText && (swapOutcome === 'promoted' ? (await sha256(join(live, PLUGIN))) === (good.files as Record<string, string>)[PLUGIN] : (await head()) === h0),
+    { swapped, swapOutcome, recordedSwap },
+  )
+  await writeFile(candidateFile, original)
+  if (swapOutcome === 'promoted') await settle(rollback({ target: 'last', live }))
+
+  // Writing into live fails partway: refused, recorded, live unchanged.
+  await mkdir(join(live, PLUGIN))
+  h0 = await head()
+  const blocked = await settle(promoteGood())
+  check('promote-write-failure-refused: a failed write is a recorded refusal and live is unchanged', blocked === 'write-failed' && (await lastResult()).reason === 'write-failed' && (await head()) === h0 && (await clean()), { blocked })
+  await rm(join(live, PLUGIN), { recursive: true, force: true })
+
+  // A candidate that adds a .gitignore beside its plugin, which could hide later edits.
+  const hiding = await candidate('stub-gitignore')
+  h0 = await head()
+  const ignored = hiding.status === 'passed' ? await settle(promote({ candidate: hiding.id as string, approve: true, candidatesRoot, live })) : `candidate ${hiding.status}`
+  check('promote-gitignore-refused: only home/src/plugins/<name>.ts can be promoted', ignored === 'controller-owned' && (await head()) === h0 && !fs.existsSync(join(live, 'home/src/plugins/.gitignore')), { ignored, files: hiding.files })
 } catch (error) {
   check('proof ran to the end', false, String(error))
 } finally {
