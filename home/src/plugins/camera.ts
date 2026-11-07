@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
+import { paintBackdrop } from '../paint'
 
 /** Where the camera stands and what it looks at. */
 export interface Pose {
@@ -38,9 +39,11 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
  * focus poses work in every mode.
  */
 const cam = new URLSearchParams(location.search).get('cam')
-const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ? cam : 'seat'
+export const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ? cam : 'seat'
+/** Layer for walls cut away from the camera: the sun's shadow camera still sees them, the view does not. */
+export const SHADOW_ONLY = 1
 const SEAT_FOV = 40
-const ISO = { fov: 20, far: 16, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
+const ISO = { fov: 20, far: 18.5, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
 const THIRD = { fov: 50, ahead: 1.3, back: 2.4, up: 2.2, lookAhead: 1.6, lookUp: 0.7, reach: 3.2 }
 const UP = new THREE.Vector3(0, 1, 0)
 
@@ -68,12 +71,11 @@ export default {
     const walk = { at: new THREE.Vector3(), goal: new THREE.Vector3() } // offset from the rest pose's standing point
     const forward = new THREE.Vector3()
     const ground = new THREE.Vector3()
-    const backdrop = new THREE.Color('#c99d74')
+    // Iso sits the diorama on a painted warm card; third person looks out into a warm haze.
+    const backdrop = MODE === 'iso' ? paintBackdrop(7) : new THREE.Color('#c99d74')
     let roomBackground: THREE.Scene['background'] = null
     const fogs = new Map<THREE.Fog, [number, number]>()
     const cutaway = new Set<THREE.Object3D>()
-    // Iso: the floor planes run past the room, so a ring at floor level fades them into the backdrop.
-    const edge = MODE === 'iso' ? softEdge(backdrop) : null
     let refresh = 0
 
     /** The rest pose's facing on the floor and the floor point some metres ahead of it. */
@@ -149,7 +151,6 @@ export default {
     ctx.effect(() => {
       const saved = { position: camera.position.clone(), quaternion: camera.quaternion.clone(), fov: camera.fov }
       const canvas = renderer.domElement
-      if (edge) scene.add(edge)
       if (MODE === 'seat') addEventListener('pointermove', onMove)
       else {
         canvas.addEventListener('pointerdown', onDown)
@@ -170,13 +171,11 @@ export default {
         canvas.removeEventListener('wheel', onWheel)
         for (const [fog, [near, far]] of fogs) Object.assign(fog, { near, far })
         if (scene.background === backdrop) scene.background = roomBackground
-        for (const o of cutaway) o.visible = true
-        if (edge) {
-          edge.removeFromParent()
-          edge.geometry.dispose()
-          edge.material.map?.dispose()
-          edge.material.dispose()
+        for (const o of cutaway) {
+          o.traverse((n) => n.layers.set(0))
+          o.visible = !o.userData.cutaway
         }
+        if (backdrop instanceof THREE.Texture) backdrop.dispose()
         camera.position.copy(saved.position)
         camera.quaternion.copy(saved.quaternion)
         camera.fov = saved.fov
@@ -244,13 +243,15 @@ export default {
         const z = orbit.zoom * orbit.zoom * (3 - 2 * orbit.zoom)
         const distance = THREE.MathUtils.lerp(ISO.far, ISO.near, z)
         const pitch = THREE.MathUtils.lerp(ISO.pitchFar, ISO.pitchNear, z)
-        rigLook.copy(standing(THREE.MathUtils.lerp(3.4, 2.55, z))).setY(THREE.MathUtils.lerp(1.15, 0.75, z))
+        rigLook.copy(standing(THREE.MathUtils.lerp(2.9, 2.55, z))).setY(THREE.MathUtils.lerp(1.05, 0.75, z))
+        // Whole-room framing centres the diorama, which sits a little to the left of the seat's line.
+        rigLook.x += forward.z * 0.7 * (1 - z)
+        rigLook.z -= forward.x * 0.7 * (1 - z)
         toCamera.copy(forward).negate().applyAxisAngle(UP, orbit.yaw).multiplyScalar(Math.cos(pitch) * distance)
         toCamera.y = Math.sin(pitch) * distance
         rigPosition.copy(rigLook).add(toCamera)
         rigPosition.y += Math.sin(t * 0.25) * 0.01
         rigFov = ISO.fov
-        edge?.position.set(rigLook.x, 0.004, rigLook.z)
       } else if (MODE === 'third') {
         walk.at.lerp(walk.goal, 1 - Math.exp(-dt * 2.2))
         const stand = standing(THIRD.ahead).add(walk.at)
@@ -283,8 +284,9 @@ export default {
 
     /**
      * The rooms' fog was tuned for a viewer 3.6 m from what they look at, so it
-     * slides back with the rig. Walls the camera stands behind are cut away, and
-     * iso sits on a warm backdrop instead of the dark beyond the room.
+     * slides back with the rig. Walls the camera stands behind leave the view but
+     * keep casting shadows, and a cut stub (`userData.cutaway`, iso's diorama) takes
+     * their place. Iso sits on a warm backdrop instead of the dark beyond the room.
      */
     const atmosphere = (distance: number) => {
       const fog = scene.fog
@@ -314,33 +316,12 @@ export default {
         }
         o.getWorldPosition(toCamera)
         toCamera.subVectors(camera.position, toCamera)
-        o.visible = toCamera.dot(o.userData.inward as THREE.Vector3) > 0
+        const facing = toCamera.dot(o.userData.inward as THREE.Vector3) > 0
+        if (o.userData.cutaway) o.visible = !facing
+        else if (o.layers.isEnabled(0) !== facing) o.traverse((n) => n.layers.set(facing ? 0 : SHADOW_ONLY))
       }
     }
   },
-}
-
-/** A floor-level square, clear in the middle and the backdrop colour at its rim. Not solid, so picking passes through. */
-function softEdge(colour: THREE.Color): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
-  const size = 512
-  const c = document.createElement('canvas')
-  c.width = c.height = size
-  const g = c.getContext('2d')!
-  const fade = g.createRadialGradient(size / 2, size / 2, size * 0.28, size / 2, size / 2, size * 0.46)
-  fade.addColorStop(0, 'rgba(0,0,0,0)')
-  fade.addColorStop(1, `#${colour.getHexString()}`)
-  g.fillStyle = fade
-  g.fillRect(0, 0, size, size)
-  const map = new THREE.CanvasTexture(c)
-  map.colorSpace = THREE.SRGBColorSpace
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(12, 12),
-    new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, fog: false, toneMapped: false }),
-  )
-  mesh.rotation.x = -Math.PI / 2
-  mesh.name = 'iso soft edge'
-  mesh.renderOrder = 1
-  return mesh
 }
 
 if (import.meta.hot) import.meta.hot.accept((m) => m && replace(m.default))

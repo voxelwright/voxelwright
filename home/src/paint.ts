@@ -495,3 +495,83 @@ export function paintBotanical(seed: number) {
   for (let i = 0; i < 30; i++) wash(60 + r() * (w - 120), 400 + r() * 60, 6 + r() * 6, 3, '#a9c48d', 0.35)
   return toTexture(c)
 }
+
+/** The garden seen from above through the kitchen window in ?cam=iso (#42): sunlit lawn, a stone path and flower beds. */
+export function paintLawn(seed: number) {
+  const w = 1024, h = 512
+  const n = makeNoise(seed, 64)
+  const r = rng(seed)
+  const [c, g] = pixels(w, h, (x, y) => {
+    const v = n(x / 70, y / 70, 4)
+    const stripe = Math.sin((x / w) * Math.PI * 14) > 0 ? 1 : 0.94
+    const glow = 1 - (y / h) * 0.25
+    const k = (0.82 + v * 0.36) * stripe * glow
+    return [104 * k + 24, 138 * k + 10, 58 * k]
+  })
+  // Stepping stones curving from the house into the garden.
+  for (let i = 0; i < 9; i++) {
+    const t = i / 8
+    const x = w * (0.42 + Math.sin(t * 2.4) * 0.12), y = h * (0.04 + t * 0.92)
+    g.fillStyle = `rgb(${200 + r() * 20}, ${184 + r() * 18}, ${156 + r() * 16})`
+    g.beginPath()
+    g.ellipse(x, y, 26 + r() * 8, 18 + r() * 6, r() * Math.PI, 0, Math.PI * 2)
+    g.fill()
+    g.fillStyle = 'rgba(70, 60, 30, 0.25)'
+    g.beginPath()
+    g.ellipse(x + 4, y + 5, 26, 16, 0, 0, Math.PI * 2)
+    g.fill()
+  }
+  // Flower beds: leafy clumps dotted with blooms.
+  const bed = (cx: number, cy: number, rx: number, ry: number, bloom: string[]) => {
+    for (let i = 0; i < 260; i++) {
+      const a = r() * Math.PI * 2, d = Math.sqrt(r())
+      const x = cx + Math.cos(a) * rx * d, y = cy + Math.sin(a) * ry * d
+      g.fillStyle = r() < 0.5 ? '#4f6e2c' : '#6b8a38'
+      g.beginPath()
+      g.arc(x, y, 6 + r() * 7, 0, Math.PI * 2)
+      g.fill()
+      if (r() < 0.35) {
+        g.fillStyle = bloom[Math.floor(r() * bloom.length)]
+        g.beginPath()
+        g.arc(x + r() * 4, y - r() * 4, 3 + r() * 3, 0, Math.PI * 2)
+        g.fill()
+      }
+    }
+  }
+  bed(w * 0.16, h * 0.3, 110, 70, ['#f4d36b', '#fff4dc', '#f29a7a'])
+  bed(w * 0.78, h * 0.55, 130, 90, ['#e7849c', '#fff4dc', '#c9a2e0'])
+  bed(w * 0.2, h * 0.85, 120, 60, ['#f6b55c', '#fff4dc'])
+  bed(w * 0.33, h * 0.42, 90, 60, ['#f29a7a', '#fff4dc', '#f4d36b'])
+  // Low sun from beyond the garden: a warm wash.
+  const sun = g.createLinearGradient(0, 0, 0, h)
+  sun.addColorStop(0, 'rgba(255, 200, 120, 0.28)')
+  sun.addColorStop(1, 'rgba(255, 200, 120, 0)')
+  g.fillStyle = sun
+  g.fillRect(0, 0, w, h)
+  return toTexture(c)
+}
+
+/** The warm card behind the iso diorama (#42): a soft pool of light on warm paper, darker toward the corners. */
+export function paintBackdrop(seed: number) {
+  const w = 512, h = 320
+  const n = makeNoise(seed, 64)
+  const [c] = pixels(w, h, (x, y) => {
+    const dx = (x / w - 0.5) * 1.3, dy = y / h - 0.42
+    const d = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 1.5)
+    const fibre = (n(x / 9, y / 9, 3) - 0.5) * 7
+    return mixRGB([236, 208, 172], [186, 138, 102], d * d).map((v) => v + fibre) as RGB
+  })
+  return toTexture(c)
+}
+
+/** A warm round glow, bright in the middle and gone at the rim, for light pools seen from above (#42). */
+export function paintGlow() {
+  const [c, g] = canvas(128, 128)
+  const glow = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+  glow.addColorStop(0, 'rgba(255, 196, 120, 0.7)')
+  glow.addColorStop(0.45, 'rgba(255, 176, 96, 0.28)')
+  glow.addColorStop(1, 'rgba(255, 160, 80, 0)')
+  g.fillStyle = glow
+  g.fillRect(0, 0, 128, 128)
+  return toTexture(c)
+}

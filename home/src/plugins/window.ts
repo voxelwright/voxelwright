@@ -4,6 +4,7 @@ import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
 import { paintGarden } from '../paint'
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js'
+import { MODE, SHADOW_ONLY } from './camera'
 
 export default {
   name: 'window',
@@ -86,6 +87,14 @@ export default {
     sun.shadow.bias = -0.0004
     sun.shadow.normalBias = 0.02
     sun.shadow.radius = 4
+    if (MODE !== 'seat') {
+      // The wider views see the whole floor, so the shadow box covers the whole room
+      // (outside it the sun lit the floor in hard wedges), and walls cut away from
+      // the camera still throw their shadows (#42).
+      Object.assign(sun.shadow.camera, { left: -5.6, right: 5.6, top: 5.6, bottom: -5.6 })
+      sun.shadow.radius = 6
+      sun.shadow.camera.layers.enable(SHADOW_ONLY)
+    }
     if (ctx.stage.features().has('csm')) {
       // Three cascades over the room's depth only (the camera's far plane is 60 m;
       // the kitchen is about 6 m deep), soft-filtered, so near shadows get the texels.
