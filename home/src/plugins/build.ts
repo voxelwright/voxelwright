@@ -733,6 +733,7 @@ export default {
       return [...lift(ringOf(made, room, -0.35), 0.02), ...lift([geo.p, geo.q], geo.height), ...lift([geo.at((d.door.from + d.door.to) / 2, 0)], 2.3)]
     }
     let before: Required<Frame> | null = null
+    let wasStill = false
     let shaped = ''
     let hadDraft = false
     const proposalGlide = () => {
@@ -770,7 +771,11 @@ export default {
         goal = { ...h, back: Math.max(0, h.back) }
       } else goal = { right: 0, up: 0, back: 0 }
       held = goal
-      const e = 1 - Math.exp(-dt * 3)
+      // Never mid-drag: the slide stands still too, so the floor stays under the pointer.
+      const still = outline.dragging() || Boolean(drag)
+      if (still && !wasStill) void ctx.view.glide({ ...ctx.view.frame }, 0)
+      wasStill = still
+      const e = still ? 0 : 1 - Math.exp(-dt * 3)
       framing.right += (goal.right - framing.right) * e
       framing.up += (goal.up - framing.up) * e
       framing.back += (goal.back - framing.back) * e

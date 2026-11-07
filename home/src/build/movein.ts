@@ -50,6 +50,8 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
   let centre: P = [0, 0]
   let startAt = 0
   let frame: Required<Frame> | null = null
+  /** Where the view stood when the room was built: moving off it before the glide means someone took the camera. */
+  let still: Required<Frame> | null = null
   let landed = false
   let held = false
   let path: P[] = []
@@ -119,6 +121,9 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     label = d.label
     person = who
     startAt = performance.now() + riseMs
+    // The proposal's own glide stops where it is, so only the person moves the view while the walls rise.
+    void view.glide({ ...view.frame }, 0)
+    still = { ...view.frame }
     phase = 'rising'
     landed = false
     held = true
@@ -130,13 +135,14 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     if (phase === 'idle' || !door) return
     const t = talk()
     if (phase === 'rising') {
+      if (held && movedOff(view.frame, still!)) held = false
       if (performance.now() < startAt) return
       if (person && t?.where(person)) t.walk(person, SPOT)
       else person = null
       phase = person ? 'walking' : 'settled'
-      // The view turns and glides to the room while they cross.
+      // The view turns and glides to the room while they cross, unless the person has taken it already.
       const to = frame!
-      void view.glide(to, 2.4).then(() => {
+      if (held) void view.glide(to, 2.4).then(() => {
         if (!movedOff(view.frame, to)) landed = true
         else held = false
       })

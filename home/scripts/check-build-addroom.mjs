@@ -510,12 +510,58 @@ try {
 
     // Enter builds it: one version, the room drawn.
     const gBefore = (await state(page)).geometries
+    const ghostLayout = await B(page, () => window.villageBuild.outline.pieces())
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 3)
     await frames(page, 6)
     s = await state(page)
     const v2 = await versions(page)
     check('Enter: one new version, "Added the playroom", and the room is drawn with its floor (and nobody says it does not fit)', v2.length === v0.length + 1 && v2.at(-1).note === 'Added the playroom' && s.floors === 3 && !/fit/.test(s.said.at(-1)), { versions: v2, floors: s.floors, said: s.said.at(-1) })
+    const builtLayout = await B(page, () => window.villageBuild.plan().furniture.filter((f) => f.id.startsWith('playroom.')))
+    // The plan keeps a turn in (-π, π], so a ghost turned 3.142 is built at -3.141: the same pose.
+    const pose = (f) => JSON.stringify({ ...f, at: f.at.mount === 'floor' ? { ...f.at, yaw: (((f.at.yaw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)).toFixed(2).replace('6.28', '0.00') } : f.at })
+    check('built: every piece stands exactly where its ghost stood', ghostLayout.length > 0 && ghostLayout.length === builtLayout.length && ghostLayout.every((g, i) => pose(g) === pose(builtLayout[i])), { ghosts: ghostLayout.length, built: builtLayout.length, differ: ghostLayout.map((g, i) => [g, builtLayout[i]]).filter(([a, b]) => JSON.stringify(a) !== JSON.stringify(b)).slice(0, 2) })
+    // The move-in: Alex's Dumpling (who asked) walks from the kitchen through the new door's gap and sits at the play table.
+    const walk = await B(page, () => new Promise((done) => {
+      const where = () => window.village.talk.where('alex')
+      const samples = []
+      const t0 = performance.now()
+      const tick = () => {
+        const r = window.villageBuild.reveal()
+        const w = where()
+        if (w) samples.push([w.x, w.z])
+        if ((r.phase === 'settled' && w?.seated) || performance.now() - t0 > 25000) return done({ r, w, samples })
+        requestAnimationFrame(tick)
+      }
+      tick()
+    }))
+    const crossings = []
+    if (walk.r.door) {
+      const [a, b] = walk.r.door.gap, mid = walk.r.door.mid
+      const along = [b[0] - a[0], b[1] - a[1]], L = Math.hypot(...along), u = [along[0] / L, along[1] / L], n = [-u[1], u[0]]
+      const side = (p) => (p[0] - mid[0]) * n[0] + (p[1] - mid[1]) * n[1]
+      for (let i = 1; i < walk.samples.length; i++) {
+        const p = walk.samples[i - 1], q = walk.samples[i]
+        if (Math.sign(side(p)) === Math.sign(side(q)) || side(p) === 0) continue
+        const k = side(p) / (side(p) - side(q))
+        const x = [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k]
+        // How far along the wall from the gap's middle it crossed, against half the gap.
+        crossings.push({ off: +Math.abs((x[0] - mid[0]) * u[0] + (x[1] - mid[1]) * u[1]).toFixed(3), half: +(L / 2).toFixed(3) })
+      }
+    }
+    const inPlayroom = walk.w && await B(page, async (w) => {
+      const P = await import('/src/build/plan.ts')
+      const p = window.villageBuild.plan()
+      return P.inside(P.floorOf(p, p.rooms.find((r) => r.id === 'playroom')), [w.x, w.z])
+    }, walk.w)
+    check('move-in: the villager who asked (Alex\'s Dumpling) crosses the shared wall only through the new door\'s gap', walk.r.person === 'alex' && crossings.length >= 1 && crossings.every((c) => c.off < c.half - 0.1), { crossings, samples: walk.samples.length })
+    check('move-in: they end seated on a stool at the play table, in the new room, and say one short line', walk.w?.seated && walk.w.spot === 'buildMovein' && inPlayroom && Math.abs(walk.w.y - 0.635) < 0.01 && /love it/.test((await state(page)).card ?? ''), { w: walk.w, seat: walk.r.seat })
+    // The way back: the tag is offered while the view is held, and it glides out to the whole house.
+    const tagShown = await B(page, () => window.villageBuild.backShown())
+    await page.click('.build-back')
+    await page.waitForTimeout(1600)
+    const out = await B(page, () => ({ held: window.villageBuild.reveal().held, frame: window.village.kernel.root.get('view').frame, shown: window.villageBuild.backShown() }))
+    check('"Back to the house" is offered while the reveal holds the view, and glides out to the whole house', tagShown && !out.held && !out.shown && out.frame.zoom < 0.02, out)
     const built = await B(page, () => {
       const p = window.villageBuild.plan()
       // The wall the playroom shares (the kitchen and living room share theirs already).
@@ -536,7 +582,7 @@ try {
       const drawn = things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('playroom.'))
       const room = p.rooms.find((r) => r.id === 'playroom')
       const ring = room ? P.floorOf(p, room) : []
-      const boxes = drawn.filter((c) => !/picture/.test(c.userData.furniture)).map((c) => {
+      const boxes = drawn.filter((c) => !/picture|play-wall/.test(c.userData.furniture)).map((c) => {
         c.updateMatrixWorld(true)
         const box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }
         c.traverse((o) => {
@@ -562,7 +608,7 @@ try {
       return { ids, drawn: drawn.map((c) => c.userData.furniture), overlaps, outside }
     })
     const firstPieces = await pieces()
-    check('built: the playroom arrives with play things, a second grouping and a picture as plan furniture in the same version, all drawn (no sofa)', ['big-rug', 'play-table', 'toy-chest', 'play-tent', 'low-bookcase', 'potted-plant', 'picture'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && !firstPieces.ids.includes('playroom.sofa') && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
+    check('built: the playroom arrives with play things, a second grouping and a picture as plan furniture in the same version, all drawn (no sofa)', ['big-rug', 'play-table', 'toy-chest', 'play-tent', 'toy-shelf', 'potted-plant', 'play-wall'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && !firstPieces.ids.includes('playroom.sofa') && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
     check('built: the pieces do not overlap one another and stand inside the room', firstPieces.overlaps.length === 0 && firstPieces.outside.length === 0, firstPieces)
     const covered = await B(page, async () => {
       const P = await import('/src/build/plan.ts')
@@ -677,8 +723,9 @@ try {
       await page.waitForTimeout(200)
     }
 
-    // The selection path: click a wall, then "open a door here into a new room".
-    await page.waitForTimeout(1500)
+    // The selection path: back from the study's move-in to the whole house, click a wall, then "open a door here into a new room".
+    await B(page, () => window.villageBuild.back())
+    await page.waitForTimeout(2600)
     const at = await B(page, () => window.villageBuild.wallPoint('living.right', 4.0, 0.43, 0))
     await page.mouse.click(...at)
     await frames(page, 3)
@@ -714,6 +761,42 @@ try {
     check('a room drawn on a stretch another page then built on is not built, and your villager says so', denDraft && !s.draft && !s.rooms.includes(denDraft.roomId) && s.rooms.includes('nook') && /runs into the nook|doesn't fit/i.test(s.said.at(-1) ?? ''), { draft: denDraft, rooms: s.rooms, said: s.said.at(-1) })
     const yardThree = await yardInside(page)
     check('with the rooms added, still nothing of the yard inside any of them', yardThree.rooms >= 3 && yardThree.total === 0, yardThree)
+    // Taking the camera ends the move-in's hold: a drag, the wheel, a held WASD key, Escape. Back to the two-room house,
+    // then the playroom built (by intent, as Alex) and taken away again for each.
+    for (let i = 0; i < 12 && (await state(page)).rooms.length > 2; i++) {
+      await B(page, async () => (await window.villageBuild.history()).undo())
+      await frames(page, 4)
+    }
+    const holds = {}
+    for (const how of ['drag', 'wheel', 'wasd', 'escape']) {
+      await B(page, () => window.villageBuild.intent({ op: 'addRoom', label: 'playroom', anchor: { room: 'kitchen', side: 'left' }, size: { fraction: 2 / 3 }, connect: { kind: 'door', leaves: 2 } }, 'alex'))
+      await until(page, (x) => x.draft, 5000)
+      await page.waitForTimeout(400)
+      await B(page, () => window.villageBuild.outline.confirm())
+      await until(page, (x) => !x.draft && x.rooms.includes('playroom'), 5000)
+      await page.waitForTimeout(300)
+      const before = await B(page, () => window.villageBuild.reveal().held)
+      if (how === 'drag') {
+        await page.mouse.move(300, 700)
+        await page.mouse.down()
+        await page.mouse.move(380, 660, { steps: 8 })
+        await page.mouse.up()
+      } else if (how === 'wheel') {
+        await page.mouse.move(700, 450)
+        await page.mouse.wheel(0, 200)
+      } else if (how === 'wasd') {
+        // Nothing being written, so a held letter moves the view (camera.ts).
+        await B(page, () => document.activeElement?.blur())
+        await page.keyboard.down('d')
+        await page.waitForTimeout(900)
+        await page.keyboard.up('d')
+      } else await page.keyboard.press('Escape')
+      await page.waitForTimeout(how === 'escape' ? 2400 : 300)
+      holds[how] = { before, after: await B(page, () => window.villageBuild.reveal().held), ...(how === 'escape' ? { zoom: await B(page, () => window.village.kernel.root.get('view').frame.zoom) } : {}) }
+      await B(page, async () => (await window.villageBuild.history()).undo())
+      await frames(page, 4)
+    }
+    check('the reveal\'s hold on the view ends on a drag, the wheel, a held WASD key and Escape (which glides out to the house)', Object.values(holds).every((h) => h.before && !h.after) && holds.escape.zoom < 0.02, holds)
     await B(page, () => window.village.unload('build'))
     await frames(page, 4)
     const yardGone = await yardNow(page)
