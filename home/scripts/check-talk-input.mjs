@@ -225,7 +225,10 @@ try {
 
     // talk: that villager turns and the camera eases to them.
     await write(page, 'I want to chat with Moss')
-    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia')
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia', 20_000, 10)
+    // The camera turns to Moss only once the note has landed, so the note is seen on its way (#42 regroup).
+    check('the camera waits for the sent note to land before turning to its reader', !s.input.flying || !s.focused, { flying: s.input.flying, focused: s.focused })
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia' && x.focused && !x.input.flying)
     check('talk route: "I want to chat with Moss" opens a talk with Moss', s.mode === 'talk' && s.partner === 'mia' && s.cards.mia && s.focused, { mode: s.mode, partner: s.partner, routes: s.input.routes })
     check('the input re-addresses to Moss', s.input.to === 'Moss', s.input.to)
     const before = (await jsonl('mia', 'conversation.jsonl')).length

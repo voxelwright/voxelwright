@@ -14,7 +14,7 @@ import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import { navigation, type Pose } from './camera'
-import { LOOK, captionStrip, focus as lookFocus, lookCss, paperSlips } from '../talk/look'
+import { LOOK, captionStrip, focus as lookFocus, lookCss, paperNote, paperSlips } from '../talk/look'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -363,7 +363,7 @@ export default {
     group.name = 'talk'
 
     // ── The cast ──────────────────────────────────────────────────────────
-    const glyphMap = stitchedBang()
+    const glyphMap = LOOK === 'a' ? paperNote() : stitchedBang()
     const cast: Member[] = PEOPLE.map((p, i) => {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })

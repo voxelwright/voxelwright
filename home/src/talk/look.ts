@@ -11,7 +11,7 @@
 import * as THREE from 'three/webgpu'
 import { uniform } from 'three/tsl'
 import { releaseGpu, type Stage } from '../kernel'
-import { canvas, rng } from '../paint'
+import { canvas, rng, toTexture } from '../paint'
 
 export type Look = 'a' | 'b' | 'c' | null
 const query = new URLSearchParams(location.search)
@@ -265,6 +265,46 @@ export function paperSlips(stage: Stage, speaker: (person: string) => Speaker | 
     releaseGpu(group)
   }
   return { frame, dispose }
+}
+
+/** Look a's "something for you" over a villager: a small folded note with a wax seal, not a felt "!". */
+export function paperNote() {
+  const [c, g] = canvas(128, 128)
+  g.translate(64, 66)
+  g.rotate(-0.12)
+  g.shadowColor = 'rgba(60, 30, 10, 0.35)'
+  g.shadowBlur = 6
+  g.shadowOffsetY = 3
+  g.fillStyle = '#fbf3e1'
+  g.beginPath()
+  g.roundRect(-48, -34, 96, 68, 4)
+  g.fill()
+  g.shadowColor = 'transparent'
+  // The flap's folds and the paper's edge.
+  g.strokeStyle = 'rgba(140, 100, 60, 0.5)'
+  g.lineWidth = 2
+  g.beginPath()
+  g.moveTo(-46, -32)
+  g.lineTo(0, 6)
+  g.lineTo(46, -32)
+  g.stroke()
+  g.strokeStyle = 'rgba(140, 100, 60, 0.3)'
+  g.beginPath()
+  g.moveTo(-46, 32)
+  g.lineTo(-10, 0)
+  g.moveTo(46, 32)
+  g.lineTo(10, 0)
+  g.stroke()
+  // A wax seal where the folds meet.
+  g.fillStyle = '#b8402e'
+  g.beginPath()
+  g.arc(0, 6, 13, 0, Math.PI * 2)
+  g.fill()
+  g.fillStyle = 'rgba(255, 220, 190, 0.45)'
+  g.beginPath()
+  g.arc(-4, 2, 4, 0, Math.PI * 2)
+  g.fill()
+  return toTexture(c)
 }
 
 // ── c: one felt caption strip ──────────────────────────────────────────────

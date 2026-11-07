@@ -176,7 +176,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const NOTEH = PADH * 0.62
   // Look a (#42 regroup): the note folds in three, like a letter, before it flies.
   // The back of the paper is blank: a folded third shows paper, not mirrored words.
-  const backMat = new THREE.MeshStandardMaterial({ color: '#efe3c8', roughness: 0.95, side: THREE.BackSide, transparent: true, emissive: '#8a7a5a', emissiveIntensity: 0.25 })
+  const backMat = LOOK === 'a' ? new THREE.MeshStandardMaterial({ color: '#efe3c8', roughness: 0.95, side: THREE.BackSide, transparent: true, emissive: '#8a7a5a', emissiveIntensity: 0.25 }) : flyMat
   const third = (i: number) => {
     const g = new THREE.PlaneGeometry(PADW / 3, NOTEH)
     const uv = g.attributes.uv
