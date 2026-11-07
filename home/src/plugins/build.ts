@@ -684,9 +684,12 @@ export default {
         plan: () => plan,
         /** The last line build mode put on screen by itself (not through the notepad). */
         noted: () => noteEl.textContent,
+        /** The lawn's outline as the lot draws it (world x, z), or null while the old board stands. */
+        lawn: () => lot.lawn(),
         /** The room being drawn: its draft, grips on screen, typed sizes, build or let go. */
         outline: {
           draft: () => outline.draft(),
+          pieces: () => outline.pieces(),
           shownAt: () => outline.shownAt(),
           grips: () => outline.grips(),
           setNumber: (dim: 'w' | 'd', v: number) => outline.setNumber(dim, v, false),

@@ -231,6 +231,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     for (const [kind, h] of ghostOf) if (!shown.has(kind)) h.visible = false
   }
 
+  let ghostsDue = false
   /** A refused drag flashes the walls chalk red for a moment. */
   let refusedAt = -Infinity
 
@@ -509,7 +510,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       m.group.scale.setScalar(live ? 1.18 : 1)
     }
     sheetMap.needsUpdate = true
-    showGhosts(base, made, d)
+    // The ghosts follow on the next frame, so the outline itself is up at once.
+    ghostsDue = true
 
     // Tags.
     anchors.w.set((wA[0] + wB[0]) / 2, 0.05, (wA[1] + wB[1]) / 2)
@@ -814,7 +816,14 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
         hooks.say(fitted.ask)
       } else accept(draft)
     },
-    frame: () => draft && place(),
+    frame: () => {
+      if (!draft) return
+      place()
+      if (ghostsDue && made) {
+        ghostsDue = false
+        showGhosts(hooks.base(), made, draft)
+      }
+    },
     dragging: () => drag !== null,
     draft: () => draft,
     made: () => made,

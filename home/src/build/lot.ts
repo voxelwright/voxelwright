@@ -308,12 +308,18 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     runFence(outline)
   }
 
-  /** Put the lot back exactly as diorama.ts drew it. */
+  /** Put the lot back exactly as diorama.ts drew it, and let go of the fence it ran. */
   const restore = () => {
     const f = found
     shown = goal = []
     outline = []
     grown.visible = false
+    if (pickets) {
+      pickets.removeFromParent()
+      pickets.dispose()
+      pickets = null
+    }
+    for (const m of rails.splice(0)) m.removeFromParent()
     if (!f) return
     for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = true
   }
@@ -336,11 +342,15 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     const f = found
     if (!f || (!shown.length && !goal.length)) return
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
-    const e = reduce ? 1 : 1 - Math.exp(-dt * 7)
+    const e = reduce ? 1 : 1 - Math.exp(-dt * 9)
     let moving = false
     shown = shown.map((r, i) => {
       const to = goal[i] ?? clampTo(r, f.rect)
-      if (same(r, to, 1e-4)) return { ...to }
+      // The last centimetre or two snaps, so a lot let go is back on the old board in well under a second.
+      if (same(r, to, 0.02)) {
+        if (!same(r, to, 1e-6)) moving = true
+        return { ...to }
+      }
       moving = true
       return { x0: r.x0 + (to.x0 - r.x0) * e, x1: r.x1 + (to.x1 - r.x1) * e, z0: r.z0 + (to.z0 - r.z0) * e, z1: r.z1 + (to.z1 - r.z1) * e }
     })
@@ -379,7 +389,6 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   const dispose = () => {
     restore()
     grown.removeFromParent()
-    pickets?.dispose()
     railBox.dispose()
     lawn.geometry.dispose()
     edge.geometry.dispose()
