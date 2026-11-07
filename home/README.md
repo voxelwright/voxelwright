@@ -200,7 +200,7 @@ Gates:
 | Gate | Rule |
 | --- | --- |
 | 60 fps (head, every scene) | under 1% of intervals over 20 ms; p99 at most 20 ms; no long task over 50 ms; at least 90% of 60 Hz frames measured |
-| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). GPU ms measures GPU work since #42, but between runs the kitchen's p95 is 9.8 to 14.3 ms on main and 12.2 to 14.5 ms on this branch, so it warns. `maxGpuMs` is a median threshold for calibration (kitchen medians are 8 to 10 ms); applied to p95 it catches a 4 to 5 ms tail. |
+| Headroom (head, high tier) | GPU p50 under the high tier's `maxGpuMs` (13 ms, the median threshold calibration uses, read from `renderer.ts`) and GPU p95 under 16 ms (inside one 60 Hz frame). GPU ms measures GPU work (`src/gpu-time.js`). Kitchen medians are 8 to 10 ms; p95 is 9.8 to 14.3 ms on main and 12.2 to 14.5 ms on this branch. |
 | Relative (head against base) | growth at most the larger of 10% and a floor: GPU p50 3 ms, GPU p95 8 ms, CPU p50 0.5 ms, draw calls 10 |
 
 Noise, base against base (`--base X --head X`), M1 Pro, with 3 to 8 other agents' headless
@@ -215,7 +215,7 @@ inside the script, 27.6 to 29.7 s wall clock (page loads 11.8 to 13.4 s, measuri
 
 Today (5f89124 plus the gate, against cb1d565, three runs): every scene holds 60 fps except
 one `talk` run (3 of 116 intervals over 20 ms, p99 33 ms). GPU p95 at high is 16 to 19 ms in
-`home`, `villagers` and `talk`, so the headroom gate fails; main fails it too (15.6 to 17 ms).
+`home`, `villagers` and `talk` on the old submit-to-done measure; that measure counted callback delay, and the headroom rule now uses GPU ms that measures GPU work (see the table above).
 GPU p50 swings between 7 and 17 ms for the same build from run to run under contention.
 `home` CPU p50 is 0.3 to 0.6 ms above main every run (draw calls 482 to 526, triangles
 52k to 84k, from the furnishing), which is at the 0.5 ms limit. `home-low` draw calls are 412 to 457,

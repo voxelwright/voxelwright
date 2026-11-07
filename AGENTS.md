@@ -33,9 +33,8 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Merge gate to main: before merging to main, `npm run perf-gate` in `home/`
   must pass against main: a consistent 60 fps (under 1% of frames over 20 ms,
   p99 at most 20 ms, no long task over 50 ms) in the gate scenes and no
-  regression beyond noise. GPU headroom (GPU p95 under 13 ms at the high tier)
-  is reported as a warning: GPU ms now measures GPU work, but the kitchen's
-  p95 varies from 10 to 14 ms between runs on main. It takes under 30 s once
+  regression beyond noise, plus GPU headroom at the high tier (GPU p50 under
+  the tier's 13 ms step-down, GPU p95 under 16 ms). It takes under 30 s once
   the base build is cached. Run it on a quiet machine: other headless Chrome
   runs share the GPU and move GPU ms (the gate warns when it sees them).
 - Use the seven-lens `.agents/skills/reviewers` review only for changes to

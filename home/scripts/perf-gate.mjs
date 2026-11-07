@@ -59,6 +59,8 @@ const DPR = 2
 const MAX_DROPPED = 0.01 // intervals over 20 ms, as a share of frames
 const MAX_P99_MS = 20
 const MAX_LONG_TASK_MS = 50 // any long task over this in the steady windows fails
+// GPU p95 at the high tier: inside one 60 Hz frame (16.7 ms) with a little margin.
+const GPU_P95_MAX_MS = 16
 // Headroom: at the high tier, GPU p95 stays under the tier's step-down threshold, read
 // from TIERS in src/plugins/renderer.ts (the one owner of that number).
 // Relative, head against base, where the base has the scene: allowed growth is the larger
@@ -480,11 +482,13 @@ try {
     row(r.scene, 'dropped >20 ms', b?.dropped ?? null, h.dropped, `< ${MAX_DROPPED * 100}%`, h.frames > 0 && h.dropped < MAX_DROPPED)
     row(r.scene, 'frame p99 ms', b?.p99 ?? null, h.p99, `<= ${MAX_P99_MS}`, h.p99 != null && h.p99 <= MAX_P99_MS)
     row(r.scene, 'long tasks >50 ms', b?.longTasks ?? null, h.longTasks, '0', h.longTasks === 0)
-    // Warning only: GPU ms now measures GPU work (src/gpu-time.js), but the kitchen's GPU p95
-    // at high varies from 9.8 to 14.3 ms between runs on main (November 6, 2026), so it would
-    // fail main against itself. It gates again once the kitchen's tail is under the limit or
-    // headroom gets its own p95 limit (maxGpuMs is a median threshold for calibration). The owner's gate is consistent 60 fps plus no regression; headroom is ours.
-    if (r.tier === 'high') row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${tierHigh}`, h.gpuP95 != null && h.gpuP95 < tierHigh, true)
+    // Headroom at the high tier, on GPU ms that measures GPU work (src/gpu-time.js):
+    // the median stays under the tier's step-down threshold (maxGpuMs is defined on the
+    // median, renderer.ts), and the slow tail stays inside one 60 fps frame with margin.
+    if (r.tier === 'high') {
+      row(r.scene, 'GPU p50 ms (headroom)', b?.gpuP50 ?? null, h.gpuP50, `< ${tierHigh}`, h.gpuP50 != null && h.gpuP50 < tierHigh)
+      row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${GPU_P95_MAX_MS}`, h.gpuP95 != null && h.gpuP95 < GPU_P95_MAX_MS)
+    }
     if (b) for (const [key, g] of Object.entries(RELATIVE)) {
       if (b[key] == null || h[key] == null) continue
       const allowed = Math.max(g.share * b[key], g.floor)
