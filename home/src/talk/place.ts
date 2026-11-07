@@ -43,8 +43,6 @@ export const ANCHORS: Record<string, Anchor> = {
   sofaWall: { mount: 'wall', x: LIVING_LEFT + 0.006, y: 0, z: 0.92, ry: Math.PI / 2, span: 0.6, wall: true },
   livingCeiling: { mount: 'ceiling', x: LX - 1.2, y: CEILING, z: 0.9, ry: 0, span: 0.8 },
 }
-/** Every anchor in the living room, for a caller that needs to know which room a piece went to. */
-export const LIVING_ANCHORS = new Set(['livingFloor', 'byPlants', 'livingSurface', 'livingWall', 'sofaWall', 'livingCeiling'])
 
 /** Rough sizes by kind (width, height, depth in metres), for the ghost when the router gave none. */
 const SIZES: [RegExp, [number, number, number]][] = [

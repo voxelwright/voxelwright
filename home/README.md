@@ -75,6 +75,13 @@ doorway's glides are smooth and fade-free in both directions, that a round
 trip adds no objects, plugins, frame hooks, DOM, entries, geometries or
 textures, the seated view's walk through the doorway, and reduced motion.
 
+The seated view faces each room's back wall and the doorway is beside you, off
+screen, so a small painted sign on each back wall ("Living room →" right of the
+kitchen clock, "← Kitchen" over the living room's bookcase) is the doorway's
+entry there. Pointing at it labels it, Tab reaches it, and choosing it walks you
+through the real doorway. `check-entries` walks from the default seat by pointer
+and back by keyboard.
+
 Per room at rest, before the rooms became one house (November 6), headless
 Chrome, 1440×900, WebGPU, holding 60 fps (the headless cap) in every mode:
 
@@ -305,6 +312,13 @@ Screenshots: `screenshots/talk/iso-*.jpg`, since replaced by the furnished room 
 
 ## One house (#42, November 7, 2026)
 
+Merged onto the talk branch the same day. The held-key rule below now reads the
+input's own writing state (`navigation.writing`, set by `talk.ts` from
+`input.writing`), so words on the pad or a sketch keep the keys too. The red
+sheet by the door was the talk notebook's cloth spine, a half-cylinder of 1 m
+radius drawn while the book is closed; it now wraps the page block, and
+`check-talk-notebook` bounds the closed book.
+
 The kitchen and the living room are one building on the yard (`src/layout.ts`):
 kitchen | living room | room for the Workshop, side by side along one back wall,
 each 6 m deep and 3 m tall, sharing 18 cm walls. The doorway between them is in
@@ -390,8 +404,15 @@ modes rather than by their cost. With frame pacing unlocked (`--disable-gpu-vsyn
 --disable-frame-rate-limit`), a high-tier frame takes 8.5 ms at p50, 1.1 ms more
 than before. That is enough to move the GPU column across a vsync step: without
 `?q=`, calibration measured 15.0 ms and stepped down to medium in one of two
-runs, where the base commit measured 10.8 ms and stayed high in three. Open: trim
-about 1 ms, or calibrate on a metric that is not quantized.
+runs, where the base commit measured 10.8 ms and stayed high in three.
+
+Re-measured after the merge onto the talk branch with GPU ms from timestamp
+queries (`src/gpu-time.js`, the pass-interval union, not submit-to-done), same
+setup, `?talk=npc&input=held&q=high`, whole-house view, three 6 s runs: 1,098
+draw calls, 250,010 triangles, GPU p50 9.4, 8.1 and 8.0 ms, p95 13.2, 10.4 and
+10.9 ms (submit-to-done read 17.1 to 17.3 ms in the same runs). That is inside
+the high tier's 13 ms step-down and 16 ms p95, so nothing was trimmed. The 16.6 ms
+above was the old measure.
 
 Checks: `node scripts/check-entries.mjs` (rewritten for glides) and
 `node scripts/check-navigation.mjs` (keys, the input rule, drag, pan, zoom,
@@ -1220,9 +1241,11 @@ JSON answer the host checks field by field (`checkRouted` in
 | journal | the journal opens at that villager or section |
 
 Furnishing (`src/talk/furnish.ts`): trusted code resolves the place from the
-words (around the table, by the window, in the corner, on the counter, the
-living room's door, or "here", the last thing clicked, only when the person said
-here). A line that starts like furnishing ("add", "put", "replace") shows the
+words (around the table, by the window, in the corner, on the counter, or
+"here", the last thing clicked, only when the person said here). Words naming
+the living room, the sofa, the plants or the sideboard pick its anchors: its
+back wall, the wall above the sofa, by the plants, its floor, the sideboard and
+its ceiling (`src/talk/place.ts`), and your villager says it is going next door. A line that starts like furnishing ("add", "put", "replace") shows the
 ghost before the route comes back; a different route dissolves it. The prop is
 made by `POST /people/:id/props` (Sonnet writing a plain-JS `build(api)`
 module), run in the prop sandbox, checked and rebuilt, then swapped in for the
@@ -1303,9 +1326,7 @@ scene before this branch). Claude only; no GPT reviewer this slice.
 
 Stubbed or missing: "messages from the school" has no data source (the
 villager says it cannot see any); projects are a record and a parcel, nobody
-builds them yet, and there is no static stand-in; the living room is not
-furnished from the kitchen (a request for it lands in the kitchen and the
-villager says so); placed props are not kept across a reload (the library is);
+builds them yet, and there is no static stand-in; placed props are not kept across a reload (the library is);
 no voice toggle and no context from where you are. Screenshots:
 `screenshots/talk/input-*.jpg` (real models).
 
@@ -1356,8 +1377,10 @@ it inside the tap, so the phone keyboard comes up.
 Keys: `talk.ts` has the one keyboard listener (`onKey`). In order: the
 input's `key()` (any key while a line has the keyboard; `j` opens the
 journal; a printable key starts a line; Escape clears a restored line);
-then the slot for room navigation, for arrows and WASD only while nothing is
-being written (`input.writing`); then Escape at the table leaves it.
+room navigation runs before it, in camera.ts's window capture listener (arrows,
+and WASD or QE held 170 ms, only while nothing is being written:
+`navigation.writing`), and prevents what it takes; then Escape at the table
+leaves it.
 
 Checks, stub host: `check-talk-npc` 39 of 39 (new: named first speaks first,
 a pass is a nod with no voice, the second speaker hears your line and the
