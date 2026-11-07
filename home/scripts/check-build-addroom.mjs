@@ -417,7 +417,7 @@ try {
       const g = scene.getObjectByName('build outline ghosts')
       return { pieces: window.villageBuild.outline.pieces().map((f) => f.id), shown: g ? g.children.filter((c) => c.visible).map((c) => c.name) : [] }
     })
-    check('outline: the first pieces stand inside as ghosts (sofa, table, rug at least)', ['sofa', 'low-table', 'rug'].every((k) => ghosts.pieces.includes(`living-room.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
+    check('outline: the first pieces stand inside as ghosts (sofa, table, rug at least)', ['sofa', 'low-table', 'rug'].every((k) => ghosts.pieces.includes(`playroom.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
     await page.keyboard.press('Escape')
     await frames(page, 4)
     // The notepad's furnishing guess for the line fades out on its own (#42); give it the time.
@@ -492,9 +492,9 @@ try {
       const p = window.villageBuild.plan()
       const scene = window.village.kernel.root.get('stage').scene
       const things = scene.getObjectByName('placed things')
-      const ids = p.furniture.filter((f) => f.id.startsWith('living-room.')).map((f) => f.id)
-      const drawn = things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('living-room.'))
-      const room = p.rooms.find((r) => r.id === 'living-room')
+      const ids = p.furniture.filter((f) => f.id.startsWith('playroom.')).map((f) => f.id)
+      const drawn = things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('playroom.'))
+      const room = p.rooms.find((r) => r.id === 'playroom')
       const ring = room ? P.floorOf(p, room) : []
       const boxes = drawn.filter((c) => !/picture/.test(c.userData.furniture)).map((c) => {
         c.updateMatrixWorld(true)
@@ -522,7 +522,7 @@ try {
       return { ids, drawn: drawn.map((c) => c.userData.furniture), overlaps, outside }
     })
     const firstPieces = await pieces()
-    check('built: the room arrives with its first pieces as plan furniture in the same version, all drawn', ['sofa', 'low-table', 'rug', 'armchair', 'floor-lamp', 'picture'].every((k) => firstPieces.ids.includes(`living-room.${k}`)) && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
+    check('built: the room arrives with its first pieces as plan furniture in the same version, all drawn', ['sofa', 'low-table', 'rug', 'armchair', 'floor-lamp', 'picture'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
     check('built: the pieces do not overlap one another and stand inside the room', firstPieces.overlaps.length === 0 && firstPieces.outside.length === 0, firstPieces)
     const covered = await B(page, async () => {
       const P = await import('/src/build/plan.ts')
@@ -596,7 +596,7 @@ try {
       const back = await B(again.page, () => {
         const p = window.villageBuild.plan()
         const things = window.village.kernel.root.get('stage').scene.getObjectByName('placed things')
-        return { ids: p.furniture.filter((f) => f.id.startsWith('living-room.')).map((f) => f.id), drawn: things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('living-room.')).length }
+        return { ids: p.furniture.filter((f) => f.id.startsWith('playroom.')).map((f) => f.id), drawn: things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('playroom.')).length }
       })
       check('reload: the first pieces are still there, drawn from the plan', back.ids.length === firstPieces.ids.length && back.drawn === back.ids.length, back)
       await again.page.close()
