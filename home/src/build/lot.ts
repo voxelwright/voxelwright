@@ -135,19 +135,16 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   parent.add(grown)
   const grass = paintTiledGrass(5)
   const lawnMat = new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 })
-  const lawn = new THREE.Mesh(new THREE.BufferGeometry(), lawnMat)
-  lawn.name = 'lot lawn'
-  lawn.rotation.x = -Math.PI / 2
-  lawn.position.y = YARD_TOP
+  // One board: its top is the lawn and its sides the painted edge, so no two faces lie a hair apart to flicker.
   const edge = new THREE.Mesh(new THREE.BufferGeometry())
-  edge.name = 'lot edge'
+  edge.name = 'lot lawn'
   edge.rotation.x = -Math.PI / 2
   const [shadowCanvas, sg] = canvas(256, 256)
   const shadowMap = toTexture(shadowCanvas)
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowMap, transparent: true, depthWrite: false, fog: false }))
   shadow.name = 'lot shadow'
   shadow.rotation.x = -Math.PI / 2
-  grown.add(lawn, edge, shadow)
+  grown.add(edge, shadow)
   let pickets: THREE.InstancedMesh | null = null
   const railBox = new THREE.BoxGeometry(1, 0.035, 0.02)
   const rails: THREE.Mesh[] = []
@@ -230,12 +227,11 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     outline = roundedRect(box, ROUND)
     // The shape lies in (x, -z) and is turned flat, so its UVs are world metres.
     const shape = new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x, -z)))
-    lawn.geometry.dispose()
-    lawn.geometry = new THREE.ShapeGeometry(shape)
     edge.geometry.dispose()
+    // ExtrudeGeometry's caps are group 0 (with UVs in shape units, world metres) and its sides group 1.
     edge.geometry = new THREE.ExtrudeGeometry(shape, { depth: f.board, bevelEnabled: false })
-    edge.material = f.edge?.material ?? lawnMat
-    edge.position.y = YARD_TOP - f.board - 0.002
+    edge.material = [lawnMat, (f.edge?.material as THREE.Material | undefined) ?? lawnMat]
+    edge.position.y = YARD_TOP - f.board
     // The board's soft shadow on the table, painted from the same rectangles.
     const xs = outline.map((p) => p[0]), zs = outline.map((p) => p[1])
     const pad = 0.9
@@ -339,7 +335,6 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     restore()
     grown.removeFromParent()
     railBox.dispose()
-    lawn.geometry.dispose()
     edge.geometry.dispose()
     shadow.geometry.dispose()
     ;(shadow.material as THREE.Material).dispose()

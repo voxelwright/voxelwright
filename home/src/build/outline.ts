@@ -324,6 +324,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     return b
   }
   const tags = { w: dimTag('w'), d: dimTag('d') }
+  /** A small paper label over the taped doorway, saying what will be cut there. */
+  const doorTag = document.createElement('div')
+  doorTag.className = 'build-door'
+  doorTag.setAttribute('aria-hidden', 'true')
+  document.body.append(doorTag)
   const field = document.createElement('input')
   field.className = 'build-dim-field'
   field.inputMode = 'decimal'
@@ -369,7 +374,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   let hover: Handle | null = null
   let shownAt = 0
   /** World points the tags hang from. */
-  const anchors = { w: new THREE.Vector3(), d: new THREE.Vector3() }
+  const anchors = { w: new THREE.Vector3(), d: new THREE.Vector3(), door: new THREE.Vector3() }
   let paths: { far: P[]; from: P[]; to: P[]; door: P[]; knob: P; pegs?: Array<[Handle, P]> } | null = null
   /** The staked-out room's points on the ground, for keeping the card off it. */
   let plot: P[] = []
@@ -540,6 +545,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       mark.position.set(c[0], mh / 2, c[1])
       mark.scale.set(mw, mh, 1)
       mark.rotation.set(0, Math.atan2(geo.out[0] * facing, geo.out[1] * facing), 0)
+      anchors.door.set(c[0], mh + 0.12, c[1])
+      doorTag.textContent = d.door.leaves === 2 ? 'double doors here' : d.door.leaves === 1 ? 'a door here' : 'an opening here'
     }
 
     // Grips: a wooden peg standing on each wall it moves (and on the door), with arrows in flour beside it
@@ -616,7 +623,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     draft = null
     if (!accept(next)) return false
     if (!group.parent) stage.scene.add(group)
-    for (const el of [tags.w, tags.d, choice]) el.classList.add('shown')
+    for (const el of [tags.w, tags.d, choice, doorTag]) el.classList.add('shown')
     cardSide = null
     shownAt = performance.now()
     place()
@@ -631,7 +638,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     editing = null
     group.removeFromParent()
     hooks.yard(null)
-    for (const el of [tags.w, tags.d, choice, field]) el.classList.remove('shown')
+    for (const el of [tags.w, tags.d, choice, field, doorTag]) el.classList.remove('shown')
     stage.renderer.domElement.style.cursor = ''
   }
   const confirm = () => {
@@ -854,6 +861,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const inX = (x: number) => Math.min(innerWidth - 60, Math.max(60, x)), inY = (y: number) => Math.min(innerHeight - 24, Math.max(24, y))
     at(tags.w, inX(wx), inY(wy))
     at(tags.d, inX(dx), inY(dy))
+    const [ox, oy] = screen(anchors.door)
+    at(doorTag, inX(ox), inY(oy), '-50%', '-100%')
     // On a phone the choice docks to the bottom, in reach of a thumb, as placing's tag does.
     const docked = innerWidth < 700 && innerHeight > innerWidth
     choice.classList.toggle('docked', docked)
@@ -873,7 +882,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const pts = plot.flatMap((p) => [screen(v3.set(p[0], 0, p[1])), screen(v3.set(p[0], STAKE_H, p[1]))])
     if (!pts.length) return
     const room: Box = { l: Math.min(...pts.map((p) => p[0])), t: Math.min(...pts.map((p) => p[1])), r: Math.max(...pts.map((p) => p[0])), b: Math.max(...pts.map((p) => p[1])) }
-    const keep: Box[] = [room, boxOf(tags.w), boxOf(tags.d)]
+    const keep: Box[] = [room, boxOf(tags.w), boxOf(tags.d), boxOf(doorTag)]
     for (const el of document.querySelectorAll('.talk-card')) {
       const b = boxOf(el)
       if (b.r - b.l > 0 && getComputedStyle(el).opacity !== '0') keep.push(b)
@@ -904,7 +913,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const dispose = () => {
     close()
     listening.abort()
-    for (const el of [tags.w, tags.d, field, choice, style]) el.remove()
+    for (const el of [tags.w, tags.d, field, choice, doorTag, style]) el.remove()
     sheet.geometry.dispose()
     mark.geometry.dispose()
     ;(mark.material as THREE.Material).dispose()
@@ -974,6 +983,10 @@ function css() {
   .build-dim { min-height: 36px; min-width: 44px; padding: 3px 12px 5px; border: 0; border-radius: 9px; cursor: text; rotate: -3deg; color: #4a3428; font: 700 18px ${HAND};
     background: linear-gradient(170deg, #fffaf0, #f6e8cf); box-shadow: 0 5px 12px rgba(70, 40, 20, 0.24), 0 1px 0 rgba(255, 255, 255, 0.7) inset; }
   .build-dim[data-dim='d'] { rotate: 4deg; }
+  .build-door { position: fixed; z-index: 6; left: 0; top: 0; padding: 2px 10px 4px; border-radius: 8px; pointer-events: none; opacity: 0; transition: opacity 160ms ease;
+    rotate: -2deg; white-space: nowrap; color: #fff6ea; font: 700 15px ${HAND}; background: #d9703a; box-shadow: 0 4px 10px rgba(70, 40, 20, 0.25); }
+  .build-door::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; rotate: 45deg; background: #d9703a; }
+  .build-door.shown { opacity: 1; }
   .build-dim::after { content: ''; position: absolute; inset: 3px; border: 1.2px dashed rgba(150, 110, 80, 0.4); border-radius: 7px; pointer-events: none; }
   .build-dim:hover::after, .build-dim:focus-visible::after { border-color: rgba(150, 100, 60, 0.85); }
   .build-dim:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; border-radius: 8px; }

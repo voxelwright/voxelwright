@@ -105,7 +105,7 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
     byFar('toy-chest', mid)
     lay('play-table', mid + away * 0.3, d.depth * 0.5, fromSide(away))
     // The tent in the far corner on the quiet side.
-    if (roomy) lay('play-tent', sideWall(away) - away * 0.7, farIn - 0.7, yawTo([-away * geo.dir[0] + back[0], -away * geo.dir[1] + back[1]]))
+    if (roomy) lay('play-tent', sideWall(away) - away * 0.7, farIn - 0.7, fromSide(away))
   } else if (STUDY.test(label)) {
     // The desk under the window, the reading chair and its lamp on the quiet side, a rug between.
     const [, dc] = byFar('desk', mid) ?? [mid, farIn - 0.5]
