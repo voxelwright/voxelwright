@@ -1128,6 +1128,7 @@ JSON answer the host checks field by field (`checkRouted` in
 | furnish | a translucent ghost of the right size at once, then the made prop in its place, with Keep, Undo and Try another on a paper tag |
 | project | your villager says so in one line; a kraft-paper parcel with a stitched "being made" tag stands where it will go; the host records it in `projects.jsonl`, and parcels come back after a reload |
 | journal | the journal opens at that villager or section |
+| theme (#50) | your villager says one line, the whole home is restyled from the sentence, and it says what changed (see Themes) |
 
 Furnishing (`src/talk/furnish.ts`): trusted code resolves the place from the
 words (around the table, by the window, in the corner, on the counter, the
