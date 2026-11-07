@@ -922,8 +922,8 @@ turns it off; without `?talk=npc` the plugin adds nothing.
 - `src/plugins/babble.ts` listens for `village/said` (`{ villager, word, index,
   last }`, sent by talk.ts as each word appears) and `village/said-stop`
   (`{ villager }`). The AudioContext starts on the first touch or key press, and a later touch resumes it if the browser held it back.
-  `M` or the felt speaker button at the bottom left mutes; the choice is kept
-  in `localStorage` (`village.babble.muted`). Hidden tabs, `pagehide` and
+  `M` or the felt speaker button at the bottom left mutes all sound (the voices and the
+  music); the choice is kept in `localStorage` (`village.babble.muted`). Hidden tabs, `pagehide` and
   unloading the plugin stop the voice; unloading closes the context.
 - `?babble=demo` (dev only) plays a scripted exchange between the three at
   talk.ts's reveal pace, without talk.ts or a model.
@@ -948,6 +948,31 @@ playing, 16.8 ms with `?babble=off`).
 
 Not done: talk.ts does not send `village/said` yet (another branch adds it);
 the voices have only been measured, not listened to by a person.
+
+## Music (#42)
+
+Music: with `?talk=npc` a quiet looped bed plays under the villagers, "Groove Music" by
+benpm (CC BY 4.0, https://freesound.org/s/203099/), the only sampled sound in the home. `?music=off` turns it
+off; without `?talk=npc` the plugin adds nothing. The credit shows when you hover or Tab to the
+note beside the speaker button, and is in `CREDITS.md` and `public/audio/CREDITS.md`.
+
+- `public/audio/groove-music.ogg` is the original re-encoded to Ogg Opus at 112 kb/s (341 KB). It
+  is exactly eight bars at 90 BPM (1,024,000 samples at 48 kHz), so it loops as it is, with no trim
+  or crossfade: `loopStart` 0, `loopEnd` the buffer's duration. The step at the loop point is
+  -65 dBFS, about twice the median step of the music itself.
+- `src/voice/bed.ts` plays it through Web Audio on any context (source, level, duck, mute), at
+  a gain of 0.26: -32 LUFS integrated (the file alone is -20.3), peak -15.8 dBFS. It fades in over
+  2 s, and drops 6 dB (80 ms down) while a villager speaks. `src/plugins/music.ts` starts it on
+  the first touch or key press, like the voices, and listens for `village/said` and
+  `village/said-stop`: the duck is released 0.6 s after the last word (250 ms time constant back).
+  A hidden tab suspends it; unloading stops, disconnects and closes its own AudioContext.
+- Switches: `M` and the speaker button (babble.ts) mute everything and tell the music with
+  `village/muted`; Shift+M or the note mutes the music alone (`village.music.muted`). Both survive a
+  reload. With `?babble=off` there are no voices, so nothing ducks and the music takes `M` itself.
+
+```sh
+node scripts/check-music.mjs [base-url]   # 29 headless checks, dev server on 5322 by default
+```
 
 ## Always-on input (#42 prototype)
 

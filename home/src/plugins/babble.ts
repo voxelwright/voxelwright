@@ -2,6 +2,7 @@ import type { Context } from 'cordis'
 import { Babbler, type Said } from '../voice/engine'
 import { voiceKey } from '../voice/profiles'
 import { runDemo } from '../voice/demo'
+import { ALL_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 
 // #42: villagers babble in time with their words when no voice model is connected.
 // talk.ts announces each revealed word with `village/said`; this plugin turns it
@@ -14,6 +15,8 @@ declare module 'cordis' {
     'village/said'(e: { villager: string; word: string; index: number; last: boolean }): void
     /** A villager's reply was cut short: stop its voice now. */
     'village/said-stop'(e: { villager: string }): void
+    /** All sound (the voices and the music) was muted or unmuted, by `M` or the speaker button. */
+    'village/muted'(e: { muted: boolean }): void
   }
 }
 
@@ -21,29 +24,6 @@ const params = new URLSearchParams(location.search)
 const MODE = params.get('babble')
 const DEMO = import.meta.env.DEV && MODE === 'demo'
 const ON = MODE !== 'off' && (params.get('talk') === 'npc' || DEMO)
-const MUTED = 'village.babble.muted'
-
-function storedMute(): boolean {
-  try {
-    return localStorage.getItem(MUTED) === '1'
-  } catch {
-    return false
-  }
-}
-
-function storeMute(muted: boolean) {
-  try {
-    localStorage.setItem(MUTED, muted ? '1' : '0')
-  } catch {
-    // Private windows may refuse storage; the toggle still works for this visit.
-  }
-}
-
-/** Typing in the slip or the notebook never toggles the voices. */
-function typing(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  return Boolean(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)))
-}
 
 const SPEAKER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path class="cone" d="M4 9.5h3.2L12 5.6v12.8l-4.8-3.9H4z"/><path class="waves" d="M15 9.2c1 .8 1.5 1.7 1.5 2.8s-.5 2-1.5 2.8M17.4 7c1.7 1.4 2.6 3.1 2.6 5s-.9 3.6-2.6 5"/><path class="hush" d="M15.5 9.5l5 5m0-5l-5 5"/></svg>`
 
@@ -75,7 +55,7 @@ export default {
     if (!ON) return
     let audio: AudioContext | null = null
     let babbler: Babbler | null = null
-    let muted = storedMute()
+    let muted = storedFlag(ALL_MUTED)
 
     const button = document.createElement('button')
     button.type = 'button'
@@ -85,14 +65,15 @@ export default {
     style.textContent = CSS
     const show = () => {
       button.setAttribute('aria-pressed', String(muted))
-      button.setAttribute('aria-label', muted ? 'Villager voices off' : 'Villager voices on')
-      button.title = `${muted ? 'Voices off' : 'Voices on'} (M)`
+      button.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on')
+      button.title = `${muted ? 'Sound off' : 'Sound on'} (M)`
     }
     const setMuted = (value: boolean) => {
       muted = value
-      storeMute(muted)
+      storeFlag(ALL_MUTED, muted)
       babbler?.setMuted(muted)
       show()
+      ctx.emit('village/muted', { muted })
     }
     show()
     button.addEventListener('click', () => setMuted(!muted))
@@ -109,9 +90,7 @@ export default {
       void audio.resume()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'm' && e.key !== 'M') return
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typing(e.target)) return
-      setMuted(!muted)
+      if (isMuteKey(e, false)) setMuted(!muted)
     }
     const onVisibility = () => document.hidden && babbler?.stop()
     const close = () => {
