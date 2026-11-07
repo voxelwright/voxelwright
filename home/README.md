@@ -1372,5 +1372,44 @@ exterior and window still show a garden. Below the 9/10 bar; this round proves t
 browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
 
 Not built yet: switching themes live with a transition, saving, editing and deleting presets,
-the per-villager "keep my costume" toggle, characters on twos from `motion.characterFps`, a
-theme written from a sentence, and the comic-book and hand-painted looks.
+the per-villager "keep my costume" toggle, characters on twos from `motion.characterFps`,
+and the comic-book and hand-painted looks.
+
+### A theme written from a sentence
+
+`village.theme.ask("make it cozier")` (`src/theme/ask.ts`), or the same line typed into the
+always-on input, which routes it to a new `theme` route. The page sends the sentence and the
+current theme to `POST /people/:id/theme` (`host/src/villager-theme.ts`, behind the per-launch
+token, under one listed person, one at a time). One tool-less model call (Sonnet by default,
+`--theme-model haiku`) writes `{note, theme}`; its prompt is built from `tokens.ts`, the three
+presets and the painter names, so it never drifts from them. "Modify" is the same call with
+the current theme as data. The host checks the shape and answers 422 on model failure; the
+page checks every field with `check()` (`src/theme/check.ts`: own known keys only, numbers
+clamped, `#rrggbb` colours, stage kinds, painters and vetoes from fixed lists, palette at most
+64, short one-line strings, missing fields from the home) and only then calls `setTheme`. A
+failure or refusal leaves the current theme. The note is shown as text. The reply also
+carries `props.hint` and `costumes.hint`; nothing remakes props from them yet. The rule
+against naming films, studios or artists is in the prompt, not in `check()`.
+
+`node scripts/check-theme-ask.mjs` (stub themer and router) proves 22 checks: hostile
+`check()` inputs (`__proto__` keys, NaN, 1e308, unknown stages, a 10,000-colour palette,
+script-looking strings), presets passing unchanged, ask applying live, a hostile answer
+clamped, junk and a failed call leaving the theme, the token and person checks, and "make it
+cozier" from the input. `--agent=claude --theme-model=sonnet|haiku [--shots=dir]` runs five
+real sentences in sequence at `?q=high`, each modifying the last.
+
+Real calls, operator login, November 6, 2026, from `ask()` to two frames after `setTheme`.
+`check()` passed every answer first time with nothing clamped:
+
+| Sentence | Sonnet | Haiku |
+| --- | --- | --- |
+| make it cyberpunk | 12.8 s, 973 tok, $0.044 | 6.9 s, 1010 tok, $0.0024 |
+| make it cozier, more autumn | 8.1 s, 902 tok, $0.021 | 6.2 s, 914 tok, $0.0015 |
+| a hand-painted pastoral summer afternoon | 9.2 s, 979 tok, $0.022 | 17.1 s, 1961 tok, $0.0020 |
+| make it look like a comic book | 7.9 s, 1012 tok, $0.022 | 48.8 s, 1463 tok, $0.0016 |
+| go back to normal | 3.8 s, 412 tok, $0.017 | 21.7 s, 463 tok, $0.0011 |
+
+Sonnet's first call pays the prompt cache write. Haiku's last three ran while other agents
+used the machine; treat its tail as unmeasured. Halftone, ink, brush and paper are still
+pass-through stubs, so the comic and pastoral results show only their tokens. Screenshots
+(Sonnet): `screenshots/themes/ask-cyberpunk.jpg`, `ask-cozier-autumn.jpg`, `ask-comic.jpg`.
