@@ -5,13 +5,16 @@
 // smallest also gets a low bookcase and a plant on the side away from the door, and a
 // picture. They are plan furniture, committed with the room in one version, so one undo
 // takes both away and a reload draws them again. The way in from the door is kept clear.
+// A playroom's toys go on a toy shelf, and its wall facing the dollhouse view gets bunting,
+// two drawings and a low ledge of picture books. Free-standing pieces keep 0.3 m inside the
+// outline and clear of the outline's pegs, so the ghosts never sit on the flour line.
 // Every piece is checked by placing's own rules (mount.ts fit) against the house as the
 // room makes it, the things already in the scene and the pieces laid before it; one that
 // will not fit is nudged toward the room's middle, and left out if it still will not.
 import * as THREE from 'three/webgpu'
 import { releaseGpu } from '../kernel'
 import { KINDS, fit, footprint, obstacles, seat, type Obstacle, type Size } from './mount'
-import { curveOf, pointAt, roomArea, type Anchor, type Furniture, type P, type Plan } from './plan'
+import { curveOf, outline as ringOf, pointAt, roomArea, type Anchor, type Furniture, type P, type Plan } from './plan'
 import { draftGeometry, type Draft } from './resolve'
 
 /** Rooms that get no sofa: a pantry or a bathroom is furnished by hand. */
@@ -69,17 +72,30 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
     const [ax, az] = at(d.door.from - 0.1, 0), [bx, bz] = at(d.door.to + 0.1, 1.5)
     list.push({ box: new THREE.Box3(new THREE.Vector3(Math.min(ax, bx), 0.03, Math.min(az, bz)), new THREE.Vector3(Math.max(ax, bx), 2, Math.max(az, bz))), name: 'way in' })
   }
+  // Where the outline's pegs stand (outline.ts grips): on each side wall's middle, the far wall's middle and the door.
+  const peg = (along: number, across: number) => {
+    const [x, z] = at(along, across)
+    list.push({ box: new THREE.Box3(new THREE.Vector3(x - 0.3, 0, z - 0.3), new THREE.Vector3(x + 0.3, 0.4, z + 0.3)), name: 'peg' })
+  }
+  peg(d.from, d.depth / 2)
+  peg(d.to, d.depth / 2)
+  peg(mid, d.depth + d.bend)
+  peg(doorMid, 0)
+  // Free-standing pieces stay this far inside the walls' centrelines.
+  const room = made.rooms.find((r) => r.id === d.roomId)
+  const inner = room ? ringOf(made, room, 0.3) : null
   const out: Furniture[] = []
   // Nudges toward the shared wall and the middle first, then any way, 10 cm at a time.
   const steps: P[] = [[0, 0]]
   for (let r = 0.1; r <= 1.21; r += 0.1) for (const [a, c] of [[0, -1], [-1, 0], [1, 0], [-1, -1], [1, -1], [0, 1], [-1, 1], [1, 1]] as const) steps.push([a * r, c * r])
   /** Lay a piece as near as it fits to (along, across); where it went, in the room's frame, or null. */
-  const lay = (kind: string, along: number, across: number, yaw: number): P | null => {
+  const lay = (kind: string, along: number, across: number, yaw: number, free = true): P | null => {
     const size = sizeOf(kind)
     const toMid = Math.sign(mid - along) || 1
     for (const [da, dc] of steps) {
       const [x, z] = at(along + da * toMid, across + dc)
       const anchor: Anchor = { mount: 'floor', x: r3(x), z: r3(z), yaw: r3(yaw) }
+      if (free && inner && !footprint(anchor.x, anchor.z, size[0], size[2], anchor.yaw).every(([px, pz]) => inside(inner, px, pz))) continue
       if (!fit({ plan: made, size, obstacles: list, supportAt: () => null }, anchor).ok) continue
       out.push({ id: `${d.roomId}.${kind}`, item: { kind }, at: anchor })
       // What stands is in the way of what comes after; a rug is not.
@@ -93,9 +109,9 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
     return null
   }
   /** A piece against the side wall on side s, `across` metres out from the shared wall. */
-  const bySide = (kind: string, s: number, across: number) => lay(kind, sideWall(s) - s * (sizeOf(kind)[2] / 2 + 0.06), across, fromSide(s))
+  const bySide = (kind: string, s: number, across: number) => lay(kind, sideWall(s) - s * (sizeOf(kind)[2] / 2 + 0.06), across, fromSide(s), false)
   /** A piece against the far wall, `along` metres along the host wall. */
-  const byFar = (kind: string, along: number) => lay(kind, along, farIn - 0.06 - sizeOf(kind)[2] / 2, facing)
+  const byFar = (kind: string, along: number) => lay(kind, along, farIn - 0.06 - sizeOf(kind)[2] / 2, facing, false)
   const roomy = roomArea(made, d.roomId) >= SMALL
   const label = d.label
 
@@ -131,10 +147,26 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
       lay('floor-lamp', sa - away * (sw / 2 + 0.1 + lw / 2), sc + sd / 2 - ld / 2, facing)
     }
   }
-  // The second grouping, on the quiet side near the shared wall: a low bookcase and a plant beside it.
+  // The second grouping, on the quiet side near the shared wall: a low bookcase (a playroom's toy shelf) and a plant beside it.
   if (roomy) {
-    const [, bc] = bySide('low-bookcase', away, T / 2 + 0.2 + sizeOf('low-bookcase')[0] / 2) ?? [0, 0]
-    if (bc) bySide('potted-plant', away, bc + sizeOf('low-bookcase')[0] / 2 + 0.3)
+    const shelf = PLAY.test(label) ? 'toy-shelf' : 'low-bookcase'
+    const [, bc] = bySide(shelf, away, T / 2 + 0.2 + sizeOf(shelf)[0] / 2) ?? [0, 0]
+    if (bc) bySide('potted-plant', away, bc + sizeOf(shelf)[0] / 2 + 0.3)
+  }
+  // A playroom's back wall (the side wall furthest back, whose inside faces the dollhouse view) gets one grouping at child height,
+  // in place of the picture.
+  if (PLAY.test(label)) {
+    const sides = made.walls.filter((w) => w.id.startsWith(`${d.roomId}.w`)).map((w) => ({ w, c: curveOf(made, w) })).filter(({ c }) => Math.abs(dot2(c.dir, geo.out)) > 0.9)
+    const back = sides.sort((p, q) => pointAt(p.c, p.c.length / 2)[1] - pointAt(q.c, q.c.length / 2)[1])[0]
+    if (back) {
+      const size = sizeOf('play-wall'), L = back.c.length
+      for (const da of [0, 0.3, -0.3, 0.6, -0.6]) {
+        const anchor: Anchor = { mount: 'wall', wallId: back.w.id, roomId: d.roomId, along: r3(L / 2 + da), height: 1.12, spin: 0 }
+        if (!fit({ plan: made, size, obstacles: list, supportAt: () => null }, anchor).ok) continue
+        out.push({ id: `${d.roomId}.play-wall`, item: { kind: 'play-wall' }, at: anchor })
+        return out
+      }
+    }
   }
   // A picture on the quiet side wall, at eye height, in its middle (or the far wall's, when the window leaves room).
   const size = sizeOf('picture')
@@ -155,3 +187,12 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
 }
 
 const dot2 = (a: P, b: P) => a[0] * b[0] + a[1] * b[1]
+
+/** Whether a floor point is inside a polygon (even-odd). */
+function inside(poly: P[], x: number, z: number) {
+  let inn = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if ((poly[i][1] > z) !== (poly[j][1] > z) && x < ((poly[j][0] - poly[i][0]) * (z - poly[i][1])) / (poly[j][1] - poly[i][1]) + poly[i][0]) inn = !inn
+  }
+  return inn
+}

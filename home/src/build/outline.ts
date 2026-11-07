@@ -970,6 +970,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     shownAt: () => shownAt,
     /** The first pieces the room would arrive with, as the ghosts show them. */
     pieces: () => pieces,
+    /** The first pieces for a draft, laid against the same scan of the house the ghosts were (the caller's commit). */
+    piecesFor: (base: Plan, made: Plan, d: Draft) => firstPieces(base, made, d, null, [], seen ??= obstacles(stage.scene, [group])),
     grips,
     dispose,
   }

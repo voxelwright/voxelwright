@@ -2,8 +2,10 @@
 // Starts its own villager host (stub router and villagers by default) and dev
 // server on a throwaway VILLAGE_ROOT, and stops both at the end.
 // Usage: node scripts/check-build-addroom.mjs [--dev=5351] [--host=5352]
-//   --look: screenshots/build/addroom-*.jpg (dollhouse, close and the new doorway seated, 1440x900 and 390x844) and addroom.mp4.
-//   --look --variant=<name>: the outline and built shots only, with &look=<name>, as addroom-outline-<name>.jpg and addroom-built-<name>.jpg.
+//   --look: screenshots/build/addroom-*.jpg (the outline, adjusted, close, the move-in's step through the door (reveal) and
+//     its settled frame (built), the new doorway seated, the phone) and addroom.mp4.
+//   --look --variant=<name>: a look prototype (&look=<name>, for a future regroup): the outline, reveal and built shots only,
+//     as addroom-outline-<name>.jpg, addroom-reveal-<name>.jpg and addroom-built-<name>.jpg.
 //   --agent=claude: add-room lines through the real router (?route=separate, Sonnet),
 //     printing each routed intent, whether it matched, and Enter to outline (or to the question).
 import { spawn, execFileSync } from 'node:child_process'
@@ -264,9 +266,9 @@ try {
     }
     await page.waitForTimeout(1200)
     await page.keyboard.press('Enter')
-    // A look with a reveal (villageBuild.reveal, ?look=movein): the doorway step as the in-between shot, then its settled frame.
+    // The move-in: the doorway step as the in-between shot, then its settled frame.
     const reveal = () => B(page, () => window.villageBuild.reveal?.().phase ?? null)
-    if (variant && (await reveal()) !== null) {
+    if ((await reveal()) !== null) {
       const end = Date.now() + 25_000
       let crossed = false
       for (let p; (p = await reveal()) !== 'settled' && Date.now() < end;) {
