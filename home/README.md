@@ -275,6 +275,27 @@ kitchen's right wall, through the doorway and round the living room's furniture
 to its plant corner. Mia (Moss, the gardener) tends the living room's plants as
 her third chore.
 
+**Cost.** Both rooms are always drawn now. Headless Chrome, 1440x900, DPR 2,
+WebGPU, `?talk=npc&input=held`, whole-house view after (the kitchen view before),
+`npm run measure -- <url> --perf --gpu`, two 6 s runs after:
+
+| | Draw calls | Triangles | GPU p50 / p95 ms | Frame p50 / p95 ms, pacing unlocked |
+| --- | --- | --- | --- | --- |
+| `q=high`, before | 907 | 187,658 | 11.2 / 17.7 | 7.4 / 8.9 |
+| `q=high`, after | 1,082 | 251,392 | 16.6 / 19.1 and 16.7 / 18.3 | 8.5 / 9.8 |
+| `q=low`, before | 838 | 184,428 | 4.9 / 6.6 | 5.7 / 6.4 |
+| `q=low`, after | 1,004 | 242,978 | 5.3 / 6.8 and 5.3 / 15.8 | 6.3 / 7.7 |
+
+The GPU column (submit to queue done) is bimodal on the M1 Pro: the same page
+reads about 8.7 or about 16.5 ms from run to run, with nothing changed in between,
+so it looks quantized by vsync. Hiding parts of the scene moved it between the two
+modes rather than by their cost. With frame pacing unlocked (`--disable-gpu-vsync
+--disable-frame-rate-limit`), a high-tier frame takes 8.5 ms at p50, 1.1 ms more
+than before. That is enough to move the GPU column across a vsync step: without
+`?q=`, calibration measured 15.0 ms and stepped down to medium in one of two
+runs, where the base commit measured 10.8 ms and stayed high in three. Open: trim
+about 1 ms, or calibrate on a metric that is not quantized.
+
 Checks: `node scripts/check-entries.mjs` (rewritten for glides) and
 `node scripts/check-navigation.mjs` (keys, the input rule, drag, pan, zoom,
 double-click, clamping, reduced motion, flicker). Demo:
