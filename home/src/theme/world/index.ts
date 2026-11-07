@@ -8,6 +8,8 @@ import type { Theme } from '../tokens'
 import { neonCity } from './neon'
 import { comicPage } from './comic'
 import { twilightStreet } from './twilight'
+import { pastoralHills } from './pastoral'
+import { pixelLot } from './pixel'
 
 /** Where the window's own painted card hung: its centre and size, so a world can hang its own there. */
 export interface View { x: number; y: number; z: number; w: number; h: number }
@@ -22,6 +24,8 @@ export const WORLDS: Record<string, (house: House) => World> = {
   'neon-city': neonCity,
   'comic-page': comicPage,
   'twilight-street': twilightStreet,
+  'pastoral-hills': pastoralHills,
+  'pixel-lot': pixelLot,
 }
 const OFF = new URLSearchParams(location.search).get('world') === '0'
 

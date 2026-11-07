@@ -32,8 +32,11 @@ export const PASTORAL: Theme = {
     // The yard and the worktable beyond it become lush summer meadow.
     backdrop: { paint: 'gouache-meadow', gain: 0.92 },
     foliage: { paint: 'gouache-leaves', gain: 1.25 },
+    // Contact shadows pool like a warm umber wash under every piece, so nothing hovers.
+    contact: { paint: 'contact-deep', color: '#8a6a5c', tint: 0.35 },
   },
   sky: { paint: 'pastoral-sky' },
+  world: 'pastoral-hills',
   // Unpainted paper: in the dollhouse view the meadow fades out to the sheet's margin, as a watercolour does.
   fog: { color: '#f4ecdc', tint: 1 },
   post: {

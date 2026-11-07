@@ -607,6 +607,44 @@ export function paintPixelPlaster() {
   return toTexture(c)
 }
 
+/**
+ * A denser contact shadow than the home's own (../../paint.ts paintContact): a denser core
+ * that reaches nearer the footprint's edge and a shorter falloff, so furniture seen from
+ * the dollhouse's height sits on the floor instead of hovering. Painted in a mid grey-brown
+ * so the theme's `contact` colour, which multiplies it, sets the shadow's hue.
+ */
+export function paintContactDeep() {
+  const [c, g] = canvas(128, 128)
+  g.filter = 'blur(10px)'
+  g.fillStyle = 'rgba(112, 92, 90, 0.8)'
+  g.beginPath()
+  g.roundRect(22, 22, 84, 84, 18)
+  g.fill()
+  return toTexture(c)
+}
+
+/**
+ * Floorboards for pixel art: four broad boards per tile in three honey values, a dark seam a
+ * pixel or so wide at 225 rows and one staggered butt joint each, no grain. Laid like the
+ * home's planks (boards run along the texture's x), so the floor's own repeat and turn apply.
+ */
+export function paintPixelPlanks() {
+  const size = 128, boards = 4, bh = size / boards
+  const [c, g] = canvas(size, size)
+  const tones = ['#dcb07e', '#cfa072', '#d8aa78', '#c99a6c']
+  for (let b = 0; b < boards; b++) {
+    const y0 = b * bh
+    g.fillStyle = tones[b % tones.length]
+    g.fillRect(0, y0, size, bh)
+    g.fillStyle = '#a87650'
+    g.fillRect(0, y0, size, 3)
+    g.fillRect((b * 37 + 20) % size, y0, 3, bh)
+  }
+  const t = toTexture(c)
+  t.anisotropy = 1
+  return t
+}
+
 /** Painters by name, as a theme's `paint` names them. */
 export const PAINTERS: Record<string, () => THREE.Texture> = {
   'night-city': () => paintNightCity(7),
@@ -617,4 +655,6 @@ export const PAINTERS: Record<string, () => THREE.Texture> = {
   'gouache-leaves': () => paintGouacheLeaves(4),
   'pastoral-sky': () => paintPastoralSky(13),
   'pixel-plaster': paintPixelPlaster,
+  'pixel-planks': paintPixelPlanks,
+  'contact-deep': paintContactDeep,
 }

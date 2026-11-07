@@ -110,7 +110,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     glow: surface(own(S, 'glow'), 'surfaces.glow'),
     other: surface(own(S, 'other'), 'surfaces.other'),
   }
-  for (const role of ['trim', 'backdrop', 'foliage'] as const) {
+  for (const role of ['trim', 'backdrop', 'foliage', 'contact'] as const) {
     const v = own(S, role)
     if (isObj(v)) surfaces[role] = surface(v, `surfaces.${role}`)
     else if (v !== undefined) note(`surfaces.${role}`)
