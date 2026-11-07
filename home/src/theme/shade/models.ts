@@ -168,7 +168,7 @@ function wet(o: Lit, cls: MaterialClass): Twin {
   if (cls === 'metal') {
     const sky = mix(color('#ff2fa8'), color('#27d8ff'), reflectVector.y.mul(0.5).add(0.5).clamp())
     const grazing = float(1).sub(normalView.dot(positionViewDirection).clamp()).pow(2).mul(0.6).add(0.12)
-    t.emissiveNode = ((o.emissiveNode ?? materialEmissive) as THREE.Node<'vec3'>).add(sky.mul(grazing).mul(0.35)) as never
+    t.emissiveNode = ((o.emissiveNode ?? materialEmissive) as THREE.Node<'vec3'>).add(sky.mul(grazing).mul(0.12)) as never
   }
   const twin: Twin = {
     material: t,
@@ -183,21 +183,26 @@ function wet(o: Lit, cls: MaterialClass): Twin {
           t.metalness = 0.25
           break
         case 'metal':
+          // Chrome, but satin: at 0.2 the magenta practical flared across the fridge door.
           t.color.lerp(chrome, 0.6)
-          t.roughness = 0.2
+          t.roughness = 0.36
           t.metalness = 1
           break
-        case 'painted':
         case 'wood':
-        case 'unknown':
-          t.color.multiplyScalar(cls === 'wood' ? 0.7 : 0.65)
-          t.roughness = o.userData.themeRole === 'wall' ? 0.6 : 0.48
+          // Wet satin: the table catches the neon in long soft highlights.
+          t.color.multiplyScalar(0.7)
+          t.roughness = 0.48
           t.metalness = 0.15
           break
+        case 'painted':
+        case 'unknown':
+          // A shade darker but no glossier: satin paint lit the counter edge like a tube.
+          t.color.multiplyScalar(0.85)
+          break
         case 'ceramic':
+          // Darker, and no glossier than it was: polished, the magenta practical blew out the counter.
           t.color.multiplyScalar(0.75)
-          // Glossy but not mirror-hot: the magenta practical blew out a polished counter.
-          t.roughness = 0.34
+          t.roughness = Math.max(0.6, o.roughness)
           break
         case 'fabric':
           t.roughness = 1
@@ -231,7 +236,10 @@ export function makeTwin(model: Model, o: THREE.Material, cls: MaterialClass): T
   const m = o as Lit
   if (model === 'class') return tint(m, cls)
   if (model === 'toon') return toon(m, cls)
-  // Neon: the floor stays the tokens' wet floor; everything else is pushed by class.
-  if (m.userData.themeRole === 'floor' || m.userData.themeRole === 'backdrop') return null
+  // Neon: the floor stays the tokens' wet floor and glass its own; the rest is pushed by class.
+  // Walls keep the tokens' paint and emissives their own colour: pushed, they dimmed the room
+  // and blazed the counter's strip.
+  const role = m.userData.themeRole
+  if (role === 'floor' || role === 'backdrop' || role === 'wall' || cls === 'glass' || cls === 'emissive') return null
   return wet(m, cls)
 }

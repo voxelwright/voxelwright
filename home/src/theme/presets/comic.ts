@@ -55,6 +55,8 @@ export const COMIC: Theme = {
     veto: [],
     stages: STAGES.filter((s) => !drop.has(s.kind)),
   },
+  // The house stands in one panel of a printed page (./world/comic.ts).
+  world: 'comic-page',
   motion: { characterFps: 12 },
   costumes: { follow: true, hint: 'flat bold colour blocks with a dark ink outline, simple graphic patterns, readable silhouettes' },
   props: { hint: 'graphic shapes with clean silhouettes, flat saturated colour faces and few small details, so they ink well' },

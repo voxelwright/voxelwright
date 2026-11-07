@@ -47,6 +47,9 @@ export const NEON_NIGHT: Theme = {
     veto: [],
     stages: [],
   },
+  // The house stands on a wet city block (./world/neon.ts); chrome and wet satin by material (./shade).
+  world: 'neon-city',
+  shade: 'wet',
   motion: {},
   costumes: { follow: true, hint: 'rain shells and knit layers in charcoal, with thin reflective magenta and cyan piping' },
   props: { hint: 'night city kitchenware: dark lacquer, brushed steel, frosted acrylic, thin neon edge lights in magenta and cyan' },

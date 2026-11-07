@@ -1,14 +1,17 @@
-// Regroup S2 (#50): the theme owns the shading. Every lit material is sorted by what it is
+// The theme owns the shading (#50, regroup S2). Every lit material is sorted by what it is
 // (./classify.ts) and rendered through a twin the theme's shading model makes (./models.ts).
 // The scene keeps the plugins' own materials: the twin is swapped in per draw through the
 // renderer's render-object hook, so picking, the hover glow and the theme plugin's role
 // shifts all still act on the original, and the twin copies its live values every frame.
 //
-//   ?theme=comic&shade=1    the theme's model (comic: toon; neon-night: wet PBR)
-//   ?theme=comic&shade=class  every class one flat colour, for a screenshot
+// A theme's `shade` token picks the model (neon night: 'wet'). For comparisons:
+//   ?shade=0       no model for any theme
+//   ?shade=toon    force a model on whatever theme is showing ('wet' likewise)
+//   ?shade=class   every class one flat colour, for a screenshot
 //
-// Without ?shade nothing here runs. Twins are released when their material leaves the
-// scene, when the model changes, and on unload.
+// The hook is installed only while a model is active, so a theme without one draws exactly
+// as before. Twins are released when their material leaves the scene, when the model
+// changes, and on unload.
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { theme } from '../index'
@@ -17,13 +20,10 @@ import { keyDirection, makeTwin, type Model, type Twin } from './models'
 
 const FLAG = new URLSearchParams(location.search).get('shade')
 
-/** Each theme's model when its tokens don't name one. */
-const DEFAULT_MODEL: Record<string, Model> = { comic: 'toon', 'neon-night': 'wet' }
-
 const RESCAN = 15
 
 export function shade(ctx: Context) {
-  if (!FLAG || FLAG === '0') return
+  if (FLAG === '0') return
   const { scene, renderer } = ctx.stage
   const classes = new Map<THREE.Material, MaterialClass | null>()
   const where = new Map<THREE.Material, string>()
@@ -33,9 +33,8 @@ export function shade(ctx: Context) {
   let key: THREE.DirectionalLight | null = null
 
   const modelFor = (): Model | null => {
-    if (FLAG === 'class') return 'class'
-    const t = theme()
-    return t.shade ?? DEFAULT_MODEL[t.id] ?? null
+    if (FLAG === 'class' || FLAG === 'toon' || FLAG === 'wet') return FLAG
+    return theme().shade ?? null
   }
   const drop = (m: THREE.Material) => {
     twins.get(m)?.dispose()
@@ -78,7 +77,11 @@ export function shade(ctx: Context) {
 
   const swap = (object: THREE.Object3D, s: THREE.Scene, camera: THREE.Camera, geometry: THREE.BufferGeometry, material: THREE.Material, group: unknown, lightsNode: unknown, clip: unknown, passId: unknown) =>
     (renderer as unknown as { renderObject: (...a: unknown[]) => void }).renderObject(object, s, camera, geometry, twins.get(material)?.material ?? material, group, lightsNode, clip, passId)
-  renderer.setRenderObjectFunction(swap as never)
+  const hook = (on: boolean) => {
+    const mine = renderer.getRenderObjectFunction() === (swap as never)
+    if (on && !mine) renderer.setRenderObjectFunction(swap as never)
+    if (!on && mine) renderer.setRenderObjectFunction(null)
+  }
 
   const direction = new THREE.Vector3()
   ctx.on('village/frame', () => {
@@ -87,7 +90,9 @@ export function shade(ctx: Context) {
     if (changed) {
       dropAll()
       model = next
+      hook(model !== null)
     }
+    if (!model) return
     // Every frame, before the theme plugin's walk in the same frame, so a new material is
     // classified from its plugin's own values, not the theme's overrides.
     walk(changed || ++frame % RESCAN === 0)
@@ -108,7 +113,7 @@ export function shade(ctx: Context) {
   ;(window as unknown as { villageShade?: unknown }).villageShade = { counts, list, twins: () => twins.size, twinOf: (m: THREE.Material) => twins.get(m)?.material, materials: () => [...classes.keys()], frames: () => frame }
 
   ctx.effect(() => () => {
-    if (renderer.getRenderObjectFunction() === (swap as never)) renderer.setRenderObjectFunction(null)
+    hook(false)
     dropAll()
     classes.clear()
     where.clear()
