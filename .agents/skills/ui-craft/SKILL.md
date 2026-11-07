@@ -129,6 +129,36 @@ asset, a dependency, a decision). Don't pretend.
 - Score candidates in one capture session against references from the same session; one scorer
   moves about one point between sessions.
 
+## Lessons from the talk regroup (#42, November 7, 2026)
+
+Details and scores are in `home/README.md`, "Talk regroup".
+
+- **Take motion frames by the app's clock.** On a loaded machine a screenshot
+  "0.15 s after Enter" was taken 2 to 3 s late, so one look's sent note was never
+  on screen and its motion score (2 to 3) measured the capture, not the design.
+  Shoot at once, read the app's own time since the event, and retake if the frame
+  missed it (`home/scripts/talk-shots.mjs`).
+- **Keep words out of the post stack.** Paper "lit by the room" was bleached by
+  bloom under a lamp, and temporal anti-aliasing ghosted a transparent mesh whose
+  text changed every word. Words drawn on the page over the 3D view (a 2D canvas
+  shaped and shadowed like the object) were crisp; keep the 3D object for what is
+  not text.
+- **Depth of field and haze cost more than they give** on a busy room seen up
+  close: both models marked lighting down (4 to 6) and scored the low tier, which
+  had none, above the high one.
+- **A held object seen through a narrow lens looks flat.** At a 20 degree field of
+  view, tilt it 45 to 50 degrees and turn it so the convergence shows.
+- **A framing camera must test the whole frame, from the pose it will take.** A
+  line of sight to the subject missed door posts at the frame's edge, and the
+  dollhouse cutaway hid the very wall the new pose would show. Test rays across
+  the frame and predict what the cutaway will draw from there.
+- **Keep the current best in every round as a shuffled reference.** The unchanged
+  reference moved up to 0.7 between rounds, so compare within a round, not across.
+- **Read the split, not only the mean.** GPT-6.1 Sol rewarded legibility and
+  consistency; Opus rewarded the input and the words being things in the world. A
+  direction that wins the structural categories and loses on fixable rendering
+  faults is worth adopting; fix the faults before judging it again.
+
 ## Do not
 
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.

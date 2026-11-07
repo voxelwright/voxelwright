@@ -16,6 +16,7 @@ import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import { navigation, type Pose } from './camera'
 import { tagVillager } from '../theme'
+import { paperCss, paperSlips } from '../talk/paper'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -452,7 +453,7 @@ export default {
     voice.setAttribute('role', 'status')
     voice.setAttribute('aria-live', 'polite')
     const style = document.createElement('style')
-    style.textContent = css()
+    style.textContent = css() + paperCss()
     ctx.effect(() => {
       document.head.append(style)
       document.body.append(slip, voice, ruler, ...cast.flatMap((m) => [m.card.el, m.tag]))
@@ -581,18 +582,83 @@ export default {
     const eye = new THREE.Vector3()
     // Line of sight for the two-shot: anything solid but the villager in the shot blocks it, other villagers too.
     const raycaster = new THREE.Raycaster()
+    // Every layer: a wall cut away from the current view sits on the shadow-only layer, yet may stand in the next shot.
+    raycaster.layers.enableAll()
+    /** While a shot is searched: where its camera would stand and what it looks at, to tell which cut-away walls it would see. */
+    let posed: { from: THREE.Vector3; at: THREE.Vector3 } | null = null
+    const wallAt = new THREE.Vector3()
+    /**
+     * Whether a cut-away wall (or its stub) would be drawn from the posed camera, by camera.ts's rule:
+     * a wall between rooms stands when the camera and what it looks at are on the same side of it, an
+     * outer wall when the camera is inside it; a stub stands in for a wall that is cut.
+     */
+    const standsInShot = (n: THREE.Object3D, from: THREE.Vector3, at: THREE.Vector3) => {
+      const wall = n.userData.interior as { x: number } | undefined
+      const inward = n.userData.inward as THREE.Vector3 | undefined
+      const facing = wall ? Math.sign(from.x - wall.x) === Math.sign(at.x - wall.x) : wallAt.copy(from).sub(n.getWorldPosition(wallAt)).dot(inward!) > 0
+      return n.userData.cutaway ? !facing : facing
+    }
     let subject: THREE.Object3D | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
-      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject) return false
+      // The held pad rides with the camera; it never blocks a shot. A cut-away wall blocks one only if it would stand in it.
+      let wall: THREE.Object3D | null = null
+      for (let n: THREE.Object3D | null = o; n; n = n.parent) {
+        if (n === subject || n.userData.hud) return false
+        if (n.userData.interior || n.userData.inward) wall ??= n
+        else if (!n.visible) return false
+      }
+      if (wall ? !(posed ? standsInShot(wall, posed.from, posed.at) : wall.visible && o.layers.isEnabled(0)) : !o.layers.isEnabled(0)) return false
       return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
+    }
+    /** While a shot is searched, only the meshes near its subject are tested: far fewer rays to cast. */
+    let nearby: THREE.Object3D[] | null = null
+    const around = (at: THREE.Vector3, reach: number) => {
+      const found: THREE.Object3D[] = []
+      const sphere = new THREE.Sphere()
+      stage.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        // Cut-away walls too: hidden from this view, they may stand in the shot being searched.
+        let wall = false
+        for (let n: THREE.Object3D | null = mesh; n && !wall; n = n.parent) wall = Boolean(n.userData.interior || n.userData.inward)
+        if (!wall && !solid(mesh)) return
+        if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere()
+        sphere.copy(mesh.geometry.boundingSphere!).applyMatrix4(mesh.matrixWorld)
+        if (sphere.center.distanceTo(at) - sphere.radius < reach) found.push(mesh)
+      })
+      return found
     }
     const clear = (from: THREE.Vector3, to: THREE.Vector3) => {
       const d = to.clone().sub(from)
       raycaster.set(from, d.clone().normalize())
       raycaster.far = d.length()
       raycaster.camera = stage.camera
-      return !raycaster.intersectObject(stage.scene, true).some((h) => solid(h.object))
+      const hits = nearby ? raycaster.intersectObjects(nearby, false) : raycaster.intersectObject(stage.scene, true)
+      return !hits.some((h) => solid(h.object))
+    }
+    /**
+     * How many of eight points spread across a pose's frame, at its subject's depth, have something
+     * in front of them: a door post or a chair at the edge of the shot counts against it. Stops
+     * counting at `enough`.
+     */
+    const probeCam = new THREE.PerspectiveCamera()
+    const clutter = (pose: Pose, at: THREE.Vector3, enough: number) => {
+      probeCam.fov = 40
+      probeCam.aspect = stage.camera.aspect
+      probeCam.position.copy(pose.position)
+      probeCam.lookAt(pose.look)
+      probeCam.updateProjectionMatrix()
+      probeCam.updateMatrixWorld()
+      const fwd = probeCam.getWorldDirection(new THREE.Vector3())
+      const depth = at.clone().sub(pose.position).dot(fwd) - 0.25
+      let n = 0
+      for (const u of [-0.85, -0.45, 0.45, 0.85])
+        for (const v of [-0.5, 0.4]) {
+          const dir = new THREE.Vector3(u, v, 0.5).unproject(probeCam).sub(pose.position).normalize()
+          if (!clear(pose.position, pose.position.clone().addScaledVector(dir, depth / Math.max(0.2, dir.dot(fwd)))) && ++n >= enough) return n
+        }
+      return n
     }
     /**
      * A close two-shot: the villager on the left third, room for its card on the
@@ -607,20 +673,47 @@ export default {
       const floor = m.v.seated > 0.5 ? m.v.seatY : 0
       const head = new THREE.Vector3(p.x, floor + m.v.fig.height * SCALE * 0.72, p.z)
       const body = head.clone().setY(floor + m.v.fig.height * SCALE * 0.35)
+      // On a wide screen the villager stands on the left third with room for its card on the right;
+      // on a tall one it stands in the middle, further back so it fits the width, with its card above.
+      const aspect = stage.camera.aspect
+      const side = THREE.MathUtils.clamp((aspect - 0.7) / 0.6, 0, 1)
+      const back = Math.max(1, 0.85 / aspect)
       const shot = (a: number, dist: number) => {
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a))
         const right = new THREE.Vector3(dir.z, 0, -dir.x)
         return {
-          position: head.clone().addScaledVector(dir, dist).addScaledVector(right, -0.15).setY(head.y + 0.42),
-          look: head.clone().setY(head.y - 0.06).addScaledVector(right, 0.3),
+          position: head.clone().addScaledVector(dir, dist * back).addScaledVector(right, -0.15 * side).setY(head.y + 0.42),
+          look: head.clone().setY(head.y - 0.06 - 0.12 * (1 - side)).addScaledVector(right, 0.3 * side),
         }
       }
-      for (const dist of [1.5, 1.15])
-        for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
-          const pose = shot(base + turn, dist)
-          if (clear(pose.position, head) && clear(pose.position, body)) return pose
-        }
-      return shot(base, 1.5)
+      // Clear both ways: from the camera to the head and body, and from the head back to the camera,
+      // which catches a camera standing inside furniture (a ray from inside a cushion hits nothing).
+      // Of the first six clear poses, the first with nothing in front of the villager anywhere in the
+      // frame wins, or else the one with least (#42 regroup: a door post once filled a third of the shot).
+      let best: Pose | null = null
+      let least = Infinity
+      let scored = 0
+      nearby = around(head, 3.5)
+      try {
+        // Each turn at both distances before the next turn: closer leaves less room for anything in front.
+        for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4])
+          for (const dist of [1.5, 1.15]) {
+            const pose = shot(base + turn, dist)
+            posed = { from: pose.position, at: pose.look }
+            if (!(clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position))) continue
+            const n = clutter(pose, head, least)
+            if (n === 0) return pose
+            if (n < least) {
+              least = n
+              best = pose
+            }
+            if (++scored === 6) return best!
+          }
+      } finally {
+        nearby = null
+        posed = null
+      }
+      return best ?? shot(base, 1.5)
     }
 
     // ── Talking with one villager ───────────────────────────────────────────
@@ -630,10 +723,19 @@ export default {
       lastTalked = m
       mode = 'talk'
       m.v.chosen = true
-      m.v.beat()
       for (const o of showing.keys()) if (o !== m) hide(o)
       mine.classList.remove('shown')
-      view.focus(twoShot(m), 7)
+      // A note on its way lands before the camera turns to its reader, so the note is seen flying;
+      // the reader hops as it arrives.
+      if (input?.flying) void input.landed().then(() => {
+        if (partner !== m || mode !== 'talk') return
+        m.v.beat()
+        view.focus(twoShot(m), 7)
+      })
+      else {
+        m.v.beat()
+        view.focus(twoShot(m), 7)
+      }
       const news = m.news
       if (news) clearNews(m)
       if (greet || news) speak(m, news ?? m.hello)
@@ -663,9 +765,15 @@ export default {
       for (const m of cast) m.tag.classList.remove('shown', 'lit')
     }
 
+    /** The table shot, pulled back on a tall screen so everyone at the table stays in frame. */
+    const tableShot = (): Pose => {
+      const back = THREE.MathUtils.clamp(0.8 / stage.camera.aspect, 1, 1.7)
+      return { position: TABLE_SHOT.look.clone().lerp(TABLE_SHOT.position, back), look: TABLE_SHOT.look }
+    }
+
     const toTable = () => {
       mode = 'table'
-      view.focus(TABLE_SHOT, 5)
+      view.focus(tableShot(), 5)
       const names = seated.map((m) => m.name)
       openSlip(seated.length > 1 ? `Write to the table…` : `Write to ${names[0]}…`, tableChips(), seated.length > 1 ? 'table' : seated[0]!)
     }
@@ -820,6 +928,7 @@ export default {
      * Resolves when the words are on the card. False if the host could not answer.
      */
     const perform = async (m: Member, speech: Speech, said: string): Promise<boolean> => {
+      replies++
       speaker = m
       m.v.thinking = true
       hide(m)
@@ -946,7 +1055,8 @@ export default {
         current = await upcoming
         if (current && mode === 'table') {
           await pause(0.45)
-          if (showing.get(m)) show(m, 'said')
+          // A narrow screen has room for one line at the table: the next speaker's.
+          if (showing.get(m)) innerWidth < 600 ? hide(m) : show(m, 'said')
         }
       }
       speaker = null
@@ -1113,10 +1223,13 @@ export default {
         const r = input.padRect()
         if (r.width) taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
       }
-      // Cards never cover the face of anyone else in the conversation.
+      // Cards never cover anyone else's face in view, in the conversation or not (#42 regroup: a reply
+      // sat on Moss's face while the camera waited wide for the sent note to land).
       const faces = new Map<Member, Omit<Spot, 'tail'>>()
-      for (const o of mode === 'talk' && partner ? [partner] : seated) {
+      for (const o of cast) {
+        if (o.fade < 0.5 || !o.v.fig.root.visible) continue
         const f = headBox(o)
+        if (f.x1 < 0 || f.x0 > innerWidth || f.y1 < 0 || f.y0 > innerHeight) continue
         faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
       }
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
@@ -1129,7 +1242,8 @@ export default {
         const right: Spot = { l: head.x1 + 24, t: mouth - 40, w, h, tail: 'left' }
         const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40, w, h, tail: 'right' }
         const above: Spot = { l: head.cx - w / 2, t: head.y0 - h - 22, w, h, tail: 'down' }
-        const ways = mode === 'talk' && partner === m ? [right, left, above] : [above, right, left]
+        // Beside the head in a talk on a wide screen; above it at the table and on a narrow screen, where beside cannot fit.
+        const ways = mode === 'talk' && partner === m && innerWidth >= 600 ? [right, left, above] : [above, right, left]
         // A card may slide along its side as long as its tail still reaches the head.
         const slides = (o: Spot) => [0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 })
         const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + 16 && mouth < o.t + o.h - 16
@@ -1156,15 +1270,21 @@ export default {
     }
     const mid = new THREE.Vector3()
     /** Not part of the conversation, in the frame, and well in front of everyone who is. */
+    const top = new THREE.Vector3()
     const crowding = (m: Member) => {
-      if (mode === 'room' || m === partner || m.seat) return false
+      // Only once the camera is on the conversation: while it waits wide for a sent note, nobody is in its way.
+      if (mode === 'room' || !view.focused || m === partner || m.seat) return false
       const subjects = mode === 'talk' && partner ? [partner] : seated
       if (!subjects.length) return false
       mid.set(m.v.pos.x, m.v.fig.height * SCALE * 0.5, m.v.pos.z)
       const d = mid.distanceTo(eye)
       const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(eye)))
+      // Its middle or its head in the frame: close to the camera, a head can fill a corner while the body is below it.
+      m.v.fig.head.getWorldPosition(top).project(stage.camera)
       mid.project(stage.camera)
-      const framed = mid.z < 1 && Math.abs(mid.x) < 1.25 && Math.abs(mid.y) < 1.25
+      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame.
+      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < 1.5 && Math.abs(p.y) < 1.25
+      const framed = inFrame(mid) || inFrame(top)
       // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
       const cut = Math.abs(mid.x) > 0.86 || mid.y < -0.8
       return framed && (cut || d < nearest - (mode === 'talk' ? 0.3 : 0.5))
@@ -1206,7 +1326,8 @@ export default {
           const mat = m.glyph.material
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
-          const goal = m.news ? 1 : 0
+          // It steps aside while you write or a note is on its way, so it never competes with whom the note is to.
+          const goal = m.news && !input?.writing && !input?.flying ? 1 : 0
           mat.opacity += (goal - mat.opacity) * (1 - Math.exp(-dt * (goal ? 5 : 3)))
           if (!m.news && mat.opacity < 0.02) m.glyph.visible = false
         }
@@ -1243,6 +1364,7 @@ export default {
         blob.opacity *= m.fade
       }
       placeCards(dt)
+      slips.frame(dt)
       input?.frame(dt, t)
       sketch?.frame(dt, t)
       furnish?.frame(dt, t)
@@ -1266,9 +1388,16 @@ export default {
     const quipLog: { text: string; at: number }[] = []
     const wait = (seconds: number) => new Promise<void>((r) => setTimeout(r, seconds * 1000))
     let quipCount = 0
+    /** Replies performed so far: a quip queued before the latest one is stale. */
+    let replies = 0
     const quip = (m: Member, text: string) => {
       let mine = 0
+      // Queued behind earlier lines, a quip can come due after the villager has begun answering a newer
+      // line; it is dropped then, rather than written over the answer (#42 regroup: "Ooh, let me see."
+      // from an earlier request replaced an answer on the card).
+      const asked = replies
       const shown = quips.then(async () => {
+        if (replies !== asked) return
         mine = ++quipCount
         quipLog.push({ text, at: Math.round(performance.now()) })
         speak(m, text)
@@ -1355,6 +1484,9 @@ export default {
       input?.dispose()
       furnish?.dispose()
     }, 'talk always-on input')
+    // ── The words as paper slips (#42 regroup, src/talk/paper.ts) ────────────
+    const slips = paperSlips((person) => cast.find((c) => c.person === person) ?? null)
+    ctx.effect(() => () => slips.dispose(), 'talk paper slips')
     // Projects already being made stand where they will go, as wrapped parcels.
     if (INPUT) void listProjects(primary().person).then((r) => {
       if (r.ok) for (const p of r.projects) furnish?.parcel(p.what, p.where)
