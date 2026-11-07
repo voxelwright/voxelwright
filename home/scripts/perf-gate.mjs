@@ -2,12 +2,13 @@
 // head, measured in one headless Chrome with base and head interleaved, against an
 // absolute 60 fps target and against the base. Exits non-zero when any gate fails.
 //
-// Usage: npm run perf-gate -- [--base <ref>] [--head <ref>] [--scenes a,b] [--full] [--seconds 2] [--json path]
+// Usage: npm run perf-gate -- [--base <ref>] [--head <ref>] [--scenes a,b] [--full] [--seconds 2] [--port 5430] [--json path]
 //   --base  defaults to the merge base of HEAD with origin/main (or main, then feature/village).
 //   --head  defaults to the working tree of this checkout.
 //   --scenes  names scenes; the default is every scene not marked `full` in SCENES below.
 //   --full  adds the `full` scenes (?q=low), which do not fit the 30 s budget.
 //   --seconds  steady measuring time per version per scene (default 2).
+//   --port  serves the base on this port and the head on the next (default 5430).
 //
 // Builds are cached by commit SHA (base) or by the home/ tree hash of the working tree
 // (head) under ~/.cache/village/perf-gate, so every worktree shares them. A base build
@@ -16,8 +17,9 @@
 // The probe runs in the page before the app (addInitScript), so base and head are measured
 // the same way whatever their code: Math.random is seeded, requestAnimationFrame is wrapped
 // to time every frame's callbacks (CPU ms) and to hold them while the page is paused, and
-// GPU ms is the wait from a frame's last submit to device.queue.onSubmittedWorkDone(), the
-// renderer's own measure, without ?gpu=1's timestamp queries. Only one page renders at a time.
+// GPU ms is the frame's GPU busy time from timestamp queries: src/gpu-time.js, the
+// renderer's own measure, injected here so a base without it is timed the same way. The
+// older submit-to-done wait is recorded too, for reference. Only one page renders at a time.
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync } from 'node:fs'
@@ -38,7 +40,8 @@ const opt = (name) => {
 const git = (...a) => execFileSync('git', a, { cwd: HOME, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 const tryGit = (...a) => { try { return git(...a) } catch { return null } }
 const CACHE = join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'village', 'perf-gate')
-const PORTS = { base: 5430, head: 5431 }
+const PORT = Number(opt('port') ?? 5430)
+const PORTS = { base: PORT, head: PORT + 1 }
 const SECONDS = Number(opt('seconds') ?? 2)
 const WINDOWS = 2 // per version, when base and head alternate; a head-only scene takes one window
 const WARM_MS = 300 // after each resume
@@ -201,8 +204,18 @@ function probe() {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
   const raf = window.requestAnimationFrame.bind(window)
-  const P = { paused: true, held: [], frames: [], cpu: 0, gpu: [], longTasks: [], queue: null, waiting: false, submitted: false }
+  const P = { paused: true, held: [], frames: [], cpu: 0, gpu: [], submitToDone: [], longTasks: [], queue: null, waiting: false, submitted: false, timer: null }
   window.__perf = P
+  if (window.GPUAdapter) {
+    const requestDevice = GPUAdapter.prototype.requestDevice
+    GPUAdapter.prototype.requestDevice = async function (...a) {
+      const device = await requestDevice.apply(this, a)
+      // gpuPassTimer is src/gpu-time.js, prepended to this probe by the gate.
+      P.timer = gpuPassTimer(device)
+      P.timer?.listeners.add((f) => P.gpu.push(f.busyMs))
+      return device
+    }
+  }
   if (window.GPUQueue) {
     const submit = GPUQueue.prototype.submit
     GPUQueue.prototype.submit = function (...a) {
@@ -223,12 +236,14 @@ function probe() {
       } finally {
         const b = performance.now()
         P.cpu += b - a
+        // A no-op unless this callback encoded passes the renderer has not already closed.
+        P.timer?.endFrame()
         if (P.submitted && P.queue && !P.waiting) {
           P.waiting = true
           P.submitted = false
           P.queue.onSubmittedWorkDone().then(() => {
             P.waiting = false
-            P.gpu.push(performance.now() - b)
+            P.submitToDone.push(performance.now() - b)
           })
         }
       }
@@ -281,7 +296,7 @@ const record = (page, warm, ms) =>
         const P = window.__perf
         P.resume()
         setTimeout(() => {
-          const f0 = P.frames.length, g0 = P.gpu.length, t0 = performance.now()
+          const f0 = P.frames.length, g0 = P.gpu.length, s0 = P.submitToDone.length, t0 = performance.now()
           setTimeout(() => {
             const t1 = performance.now()
             const frames = P.frames.slice(f0)
@@ -291,6 +306,7 @@ const record = (page, warm, ms) =>
               intervals: frames.slice(1).map((f, i) => f[0] - frames[i][0]),
               cpu: frames.map((f) => f[1]),
               gpu: P.gpu.slice(g0),
+              submitToDone: P.submitToDone.slice(s0),
               longTasks: P.longTasks.filter(([at, d]) => at >= t0 && at <= t1).map(([, d]) => d),
               drawCalls: s.render?.drawCalls ?? null,
               triangles: s.render?.triangles ?? null,
@@ -308,7 +324,7 @@ const pick = (sorted, p) => (sorted.length ? sorted[Math.floor(p * (sorted.lengt
 const median = (list) => pick([...list].sort((a, b) => a - b), 0.5)
 function summarize(windows) {
   const all = (key) => windows.flatMap((w) => w[key]).sort((a, b) => a - b)
-  const intervals = all('intervals'), gpu = all('gpu'), cpu = all('cpu'), longTasks = all('longTasks')
+  const intervals = all('intervals'), gpu = all('gpu'), cpu = all('cpu'), longTasks = all('longTasks'), std = all('submitToDone')
   const r = (x, d = 2) => (x == null ? null : +x.toFixed(d))
   return {
     frames: intervals.length,
@@ -322,6 +338,8 @@ function summarize(windows) {
     gpuP50: r(pick(gpu, 0.5)),
     gpuP95: r(pick(gpu, 0.95)),
     gpuSamples: gpu.length,
+    submitToDoneP50: r(pick(std, 0.5)),
+    submitToDoneP95: r(pick(std, 0.95)),
     cpuP50: r(pick(cpu, 0.5)),
     cpuP95: r(pick(cpu, 0.95)),
     longTasks: longTasks.length,
@@ -357,6 +375,8 @@ let exitCode = 1
 try {
   await mkdir(CACHE, { recursive: true })
   const contendedBefore = otherHeadlessChromes()
+  // src/gpu-time.js as a plain script: its one export becomes a function declaration.
+  const gpuTimeSource = (await readFile(join(HOME, 'src/gpu-time.js'), 'utf8')).replace(/^export function /m, 'function ')
   const tierHigh = Number(/high:\s*\{[^}]*maxGpuMs:\s*([\d.]+)/.exec(await readFile(join(HOME, 'src/plugins/renderer.ts'), 'utf8'))?.[1])
   if (!Number.isFinite(tierHigh)) throw new Error('could not read the high tier maxGpuMs from src/plugins/renderer.ts')
 
@@ -378,7 +398,7 @@ try {
   const loads = {}
   const open = async (side, scene) => {
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: DPR })
-    await context.addInitScript(probe)
+    await context.addInitScript({ content: `${gpuTimeSource}\n;(${probe})()` })
     const page = await context.newPage()
     page.on('pageerror', (e) => errors[side].push(`${scene.page}: ${e}`))
     const t = Date.now()
@@ -458,9 +478,10 @@ try {
     row(r.scene, 'dropped >20 ms', b?.dropped ?? null, h.dropped, `< ${MAX_DROPPED * 100}%`, h.frames > 0 && h.dropped < MAX_DROPPED)
     row(r.scene, 'frame p99 ms', b?.p99 ?? null, h.p99, `<= ${MAX_P99_MS}`, h.p99 != null && h.p99 <= MAX_P99_MS)
     row(r.scene, 'long tasks >50 ms', b?.longTasks ?? null, h.longTasks, '0', h.longTasks === 0)
-    // Warning only until GPU ms measures GPU work: submit-to-done includes the main thread's
-    // delay delivering the callback, so at the 60 Hz cap p95 settles near one frame (16-17 ms)
-    // even on main. The owner's gate is consistent 60 fps plus no regression; headroom is ours.
+    // Warning only: GPU ms now measures GPU work (src/gpu-time.js), and the kitchen's GPU p95
+    // at high is 13.6 to 14.3 ms on main and 12.2 to 14.5 ms on the head (November 6, 2026), so gating it
+    // would block every merge. It gates again once the kitchen is under 13 ms or the limit is
+    // reset. The owner's gate is consistent 60 fps plus no regression; headroom is ours.
     if (r.tier === 'high') row(r.scene, 'GPU p95 ms (headroom)', b?.gpuP95 ?? null, h.gpuP95, `< ${tierHigh}`, h.gpuP95 != null && h.gpuP95 < tierHigh, true)
     if (b) for (const [key, g] of Object.entries(RELATIVE)) {
       if (b[key] == null || h[key] == null) continue
@@ -478,10 +499,10 @@ try {
   const widths = table[0].map((_, i) => Math.max(...table.map((r) => r[i].length)))
   console.log(`perf gate: base ${baseRef} ${baseSha.slice(0, 10)} against head ${headRef ?? 'working tree'} (${head.hash ?? ''})`)
   for (const r of table) console.log(r.map((c, i) => c.padEnd(widths[i])).join('  '))
-  console.log('\nper scene (head): frames, frame p50/p95/p99, >33 ms, GPU p50/p95, CPU p50/p95, draws, triangles, heap')
+  console.log('\nper scene: frames, frame p50/p95/p99, >33 ms, GPU p50/p95, submit-to-done p50/p95, CPU p50/p95, draws, triangles, heap')
   for (const r of results) for (const side of ['base', 'head']) {
     const s = r[side]
-    if (s) console.log(`  ${r.scene.padEnd(10)} ${side}: ${s.frames} frames, ${s.p50}/${s.p95}/${s.p99} ms, ${s.over33} over 33 ms, GPU ${s.gpuP50}/${s.gpuP95} ms, CPU ${s.cpuP50}/${s.cpuP95} ms, ${s.drawCalls} draws, ${s.triangles} tris, ${s.heapMB} MB`)
+    if (s) console.log(`  ${r.scene.padEnd(10)} ${side}: ${s.frames} frames, ${s.p50}/${s.p95}/${s.p99} ms, ${s.over33} over 33 ms, GPU ${s.gpuP50}/${s.gpuP95} ms, submit-to-done ${s.submitToDoneP50}/${s.submitToDoneP95} ms, CPU ${s.cpuP50}/${s.cpuP95} ms, ${s.drawCalls} draws, ${s.triangles} tris, ${s.heapMB} MB`)
   }
   const sec = (ms) => (ms / 1000).toFixed(1)
   console.log(`\ntime: total ${sec(times.total)} s; base build ${baseBuild.cached ? 'cached' : `${sec(baseBuild.ms)} s`}; head build ${head.cached ? 'cached' : `${sec(head.ms)} s`}; page loads ${sec(times.pageLoads)} s; measuring ${sec(times.measure)} s`)

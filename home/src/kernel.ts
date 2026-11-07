@@ -15,10 +15,14 @@ export interface Stage {
   /** Rendering features on at the current tier (csm, gtao, traa, phys, ssgi), or exactly ?fx= when given. */
   features: () => Set<string>
   /**
-   * Per frame, in ms: gpu is submit-to-done on the WebGPU queue, passSum the summed
-   * timestamp-query pass durations (?gpu=1 only), cpu the JS frame (hooks and draw).
+   * Per frame, in ms: gpu is GPU busy time (the union of the frame's pass intervals from
+   * timestamp queries, src/gpu-time.js), passSum the summed pass durations (they overlap,
+   * so this overcounts), submitToDone the wait from the frame's last submit to
+   * onSubmittedWorkDone (includes main-thread delay), cpu the JS frame (hooks and draw).
+   * gpu and passSum are recorded while calibrating and under ?gpu=1, submitToDone under
+   * ?gpu=1. tracking is whether timestamp queries are available.
    */
-  timing: { gpu: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string }
+  timing: { gpu: number[]; submitToDone: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string }
   backend: 'WebGPU' | 'WebGL2'
   /** Draws one frame with the most recently added draw pass, or a plain render. */
   draw: () => void
