@@ -75,31 +75,51 @@ const residue = (page) => page.evaluate(() => {
   })
   check('blend: ends on the target tokens (exposure 1.18)', Math.abs(tokens.exposure - 1.18) < 1e-6, tokens)
 
-  for (const [from, to] of [['blue-hour', 'neon-night'], ['neon-night', 'sixteen-bit'], ['sixteen-bit', 'home']]) {
+  // Rebuilds: the next chain compiles while the old one keeps drawing live (no held frame
+  // before the swap), then the last frame is held over the swap and fades. Every frame of the
+  // switch is gated under 100 ms; Pastoral's is reported only, since its window painter takes
+  // about 1.3 s of main-thread time on first use (src/theme/paint.ts, not the chain).
+  const pairs = [['blue-hour', 'neon-night'], ['neon-night', 'sixteen-bit'], ['sixteen-bit', 'comic'], ['comic', 'home'], ['home', 'neon-night'], ['neon-night', 'pastoral'], ['pastoral', 'home']]
+  for (const [from, to] of pairs) {
+    await page.waitForFunction(() => !document.querySelector('.village-theme-hold'), null, { timeout: 5000 })
     const t0 = await page.evaluate((id) => {
       window.__frames = []
       window.village.theme.set(id)
       return performance.now()
     }, to)
-    if (shots && to === 'neon-night') {
-      for (const ms of [60, 400, 700, 900, 1100]) {
-        await page.waitForTimeout(ms === 60 ? 60 : ms - [60, 400, 700, 900, 1100][[60, 400, 700, 900, 1100].indexOf(ms) - 1])
-        await page.screenshot({ path: `${shots}/switch-${String(ms).padStart(4, '0')}ms.png` })
-      }
-    }
     await done(page)
+    // The copy fades for 0.6 s after the switch is done.
+    await page.waitForFunction(() => !document.querySelector('.village-theme-hold'), null, { timeout: 3000 }).catch(() => {})
     const r = await page.evaluate(() => window.village.theme.lastSwitch())
     const frames = await page.evaluate((t0) => window.__frames.filter((f) => f.t >= t0), t0)
-    // From the frame after the copy until the frame after the new chain's first draw (its
-    // shader compile stall), the held frame must be fully on screen. The chain is new from
-    // the first frame that starts with postfx's draw pass added again.
-    const added = frames[0]?.added
-    const firstNew = frames.findIndex((f) => f.added > added)
-    const covered = firstNew > 0 && frames[0].added === added && frames.slice(1, firstNew + 2).every((f) => f.hold === 1)
-    const stall = firstNew > 0 ? Math.max(...frames.slice(1, firstNew + 2).map((f, i, a) => (i ? f.t - a[i - 1].t : 0))) : null
-    check(`rebuild: ${from} to ${to} completes without a reload, held frame removed`, r.path === 'rebuild' && r.done && (await page.evaluate(() => !document.querySelector('.village-theme-hold'))), r)
-    check(`rebuild: ${from} to ${to}, the held frame is on screen from the copy through the new chain's first frame (stall ${stall?.toFixed(0)} ms)`, covered, { firstNew, frames: frames.slice(0, firstNew + 3) })
-    measures[`${from}->${to}`] = r
+    const swaps = await page.evaluate((t0) => window.village.theme.swaps().filter((s) => s.at >= t0), t0)
+    const swapAt = frames.findIndex((f) => f.t > (swaps[0]?.at ?? Infinity))
+    const live = swapAt > 0 && frames.slice(0, swapAt).every((f) => f.hold === 0)
+    const covered = swapAt > 0 && frames[swapAt].hold === 1
+    const intervals = frames.slice(1).map((f, i) => f.t - frames[i].t)
+    const worst = Math.max(...intervals)
+    check(`rebuild: ${from} to ${to} completes without a reload, one chain swapped in, held frame removed`, r.path === 'rebuild' && r.done && swaps.length === 1 && swaps[0].look === to && (await page.evaluate(() => !document.querySelector('.village-theme-hold'))), { r, swaps })
+    check(`rebuild: ${from} to ${to}, the old chain draws live while the next compiles (${r.compiledMs} ms), the copy covers the swap`, live && covered, { swapAt, frames: frames.slice(Math.max(0, swapAt - 2), swapAt + 3) })
+    if (to === 'pastoral') measures[`worst frame ${from}->${to} (reported)`] = worst
+    else check(`rebuild: ${from} to ${to}, no frame over 100 ms at ?q=high (worst ${worst.toFixed(1)} ms)`, worst < 100, { intervals: intervals.filter((x) => x > 34) })
+    measures[`${from}->${to}`] = { ...r, worst: +worst.toFixed(1) }
+  }
+
+  // Two rebuilds in quick succession: the look before last is never swapped in or shown.
+  {
+    await set(page, 'home')
+    const t0 = await page.evaluate(() => {
+      window.__frames = []
+      window.village.theme.set('neon-night')
+      return performance.now()
+    })
+    // The second choice lands a frame later, while neon night is still compiling.
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(window.village.theme.set('comic')))))
+    await done(page)
+    await page.waitForTimeout(800)
+    const swaps = await page.evaluate((t0) => window.village.theme.swaps().filter((s) => s.at >= t0).map((s) => s.look), t0)
+    const state = await page.evaluate(() => ({ current: window.village.theme.current(), shown: window.village.kernel.root.get('stage') && window.village.theme.switching(), hold: Boolean(document.querySelector('.village-theme-hold')) }))
+    check('double switch: home to neon night to comic a frame later swaps in only comic, no neon frame, no leftover copy', swaps.length === 1 && swaps[0] === 'comic' && state.current === 'comic' && !state.hold, { swaps, state })
   }
   check('no page errors while switching', errors.length === 0, errors)
   await context.close()
@@ -113,6 +133,37 @@ const residue = (page) => page.evaluate(() => {
   check('reduced motion: blue hour switches instantly', r.path === 'instant' && r.settledMs < 200 && Math.abs(exposure - 1.18) < 1e-6, { r, exposure })
   const n = await set(page, 'neon-night')
   check('reduced motion: a rebuild completes and settles within 100 ms of the new chain\'s first frame', n.done && n.settledMs - n.firstFrameMs < 150, n)
+  await context.close()
+}
+
+// A blend finishes without the theme plugin: it runs on its own animation frames.
+{
+  const { context, page } = await open('q=low')
+  await page.evaluate(() => localStorage.clear())
+  await page.evaluate(async () => {
+    window.village.theme.set('blue-hour')
+    await window.village.unload('theme')
+  })
+  const r = await page.waitForFunction(() => !window.village.theme.switching() && window.village.theme.lastSwitch()?.done, null, { timeout: 5000 }).then(() => true, () => false)
+  const after = await page.evaluate(() => ({ active: window.village.snapshot().plugins.active.includes('theme'), shown: window.village.theme.get(window.village.theme.current())?.id, report: window.village.theme.lastSwitch() }))
+  check('blend without the theme plugin: finishes on time with the plugin unloaded', r && !after.active && after.report.path === 'blend' && after.report.settledMs < 2500, after)
+  await context.close()
+}
+
+// Deleting the look on screen falls back to the look it was made from, and its card is marked.
+{
+  const { context, page } = await open('q=low')
+  await page.evaluate(() => localStorage.clear())
+  await set(page, 'blue-hour')
+  const id = await page.evaluate(() => window.village.theme.save('Gone soon'))
+  await page.evaluate(() => window.village.kernel.root.get('entries').choose('swatch-book'))
+  await page.waitForTimeout(500)
+  await page.click(`.swatch-slot.mine .swatch-tool:has-text("tear out")`)
+  await done(page)
+  await page.waitForTimeout(200)
+  const after = await page.evaluate(() => ({ current: window.village.theme.current(), marked: document.querySelector('.swatch-slot.current [data-look]')?.dataset.look ?? null, mine: window.village.theme.list().filter((l) => l.mine).length }))
+  check('delete the shown look: falls back to the look it was made from (blue hour), its card marked', id && after.current === 'blue-hour' && after.marked === 'blue-hour' && after.mine === 0, after)
+  await page.evaluate(() => localStorage.clear())
   await context.close()
 }
 
@@ -325,11 +376,9 @@ const residue = (page) => page.evaluate(() => {
   await context.close()
 }
 
-// 7. Three load and unload cycles of the theme plugin and postfx leave nothing behind.
-// At the low tier nothing of a retired chain remains. At the high tier three keeps one
-// FramebufferTexture per retired scene pass (the glass's transmission backdrop, a "phys"
-// feature, cached per render target inside the renderer), so there the growth is measured
-// and reported, not gated. Textures are compared with theme and postfx both unloaded,
+// 7. Five load and unload cycles of the theme plugin and postfx leave nothing behind. The
+// glass's transmission backdrop (a "phys" feature at the high tier) is a FramebufferTexture
+// three clones per render target; postfx releases its scene pass's copy when a chain retires. Textures are compared with theme and postfx both unloaded,
 // against the same page with postfx unloaded before any switch.
 for (const q of ['q=low', 'q=high']) {
   const { context, page } = await open(q)
@@ -341,7 +390,7 @@ for (const q of ['q=low', 'q=high']) {
   await page.evaluate(() => window.village.load('postfx'))
   await page.waitForTimeout(500)
   const cycles = []
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
     await set(page, 'neon-night')
     await set(page, 'sixteen-bit')
     await set(page, 'home')
@@ -349,11 +398,12 @@ for (const q of ['q=low', 'q=high']) {
     await page.waitForTimeout(500)
     cycles.push(await residue(page))
   }
-  check(`${q}, 3 cycles: geometries, frame hooks and draw passes back at their no-flag values after each`, cycles.every((c) => c.geometries === fresh.geometries && c.frameHooks === fresh.frameHooks && c.drawPasses === fresh.drawPasses), { fresh, cycles })
+  check(`${q}, 5 cycles: geometries, frame hooks and draw passes back at their no-flag values after each`, cycles.every((c) => c.geometries === fresh.geometries && c.frameHooks === fresh.frameHooks && c.drawPasses === fresh.drawPasses), { fresh, cycles })
   await page.evaluate(() => window.village.unload('postfx'))
   await page.waitForTimeout(300)
   const end = await residue(page)
-  if (q === 'q=low') check(`${q}, 3 cycles: with theme and postfx unloaded, geometries and textures match the page before any switch`, end.geometries === bare.geometries && end.textures === bare.textures && end.frameHooks === bare.frameHooks, { bare, end })
+  check(`${q}, 5 cycles: live texture count does not grow from the first cycle to the fifth (${cycles.map((c) => c.textures).join(', ')})`, cycles.every((c) => c.textures <= cycles[0].textures), cycles.map((c) => c.textures))
+  if (q === 'q=low') check(`${q}, 5 cycles: with theme and postfx unloaded, geometries and textures match the page before any switch`, end.geometries === bare.geometries && end.textures === bare.textures && end.frameHooks === bare.frameHooks, { bare, end })
   measures[`cycles ${q}`] = { fresh: fresh.textures, live: cycles.map((c) => c.textures), unloaded: [bare.textures, end.textures] }
   await page.evaluate(() => localStorage.clear())
   await context.close()

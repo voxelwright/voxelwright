@@ -6,10 +6,13 @@ import { canvas, toTexture } from '../paint'
 import { themes, type LookInfo } from '../theme'
 import type { Shift, Theme } from '../theme/tokens'
 
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 const INK = '#4a3326'
 const STRIPS = 7
+/** What the villagers say when a look can't be written (as the always-on input does). */
+const FAILED = 'I couldn\'t change the look just now.'
 
 /** What a chip on a look's card stands for: a thing in the kitchen and the role that colours it. */
 const CHIPS: Array<{ base: string; pick: (t: Theme) => Shift }> = [
@@ -123,6 +126,7 @@ export default {
     style.textContent = css()
     let editing: string | null = null // a card being renamed, or 'new' for "save this look"
     let asking = false
+    let asked = '' // the request being mixed, kept on the slip while the model writes
     let note = ''
 
     const button = (cls: string, text: string, onClick: () => void, label?: string) => {
@@ -161,7 +165,7 @@ export default {
       const t = themes.get(look.id)!
       const wrap = document.createElement('div')
       wrap.className = `swatch-slot${look.current ? ' current' : ''}${look.mine ? ' mine' : ''}`
-      wrap.style.setProperty('--r', `${(index - (count - 1) / 2) * 2.4}deg`)
+      wrap.style.setProperty('--r', `${(index - (count - 1) / 2) * 3.2}deg`)
       const b = button('swatch-card', '', () => themes.set(look.id), `${look.label}${look.current ? ', on the walls now' : ''}`)
       b.dataset.look = look.id
       b.title = look.about
@@ -230,7 +234,7 @@ export default {
       // "Save this look": a blank strip; the look on screen, a blend included, goes under a name.
       const blank = document.createElement('div')
       blank.className = 'swatch-slot blank'
-      blank.style.setProperty('--r', `${(count - 1 - (count - 1) / 2) * 2.4}deg`)
+      blank.style.setProperty('--r', `${(count - 1 - (count - 1) / 2) * 3.2}deg`)
       if (editing === 'new') {
         const input = field('', 'a name', 'Name for this look', (v) => {
           const id = themes.save(v)
@@ -270,36 +274,55 @@ export default {
       head.textContent = 'Ask for a look'
       const input = field('', 'make it cozier, more autumn', 'Ask for a look in your own words', async (v) => {
         const text = v.trim()
-        if (!text) return
+        if (!text || asking) return
         if (typeof ask !== 'function') {
           note = 'Looks written from words aren\'t here yet. Your words were not sent.'
           render('.swatch-ask input')
           return
         }
         asking = true
-        note = 'Mixing it…'
+        asked = text
+        note = ''
         render('.swatch-ask input')
+        let said: string
         try {
-          await ask.call(themes, text)
-          note = ''
-        } catch (e) {
-          note = `That didn't work: ${e instanceof Error ? e.message : String(e)}`
+          // ask() answers { ok, note, label } or { ok: false, why }; it throws only on a fault.
+          const r = await ask.call(themes, text) as { ok?: boolean; note?: string; label?: string } | undefined
+          said = r?.ok ? r.note || `Now ${r.label ?? 'a new look'}.` : FAILED
+        } catch {
+          said = FAILED
         }
         asking = false
-        render('.swatch-ask input')
+        note = said
+        render(fan.contains(document.activeElement) ? '.swatch-ask input' : undefined)
       }, () => {
         // Escape clears what is written; on an empty line it closes the book, as anywhere else.
         if (!input.value) return false
         input.value = ''
       })
       input.maxLength = 200
-      input.disabled = asking
+      // Read-only, not disabled, while the paint is mixed, so focus stays on the slip.
+      input.readOnly = asking
+      if (asking) input.value = asked
+      input.addEventListener('input', () => (asked = input.value))
       const status = document.createElement('span')
-      status.className = 'ask-note'
+      status.className = `ask-note${asking ? ' mixing' : ''}`
       status.setAttribute('role', 'status')
-      status.textContent = note || (typeof ask === 'function' ? '' : 'not here yet: looks from words are coming')
+      if (asking) {
+        const pot = document.createElement('span')
+        pot.className = 'pot'
+        pot.setAttribute('aria-hidden', 'true')
+        status.append(pot, 'Mixing the paint')
+        const dots = document.createElement('span')
+        dots.className = 'dots'
+        dots.setAttribute('aria-hidden', 'true')
+        dots.textContent = '...'
+        status.append(dots)
+      } else status.textContent = note || (typeof ask === 'function' ? '' : 'not here yet: looks from words are coming')
+      slip.classList.toggle('busy', asking)
       slip.append(head, input, status)
       fan.append(row, slip)
+      if (!fan.hidden) place()
       if (focus) (fan.querySelector<HTMLElement>(focus) ?? fan.querySelector<HTMLElement>('.current .swatch-card'))?.focus({ preventScroll: true })
     }
 
@@ -314,18 +337,61 @@ export default {
     }
     fan.addEventListener('keydown', onKey)
 
+    // The cards open out of the deck on the sill: the row stands on the sill line, centred on
+    // the deck as far as the screen allows, and each card grows out of the rivet.
+    const pivot = new THREE.Vector3()
+    const anchor = () => {
+      deck.getWorldPosition(pivot).project(ctx.stage.camera)
+      const rect = ctx.stage.renderer.domElement.getBoundingClientRect()
+      return { x: rect.left + ((pivot.x + 1) / 2) * rect.width, y: rect.top + ((1 - pivot.y) / 2) * rect.height }
+    }
+    const place = () => {
+      const a = anchor()
+      const row = fan.querySelector<HTMLElement>('.swatch-row')
+      if (!row) return a
+      const w = fan.offsetWidth, h = row.offsetHeight
+      fan.style.left = `${Math.min(innerWidth - 16 - w / 2, Math.max(16 + w / 2, a.x))}px`
+      fan.style.top = `${Math.max(12, Math.min(innerHeight - fan.offsetHeight - 12, a.y - h + 6))}px`
+      return a
+    }
+    const spring = 'cubic-bezier(.2, 1.15, .35, 1)'
+    const fly = (a: { x: number; y: number }, out: boolean) => {
+      if (reducedMotion.matches) return
+      const slots = [...fan.querySelectorAll<HTMLElement>('.swatch-slot')]
+      slots.forEach((slot, i) => {
+        const r = slot.getBoundingClientRect()
+        const from = `translate(${a.x - (r.left + r.width / 2)}px, ${a.y - r.bottom}px) scale(0.16) rotate(${(i - slots.length / 2) * 9}deg)`
+        const frames = [{ transform: from, opacity: 0.4 }, { transform: 'none', opacity: 1 }]
+        slot.animate(out ? frames.reverse() : frames, { duration: out ? 150 : 360, delay: out ? 0 : i * 22, easing: out ? 'ease-in' : spring, fill: 'backwards' })
+      })
+      const slip = fan.querySelector<HTMLElement>('.swatch-ask')
+      slip?.animate([{ opacity: 0, transform: 'translateY(-10px) scaleY(0.6)' }, { opacity: 1, transform: 'none' }], { duration: out ? 120 : 260, delay: out ? 0 : 160, easing: 'ease-out', fill: 'backwards', direction: out ? 'reverse' : 'normal' })
+    }
+    const onResize = () => !fan.hidden && place()
+
+    let closing = 0
     const open = () => {
+      clearTimeout(closing)
       editing = null
       note = ''
       fan.hidden = false
       render('.current .swatch-card')
-      requestAnimationFrame(() => fan.classList.add('shown'))
+      fly(place(), false)
     }
     const close = () => {
-      fan.classList.remove('shown')
-      fan.hidden = true
       editing = null
+      if (reducedMotion.matches || fan.hidden) {
+        fan.hidden = true
+        return
+      }
+      fly(anchor(), true)
+      closing = window.setTimeout(() => (fan.hidden = true), 150)
     }
+    addEventListener('resize', onResize)
+    ctx.effect(() => () => {
+      removeEventListener('resize', onResize)
+      clearTimeout(closing)
+    }, 'swatch book placement')
 
     ctx.effect(() => {
       document.head.append(style)
@@ -352,14 +418,12 @@ export default {
 function css() {
   const paper = 'radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%)'
   return `
-  .swatch-fan { position: fixed; z-index: 5; left: 50%; bottom: 22px; translate: -50% 24px; opacity: 0; display: flex; flex-direction: column; align-items: center; gap: 14px;
-    transition: opacity 220ms ease, translate 280ms cubic-bezier(.2, 1.3, .4, 1); max-width: calc(100vw - 32px); }
-  .swatch-fan.shown { opacity: 1; translate: -50% 0; }
+  .swatch-fan { position: fixed; z-index: 5; left: 50%; top: 40%; translate: -50% 0; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: calc(100vw - 32px); }
   .swatch-fan[hidden] { display: none; }
   .swatch-row { display: flex; align-items: flex-end; gap: 0; padding: 18px 10px 0; }
-  .swatch-slot { position: relative; display: flex; flex-direction: column; align-items: center; margin: 0 -6px; rotate: var(--r, 0deg); transform-origin: 50% 160%;
+  .swatch-slot { position: relative; display: flex; flex-direction: column; align-items: center; margin: 0 -1px; rotate: var(--r, 0deg); transform-origin: 50% 300%;
     transition: translate 200ms cubic-bezier(.2, 1.3, .4, 1), rotate 200ms ease; }
-  .swatch-slot:hover, .swatch-slot:focus-within { translate: 0 -14px; rotate: 0deg; z-index: 2; }
+  .swatch-slot:hover, .swatch-slot:focus-within { translate: 0 -14px; z-index: 2; }
   .swatch-card { position: relative; width: 112px; height: 214px; box-sizing: border-box; padding: 8px 8px 0; border: 0; border-radius: 6px 6px 10px 10px; cursor: pointer;
     background: ${paper}; color: ${INK}; display: flex; flex-direction: column; align-items: stretch; gap: 0;
     box-shadow: 0 10px 24px rgba(60, 30, 10, 0.28), 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 -2px 0 rgba(120, 80, 50, 0.12) inset; }
@@ -387,8 +451,16 @@ function css() {
     box-shadow: 0 8px 22px rgba(60, 30, 10, 0.26), 0 1px 0 rgba(255, 255, 255, 0.8) inset; }
   .swatch-ask .ask-head { font: 700 18px ${HAND}; color: #9a5a35; }
   .swatch-ask .swatch-field { width: 100%; margin: 0; background: rgba(255, 252, 244, 0.85); font: italic 17px ${HAND}; }
-  .swatch-ask .ask-note { grid-column: 1 / -1; min-height: 1em; font: italic 15px ${HAND}; color: rgba(74, 51, 38, 0.9); }
-  @media (prefers-reduced-motion: reduce) { .swatch-fan, .swatch-slot { transition: none; } }
+  .swatch-ask .ask-note { grid-column: 1 / -1; min-height: 1.2em; display: flex; align-items: center; gap: 8px; font: italic 15px ${HAND}; color: rgba(74, 51, 38, 0.9); }
+  .swatch-ask.busy .swatch-field { color: rgba(74, 51, 38, 0.6); }
+  .swatch-ask .pot { position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none;
+    background: conic-gradient(#c2714f, #e0b25c, #8fae5a, #6f8fb3, #b07aa1, #c2714f); animation: swatch-mix 1.1s linear infinite;
+    box-shadow: inset 0 0 0 2px rgba(255, 250, 240, 0.7), 0 2px 5px rgba(60, 30, 10, 0.3); }
+  .swatch-ask .pot::after { content: ''; position: absolute; inset: 7px; border-radius: 50%; background: #fbf1dd; }
+  .swatch-ask .dots { display: inline-block; width: 1.4em; overflow: hidden; vertical-align: bottom; animation: swatch-dots 1.4s steps(4) infinite; white-space: nowrap; }
+  @keyframes swatch-mix { to { rotate: 360deg; } }
+  @keyframes swatch-dots { from { width: 0; } to { width: 1.4em; } }
+  @media (prefers-reduced-motion: reduce) { .swatch-fan, .swatch-slot { transition: none; } .swatch-ask .pot, .swatch-ask .dots { animation: none; } }
   @media (max-width: 700px) { .swatch-card { width: 78px; height: 170px; } .swatch-card .chips span { height: 18px; } .swatch-card .name { font-size: 14px; } }
   `
 }

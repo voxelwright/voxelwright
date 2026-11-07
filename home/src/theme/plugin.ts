@@ -167,8 +167,8 @@ export default {
 
     let frame = 0
     let costumes = costumeVersion()
-    ctx.on('village/frame', (dt) => {
-      tick(dt)
+    ctx.on('village/frame', () => {
+      tick()
       const t = theme()
       const changed = t !== applied || costumes !== costumeVersion()
       if (!changed && ++frame % RESCAN) return

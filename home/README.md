@@ -1432,11 +1432,15 @@ pass-through stubs, so the comic and pastoral results show only their tokens. Sc
 ### Switching live, saved looks and the swatch book
 
 The swatch book is a paint fan deck on the window sill (an entry: hover, click, or Tab and
-Enter). It lays out one painted card per look; choosing a card switches the home live. Your own
-looks get "rename" and "tear out", the blank card saves the look on screen (a half-finished
-blend included) under a name, and the same name replaces it. The slip at the bottom takes a
-written request and calls `village.theme.ask(text)` when the theme writer provides it; until
-then it says it isn't there yet and sends nothing. Escape clears the slip, then closes the book.
+Enter). Its cards open out of the deck: the row stands on the sill line, centred on the deck as
+far as the screen allows, and each card grows out of the rivet in a gentle fan. Choosing a card
+switches the home live. Your own looks get "rename" and "tear out", the blank card saves the look
+on screen (a half-finished blend included) under a name, and the same name replaces it. Tearing
+out the look on screen switches to the look it was made from, so a card is always marked. The
+slip under the cards calls `village.theme.ask(text)`: while the model writes, the request stays
+on the slip with a turning paint pot and "Mixing the paint"; then it shows the note, or the line
+the villagers use when it fails ("I couldn't change the look just now."). Escape clears the slip,
+then closes the book.
 
 `setTheme()` picks one of two paths (`src/theme/switch.ts`):
 
@@ -1445,13 +1449,18 @@ then it says it isn't there yet and sends nothing. Escape clears the slip, then 
   Postfx's numbers (bloom, vignette, warmth, grain, grade, sky colour, reflection strength) are
   uniforms synced from `theme()` in its draw pass, so nothing is rebuilt. The grade is always in
   the chain, written so its identity is exact. A value one look leaves unset (roughness, emissive,
-  a painted map) changes at the midpoint. Golden hour and the new Blue hour share a shape.
-- Any other pair: the last frame is copied to a canvas over the scene (a WebGPU canvas reads back
-  blank outside its frame, so the copy runs in a microtask after the draw), postfx is rebuilt, and
-  the copy stays until the new chain has drawn a frame and the GPU has finished it, then fades
-  over 0.6 s.
+  a painted map) changes at the midpoint. Golden hour and Blue hour share a shape. The blend runs
+  on its own animation frames by the clock, so it finishes without the theme plugin.
+- Any other pair: postfx builds the next look's chain and compiles it while the current chain
+  keeps drawing the room live (`prepare()` in `src/plugins/postfx.ts`). Its scene passes compile
+  with `PassNode.compileAsync`; its quads (stages, bloom, render-to-texture nodes) compile through
+  warm draws that ask three for every missing pipeline asynchronously, so three skips those objects
+  until they are ready. A warm draw runs before the live chain's draw in the same frame, which
+  clears the canvas over it. When everything is ready, the last frame is copied to a canvas over
+  the scene, the new chain and the new look are swapped in under it in the same frame, and the
+  copy fades over 0.6 s. A second choice while a chain compiles drops that chain unseen.
 
-With `prefers-reduced-motion` a blend is instant and the held frame is dropped without a fade.
+With `prefers-reduced-motion` a blend is instant and the copy is dropped without a fade.
 
 Looks you save live in `localStorage` (`village.themes`), the last chosen look in
 `village.theme.last` (`?theme=` wins over it) and costume choices in `village.theme.costumes`.
@@ -1465,30 +1474,44 @@ in it before is put back from the plugin's saved originals. `window.village.them
 `list()`, `current()`, `get(id)`, `set(id)`, `save(name)`, `rename(id, name)`, `remove(id)`,
 `keepCostume(villagerId, on)`, `keepsCostume(id)`, `switching()` and `lastSwitch()`.
 
-`node scripts/check-themes.mjs [base-url] --before=<png>` proves both paths, the held frame,
-reduced motion, saved looks across reloads, keep my costume, the swatch book by keyboard and
-pointer, three theme and postfx load and unload cycles, and the no-op (the `--before` capture
-comes from `theme-shots.mjs` on the commit before; the swatch book is unloaded for the capture).
+`node scripts/check-themes.mjs [base-url] --before=<png>` proves both paths, the old chain
+drawing live until the swap, every rebuild frame under 100 ms at `?q=high`, a double switch that
+never swaps in the look before last, reduced motion, a blend with the theme plugin unloaded,
+deleting the look on screen, saved looks across reloads, keep my costume, the swatch book by
+keyboard and pointer, five theme and postfx cycles with no texture growth at either tier, and the
+no-op (the `--before` capture comes from `theme-shots.mjs` on the commit before; the swatch book
+is unloaded for the capture). Three clones the glass's transmission backdrop per render target
+and never frees it; postfx releases its scene pass's copy when a chain retires, which ended the
+one-texture-per-rebuild growth at the high tier.
 
-Switch timing, headless Chrome, 1440x900, `?q=high`, M1 Pro shared with three other builders:
+Switch timing, headless Chrome, 1440x900, `?q=high`, M1 Pro shared with three other builders,
+fresh browser per run (cold shader caches). Worst frame is the longest frame interval from the
+choice until the copy has faded:
 
-| Switch | Worst frame | First frame of the new chain | Settled |
-| --- | --- | --- | --- |
-| Golden hour to Blue hour (blend) | 16.8 ms | none rebuilt | 1.50 s |
-| Blue hour to Neon night | 117 to 733 ms | 0.29 to 0.96 s | 0.92 to 1.59 s |
-| Neon night to 16-bit | 83 to 567 ms | 0.25 to 0.73 s | 0.90 to 1.37 s |
-| 16-bit to Golden hour | 100 ms | 0.15 s | 0.79 s |
+| Switch | Worst frame before | Worst frame now | Compiled ahead | Settled |
+| --- | --- | --- | --- | --- |
+| Golden hour to Blue hour (blend) | 16.8 to 33 ms | 16.8 ms | none rebuilt | 1.51 s |
+| Blue hour to Neon night | 117 to 733 ms | 40 ms | 0.71 s | 0.77 s |
+| Neon night to 16-bit | 83 to 567 ms | 23 ms | 0.86 s | 0.92 s |
+| 16-bit to Comic | (comic cold: 2.2 to 6 s) | 29 ms | 0.53 s | 0.59 s |
+| Comic to Golden hour | 183 ms | 28 ms | 0.25 s | 0.30 s |
+| Neon night to Pastoral | 1.4 to 13 s cold, 0.22 s warm | 1.04 s cold, 17 ms warm | 0.25 s | 1.37 s |
 
-The worst frame is the new chain's shader compile; it happens under the held frame.
+What is left in Pastoral's cold switch is not the chain: its window painter (`pastoral-view` in
+`src/theme/paint.ts`) took 1.3 s of main-thread time on first use, at the swap frame. A faster
+painter is in progress in the pastoral unit; painting ahead needs a `prepaint` from the theme
+plugin's paint path.
 `node scripts/theme-strip.mjs <out.png> <from> <to> <ms> ...` draws a real frame strip of a
 switch in the page (Playwright screenshots take 0.1 to 8 s each, too slow for a 1.5 s switch).
 Screenshots: `screenshots/themes/swatch-book-*.jpg` and `switch-*-strip.jpg`.
 
 Look (ui-craft, a fresh Opus scorer per round, overall out of 10): 6, then 6 after a dusk window
-for Blue hour, one mark for the current card and larger notes. Per category in round 2: warmth 7,
-materials 6, lighting 5, legibility 6, consistency 6, motion 6, the swatch book belongs 6, the
-room changing 6 (the blend alone "about 8", the rebuild "about 5"). Asked for next: open the
-cards from the fan on the sill instead of floating them over the table; compile the next chain
-before holding the frame, so the rebuild doesn't read as a freeze then a jump; let the lamp
-become the key light at dusk; fewer, smaller dust motes outside the beam. Below the 9/10 bar.
+for Blue hour, one mark for the current card and larger notes. After compiling ahead, the fan from
+the sill and the mixing slip (one round, November 7): 6. Per category: warmth 7, materials 6,
+lighting 7, legibility 6, consistency 6, motion 5, the swatch book belongs 6, the room changing 6
+(the blend alone about 8, the rebuild about 4, judged on a strip whose one-second freeze is
+Pastoral's cold painter), the slip alive while waiting 4. Asked for next: a smaller fan nearer the
+sill that never covers the lamp; square matte chips; one arc for every card; the slip as a paper
+strip; a blank card that fills with colours while the look is written; a rebuild that starts
+changing the light at frame 0. Below the 9/10 bar.
 
