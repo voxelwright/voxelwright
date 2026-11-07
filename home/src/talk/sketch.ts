@@ -242,11 +242,12 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   const rubberTag = tag('rubber', 'rubber', () => setTool('rubber'))
   const undoTag = tag('undo', 'undo', () => undo())
   const clearTag = tag('clear', 'clear', () => clear())
+  const doneTag = tag('done', 'done', () => open(false))
   const makeTag = tag('Make it', 'make', () => void make())
   const giveTag = tag('Give', 'give', () => void give())
   const group1 = document.createElement('span')
   group1.className = 'group'
-  group1.append(penTag, rubberTag, undoTag, clearTag)
+  group1.append(penTag, rubberTag, undoTag, clearTag, doneTag)
   const group2 = document.createElement('span')
   group2.className = 'group act'
   group2.append(makeTag, giveTag)
@@ -318,7 +319,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     const at = onPage(e.clientX, e.clientY)
     if (!at) return
     if (!sketching) open(true)
-    live = { pts: [{ x: at.x, y: at.y, p: pressure(e) }], erase: tool === 'rubber', size: tool === 'rubber' ? 34 : e.pointerType === 'touch' ? 9 : 8 }
+    live = { pts: [{ x: at.x, y: at.y, p: pressure(e) }], erase: tool === 'rubber', size: tool === 'rubber' ? 36 : e.pointerType === 'touch' ? 12 : 11 }
     tip = at.local
     dirty = true
   }
@@ -393,6 +394,16 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   })
   const onKey = (e: KeyboardEvent) => {
     if (!sketching || hooks.blocked()) return
+    const t = e.target as HTMLElement | null
+    const inField = t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA'
+    // Enter with the keyboard elsewhere (after a tap on a tool) still makes or gives the page; in the line, input.ts asks us.
+    if (e.key === 'Enter' && !inField && !e.isComposing && inked()) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (hooks.to().name === hooks.maker) void make()
+      else void give()
+      return
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !input.text) {
       e.preventDefault()
       undo()
@@ -598,7 +609,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   const q = new THREE.Quaternion()
   const scl = new THREE.Vector3()
   const camPos = new THREE.Vector3()
-  const rest = new THREE.Vector3(PADW / 2 + 0.05, -PADH * 0.15, 0.02)
+  // At rest the pencil lies across the top of the pad, over the binding, where it shows even when the pad is tucked away.
+  const rest = new THREE.Vector3(PADW * 0.08, PADH / 2 + 0.06, 0.03)
   const tipAt = new THREE.Vector3().copy(rest)
   const place = (el: HTMLElement, x0: number, y0: number, x1: number, y1: number) => {
     el.style.left = `${Math.round(x0)}px`
@@ -618,6 +630,19 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     }
     return { x0, y0, x1, y1 }
   }
+  /** The paper on screen, from its own four corners (a world box round a tilted page is far bigger than the page). */
+  const corners = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([x, y]) => new THREE.Vector3(x * PADW, y * PADH, 0))
+  const paperRect = () => {
+    layer.updateWorldMatrix(true, false)
+    const r = renderer.domElement.getBoundingClientRect()
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const c of corners) {
+      const p = tmp.copy(c).applyMatrix4(layer.matrixWorld).project(camera)
+      const sx = r.left + ((p.x + 1) / 2) * r.width, sy = r.top + ((1 - p.y) / 2) * r.height
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+    }
+    return { x0, y0, x1, y1 }
+  }
   const frame = (dt: number, t: number) => {
     const away = hooks.blocked() || !input.state().padVisible
     if (away && sketching) open(false)
@@ -626,8 +651,8 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     surface.hidden = away || !(sketching || raised)
     surface.classList.toggle('drawing', sketching)
     if (!surface.hidden) {
-      const r = input.padRect()
-      place(surface, r.left, r.top, r.left + r.width, r.top + r.height)
+      const r = paperRect()
+      place(surface, r.x0, r.y0, r.x1, Math.min(innerHeight, r.y1))
     }
     if (dirty) {
       dirty = false
@@ -639,17 +664,22 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     tipAt.lerp(goal, k)
     pencil.group.position.copy(tipAt)
     const inHand = sketching && tip ? 1 : 0
-    const flip = tool === 'rubber' ? Math.PI : 0
-    pencil.group.rotation.set(-0.5 * inHand + (1 - inHand) * 0.0, 0, (1 - inHand) * 0.08 - inHand * 0.5 + flip)
-    if (tool === 'rubber' && inHand) pencil.group.position.addScaledVector(new THREE.Vector3(0, 1, 0).applyEuler(pencil.group.rotation), -pencil.length * 0.9)
+    // In hand it leans up and to the right, toward you; the rubber end goes down when rubbing out.
+    if (inHand) {
+      pencil.group.rotation.set(0.55, 0, tool === 'rubber' ? Math.PI + 0.5 : -0.5)
+      if (tool === 'rubber') pencil.group.position.addScaledVector(new THREE.Vector3(0, 1, 0).applyEuler(pencil.group.rotation), -pencil.length * 0.9)
+    } else pencil.group.rotation.set(0, 0, Math.PI / 2 - 0.04)
     pencil.group.visible = !away
     const pb = screenOf(pencil.group)
     place(pencilButton, pb.x0 - 6, pb.y0 - 6, pb.x1 + 6, pb.y1 + 6)
-    pencilButton.hidden = away || (sketching && Boolean(tip))
-    // Tools sit on the pad's top edge while drawing.
+    // While drawing the pencil is in your hand: its button would catch strokes at the page's top. "done" puts it down.
+    pencilButton.hidden = away || sketching
+    // Tools sit on the pad's top edge while drawing, inside the window.
     if (sketching) {
-      const r = input.padRect()
-      tools.style.translate = `${Math.round(r.left + r.width / 2)}px ${Math.round(Math.max(8, r.top - 12))}px`
+      const r = paperRect()
+      const w = tools.offsetWidth, h = tools.offsetHeight
+      const x = THREE.MathUtils.clamp((r.x0 + r.x1) / 2, w / 2 + 8, innerWidth - w / 2 - 8)
+      tools.style.translate = `${Math.round(x)}px ${Math.round(Math.max(h + 8, r.y0 - 30))}px`
     }
     const to = hooks.to()
     giveTag.textContent = `Give to ${to.name}`
@@ -799,14 +829,14 @@ function css() {
   .sketch-pencil { position: fixed; z-index: 6; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 10px; touch-action: manipulation; }
   .sketch-pencil:focus-visible { outline: 3px solid rgba(255, 236, 200, 0.9); outline-offset: 2px; }
   .sketch-pencil[hidden] { display: none; }
-  .sketch-tools { position: fixed; z-index: 7; left: 0; top: 0; display: flex; gap: 10px; align-items: center; translate: -9999px 0; transform: translate(-50%, -100%);
+  .sketch-tools { position: fixed; z-index: 7; left: 0; top: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 10px; align-items: center; width: max-content; max-width: calc(100vw - 16px); translate: -9999px 0; transform: translate(-50%, -100%);
     opacity: 0; scale: 0.94; pointer-events: none; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1); touch-action: manipulation; }
   .sketch-tools.shown { opacity: 1; scale: 1; pointer-events: auto; }
   .sketch-tools .group { position: relative; display: flex; gap: 2px; padding: 6px 8px 7px; border-radius: 13px; background: ${paper}; color: #46301f;
     box-shadow: 0 8px 20px rgba(60, 30, 10, 0.22), 0 2px 0 rgba(255, 255, 255, 0.7) inset; }
   .sketch-tools .group::before { content: ''; position: absolute; inset: 4px; border: 1.5px dashed rgba(150, 100, 60, 0.34); border-radius: 9px; pointer-events: none; }
   .sketch-tools button { position: relative; min-height: 36px; padding: 2px 9px 4px; border: 0; border-radius: 9px; background: none; cursor: pointer;
-    color: #6a4a34; font: 700 20px ${HAND}; transition: translate 120ms ease, background 120ms ease; }
+    color: #6a4a34; font: 700 20px ${HAND}; white-space: nowrap; transition: translate 120ms ease, background 120ms ease; }
   .sketch-tools button.on { background: rgba(60, 90, 138, 0.13); color: ${INK}; }
   .sketch-tools button:hover, .sketch-tools button:focus-visible { translate: 0 -1px; outline: none; text-decoration: underline wavy rgba(120, 80, 50, 0.5); }
   .sketch-tools button[data-tool='make'] { color: #3f6a35; }

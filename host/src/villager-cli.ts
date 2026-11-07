@@ -44,7 +44,7 @@ const fiber = root.plugin(villager, {
   agent: values.agent === 'stub' ? stubAgent() : (values.agent === 'warm' ? warmAgent : claudeAgent)({ model: values.model, thinking: values.thinking }),
   router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
-  sketchMaker: values.agent === 'stub' ? stubSketchMaker() : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
+  sketchMaker: values.agent === 'stub' ? stubSketchMaker(1500) : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
 })
 await fiber.await()
 console.log(`villager (${values.agent}${values.agent === 'stub' ? '' : `, ${values.model}`}) for ${Object.keys(people ?? { alex: 1 }).join(', ')} listening on 127.0.0.1:${root.villager.port}`)
