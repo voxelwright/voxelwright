@@ -367,12 +367,12 @@ function css() {
   .swatch-card .chips { display: flex; flex-direction: column; gap: 4px; }
   .swatch-card .chips span { display: block; height: 26px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(60, 30, 10, 0.12), inset 0 -6px 10px rgba(255, 255, 255, 0.08); }
   .swatch-card .name { margin-top: 8px; font: 700 17px/1.1 ${HAND}; text-align: center; overflow-wrap: anywhere; }
-  .swatch-slot.current .swatch-card { box-shadow: 0 14px 30px rgba(60, 30, 10, 0.34), 0 0 0 2.5px #c2714f, 0 1px 0 rgba(255, 255, 255, 0.8) inset; }
+  .swatch-slot.current .swatch-card { box-shadow: 0 14px 30px rgba(60, 30, 10, 0.34), 0 1px 0 rgba(255, 255, 255, 0.8) inset; }
   .swatch-card .now { position: absolute; left: 50%; top: -15px; translate: -50% 0; padding: 2px 10px 3px; border-radius: 9px; background: #c2714f; color: #fffaf0;
     font: italic 700 14px ${HAND}; white-space: nowrap; box-shadow: 0 3px 8px rgba(60, 30, 10, 0.25); }
-  .swatch-card .yours { position: absolute; right: 6px; bottom: 6px; font: italic 12px ${BOOK}; color: rgba(74, 51, 38, 0.6); }
+  .swatch-card .yours { position: absolute; right: 7px; bottom: 5px; font: italic 13px ${HAND}; color: rgba(74, 51, 38, 0.85); }
   .swatch-slot .tools { display: flex; gap: 4px; margin-top: 6px; }
-  .swatch-tool { border: 0; padding: 3px 8px; border-radius: 8px; background: rgba(251, 243, 226, 0.92); color: ${INK}; font: italic 14px ${HAND}; cursor: pointer;
+  .swatch-tool { border: 0; padding: 4px 10px; border-radius: 8px; background: rgba(251, 243, 226, 0.96); color: ${INK}; font: italic 15px ${HAND}; cursor: pointer;
     box-shadow: 0 3px 8px rgba(60, 30, 10, 0.2); }
   .swatch-tool:focus-visible, .swatch-field:focus-visible { outline: 3px solid rgba(255, 236, 200, 0.95); outline-offset: 2px; }
   .swatch-slot.blank .swatch-card { background: rgba(251, 243, 226, 0.9); box-shadow: inset 0 0 0 2px rgba(120, 80, 50, 0.35); justify-content: center; align-items: center; }
@@ -386,8 +386,8 @@ function css() {
     background-image: repeating-linear-gradient(transparent 0 25px, rgba(60, 90, 138, 0.16) 25px 26px), ${paper};
     box-shadow: 0 8px 22px rgba(60, 30, 10, 0.26), 0 1px 0 rgba(255, 255, 255, 0.8) inset; }
   .swatch-ask .ask-head { font: 700 18px ${HAND}; color: #9a5a35; }
-  .swatch-ask .swatch-field { width: 100%; margin: 0; background: rgba(255, 252, 244, 0.85); font: italic 16px ${BOOK}; }
-  .swatch-ask .ask-note { grid-column: 1 / -1; min-height: 1em; font: italic 14px ${HAND}; color: rgba(74, 51, 38, 0.75); }
+  .swatch-ask .swatch-field { width: 100%; margin: 0; background: rgba(255, 252, 244, 0.85); font: italic 17px ${HAND}; }
+  .swatch-ask .ask-note { grid-column: 1 / -1; min-height: 1em; font: italic 15px ${HAND}; color: rgba(74, 51, 38, 0.9); }
   @media (prefers-reduced-motion: reduce) { .swatch-fan, .swatch-slot { transition: none; } }
   @media (max-width: 700px) { .swatch-card { width: 78px; height: 170px; } .swatch-card .chips span { height: 18px; } .swatch-card .name { font-size: 14px; } }
   `
