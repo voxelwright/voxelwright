@@ -519,33 +519,44 @@ What works:
   in front of the table, Moss tending the big plant). Walkers yield to each
   other and step around anyone standing still, then rejoin their path. Now and
   then one looks up from its chore and waves at you; hovering one makes it
-  pause, wave and show its name tag, so it is easy to click.
+  pause, wave, take on a soft outline in its owner's colour and show its name
+  tag ("Alex's Dumpling") just over its own head, so it is easy to click.
 - Talk in one step: click, or Tab and Enter. It stops, hops, turns to you, and
   the camera arcs (rate 7, about 0.4 s) into a close two-shot that turns until
   nothing stands in the way. While the talk is open the shot is locked: a
   walker about to step into it waits at the edge of frame, and one already at
-  a chore in frame stays at it. The reply card wears the villager's name tag
-  (felt ribbon in its colour, "Dumpling · Alex's"). Replies appear a whole word
-  at a time (58 letters a second), on a card already sized for the page, with
-  stitched dots while the villager is still talking and "go on" when there is
-  more. A page is about two short sentences (one if two would pass 150
-  letters). While the model works the villager looks up and taps its chin for
-  at least half a second; there is no spinner.
+  a chore in frame stays at it. In a talk or at the table, anyone not in the
+  conversation who comes well in front of it, or is cut off by the frame's
+  edge, fades out (hashed alpha, so no sorting or shader rebuild) and back once
+  clear. The reply card wears the villager's name tag (felt ribbon in its
+  colour) and sits beside its head in a talk and above it at the table, with
+  its tail on the head; it keeps off other speakers' faces and the slip.
+  Replies appear a whole word at a time (58 letters a second) and the card
+  grows with them, with stitched dots after the last word while the villager
+  is still talking. A page holds seven lines: only a reply that would overflow
+  turns its page (by itself after a read, or with "go on"), and the page
+  before stays above as one dimmed line that opens on a click. While the model
+  works the villager looks up and taps its chin for at least half a second;
+  there is no spinner.
 - The slip: one stitched paper slip at the bottom right holds your last line,
   the writing line and two or three chips. Its tab says who the line goes to
-  ("to Dumpling · Alex's", "to the table") in that villager's ink, so it never
-  reads as the villager speaking. Chips already said are not offered again.
-  `?slip=always` keeps the slip on screen with no talk open, addressed to your
-  own villager (Alex's Dumpling) with "Write to Dumpling…"; a line written
-  there turns Dumpling to you and sends it. Without the flag the slip shows
-  only during a talk.
+  ("to Dumpling", "to the table") in that villager's ink, so it never reads as
+  the villager speaking. Lines are written in the book face; handwriting is
+  kept for short labels. A chip once said, or whose topic you already wrote
+  about ("What's for dinner?" after a typed dinner question), is not offered
+  again; after the first exchange the chips fold behind one quiet "…", and
+  they hide while a villager answers. `?slip=always` keeps the slip on screen
+  with no talk open, addressed to your own villager with "Write to
+  Dumpling…": Dumpling wears a soft outline and turns to you while you write,
+  and the line turns it to you and is sent there. Without the flag the slip
+  shows only during a talk.
 - The table: "Come sit with me" walks the villager (hurrying) to the nearest
   free chair, far side first; the talk prototype adds a fourth chair on the
   near side and a felt booster cushion on each chair, so a seated villager
   clears the table top. Every seated villager answers in turn: their requests
   start together, they speak one at a time with a lit name tag and a lean-in;
-  cards that have finished shrink and dim, and only the speaker's tag shows
-  while someone speaks. Starting a line with a name ("Tuft, ...") asks only
+  cards that have finished fold to two dimmed lines and move aside for the
+  speaker, and only the speaker's tag shows while someone speaks. Starting a line with a name ("Tuft, ...") asks only
   that one; clicking a seated villager fills in its name.
 - Goodbyes: "Thanks, everyone", or a typed farewell ("thanks, bye", "see you
   later"; the whole line, at most 40 letters), makes each villager say a short
@@ -558,6 +569,11 @@ What works:
   The host passes context to the villager's turn, marked as not the person's
   words, and never stores it in `conversation.jsonl`, so the notebook never
   shows it as your writing.
+- Voices: each word that appears on a card is emitted on the card's own
+  reveal clock as `village/said` (`{ villager, word, index, last }`, with
+  `last` on the reply's final word), and a reply cut short (Escape, the host
+  failing mid-reply, a goodbye) as `village/said-stop`. The talk plugin makes
+  no sound itself.
 - The voice (`host/src/villager-agent.ts`): a warm household character, one
   or two short sentences, no lists, at most one gentle question, no talk of
   its notes or limits unless asked, and no claims of things it did not do. It
@@ -582,33 +598,44 @@ hand-placed corridors that clear it).
 `VILLAGE_ROOT` and proves, headless: nothing changes without the flag; the
 three walk their chores; hover shows the name tag; a click talks in one step
 and focuses the line; the thinking beat shows and the reply streams onto the
-card; replies are revealed in whole words with the still-talking cue, on a
-card sized for the page (it fails if letters are revealed one by one); at most
-two sentences per page; Escape returns to chores; Tab and Enter talk; two are
-invited and seated; a table line is answered by both in turn with one speaker
-and one lit tag at a time; a name asks only that villager; the other's words
-arrive only as context and are never stored as your line; the host down is
-said in character and the line kept; a typed farewell gets a goodbye from each
-and sends nothing; Escape at the table releases everyone; the glyph shows,
-fades after a second of looking and never returns; without `?slip=always` the
-slip is hidden in the room, and with it the slip stays addressed to your
-villager, re-addresses itself and sends there; unloading `talk` three times
-leaves the same objects, geometries, textures, frame hooks, DOM and entries as
-a `?cam=iso` page. 24 of 24 passed (stub host, November 6, 2026). `--agent=claude`
+card; replies are revealed in whole words with the still-talking cue (it
+fails if letters are revealed one by one); each word fires `village/said` in
+order with `last` on the final one, and Escape mid-reply fires
+`village/said-stop`; the card grows with the words, with no pre-sized card; a
+short reply stays on one page and a long one turns only on overflow, keeping
+the first page as a dimmed line; hover shows "Sam's Tuft" over Tuft's own head
+and outlines it; Escape returns to chores; Tab and Enter talk; after the first
+exchange the chips fold behind "…" and a typed dinner question drops "What's
+for dinner?"; two are invited and seated; a table line is answered by both in
+turn with one speaker and one lit tag at a time, and drops "What's everyone up
+to?"; every card and tag stays inside the window with its tail over its own
+villager; a walker brought between the camera and the table fades out and
+back; a name asks only that villager; the other's words arrive only as context
+and are never stored as your line; the host down is said in character and the
+line kept; a typed farewell gets a goodbye from each and sends nothing; Escape
+at the table releases everyone; the glyph shows, fades after a second of
+looking and never returns; without `?slip=always` the slip is hidden in the
+room, and with it the slip stays addressed to your villager, which wears the
+outline and turns to you while you write, re-addresses itself and sends there;
+unloading `talk` three times leaves the same objects, geometries, textures,
+frame hooks, DOM and entries as a `?cam=iso` page. 32 of 32 passed (stub host,
+November 7, 2026). `--agent=claude`
 runs one real talk, one two-villager table exchange and a typed farewell
 instead, and `--video=dir` records it.
 
-Real model, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet 5.5 with a
-Haiku helper call), times measured in the host from the start of each turn:
+Real model, November 7, 2026, M1 Pro (Sonnet 5.5 with a Haiku helper call),
+times measured in the host from the start of each turn, last of three
+recorded runs:
 
 | Turn | Villager | First text | Whole turn | Cost |
 | --- | --- | --- | --- | --- |
-| single talk, first turn of the session | Dumpling (alex) | 3.7 s | 4.2 s | $0.0048 |
-| table, two seated | Dumpling (alex) | 4.5 s | 4.9 s | $0.0044 |
-| table, two seated | Moss (mia) | 4.7 s | 5.3 s | $0.0053 |
+| single talk, first turn of the session | Dumpling (alex) | 4.0 s | 4.7 s | $0.0037 |
+| table, two seated | Dumpling (alex) | 4.4 s | 5.3 s | $0.0043 |
+| table, two seated | Moss (mia) | 4.5 s | 5.3 s | $0.0049 |
 
-Replies still run two or three sentences, usually ending in one question, so
-pages sometimes turn by themselves.
+Replies run two to four sentences (230 to 280 letters); with seven-line
+pages a three-sentence reply now stays on one page, and only longer ones
+turn.
 
 Frame cost, headless Chrome, 1440x900, WebGPU, `npm run measure -- '<url>'
 --perf --gpu`, one 6 s run each while the villagers walked, this branch against
@@ -632,8 +659,10 @@ page, 4.4 against 3.8 ms on the iso page).
 Look: a fresh Opus scorer per round saw only the `npc-*.jpg` screenshots and
 nine categories (warmth, material honesty, lighting and depth, who is
 speaking, consistency, character appeal, game not tool, friction, low mode).
-Means: 5.7 for the merged screenshots, then 6.1, 6.3 and 6.6 after each round of fixes; stopped at the round cap. What holds it down now is mostly the scene and the characters,
-not the talk: tube-like scarves, plastic-looking cabinets and fridge, the
-pendant's hot spot on the table, small villagers in the room view, empty
-floor, and a low mode that looks like a degraded high mode rather than its own
-look. Screenshots: `screenshots/talk/npc-*.jpg` (real replies).
+Means: 5.7 for the merged screenshots, then 6.1, 6.3 and 6.6 after each round of fixes; stopped at the round cap.
+Round 3 (#42 talk polish, ten categories with motion polish added): 6.9, 7.0
+and 7.0. What still holds it down: a fixed composer in the corner that reads
+as a chat widget (and its typing dots and "…"), villagers that clip into
+chairs or bunch at one spot after the table, a hovered walker that stays
+turned away, the room's empty floor and bare walls, and the hot spot on the
+table. Screenshots: `screenshots/talk/npc-*.jpg` (real replies).
