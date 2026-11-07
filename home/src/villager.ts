@@ -90,7 +90,7 @@ export async function say(person: string, text: string, onText: (t: string) => v
 // the page treats it as data. Prop modules only ever run in the prop sandbox.
 
 export interface Routed {
-  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal'
+  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme'
   to?: string
   say?: string
   message?: string
@@ -133,3 +133,6 @@ export const library = (person: string) => call<{ items: { id: string; name: str
 export const startProject = (person: string, what: string, where: string | undefined, text: string) =>
   call<{ project: { id: string; what: string; state: string } }>(`/people/${person}/projects`, { what, where, text })
 export const projects = (person: string) => call<{ projects: { id: string; what: string; where?: string; state: string }[] }>(`/people/${person}/projects`)
+/** A theme written from a sentence (#50): unchecked theme data, a one-line note, and the prop and costume hints. */
+export const askTheme = (person: string, text: string, current: unknown) =>
+  call<{ theme: unknown; note: string; hints: { props: unknown; costumes: unknown }; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/theme`, { text, current })

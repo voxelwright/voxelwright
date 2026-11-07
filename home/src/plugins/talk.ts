@@ -9,6 +9,7 @@ import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
+import { ask as askTheme } from '../theme/ask'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
 
@@ -1383,6 +1384,14 @@ export default {
           furnish!.dismiss(guess)
           ctx.emit('village/journal', { person: to?.person, section: routed.section })
           return
+        case 'theme': {
+          // #50: the whole home's look, written from the person's own words; the note is shown as text.
+          furnish!.dismiss(guess)
+          if (routed.say) quip(me, routed.say)
+          const r = await askTheme(text, me.person)
+          quip(me, r.ok ? r.note || `Now ${r.label}.` : "I couldn't change the look just now.")
+          return
+        }
       }
     }
 
