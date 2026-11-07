@@ -1409,7 +1409,8 @@ Real calls, operator login, November 6, 2026, from `ask()` to two frames after `
 | make it look like a comic book | 7.9 s, 1012 tok, $0.022 | 48.8 s, 1463 tok, $0.0016 |
 | go back to normal | 3.8 s, 412 tok, $0.017 | 21.7 s, 463 tok, $0.0011 |
 
-Sonnet's first call pays the prompt cache write. Haiku's last three ran while other agents
-used the machine; treat its tail as unmeasured. Halftone, ink, brush and paper are still
+Sonnet's first call pays the prompt cache write. Haiku's last three took 17 to 49 s (host-side
+API time similar); the cause was not investigated, and other agents were using the machine.
+One run each, so these are single samples. Halftone, ink, brush and paper are still
 pass-through stubs, so the comic and pastoral results show only their tokens. Screenshots
 (Sonnet): `screenshots/themes/ask-cyberpunk.jpg`, `ask-cozier-autumn.jpg`, `ask-comic.jpg`.
