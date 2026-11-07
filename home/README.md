@@ -211,6 +211,104 @@ Dollhouse shell, same setup, one 6 s run each:
 
 Screenshots: `screenshots/talk/iso-*.jpg`.
 
+## Generated props (#42 experiment, November 6, 2026)
+
+Question: how fast and how good can a model make a new furniture prop in this
+style from a line of text? Two arms, same five prompts, same style guide
+(`scripts/props/style.md`):
+
+- **A, free code**: the model writes a module `build(api)` that gets three.js,
+  `RoundedBoxGeometry` and the `paint.ts` painters through `api`.
+- **B, JSON spec**: the model writes a prop spec (box, cylinder, sphere, lathe,
+  extrude; per-part transform and bevel; wood, fabric, painted, metal, ceramic
+  and wallpaper presets; an overall size). `src/props/spec.ts` validates it,
+  clamps lengths to 0.002 to 3 m, and rejects more than 60 parts or 8
+  materials and any unknown shape or preset. The spec is never executed.
+
+`?props=<run-id>[,<run-id>]` loads results from `generated/props/` (git-ignored)
+into the kitchen; `&focus=1` frames them. `main.ts` imports the loader only in
+dev builds with the flag, so without it nothing loads and the production build
+contains none of it. Run, with the dev server on 5302:
+
+```sh
+node scripts/props/run.mjs <out>      # claude -p, 5 at a time, one repair pass on failure
+node scripts/props/capture.mjs <out>  # iso + close captures, draw calls, the floor
+node scripts/props/score.mjs <out>    # a fresh claude -p --model opus scorer per result
+node scripts/props/sheet.mjs <out>    # one sheet per prompt and results.md
+```
+
+Latency is wall clock for `claude -p` (default effort, about 1 to 2 s of CLI
+start included), measured with 5 calls running at once. Triangles and draw
+calls are the `?cam=iso&q=high` frame minus a frame without props (shadow
+passes included). Scores are 1 to 10 for "belongs in this painterly home" and
+"is what was asked", from Opus given the two captures and the request.
+
+| Prompt | Arm | Model | Latency s | First try | Repair | Out tokens | Triangles | Draw calls | Belongs | Asked |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | B | haiku | 11.1 | yes |  | 1525 | 1824 | 4 | 6 | 6 |
+| 1 | B | sonnet | 9.4 | yes |  | 1240 | 2048 | 22 | 7 | 7 |
+| 1 | B | opus | 22.8 | yes |  | 2291 | 5680 | 20 | 6 | 6 |
+| 1 | A | haiku | 18.0 | yes |  | 3649 | 3872 | 6 | 6 | 6 |
+| 1 | A | sonnet | 8.2 | yes |  | 1142 | 5344 | 26 | 7 | 7 |
+| 1 | A | opus | 21.5 | yes |  | 2156 | 6272 | 30 | 8 | 8 |
+| 2 | B | haiku | 40.4 | yes |  | 9348 | 24000 | 80 | 6 | 7 |
+| 2 | B | sonnet | 17.5 | yes |  | 2601 | 13296 | 52 | 7 | 7 |
+| 2 | B | opus | 27.4 | yes |  | 2910 | 15600 | 52 | 6 | 7 |
+| 2 | A | haiku | 27.8 | yes |  | 5800 | 24000 | 80 | 6 | 7 |
+| 2 | A | sonnet | 11.9 | yes |  | 1629 | 26064 | 60 | 6 | 7 |
+| 2 | A | opus | 27.3 | yes |  | 2831 | 20352 | 64 | 6 | 7 |
+| 3 | B | haiku | 22.2 | yes |  | 4235 | 4976 | 27 | 7 | 8 |
+| 3 | B | sonnet | 21.9 | yes |  | 2808 | 6304 | 33 | 7 | 8 |
+| 3 | B | opus | 55.7 | yes |  | 5654 | 8920 | 43 | 7 | 8 |
+| 3 | A | haiku | 18.7 | yes |  | 4018 | 8880 | 32 | 6 | 8 |
+| 3 | A | sonnet | 20.9 | yes |  | 2936 | 17872 | 48 | 8 | 9 |
+| 3 | A | opus | 91.6 | yes |  | 5314 | 21624 | 47 | 8 | 9 |
+| 4 | B | haiku | 8.3 | yes |  | 474 | 24 | 2 | 3 | 4 |
+| 4 | B | sonnet | 4.2 | yes |  | 293 | 1224 | 6 | 5 | 3 |
+| 4 | B | opus | 9.7 | yes |  | 534 | 24 | 2 | 5 | 4 |
+| 4 | A | haiku | 5.5 | yes |  | 858 | 600 | 2 | 4 | 4 |
+| 4 | A | sonnet | 6.1 | yes |  | 611 | 2376 | 6 | 6 | 4 |
+| 4 | A | opus | 11.9 | yes |  | 1057 | 24 | 12 | 5 | 4 |
+| 5 | B | haiku | 36.8 | yes |  | 7282 | 9280 | 50 | 6 | 7 |
+| 5 | B | sonnet | 25.4 | yes |  | 3384 | 9976 | 48 | 7 | 9 |
+| 5 | B | opus | 75.4 | yes |  | 8105 | 11192 | 64 | 8 | 9 |
+| 5 | A | haiku | 71.7 | yes |  | 15898 | 11988 | 72 | 7 | 8 |
+| 5 | A | sonnet | 43.5 | yes |  | 5835 | 16088 | 106 | 8 | 9 |
+| 5 | A | opus | 115.9 | yes |  | 11508 | 17512 | 88 | 8 | 9 |
+
+Every result built on the first try (30 of 30), so no repair pass ran. Cost
+was $1.58 to generate and $1.88 to score.
+
+| Arm, model | Median latency s | Mean belongs | Mean asked |
+| --- | --- | --- | --- |
+| B haiku | 22.2 | 5.6 | 6.4 |
+| B sonnet | 17.5 | 6.6 | 6.8 |
+| B opus | 27.4 | 6.4 | 6.8 |
+| A haiku | 18.7 | 5.8 | 6.6 |
+| A sonnet | 11.9 | 7.0 | 7.2 |
+| A opus | 27.3 | 7.0 | 7.4 |
+
+Findings:
+
+- Sonnet is the fastest and about as good as Opus. Haiku is not faster: it
+  writes 1.5 to 3 times the tokens (pinball as code: 15,898 tokens, 72 s).
+- Free code scores 0.4 to 0.6 higher than the spec on "belongs", and Sonnet's
+  code came back faster (median 11.9 s against 17.5 s), but it is model output
+  running in the home. The spec arm's gap is in the presets (lathe
+  wood shows ring grain; no glass, lights or text) rather than in shapes.
+- The pinball machine did not fail. All six read as pinball (asked 7 to 9). It
+  is slow, 25 to 116 s, with 48 to 106 draw calls, against 2 to 30 for a table.
+- Low "asked" scores for the wallpaper (3 to 4) and the chairs come from this
+  harness: the wallpaper prompt asked for a 1.2 m panel, not the whole wall,
+  and the chairs were captured without the table they were made for.
+- Floor, no generation: a parsed "put a chair by the window" places a copy of
+  the existing chair in 31 to 35 ms to the next frame (build 16 to 24 ms).
+
+Fast path, for under 10 to 20 s: Sonnet writing a JSON spec, with the spec
+arm's presets extended (glass, a simple emissive, a lathe wood mapping). Spec
+results came back in 4 to 25 s. Opus and anything with many parts (the pinball
+machine, a scene of several pieces) go to a background project.
+
 ## Measured, kitchen scene (November 6, 2026)
 
 Headless Chrome through Playwright 1.65 (`--enable-unsafe-webgpu
