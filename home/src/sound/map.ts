@@ -37,5 +37,9 @@ export type SoundEvent = keyof typeof lines
 export const MAP: { [K in SoundEvent]: Line<K> } = lines
 export const SOUND_EVENTS = Object.keys(MAP) as SoundEvent[]
 
-/** Where an event happened, for stereo pan: `at`, else `from`. */
-export const whereOf = (e: Record<string, unknown>): Where | undefined => (e.at ?? e.from) as Where | undefined
+const isWhere = (v: unknown): v is Where => {
+  const w = v as Where | null
+  return typeof w === 'object' && w !== null && Number.isFinite(w.x) && Number.isFinite(w.y) && Number.isFinite(w.z)
+}
+/** The event's world position: `at`, else a positional `from` (a walk's `from` is a room name, not a place). */
+export const whereOf = (e: Record<string, unknown>): Where | undefined => (isWhere(e.at) ? e.at : isWhere(e.from) ? e.from : undefined)

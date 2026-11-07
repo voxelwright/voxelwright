@@ -143,7 +143,7 @@ export default {
       const camera = ctx.get('stage')?.camera
       if (!at || !camera) return 0
       const ndc = point.set(at.x, at.y, at.z).project(camera)
-      if (ndc.z >= 1 || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) return 0
+      if (!Number.isFinite(ndc.x) || ndc.z >= 1 || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) return 0
       return ndc.x * WIDTH
     }
     const live = () => {

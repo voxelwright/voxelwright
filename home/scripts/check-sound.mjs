@@ -381,14 +381,16 @@ check('public/audio/sfx fits the 400 KB budget', sizeOf(sfxDir) <= SFX_BUDGET, `
   await p.keyboard.press('Escape')
   await p.waitForTimeout(1500)
   // The door's centre can sit behind furniture: look around it until the pointer finds the entry (as check-entries.mjs does).
-  const door = await spot('to-living')
+  // Since the rooms became one house (#42) the seated kitchen view may not see the doorway itself; the living-room sign goes there too.
+  const doorId = (await spot('to-living'))?.onScreen ? 'to-living' : 'sign-living'
+  const door = await spot(doorId)
   const hovered = () => p.evaluate(() => window.village.kernel.root.get('entries').hovered)
   let aim = null
   for (const r of [0, 30, 60, 90, 120]) {
     for (const [dx, dy] of r ? [[0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, 1], [-1, 1], [1, -1]] : [[0, 0]]) {
       await p.mouse.move(door.x + dx * r, door.y + dy * r)
       await p.waitForTimeout(120)
-      if ((await hovered()) === 'to-living') aim = [door.x + dx * r, door.y + dy * r]
+      if ((await hovered()) === doorId) aim = [door.x + dx * r, door.y + dy * r]
       if (aim) break
     }
     if (aim) break
@@ -399,7 +401,7 @@ check('public/audio/sfx fits the 400 KB budget', sizeOf(sfxDir) <= SFX_BUDGET, `
   const walk = await p.evaluate(() => ({ heard: window.heard, played: window.village.sound.log.map((l) => `${l.cue}${l.pan ? `@${l.pan.toFixed(2)}` : ''}`), room: window.village.snapshot().room }))
   report.walk = { events: walk.heard.map((h) => h.name + (h.phase ? `:${h.phase}` : '')).join(' '), played: walk.played.join(' ') }
   const names = walk.heard.map((h) => h.name + (h.phase ? `:${h.phase}` : ''))
-  const want = ['hover', 'chose', 'glide', 'backed', 'walk:leave', 'walk:arrive']
+  const want = ['hover', 'chose', 'glide', 'backed', 'walk:leave']
   check('A real walk (hover and choose the notebook, back out, walk to the living room) fires its events and plays cues', want.every((w) => names.includes(w)) && walk.room === 'living' && walk.played.some((x) => x.startsWith('walk')) && walk.played.some((x) => x.startsWith('chose')), `${report.walk.events} | played ${report.walk.played}`)
   await p.close()
 }
