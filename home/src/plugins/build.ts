@@ -9,14 +9,14 @@ import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
-import { OPENING_HEAD, draftEdits, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
+import { OPENING_HEAD, draftEdits, draftGeometry, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
 import { makeLot } from '../build/lot'
-import { firstPieces } from '../build/firstroom'
 import { makeMoveIn } from '../build/movein'
-import { MODE } from './camera'
+import { fitFrame, lift, type Box } from '../build/frame'
+import { MODE, OVERVIEW, type Frame } from './camera'
 
 declare module 'cordis' {
   interface Events {
@@ -28,7 +28,7 @@ declare module 'cordis' {
     'village/build-intent'(request: BuildRequest): void
   }
 }
-export interface BuildRequest { intent: unknown; say?: string; reply: (text: string) => void; handled?: boolean }
+export interface BuildRequest { intent: unknown; say?: string; reply: (text: string) => void; handled?: boolean; /** Whose villager asked: they move into the room. */ person?: string }
 
 /**
  * #48 experiment, ?build=1 only: the kitchen's walls and floor come from a floor
@@ -38,13 +38,15 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
  * room is one committed version, and Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through
  * them. Saying "add a room…" on the notepad, or clicking a wall and saying "open a
  * door here into a new room", draws the room's outline to adjust, then build or
- * let go (src/build/outline.ts). Without the flag this plugin does nothing.
+ * let go (src/build/outline.ts). While the outline shows, the dollhouse view frames it with the
+ * shared wall and the door; once built, the villager who asked walks in (src/build/movein.ts).
+ * Without the flag this plugin does nothing.
  */
 const ENABLED = new URLSearchParams(location.search).get('build') === '1'
-/** Regroup 2 look prototypes (?look=<name>); only `movein` lives here. */
-const LOOK = new URLSearchParams(location.search).get('look')
 /** The wall that drags and bends: the house's right wall, where the Workshop will go. */
 const WALL = 'living.right'
+/** Screen boxes (NDC) the proposal fills: the top is left for its card, the bottom for the notepad. */
+const PROPOSAL_BOX: Box = { x: [-0.84, 0.84], y: [-0.7, 0.46] }
 /** What lounge.ts builds that the plan's walls and floor stand in for. */
 const LOUNGE_PARTS = new Set(['lounge floor', 'lounge wall', 'lounge skirting'])
 const STUB = 0.42
@@ -55,16 +57,34 @@ export default {
   apply(ctx: Context) {
     if (!ENABLED) return
     const { scene, camera, renderer } = ctx.stage
-    /** ?look=movein: the villager who drew the room walks into it and the view follows them in. */
-    const movein = LOOK === 'movein' ? makeMoveIn(ctx.view, camera) : null
+    /** The villager who drew the room walks into it and the view follows them in (the dollhouse only). */
+    const movein = MODE === 'iso' ? makeMoveIn(ctx.view, camera) : null
+    // "Back to the house": a quiet paper tag while the reveal holds the view; it (or Escape) glides out to the whole house.
+    const backEl = document.createElement('button')
+    backEl.type = 'button'
+    backEl.className = 'build-back'
+    backEl.textContent = 'Back to the house'
+    const backToHouse = () => {
+      if (!movein?.holding()) return false
+      movein.letGo()
+      void ctx.view.glide(OVERVIEW, 1.2)
+      return true
+    }
+    backEl.addEventListener('click', backToHouse)
     if (movein) ctx.effect(() => {
-      // Taking the camera (a drag or the wheel) ends the reveal's hold on the view; the villager stays a while.
+      // Taking the camera (a drag, the wheel, an arrow key) ends the reveal's hold on the view; the villager stays a while.
+      // A held WASD key lets go too, once camera.ts turns it into a pan (movein.ts sees the view move off its frame).
       const el = renderer.domElement
+      const onKeyTake = (e: KeyboardEvent) => e.key.startsWith('Arrow') && !typing() && movein.letGo()
       el.addEventListener('pointerdown', movein.letGo)
       el.addEventListener('wheel', movein.letGo, { passive: true })
+      addEventListener('keydown', onKeyTake, true)
+      document.body.append(backEl)
       return () => {
         el.removeEventListener('pointerdown', movein.letGo)
         el.removeEventListener('wheel', movein.letGo)
+        removeEventListener('keydown', onKeyTake, true)
+        backEl.remove()
         movein.release()
       }
     }, 'build move-in')
@@ -204,12 +224,44 @@ export default {
         if (before) copyState(before, meshes(fresh))
       }
       builtPlan = next
+      shareWalls(next)
       tidyYard()
       fitSun(next)
       highlight()
       rebuildMs.push(performance.now() - start)
     }
 
+    /**
+     * A house wall a new room now backs (the kitchen's left wall, say) is still built as an outer wall, so camera.ts keeps
+     * it standing whenever the camera is on the house's side and the new room hides behind it. It becomes an interior
+     * wall, as kitchendoor.ts's is: cut down to its stub unless the view is close in and looking across it.
+     * Only walls that run along z (camera.ts's interior rule compares x).
+     */
+    const shareWalls = (p: Plan) => {
+      if (!built) return
+      const shared = new Map<string, { x: number }>()
+      for (const w of p.walls) {
+        const rooms = roomsOf(p, w.id)
+        if (rooms.length < 2 || rooms.every((r) => BASE_ROOMS.has(r.id))) continue
+        const c = curveOf(p, w)
+        if (Math.abs(c.dir[0]) > 0.2) continue
+        shared.set(w.id, { x: (c.a[0] + c.b[0]) / 2 })
+      }
+      // A short leftover of the same house wall beside the new room (under a metre) goes with it, or it stands alone as a pillar.
+      const xs = [...shared.values()].map((s) => s.x)
+      for (const w of p.walls) {
+        const c = curveOf(p, w)
+        const x = (c.a[0] + c.b[0]) / 2
+        if (shared.has(w.id) || Math.abs(c.dir[0]) > 0.2 || c.length > 1 || !xs.some((s) => Math.abs(s - x) < 0.02)) continue
+        shared.set(w.id, { x })
+      }
+      for (const m of meshes(built)) {
+        const at = shared.get(m.userData.wall)
+        if (!at || !m.userData.inward) continue
+        delete m.userData.inward
+        m.userData.interior = at
+      }
+    }
     const inScene = (o: THREE.Object3D) => {
       for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === scene) return true
       return false
@@ -426,6 +478,7 @@ export default {
         void (e.shiftKey ? history?.redo() : history?.undo())
         return
       }
+      if (e.key === 'Escape' && !outline.draft() && !typing() && backToHouse()) return stop(e)
       if (e.key === 'Escape' && selected && !outline.draft() && !typing()) selectWall(null)
     }
 
@@ -504,6 +557,8 @@ export default {
 
     // ── Adding a room: an intent from the notepad becomes an outline to adjust ─
     let reply: (text: string) => void = () => {}
+    /** Whose villager asked for the room being drawn: they move into it once it is built. */
+    let asker: string | null = null
     const said: string[] = []
     const say = (text: string) => {
       said.push(text)
@@ -531,6 +586,11 @@ export default {
         .build-note.shown { opacity: 1; translate: -50% 0; pointer-events: auto; cursor: pointer; }
         @media (prefers-reduced-motion: reduce) { .build-note { transition: none; } }
         ${tagCss('.build-note', '.build-note-x', '.build-note-y', '.build-note-z')}
+        ${tagCss('.build-back-card', '.build-back-x', '.build-back', '.build-back-z')}
+        .build-back { position: fixed; top: max(18px, env(safe-area-inset-top)); left: 50%; translate: -50% -8px; z-index: 20; rotate: -1.5deg;
+          box-shadow: 0 6px 14px rgba(70, 40, 20, 0.18); opacity: 0; pointer-events: none; transition: opacity 260ms ease, translate 260ms ease; }
+        .build-back.shown { opacity: 1; translate: -50% 0; pointer-events: auto; }
+        @media (prefers-reduced-motion: reduce) { .build-back { transition: none; } }
       `
       document.head.append(style)
       document.body.append(noteEl)
@@ -585,11 +645,12 @@ export default {
         const what = /^New room( \d+)?$/.test(draft.label) ? 'Added a room' : `Added the ${draft.label.toLowerCase()}`
         committing = true
         const base = h.plan
-        // The room arrives with its first pieces, in the same version: one undo takes both away.
-        const pieces = firstPieces(h.plan, fitted.plan, draft, scene, [scene.getObjectByName('build outline')].filter((o): o is THREE.Object3D => Boolean(o)))
+        // The room arrives with its first pieces, in the same version: one undo takes both away. They are laid against the
+        // same scan of the house the ghosts were, so what is built stands exactly where the ghosts stood.
+        const pieces = outline.piecesFor(h.plan, fitted.plan, draft)
         h.commit([...draftEdits(h.plan, draft), ...pieces.map((furniture): Edit => ({ op: 'placeItem', furniture }))], what).then(() => {
           rising = settling = { room: draft.roomId, at: performance.now() }
-          movein?.start(base, fitted.plan, draft, pieces, RISE_MS)
+          movein?.start(base, fitted.plan, draft, pieces, RISE_MS, asker)
           committing = false
           outline.close()
           selectWall(null)
@@ -601,7 +662,8 @@ export default {
       },
     })
     /** Resolve an intent now; the outline is up before this returns, or one line says why not. */
-    const take = (raw: unknown, ack?: string) => {
+    const take = (raw: unknown, ack?: string, person?: string) => {
+      asker = person ?? null
       const checked = checkIntent(raw)
       if ('reason' in checked) return say("I didn't quite catch where the room should go. Could you say it another way?")
       const r = resolve(history?.plan ?? plan, checked.intent, { view: view(), selected: selected && { wallId: selected.wallId, t: selected.t }, current: inView(), occupied })
@@ -613,8 +675,8 @@ export default {
     ctx.on('village/build-intent', (request) => {
       request.handled = true
       reply = request.reply
-      if (history) take(request.intent, request.say)
-      else void opened.then(() => take(request.intent, request.say))
+      if (history) take(request.intent, request.say, request.person)
+      else void opened.then(() => take(request.intent, request.say, request.person))
     })
     if (MODE === 'iso') {
       ctx.effect(() => {
@@ -633,42 +695,92 @@ export default {
       }, 'build handles')
     }
 
-    // In iso the dollhouse view framed the kitchen; once the house (or a room being drawn) reaches past it,
-    // the view eases back and over so all of it is in the picture. A pure move: the camera keeps its angle.
+    // In iso the dollhouse view framed the kitchen; once the house reaches past it, the view eases back and over so
+    // all of it is in the picture. While a room is proposed, the view glides (keeping its turn) to frame the outline,
+    // the shared wall and the door mark in the proposal box, again after each change but never while a grip is held,
+    // and Not now glides back to where it was. A pure slide on top of camera.ts's pose: the camera keeps its angle.
     const framing = { right: 0, up: 0, back: 0 }
     let goal = { ...framing }, held = goal
     const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), q = new THREE.Vector3()
+    /** The slide that puts these points inside a screen box (NDC), in the camera as camera.ts posed it this frame. */
+    const holdIn = (pts: THREE.Vector3[], box: Box, closer = 0) => {
+      camera.updateMatrixWorld()
+      const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, depth = 0
+      for (const p of pts) {
+        q.copy(p).applyMatrix4(camera.matrixWorldInverse)
+        x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y)
+        depth += -q.z
+      }
+      depth /= pts.length
+      const bw = (box.x[1] - box.x[0]) / 2, bh = (box.y[1] - box.y[0]) / 2
+      const need = Math.max((x1 - x0) / 2 / (tan * camera.aspect * bw), (y1 - y0) / 2 / (tan * bh))
+      // At most 10 m further: on a narrow phone the whole house would put the camera past the far plane.
+      const back = Math.min(10, Math.max(-closer, need - depth))
+      const D = depth + back
+      return {
+        right: (x0 + x1) / 2 - ((box.x[0] + box.x[1]) / 2) * tan * camera.aspect * D,
+        up: (y0 + y1) / 2 - ((box.y[0] + box.y[1]) / 2) * tan * D,
+        back,
+      }
+    }
+    /** What the proposal frames: the staked-out floor, the shared wall's ends at full height, and the door mark. */
+    const proposalPoints = () => {
+      const d = outline.draft(), made = outline.made()
+      const room = d && made?.rooms.find((r) => r.id === d.roomId)
+      if (!d || !made || !room) return null
+      const geo = draftGeometry(history?.plan ?? plan, d)
+      return [...lift(ringOf(made, room, -0.35), 0.02), ...lift([geo.p, geo.q], geo.height), ...lift([geo.at((d.door.from + d.door.to) / 2, 0)], 2.3)]
+    }
+    let before: Required<Frame> | null = null
+    let wasStill = false
+    let shaped = ''
+    let hadDraft = false
+    const proposalGlide = () => {
+      const d = outline.draft()
+      if (d && !hadDraft) {
+        before = { ...ctx.view.frame }
+        shaped = ''
+      }
+      if (d && !outline.dragging()) {
+        const key = JSON.stringify([d.from, d.to, d.depth, d.bend, d.door])
+        const pts = key !== shaped ? proposalPoints() : null
+        if (pts) {
+          shaped = key
+          void ctx.view.glide(fitFrame(pts, ctx.view.frame.yaw, PROPOSAL_BOX, camera.aspect, 0.55).frame, hadDraft ? 0.7 : 1.0)
+        }
+      }
+      // Not now (the outline went away without a room): back to where the view was.
+      if (!d && hadDraft && !committing && before && !movein?.holding()) void ctx.view.glide(before, 0.9)
+      if (!d) before = null
+      hadDraft = Boolean(d)
+    }
     const frameHouse = (dt: number) => {
       const shown = outline.made() ?? plan
-      // The view holds still while something is being dragged, so the floor stays under the pointer.
+      proposalGlide()
       const reveal = movein?.framing(dt)
+      const pts = outline.draft() ? proposalPoints() : null
+      // The view holds still while something is being dragged, so the floor stays under the pointer.
       if (outline.dragging() || drag) goal = held
       else if (reveal) goal = reveal
+      else if (pts) goal = holdIn(pts, PROPOSAL_BOX, 1.5)
       else if (shown.rooms.some((r) => !BASE_ROOMS.has(r.id))) {
-        // Fit every room's footprint, floor to wall top, in the camera as camera.ts posed it this frame.
-        camera.updateMatrixWorld()
-        const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
-        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, depth = 0, n = 0
-        // While a room is drawn, the view centres on it (a phone cannot take in the whole house); after, on the house.
-        const drafted = outline.draft()
-        const fitted = drafted ? shown.rooms.filter((r) => r.id === drafted.roomId) : shown.rooms
-        for (const r of fitted) for (const [x, z] of ringOf(shown, r, drafted ? -1.4 : -0.6)) for (const y of [0, 3]) {
-          q.set(x, y, z).applyMatrix4(camera.matrixWorldInverse)
-          x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y)
-          depth += -q.z
-          n++
-        }
-        depth /= n
-        const need = Math.max((x1 - x0) / 2 / (tan * camera.aspect), (y1 - y0) / 2 / tan) * 1.12
-        // At most 10 m further: on a narrow phone the whole house would put the camera past the far plane.
-        goal = { right: (x0 + x1) / 2, up: (y0 + y1) / 2, back: Math.min(10, Math.max(0, need - depth)) }
+        // Fit every room's footprint, floor to wall top.
+        const all = shown.rooms.flatMap((r) => [...lift(ringOf(shown, r, -0.6), 0), ...lift(ringOf(shown, r, -0.6), 3)])
+        const h = holdIn(all, { x: [-1 / 1.12, 1 / 1.12], y: [-1 / 1.12, 1 / 1.12] })
+        goal = { ...h, back: Math.max(0, h.back) }
       } else goal = { right: 0, up: 0, back: 0 }
       held = goal
-      const e = 1 - Math.exp(-dt * 3)
+      // Never mid-drag: the slide stands still too, so the floor stays under the pointer.
+      const still = outline.dragging() || Boolean(drag)
+      if (still && !wasStill) void ctx.view.glide({ ...ctx.view.frame }, 0)
+      wasStill = still
+      const e = still ? 0 : 1 - Math.exp(-dt * 3)
       framing.right += (goal.right - framing.right) * e
       framing.up += (goal.up - framing.up) * e
       framing.back += (goal.back - framing.back) * e
-      if (Math.abs(framing.right) + Math.abs(framing.up) + framing.back < 1e-4) return
+      backEl.classList.toggle('shown', Boolean(movein?.holding()) && !outline.draft())
+      if (Math.abs(framing.right) + Math.abs(framing.up) + Math.abs(framing.back) < 1e-4) return
       camera.getWorldDirection(fwd)
       right.setFromMatrixColumn(camera.matrixWorld, 0)
       up.setFromMatrixColumn(camera.matrixWorld, 1)
@@ -734,7 +846,7 @@ export default {
           cancel: () => outline.cancel(),
         },
         /** An intent as the notepad would deliver it, without the notepad. */
-        intent: (raw: unknown) => take(raw),
+        intent: (raw: unknown, person?: string) => take(raw, undefined, person),
         said: () => said.slice(),
         /** Built-ins against a wall's faces in the house as it stands, and how long each scan took (ms). */
         fixtures: (wallId: string) => fixtures.on(history?.plan ?? plan, wallId),
@@ -802,8 +914,8 @@ export default {
           return m?.position.x ?? null
         },
       }
-      // ?look=movein: how far the move-in has got, for the look check.
-      if (movein) Object.assign(api, { reveal: () => movein.state() })
+      // How far the move-in has got, and the way back out, for the checks.
+      if (movein) Object.assign(api, { reveal: () => movein.state(), back: () => backToHouse(), backShown: () => backEl.classList.contains('shown') })
       Object.assign(window, { villageBuild: api })
       return () => {
         delete (window as unknown as { villageBuild?: unknown }).villageBuild

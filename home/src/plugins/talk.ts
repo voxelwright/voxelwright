@@ -1460,7 +1460,7 @@ export default {
           // Build mode draws the room and speaks for your villager: the route's line, or one asking what was meant (#48).
           furnish!.dismiss(guess)
           if (mode === 'talk') endTalk()
-          const request = { intent: routed.intent, say: routed.say, reply: (line: string) => quip(me, line), handled: false }
+          const request = { intent: routed.intent, say: routed.say, person: me.person, reply: (line: string) => quip(me, line), handled: false }
           ctx.emit('village/build-intent', request)
           if (!request.handled) quip(me, "Let's do that in build mode. I can't move walls from here.")
           return
@@ -1515,6 +1515,11 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m && spot) m.v.sendTo(spot)
           else m?.v.release(0.2)
+        },
+        /** Where one villager stands and what it is doing, without building the whole state (build mode's move-in, #48). */
+        where: (person: string) => {
+          const m = cast.find((c) => c.person === person)
+          return m ? { x: m.v.pos.x, y: m.v.pos.y, z: m.v.pos.z, state: m.v.state, seated: m.v.seated > 0.5, spot: m.v.spot } : null
         },
         /** Where a villager is on screen: its middle, or `up` of the way from its feet to the top of its head. */
         screen: (person: string, up = 0.5) => {
