@@ -13,8 +13,8 @@ import type { House } from '../world'
 
 /** Art rows the house's height on screen should span. */
 const HOUSE_ROWS = 260
-/** A depth jump this many metres reads as a silhouette. */
-const EDGE_M = 0.14
+/** A depth jump this many metres starts a silhouette (full strength at 2.2 times); a third of it is a quiet seam. */
+const EDGE_M = 0.1
 /** Dither a flat midtone keeps: 0 drew the lawn's soft light falloff as one hard ring. */
 const FLAT = 0.15
 
