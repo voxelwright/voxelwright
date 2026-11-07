@@ -1,15 +1,18 @@
 // #47 experiment runner: generate felt villagers from a description with `claude -p`,
 // check each in headless Chrome against the dev server, allow one repair pass fed the error.
 // Usage: node scripts/villagers/run.mjs <out-dir> [base-url] [--set round1|readability] [--arms spec,code] [--prefix r2-]
-//        [--only spec-1,code-3] [--concurrency 5] [--model sonnet]
+//        [--only spec-1,code-3] [--concurrency 5] [--model sonnet] [--strategy=a|b|c]
 // Writes home/generated/villagers/<prefix><run-id>/ (git-ignored), <out-dir>/results.json and <out-dir>/voices.json.
 // Round 2: the role is given with the request, the description's mapped voice is the starting voice,
 // and assemble.ts's checks (gen/checks.ts) refuse a hidden face, a floating part, a tiny prop or odd proportions.
+// --strategy (the look regroup, look-strategies.mjs and gen/assemble.ts Strategy) swaps the owner colour's
+// prompt and its trusted handling for the code arm; unset is today's scarf.
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { withStrategy } from './look-strategies.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const home = resolve(here, '../..')
@@ -23,6 +26,7 @@ const model = flag('--model', 'sonnet')
 const set = flag('--set', 'round1')
 const arms = flag('--arms', 'spec,code').split(',')
 const prefix = flag('--prefix', '')
+const strategy = args.find((a) => a.startsWith('--strategy='))?.slice(11) || undefined
 const cwd = flag('--cwd', join(out, 'claude-cwd'))
 mkdirSync(cwd, { recursive: true })
 
@@ -37,7 +41,7 @@ const personas = await import('../../../host/src/persona.ts').catch(() => null)
 const TEMPLATES = Object.fromEntries(Object.entries(personas?.TEMPLATE_CARDS ?? {}).map(([id, c]) => [id, { id, name: c.label, persona: personas.TEMPLATES[id] }]))
 if (!DESCRIPTIONS) throw new Error(`no description set "${set}"`)
 const style = readFileSync(join(here, 'style.md'), 'utf8')
-const system = { code: `${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }
+const system = { code: withStrategy(`${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, strategy), spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }
 // The code arm's module is saved as text: it is only handed to the sandbox, and a fetched .js would join Vite's module graph and reload the page when rewritten.
 const FILE = { spec: 'villager.json', code: 'villager.code.txt' }
 
@@ -106,13 +110,13 @@ async function job({ arm, n }) {
   if (d.template && !template) throw new Error(`no template "${d.template}"`)
   const ask = `Make a villager: ${d.text}.\n\nIts role is ${d.role}. Its owner is ${d.owner}; the owner's accent colour is ${d.accent}.\n\nStarting voice, from the description: ${JSON.stringify(mapped)}`
     + (template ? `\n\nPersonality template "${template.name}": ${JSON.stringify(template.persona)}` : '')
-  const meta = { arm, file, accent: d.accent, owner: d.owner, role: d.role, description: d.text, profile: PROFILES[d.owner] ?? null, ...(d.template ? { template: d.template } : {}) }
+  const meta = { arm, file, accent: d.accent, owner: d.owner, role: d.role, description: d.text, profile: PROFILES[d.owner] ?? null, ...(d.template ? { template: d.template } : {}), ...(strategy && arm === 'code' ? { strategy } : {}) }
   const first = await claude(system[arm], ask)
   writeFileSync(join(dir, 'raw.txt'), first.text)
   const body = extract(first.text, arm)
   writeFileSync(join(dir, file), body)
   const firstCheck = await verify(id, meta)
-  const row = { id, arm, n, description: d.text, owner: d.owner, accent: d.accent, role: d.role, template: d.template ?? null, profile: meta.profile, mappedVoice: mapped, model, first: { ...first, text: undefined, check: firstCheck } }
+  const row = { id, arm, n, strategy: strategy ?? null, description: d.text, owner: d.owner, accent: d.accent, role: d.role, template: d.template ?? null, profile: meta.profile, mappedVoice: mapped, model, first: { ...first, text: undefined, check: firstCheck } }
   if (!firstCheck.ok) {
     const repairAsk = `${ask}\n\nYour previous file:\n\`\`\`${arm === 'code' ? 'js' : 'json'}\n${body}\n\`\`\`\n\nIt failed with this error:\n${firstCheck.error}\n\nReturn the corrected complete file.`
     const repair = await claude(system[arm], repairAsk)

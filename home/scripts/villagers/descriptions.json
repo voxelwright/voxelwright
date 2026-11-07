@@ -177,5 +177,57 @@
    "adult": true,
    "crudeOptIn": true
   }
+ },
+ "regroup": {
+  "15": {
+   "text": "a hedgehog who fixes broken toys and squeaky doors",
+   "role": "maker",
+   "owner": "Mia",
+   "accent": "#e0b53a",
+   "template": "craftsperson"
+  },
+  "05": {
+   "text": "a slow snail who tends the tomato pots and talks to the seedlings",
+   "role": "gardener",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "18": {
+   "text": "a soft woolly sheep who looks after anyone feeling poorly",
+   "role": "carer",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "t1": {
+   "text": "a patient old tortoise who keeps the family calendar and loves jazz",
+   "role": "keeper",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "01": {
+   "text": "a stout badger who bakes bread before anyone is awake",
+   "role": "cook",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "02": {
+   "text": "a quick little fox who flips pancakes on Saturday mornings",
+   "role": "cook",
+   "owner": "Sam",
+   "accent": "#3d7cc8",
+   "template": "buddy"
+  },
+  "08": {
+   "text": "a tall, fussy giraffe who tidies the high cupboards",
+   "role": "tidier",
+   "owner": "Robin",
+   "accent": "#6a9a4a"
+  },
+  "14": {
+   "text": "a chirpy little sparrow who brings in the post",
+   "role": "messenger",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  }
  }
 }

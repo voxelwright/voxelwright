@@ -7,7 +7,9 @@
 // - a blind sheet for model scorers (black, numbered in a shuffled order, no labels) and its key.
 // - round 3, species: mean pairwise IoU over all villagers (lower is more varied), and how many are the
 //   default round template by gen/checks.ts speciesFeatures (no feature at or over SPECIES).
-// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47]   (dev server running)
+// - the look regroup: owner-colour parts hanging in front of the face (gen/checks.ts accentTails), and with
+//   --close=<id>,<id> a close view of each named villager (shots/<id>-close.jpg).
+// Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47] [--close=<ids>]   (dev server running)
 // --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
 // --seed shuffles the blind sheet's numbering (47 gave round 3's order; round 4 used 48).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -18,6 +20,7 @@ const out = resolve(process.argv[2])
 const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://localhost:5332/'
 const checksOff = process.argv.includes('--checks=off')
 const seedArg = Number(process.argv.find((a) => a.startsWith('--seed='))?.slice(7) ?? 47)
+const close = process.argv.find((a) => a.startsWith('--close='))?.slice(8).split(',').filter(Boolean) ?? []
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
 const shots = join(out, 'shots')
 mkdirSync(shots, { recursive: true })
@@ -39,10 +42,10 @@ async function open(query) {
   return page
 }
 
-// Colour tiles: each villager alone at the lineup spot in the dollhouse view.
+// Colour tiles: each villager alone at the lineup spot in the dollhouse view (one page at a time: the machine is shared).
 const screenH = {}
 let next = 0
-await Promise.all([0, 1].map(async () => {
+await Promise.all([0].map(async () => {
   while (next < ids.length) {
     const id = ids[next++]
     const page = await open(`gen=${id}&lineup=1`)
@@ -53,6 +56,12 @@ await Promise.all([0, 1].map(async () => {
     await page.close()
   }
 }))
+
+for (const id of close) {
+  const page = await open(`gen=${id}&lineup=1&close=1`)
+  await page.screenshot({ path: join(shots, `${id}-close.jpg`), type: 'jpeg', quality: 88 })
+  await page.close()
+}
 
 // Silhouettes and accent masks, every villager alone at the origin.
 const page = await open(`gen=${ids.join(',')}&lineup=1`)
@@ -92,6 +101,7 @@ const rows = black.map((m, i) => {
     nearest: black[nearest.j].id, nearestRole: role(nearest.j), nearestIoU: +nearest.v.toFixed(3), sameRole: role(nearest.j) === r.role,
     accentPx, figurePx, accentShare: +(accentPx / figurePx).toFixed(3), screenH: screenH[m.id],
     species: report[m.id]?.measures?.species ?? null, template: isTemplate(report[m.id]?.measures?.species),
+    tails: report[m.id]?.measures?.tails ?? null, fixes: report[m.id]?.fixes ?? [],
   }
 })
 const mean = (xs) => xs.reduce((t, x) => t + x, 0) / xs.length
@@ -106,6 +116,8 @@ const summary = {
   declaredRoleAgrees: rows.filter((r) => r.declaredRole === r.role).length,
   minAccentPx: Math.min(...rows.map((r) => r.accentPx)), medianAccentPx: rows.map((r) => r.accentPx).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
   minAccentShare: Math.min(...rows.map((r) => r.accentShare)),
+  medianAccentShare: rows.map((r) => r.accentShare).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
+  withTails: rows.filter((r) => r.tails).length,
   medianScreenH: Object.values(screenH).sort((a, b) => a - b)[Math.floor(ids.length / 2)],
 }
 writeFileSync(join(out, 'readability.json'), JSON.stringify({ summary, rows, ids: black.map((m) => m.id), iou }, null, 1))
@@ -143,9 +155,10 @@ const md = [
   `- Mean IoU within a role ${summary.withinRoleIoU}, between roles ${summary.betweenRoleIoU}`,
   `- Species: mean pairwise IoU ${summary.meanIoU} (lower is more varied); ${summary.roundTemplate} of ${rows.length} are the default round template`,
   `- Model declared the requested role: ${summary.declaredRoleAgrees} of ${rows.length}`,
-  `- Visible accent: min ${summary.minAccentPx} px, median ${summary.medianAccentPx} px of the ${SIZE} px render; min share of the figure ${(summary.minAccentShare * 100).toFixed(1)}%`, '',
-  '| id | name | role | nearest | its role | IoU | accent px | accent share | owner | round template | species features |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${(r.accentShare * 100).toFixed(1)}% | ${r.owner} | ${r.template ? 'yes' : ''} | ${r.species ? Object.entries(r.species).map(([k, v]) => `${k} ${v}`).join(', ') : ''} |`),
+  `- Visible accent: min ${summary.minAccentPx} px, median ${summary.medianAccentPx} px of the ${SIZE} px render; share of the figure min ${(summary.minAccentShare * 100).toFixed(1)}%, median ${(summary.medianAccentShare * 100).toFixed(1)}%`,
+  `- Owner-colour parts hanging in front of the face: ${summary.withTails} of ${rows.length} villagers`, '',
+  '| id | name | role | nearest | its role | IoU | accent px | accent share | hanging | owner | round template | species features |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+  ...rows.map((r) => `| ${r.id} | ${r.name} | ${r.role} | ${r.nearest} | ${r.nearestRole} | ${r.nearestIoU.toFixed(2)} | ${r.accentPx} | ${(r.accentShare * 100).toFixed(1)}% | ${r.tails ?? ''} | ${r.owner} | ${r.template ? 'yes' : ''} | ${r.species ? Object.entries(r.species).map(([k, v]) => `${k} ${v}`).join(', ') : ''} |`),
 ].join('\n')
 writeFileSync(join(out, 'readability.md'), md + '\n')
 console.log(md)

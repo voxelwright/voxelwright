@@ -31,6 +31,8 @@ export interface Measures {
   species: Species | null
   /** How far the role mark breaks the outline (./markBreak); null when nothing is tagged with villager.mark(). */
   mark: MarkBreak | null
+  /** Owner-colour parts hanging below the chin in front of the face, the scarf tail that reads as a tongue (./accentTails). */
+  tails: number
 }
 
 /** The colour the part was made in (assemble.ts keeps it; the felt material shades its own). */
@@ -49,7 +51,7 @@ function slotOf(o: THREE.Object3D, root: THREE.Object3D): string {
  * the default round template. `held` is the prop's group, if any; `head` and `hands` are the
  * rig's groups, which the species measure needs.
  */
-export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THREE.Object3D | null, { head = null, hands = [], species = true, mark = true, role = '' }: { head?: THREE.Object3D | null; hands?: THREE.Object3D[]; species?: boolean; mark?: boolean; role?: string } = {}): { failures: string[]; measures: Measures } {
+export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THREE.Object3D | null, { head = null, hands = [], species = true, mark = true, role = '', markMin = MARK }: { head?: THREE.Object3D | null; hands?: THREE.Object3D[]; species?: boolean; mark?: boolean; role?: string; markMin?: number } = {}): { failures: string[]; measures: Measures } {
   root.updateMatrixWorld(true)
   const meshes: THREE.Mesh[] = []
   root.traverse((o) => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh) })
@@ -152,10 +154,32 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     if (!broke) failures.push(`nothing is tagged as ${name}; build it as the role table says and pass it to villager.mark() so the home can check it`)
     else if (broke.core) failures.push(`the ${broke.core} itself is tagged with villager.mark(); tag only ${name}, not the ${broke.core} it sits on`)
     else if (broke.share > MARK_SHARE) failures.push(`the parts tagged with villager.mark() are ${Math.round(broke.share * 100)}% of the villager; tag only ${name}, at most ${Math.round(MARK_SHARE * 100)}% of it`)
-    else if (Math.max(broke.above, broke.side) < MARK) failures.push(`${name} stays inside the outline seen from in front and above: it rises ${Math.max(0, broke.above * height).toFixed(2)} above the head and reaches ${Math.max(0, broke.side * height).toFixed(2)} past the body's side; make it rise at least ${(MARK * height).toFixed(2)} above the top of the head, or reach that far past the side of the head or body, so it changes the outline`)
+    else if (Math.max(broke.above, broke.side) < markMin) failures.push(`${name} stays inside the outline seen from in front and above: it rises ${Math.max(0, broke.above * height).toFixed(2)} above the head and reaches ${Math.max(0, broke.side * height).toFixed(2)} past the body's side; make it rise at least ${(markMin * height).toFixed(2)} above the top of the head, or reach that far past the side of the head or body, so it changes the outline`)
   }
 
-  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke } }
+  const tails = accentTails(meshes, inHeld, eyes, head, hands).length
+  return { failures, measures: { height, width: size.x, depth: size.z, held: heldRatio, pieces, eyeRays, species: features, mark: broke, tails } }
+}
+
+/**
+ * Owner-colour parts (assemble.ts flags them) that hang in front of the face: they reach below the
+ * chin (the head core's bottom), sit inside the head's width, in the front half of the body, and are
+ * taller than wide. A scarf ring is wide and flat and does not count; its hanging tails do, on either
+ * side of the chest, because at dollhouse distance any red strip under the mouth reads as a tongue.
+ */
+export function accentTails(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: THREE.Object3D[], headGroup: THREE.Object3D | null, handGroups: THREE.Object3D[]): THREE.Mesh[] {
+  const accent = meshes.filter((m) => m.userData.accent && !m.userData.mark && !inHeld.has(m))
+  if (!accent.length) return []
+  const { head, body } = coresOf(meshes.filter((m) => !inHeld.has(m) && !m.userData.accent && !m.userData.mark), eyes, headGroup, handGroups)
+  if (!head || !body) return []
+  const hb = new THREE.Box3().setFromObject(head, true), bb = new THREE.Box3().setFromObject(body, true)
+  const front = (bb.min.z + bb.max.z) / 2
+  return accent.filter((m) => {
+    const b = new THREE.Box3().setFromObject(m, true)
+    const s = b.getSize(new THREE.Vector3())
+    const cx = (b.min.x + b.max.x) / 2
+    return b.min.y < hb.min.y - 0.005 && cx > hb.min.x && cx < hb.max.x && b.max.z > front && s.y > s.x
+  })
 }
 
 /** A role mark must reach this far (over the height) above the head or past the side, seen from the dollhouse. */
@@ -200,7 +224,14 @@ export function markBreak(meshes: THREE.Mesh[], inHeld: Set<THREE.Mesh>, eyes: T
   const all = coresOf(figure, eyes, headGroup, handGroups)
   const cores = coresOf(figure.filter((m) => !m.userData.mark), eyes, headGroup, handGroups)
   const eyeAt = eyes.map((e) => e.getWorldPosition(new THREE.Vector3()))
-  const holdsEye = (m: THREE.Mesh) => all.inHead.has(m) && !all.inEye.has(m) && eyeAt.some((p) => new THREE.Box3().setFromObject(m, true).expandByScalar(0.005).containsPoint(p))
+  // In the part's own axes: a sun-hat brim tilted back, as the role table asks, has a world box that swallows the face.
+  const holdsEye = (m: THREE.Mesh) => {
+    if (!all.inHead.has(m) || all.inEye.has(m)) return false
+    m.geometry.computeBoundingBox()
+    const local = m.geometry.boundingBox!.clone().expandByScalar(0.005)
+    const inv = m.matrixWorld.clone().invert()
+    return eyeAt.some((p) => local.containsPoint(p.clone().applyMatrix4(inv)))
+  }
   const unmarkedBody = cores.body
   const headMarked = !cores.head || marked.some(holdsEye)
   const bodyMarked = !unmarkedBody || marked.some((m) => !all.inHead.has(m) && !all.inHand.has(m) && !all.inEye.has(m) && !inHeld.has(m) && volumeOf(m) > volumeOf(unmarkedBody))

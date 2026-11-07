@@ -19,7 +19,7 @@ import { contactShadows, stepCrowd } from '../cast'
 import { KINDS, PLUSH } from '../kinds'
 import { Villager } from '../rig'
 import type { Figure } from '../rig'
-import { assemble } from './assemble'
+import { assemble, type Strategy } from './assemble'
 import { build, check } from './build'
 import { inspect, type Measures } from './checks'
 import { COVERAGE } from './originals'
@@ -29,6 +29,8 @@ export interface Meta {
   arm: 'spec' | 'code'; file: string; accent: string; owner?: string; description?: string
   /** The personality pattern the runner asked for (an id from host/src/persona.ts TEMPLATES); provenance only. */
   template?: string
+  /** The #47 look regroup's strategy (./assemble.ts Strategy); unset is today's look. */
+  strategy?: Strategy
 }
 interface Made { fig: Figure; name: string; role?: string; bark: string; voice: VoiceSpec | null; persona?: Persona; fixes: string[]; measures?: Measures; timing?: Record<string, number> }
 
@@ -41,7 +43,7 @@ let box: PropBox | null = null
 /** `&checks=off` shows a villager the checks would refuse, to look at what they caught. */
 const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
 
-async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true): Promise<Made> {
+async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, strategy?: Strategy): Promise<Made> {
   box ??= new PropBox()
   const t0 = performance.now()
   const result = await box.run(code)
@@ -49,7 +51,7 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark)
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, strategy)
   return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
 }
 
@@ -86,7 +88,7 @@ async function fromFile(text: string, meta: Meta, phys: boolean, seed: number): 
     }
     return fromSpec(raw, phys, meta.accent, seed)
   }
-  return fromCode(text, phys, meta.accent, seed)
+  return fromCode(text, phys, meta.accent, seed, true, true, meta.strategy)
 }
 
 function measure(root: THREE.Object3D) {
