@@ -369,14 +369,6 @@ try {
   const placed = (await furniture(page)).map((f) => f.id).sort()
   const drawnBeforeReload = Object.fromEntries((await page.evaluate(() => window.villagePlace.drawn())).map((x) => [x.id, x]))
   check('no page errors', errors.length === 0, errors)
-  if (look) {
-    await context.close()
-    const video = readdirSync(join(root, 'video')).find((f) => f.endsWith('.webm'))
-    const mp4 = join(OUT, 'place.mp4')
-    rmSync(mp4, { force: true })
-    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', join(root, 'video', video), '-vf', 'fps=24,scale=1280:-2', '-c:v', 'libx264', '-preset', 'slow', '-crf', '30', '-pix_fmt', 'yuv420p', mp4])
-    console.log(`clip ${mp4} ${(statSync(mp4).size / 1e6).toFixed(2)} MB`)
-  }
   const page2 = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
   await open(page2)
   const back2 = Object.fromEntries((await page2.evaluate(() => window.villagePlace.drawn())).map((x) => [x.id, x]))
@@ -416,6 +408,14 @@ try {
     await tp.screenshot({ path: join(OUT, 'place-phone-wall.jpg'), quality: 86 })
   }
   await phone.close()
+  if (look) {
+    await context.close()
+    const video = readdirSync(join(root, 'video')).find((f) => f.endsWith('.webm'))
+    const mp4 = join(OUT, 'place.mp4')
+    rmSync(mp4, { force: true })
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', join(root, 'video', video), '-vf', 'fps=24,scale=1280:-2', '-c:v', 'libx264', '-preset', 'slow', '-crf', '30', '-pix_fmt', 'yuv420p', mp4])
+    console.log(`clip ${mp4} ${(statSync(mp4).size / 1e6).toFixed(2)} MB`)
+  }
 } catch (error) {
   failed = true
   console.error(error)

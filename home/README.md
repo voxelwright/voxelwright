@@ -1434,3 +1434,54 @@ Its last part runs the real villager host with synthetic people. Two pages share
 root, a stale page is refused, and a restarted host reopens to the same head,
 plans and names. Not wired into the page yet. `diff` reports the host wall that
 `addRoom` splits as changed, because it keeps its id, while the new pieces are added.
+
+### Placing items
+
+`?build=1` only. `plugins/place.ts` provides the Cordis service `placement` (typed in
+`src/build/place.ts`) for build mode and #42's furnishing, and draws the furniture in the
+house plan. `begin(item, pose?)` places a new thing and `move(furnitureId)` moves a placed
+one. Both return a `Placing`: `done` resolves `{status: 'confirmed', pose, furnitureId}` or
+`{status: 'cancelled'}`, `swap(object, size?, item?)` puts the made prop in place of the
+ghost and keeps the pose, and `cancel()` ends it from outside. `item` is
+`{library, person}` or `{kind}`. Confirming while the prop is still being made waits for
+`swap()` to name its library item. The library item is then kept on the host, so the drafts
+pruning leaves it, and one version (`placeItem` or `moveItem`) is committed through
+`house()`, noted "Placed the …". If the commit fails, the ghost stays and says so.
+Undo and redo come from the versions.
+
+- Mounts (`src/build/mount.ts`). **floor** keeps clear of walls, other furniture and
+  0.6 m in front of doors. **surface** needs an upward face above 0.3 m under its middle
+  and four corners, level to 2.5 cm. Faces are found by casting rays at what the room
+  draws, so the table, counters and shelves need no tags. **wall** hangs flat on a wall the
+  camera sees whole, clear of doors, windows and what already hangs there. On a curved wall
+  it faces the normal and stands off the curve. **ceiling** hangs 0.75 m below the room's
+  ceiling on a cord with a rose, with a soft glow on the ceiling while it is placed.
+  Collisions use the world boxes of meshes, and 10 cm columns for merged meshes (furnish.ts
+  batches its things). Flat things such as rugs don't count.
+- Input: drag the thing (mouse, or one finger) and it snaps to 5 cm, then to the nearest
+  spot that fits within 30 cm. Where nothing fits, it turns red, shows through what it is
+  inside and says why. Q/E turn it 15°, Shift+Q/E 45° and Alt+Q/E 1°. The round handle turns
+  it in 15° steps (Alt: no steps), and a tap on the handle turns it 15°. Two fingers twist it.
+  Alt while dragging means no grid and no pull. Enter or "Place it" confirms, and Escape or
+  "Not now" cancels. In iso the pointer is taken from the camera only on the thing or its
+  handle. While a placement is open, the canvas has `touch-action: none`.
+- Record (`plan.ts`): `Furniture {id, item, at}`. `at` is one anchor per mount: floor and
+  ceiling `{x, z, yaw}`, surface `{x, y, z, yaw}`, wall `{wallId, roomId, along, height, spin}`.
+  The surface height is stored because supports have no plan id. `roomId` is stored only
+  for walls, where it says which face. The other rooms follow from x and z. The
+  ops check dangling walls and rooms, an anchor off its wall, and a point outside every
+  room. `validate()` checks only references.
+- Dev: `window.villagePlace.begin('crate' | 'vase' | 'picture' | 'pendant')` places a
+  built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
+
+```sh
+cd home && node scripts/check-place.mjs           # 56/56: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, swap while making, move, undo, reload
+cd home && node scripts/check-place.mjs --look    # also screenshots/build/place-*.jpg and place.mp4
+```
+
+Measured (M1, headless): `begin` takes 10 to 20 ms for floor, wall and ceiling, and about
+600 ms for surface (it scans the room's tops). 100 drag moves leave the geometry count flat.
+Missing: walls moving or splitting (`moveWall`, `addRoom`) don't carry wall
+things along yet. A thing whose wall shrinks is drawn at the wall's end. The kitchen's
+built-in furniture can't be moved: that needs a plan entry per named fixture and plugins
+that read their pose from it. A cut-away wall isn't offered for hanging.

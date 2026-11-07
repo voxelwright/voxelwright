@@ -134,12 +134,12 @@ export function placement(deps: PlaceDeps): Placement & {
 
   // ── Shared drawing pieces: made once, shown while a session runs ──────────
   const [padCanvas, pg] = canvas(256, 256)
-  pg.fillStyle = 'rgba(255, 255, 255, 0.22)'
+  pg.fillStyle = 'rgba(255, 255, 255, 0.4)'
   pg.beginPath()
   pg.roundRect(14, 14, 228, 228, 36)
   pg.fill()
   pg.setLineDash([16, 12])
-  pg.lineWidth = 7
+  pg.lineWidth = 10
   pg.strokeStyle = 'rgba(255, 255, 255, 0.95)'
   pg.beginPath()
   pg.roundRect(18, 18, 220, 220, 32)
@@ -282,6 +282,9 @@ export function placement(deps: PlaceDeps): Placement & {
           c.emissiveIntensity = 0.35
         }
         if (c.map && c.color) c.color.lerp(RED, 0.2)
+        // Where it can't go it is often inside something: show it through.
+        c.depthTest = false
+        c.depthWrite = false
         return c
       })
       s.looks.set(m, { original: m.material, ok, bad })
@@ -291,6 +294,7 @@ export function placement(deps: PlaceDeps): Placement & {
   const unghost = (s: Session) => {
     for (const [m, look] of s.looks) {
       m.material = look.original
+      m.renderOrder = 0
       for (const c of [...look.ok, ...look.bad]) c.dispose()
     }
     s.looks.clear()
@@ -300,6 +304,7 @@ export function placement(deps: PlaceDeps): Placement & {
     for (const [m, look] of s.looks) {
       const want = good ? look.ok : look.bad
       m.material = Array.isArray(look.original) ? want : want[0]
+      m.renderOrder = good ? 0 : 3
     }
     padMat.color.copy(good ? OK : BAD)
     s.dom.tag.classList.toggle('bad', !good)
@@ -340,7 +345,7 @@ export function placement(deps: PlaceDeps): Placement & {
       pad.position.set(p.x, y, p.z)
       pad.rotation.set(0, p.yaw, 0, 'YXZ')
       pad.rotateX(-Math.PI / 2)
-      pad.scale.set(w + 0.1, d + 0.1, 1)
+      pad.scale.set(w + 0.18, d + 0.18, 1)
       if (s.mount === 'ceiling') {
         const room = roomAt(deps.plan(), p.x, p.z)
         ceiling.position.set(p.x, (room ? ceilingOf(deps.plan(), room) : 3) - 0.01, p.z)
@@ -822,7 +827,8 @@ export function placement(deps: PlaceDeps): Placement & {
       const s = session
       if (!s) return
       const k = reducedMotion.matches ? 1 : 1 - Math.exp(-dt * 14)
-      const goal = s.lift ? 0.05 : 0
+      // It floats a little while placed and a little more while held.
+      const goal = s.lift ? 0.07 : 0.025
       if (Math.abs(s.lifted - goal) > 1e-4) {
         s.lifted += (goal - s.lifted) * k
         stagePose(s)
@@ -878,19 +884,17 @@ export function placement(deps: PlaceDeps): Placement & {
 function css() {
   return `
   .place-tag { position: fixed; left: 0; top: 0; z-index: 40; display: grid; gap: 6px; min-width: 220px; max-width: min(320px, calc(100vw - 24px));
-    padding: 14px 16px 12px 30px; background: #fbf3e2; color: #4a3428; border-radius: 14px; font: 600 15px/1.25 ${HAND};
+    padding: 14px 18px 12px 20px; background: #fbf3e2; color: #4a3428; border-radius: 14px; font: 600 15px/1.25 ${HAND};
     box-shadow: 0 12px 26px rgba(70, 40, 20, 0.22), 0 2px 0 rgba(255, 255, 255, 0.7) inset; transform-origin: 50% 0; will-change: transform; }
-  .place-tag::before { content: ''; position: absolute; left: 11px; top: 16px; width: 9px; height: 9px; border-radius: 50%;
-    border: 2px solid rgba(150, 110, 80, 0.55); background: #f1e2c4; }
   .place-tag::after { content: ''; position: absolute; inset: 5px; border: 1.5px dashed rgba(150, 110, 80, 0.35); border-radius: 10px; pointer-events: none; }
   .place-tag strong { font: 700 20px/1.1 ${HAND}; letter-spacing: 0.01em; }
-  .place-tag .hint { font: italic 15px/1.3 ${HAND}; color: rgba(74, 52, 40, 0.78); min-height: 1.3em; }
+  .place-tag .hint { font: italic 600 17px/1.3 ${HAND}; color: #5e4434; min-height: 1.3em; }
   .place-tag.bad .hint { color: #a63c2c; }
   .place-tag .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; position: relative; z-index: 1; }
   .place-tag button { min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 22px; font: 700 16px ${HAND}; cursor: pointer;
     border: 1.5px solid rgba(122, 82, 54, 0.45); background: transparent; color: #5b3d2b; }
   .place-tag button[data-place=confirm] { background: #7a5236; border-color: #6a4630; color: #fff6e6; box-shadow: 0 2px 0 rgba(60, 34, 18, 0.35); }
-  .place-tag button[aria-disabled=true] { opacity: 0.45; cursor: not-allowed; }
+  .place-tag button[data-place=confirm][aria-disabled=true] { background: #eadbc2; border: 1.5px dashed #a07a5c; color: #6a4630; box-shadow: none; cursor: not-allowed; }
   .place-tag button:focus-visible, .place-turn:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; }
   .place-tag.shake { animation: place-shake 0.36s ease; }
   @keyframes place-shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
