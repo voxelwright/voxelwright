@@ -330,7 +330,7 @@ try {
     const direct = await until(page2, (s) => s.mode === 'talk' && s.partner === 'alex' && !s.pending && s.cards.alex?.finished, 20_000)
     const toAlex = (await jsonl('alex', 'conversation.jsonl')).slice(before2)
     check('without ?slip=always the slip is hidden in the room', !roomSlip, roomSlip)
-    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "toDumplingAlex's" && /Write to Alex's villager/.test(idle.placeholder) && toSam.to === 'sam' && toSam.tab === "toTuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
+    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "toDumplingAlex's" && idle.placeholder === 'Write to Dumpling…' && toSam.to === 'sam' && toSam.tab === "toTuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
     await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.

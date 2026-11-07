@@ -394,7 +394,7 @@ export default {
       }
       // Always on: addressed to nobody in particular, so to your own villager, quietly.
       address(primary())
-      line.placeholder = `Write to ${primary().owner}'s villager…`
+      line.placeholder = `Write to ${primary().name}…`
       setChips([])
       slip.classList.add('shown', 'idle')
     }
@@ -489,7 +489,7 @@ export default {
       mode = 'table'
       view.focus(TABLE_SHOT, 5)
       const names = seated.map((m) => m.name)
-      openSlip(seated.length > 1 ? `Write to the table, or start with a name…` : `Write to ${names[0]}…`, ["What's everyone up to?", THANKS].filter((c) => c === THANKS || !used.has(c)), seated.length > 1 ? 'table' : seated[0]!)
+      openSlip(seated.length > 1 ? `Write to the table…` : `Write to ${names[0]}…`, ["What's everyone up to?", THANKS].filter((c) => c === THANKS || !used.has(c)), seated.length > 1 ? 'table' : seated[0]!)
     }
 
     const invite = (m: Member) => {
@@ -621,7 +621,7 @@ export default {
         if (mode === 'talk' && partner) {
           line.placeholder = `Write to ${partner.name}…`
           setChips(chipsFor(partner))
-        } else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Write to the table, or start with a name…' : `Write to ${seated[0]?.name ?? ''}…`
+        } else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Write to the table…' : `Write to ${seated[0]?.name ?? ''}…`
       }
     }
 
