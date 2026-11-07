@@ -152,4 +152,9 @@ interface Readiness {
 // Dev builds also expose the kernel so scripts/check-kernel.mjs can load test plugins.
 if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload } })
 Object.assign(window, { village })
+// The theme plugin joins as soon as the rooms are ready, not at the first switch. Its fixture
+// lights (at intensity 0 in the home's look, so the room looks the same) join every lit
+// material's light list, which rebuilds the room's shaders once, about 190 ms: while the page
+// settles, not in a switch.
+if (!THEMED && !only) void village.ready().then(() => load(themePlugin))
 attachAsk()

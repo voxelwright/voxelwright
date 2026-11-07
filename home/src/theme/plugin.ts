@@ -7,6 +7,7 @@ import { worlds } from './world'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 import { shade } from './shade/apply'
 import { interior } from './interior'
+import { onPreview } from './ahead'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
@@ -147,6 +148,11 @@ export default {
     const inside = interior(ctx)
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
+    // Registered before shade's, so the next world stands before its twins are made.
+    ctx.effect(() => onPreview((next, on) => {
+      const group = world.preview(next, on)
+      if (group) inside.light(group)
+    }), 'theme preview')
     shade(ctx)
 
     const light = (l: Lit, t: Theme, force: boolean) => {

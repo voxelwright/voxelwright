@@ -32,6 +32,10 @@ export function interior(ctx: Context) {
       lights?.place(t.id)
       fit?.update(t, stood?.house ?? null)
     },
+    /** A world stood ahead for a compile gets the light list it will have (./outdoors.ts). */
+    light(group: THREE.Group) {
+      yard(group)
+    },
     drop() {
       sun.drop()
       lights?.drop()

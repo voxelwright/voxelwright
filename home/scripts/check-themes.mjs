@@ -214,8 +214,8 @@ const residue = (page) => page.evaluate(() => {
   check('last look: neon night comes back after a reload', restored.current === 'neon-night' && restored.active.includes('theme') && restored.active.includes('postfx'), restored)
   await page.goto(`${base}?q=low&theme=home`)
   await page.evaluate(() => window.village.ready())
-  const asked = await page.evaluate(() => ({ current: window.village.theme.current(), theme: window.village.snapshot().plugins.active.includes('theme') }))
-  check('?theme= wins over the last look', asked.current === 'home' && !asked.theme, asked)
+  const asked = await page.evaluate(() => ({ current: window.village.theme.current(), shown: window.village.theme.get(window.village.theme.current())?.id }))
+  check('?theme= wins over the last look', asked.current === 'home' && asked.shown === 'home', asked)
 
   // A tampered record is refused, not loaded.
   await page.evaluate(() => localStorage.setItem('village.themes', JSON.stringify([
@@ -383,6 +383,9 @@ const residue = (page) => page.evaluate(() => {
 for (const q of ['q=low', 'q=high']) {
   const { context, page } = await open(q)
   await page.waitForTimeout(1500)
+  // The theme plugin loads on idle after the page settles (src/main.ts); the cycles end with it unloaded.
+  await page.evaluate(() => window.village.unload('theme'))
+  await page.waitForTimeout(300)
   const fresh = await residue(page)
   await page.evaluate(() => window.village.unload('postfx'))
   await page.waitForTimeout(300)
