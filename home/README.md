@@ -276,7 +276,7 @@ passes included). Scores are 1 to 10 for "belongs in this painterly home" and
 | 5 | A | sonnet | 43.5 | yes |  | 5835 | 16088 | 106 | 8 | 9 |
 | 5 | A | opus | 115.9 | yes |  | 11508 | 17512 | 88 | 8 | 9 |
 
-Every result built on the first try (30 of 30), so no repair pass ran. Cost
+Every result built on the first try (30 of 30), so no repair pass ran and its timing is unmeasured. Arm A was checked by Vite's transform and a runtime build in Chrome, with no type check; arm B by `JSON.parse` and the validator. Cost
 was $1.58 to generate and $1.88 to score.
 
 | Arm, model | Median latency s | Mean belongs | Mean asked |
@@ -291,13 +291,13 @@ was $1.58 to generate and $1.88 to score.
 Findings:
 
 - Sonnet is the fastest and about as good as Opus. Haiku is not faster: it
-  writes 1.5 to 3 times the tokens (pinball as code: 15,898 tokens, 72 s).
-- Free code scores 0.4 to 0.6 higher than the spec on "belongs", and Sonnet's
+  writes 1.2 to 3.6 times Sonnet's tokens (pinball as code: 15,898 tokens, 72 s).
+- Free code scores 0.2 to 0.6 higher than the spec on "belongs", and Sonnet's
   code came back faster (median 11.9 s against 17.5 s), but it is model output
   running in the home. The spec arm's gap is in the presets (lathe
   wood shows ring grain; no glass, lights or text) rather than in shapes.
 - The pinball machine did not fail. All six read as pinball (asked 7 to 9). It
-  is slow, 25 to 116 s, with 48 to 106 draw calls, against 2 to 30 for a table.
+  is slow, 25 to 116 s, with 48 to 106 draw calls, against 4 to 30 for a table.
 - Low "asked" scores for the wallpaper (3 to 4) and the chairs come from this
   harness: the wallpaper prompt asked for a 1.2 m panel, not the whole wall,
   and the chairs were captured without the table they were made for.
