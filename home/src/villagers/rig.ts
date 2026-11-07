@@ -73,6 +73,8 @@ export class Villager {
   thinking = false
   /** Saying something right now: leans in and nods. */
   speaking = false
+  /** Someone else at the table is speaking: where they are, so it turns its head to listen (#42). */
+  listenTo: THREE.Vector3 | null = null
   /** Being written to from across the room: turns part way to the person and looks up. */
   attending = false
   /** Called when a chore at a spot is finished, before moving on. */
@@ -112,6 +114,8 @@ export class Villager {
   private beatU = 1
   /** Progress of a glance and a little wave at the person; 1 is at rest. */
   private greetU = 1
+  /** Progress of a nod (a pass at the table, #42); 1 is at rest. */
+  private nodU = 1
   /** Height it sits at on a chair: the bare seat, or a booster cushion on it. */
   readonly seatY: number
 
@@ -200,6 +204,11 @@ export class Villager {
   /** A short hop of recognition when someone turns to it. */
   beat() {
     this.beatU = 0
+  }
+
+  /** Two small nods: agreeing without a word. */
+  nod() {
+    this.nodU = 0
   }
 
   /** Look up from the chore, turn a little to the person and wave. */
@@ -325,6 +334,7 @@ export class Villager {
     this.speak += ((this.speaking ? 1 : 0) - this.speak) * (1 - Math.exp(-dt * 6))
     this.beatU = Math.min(1, this.beatU + dt / 0.42)
     this.greetU = Math.min(1, this.greetU + dt / 1.8)
+    this.nodU = Math.min(1, this.nodU + dt / 1.1)
     if (this.state === 'sit') this.seated = 1
     else if (this.state !== 'hop') this.seated = 0
     this.phase += (this.v * dt) / (fig.stride * this.k)
@@ -473,10 +483,12 @@ export class Villager {
       this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
-    const headGoal = this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
+    const listening = this.listenTo && this.state === 'sit' && this.speak < 0.5 ? Math.atan2(this.listenTo.x - this.pos.x, this.listenTo.z - this.pos.z) : null
+    const headGoal = listening !== null ? THREE.MathUtils.clamp(wrap(listening - this.yaw), -1.1, 1.1)
+      : this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
-    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2)
+    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
     head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)
     // Blink every few seconds.
     this.blinkAt -= dt
