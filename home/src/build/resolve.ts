@@ -1,0 +1,290 @@
+// The trusted resolver (#48): a checked intent, the plan and what the person is
+// looking at become a draft room, and the draft becomes plan edits. Pure: no
+// three.js, no DOM. Whatever the model asked for, only this code chooses the
+// geometry, and an unclear or impossible request comes back as one short line
+// the person's villager says, never as a form.
+//
+// Rules, stated once:
+// - Sides are relative to the camera. The camera's view direction on the floor
+//   is "behind"; its reverse is "front"; turned a quarter left or right it is
+//   "left" or "right". The anchor room's wall whose outward normal points most
+//   that way is the side. When two walls point that way about equally (the camera
+//   looks at a corner, within 0.15 of each other in cosine), the resolver asks.
+// - Sizes: w runs along the shared wall, d away from it ("4 by 3" is w 4, d 3).
+//   "2/3 the size" is 2/3 of the anchor room's floor area (inside the wall
+//   centrelines, as roomArea measures it): w starts at the shared wall's length
+//   times the square root of the fraction, and of the 10 cm steps within 50 cm of
+//   that, the pair (w, d) closest to the target area wins.
+// - Everything snaps to 10 cm. The room is centred on the wall (or on the clicked
+//   point), then slid along the wall to the nearest stretch with no window or
+//   door on it.
+// - A door is single (0.9 m) unless asked for double doors (1.4 m), centred on the
+//   shared stretch or at the clicked point. An "opening" is a doorway with no leaves.
+import { DOORWAY } from '../layout'
+import { MIN_WALL, PlanError, apply, curveOf, normalAt, outline, roomArea, roomWalls, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
+import type { Intent, Side } from './intent'
+
+export interface ResolveContext {
+  /** The camera's view direction on the floor (x, z); need not be unit length. */
+  view: P
+  /** The wall picked in build mode and where along it (metres from its corner a). */
+  selected?: { wallId: Id; t: number } | null
+  /** The room in view, for "this room". */
+  current?: Id | null
+}
+
+/** A room being drawn, before it is applied. Every length is in metres and snapped to 10 cm. */
+export interface Draft {
+  roomId: Id
+  label: string
+  /** The straight wall it hangs on, and the stretch it shares, from that wall's corner a. */
+  wallId: Id
+  from: number
+  to: number
+  depth: number
+  /** Bulge of the far wall (0 is straight). */
+  bend: number
+  /** A door in the shared stretch, in the host wall's frame; no leaves is a plain opening. */
+  door: { from: number; to: number; leaves?: 1 | 2 }
+}
+
+export type Resolved = { draft: Draft; plan: Plan; edits: Edit[] } | { ask: string }
+
+export const SNAP = 0.1
+const DOOR_WIDTH = { 1: 0.9, 2: 1.4, opening: 1.2 } as const
+const DEFAULT = { w: 3.6, d: 3 }
+const TIE = 0.15
+/** A door keeps this far from the shared stretch's ends. */
+const JAMB = 0.15
+
+const snap = (v: number) => Math.round(v / SNAP) * SNAP
+const round = (v: number) => Math.round(v * 1e6) / 1e6
+const fmt = (v: number) => (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '')
+const lower = (label: string) => label.toLowerCase()
+
+/** The edits a draft stands for: one addRoom, and a bend of its far wall if it has one. */
+export function draftEdits(plan: Plan, d: Draft): Edit[] {
+  const edits: Edit[] = [{
+    op: 'addRoom', room: { id: d.roomId, label: d.label }, wallId: d.wallId, from: d.from, to: d.to, depth: d.depth,
+    door: { id: `${d.roomId}.door`, from: d.door.from, to: d.door.to, ...(d.door.leaves ? { leaves: d.door.leaves } : { head: 2.3 }) },
+  }]
+  // The draft's bend is positive outward; the far wall runs the new room's loop backwards when the host does not.
+  if (Math.abs(d.bend) > 1e-9) edits.push({ op: 'bendWall', wallId: `${d.roomId}.w2`, sagitta: hostForward(plan, d.wallId) ? d.bend : -d.bend })
+  return edits
+}
+
+const applyDraft = (plan: Plan, d: Draft): Plan => draftEdits(plan, d).reduce(apply, plan)
+
+const ownersOf = (plan: Plan, wallId: Id) => plan.rooms.filter((r) => roomWalls(plan, r).some(({ wall }) => wall.id === wallId))
+/** Does the one room on this wall run it a→b? */
+const hostForward = (plan: Plan, wallId: Id) => roomWalls(plan, ownersOf(plan, wallId)[0]).find(({ wall }) => wall.id === wallId)!.forward
+
+/** Does the draft make a valid house that runs into no other room? The plan it makes, or what to say. */
+export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
+  let next: Plan
+  try {
+    next = applyDraft(plan, d)
+  } catch (e) {
+    if (e instanceof PlanError) return { ask: "That doesn't quite fit there. Try it a little smaller?" }
+    throw e
+  }
+  if (Math.abs(Math.abs(curveOf(next, next.walls.find((w) => w.id === `${d.roomId}.w2`)!).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "That far wall can't curve so much. A gentler bend?" }
+  const room = next.rooms.find((r) => r.id === d.roomId)!
+  const mine = outline(next, room, 0.05)
+  for (const other of next.rooms) {
+    if (other.id === d.roomId) continue
+    if (overlaps(mine, outline(next, other))) return { ask: `That would run into the ${lower(other.label)}. Somewhere else, or a little smaller?` }
+  }
+  return { plan: next }
+}
+
+/** Resolve an intent against the plan and the view: a draft and the plan it makes, or one line to say. */
+export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolved {
+  const sel = ctx.selected ?? null
+  const bySelection = intent.anchor.wall === 'selected' || intent.connect?.at === 'selected-point'
+  let room: Room | undefined
+  let host: Wall | undefined
+  if (bySelection && !intent.anchor.side) {
+    if (!sel) return { ask: 'Which wall? Click one and tell me again.' }
+    host = plan.walls.find((w) => w.id === sel.wallId)
+    if (!host) return { ask: 'Which wall? Click one and tell me again.' }
+    const owners = ownersOf(plan, host.id)
+    if (owners.length !== 1) return { ask: `That wall already joins the ${owners.map((r) => lower(r.label)).join(' and the ')}. Pick an outside wall?` }
+    room = owners[0]
+  } else {
+    const found = anchorRoom(plan, intent.anchor.room, ctx)
+    if ('ask' in found) return found
+    room = found.room
+    if (!intent.anchor.side) return { ask: `Which side of the ${lower(room.label)} should it go on?` }
+    const side = sideWall(plan, room, intent.anchor.side, ctx.view)
+    if ('ask' in side) return side
+    host = side.wall
+  }
+  const c = curveOf(plan, host)
+  if (c.radius !== Infinity) return { ask: `That wall of the ${lower(room.label)} curves, and I can only add rooms on straight walls for now.` }
+  const L = c.length
+
+  // Size.
+  let w: number, d: number
+  const size = intent.size
+  if (size?.fraction !== undefined) {
+    const target = size.fraction * roomArea(plan, room.id)
+    const w0 = L * Math.sqrt(size.fraction)
+    let best: [number, number, number] | null = null
+    for (let k = -5; k <= 5; k++) {
+      const wk = round(snap(w0) + k * SNAP)
+      if (wk < 1.5 || wk > L + 1e-9) continue
+      const dk = round(Math.max(1.5, snap(target / wk)))
+      const err = Math.abs(wk * dk - target)
+      if (!best || err < best[2] - 1e-9 || (Math.abs(err - best[2]) < 1e-9 && Math.abs(wk - w0) < Math.abs(best[0] - w0))) best = [wk, dk, err]
+    }
+    if (!best) return { ask: `That wall is too short for a room that size. Smaller, maybe?` }
+    ;[w, d] = best
+  } else {
+    w = round(snap(size?.w ?? Math.min(DEFAULT.w, L)))
+    d = round(snap(size?.d ?? DEFAULT.d))
+  }
+  if (w > L + 1e-9) return { ask: `That wall is only ${fmt(L)} m long, so the room can be ${fmt(Math.floor(L * 10) / 10)} m wide at most. Shall I?` }
+
+  // Where along the wall: centred on the click or the wall, then slid clear of windows and doors.
+  const centre = bySelection && sel && sel.wallId === host.id ? sel.t : L / 2
+  const free = freeStretches(host, L)
+  let from: number | null = null
+  for (const [a, b] of free) {
+    if (b - a < w - 1e-9) continue
+    const lo = Math.ceil((a - 1e-9) / SNAP) * SNAP, hi = Math.floor((b - w + 1e-9) / SNAP) * SNAP
+    if (hi < lo - 1e-9) continue
+    // Every 10 cm step in the stretch, and flush with its end; a split must not leave a piece of wall under MIN_WALL.
+    const steps = Array.from({ length: Math.round((hi - lo) / SNAP) + 1 }, (_, i) => round(lo + i * SNAP))
+    if (b > L - 1e-9) steps.push(round(L - w))
+    for (const f of steps) {
+      const rest = L - (f + w)
+      if ((f > 1e-9 && f < MIN_WALL - 1e-9) || (rest > 1e-9 && rest < MIN_WALL - 1e-9) || f < a - 1e-9 || f + w > b + 1e-9) continue
+      if (from === null || Math.abs(f + w / 2 - centre) < Math.abs(from + w / 2 - centre) - 1e-9) from = f
+    }
+  }
+  if (from === null) return { ask: `There's a window or a door along that wall, so a ${fmt(w)} m room won't fit there. Narrower, maybe?` }
+  const to = round(from + w)
+
+  // The door.
+  const kind = intent.connect?.kind ?? 'door'
+  const leaves = kind === 'opening' ? undefined : intent.connect?.leaves ?? 1
+  const dw = DOOR_WIDTH[leaves ?? 'opening']
+  const doorAt = intent.connect?.at === 'selected-point' && sel && sel.wallId === host.id ? sel.t : (from + to) / 2
+  const door = placeDoor(from, to, dw, doorAt)
+
+  const label = intent.label ? intent.label.replace(/^\p{Ll}/u, (ch) => ch.toUpperCase()) : 'New room'
+  const draft: Draft = { roomId: freshId(plan, intent.label ?? 'room'), label, wallId: host.id, from, to, depth: d, bend: 0, door: { ...door, ...(leaves ? { leaves } : {}) } }
+  const fitted = fit(plan, draft)
+  if ('ask' in fitted) return fitted
+  return { draft, plan: fitted.plan, edits: draftEdits(plan, draft) }
+}
+
+/** A door of width dw centred near `at`, kept inside the stretch [from, to] and snapped. */
+export function placeDoor(from: number, to: number, dw: number, at: number): { from: number; to: number } {
+  const w = Math.min(dw, to - from - 2 * JAMB)
+  const lo = from + JAMB, hi = to - JAMB - w
+  const f = round(Math.min(hi, Math.max(lo, snap(at - w / 2))))
+  return { from: f, to: round(f + w) }
+}
+
+function anchorRoom(plan: Plan, said: string | undefined, ctx: ResolveContext): { room: Room } | { ask: string } {
+  if (!said || said === 'this') {
+    const room = plan.rooms.find((r) => r.id === ctx.current) ?? (plan.rooms.length === 1 ? plan.rooms[0] : undefined)
+    return room ? { room } : { ask: `Next to which room: the ${plan.rooms.map((r) => lower(r.label)).join(', the ')}?` }
+  }
+  const words = said.toLowerCase().replace(/^the\s+/, '').trim()
+  const matches = plan.rooms.filter((r) => {
+    const l = r.label.toLowerCase()
+    return l === words || r.id === words || l.includes(words) || words.includes(l)
+  })
+  if (matches.length === 1) return { room: matches[0] }
+  const known = plan.rooms.map((r) => `the ${lower(r.label)}`)
+  if (matches.length > 1) return { ask: `Which one do you mean: ${known.join(' or ')}?` }
+  return { ask: `I don't know a ${words} yet, only ${known.length > 1 ? `${known.slice(0, -1).join(', ')} and ${known.at(-1)}` : known[0]}. Which one shall it go by?` }
+}
+
+/** The direction a side points in on the floor, from the camera's view direction. */
+export function sideDirection(side: Side, view: P): P {
+  const n = Math.hypot(view[0], view[1]) || 1
+  const [fx, fz] = [view[0] / n, view[1] / n]
+  // three.js looks down -z with +x to the right, so right is (-fz, fx) and left is (fz, -fx).
+  return side === 'behind' ? [fx, fz] : side === 'front' ? [-fx, -fz] : side === 'left' ? [fz, -fx] : [-fz, fx]
+}
+
+function sideWall(plan: Plan, room: Room, side: Side, view: P): { wall: Wall } | { ask: string } {
+  const dir = sideDirection(side, view)
+  const walls = roomWalls(plan, room).map(({ wall, forward }) => {
+    const c = curveOf(plan, wall)
+    const [nx, nz] = normalAt(c, c.length / 2)
+    const s = forward ? 1 : -1
+    return { wall, c, dot: nx * s * dir[0] + nz * s * dir[1] }
+  })
+  const best = Math.max(...walls.map((k) => k.dot))
+  // Split pieces of one straight side point the same way; a corner view has two sides close in cosine.
+  const face = walls.filter((k) => k.dot > best - TIE)
+  const other = Math.max(-1, ...walls.filter((k) => !face.includes(k)).map((k) => k.dot))
+  // Two faces of the room point that way about equally: a wall in the face turns away from the best one.
+  const lead = face.find((k) => k.dot === best)!
+  const turned = face.some((k) => Math.abs(k.c.dir[0] * lead.c.dir[1] - k.c.dir[1] * lead.c.dir[0]) > 0.05)
+  if (turned || best - other < TIE) return { ask: `From here I'm looking at a corner of the ${lower(room.label)}. Click the wall you mean and tell me again?` }
+  if (face.some((k) => k.c.radius !== Infinity)) return { ask: `That side of the ${lower(room.label)} curves, and I can only add rooms on straight walls for now.` }
+  const outside = face.filter((k) => ownersOf(plan, k.wall.id).length === 1)
+  if (!outside.length) {
+    const next = ownersOf(plan, face[0].wall.id).find((r) => r.id !== room.id)
+    return { ask: `There's already the ${lower(next?.label ?? 'room')} on that side. Somewhere else?` }
+  }
+  return { wall: outside.sort((p, q) => q.c.length - p.c.length)[0].wall }
+}
+
+/** Stretches of a wall with no opening on them, from corner a. */
+function freeStretches(wall: Wall, L: number): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  let at = 0
+  for (const o of [...wall.openings].sort((p, q) => p.from - q.from)) {
+    if (o.from > at) out.push([at, o.from])
+    at = Math.max(at, o.to)
+  }
+  if (L > at) out.push([at, L])
+  return out.filter(([a, b]) => b - a >= MIN_WALL)
+}
+
+function freshId(plan: Plan, label: string): Id {
+  const base = label.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'room'
+  const taken = new Set([...plan.rooms.map((r) => r.id), ...plan.corners.map((c) => c.id), ...plan.walls.map((w) => w.id)])
+  const used = (id: string) => taken.has(id) || [...taken].some((t) => t.startsWith(`${id}.`))
+  let id = base
+  for (let n = 2; used(id); n++) id = `${base}-${n}`
+  return id
+}
+
+// ---------------------------------------------------------------- overlap
+
+const cross = (o: P, a: P, b: P) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+function segmentsCross(a: P, b: P, c: P, d: P): boolean {
+  const d1 = cross(c, d, a), d2 = cross(c, d, b), d3 = cross(a, b, c), d4 = cross(a, b, d)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+function inside(p: P, poly: P[]): boolean {
+  let hit = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j]
+    if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) hit = !hit
+  }
+  return hit
+}
+/** Do two simple polygons share any area (edges crossing, or one inside the other)? */
+export function overlaps(a: P[], b: P[]): boolean {
+  for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) if (segmentsCross(a[i], a[(i + 1) % a.length], b[j], b[(j + 1) % b.length])) return true
+  return inside(a[0], b) || inside(b[0], a)
+}
+
+/** Where a draft's pieces are on the floor, for drawing: corners, far wall, door, in world metres. */
+export function draftGeometry(plan: Plan, d: Draft) {
+  const host = plan.walls.find((w) => w.id === d.wallId)!
+  const c = curveOf(plan, host)
+  const forward = hostForward(plan, host.id)
+  const out: P = forward ? c.normal : [-c.normal[0], -c.normal[1]]
+  const at = (t: number, k = 0): P => [c.a[0] + c.dir[0] * t + out[0] * k, c.a[1] + c.dir[1] * t + out[1] * k]
+  return { dir: c.dir, out, thickness: host.thickness, height: host.height, at, p: at(d.from), q: at(d.to), pf: at(d.from, d.depth), qf: at(d.to, d.depth), hostLength: c.length }
+}

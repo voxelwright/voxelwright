@@ -122,7 +122,8 @@ export type Edit =
       from: number
       to: number
       depth: number
-      door?: { id: Id; from: number; to: number; leaves: 1 | 2; head?: number }
+      /** No leaves is a plain opening. */
+      door?: { id: Id; from: number; to: number; leaves?: 1 | 2; head?: number }
     }
   /** Place a new thing. Its id is new to the plan; the anchor must be in a room (wall: on the wall, facing a room it bounds). */
   | { op: 'placeItem'; furniture: Furniture }
@@ -530,7 +531,7 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
   for (const o of host.openings) if (!split.some((w) => w.openings.some((x) => x.id === o.id))) reasons.push(`opening ${o.id} straddles a new corner`)
   if (edit.door) {
     const shared = split.find((w) => w.id === sharedId)!
-    shared.openings.push({ id: edit.door.id, kind: 'door', from: round(edit.door.from - from), to: round(edit.door.to - from), sill: 0, head: edit.door.head ?? DOORWAY.top, leaves: edit.door.leaves })
+    shared.openings.push({ id: edit.door.id, kind: 'door', from: round(edit.door.from - from), to: round(edit.door.to - from), sill: 0, head: edit.door.head ?? DOORWAY.top, ...(edit.door.leaves ? { leaves: edit.door.leaves } : {}) })
   }
   const fresh = (n: number, a: Id, b: Id): Wall => ({ id: `${id}.w${n}`, a, b, thickness: host.thickness, height: host.height, sagitta: 0, openings: [] })
   const walls = plan.walls.flatMap((w) => (w.id === host.id ? split : [w]))

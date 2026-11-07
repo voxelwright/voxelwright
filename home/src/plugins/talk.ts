@@ -1383,6 +1383,15 @@ export default {
           furnish!.dismiss(guess)
           ctx.emit('village/journal', { person: to?.person, section: routed.section })
           return
+        case 'build': {
+          // Build mode draws the room and speaks for your villager: the route's line, or one asking what was meant (#48).
+          furnish!.dismiss(guess)
+          if (mode === 'talk') endTalk()
+          const request = { intent: routed.intent, say: routed.say, reply: (line: string) => quip(me, line), handled: false }
+          ctx.emit('village/build-intent', request)
+          if (!request.handled) quip(me, "Let's do that in build mode. I can't move walls from here.")
+          return
+        }
       }
     }
 

@@ -55,6 +55,9 @@ export function makeKit(): Kit {
 interface Frame {
   wall: Wall
   c: Curve
+  /** Whether the room's outline turns at the wall's start and end (in t order); a wall split in a straight run does not. */
+  turnA: boolean
+  turnB: boolean
   alongX: boolean
   /** +1 when t grows with the world axis. */
   sign: number
@@ -67,7 +70,22 @@ interface Frame {
 const frameOf = (plan: Plan, wall: Wall, forward: boolean): Frame => {
   const c = curveOf(plan, wall)
   const alongX = Math.abs(c.dir[0]) >= Math.abs(c.dir[1])
-  return { wall, c, alongX, sign: Math.sign(alongX ? c.dir[0] : c.dir[1]), across: Math.sign(alongX ? c.normal[1] : c.normal[0]), out: forward ? 1 : -1 }
+  return { wall, c, turnA: true, turnB: true, alongX, sign: Math.sign(alongX ? c.dir[0] : c.dir[1]), across: Math.sign(alongX ? c.normal[1] : c.normal[0]), out: forward ? 1 : -1 }
+}
+
+/** A room's frames in loop order, each knowing whether the outline turns at its ends. */
+function framesOf(plan: Plan, room: Room): Frame[] {
+  const frames = roomWalls(plan, room).map(({ wall, forward }) => frameOf(plan, wall, forward))
+  const straight = (f: Frame) => f.c.radius === Infinity
+  frames.forEach((f, i) => {
+    const prev = frames[(i + frames.length - 1) % frames.length], next = frames[(i + 1) % frames.length]
+    // Two straight walls in one line meet without a corner.
+    const inLine = (g: Frame) => straight(f) && straight(g) && Math.abs(f.c.dir[0] * g.c.dir[1] - f.c.dir[1] * g.c.dir[0]) < 1e-6
+    const [atA, atB] = f.out > 0 ? [prev, next] : [next, prev]
+    f.turnA = !inLine(atA)
+    f.turnB = !inLine(atB)
+  })
+  return frames
 }
 
 type UvMap = (uv: THREE.BufferAttribute, len: number, uMin: number, y0: number, y1: number) => void
@@ -160,6 +178,8 @@ export interface Built {
   /** What diorama.ts's shell() and floor() build, for ?cam=iso. */
   shell: THREE.Group | null
   floor: THREE.Mesh | null
+  /** Every other room in the plan: its floor, base and the walls the first room does not own. Null with one room. */
+  rooms: THREE.Group | null
 }
 
 /**
@@ -167,7 +187,7 @@ export interface Built {
  * contact shadow when the footprint changed; while dragging the old one stretches.
  */
 export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean; handle?: string; final?: boolean }): Built {
-  const frames = roomWalls(plan, room).map(({ wall, forward }) => frameOf(plan, wall, forward))
+  const frames = framesOf(plan, room)
   const seat = new THREE.Group()
   seat.name = 'build seat'
 
@@ -194,7 +214,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       }
     } else {
       // room.ts: the side wall between the back and front inner faces, plain box UVs.
-      for (const [a, b, y0, y1] of around(f.wall.openings, T / 2, L - T / 2, H)) {
+      for (const [a, b, y0, y1] of around(f.wall.openings, f.turnA ? T / 2 : 0, f.turnB ? L - T / 2 : L, H)) {
         const m = piece(f, a, b, y0, y1, T, 0, kit.seatWall)
         m.castShadow = m.receiveShadow = true
         seat.add(m)
@@ -210,7 +230,8 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       seat.add(m)
     }
   }
-  if (!options.iso) return { seat, shell: null, floor: null }
+  const rooms = otherRooms(plan, room, kit)
+  if (!options.iso) return { seat, shell: null, floor: null, rooms }
 
   // The shell, as diorama.ts's shell() builds it, for any outline.
   const shell = new THREE.Group()
@@ -225,7 +246,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * len + uMin - ox0) / 8, (uv.getY(i) * (y1 - y0) + y0) / H)
     }
     // Back and front run the full outer width; the side walls fit between them.
-    const [t0, t1] = f.alongX ? [-T / 2, L + T / 2] : [T / 2, L - T / 2]
+    const [t0, t1] = f.alongX ? [-T / 2, L + T / 2] : [f.turnA ? T / 2 : 0, f.turnB ? L - T / 2 : L]
     const wallMat = options.handle === f.wall.id ? kit.handleWall : kit.shellWall
     const run = (a: number, b: number, y0: number, y1: number) => {
       const m = piece(f, a, b, y0, y1, T, 0, wallMat, world8)
@@ -270,7 +291,66 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
   shell.add(base)
   shell.add(contactShadow(kit, ox1 - ox0, oz1 - oz0, (ox0 + ox1) / 2, (oz0 + oz1) / 2, YARD_TOP + 0.003, 0.5, options.final ?? true))
 
-  return { seat, shell, floor: floorMesh(plan, room, kit) }
+  return { seat, shell, floor: floorMesh(plan, room, kit), rooms }
+}
+
+/**
+ * The plan's other rooms, built as the shell builds walls: full height around
+ * their openings, a cap on top, a low stub that stands in when the camera is
+ * outside, and a base under the floor. A wall shared with the first room is that
+ * room's to draw; a wall two other rooms share is drawn once.
+ */
+function otherRooms(plan: Plan, first: Room, kit: Kit): THREE.Group | null {
+  const others = plan.rooms.filter((r) => r !== first)
+  if (!others.length) return null
+  const group = new THREE.Group()
+  group.name = 'build rooms'
+  const drawn = new Set(roomWalls(plan, first).map(({ wall }) => wall.id))
+  for (const room of others) {
+    const frames = framesOf(plan, room)
+    const outer = outline(plan, room, -frames[0].wall.thickness / 2)
+    const xs = outer.map((p) => p[0]), zs = outer.map((p) => p[1])
+    const ox0 = Math.min(...xs), ox1 = Math.max(...xs), oz0 = Math.min(...zs), oz1 = Math.max(...zs)
+    for (const f of frames) {
+      if (drawn.has(f.wall.id)) continue
+      drawn.add(f.wall.id)
+      const T = f.wall.thickness, H = f.wall.height, L = f.c.length
+      const world8: UvMap = (uv, len, uMin, y0, y1) => {
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * len + uMin - ox0) / 8, (uv.getY(i) * (y1 - y0) + y0) / H)
+      }
+      const [t0, t1] = f.alongX ? [f.turnA ? -T / 2 : 0, f.turnB ? L + T / 2 : L] : [f.turnA ? T / 2 : 0, f.turnB ? L - T / 2 : L]
+      const run = (a: number, b: number, y0: number, y1: number, capped: boolean) => {
+        const m = piece(f, a, b, y0, y1, T, 0, kit.shellWall, world8)
+        m.castShadow = m.receiveShadow = true
+        const parts: THREE.Mesh[] = [m]
+        if (capped) {
+          const cap = piece(f, a, b, y1, y1 + 0.02, T + 0.004, 0, kit.cut)
+          cap.position.y = y1 + 0.01
+          cap.castShadow = true
+          parts.push(cap)
+        }
+        return parts
+      }
+      for (const [a, b, y0, y1] of around(f.wall.openings, t0, t1, H)) group.add(...run(a, b, y0, y1, y1 >= H))
+      for (const [a, b] of spans(f.wall.openings.filter((o) => o.sill < STUB), t0, t1, STUB)) {
+        for (const m of run(a, b, 0, STUB, true)) {
+          m.userData.cutaway = true
+          m.visible = false
+          group.add(m)
+        }
+      }
+    }
+    const base = new THREE.Mesh(new THREE.BoxGeometry(ox1 - ox0 + 0.08, BASE, oz1 - oz0 + 0.08), kit.cut)
+    base.position.set((ox0 + ox1) / 2, -BASE / 2 - 0.004, (oz0 + oz1) / 2)
+    base.receiveShadow = true
+    base.userData.room = room.id
+    group.add(base)
+    const floor = floorMesh(plan, room, kit)
+    floor.name = 'build room floor'
+    floor.userData.room = room.id
+    group.add(floor)
+  }
+  return group
 }
 
 /** The plank floor inside the walls, curved walls and all; boards keep their size and stay put as walls move. */
