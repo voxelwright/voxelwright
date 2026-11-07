@@ -29,6 +29,7 @@ const MIN = 1.5
 const PX = 1024
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
+type Side = 'left' | 'right' | 'above' | 'below'
 
 export interface OutlineHooks {
   /** The plan the draft hangs on: the house as it stands. */
@@ -106,13 +107,65 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   sheet.name = 'build outline sheet'
   // A proposal is marked out, not built: only "Build it" raises real walls (plugins/build.ts).
   group.add(sheet)
+  // Where the door will be cut, taped out on the face of the shared wall the camera sees.
+  const DOOR_PX = [256, 512] as const
+  const [markCanvas, mg] = canvas(DOOR_PX[0], DOOR_PX[1])
+  const markMap = toTexture(markCanvas)
+  const mark = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({
+    map: markMap, roughness: 0.9, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  }))
+  mark.name = 'build outline door mark'
+  mark.renderOrder = 3
+  group.add(mark)
+  /** The doorway to be: a warm shade where the wall will open, masking tape round it, a line where two leaves would meet. */
+  const paintMark = (w: number, h: number, leaves: number) => {
+    const [W, H] = DOOR_PX
+    const sx = W / w, sy = H / h
+    mg.clearRect(0, 0, W, H)
+    const tape = 0.075
+    // A doorway with its head's corners eased, the shape the casing will have once it is cut.
+    const rise = Math.min(0.14, w * 0.12), spring = rise
+    const arch = (inset: number) => {
+      mg.beginPath()
+      mg.moveTo(inset * sx, h * sy)
+      mg.lineTo(inset * sx, spring * sy)
+      mg.bezierCurveTo(inset * sx, (inset * 0.6) * sy, (w - inset) * sx, (inset * 0.6) * sy, (w - inset) * sx, spring * sy)
+      mg.lineTo((w - inset) * sx, h * sy)
+    }
+    arch(tape / 2)
+    mg.closePath()
+    mg.fillStyle = 'rgba(132, 82, 46, 0.34)'
+    mg.fill()
+    // Hand-laid tape: a strong strip with a lighter edge where it catches the light.
+    for (const [colour, width] of [['rgba(229, 116, 56, 0.95)', tape], ['rgba(255, 226, 190, 0.35)', tape * 0.28]] as const) {
+      mg.save()
+      mg.strokeStyle = colour
+      mg.lineWidth = width * sx
+      mg.lineJoin = 'round'
+      arch(tape / 2)
+      mg.stroke()
+      mg.restore()
+    }
+    if (leaves === 2) {
+      mg.save()
+      mg.strokeStyle = 'rgba(229, 116, 56, 0.85)'
+      mg.lineWidth = 0.022 * sx
+      mg.setLineDash([0.07 * sy, 0.05 * sy])
+      mg.beginPath()
+      mg.moveTo((w / 2) * sx, (tape + 0.06) * sy)
+      mg.lineTo((w / 2) * sx, h * sy)
+      mg.stroke()
+      mg.restore()
+    }
+    markMap.needsUpdate = true
+  }
   /** Wooden pegs standing on the walls they move: a turned body and a lighter head; the bend peg's head is sage. */
   const pegBody = new THREE.CylinderGeometry(0.11, 0.13, 0.1, 24)
   pegBody.translate(0, 0.05, 0)
   const pegHead = new THREE.CylinderGeometry(0.1, 0.11, 0.035, 24)
   pegHead.translate(0, 0.115, 0)
-  const pegWood = new THREE.MeshStandardMaterial({ color: '#8f5f3c', roughness: 0.6 })
-  const pegTop = new THREE.MeshStandardMaterial({ color: '#e1bb88', roughness: 0.55 })
+  const pegWood = new THREE.MeshStandardMaterial({ color: '#6e4429', roughness: 0.6 })
+  const pegTop = new THREE.MeshStandardMaterial({ color: '#f4dcb2', roughness: 0.55, emissive: '#5a3a1e', emissiveIntensity: 0.12 })
   const pegSage = new THREE.MeshStandardMaterial({ color: '#9fb486', roughness: 0.55 })
   const pegLive = new THREE.MeshStandardMaterial({ color: '#f0a65c', roughness: 0.5, emissive: '#b8641e', emissiveIntensity: 0.25 })
   const pegMeshes = new Map<Handle, { group: THREE.Group; head: THREE.Mesh; top: THREE.Material }>()
@@ -178,8 +231,10 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const ghosts = new THREE.Group()
   ghosts.name = 'build outline ghosts'
   group.add(ghosts)
-  const ghostFelt = new THREE.MeshStandardMaterial({ color: '#f3e2c4', roughness: 1, transparent: true, opacity: 0.34, depthWrite: false })
-  const ghostRug = new THREE.MeshStandardMaterial({ roughness: 1, transparent: true, opacity: 0.45, depthWrite: false })
+  // Warm felt, half there, with a soft pencil rim, so the pieces read on grass in sun or shade.
+  const ghostFelt = new THREE.MeshStandardMaterial({ color: '#d99a62', emissive: '#7a4220', emissiveIntensity: 0.18, roughness: 1, transparent: true, opacity: 0.62 })
+  const ghostRug = new THREE.MeshStandardMaterial({ color: '#f0c79a', roughness: 1, transparent: true, opacity: 0.7, depthWrite: false })
+  const ghostRim = new THREE.MeshBasicMaterial({ color: '#5c3a22', side: THREE.BackSide, transparent: true, opacity: 0.6, fog: false })
   /** One ghost per kind, built on first need and kept while the outline lives. */
   const ghostOf = new Map<string, THREE.Group>()
   const ghost = (kind: string) => {
@@ -189,22 +244,38 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       const made = seat(k.build(), k.mount)
       h = made.holder
       h.name = `build outline ghost ${kind}`
+      const rims: Array<[THREE.Mesh, THREE.Mesh]> = []
       h.traverse((o) => {
         const m = o as THREE.Mesh
         if (!m.isMesh) return
         const was = m.material as THREE.MeshStandardMaterial
-        // The rug keeps its braid, faintly; everything else is plain felt.
-        if (kind === 'rug' && was.map) {
+        // A piece's own contact shadow stays off the lawn: the flour already marks the floor.
+        if (m.userData.contact) {
+          m.visible = false
+          return
+        }
+        // The rug keeps its braid, warm and faint; everything else is plain felt with a rim.
+        if (kind.endsWith('rug') && was.map) {
           ghostRug.map = was.map
           m.material = ghostRug
         } else {
           was.map?.dispose()
           m.material = ghostFelt
+          m.renderOrder = 3
+          // The rim: the same shape a little larger, its inside showing only round the outline.
+          m.geometry.computeBoundingBox()
+          const size = m.geometry.boundingBox!.getSize(new THREE.Vector3())
+          const rim = new THREE.Mesh(m.geometry, ghostRim)
+          rim.scale.set(1 + 0.045 / Math.max(size.x, 0.02), 1 + 0.045 / Math.max(size.y, 0.02), 1 + 0.045 / Math.max(size.z, 0.02))
+          rim.renderOrder = 4
+          rim.raycast = () => {}
+          rims.push([m, rim])
         }
         if (m.material !== was) was.dispose()
         m.castShadow = m.receiveShadow = false
         m.raycast = () => {}
       })
+      for (const [m, rim] of rims) m.add(rim)
       ghostOf.set(kind, h)
       ghosts.add(h)
     }
@@ -253,6 +324,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     return b
   }
   const tags = { w: dimTag('w'), d: dimTag('d') }
+  /** A small paper label over the taped doorway, saying what will be cut there. */
+  const doorTag = document.createElement('div')
+  doorTag.className = 'build-door'
+  doorTag.setAttribute('aria-hidden', 'true')
+  document.body.append(doorTag)
   const field = document.createElement('input')
   field.className = 'build-dim-field'
   field.inputMode = 'decimal'
@@ -298,8 +374,12 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   let hover: Handle | null = null
   let shownAt = 0
   /** World points the tags hang from. */
-  const anchors = { w: new THREE.Vector3(), d: new THREE.Vector3(), title: new THREE.Vector3() }
+  const anchors = { w: new THREE.Vector3(), d: new THREE.Vector3(), door: new THREE.Vector3() }
   let paths: { far: P[]; from: P[]; to: P[]; door: P[]; knob: P; pegs?: Array<[Handle, P]> } | null = null
+  /** The staked-out room's points on the ground, for keeping the card off it. */
+  let plot: P[] = []
+  /** The side of the room the choice card stands on, kept while it still fits there. */
+  let cardSide: Side | null = null
 
   const accept = (next: Draft, quiet = true): boolean => {
     const fitted = fit(hooks.base(), next)
@@ -357,6 +437,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     // Inside the room, as the right wall's dot is, clear of the size tags outside.
     const knobAt = add(mid, geo.out, -0.55)
     paths = { far: arc, from: [geo.p, geo.pf], to: [geo.q, geo.qf], door: [doorA, doorB], knob: knobAt }
+    // What the choice card must keep clear of: the staked-out room, its stakes and its pegs.
+    plot = [...wallOut, ...wallIn, knobAt]
 
     // The sheet covers everything drawn, square, with a margin.
     const pts = [...wallOut, wA, wB, dA, dB, knobAt]
@@ -453,6 +535,19 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       flour(arcPts, 0.032, 0.9, FLOUR, [0.07, 0.08])
     }
     if (!d.door.leaves) flour([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.032, 0.9, FLOUR, [0.07, 0.08])
+    {
+      // The same doorway taped out on the shared wall, on whichever face the camera sees.
+      const head = made.walls.flatMap((w) => w.openings).find((o) => o.id === `${d.roomId}.door`)?.head ?? 2.05
+      const facing = dot(geo.out, hooks.view()) < 0 ? 1 : -1
+      const mw = dw + 0.1, mh = head + 0.05
+      paintMark(mw, mh, d.door.leaves ?? 0)
+      const c = geo.at((d.door.from + d.door.to) / 2, facing * (T / 2 + 0.006))
+      mark.position.set(c[0], mh / 2, c[1])
+      mark.scale.set(mw, mh, 1)
+      mark.rotation.set(0, Math.atan2(geo.out[0] * facing, geo.out[1] * facing), 0)
+      anchors.door.set(c[0], mh + 0.12, c[1])
+      doorTag.textContent = d.door.leaves === 2 ? 'double doors here' : d.door.leaves === 1 ? 'a door here' : 'an opening here'
+    }
 
     // Grips: a wooden peg standing on each wall it moves (and on the door), with arrows in flour beside it
     // for the way it goes. The sage peg bends the far wall: a dashed curve runs from that wall's ends through it.
@@ -516,9 +611,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     // Tags.
     anchors.w.set((wA[0] + wB[0]) / 2, 0.05, (wA[1] + wB[1]) / 2)
     anchors.d.set((dA[0] + dB[0]) / 2, 0.05, (dA[1] + dB[1]) / 2)
-    // Beyond the far wall, so the tag never sits over the room.
-    const beyond = add(mid, geo.out, bulge + 1.1)
-    anchors.title.set(beyond[0], 0.6, beyond[1])
     if (editing !== 'w') tags.w.textContent = `${fmt(d.to - d.from)} m`
     if (editing !== 'd') tags.d.textContent = `${fmt(d.depth)} m`
     titleName.textContent = /^New room( \d+)?$/.test(d.label) ? 'A new room' : `The new ${d.label.toLowerCase()}`
@@ -531,7 +623,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     draft = null
     if (!accept(next)) return false
     if (!group.parent) stage.scene.add(group)
-    for (const el of [tags.w, tags.d, choice]) el.classList.add('shown')
+    for (const el of [tags.w, tags.d, choice, doorTag]) el.classList.add('shown')
+    cardSide = null
     shownAt = performance.now()
     place()
     return true
@@ -545,7 +638,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     editing = null
     group.removeFromParent()
     hooks.yard(null)
-    for (const el of [tags.w, tags.d, choice, field]) el.classList.remove('shown')
+    for (const el of [tags.w, tags.d, choice, field, doorTag]) el.classList.remove('shown')
     stage.renderer.domElement.style.cursor = ''
   }
   const confirm = () => {
@@ -744,7 +837,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   addEventListener('keydown', onKey, listen)
 
   // ── Each frame: hang the tags on their world points ──────────────────────
-  const v = new THREE.Vector3()
+  const v = new THREE.Vector3(), v3 = new THREE.Vector3()
   const screen = (p: THREE.Vector3): [number, number] => {
     v.copy(p).project(stage.camera)
     const r = stage.renderer.domElement.getBoundingClientRect()
@@ -754,6 +847,13 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const t = `calc(${Math.round(x)}px + ${ax}) calc(${Math.round(y)}px + ${ay})`
     if (el.style.translate !== t) el.style.translate = t
   }
+  /** A screen box: left, top, right, bottom (CSS px). */
+  type Box = { l: number; t: number; r: number; b: number }
+  const meets = (a: Box, b: Box, gap = 10) => a.l < b.r + gap && b.l < a.r + gap && a.t < b.b + gap && b.t < a.b + gap
+  const boxOf = (el: Element): Box => {
+    const r = el.getBoundingClientRect()
+    return { l: r.left, t: r.top, r: r.right, b: r.bottom }
+  }
   const place = () => {
     if (!draft) return
     const [wx, wy] = screen(anchors.w), [dx, dy] = screen(anchors.d)
@@ -761,29 +861,69 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const inX = (x: number) => Math.min(innerWidth - 60, Math.max(60, x)), inY = (y: number) => Math.min(innerHeight - 24, Math.max(24, y))
     at(tags.w, inX(wx), inY(wy))
     at(tags.d, inX(dx), inY(dy))
-    const [tx, ty] = screen(anchors.title)
+    const [ox, oy] = screen(anchors.door)
+    at(doorTag, inX(ox), inY(oy), '-50%', '-100%')
     // On a phone the choice docks to the bottom, in reach of a thumb, as placing's tag does.
     const docked = innerWidth < 700 && innerHeight > innerWidth
     choice.classList.toggle('docked', docked)
     if (docked) choice.style.translate = ''
-    else at(choice, Math.min(innerWidth - 150, Math.max(150, tx)), Math.max(16, ty), '-50%', '-100%')
+    else placeCard()
     if (editing) {
       const [ex, ey] = editing === 'w' ? [wx, wy] : [dx, dy]
       at(field, ex, ey)
     }
   }
+  /**
+   * The choice card stands beside the staked-out room, never over it: on open lawn or the
+   * table, its tail pointing at the room. It keeps clear of the size tags and of anything a
+   * villager is saying, and keeps its side while that side still has room.
+   */
+  const placeCard = () => {
+    const pts = plot.flatMap((p) => [screen(v3.set(p[0], 0, p[1])), screen(v3.set(p[0], STAKE_H, p[1]))])
+    if (!pts.length) return
+    const room: Box = { l: Math.min(...pts.map((p) => p[0])), t: Math.min(...pts.map((p) => p[1])), r: Math.max(...pts.map((p) => p[0])), b: Math.max(...pts.map((p) => p[1])) }
+    const keep: Box[] = [room, boxOf(tags.w), boxOf(tags.d), boxOf(doorTag)]
+    for (const el of document.querySelectorAll('.talk-card')) {
+      const b = boxOf(el)
+      if (b.r - b.l > 0 && getComputedStyle(el).opacity !== '0') keep.push(b)
+    }
+    const w = choice.offsetWidth, h = choice.offsetHeight, cy = (room.t + room.b) / 2, cx = (room.l + room.r) / 2
+    const E = 16, GAP = 26
+    const clampY = (t: number) => Math.min(innerHeight - E - h, Math.max(E, t))
+    const clampX = (l: number) => Math.min(innerWidth - E - w, Math.max(E, l))
+    const spot = (side: Side): Box & { side: Side } => {
+      const l = side === 'left' ? room.l - GAP - w : side === 'right' ? room.r + GAP : clampX(cx - w / 2)
+      const t = side === 'above' ? room.t - GAP - h : side === 'below' ? room.b + GAP : clampY(cy - h / 2)
+      return { l, t, r: l + w, b: t + h, side }
+    }
+    const fits = (o: Box) => o.l >= E && o.t >= E && o.r <= innerWidth - E && o.b <= innerHeight - E && !keep.some((k) => meets(o, k))
+    const order: Side[] = ['left', 'right', 'above', 'below']
+    if (cardSide) order.unshift(cardSide)
+    // Where it fits clear of everything; failing that, clear of the room at least; failing that, the left, on screen.
+    const o = order.map(spot).find(fits)
+      ?? order.map(spot).find((c) => c.l >= E && c.t >= E && c.r <= innerWidth - E && c.b <= innerHeight - E && !meets(c, room))
+      ?? { ...spot('left'), l: clampX(room.l - GAP - w) }
+    cardSide = o.side
+    choice.dataset.tail = { left: 'right', right: 'left', above: 'down', below: 'up' }[o.side]
+    const along = o.side === 'left' || o.side === 'right' ? Math.min(h - 22, Math.max(22, cy - o.t)) : Math.min(w - 26, Math.max(26, cx - o.l))
+    choice.style.setProperty('--tail', `${Math.round(along)}px`)
+    at(choice, o.l, o.t, '0px', '0px')
+  }
 
   const dispose = () => {
     close()
     listening.abort()
-    for (const el of [tags.w, tags.d, field, choice, style]) el.remove()
+    for (const el of [tags.w, tags.d, field, choice, doorTag, style]) el.remove()
     sheet.geometry.dispose()
+    mark.geometry.dispose()
+    ;(mark.material as THREE.Material).dispose()
+    markMap.dispose()
     ;(sheet.material as THREE.Material).dispose()
     sheetMap.dispose()
     for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive, stakeGeo, stakeTip, stringGeo, stakeWood, stringMat]) x.dispose()
     for (const h of ghostOf.values()) releaseGpu(h)
     ghostRug.map?.dispose()
-    for (const m of [ghostFelt, ghostRug]) m.dispose()
+    for (const m of [ghostFelt, ghostRug, ghostRim]) m.dispose()
   }
 
   /** Screen points (CSS px) of each grip, for the checks. */
@@ -840,23 +980,28 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
 function css() {
   return `
   .build-dim, .build-choice, .build-dim-field { position: fixed; z-index: 6; left: 0; top: 0; opacity: 0; pointer-events: none; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.9; }
-  .build-dim { min-height: 44px; padding: 4px 10px 6px; border: 0; background: none; cursor: text; rotate: -3deg; color: #5e4434; font: 600 18px ${HAND};
-    text-shadow: 0 0 2px #fbf1dd, 0 0 5px #fbf1dd, 0 0 9px rgba(251, 241, 221, 0.9); }
+  .build-dim { min-height: 36px; min-width: 44px; padding: 3px 12px 5px; border: 0; border-radius: 9px; cursor: text; rotate: -3deg; color: #4a3428; font: 700 18px ${HAND};
+    background: linear-gradient(170deg, #fffaf0, #f6e8cf); box-shadow: 0 5px 12px rgba(70, 40, 20, 0.24), 0 1px 0 rgba(255, 255, 255, 0.7) inset; }
   .build-dim[data-dim='d'] { rotate: 4deg; }
-  .build-dim::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 8px; height: 2px; border-radius: 2px; opacity: 0.35;
-    background: repeating-linear-gradient(90deg, #6a4630 0 6px, transparent 6px 10px); }
-  .build-dim:hover::after, .build-dim:focus-visible::after { opacity: 0.8; }
+  .build-door { position: fixed; z-index: 6; left: 0; top: 0; padding: 2px 10px 4px; border-radius: 8px; pointer-events: none; opacity: 0; transition: opacity 160ms ease;
+    rotate: -2deg; white-space: nowrap; color: #fff6ea; font: 700 15px ${HAND}; background: #d9703a; box-shadow: 0 4px 10px rgba(70, 40, 20, 0.25); }
+  .build-door::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; rotate: 45deg; background: #d9703a; }
+  .build-door.shown { opacity: 1; }
+  .build-dim::after { content: ''; position: absolute; inset: 3px; border: 1.2px dashed rgba(150, 110, 80, 0.4); border-radius: 7px; pointer-events: none; }
+  .build-dim:hover::after, .build-dim:focus-visible::after { border-color: rgba(150, 100, 60, 0.85); }
   .build-dim:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; border-radius: 8px; }
   .build-dim.shown, .build-choice.shown, .build-dim-field.shown { opacity: 1; scale: 1; pointer-events: auto; }
-  .build-dim.shown { opacity: 0.72; }
   .build-dim.shown:hover, .build-dim.shown:focus-visible { opacity: 1; }
   .build-dim.editing { opacity: 0; pointer-events: none; }
   .build-dim-field { width: 92px; padding: 3px 10px 5px; border: 1.5px dashed rgba(150, 100, 60, 0.5); border-radius: 9px; text-align: center;
     background: #fffaf0; color: #4a3428; font: 700 20px ${HAND}; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.22); outline: none; }
-  .build-choice { display: grid; gap: 6px; min-width: 220px; padding: 14px 18px 12px 20px; transform-origin: 50% 100%; rotate: -1.2deg; }
+  .build-choice { display: grid; gap: 6px; min-width: 220px; padding: 14px 18px 12px 20px; rotate: -1.2deg; }
   ${tagCss('.build-choice', ".build-choice button[data-choice='apply']", ".build-choice button[data-choice='cancel']", '[aria-disabled=true]')}
-  .build-choice::after { content: ''; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; margin-left: -8px; rotate: 45deg;
-    background: #f4e6cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
+  .build-choice::after { content: ''; position: absolute; width: 16px; height: 16px; rotate: 45deg; background: #f4e6cb; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
+  .build-choice[data-tail='down']::after { left: var(--tail, 50%); bottom: -8px; margin-left: -8px; border-radius: 0 0 4px 0; }
+  .build-choice[data-tail='up']::after { left: var(--tail, 50%); top: -8px; margin-left: -8px; border-radius: 4px 0 0 0; box-shadow: none; background: #fdf6e8; }
+  .build-choice[data-tail='right']::after { right: -8px; top: var(--tail, 50%); margin-top: -8px; border-radius: 0 4px 0 0; box-shadow: 3px -3px 5px rgba(60, 30, 10, 0.1); }
+  .build-choice[data-tail='left']::after { left: -8px; top: var(--tail, 50%); margin-top: -8px; border-radius: 0 0 0 4px; box-shadow: -3px 3px 5px rgba(60, 30, 10, 0.1); background: #fbf1df; }
   .build-choice .title { white-space: nowrap; color: #6a4a34; }
   .build-choice .title .name { font: 700 20px/1.1 ${HAND}; color: #4a3428; letter-spacing: 0.01em; }
   .build-choice .title .area { font: italic 600 17px ${HAND}; color: #5e4434; }

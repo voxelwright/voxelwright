@@ -37,6 +37,10 @@ export interface Kit {
   loungeFloor: THREE.MeshStandardMaterial
   shadow: THREE.MeshBasicMaterial
   shadowSize: string
+  /** The panes of windows build edits open. */
+  glass: THREE.MeshStandardMaterial
+  /** The patch of daylight such a window throws on the floor. */
+  daylight: THREE.MeshBasicMaterial
 }
 
 export function makeKit(): Kit {
@@ -66,7 +70,22 @@ export function makeKit(): Kit {
     loungeFloor: new THREE.MeshStandardMaterial({ map: oak, roughness: 0.6 }),
     shadow: new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false }),
     shadowSize: '',
+    glass: new THREE.MeshStandardMaterial({ color: '#dff0f2', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false }),
+    daylight: new THREE.MeshBasicMaterial({ map: daylightPatch(), color: '#ffe2a8', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }),
   }
+}
+
+/** A soft-edged patch of window light, brightest by the wall (the texture's top edge) and fading into the room. */
+function daylightPatch() {
+  const [c, g] = canvas(128, 256)
+  const along = g.createLinearGradient(0, 0, 0, 256)
+  along.addColorStop(0, 'rgba(255, 255, 255, 0.95)')
+  along.addColorStop(0.55, 'rgba(255, 255, 255, 0.45)')
+  along.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  g.fillStyle = along
+  g.filter = 'blur(10px)'
+  g.fillRect(18, 6, 92, 244)
+  return toTexture(c)
 }
 
 /** One wall's frame: its curve, the world axis its boxes are built along, and the room's inward side. */
@@ -174,11 +193,17 @@ const CASING = 0.075
 /**
  * Timber round each door a build edit opened in this wall: a jamb each side and a head on both
  * faces, and boards lining the reveal and the underside of the lintel, so the cut wall reads as a doorway.
+ * Each window such an edit opened gets a frame, a pane with glazing bars, a sill inside and out,
+ * and a patch of daylight on the floor below it.
  */
 function doorTrim(f: Frame, kit: Kit): THREE.Mesh[] {
   const out: THREE.Mesh[] = []
   const T = f.wall.thickness
   for (const o of f.wall.openings) {
+    if (o.kind === 'window' && !BASE_OPENINGS.has(o.id)) {
+      out.push(...windowTrim(f, kit, o))
+      continue
+    }
     if (o.kind !== 'door' || o.sill > 0.01 || BASE_OPENINGS.has(o.id)) continue
     for (const side of [1, -1]) {
       const off = side * (T / 2 + 0.012)
@@ -197,6 +222,52 @@ function doorTrim(f: Frame, kit: Kit): THREE.Mesh[] {
     )
   }
   for (const m of out) m.castShadow = m.receiveShadow = true
+  return out
+}
+
+const FRAME = 0.06
+function windowTrim(f: Frame, kit: Kit, o: Opening): THREE.Mesh[] {
+  const T = f.wall.thickness
+  // The room is on the wall's inward side: against the normal when its loop runs the wall a→b.
+  const inSide = -f.out
+  const out: THREE.Mesh[] = []
+  // The reveal lined in painted board, all round.
+  out.push(
+    piece(f, o.from, o.from + 0.02, o.sill, o.head, T + 0.02, 0, kit.trim),
+    piece(f, o.to - 0.02, o.to, o.sill, o.head, T + 0.02, 0, kit.trim),
+    piece(f, o.from, o.to, o.head - 0.02, o.head, T + 0.02, 0, kit.trim),
+  )
+  // The frame in the middle of the wall, and its glazing bars: one upright per 0.7 m, and a bar across near the top.
+  const mid = (a: number, b: number, y0: number, y1: number) => piece(f, a, b, y0, y1, 0.07, 0, kit.trim)
+  out.push(mid(o.from, o.from + FRAME, o.sill, o.head), mid(o.to - FRAME, o.to, o.sill, o.head), mid(o.from, o.to, o.head - FRAME, o.head), mid(o.from, o.to, o.sill, o.sill + FRAME))
+  const panes = Math.max(2, Math.round((o.to - o.from) / 0.7))
+  for (let i = 1; i < panes; i++) {
+    const t = o.from + ((o.to - o.from) * i) / panes
+    out.push(mid(t - 0.02, t + 0.02, o.sill, o.head))
+  }
+  const bar = o.sill + (o.head - o.sill) * 0.7
+  out.push(mid(o.from, o.to, bar - 0.018, bar + 0.018))
+  // Sills: a deep timber one inside to set things on, a plain one outside to shed rain.
+  out.push(
+    piece(f, o.from - 0.08, o.to + 0.08, o.sill - 0.04, o.sill, 0.13, inSide * (T / 2 + 0.03), kit.timber),
+    piece(f, o.from - 0.05, o.to + 0.05, o.sill - 0.05, o.sill - 0.01, 0.08, -inSide * (T / 2 + 0.02), kit.trim),
+  )
+  for (const m of out) m.castShadow = m.receiveShadow = true
+  const pane = piece(f, o.from + FRAME, o.to - FRAME, o.sill + FRAME, o.head - FRAME, 0.012, 0, kit.glass)
+  pane.renderOrder = 2
+  out.push(pane)
+  // Daylight falling in through it: a soft patch on the floor, reaching into the room.
+  const w = (o.to - o.from) * 1.15, reach = 1.9
+  const tm = (o.from + o.to) / 2
+  const [x, z] = pointAt(f.c, tm), [nx, nz] = normalAt(f.c, tm)
+  // Laid flat, its texture's top edge (the bright one) lies toward -z; turned so that edge runs along the wall.
+  const patch = new THREE.Mesh(new THREE.PlaneGeometry(w, reach), kit.daylight)
+  patch.geometry.rotateX(-Math.PI / 2)
+  patch.geometry.rotateY(Math.atan2(nx * inSide, nz * inSide))
+  patch.position.set(x + nx * inSide * (T / 2 + reach / 2), 0.006, z + nz * inSide * (T / 2 + reach / 2))
+  patch.renderOrder = 2
+  patch.name = 'build window daylight'
+  out.push(patch)
   return out
 }
 

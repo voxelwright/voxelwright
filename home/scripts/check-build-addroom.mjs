@@ -221,6 +221,9 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(variant ? {} : { recordVideo: { dir: tmp, size: { width: 960, height: 600 } } }) })
     const { page } = await open(`?talk=npc&build=1&q=high${variant ? `&look=${encodeURIComponent(variant)}` : ''}`, context)
     await page.waitForTimeout(1200)
+    // Open the notepad by its pad first: on a loaded machine the first stray key can be lost while the pad takes the keyboard.
+    await page.click('.talk-pad').catch(() => {})
+    await page.waitForTimeout(300)
     await say(page, LEFT, 35)
     await until(page, (x) => x.draft, 10_000)
     await page.waitForTimeout(1800)
@@ -417,7 +420,27 @@ try {
       const g = scene.getObjectByName('build outline ghosts')
       return { pieces: window.villageBuild.outline.pieces().map((f) => f.id), shown: g ? g.children.filter((c) => c.visible).map((c) => c.name) : [] }
     })
-    check('outline: the first pieces stand inside as ghosts (sofa, table, rug at least)', ['sofa', 'low-table', 'rug'].every((k) => ghosts.pieces.includes(`playroom.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
+    check('outline: the playroom\'s first pieces stand inside as ghosts (a big rug, the little table, the toy chest at least)', ['big-rug', 'play-table', 'toy-chest'].every((k) => ghosts.pieces.includes(`playroom.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
+    // The choice card stands clear of the staked-out room: no grip on screen falls inside it.
+    const cardClear = await B(page, () => {
+      const r = document.querySelector('.build-choice.shown').getBoundingClientRect()
+      const g = window.villageBuild.outline.grips()
+      const under = Object.entries(g).filter(([k, p]) => k !== 'at' && p[0] > r.left && p[0] < r.right && p[1] > r.top && p[1] < r.bottom).map(([k]) => k)
+      return { card: [r.left, r.top, r.right, r.bottom].map(Math.round), under, tail: document.querySelector('.build-choice').dataset.tail }
+    })
+    check('outline: the choice card covers no part of the outline (no grip under it) and points its tail at the room', cardClear.under.length === 0 && Boolean(cardClear.tail), cardClear)
+    // The doorway to be is taped out on the face of the shared wall the camera sees.
+    const marked = await B(page, () => {
+      const scene = window.village.kernel.root.get('stage').scene
+      const m = scene.getObjectByName('build outline door mark')
+      const cam = window.village.kernel.root.get('stage').camera
+      if (!m) return null
+      m.updateMatrixWorld()
+      const n = m.getWorldDirection(m.position.clone())
+      const to = cam.position.clone().sub(m.getWorldPosition(m.position.clone()))
+      return { visible: m.visible, facesCamera: n.dot(to) > 0, y: +m.position.y.toFixed(2) }
+    })
+    check('outline: the doorway to be is marked on the shared wall, on the face the camera sees', marked?.visible && marked.facesCamera, marked)
     await page.keyboard.press('Escape')
     await frames(page, 4)
     // The notepad's furnishing guess for the line fades out on its own (#42); give it the time.
@@ -522,7 +545,7 @@ try {
       return { ids, drawn: drawn.map((c) => c.userData.furniture), overlaps, outside }
     })
     const firstPieces = await pieces()
-    check('built: the room arrives with its first pieces as plan furniture in the same version, all drawn', ['sofa', 'low-table', 'rug', 'armchair', 'floor-lamp', 'picture'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
+    check('built: the playroom arrives with play things, a second grouping and a picture as plan furniture in the same version, all drawn (no sofa)', ['big-rug', 'play-table', 'toy-chest', 'play-tent', 'low-bookcase', 'potted-plant', 'picture'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && !firstPieces.ids.includes('playroom.sofa') && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
     check('built: the pieces do not overlap one another and stand inside the room', firstPieces.overlaps.length === 0 && firstPieces.outside.length === 0, firstPieces)
     const covered = await B(page, async () => {
       const P = await import('/src/build/plan.ts')
@@ -534,6 +557,23 @@ try {
     })
     check('the lawn has grown and holds every room with its walls', covered.lawn && covered.out.length === 0, covered)
     check('the shared wall is one wall with the door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.kind === 'door') && built.bent !== 0, built)
+    const windowed = await B(page, () => {
+      const p = window.villageBuild.plan()
+      const scene = window.village.kernel.root.get('stage').scene
+      return { window: p.walls.find((w) => w.id === 'playroom.w2')?.openings.find((o) => o.kind === 'window') ?? null, daylight: Boolean(scene.getObjectByName('build window daylight')) }
+    })
+    check('built: the far wall has a window, and daylight falls through it onto the floor', windowed.window && windowed.daylight, windowed)
+    // One clean lawn: every turn of its outline goes the same way, so no corner steps in.
+    const convex = await B(page, () => {
+      const l = window.villageBuild.lawn()
+      if (!l) return null
+      const turns = l.map((p, i) => {
+        const a = l[(i + l.length - 1) % l.length], b = l[(i + 1) % l.length]
+        return Math.sign((p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0]))
+      }).filter((t) => t !== 0)
+      return { points: l.length, ways: [...new Set(turns)] }
+    })
+    check('built: the lawn is one clean shape, with no corner stepping in', convex && convex.ways.length === 1, convex)
     // The door is a real gap in the generated walls: a level ray at 1 m through its middle, from 1 m inside one room
     // to 1 m inside the other, meets no wall; the same ray 0.3 m past a jamb meets the shared wall.
     const gap = await B(page, async () => {

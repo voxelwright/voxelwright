@@ -1641,10 +1641,14 @@ built. A flour line runs along both faces of the walls to be built (the far
 wall as an arc when it bends) and along the shared wall, broken where the door
 goes; the door's jambs and leaves are firm lines and its swing is dashed. An
 orange string on corner stakes runs over the outer line. The room's first
-pieces stand inside as soft felt ghosts. The bubble gives the size in words
-("a bit smaller than the kitchen"); the width and depth tags in metres are
-quieter, and still editable. Wooden pegs stand on the walls they move, with
-arrows in flour.
+pieces stand inside as warm felt ghosts with a darker rim. The doorway to be is
+also taped out, in orange masking tape over a warm shade, on whichever face of
+the shared wall the camera sees. The bubble gives the size in words ("a bit
+smaller than the kitchen") and stands beside the outline, never over it: left,
+right, above or below, clear of the size tags and of any villager's card, its
+tail pointing at the room. The width and depth sit on paper tags outside the
+outline's edges; click one to type a size. Wooden pegs stand on the walls they
+move, with arrows in flour.
 
 To adjust it, drag a peg or a wall, or click a size and type. The sage peg
 bends the far wall, and a dashed curve runs from that wall's ends through it.
@@ -1653,19 +1657,27 @@ being drawn, then to the house.
 
 Enter or "Build it" commits one version ("Added the study"), and the real walls
 rise from the floor in 0.7 s (at once with reduced motion). The room arrives
-with its first pieces (`src/build/firstroom.ts`): a sofa against the far wall
-(into a bay if it bends) facing a low table on a braided rug, an armchair
-turned to the table on the side away from the door, a floor lamp at the sofa's
-end and a picture over it; a room under 14 m² keeps to the sofa, table, rug
-and picture. They are `placeItem` edits in the room's own
+with a window in the middle of its far wall (an `addOpening` edit, 42% of the
+wall, 0.9 to 2.2 m; a curved window when the wall bends) and its first pieces
+(`src/build/firstroom.ts`), chosen by its name. A playroom gets a big braided
+rug with a little table and two stools on it, a toy chest under the window and
+a play tent in the far corner; a study a desk and chair under the window, a rug,
+and an armchair and floor lamp; a bedroom a bed with its head to the side wall,
+a side table and a rug; anything else a sofa against the far wall facing a low
+table on a big rug, an armchair and a floor lamp. Every room of 14 m² or more
+also gets a low bookcase and a potted plant on the side away from the door, by
+the shared wall, and a picture on that side wall. A strip 1.5 m into the room
+from the door is kept clear. They are `placeItem` edits in the room's own
 version, so one undo takes both away, and placing draws them from the plan, so
 they come back on reload. Each is checked by placing's fit rules
 (`src/build/mount.ts`) against the new house, what is already in the scene and
 the pieces laid before it; one that will not fit moves toward the shared wall
 and the middle 10 cm at a time, and is left out if it never fits. Rooms whose
 name says pantry, store, bathroom, laundry, utility, garage or hall get none.
-The pieces are kinds (`src/build/pieces.ts`): `sofa`, `armchair`, `low-table`,
-`floor-lamp` and `rug`. Escape or "Not now"
+The pieces are kinds (`src/build/pieces.ts`), each on a soft contact shadow
+inside its own footprint: `sofa`, `armchair`, `low-table`, `floor-lamp`, `rug`,
+`big-rug`, `low-bookcase`, `potted-plant`, `play-tent`, `play-table`,
+`toy-chest`, `desk`, `bed` and `side-table`. Escape or "Not now"
 leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
 plan history is `src/build/house.ts`: the host's store when the host is
 running. Without a host it is kept in memory, and a paper note at the top says
@@ -1673,19 +1685,22 @@ once that nothing built will outlast the page.
 
 Every room renders with its floor and base, and a shared wall is drawn once. A
 door that a build edit opens gets a timber casing on both faces, lined reveals
-and a threshold board. The kitchen's own openings stay as room.ts draws them.
+and a threshold board. A window it opens gets a frame with glazing bars, a pane,
+a timber sill inside and a painted one outside, and a soft patch of daylight on
+the floor below it. The kitchen's own openings stay as room.ts draws them.
 The lot answers the plan (`src/build/lot.ts`): while any room or the staked-out
 room reaches past diorama.ts's lawn board, the lawn, its edge, its shadow and
-the picket fence are redrawn as the old board plus a rectangle round each room
-(its walls plus 1 m), on a grass that tiles without seams, and the fence keeps
-its gate where the path still meets it. `src/build/yard.ts` hides the flowers,
+the picket fence are redrawn as one rectangle with rounded corners holding the
+old board and each room's walls plus 1 m, so no corner steps in, on a grass
+that tiles without seams; the fence follows it at the old board's inset and
+keeps its gate where the path still meets it. `src/build/yard.ts` hides the flowers,
 stones and shrubs inside a room, on the lawn round it, and along the stretch of
 old fence the lot grew past. All of it is runtime only and goes back when the
 rooms are undone or build mode unloads. The new room's base follows its walls
 round a bay, and the sun's shadow box grows to hold every room.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 54 checks (first pieces, lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 61 checks (first pieces, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
 ```
@@ -1729,8 +1744,10 @@ built room as an empty shell off the lot (the yard does not follow the plan,
 pendant wire across the window. `screenshots/build/look-before-after.jpg`
 pairs before and after for each placing and add-room shot, desktop and phone.
 
-Missing or approximate: the first pieces are one living-room set whatever the
-room is called (pantries and the like get none). The ghosts are built the
+Missing or approximate: the first pieces know four kinds of room by name
+(playroom, study, bedroom, and living room for anything else; pantries and the
+like get none). The villager's card is placed by `src/plugins/talk.ts` above
+the speaker's head and can still cover part of the kitchen. The ghosts are built the
 first time a room is staked out, which costs one slow frame. The size tags edit
 width and depth only, not the bend. On a phone the view centres on the new room
 but can't take in the whole house. Rooms are rectangles on straight walls only.
