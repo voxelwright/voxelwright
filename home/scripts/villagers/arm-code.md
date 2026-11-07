@@ -6,7 +6,7 @@ It runs in a sealed sandbox. You build the villager from three.js meshes; only t
 
 `api` holds:
 - api.THREE: three.js core r187. Use Group, Mesh, SphereGeometry, CapsuleGeometry, CylinderGeometry, ConeGeometry, TorusGeometry, BoxGeometry, LatheGeometry, CircleGeometry, Vector2, MeshStandardMaterial.
-- api.RoundedBoxGeometry(width, height, depth, segments, radius) (use `new`).
+- api.RoundedBoxGeometry(width, height, depth, segments, radius) (use `new`). It is not part of THREE: `new THREE.RoundedBoxGeometry` fails.
 
 Materials: only `new THREE.MeshStandardMaterial({ color: '#rrggbb', roughness })`. The home re-dresses every part: roughness 0.5 or more becomes stitched felt in that colour (use this for almost everything); roughness under 0.5 becomes a smooth glossy bead (button eyes, a nose, metal). Do not paint textures.
 
@@ -18,12 +18,22 @@ Materials: only `new THREE.MeshStandardMaterial({ color: '#rrggbb', roughness })
   - feet: one on +x, one on -x, sitting on the floor under the body; the walk cycle places them. Legs, if any, belong to the feet.
   - held: the prop, placed in front of one hand; it moves with the nearest hand.
 - villager.gait({ speed: 0.2..0.6 m/s, stride: 0.14..0.34 per two steps, bob: 0..0.08, stepped: true, fidget: 0..1 })
-- villager.about({ name, role, bark, voice }): role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..480 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }.
+- villager.about({ name, role, bark, voice, persona }): role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..560 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }; persona is { role, speciality, temperament, register, humour, quirks: [], topics: [], dials: { warmth, playful, chatty, humour } } as described above.
 Numbers outside these ranges are clamped.
 
-The owner's accent colour is given with the request: make a scarf round the neck in exactly that colour, and use it nowhere else. Do not touch the scene, DOM, network or timers. Keep it under about 60 meshes.
+The request gives a starting voice worked out from the description. Start from it and change only what the character calls for; say what you changed and why in one comment line just above villager.about(), starting `// voice:`.
 
-Example (Dumpling, the existing cook, accent #c8553d):
+The owner's accent colour is given with the request: make the scarf round the neck in exactly that colour (and at most one trim on the role's mark), and use it nowhere else.
+
+The home checks the finished villager and refuses it, with the reason, when:
+- an eye is hidden: rays from straight in front of each eye, and from in front and 33 degrees above (where the home is seen from), must reach the eye first, so no scarf, hat brim, hood or prop may cover the face from either;
+- a part floats: every mesh must touch or overlap another (bounding boxes within 0.02), so a head sits on its neck and a hat on its head;
+- the held prop's longest side is under a third of the villager's height, or longer than its height;
+- it is under 0.3 or over 0.95 tall, or wider than 1.5 times its height.
+
+Do not touch the scene, DOM, network or timers. Keep it under about 60 meshes.
+
+Example (Dumpling, the existing cook, given its role's toque, accent #c8553d):
 
 export default function (villager, api) {
   const { THREE } = api
@@ -33,14 +43,19 @@ export default function (villager, api) {
   const body = add(villager, new THREE.SphereGeometry(0.2, 32, 20), tan, 0, 0.146, 0)
   body.scale.set(1, 0.56, 0.88)
   add(villager, new THREE.SphereGeometry(0.09, 20, 12), cream, 0, 0.15, 0.13).scale.set(0.9, 0.9, 0.35)
-  const scarf = add(villager, new THREE.TorusGeometry(0.16, 0.024, 10, 28), felt('#c8553d'), 0, 0.25, 0)
+  const scarf = add(villager, new THREE.TorusGeometry(0.15, 0.03, 10, 28), felt('#c8553d'), 0, 0.24, 0)
   scarf.rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(villager, new THREE.CapsuleGeometry(0.026, 0.07, 6, 10), felt('#c8553d'), s * 0.04, 0.19, 0.15).rotation.z = s * 0.15
   const head = villager.tag(new THREE.Group(), 'head')
   head.position.set(0, 0.36, 0)
   villager.add(head)
   add(head, new THREE.SphereGeometry(0.164, 32, 20), tan, 0, 0, 0).scale.set(1.08, 0.92, 0.95)
   add(head, new THREE.SphereGeometry(0.07, 20, 12), cream, 0, -0.04, 0.12).scale.set(1.15, 0.75, 0.6)
   add(head, new THREE.SphereGeometry(0.016, 12, 8), new THREE.MeshStandardMaterial({ color: '#4a2e28', roughness: 0.3 }), 0, -0.016, 0.16)
+  // The cook's mark: a tall puffy toque, a band and a wider puff on top.
+  const white = felt('#f4efe4')
+  add(head, new THREE.CylinderGeometry(0.085, 0.08, 0.07, 24), white, 0, 0.16, -0.01)
+  add(head, new THREE.SphereGeometry(0.105, 24, 16), white, 0, 0.25, -0.01).scale.set(1, 0.85, 1)
   for (const s of [-1, 1]) {
     const ear = add(head, new THREE.CapsuleGeometry(0.033, 0.15, 6, 12), tan, s * 0.164, -0.016, -0.008)
     ear.rotation.z = s * 0.28
@@ -59,7 +74,18 @@ export default function (villager, api) {
   add(spoon, new THREE.CylinderGeometry(0.008, 0.01, 0.2, 8), felt('#a8703a'), 0, 0.05, 0)
   add(spoon, new THREE.SphereGeometry(0.03, 14, 10), felt('#a8703a'), 0, 0.165, 0).scale.set(1, 1.3, 0.45)
   villager.gait({ speed: 0.38, stride: 0.24, bob: 0.04, stepped: true, fidget: 0.3 })
-  villager.about({ name: 'Dumpling', role: 'cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", voice: { pitch: 240, range: 3, formant: 1.1, rate: 10, breath: 0.1, wobble: 0.25, wobbleRate: 5, tilt: 1.6, gain: 0.9 } })
+  // voice: from the starting voice, a little lower and darker for a round, unhurried cook.
+  villager.about({
+    name: 'Dumpling', role: 'cook', bark: "Soup's on for Thursday. Shall I add bread to the list?",
+    voice: { pitch: 240, range: 3, formant: 1.1, rate: 10, breath: 0.1, wobble: 0.25, wobbleRate: 5, tilt: 1.6, gain: 0.9 },
+    persona: {
+      role: 'Runs the kitchen and the weekly menu', speciality: 'Cooking for a week from one big shop',
+      temperament: 'warm', register: 'plain', humour: 'gentle',
+      quirks: ['Plans meals around what is about to go off', 'Keeps a running tally of who skipped breakfast'],
+      topics: ["the week's menu", 'what is in season', 'the shopping list'],
+      dials: { warmth: 0.8, playful: 0.3, chatty: 0.5, humour: 'clean' },
+    },
+  })
 }
 
 Fence the answer as ```js.

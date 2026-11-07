@@ -1,7 +1,9 @@
 // Renders every generated villager's babble voice offline on one fixed line and measures it (#47).
 // Input: JSON [{id, arm?, description, name, voice?}]. Each entry renders as "model" (its own voice, if given)
 // and as "mapped" (voiceFromDescription). Writes WAVs, results.md and results.json to --wav=dir.
-// Usage: node scripts/villagers/voices.mjs <voices.json> [base-url] --wav=<dir>   (dev server running)
+// Usage: node scripts/villagers/voices.mjs <voices.json> [base-url] --wav=<dir> [--checks=<file.json>]   (dev server running)
+// --checks: [{ "a": id, "b": id, "metric": "f0Hz" | "centroidHz" | "syllablesPerSec", "why": text }], each meaning a's metric is
+// above b's, run per arm; without it the round-1 mouse, tortoise and bear checks run.
 // Exits non-zero when a directional check fails. Models cannot listen: these are numbers, not taste.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,6 +14,7 @@ const args = process.argv.slice(2)
 const file = args.find((a) => !a.startsWith('--') && a.endsWith('.json'))
 const base = args.find((a) => /^https?:/.test(a)) ?? 'http://localhost:5331/'
 const wavDir = args.find((a) => a.startsWith('--wav='))?.slice(6)
+const checksFile = args.find((a) => a.startsWith('--checks='))?.slice(9)
 if (!file || !wavDir) {
   console.error('usage: node scripts/villagers/voices.mjs <voices.json> [base-url] --wav=<dir>')
   process.exit(2)
@@ -96,7 +99,13 @@ for (const arm of arms) {
 
 // ── directional checks (the five fixture descriptions, matched by their key word) ──
 const checks = []
-for (const arm of arms) {
+const UNIT = { f0Hz: 'Hz', centroidHz: 'Hz', syllablesPerSec: 'syl/s' }
+if (checksFile) for (const arm of arms) for (const { a, b, metric, why } of JSON.parse(readFileSync(checksFile, 'utf8'))) {
+  const [x, y] = [a, b].map((id) => rows.find((r) => r.arm === arm && r.id === id))
+  if (!x || !y) continue
+  checks.push({ arm, name: `${a} ${metric} > ${b} ${metric} (${why})`, pass: x[metric] > y[metric], detail: `${x[metric]} vs ${y[metric]} ${UNIT[metric]}` })
+}
+for (const arm of checksFile ? [] : arms) {
   const by = (word) => rows.find((r) => r.arm === arm && r.id.includes(word))
   const [mouse, tortoise, bear] = ['mouse', 'tortoise', 'bear'].map(by)
   if (!mouse || !tortoise || !bear) continue

@@ -633,6 +633,74 @@ heron 144 to 145 / 731 to 817, frog 157 to 333 / 539 to 932. The model crowds th
 6% apart, code bear and heron 2.3 semitones and 8%. The mapping spreads
 wider but pins the mouse at the 480 Hz ceiling. check-babble still passes 27 of 27.
 
+### Round 2 (November 7, 2026): checks, role silhouettes, personas
+
+Code arm only (the look path); the spec arm still builds (one rerun job, `r2-spec-3`).
+
+- **Checks before showing** (`src/villagers/gen/checks.ts`, run by `assemble.ts`): rays from
+  in front and from the dollhouse pitch (33° above) must reach each eye first; every mesh must
+  touch another (bounding boxes within 0.02); the held prop's longest side is 1/3 to 1.1 of the
+  height; height 0.3 to 0.95, width at most 1.5 times the height. A failure is one sentence the
+  runner sends back as the repair request. `&checks=off` shows what was caught.
+  `node scripts/check-villager-gen.mjs [base]` (23 checks, dev server running): the hand-made
+  three and their specs pass, round 1's bear (scarf ring) and a level sun-hat brim are refused,
+  as are a lifted head, a tiny prop and a stretched body. The static box test passes round 1's
+  tortoise; what looked loose there were shell patches, which bounding boxes cannot see.
+- **Silhouette = role**: `scripts/villagers/style.md` gives each role one big mark (toque, tilted
+  sun hat, duster plume above the head, hip ledger, mortarboard, short-peak cap and mail bag,
+  goggles and tool belt, hood). The scarf is thicker and stays at the neck.
+- **Voices** start from `voiceFromDescription()`; the model adjusts with a `// voice:` reason.
+  `RANGES.voice.pitch` now tops out at 560 Hz; a 560 Hz voice tracks at 539 Hz (114 YIN frames).
+- **Personas**: `Persona` in `spec.ts` (provisional until #42 publishes its schema), checked
+  and capped in `build.ts` (strings are cut before any other work, on a word boundary).
+  `gen/templates.ts` holds six built-in templates, `applyTemplate()` (the template wins on
+  temperament, register, humour and dials; the description keeps role, speciality and topics)
+  and `gatePersona()`, the one rule for crude humour: only a known adult who opted in keeps it.
+
+```sh
+node scripts/villagers/run.mjs <out> [base] --set round1|readability --arms code --prefix r2-
+node scripts/villagers/capture.mjs <out> [base] --compare=generated/villagers/exp1
+node scripts/villagers/readability.mjs <out> [base]
+node scripts/villagers/voices.mjs <out>/voices.json [base] --wav=<dir> --checks=scripts/villagers/readability-voices.json
+```
+
+Round 1's five again (`screenshots/villager-gen/round2/rerun-lineup-sheet.jpg`, round 1 above
+round 2): all five usable, 3 first try, 2 repaired (`THREE.RoundedBoxGeometry`), median 107 s
+wall at 6 concurrent (persona text roughly doubled output tokens, 8,000 a villager), $0.60.
+Every role mark shows; the bear's face is clear; the closest silhouette pair among the five is
+0.74 (round 1: 0.82). Voices: 1 of 10 pairs too close (tortoise and bear, 2.3 st, 14%), all 7
+directional checks pass.
+
+Readability test, 20 synthetic villagers (all 8 roles, 2 or 3 each; 4 owners; fox, rabbit and
+hedgehog each in two roles; 7 made with a template), `round2/readability-*.jpg`:
+
+| Measure | Result |
+| --- | --- |
+| Usable | 20 of 20; 8 repaired (7 `THREE.RoundedBoxGeometry`, 1 duster longer than the villager) |
+| Role readability: nearest silhouette has the same role | 55% (chance 8%) |
+| Mean silhouette IoU within a role / between roles | 0.72 / 0.65 |
+| Visible accent at dollhouse distance (128 px for 1.4 m) | min 229 px (8.6% of the figure), median 391 px |
+| Voices too close (<3 st and <20% centroid) | 11 of 190 pairs (the mapping alone: 35) |
+| Voice directional checks | 9 of 9 |
+
+Hats read: cooks, gardeners, tutors and messengers find their own role. Goggles, tool belts,
+hoods and hip bags are mostly inside the round body outline, so makers and carers match other
+roles. Personas (`round2/personas-*.md`) are adult and specific; the crude template comes out
+cheeky for an adult who did not opt in and stays crude for one who did. Earlier passes, kept in
+`generated/villagers/exp2/*-a` and `*-b`: before the 33° rays, all three gardeners' sun-hat
+brims hid their faces from the dollhouse camera and passed the front-only check.
+
+Regression, seen by the lead in `round2/rerun-lineup-sheet.jpg` and `readability-colour.jpg`:
+the role cues read, but species anatomy collapsed into one round teddy body. The rerun tortoise
+has no shell, the mouse reads as a bear in a cap and the heron as a round body under a
+mortarboard; round 1's code arm had better species. Next: species-defining anatomy first, then
+the role cue on top, and a check that the body is not the default round template.
+
+After the round, `THREE.RoundedBoxGeometry` also resolves in the sandbox (the cause of 9 of 25
+repairs), the persona caps are 64 characters for role and 80 for speciality (40 cut mid-phrase), and
+repeated quirks are dropped. `node scripts/check-villager-gen.mjs` 23 of 23 (dev server on 5332),
+`node scripts/check-prop-sandbox.mjs --port=5336` 39 of 39.
+
 ## Measured, kitchen scene (November 6, 2026)
 
 Headless Chrome through Playwright 1.65 (`--enable-unsafe-webgpu

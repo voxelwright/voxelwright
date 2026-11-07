@@ -22,7 +22,7 @@ export type HeldProp = 'spoon' | 'duster' | 'can' | 'letter' | 'pouch' | 'book' 
 
 /** Babble voice, the same nine fields as voice/profiles.ts VoiceProfile, with hard ranges. */
 export interface VoiceSpec {
-  /** Base fundamental, Hz. 90 to 480. */
+  /** Base fundamental, Hz. 90 to 560. */
   pitch: number
   /** Per-word pitch spread, semitones. 0.5 to 7. */
   range: number
@@ -40,6 +40,33 @@ export interface VoiceSpec {
   /** Level, 0.6 to 1.2. */
   gain: number
 }
+
+/**
+ * Who the villager is, as its owner's household helper (#47, provisional shape until #42's
+ * harness publishes the schema in host/README.md). Always an adult, competent character,
+ * whatever the felt body looks like: the plush is an art style, not a mental age.
+ */
+export interface Persona {
+  /** What it does for the household, in a few words. Up to 40 characters. */
+  role: string
+  /** What it is particularly good at. Up to 60 characters. */
+  speciality: string
+  temperament: 'dry' | 'upbeat' | 'calm' | 'blunt' | 'warm' | 'wry'
+  register: 'plain' | 'formal' | 'casual'
+  humour: 'none' | 'dry' | 'deadpan' | 'wordplay' | 'gentle'
+  /** Up to 3 habits, each up to 60 characters. */
+  quirks: string[]
+  /** Up to 5 things it likes to talk about, each up to 40 characters. */
+  topics: string[]
+  /**
+   * 0 to 1 each: warmth 0 blunt to 1 warm, playful 0 serious to 1 playful, chatty 0 brief to 1 chatty.
+   * humour is how far jokes may go; 'crude' survives only through templates.ts gatePersona().
+   */
+  dials: { warmth: number; playful: number; chatty: number; humour: 'clean' | 'cheeky' | 'crude' }
+}
+
+/** Length caps for the persona's free text, applied by trusted code (build.ts check()). */
+export const PERSONA_TEXT = { role: 64, speciality: 80, quirks: 3, quirk: 60, topics: 5, topic: 40 } as const
 
 export interface VillagerSpec {
   /** Short name, one or two words; synthetic. */
@@ -80,6 +107,8 @@ export interface VillagerSpec {
     fidget: number
   }
   voice: VoiceSpec
+  /** Optional: a villager without one gets the home's default manner. */
+  persona?: Persona
 }
 
 /** The owner's accent, given to generation as a fixed input. */
@@ -90,7 +119,8 @@ export const RANGES = {
   body: { r: [0.11, 0.24], tall: [0.7, 1.8], head: [0.6, 1.1], legs: [0, 0.12] },
   eyes: [0.6, 1.4],
   gait: { speed: [0.2, 0.6], stride: [0.14, 0.34], bob: [0, 0.08], fidget: [0, 1] },
-  voice: { pitch: [90, 480], range: [0.5, 7], formant: [0.75, 1.6], rate: [4, 16], breath: [0, 0.6], wobble: [0, 1.2], wobbleRate: [3, 9], tilt: [0.8, 2.6], gain: [0.6, 1.2] },
+  persona: { warmth: [0, 1], playful: [0, 1], chatty: [0, 1] },
+  voice: { pitch: [90, 560], range: [0.5, 7], formant: [0.75, 1.6], rate: [4, 16], breath: [0, 0.6], wobble: [0, 1.2], wobbleRate: [3, 9], tilt: [0.8, 2.6], gain: [0.6, 1.2] },
 } as const satisfies Record<string, Range | Record<string, Range>>
 
 export const ENUMS = {
@@ -102,5 +132,10 @@ export const ENUMS = {
   back: ['none', 'shell', 'wings', 'quilt'],
   pattern: ['plain', 'belly', 'spots', 'stripes', 'patches'],
   accessory: ['none', 'glasses', 'hat', 'beret', 'bow', 'apron', 'satchel', 'headphones', 'flower', 'leaf'],
+  temperament: ['dry', 'upbeat', 'calm', 'blunt', 'warm', 'wry'],
+  register: ['plain', 'formal', 'casual'],
+  humour: ['none', 'dry', 'deadpan', 'wordplay', 'gentle'],
+  /** Persona.dials.humour: how far jokes may go (the style above is separate). */
+  humourDial: ['clean', 'cheeky', 'crude'],
   prop: ['spoon', 'duster', 'can', 'letter', 'pouch', 'book', 'calendar', 'pencil', 'basket', 'mug', 'wrench', 'none'],
 } as const

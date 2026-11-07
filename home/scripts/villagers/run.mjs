@@ -1,7 +1,10 @@
 // #47 experiment runner: generate felt villagers from a description with `claude -p`,
 // check each in headless Chrome against the dev server, allow one repair pass fed the error.
-// Usage: node scripts/villagers/run.mjs <out-dir> [base-url] [--only spec-1,code-3] [--concurrency 5] [--model sonnet]
-// Writes home/generated/villagers/<run-id>/ (git-ignored), <out-dir>/results.json and <out-dir>/voices.json.
+// Usage: node scripts/villagers/run.mjs <out-dir> [base-url] [--set round1|readability] [--arms spec,code] [--prefix r2-]
+//        [--only spec-1,code-3] [--concurrency 5] [--model sonnet]
+// Writes home/generated/villagers/<prefix><run-id>/ (git-ignored), <out-dir>/results.json and <out-dir>/voices.json.
+// Round 2: the role is given with the request, the description's mapped voice is the starting voice,
+// and assemble.ts's checks (gen/checks.ts) refuse a hidden face, a floating part, a tiny prop or odd proportions.
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -17,17 +20,20 @@ const base = args[1] && !args[1].startsWith('--') ? args[1] : 'http://localhost:
 const only = flag('--only', '')?.split(',').filter(Boolean)
 const concurrency = Number(flag('--concurrency', 5))
 const model = flag('--model', 'sonnet')
+const set = flag('--set', 'round1')
+const arms = flag('--arms', 'spec,code').split(',')
+const prefix = flag('--prefix', '')
 const cwd = flag('--cwd', join(out, 'claude-cwd'))
 mkdirSync(cwd, { recursive: true })
 
-/** Synthetic descriptions, each with its fixed owner. The accent is an input to generation, never the model's choice. */
-export const DESCRIPTIONS = {
-  1: { text: 'a patient old tortoise who keeps the family calendar and loves jazz', owner: 'Alex', accent: '#c8553d' },
-  2: { text: 'a jittery little mouse who sorts the mail and never stops chattering', owner: 'Sam', accent: '#3d7cc8' },
-  3: { text: 'a big gentle bear who cooks slow Sunday breakfasts and hums while working', owner: 'Alex', accent: '#c8553d' },
-  4: { text: 'a tall, slightly strict heron who tutors the kids in maths', owner: 'Mia', accent: '#e0b53a' },
-  5: { text: 'a cheerful round frog who waters the plants and tells terrible puns', owner: 'Sam', accent: '#3d7cc8' },
-}
+/** Synthetic descriptions, each with its fixed owner and role. The accent is an input to generation, never the model's choice. */
+export const SETS = JSON.parse(readFileSync(join(here, 'descriptions.json'), 'utf8'))
+const DESCRIPTIONS = SETS[set]
+/** Synthetic owner profiles: who may get crude humour (templates.ts gatePersona). */
+const PROFILES = SETS.profiles ?? {}
+// Templates for the ask, read from the source so the prompt and the merge use the same data.
+const TEMPLATES = Object.fromEntries((await import('../../src/villagers/gen/templates.ts').catch(() => null))?.BUILTIN_TEMPLATES?.map((t) => [t.id, t]) ?? [])
+if (!DESCRIPTIONS) throw new Error(`no description set "${set}"`)
 const style = readFileSync(join(here, 'style.md'), 'utf8')
 const system = { code: `${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }
 // The code arm's module is saved as text: it is only handed to the sandbox, and a fetched .js would join Vite's module graph and reload the page when rewritten.
@@ -72,20 +78,28 @@ async function verify(id, meta) {
   return { ...r, checkMs: performance.now() - t0 }
 }
 
+// The description's mapped voice (src/voice/gen.ts), given to the model as its starting voice.
+const mapVoice = (text) => page.evaluate(async (t) => (await import('/src/voice/gen.ts')).voiceFromDescription(t), text)
+const round = (v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, Math.round(x * 100) / 100]))
+
 async function job({ arm, n }) {
-  const id = `${arm}-${n}`
+  const id = `${prefix}${set === 'round1' ? `${arm}-` : ''}${n}`
   const d = DESCRIPTIONS[n]
   const dir = join(home, 'generated/villagers', id)
   mkdirSync(dir, { recursive: true })
   const file = FILE[arm]
-  const ask = `Make a villager: ${d.text}.\n\nIts owner is ${d.owner}; the owner's accent colour is ${d.accent}.`
-  const meta = { arm, file, accent: d.accent, owner: d.owner, description: d.text }
+  const mapped = round(await mapVoice(d.text))
+  const template = d.template ? TEMPLATES[d.template] : null
+  if (d.template && !template) throw new Error(`no template "${d.template}"`)
+  const ask = `Make a villager: ${d.text}.\n\nIts role is ${d.role}. Its owner is ${d.owner}; the owner's accent colour is ${d.accent}.\n\nStarting voice, from the description: ${JSON.stringify(mapped)}`
+    + (template ? `\n\nPersonality template "${template.name}": ${JSON.stringify(template.persona)}` : '')
+  const meta = { arm, file, accent: d.accent, owner: d.owner, role: d.role, description: d.text, profile: PROFILES[d.owner] ?? null, ...(d.template ? { template: d.template } : {}) }
   const first = await claude(system[arm], ask)
   writeFileSync(join(dir, 'raw.txt'), first.text)
   const body = extract(first.text, arm)
   writeFileSync(join(dir, file), body)
   const firstCheck = await verify(id, meta)
-  const row = { id, arm, n, description: d.text, owner: d.owner, accent: d.accent, model, first: { ...first, text: undefined, check: firstCheck } }
+  const row = { id, arm, n, description: d.text, owner: d.owner, accent: d.accent, role: d.role, template: d.template ?? null, profile: meta.profile, mappedVoice: mapped, model, first: { ...first, text: undefined, check: firstCheck } }
   if (!firstCheck.ok) {
     const repairAsk = `${ask}\n\nYour previous file:\n\`\`\`${arm === 'code' ? 'js' : 'json'}\n${body}\n\`\`\`\n\nIt failed with this error:\n${firstCheck.error}\n\nReturn the corrected complete file.`
     const repair = await claude(system[arm], repairAsk)
@@ -101,7 +115,7 @@ async function job({ arm, n }) {
 }
 
 const jobs = []
-for (const arm of ['spec', 'code']) for (const n of [1, 2, 3, 4, 5]) if (!only?.length || only.includes(`${arm}-${n}`)) jobs.push({ arm, n })
+for (const arm of arms) for (const n of Object.keys(DESCRIPTIONS)) if (!only?.length || only.includes(`${arm}-${n}`) || only.includes(n)) jobs.push({ arm, n })
 const resultsFile = join(out, 'results.json')
 const results = existsSync(resultsFile) ? JSON.parse(readFileSync(resultsFile, 'utf8')) : {}
 let next = 0
@@ -118,7 +132,22 @@ const voices = []
 for (const row of Object.values(results).sort((a, b) => a.id.localeCompare(b.id))) {
   const meta = JSON.parse(readFileSync(join(home, 'generated/villagers', row.id, 'meta.json'), 'utf8'))
   const v = await page.evaluate(([m, b]) => window.villagerGen.check(m, b), [meta, `/generated/villagers/${row.id}`])
-  voices.push({ id: row.id, arm: row.arm, description: row.description, name: v.name ?? null, voice: v.voice ?? null })
+  voices.push({ id: row.id, arm: row.arm, description: row.description, role: row.role, declaredRole: v.role ?? null, name: v.name ?? null, voice: v.voice ?? null })
+  row.persona = v.persona ?? null
+  row.bark = v.bark ?? null
 }
 writeFileSync(join(out, 'voices.json'), JSON.stringify(voices, null, 1))
+writeFileSync(resultsFile, JSON.stringify(results, null, 1))
+// Personas, for checking that every one is adult, specific and different.
+const cell = (x) => String(x ?? '').replace(/\|/g, '/')
+writeFileSync(join(out, 'personas.md'), [
+  '| id | name | role | template / profile | persona role | speciality | temperament | register | humour | warmth / playful / chatty | humour dial | quirks | topics | bark |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+  ...Object.values(results).sort((a, b) => a.id.localeCompare(b.id)).map((r) => {
+    const p = r.persona
+    const who = `${r.template ?? '-'} / ${r.profile ? (r.profile.adult ? `adult${r.profile.crudeOptIn ? ', crude opt-in' : ''}` : 'child') : 'unknown'}`
+    if (!p) return `| ${r.id} | | ${r.role ?? ''} | ${who} | (no persona) | | | | | | | | | ${cell(r.bark)} |`
+    return `| ${r.id} | ${cell(voices.find((v) => v.id === r.id)?.name)} | ${r.role ?? ''} | ${who} | ${cell(p.role)} | ${cell(p.speciality)} | ${p.temperament} | ${p.register} | ${p.humour} | ${p.dials.warmth} / ${p.dials.playful} / ${p.dials.chatty} | ${p.dials.humour} | ${p.quirks.map(cell).join('; ')} | ${p.topics.map(cell).join('; ')} | ${cell(r.bark)} |`
+  }),
+].join('\n') + '\n')
 await browser.close()

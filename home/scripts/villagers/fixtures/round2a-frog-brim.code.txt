@@ -1,0 +1,59 @@
+export default function (villager, api) {
+  const { THREE } = api
+  const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 })
+  const bead = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.25 })
+  const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
+  const green = felt('#8fae6a'), belly = felt('#efe3c0'), blush = felt('#e3a597')
+  const blue = '#3d7cc8'
+
+  // Body
+  add(villager, new THREE.SphereGeometry(0.17, 32, 20), green, 0, 0.15, 0).scale.set(1, 0.85, 0.9)
+  add(villager, new THREE.SphereGeometry(0.1, 20, 12), belly, 0, 0.14, 0.1).scale.set(0.95, 0.95, 0.4)
+
+  // Scarf: thick tube at the neck, two tails in front
+  const scarf = add(villager, new THREE.TorusGeometry(0.13, 0.032, 12, 32), felt(blue), 0, 0.26, 0)
+  scarf.rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(villager, new THREE.CapsuleGeometry(0.028, 0.08, 6, 10), felt(blue), s * 0.045, 0.19, 0.135).rotation.z = s * 0.1
+
+  // Head
+  const head = villager.tag(new THREE.Group(), 'head')
+  head.position.set(0, 0.36, 0)
+  villager.add(head)
+  add(head, new THREE.SphereGeometry(0.15, 32, 20), green, 0, 0, 0).scale.set(1.2, 0.85, 1)
+  const smile = add(head, new THREE.TorusGeometry(0.065, 0.005, 6, 18, Math.PI), felt('#5a3a30'), 0, -0.03, 0.138)
+  smile.rotation.z = Math.PI
+  for (const s of [-1, 1]) {
+    add(head, new THREE.SphereGeometry(0.026, 12, 8), blush, s * 0.1, -0.03, 0.1).scale.set(1, 0.8, 0.6)
+    add(head, new THREE.SphereGeometry(0.045, 16, 12), green, s * 0.075, 0.08, 0.07)
+    const eye = villager.tag(add(head, new THREE.CylinderGeometry(0.026, 0.026, 0.012, 18), bead('#241a18'), s * 0.075, 0.08, 0.113), s < 0 ? 'eye-left' : 'eye-right')
+    eye.rotation.x = Math.PI / 2
+  }
+  // The gardener's mark: wide, flat, level brim with a low crown
+  const straw = felt('#dcc080')
+  add(head, new THREE.CylinderGeometry(0.32, 0.32, 0.02, 40), straw, 0, 0.13, 0)
+  add(head, new THREE.CylinderGeometry(0.1, 0.115, 0.07, 28), straw, 0, 0.17, 0)
+
+  // Hands and feet
+  for (const s of [-1, 1]) {
+    const hand = villager.tag(add(villager, new THREE.CapsuleGeometry(0.034, 0.05, 6, 10), green, s * 0.185, 0.16, 0.02), s < 0 ? 'hand-left' : 'hand-right')
+    hand.rotation.z = s * 0.5
+    villager.tag(add(villager, new THREE.SphereGeometry(0.05, 16, 10), green, s * 0.09, 0.03, 0.05), s < 0 ? 'foot-left' : 'foot-right').scale.set(1.15, 0.6, 1.5)
+  }
+
+  // Held watering can
+  const can = villager.tag(new THREE.Group(), 'held')
+  can.position.set(-0.2, 0.14, 0.06)
+  villager.add(can)
+  const rust = felt('#b5653f')
+  add(can, new THREE.CylinderGeometry(0.055, 0.06, 0.1, 22), rust, 0, 0, 0)
+  const spout = add(can, new THREE.CylinderGeometry(0.01, 0.015, 0.16, 10), rust, 0, 0.0, 0.1)
+  spout.rotation.x = 1.0
+  const rose = add(can, new THREE.CylinderGeometry(0.03, 0.02, 0.02, 14), rust, 0, 0.043, 0.167)
+  rose.rotation.x = 1.0
+  const handle = add(can, new THREE.TorusGeometry(0.04, 0.009, 8, 16), rust, 0, 0.0, -0.06)
+  handle.rotation.y = Math.PI / 2
+
+  villager.gait({ speed: 0.36, stride: 0.22, bob: 0.05, stepped: true, fidget: 0.4 })
+  // voice: a touch lower and more wobbly than the start, for a croaky, giggly frog who loves a pun.
+  villager.about({ name: 'Puddle', role: 'gardener', bark: "I'm so glad you're here, the tomatoes said you'd be a-peel-ing!", voice: { pitch: 210, range: 4.5, formant: 1.0, rate: 11, breath: 0.08, wobble: 0.6, wobbleRate: 6, tilt: 1.8, gain: 0.9 } })
+}

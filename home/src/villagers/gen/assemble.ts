@@ -10,6 +10,7 @@ import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
+import { inspect, type Measures } from './checks'
 import type { VillagerSpec } from './spec'
 
 const REQUIRED: Role[] = ['head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right']
@@ -19,15 +20,23 @@ const HEIGHT: [number, number] = [0.25, 1.1]
 export interface Assembled {
   fig: Figure
   /** Name, role, bark, gait and voice, clamped by the spec checker. */
-  about: Pick<VillagerSpec, 'name' | 'role' | 'bark' | 'gait' | 'voice'>
+  about: Pick<VillagerSpec, 'name' | 'role' | 'bark' | 'gait' | 'voice' | 'persona'>
   fixes: string[]
+  /** What ./checks.ts measured; the figure is refused before this when a check fails. */
+  measures: Measures
+}
+
+/** Two #rrggbb colours within a few steps of 255 on every channel. */
+function near(a: string, b: string, tol = 8) {
+  const x = new THREE.Color(a), y = new THREE.Color(b)
+  return Math.max(Math.abs(x.r - y.r), Math.abs(x.g - y.g), Math.abs(x.b - y.b)) * 255 <= tol
 }
 
 const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'object' && !Array.isArray(o) && Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined)
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
 /** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -39,8 +48,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   // Gait and about: plain data through the spec checker, so the same ranges clamp both arms.
   const meta = own(raw, 'villager')
   const about = own(meta, 'about')
-  const checked = check({ name: own(about, 'name'), role: own(about, 'role'), bark: own(about, 'bark'), voice: own(about, 'voice'), gait: own(meta, 'gait') })
-  const fixes = checked.fixes.filter((f) => /^(name|role|bark|gait|voice)/.test(f))
+  const persona = own(about, 'persona')
+  const checked = check({ name: own(about, 'name'), role: own(about, 'role'), bark: own(about, 'bark'), voice: own(about, 'voice'), gait: own(meta, 'gait'), ...(persona === undefined ? {} : { persona }) })
+  const fixes = checked.fixes.filter((f) => /^(name|role|bark|gait|voice|persona)/.test(f))
 
   // Trusted rebuild of the geometry; its materials are replaced below.
   const group = rebuild(prop)
@@ -81,6 +91,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     }
     replaced.add(old)
     mesh.material = made.get(k)!
+    // The made colour, for check reasons, and the owner's accent, for measuring how much of it shows (load.ts silhouettes).
+    mesh.userData.colour = hex(prop.materials[k].color)
+    if (near(mesh.userData.colour, accent)) mesh.userData.accent = true
   })
   for (const m of replaced) m.dispose()
 
@@ -114,7 +127,7 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     h.userData.rest = p.clone()
     return h
   })
-  if (heldAt) into(hands[0], 'held', handPivots[0].p, handPivots[0].p)
+  const held = heldAt ? into(hands[0], 'held', handPivots[0].p, handPivots[0].p) : null
   // Feet: pivot under each foot on the floor; the rig places foot 0 on +x.
   const footPivots = (['foot-left', 'foot-right'] as const).map((r) => ({ r, c: box(r).getCenter(new THREE.Vector3()) }))
   footPivots.sort((a, b) => b.c.x - a.c.x)
@@ -122,6 +135,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const side = THREE.MathUtils.clamp((Math.abs(footPivots[0].c.x) + Math.abs(footPivots[1].c.x)) / 2, 0.02, 0.25)
   const hip = THREE.MathUtils.clamp(box('body').min.y, 0, 0.4)
   root.traverse((n) => { n.castShadow = n.receiveShadow = true })
+  // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions.
+  const { failures, measures } = inspect(root, eyes, held)
+  if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
   const g = checked.spec.gait
   const touch = g.fidget > 0.02 ? (v: Villager) => {
@@ -133,5 +149,5 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     stride: g.stride, speed: g.speed, bob: g.bob, stepped: g.stepped, outline, touch,
   }
   const { name, role, bark, voice } = checked.spec
-  return { fig, about: { name, role, bark, gait: g, voice }, fixes }
+  return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures }
 }

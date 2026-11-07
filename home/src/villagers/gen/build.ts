@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu'
 import { canvas, rng, toTexture } from '../../paint'
 import { buttonEye, faceTexture, feltKit, feltTexture, fuzzFill, hand, mesh, part, prop as heldBase, skeleton, srgb, stitchPath, type Prop } from '../kinds'
 import type { Figure, Villager } from '../rig'
-import { ENUMS, RANGES, type Accessory, type BodyShape, type HeldProp, type VillagerSpec, type VoiceSpec } from './spec'
+import { ENUMS, PERSONA_TEXT, RANGES, type Accessory, type BodyShape, type HeldProp, type VillagerSpec, type VoiceSpec } from './spec'
 
 // ─── check ────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,21 @@ const HEX = /^#[0-9a-f]{6}$/i
 
 export interface Checked { spec: VillagerSpec; fixes: string[] }
 
+/**
+ * Untrusted text to at most `max` characters of single-spaced text. Cut first, so the cost does not
+ * grow with the input; a cut lands on a word boundary when there is one in the last third.
+ */
+function cap(v: string, max: number) {
+  const s = v.slice(0, 4 * max).replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return (space > max * 0.66 ? cut.slice(0, space) : cut).replace(/[\s,;:-]+$/, '')
+}
+
+/** A short note of an untrusted value for `fixes`; its cost never grows with the value's size. */
+const brief = (v: unknown, n: number) => (typeof v === 'string' ? JSON.stringify(v.slice(0, n)) : v !== null && typeof v === 'object' ? (Array.isArray(v) ? 'an array' : 'an object') : String(v).slice(0, n))
+
 /** Untrusted JSON to a spec. Never fails: anything wrong is clamped or replaced, and listed in `fixes`. */
 export function check(raw: unknown): Checked {
   const fixes: string[] = []
@@ -40,19 +55,20 @@ export function check(raw: unknown): Checked {
   const pick = <T extends string>(o: unknown, k: string, options: readonly T[], fallback: T, where: string): T => {
     const v = own(o, k)
     if (typeof v === 'string' && (options as readonly string[]).includes(v)) return v as T
-    fixes.push(`${where}: ${JSON.stringify(v)?.slice(0, 30)} -> ${fallback}`)
+    fixes.push(`${where}: ${brief(v, 30)} -> ${fallback}`)
     return fallback
   }
   const text = (o: unknown, k: string, max: number, fallback: string, where: string) => {
     const v = own(o, k)
-    if (typeof v === 'string' && v.trim()) return v.trim().replace(/\s+/g, ' ').slice(0, max)
+    const s = typeof v === 'string' ? cap(v, max) : ''
+    if (s) return s
     fixes.push(`${where}: missing`)
     return fallback
   }
   const hex = (o: unknown, k: string, fallback: string, where: string) => {
     const v = own(o, k)
     if (typeof v === 'string' && HEX.test(v)) return v.toLowerCase()
-    fixes.push(`${where}: ${JSON.stringify(v)?.slice(0, 20)} -> ${fallback}`)
+    fixes.push(`${where}: ${brief(v, 20)} -> ${fallback}`)
     return fallback
   }
   const D = DEFAULT
@@ -61,7 +77,7 @@ export function check(raw: unknown): Checked {
   const accessories: Accessory[] = []
   if (Array.isArray(accessoriesRaw)) {
     for (const a of accessoriesRaw) {
-      if (typeof a !== 'string' || !(ENUMS.accessory as readonly string[]).includes(a)) { fixes.push(`accessory ${JSON.stringify(a)?.slice(0, 20)} dropped`); continue }
+      if (typeof a !== 'string' || !(ENUMS.accessory as readonly string[]).includes(a)) { fixes.push(`accessory ${brief(a, 20)} dropped`); continue }
       if (a === 'none' || accessories.includes(a as Accessory)) continue
       if (accessories.length >= MAX_ACCESSORIES) { fixes.push(`accessory ${a} dropped (at most ${MAX_ACCESSORIES})`); continue }
       accessories.push(a as Accessory)
@@ -104,6 +120,37 @@ export function check(raw: unknown): Checked {
       fidget: num(gait, 'fidget', RANGES.gait.fidget, D.gait.fidget, 'gait.fidget'),
     },
     voice: Object.fromEntries((Object.keys(v) as (keyof VoiceSpec)[]).map((k) => [k, num(voice, k, v[k], D.voice[k], `voice.${k}`)])) as unknown as VoiceSpec,
+  }
+  const persona = own(raw, 'persona')
+  if (persona !== undefined) {
+    const dials = own(persona, 'dials')
+    const P = PERSONA_TEXT
+    // Arrays are cut to their cap before anything looks at their items.
+    const list = (k: string, n: number, max: number) => {
+      const a = own(persona, k)
+      if (!Array.isArray(a)) {
+        fixes.push(`persona.${k}: not a list`)
+        return []
+      }
+      if (a.length > n) fixes.push(`persona.${k}: kept ${n} of ${a.length}`)
+      // Duplicates dropped: a repeated quirk reads as a glitch.
+      return [...new Set(a.slice(0, n).map((x) => (typeof x === 'string' ? cap(x, max) : '')).filter(Boolean))]
+    }
+    spec.persona = {
+      role: text(persona, 'role', P.role, spec.role, 'persona.role'),
+      speciality: text(persona, 'speciality', P.speciality, spec.role, 'persona.speciality'),
+      temperament: pick(persona, 'temperament', ENUMS.temperament, 'calm', 'persona.temperament'),
+      register: pick(persona, 'register', ENUMS.register, 'plain', 'persona.register'),
+      humour: pick(persona, 'humour', ENUMS.humour, 'none', 'persona.humour'),
+      quirks: list('quirks', P.quirks, P.quirk),
+      topics: list('topics', P.topics, P.topic),
+      dials: {
+        warmth: num(dials, 'warmth', RANGES.persona.warmth, 0.5, 'persona.dials.warmth'),
+        playful: num(dials, 'playful', RANGES.persona.playful, 0.3, 'persona.dials.playful'),
+        chatty: num(dials, 'chatty', RANGES.persona.chatty, 0.4, 'persona.dials.chatty'),
+        humour: pick(dials, 'humour', ENUMS.humourDial, 'clean', 'persona.dials.humour'),
+      },
+    }
   }
   return { spec, fixes }
 }

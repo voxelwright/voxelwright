@@ -65,7 +65,8 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
       material: (preset: Material['preset'], options: Omit<Material, 'preset'> = {}, seed = 1) => material({ ...options, preset }, seed),
       note: (text: unknown) => void (notes.length < 20 && notes.push(String(text).slice(0, 200))),
     }
-    const api = { THREE, RoundedBoxGeometry, paint, prop }
+    // RoundedBoxGeometry is also under THREE: models reach for THREE.RoundedBoxGeometry (9 of 25 repairs in #47 round 2).
+    const api = { THREE: { ...THREE, RoundedBoxGeometry }, RoundedBoxGeometry, paint, prop }
     const t0 = now()
     const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
     const mod = await import(/* @vite-ignore */ url)

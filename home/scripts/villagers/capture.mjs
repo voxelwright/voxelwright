@@ -2,13 +2,16 @@
 // and a close view, record draw calls and triangles against a no-villager baseline,
 // shoot both arms and the schema-coverage pairs in rows, render flat silhouettes and
 // their pairwise IoU, and write <out>/results.md.
-// Usage: node scripts/villagers/capture.mjs <out-dir> [base-url]   (dev server running)
+// Usage: node scripts/villagers/capture.mjs <out-dir> [base-url] [--compare=<earlier-out-dir>]   (dev server running)
+// --compare adds the earlier run's code row to the lineup sheet (round 2 against round 1, like for like).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { chromium } from 'playwright'
 
-const out = resolve(process.argv[2])
-const base = process.argv[3] ?? 'http://localhost:5330/'
+const args = process.argv.slice(2)
+const out = resolve(args[0])
+const base = args.find((a, i) => i > 0 && /^https?:/.test(a)) ?? 'http://localhost:5330/'
+const compare = args.find((a) => a.startsWith('--compare='))?.slice(10)
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
 const shots = join(out, 'shots')
 mkdirSync(shots, { recursive: true })
@@ -52,9 +55,11 @@ await Promise.all([0, 1].map(async () => {
 }))
 
 // Rows: each arm side by side, and the hand-made plush beside their coverage specs.
-const row = (arm) => [1, 2, 3, 4, 5].map((n) => `${arm}-${n}`).filter((id) => usable.includes(id)).join(',')
-await shoot(`gen=${row('spec')}&lineup=1&close=1`, 'row-spec.jpg')
-await shoot(`gen=${row('code')}&lineup=1&close=1`, 'row-code.jpg')
+const NS = [...new Set(ids.map((id) => String(results[id].n)))].sort()
+const ARMS = ['spec', 'code'].filter((arm) => ids.some((id) => results[id].arm === arm))
+const idOf = (rs, arm, n) => Object.keys(rs).find((id) => rs[id].arm === arm && String(rs[id].n) === n)
+const row = (arm) => NS.map((n) => idOf(results, arm, n)).filter((id) => usable.includes(id)).join(',')
+for (const arm of ARMS) await shoot(`gen=${row(arm)}&lineup=1&close=1`, `row-${arm}.jpg`)
 await shoot('gen=hand:dumpling,spec:dumpling,hand:tuft,spec:tuft,hand:moss,spec:moss&lineup=1&close=1', 'coverage.jpg')
 
 // Silhouettes: every result plus the three hand-made plush, flat black on white from the dollhouse heading.
@@ -107,21 +112,25 @@ await hp.screenshot({ path: join(shots, 'silhouettes.jpg'), type: 'jpeg', qualit
 
 // The lineup sheet: every close view, descriptions across, arms down.
 const s = (ms) => (ms == null ? '' : (ms / 1000).toFixed(1))
-const tile = (id) => {
-  const r = results[id]
-  if (!r || !usable.includes(id)) return '<div class="cell"><div class="fail">no usable result</div></div>'
+const tile = (id, rs = results, dir = shots) => {
+  const r = rs[id]
+  if (!r || !(r.repair ?? r.first).check.ok) return '<div class="cell"><div class="fail">no usable result</div></div>'
   const c = r.capture ?? {}
-  return `<div class="cell"><img src="file://${join(shots, `${id}-close.jpg`)}"><p><b>${c.name ?? ''}</b> &middot; ${id}<br>${s(r.first.wallMs + (r.repair?.wallMs ?? 0))} s &middot; ${r.repair ? 'repaired' : 'first try'} &middot; ${c.triangles ?? ''} tris &middot; ${c.drawCalls ?? ''} draws</p></div>`
+  return `<div class="cell"><img src="file://${join(dir, `${id}-close.jpg`)}"><p><b>${c.name ?? ''}</b> &middot; ${id}<br>${s(r.first.wallMs + (r.repair?.wallMs ?? 0))} s &middot; ${r.repair ? 'repaired' : 'first try'} &middot; ${c.triangles ?? ''} tris &middot; ${c.drawCalls ?? ''} draws</p></div>`
 }
-const DESC = Object.fromEntries(ids.map((id) => [results[id].n, results[id].description]))
+const DESC = Object.fromEntries(ids.map((id) => [String(results[id].n), results[id].description]))
+const earlier = compare ? JSON.parse(readFileSync(join(resolve(compare), 'results.json'), 'utf8')) : null
+const sheetRows = [
+  ...(earlier ? [['Round 1 code', (n) => tile(idOf(earlier, 'code', n), earlier, join(resolve(compare), 'shots'))]] : []),
+  ...ARMS.map((arm) => [earlier ? `Round 2 ${arm}` : arm === 'spec' ? 'Spec (JSON)' : 'Code (sandbox)', (n) => tile(idOf(results, arm, n))]),
+]
 const sheet = `<html><head><style>
   body { margin: 0; padding: 20px; background: #f4ece0; font: 14px/1.3 Georgia, serif; color: #3a2a1e; width: 2060px }
   .grid { display: grid; grid-template-columns: 90px repeat(5, 390px); gap: 10px; align-items: start } .cell { background: #fffaf2; padding: 6px; border-radius: 8px }
   img { width: 378px; display: block; border-radius: 4px } p { margin: 4px 0 0; font-size: 13px } .h { font-style: italic; font-size: 13px } .arm { font-weight: bold; padding-top: 90px }
   .fail { width: 378px; height: 236px; display: grid; place-items: center; background: #e8d9c6 }
-</style></head><body><div class="grid"><div></div>${[1, 2, 3, 4, 5].map((n) => `<div class="h">${n}. ${DESC[n] ?? ''}</div>`).join('')}
-<div class="arm">Spec (JSON)</div>${[1, 2, 3, 4, 5].map((n) => tile(`spec-${n}`)).join('')}
-<div class="arm">Code (sandbox)</div>${[1, 2, 3, 4, 5].map((n) => tile(`code-${n}`)).join('')}</div></body></html>`
+</style></head><body><div class="grid"><div></div>${NS.map((n) => `<div class="h">${n}. ${DESC[n] ?? ''}</div>`).join('')}
+${sheetRows.map(([label, cell]) => `<div class="arm">${label}</div>${NS.map(cell).join('')}`).join('\n')}</div></body></html>`
 writeFileSync(join(out, 'lineup.html'), sheet)
 await hp.setViewportSize({ width: 2100, height: 800 })
 await hp.goto(`file://${join(out, 'lineup.html')}`)
@@ -129,9 +138,9 @@ await hp.screenshot({ path: join(shots, 'lineup-sheet.jpg'), type: 'jpeg', quali
 await hp.close()
 
 // results.md
-const lines = ['| # | Description | Arm | Name | Latency s | API s | First try | Out tokens | Cost $ | Triangles | Draw calls | Build ms | Fixes | Max IoU |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
-for (const n of [1, 2, 3, 4, 5]) for (const arm of ['spec', 'code']) {
-  const r = results[`${arm}-${n}`]
+const lines = ['| # | Description | Arm | Name | Latency s | API s | First try | Out tokens | Cost $ | Triangles | Draw calls | Build ms | Fixes | Max IoU | Why repaired |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+for (const n of NS) for (const arm of ARMS) {
+  const r = results[idOf(results, arm, n)]
   if (!r) continue
   const c = r.capture ?? {}
   const latency = r.first.wallMs + (r.repair?.wallMs ?? 0)
@@ -139,11 +148,11 @@ for (const n of [1, 2, 3, 4, 5]) for (const arm of ['spec', 'code']) {
   const tokens = (r.first.outputTokens ?? 0) + (r.repair?.outputTokens ?? 0)
   const cost = (r.first.costUsd ?? 0) + (r.repair?.costUsd ?? 0)
   const first = r.first.check.ok ? 'yes' : r.repair?.check.ok ? 'no, repaired' : 'no, failed'
-  lines.push(`| ${n} | ${r.description} | ${arm} | ${c.name ?? ''} | ${s(latency)} | ${s(api)} | ${first} | ${tokens} | ${cost.toFixed(3)} | ${c.triangles ?? ''} | ${c.drawCalls ?? ''} | ${c.buildMs == null ? '' : Math.round(c.buildMs)} | ${c.fixes?.length ?? ''} | ${r.maxIoU == null ? '' : r.maxIoU.toFixed(2)} |`)
+  lines.push(`| ${n} | ${r.description} | ${arm} | ${c.name ?? ''} | ${s(latency)} | ${s(api)} | ${first} | ${tokens} | ${cost.toFixed(3)} | ${c.triangles ?? ''} | ${c.drawCalls ?? ''} | ${c.buildMs == null ? '' : Math.round(c.buildMs)} | ${c.fixes?.length ?? ''} | ${r.maxIoU == null ? '' : r.maxIoU.toFixed(2)} | ${r.first.check.ok ? '' : String(r.first.check.error).replace(/\|/g, '/').slice(0, 160)} |`)
 }
 const median = (xs) => { const a = [...xs].sort((p, q) => p - q); return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : NaN }
 lines.push('', '| Arm | Median latency s | Median API s | First try | Total cost $ | Median triangles | Median build ms |', '| --- | --- | --- | --- | --- | --- | --- |')
-for (const arm of ['spec', 'code']) {
+for (const arm of ARMS) {
   const rs = ids.filter((id) => results[id].arm === arm).map((id) => results[id])
   lines.push(`| ${arm} | ${s(median(rs.map((r) => r.first.wallMs + (r.repair?.wallMs ?? 0))))} | ${s(median(rs.map((r) => (r.first.apiMs ?? 0) + (r.repair?.apiMs ?? 0))))} | ${rs.filter((r) => r.first.check.ok).length} of ${rs.length} | ${rs.reduce((t, r) => t + (r.first.costUsd ?? 0) + (r.repair?.costUsd ?? 0), 0).toFixed(3)} | ${median(rs.map((r) => r.capture?.triangles ?? NaN).filter(Number.isFinite))} | ${Math.round(median(rs.map((r) => r.capture?.buildMs ?? NaN).filter(Number.isFinite)))} |`)
 }

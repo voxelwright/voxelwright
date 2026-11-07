@@ -1,0 +1,181 @@
+{
+ "round1": {
+  "1": {
+   "text": "a patient old tortoise who keeps the family calendar and loves jazz",
+   "role": "keeper",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "2": {
+   "text": "a jittery little mouse who sorts the mail and never stops chattering",
+   "role": "messenger",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "3": {
+   "text": "a big gentle bear who cooks slow Sunday breakfasts and hums while working",
+   "role": "cook",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "4": {
+   "text": "a tall, slightly strict heron who tutors the kids in maths",
+   "role": "tutor",
+   "owner": "Mia",
+   "accent": "#e0b53a"
+  },
+  "5": {
+   "text": "a cheerful round frog who waters the plants and tells terrible puns",
+   "role": "gardener",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  }
+ },
+ "readability": {
+  "01": {
+   "text": "a stout badger who bakes bread before anyone is awake",
+   "role": "cook",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "02": {
+   "text": "a quick little fox who flips pancakes on Saturday mornings",
+   "role": "cook",
+   "owner": "Sam",
+   "accent": "#3d7cc8",
+   "template": "buddy"
+  },
+  "03": {
+   "text": "a sleepy old walrus who simmers soup all afternoon",
+   "role": "cook",
+   "owner": "Mia",
+   "accent": "#e0b53a"
+  },
+  "04": {
+   "text": "a shy rabbit who grows carrots and herbs on the windowsill",
+   "role": "gardener",
+   "owner": "Robin",
+   "accent": "#6a9a4a"
+  },
+  "05": {
+   "text": "a slow snail who tends the tomato pots and talks to the seedlings",
+   "role": "gardener",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "06": {
+   "text": "a big friendly hippo who digs the vegetable patch",
+   "role": "gardener",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "07": {
+   "text": "a busy hedgehog who dusts every shelf and hums",
+   "role": "tidier",
+   "owner": "Mia",
+   "accent": "#e0b53a"
+  },
+  "08": {
+   "text": "a tall, fussy giraffe who tidies the high cupboards",
+   "role": "tidier",
+   "owner": "Robin",
+   "accent": "#6a9a4a"
+  },
+  "09": {
+   "text": "a careful owl who keeps the household accounts and shopping lists",
+   "role": "keeper",
+   "owner": "Alex",
+   "accent": "#c8553d",
+   "template": "organiser"
+  },
+  "10": {
+   "text": "a calm beaver who keeps the pantry stocked and labelled",
+   "role": "keeper",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "11": {
+   "text": "a gentle rabbit who reads with the kids and helps with spelling",
+   "role": "tutor",
+   "owner": "Mia",
+   "accent": "#e0b53a",
+   "template": "companion"
+  },
+  "12": {
+   "text": "a wise old elephant who teaches the kids history",
+   "role": "tutor",
+   "owner": "Robin",
+   "accent": "#6a9a4a",
+   "template": "coach"
+  },
+  "13": {
+   "text": "a quick fox who carries notes between the family",
+   "role": "messenger",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "14": {
+   "text": "a chirpy little sparrow who brings in the post",
+   "role": "messenger",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "15": {
+   "text": "a hedgehog who fixes broken toys and squeaky doors",
+   "role": "maker",
+   "owner": "Mia",
+   "accent": "#e0b53a",
+   "template": "craftsperson"
+  },
+  "16": {
+   "text": "a burly ox who builds shelves and mends chairs",
+   "role": "maker",
+   "owner": "Robin",
+   "accent": "#6a9a4a",
+   "template": "buddy"
+  },
+  "17": {
+   "text": "a tiny clever mouse who repairs clocks and gadgets",
+   "role": "maker",
+   "owner": "Alex",
+   "accent": "#c8553d"
+  },
+  "18": {
+   "text": "a soft woolly sheep who looks after anyone feeling poorly",
+   "role": "carer",
+   "owner": "Sam",
+   "accent": "#3d7cc8"
+  },
+  "19": {
+   "text": "a kind old cat who tucks the kids in and makes cocoa",
+   "role": "carer",
+   "owner": "Mia",
+   "accent": "#e0b53a",
+   "template": "grandparent"
+  },
+  "20": {
+   "text": "a quiet panda who checks everyone has had water and a rest",
+   "role": "carer",
+   "owner": "Robin",
+   "accent": "#6a9a4a"
+  }
+ },
+ "profiles": {
+  "Alex": {
+   "adult": true,
+   "crudeOptIn": false
+  },
+  "Sam": {
+   "adult": true,
+   "crudeOptIn": false
+  },
+  "Mia": {
+   "adult": false,
+   "crudeOptIn": false
+  },
+  "Robin": {
+   "adult": true,
+   "crudeOptIn": true
+  }
+ }
+}

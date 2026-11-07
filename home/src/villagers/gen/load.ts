@@ -21,11 +21,19 @@ import { Villager } from '../rig'
 import type { Figure } from '../rig'
 import { assemble } from './assemble'
 import { build, check } from './build'
+import { inspect, type Measures } from './checks'
 import { COVERAGE } from './originals'
-import type { VoiceSpec } from './spec'
+import type { Persona, VoiceSpec } from './spec'
+import { applyTemplate, BUILTIN_TEMPLATES, gatePersona, type PersonaProfile } from './templates'
 
-export interface Meta { arm: 'spec' | 'code'; file: string; accent: string; owner?: string; description?: string }
-interface Made { fig: Figure; name: string; bark: string; voice: VoiceSpec | null; fixes: string[]; timing?: Record<string, number> }
+export interface Meta {
+  arm: 'spec' | 'code'; file: string; accent: string; owner?: string; description?: string
+  /** A built-in persona template merged over the generated persona (templates.ts applyTemplate). */
+  template?: string
+  /** Who the villager is for; decides crude humour (templates.ts gatePersona). Missing means unknown. */
+  profile?: PersonaProfile
+}
+interface Made { fig: Figure; name: string; role?: string; bark: string; voice: VoiceSpec | null; persona?: Persona; fixes: string[]; measures?: Measures; timing?: Record<string, number> }
 
 /** Where captures look from: the iso camera's heading, so a figure at this yaw shows three quarters. */
 const CAMERA_YAW = 0.6
@@ -33,6 +41,8 @@ const FACE_YAW = 0.25
 /** The middle of the lineup, on the open floor in front of the table. */
 const LINE = { x: -0.25, z: 1.15 }
 let box: PropBox | null = null
+/** `&checks=off` shows a villager the checks would refuse, to look at what they caught. */
+const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
 
 async function fromCode(code: string, phys: boolean, accent: string, seed: number): Promise<Made> {
   box ??= new PropBox()
@@ -42,13 +52,13 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed)
-  return { fig: a.fig, name: a.about.name, bark: a.about.bark, voice: a.about.voice, fixes: a.fixes, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce)
+  return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
 }
 
 function fromSpec(raw: unknown, phys: boolean, accent: string, seed: number): Made {
   const { spec, fixes } = check(raw)
-  return { fig: build(spec, phys, { accent }, seed), name: spec.name, bark: spec.bark, voice: spec.voice, fixes }
+  return { fig: build(spec, phys, { accent }, seed), name: spec.name, role: spec.role, bark: spec.bark, voice: spec.voice, persona: spec.persona, fixes }
 }
 
 async function make(id: string, phys: boolean, seed: number, meta?: Meta, base?: string): Promise<Made> {
@@ -64,6 +74,14 @@ async function make(id: string, phys: boolean, seed: number, meta?: Meta, base?:
   const res = await fetch(`${base}/${meta.file}`)
   if (!res.ok) throw new Error(`could not read ${meta.file}: ${res.status}`)
   const text = await res.text()
+  const m = await fromFile(text, meta, phys, seed)
+  // Template, then the crude-humour gate: model output and templates never grant crude on their own.
+  const template = BUILTIN_TEMPLATES.find((t) => t.id === meta.template)
+  const persona = m.persona && template ? applyTemplate(m.persona, template) : m.persona
+  return { ...m, persona: gatePersona(persona, meta.profile ?? null) }
+}
+
+async function fromFile(text: string, meta: Meta, phys: boolean, seed: number): Promise<Made> {
   if (meta.arm === 'spec') {
     let raw: unknown
     try {
@@ -107,7 +125,7 @@ export default {
         const t0 = performance.now()
         try {
           const m = await make(id, phys, 31 + i * 17)
-          report[id] = { ok: true, name: m.name, ...measure(m.fig.root), buildMs: performance.now() - t0, timing: m.timing, fixes: m.fixes, height: m.fig.height }
+          report[id] = { ok: true, name: m.name, role: m.role, ...measure(m.fig.root), buildMs: performance.now() - t0, timing: m.timing, fixes: m.fixes, measures: m.measures, height: m.fig.height }
           return { id, m }
         } catch (error) {
           report[id] = { ok: false, error: String(error instanceof Error ? error.message : error) }
@@ -163,7 +181,7 @@ export default {
       const t0 = performance.now()
       try {
         const m = await make('run', phys, 31, meta, base)
-        const r = { ok: true, name: m.name, bark: m.bark, voice: m.voice, ...measure(m.fig.root), fixes: m.fixes, height: m.fig.height, buildMs: performance.now() - t0, timing: m.timing }
+        const r = { ok: true, name: m.name, role: m.role, bark: m.bark, voice: m.voice, persona: m.persona, ...measure(m.fig.root), fixes: m.fixes, measures: m.measures, height: m.fig.height, buildMs: performance.now() - t0, timing: m.timing }
         releaseGpu(m.fig.root)
         return r
       } catch (error) {
@@ -175,7 +193,7 @@ export default {
     const trial = async (code: string) => {
       try {
         const m = await fromCode(code, phys, '#c8553d', 31)
-        const r = { ok: true, name: m.name, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
+        const r = { ok: true, name: m.name, persona: m.persona, measures: m.measures, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
         releaseGpu(m.fig.root)
         return r
       } catch (error) {
@@ -183,15 +201,26 @@ export default {
       }
     }
 
+    /** The trusted checks on a hand-made plush or a spec build (`hand:moss`, `spec:tuft`): they must pass the originals. */
+    const audit = async (id: string) => {
+      const m = await make(id, phys, 31)
+      const r = inspect(m.fig.root, m.fig.eyes, null)
+      releaseGpu(m.fig.root)
+      return r
+    }
+
     /**
      * Each placed villager alone, flat black on white, from the dollhouse heading and pitch
      * (fov 20), framing 1.4 m: a row-major 0/1 mask of size x size, and its bounds.
+     * With `accent`, parts in the owner's accent (assemble.ts flags them) render red and
+     * the mask holds '2' where the accent shows, so its visible area can be counted.
      */
-    const silhouettes = async (size = 128) => {
+    const silhouettes = async (size = 128, accent = false) => {
       const { renderer } = ctx.stage
       const target = new THREE.RenderTarget(size, size)
       const camera = new THREE.PerspectiveCamera(20, 1, 0.5, 30)
       const black = new THREE.MeshBasicMaterial({ color: '#000000' })
+      const red = new THREE.MeshBasicMaterial({ color: '#ff0000' })
       const scene = new THREE.Scene()
       scene.background = new THREE.Color('#ffffff')
       const out: { id: string; name: string; mask: string; w: number; h: number }[] = []
@@ -204,7 +233,7 @@ export default {
           const m = o as THREE.Mesh
           if (m.isMesh) {
             mats.set(m, m.material)
-            m.material = black
+            m.material = accent && m.userData.accent ? red : black
           }
         })
         scene.add(root)
@@ -232,17 +261,37 @@ export default {
         const topDown = (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend === true
         for (let y = 0; y < size; y++) {
           const row = topDown ? y : size - 1 - y
-          for (let x = 0; x < size; x++) mask += px[(row * size + x) * 4] < 128 ? '1' : '0'
+          for (let x = 0; x < size; x++) {
+            const k = (row * size + x) * 4
+            mask += px[k + 1] >= 128 ? '0' : px[k] >= 128 ? '2' : '1'
+          }
         }
         out.push({ id, name, mask, w: size, h: size })
       }
       target.dispose()
       black.dispose()
+      red.dispose()
       return out
     }
 
+    /** Each placed villager's bounds on screen, in CSS pixels, for cropping dollhouse-distance tiles. */
+    const screen = () => {
+      const { camera, renderer } = ctx.stage
+      const rect = renderer.domElement.getBoundingClientRect()
+      return placed.map(({ id, v }) => {
+        const b = new THREE.Box3().setFromObject(v.fig.root)
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+        for (let i = 0; i < 8; i++) {
+          const p = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
+          const x = rect.left + (p.x + 1) / 2 * rect.width, y = rect.top + (1 - p.y) / 2 * rect.height
+          x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y)
+        }
+        return { id, x0, y0, x1, y1 }
+      })
+    }
+
     ctx.effect(() => {
-      Object.assign(window, { villagerGen: { loaded: loading, check: checkFile, trial, silhouettes, report, placed: () => placed.map(({ id, name, v }) => ({ id, name, x: v.pos.x, z: v.pos.z, height: v.fig.height })) } })
+      Object.assign(window, { villagerGen: { loaded: loading, check: checkFile, trial, audit, silhouettes, screen, report, placed: () => placed.map(({ id, name, v }) => ({ id, name, x: v.pos.x, z: v.pos.z, height: v.fig.height })) } })
       return () => {
         delete (window as { villagerGen?: unknown }).villagerGen
         box?.dispose()
