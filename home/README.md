@@ -1118,7 +1118,8 @@ node scripts/villagers/measure-marks.mjs r7-
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
-checked by grepping `dist/`) turns the kitchen table into a felt workshop. The camera
+checked by grepping `dist/`) turns the kitchen table into a felt workshop. This section describes the
+round-6 bench, now `&setup=bench`; the default tunes in a cheval mirror (below). The camera
 leans over the table; the notebook and its pencil step aside. You write who the villager
 is on a paper slip lying on the cutting mat, pick a personality pattern card from the
 rack behind the mat, or both; the picked card stands up out of the rack and its felt card,
@@ -1258,14 +1259,22 @@ and person scoping as the props endpoints; model failures answer 422:
 ```sh
 node test/villager-make.ts [--live]                 # in host/: 81 checks, stub maker; --live adds one Sonnet call
 node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
-node scripts/villagers/check-setup.mjs --strategy=a|b|c|1 [--shots=dir] [--viewports=1440x900,1024x768,390x844]
+node scripts/villagers/check-setup.mjs --strategy=1|b|bench [--shots=dir] [--viewports=1440x900,1024x768,390x844]
 ```
 
-Regroup 1 (prototypes, November 7): `&setup=a` (one tool at a time, from a sewing tin), `&setup=b`
-(a fitting mirror with the controls in its frame) and `&setup=c` (no tools: tune by talking, read by
-`setup-talk.ts` with no model call) share everything but the tuning surface with `&setup=1`.
-`--strategy=` runs one of them through the whole flow at each size. Captures, sheets and the
-learning log: `screenshots/villager-gen/setup/regroup-1/` and `LEARNING.md`.
+Tuning (November 7, after two regroups): `&setup=1` tunes the villager in a cheval mirror in the room
+(`gen/setup-d.ts`). The mirror and a felt fitting stool stand at the table's left end; the villager
+stands on the stool against painted silver glass. The tape measure is on the frame's left rail (its
+brass marker rides the head), the felt colour dots on the right, three dials on the stool's drawer,
+the manner ribbons across its legs and the jokes switch on its foot rail; each control has its two
+ends written beside it, shows how it moves on hover, focus and once as it comes out, and works by
+keyboard (Tab walks the nine values in order). Before there is a villager the pattern swatches hang
+in the glass; while the pattern is made the cutting happens on the stool's top. `&setup=b` (regroup
+1's mirror panel) and `&setup=bench` (the round-6 bench) are kept for the record; both mirrors share
+`gen/setup-controls.ts`. `--strategy=1` runs the default through the whole flow at each size with the
+layout gate, a face-spill check, a 14 px floor and the keyboard order; the other checks below drive the
+bench and prove the shared core. Captures and the learning log: `screenshots/villager-gen/setup/`
+(`d-round-2/` is the latest) and `LEARNING.md`.
 
 `check-setup.mjs` starts its own dev server (5334) and a host in-process with a stub
 maker, then proves headless: the workshop, the stitch order and pace, focus on the first

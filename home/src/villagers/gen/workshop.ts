@@ -213,6 +213,11 @@ export interface Workshop {
   frame(dt: number, t: number): void
   /** Lay the table out for a wide or a narrow screen (moves MAT, the one owner of where the mat is). */
   arrange(layout: 'wide' | 'narrow'): void
+  /**
+   * Do the cutting and the needlework on a small surface instead of the mat (the fitting stool's top, about 0.5 by
+   * 0.25 m, centred at `at`), at a smaller scale with one row of pieces; null puts it back on the mat.
+   */
+  bench(at: THREE.Vector3 | null): void
   /** Release the thread's last geometry (the rest goes with the group). */
   dispose(): void
 }
@@ -362,7 +367,15 @@ export function workshop(): Workshop {
     return pin
   })
   const workAt = new THREE.Vector3()
-  const slotAt = (i: number) => new THREE.Vector3(MAT.x - 0.25 + (i % 6) * 0.085, y + 0.007, MAT.z + 0.13 + Math.floor(i / 6) * 0.065)
+  /** Twelve pieces in two rows on the mat; one row of six on the stool. */
+  const slots = () => (benchAt ? 6 : SLOTS)
+  /** The fitting stool's top, when the work is done there instead of on the mat (bench()). */
+  let benchAt: THREE.Vector3 | null = null
+  /** The work's scale and the surface's height: smaller on the stool. */
+  let ks = 1, wy = y
+  const slotAt = (i: number) => benchAt
+    ? new THREE.Vector3(benchAt.x - 0.2 + (i % 6) * 0.08, wy + 0.001, benchAt.z + 0.088)
+    : new THREE.Vector3(MAT.x - 0.25 + (i % 6) * 0.085, y + 0.007, MAT.z + 0.13 + Math.floor(i / 6) * 0.065)
 
   // Scissors: two blades and finger loops about a pivot.
   const scissors = new THREE.Group()
@@ -438,10 +451,16 @@ export function workshop(): Workshop {
     sheet.position.copy(onMat ? new THREE.Vector3(MAT.x - 0.2, y + 0.0045, MAT.z - 0.095) : sheetRest)
     sheet.scale.setScalar(onMat ? 0.72 : 1)
     sheet.rotation.z = onMat ? -0.04 : 0.1
-    sheetFelt.position.copy(working ? workAt : new THREE.Vector3(MAT.x + 0.26, y + 0.009, MAT.z + 0.16))
-    sheetFelt.rotation.y = working ? 0 : 0.25
-    scissors.position.set(MAT.x + 0.28, y + 0.015, MAT.z + 0.15)
+    sheetFelt.position.copy(working || benchAt ? workAt : new THREE.Vector3(MAT.x + 0.26, y + 0.009, MAT.z + 0.16))
+    sheetFelt.rotation.y = working || benchAt ? 0 : 0.25
+    // On the stool the felt sheet is put away until there is work (the villager stands on the pad).
+    sheetFelt.visible = working || !benchAt
+    sheetFelt.scale.setScalar(ks)
+    if (benchAt) scissors.position.set(benchAt.x + 0.2, wy + 0.006, benchAt.z + 0.03)
+    else scissors.position.set(MAT.x + 0.28, y + 0.015, MAT.z + 0.15)
     scissors.rotation.y = 0.6
+    scissors.visible = working || !benchAt
+    scissors.scale.setScalar(benchAt ? 0.8 : 1)
     for (const c of chalks) c.visible = false
   }
   let passing: { from: THREE.Vector3; to: THREE.Vector3; u: number; seconds: number; done: () => void } | null = null
@@ -455,12 +474,30 @@ export function workshop(): Workshop {
     sheetRest.set(wide ? -0.63 : -0.98, y + 0.0035, wide ? -0.16 : -0.1)
     pencil.position.set(wide ? -0.4 : -0.75, y + 0.009, wide ? -0.02 : 0.05)
     cushionAt.position.set(wide ? -0.82 : -0.95, y, wide ? -0.27 : 0.25)
-    reel.group.position.set(wide ? 0.1 : 0.2, y, wide ? 0.42 : 0.12)
-    reelTop.set(reel.group.position.x, y + 0.03, reel.group.position.z)
-    workAt.set(MAT.x + 0.03, y + 0.009, MAT.z - 0.04)
-    scrap.position.set(MAT.x + 0.25, y + 0.009, MAT.z - 0.08)
-    rest.set(MAT.x + 0.29, y + 0.012, MAT.z - 0.06)
-    for (const c of chalks) c.position.set(workAt.x, y + 0.0115, workAt.z)
+    if (benchAt) {
+      // On the stool's top: the felt sheet left of the pad's middle, the scrap and the needle at its right, the
+      // reel on the table beside the stool.
+      ks = 0.6
+      wy = benchAt.y + 0.007
+      reel.group.position.set(benchAt.x + 0.235, benchAt.y, benchAt.z - 0.085)
+      workAt.set(benchAt.x - 0.06, wy + 0.002, benchAt.z - 0.035)
+      scrap.position.set(benchAt.x + 0.17, wy + 0.002, benchAt.z - 0.05)
+      rest.set(benchAt.x + 0.19, wy + 0.005, benchAt.z - 0.03)
+    } else {
+      ks = 1
+      wy = y
+      reel.group.position.set(wide ? 0.1 : 0.2, y, wide ? 0.42 : 0.12)
+      workAt.set(MAT.x + 0.03, y + 0.009, MAT.z - 0.04)
+      scrap.position.set(MAT.x + 0.25, y + 0.009, MAT.z - 0.08)
+      rest.set(MAT.x + 0.29, y + 0.012, MAT.z - 0.06)
+    }
+    reelTop.set(reel.group.position.x, reel.group.position.y + 0.03, reel.group.position.z)
+    scrap.scale.setScalar(benchAt ? 0.75 : 1)
+    for (const c of chalks) {
+      c.position.set(workAt.x, workAt.y + 0.0025, workAt.z)
+      c.scale.setScalar(ks)
+    }
+    for (const p of pieces) p.scale.setScalar(ks)
     lay()
     api.frame(0, 0)
   }
@@ -537,24 +574,24 @@ export function workshop(): Workshop {
           // The needle goes down through the scrap and up again, a stitch about every 0.9 s.
           const c = (tt % 0.9) / 0.9
           const along = Math.floor(tt / 0.9) % 6
-          needle.position.set(scrap.position.x - 0.04 + along * 0.014, y + 0.012 + Math.max(-0.02, Math.cos(c * Math.PI * 2) * 0.03), scrap.position.z + 0.01)
+          needle.position.set(scrap.position.x - 0.04 * ks + along * 0.014 * ks, wy + 0.012 + Math.max(-0.02, Math.cos(c * Math.PI * 2) * 0.03), scrap.position.z + 0.01)
           needle.rotation.set(0.35, 0, -0.25)
           rethread()
         }
         // One pattern piece every 4.5 s: chalk it (1.5 s), cut along the chalk (1.8 s), lay it in the row and pin it (0.9 s).
-        const k = Math.floor(since / 4.5), u = since % 4.5
-        const shape = k % outlines.length
+        const n = Math.floor(since / 4.5), u = since % 4.5
+        const shape = n % outlines.length
         const { points } = outlines[shape]
         chalks.forEach((c, i) => (c.visible = i === shape && u < 3.3))
         const chalk = chalks[shape]
         chalk.geometry.setDrawRange(0, 6 * Math.floor(Math.min(1, u / 1.5) * (points.length - 1)))
-        const piece = pieces[k % SLOTS]
+        const piece = pieces[n % slots()]
         if (u >= 1.5 && u < 3.3) {
           // The scissors follow the chalk round, blades snipping.
           const w = (u - 1.5) / 1.8
           const at = Math.min(points.length - 2, Math.floor(w * (points.length - 1)))
           const p = points[at], q = points[at + 1]
-          scissors.position.set(workAt.x + p.x, y + 0.016, workAt.z - p.y)
+          scissors.position.set(workAt.x + p.x * ks, wy + 0.016, workAt.z - p.y * ks)
           scissors.rotation.y = Math.atan2(q.y - p.y, q.x - p.x) + Math.PI
           if (fresh) {
             const open = 0.34 * (0.5 + 0.5 * Math.cos(tt * 9))
@@ -565,16 +602,16 @@ export function workshop(): Workshop {
           // The cut piece lifts off the sheet and is laid in the row, then pinned.
           const w = Math.min(1, (u - 3.3) / 0.7)
           const e = w * w * (3 - 2 * w)
-          const slot = slotAt(k % SLOTS)
+          const slot = slotAt(n % slots())
           piece.visible = true
-          piece.position.lerpVectors(new THREE.Vector3(workAt.x, y + 0.012, workAt.z), slot, e)
+          piece.position.lerpVectors(new THREE.Vector3(workAt.x, wy + 0.012, workAt.z), slot, e)
           piece.position.y += Math.sin(e * Math.PI) * 0.03
-          piece.rotation.y = e * 0.4 * ((k % 3) - 1)
-          pins[k % SLOTS].visible = w >= 1
-          pins[k % SLOTS].position.copy(slot).add(new THREE.Vector3(0.006, 0.003, -0.004))
-          scissors.position.set(workAt.x + 0.15, y + 0.015, workAt.z + 0.02)
+          piece.rotation.y = e * 0.4 * ((n % 3) - 1)
+          pins[n % slots()].visible = w >= 1
+          pins[n % slots()].position.copy(slot).add(new THREE.Vector3(0.006, 0.003, -0.004))
+          scissors.position.set(workAt.x + 0.15 * ks, wy + 0.015, workAt.z + 0.02)
           scissors.rotation.y = 0.6
-          if (w >= 1) cut = Math.max(cut, Math.min(SLOTS, k + 1))
+          if (w >= 1) cut = Math.max(cut, Math.min(slots(), n + 1))
         }
       } else if (fresh || still) {
         needle.position.copy(rest)
@@ -585,6 +622,10 @@ export function workshop(): Workshop {
       }
     },
     arrange,
+    bench(at) {
+      benchAt = at?.clone() ?? null
+      arrange(wide ? 'wide' : 'narrow')
+    },
     dispose() {
       thread.geometry.dispose()
     },

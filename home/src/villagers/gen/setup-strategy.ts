@@ -1,4 +1,6 @@
-// #47 regroup, dev only: &setup=a|b|c|d|e swaps how a made villager is tuned, sharing everything
+// #47 setup, dev only: how a made villager is tuned. &setup=1 (or d) is the default, the cheval mirror in
+// the room (setup-d.ts); &setup=b is regroup 1's mirror panel and &setup=bench the round-6 bench (no
+// strategy), both kept for the record. A strategy shares everything
 // else in setup.ts (the slip, the patterns, the waiting, the stitching, the persona, the host,
 // the voice and the send-off). A strategy only answers the questions setup.ts asks it: where the
 // camera goes, where the villager stands, which tools show, where the page's paper goes, and what
@@ -10,11 +12,9 @@ import type { Pose } from '../../plugins/camera'
 import type { Persona } from './setup-persona'
 import type { rack, RackCard } from './setup-rack'
 import type { Controls, Key, Layout } from './sliders'
+import type { Workshop } from './workshop'
 import { mirror } from './setup-b'
-import { tin } from './setup-a'
-import { talk } from './setup-c'
 import { fitting } from './setup-d'
-import { hybrid } from './setup-e'
 
 export type SetupState = 'empty' | 'waiting' | 'stitching' | 'tuning' | 'leaving' | 'failed'
 export interface Rect { left: number; top: number; right: number; bottom: number }
@@ -24,6 +24,8 @@ export interface Scene {
   stage: Stage
   group: THREE.Group
   tools: Controls
+  /** The workshop on the table (the mat, the cutting and the needle). */
+  shop: Workshop
   patterns: ReturnType<typeof rack>
   slip: HTMLFormElement
   line: HTMLTextAreaElement
@@ -51,17 +53,17 @@ export interface Scene {
   hueAt(v: number): string | null
   cards(): RackCard[]
   watching(): boolean
+  /** Put a strategy's controls in the page's tab order, after the name tag and before the save and send-off tags. */
+  mount(e: HTMLElement): void
 }
 
 export interface Strategy {
-  id: 'a' | 'b' | 'c' | 'd' | 'e'
+  id: 'b' | 'd'
   /** Null from any of these: the bench's own answer. */
   pose?(state: SetupState): Pose | null
   standAt?(): THREE.Vector3 | null
   turn?(): number | null
   toolsVisible?(): boolean | null
-  /** True while the strategy shows the bench as it is (E on a wide screen): the bench reframes after a size change. */
-  bench?(): boolean
   /**
    * How much smaller to show a villager (its bounds in its own space, at scale 1) while it is being fitted, or null for
    * the bench's own fit. Its tuned size is unchanged; it grows to it as it hops down.
@@ -76,18 +78,14 @@ export interface Strategy {
   /** Top-left of the name tag, speech note, save or send-off tag, or null for the bench's place. */
   place?(what: 'name' | 'card' | 'save' | 'done', w: number, h: number): { x: number; y: number } | null
   frame?(dt: number, t: number): void
-  /** A tool on the table was pressed: true when the strategy took it (picked it up) instead of a drag. */
-  grab?(key: Key): boolean
   /** Extra entries on window.villagerSetup, for the checks. */
   api?: Record<string, unknown>
   dispose(): void
 }
 
+/** The strategy for &setup=: 1 (the default) and d are the cheval mirror, b the mirror panel; bench (null) the bench. */
 export function strategyFor(id: string, scene: Scene): Strategy | null {
-  if (id === 'a') return tin(scene)
+  if (id === '1' || id === 'd') return fitting(scene)
   if (id === 'b') return mirror(scene)
-  if (id === 'c') return talk(scene)
-  if (id === 'd') return fitting(scene)
-  if (id === 'e') return hybrid(scene)
   return null
 }

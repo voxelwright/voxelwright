@@ -504,7 +504,7 @@ const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
 /** Narrow: the stitch dial's tag lies in front of it, as every grid tool's does. */
 const DIAL_FRONT = new THREE.Vector3(0, 0, 0.13)
 
-export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void; grab?(key: Key): boolean }): Controls {
+export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void }): Controls {
   const group = new THREE.Group()
   group.name = 'villager workshop controls'
   const rail = spoolRail()
@@ -766,7 +766,6 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     const tool = hit(e)
     if (!tool) return
     e.preventDefault()
-    if (hooks.grab?.(tool.key)) return
     begin(tool, e, hitPart ?? undefined)
   }
   const onTagDown = (e: PointerEvent) => {

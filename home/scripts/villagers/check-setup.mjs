@@ -6,9 +6,11 @@
 // returning to baseline, the one repair pass (a refused module or a refused persona), the jokes dial as
 // the host's humourCeiling locks it, patterns from the host, and the send-off writing persona.json.
 // --live adds one real Sonnet make (and at most one remake) through the host and the page.
-// --strategy=a|b|c|d|e|1 runs only the #47 regroup's flow for that way of tuning (1 is the bench), at each of --viewports
-// (default 1440x900,1024x768,390x844), with captures in <shots>/<wide|tablet|narrow>/.
-// Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900] [--strategy=a]
+// The host, pattern, repair and unload checks drive the round-6 bench (&setup=bench): they prove setup.ts's shared core.
+// --strategy=1|b|bench runs only the tuning flow for that way of tuning (1, the default, is the cheval mirror; b and
+// bench are kept from the regroups), at each of --viewports (default 1440x900,1024x768,390x844), with captures in
+// <shots>/<wide|tablet|narrow>/.
+// Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900] [--strategy=1]
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -62,7 +64,7 @@ async function open(query, opts = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? '1'}${query}`)
+  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}`)
   await page.waitForFunction(() => window.villagerSetup && window.village, null, { timeout: 60000 })
   await page.waitForTimeout(400)
   return { context, page, errors }
@@ -76,10 +78,10 @@ const until = (page, states, timeout = 30000) => page.waitForFunction((s) => s.i
  * bounds; and no tool on the table lies under the slip. Run at every captured moment.
  */
 const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done', '.vs-saved',
-  // The regroup's strategies: A's held card, end words and tin hint; B's frame controls and swatches; C's examples and change notes.
-  '.vs-held', '.vs-heldend', '.vs-tinhint', '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch', '.vs-examples', '.vs-change',
-  // Regroup 2: D's mirror and box in the room (their parts, and the rails' words), E's head tape on the bench.
-  '.vs-fit .tape', '.vs-fit .tag', '.vs-fit .dot', '.vs-fit .dial', '.vs-fit .ribbon-row', '.vs-fit .jokes', '.vs-headtape']
+  // B's frame controls and the swatches.
+  '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch',
+  // The cheval mirror (the default): the parts on its rails, drawer, legs and foot, and the rails' words.
+  '.vs-fit .tape', '.vs-fit .tag', '.vs-fit .dot', '.vs-fit .dial', '.vs-fit .ribbon-row', '.vs-fit .jokes']
 const layout = (page) => page.evaluate((selectors) => {
   const boxes = []
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
@@ -101,6 +103,21 @@ const layout = (page) => page.evaluate((selectors) => {
   if (slip) for (const t of window.villagerSetup.toolBounds()) if (hit(slip.r, t)) overlaps.push(`.vs-slip × tool ${t.key}`)
   return { labels, outside, overlaps }
 }, LABELS)
+/** Visible words under 14 px inside these elements (the phone's floor). */
+const small = (page, sel) => page.evaluate((sel) => {
+  const out = []
+  for (const root of document.querySelectorAll(sel)) {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const e = n.parentElement
+      if (!n.textContent.trim() || !e) continue
+      const cs = getComputedStyle(e)
+      if (cs.visibility === 'hidden' || cs.display === 'none' || !e.getClientRects().length) continue
+      if (parseFloat(cs.fontSize) < 13.95) out.push(`${n.textContent.trim().slice(0, 20)}: ${cs.fontSize}`)
+    }
+  }
+  return out
+}, sel)
 let shotDir = shots
 const shot = async (page, name) => {
   const l = await layout(page)
@@ -121,6 +138,8 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
  */
 async function regroup(s) {
   const tag = `[${s}] ${vw}×${vh}`
+  /** The cheval mirror: the default (1), also called d. */
+  const cheval = s === '1' || s === 'd'
   const settle = (page) => page.waitForFunction(async () => {
     const a = window.villagerSetup.camera()
     await new Promise((r) => setTimeout(r, 250))
@@ -131,8 +150,12 @@ async function regroup(s) {
     await page.waitForTimeout(2200)
     await settle(page)
     await shot(page, '1-empty')
-    // B, D and E's phone hang the patterns as swatches in the glass; the bench and the rest stand them on the rack.
-    const glass = s === 'b' || s === 'd' || (s === 'e' && vw < vh)
+    if (cheval) {
+      check(`${tag}: before there is a villager the controls are put away: nothing to tab to`, await page.evaluate(() => [...document.querySelectorAll('.vs-fit [tabindex="0"]')].every((e) => getComputedStyle(e).visibility === 'hidden')))
+      check(`${tag}: no word on the swatches or the slip is under 14 px`, (await small(page, '.vs-fit, .vs-slip')).length === 0, await small(page, '.vs-fit, .vs-slip'))
+    }
+    // The mirrors hang the patterns as swatches in the glass; the bench stands them on the rack.
+    const glass = s === 'b' || cheval
     await page.click(glass ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
     await page.waitForTimeout(700)
     check(`${tag}: picking a pattern shows it on the slip`, (await st(page)).rack.picked === 'coach' && (await page.textContent('.vs-slip .chip')).includes('Calm coach'))
@@ -143,50 +166,11 @@ async function regroup(s) {
     await page.waitForTimeout(1200)
     const before = await st(page)
     const v0 = before.values
-    if (s === 'a') {
-      // The tin: click the tape measure out of it, pull the tape, then each other tool in turn by keyboard.
-      const at = await page.evaluate(() => window.villagerSetup.tinAt('size'))
-      await page.mouse.click(at.x, at.y)
-      await page.waitForTimeout(500)
-      check(`${tag}: clicking the tape measure in the tin holds it out, alone`, await page.evaluate(() => window.villagerSetup.out()) === 'size' && await page.evaluate(() => [...document.querySelectorAll('.vs-tool, .vs-end')].filter((e) => getComputedStyle(e).display !== 'none').length) === 1)
-      await settle(page)
-      const h = await page.evaluate(() => window.villagerSetup.screen('size'))
-      await page.mouse.move(h.x, h.y)
-      await page.mouse.down()
-      await page.mouse.move(h.x + 90, h.y, { steps: 6 })
-      await page.mouse.up()
-      await page.waitForTimeout(900)
-      await shot(page, '3-tuning')
-      const steps = [['hue', ['ArrowLeft', 6]], ['pitch', ['ArrowUp', 5]], ['pace', ['PageDown', 1]], ['energy', ['End', 1]], ['manner', ['Home', 1, 'Tab', 1, 'Home', 1, 'Tab', 1, 'Home', 1]], ['humour', ['End', 1]]]
-      for (const [item, keys] of steps) {
-        await page.evaluate((i) => window.villagerSetup.pick(i), item)
-        await page.waitForTimeout(250)
-        for (let i = 0; i < keys.length; i += 2) for (let n = 0; n < keys[i + 1]; n++) await page.keyboard.press(keys[i])
-      }
-      const lockedNote = (await st(page)).note
-      await page.keyboard.press('Escape')
-      check(`${tag}: crude is refused with the household's admin note; Escape puts the tool back`, /household's admin/.test(lockedNote ?? '') && await page.evaluate(() => window.villagerSetup.out()) === null, lockedNote)
-    } else if (s === 'e' && vw >= vh) {
-      // E on a wide screen or a tablet is the bench, with a tape stood by the villager's head: drag its marker up.
-      check(`${tag}: a wide screen gets the bench, with the tape at the villager's head`, await page.evaluate(() => window.villagerSetup.surface()) === 'bench' && await page.evaluate(() => window.villagerSetup.headTape()) !== null)
-      const v = await page.evaluate(() => window.villagerSetup.bounds())
-      const t = await page.evaluate(() => window.villagerSetup.headTape())
-      check(`${tag}: the head tape's marker sits at the villager's head`, Math.abs(t.top - v.top) < 4, { tape: t.top, head: v.top })
-      await page.mouse.move(t.left + t.width / 2, t.top + 1)
-      await page.mouse.down()
-      await page.mouse.move(t.left + t.width / 2, t.top - 50, { steps: 5 })
-      await page.mouse.up()
-      await page.waitForTimeout(900)
-      await settle(page)
-      await shot(page, '3-tuning')
-      for (const [k, v] of [['hue', 0.2], ['pitch', 0.75], ['pace', 0.3], ['energy', 1], ['warmth', 0], ['playful', 0], ['chatty', 0], ['humour', 1]]) await page.evaluate(([k, v]) => window.villagerSetup.set(k, v), [k, v])
-      // And by keyboard: the head tape is a slider too.
-      await page.focus('.vs-headtape')
-      await page.keyboard.press('ArrowUp')
-    } else if (s === 'b' || s === 'd' || s === 'e') {
+    if (s === 'b' || cheval) {
       // The frame: the size marker dragged up to a taller head, a colour dot, the dials turned, the ribbons and the jokes switch.
-      const box = s === 'd' ? '.vs-fit' : '.vs-mirror'
-      if (s === 'e') check(`${tag}: a phone gets the mirror`, await page.evaluate(() => window.villagerSetup.surface()) === 'mirror')
+      const box = cheval ? '.vs-fit' : '.vs-mirror'
+      // The first reveal (each control shows once how it moves) is over before the marker is measured.
+      if (cheval) await page.waitForFunction(() => !document.querySelector('.vs-fit.reveal'), null, { timeout: 8000 })
       const v = await page.evaluate(() => window.villagerSetup.bounds())
       const tape = await page.evaluate(() => window.villagerSetup.control('size'))
       const mk = await page.evaluate((box) => document.querySelector(`${box} .marker`).getBoundingClientRect().toJSON(), box)
@@ -208,27 +192,6 @@ async function regroup(s) {
       }
       await page.click(`${box} .step:last-of-type`)
       check(`${tag}: crude on the jokes switch is refused with the household's admin note`, /household's admin/.test((await st(page)).note ?? ''), (await st(page)).note)
-    } else if (s === 'c') {
-      // Talking: phrases on the slip, Enter each; one is undone.
-      const say = async (text) => {
-        await page.locator('.vs-say .line').fill(text)
-        await page.locator('.vs-say .line').press('Enter')
-        await page.waitForTimeout(250)
-      }
-      await say('a bit taller, and a lower voice')
-      await page.waitForTimeout(900)
-      await shot(page, '3-tuning')
-      for (const text of ['make them greener', 'talk slower', 'livelier', 'much blunter', 'more serious', 'less chatty']) await say(text)
-      await say('crude jokes please')
-      const lockedNote = (await st(page)).note
-      check(`${tag}: "crude jokes" is refused with the household's admin note, and its change note says so`, /household's admin/.test(lockedNote ?? '') && /set by the household/.test(await page.textContent('.vs-change')), lockedNote)
-      await say('keep the jokes clean')
-      await say('a bit livelier')
-      const pre = (await st(page)).values.energy
-      await page.click('.vs-change .undo')
-      check(`${tag}: Undo puts the last change back`, (await st(page)).values.energy < pre, { pre, now: (await st(page)).values.energy })
-      await say('blorp the wibble')
-      check(`${tag}: a phrase it can't read changes nothing and says so`, /didn't catch/i.test(await page.textContent('.vs-say .status')))
     } else {
       await page.waitForTimeout(400)
       await shot(page, '3-tuning')
@@ -239,7 +202,28 @@ async function regroup(s) {
     const v1 = after.values
     const moved = { size: v1.size > v0.size + 0.05 && after.scale > before.scale * 1.03, hue: Math.abs(v1.hue - v0.hue) > 0.1 && Math.abs(after.hue - before.hue) > 0.1, pitch: Math.abs(v1.pitch - v0.pitch) > 0.1 && after.voice.pitch !== before.voice.pitch, pace: v1.pace < v0.pace - 0.1 && after.voice.rate < before.voice.rate, energy: v1.energy > v0.energy + 0.1 && after.gait.speed > before.gait.speed, warmth: v1.warmth < v0.warmth - 0.1, playful: v1.playful < v0.playful - 0.1, chatty: v1.chatty < v0.chatty - 0.1, humour: v1.humour <= 0.5 }
     check(`${tag}: all nine values change through this way of tuning, and the villager with them`, Object.values(moved).every(Boolean), { moved, v0, v1 })
-    if (s !== '1') check(`${tag}: it answers a change in a short line`, (await pg(page)).card?.length > 2, (await pg(page)).card)
+    if (s !== 'bench') check(`${tag}: it answers a change in a short line`, (await pg(page)).card?.length > 2, (await pg(page)).card)
+    if (cheval) {
+      check(`${tag}: every control fits inside its face of the furniture`, (await page.evaluate(() => window.villagerSetup.spill())).length === 0, await page.evaluate(() => window.villagerSetup.spill()))
+      check(`${tag}: no word on the furniture is under 14 px`, (await small(page, '.vs-fit')).length === 0, await small(page, '.vs-fit'))
+      // Keyboard: Tab walks the nine values in order (the colours and the jokes are one stop each), then the save and send-off tags.
+      await page.focus('.vs-fit .marker')
+      const order = []
+      for (let i = 0; i < 11; i++) {
+        await page.keyboard.press('Tab')
+        order.push(await page.evaluate(() => document.activeElement?.dataset?.key ?? (document.activeElement?.closest('.vs-save') ? 'save' : document.activeElement?.className)))
+      }
+      check(`${tag}: Tab walks the nine values in order, then saving and "Off you go"`, JSON.stringify(order) === JSON.stringify(['hue', 'pitch', 'pace', 'energy', 'warmth', 'playful', 'chatty', 'humour', 'save', 'save', 'vs-done vs-tag shown']), order)
+      await page.focus('.vs-fit .dot[tabindex="0"]')
+      const h0 = (await st(page)).values.hue
+      await page.keyboard.press('ArrowDown')
+      await page.waitForTimeout(150)
+      check(`${tag}: the colours are a radio group: an arrow moves to the next colour`, Math.abs((await st(page)).values.hue - h0 - 1 / 6) < 1e-6 && await page.evaluate(() => document.activeElement?.getAttribute('aria-checked')) === 'true', { h0, h1: (await st(page)).values.hue })
+      await page.keyboard.press('ArrowUp')
+      await page.click('.vs-save button')
+      await page.waitForFunction(() => /Kept as a pattern/.test(window.villagerSetup.state().note ?? ''), null, { timeout: 8000 }).catch(() => {})
+      check(`${tag}: "Save as a pattern" keeps it on the host`, /Kept as a pattern/.test((await st(page)).note ?? ''), (await st(page)).note)
+    }
     await page.click('.vs-done')
     await page.waitForTimeout(2600)
     const s3 = await st(page)
@@ -248,6 +232,28 @@ async function regroup(s) {
     const w1 = (await st(page)).walkers[0]
     check(`${tag}: "Off you go" sends it off at its tuned size, walking in view`, s3.walkers.length === 1 && w1 && Math.hypot(w1.x - w0.x, w1.z - w0.z) > 0.05 && Math.abs(w1.scale - after.scale) < 1e-6 && w0.seen && w1.seen && s3.kept[0]?.tuning.size === v1.size, { walkers: s3.walkers, w1 })
     await shot(page, '5-walking')
+    if (cheval) {
+      // Unload and reload the default flow: its furniture, textures, page layers and the stool's bench return to baseline.
+      const measure = () => page.evaluate(() => {
+        const n = window.village.snapshot()
+        return { objects: n.sceneObjects, geometries: n.geometries, textures: n.textures, hooks: n.frameHooks, dom: n.dom, setup: n.objects.filter((o) => /villager (setup|workshop)|workshop mirror/.test(o)).length, layers: document.querySelectorAll('.vs-fit').length }
+      })
+      const counts = []
+      for (let round = 0; round < 2; round++) {
+        await page.evaluate(() => window.village.kernel.unload('villagersetup'))
+        await page.waitForTimeout(300)
+        counts.push(await measure())
+        await page.evaluate(async () => window.village.kernel.load((await import('/src/villagers/gen/setup.ts')).default))
+        await page.waitForFunction(() => window.villagerSetup, null, { timeout: 20000 })
+        await page.evaluate(() => window.villagerSetup.start(''))
+        await page.waitForFunction(() => window.villagerSetup.state().state === 'tuning', null, { timeout: 30000 })
+        await page.waitForTimeout(300)
+      }
+      await page.evaluate(() => window.village.kernel.unload('villagersetup'))
+      await page.waitForTimeout(300)
+      counts.push(await measure())
+      check(`${tag}: unloading the mirror returns objects, hooks and DOM to baseline; geometries and textures do not grow`, counts.every((c) => c.setup === 0 && c.layers === 0 && c.objects === counts[0].objects && c.hooks === counts[0].hooks && c.dom === counts[0].dom) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures) && counts[1].geometries - counts[0].geometries <= 2 && counts[1].textures - counts[0].textures <= 2, counts)
+    }
     check(`${tag}: no page errors`, errors.length === 0, errors)
     await context.close()
   }

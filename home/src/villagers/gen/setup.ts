@@ -46,7 +46,7 @@ const FROM = params.get('from')
 const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : 'alex'
 const ACCENT = /^#[0-9a-f]{6}$/i.test(params.get('accent') ?? '') ? params.get('accent')! : '#c8553d'
 const OWNER = PERSON.charAt(0).toUpperCase() + PERSON.slice(1)
-/** #47 regroup: &setup=a|b|c|d|e tries a radically different way to tune (one tool at a time, a fitting mirror, talking, a mirror in the room, the bench with a phone mirror); 1 is the bench. */
+/** How a made villager is tuned: 1 (the default) the cheval mirror in the room; b and bench kept from the regroups (setup-strategy.ts). */
 const STRATEGY = params.get('setup') ?? '1'
 /** Where it lands when it hops off the table: a spot the walk routes know. */
 const LANDING = 'seatNear'
@@ -86,7 +86,7 @@ export default {
     /** The host's profile of this person and its jokes dial (GET persona-templates). Until it answers, the dial is clean or cheeky. */
     let PROFILE: unknown = null
     let HUMOUR_DIAL: HumourDial = { locked: null }
-    /** The regroup's strategy, when &setup= names one; null is the bench (round 6). */
+    /** How the villager is tuned (setup-strategy.ts); null is the bench (round 6, &setup=bench). */
     let S: Strategy | null = null
 
     const tools = controls(stage, {
@@ -95,10 +95,9 @@ export default {
         if (!made) return
         say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
         // A bigger or smaller villager: the camera eases to frame it again (never during the drag).
-        if (key === 'size' && state === 'tuning' && (!S || S.bench?.())) atTable()
+        if (key === 'size' && state === 'tuning' && !S) atTable()
       },
       locked: () => note(lockedNote()),
-      grab: (key) => S?.grab?.(key) ?? false,
     })
     group.add(tools.group)
     // Crude is never chosen on the table: it is only ever the household admin's setting for a grown-up.
@@ -907,7 +906,7 @@ export default {
     // ── The regroup's strategy, if one is asked for ──────────────────────
     const target = new THREE.PerspectiveCamera()
     S = strategyFor(STRATEGY, {
-      stage, group, tools, patterns, slip, line, sew,
+      stage, group, tools, shop, patterns, slip, line, sew,
       state: () => state,
       layout: () => layout,
       made: () => made,
@@ -942,6 +941,7 @@ export default {
       },
       cards: () => shownCards,
       watching: () => watching !== null,
+      mount: (e) => saveTag.before(e),
     })
     if (S) document.documentElement.dataset.vsStrategy = S.id
 
@@ -1035,7 +1035,7 @@ export default {
         // The slip lies on the mat, or sits at the near edge; either way inside the screen.
         const w = slip.offsetWidth, h = slip.offsetHeight
         let x = innerWidth / 2, y = innerHeight - h / 2 - (innerWidth < 600 ? 16 : 24)
-        const own = slipAt !== 'front' ? S?.slip?.(w, h) : null
+        const own = S?.slip?.(w, h) ?? null
         if (own) ({ x, y } = own)
         else if (slipAt === 'mat') {
           // As wide as the mat looks (within reason), so it lies on it and clear of the ribbons' tags.
@@ -1230,7 +1230,7 @@ function css() {
     background: var(--felt, #7b9a6e); color: #fffaf0; box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); text-shadow: 0 1px 0 rgba(40, 20, 8, 0.3); }
   .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed rgba(255, 250, 235, 0.7); border-radius: 4px; pointer-events: none; }
   .vs-slip .chip b { font: 700 19px/1.15 ${HAND}; white-space: nowrap; }
-  .vs-slip .chip span { font: italic 13.5px/1.3 ${BOOK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vs-slip .chip span { font: italic 14px/1.3 ${BOOK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .vs-slip .chip i { align-self: center; font: 700 15px/1 ${HAND}; font-style: normal; opacity: 0.9; }
   .vs-slip .chip[hidden] { display: none; }
   .vs-slip .chip:hover i, .vs-slip .chip:focus-visible i { opacity: 1; text-decoration: underline; }

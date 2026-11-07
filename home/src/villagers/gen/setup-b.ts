@@ -8,197 +8,42 @@ import * as THREE from 'three/webgpu'
 import { HAND, MAT, TOP } from './workshop'
 import type { Key } from './sliders'
 import type { Scene, Strategy } from './setup-strategy'
-import { footFor } from './setup-rack'
+import { BOOK, el, fittingControls } from './setup-controls'
 
-const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
-const RIBBON: Record<'warmth' | 'playful' | 'chatty', { ground: string; ends: [string, string] }> = {
-  warmth: { ground: '#c4553f', ends: ['blunt', 'warm'] },
-  playful: { ground: '#d6b45c', ends: ['serious', 'playful'] },
-  chatty: { ground: '#6f86a8', ends: ['brief', 'chatty'] },
-}
-const DIAL: Record<'pitch' | 'pace' | 'energy', { name: string; ends: [string, string] }> = {
-  pitch: { name: 'pitch', ends: ['low', 'high'] },
-  pace: { name: 'pace', ends: ['slow', 'quick'] },
-  energy: { name: 'energy', ends: ['calm', 'lively'] },
-}
-
-/**
- * `grounded` (E's phone): a lighter mirror that lets the kitchen show round it, an arched top with no
- * rail, the tape along the glass's own edge, and the name tag left on the kitchen above it.
- */
-/** The size for a head at page row y: the feet stay put, the height scales. Shared by every tape whose marker rides the head. */
-export function sizeAt(scene: Scene, y: number) {
-  const r = scene.villager()
-  const v = scene.tools.values.size
-  if (!r) return v
-  const s = (2 ** ((v - 0.5) * 0.64) * Math.max(10, r.bottom - y)) / Math.max(10, r.bottom - r.top)
-  return 0.5 + Math.log2(s) / 0.64
-}
-
-export function mirror(scene: Scene, opts: { grounded?: boolean } = {}): Strategy & { park(): void } {
-  const { tools, patterns } = scene
-  const el = (tag: string, cls: string, parent?: HTMLElement) => {
-    const e = document.createElement(tag)
-    e.className = cls
-    parent?.append(e)
-    return e
-  }
-  const frame = el('div', `vs-mirror${opts.grounded ? ' grounded' : ''}`)
+export function mirror(scene: Scene): Strategy {
+  const { patterns } = scene
+  const frame = el('div', 'vs-mirror')
   const top = el('div', 'rail top', frame)
   const left = el('div', 'rail left', frame)
   const glass = el('div', 'glass', frame)
   const right = el('div', 'rail right', frame)
   const bottom = el('div', 'rail bottom', frame)
-  void top
-  void glass
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
   document.body.append(frame)
-
-  // A run of changes ends in one line from the villager, as on the bench.
-  let lineTimer = 0
-  const changed = () => {
-    clearTimeout(lineTimer)
-    lineTimer = window.setTimeout(() => scene.tuned(), 380)
-  }
-  /** A slider the keyboard reaches: arrows step, Page jumps, Home and End go to the ends. */
-  const slider = (e: HTMLElement, key: Key, label: string) => {
-    e.tabIndex = 0
-    e.setAttribute('role', 'slider')
-    e.setAttribute('aria-label', label)
-    e.setAttribute('aria-valuemin', '0')
-    e.setAttribute('aria-valuemax', '100')
-    e.dataset.key = key
-    e.addEventListener('keydown', (ev) => {
-      const step = { ArrowRight: 0.05, ArrowUp: 0.05, ArrowLeft: -0.05, ArrowDown: -0.05, PageUp: 0.2, PageDown: -0.2 }[ev.key]
-      const v = step !== undefined ? tools.values[key] + step : ev.key === 'Home' ? 0 : ev.key === 'End' ? 1 : null
-      if (v === null) return
-      ev.preventDefault()
-      tools.set(key, Math.min(1, Math.max(0, v)))
-      changed()
-    })
-  }
-  /** Drag on an element: `to` maps the pointer to a value. */
-  const drag = (e: HTMLElement, key: Key, to: (ev: PointerEvent, from: { x: number; y: number; v: number }) => number) => {
-    e.addEventListener('pointerdown', (ev) => {
-      if (ev.button !== 0) return
-      ev.preventDefault()
-      e.focus({ preventScroll: true })
-      e.setPointerCapture(ev.pointerId)
-      const from = { x: ev.clientX, y: ev.clientY, v: tools.values[key] }
-      tools.set(key, Math.min(1, Math.max(0, to(ev, from))))
-      const move = (m: PointerEvent) => tools.set(key, Math.min(1, Math.max(0, to(m, from))))
-      const up = () => {
-        e.removeEventListener('pointermove', move)
-        e.removeEventListener('pointerup', up)
-        e.removeEventListener('pointercancel', up)
-        changed()
-      }
-      e.addEventListener('pointermove', move)
-      e.addEventListener('pointerup', up)
-      e.addEventListener('pointercancel', up)
-    })
-  }
+  const kit = fittingControls(scene)
 
   // ── Left: the tape measure up the side; its marker is at the villager's head ──
-  const tape = el('div', 'tape', left)
+  const { tape, marker } = kit.tape(left)
   el('b', 'rail-name', left).textContent = 'height'
-  const marker = el('div', 'marker', tape)
-  slider(marker, 'size', 'Size: drag the marker to their height')
-  const sizeFor = (y: number) => sizeAt(scene, y)
-  drag(tape, 'size', (ev) => sizeFor(ev.clientY))
-
   // ── Bottom: the felt colours ──
-  const colours = el('div', 'colours', bottom)
+  const { colours, dots } = kit.colours(bottom)
   el('b', 'rail-name', colours).textContent = 'colour'
-  colours.setAttribute('role', 'radiogroup')
-  colours.setAttribute('aria-label', 'Felt colour')
-  const dots = Array.from({ length: 7 }, (_, i) => {
-    const d = el('button', 'dot', colours) as HTMLButtonElement
-    d.type = 'button'
-    d.setAttribute('role', 'radio')
-    d.setAttribute('aria-label', i === 3 ? 'Colour as made' : `Colour turned ${i < 3 ? 'one way' : 'the other way'}, ${Math.abs(i - 3)} of 3`)
-    d.dataset.key = 'hue'
-    d.addEventListener('click', () => {
-      tools.set('hue', i / 6)
-      changed()
-    })
-    return d
-  })
-
+  colours.prepend(colours.lastChild!)
   // ── Right: voice and energy dials, three manner ribbons and the jokes switch ──
   const controls = el('div', 'controls', right)
-  const dialRow = el('div', 'dials', controls)
-  const knobs = (Object.keys(DIAL) as (keyof typeof DIAL)[]).map((key) => {
-    const box = el('div', 'dial', dialRow)
-    el('b', 'dial-name', box).textContent = DIAL[key].name
-    const knob = el('div', 'knob', box)
-    el('i', 'notch', knob)
-    const ends = el('div', 'dial-ends', box)
-    el('span', '', ends).textContent = DIAL[key].ends[0]
-    el('span', '', ends).textContent = DIAL[key].ends[1]
-    slider(knob, key, `${DIAL[key].name}, a dial from ${DIAL[key].ends[0]} to ${DIAL[key].ends[1]}`)
-    // Turn it by dragging sideways or up.
-    drag(knob, key, (ev, from) => from.v + ((ev.clientX - from.x) - (ev.clientY - from.y)) / 160)
-    return { key, knob }
-  })
+  const knobs = kit.dials(el('div', 'dials', controls))
   const manner = el('div', 'manner', controls)
   el('b', 'rail-name', manner).textContent = 'manner'
-  const ribbons = (Object.keys(RIBBON) as (keyof typeof RIBBON)[]).map((key) => {
-    const row = el('div', 'ribbon-row', manner)
-    el('span', 'end', row).textContent = RIBBON[key].ends[0]
-    const strip = el('div', 'ribbon', row)
-    strip.style.setProperty('--ground', RIBBON[key].ground)
-    const button = el('i', 'button', strip)
-    el('span', 'end', row).textContent = RIBBON[key].ends[1]
-    slider(strip, key, `${RIBBON[key].ends[0]} to ${RIBBON[key].ends[1]}, a ribbon`)
-    drag(strip, key, (ev) => {
-      const r = strip.getBoundingClientRect()
-      return (ev.clientX - r.left) / r.width
-    })
-    return { key, strip, button }
-  })
+  const ribbons = kit.ribbons(manner)
   const jokes = el('div', 'jokes', controls)
   el('b', 'rail-name', jokes).textContent = 'jokes'
-  jokes.setAttribute('role', 'radiogroup')
-  jokes.setAttribute('aria-label', 'Jokes')
-  const steps = (['clean', 'cheeky', 'crude'] as const).map((word, i) => {
-    const b = el('button', 'step', jokes) as HTMLButtonElement
-    b.type = 'button'
-    b.setAttribute('role', 'radio')
-    b.textContent = word
-    b.dataset.key = 'humour'
-    b.addEventListener('click', () => {
-      tools.set('humour', i / 2)
-      changed()
-    })
-    return b
-  })
-
+  const steps = kit.jokes(jokes)
   // ── Right (before there is a villager): the pattern swatches, hanging like fabric samples ──
   const swatches = el('div', 'swatches', right)
   el('b', 'rail-name', swatches).textContent = 'patterns'
-  const hang = el('div', 'hang', swatches)
-  let shown = ''
-  const drawSwatches = () => {
-    const cards = scene.cards()
-    const sig = cards.map((c) => c.template.id).join(',') + `|${patterns.picked?.template.id}`
-    if (sig === shown) return
-    shown = sig
-    hang.textContent = ''
-    for (const card of cards) {
-      const b = el('button', 'vs-swatch', hang) as HTMLButtonElement
-      b.type = 'button'
-      b.dataset.template = card.template.id
-      b.style.setProperty('--felt', patterns.feltOf(card))
-      b.setAttribute('aria-pressed', String(patterns.picked?.template.id === card.template.id))
-      el('b', '', b).textContent = card.template.name
-      const foot = footFor(card)
-      if (foot) el('small', '', b).textContent = foot
-      b.addEventListener('click', () => patterns.pick(patterns.picked?.template.id === card.template.id ? null : card))
-    }
-  }
+  const drawSwatches = kit.swatches(el('div', 'hang', swatches))
 
   const narrow = () => scene.layout() === 'narrow'
   /** The frame's glass, on the page; laid out by CSS from the screen's shape. */
@@ -222,12 +67,6 @@ export function mirror(scene: Scene, opts: { grounded?: boolean } = {}): Strateg
 
   return {
     id: 'b',
-    /** Put away (E on a wide screen): the bench and its rack are back. */
-    park() {
-      frame.classList.remove('shown', 'tuning')
-      delete document.documentElement.dataset.vsMirror
-      patterns.group.visible = true
-    },
     standAt: () => new THREE.Vector3(MAT.x, TOP + 0.006, MAT.z - 0.04),
     // Square on to the mirror.
     turn: () => 0.05,
@@ -259,7 +98,6 @@ export function mirror(scene: Scene, opts: { grounded?: boolean } = {}): Strateg
       if (!showFrame()) return null
       const f = frame.getBoundingClientRect()
       if (what === 'name') {
-        if (opts.grounded) return null
         // A brass name plate on the frame's top rail.
         const t = top.getBoundingClientRect()
         return { x: t.left + t.width / 2 - w / 2, y: t.top + t.height / 2 - h / 2 }
@@ -277,46 +115,15 @@ export function mirror(scene: Scene, opts: { grounded?: boolean } = {}): Strateg
       patterns.group.visible = false
       if (!on) return
       drawSwatches()
-      const v = tools.values
-      // The marker rides the villager's head; the tape's ticks are only a ruler.
-      const r = scene.villager(), t = tape.getBoundingClientRect()
-      const y = r && scene.state() === 'tuning' ? THREE.MathUtils.clamp(r.top - t.top, 8, t.height - 8) : t.height * (1 - v.size)
-      marker.style.top = `${Math.round(y)}px`
-      marker.setAttribute('aria-valuenow', String(Math.round(v.size * 100)))
-      dots.forEach((d, i) => {
-        const c = scene.hueAt(i / 6)
-        if (c) d.style.background = c
-        const at = Math.abs(v.hue - i / 6) < 0.05
-        d.classList.toggle('at', at)
-        d.setAttribute('aria-checked', String(at))
-      })
-      for (const k of knobs) {
-        k.knob.style.setProperty('--turn', `${Math.round(-135 + v[k.key] * 270)}deg`)
-        k.knob.setAttribute('aria-valuenow', String(Math.round(v[k.key] * 100)))
-      }
-      for (const rb of ribbons) {
-        rb.button.style.left = `${(v[rb.key] * 100).toFixed(1)}%`
-        rb.strip.setAttribute('aria-valuenow', String(Math.round(v[rb.key] * 100)))
-      }
-      const at = Math.round(v.humour * 2)
-      steps.forEach((s, i) => {
-        s.classList.toggle('at', i === at)
-        s.setAttribute('aria-checked', String(i === at))
-      })
-      // Crude shows only as a level the household's admin set: otherwise it is a locked mark, never a choice.
-      steps[2].classList.toggle('locked', at !== 2)
+      kit.sync({ marker, tape, dots, knobs, ribbons, steps })
     },
     api: {
       /** A control's middle on the page, to click or drag it. */
-      control: (key: Key) => {
-        const e = key === 'size' ? tape : key === 'hue' ? dots[0] : key === 'humour' ? steps[0] : (knobs.find((k) => k.key === key)?.knob ?? ribbons.find((r) => r.key === key)!.strip)
-        const b = e.getBoundingClientRect()
-        return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, h: b.height }
-      },
+      control: (key: Key) => kit.control({ marker, tape, dots, knobs, ribbons, steps }, key),
       glass: () => glassRect().toJSON(),
     },
     dispose() {
-      clearTimeout(lineTimer)
+      kit.dispose()
       patterns.group.visible = true
       delete document.documentElement.dataset.vsMirror
       frame.remove()
@@ -426,21 +233,6 @@ function css() {
     .vs-swatch { width: calc(33% - 6px); min-height: 60px; padding: 10px 4px 12px; }
     .vs-swatch b { font-size: 14px; }
     .vs-mirror:not(.tuning) .bottom { display: none; }
-  }
-  /* E's phone: grounded. A thin arched frame of light wood with the kitchen round it; no top rail (the name tag
-     stays on the kitchen above); the tape lies along the glass's edge; the controls are the mirror's felt base. */
-  @media (max-aspect-ratio: 9/10) {
-    .vs-mirror.grounded { top: 96px; left: 14px; right: 14px; height: calc(100vh - 110px); border: 4px solid #c99a66;
-      border-radius: 150px 150px 16px 16px / 110px 110px 16px 16px; overflow: hidden; grid-template-rows: 0 minmax(0, 1fr) auto auto;
-      box-shadow: 0 10px 22px rgba(40, 22, 8, 0.26), 0 0 0 1px rgba(110, 70, 35, 0.35); }
-    .vs-mirror.grounded .top { display: none; }
-    .vs-mirror.grounded .left { background: none; }
-    .vs-mirror.grounded .left::after { display: none; }
-    .vs-mirror.grounded .left .rail-name { color: #4a3220; text-shadow: 0 1px 0 rgba(255, 245, 225, 0.8); }
-    .vs-mirror.grounded .glass { box-shadow: inset 0 0 0 1px rgba(255, 235, 200, 0.5), inset 0 0 30px rgba(20, 30, 40, 0.16); }
-    .vs-mirror.grounded .bottom, .vs-mirror.grounded .right { background: ${felt}, #56785f; }
-    .vs-mirror.grounded .bottom { border-top: 3px solid #c99a66; border-radius: 0; }
-    .vs-mirror.grounded .right { border-radius: 0 0 10px 10px; padding-bottom: 74px; }
   }
   @media (prefers-reduced-motion: reduce) { .vs-mirror, .vs-mirror .marker, .vs-swatch, .vs-mirror .dot { transition: none; } }
   `
