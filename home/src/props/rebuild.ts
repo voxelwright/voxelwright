@@ -215,10 +215,20 @@ export function rebuild(prop: PropData): THREE.Group {
     return geo
   })
   const group = new THREE.Group()
+  const matrix = new THREE.Matrix4()
   for (const m of prop.meshes) {
     const mesh = new THREE.Mesh(geometries[m.geometry], materials[m.material])
-    mesh.matrixAutoUpdate = false
-    mesh.matrix.fromArray(m.matrix)
+    // Position, rotation and scale like every other object in the home. A matrix with shear
+    // cannot be split that way, so its mesh gets its own copy of the geometry with the matrix baked in.
+    matrix.fromArray(m.matrix)
+    matrix.decompose(mesh.position, mesh.quaternion, mesh.scale)
+    mesh.updateMatrix()
+    if (mesh.matrix.elements.some((v, i) => Math.abs(v - matrix.elements[i]) > 1e-5)) {
+      mesh.geometry = mesh.geometry.clone().applyMatrix4(matrix)
+      mesh.position.set(0, 0, 0)
+      mesh.quaternion.identity()
+      mesh.scale.set(1, 1, 1)
+    }
     mesh.castShadow = mesh.receiveShadow = true
     group.add(mesh)
   }
