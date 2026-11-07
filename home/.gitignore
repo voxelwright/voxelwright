@@ -2,3 +2,5 @@ node_modules/
 dist/
 generated/
 perf-gate.json
+.sound-lab/
+public/sound-lab/
