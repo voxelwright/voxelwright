@@ -11,8 +11,9 @@ import { TABLE_TOP } from '../../layout'
 import { feltTexture } from '../kinds'
 
 export const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
-/** Where the villager stands on the mat, in world space. */
+/** The cutting mat, in world space; the villager stands on it. arrange() moves it back on a narrow screen. */
 export const MAT = { x: -0.22, z: 0.12, w: 0.74, d: 0.44 }
+const MAT_Z = { wide: 0.12, narrow: -0.02 }
 export const TOP = TABLE_TOP
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -210,6 +211,8 @@ export interface Workshop {
   /** Pattern pieces cut so far while waiting (honest: one per few seconds, they are scenery). */
   readonly cut: number
   frame(dt: number, t: number): void
+  /** Lay the table out for a wide or a narrow screen (moves MAT, the one owner of where the mat is). */
+  arrange(layout: 'wide' | 'narrow'): void
   /** Release the thread's last geometry (the rest goes with the group). */
   dispose(): void
 }
@@ -252,7 +255,8 @@ export function workshop(): Workshop {
     group.add(shadowed(pencil))
   }
 
-  // A tomato pin cushion with pins, behind the mat.
+  // A tomato pin cushion with pins, by the pattern sheet.
+  let cushionAt: THREE.Object3D
   {
     const cushion = new THREE.Group()
     const red = new THREE.Mesh(new THREE.SphereGeometry(0.045, 24, 14), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture('#c4553f', 7, { band: false }), roughness: 1 }))
@@ -285,32 +289,80 @@ export function workshop(): Workshop {
       pin.rotation.set(Math.cos(a) * tilt, 0, -Math.sin(a) * tilt)
       cushion.add(pin)
     })
-    cushion.position.set(-0.24, y, -0.25)
     group.add(shadowed(cushion))
+    cushionAt = cushion
   }
 
-  // A felt sheet being cut (right of the mat), with the scissors on it.
-  const sheetFelt = new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.004, 0.15, 2, 0.002), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture('#d9a35f', 13, { band: false }), roughness: 1 }))
-  sheetFelt.position.set(0.04, y + 0.009, 0.28)
-  sheetFelt.rotation.y = 0.25
+  // A felt sheet being cut, with the scissors on it: at rest by the mat's front right, moved to the middle of the mat while working.
+  const sheetFelt = new THREE.Mesh(new RoundedBoxGeometry(0.29, 0.004, 0.23, 2, 0.002), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture('#d9a35f', 13, { band: false }), roughness: 1 }))
   group.add(shadowed(sheetFelt))
 
-  // Cut pieces, laid on the mat one by one while waiting.
-  const pieceColours = ['#d9a35f', '#e7d7b8', '#c97b63', '#9db08a', '#d9a35f', '#e7d7b8', '#c97b63', '#9db08a']
-  const pieces = pieceColours.map((c, i) => {
+  // While the model works, the pattern is made on the mat, one piece at a time: chalked on the felt,
+  // cut out along the chalk, then laid in a row and pinned. Honest activity, never a percentage; the
+  // pieces are scenery, not the villager's real parts.
+  const SHAPES: { name: string; draw: (s: THREE.Shape) => void }[] = [
+    { name: 'body', draw: (s) => s.absellipse(0, 0, 0.05, 0.064, 0, Math.PI * 2, false, 0) },
+    { name: 'head', draw: (s) => s.absellipse(0, 0, 0.042, 0.04, 0, Math.PI * 2, false, 0) },
+    { name: 'ear', draw: (s) => { s.moveTo(0, 0.045); s.quadraticCurveTo(0.03, 0, 0, -0.03); s.quadraticCurveTo(-0.03, 0, 0, 0.045) } },
+    { name: 'ear', draw: (s) => { s.moveTo(0, 0.045); s.quadraticCurveTo(0.03, 0, 0, -0.03); s.quadraticCurveTo(-0.03, 0, 0, 0.045) } },
+    { name: 'hand', draw: (s) => s.absellipse(0, 0, 0.022, 0.03, 0, Math.PI * 2, false, 0) },
+    { name: 'hand', draw: (s) => s.absellipse(0, 0, 0.022, 0.03, 0, Math.PI * 2, false, 0) },
+    { name: 'foot', draw: (s) => s.absellipse(0, 0, 0.032, 0.02, 0, Math.PI * 2, false, 0) },
+    { name: 'foot', draw: (s) => s.absellipse(0, 0, 0.032, 0.02, 0, Math.PI * 2, false, 0) },
+  ]
+  const SLOTS = 12
+  const pieceColours = ['#d9a35f', '#e7d7b8', '#c97b63', '#9db08a']
+  const outlines = SHAPES.map(({ draw }) => {
     const shape = new THREE.Shape()
-    const r = 0.026 + (i % 3) * 0.006
-    if (i % 2) shape.absellipse(0, 0, r, r * 1.5, 0, Math.PI * 2, false, 0)
-    else shape.absellipse(0, 0, r * 1.3, r, 0, Math.PI * 2, false, 0)
-    const m = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.003, bevelEnabled: false, curveSegments: 18 }).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture(c, 40 + i, { band: false }), roughness: 1 }))
-    const col = i % 4, row = Math.floor(i / 4)
-    m.position.set(MAT.x - 0.28 + col * 0.075, y + 0.007, MAT.z + 0.1 + row * 0.07)
-    m.rotation.y = i * 0.7
+    draw(shape)
+    // Drawn a little larger than a real piece so the chalk and the cut read from across the table.
+    const points = shape.getSpacedPoints(72).map((p) => p.multiplyScalar(1.35))
+    return { shape: new THREE.Shape(points), points }
+  })
+  const pieces = Array.from({ length: SLOTS }, (_, i) => {
+    const { shape } = outlines[i % outlines.length]
+    const m = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.003, bevelEnabled: false, curveSegments: 18 }).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture(pieceColours[i % 4], 40 + i, { band: false }), roughness: 1 }))
     m.visible = false
     m.name = `workshop piece ${i}`
     group.add(shadowed(m))
     return m
   })
+  // A chalk line per shape: a thin strip along the outline that is drawn in, a stretch at a time.
+  const chalkMat = new THREE.MeshBasicMaterial({ color: '#f7f1e3', transparent: true, opacity: 0.9, depthWrite: false })
+  const chalks = outlines.map(({ points }) => {
+    const pos: number[] = [], index: number[] = []
+    points.forEach((p, i) => {
+      const q = points[(i + 1) % points.length], o = points[(i + points.length - 1) % points.length]
+      const tx = q.x - o.x, ty = q.y - o.y, l = Math.hypot(tx, ty) || 1
+      const nx = (-ty / l) * 0.0022, ny = (tx / l) * 0.0022
+      // Shape y is the table's -z (the shape lies flat, extruded upward).
+      pos.push(p.x + nx, 0, -(p.y + ny), p.x - nx, 0, -(p.y - ny))
+      if (i < points.length - 1) index.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2)
+    })
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    g.setIndex(index)
+    const m = new THREE.Mesh(g, chalkMat)
+    m.visible = false
+    m.renderOrder = 2
+    group.add(m)
+    return m
+  })
+  // A pin through each laid piece.
+  const pins = Array.from({ length: SLOTS }, (_, i) => {
+    const pin = new THREE.Group()
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0008, 0.0008, 0.03, 4), new THREE.MeshStandardMaterial({ color: '#c9c9c9', roughness: 0.3, metalness: 0.6 }))
+    shaft.position.y = 0.006
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 10, 8), new THREE.MeshStandardMaterial({ color: ['#e8c547', '#6b8fb3', '#b0563f', '#7a9a5a'][i % 4], roughness: 0.35 }))
+    head.position.y = 0.021
+    pin.add(shaft, head)
+    pin.rotation.set(0.5, 0, -0.4)
+    pin.visible = false
+    group.add(pin)
+    return pin
+  })
+  const workAt = new THREE.Vector3()
+  const slotAt = (i: number) => new THREE.Vector3(MAT.x - 0.3 + (i % 6) * 0.085, y + 0.007, MAT.z + 0.15 + Math.floor(i / 6) * 0.065)
 
   // Scissors: two blades and finger loops about a pivot.
   const scissors = new THREE.Group()
@@ -339,7 +391,6 @@ export function workshop(): Workshop {
     const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.006, 10), steel)
     pivot.position.y = 0.002
     scissors.add(pivot)
-    scissors.position.set(0.06, y + 0.015, 0.27)
     scissors.rotation.y = 0.6
     group.add(shadowed(scissors))
   }
@@ -362,24 +413,49 @@ export function workshop(): Workshop {
   const threadColour = '#c4553f'
   const threadMat = mat(threadColour, 0.9)
   const reel = spool(threadColour, 0.02, 0.046)
-  reel.group.position.set(-0.1, y, -0.17)
   group.add(reel.group)
-  const reelTop = new THREE.Vector3(-0.1, y + 0.03, -0.17)
+  const reelTop = new THREE.Vector3()
   const thread = new THREE.Mesh(new THREE.BufferGeometry(), threadMat)
   thread.name = 'workshop thread'
   group.add(thread)
 
   // A felt scrap the needle works on while waiting.
   const scrap = new THREE.Mesh(new RoundedBoxGeometry(0.13, 0.004, 0.1, 2, 0.002), new THREE.MeshStandardMaterial({ color: '#ffffff', map: feltTexture('#e7d7b8', 21, { band: true }), roughness: 1 }))
-  scrap.position.set(MAT.x + 0.22, y + 0.009, MAT.z - 0.06)
   scrap.rotation.y = -0.2
   group.add(shadowed(scrap))
 
   let state: 'idle' | 'working' | 'tidy' = 'idle'
   let since = 0
   let cut = 0
+  /** The felt sheet and scissors: on the middle of the mat while working, else back at the front right. */
+  const lay = () => {
+    const working = state === 'working'
+    sheetFelt.position.copy(working ? workAt : new THREE.Vector3(MAT.x + 0.26, y + 0.009, MAT.z + 0.16))
+    sheetFelt.rotation.y = working ? 0 : 0.25
+    scissors.position.set(MAT.x + 0.28, y + 0.015, MAT.z + 0.15)
+    scissors.rotation.y = 0.6
+    for (const c of chalks) c.visible = false
+  }
   let passing: { from: THREE.Vector3; to: THREE.Vector3; u: number; seconds: number; done: () => void } | null = null
-  const rest = new THREE.Vector3(MAT.x + 0.26, y + 0.012, MAT.z - 0.04)
+  const rest = new THREE.Vector3()
+
+  // Where everything lies. Things on the mat follow it; the sheet, pencil, cushion and reel have a place per layout.
+  const arrange = (layout: 'wide' | 'narrow') => {
+    MAT.z = MAT_Z[layout]
+    matMesh.position.set(MAT.x, y + 0.003, MAT.z)
+    const wide = layout === 'wide'
+    sheet.position.set(wide ? -0.63 : -0.98, y + 0.0035, wide ? -0.16 : -0.1)
+    pencil.position.set(wide ? -0.4 : -0.75, y + 0.009, wide ? -0.02 : 0.05)
+    cushionAt.position.set(wide ? -0.82 : -0.95, y, wide ? -0.27 : 0.25)
+    reel.group.position.set(wide ? 0.1 : 0.2, y, wide ? 0.42 : 0.12)
+    reelTop.set(reel.group.position.x, y + 0.03, reel.group.position.z)
+    workAt.set(MAT.x + 0.03, y + 0.009, MAT.z - 0.04)
+    scrap.position.set(MAT.x + 0.25, y + 0.009, MAT.z - 0.08)
+    rest.set(MAT.x + 0.29, y + 0.012, MAT.z - 0.06)
+    for (const c of chalks) c.position.set(workAt.x, y + 0.0115, workAt.z)
+    lay()
+    api.frame(0, 0)
+  }
   const eyeAt = new THREE.Vector3()
   const mid = new THREE.Vector3()
   let tick = -1
@@ -407,8 +483,10 @@ export function workshop(): Workshop {
       since = 0
       if (next !== 'working') {
         for (const p of pieces) p.visible = false
+        for (const p of pins) p.visible = false
         cut = 0
       }
+      lay()
     },
     pass(at, span, seconds) {
       if (reducedMotion.matches) return Promise.resolve()
@@ -454,27 +532,55 @@ export function workshop(): Workshop {
           needle.position.set(scrap.position.x - 0.04 + along * 0.014, y + 0.012 + Math.max(-0.02, Math.cos(c * Math.PI * 2) * 0.03), scrap.position.z + 0.01)
           needle.rotation.set(0.35, 0, -0.25)
           rethread()
-          // Scissors snip along.
-          const open = 0.32 * (0.5 + 0.5 * Math.cos(tt * 7))
-          blades[0].rotation.y = open / 2
-          blades[1].rotation.y = -open / 2
-          scissors.position.x = 0.06 + Math.sin(tt * 0.6) * 0.03
         }
-        const due = Math.min(pieces.length, Math.floor(since / 4.5))
-        while (cut < due) pieces[cut++].visible = true
+        // One pattern piece every 4.5 s: chalk it (1.5 s), cut along the chalk (1.8 s), lay it in the row and pin it (0.9 s).
+        const k = Math.floor(since / 4.5), u = since % 4.5
+        const shape = k % outlines.length
+        const { points } = outlines[shape]
+        chalks.forEach((c, i) => (c.visible = i === shape && u < 3.3))
+        const chalk = chalks[shape]
+        chalk.geometry.setDrawRange(0, 6 * Math.floor(Math.min(1, u / 1.5) * (points.length - 1)))
+        const piece = pieces[k % SLOTS]
+        if (u >= 1.5 && u < 3.3) {
+          // The scissors follow the chalk round, blades snipping.
+          const w = (u - 1.5) / 1.8
+          const at = Math.min(points.length - 2, Math.floor(w * (points.length - 1)))
+          const p = points[at], q = points[at + 1]
+          scissors.position.set(workAt.x + p.x, y + 0.016, workAt.z - p.y)
+          scissors.rotation.y = Math.atan2(q.y - p.y, q.x - p.x) + Math.PI
+          if (fresh) {
+            const open = 0.34 * (0.5 + 0.5 * Math.cos(tt * 9))
+            blades[0].rotation.y = open / 2
+            blades[1].rotation.y = -open / 2
+          }
+        } else if (u >= 3.3) {
+          // The cut piece lifts off the sheet and is laid in the row, then pinned.
+          const w = Math.min(1, (u - 3.3) / 0.7)
+          const e = w * w * (3 - 2 * w)
+          const slot = slotAt(k % SLOTS)
+          piece.visible = true
+          piece.position.lerpVectors(new THREE.Vector3(workAt.x, y + 0.012, workAt.z), slot, e)
+          piece.position.y += Math.sin(e * Math.PI) * 0.03
+          piece.rotation.y = e * 0.4 * ((k % 3) - 1)
+          pins[k % SLOTS].visible = w >= 1
+          pins[k % SLOTS].position.copy(slot).add(new THREE.Vector3(0.006, 0.003, -0.004))
+          scissors.position.set(workAt.x + 0.15, y + 0.015, workAt.z + 0.02)
+          scissors.rotation.y = 0.6
+          if (w >= 1) cut = Math.max(cut, Math.min(SLOTS, k + 1))
+        }
       } else if (fresh || still) {
         needle.position.copy(rest)
         needle.rotation.set(Math.PI / 2 - 0.05, 0.3, 0)
         blades[0].rotation.y = 0.06
         blades[1].rotation.y = -0.06
-        scissors.position.x = 0.06
         rethread()
       }
     },
+    arrange,
     dispose() {
       thread.geometry.dispose()
     },
   }
-  api.frame(0, 0)
+  arrange('wide')
   return api
 }

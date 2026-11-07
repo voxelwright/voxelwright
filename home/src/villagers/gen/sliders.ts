@@ -16,17 +16,19 @@ export const PERSONA_KEYS: Key[] = ['warmth', 'playful', 'chatty', 'humour']
 /** The humour dial's three positions, 0, 0.5 and 1. */
 export const HUMOUR = ['clean', 'cheeky', 'crude'] as const
 
-const LABEL: Record<Key, { tag: string; aria: string; low: string; high: string }> = {
-  size: { tag: 'size', aria: 'Size, a tape measure', low: 'smaller', high: 'bigger' },
-  hue: { tag: 'colour', aria: 'Felt colour, a rail of thread spools', low: 'cooler', high: 'warmer' },
-  pitch: { tag: 'pitch', aria: 'Voice pitch, a toy xylophone', low: 'lower', high: 'higher' },
-  pace: { tag: 'pace', aria: 'Voice pace, a metronome', low: 'slower', high: 'quicker' },
-  energy: { tag: 'energy', aria: 'Energy, a wind-up key', low: 'calmer', high: 'livelier' },
-  warmth: { tag: 'manner', aria: 'Manner, from blunt to warm, a ribbon with a button', low: 'blunter', high: 'warmer' },
-  playful: { tag: 'play', aria: 'Humour, from serious to playful, a ribbon with a button', low: 'more serious', high: 'more playful' },
-  chatty: { tag: 'talk', aria: 'Talk, from brief to chatty, a ribbon with a button', low: 'briefer', high: 'chattier' },
-  humour: { tag: 'jokes', aria: 'Humour, clean, cheeky or crude, a three-position stitch dial', low: 'cleaner', high: 'cruder' },
+/** Each tool's tag: its name, what its two ends do (shown on the tag), and what a screen reader hears. */
+const LABEL: Record<Key, { tag: string; aria: string; low: string; high: string; ends: [string, string] }> = {
+  size: { tag: 'size', aria: 'Size, a tape measure', low: 'smaller', high: 'bigger', ends: ['small', 'big'] },
+  hue: { tag: 'colour', aria: 'Felt colour, a rail of thread spools', low: 'turned one way', high: 'turned the other way', ends: ['', ''] },
+  pitch: { tag: 'pitch', aria: 'Voice pitch, a toy xylophone', low: 'lower', high: 'higher', ends: ['low', 'high'] },
+  pace: { tag: 'pace', aria: 'Voice pace, a metronome', low: 'slower', high: 'quicker', ends: ['slow', 'quick'] },
+  energy: { tag: 'energy', aria: 'Energy, a wind-up key', low: 'calmer', high: 'livelier', ends: ['calm', 'lively'] },
+  warmth: { tag: 'manner', aria: 'Manner, from blunt to warm, a ribbon with a button', low: 'blunter', high: 'warmer', ends: ['blunt', 'warm'] },
+  playful: { tag: 'play', aria: 'Humour, from serious to playful, a ribbon with a button', low: 'more serious', high: 'more playful', ends: ['serious', 'playful'] },
+  chatty: { tag: 'talk', aria: 'Talk, from brief to chatty, a ribbon with a button', low: 'briefer', high: 'chattier', ends: ['brief', 'chatty'] },
+  humour: { tag: 'jokes', aria: 'Humour, clean, cheeky or crude, a three-position stitch dial', low: 'cleaner', high: 'cruder', ends: ['', ''] },
 }
+const RIBBONS: Key[] = ['warmth', 'playful', 'chatty']
 
 /** How a 0..1 value reads aloud: "as made", "a little bigger", "much smaller". */
 export function valueText(key: Key, v: number): string {
@@ -63,8 +65,10 @@ interface Tool {
   group: THREE.Group
   /** Where a drag moves the value from 0 to 1, in the tool's own space; null drags sideways on screen. */
   axis: [THREE.Vector3, THREE.Vector3] | null
-  /** Under the tool, where its tag hangs. */
+  /** Under the tool, where its tag hangs (a ribbon's: its left end). */
   tagAt: THREE.Vector3
+  /** A ribbon's right end, where its second tag hangs. */
+  endAt?: THREE.Vector3
   show(v: number): void
   tick?(dt: number, t: number): void
   /** Discrete positions (the humour dial's three), else continuous. */
@@ -348,8 +352,8 @@ function stitchDial(): Tool {
   }
 }
 
-/** A grosgrain ribbon with its two ends embroidered, and a button that slides along it. */
-function ribbon(key: Key, ground: string, ink: string, left: string, right: string): Tool {
+/** A grosgrain ribbon with a stitched edge and a button that slides along it; its ends are labelled by paper tags. */
+function ribbon(key: Key, ground: string): Tool {
   const g = new THREE.Group()
   const W = 1024, H = 96
   const cv = document.createElement('canvas')
@@ -373,17 +377,11 @@ function ribbon(key: Key, ground: string, ink: string, left: string, right: stri
     x.stroke()
   }
   x.setLineDash([])
-  x.fillStyle = ink
-  x.font = `700 58px ${HAND}`
-  x.textBaseline = 'middle'
-  x.fillText(left, 22, H / 2 + 2)
-  x.textAlign = 'right'
-  x.fillText(right, W - 22, H / 2 + 2)
-  const tex = new THREE.CanvasTexture(cv)
+    const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 8
   const ribbonMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75 })
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.002, 0.046), ribbonMat)
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.002, 0.046), ribbonMat)
   strip.position.y = 0.001
   g.add(strip)
   // A four-hole wooden button.
@@ -397,11 +395,12 @@ function ribbon(key: Key, ground: string, ink: string, left: string, right: stri
     button.add(hole)
   }
   g.add(button)
-  const x0 = -0.13, x1 = 0.13
+  const x0 = -0.11, x1 = 0.11
   return {
     key, group: g, glow: [disc.material as THREE.MeshStandardMaterial],
     axis: [new THREE.Vector3(x0, 0, 0), new THREE.Vector3(x1, 0, 0)],
-    tagAt: new THREE.Vector3(-0.27, 0, -0.01),
+    tagAt: new THREE.Vector3(-0.185, 0, 0),
+    endAt: new THREE.Vector3(0.185, 0, 0),
     show(v) {
       button.position.x = x0 + (x1 - x0) * v
     },
@@ -417,31 +416,62 @@ export interface Controls {
   init(values: Partial<Record<Key, number>>): void
   /** Lock a stepped tool's top position (crude humour): the dial stops one short and shows a padlock. */
   lock(key: Key, on: boolean): void
-  enable(on: boolean): void
+  /** 'off' hides the tags, 'preview' shows them quietly with nothing to grab, 'on' makes the tools work. */
+  mode(state: 'off' | 'preview' | 'on'): void
+  /** Lay the tools out for a wide screen (one row along the near edge) or a narrow one (a grid before the mat). */
+  arrange(layout: Layout): void
   /** The thread colours for the colour rail: the main felt turned through the slider's range. */
   felt(main: THREE.Color): void
   /** Metronome tempo, as a multiple of the made pace. */
   tempo(rate: number): void
   /** Move keyboard focus to a tool's tag. */
   focus(key: Key): void
+  /** The left edge on screen of the ribbons' left-hand tags, so the slip can keep clear of them (Infinity when hidden). */
+  ribbonsLeft(): number
+  /** Paper lying over the table (the slip): quiet preview tags under it are hidden, as the paper would hide them. */
+  under(rect: DOMRect | null): void
   /** Where a tool's handle (its value's end of the axis) is on screen, for the checks. */
   screen(key: Key): { x: number; y: number }
   frame(dt: number, t: number): void
   dispose(): void
 }
 
-/** Where each tool sits along the near edge of the table, in world space. */
-const PLACES: Record<Key, [number, number, number]> = {
-  size: [-0.98, 0.5, 0.2],
-  hue: [-0.56, 0.53, 0.04],
-  pitch: [-0.12, 0.52, 0],
-  pace: [0.22, 0.47, -0.35],
-  energy: [0.45, 0.5, -0.5],
-  warmth: [0.42, 0.1, -0.06],
-  playful: [0.42, 0.2, -0.06],
-  chatty: [0.42, 0.3, -0.06],
-  humour: [-1.0, 0.27, 0.15],
+export type Layout = 'wide' | 'narrow'
+
+/**
+ * Where each tool sits, in world space: [x, z, turn, scale]. Wide: one row along the near edge, the
+ * ribbons right of the mat and the stitch dial by the mug. Narrow (a phone held upright): two rows of
+ * three before the mat and the three ribbons across the front, each labelled at both ends.
+ */
+const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
+  wide: {
+    size: [-0.99, 0.5, 0.2, 1],
+    pace: [-0.6, 0.48, -0.15, 1],
+    hue: [-0.3, 0.53, 0.02, 1],
+    pitch: [0.07, 0.52, 0, 1],
+    energy: [0.45, 0.56, -0.45, 1],
+    warmth: [0.47, 0.11, -0.04, 1],
+    playful: [0.47, 0.235, -0.04, 1],
+    chatty: [0.47, 0.36, -0.04, 1],
+    humour: [-0.98, 0.25, 0.15, 1],
+  },
+  narrow: {
+    size: [-0.6, 0.575, 0.1, 0.6],
+    hue: [-0.405, 0.585, 0, 0.56],
+    pitch: [-0.2, 0.575, 0, 0.56],
+    energy: [-0.05, 0.575, -0.5, 0.66],
+    humour: [0.07, 0.565, 0, 0.48],
+    pace: [0.18, 0.555, -0.25, 0.66],
+    warmth: [-0.21, 0.27, 0, 0.62],
+    playful: [-0.21, 0.365, 0, 0.62],
+    chatty: [-0.21, 0.46, 0, 0.62],
+  },
 }
+
+/** The kitchen table's near edge (table.ts: centred at z 0.15, a metre deep). Narrow tags hang from it on threads. */
+const NEAR_EDGE = 0.65
+/** Narrow: where each tool's tag hangs below the edge, [column, row]; the outer tools on the shortest threads. */
+const HANG: Partial<Record<Key, [0 | 1, number]>> = { size: [0, 0], hue: [0, 1], pitch: [0, 2], pace: [1, 0], humour: [1, 1], energy: [1, 2] }
 
 export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void }): Controls {
   const group = new THREE.Group()
@@ -450,44 +480,118 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   const pace = metronome()
   const tools: Tool[] = [
     tapeMeasure(), rail, xylophone(), pace, windupKey(),
-    ribbon('warmth', '#c4553f', '#fff4e2', 'blunt', 'warm'),
-    ribbon('playful', '#d6b45c', '#4a3220', 'serious', 'playful'),
-    ribbon('chatty', '#6f86a8', '#fff4e2', 'brief', 'chatty'),
+    ribbon('warmth', '#c4553f'),
+    ribbon('playful', '#d6b45c'),
+    ribbon('chatty', '#6f86a8'),
     stitchDial(),
   ]
+  const toolOf = (key: Key) => tools.find((t) => t.key === key)!
   const locked = new Set<Key>()
   let nudged = false
   const values = Object.fromEntries(KEYS.map((k) => [k, 0.5])) as Record<Key, number>
   for (const tool of tools) {
-    const [x, z, ry] = PLACES[tool.key]
-    tool.group.position.set(x, TOP, z)
-    tool.group.rotation.y = ry
     tool.group.name = `workshop ${tool.key}`
     tool.group.traverse((n) => { n.castShadow = n.receiveShadow = true })
     group.add(tool.group)
     tool.show(0.5)
   }
+  let layout: Layout = 'wide'
+  let lift: Partial<Record<Key, number>> = {}
+  const place = () => {
+    for (const tool of tools) {
+      const [x, z, ry, k] = PLACES[layout][tool.key]
+      tool.group.position.set(x, TOP + (lift[tool.key] ?? 0) * 0.008, z)
+      tool.group.rotation.y = ry
+      tool.group.scale.setScalar(k)
+    }
+  }
+  place()
   let enabled = false
 
   // ── The tags: real sliders for the keyboard and screen readers ──────────
+  // Each tool's tag says what it is and what its two ends do, with a stitch and a bead for where it is
+  // now. A ribbon's tags are its two end words; the left one is the slider, the right one a label.
   const shelf = document.createElement('div')
   shelf.className = 'vs-tools'
   shelf.setAttribute('role', 'group')
   shelf.setAttribute('aria-label', 'Tune the villager')
   const tags = new Map<Key, HTMLDivElement>()
+  const ends = new Map<Key, HTMLDivElement>()
+  const beads = new Map<Key, HTMLElement>()
+  const swatches: HTMLElement[] = []
+  const marks: HTMLElement[] = []
   for (const tool of tools) {
     const tag = document.createElement('div')
-    tag.className = 'vs-tool'
+    tag.className = 'vs-tool vs-tag'
     tag.tabIndex = -1
     tag.dataset.key = tool.key
     tag.setAttribute('role', 'slider')
     tag.setAttribute('aria-label', LABEL[tool.key].aria)
     tag.setAttribute('aria-valuemin', '0')
     tag.setAttribute('aria-valuemax', '100')
-    tag.textContent = LABEL[tool.key].tag
+    const [lo, hi] = LABEL[tool.key].ends
+    if (RIBBONS.includes(tool.key)) {
+      tag.classList.add('end', 'lo')
+      tag.textContent = lo
+      const end = document.createElement('div')
+      end.className = 'vs-end vs-tag end hi'
+      end.setAttribute('aria-hidden', 'true')
+      end.dataset.key = tool.key
+      end.textContent = hi
+      ends.set(tool.key, end)
+    } else {
+      const name = document.createElement('b')
+      name.textContent = LABEL[tool.key].tag
+      const gauge = document.createElement('span')
+      gauge.className = 'ga'
+      gauge.setAttribute('aria-hidden', 'true')
+      if (tool.key === 'humour') {
+        for (const word of HUMOUR) {
+          const m = document.createElement('i')
+          m.textContent = word
+          m.dataset.step = word
+          marks.push(m)
+          gauge.append(m)
+        }
+      } else {
+        const track = document.createElement('span')
+        track.className = 'tr'
+        const bead = document.createElement('span')
+        bead.className = 'bd'
+        track.append(bead)
+        beads.set(tool.key, bead)
+        if (tool.key === 'hue') {
+          const a = document.createElement('span'), b = document.createElement('span')
+          a.className = b.className = 'sw'
+          swatches.push(a, b)
+          gauge.append(a, track, b)
+        } else {
+          const a = document.createElement('i'), b = document.createElement('i')
+          a.textContent = lo
+          b.textContent = hi
+          gauge.append(a, track, b)
+        }
+      }
+      tag.append(name, gauge)
+      // The stitch dial's tag stands behind it, so it hangs upward from its anchor.
+      if (tool.key === 'humour') tag.classList.add('up')
+    }
     shelf.append(tag)
     tags.set(tool.key, tag)
   }
+  // The right-hand ribbon ends after every slider, so Tab order stays tool by tool.
+  for (const end of ends.values()) shelf.append(end)
+  // Narrow: the threads the tags hang by, from each tool over the table's edge.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.classList.add('vs-threads')
+  svg.setAttribute('aria-hidden', 'true')
+  const threads = new Map<Key, SVGPathElement>()
+  for (const key of Object.keys(HANG) as Key[]) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    svg.append(path)
+    threads.set(key, path)
+  }
+  shelf.prepend(svg)
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
@@ -498,11 +602,23 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       m.emissive.set('#ffcf8a')
       m.emissiveIntensity = on * 0.35
     }
+    lift[tool.key] = on
     tool.group.position.y = TOP + on * 0.008
+    tags.get(tool.key)!.classList.toggle('on', on > 0)
+    ends.get(tool.key)?.classList.toggle('on', on > 0)
+  }
+  /** The tag's reading of a value: the bead along its stitch, or the humour word in ink. */
+  const read = (key: Key, v: number) => {
+    const tag = tags.get(key)!
+    tag.setAttribute('aria-valuenow', String(Math.round(v * 100)))
+    tag.setAttribute('aria-valuetext', valueText(key, v))
+    const bead = beads.get(key)
+    if (bead) bead.style.left = `${(v * 100).toFixed(1)}%`
+    if (key === 'humour') for (const m of marks) m.classList.toggle('at', m.dataset.step === HUMOUR[Math.round(v * 2)])
   }
   const apply = (key: Key, v: number) => {
     v = Math.min(1, Math.max(0, v))
-    const tool = tools.find((t) => t.key === key)!
+    const tool = toolOf(key)
     if (tool.steps) v = Math.round(v * (tool.steps - 1)) / (tool.steps - 1)
     if (locked.has(key) && v >= 1) {
       v = (tool.steps! - 2) / (tool.steps! - 1)
@@ -511,17 +627,11 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     } else nudged = false
     if (values[key] === v && tool.steps) return
     values[key] = v
-    tools.find((t) => t.key === key)!.show(v)
-    const tag = tags.get(key)!
-    tag.setAttribute('aria-valuenow', String(Math.round(v * 100)))
-    tag.setAttribute('aria-valuetext', valueText(key, v))
+    tool.show(v)
+    read(key, v)
     hooks.input(key, v)
   }
-  for (const k of KEYS) {
-    const tag = tags.get(k)!
-    tag.setAttribute('aria-valuenow', '50')
-    tag.setAttribute('aria-valuetext', valueText(k, 0.5))
-  }
+  for (const k of KEYS) read(k, 0.5)
 
   // Keyboard: arrows nudge, Page keys jump, Home and End go to the ends. One phrase per run of presses.
   let releaseTimer = 0
@@ -530,7 +640,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     if (!enabled) return
     const step = { ArrowRight: 0.05, ArrowUp: 0.05, ArrowLeft: -0.05, ArrowDown: -0.05, PageUp: 0.2, PageDown: -0.2 }[e.key]
     let v: number | null = null
-    const stepped = tools.find((t) => t.key === key)!.steps
+    const stepped = toolOf(key).steps
     if (step !== undefined) v = values[key] + (stepped ? Math.sign(step) / (stepped - 1) : step)
     else if (e.key === 'Home') v = 0
     else if (e.key === 'End') v = 1
@@ -542,8 +652,8 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
   for (const tag of tags.values()) {
     tag.addEventListener('keydown', onKey)
-    tag.addEventListener('focus', () => glow(tools.find((t) => t.key === tag.dataset.key)!, 1))
-    tag.addEventListener('blur', () => glow(tools.find((t) => t.key === tag.dataset.key)!, 0))
+    tag.addEventListener('focus', () => glow(toolOf(tag.dataset.key as Key), 1))
+    tag.addEventListener('blur', () => glow(toolOf(tag.dataset.key as Key), 0))
   }
 
   // Pointer: grab a tool (or its tag) and drag along its own axis, as it appears on screen.
@@ -587,10 +697,11 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
   const onTagDown = (e: PointerEvent) => {
     if (!enabled || e.button !== 0) return
-    const tag = e.currentTarget as HTMLElement
-    tag.focus({ preventScroll: true })
+    const el = e.currentTarget as HTMLElement
+    const key = el.dataset.key as Key
+    tags.get(key)!.focus({ preventScroll: true })
     e.preventDefault()
-    begin(tools.find((t) => t.key === tag.dataset.key)!, e)
+    begin(toolOf(key), e)
   }
   const onMove = (e: PointerEvent) => {
     if (drag && e.pointerId === drag.id) {
@@ -609,12 +720,38 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     hooks.release(tool.key, values[tool.key])
   }
   canvas.addEventListener('pointerdown', onDown)
-  for (const tag of tags.values()) tag.addEventListener('pointerdown', onTagDown)
+  for (const el of [...tags.values(), ...ends.values()]) el.addEventListener('pointerdown', onTagDown)
   addEventListener('pointermove', onMove)
   addEventListener('pointerup', onUp)
   addEventListener('pointercancel', onUp)
 
   const anchor = new THREE.Vector3()
+  let shown: 'off' | 'preview' | 'on' = 'off'
+  let cover: DOMRect | null = null
+  const pin = (el: HTMLElement, at: THREE.Vector3, tool: Tool, r: DOMRect) => {
+    anchor.copy(at).applyMatrix4(tool.group.matrixWorld).project(stage.camera)
+    const x = Math.round(r.left + ((anchor.x + 1) / 2) * r.width)
+    const y = Math.round(r.top + ((1 - anchor.y) / 2) * r.height)
+    // A ribbon's tags hang off its ends, outward; every other tag hangs under its tool.
+    const t = el.classList.contains('lo') ? `calc(${x}px - 100%) calc(${y}px - 50%)` : el.classList.contains('hi') ? `${x}px calc(${y}px - 50%)` : el.classList.contains('up') ? `calc(${x}px - 50%) calc(${y}px - 100%)` : `calc(${x}px - 50%) ${y}px`
+    if (el.style.translate !== t) el.style.translate = t
+  }
+  const screenOf = (p: THREE.Vector3, r: DOMRect) => {
+    p.project(stage.camera)
+    return [Math.round(r.left + ((p.x + 1) / 2) * r.width), Math.round(r.top + ((1 - p.y) / 2) * r.height)]
+  }
+  /** Narrow: the tag hangs below the table's near edge on a thread that runs from the tool over the edge. */
+  const hang = (el: HTMLElement, thread: SVGPathElement, tool: Tool, [col, row]: [0 | 1, number], r: DOMRect) => {
+    const [tx, ty] = screenOf(anchor.set(0, 0.01, 0).applyMatrix4(tool.group.matrixWorld), r)
+    const [ex, ey] = screenOf(anchor.set(tool.group.position.x, TOP, NEAR_EDGE), r)
+    const w = el.offsetWidth
+    const x = Math.round(r.width * (col ? 0.73 : 0.27))
+    const y = ey + 18 + row * 52
+    const t = `${x - w / 2}px ${y}px`
+    if (el.style.translate !== t) el.style.translate = t
+    const d = `M${tx} ${ty} L${ex} ${ey} L${x} ${y + 4}`
+    if (thread.getAttribute('d') !== d) thread.setAttribute('d', d)
+  }
   return {
     group,
     values,
@@ -624,18 +761,27 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
         const v = Math.min(1, Math.max(0, start[tool.key] ?? 0.5))
         values[tool.key] = v
         tool.show(v)
-        const tag = tags.get(tool.key)!
-        tag.setAttribute('aria-valuenow', String(Math.round(v * 100)))
-        tag.setAttribute('aria-valuetext', valueText(tool.key, v))
+        read(tool.key, v)
       }
     },
-    enable(on) {
-      enabled = on
-      shelf.classList.toggle('shown', on)
-      for (const tag of tags.values()) tag.tabIndex = on ? 0 : -1
+    mode(state) {
+      shown = state
+      enabled = state === 'on'
+      shelf.classList.toggle('shown', state === 'on')
+      shelf.classList.toggle('preview', state === 'preview')
+      for (const tag of tags.values()) tag.tabIndex = enabled ? 0 : -1
+    },
+    arrange(next) {
+      layout = next
+      shelf.dataset.layout = next
+      place()
     },
     felt(main) {
-      rail.colours(Array.from({ length: 7 }, (_, i) => rotateHue(main, (i / 6 - 0.5) * 2 * HUE_SPAN)))
+      const list = Array.from({ length: 7 }, (_, i) => rotateHue(main, (i / 6 - 0.5) * 2 * HUE_SPAN))
+      rail.colours(list)
+      // The colour tag's two swatches are the rail's end threads.
+      swatches[0].style.background = `#${list[0].getHexString()}`
+      swatches[1].style.background = `#${list[6].getHexString()}`
     },
     tempo(rate) {
       pace.rate = rate
@@ -643,14 +789,22 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     lock(key, on) {
       if (on) locked.add(key)
       else locked.delete(key)
-      tools.find((t) => t.key === key)!.lock?.(on)
+      toolOf(key).lock?.(on)
+      if (key === 'humour') marks.at(-1)!.classList.toggle('locked', on)
       if (on && values[key] >= 1) apply(key, 1)
     },
     focus(key) {
       tags.get(key)!.focus({ preventScroll: true })
     },
+    under(rect) {
+      cover = rect
+    },
+    ribbonsLeft() {
+      if (shown === 'off') return Infinity
+      return Math.min(...RIBBONS.map((k) => tags.get(k)!.getBoundingClientRect().left))
+    },
     screen(key) {
-      const tool = tools.find((t) => t.key === key)!
+      const tool = toolOf(key)
       tool.group.updateMatrixWorld(true)
       const p = tool.axis ? new THREE.Vector3().lerpVectors(tool.axis[0], tool.axis[1], values[key]) : new THREE.Vector3(0.05, 0.03, 0)
       const q = toScreen(p.applyMatrix4(tool.group.matrixWorld))
@@ -658,16 +812,21 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     },
     frame(dt, t) {
       for (const tool of tools) tool.tick?.(dt, t)
-      if (!enabled) return
+      if (shown === 'off') return
       const r = canvas.getBoundingClientRect()
       for (const tool of tools) {
         tool.group.updateMatrixWorld()
-        anchor.copy(tool.tagAt).applyMatrix4(tool.group.matrixWorld).project(stage.camera)
-        const x = Math.round(r.left + ((anchor.x + 1) / 2) * r.width)
-        const y = Math.round(r.top + ((1 - anchor.y) / 2) * r.height)
-        const at = `calc(${x}px - 50%) ${y}px`
-        const tag = tags.get(tool.key)!
-        if (tag.style.translate !== at) tag.style.translate = at
+        const row = layout === 'narrow' ? HANG[tool.key] : undefined
+        if (row === undefined) pin(tags.get(tool.key)!, tool.tagAt, tool, r)
+        else hang(tags.get(tool.key)!, threads.get(tool.key)!, tool, row, r)
+        const end = ends.get(tool.key)
+        if (end && tool.endAt) pin(end, tool.endAt, tool, r)
+      }
+      if (shown === 'preview') {
+        for (const el of [...tags.values(), ...ends.values()]) {
+          const b = el.getBoundingClientRect()
+          el.classList.toggle('under', Boolean(cover && b.left < cover.right && cover.left < b.right && b.top < cover.bottom && cover.top < b.bottom))
+        }
       }
     },
     dispose() {
@@ -683,21 +842,57 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
 }
 
+/**
+ * The one paper-tag style for every label in the workshop (tools, ribbon ends, pattern names, the
+ * save and send-off tags): cream card, a punched hole, handwriting. Active (focused or dragged) is the
+ * same tag lifted, with a stitched thread-blue edge.
+ */
+export const TAG_CSS = `
+  .vs-tag { box-sizing: border-box; padding: 4px 11px 5px; border-radius: 4px 9px 9px 4px; color: #4a3220;
+    background: linear-gradient(180deg, #fffaf0, #f4e6c9); font: 700 18px/1.15 ${HAND}; white-space: nowrap;
+    box-shadow: 0 3px 8px rgba(60, 30, 10, 0.22), inset 0 0 0 1px rgba(150, 100, 60, 0.2); }
+  .vs-tag.on, .vs-tag:focus-visible { outline: none; color: #23395a; transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(60, 30, 10, 0.3), inset 0 0 0 1px rgba(150, 100, 60, 0.2); }
+  .vs-tag.on::after, .vs-tag:focus-visible::after { content: ''; position: absolute; inset: 3px; border: 1.6px dashed rgba(47, 74, 107, 0.75); border-radius: 3px 7px 7px 3px; pointer-events: none; }
+`
+
 function css() {
   return `
+  ${TAG_CSS}
   .vs-tools { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  .vs-tool { position: absolute; left: 0; top: 0; padding: 2px 11px 4px; border-radius: 4px 9px 9px 4px; cursor: grab; touch-action: none;
-    background: linear-gradient(180deg, #fffaf0, #f4e6c9); color: #5a3d27; font: 700 17px/1.2 ${HAND}; white-space: nowrap;
-    box-shadow: 0 3px 8px rgba(60, 30, 10, 0.22), inset 0 0 0 1px rgba(150, 100, 60, 0.18); rotate: -2deg;
-    opacity: 0; pointer-events: none; transition: opacity 260ms ease, scale 160ms ease; user-select: none; }
-  .vs-tool::before { content: ''; position: absolute; left: -5px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
-    background: #f8efdc; box-shadow: inset 0 0 0 1.5px rgba(120, 80, 50, 0.5); }
-  .vs-tool:nth-child(2n) { rotate: 2deg; }
-  .vs-tools.shown .vs-tool { opacity: 1; pointer-events: auto; }
-  .vs-tool:hover { scale: 1.06; }
-  .vs-tool:focus-visible { outline: none; scale: 1.1; color: #2b3f60; text-decoration: underline wavy rgba(47, 74, 107, 0.6); text-underline-offset: 4px;
-    box-shadow: 0 0 0 3px rgba(255, 240, 205, 0.95), 0 0 0 5px rgba(47, 74, 107, 0.55), 0 6px 14px rgba(60, 30, 10, 0.3); }
-  @media (max-width: 600px) { .vs-tool { font-size: 14px; padding: 1px 8px 3px; } }
-  @media (prefers-reduced-motion: reduce) { .vs-tool { transition: none; } }
+  .vs-threads { position: absolute; inset: 0; width: 100%; height: 100%; display: none; overflow: visible; }
+  .vs-tools[data-layout=narrow] .vs-threads { display: block; }
+  .vs-threads path { fill: none; stroke: #f8eedb; stroke-width: 1.6; stroke-dasharray: 5 3; opacity: 0; transition: opacity 260ms ease; filter: drop-shadow(0 1px 0.5px rgba(60, 30, 10, 0.45)); }
+  .vs-tools.shown .vs-threads path { opacity: 1; }
+  .vs-tools.preview .vs-threads path { opacity: 0.5; }
+  .vs-tool, .vs-end { position: absolute; left: 0; top: 0; cursor: grab; touch-action: none; user-select: none;
+    opacity: 0; pointer-events: none; transition: opacity 260ms ease; }
+  .vs-tool { display: flex; flex-direction: column; align-items: center; gap: 1px; padding-left: 13px; }
+  .vs-tool::before, .vs-end.lo::before { content: ''; position: absolute; left: 4px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
+    background: #e9dcc0; box-shadow: inset 0 0 0 1.5px rgba(120, 80, 50, 0.45); }
+  .vs-end.hi { padding-left: 11px; padding-right: 13px; border-radius: 9px 4px 4px 9px; }
+  .vs-end.hi::before { content: ''; position: absolute; right: 4px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
+    background: #e9dcc0; box-shadow: inset 0 0 0 1.5px rgba(120, 80, 50, 0.45); }
+  .vs-tool b { font-weight: 700; }
+  .vs-tool .ga { display: flex; align-items: center; gap: 5px; font: 700 14px/1.1 ${HAND}; color: #6a5039; }
+  .vs-tool .ga i { font-style: normal; }
+  .vs-tool .tr { position: relative; width: 30px; height: 2px; background: repeating-linear-gradient(90deg, rgba(106, 80, 57, 0.6) 0 4px, transparent 4px 7px); }
+  .vs-tool .bd { position: absolute; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #2f4a6b; box-shadow: 0 1px 1px rgba(0,0,0,.25); }
+  .vs-tool .sw { width: 11px; height: 11px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(60, 30, 10, 0.3); background: #d9a35f; }
+  .vs-tool .ga i[data-step] { opacity: 0.55; }
+  .vs-tool .ga i.at { opacity: 1; color: #23395a; text-decoration: underline 1.5px; text-underline-offset: 3px; }
+  .vs-tool .ga i.locked { opacity: 0.4; text-decoration: line-through 1px; }
+  .vs-tools.shown .vs-tool, .vs-tools.shown .vs-end { opacity: 1; pointer-events: auto; }
+  .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { opacity: 0.6; }
+  .vs-tools.preview .under { opacity: 0; }
+  /* Narrow, before there is a villager: the slip covers where the tool tags hang, so only the ribbon ends preview. */
+  .vs-tools.preview[data-layout=narrow] .vs-tool:not(.end), .vs-tools.preview[data-layout=narrow] .vs-threads { display: none; }
+  .vs-tools.shown .vs-tag:hover { transform: translateY(-1px); }
+  .vs-tools[data-layout=narrow] .vs-tag { font-size: 15px; padding: 3px 8px 4px; }
+  .vs-tools[data-layout=narrow] .vs-tool { padding-left: 11px; }
+  .vs-tools[data-layout=narrow] .vs-end.hi { padding-right: 11px; }
+  .vs-tools[data-layout=narrow] .vs-tool .ga { font-size: 12px; gap: 3px; }
+  .vs-tools[data-layout=narrow] .vs-tool .tr { width: 22px; }
+  @media (prefers-reduced-motion: reduce) { .vs-tool, .vs-end { transition: none; } }
   `
 }

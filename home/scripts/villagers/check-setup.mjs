@@ -27,10 +27,13 @@ const { stubAgent } = await import(join(homeDir, '../host/src/villager-agent.ts'
 const { stubVillagerMaker, claudeVillagerMaker } = await import(join(homeDir, '../host/src/villager-make.ts'))
 const hostCtx = new Context()
 const stub = stubVillagerMaker(3000)
+// One flow waits longer, so the waiting capture shows a pattern piece already cut and pinned.
+const slowStub = stubVillagerMaker(10000)
+let slow = false
 let useLive = false
 const realMaker = live ? claudeVillagerMaker('sonnet') : null
 const { parseProfiles } = await import(join(homeDir, '../host/src/villager-make.ts'))
-const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam' }, profiles: parseProfiles('alex:adult-optin,sam:child'), villagerMaker: (ask) => (useLive ? realMaker(ask) : stub(ask)) })
+const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam' }, profiles: parseProfiles('alex:adult-optin,sam:child'), villagerMaker: (ask) => (useLive ? realMaker(ask) : slow ? slowStub(ask) : stub(ask)) })
 await host.await()
 const hostPort = hostCtx.villager.port
 
@@ -58,7 +61,32 @@ async function open(query, opts = {}) {
 const st = (page) => page.evaluate(() => window.villagerSetup.state())
 const pg = (page) => page.evaluate(() => window.villagerSetup.page())
 const until = (page, states, timeout = 30000) => page.waitForFunction((s) => s.includes(window.villagerSetup.state().state), states, { timeout })
-const shot = async (page, name) => shots && page.screenshot({ path: join(shots, `${name}.jpg`), type: 'jpeg', quality: 82 })
+/**
+ * The layout gate: every visible label (tool tags, ribbon ends, pattern names, the slip, the speech card,
+ * the name, save and send-off tags) lies inside the screen and overlaps no other. Run at every captured moment.
+ */
+const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done']
+const layout = (page) => page.evaluate((selectors) => {
+  const boxes = []
+  for (const s of selectors) for (const e of document.querySelectorAll(s)) {
+    const cs = getComputedStyle(e)
+    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) continue
+    const r = e.getBoundingClientRect()
+    if (r.width && r.height) boxes.push({ what: `${s}${e.dataset.key ? `[${e.dataset.key}]` : e.dataset.template ? `[${e.dataset.template}]` : ''}`, r })
+  }
+  const outside = boxes.filter(({ r }) => r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight).map((b) => b.what)
+  const overlaps = []
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i].r, b = boxes[j].r
+    if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
+  }
+  return { labels: boxes.length, outside, overlaps }
+}, LABELS)
+const shot = async (page, name) => {
+  const l = await layout(page)
+  check(`layout at ${name} (${vw}×${vh}): ${l.labels} labels, all on screen, none overlapping`, l.labels > 0 && !l.outside.length && !l.overlaps.length, l)
+  if (shots) await page.screenshot({ path: join(shots, `${name}.jpg`), type: 'jpeg', quality: 82 })
+}
 const seat = [0.1, 1.45, 2.7]
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
@@ -73,7 +101,7 @@ try {
     check('the notebook and its pencil step aside', p0.aside.length === 2 && p0.aside.every((v) => v === false), p0.aside)
     check('the camera leans over the table', dist(await page.evaluate(() => window.villagerSetup.camera()), seat) > 0.5)
     check('the slip shows the saved description, ready to write in', p0.slip && p0.slipText.length > 10 && !p0.slipReadOnly && p0.focus === 'line', p0)
-    check('no tool tags before there is a villager', !(await page.evaluate(() => document.querySelector('.vs-tools.shown'))))
+    check('before there is a villager the tool tags are only a quiet preview: nothing to grab or tab to', await page.evaluate(() => !document.querySelector('.vs-tools.shown') && [...document.querySelectorAll('.vs-tool')].every((t) => t.tabIndex === -1)))
     await shot(page, '1-empty')
 
     // Keyboard: Enter on the slip. Parts arrive in order, one needle pass each.
@@ -145,6 +173,9 @@ try {
     check('dragging the mallet changes pitch live, as it moves', mid < after.values.pitch && dragged.values.pitch < mid && dragged.voice.pitch < after.voice.pitch, { start: after.values.pitch, mid, end: dragged.values.pitch })
     check('the camera stays on the table while dragging', dist(await page.evaluate(() => window.villagerSetup.camera()), seat) > 0.5)
 
+    // The colour goes back to as made before the send-off, so the walk-off capture shows the villager the
+    // tuning capture showed (the colour turn itself was checked above).
+    await page.evaluate(() => window.villagerSetup.set('hue', 0.5))
     // Tab past the last tool reaches the send-off tag; Enter sends it off to walk.
     await page.focus('.vs-tool[data-key=humour]')
     await page.keyboard.press('Tab')
@@ -159,6 +190,7 @@ try {
     await page.waitForTimeout(2500)
     const w1 = (await st(page)).walkers[0]
     check('it walks (moves on the floor), at its tuned size', Math.hypot(w1.x - w0.x, w1.z - w0.z) > 0.05 && Math.abs(w1.scale - after.scale) < 1e-6, { w0, w1 })
+    check('the camera follows it as it walks off: it stays in view', w0.seen && w1.seen, { w0, w1 })
     check('the tuned result is kept as data: module text, persona and nine values', s3.kept.length === 1 && s3.kept[0].source.from === FROM && Math.abs(s3.kept[0].tuning.size - after.values.size) < 1e-9 && s3.kept[0].tuning.warmth === 0 && s3.kept[0].persona?.role && /chars$/.test(s3.kept[0].module), s3.kept[0])
     const p3 = await pg(page)
     check('the slip is back, ready for another', p3.slip && !p3.slipReadOnly, p3)
@@ -198,13 +230,16 @@ try {
     const rackState = await page.evaluate(() => window.villagerSetup.patterns())
     check('patterns: the rack offers the built-in templates for this profile', ['organiser', 'coach', 'grandparent', 'craftsperson', 'buddy'].every((id) => rackState.cards.some((c) => c.id === id)) && !rackState.cards.some((c) => c.id === 'companion'), rackState.cards.map((c) => c.id))
     await page.click('.vs-pattern[data-template=coach]')
-    await page.waitForTimeout(200)
+    await page.waitForTimeout(600)
     check('patterns: picking a card shows it on the slip', (await page.textContent('.vs-slip .chip')).includes('Calm coach') && (await st(page)).rack.picked === 'coach')
+    await shot(page, '1b-picked')
     await page.focus('.vs-slip .line')
     await page.keyboard.press('Enter')
     await until(page, ['tuning'])
     const s = await st(page)
     check('patterns: the villager takes the template: calm, gentle humour, its dials on the ribbons', s.persona.temperament === 'calm' && s.persona.humour === 'gentle' && Math.abs(s.values.warmth - 0.7) < 1e-9 && s.persona.quirks.some((q) => /next step/.test(q)), s.persona)
+    await page.waitForTimeout(900)
+    check('patterns: the name tag says which pattern it was made from', ((await pg(page)).nametag ?? '').includes('Calm coach pattern'), (await pg(page)).nametag)
     await shot(page, '4-pattern')
     await context.close()
   }
@@ -264,6 +299,7 @@ try {
   {
     const { context, page, errors } = await open('&profile=adult-optin')
     await page.locator('.vs-slip .line').fill('a sleepy hedgehog who bakes bread before dawn')
+    slow = true
     await page.keyboard.press('Enter')
     await page.waitForTimeout(1200)
     const w = await st(page)
@@ -272,14 +308,18 @@ try {
     await page.waitForTimeout(400)
     const n1 = await needle()
     check('host: while the model works, the table is busy and says how long so far', w.state === 'waiting' && /Drafting the pattern/.test(w.status) && dist(n0, n1) > 0.002, { state: w.state, status: w.status, n0, n1 })
+    await page.waitForTimeout(5300)
+    const cut = await st(page)
+    check('host: while waiting, pattern pieces are cut and pinned on the mat, one every few seconds', cut.state === 'waiting' && cut.cut >= 1 && cut.cut <= 2, { state: cut.state, cut: cut.cut })
     await shot(page, '2-waiting')
     await until(page, ['tuning', 'failed'])
+    slow = false
     const s = await st(page)
     check('host: the made module is stitched in the asked accent', s.state === 'tuning' && s.name === 'Dumpling' && s.pieces.accessories > 0, { state: s.state, failure: s.failure, name: s.name, pieces: s.pieces })
     if (s.state !== 'tuning') throw new Error(`host stub villager failed: ${s.failure}`)
     await page.evaluate(() => window.villagerSetup.set('size', 0.8))
     await page.evaluate(() => window.villagerSetup.sendOff())
-    await page.waitForTimeout(1600)
+    await until(page, ['empty'])
     const files = await readdir(join(root, 'people', 'alex', 'villagers'))
     const stored = JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', files[0]), 'utf8'))
     check('host: the send-off keeps the tuning beside the module, on the host', files.length === 1 && stored.tuning?.size === 0.8 && stored.module.includes('villager.tag('), stored.tuning)
@@ -297,7 +337,7 @@ try {
     const pattern = JSON.parse(await readFile(join(root, 'people', 'alex', 'persona-templates', savedFiles[0]), 'utf8'))
     check('save: an opted-in adult keeps crude and the tuned warmth', pattern.persona.dials.humour === 'crude' && pattern.persona.dials.warmth === 0.2 && pattern.shared === true, pattern.persona.dials)
     await page.evaluate(() => window.villagerSetup.sendOff())
-    await page.waitForTimeout(1500)
+    await until(page, ['empty'])
 
     await page.locator('.vs-slip .line').fill('a [stub-fail] fox')
     await page.keyboard.press('Enter')

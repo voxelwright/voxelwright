@@ -26,9 +26,9 @@ import { SPOTS } from '../world'
 import { assemble } from './assemble'
 import { build, check } from './build'
 import { accentMeshes, hueTurn, pieces, Puppet, type Piece } from './setup-stitch'
-import { controls, HUE_SPAN, HUMOUR, KEYS, type Key } from './sliders'
+import { controls, HUE_SPAN, HUMOUR, KEYS, TAG_CSS, type Key, type Layout } from './sliders'
 import { checked, crudeAllowed, fallbackPersona, personaFor, personaNotes, profileFrom, tunedLine, type Persona, type PersonaTemplate } from './setup-persona'
-import { rack, type RackCard } from './setup-rack'
+import { footFor, rack, type RackCard } from './setup-rack'
 import { templatesFor } from './templates'
 import { HAND, MAT, TOP, workshop } from './workshop'
 import type { Meta } from './load'
@@ -113,17 +113,58 @@ export default {
       stage.camera.fov = fov
       stage.camera.updateProjectionMatrix()
     }
+    // Wide: the whole bench, about 1.7 m of tools, across the screen. Narrow (a phone held upright): the
+    // mat and the grid of tools before it, about a metre across, from higher up so the rows stack down the screen.
+    const layoutFor = (): Layout => (innerWidth / innerHeight < 0.9 ? 'narrow' : 'wide')
+    let layout: Layout = layoutFor()
     const pose = () => {
       const aspect = innerWidth / innerHeight
-      const fov = aspect < 0.9 ? THREE.MathUtils.clamp(seatFov / Math.max(aspect, 0.42) * 0.7, seatFov, 72) : seatFov
+      const narrow = layout === 'narrow'
+      if (narrow && (state === 'empty' || state === 'failed' || state === 'waiting')) {
+        // Narrow, before there is a villager: the rack and the mat (where the pattern is made), with the slip on the near half of the table.
+        lens(56)
+        const h = Math.atan(Math.tan(THREE.MathUtils.degToRad(28)) * aspect)
+        const look = new THREE.Vector3(MAT.x, TOP, MAT.z + 0.18)
+        return { position: look.clone().addScaledVector(new THREE.Vector3(0, 1.0, 1).normalize(), Math.max(0.42, patterns.width() / 2 + 0.04) / Math.tan(h)), look }
+      }
+      const fov = narrow ? 56 : seatFov
       lens(fov)
-      // Far enough back that the whole bench (about 1.6 m of tools) fits across.
       const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * aspect)
-      const dist = THREE.MathUtils.clamp(0.82 / Math.tan(half), 2.15, 4.4)
-      const look = new THREE.Vector3(-0.24, TOP + (aspect < 0.9 ? 0.3 : 0.1), MAT.z - (aspect < 0.9 ? 0.12 : 0.02))
-      return { position: look.clone().addScaledVector(new THREE.Vector3(0, aspect < 0.9 ? 0.75 : 0.5, 1).normalize(), dist), look }
+      const dist = narrow ? 0.45 / Math.tan(half) : THREE.MathUtils.clamp(1.08 / Math.tan(half), 1.85, 4.4)
+      // Narrow: the table sits in the upper half, leaving the lower half for the tags that hang from its edge.
+      const look = narrow ? new THREE.Vector3(-0.21, TOP, MAT.z + 0.36) : new THREE.Vector3(-0.17, TOP + 0.1, MAT.z - 0.02)
+      return { position: look.clone().addScaledVector(new THREE.Vector3(0, narrow ? 1.1 : 0.5, 1).normalize(), dist), look }
     }
-    const atTable = () => view.focus(pose(), 2.4)
+    const arrange = () => {
+      layout = layoutFor()
+      shop.arrange(layout)
+      tools.arrange(layout)
+      patterns.arrange(layout)
+      document.documentElement.dataset.vsLayout = layout
+      if (puppet && state !== 'leaving') puppet.at.set(MAT.x - 0.1, TOP + 0.006, MAT.z - 0.07)
+    }
+    const atTable = () => {
+      watching = null
+      view.focus(pose(), 2.4)
+      if (state === 'empty' || state === 'failed') {
+        // Wide: the slip lies on the empty mat and the tools show quiet tags. Narrow: the slip sits on the
+        // near half of the table, over where the tool tags hang, so only the ribbons' ends show (sliders.ts).
+        slipAt = layout === 'wide' ? 'mat' : 'edge'
+        tools.mode('preview')
+        patterns.enable('on')
+      }
+    }
+    /** Where the slip lies: on the empty mat, or at the near edge while the mat is busy or the camera is away. */
+    let slipAt: 'mat' | 'edge' = 'mat'
+    // After the send-off the camera watches the new villager walk off for a while, then comes back.
+    let watching: { walker: Villager; until: number } | null = null
+    const watchPose = (p: THREE.Vector3) => {
+      const narrow = layout === 'narrow'
+      lens(narrow ? 58 : seatFov)
+      // From high up and in front, looking down over the chairs and the reading lamp.
+      const look = new THREE.Vector3(p.x, 0.35, p.z - 0.2)
+      return { position: look.clone().add(new THREE.Vector3(narrow ? 0.1 : 0.15, narrow ? 2.3 : 2.05, narrow ? 2.2 : 2.45)), look }
+    }
     const leaveTable = (rate?: number) => {
       lens(seatFov)
       view.focus(null, rate)
@@ -157,7 +198,7 @@ export default {
     line.className = 'line'
     line.rows = 2
     line.maxLength = 300
-    line.placeholder = 'Who are they? A sleepy hedgehog who bakes bread…'
+    line.placeholder = 'e.g. a sleepy hedgehog who bakes bread before dawn'
     line.setAttribute('aria-label', 'Describe them in a line')
     ruled.append(line)
     const status = document.createElement('p')
@@ -177,11 +218,11 @@ export default {
     card.className = 'vs-card'
     card.setAttribute('aria-hidden', 'true')
     const nametag = document.createElement('div')
-    nametag.className = 'vs-name'
+    nametag.className = 'vs-name vs-tag'
     const done = document.createElement('button')
     done.type = 'button'
-    done.className = 'vs-done'
-    done.innerHTML = '<span>Off you go</span>'
+    done.className = 'vs-done vs-tag'
+    done.textContent = 'Off you go'
     // A small paper note for plain explanations (a locked dial, a template made gentler).
     const noteEl = document.createElement('p')
     noteEl.className = 'vs-note'
@@ -196,7 +237,7 @@ export default {
     }
     // Save as a pattern: the tuned persona as a template, kept on the host, optionally for the family.
     const saveTag = document.createElement('div')
-    saveTag.className = 'vs-save'
+    saveTag.className = 'vs-save vs-tag'
     const saveButton = document.createElement('button')
     saveButton.type = 'button'
     saveButton.textContent = 'Save as a pattern'
@@ -205,7 +246,7 @@ export default {
     share.type = 'checkbox'
     shareLabel.append(share, ' share with the family')
     saveTag.append(saveButton, shareLabel)
-    // The picked pattern, on the slip.
+    // The picked pattern: its felt card, big, clipped to the slip. Clicking it puts it back on the rack.
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'chip'
@@ -311,9 +352,11 @@ export default {
         line.focus()
         return
       }
-      atTable()
-      patterns.enable(false)
+      patterns.enable('quiet')
       state = 'waiting'
+      atTable()
+      tools.mode('off')
+      slipAt = 'edge'
       slip.classList.add('waiting')
       line.readOnly = true
       sew.disabled = true
@@ -369,11 +412,12 @@ export default {
       state = 'failed'
       timings.failedMs = performance.now()
       shop.activity('tidy')
+      slipAt = 'mat'
       slip.classList.remove('waiting')
       line.readOnly = false
       sew.disabled = false
       sew.textContent = 'Try again'
-      patterns.enable(true)
+      patterns.enable('on')
       lastFailure = detail
       const words: Record<string, string> = {
         away: "The workshop's helper isn't in just now, so nothing was sewn. Your words are still here.",
@@ -402,6 +446,11 @@ export default {
         scales.set(o, o.scale.clone())
         o.visible = false
       }
+      // The slip lifts away as the stitching starts; the mat is the show now.
+      slip.classList.remove('shown', 'waiting')
+      slip.inert = true
+      patterns.enable('off')
+      atTable()
       const at = new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - 0.07)
       const cam = stage.camera.position
       puppet = new Puppet(fig, at, Math.atan2(cam.x - at.x, cam.z - at.z) - 0.35)
@@ -428,11 +477,15 @@ export default {
         small.textContent = made!.persona.role
         nametag.append(' ', small)
       }
+      // Made from a pattern: the pattern's name rides on the tag, so you can see it took.
+      if (made!.template) {
+        const from = document.createElement('i')
+        from.textContent = `${made!.template} pattern`
+        nametag.append(from)
+      }
       nametag.classList.add('shown')
-      slip.classList.remove('shown', 'waiting')
-      slip.inert = true
-      tools.enable(true)
-      patterns.enable(false)
+      tools.mode('on')
+      patterns.enable('off')
       done.classList.add('shown')
       saveTag.classList.add('shown')
       setStatus('')
@@ -500,7 +553,7 @@ export default {
     const sendOff = async () => {
       if (state !== 'tuning' || !fig || !puppet || !made) return
       state = 'leaving'
-      tools.enable(false)
+      tools.mode('off')
       done.classList.remove('shown')
       saveTag.classList.remove('shown')
       nametag.classList.remove('shown')
@@ -511,19 +564,22 @@ export default {
       const spot = SPOTS[LANDING]
       puppet.looking = false
       await puppet.leap(new THREE.Vector3(spot.at[0], 0, spot.at[1]), reducedMotion.matches ? 0.01 : 1.1, 0.35)
-      const r = ROUTINES[1]
-      const walker = new Villager(fig, r.tasks, { start: LANDING, wait: 0.8 })
+      // The second routine's chores, counter first: that way leads across open floor, in view, not behind a chair.
+      const tasks = [...ROUTINES[1].tasks]
+      tasks.unshift(...tasks.splice(tasks.findIndex((t) => t.spot === 'counter'), 1))
+      const walker = new Villager(fig, tasks, { start: LANDING, wait: 0.8 })
       walkers.push(walker)
       for (const b of blobs) b.removeFromParent()
       blobs = contactShadows(walkers)
       group.add(...blobs)
+      // Watch it go: the camera follows it across the kitchen for a few seconds, then comes back to the table.
+      watching = { walker, until: performance.now() + 9000 }
       puppet = null
       fig = null
       hueShift = null
       base = null
       made = null
-      leaveTable(2)
-      // Ready for another, with the slip back on the table.
+      // Ready for another, with the slip back.
       state = 'empty'
       line.readOnly = false
       sew.disabled = false
@@ -531,9 +587,9 @@ export default {
       line.value = ''
       shop.pattern('')
       setStatus(`${record.name} is off to help. Write another, or watch them go.`, 'warm')
+      slipAt = 'edge'
       slip.classList.add('shown')
       slip.inert = false
-      patterns.enable(true)
     }
 
     // ── Patterns: A's built-in templates for this profile, then the person's and the family's from the host ──
@@ -553,7 +609,21 @@ export default {
     const patternsReady = loadPatterns()
     const onPattern = (card: RackCard | null) => {
       chip.hidden = !card
-      chip.textContent = card ? `pattern: ${card.template.name} ✕` : ''
+      slip.classList.toggle('patterned', Boolean(card))
+      chip.textContent = ''
+      if (card) {
+        const p = card.template.persona
+        const head = document.createElement('small')
+        head.textContent = 'pattern'
+        const name = document.createElement('b')
+        name.textContent = card.template.name
+        const about = document.createElement('span')
+        about.textContent = [p.temperament, p.humour && p.humour !== 'none' ? `${p.humour} humour` : null, footFor(card) || null].filter(Boolean).join(' · ')
+        const back = document.createElement('i')
+        back.textContent = 'put back ✕'
+        chip.append(head, name, about, back)
+        chip.style.setProperty('--felt', patterns.feltOf(card))
+      }
       chip.setAttribute('aria-label', card ? `Pattern ${card.template.name}. Click to put it back.` : '')
       if (card && card.template.persona.dials?.humour === 'crude' && !crudeAllowed(PROFILE)) note(`${card.template.name} will be cheeky here, not crude. Crude jokes need a grown-up profile that has opted in.`)
     }
@@ -589,12 +659,17 @@ export default {
     line.addEventListener('keydown', onLineKey)
     line.addEventListener('focus', onFocusLine)
     done.addEventListener('click', onDone)
-    const onResize = () => view.focused && state !== 'leaving' && atTable()
+    const onResize = () => {
+      arrange()
+      if (view.focused && !watching && state !== 'leaving') atTable()
+      if (state === 'tuning') tools.mode('on')
+    }
     addEventListener('resize', onResize)
 
     ctx.effect(() => {
+      arrange()
       atTable()
-      patterns.enable(true)
+      patterns.enable('on')
       line.focus({ preventScroll: true })
       return () => {
         leaveTable()
@@ -624,8 +699,36 @@ export default {
     // ── Each frame ─────────────────────────────────────────────────────────
     const eye = new THREE.Vector3()
     const head = new THREE.Vector3()
+    const matAt = new THREE.Vector3()
     ctx.on('village/frame', (dt, t) => {
       const step = Math.min(dt, 0.05)
+      if (watching) {
+        if (performance.now() > watching.until && state === 'empty') atTable()
+        else view.focus(watchPose(watching.walker.pos), 1.6)
+      }
+      if (slip.classList.contains('shown')) {
+        // The slip lies on the mat, or sits at the near edge; either way inside the screen.
+        const w = slip.offsetWidth, h = slip.offsetHeight
+        let x = innerWidth / 2, y = innerHeight - h / 2 - (innerWidth < 600 ? 16 : 24)
+        if (slipAt === 'mat') {
+          // As wide as the mat looks (within reason), so it lies on it and clear of the ribbons' tags.
+          const l = matAt.set(MAT.x - MAT.w / 2, TOP, MAT.z + MAT.d / 2).project(stage.camera).x
+          const r = matAt.set(MAT.x + MAT.w / 2, TOP, MAT.z + MAT.d / 2).project(stage.camera).x
+          const width = `${Math.round(THREE.MathUtils.clamp(((r - l) / 2) * innerWidth + 16, 300, 440))}px`
+          if (slip.style.width !== width) slip.style.width = width
+          matAt.set(MAT.x, TOP, MAT.z + 0.02).project(stage.camera)
+          x = ((matAt.x + 1) / 2) * innerWidth
+          // Centred on the mat, but never over the rack's cards behind it.
+          y = Math.max(((1 - matAt.y) / 2) * innerHeight, patterns.bottom + 12 + h / 2)
+        } else if (slip.style.width) slip.style.width = ''
+        // On the mat it keeps clear of the ribbons' tags to its right.
+        const right = slipAt === 'mat' ? Math.min(innerWidth - 16, tools.ribbonsLeft() - 10) : innerWidth - 16
+        x = Math.round(THREE.MathUtils.clamp(x, w / 2 + 16, right - w / 2))
+        y = Math.round(THREE.MathUtils.clamp(y, h / 2 + 30, innerHeight - h / 2 - 16))
+        const at = `calc(${x}px - 50%) calc(${y}px - 50%)`
+        if (slip.style.translate !== at) slip.style.translate = at
+        tools.under(new DOMRect(x - w / 2, y - h / 2, w, h))
+      } else tools.under(null)
       shop.frame(step, t)
       tools.frame(step, t)
       patterns.frame()
@@ -637,39 +740,42 @@ export default {
         fig.root.updateMatrixWorld()
         head.set(0, fig.height * 1.08, 0).applyMatrix4(fig.root.matrixWorld).project(stage.camera)
         const r = stage.renderer.domElement.getBoundingClientRect()
-        const x = Math.round(THREE.MathUtils.clamp(r.left + ((head.x + 1) / 2) * r.width, 150, innerWidth - 150))
-        const y = Math.round(THREE.MathUtils.clamp(r.top + ((1 - head.y) / 2) * r.height, 90, innerHeight - 120))
+        const cw = card.offsetWidth / 2 + 12
+        const x = Math.round(THREE.MathUtils.clamp(r.left + ((head.x + 1) / 2) * r.width, cw, innerWidth - cw))
+        const y = Math.round(THREE.MathUtils.clamp(r.top + ((1 - head.y) / 2) * r.height, card.offsetHeight + (layout === 'narrow' ? 84 : 24), innerHeight - 120))
         const at = `calc(${x}px - 50%) calc(${y}px - 100%)`
         if (card.style.translate !== at) card.style.translate = at
-        // The name tag lies on the mat just in front of its feet.
+        // The name tag lies on the mat just in front of its feet; narrow, it heads the screen at the top left.
+        if (layout === 'narrow') {
+          const nat = '16px 16px'
+          if (nametag.style.translate !== nat) nametag.style.translate = nat
+        } else {
         foot2.set(fig.root.position.x, TOP, fig.root.position.z + fig.side * fig.root.scale.x + 0.11).project(stage.camera)
         const nx = Math.round(r.left + ((foot2.x + 1) / 2) * r.width)
         const ny = Math.round(r.top + ((1 - foot2.y) / 2) * r.height)
         const nat = `calc(${nx}px - 50%) ${Math.min(innerHeight - 60, ny)}px`
         if (nametag.style.translate !== nat) nametag.style.translate = nat
+        }
       }
-      // The save tag hangs from the near left corner, the send-off tag from the near right.
+      // The save tag and the send-off tag sit in the bottom corners, clear of the tools' tags.
+      const edge = layout === 'narrow' ? 16 : 24
       if (saveTag.classList.contains('shown')) {
-        corner.set(-1.12, TOP - 0.03, 0.66).project(stage.camera)
-        const r = stage.renderer.domElement.getBoundingClientRect()
-        const cx = Math.round(Math.max(16, r.left + ((corner.x + 1) / 2) * r.width))
-        const cy = Math.round(Math.min(innerHeight - 90, r.top + ((1 - corner.y) / 2) * r.height))
-        const sat = `${cx}px ${cy}px`
+        const sat = `${edge}px ${innerHeight - edge - saveTag.offsetHeight}px`
         if (saveTag.style.translate !== sat) saveTag.style.translate = sat
       }
       if (done.classList.contains('shown')) {
-        corner.set(0.5, TOP - 0.03, 0.66).project(stage.camera)
-        const r = stage.renderer.domElement.getBoundingClientRect()
-        const cx = Math.round(Math.min(innerWidth - 110, r.left + ((corner.x + 1) / 2) * r.width))
-        const cy = Math.round(Math.min(innerHeight - 70, r.top + ((1 - corner.y) / 2) * r.height))
-        const dat = `calc(${cx}px - 50%) ${cy}px`
+        const dat = `${innerWidth - edge - done.offsetWidth}px ${innerHeight - edge - done.offsetHeight}px`
         if (done.style.translate !== dat) done.style.translate = dat
       }
     })
     const foot2 = new THREE.Vector3()
-    const corner = new THREE.Vector3()
 
     // ── For the checks ─────────────────────────────────────────────────────
+    /** Whether a walker's middle is inside the camera's view. */
+    const onScreen = (w: Villager) => {
+      const p = w.fig.root.localToWorld(new THREE.Vector3(0, w.fig.height * 0.5, 0)).project(stage.camera)
+      return Math.abs(p.x) < 0.95 && Math.abs(p.y) < 0.95 && p.z < 1
+    }
     ctx.effect(() => {
       const api = {
         state: () => ({
@@ -689,7 +795,7 @@ export default {
           values: { ...tools.values },
           placed: fig ? fig.root.parent === group : false,
           visibleMeshes: fig ? countVisible(fig.root) : 0,
-          walkers: walkers.map((w) => ({ x: w.pos.x, z: w.pos.z, state: w.state, scale: w.fig.root.scale.x })),
+          walkers: walkers.map((w) => ({ x: w.pos.x, z: w.pos.z, state: w.state, scale: w.fig.root.scale.x, seen: onScreen(w) })),
           pieces: { ...pieceTimes },
           cut: shop.cut,
           status: status.textContent,
@@ -724,38 +830,57 @@ const countVisible = (root: THREE.Object3D) => {
 
 function css() {
   const paper = 'radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%)'
+  // Two typefaces: handwriting for everything written on paper or felt (tags, the slip, names), the book
+  // face for what is said or explained (the speech card, the status line, notes).
   return `
+  ${TAG_CSS}
   .vs-slip, .vs-card { box-sizing: border-box; border-radius: 16px; color: #46301f; background: ${paper}; }
   .vs-slip::before, .vs-card::before { content: ''; position: absolute; inset: 7px; border: 1.5px dashed rgba(150, 100, 60, 0.32); border-radius: 11px; pointer-events: none; }
-  .vs-slip { position: fixed; z-index: 6; left: 50%; bottom: 26px; width: min(460px, calc(100vw - 32px)); padding: 26px 22px 14px; translate: -50% 16px;
-    box-shadow: 0 10px 24px rgba(60, 30, 10, 0.2), 0 2px 0 rgba(255, 255, 255, 0.75) inset; rotate: -0.6deg;
-    display: flex; flex-direction: column; gap: 6px; opacity: 0; pointer-events: none; transition: opacity 240ms ease, translate 280ms ease; }
-  .vs-slip.shown { opacity: 1; translate: -50% 0; pointer-events: auto; }
+  .vs-slip { position: fixed; z-index: 6; left: 0; top: 0; width: min(440px, calc(100vw - 32px)); padding: 26px 22px 14px; transform: translateY(14px);
+    box-shadow: 0 14px 26px rgba(60, 30, 10, 0.24), 0 3px 4px rgba(60, 30, 10, 0.16), 0 2px 0 rgba(255, 255, 255, 0.75) inset; rotate: -0.8deg;
+    display: flex; flex-direction: column; gap: 6px; opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity 220ms ease, transform 260ms ease, visibility 0s linear 220ms; }
+  .vs-slip.shown { opacity: 1; visibility: visible; transform: none; pointer-events: auto; transition: opacity 220ms ease, transform 260ms ease; }
   .vs-slip .tab { position: absolute; left: 18px; top: -18px; display: inline-flex; align-items: baseline; gap: 7px; padding: 4px 14px 5px; border-radius: 11px 11px 5px 5px;
     background: #fffaf0; color: #7a3b2a; box-shadow: 0 2px 6px rgba(60, 30, 10, 0.14), inset 0 0 0 1.5px rgba(196, 85, 63, 0.4); }
   .vs-slip .tab::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(196, 85, 63, 0.35); border-radius: 8px 8px 3px 3px; pointer-events: none; }
   .vs-slip .tab b { font: 700 21px/1.15 ${HAND}; }
-  .vs-slip .tab i { font: italic 16px/1.15 ${HAND}; opacity: 0.8; }
+  .vs-slip .tab i { font: 700 16px/1.15 ${HAND}; opacity: 0.75; font-style: normal; }
   .vs-slip .ruled { display: block; position: relative; }
   .vs-slip .line { box-sizing: border-box; width: 100%; resize: none; padding: 2px 2px 4px; border: 0; outline: none; background: none;
     color: #23395a; caret-color: #23395a; font: 21px/31px ${HAND};
     background-image: repeating-linear-gradient(transparent 0 29px, rgba(90, 60, 38, 0.32) 29px 31px); background-attachment: local; }
-  .vs-slip .line::placeholder { color: rgba(74, 52, 36, 0.6); font-style: italic; }
+  /* The example is printed, not written: the book face, grey and italic, so it never reads as your words. */
+  .vs-slip .line::placeholder { color: rgba(90, 70, 55, 0.55); font: italic 17px/31px ${BOOK}; }
   .vs-slip .ruled:focus-within .line { background-image: repeating-linear-gradient(transparent 0 29px, rgba(47, 74, 107, 0.5) 29px 31px); }
   .vs-slip .foot { display: flex; align-items: center; gap: 12px; min-height: 30px; }
   .vs-slip .status { flex: 1; margin: 0; font: italic 16px/1.35 ${BOOK}; color: #6b5340; }
   .vs-slip .status[data-tone='warm'] { color: #6a4a2c; }
   .vs-slip .status[data-tone='sorry'] { color: #8a3b2a; }
-  .vs-slip .sew { position: relative; flex: none; padding: 4px 14px 6px; border: 0; border-radius: 10px; cursor: pointer;
+  .vs-slip .sew { position: relative; flex: none; padding: 5px 16px 7px; border: 0; border-radius: 4px 10px 10px 4px; cursor: pointer;
     background: #c4553f; color: #fffaf0; font: 700 18px/1.1 ${HAND}; box-shadow: 0 3px 8px rgba(120, 50, 30, 0.3); transition: translate 120ms ease, background 120ms ease; }
-  .vs-slip .sew::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 245, 230, 0.6); border-radius: 7px; pointer-events: none; }
+  .vs-slip .sew::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 245, 230, 0.6); border-radius: 3px 7px 7px 3px; pointer-events: none; }
   .vs-slip .sew:hover, .vs-slip .sew:focus-visible { translate: 0 -1px; background: #b04a35; outline: none; }
   .vs-slip .sew:focus-visible { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6); }
+  .vs-slip.waiting { width: min(400px, calc(100vw - 32px)); padding-top: 22px; }
   .vs-slip.waiting .sew { display: none; }
-  .vs-slip.waiting .line { opacity: 0.7; }
+  .vs-slip.waiting .line { color: #2f4a6b; font-size: 19px; }
   .vs-slip.waiting .status::after { content: ''; display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: -2px;
     border: 2px dotted rgba(122, 59, 42, 0.6); border-radius: 50%; animation: vs-spin 2.4s linear infinite; }
   @keyframes vs-spin { to { rotate: 1turn; } }
+
+  /* The picked pattern: its felt card, stitched across the top of the slip. */
+  .vs-slip .chip { position: relative; display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 10px; margin: 2px -4px 4px; box-sizing: border-box;
+    padding: 9px 14px 9px 16px; border: 0; border-radius: 6px; cursor: pointer; rotate: 0.8deg; text-align: left;
+    background: var(--felt, #7b9a6e); color: #fffaf0; box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); text-shadow: 0 1px 0 rgba(40, 20, 8, 0.3); }
+  .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed rgba(255, 250, 235, 0.7); border-radius: 4px; pointer-events: none; }
+  .vs-slip .chip small { grid-column: 1 / -1; font: 700 13px/1.1 ${HAND}; opacity: 0.85; }
+  .vs-slip .chip b { font: 700 23px/1.15 ${HAND}; }
+  .vs-slip .chip span { grid-column: 1; font: italic 14px/1.3 ${BOOK}; }
+  .vs-slip .chip i { grid-column: 2; grid-row: 2 / 4; align-self: center; font: 700 14px/1 ${HAND}; font-style: normal; opacity: 0.9; white-space: nowrap; }
+  .vs-slip .chip[hidden] { display: none; }
+  .vs-slip .chip:hover i, .vs-slip .chip:focus-visible i { opacity: 1; text-decoration: underline; }
+  .vs-slip .chip:focus-visible { outline: none; box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.7); }
 
   .vs-card { position: fixed; z-index: 6; left: 0; top: 0; max-width: min(360px, calc(100vw - 32px)); padding: 18px 20px 13px; margin-top: -14px;
     box-shadow: 0 12px 28px rgba(60, 30, 10, 0.26), 0 2px 0 rgba(255, 255, 255, 0.7) inset; font: 19px/1.42 ${BOOK}; color: #3d2a1c;
@@ -767,48 +892,51 @@ function css() {
   .vs-card span { opacity: 0; transition: opacity 90ms ease; }
   .vs-card span.in { opacity: 1; }
 
-  .vs-name { position: fixed; z-index: 5; left: 0; top: 0; padding: 4px 14px 6px; border-radius: 11px 11px 5px 5px; pointer-events: none;
-    background: color-mix(in oklab, #c4553f 86%, #2a1608); color: #fffaf0; font: 700 20px/1.15 ${HAND}; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35);
-    box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25); opacity: 0; transition: opacity 240ms ease; }
-  .vs-name::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.6); border-radius: 8px 8px 3px 3px; }
+  /* The name tag, the save tag and the send-off tag are the same paper tag as the tools; colour says what each is for. */
+  .vs-name { position: fixed; z-index: 5; left: 0; top: 0; pointer-events: none; opacity: 0; transition: opacity 240ms ease;
+    background: color-mix(in oklab, #c4553f 88%, #2a1608); color: #fffaf0; font-size: 20px; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35); }
+  .vs-name::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.6); border-radius: 3px 7px 7px 3px; }
   .vs-name.shown { opacity: 1; }
-  .vs-name small { font: 600 15px/1.15 ${HAND}; opacity: 0.85; }
+  .vs-name small { font: 700 15px/1.15 ${HAND}; opacity: 0.85; }
+  .vs-name i { display: block; font: 700 14px/1.2 ${HAND}; font-style: normal; opacity: 0.85; }
 
-  .vs-done { position: fixed; z-index: 6; left: 0; top: 0; padding: 0; border: 0; background: none; cursor: pointer; opacity: 0; pointer-events: none;
-    transition: opacity 260ms ease; transform-origin: 50% 0; }
+  .vs-done { position: fixed; z-index: 6; left: 0; top: 0; cursor: pointer; opacity: 0; pointer-events: none; border: 0;
+    padding: 9px 20px 10px 30px; background: #6f8f62; color: #fffaf0; font-size: 22px; text-shadow: 0 1px 0 rgba(30, 50, 20, 0.4);
+    transition: opacity 260ms ease, translate 160ms ease; }
   .vs-done.shown { opacity: 1; pointer-events: auto; }
-  .vs-done::before { content: ''; position: absolute; left: 50%; top: -16px; height: 20px; border-left: 2px dashed rgba(120, 80, 50, 0.55); }
-  .vs-done span { position: relative; display: inline-block; padding: 10px 22px 12px 34px; border-radius: 8px 18px 18px 8px; rotate: -2deg;
-    background: #7b9a6e; color: #fffaf0; font: 700 23px/1 ${HAND}; text-shadow: 0 1px 0 rgba(30, 50, 20, 0.4);
-    box-shadow: 0 6px 14px rgba(40, 60, 30, 0.3), inset 0 0 0 2px rgba(255, 255, 255, 0.12); transition: rotate 160ms ease, translate 160ms ease; }
-  .vs-done span::before { content: ''; position: absolute; left: 12px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%;
+  .vs-done::before { content: ''; position: absolute; left: 11px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%;
     background: #f3e7cf; box-shadow: inset 0 0 0 2px rgba(60, 80, 40, 0.5); }
-  .vs-done span::after { content: ''; position: absolute; inset: 4px; border: 1.5px dashed rgba(255, 250, 235, 0.6); border-radius: 5px 14px 14px 5px; pointer-events: none; }
-  .vs-done:hover span, .vs-done:focus-visible span { rotate: 0deg; translate: 0 -2px; }
-  .vs-done:focus-visible { outline: none; }
-  .vs-done:focus-visible span { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6), 0 6px 14px rgba(40, 60, 30, 0.3); }
-  @media (max-width: 600px) { .vs-slip { bottom: 16px; } .vs-done span { font-size: 18px; padding: 8px 16px 9px 28px; } .vs-save { padding: 8px 12px 7px; } .vs-save button { font-size: 16px; } .vs-save label { font-size: 13px; } .vs-card { font-size: 17px; } }
-  @media (prefers-reduced-motion: reduce) { .vs-slip, .vs-card, .vs-name, .vs-done, .vs-done span, .vs-card span { transition: none; } .vs-slip.waiting .status::after { animation: none; } }
-  .vs-slip .chip { align-self: flex-start; position: relative; margin: -2px 0 0; padding: 3px 12px 4px; border: 0; border-radius: 999px; cursor: pointer;
-    background: rgba(123, 154, 110, 0.22); color: #3f5a32; font: 700 16px ${HAND}; }
-  .vs-slip .chip::before { content: ''; position: absolute; inset: 2px; border: 1.2px dashed rgba(63, 90, 50, 0.45); border-radius: 999px; }
-  .vs-slip .chip[hidden] { display: none; }
-  .vs-slip .chip:focus-visible { outline: none; box-shadow: 0 0 0 2px #fffaf0, 0 0 0 4px rgba(47, 74, 107, 0.6); }
+  .vs-done::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 250, 235, 0.6); border-radius: 3px 7px 7px 3px; pointer-events: none; }
+  .vs-done:hover { background: #658657; }
+  .vs-done:focus-visible { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6), 0 6px 14px rgba(40, 60, 30, 0.3); }
+
+  .vs-save { position: fixed; z-index: 6; left: 0; top: 0; display: flex; flex-direction: column; gap: 3px; padding: 8px 14px 8px 18px;
+    opacity: 0; pointer-events: none; transition: opacity 240ms ease; }
+  .vs-save::before { content: ''; position: absolute; left: 6px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
+    background: #e9dcc0; box-shadow: inset 0 0 0 1.5px rgba(120, 80, 50, 0.45); }
+  .vs-save.shown { opacity: 1; pointer-events: auto; }
+  .vs-save button { position: relative; padding: 0; border: 0; background: none; cursor: pointer; color: #7a3b2a; font: 700 19px/1.2 ${HAND}; text-align: left; }
+  .vs-save button:hover, .vs-save button:focus-visible { outline: none; text-decoration: underline 1.5px; text-underline-offset: 4px; }
+  .vs-save label { display: flex; align-items: center; gap: 6px; font: 700 14px/1.2 ${HAND}; color: #6a5039; cursor: pointer; }
+  .vs-save input { margin: 0; accent-color: #6f8f62; }
+
   .vs-note { position: fixed; z-index: 7; left: 50%; top: 18px; max-width: min(460px, calc(100vw - 32px)); margin: 0; padding: 10px 16px 11px; translate: -50% -8px;
     border-radius: 4px; background: #fdf6df; color: #4a3220; font: italic 16px/1.4 ${BOOK}; rotate: -0.8deg;
     box-shadow: 0 6px 14px rgba(60, 30, 10, 0.2); opacity: 0; pointer-events: none; transition: opacity 220ms ease, translate 220ms ease; }
   .vs-note::before { content: ''; position: absolute; left: 50%; top: -6px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #c4553f;
     box-shadow: 0 2px 3px rgba(60, 30, 10, 0.35); }
   .vs-note.shown { opacity: 1; translate: -50% 0; }
-  .vs-save { position: fixed; z-index: 6; left: 0; top: 0; display: flex; flex-direction: column; gap: 4px; padding: 12px 16px 10px; border-radius: 6px 14px 14px 6px;
-    background: linear-gradient(180deg, #fffaf0, #f4e6c9); color: #5a3d27; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.2); rotate: 1.2deg;
-    opacity: 0; pointer-events: none; transition: opacity 240ms ease; }
-  .vs-save::after { content: ''; position: absolute; inset: 5px; border: 1.5px dashed rgba(150, 100, 60, 0.35); border-radius: 4px 10px 10px 4px; pointer-events: none; }
-  .vs-save.shown { opacity: 1; pointer-events: auto; }
-  .vs-save button { position: relative; z-index: 1; padding: 0; border: 0; background: none; cursor: pointer; color: #7a3b2a; font: 700 20px/1.2 ${HAND}; text-align: left; }
-  .vs-save button:hover, .vs-save button:focus-visible { outline: none; text-decoration: underline wavy rgba(122, 59, 42, 0.5); text-underline-offset: 4px; }
-  .vs-save label { position: relative; z-index: 1; display: flex; align-items: center; gap: 6px; font: 15px/1.2 ${HAND}; cursor: pointer; }
-  .vs-save input { accent-color: #7b9a6e; }
-    @media (prefers-reduced-motion: reduce) { .vs-note, .vs-save { transition: none; } }
+
+  @media (max-width: 600px) {
+    .vs-slip { padding: 24px 16px 12px; }
+    .vs-slip .line { font-size: 19px; line-height: 29px; background-image: repeating-linear-gradient(transparent 0 27px, rgba(90, 60, 38, 0.32) 27px 29px); }
+    .vs-slip .line::placeholder { font-size: 15px; line-height: 29px; }
+    .vs-slip .status { font-size: 15px; }
+    .vs-slip .chip b { font-size: 21px; }
+    .vs-done { font-size: 19px; padding: 8px 16px 9px 26px; }
+    .vs-save button { font-size: 17px; }
+    .vs-card { font-size: 17px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .vs-slip, .vs-card, .vs-name, .vs-done, .vs-card span, .vs-note, .vs-save { transition: none; } .vs-slip.waiting .status::after { animation: none; } }
   `
 }
