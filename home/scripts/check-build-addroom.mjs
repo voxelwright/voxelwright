@@ -277,7 +277,7 @@ try {
       const [x, z] = P.pointAt(c, (o.from + o.to) / 2)
       const root = window.village.kernel.root
       const V = root.get('stage').camera.position.constructor
-      root.get('view').focus({ position: new V(x + 2.7, 1.35, z + 0.7), look: new V(x, 1.15, z) }, 50)
+      root.get('view').focus({ position: new V(x + 2.7, 1.75, z + 0.7), look: new V(x, 0.95, z) }, 50)
     })
     await dp.waitForTimeout(1500)
     await dp.screenshot({ path: join(OUT, 'addroom-door.jpg'), quality: 88, type: 'jpeg' })

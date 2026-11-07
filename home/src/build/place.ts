@@ -24,7 +24,7 @@ import {
   CORD, KINDS, SURFACE_MIN, cord, alongOf, ceilingOf, faceOf, fit, floorOf, obstacles, poseOf, roomsOf, seat, setPose, supports, wallHeight,
   type Fit, type Obstacle, type Pose, type Size,
 } from './mount'
-import { CHALK, CHALK_RED, HAND, paintDots, paintDrop, paintNoGo, paintRing, paintShadow, rimMaterial, rimOf, tagCss } from './sketch'
+import { CHALK, CHALK_RED, HAND, paintBlockOutline, paintCeilingMark, paintContact, paintDots, paintDrop, paintNoGo, paintRing, paintShadow, rimMaterial, rimOf, tagCss } from './sketch'
 
 export type { Mount } from './plan'
 export type { Pose } from './mount'
@@ -115,7 +115,7 @@ interface Session {
   lifted: number
   message: string
   resolve: (d: Done) => void
-  dom: { tag: HTMLDivElement; hint: HTMLSpanElement; place: HTMLButtonElement; turn: HTMLButtonElement }
+  dom: { tag: HTMLDivElement; hint: HTMLSpanElement; place: HTMLButtonElement; turn: HTMLButtonElement; guide: SVGSVGElement }
 }
 
 export function placement(deps: PlaceDeps): Placement & {
@@ -157,24 +157,23 @@ export function placement(deps: PlaceDeps): Placement & {
   const thread = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: dotsMap, color: '#8a5e3e', transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }))
   thread.name = 'placement thread'
   thread.raycast = () => {}
-  /** What it bumps into, outlined in chalk red. */
+  /** What it bumps into: a muted chalk-red dashed contour on its top, and a hatched patch where the two would meet. */
   const blocker = new THREE.Group()
   blocker.name = 'placement blocker'
-  const blockFill = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.18, depthWrite: false, fog: false }))
-  blockFill.raycast = () => {}
-  blockFill.renderOrder = 4
-  // Its edges as chalk-red bars a couple of centimetres thick: a 1 px line is lost in a lit room.
-  const barGeo = new THREE.BoxGeometry(1, 1, 1)
-  const barMat = new THREE.MeshBasicMaterial({ color: CHALK_RED, transparent: true, opacity: 0.9, fog: false })
-  const bars = Array.from({ length: 12 }, () => {
-    const m = new THREE.Mesh(barGeo, barMat)
-    m.raycast = () => {}
-    m.renderOrder = 4
-    return m
-  })
-  blocker.add(blockFill, ...bars)
+  const blockOutline = decal('placement blocker outline', paintBlockOutline(), 4)
+  const contact = decal('placement contact', paintContact(), 4)
+  ;(contact.material as THREE.Material).depthTest = false
+  blocker.add(blockOutline, contact)
   blocker.visible = false
-  const decals = [shadow, noGo, ring, drop, thread]
+  /** Where a hung thing's cord meets the ceiling: a faint patch of the ceiling plane, seen from below and above. */
+  const rose = decal('placement ceiling', paintCeilingMark(), 1)
+  ;(rose.material as THREE.Material).side = THREE.DoubleSide
+  /** The dollhouse has no ceiling: a see-through timber joist across the room carries the cord, wall to wall. */
+  const joist = new THREE.Mesh(new THREE.BoxGeometry(1, 0.09, 0.07), new THREE.MeshStandardMaterial({ color: '#b98a5e', roughness: 0.7, transparent: true, opacity: 0.78 }))
+  joist.name = 'placement joist'
+  joist.castShadow = true
+  joist.raycast = () => {}
+  const decals = [shadow, noGo, ring, drop, thread, rose, blockOutline, contact]
   const xrayMat = new THREE.MeshBasicMaterial({ color: '#cdb796', transparent: true, opacity: 0.42, depthWrite: false, depthFunc: THREE.GreaterDepth, fog: false })
   const ringMat = ring.material as THREE.MeshBasicMaterial
   const OK = new THREE.Color(CHALK), BAD = new THREE.Color(CHALK_RED)
@@ -379,23 +378,26 @@ export function placement(deps: PlaceDeps): Placement & {
     const box = new THREE.Box3()
     for (const o of s.obstacles) if (o.name === name && o.box.intersectsBox(near)) box.union(o.box)
     if (box.isEmpty()) return
-    const size = box.getSize(new THREE.Vector3()).addScalar(0.03)
-    box.getCenter(blocker.position)
-    blockFill.scale.copy(size)
-    const t = 0.022
-    let i = 0
-    for (const axis of [0, 1, 2] as const) for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) {
-      const bar = bars[i++]
-      const [u, v] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1]
-      const pos = [0, 0, 0], scl = [t, t, t]
-      pos[u] = a * size.getComponent(u)
-      pos[v] = b * size.getComponent(v)
-      scl[axis] = size.getComponent(axis) + t
-      bar.position.fromArray(pos)
-      bar.scale.fromArray(scl)
+    const size = box.getSize(new THREE.Vector3()).addScalar(0.04)
+    const c = box.getCenter(new THREE.Vector3())
+    const lay = (m: THREE.Mesh, x: number, y: number, z: number, sx: number, sz: number) => {
+      m.position.set(x, y, z)
+      m.rotation.set(-Math.PI / 2, 0, 0)
+      m.scale.set(sx, sz, 1)
     }
+    blocker.position.set(0, 0, 0)
+    lay(blockOutline, c.x, box.max.y + 0.006, c.z, size.x, size.z)
+    // The meeting patch: where the two footprints overlap, at the held thing's base (or the blocker's top for hung things).
+    const o = mine.clone().intersect(box)
+    const oc = o.getCenter(new THREE.Vector3()), os = o.getSize(new THREE.Vector3())
+    const y = s.mount === 'floor' || s.mount === 'surface' ? p.y + 0.008 : box.max.y + 0.008
+    lay(contact, oc.x, y, oc.z, Math.max(0.08, os.x), Math.max(0.08, os.z))
+    contact.visible = !o.isEmpty()
     blocker.visible = true
+    blockerBox.copy(box)
   }
+  /** The last thing shown as in the way, so the tag can keep clear of it. */
+  const blockerBox = new THREE.Box3()
   const hint = (s: Session) => {
     const coarse = matchMedia('(pointer: coarse)').matches
     const text = s.message || (s.state === 'confirming'
@@ -474,6 +476,22 @@ export function placement(deps: PlaceDeps): Placement & {
         flat(noGo, 0.007, w + 0.2, d + 0.2)
         flat(ring, y, R * 2, R * 2)
         ringAt.centre.set(p.x, y, p.z)
+        flat(rose, p.y + CORD - 0.004, 0.62, 0.62, 0)
+        // The joist runs along x through the cord's top, between the room's inner faces at that z.
+        const room = roomAt(deps.plan(), p.x, p.z)
+        const floorRing = room ? floorOf(deps.plan(), room) : null
+        let xa = p.x - 1, xb = p.x + 1
+        if (floorRing) {
+          const xs: number[] = []
+          for (let i = 0; i < floorRing.length; i++) {
+            const [ax, az] = floorRing[i], [bx, bz] = floorRing[(i + 1) % floorRing.length]
+            if ((az > p.z) !== (bz > p.z)) xs.push(ax + ((p.z - az) * (bx - ax)) / (bz - az))
+          }
+          const left = xs.filter((x) => x <= p.x), right = xs.filter((x) => x >= p.x)
+          if (left.length && right.length) [xa, xb] = [Math.max(...left), Math.min(...right)]
+        }
+        joist.position.set((xa + xb) / 2, p.y + CORD + 0.045, p.z)
+        joist.scale.set(xb - xa, 1, 1)
       } else {
         s.holder.position.y += s.lifted
         // Higher is softer: the shadow spreads and pales as it lifts.
@@ -732,8 +750,13 @@ export function placement(deps: PlaceDeps): Placement & {
       stop(e)
       if (session) turn(session, snap(yawOf(session.at) - STEP, STEP))
     })
-    document.body.append(tag, turnBtn)
-    return { tag, hint: hintEl, place: placeBtn, turn: turnBtn }
+    // The knob's stem to the ring and a short arc along it with arrowheads: drag it round.
+    const guide = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    guide.classList.add('place-guide')
+    guide.setAttribute('aria-hidden', 'true')
+    guide.innerHTML = '<path class="arc"/><path class="heads"/><path class="stem"/>'
+    document.body.append(guide, tag, turnBtn)
+    return { tag, hint: hintEl, place: placeBtn, turn: turnBtn, guide }
   }
 
   /** On a phone the tag docks to the bottom, in reach of a thumb, and the view frames the thing above it. */
@@ -746,6 +769,14 @@ export function placement(deps: PlaceDeps): Placement & {
       x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
     }
     const span = Math.max(x1 - x0, y1 - y0)
+    const thing = { x0, x1, y0, y1 }
+    // Where it can't go, the tag keeps clear of what is in the way too, so you can see it.
+    if (blocker.visible && !s.fit.ok) {
+      for (const x of [blockerBox.min.x, blockerBox.max.x]) for (const y of [blockerBox.min.y, blockerBox.max.y]) for (const z of [blockerBox.min.z, blockerBox.max.z]) {
+        const [sx, sy] = project(x, y, z)
+        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+      }
+    }
     if (s.mount === 'ceiling') {
       // A hung thing's tag keeps clear of its thread and its spot on the floor too.
       const [fx, fy] = project(drop.position.x, 0, drop.position.z)
@@ -760,15 +791,30 @@ export function placement(deps: PlaceDeps): Placement & {
       if (tag.style.transform) tag.style.transform = ''
     } else {
       const tw = tag.offsetWidth, th = tag.offsetHeight
-      // Above the thing when there is room, else below it; always on screen. The tail points at it.
-      let ty = y0 - th - 22
-      const below = ty < 12
-      if (below) ty = Math.min(vh - th - 12, y1 + 22)
-      const cx = (x0 + x1) / 2
-      const tx = Math.min(Math.max(cx - tw / 2, 12), vw - tw - 12)
-      tag.classList.toggle('below', below)
-      tag.style.setProperty('--tail', `${Math.round(Math.min(Math.max(cx - tx, 24), tw - 24))}px`)
-      tag.style.transform = `translate(${Math.round(tx)}px, ${Math.round(ty)}px) rotate(-1.2deg)`
+      if (s.mount === 'ceiling') {
+        // A hung thing: the tag hangs beside it, at its height, clear of the cord, the thread and the pool below.
+        const cy = (thing.y0 + thing.y1) / 2
+        let tx = thing.x1 + 26
+        const left = tx + tw > vw - 12
+        if (left) tx = thing.x0 - 26 - tw
+        const ty = Math.min(Math.max(cy - th / 2, 12), vh - th - 12)
+        tag.classList.remove('below')
+        tag.classList.toggle('side', true)
+        tag.classList.toggle('left', left)
+        tag.style.setProperty('--tail-y', `${Math.round(Math.min(Math.max(cy - ty, 20), th - 20))}px`)
+        tag.style.transform = `translate(${Math.round(tx)}px, ${Math.round(ty)}px) rotate(-1.2deg)`
+      } else {
+        // Above the thing when there is room, else below it; always on screen. The tail points at it.
+        let ty = y0 - th - 22
+        const below = ty < 12
+        if (below) ty = Math.min(vh - th - 12, y1 + 22)
+        const cx = (x0 + x1) / 2
+        const tx = Math.min(Math.max(cx - tw / 2, 12), vw - tw - 12)
+        tag.classList.remove('side', 'left')
+        tag.classList.toggle('below', below)
+        tag.style.setProperty('--tail', `${Math.round(Math.min(Math.max(cx - tx, 24), tw - 24))}px`)
+        tag.style.transform = `translate(${Math.round(tx)}px, ${Math.round(ty)}px) rotate(-1.2deg)`
+      }
     }
     // The turn handle rides the ring, on the side toward the screen's right.
     const h = handleAt()
@@ -788,7 +834,50 @@ export function placement(deps: PlaceDeps): Placement & {
       else if (!under(hx, 2 * ry - hy)) hy = 2 * ry - hy
       else [hx, hy] = [rx, Math.max(hy, y1 + half + 8)]
     }
-    s.dom.turn.style.transform = `translate(${Math.round(Math.min(Math.max(hx - half, 4), vw - 2 * half - 4))}px, ${Math.round(Math.min(Math.max(hy - half, 4), vh - 2 * half - 4))}px)`
+    const kx = Math.min(Math.max(hx - half, 4), vw - 2 * half - 4) + half, ky = Math.min(Math.max(hy - half, 4), vh - 2 * half - 4) + half
+    s.dom.turn.style.transform = `translate(${Math.round(kx - half)}px, ${Math.round(ky - half)}px)`
+    drawGuide(s, kx, ky, half)
+  }
+  /** The knob's stem to the nearest point of the ring, and a short arc along the ring each way with arrowheads. */
+  const drawGuide = (s: Session, kx: number, ky: number, half: number) => {
+    const a = new THREE.Vector3(), b = new THREE.Vector3()
+    const helper = Math.abs(ringAt.normal.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+    a.crossVectors(ringAt.normal, helper).normalize()
+    b.crossVectors(ringAt.normal, a).normalize()
+    const R = ringAt.radius * 0.94
+    const at = (t: number) => {
+      const w = ringAt.centre.clone().addScaledVector(a, Math.cos(t) * R).addScaledVector(b, Math.sin(t) * R)
+      return project(w.x, w.y, w.z)
+    }
+    let t0 = 0, best = Infinity
+    for (let i = 0; i < 72; i++) {
+      const t = (i / 72) * Math.PI * 2
+      const [x, y] = at(t)
+      const dd = (x - kx) ** 2 + (y - ky) ** 2
+      if (dd < best) [best, t0] = [dd, t]
+    }
+    const [rx, ry] = at(t0)
+    const d = Math.hypot(kx - rx, ky - ry)
+    const stem = d > half ? `M${(kx + ((rx - kx) * half) / d).toFixed(1)} ${(ky + ((ry - ky) * half) / d).toFixed(1)}L${rx.toFixed(1)} ${ry.toFixed(1)}` : ''
+    const pts: Array<[number, number]> = []
+    for (let i = -10; i <= 10; i++) pts.push(at(t0 + (i / 10) * 0.62))
+    // Leave a gap under the knob itself.
+    const out = pts.map(([x, y]) => (Math.hypot(x - kx, y - ky) < half + 3 ? null : [x, y]))
+    let arc = ''
+    out.forEach((p, i) => {
+      if (!p) return
+      arc += `${i && out[i - 1] ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`
+    })
+    const head = (tip: [number, number], from: [number, number]) => {
+      const ux = tip[0] - from[0], uy = tip[1] - from[1], l = Math.hypot(ux, uy) || 1
+      const [dx, dy] = [(ux / l) * 9, (uy / l) * 9]
+      return `M${(tip[0] - dx - dy * 0.7).toFixed(1)} ${(tip[1] - dy + dx * 0.7).toFixed(1)}L${tip[0].toFixed(1)} ${tip[1].toFixed(1)}L${(tip[0] - dx + dy * 0.7).toFixed(1)} ${(tip[1] - dy - dx * 0.7).toFixed(1)}`
+    }
+    const [arcEl, headsEl, stemEl] = s.dom.guide.children
+    arcEl.setAttribute('d', arc)
+    headsEl.setAttribute('d', head(pts[pts.length - 1], pts[pts.length - 3]) + head(pts[0], pts[2]))
+    stemEl.setAttribute('d', stem)
+    s.dom.guide.classList.toggle('bad', !s.fit.ok)
   }
 
   /**
@@ -847,7 +936,7 @@ export function placement(deps: PlaceDeps): Placement & {
     // A hung thing hangs from its cord while it is placed, as it will once placed.
     if (s.mount === 'ceiling' && !holder.getObjectByName('cord')) holder.add(cord(CORD))
     if (!holder.parent) group.add(holder)
-    group.add(noGo, ring, blocker, ...(s.mount === 'ceiling' ? [drop, thread] : [shadow]))
+    group.add(noGo, ring, blocker, ...(s.mount === 'ceiling' ? [drop, thread, rose, joist] : [shadow]))
     pan.fresh = true
     s.obstacles = obstacles(scene, [holder, group])
     s.supports = supports(scene, [holder, group])
@@ -998,8 +1087,10 @@ export function placement(deps: PlaceDeps): Placement & {
     unghost(s)
     s.dom.tag.remove()
     s.dom.turn.remove()
+    s.dom.guide.remove()
     for (const m of decals) m.removeFromParent()
     blocker.removeFromParent()
+    joist.removeFromParent()
     drag = null
     twist = null
     turning = null
@@ -1072,10 +1163,8 @@ export function placement(deps: PlaceDeps): Placement & {
       style.remove()
       plane.dispose()
       xrayMat.dispose()
-      blockFill.geometry.dispose()
-      ;(blockFill.material as THREE.Material).dispose()
-      barGeo.dispose()
-      barMat.dispose()
+      joist.geometry.dispose()
+      ;(joist.material as THREE.Material).dispose()
       for (const m of decals) {
         const mat = m.material as THREE.MeshBasicMaterial
         mat.map?.dispose()
@@ -1140,7 +1229,15 @@ function css() {
   .place-turn { position: fixed; left: 0; top: 0; z-index: 40; width: 48px; height: 48px; padding: 0; border: 0; background: transparent; cursor: grab;
     touch-action: none; color: #3a2416; will-change: transform; display: grid; place-items: center; }
   .place-turn .knob { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #e6cfa8, #cdb08a);
-    box-shadow: 0 4px 10px rgba(70, 40, 20, 0.3), 0 0 0 3px rgba(58, 36, 22, 0.95), 0 0 0 7px rgba(255, 246, 228, 0.0), inset 0 0 0 5px rgba(150, 110, 80, 0.25); transition: scale 140ms ease; }
+    box-shadow: 0 4px 10px rgba(70, 40, 20, 0.28), 0 0 0 2px rgba(122, 82, 54, 0.75), inset 0 0 0 5px rgba(150, 110, 80, 0.2); transition: scale 140ms ease; }
+  .place-guide { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 39; pointer-events: none; overflow: visible; }
+  .place-guide path { fill: none; stroke: rgba(122, 82, 54, 0.85); stroke-linecap: round; stroke-linejoin: round; }
+  .place-guide .arc { stroke-width: 3; stroke-dasharray: 7 6; }
+  .place-guide .heads { stroke-width: 3; }
+  .place-guide .stem { stroke-width: 4; stroke: rgba(122, 82, 54, 0.75); }
+  .place-guide.bad path { stroke: rgba(196, 92, 70, 0.8); }
+  .place-tag.side::after { left: -8px; top: var(--tail-y, 50%); bottom: auto; margin: -8px 0 0; rotate: 45deg; background: #fbf3e2; border-radius: 0 0 0 4px; box-shadow: -3px 3px 5px rgba(60, 30, 10, 0.1); }
+  .place-tag.side.left::after { left: auto; right: -8px; border-radius: 0 4px 0 0; box-shadow: 3px -3px 5px rgba(60, 30, 10, 0.1); }
   .place-turn svg { width: 20px; height: 20px; display: block; }
   .place-turn:hover .knob { scale: 1.08; }
   .place-turn.bad { color: #a63c2c; }

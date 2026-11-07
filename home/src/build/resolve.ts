@@ -100,17 +100,17 @@ export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
   try {
     next = applyDraft(plan, d)
   } catch (e) {
-    if (e instanceof PlanError) return { ask: "That doesn't quite fit there. Try it a little smaller?" }
+    if (e instanceof PlanError) return { ask: "That doesn't fit. A bit smaller?" }
     throw e
   }
-  if (Math.abs(Math.abs(curveOf(next, next.walls.find((w) => w.id === `${d.roomId}.w2`)!).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "That far wall can't curve so much. A gentler bend?" }
+  if (Math.abs(Math.abs(curveOf(next, next.walls.find((w) => w.id === `${d.roomId}.w2`)!).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "It can't bend that far. Gentler?" }
   const block = blockerOf(d.door, d.keepOut)
-  if (block) return { ask: `The ${block.name} is in the way of the door there.` }
+  if (block) return { ask: `The ${block.name}'s in the way of the door.` }
   const room = next.rooms.find((r) => r.id === d.roomId)!
   const mine = outline(next, room, 0.05)
   for (const other of next.rooms) {
     if (other.id === d.roomId) continue
-    if (overlaps(mine, outline(next, other))) return { ask: `That would run into the ${lower(other.label)}. Somewhere else, or a little smaller?` }
+    if (overlaps(mine, outline(next, other))) return { ask: `That runs into the ${lower(other.label)}. Smaller, or elsewhere?` }
   }
   return { plan: next }
 }
@@ -126,19 +126,19 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
     host = plan.walls.find((w) => w.id === sel.wallId)
     if (!host) return { ask: 'Which wall? Click one and tell me again.' }
     const owners = ownersOf(plan, host.id)
-    if (owners.length !== 1) return { ask: `That wall already joins the ${owners.map((r) => lower(r.label)).join(' and the ')}. Pick an outside wall?` }
+    if (owners.length !== 1) return { ask: `That wall joins the ${owners.map((r) => lower(r.label)).join(' and the ')}. An outside wall?` }
     room = owners[0]
   } else {
     const found = anchorRoom(plan, intent.anchor.room, ctx)
     if ('ask' in found) return found
     room = found.room
-    if (!intent.anchor.side) return { ask: `Which side of the ${lower(room.label)} should it go on?` }
+    if (!intent.anchor.side) return { ask: `Which side of the ${lower(room.label)}?` }
     const side = sideWall(plan, room, intent.anchor.side, ctx.view)
     if ('ask' in side) return side
     host = side.wall
   }
   const c = curveOf(plan, host)
-  if (c.radius !== Infinity) return { ask: `That wall of the ${lower(room.label)} curves, and I can only add rooms on straight walls for now.` }
+  if (c.radius !== Infinity) return { ask: `That wall curves. Rooms go on straight walls for now.` }
   const L = c.length
 
   // Size.
@@ -155,13 +155,13 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
       const err = Math.abs(wk * dk - target)
       if (!best || err < best[2] - 1e-9 || (Math.abs(err - best[2]) < 1e-9 && Math.abs(wk - w0) < Math.abs(best[0] - w0))) best = [wk, dk, err]
     }
-    if (!best) return { ask: `That wall is too short for a room that size. Smaller, maybe?` }
+    if (!best) return { ask: `That wall's too short. Smaller?` }
     ;[w, d] = best
   } else {
     w = round(snap(size?.w ?? Math.min(DEFAULT.w, L)))
     d = round(snap(size?.d ?? DEFAULT.d))
   }
-  if (w > L + 1e-9) return { ask: `That wall is only ${fmt(L)} m long, so the room can be ${fmt(Math.floor(L * 10) / 10)} m wide at most. Shall I?` }
+  if (w > L + 1e-9) return { ask: `That wall is ${fmt(L)} m. Make it ${fmt(Math.floor(L * 10) / 10)} m wide?` }
 
   // Where along the wall: centred on the click or the wall, then slid clear of windows and doors.
   const centre = bySelection && sel && sel.wallId === host.id ? sel.t : L / 2
@@ -183,7 +183,7 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
       if (from === null || Math.abs(f + w / 2 - centre) < Math.abs(from + w / 2 - centre) - 1e-9) from = f
     }
   }
-  if (from === null) return { ask: `There's a window or a door along that wall, so a ${fmt(w)} m room won't fit there. Narrower, maybe?` }
+  if (from === null) return { ask: `A window or a door is in the way. Narrower than ${fmt(w)} m?` }
   let to = round(from + w)
 
   // The door, clear of what stands against the wall; the room slides along the wall if the door must.
@@ -208,9 +208,9 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
   let found = clearDoor(DOOR_WIDTH[leaves ?? 'opening'])
   if (!found && leaves === 2 && (found = clearDoor(DOOR_WIDTH[1]))) {
     leaves = 1
-    note = `The ${name} is in the way of double doors, so I drew a single door beside it. Like this?`
+    note = `The ${name}'s in the way. One single door here instead?`
   }
-  if (!found) return { ask: `The ${name ?? 'furniture'} is in the way there, and that wall has no clear spot for a door. Another wall, maybe?` }
+  if (!found) return { ask: `The ${name ?? 'furniture'} is in the way there. Another wall?` }
   from = found.f
   to = round(from + w)
   const door = found.door
@@ -266,7 +266,7 @@ function anchorRoom(plan: Plan, said: string | undefined, ctx: ResolveContext): 
   if (matches.length === 1) return { room: matches[0] }
   const known = plan.rooms.map((r) => `the ${lower(r.label)}`)
   if (matches.length > 1) return { ask: `Which one do you mean: ${known.join(' or ')}?` }
-  return { ask: `I don't know a ${words} yet, only ${known.length > 1 ? `${known.slice(0, -1).join(', ')} and ${known.at(-1)}` : known[0]}. Which one shall it go by?` }
+  return { ask: `No ${words} yet, only ${known.length > 1 ? `${known.slice(0, -1).join(', ')} and ${known.at(-1)}` : known[0]}. Which one?` }
 }
 
 /** The direction a side points in on the floor, from the camera's view direction. */
@@ -292,12 +292,12 @@ function sideWall(plan: Plan, room: Room, side: Side, view: P): { wall: Wall } |
   // Two faces of the room point that way about equally: a wall in the face turns away from the best one.
   const lead = face.find((k) => k.dot === best)!
   const turned = face.some((k) => Math.abs(k.c.dir[0] * lead.c.dir[1] - k.c.dir[1] * lead.c.dir[0]) > 0.05)
-  if (turned || best - other < TIE) return { ask: `From here I'm looking at a corner of the ${lower(room.label)}. Click the wall you mean and tell me again?` }
-  if (face.some((k) => k.c.radius !== Infinity)) return { ask: `That side of the ${lower(room.label)} curves, and I can only add rooms on straight walls for now.` }
+  if (turned || best - other < TIE) return { ask: `I'm looking at a corner. Click the wall you mean?` }
+  if (face.some((k) => k.c.radius !== Infinity)) return { ask: `That side curves. Rooms go on straight walls for now.` }
   const outside = face.filter((k) => ownersOf(plan, k.wall.id).length === 1)
   if (!outside.length) {
     const next = ownersOf(plan, face[0].wall.id).find((r) => r.id !== room.id)
-    return { ask: `There's already the ${lower(next?.label ?? 'room')} on that side. Somewhere else?` }
+    return { ask: `The ${lower(next?.label ?? 'room')} is already there. Elsewhere?` }
   }
   return { wall: outside.sort((p, q) => q.c.length - p.c.length)[0].wall }
 }

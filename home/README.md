@@ -1412,12 +1412,18 @@ plan and the view, or into one line your villager says:
   room would run into another room, no stretch fits, the room or side is
   unclear, or the wall is too short.
 
-`src/build/outline.ts` draws the draft at once: a plot of turned earth with
-taped-down tracing paper on it, hand-wobbled pencil walls with a graphite
-smudge, sketched floorboards, the door's swing dashed, low plaster wall stubs,
-tape measures along two sides with handwritten sizes, and wooden pegs with
-arrows (a sage one for the bend). The yard's fence and flowers step aside under
-the paper while it is out. Drag a peg or a wall, pull the sage peg inside the
+`src/build/outline.ts` draws the draft at once, as a sketch rather than a building:
+taped-down cream paper on a light plot of earth, the walls as graphite strokes with
+close hatching and a lighter hatched band outside them for height, bare paper for the
+floor with two faint construction lines, the door's swing dashed, tape measures along
+two sides with handwritten sizes, and small wooden pegs standing on the walls they move,
+with pencilled arrows. The sage peg bends the far wall, and a dashed pencil curve runs
+from that wall's ends through it. Real walls appear only on "Build it", rising from the
+floor in 0.7 s (at once with reduced motion). The yard's fence, rails, flowers, stones
+and shrubs step aside under the paper and from every built room and its walls
+(`src/build/yard.ts`, runtime only, put back on unload) until the yard follows the plan.
+A door that a build edit opens gets a timber casing on both faces, lined reveals and a
+threshold board; the kitchen's own openings are left as room.ts draws them. Drag a peg or a wall, pull the sage peg inside the
 far wall to bend it, or click a size and type. A refused drag flashes the walls
 chalk red. Enter or "Build it" commits one version ("Added the study"); Escape
 or "Not now" leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through
@@ -1427,12 +1433,12 @@ The plan history is `src/build/house.ts`: the host's store when the host is
 running, memory otherwise.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 34 checks
+node scripts/check-build-addroom.mjs                  # stub host and router, 44 checks (yard clear of built rooms, put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
 ```
 
-Stub (November 7, 2026): 34 of 34. Enter to outline is 209 ms with the stub
+Stub (November 7, 2026): 44 of 44. Enter to outline is 209 ms with the stub
 router on `?route=separate`; the outline is drawn in the same call that
 receives the route. On the default one-call path the stub villager streams its
 ROUTE reply six letters at a time, so it measures about 1.8 s there.
@@ -1456,10 +1462,18 @@ on the first line of a fresh page. The router call, not the house, is the wait.
 Look (Opus scorer, shots only, ui-craft rubric plus "a hand-drawn blueprint
 that feels part of a cozy home"): 4.5, 4.5 and 5 out of 10 over three rounds.
 It still finds the paper flat and the dimension lines too CAD-like.
+Look round 3 (November 7, Opus, ui-craft rubric plus "placing furniture and sketching a
+new room in a cozy dollhouse feels like a game, not a CAD tool"; warmth, material, light,
+text, consistency, affordance, phone, game feel): before A 8/7/7/6/7/6/7/6, B 6/5/5/6/6/7/7/5;
+round 1 A 8/7/7/8/7/8/7/7, B 7/6/6/7/6/7/7/6; round 2 A 8/7/7/8/8/8/7/7, B 6/6/6/7/6/7/6/6.
+Below the 9 bar. Still named: the built room is an empty shell hanging off the lot (the
+yard does not follow the plan), tape measures and m² still read as drafting, the kitchen's
+pendant wire across the window. `screenshots/build/look-before-after.jpg` pairs before and
+after for red, floor, wall, curved wall, ceiling, outline, adjusted, built and doorway, then
+the phone floor, wall and add-room shots.
 
-Missing or approximate: the new room lands on the yard. The fence, path and
-grass run through it and the sun's shadow box doesn't cover it. There's no
-threshold in a doorway between rooms, so the base shows. The size tags edit
+Missing or approximate: the new room lands on the yard's grass, past the
+board's edge, and the sun's shadow box doesn't cover it. The size tags edit
 width and depth only, not the bend. On a phone the view centres on the new room
 but can't take in the whole house. Rooms are rectangles on straight walls only.
 Furniture is left to the placement unit.
@@ -1553,17 +1567,23 @@ Undo and redo come from the versions.
   draws, so the table, counters and shelves need no tags. **wall** hangs flat on a wall the
   camera sees whole, clear of doors, windows and what already hangs there. On a curved wall
   it faces the normal and stands off the curve. **ceiling** hangs 0.75 m below the room's
-  ceiling on a cord with a rose, with a soft glow on the ceiling while it is placed.
+  ceiling on a cord with a rose. While it is placed, a see-through timber joist runs wall to
+  wall through the cord's top, with a pencil mark where the cord meets it.
   Collisions use the world boxes of meshes, and 10 cm columns for merged meshes (furnish.ts
-  batches its things). Flat things such as rugs don't count.
+  batches its things). Flat things such as rugs don't count. A wall thing counts built-ins up
+  to 0.6 m plus the wall's bulge off its face, so a bay bent out behind the shelf still has the
+  shelf in front. An opening is its hole plus the built-ins that dress it (frame, sill), so
+  nothing hangs over a sill's end.
 - Input: drag the thing (mouse, or one finger) and it snaps to 5 cm, then to the nearest
   spot that fits within 30 cm. Where nothing fits, its rim and footprint turn chalk red, it
-  shows through what it is inside, what it bumps into is outlined in red, and it says why.
+  shows through what it is inside, what it bumps into gets a dashed chalk-red contour on its
+  top and a hatched patch where the two meet, the tag keeps clear of both, and it says why.
   Q/E turn it 15°, Shift+Q/E 45° and Alt+Q/E 1°. The knob on the turn ring turns it in 15°
   steps (Alt: no steps), and a tap on it turns it 15°. Two fingers twist it.
 - The look (`src/build/sketch.ts`, shared with adding rooms): the held thing is see-through
   with a chalk rim, a faint silhouette where furniture hides it, a contact shadow and a turn
-  ring; a hung thing shows a dotted thread down to a pool of its light. On a phone the tag
+  ring joined to its knob, with a dashed arc and arrowheads along the ring; a hung thing shows
+  a dotted thread down to a pool of its light, and its tag hangs beside it. On a phone the tag
   docks at the bottom and the view eases sideways so the thing sits above it.
   Alt while dragging means no grid and no pull. Enter or "Place it" confirms, and Escape or
   "Not now" cancels. In iso the pointer is taken from the camera only on the thing or its
@@ -1578,7 +1598,7 @@ Undo and redo come from the versions.
   built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
 
 ```sh
-cd home && node scripts/check-place.mjs           # 59/59: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
+cd home && node scripts/check-place.mjs           # 64/64: plan ops, each mount dragged, red and refused (a sill's end, a shelf in front of a bay), Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
 cd home && node scripts/check-place.mjs --look    # also screenshots/build/place-*.jpg and place.mp4
 ```
 

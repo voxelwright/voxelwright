@@ -170,6 +170,8 @@ function doorTrim(f: Frame, kit: Kit): THREE.Mesh[] {
       piece(f, o.from, o.from + 0.018, 0, o.head, T + 0.02, 0, kit.timber),
       piece(f, o.to - 0.018, o.to, 0, o.head, T + 0.02, 0, kit.timber),
       piece(f, o.from, o.to, o.head - 0.018, o.head, T + 0.02, 0, kit.timber),
+      // A threshold board across the floor, so the base never shows between the rooms.
+      piece(f, o.from, o.to, 0, 0.014, T + 0.06, 0, kit.timber),
     )
   }
   for (const m of out) m.castShadow = m.receiveShadow = true
@@ -254,7 +256,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       }
     }
   }
-  for (const f of frames.filter((k) => SEATED.includes(sideOf(k)))) seat.add(...doorTrim(f, kit))
+  for (const f of frames.filter((k) => SEATED.includes(sideOf(k)))) for (const m of doorTrim(f, kit)) seat.add(m)
   // Skirting along the back wall, broken by doors.
   for (const f of frames.filter((k) => sideOf(k) === 'back')) {
     const T = f.wall.thickness
@@ -302,7 +304,7 @@ export function build(plan: Plan, room: Room, kit: Kit, options: { iso: boolean;
       shell.add(m, ...(y1 >= H ? [cap] : []))
       if (y1 < H) cap.geometry.dispose()
     }
-    if (!SEATED.includes(sideOf(f))) shell.add(...doorTrim(f, kit))
+    if (!SEATED.includes(sideOf(f))) for (const m of doorTrim(f, kit)) shell.add(m)
     for (const [a, b] of spans(doors, t0, t1, STUB)) {
       for (const m of run(a, b, 0, STUB)) {
         m.userData.cutaway = true
@@ -367,7 +369,7 @@ function otherRooms(plan: Plan, first: Room, kit: Kit): THREE.Group | null {
         return parts
       }
       for (const [a, b, y0, y1] of around(f.wall.openings, t0, t1, H)) group.add(...run(a, b, y0, y1, y1 >= H))
-      group.add(...doorTrim(f, kit))
+      for (const m of doorTrim(f, kit)) group.add(m)
       for (const [a, b] of spans(f.wall.openings.filter((o) => o.sill < STUB), t0, t1, STUB)) {
         for (const m of run(a, b, 0, STUB, true)) {
           m.userData.cutaway = true

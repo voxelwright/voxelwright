@@ -19,7 +19,9 @@ const INK = 'rgba(78, 52, 34, 0.95)'
 /** Carpenter's red pencil, for the measurements. */
 const PENCIL = 'rgba(96, 62, 40, 0.8)'
 // Darker than it looks: the scene's exposure and bloom lift it to a warm tracing-paper cream.
-const PAPER = 'rgba(238, 222, 186, 0.92)'
+const PAPER = 'rgba(246, 236, 212, 0.9)'
+/** Soft graphite, for the walls drawn on the paper. */
+const GRAPHITE = 'rgba(62, 56, 52, 0.92)'
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
 
@@ -32,6 +34,8 @@ export interface OutlineHooks {
   say(text: string): void
   /** The camera's view direction on the floor. */
   view(): P
+  /** The paper's outline on the ground (null when it is put away): the yard steps aside under it. */
+  yard?(paper: P[] | null): void
 }
 
 const snap = (v: number, step = SNAP) => Math.round(Math.round(v / step) * step * 1e6) / 1e6
@@ -97,7 +101,30 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   edges.name = 'build outline edges'
   edges.renderOrder = 2
 
+  // A proposal is drawn, not built: the paper carries the walls, and only "Build it" raises real ones (plugins/build.ts).
+  ghosts.visible = edges.visible = false
   group.add(sheet, ghosts, edges)
+  /** Wooden pegs standing on the walls they move: a turned body and a lighter head; the bend peg's head is sage. */
+  const pegBody = new THREE.CylinderGeometry(0.11, 0.13, 0.1, 24)
+  pegBody.translate(0, 0.05, 0)
+  const pegHead = new THREE.CylinderGeometry(0.1, 0.11, 0.035, 24)
+  pegHead.translate(0, 0.115, 0)
+  const pegWood = new THREE.MeshStandardMaterial({ color: '#8f5f3c', roughness: 0.6 })
+  const pegTop = new THREE.MeshStandardMaterial({ color: '#e1bb88', roughness: 0.55 })
+  const pegSage = new THREE.MeshStandardMaterial({ color: '#9fb486', roughness: 0.55 })
+  const pegLive = new THREE.MeshStandardMaterial({ color: '#f0a65c', roughness: 0.5, emissive: '#b8641e', emissiveIntensity: 0.25 })
+  const pegMeshes = new Map<Handle, { group: THREE.Group; head: THREE.Mesh; top: THREE.Material }>()
+  for (const h of ['far', 'from', 'to', 'door', 'bend'] as Handle[]) {
+    const pg = new THREE.Group()
+    pg.name = `build outline peg ${h}`
+    const body = new THREE.Mesh(pegBody, pegWood)
+    const top = h === 'bend' ? pegSage : pegTop
+    const head = new THREE.Mesh(pegHead, top)
+    body.castShadow = head.castShadow = true
+    pg.add(body, head)
+    pegMeshes.set(h, { group: pg, head, top })
+    group.add(pg)
+  }
   /** Tracing-paper grain, painted once and laid over the paper on every redraw. */
   const grain = paperGrain(512)
   /** The plot's turned earth under the paper, painted once. */
@@ -105,65 +132,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   /** A refused drag flashes the walls chalk red for a moment. */
   let refusedAt = -Infinity
 
-  // The yard's fence and flowers step aside under the paper while it is out (runtime only: diorama.ts is untouched).
-  const YARD = ['picket fence', 'yard plants', 'yard blooms']
-  const tucked = new Map<THREE.InstancedMesh, Float32Array>()
-  const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
-  const m4 = new THREE.Matrix4(), at4 = new THREE.Vector3()
-  const inside = (p: P, poly: P[]) => {
-    let inn = false
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, zi] = poly[i], [xj, zj] = poly[j]
-      if ((zi > p[1]) !== (zj > p[1]) && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) inn = !inn
-    }
-    return inn
-  }
-  const tidyYard = (poly: P[] | null) => {
-    if (poly) for (const name of YARD) {
-      const m = stage.scene.getObjectByName(name) as THREE.InstancedMesh | undefined
-      if (m?.isInstancedMesh && !tucked.has(m)) tucked.set(m, (m.instanceMatrix.array as Float32Array).slice())
-    }
-    for (const [m, saved] of tucked) {
-      m.updateMatrixWorld()
-      for (let i = 0; i < m.count; i++) {
-        m4.fromArray(saved, i * 16)
-        at4.setFromMatrixPosition(m4).applyMatrix4(m.matrixWorld)
-        m.setMatrixAt(i, poly && inside([at4.x, at4.z], poly) ? hidden : m4)
-      }
-      m.instanceMatrix.needsUpdate = true
-      if (!poly) m.computeBoundingSphere()
-    }
-    if (!poly) tucked.clear()
-    else for (const m of tucked.keys()) m.computeBoundingSphere()
-    // The fence's rails are one merged mesh: a rail that runs under the paper is left out while it is there.
-    if (poly && !rails) {
-      const fence = stage.scene.getObjectByName('picket fence') as THREE.Mesh | undefined
-      const rail = fence?.parent?.children.find((c) => (c as THREE.Mesh).isMesh && c !== fence && (c as THREE.Mesh).material === fence.material) as THREE.Mesh | undefined
-      if (rail?.geometry.index) rails = { mesh: rail, index: rail.geometry.index }
-    }
-    if (!rails) return
-    const { mesh, index } = rails
-    if (!poly) {
-      mesh.geometry.setIndex(index)
-      rails = null
-      return
-    }
-    const pos = mesh.geometry.attributes.position
-    mesh.updateMatrixWorld()
-    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
-    const keep: number[] = []
-    for (let t = 0; t < index.count; t += 3) {
-      for (let j = 0; j < 3; j++) v[j].fromBufferAttribute(pos, index.getX(t + j)).applyMatrix4(mesh.matrixWorld)
-      let under = false
-      for (let j = 0; j < 3 && !under; j++) for (let s = 0; s <= 12 && !under; s++) {
-        const a = v[j], b = v[(j + 1) % 3], f = s / 12
-        under = inside([a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f], poly)
-      }
-      if (!under) keep.push(index.getX(t), index.getX(t + 1), index.getX(t + 2))
-    }
-    mesh.geometry.setIndex(keep)
-  }
-  let rails: { mesh: THREE.Mesh; index: THREE.BufferAttribute } | null = null
+  // The yard's fence and flowers step aside under the paper while it is out (the caller owns the yard: hooks.yard).
+  const tidyYard = (poly: P[] | null) => hooks.yard?.(poly)
 
   // ── Paper tags: the two sizes, and the choice ────────────────────────────
   const style = document.createElement('style')
@@ -327,7 +297,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       for (let pass = 0; pass < 2; pass++) {
         g.save()
         g.globalAlpha = alpha * (pass ? 0.45 : 0.85)
-        g.strokeStyle = refused && colour === INK ? CHALK_RED : colour
+        g.strokeStyle = refused && (colour === INK || colour === GRAPHITE) ? CHALK_RED : colour
         g.lineWidth = width * k * (pass ? 0.55 : 1)
         if (pass) g.translate(0.006 * k, 0.004 * k)
         trace(wander(path, over * (pass ? 0.6 : 1)))
@@ -337,8 +307,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       g.setLineDash([])
     }
     /** Hatching by hand: uneven spacing, each stroke a little off the angle. */
-    const hatch = (gap: number, alpha: number, width: number, dir: 1 | -1) => {
-      g.strokeStyle = INK
+    const hatch = (gap: number, alpha: number, width: number, dir: 1 | -1, colour = INK) => {
+      g.strokeStyle = refused ? CHALK_RED : colour
       g.lineWidth = width * k
       for (let s = -PX; s < PX * 2; s += gap * k * (0.75 + Math.abs(rnd()))) {
         g.globalAlpha = alpha * (0.7 + rnd() * 0.6)
@@ -355,11 +325,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const sheetRing = wander([...ringOf(made, room, -T / 2 - 0.4), ringOf(made, room, -T / 2 - 0.4)[0]])
     tidyYard(offsetPath(sheetRing, 0.12))
     // The plot: a patch of turned earth staked out under the paper, its edge soft and tufted with grass.
-    const plot = wander([...ringOf(made, room, -T / 2 - 1.05), ringOf(made, room, -T / 2 - 1.05)[0]])
+    const plot = wander([...ringOf(made, room, -T / 2 - 0.62), ringOf(made, room, -T / 2 - 0.62)[0]])
     g.save()
     g.filter = `blur(${Math.round(0.12 * k)}px)`
     trace(plot, true)
-    g.fillStyle = 'rgba(120, 84, 52, 0.55)'
+    g.fillStyle = 'rgba(120, 84, 52, 0.22)'
     g.fill()
     g.restore()
     g.save()
@@ -369,7 +339,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const soilPattern = g.createPattern(soil, 'repeat')!
     soilPattern.setTransform(new DOMMatrix().scale((k * 0.9) / 256))
     g.fillStyle = soilPattern
-    g.globalAlpha = 1
+    g.globalAlpha = 0.4
     g.fillRect(0, 0, PX, PX)
     g.restore()
     {
@@ -400,7 +370,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     g.fill()
     g.clip()
     g.globalCompositeOperation = 'multiply'
-    g.globalAlpha = 0.65
+    g.globalAlpha = 0.45
     g.fillStyle = g.createPattern(grain, 'repeat')!
     g.fillRect(0, 0, PX, PX)
     g.restore()
@@ -416,30 +386,13 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       const [x, y] = px(p), [cx2, cy2] = px(cc)
       drawTape(g, x, y, 0.5 * k, 0.16 * k, Math.atan2(y - cy2, x - cx2) + Math.PI / 2 + (i % 2 ? 0.15 : -0.12), hues[i % hues.length])
     })
-    // The floor, sketched: boards running away from the shared wall, their butt joints staggered.
-    g.save()
-    trace(inner, true)
-    g.clip()
-    g.strokeStyle = INK
-    g.lineWidth = 0.008 * k
-    const o = geo.at(0)
-    for (let a = -40; a <= 40; a++) {
-      const c0 = add(o, geo.dir, a * 0.2)
-      g.globalAlpha = 0.16 + Math.abs(rnd()) * 0.08
-      g.beginPath()
-      g.moveTo(...px(add(c0, geo.out, -1)))
-      g.lineTo(...px(add(c0, geo.out, 14)))
-      g.stroke()
-      for (let j = ((a * 7) % 5 + 5) % 5 * 0.25 + 0.3; j < 14; j += 1.3) {
-        g.globalAlpha = 0.14
-        g.beginPath()
-        g.moveTo(...px(add(add(o, geo.dir, a * 0.2), geo.out, j)))
-        g.lineTo(...px(add(add(o, geo.dir, (a + 1) * 0.2), geo.out, j)))
-        g.stroke()
-      }
+    // The floor is bare paper: only two faint construction lines through the middle, as a sketch has.
+    {
+      const mA = geo.at((d.from + d.to) / 2, 0.15), mB = geo.at((d.from + d.to) / 2, d.depth - 0.15)
+      const cA = geo.at(d.from + 0.15, d.depth / 2), cB = geo.at(d.to - 0.15, d.depth / 2)
+      chalk([mA, mB], 0.008, 0.28, GRAPHITE, [0.18, 0.1])
+      chalk([cA, cB], 0.008, 0.28, GRAPHITE, [0.18, 0.1])
     }
-    g.globalAlpha = 1
-    g.restore()
 
     // A graphite smudge where the side of the pencil dragged along the walls.
     g.save()
@@ -456,13 +409,24 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     g.beginPath()
     ;[...wallOut, ...[...wallIn].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
     g.closePath()
-    g.fillStyle = refused ? 'rgba(214, 120, 96, 0.4)' : 'rgba(170, 140, 108, 0.45)'
+    g.fillStyle = refused ? 'rgba(214, 120, 96, 0.35)' : 'rgba(96, 88, 82, 0.16)'
     g.fill()
     g.clip()
-    hatch(0.07, 0.42, 0.011, -1)
+    hatch(0.045, 0.5, 0.009, -1, GRAPHITE)
     g.restore()
-    chalk(wallOut, 0.036, 1, INK, [], 0.1)
-    chalk(wallIn, 0.028, 0.9, INK, [], 0.08)
+    // Height, the way a sketch shows it: a light hatched band falling outside the walls, as their shadow on the paper.
+    {
+      const fall = offsetPath(centre, (side > 0 ? 1 : -1) * (T / 2 + 0.16))
+      g.save()
+      g.beginPath()
+      ;[...fall, ...[...wallOut].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
+      g.closePath()
+      g.clip()
+      hatch(0.035, 0.22, 0.007, 1, GRAPHITE)
+      g.restore()
+    }
+    chalk(wallOut, 0.03, 1, GRAPHITE, [], 0.1)
+    chalk(wallIn, 0.022, 0.9, GRAPHITE, [], 0.08)
 
     // The door: jambs across the shared wall, and each leaf with its swing into the new room.
     for (const t of [d.door.from, d.door.to]) chalk([geo.at(t, -T / 2 - 0.04), geo.at(t, T / 2 + 0.04)], 0.03)
@@ -493,47 +457,66 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     dimension(wA, wB)
     dimension(dA, dB)
 
-    // Grips: the same cream knobs as the turn handle when placing, on each wall that moves, the door and the bend.
+    // Grips: a wooden peg standing on each wall it moves (and on the door), with arrows pencilled on the paper
+    // beside it for the way it goes. The sage peg bends the far wall: a dashed pencil curve runs from that wall's
+    // ends through it, the wall it would make.
     const active = drag?.handle ?? hover
-    const ang = (v: P) => Math.atan2(v[1], v[0])
-    const knob = (p: P, r: number, live: boolean, angle?: number) => drawKnob(g, ...px(p), r * k, live, angle === undefined ? undefined : { angle, both: true })
-    // Just inside each wall, so the wall stubs never hide them (the wall itself is still what you grab).
-    const inset = T / 2 + 0.3
-    // The far wall's peg sits a third of the way along, clear of the bend peg at its middle.
-    const pegs: Array<[Handle, P]> = [
-      ['far', add(pointAt(far, far.length * 0.3), geo.out, -inset)],
-      ['from', add(geo.at(d.from, d.depth / 2), geo.dir, inset)],
-      ['to', add(geo.at(d.to, d.depth / 2), geo.dir, -inset)],
+    const pegs: Array<[Handle, P, P]> = [
+      ['far', pointAt(far, far.length * 0.3), geo.out],
+      ['from', geo.at(d.from, d.depth / 2), geo.dir],
+      ['to', geo.at(d.to, d.depth / 2), geo.dir],
     ]
-    paths.pegs = pegs
-    for (const [h, p] of pegs) knob(p, 0.2, active === h, ang(h === 'far' ? geo.out : geo.dir))
-    const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
-    knob(dc, 0.17, active === 'door', ang(geo.dir))
-    // The bend knob carries a little bowed arrow: pull to curve the wall.
-    // The bend peg is sage, not wood: it curves the wall rather than moving it.
-    drawKnob(g, ...px(knobAt), 0.22 * k, active === 'bend', undefined, '#8fa278')
-    {
-      const [x, y] = px(knobAt), r = 0.08 * k
-      const [ux, uy] = [geo.out[0], geo.out[1]]
+    paths.pegs = pegs.map(([h, p]) => [h, p] as [Handle, P])
+    const doorAt = geo.at((d.door.from + d.door.to) / 2, 0)
+    const arrows = (p: P, u: P, live: boolean) => {
+      const nrm: P = [-u[1], u[0]]
       g.save()
-      g.translate(x, y)
-      g.rotate(Math.atan2(uy, ux))
-      g.strokeStyle = 'rgba(106, 70, 48, 0.9)'
-      g.lineWidth = 0.018 * k
-      g.lineCap = 'round'
+      g.globalAlpha = live ? 0.95 : 0.7
+      g.strokeStyle = live ? '#b8641e' : PENCIL
+      g.lineWidth = 0.022 * k
+      g.lineCap = g.lineJoin = 'round'
+      for (const sgn of [1, -1]) {
+        const tip = add(p, u, sgn * 0.34), base = add(p, u, sgn * 0.22)
+        g.beginPath()
+        g.moveTo(...px(add(base, nrm, 0.06)))
+        g.lineTo(...px(tip))
+        g.lineTo(...px(add(base, nrm, -0.06)))
+        g.stroke()
+      }
+      g.restore()
+      // A soft shadow under the peg.
+      g.save()
+      g.filter = `blur(${Math.max(1, Math.round(0.025 * k))}px)`
+      g.fillStyle = 'rgba(60, 34, 16, 0.35)'
       g.beginPath()
-      g.moveTo(-r, -r * 0.8)
-      g.quadraticCurveTo(r * 0.6, 0, -r, r * 0.8)
-      g.stroke()
-      g.beginPath()
-      g.moveTo(r * 0.85, 0)
-      g.lineTo(r * 0.35, -r * 0.35)
-      g.moveTo(r * 0.85, 0)
-      g.lineTo(r * 0.35, r * 0.35)
-      g.stroke()
+      g.arc(...px(add(p, [0.6, 0.8], 0.04)), 0.14 * k, 0, Math.PI * 2)
+      g.fill()
       g.restore()
     }
-    drawPencil(g, ...px(add(geo.at((d.from + d.to) / 2 - Math.min(1.1, (d.to - d.from) * 0.28), d.depth * 0.42), geo.out, 0)), 0.95 * k, Math.atan2(geo.dir[1], geo.dir[0]) + 0.5)
+    for (const [h, p, u] of pegs) arrows(p, u, active === h)
+    arrows(doorAt, geo.dir, active === 'door')
+    {
+      // The bend guide: from the far wall's ends through the sage peg.
+      const a0 = arc[0], a1 = arc[arc.length - 1]
+      const c: P = [2 * knobAt[0] - (a0[0] + a1[0]) / 2, 2 * knobAt[1] - (a0[1] + a1[1]) / 2]
+      const guide: P[] = Array.from({ length: 25 }, (_, i) => {
+        const t = i / 24
+        return [(1 - t) ** 2 * a0[0] + 2 * (1 - t) * t * c[0] + t * t * a1[0], (1 - t) ** 2 * a0[1] + 2 * (1 - t) * t * c[1] + t * t * a1[1]]
+      })
+      chalk(guide, 0.014, active === 'bend' ? 0.9 : 0.55, active === 'bend' ? '#6f8a55' : PENCIL, [0.08, 0.07])
+      arrows(knobAt, geo.out, active === 'bend')
+    }
+    for (const [h, at] of [...pegs.map(([h, p]) => [h, p] as [Handle, P]), ['door', doorAt] as [Handle, P], ['bend', knobAt] as [Handle, P]]) {
+      const m = pegMeshes.get(h)!
+      m.group.position.set(at[0], 0.012, at[1])
+      const live = active === h
+      m.head.material = live ? pegLive : m.top
+      m.group.scale.setScalar(live ? 1.18 : 1)
+    }
+    // The pencil lies on the paper outside the walls, clear of every peg.
+    const tOther = depthAtTo ? d.from : d.to
+    const otherDir: P = depthAtTo ? [-geo.dir[0], -geo.dir[1]] : geo.dir
+    drawPencil(g, ...px(add(geo.at(tOther, Math.min(d.depth * 0.75, d.depth - 0.5)), otherDir, T / 2 + 0.26)), 0.62 * k, Math.atan2(geo.out[1], geo.out[0]) + 0.12)
     sheetMap.needsUpdate = true
 
     // Ghost walls: both faces and the top of each new wall.
@@ -833,6 +816,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     sheetMap.dispose()
     ghostMat.dispose()
     edgeMat.dispose()
+    for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive]) x.dispose()
   }
 
   /** Screen points (CSS px) of each grip, for the checks. */

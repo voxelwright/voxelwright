@@ -81,6 +81,67 @@ export function paintNoGo() {
   return toTexture(c)
 }
 
+/** What it bumps into, seen from above: a muted chalk-red dashed contour round its footprint, no fill. */
+export function paintBlockOutline() {
+  const [c, g] = canvas(256, 256)
+  g.setLineDash([16, 12])
+  g.lineCap = 'round'
+  g.lineWidth = 6
+  g.strokeStyle = 'rgba(196, 92, 70, 0.82)'
+  g.beginPath()
+  g.roundRect(10, 10, 236, 236, 26)
+  g.stroke()
+  return toTexture(c)
+}
+
+/** Where two things would meet: a small patch of chalk-red hatching with a soft edge. */
+export function paintContact() {
+  const [c, g] = canvas(128, 128)
+  g.fillStyle = 'rgba(214, 96, 72, 0.22)'
+  g.beginPath()
+  g.roundRect(6, 6, 116, 116, 14)
+  g.fill()
+  g.clip()
+  g.strokeStyle = 'rgba(190, 70, 50, 0.85)'
+  g.lineWidth = 5
+  g.lineCap = 'round'
+  for (let s = -128; s < 256; s += 18) {
+    g.beginPath()
+    g.moveTo(s, 128)
+    g.lineTo(s + 128, 0)
+    g.stroke()
+  }
+  return toTexture(c)
+}
+
+/** Where a hung thing's cord meets the ceiling: a faint disc of the ceiling plane with a dotted pencil ring and a cross. */
+export function paintCeilingMark() {
+  const S = 256
+  const [c, g] = canvas(S, S)
+  const disc = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2)
+  disc.addColorStop(0, 'rgba(255, 246, 228, 0.75)')
+  disc.addColorStop(0.6, 'rgba(255, 240, 214, 0.4)')
+  disc.addColorStop(1, 'rgba(255, 236, 206, 0)')
+  g.fillStyle = disc
+  g.fillRect(0, 0, S, S)
+  g.strokeStyle = 'rgba(122, 82, 54, 0.85)'
+  g.lineCap = 'round'
+  g.lineWidth = 5
+  g.setLineDash([1, 12])
+  g.beginPath()
+  g.arc(S / 2, S / 2, S / 2 - 34, 0, Math.PI * 2)
+  g.stroke()
+  g.setLineDash([])
+  g.lineWidth = 4
+  for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    g.beginPath()
+    g.moveTo(S / 2 - dx * 30, S / 2 - dy * 30)
+    g.lineTo(S / 2 + dx * 30, S / 2 + dy * 30)
+    g.stroke()
+  }
+  return toTexture(c)
+}
+
 /**
  * The turn ring: a cream band edged in pencil, laid on the floor with a soft shadow, with a
  * notch at each quarter so a turn reads. White-cream, tinted by the material (red where it can't go).
