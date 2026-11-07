@@ -41,6 +41,26 @@ const COVER = () => {
   else document.addEventListener('DOMContentLoaded', add)
 }
 
+/** Hover Mia (she pauses), then click where she is now, as check-talk-npc.mjs does; she turns and her hello card appears. */
+async function clickMia(p) {
+  let mia = await p.evaluate(() => window.village.talk.screen('mia'))
+  await p.mouse.move(mia.x, mia.y, { steps: 6 })
+  await p.waitForTimeout(500)
+  mia = await p.evaluate(() => window.village.talk.screen('mia'))
+  await p.mouse.move(mia.x, mia.y)
+  await p.waitForTimeout(150)
+  await p.mouse.click(mia.x, mia.y)
+  await p.waitForTimeout(3600)
+}
+
+/** Type a line on the notepad and send it to Moss (no model runs; the note only flies). */
+async function sendToMoss(p) {
+  await p.keyboard.type('chat with Moss', { delay: 55 })
+  await p.waitForTimeout(250)
+  await p.keyboard.press('Enter')
+  await p.waitForTimeout(2600)
+}
+
 /** Each clip: how it is made, and what the page says about it. */
 const CLIPS = [
   {
@@ -55,28 +75,20 @@ const CLIPS = [
     },
   },
   {
-    cue: 'card', how: 'real', note: 'Real: clicking Mia; she turns and her hello card appears.',
-    async act(p) {
-      // Hover first (Mia pauses), then click where she is now, as check-talk-npc.mjs does.
-      let mia = await p.evaluate(() => window.village.talk.screen('mia'))
-      await p.mouse.move(mia.x, mia.y, { steps: 6 })
-      await p.waitForTimeout(500)
-      mia = await p.evaluate(() => window.village.talk.screen('mia'))
-      await p.mouse.move(mia.x, mia.y)
-      await p.waitForTimeout(150)
-      await p.mouse.click(mia.x, mia.y)
-      await p.waitForTimeout(3600)
-    },
+    cue: 'card', how: 'real', note: 'Real: clicking Mia; she turns and her hello card appears.', act: clickMia,
   },
   {
-    cue: 'sent', how: 'real', note: 'Real: a line typed on the notepad and sent to Moss (no model runs; the note only flies).',
+    cue: 'sent', how: 'real', note: 'Real: a line typed on the notepad and sent to Moss (no model runs; the note only flies).', act: sendToMoss,
+  },
+  { cue: 'turned', how: 'real', note: 'Real: clicking Mia; she turns to face you (her card follows).', act: clickMia },
+  {
+    cue: 'pad-up', how: 'real', note: 'Real: typing starts on the notepad and it rises.',
     async act(p) {
-      await p.keyboard.type('chat with Moss', { delay: 55 })
-      await p.waitForTimeout(250)
-      await p.keyboard.press('Enter')
-      await p.waitForTimeout(2600)
+      await p.keyboard.type('hello Mia', { delay: 70 })
+      await p.waitForTimeout(2200)
     },
   },
+  { cue: 'pad-down', how: 'real', note: 'Real: a line sent to Moss; the notepad goes down as the note flies.', act: sendToMoss },
   {
     cue: 'news', how: 'real', note: 'Real "!" over Mia, shown by the dev hook (in the home it appears after her chore by the plant).',
     async act(p) {
