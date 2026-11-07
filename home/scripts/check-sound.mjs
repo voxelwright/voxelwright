@@ -261,7 +261,8 @@ const SAMPLE = {
   const lat = {}
   for (const [name, e] of [['village/chose', SAMPLE['village/chose']], ['village/hover', SAMPLE['village/hover']], ['village/sent', SAMPLE['village/sent']], ['village/routed', SAMPLE['village/routed']], ['village/refused', SAMPLE['village/refused']]]) {
     const t = await emit(quiet, name, e)
-    await quiet.waitForTimeout(400)
+    // Long enough for the slowest cue (sent, about 1.3 s) to end before the next event is timed.
+    await quiet.waitForTimeout(1500)
     const first = await quiet.evaluate((t) => window.taps.output.find(([bt, p]) => bt >= t - 0.01 && p > 1e-4), t)
     lat[name.slice(8)] = first ? +((first[0] - t) * 1000).toFixed(1) : null
   }

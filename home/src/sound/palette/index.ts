@@ -319,7 +319,9 @@ const sent = {
       // (three takes) that ends as the slip lands on felt.
       const fly = flight(p)
       const swish = pick(p, S.swish.takes)
-      const tore = sample(a, out, kit.sample(S.tear.file), p.at, pick(p, S.tear.takes), { gain: p.gain * 1.5, rate: p.rate, len: 0.32 })
+      // Each tear take starts 18 to 33 ms before the paper does (measured): skip that, so the tear is heard on the event.
+      const k = p.index % S.tear.takes.length
+      const tore = sample(a, out, kit.sample(S.tear.file), p.at, S.tear.takes[k], { gain: p.gain * 1.5, rate: p.rate, len: 0.32, from: [0.018, 0.018, 0.03, 0.033][k] })
       const flew = sample(a, out, kit.sample(S.swish.file), p.at + 0.1 + Math.max(0, fly - swish[1]), swish, { gain: p.gain * 2.1, rate: p.rate })
       if (tore && flew) {
         thump(a, out, kit, p.at + 0.1 + fly - 0.02, { from: 200, to: 120, dur: 0.07, gain: p.gain * 0.35, random: p.random, puff: 0.7, cut: 900 })
