@@ -112,12 +112,8 @@ export default {
     for (const m of [candle, pumpkin]) m.castShadow = true
     group.add(candle, vase, books, pumpkin, leaves.build('pothos leaves'), broad.build('shelf plant leaves'), ...stems)
 
-    // The strips' warm light falling on the plants below, kept to two lights.
-    for (const [x, y] of [[-0.72, 1.28], [0.95, 1.58]]) {
-      const light = new THREE.PointLight('#ffdcaa', 0.9, 1.6, 1.8)
-      light.position.set(x, y, 0.3)
-      group.add(light)
-    }
+    // The strips' light on the plants below is painted (the pools above) and the living room's lamp-light:
+    // with the whole house drawn, each point light costs every pixel (#42).
     own(ctx, group)
 
     const { view, entries } = ctx

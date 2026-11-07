@@ -2,7 +2,7 @@
 // "where" (the person's words) and "mount" as data, and this decides the pose from
 // the room's own measurements. Build mode will move things afterwards; this only
 // has to get the first placement right.
-import { DOORWAY, TABLE_TOP, WALL_Z, WINDOW } from '../layout'
+import { LIVING_X, TABLE_TOP, WALL_Z, WINDOW } from '../layout'
 
 export const MOUNTS = ['floor', 'surface', 'wall', 'ceiling'] as const
 export type Mount = (typeof MOUNTS)[number]
@@ -17,6 +17,8 @@ const AROUND_TABLE: [number, number][] = [[-1.4, 0.2], [-0.75, 1.0], [0.85, 0.85
 /** The ceiling line (room.ts) and the inner face of the left wall. */
 export const CEILING = 3.0
 const SIDE_X = -3.4 + 0.09
+/** The living room (lounge.ts, loungefurnish.ts): its back wall, and the shared wall's living-room face behind the sofa. */
+const LX = LIVING_X, LIVING_LEFT = LIVING_X - 3.2
 
 interface Anchor { mount: Mount; x: number; y: number; z: number; ry: number; /** How far along the anchor a piece may slide to stay clear of others. */ span: number; wall?: boolean }
 /** Named places, resolved here. The model only ever names them in its words. */
@@ -31,9 +33,18 @@ export const ANCHORS: Record<string, Anchor> = {
   wall: { mount: 'wall', x: 0.9, y: 0, z: WALL_Z + 0.006, ry: 0, span: 0.85, wall: true },
   sideWall: { mount: 'wall', x: SIDE_X, y: 0, z: -0.3, ry: Math.PI / 2, span: 1.4, wall: true },
   ceiling: { mount: 'ceiling', x: 1.3, y: CEILING, z: 0.35, ry: 0, span: 0.8 },
-  // The living room is another room; until it can be furnished from here, its door stands in for it.
-  livingDoor: { mount: 'floor', x: (DOORWAY.x0 + DOORWAY.x1) / 2 + 0.35, y: 0, z: WALL_Z + 0.75, ry: 0.55, span: 0.5 },
+  // The living room, next door through the shared wall.
+  livingFloor: { mount: 'floor', x: LX + 0.1, y: 0, z: 0.75, ry: -0.5, span: 0.5 },
+  byPlants: { mount: 'floor', x: LX + 0.55, y: 0, z: -0.85, ry: -0.4, span: 0.35 },
+  // The sideboard's right end, clear of its lamp and photos.
+  livingSurface: { mount: 'surface', x: LX - 0.3, y: 0.8, z: WALL_Z + 0.3, ry: 0, span: 0.12 },
+  // The back wall between the bookcase's corner and the sideboard, and the shared wall above the sofa.
+  livingWall: { mount: 'wall', x: LX - 2.2, y: 0, z: WALL_Z + 0.006, ry: 0, span: 0.3, wall: true },
+  sofaWall: { mount: 'wall', x: LIVING_LEFT + 0.006, y: 0, z: 0.92, ry: Math.PI / 2, span: 0.6, wall: true },
+  livingCeiling: { mount: 'ceiling', x: LX - 1.2, y: CEILING, z: 0.9, ry: 0, span: 0.8 },
 }
+/** Every anchor in the living room, for a caller that needs to know which room a piece went to. */
+export const LIVING_ANCHORS = new Set(['livingFloor', 'byPlants', 'livingSurface', 'livingWall', 'sofaWall', 'livingCeiling'])
 
 /** Rough sizes by kind (width, height, depth in metres), for the ghost when the router gave none. */
 const SIZES: [RegExp, [number, number, number]][] = [
@@ -86,14 +97,19 @@ export interface PlaceOptions {
   face?: (x: number, z: number) => number
 }
 
-/** The anchor a line's words name for a mount, and a note when it cannot be where they said. */
+/** The anchor a line's words name for a mount, and a note when it went to the other room. */
 function anchorFor(mount: Mount, w: string): { name: string; note?: string } {
-  const living = /living ?room|lounge|sofa|couch/.test(w)
-  const note = living ? "The living room isn't open from here yet, so it's here in the kitchen for now." : undefined
-  if (mount === 'ceiling') return { name: 'ceiling', note }
-  if (mount === 'wall') return { name: /\b(left|side)\b/.test(w) ? 'sideWall' : 'wall', note }
-  if (mount === 'surface') return { name: /counter|worktop/.test(w) ? 'counter' : /sill|window/.test(w) ? 'sill' : 'table', note }
-  return { name: /window/.test(w) ? 'window' : /corner/.test(w) ? 'corner' : 'floor', note }
+  if (/living ?room|lounge|sofa|couch|plants\b|plant (corner|shelves)|sideboard/.test(w)) {
+    const note = "That's for the living room, so it's going next door."
+    if (mount === 'ceiling') return { name: 'livingCeiling', note }
+    if (mount === 'wall') return { name: /sofa|couch/.test(w) ? 'sofaWall' : 'livingWall', note }
+    if (mount === 'surface') return { name: 'livingSurface', note }
+    return { name: /plant/.test(w) ? 'byPlants' : 'livingFloor', note }
+  }
+  if (mount === 'ceiling') return { name: 'ceiling' }
+  if (mount === 'wall') return { name: /\b(left|side)\b/.test(w) ? 'sideWall' : 'wall' }
+  if (mount === 'surface') return { name: /counter|worktop/.test(w) ? 'counter' : /sill|window/.test(w) ? 'sill' : 'table' }
+  return { name: /window/.test(w) ? 'window' : /corner/.test(w) ? 'corner' : 'floor' }
 }
 
 /**

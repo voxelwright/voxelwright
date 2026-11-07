@@ -13,7 +13,7 @@ import { mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
-import type { Pose } from './camera'
+import { navigation, type Pose } from './camera'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
 // Three felt villagers, each the villager of one synthetic person, do chores in
@@ -80,7 +80,7 @@ const PEOPLE: Person[] = [
     hello: "Oh! Hello. The soup can mind itself for a minute.", chips: ["What's for dinner?", 'How was your day?'], bye: 'Back to my soup, then. Bye for now!' },
   { person: 'sam', owner: 'Sam', colour: '#d29a26', start: 'shelf', wait: 2, tasks: [{ spot: 'counter', stay: 6 }, { spot: 'shelf', stay: 6 }],
     hello: "Hi! Just putting the toys back. What's up?", chips: ['Anything need doing?', 'How was your day?'], bye: 'Off to tidy! See you soon.' },
-  { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }],
+  { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }, { spot: 'loungePlants', stay: 6 }],
     hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'], bye: 'Bye! The basil is waiting for me.' },
 ]
 /** The synthetic "something for you" a villager carries after a chore. */
@@ -1010,9 +1010,12 @@ export default {
     //   1. The always-on input (input.key): while a line has the keyboard every key is
     //      the line's; with nothing written, `j` opens the journal and a printable key
     //      starts a line. Escape with words clears them (the field's own handler).
-    //   2. Room navigation (arrows, WASD) belongs here, after the input: only when
-    //      nothing is being written (`!input?.writing`). Not built yet; the
-    //      connected-house branch adds it in this slot.
+    //   2. Room navigation (arrows, held WASD and QE) is camera.ts's: its window capture
+    //      listener runs before this one and prevents what it takes, so onKey returns at
+    //      `defaultPrevented`. It moves the view only while nothing is being written
+    //      (`navigation.writing`, set here from `input.writing`). A letter tapped for less
+    //      than 170 ms is replayed and reaches step 1; the input asks `navigation.claims()`
+    //      (in `blocked`) so a held letter never writes.
     //   3. Escape at the table leaves it (when no entry is open, so entries' own Escape wins).
     // The slip variant (?input=slip) keeps its own form field, and only step 3 applies.
     const onSubmit = (e: Event) => {
@@ -1022,7 +1025,6 @@ export default {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
       if (input?.key(e)) return
-      // 2. Navigation slot (see above).
       if (e.key === 'Escape' && mode === 'table' && !entries.active) {
         e.preventDefault()
         leaveTable()
@@ -1310,11 +1312,15 @@ export default {
         const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
         return m ? m.v.fig.head.getWorldPosition(headAt) : null
       },
-      blocked: () => entries.active === 'notebook',
+      blocked: () => entries.active === 'notebook' || navigation.claims(),
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
       enter: (): boolean => sketch?.enter() ?? false,
     }) : null
+    if (input) {
+      navigation.writing = () => input.writing
+      ctx.effect(() => () => void (navigation.writing = () => false), 'talk navigation')
+    }
     // ── Sketching on the held notepad (#42, src/talk/sketch.ts) ──────────────
     /** Whom the pad is addressed to, as a villager (the table counts as the first seated). */
     const padTo = () => (mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] ?? primary() : primary())

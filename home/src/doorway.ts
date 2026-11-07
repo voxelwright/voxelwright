@@ -1,6 +1,5 @@
-// Doorways between rooms, shared by each room's door plugin.
+// Doorways and window openings, shared by the plugins that cut them.
 import * as THREE from 'three/webgpu'
-import { canvas, toTexture } from './paint'
 
 const TRIM = 0.07
 
@@ -20,41 +19,62 @@ export function casing(w: number, h: number, color = '#efe6d6'): THREE.Group {
   return group
 }
 
-/** A warm glow on the far wall of a short passage: light from the next room. */
-function paintPassage(warm: string): THREE.Texture {
-  const [c, g] = canvas(256, 512)
-  const grad = g.createLinearGradient(0, 0, 0, 512)
-  grad.addColorStop(0, '#7a5c44')
-  grad.addColorStop(0.55, '#c49a6c')
-  grad.addColorStop(1, '#8a6a4c')
-  g.fillStyle = grad
-  g.fillRect(0, 0, 256, 512)
-  const pool = g.createRadialGradient(150, 300, 10, 150, 300, 220)
-  pool.addColorStop(0, warm)
-  pool.addColorStop(1, 'rgba(0,0,0,0)')
-  g.fillStyle = pool
-  g.fillRect(0, 0, 256, 512)
-  return toTexture(c)
+/**
+ * The lining of an opening w wide and h tall through a wall `depth` thick: jambs and a
+ * head (and a stool when `sill`), its bottom centre at the origin, the wall's room face
+ * at z = 0 and its far face at z = -depth. Each piece reaches 2 mm into the wall, so the
+ * wall's own reveal faces are buried in solid wood and no two visible faces share a
+ * plane (the doorway and window flicker of #42 was exactly that). The casing on the
+ * wall's face covers the 2 mm seams.
+ */
+export function lining(w: number, h: number, depth: number, sill = false, color = '#efe6d6'): THREE.Group {
+  const group = new THREE.Group()
+  group.name = 'lining'
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
+  const BURY = 0.002, THICK = 0.03
+  const piece = (bw: number, bh: number, x: number, y: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, depth), material)
+    m.position.set(x, y, -depth / 2)
+    m.castShadow = m.receiveShadow = true
+    group.add(m)
+  }
+  const sideW = THICK + BURY
+  const bottom = sill ? -BURY : 0
+  piece(sideW, h - bottom + BURY, -w / 2 + THICK / 2 - BURY / 2, (h + bottom + BURY) / 2)
+  piece(sideW, h - bottom + BURY, w / 2 - THICK / 2 + BURY / 2, (h + bottom + BURY) / 2)
+  piece(w - THICK * 2, THICK + BURY, 0, h - THICK / 2 + BURY / 2)
+  if (sill) piece(w - THICK * 2, THICK + BURY, 0, THICK / 2 - BURY / 2)
+  return group
 }
 
-/** An open doorway: casing plus a short passage that glows with the next room's light. */
-export function openDoorway(w: number, h: number, depth: number, warm = 'rgba(255, 214, 150, 0.85)'): THREE.Group {
-  const group = casing(w, h)
+/**
+ * An open doorway through a wall `depth` thick: a lining, a threshold and a casing on
+ * both faces. `sides[0]` is the room-side casing (facing +z), `sides[1]` the far side's;
+ * each holds an unseen pick slab filling its half of the opening, so pointing into the
+ * doorway from either room picks that side's entry.
+ */
+export function openDoorway(w: number, h: number, depth: number): THREE.Group & { sides: [THREE.Group, THREE.Group] } {
+  const group = new THREE.Group() as THREE.Group & { sides: [THREE.Group, THREE.Group] }
   group.name = 'doorway'
-  const dim = new THREE.MeshStandardMaterial({ color: '#b8987a', roughness: 0.9 })
-  const far = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.6, h + 0.3), new THREE.MeshBasicMaterial({ map: paintPassage(warm) }))
-  far.position.set(0.15, (h + 0.3) / 2, -depth)
-  group.add(far)
-  for (const side of [-1, 1]) {
-    const wall = new THREE.Mesh(new THREE.PlaneGeometry(depth, h), dim)
-    wall.rotation.y = side * -Math.PI / 2
-    wall.position.set(side * w / 2, h / 2, -depth / 2)
-    group.add(wall)
+  const pickMat = new THREE.MeshBasicMaterial({ visible: false })
+  const side = (turn: number) => {
+    const s = new THREE.Group()
+    s.add(casing(w, h))
+    const pick = new THREE.Mesh(new THREE.BoxGeometry(w, h, depth / 2), pickMat)
+    pick.position.set(0, h / 2, -depth / 4)
+    pick.userData.pick = true // seen by the entries' picking, never drawn
+    s.add(pick)
+    s.rotation.y = turn
+    if (turn) s.position.z = -depth
+    group.add(s)
+    return s
   }
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, depth), new THREE.MeshStandardMaterial({ color: '#a8835c', roughness: 0.7 }))
-  floor.rotation.x = -Math.PI / 2
-  floor.position.set(0, 0.002, -depth / 2)
-  group.add(floor)
+  group.sides = [side(0), side(Math.PI)]
+  group.add(lining(w, h, depth))
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, 0.012, depth + 0.02), new THREE.MeshStandardMaterial({ color: '#b8875c', roughness: 0.6 }))
+  sill.position.set(0, 0.002, -depth / 2)
+  sill.receiveShadow = true
+  group.add(sill)
   return group
 }
 

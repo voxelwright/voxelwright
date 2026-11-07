@@ -61,26 +61,22 @@ click elsewhere backs out. Touch skips hover. The nearest visible, depth-writing
 glows, labels and camera moves are instant.
 
 Entries today: the notebook, the fridge (frames its door; family moments and
-what's coming up will live there), the kitchen doorway ("Living room"), and in
-the living room the plant shelves ("Idea garden", a placeholder for Plant a
-Seed), the doorway back ("Kitchen") and the closed "Workshop" door.
+what's coming up will live there), the doorway between the rooms (its kitchen
+face is "Living room", its living-room face "Kitchen"), the plant shelves
+("Idea garden", a placeholder for Plant a Seed) and the closed "Workshop" door.
 
-Rooms are groups of plugins (`PLANS` in `src/plugins/rooms.ts`). Choosing a
-doorway eases the camera towards it, fades through warm dark, swaps rooms and
-eases in. `?room=living` starts in the living room. By default the
-neighbouring room stays loaded but hidden, because loading on entry stalled
-one frame for 0.5 to 2.2 s behind the fade; `?rooms=unload` loads on entry and
-unloads on leaving. `node scripts/check-entries.mjs` proves keyboard and
-pointer reach for every entry, the walks, reduced motion, and that leaving a
-room under `?rooms=unload` leaves no objects, plugins, frame hooks, geometries
-or DOM behind; `--keep` runs the walks with the default.
+Rooms are groups of plugins (`PLANS` in `src/plugins/rooms.ts`), all loaded
+for the whole visit and all drawn: since #42 the kitchen and the living room are
+one house (see "One house" below). Choosing a doorway glides the view through
+the house to the other room, with no fade and no swap. `?room=living` starts
+framed on (dollhouse) or seated in the living room. `node scripts/check-entries.mjs`
+proves keyboard and pointer reach for every entry in both rooms, that the
+doorway's glides are smooth and fade-free in both directions, that a round
+trip adds no objects, plugins, frame hooks, DOM, entries, geometries or
+textures, the seated view's walk through the doorway, and reduced motion.
 
-Walk measurements, headless Chrome, 1440×900, DPR 1, four walks each:
-
-| Policy | Swap behind the fade | Worst frame during a walk |
-| --- | --- | --- |
-| unload on leaving | 0.63 to 1.11 s | 0.52 to 2.2 s |
-| keep neighbour loaded (default) | 0.09 s | 33 to 50 ms |
+Per room at rest, before the rooms became one house (November 6), headless
+Chrome, 1440×900, WebGPU, holding 60 fps (the headless cap) in every mode:
 
 Per room at rest, headless Chrome, 1440×900, WebGPU, holding 60 fps (the
 headless cap) in every mode:
@@ -244,26 +240,25 @@ replies or table rounds), page load time (reported in the JSON, not gated) and a
 
 ## Camera variants (#42 probe)
 
-`?cam=iso` looks down on the room like a dollhouse: a 20° perspective camera
-16 m away (the stage camera stays perspective, so postfx and entries keep
-working). Drag or Q/E orbit within about -30° to +80°, the wheel zooms from the
-whole room to the table. `?cam=third` stands 2.4 m behind and 2.2 m above a
+`?cam=iso` looks down on the house like a dollhouse: a 20° perspective camera
+(the stage camera stays perspective, so postfx and entries keep working). Its
+navigation is described in "One house" below. `?cam=third` stands 2.4 m behind and 2.2 m above a
 point on the floor; clicking the floor walks there, clicking an object walks to
 a step in front of it (and chooses it, if it is an entry). Without `?cam=`
 nothing changes. Both rigs hang off the resting pose that `travel()` moves, so
 room walks work, and focus poses blend the field of view back to 40°. Q/E are
 ignored while typing, so the notebook still takes the letter q.
 
-Iso is a dollhouse cutaway. Only the iso plan loads `diorama` (kitchen) and
-`loungediorama` (living room); `src/diorama.ts` builds the shell: a base with
+Iso is a dollhouse cutaway. Only the iso plan loads `diorama` (the whole house
+since #42); `src/diorama.ts` builds the shell: a base with
 a soft contact shadow, a floor clipped to the walls, thick walls with painted
 caps, and low cut stubs that take a wall's place when the camera stands
 outside it. Walls tagged `userData.inward` that face away move to a
 shadow-only layer (`SHADOW_ONLY`), so they keep casting; in both wider views the
 sun's shadow box covers the whole room, which removed the hard sun wedges.
-Behind the kitchen sits a garden plot with a tree, which the window looks down
-on, and the doorway passage has an outside. The pendant hangs from a braced
-wall arm, and a soft pool on the table shows it is on. The kitchen's 9 m floor
+Behind the house sits a garden plot with trees, which the kitchen window looks down
+on. The pendant hangs from a braced
+wall arm, and a soft pool on the table shows it is on. The seated view's kitchen floor, the living room's ceiling
 and the painted garden card are `userData.seatOnly`. `?cam=third` keeps the old
 fixes: walls cut away, fog slid back and a warm backdrop.
 
@@ -307,6 +302,101 @@ Dollhouse shell, same setup, one 6 s run each:
 | `?cam=iso&q=high&room=living`, after | 193 | 41,272 | 9.2 / 11.5 |
 
 Screenshots: `screenshots/talk/iso-*.jpg`, since replaced by the furnished room below (`room-home-before.jpg` is this shell).
+
+## One house (#42, November 7, 2026)
+
+The kitchen and the living room are one building on the yard (`src/layout.ts`):
+kitchen | living room | room for the Workshop, side by side along one back wall,
+each 6 m deep and 3 m tall, sharing 18 cm walls. The doorway between them is in
+the shared wall (z 2.45 to 3.15), not the kitchen's back wall: with the living
+room behind the kitchen its plant wall would have stood behind the kitchen's
+back wall, hidden from every front view. The Workshop's closed door in the
+living room's right wall leads to where that room will go. Both rooms load at
+the start and stay drawn; there is no fade, veil or swap. The house shares one
+sun (its shadow box now centred on the house, 18 m across), one fill and one
+fog; the living room adds one warm point light, because every point light costs
+every pixel once the whole house is drawn (the sideboard lamp and the grow
+strips are emissive now).
+
+**Flicker.** The flicker on door and window frames was z-fighting. The old
+doorway's passage planes lay on the wall's reveal faces, and the window's frame
+bars were buried in the wall with their inner faces on the reveal planes (plus
+a 1 cm sunlit sliver of the frame's top face under a soft shadow edge). TRAA's
+sub-pixel jitter re-decides the depth tie every frame, which turns a static
+pattern into shimmer. Measured with the camera held still on a focus pose, 8
+frames: the doorway's reveal had 5.6% of its pixels changing by more than 20
+levels; moving the passage planes 4 cm cleared it (0.01%), turning TRAA off
+cleared it (static pattern left), and shadow bias changes did nothing (6.8%).
+Openings now have a lining (jambs and head, `lining()` in `src/doorway.ts`)
+that reaches 2 mm into the wall so the reveal faces are buried in solid wood,
+a casing proud of the wall, and no exposed face narrower than about 3 cm.
+Crops: the window's top trim went from a dashed shimmering line to 0.27%, and
+`check-navigation` gates both trims under 0.5%.
+
+**Moving around (dollhouse).** The view rests on a floor point with a turn and
+a zoom from the whole house (36 m away) to one corner (5.6 m):
+
+| Input | Does |
+| --- | --- |
+| Left drag | turn (and tilt a little) |
+| Right drag, shift drag, two fingers | pan |
+| Wheel, trackpad pinch, two-finger spread | zoom |
+| Double-click the floor | glide there, at least half-way in |
+| Arrow keys | pan, while nothing is being written |
+| Hold W A S D | pan |
+| Hold Q E | turn |
+| Doorway entry (click, or Tab and Enter) | glide through the house to that room |
+
+The view stays over the house and its yard (1 m past the walls, 1.5 m front and
+back). Under `prefers-reduced-motion` every move lands at once.
+
+**Keys and the always-on input.** Letters belong to the input: a tapped letter
+writes, as before, even W, A, S, D, Q or E. Held for 170 ms, one of those six
+moves the view until it is let go. A second key during the wait means someone is
+typing, so the first letter is written and typing carries on, in order. Once a
+line has text (or any text field has focus), arrows and letters edit the line
+and the view stays still. The camera claims keys in a window capture listener
+registered before the input's, and the input asks `navigation.claims()` (one
+line in `talk.ts`'s `blocked` hook) before turning a key into writing.
+
+**Cutaway.** Outer walls keep the old rule (the wall the camera stands behind
+leaves the view, keeps its shadow, and a stub takes its place). The shared wall
+has two insides, so it stands at full height only when you are close in (zoom
+over 0.5 or a focus pose) and it is behind what you look at; otherwise it is a
+stub and the next room shows over it. Its doorway trim goes with it. Every
+cut-away wall and stub is compiled once at load, which removed a 450 ms stall
+on the first glide into a room.
+
+**Villagers.** The open paths in `src/villagers/world.ts` run along the
+kitchen's right wall, through the doorway and round the living room's furniture
+to its plant corner. Mia (Moss, the gardener) tends the living room's plants as
+her third chore.
+
+**Cost.** Both rooms are always drawn now. Headless Chrome, 1440x900, DPR 2,
+WebGPU, `?talk=npc&input=held`, whole-house view after (the kitchen view before),
+`npm run measure -- <url> --perf --gpu`, two 6 s runs after:
+
+| | Draw calls | Triangles | GPU p50 / p95 ms | Frame p50 / p95 ms, pacing unlocked |
+| --- | --- | --- | --- | --- |
+| `q=high`, before | 907 | 187,658 | 11.2 / 17.7 | 7.4 / 8.9 |
+| `q=high`, after | 1,082 | 251,392 | 16.6 / 19.1 and 16.7 / 18.3 | 8.5 / 9.8 |
+| `q=low`, before | 838 | 184,428 | 4.9 / 6.6 | 5.7 / 6.4 |
+| `q=low`, after | 1,004 | 242,978 | 5.3 / 6.8 and 5.3 / 15.8 | 6.3 / 7.7 |
+
+The GPU column (submit to queue done) is bimodal on the M1 Pro: the same page
+reads about 8.7 or about 16.5 ms from run to run, with nothing changed in between,
+so it looks quantized by vsync. Hiding parts of the scene moved it between the two
+modes rather than by their cost. With frame pacing unlocked (`--disable-gpu-vsync
+--disable-frame-rate-limit`), a high-tier frame takes 8.5 ms at p50, 1.1 ms more
+than before. That is enough to move the GPU column across a vsync step: without
+`?q=`, calibration measured 15.0 ms and stepped down to medium in one of two
+runs, where the base commit measured 10.8 ms and stayed high in three. Open: trim
+about 1 ms, or calibrate on a metric that is not quantized.
+
+Checks: `node scripts/check-entries.mjs` (rewritten for glides) and
+`node scripts/check-navigation.mjs` (keys, the input rule, drag, pan, zoom,
+double-click, clamping, reduced motion, flicker). Demo:
+`node scripts/demo-house.mjs out.mp4 <base-url>` records a 30 s clip.
 
 ## The room as a home screen (#42, November 6, 2026)
 
