@@ -18,7 +18,7 @@
 // new head. A version exists only once the store has accepted it; until then
 // head, versions and plan stay as they were. Plans and versions handed out are
 // frozen: they are history, not scratch space.
-import { apply, curveOf, HOUSE_PLAN, PLAN_SCHEMA, PlanError, pointAt, round, roomWalls, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
+import { apply, curveOf, PLAN_SCHEMA, PlanError, pointAt, round, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
 
 export interface Version {
   id: string
@@ -115,41 +115,110 @@ function deepFreeze<T>(value: T): T {
 /** One step: a stored plan at schema n in, the same house at a later schema out. */
 export type Upgrade = (plan: unknown) => unknown
 
+// Schema 2's living room and doorway as schema 2 first defined them (HOUSE_PLAN on
+// 2026-11-07). Frozen here, not read from HOUSE_PLAN: upgrades run on every load and
+// are never saved, so a later change to layout.ts must not move every old version's
+// living room or doorway. check-plan-history proves today's HOUSE_PLAN equals them.
+const DOOR_LIVING: Opening = { id: 'kitchen.door-living', kind: 'door', from: 4.74, to: 5.44, sill: 0, head: 2.08, leaves: 1 }
+/** The doorway's world z where it starts on the shared wall, which runs back (corner a) to front. */
+const DOOR_LIVING_Z = 2.45
+const LIVING_CORNERS = [
+  { id: 'living.back-right', x: 8.47, z: -2.29 },
+  { id: 'living.front-right', x: 8.47, z: 3.89 },
+]
+const livingWall = (id: Id, a: Id, b: Id, openings: Opening[] = []): Wall => ({ id, a, b, thickness: 0.18, height: 3, sagitta: 0, openings })
+const LIVING_WALLS: Wall[] = [
+  livingWall('living.back', 'kitchen.back-right', 'living.back-right'),
+  livingWall('living.right', 'living.back-right', 'living.front-right', [
+    { id: 'living.door-workshop', kind: 'door', from: 1.43, to: 2.25, sill: 0, head: 2.05, leaves: 1 },
+  ]),
+  livingWall('living.front', 'living.front-right', 'kitchen.front-right'),
+]
+const LIVING: Room = { id: 'living', label: 'Living room', loop: ['kitchen.back-right', 'living.back-right', 'living.front-right', 'kitchen.front-right'] }
+/** How far a thing hung on the shared wall stays from the doorway's sides, and above its head. */
+const DOOR_CLEAR = 0.5
+
+/**
+ * A room the person made that the living room would collide with (one called "Living
+ * room", or with the id `living` that the home's living room needs) keeps its shape
+ * and things under a fresh id and name: `living-2`, "Living room 2" and so on.
+ */
+function makeWayForLiving(plan: Plan): Plan {
+  const ids = [...plan.corners.map((c) => c.id), ...plan.walls.map((w) => w.id), ...plan.walls.flatMap((w) => w.openings.map((o) => o.id)), ...plan.rooms.map((r) => r.id), ...plan.furniture.map((f) => f.id)]
+  const free = (n: number, taken: (s: string) => boolean, make: (n: number) => string): string => (taken(make(n)) ? free(n + 1, taken, make) : make(n))
+  let next = plan
+  if (plan.rooms.some((r) => r.id === LIVING.id)) {
+    const old = LIVING.id
+    const fresh = free(2, (s) => ids.some((id) => id === s || id.startsWith(`${s}.`)), (n) => `${old}-${n}`)
+    const ren = (s: Id) => (s === old ? fresh : s.startsWith(`${old}.`) ? fresh + s.slice(old.length) : s)
+    next = {
+      ...next,
+      corners: next.corners.map((c) => ({ ...c, id: ren(c.id) })),
+      walls: next.walls.map((w) => ({ ...w, id: ren(w.id), a: ren(w.a), b: ren(w.b), openings: w.openings.map((o) => ({ ...o, id: ren(o.id) })) })),
+      rooms: next.rooms.map((r) => ({ ...r, id: ren(r.id), loop: r.loop.map(ren) })),
+      furniture: next.furniture.map((f) => {
+        const at = f.at.mount === 'wall' ? { ...f.at, wallId: ren(f.at.wallId), roomId: ren(f.at.roomId) } : f.at.mount === 'surface' && f.at.on !== undefined ? { ...f.at, on: ren(f.at.on) } : f.at
+        return { ...f, id: ren(f.id), at }
+      }),
+    }
+  }
+  const key = LIVING.label.toLowerCase()
+  if (next.rooms.some((r) => r.label.toLowerCase() === key)) {
+    const label = free(2, (s) => next.rooms.some((r) => r.label.toLowerCase() === s.toLowerCase()), (n) => `${LIVING.label} ${n}`)
+    next = { ...next, rooms: next.rooms.map((r) => (r.label.toLowerCase() === key ? { ...r, label } : r)) }
+  }
+  return next
+}
+
 /**
  * Schema 1 was the kitchen alone, its doorway in the back wall to a living room kept
- * elsewhere. Schema 2 is the whole house (HOUSE_PLAN): the living room stands beside
- * the kitchen, and the doorway is in the wall they share, the kitchen's right wall. The
- * step keeps the kitchen as it was shaped (moved or bent walls, added rooms, things
- * placed), moves the doorway onto that wall and builds the living room against it.
- * When the kitchen's right side no longer allows that (a room added on it, or one
- * where the living room stands) it says why, and that version cannot be shown.
+ * elsewhere. Schema 2 is the whole house: the living room stands beside the kitchen,
+ * and the doorway is in the wall they share, the kitchen's right wall. The step keeps
+ * the kitchen as it was shaped (moved or bent walls, added rooms, things placed),
+ * moves the doorway onto that wall at the height of the house it stood at (shifted
+ * along to fit when the wall got shorter), moves anything hung where the doorway now
+ * is to just beside it, and builds the living room against the wall. When the
+ * kitchen's right side no longer allows that (a room added on it, or one where the
+ * living room stands) it says why, and that version cannot be shown.
  */
 function houseFromKitchen(stored: unknown): unknown {
-  const plan = structuredClone(stored) as Plan
-  const base = HOUSE_PLAN
-  const door = base.walls.flatMap((w) => w.openings).find((o) => o.id === 'kitchen.door-living')!
+  const plan = makeWayForLiving(structuredClone(stored) as Plan)
   const shared = plan.walls.find((w) => w.id === 'kitchen.right')
   if (!shared || shared.a !== 'kitchen.back-right' || shared.b !== 'kitchen.front-right') {
     throw new Error("a room was added on the kitchen's right wall, where the living room now stands")
   }
-  const living = base.rooms.find((r) => r.id === 'living')!
-  const ours = new Set(base.rooms.find((r) => r.id === 'kitchen')!.loop)
+  const corners = plan.corners.map((c) => ({ ...c, x: round(c.x), z: round(c.z) }))
+  const A = corners.find((c) => c.id === shared.a)!
+  const length = curveOf({ ...plan, corners }, shared).length
+  const width = round(DOOR_LIVING.to - DOOR_LIVING.from)
+  const from = round(Math.min(Math.max(DOOR_LIVING_Z - A.z, 0.3), length - 0.3 - width))
+  const door: Opening = { ...DOOR_LIVING, from, to: round(from + width) }
+  const furniture = plan.furniture.map((f) => {
+    const { at } = f
+    if (at.mount !== 'wall' || at.wallId !== shared.id || at.height >= door.head + DOOR_CLEAR) return f
+    const [before, after] = [door.from - DOOR_CLEAR, door.to + DOOR_CLEAR]
+    if (!(at.along > before && at.along < after)) return f
+    const fits = (v: number) => v >= 0 && v <= length
+    const sides = (at.along - before <= after - at.along ? [before, after] : [after, before]).filter(fits)
+    return sides.length ? { ...f, at: { ...at, along: round(sides[0]) } } : f
+  })
   const next: Plan = {
     ...plan,
     schema: PLAN_SCHEMA,
-    corners: [...plan.corners.map((c) => ({ ...c, x: round(c.x), z: round(c.z) })), ...base.corners.filter((c) => !ours.has(c.id))],
+    corners: [...corners, ...LIVING_CORNERS],
     walls: [
       ...plan.walls.map((w) => {
         const openings = w.openings.filter((o) => o.id !== door.id).map((o) => ({ ...o, from: round(o.from), to: round(o.to) }))
         return w.id === shared.id ? { ...w, openings: [...openings, door].sort((p, q) => p.from - q.from) } : { ...w, openings }
       }),
-      ...base.walls.filter((w) => roomWalls(base, living).some(({ wall }) => wall.id === w.id) && w.id !== shared.id),
+      ...LIVING_WALLS,
     ],
-    rooms: [...plan.rooms, living],
+    rooms: [...plan.rooms, LIVING],
+    furniture,
   }
   const reasons = validate(next)
-  if (reasons.length) throw new Error(`the kitchen's right side no longer leaves room for the living room: ${reasons.join('; ')}`)
-  return next
+  if (reasons.length) throw new Error(`the kitchen-only plan cannot become the whole house: ${reasons.join('; ')}`)
+  return structuredClone(next)
 }
 
 /** UPGRADES[n] brings a schema-n plan forward. Add a step whenever PLAN_SCHEMA goes up, and bump it whenever validate() starts refusing plans it accepted. */
