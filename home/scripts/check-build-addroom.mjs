@@ -221,6 +221,9 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(variant ? {} : { recordVideo: { dir: tmp, size: { width: 960, height: 600 } } }) })
     const { page } = await open(`?talk=npc&build=1&q=high${variant ? `&look=${encodeURIComponent(variant)}` : ''}`, context)
     await page.waitForTimeout(1200)
+    // Open the notepad by its pad first: on a loaded machine the first stray key can be lost while the pad takes the keyboard.
+    await page.click('.talk-pad').catch(() => {})
+    await page.waitForTimeout(300)
     await say(page, LEFT, 35)
     await until(page, (x) => x.draft, 10_000)
     await page.waitForTimeout(1800)
