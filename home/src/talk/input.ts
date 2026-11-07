@@ -246,6 +246,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   let blink = 0
   /** Seconds since the last send, for the "sent" beat on the card. */
   let sent = 99
+  let everSent = false
   const wrap = (g: CanvasRenderingContext2D, s: string, width: number) => {
     const out: string[] = []
     let line = ''
@@ -302,7 +303,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.font = `700 ${big}px ${HAND}`
     g.fillStyle = to.colour
     g.fillText(name, x0 + toW, y0)
-    if (resting) {
+    // The pencilled hint only until the first line is sent: after that it would read as a form's placeholder.
+    if (resting && !everSent) {
       g.font = `italic 58px ${HAND}`
       g.fillStyle = 'rgba(70, 50, 36, 0.8)'
       g.fillText('just start typing…', 130, 278)
@@ -411,6 +413,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   /** The note leaves: the pad tears it off and it flies to the recipient; the speech card rises toward them. */
   const send = () => {
     sent = 0
+    everSent = true
     const target = hooks.target()
     if (hooks.variant === 'held') {
       // The note leaves without the caret.

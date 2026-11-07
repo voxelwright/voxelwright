@@ -162,7 +162,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     const top = el.querySelector<HTMLElement>('.words')?.offsetTop ?? 22
     const px = said ? 16 : 19
     g.font = `${beat ? 'italic ' : ''}${px}px ${BOOK}`
-    g.fillStyle = said ? '#46321f' : '#24170f'
+    g.fillStyle = said ? '#6e5642' : '#24170f'
     let lines = wrap(g, words, w - 44)
     if (said && lines.length > 3) lines = [...lines.slice(0, 2), lines[2].replace(/\s*\S*$/, '') + ' …']
     const lead = px * 1.42
@@ -217,8 +217,9 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const toward = el.dataset.tail === 'left' ? -1 : el.dataset.tail === 'right' ? 1 : 0
       slip.c.style.transformOrigin = toward < 0 ? '0 50%' : toward > 0 ? '100% 50%' : '50% 100%'
       slip.c.style.transform = `translate(${parseFloat(m[1]) - TAB}px, ${parseFloat(m[2]) - TAB}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28}deg)`
-      // Whoever speaks now is full strength; what was said before steps back.
-      slip.c.style.opacity = String(slip.fade * (el.classList.contains('said') ? 0.72 : 1))
+      // Whoever speaks now is in dark ink; what was said before steps back in lighter ink, still opaque
+      // (see-through, the lamp showed through its words).
+      slip.c.style.opacity = String(slip.fade)
     }
   }
   const dispose = () => {
