@@ -110,7 +110,8 @@ async function session(name, viewport, q, fn, extra = {}) {
 }
 
 const state = (page) => page.evaluate(() => window.village.talk.state())
-async function until(page, test, ms = 30_000) {
+// A real model's reply can run to several pages, each turned after time to read it.
+async function until(page, test, ms = real ? 120_000 : 30_000) {
   const end = Date.now() + ms
   let s
   do {
@@ -143,7 +144,7 @@ async function tableRound(page, shot) {
   await page.keyboard.type('Shall we plant some herbs this weekend?', { delay: 25 })
   await page.keyboard.press('Enter')
   // Mid-round: one villager has spoken, the next is half-way through its words.
-  await until(page, (s) => s.round.length >= 2 && s.speaker === s.round[1].speaker && s.cards[s.speaker]?.as === 'speaking' && !s.cards[s.speaker].finished && s.cards[s.speaker].text.length > 20, 40_000)
+  await until(page, (s) => s.round.length >= 2 && s.speaker === s.round[1].speaker && s.cards[s.speaker]?.as === 'speaking' && !s.cards[s.speaker].finished && s.cards[s.speaker].text.length > 20, real ? 120_000 : 40_000)
   await page.waitForTimeout(700)
   await shot('table')
 }
@@ -174,7 +175,8 @@ try {
       await page.waitForTimeout(800)
       await page.keyboard.type("What's for dinner tonight?", { delay: 20 })
     }
-    await page.waitForTimeout(300)
+    // The late frame by the page's clock too: 0.7 s after Enter, or at once if the first frame took longer.
+    await until(page, (x) => x.input.sentAgo >= 0.7, 5000)
     await shot('sent-late')
     sent.push({ late: true, sentAgo: +(await state(page)).input.sentAgo.toFixed(2) })
     // Landed: the note has arrived (held, or opening into the reply).

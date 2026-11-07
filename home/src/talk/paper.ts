@@ -40,6 +40,8 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     const [c, g] = canvas(64, 64)
     c.className = 'talk-paper'
     c.setAttribute('aria-hidden', 'true')
+    // Your note lies over the reply it is clipped to.
+    if (person === 'you') c.style.zIndex = '4'
     document.body.append(c)
     const seed = [...person].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) % 997
     const slip: Slip = { c, g, key: '', fade: 0, tilt: (rng(seed)() - 0.5) * 0.06, seed, from: null, open: 1 }
@@ -151,23 +153,6 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.textBaseline = 'middle'
     g.fillText(who.name, 13, th / 2 + 1)
     g.restore()
-    // Your line, at the head of the slip in your hand and ink, over a ruled line of your pad: the note opened out.
-    const asked = el.querySelector<HTMLElement>('.asked')
-    if (asked && !asked.hidden && !said) {
-      g.font = `19px ${HAND}`
-      g.fillStyle = INK
-      let kept = wrap(g, asked.textContent ?? '', w - 44)
-      if (kept.length > 2) kept = [kept[0], kept[1].replace(/\s*\S*$/, '') + ' …']
-      kept.forEach((l, i) => g.fillText(l, x0 + 22, y0 + asked.offsetTop + 19 + i * 24.7))
-      const ruleY = y0 + asked.offsetTop + asked.offsetHeight + 1
-      g.strokeStyle = 'rgba(120, 150, 190, 0.55)'
-      g.lineWidth = 1.2
-      g.beginPath()
-      g.moveTo(x0 + 14, ruleY)
-      g.lineTo(x1 - 14, ruleY)
-      g.stroke()
-      g.lineWidth = 0.8
-    }
     // The page before, if one has turned: one dimmed italic line over a pencilled rule (all of it once opened).
     const before = el.querySelector<HTMLElement>('.before')
     g.textBaseline = 'alphabetic'
@@ -258,12 +243,18 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.strokeStyle = 'rgba(120, 85, 50, 0.3)'
     g.lineWidth = 0.8
     g.stroke()
+    // Addressed at its head as on the pad: "to" in pencil, the name in its colour.
     const to = el.querySelector<HTMLElement>('.to-line')
     g.textBaseline = 'alphabetic'
     if (to) {
+      const y = y0 + to.offsetTop + 15
       g.font = `italic 15px ${HAND}`
       g.fillStyle = 'rgba(70, 50, 36, 0.75)'
-      g.fillText(to.textContent ?? '', x0 + 20, y0 + to.offsetTop + 15)
+      g.fillText('to ', x0 + 20, y)
+      const tw = g.measureText('to ').width
+      g.font = `700 16px ${HAND}`
+      g.fillStyle = el.style.getPropertyValue('--c') || '#8a6a48'
+      g.fillText(el.dataset.to ?? '', x0 + 20 + tw, y)
     }
     g.font = `20px ${HAND}`
     g.fillStyle = INK
@@ -292,8 +283,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const cue = (el.querySelector('.cue') as HTMLElement | null)?.hidden
       const before = el.querySelector<HTMLElement>('.before')
       const more = (el.querySelector('.more') as HTMLElement | null)?.hidden
-      const asked = el.querySelector<HTMLElement>('.asked')
-      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, asked?.textContent, el.className, el.dataset.tail, el.style.getPropertyValue('--tail'), el.style.getPropertyValue('--reach')].join('|')
+      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, el.dataset.to, el.className, el.dataset.tail, el.style.getPropertyValue('--tail'), el.style.getPropertyValue('--reach')].join('|')
       if (key !== slip.key) {
         slip.key = key
         paint(slip, el, who, w, h)
@@ -306,7 +296,9 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       // the round's order could not be read: the regroup's rounds 5 and 6).
       const said = el.classList.contains('said')
       // Your line lies on the table: tipped back, as paper on a table top is seen from a chair.
-      const lying = el.classList.contains('mine') ? 32 : 0
+      // Clipped to a reply it stands with it, turned a little more than a slip is.
+      const clipped = el.classList.contains('clipped')
+      const lying = el.classList.contains('mine') && !clipped ? 32 : 0
       const x = parseFloat(m[1]) - TAB, y = parseFloat(m[2]) - TAB + (said ? 6 : 0)
       if (slip.from) {
         // Opening out of the landed note: from its size and place on screen, unfolding, to the slip's own.
@@ -319,7 +311,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
         slip.c.style.transformOrigin = '0 0'
         slip.c.style.transform = `translate(${fx + (x - fx) * p}px, ${fy + (y - fy) * p}px) perspective(900px) rotateX(${(1 - p) * 70 + lying}deg) scale(${sc})`
         if (slip.open >= 1) slip.from = null
-      } else slip.c.style.transform = `translate(${x}px, ${y}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt}rad) rotateX(${(1 - slip.fade) * 28 + lying}deg) scale(${said ? 0.93 : 1})`
+      } else slip.c.style.transform = `translate(${x}px, ${y}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt + (clipped ? 0.05 : 0)}rad) rotateX(${(1 - slip.fade) * 28 + lying}deg) scale(${said ? 0.93 : 1})`
       slip.c.style.filter = said ? 'saturate(0.6) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))' : ''
       slip.c.style.opacity = String(slip.from ? Math.min(1, slip.fade * 1.6) : slip.fade)
     }

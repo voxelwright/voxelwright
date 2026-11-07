@@ -177,8 +177,6 @@ const fits = (text: string) => {
 /** A speech card anchored to a villager: a stitched paper card wearing its name tag. */
 class Card {
   el = document.createElement('div')
-  /** Your line this answers, at the head of the slip in your ink: the note opened into the reply (#42 paper climb). */
-  private asked = document.createElement('p')
   /** The page before this one, kept as one dimmed line. */
   private before = document.createElement('p')
   private words = document.createElement('p')
@@ -223,9 +221,7 @@ class Card {
     this.cue.setAttribute('aria-label', 'still talking')
     this.cue.innerHTML = '<i></i><i></i><i></i>'
     this.words.append(this.said, this.cue)
-    this.asked.className = 'asked'
-    this.asked.hidden = true
-    page.append(this.asked, this.before, this.words)
+    page.append(this.before, this.words)
     this.more.type = 'button'
     this.more.className = 'more'
     this.more.textContent = 'go on'
@@ -260,14 +256,6 @@ class Card {
     this.before.textContent = ''
     this.before.hidden = true
     this.before.classList.remove('open')
-    this.asked.textContent = ''
-    this.asked.hidden = true
-  }
-
-  /** The line this reply answers, written at its head (a talk; at the table your line lies on the table). */
-  answering(line: string) {
-    this.asked.textContent = line
-    this.asked.hidden = !line
   }
 
   /** The words so far, streaming or whole; `done` once the speaker has finished. */
@@ -480,7 +468,8 @@ export default {
     mySaid.className = 'said'
     myWords.append(mySaid)
     myNote.append(myTo, myWords)
-    const pinned = { on: false, x: 0, y: 0, placed: false, lost: 0 }
+    /** Your line on screen: lying on the table (`card` null), or clipped to the reply it brought (#42 paper climb). */
+    const pinned: { on: boolean; card: Member | null; x: number; y: number; placed: boolean; lost: number } = { on: false, card: null, x: 0, y: 0, placed: false, lost: 0 }
     const style = document.createElement('style')
     style.textContent = css() + paperCss()
     ctx.effect(() => {
@@ -521,6 +510,7 @@ export default {
       m.card.el.classList.toggle('said', as === 'said')
     }
     const hide = (m: Member) => {
+      if (pinned.card === m) unpin()
       m.card.stop()
       showing.delete(m)
       m.card.placed = false
@@ -531,10 +521,18 @@ export default {
       unpin()
     }
     /** Your line lies on the table, opened out of the note that landed there. */
-    const pin = (text: string) => {
-      myTo.textContent = 'to the table'
+    /**
+     * Your line, as the slip torn off your pad, addressed at its head: one form wherever it is. At the table it
+     * lies on the table for the round; in a talk it is clipped to the corner of the reply it brought.
+     */
+    const pin = (text: string, to: Member | null = null) => {
+      myTo.textContent = `to ${to?.name ?? 'the table'}`
+      myNote.dataset.to = to?.name ?? 'the table'
+      myNote.style.setProperty('--c', to?.colour ?? '#8a6a48')
       mySaid.textContent = text
       pinned.on = true
+      pinned.card = to
+      myNote.classList.toggle('clipped', Boolean(to))
       pinned.placed = false
       if (input?.holding && input.heldBy() === null) {
         const at = input.heldAt()
@@ -544,6 +542,7 @@ export default {
     }
     const unpin = () => {
       pinned.on = false
+      pinned.card = null
       myNote.classList.remove('shown')
     }
     const speak = (m: Member, text: string, done = true) => {
@@ -1018,8 +1017,8 @@ export default {
       }
       m.v.speaking = true
       speak(m, speech.text, speech.done && !speech.away)
-      // In a talk the slip carries your line at its head, in your ink: the note opened into the reply.
-      if (mode === 'talk') m.card.answering(said)
+      // In a talk your note comes back clipped to the reply: the note opened into it.
+      if (mode === 'talk') pin(said, m)
       timing?.set(m, performance.now())
       while (!speech.done || !m.card.finished) {
         // The host failing mid-reply cuts the words short where they are.
@@ -1043,7 +1042,10 @@ export default {
     const openNote = (m: Member) => {
       if (!input?.holding || input.heldBy() !== m.v.fig.root) return
       const at = input.heldAt()
-      if (at) slips.from(m.person, at)
+      if (at) {
+        slips.from(m.person, at)
+        slips.from('you', at)
+      }
       input.release()
     }
 
@@ -1263,6 +1265,8 @@ export default {
     const EDGE = 12
     /** How far a card's name tab sticks up above it. */
     const TAB = 22
+    /** How far your clipped note overlaps the top of the reply it rides on. */
+    const CLIP = 18
     const camUp = new THREE.Vector3()
     const camRight = new THREE.Vector3()
     const edge = new THREE.Vector3()
@@ -1317,11 +1321,13 @@ export default {
       for (const m of order) {
         const { card } = m
         const el = card.el
-        const w = el.offsetWidth, h = el.offsetHeight
+        // Your note clipped above its top edge is placed with it, as one block.
+        const lead = pinned.on && pinned.card === m ? myNote.offsetHeight - CLIP : 0
+        const w = el.offsetWidth, ch = el.offsetHeight, h = ch + lead
         const head = headBox(m)
         const mouth = head.y0 + (head.y1 - head.y0) * 0.5
-        const right: Spot = { l: head.x1 + 24, t: mouth - 40, w, h, tail: 'left' }
-        const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40, w, h, tail: 'right' }
+        const right: Spot = { l: head.x1 + 24, t: mouth - 40 - lead, w, h, tail: 'left' }
+        const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40 - lead, w, h, tail: 'right' }
         const above: Spot = { l: head.cx - w / 2, t: head.y0 - h - 22, w, h, tail: 'down' }
         // Beside the head in a talk on a wide screen; above it at the table and on a narrow screen, where beside cannot fit.
         const ways = mode === 'talk' && partner === m && innerWidth >= 600 ? [right, left, above] : [above, right, left]
@@ -1329,7 +1335,7 @@ export default {
         // Above a head, also pushed back inside the window's edge: on a phone a slip is nearly as wide as the screen.
         const slides = (o: Spot) => [...[0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 }),
           ...(o.tail === 'down' ? [{ ...o, l: THREE.MathUtils.clamp(o.l, EDGE, innerWidth - EDGE - w) }] : [])]
-        const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + 16 && mouth < o.t + o.h - 16
+        const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + lead + 16 && mouth < o.t + o.h - 16
         const blocked = [...taken, ...[...faces].filter(([o]) => o !== m).map(([, f]) => f)]
         // Higher above the head, its tail stretched down to it, before covering anyone's face (#42 paper
         // climb: on a phone at the table the slip sat on a listener's head).
@@ -1351,18 +1357,30 @@ export default {
         // Glide to the place rather than jump, except when the card first appears.
         const k = card.placed && !reducedMotion.matches ? 1 - Math.exp(-dt * 14) : 1
         card.x += (spot.l - card.x) * k
-        card.y += (spot.t - card.y) * k
+        card.y += (spot.t + lead - card.y) * k
         card.placed = true
         el.style.translate = `${card.x}px ${card.y}px`
         el.dataset.tail = crossed ? 'none' : spot.tail
         el.style.setProperty('--reach', `${spot.tail === 'down' && !crossed ? Math.max(0, Math.round(head.y0 - 22 - (card.y + h))) : 0}px`)
         el.style.setProperty('--tail', spot.tail === 'down'
           ? `${THREE.MathUtils.clamp(head.cx - card.x, 22, w - 22)}px`
-          : `${THREE.MathUtils.clamp(mouth - card.y, 18, h - 18)}px`)
+          : `${THREE.MathUtils.clamp(mouth - card.y, 18, ch - 18)}px`)
       }
       // Your line, lying on the table near where the note landed, wherever it covers no face and no slip;
       // where there is no such place (a phone), it stays out of the way.
-      if (pinned.on) {
+      // In a talk, your note rides on the reply's top right corner, overlapping its edge like a clipped page.
+      if (pinned.on && pinned.card) {
+        const { card } = pinned.card
+        const shown = showing.has(pinned.card) && card.placed
+        myNote.classList.toggle('shown', shown)
+        if (shown) {
+          const w = myNote.offsetWidth
+          pinned.x = THREE.MathUtils.clamp(card.x + card.el.offsetWidth - w + 12, EDGE, innerWidth - EDGE - w)
+          pinned.y = card.y - myNote.offsetHeight + CLIP
+          pinned.placed = true
+          myNote.style.translate = `${pinned.x}px ${pinned.y}px`
+        }
+      } else if (pinned.on) {
         const w = myNote.offsetWidth, h = myNote.offsetHeight
         const a = toPx(edge.copy(TABLE_NOTE))
         const blocked = [...taken, ...faces.values()]
@@ -1484,7 +1502,8 @@ export default {
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
         if (m.fade !== fadeGoal) {
-          m.fade = Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 7))
+          // Quickly: half-faded, the hashed alpha reads as noise (#42 paper climb).
+          m.fade = Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 16))
           for (const { mat, base } of m.mats) mat.opacity = base * m.fade
           m.v.fig.root.visible = m.fade > 0.01
         }
@@ -1862,9 +1881,6 @@ function css() {
   .talk-card .before { margin: 0 0 6px; padding-bottom: 5px; border-bottom: 1.5px dashed rgba(150, 100, 60, 0.28); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: italic 16px/1.35 ${BOOK}; color: #6b5340; opacity: 0.72; }
   .talk-card .before.open { white-space: pre-wrap; }
-  .talk-card .asked { margin: 0 0 8px; padding-bottom: 6px; font: 19px/1.3 ${HAND}; color: ${MY_INK};
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .talk-card .asked[hidden], .talk-card.said .asked { display: none; }
   .talk-card.mine { max-width: min(240px, calc(100vw - 32px)); padding: 14px 18px 12px; }
   .talk-card.mine, .talk-card.mine.shown { pointer-events: none; }
   .talk-card.mine::after { display: none; }

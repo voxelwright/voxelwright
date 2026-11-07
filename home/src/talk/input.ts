@@ -306,10 +306,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.font = `italic 52px ${HAND}`
     const toW = g.measureText('to ').width
     g.fillStyle = 'rgba(70, 50, 36, 0.7)'
-    g.fillText('to ', 120, 118)
+    g.fillText('to ', 120, 106)
     g.font = `700 92px ${HAND}`
     g.fillStyle = to.colour
-    g.fillText(to.label, 120 + toW, 118)
+    g.fillText(to.label, 120 + toW, 106)
     // The pencilled hint only until the first line is sent: after that it would read as a form's placeholder.
     if (resting && !everSent) {
       g.font = `italic 56px ${HAND}`
@@ -607,7 +607,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       const near = 1 / Math.max(0.2, start.distanceTo(camAt)), far = 1 / Math.max(0.2, end.distanceTo(camAt))
       const s = THREE.MathUtils.smoothstep(k, 0, 1)
       const e = (s * far) / ((1 - s) * near + s * far)
-      const pos = start.clone().addScaledVector(up, 0.05 * lifted).lerp(end, e).addScaledVector(up, Math.sin(k * Math.PI) * 0.3)
+      const pos = start.clone().addScaledVector(up, 0.05 * lifted).lerp(end, e)
+      // Its arc is the same height on screen all the way: in metres it grows with its distance from the camera
+      // (a fixed 0.3 m arc lifted it out of the top of the frame while it was still near).
+      pos.y += Math.sin(k * Math.PI) * 0.07 * pos.distanceTo(camAt)
       flyer.matrixAutoUpdate = true
       flyer.position.copy(pos)
       // It arrives turned to be read: held up toward you, or flat on the table with its words your way.
