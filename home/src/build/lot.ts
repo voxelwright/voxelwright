@@ -1,10 +1,10 @@
 // The lot answers the plan (#48): the lawn board, its painted edge, its soft shadow and the
 // picket fence grow to hold every room and the room being staked out, a margin of lawn
 // round each, and go back exactly as diorama.ts drew them when nothing reaches past the
-// old board. The grown lawn is the union of the old board and one rectangle per room
-// (its walls plus MARGIN), drawn as one flat shape with world-metre UVs on a grass that
-// tiles without seams; the fence runs round that shape, keeping the old gate where the
-// path still meets the fence.
+// old board. The grown lawn is one rectangle with rounded corners holding the old board and
+// each room's walls plus MARGIN, so it never steps in at a corner, drawn as one flat shape
+// with world-metre UVs on a grass that tiles without seams; the fence runs round it at the
+// old board's inset, keeping the old gate where the path still meets the fence.
 import * as THREE from 'three/webgpu'
 import { YARD_TOP } from '../diorama'
 import { canvas, makeNoise, rng, toTexture } from '../paint'
@@ -26,82 +26,29 @@ const clampTo = (r: Rect, to: Rect): Rect => {
   return { x0: cx(r.x0), x1: cx(r.x1), z0: cz(r.z0), z1: cz(r.z1) }
 }
 
-/**
- * The outline of a union of axis-aligned rectangles, counter-clockwise seen from above
- * with x right and z down the page (the largest loop when the union has several).
- */
-export function unionOutline(rects: Rect[]): P[] {
-  const live = rects.filter((r) => r.x1 - r.x0 > 1e-4 && r.z1 - r.z0 > 1e-4)
-  const xs = [...new Set(live.flatMap((r) => [r.x0, r.x1]))].sort((a, b) => a - b)
-  const zs = [...new Set(live.flatMap((r) => [r.z0, r.z1]))].sort((a, b) => a - b)
-  const nx = xs.length - 1, nz = zs.length - 1
-  const full = (i: number, j: number) => {
-    if (i < 0 || j < 0 || i >= nx || j >= nz) return false
-    const x = (xs[i] + xs[i + 1]) / 2, z = (zs[j] + zs[j + 1]) / 2
-    return live.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1)
-  }
-  // Boundary edges with the lawn on their left, as grid corner pairs.
-  const next = new Map<string, Array<[number, number]>>()
-  const edge = (a: [number, number], b: [number, number]) => {
-    const k = `${a[0]},${a[1]}`
-    next.set(k, [...(next.get(k) ?? []), b])
-  }
-  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
-    if (!full(i, j)) continue
-    if (!full(i, j - 1)) edge([i + 1, j], [i, j])
-    if (!full(i - 1, j)) edge([i, j], [i, j + 1])
-    if (!full(i, j + 1)) edge([i, j + 1], [i + 1, j + 1])
-    if (!full(i + 1, j)) edge([i + 1, j + 1], [i + 1, j])
-  }
-  let best: P[] = []
-  let bestArea = 0
-  while (next.size) {
-    const [k0] = next.keys()
-    const start = k0.split(',').map(Number) as [number, number]
-    const loop: Array<[number, number]> = []
-    let at = start
-    for (let guard = 0; guard < 10000; guard++) {
-      const k = `${at[0]},${at[1]}`
-      const outs = next.get(k)
-      if (!outs?.length) break
-      const to = outs.shift()!
-      if (!outs.length) next.delete(k)
-      loop.push(at)
-      at = to
-      if (at[0] === start[0] && at[1] === start[1]) break
-    }
-    // Drop the points where the outline runs straight on.
-    const pts = loop.filter((p, i) => {
-      const a = loop[(i + loop.length - 1) % loop.length], b = loop[(i + 1) % loop.length]
-      return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1]))
-    }).map(([i, j]) => [xs[i], zs[j]] as P)
-    let area = 0
-    for (let i = 0; i < pts.length; i++) {
-      const [ax, az] = pts[i], [bx, bz] = pts[(i + 1) % pts.length]
-      area += ax * bz - bx * az
-    }
-    if (Math.abs(area) > bestArea) {
-      bestArea = Math.abs(area)
-      best = pts
-    }
-  }
-  return best
-}
+/** Corner radius of the grown lawn, in metres; the fence's is this less its inset. */
+const ROUND = 0.7
 
-/** An outline moved inward by d: each corner of a right-angled outline moves d along both of its edges' inward normals. */
-function insetOutline(pts: P[], d: number): P[] {
-  let area = 0
-  for (let i = 0; i < pts.length; i++) area += pts[i][0] * pts[(i + 1) % pts.length][1] - pts[(i + 1) % pts.length][0] * pts[i][1]
-  const s = Math.sign(area) || 1
-  const inward = (a: P, b: P): P => {
-    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
-    return [(-(b[1] - a[1]) / l) * s, ((b[0] - a[0]) / l) * s]
+/** The rectangle holding all of these. */
+const hull = (rects: Rect[]): Rect => ({
+  x0: Math.min(...rects.map((r) => r.x0)), x1: Math.max(...rects.map((r) => r.x1)),
+  z0: Math.min(...rects.map((r) => r.z0)), z1: Math.max(...rects.map((r) => r.z1)),
+})
+
+/**
+ * A rectangle with rounded corners, counter-clockwise seen from above with x right and z down
+ * the page: each corner is a quarter circle of `radius` in `steps` pieces.
+ */
+export function roundedRect(r: Rect, radius: number, steps = 6): P[] {
+  const k = Math.max(0, Math.min(radius, (r.x1 - r.x0) / 2, (r.z1 - r.z0) / 2))
+  const out: P[] = []
+  // Corner centres in drawing order, each with the angle its quarter starts at.
+  const corners: Array<[number, number, number]> = [[r.x0 + k, r.z0 + k, -Math.PI / 2], [r.x0 + k, r.z1 - k, Math.PI], [r.x1 - k, r.z1 - k, Math.PI / 2], [r.x1 - k, r.z0 + k, 0]]
+  for (const [cx, cz, a0] of corners) for (let i = 0; i <= steps; i++) {
+    const a = a0 - (i / steps) * (Math.PI / 2)
+    out.push([cx + Math.cos(a) * k, cz + Math.sin(a) * k])
   }
-  return pts.map((p, i) => {
-    const a = pts[(i + pts.length - 1) % pts.length], b = pts[(i + 1) % pts.length]
-    const n0 = inward(a, p), n1 = inward(p, b)
-    return [p[0] + (n0[0] + n1[0]) * d, p[1] + (n0[1] + n1[1]) * d] as P
-  })
+  return out
 }
 
 /** diorama.ts's grass colours, painted so the tile wraps: noise on whole lattice periods and speckles drawn across the seams. */
@@ -205,7 +152,8 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   const railBox = new THREE.BoxGeometry(1, 0.035, 0.02)
   const rails: THREE.Mesh[] = []
 
-  const runFence = (outline: P[]) => {
+  /** Pickets and rails along the fence's line (already inset from the board's edge). */
+  const runFence = (line: P[]) => {
     const f = found!
     if (!pickets) {
       pickets = new THREE.InstancedMesh(f.fence.geometry, f.fence.material, 1600)
@@ -214,7 +162,6 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
       pickets.name = 'lot pickets'
       grown.add(pickets)
     }
-    const line = insetOutline(outline, INSET)
     // The gate stays only where the path still meets the fence.
     const onLine = (p: P) => line.some((a, i) => {
       const b = line[(i + 1) % line.length]
@@ -278,7 +225,9 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
 
   const lay = (rects: Rect[]) => {
     const f = found!
-    outline = unionOutline([f.rect, ...rects])
+    // One clean shape: the old board and every room's rectangle in one rounded rectangle, so no corner steps in.
+    const box = hull([f.rect, ...rects])
+    outline = roundedRect(box, ROUND)
     // The shape lies in (x, -z) and is turned flat, so its UVs are world metres.
     const shape = new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x, -z)))
     lawn.geometry.dispose()
@@ -305,7 +254,7 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     shadow.position.set((x0 + x1) / 2, YARD_TOP - f.board + 0.001, (z0 + z1) / 2)
     for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = false
     grown.visible = true
-    runFence(outline)
+    runFence(roundedRect({ x0: box.x0 + INSET, x1: box.x1 - INSET, z0: box.z0 + INSET, z1: box.z1 - INSET }, ROUND - INSET))
   }
 
   /** Put the lot back exactly as diorama.ts drew it, and let go of the fence it ran. */
