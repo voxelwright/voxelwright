@@ -46,7 +46,8 @@ const SIZES: [RegExp, [number, number, number]][] = [
 export const sizeOf = (what: string, given?: number[]): [number, number, number] =>
   (given?.length === 3 ? given : SIZES.find(([re]) => re.test(what.toLowerCase()))?.[1] ?? [0.6, 0.6, 0.6]) as [number, number, number]
 
-const WALL_KIND = /\b(tv|television|telly|picture|painting|poster|print|frame|mirror|clock|shel(f|ves)|wallpaper|hooks?|calendar)\b/
+/** Things that belong on a wall whatever the model said. Only whole kinds: "print" or "frame" also describe tables and beds. */
+const WALL_KIND = /\b(tv|television|telly|picture|painting|poster|mirror|clock|wallpaper|calendar)s?\b/
 const CEILING_KIND = /\b(lantern|chandelier|mobile|pendant|bunting|hanging)\b/
 
 /**

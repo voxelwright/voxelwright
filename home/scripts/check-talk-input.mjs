@@ -378,9 +378,10 @@ try {
         ['a plant by the window', p('plant', 'by the window | a plant by the window', 'floor')],
         ['add a lamp in the corner', p('lamp', 'in the corner', 'floor')],
         ['a mug on the counter', p('mug', 'on the counter', 'surface')],
+        ['add a table to the interior with a cow', p('wooden table with black and white cow-spot print', 'the interior | add a table to the interior with a cow', 'floor')],
       ].map(([text, r]) => ({ text, mount: r.mount, anchor: r.poses[0].anchor, x: +r.poses[0].x.toFixed(2), y: +r.poses[0].y.toFixed(2), z: +r.poses[0].z.toFixed(2), size: r.size }))
     })
-    const want = [['wall', 'wall'], ['wall', 'wall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter']]
+    const want = [['wall', 'wall'], ['wall', 'wall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
     check('each line gets its expected mount and anchor (a TV the model put on the floor goes on the wall)', poses.every((p, i) => p.mount === want[i][0] && p.anchor === want[i][1]), poses)
     const distinct = new Set(poses.filter((p) => p.anchor !== 'wall').map((p) => `${p.x},${p.y},${p.z}`))
     check('distinct anchors give distinct poses', distinct.size === poses.filter((p) => p.anchor !== 'wall').length, poses)
