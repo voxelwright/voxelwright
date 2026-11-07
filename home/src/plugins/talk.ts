@@ -16,13 +16,17 @@ import type { Pose } from './camera'
 // table and the table becomes a group conversation.
 const params = new URLSearchParams(location.search)
 const ON = params.get('talk') === 'npc'
+/** ?slip=always keeps your paper slip on screen with no talk open, addressed to your own villager. */
+const SLIP_ALWAYS = params.get('slip') === 'always'
 const KIND = KINDS[params.get('villager') ?? ''] ? params.get('villager')! : 'b'
 const SCALE = 1.3
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 /** Villagers' words: a warm book face, easier to read at length than handwriting. */
 const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
-/** Letters a second: a readable pace that still keeps up with a streaming reply. */
-const TYPE_RATE = 42
+/** Letters a second, revealed a whole word at a time: a reading pace that keeps up with a streaming reply. */
+const TYPE_RATE = 58
+/** A page holds two sentences, or one if two would run longer than this. */
+const PAGE_CHARS = 150
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
 interface Person {
@@ -156,12 +160,15 @@ class Card {
     return this.done && this.visible >= this.end && !this.full.slice(this.end).trim()
   }
 
-  /** At most two sentences at a time; "go on" turns the page. */
+  /** About two short sentences at a time; "go on" turns the page. */
   private paginate() {
     const rest = this.full.slice(this.from)
     const stops = [...rest.matchAll(/[.!?…]+["')]?(\s+|$)/g)]
-    const second = stops[1]
-    const cut = second && (second.index! + second[0].length < rest.length || this.done) ? second.index! + second[0].trimEnd().length : rest.length
+    const closed = (s: RegExpExecArray | RegExpMatchArray | undefined) => s && (s.index! + s[0].length < rest.length || this.done)
+    const at = (s: RegExpExecArray | RegExpMatchArray) => s.index! + s[0].trimEnd().length
+    const [first, second] = stops
+    const cut = closed(first) && (at(first) > PAGE_CHARS * 0.55 || (closed(second) && at(second!) > PAGE_CHARS) || (!second && rest.length > PAGE_CHARS)) ? at(first!)
+      : closed(second) ? at(second!) : rest.length
     this.end = this.from + cut
   }
 
@@ -284,12 +291,12 @@ export default {
     line.setAttribute('aria-label', 'Say something')
     const mine = document.createElement('p')
     mine.className = 'mine'
-    const you = nameTag('You', null, '#3f5a7a')
-    you.classList.add('tab')
+    // The slip's tab says who the line goes to; it changes as you turn to a villager or the table.
+    let to = document.createElement('div')
     const ruled = document.createElement('label')
     ruled.className = 'ruled'
     ruled.append(line)
-    slip.append(you, mine, ruled, chips)
+    slip.append(to, mine, ruled, chips)
     const voice = document.createElement('div')
     voice.className = 'talk-voice'
     voice.setAttribute('role', 'status')
@@ -306,6 +313,7 @@ export default {
         }
         slip.remove()
         voice.remove()
+        document.body.classList.remove('talk-hovering')
         style.remove()
       }
     }, 'talk page')
@@ -352,17 +360,38 @@ export default {
         return b
       }))
     }
-    const openSlip = (placeholder: string, labels: string[]) => {
+    /** Address the slip to one villager or the whole table. */
+    const address = (who: Member | 'table') => {
+      const tag = who === 'table' ? nameTag('The table', null, '#8a6a48') : nameTag(who.name, who.owner, who.colour)
+      tag.classList.add('tab')
+      slip.dataset.to = who === 'table' ? 'table' : who.person
+      to.replaceWith(tag)
+      to = tag
+    }
+    const openSlip = (placeholder: string, labels: string[], who: Member | 'table') => {
+      address(who)
       line.placeholder = placeholder
       setChips(labels)
       slip.classList.add('shown')
+      slip.classList.remove('idle')
       if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => line.focus({ preventScroll: true }), 30)
     }
+    /** Your own villager: the one a line goes to when nobody else is being talked to. */
+    const primary = () => cast[0]
     const closeSlip = () => {
-      slip.classList.remove('shown')
       mine.classList.remove('shown')
       line.blur()
+      if (!SLIP_ALWAYS) {
+        slip.classList.remove('shown')
+        return
+      }
+      // Always on: addressed to nobody in particular, so to your own villager, quietly.
+      address(primary())
+      line.placeholder = `Write to ${primary().owner}'s villager…`
+      setChips([])
+      slip.classList.add('shown', 'idle')
     }
+    if (SLIP_ALWAYS) closeSlip()
 
     // ── Camera ─────────────────────────────────────────────────────────────
     const eye = new THREE.Vector3()
@@ -411,7 +440,7 @@ export default {
     }
 
     // ── Talking with one villager ───────────────────────────────────────────
-    const talk = (m: Member) => {
+    const talk = (m: Member, greet = true) => {
       if (partner && partner !== m) endTalk(false)
       partner = m
       mode = 'talk'
@@ -422,9 +451,9 @@ export default {
       view.focus(twoShot(m), 7)
       const news = m.news
       if (news) clearNews(m)
-      speak(m, news ?? m.hello)
+      if (greet || news) speak(m, news ?? m.hello)
       const invited = Boolean(m.seat)
-      openSlip(`Say something to ${m.name}…`, [...m.chips, ...(invited ? [] : [INVITE])])
+      openSlip(`Say something to ${m.name}…`, [...m.chips, ...(invited ? [] : [INVITE])], m)
     }
 
     /** Back to chores, or to the table if anyone is sitting there. */
@@ -453,7 +482,7 @@ export default {
       mode = 'table'
       view.focus(TABLE_SHOT, 5)
       const names = seated.map((m) => m.name)
-      openSlip(seated.length > 1 ? `Say something, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS])
+      openSlip(seated.length > 1 ? `Say something, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS], seated.length > 1 ? 'table' : seated[0]!)
     }
 
     const invite = (m: Member) => {
@@ -560,6 +589,8 @@ export default {
     const send = async (text: string) => {
       text = text.trim()
       if (!text || pending) return
+      // A line written with no talk open goes to your own villager, who turns to you.
+      if (mode === 'room' && SLIP_ALWAYS) talk(primary(), false)
       pending = true
       line.value = ''
       mine.textContent = text
@@ -748,15 +779,20 @@ export default {
         free[Math.floor(Math.random() * free.length)]?.v.greet()
         nextGreet = 9 + Math.random() * 6
       }
-      // Hovering one makes it look up and wave back.
+      // Hovering one makes it look up and wave back, and shows its name tag in place of the plain label.
       if (entries.hovered !== hovered) {
         hovered = entries.hovered
+        document.body.classList.toggle('talk-hovering', mode === 'room' && cast.some((m) => m.entry === hovered))
         if (mode === 'room') cast.find((m) => m.entry === hovered)?.v.greet()
       }
       stage.camera.getWorldPosition(eye)
       // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
       if (released && entries.hovered !== released.entry) released = null
-      for (const m of cast) m.v.paused = (entries.hovered === m.entry && m !== released && mode === 'room') || offstage(m)
+      for (const m of cast) {
+        m.v.paused = (entries.hovered === m.entry && m !== released && mode === 'room') || offstage(m)
+        // Someone already at a chore in the shot stays at it until the talk ends, instead of crossing behind.
+        m.v.linger = mode === 'talk' && partner !== null && m !== partner && m.v.state === 'work' && inShot(m.v.pos.x, m.v.pos.z, partner.v.pos.distanceTo(eye) + 1.6)
+      }
       stepCrowd(crowd, blobs, Math.min(dt, 0.05), t, eye, SCALE)
       for (const m of cast) {
         // The glyph bobs over the head and fades once looked at for a second.
@@ -795,9 +831,11 @@ export default {
             card.classList.remove('beside')
           }
         }
-        // Name tags over everyone at the table; the speaker's is lit and carries the card.
-        const tagged = mode === 'table' && m.seat !== null && m.v.seated > 0.5 && !showing.has(m)
+        // Name tags over everyone at the table; the speaker's is lit and carries the card. In the room, over the one hovered.
+        const hover = mode === 'room' && entries.hovered === m.entry
+        const tagged = (mode === 'table' && m.seat !== null && m.v.seated > 0.5 && !showing.has(m)) || hover
         m.tag.classList.toggle('shown', tagged)
+        m.tag.classList.toggle('hover', hover)
         if (tagged) {
           const s = screen(m, 0.06)
           m.tag.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`
@@ -832,10 +870,11 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m) notify(m)
         },
-        screen: (person: string) => {
+        /** Where a villager is on screen: its middle, or `up` of the way from its feet to the top of its head. */
+        screen: (person: string, up = 0.5) => {
           const m = cast.find((c) => c.person === person)!
           const box = new THREE.Box3().setFromObject(m.v.fig.root)
-          const c = box.getCenter(new THREE.Vector3())
+          const c = box.getCenter(new THREE.Vector3()).setY(THREE.MathUtils.lerp(box.min.y, box.max.y, up))
           c.project(stage.camera)
           const r = rect()
           return { x: r.left + ((c.x + 1) / 2) * r.width, y: r.top + ((1 - c.y) / 2) * r.height }
@@ -894,7 +933,7 @@ function css() {
   .talk-card { position: fixed; left: 0; top: 0; width: 330px; max-width: calc(100vw - 32px); padding: 24px 22px 14px;
     opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1), filter 300ms ease; scale: 0.94; transform-origin: 0 50%; }
   .talk-card.shown { opacity: 1; scale: 1; pointer-events: auto; }
-  .talk-card.said { opacity: 0.72; scale: 0.8; filter: saturate(0.55) brightness(0.96); }
+  .talk-card.said { opacity: 0.95; scale: 0.8; filter: saturate(0.5) brightness(0.93); }
   .talk-card.said .nametag { box-shadow: none; }
   .talk-card::after { content: ''; position: absolute; left: var(--tail, 50%); bottom: -10px; width: 20px; height: 20px; margin-left: -10px;
     background: #f5e7cb; rotate: 45deg; border-radius: 0 0 5px 0; box-shadow: 4px 4px 6px rgba(60, 30, 10, 0.14); }
@@ -925,11 +964,15 @@ function css() {
   .talk-tag { position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0; scale: 0.86; transform-origin: 50% 100%;
     transition: opacity 200ms ease, scale 260ms cubic-bezier(.2, 1.5, .4, 1), filter 200ms ease; filter: saturate(0.7); }
   .talk-tag.shown { opacity: 0.86; }
+  .talk-tag.hover { opacity: 1; scale: 1; }
+  body.talk-hovering .village-label { visibility: hidden; }
   .talk-tag.shown.lit { opacity: 1; scale: 1.08; filter: none; box-shadow: 0 0 0 3px rgba(255, 244, 214, 0.85), 0 6px 16px rgba(60, 30, 10, 0.35); }
 
   .talk-slip { position: fixed; right: 28px; bottom: 24px; width: min(410px, calc(100vw - 32px)); padding: 26px 22px 16px;
     display: flex; flex-direction: column; gap: 8px; opacity: 0; translate: 0 14px; pointer-events: none; transition: opacity 220ms ease, translate 240ms ease; }
   .talk-slip.shown { opacity: 1; translate: 0 0; pointer-events: auto; }
+  .talk-slip.idle { padding-bottom: 12px; }
+  .talk-slip.idle .chips { display: none; }
   .talk-slip .mine { margin: 0 0 2px; display: none; color: #2f4a6b; font: italic 20px/1.3 ${HAND}; }
   .talk-slip .mine.shown { display: block; }
   .talk-slip .ruled { display: block; position: relative; }

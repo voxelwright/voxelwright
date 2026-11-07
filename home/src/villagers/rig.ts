@@ -61,6 +61,8 @@ export class Villager {
   paused = false
   /** Sent somewhere by the person (a chair at the table): stays there until released. */
   held = false
+  /** Stays at its chore a while longer (out of someone else's conversation). */
+  linger = false
   /** Waiting on its own words: looks up and taps its chin. */
   thinking = false
   /** Saying something right now: leans in and nods. */
@@ -256,7 +258,7 @@ export class Villager {
       }
     } else if (this.state === 'work') {
       goalYaw = SPOTS[this.spot]?.face ?? this.yaw
-      if (!this.chosen && !this.idle && !this.held) {
+      if (!this.chosen && !this.idle && !this.held && !this.linger) {
         this.timer -= dt
         if (this.timer <= 0) {
           this.onDone?.(this.spot)

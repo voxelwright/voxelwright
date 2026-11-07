@@ -173,8 +173,8 @@ try {
     let p = await page.evaluate(() => window.village.talk.screen('sam'))
     await page.mouse.move(p.x, p.y)
     await page.waitForTimeout(500)
-    const hover = await page.evaluate(() => ({ hovered: window.village.kernel.root.get('entries').hovered, label: document.querySelector('.village-label')?.textContent, shown: document.querySelector('.village-label')?.classList.contains('shown') }))
-    check('hover names the villager', hover.hovered === 'villager-sam' && hover.label === 'Tuft' && hover.shown, hover)
+    const hover = await page.evaluate(() => ({ hovered: window.village.kernel.root.get('entries').hovered, tags: [...document.querySelectorAll('.talk-tag.shown')].map((t) => t.textContent) }))
+    check('hover shows the villager\'s name tag', hover.hovered === 'villager-sam' && hover.tags.join() === "TuftSam's", hover)
     await clickVillager(page, 'sam')
     const talking = await until(page, (s) => s.mode === 'talk' && s.cards.sam, 3000)
     await page.waitForTimeout(300)
@@ -292,10 +292,10 @@ try {
     await page.waitForTimeout(2500) // the camera settles back over the room
     await page.evaluate(() => window.village.talk.notify('mia'))
     const shown = await until(page, (s) => s.cast.mia.glyph > 0.8, 3000)
-    let m = await page.evaluate(() => window.village.talk.screen('mia'))
+    let m = await page.evaluate(() => window.village.talk.screen('mia', 0.75))
     await page.mouse.move(m.x, m.y)
     await page.waitForTimeout(400)
-    m = await page.evaluate(() => window.village.talk.screen('mia'))
+    m = await page.evaluate(() => window.village.talk.screen('mia', 0.75))
     await page.mouse.move(m.x, m.y)
     const faded = await until(page, (s) => s.cast.mia.glyph === 0 && !s.cast.mia.news, 4000)
     await page.evaluate(() => window.village.talk.notify('mia'))
@@ -303,6 +303,33 @@ try {
     const again = await state(page)
     check('the "!" glyph shows, fades after about a second of looking, and never escalates', shown.cast.mia.glyph > 0.8 && faded.cast.mia.glyph === 0 && !again.cast.mia.news && again.cast.mia.glyph === 0, { shown: shown.cast.mia.glyph, faded: faded.cast.mia, again: again.cast.mia.glyph })
     await page.mouse.move(5, 5)
+
+    // ?slip=always: the slip stays on screen with no talk open, addressed to your own villager, and re-addresses itself.
+    const roomSlip = await page.evaluate(() => document.querySelector('.talk-slip').classList.contains('shown'))
+    const page2 = await context.newPage()
+    page2.on('pageerror', (e) => errors.push(String(e)))
+    await open(page2, '?talk=npc&slip=always&q=low')
+    await page2.waitForTimeout(500)
+    const slipOf = () => page2.evaluate(() => {
+      const el = document.querySelector('.talk-slip')
+      return { shown: el.classList.contains('shown'), to: el.dataset.to, tab: el.querySelector('.tab')?.textContent, placeholder: el.querySelector('.line').placeholder }
+    })
+    const idle = await slipOf()
+    await page2.focus('[data-entry="villager-sam"]')
+    await page2.keyboard.press('Enter')
+    await until(page2, (s) => s.mode === 'talk' && s.partner === 'sam', 3000)
+    const toSam = await slipOf()
+    await page2.keyboard.press('Escape')
+    await until(page2, (s) => s.mode === 'room', 2000)
+    const backIdle = await slipOf()
+    const before2 = (await jsonl('alex', 'conversation.jsonl')).length
+    await page2.locator('.talk-slip .line').focus()
+    await typeLine(page2, 'Remind me what we said about dinner?')
+    const direct = await until(page2, (s) => s.mode === 'talk' && s.partner === 'alex' && !s.pending && s.cards.alex?.finished, 20_000)
+    const toAlex = (await jsonl('alex', 'conversation.jsonl')).slice(before2)
+    check('without ?slip=always the slip is hidden in the room', !roomSlip, roomSlip)
+    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "DumplingAlex's" && /Write to Alex's villager/.test(idle.placeholder) && toSam.to === 'sam' && toSam.tab === "TuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
+    await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.
     const counts = []
