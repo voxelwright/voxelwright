@@ -1183,3 +1183,69 @@ text is slow; thinking still appears on some Haiku turns despite
 `thinking: disabled`; the phone layout (field of view, tap areas, card
 placement) is a later unit; the speech variant has no touch path.
 
+
+## Themes (#50 prototype)
+
+`?theme=<id>` restyles the whole home: `sixteen-bit` (16-bit pixel art) or `neon-night`
+(a rain-soaked neon night). Without `?theme=` nothing changes: the theme plugin isn't loaded
+and postfx reads the default theme, whose values are its old literals. A seeded, clock-fixed
+`?q=low` capture against the code before themes differs by a mean of 0.30 to 0.34 (seat) and
+0.30 (iso), against 0.17 to 1.68 between two runs of the old code.
+
+A theme is data (`src/theme/tokens.ts`), one file per preset in `src/theme/presets/`:
+
+- Lights by role: key (shadow-casting), fill (hemisphere), rim, practical (point and spot),
+  plus exposure. Each shifts the light's own colour towards a target, with a gain.
+- Surfaces by role: wall, floor, view (the painted window backdrop), beam (sunbeam, lamp
+  pool), glow (anything with a non-black emissive), trim, backdrop (the yard), other. A role
+  can set colour, roughness, metalness, emissive, or `paint` (a code painter that replaces
+  the map, in `src/theme/paint.ts`).
+- Fog colour, post-processing (bloom, vignette, warmth, grain, grade, the colour beyond the
+  room, reflections, vetoed features, extra stages such as `pixel`), animation timing,
+  costume rules and a prop style hint.
+
+`src/theme/plugin.ts` applies a theme to whatever the plugins made, by role, from each
+object's own values, and puts them back on unload. Plugins tag a role with
+`userData.themeRole` (one line each) or the role is inferred from the object's kind, so
+rooms, props and villagers from other threads are themed without changing them. A light's
+level is folded into its colour, because `window.ts` animates the sun's intensity every
+frame. `src/theme/fx/` holds post stages that can own the scene pass (resolution, filtering)
+and work in display space, after tone mapping, where palettes and dithering belong. Recipes
+are in `.agents/skills/tsl-stylised-post`.
+
+What a theme changes, by mechanism:
+
+| Mechanism | Speed | 16-bit | Neon night |
+| --- | --- | --- | --- |
+| Tokens | next frame | warm sun, cool fill, saturation 1.4, no grain, TRAA off | moonlight, violet fill, magenta lamp and rim, dark walls, glossy floor, violet fog and lift |
+| Post stage | one pipeline rebuild | 225 rows of integer art pixels, outlines, 37-colour OKLab palette, ordered dither | bloom 0.7, SSR at a third of the resolution on tiers with TRAA |
+| Local repaint (code painter) | milliseconds | none | the window shows a night city with lit towers and rain |
+| Model and prop sandbox (not built yet) | 10 to 15 s per prop | floor planks and small props redrawn at pixel scale | neon tube trim, a sign throwing light, a wet street outside |
+
+Costumes follow the same split: colours shift with the tokens today; new costumes would be
+made by the model.
+
+Frame cost, headless Chrome, 1440x900, M1 Pro, WebGPU, `npm run measure -- '<url>' --perf --gpu`,
+one 6 s run each, same session (neon seated is the second of two repeats after a stalled first run):
+
+| Page | Draw calls | GPU p50 / p95 ms |
+| --- | --- | --- |
+| `?q=high` | 526 | 11.0 / 11.9 |
+| `?q=high&theme=sixteen-bit` | 513 | 6.5 / 10.4 |
+| `?q=high&theme=neon-night` | 533 | 8.6 to 9.4 / 11.0 to 16.4 |
+| `?q=high&cam=iso` | 602 | 8.7 / 11.1 |
+| `?q=high&cam=iso&theme=sixteen-bit` | 589 | 7.9 / 11.3 |
+| `?q=high&cam=iso&theme=neon-night` | 609 | 11.3 / 16.4 |
+| `?q=low` | 457 | 5.5 / 9.1 |
+| `?q=low&theme=sixteen-bit` | 444 | 3.8 / 5.4 |
+| `?q=low&theme=neon-night` | 457 | 6.0 / 11.0 |
+
+16-bit is cheaper than the default because the scene renders at about 225 rows. SSR at half
+resolution cost 4 to 7 ms and once broke the 13 ms step-down; at a third it costs about 1 ms.
+
+`node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
+browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
+
+Not built yet: switching themes live with a transition, saving, editing and deleting presets,
+the per-villager "keep my costume" toggle, characters on twos from `motion.characterFps`, a
+theme written from a sentence, and the comic-book and hand-painted looks.
