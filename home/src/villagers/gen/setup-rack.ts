@@ -6,9 +6,12 @@
 import * as THREE from 'three/webgpu'
 import type { Stage } from '../../kernel'
 import { HAND, MAT, TOP } from './workshop'
-import type { PersonaTemplate } from './templates'
+import type { PatternData } from '../../villager'
 
-export interface RackCard { template: PersonaTemplate; source: 'built-in' | 'mine' | 'family'; maker?: string }
+/** A pattern card: a host pattern (built-in, the person's own or the family's), its manner as persona fields. */
+export interface RackCard { template: PatternData; source: 'built-in' | 'mine' | 'family'; maker?: string }
+/** How the host names this pattern when making from it: a built-in id, or "<maker>:<id>". */
+export const refOf = (card: RackCard, person: string) => card.source === 'built-in' ? card.template.id : `${card.template.maker ?? person}:${card.template.id}`
 
 /** The felt a card is cut from, by its place on the rack; the slip's big card wears the same. */
 export const feltFor = (i: number) => FELTS[i % FELTS.length]
@@ -296,7 +299,7 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
       api.bottom = low
     },
     /** For the checks: the template ids in order and the picked one. */
-    state: () => ({ cards: cards.map((c) => ({ id: c.card.template.id, name: c.card.template.name, source: c.card.source, humour: c.card.template.persona.dials?.humour ?? null })), picked: picked?.template.id ?? null }),
+    state: () => ({ cards: cards.map((c) => ({ id: c.card.template.id, name: c.card.template.name, source: c.card.source, humour: (c.card.template.persona.humour as { lean?: string } | undefined)?.lean ?? null })), picked: picked?.template.id ?? null }),
     dispose() {
       clear()
       shelf.remove()

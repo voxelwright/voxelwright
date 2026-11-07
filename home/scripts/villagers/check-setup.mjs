@@ -3,7 +3,8 @@
 // (orchestration only, no model), then drives ?villager=gen&setup=1 in headless Chrome:
 // &from= stitching, the five tools by keyboard and pointer, the send-off, reduced motion,
 // failures leaving nothing placed, the stub host's waiting and 422 paths, and unloads
-// returning to baseline, the one repair pass, and the crude gate taken from the host's profile.
+// returning to baseline, the one repair pass (a refused module or a refused persona), the jokes dial as
+// the host's humourCeiling locks it, patterns from the host, and the send-off writing persona.json.
 // --live adds one real Sonnet make (and at most one remake) through the host and the page.
 // Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900]
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -22,8 +23,9 @@ const [vw, vh] = arg('viewport', '1440x900').split('x').map(Number)
 const root = await mkdtemp(join(tmpdir(), 'villager-setup-'))
 
 // The host, in this process: the real routes and token, a stub villager maker that takes 3 s.
-// Profiles live on the host only (the page has no profile flag): Alex is an adult who opted in to
-// crude humour, Jo an adult who did not, Sam a child, and Kit has no profile (unknown).
+// Profiles are #42's and live on the host only (the page has no profile flag): Alex and Jo are adults with
+// no humour setting (the dial is clean or cheeky), Lee an adult whose admin set crude, Sam a child, and Kit
+// has no profile (unknown).
 const { Context } = await import(join(homeDir, '../host/node_modules/cordis/lib/index.mjs')).catch(() => import('cordis'))
 const { default: villager } = await import(join(homeDir, '../host/src/villager.ts'))
 const { stubAgent } = await import(join(homeDir, '../host/src/villager-agent.ts'))
@@ -35,8 +37,8 @@ const slowStub = stubVillagerMaker(10000)
 let slow = false
 let useLive = false
 const realMaker = live ? claudeVillagerMaker('sonnet') : null
-const { parseProfiles } = await import(join(homeDir, '../host/src/villager-make.ts'))
-const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam', jo: 'Jo', kit: 'Kit' }, profiles: parseProfiles('alex:adult-optin,sam:child,jo:adult'), villagerMaker: (ask) => (useLive ? realMaker(ask) : slow ? slowStub(ask) : stub(ask)) })
+const { TEMPLATES } = await import(join(homeDir, '../host/src/persona.ts'))
+const host = hostCtx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam', jo: 'Jo', lee: 'Lee', kit: 'Kit' }, profiles: { alex: { age: 'adult' }, jo: { age: 'adult' }, lee: { age: 'adult', humour: 'crude' }, sam: { age: 'child' } }, villagerMaker: (ask) => (useLive ? realMaker(ask) : slow ? slowStub(ask) : stub(ask)) })
 await host.await()
 const hostPort = hostCtx.villager.port
 
@@ -162,7 +164,7 @@ try {
     await page.keyboard.press('Tab')
     await page.keyboard.press('End')
     const locked = await st(page)
-    check('humour: crude is locked for an adult who has not opted in (the host\'s profile); the dial stops at cheeky and says why', locked.values.humour === 0.5 && /locked/.test(locked.note ?? ''), { humour: locked.values.humour, note: locked.note })
+    check('humour: crude is never picked on the table; the dial stops at cheeky and says only the household\'s admin sets it', locked.values.humour === 0.5 && /household's admin/.test(locked.note ?? ''), { humour: locked.values.humour, note: locked.note, dial: locked.humourDial })
     await page.keyboard.press('Home')
     await page.waitForTimeout(700)
     const after = await st(page)
@@ -240,49 +242,48 @@ try {
     await context.close()
   }
 
-  // ── Patterns: a template alone or with words; the humour gate in the page ──
+  // ── Patterns from the host: with words or alone; the manner set by the host; the admin's crude ──
   {
-    const { context, page, errors } = await open(`&from=${FROM}&person=jo`)
+    const { context, page, errors } = await open('&person=lee')
     const rackState = await page.evaluate(() => window.villagerSetup.patterns())
-    check('patterns: the rack offers the built-in templates for this profile', ['organiser', 'coach', 'grandparent', 'craftsperson', 'buddy'].every((id) => rackState.cards.some((c) => c.id === id)) && !rackState.cards.some((c) => c.id === 'companion'), rackState.cards.map((c) => c.id))
+    check('patterns: the rack offers the host\'s built-in patterns for this profile', ['organiser', 'coach', 'grandparent', 'craftsperson', 'buddy'].every((id) => rackState.cards.some((c) => c.id === id)) && !rackState.cards.some((c) => c.id === 'companion'), rackState.cards.map((c) => c.id))
+    await page.locator('.vs-slip .line').fill('a quiet heron who keeps the diary')
     await page.click('.vs-pattern[data-template=coach]')
     await page.waitForTimeout(600)
     check('patterns: picking a card shows it on the slip', (await page.textContent('.vs-slip .chip')).includes('Calm coach') && (await st(page)).rack.picked === 'coach')
     await shot(page, '1b-picked')
     await page.focus('.vs-slip .line')
     await page.keyboard.press('Enter')
-    await until(page, ['tuning'])
+    await until(page, ['tuning', 'failed'])
     const s = await st(page)
-    check('patterns: the villager takes the template: calm, gentle humour, its dials on the ribbons', s.persona.temperament === 'calm' && s.persona.humour === 'gentle' && Math.abs(s.values.warmth - 0.7) < 1e-9 && s.persona.quirks.some((q) => /next step/.test(q)), s.persona)
+    check('patterns: the host sets the pattern\'s manner over the model\'s persona (coach register and quirks, the model\'s name)', s.persona?.template === 'coach' && s.persona.register === TEMPLATES.coach.register && s.persona.quirks.includes('breaks things into the smallest next step') && s.persona.name === 'Biscuit' && s.values.chatty === 0.5, s.persona)
+    check('humour: for an adult whose admin set crude, the dial is pinned at crude (the persona\'s own lean stays cheeky)', s.humourDial?.locked === 'crude' && s.humourDial.by === 'admin' && s.values.humour === 1 && s.persona.humour.lean !== 'crude', { dial: s.humourDial, humour: s.values.humour })
+    await page.evaluate(() => window.villagerSetup.set('humour', 0))
+    const pinned = await st(page)
+    check('humour: moving a pinned dial leaves it and says the household\'s admin set it', pinned.values.humour === 1 && /set by the household's admin/.test(pinned.note ?? ''), { humour: pinned.values.humour, note: pinned.note })
     await page.waitForTimeout(900)
     check('patterns: the name tag says which pattern it was made from', ((await pg(page)).nametag ?? '').includes('Calm coach pattern'), (await pg(page)).nametag)
+    // The camera eases to fit this villager; the capture waits until it has stopped (slow on a busy machine).
+    await page.waitForFunction(async () => {
+      const a = window.villagerSetup.camera()
+      await new Promise((r) => setTimeout(r, 250))
+      return window.villagerSetup.camera().every((v, i) => Math.abs(v - a[i]) < 1e-4)
+    }, null, { timeout: 15000 })
     await shot(page, '4-pattern')
+    check('patterns: no page errors', errors.length === 0, errors)
     await context.close()
   }
   {
-    // Irreverent buddy for an adult who has not opted in: cheeky, with a short note why.
-    const { context, page } = await open(`&from=${FROM}&person=jo`)
-    await page.evaluate(() => window.villagerSetup.patterns())
-    await page.click('.vs-pattern[data-template=buddy]')
-    const picked = await st(page)
-    await page.focus('.vs-slip .line')
-    await page.keyboard.press('Enter')
-    await until(page, ['tuning'])
-    const s = await st(page)
-    check('patterns: irreverent buddy without the opt-in is cheeky, with a warm note', s.persona.dials.humour === 'cheeky' && s.values.humour === 0.5 && /cheeky/.test(picked.note ?? '') && /opted in/.test(picked.note ?? ''), { humour: s.persona.dials.humour, note: picked.note })
-    await context.close()
-  }
-  {
-    // A template alone, no words: allowed (the saved description stands in for &from=).
-    const { context, page } = await open(`&from=${FROM}`)
+    // A pattern alone, no words: the model gets the pattern's name as the description.
+    const { context, page } = await open('&person=lee')
     await page.evaluate(() => window.villagerSetup.patterns())
     await page.click('.vs-pattern[data-template=buddy]')
     await page.locator('.vs-slip .line').fill('')
     await page.focus('.vs-slip .line')
     await page.keyboard.press('Enter')
-    await until(page, ['tuning'])
+    await until(page, ['tuning', 'failed'])
     const s = await st(page)
-    check('patterns: a template alone makes a villager; an opted-in adult keeps crude', s.state === 'tuning' && s.persona.dials.humour === 'crude' && s.values.humour === 1, s.persona.dials)
+    check('patterns: a pattern alone makes a villager, in the buddy\'s manner, never crude itself', s.state === 'tuning' && s.persona?.template === 'buddy' && s.persona.register === TEMPLATES.buddy.register && s.persona.humour.lean === 'cheeky', s.persona)
     await context.close()
   }
 
@@ -331,7 +332,7 @@ try {
     await until(page, ['tuning', 'failed'])
     slow = false
     const s = await st(page)
-    check('host: the made module is stitched in the asked accent', s.state === 'tuning' && s.name === 'Dumpling' && s.pieces.accessories > 0, { state: s.state, failure: s.failure, name: s.name, pieces: s.pieces })
+    check('host: the made module is stitched in the asked accent, named by its checked persona', s.state === 'tuning' && s.name === 'Biscuit' && s.persona?.name === 'Biscuit' && s.pieces.accessories > 0, { state: s.state, failure: s.failure, name: s.name, pieces: s.pieces })
     if (s.state !== 'tuning') throw new Error(`host stub villager failed: ${s.failure}`)
     await page.evaluate(() => window.villagerSetup.set('size', 0.8))
     await page.evaluate(() => window.villagerSetup.sendOff())
@@ -339,6 +340,12 @@ try {
     const files = await readdir(join(root, 'people', 'alex', 'villagers'))
     const stored = JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', files[0]), 'utf8'))
     check('host: the send-off keeps the tuning beside the module, on the host', files.length === 1 && stored.tuning?.size === 0.8 && stored.module.includes('villager.tag('), stored.tuning)
+    await page.waitForFunction(() => window.villagerSetup.state().sentOff !== 'sending', null, { timeout: 10000 })
+    const personaJson = JSON.parse(await readFile(join(root, 'people', 'alex', 'persona.json'), 'utf8'))
+    const voiceJson = JSON.parse(await readFile(join(root, 'people', 'alex', 'voice.json'), 'utf8'))
+    check('send-off: "Off you go" writes the person\'s persona.json (checked by the host) and its babble voice', (await st(page)).sentOff === 'Biscuit' && personaJson.name === 'Biscuit' && ['pitch', 'range', 'formant', 'rate', 'breath', 'wobble', 'wobbleRate', 'tilt', 'gain'].every((k) => Number.isFinite(voiceJson[k])), { sentOff: (await st(page)).sentOff, name: personaJson.name, voice: voiceJson })
+    const current = await page.evaluate(async () => (await import('/src/villager.ts')).currentVillager('alex'))
+    check('send-off: after a reload the host serves the villager and its voice', current.ok && current.persona?.name === 'Biscuit' && current.voice?.pitch === voiceJson.pitch, current)
 
     // Save a tuned pattern, shared: it reloads, and Sam (a child) sees it as cheeky.
     await write(page, 'a wry badger who fixes the bikes')
@@ -346,6 +353,7 @@ try {
     await until(page, ['tuning', 'failed'])
     await page.evaluate(() => window.villagerSetup.set('warmth', 0.2))
     await page.evaluate(() => window.villagerSetup.set('humour', 1))
+    check('humour: an adult without an admin setting cannot pick crude (the dial stays at cheeky)', (await st(page)).values.humour === 0.5)
     await page.evaluate(() => window.villagerSetup.save(true))
     const afterSave = await st(page)
     const savedFiles = await readdir(join(root, 'people', 'alex', 'persona-templates')).catch(() => [])
@@ -355,7 +363,7 @@ try {
     check('save: the saved card stands in the rack with a "saved" tag', await page.evaluate(() => document.querySelector('.vs-saved')?.classList.contains('shown')))
     await shot(page, '4b-saved')
     const pattern = JSON.parse(await readFile(join(root, 'people', 'alex', 'persona-templates', savedFiles[0]), 'utf8'))
-    check('save: an opted-in adult keeps crude and the tuned warmth', pattern.persona.dials.humour === 'crude' && pattern.persona.dials.warmth === 0.2 && pattern.shared === true, pattern.persona.dials)
+    check('save: kept as a whole persona, the tuned warmth mapped in (blunt), cheeky at most, shared', /^blunt/.test(pattern.persona.temperament) && pattern.persona.humour.lean === 'cheeky' && pattern.shared === true && !('dials' in pattern.persona), pattern.persona)
     await page.evaluate(() => window.villagerSetup.sendOff())
     await until(page, ['empty'])
 
@@ -371,21 +379,22 @@ try {
     // It reloads for its maker, and is shared with Sam, a child, as cheeky in the host and the page.
     const again = await open('')
     const mine = await again.page.evaluate(() => window.villagerSetup.patterns())
-    check('save: after a reload the saved pattern is back on the rack', mine.cards.some((c) => c.source === 'mine' && c.humour === 'crude'), mine.cards)
+    check('save: after a reload the saved pattern is back on the rack', mine.cards.some((c) => c.source === 'mine' && c.humour === 'cheeky'), mine.cards)
     await again.context.close()
     // The URL asks for an opted-in adult; the page has no such flag and takes Sam's profile from the host.
-    const sam = await open(`&from=${FROM}&person=sam&profile=adult-optin`)
+    const sam = await open('&person=sam&profile=adult-optin')
     const seen = await sam.page.evaluate(() => window.villagerSetup.patterns())
-    check('profile: the page takes the person\'s profile from the host, whatever the URL says', JSON.stringify((await st(sam.page)).profile) === JSON.stringify({ adult: false, crudeOptIn: false }), (await st(sam.page)).profile)
+    check('profile: the page takes the person\'s profile from the host, whatever the URL says', JSON.stringify((await st(sam.page)).profile) === JSON.stringify({ age: 'child' }), (await st(sam.page)).profile)
     const shared = seen.cards.find((c) => c.source === 'family')
-    check('family: the shared pattern appears for another person, cheeky from the host', shared && shared.humour === 'cheeky', seen.cards)
+    check('family: the shared pattern appears for another person, as saved', shared && shared.humour === 'cheeky', seen.cards)
     check('family: built-in templates for a child leave out the adults-only one', !seen.cards.some((c) => c.id === 'buddy') && seen.cards.some((c) => c.id === 'companion'), seen.cards.map((c) => c.id))
     await sam.page.click(`.vs-pattern[data-template="${shared.id}"]`)
+    await sam.page.locator('.vs-slip .line').fill('a patient owl who helps with spelling')
     await sam.page.focus('.vs-slip .line')
     await sam.page.keyboard.press('Enter')
-    await until(sam.page, ['tuning'])
+    await until(sam.page, ['tuning', 'failed'])
     const s = await st(sam.page)
-    check('family: Sam\'s villager from it is cheeky in the page, and the dial is locked', s.persona.dials.humour === 'cheeky' && s.values.humour === 0.5 && Math.abs(s.values.warmth - 0.2) < 1e-9, { dials: s.persona.dials, values: s.values })
+    check('family: Sam\'s villager takes the shared pattern\'s manner (blunt), cheeky at most', /^blunt/.test(s.persona?.temperament ?? '') && s.persona.humour.lean === 'cheeky' && s.values.humour === 0.5, { persona: s.persona, values: s.values })
     await sam.page.evaluate(() => window.villagerSetup.set('humour', 1))
     check('family: pushing the dial to crude for a child stays cheeky, with &profile=adult-optin in the URL', (await st(sam.page)).values.humour === 0.5)
     await sam.page.evaluate(() => window.villagerSetup.sendOff())
@@ -400,7 +409,7 @@ try {
     await until(kit.page, ['tuning'])
     await kit.page.evaluate(() => window.villagerSetup.set('humour', 1))
     const k = await st(kit.page)
-    check('profile: a person the host has no profile for is unknown, and the dial stops at cheeky', k.profile === null && k.values.humour === 0.5, { profile: k.profile, humour: k.values.humour })
+    check('profile: a person the host has no profile for is unknown, and the dial stops at cheeky', k.profile?.age === 'unknown' && k.values.humour === 0.5, { profile: k.profile, humour: k.values.humour })
     await kit.context.close()
   }
 
@@ -419,6 +428,17 @@ try {
     const record = records.find((x) => x.description.includes('giraffe'))
     check('repair: the remade module is stitched, and the host keeps the reason and the first module', s.state === 'tuning' && s.timings.repaired === 1 && record?.repair?.reason === r.refusal && record.repair.previous.includes("villager.mark(villager.tag(new THREE.Group(), 'head'))") && !record.module.includes('villager.mark(villager.tag'), { state: s.state, failure: s.failure, repair: record?.repair?.reason })
     check('repair: no page errors', errors.length === 0, errors)
+    await context.close()
+  }
+  {
+    // The host's persona check refuses the first persona (a crude lean): one remake with that reason.
+    const { context, page, errors } = await open('&person=kit')
+    await page.locator('.vs-slip .line').fill('a [stub-bad-persona] vole who sorts the post')
+    await page.keyboard.press('Enter')
+    await until(page, ['tuning', 'failed'])
+    const s = await st(page)
+    check('repair: a persona the host refused is remade once with the check\'s reason, and the repaired one is used', s.state === 'tuning' && s.timings.repaired === 1 && /humour\.lean is clean or cheeky/.test(s.refusal) && s.persona?.name === 'Biscuit', { state: s.state, refusal: s.refusal, failure: s.failure })
+    check('repair (persona): no page errors', errors.length === 0, errors)
     await context.close()
   }
 

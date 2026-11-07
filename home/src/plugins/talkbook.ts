@@ -1,8 +1,10 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
+import { inputVariant } from '../talk/input'
 import { own, replace } from '../kernel'
 import { canvas, makeNoise, paintLinen, paintPageEdges, paintPaper, paintRibbon, rng, toTexture } from '../paint'
 import { conversation, say } from '../villager'
+import { listSketches, sketchImage } from '../talk/sketch'
 
 // The richer kitchen notebook (#42 prototype), only with ?talk=notebook. The
 // table's notebook steps aside (notebook.ts returns early on the same flag and
@@ -12,15 +14,15 @@ import { conversation, say } from '../villager'
 // only DOM is one off-screen input and one polite live region.
 
 type RGB = [number, number, number]
-type Section = 'talk' | 'tasks'
+type Section = 'talk' | 'tasks' | 'sketches'
 type Mark = 'sprig' | 'sun' | 'moon'
 interface Villager { id: string; name: string; awake: boolean; ribbon: RGB; mark: Mark }
 
 // Synthetic people until family isolation is proven (AGENTS.md). Only alex has
 // a villager on the host; June and Bram are painted placeholders that say so.
 const query = new URLSearchParams(location.search)
-/** With the always-on input (?talk=npc&input=held|speech, #42) this book is the journal: one ribbon per villager in the room, all awake. */
-const JOURNAL = query.get('talk') === 'npc' && (query.get('input') === 'held' || query.get('input') === 'speech')
+/** With the always-on input (?talk=npc, held or speech, #42) this book is the journal: one ribbon per villager in the room, all awake. */
+const JOURNAL = inputVariant(query) !== null
 const VILLAGERS: Villager[] = JOURNAL ? [
   { id: 'alex', name: 'Dumpling', awake: true, ribbon: [178, 74, 54], mark: 'sprig' },
   { id: 'sam', name: 'Tuft', awake: true, ribbon: [196, 146, 40], mark: 'sun' },
@@ -277,7 +279,7 @@ export default {
     // Where we are in the book, remembered between visits.
     const saved = readJson<{ villager?: string; section?: Section }>(AT_KEY, {})
     let vi = Math.max(0, VILLAGERS.findIndex((v) => v.id === saved.villager))
-    let section: Section = saved.section === 'tasks' ? 'tasks' : 'talk'
+    let section: Section = saved.section === 'tasks' ? 'tasks' : saved.section === 'sketches' && JOURNAL ? 'sketches' : 'talk'
     let spread = -1 // talk spreads: -1 follows the latest
     const ticked = readJson<Record<string, boolean>>(TASKS_KEY, {})
     const unsent = readJson<{ person: string; text: string }[]>(UNSENT_KEY, [])
@@ -497,12 +499,12 @@ export default {
     })
 
     // Paper index tabs on the right page's fore-edge.
-    const SECTIONS: { id: Section; label: string }[] = [{ id: 'talk', label: 'Talk' }, { id: 'tasks', label: 'Tasks' }]
+    const SECTIONS: { id: Section; label: string }[] = [{ id: 'talk', label: 'Talk' }, { id: 'tasks', label: 'Tasks' }, ...(JOURNAL ? [{ id: 'sketches' as const, label: 'Sketches' }] : [])]
     const tabs = SECTIONS.map((s, i) => {
       const [c, g] = canvas(256, 160)
       g.drawImage(paperR, 300, 300, 256, 160, 0, 0, 256, 160)
       g.textAlign = 'center'
-      inkText(g, s.label, 168, 104, 'italic 600 66px "Bradley Hand", "Segoe Print", cursive', 'rgba(36, 28, 22, 0.95)')
+      inkText(g, s.label, 168, 104, 'italic 600 66px "Bradley Hand", "Segoe Print", cursive', 'rgba(36, 28, 22, 0.95)', 170)
       const face = new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.9 })
       const edge = new THREE.MeshStandardMaterial({ color: '#e6d6b6', roughness: 0.9 })
       const tab = boxWith(0.058, 0.0007, 0.075, [edge, edge, face, edge, edge, edge])
@@ -545,15 +547,16 @@ export default {
     const latestSpread = () => Math.ceil((talkPages().length - 1) / 2)
     const currentSpread = () => (spread < 0 ? latestSpread() : Math.min(spread, latestSpread()))
 
-    type PageView = { kind: 'card' } | { kind: 'talk'; page: number; spread: number; last: number } | { kind: 'tasks' } | { kind: 'asleep' }
+    type PageView = { kind: 'card' } | { kind: 'talk'; page: number; spread: number; last: number } | { kind: 'tasks' } | { kind: 'sketches' } | { kind: 'asleep' }
     const leftView = (): PageView => {
-      if (section === 'tasks' || !v().awake) return { kind: 'card' }
+      if (section !== 'talk' || !v().awake) return { kind: 'card' }
       const s = currentSpread()
       return s === 0 ? { kind: 'card' } : { kind: 'talk', page: 2 * s - 1, spread: s, last: latestSpread() }
     }
     const rightView = (): PageView => {
       if (!v().awake) return { kind: 'asleep' }
       if (section === 'tasks') return { kind: 'tasks' }
+      if (section === 'sketches') return { kind: 'sketches' }
       const s = currentSpread()
       return { kind: 'talk', page: 2 * s, spread: s, last: latestSpread() }
     }
@@ -699,6 +702,50 @@ export default {
       inkText(g, 'A sample list for now.', 120, PH - 120, SMALL_PENCIL, 'rgba(86, 80, 74, 0.6)')
     }
 
+    // ---- sketches (#42, src/talk/sketch.ts): the person's drawings, kept on the host under them ----
+    type Kept = { id: string; words?: string; given: string[]; made: string[]; img: ImageBitmap | null }
+    let drawings: Kept[] = []
+    const loadSketches = async () => {
+      const list = await listSketches('alex')
+      if (!list.ok) return
+      const known = new Map(drawings.map((d) => [d.id, d.img]))
+      drawings = await Promise.all(list.sketches.slice(0, 6).map(async (d) => ({ ...d, img: known.get(d.id) ?? await sketchImage('alex', d.id) })))
+      dirty = true
+    }
+    /** Your drawings on your own ribbon; on a villager's, the ones you gave them. Pinned on the page like cuttings. */
+    const paintSketches = (g: CanvasRenderingContext2D) => {
+      g.textAlign = 'left'
+      title(g, 'Sketches')
+      const mine = v().id === 'alex'
+      const shown = drawings.filter((d) => mine || d.given.includes(v().id))
+      if (!shown.length) {
+        g.textAlign = 'center'
+        inkText(g, mine ? 'Draw on your notepad: tap the pencil.' : `Nothing given to ${v().name} yet.`, PW / 2, 420, PENCIL, PENCIL_INK)
+        return
+      }
+      const r = rng(1300)
+      shown.forEach((d, i) => {
+        const col = i % 2, row = Math.floor(i / 2)
+        const w = 380, h = Math.round(w * 461 / 768)
+        const x = 110 + col * 430, y = 250 + row * 380
+        g.save()
+        g.translate(x + w / 2, y + h / 2)
+        g.rotate((r() - 0.5) * 0.06)
+        g.fillStyle = 'rgba(80, 50, 20, 0.16)'
+        g.fillRect(-w / 2 + 6, -h / 2 + 8, w, h)
+        g.fillStyle = '#fbf3e1'
+        g.fillRect(-w / 2, -h / 2, w, h)
+        if (d.img) g.drawImage(d.img, -w / 2, -h / 2, w, h)
+        // A strip of tape across the top.
+        g.fillStyle = 'rgba(230, 214, 170, 0.75)'
+        g.fillRect(-46, -h / 2 - 14, 92, 28)
+        g.restore()
+        const what = d.made.length ? 'made into a piece' : d.given.length ? `given to ${d.given.map((id) => VILLAGERS.find((x) => x.id === id)?.name ?? id).join(', ')}` : ''
+        g.textAlign = 'left'
+        if (what) inkText(g, what, x + 4, y + h + 52, SMALL_PENCIL, PENCIL_INK, w)
+      })
+    }
+
     const paintAsleep = (g: CanvasRenderingContext2D) => {
       const who = v()
       paintPressedFlower(g, 520, 380, 800 + vi)
@@ -718,6 +765,7 @@ export default {
       if (pv.kind === 'card') paintCard(g)
       else if (pv.kind === 'talk') paintTalk(g, side, pv)
       else if (pv.kind === 'tasks') paintTasks(g)
+      else if (pv.kind === 'sketches') paintSketches(g)
       else paintAsleep(g)
       g.restore()
     }
@@ -793,7 +841,7 @@ export default {
       ...(section === 'tasks' && v().awake ? tasks().map((_, index) => ({ kind: 'task' as const, index })) : []),
     ]
     const describe = (c: Control) =>
-      c.kind === 'ribbon' ? `${VILLAGERS[c.index].name}'s ribbon` : c.kind === 'tab' ? `${c.section === 'talk' ? 'Talk' : 'Tasks'} tab` : `${tasks()[c.index].text}, ${ticked[`${v().id}.${tasks()[c.index].id}`] ? 'ticked' : 'not ticked'}`
+      c.kind === 'ribbon' ? `${VILLAGERS[c.index].name}'s ribbon` : c.kind === 'tab' ? `${SECTIONS.find((x) => x.id === c.section)?.label} tab` : `${tasks()[c.index].text}, ${ticked[`${v().id}.${tasks()[c.index].id}`] ? 'ticked' : 'not ticked'}`
 
     const voice = document.createElement('p')
     voice.className = 'village-offscreen'
@@ -814,12 +862,14 @@ export default {
     }
     const pickSection = (next: Section) => {
       if (next === section) return
+      const order = (x: Section) => SECTIONS.findIndex((y) => y.id === x)
       turnTo(() => {
         section = next
         spread = -1
-      }, next === 'tasks' ? 1 : -1, 1)
+      }, order(next) > order(section) ? 1 : -1, 1)
       updateInput()
-      announce(next === 'talk' ? `Talk with ${v().name}` : `${v().name}'s tasks`)
+      if (next === 'sketches') void loadSketches()
+      announce(next === 'talk' ? `Talk with ${v().name}` : next === 'tasks' ? `${v().name}'s tasks` : 'Sketches')
     }
     const turnSpread = (dir: 1 | -1) => {
       if (section !== 'talk' || !v().awake) return
@@ -946,7 +996,8 @@ export default {
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault()
         learn()
-        pickSection(e.key === 'ArrowDown' ? 'tasks' : 'talk')
+        const at = SECTIONS.findIndex((x) => x.id === section) + (e.key === 'ArrowDown' ? 1 : -1)
+        pickSection(SECTIONS[Math.max(0, Math.min(SECTIONS.length - 1, at))].id)
       } else if (e.key === 'PageUp' || e.key === 'PageDown') {
         e.preventDefault()
         turnSpread(e.key === 'PageDown' ? 1 : -1)
@@ -1046,6 +1097,7 @@ export default {
 
     // The always-on input opens the journal at a villager or section (#42).
     ctx.on('village/journal', ({ person, section: wanted }) => {
+      if (JOURNAL) void loadSketches()
       const index = VILLAGERS.findIndex((x) => x.id === person)
       if (!open) {
         // Closed: go straight to the page, no leaves to turn behind a shut cover.

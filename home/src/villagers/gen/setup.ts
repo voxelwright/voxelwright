@@ -15,7 +15,7 @@ import { own } from '../../kernel'
 import { ROUTINES, SCALE } from '../../plugins/villagers'
 import { validate } from '../../props/rebuild'
 import { PropBox } from '../../props/sandbox'
-import { familyTemplates, makeVillager, personaTemplates, remakeVillager, saveTemplate, tuneVillager } from '../../villager'
+import { familyTemplates, makeVillager, personaTemplates, remakeVillager, saveTemplate, sendOffVillager, type HumourDial, type PatternData } from '../../villager'
 import { Babbler } from '../../voice/engine'
 import { clampVoice, voiceFromDescription } from '../../voice/gen'
 import { registerVoice, unregisterVoice, VOICES, type VoiceProfile } from '../../voice/profiles'
@@ -26,10 +26,9 @@ import { SPOTS } from '../world'
 import { assemble } from './assemble'
 import { build, check } from './build'
 import { accentMeshes, hueTurn, pieces, Puppet, type Piece } from './setup-stitch'
-import { controls, HUE_SPAN, HUMOUR, KEYS, TAG_CSS, type Key, type Layout } from './sliders'
-import { checked, crudeAllowed, fallbackPersona, personaFor, personaNotes, tunedLine, type Persona, type PersonaProfile, type PersonaTemplate } from './setup-persona'
-import { footFor, rack, type RackCard } from './setup-rack'
-import { templatesFor } from './templates'
+import { controls, HUE_SPAN, KEYS, TAG_CSS, type Key, type Layout } from './sliders'
+import { checked, dialsOf, fallbackPersona, personaNotes, tunedLine, type Persona } from './setup-persona'
+import { footFor, rack, refOf, type RackCard } from './setup-rack'
 import { HAND, MAT, TOP, workshop } from './workshop'
 import type { Meta } from './load'
 
@@ -80,8 +79,9 @@ export default {
     const kept: Made[] = []
     const timings: Record<string, number> = {}
     let box: PropBox | null = null
-    /** The host's profile of this person (GET persona-templates), the only input to the crude gate. Null, and crude locked, until it answers. */
-    let PROFILE: PersonaProfile = null
+    /** The host's profile of this person and its jokes dial (GET persona-templates). Until it answers, the dial is clean or cheeky. */
+    let PROFILE: unknown = null
+    let HUMOUR_DIAL: HumourDial = { locked: null }
 
     const tools = controls(stage, {
       input: (key, v) => applyTuning(key, v),
@@ -91,10 +91,18 @@ export default {
         // A bigger or smaller villager: the camera eases to frame it again (never during the drag).
         if (key === 'size' && state === 'tuning') atTable()
       },
-      locked: () => note('Crude jokes stay locked here. They need a grown-up profile that has opted in.'),
+      locked: () => note(lockedNote()),
     })
     group.add(tools.group)
+    // Crude is never chosen on the table: it is only ever the household admin's setting for a grown-up.
     tools.lock('humour', true)
+    const lockedNote = () => HUMOUR_DIAL.locked === null
+      ? "Crude isn't picked here. Only the household's admin can set it, for a grown-up."
+      : HUMOUR_DIAL.by === 'admin'
+        ? `${HUMOUR_DIAL.locked === 'crude' ? 'Crude jokes are on' : `Jokes stay ${HUMOUR_DIAL.locked}`} for ${OWNER}, set by the household's admin.`
+        : `${OWNER} asked to keep it clean, so the jokes stay clean.`
+    /** The dial's position for a host-locked level: clean 0, cheeky 0.5, crude 1. */
+    const lockedAt = () => HUMOUR_DIAL.locked === null ? null : HUMOUR_DIAL.locked === 'crude' ? 1 : HUMOUR_DIAL.locked === 'cheeky' ? 0.5 : 0
     const patterns = rack(stage, (card) => onPattern(card))
     group.add(patterns.group)
     own(ctx, group)
@@ -477,14 +485,15 @@ export default {
       setStatus(FROM ? 'Unfolding a saved pattern…' : 'Drafting the pattern from your words… usually about a minute.', 'warm')
       let fail: string | null = null
       try {
-        let arm: 'code' | 'spec' = 'code', text = '', source: Made['source'] = {}, hostPersona: unknown = null
+        let arm: 'code' | 'spec' = 'code', text = '', source: Made['source'] = {}, hostPersona: unknown = null, hostRefusal = ''
+        let hostDials: Record<string, number> | null = null
         if (FROM) {
           const saved = await fetchSaved(FROM)
           arm = saved.meta.arm
           text = saved.text
           source = { from: FROM }
         } else {
-          const answer = await makeVillager(PERSON, description, ACCENT)
+          const answer = await makeVillager(PERSON, description, ACCENT, template ? refOf(patterns.picked!, PERSON) : undefined)
           timings.modelMs = answer.ms
           if (!answer.ok) {
             fail = answer.why === 'away' ? 'away' : answer.why === 'busy' ? 'busy' : 'model'
@@ -492,16 +501,22 @@ export default {
           }
           text = answer.module
           hostPersona = answer.persona
+          hostRefusal = answer.personaRefused ?? ''
+          hostDials = answer.dials
           source = { item: answer.item }
           timings.costUsd = answer.costUsd ?? NaN
         }
-        let got: Awaited<ReturnType<typeof figureFrom>>
+        let got: Awaited<ReturnType<typeof figureFrom>> | null = null
+        let moduleRefusal = ''
         try {
           got = await figureFrom(arm, text, ACCENT)
         } catch (error) {
           if (FROM || !source.item) throw error
-          // The home's checks refused it: one repair, with the reason, and the clock still counting.
-          const reason = String(error instanceof Error ? error.message : error)
+          moduleRefusal = String(error instanceof Error ? error.message : error)
+        }
+        if (!FROM && source.item && (!got || hostRefusal)) {
+          // The home's checks refused the module, or the host's check its persona: one repair, with the reasons, and the clock still counting.
+          const reason = [moduleRefusal, hostRefusal].filter(Boolean).join('; ')
           lastRefusal = reason
           repairing = true
           setStatus(`One piece didn't sit right, so it's being re-cut… ${elapsed()} s`, 'warm')
@@ -512,27 +527,30 @@ export default {
             throw new Error(`remake: ${again.why} (first: ${reason})`)
           }
           text = again.module
-          hostPersona = again.persona ?? hostPersona
+          if (again.personaRefused) throw new Error(`remake: ${again.personaRefused} (first: ${reason})`)
+          hostPersona = again.persona
+          hostDials = again.dials
           timings.costUsd = (timings.costUsd || 0) + (again.costUsd ?? NaN)
           got = await figureFrom(arm, text, ACCENT)
           timings.repaired = 1
         }
+        if (!got) throw new Error(moduleRefusal)
         await patternsReady
-        // The persona: the host's (checked again here), else the module's own, else a plain one from
-        // the words; then the picked pattern over it; then the gate for this profile.
-        const base = checked(hostPersona) ?? checked(got.persona) ?? fallbackPersona(description, got.role)
-        const { persona, gated } = personaFor(base, template, PROFILE)
-        if (gated) note(`${template?.name ?? 'This pattern'} is set to cheeky here. Crude jokes need a grown-up profile that has opted in.`)
+        // The persona: the host's, checked by #42's checkPersona there (a live one always has it); a saved result's
+        // own, else a plain one from the words. The dials are only where the sliders start.
+        const persona = checked(hostPersona) ?? checked(got.persona) ?? fallbackPersona(description, got.role, got.name)
+        const dials = hostDials ?? dialsOf(persona)
         const tuning = Object.fromEntries(KEYS.map((k) => [k, 0.5])) as Tuning
-        tuning.warmth = persona.dials.warmth
-        tuning.playful = persona.dials.playful
-        tuning.chatty = persona.dials.chatty
-        tuning.humour = HUMOUR.indexOf(persona.dials.humour) / 2
-        made = { source, description, accent: ACCENT, module: text, arm, name: got.name, persona, template: template?.name ?? null, tuning }
+        tuning.warmth = dials.warmth
+        tuning.playful = dials.playful
+        tuning.chatty = dials.chatty
+        tuning.humour = lockedAt() ?? dials.humour
+        // A live villager is called by its checked persona's name (the one sent off); a saved result by its own.
+        made = { source, description, accent: ACCENT, module: text, arm, name: checked(hostPersona)?.name ?? got.name, persona, template: template?.name ?? null, tuning }
         tools.init(tuning)
         clearInterval(clock)
         timings.readyMs = performance.now() - t0
-        await stitch(got.fig, got.name, got.bark, got.voice ?? voiceFromDescription(description))
+        await stitch(got.fig, made.name, got.bark, got.voice ?? voiceFromDescription(description))
       } catch (error) {
         clearInterval(clock)
         failed(fail ?? 'sewing', String(error instanceof Error ? error.message : error))
@@ -560,6 +578,8 @@ export default {
       line.focus({ preventScroll: true })
     }
     let lastFailure = ''
+    /** The last send-off: the host's name for the person's villager now, 'sending', or why it failed. */
+    let sentOff: string | null = null
     /** The home's checks' reason for refusing the first live module, sent with the one repair request. */
     let lastRefusal = ''
 
@@ -568,7 +588,7 @@ export default {
       state = 'stitching'
       fig = made_
       shop.activity('tidy')
-      shop.pattern(made!.description, name, personaNotes(made!.persona, patterns.picked?.template ?? null))
+      shop.pattern(made!.description, name, personaNotes(made!.persona, made!.template))
       const accent = accentMeshes(fig, ACCENT)
       const parts = pieces(fig, accent)
       hueShift = hueTurn(fig, accent)
@@ -709,7 +729,15 @@ export default {
       noteEl.classList.remove('shown')
       const record: Made = { ...made, tuning: { ...made.tuning } }
       kept.push(record)
-      if (record.source.item) void tuneVillager(PERSON, record.source.item, { ...record.tuning })
+      // A live villager becomes the person's: the host writes its tuned persona (people/<id>/persona.json, the old one kept) and its voice.
+      const voice = voiceKey ? VOICES[voiceKey] : null
+      if (record.source.item && voice) {
+        sentOff = 'sending'
+        void sendOffVillager(PERSON, record.source.item, { ...record.tuning }, { ...voice }).then((r) => {
+          sentOff = r.ok ? r.name : `failed: ${r.why}`
+          if (!r.ok) note(`${record.name} couldn't move in just now${r.why === 'away' ? ": the workshop's helper isn't in" : ''}. Nothing changed.`)
+        })
+      }
       const spot = SPOTS[LANDING]
       puppet.looking = false
       // Down it hops, growing from its bench size to its own as it goes.
@@ -750,14 +778,15 @@ export default {
 
     // ── Patterns: A's built-in templates for this profile, then the person's and the family's from the host ──
     let lastSaved: string | null = null
-    const asTemplate = (t: { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child' }): PersonaTemplate => ({ id: t.id, name: t.name, persona: t.persona as PersonaTemplate['persona'], audience: t.audience })
     const loadPatterns = async () => {
       const [mine, family] = await Promise.all([personaTemplates(PERSON), familyTemplates(PERSON)])
       PROFILE = mine.ok ? mine.profile : null
-      tools.lock('humour', !crudeAllowed(PROFILE))
-      const list: RackCard[] = templatesFor(PROFILE).map((template) => ({ template, source: 'built-in' }))
-      if (mine.ok) list.push(...mine.templates.map((t) => ({ template: asTemplate(t), source: 'mine' as const })))
-      if (family.ok) list.push(...family.templates.filter((t) => t.maker !== PERSON).map((t) => ({ template: asTemplate(t), source: 'family' as const, maker: t.maker.charAt(0).toUpperCase() + t.maker.slice(1) })))
+      HUMOUR_DIAL = mine.ok ? mine.humour : { locked: null }
+      // A level the host locks (the admin's setting, or the person's own "keep it clean") pins the dial there.
+      tools.fix('humour', lockedAt())
+      const list: RackCard[] = mine.ok ? mine.builtin.map((template) => ({ template, source: 'built-in' as const })) : []
+      if (mine.ok) list.push(...mine.templates.map((template) => ({ template, source: 'mine' as const })))
+      if (family.ok) list.push(...family.templates.filter((t) => t.maker !== PERSON).map((template) => ({ template, source: 'family' as const, maker: (template.maker ?? '').charAt(0).toUpperCase() + (template.maker ?? '').slice(1) })))
       // Newest saved patterns first after the built-in ones, so a fresh save is on the rack.
       const builtIn = list.filter((c) => c.source === 'built-in')
       const saved = list.filter((c) => c.source !== 'built-in').reverse()
@@ -770,11 +799,11 @@ export default {
       slip.classList.toggle('patterned', Boolean(card))
       chip.textContent = ''
       if (card) {
-        const p = card.template.persona
+        const p = card.template.persona as Partial<Persona>
         const name = document.createElement('b')
         name.textContent = card.template.name
         const about = document.createElement('span')
-        about.textContent = [p.temperament, p.humour && p.humour !== 'none' ? `${p.humour} humour` : null, footFor(card) || null].filter(Boolean).join(' · ')
+        about.textContent = [p.temperament, p.humour?.style ?? null, footFor(card) || null].filter(Boolean).join(' · ')
         const back = document.createElement('i')
         back.textContent = '✕'
         back.setAttribute('aria-hidden', 'true')
@@ -786,15 +815,15 @@ export default {
       // The words say who they are (the line's example says so); the pattern, how they talk.
       if (state === 'empty' || state === 'failed') setStatus(card ? `${card.template.name} sets how they talk.` : READY)
       chip.setAttribute('aria-label', card ? `Pattern ${card.template.name}. Click to put it back.` : '')
-      if (card && card.template.persona.dials?.humour === 'crude' && !crudeAllowed(PROFILE)) note(`${card.template.name} will be cheeky here, not crude. Crude jokes need a grown-up profile that has opted in.`)
     }
     const saveAsPattern = async () => {
       if (!made) return
       const t = made.tuning
-      const persona = { ...made.persona, dials: { warmth: t.warmth, playful: t.playful, chatty: t.chatty, humour: HUMOUR[Math.round(t.humour * 2)] } }
+      // The persona as the host checked it, and the dials beside it: the host maps them in and checks the result.
+      const dials = { warmth: t.warmth, playful: t.playful, chatty: t.chatty, humour: Math.min(t.humour, 0.5) }
       const name = `Like ${made.name}`.slice(0, 40)
       saveButton.disabled = true
-      const saved = await saveTemplate(PERSON, name, persona, share.checked)
+      const saved = await saveTemplate(PERSON, name, made.persona, dials, share.checked)
       saveButton.disabled = false
       if (!saved.ok) return note(saved.why === 'away' ? "Couldn't keep the pattern: the workshop's helper isn't in just now." : "Couldn't keep the pattern this time.")
       lastSaved = saved.template.id
@@ -967,6 +996,8 @@ export default {
           name: made?.name ?? null,
           persona: made?.persona ?? null,
           profile: PROFILE,
+          humourDial: HUMOUR_DIAL,
+          sentOff,
           rack: patterns.state(),
           note: noteEl.classList.contains('shown') ? noteEl.textContent : null,
           saved: lastSaved,

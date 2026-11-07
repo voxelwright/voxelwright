@@ -1,44 +1,38 @@
-// #47 setup, dev only: the villager's adult persona in the workshop. The shape and its
-// checks are builder A's (./spec.ts Persona, ./build.ts check()), templates and the one
-// crude-humour rule are A's too (./templates.ts applyTemplate, gatePersona). This file
-// only puts them together for the scene and writes the scene's own lines. The felt is an
-// art style, not a mental age. The profile these take is the host's, read from GET
-// persona-templates (setup.ts); until it answers, it is null and crude stays locked. The host
-// gates every persona and tuning it stores or serves with the same rule, so the page cannot
-// unlock anything there either.
-import { check } from './build'
+// #47 setup, dev only: the villager's adult persona in the workshop. The persona is #42's
+// persona.json shape; the host owns it, its check (checkPersona), the patterns (TEMPLATES) and the
+// humour rule (humourCeiling). The page shows what the host checked and sends the dials back as
+// data; it never decides humour. This file only writes the scene's own lines. The felt is an art
+// style, not a mental age.
+import { personaShape } from './build'
 import type { Persona } from './spec'
-import { applyTemplate, gatePersona, type PersonaProfile, type PersonaTemplate } from './templates'
 
-export type { Persona, PersonaProfile, PersonaTemplate }
+export type { Persona }
 
-/** Untrusted persona data through A's checker; null when there is none. */
-export function checked(raw: unknown): Persona | null {
-  if (raw === null || typeof raw !== 'object') return null
-  return check({ persona: raw }).spec.persona ?? null
+/** A persona of the host's shape, for display; null when there is none. */
+export const checked = (raw: unknown): Persona | null => personaShape(raw)
+
+/**
+ * Saved round-1 results carry no persona in this shape: a plain one for display from the name, the role
+ * and the description's "who ..." clause. It never leaves the page: only a host-checked persona is sent off.
+ */
+export function fallbackPersona(description: string, role: string, name: string): Persona {
+  const who = (/\bwho\s+(.+)$/i.exec(description)?.[1] ?? description).split(/\band\b/)[0].trim()
+  const plain = (s: string, max: number) => s.replace(/[^\p{L}\p{N} ,.;:!?'’()&/+-]/gu, '').slice(0, max).trim()
+  return {
+    name: /^[A-Z][A-Za-z' -]{0,23}$/.test(name) ? name : 'Hazel',
+    role: plain(role, 24) || 'helper',
+    speciality: plain(who, 160) || plain(role, 160) || 'the household',
+    temperament: 'steady, capable',
+    register: 'plain and friendly',
+    humour: { style: 'light and dry', lean: 'clean' },
+    quirks: [],
+    cares: [],
+    lengths: { card: 2, table: 1, long: 10 },
+  }
 }
 
-/** Saved round-1 results have no persona: a plain one from the role and the description's "who ..." clause. */
-export function fallbackPersona(description: string, role: string): Persona {
-  const who = /\bwho\s+(.+)$/i.exec(description)?.[1] ?? description
-  return checked({ role, speciality: who.split(/\band\b/)[0].trim() || role, temperament: 'calm', register: 'plain', humour: 'dry', quirks: [], topics: [] })!
-}
-
-/** Description persona, then the template over it, then the gate. Returns whether the gate changed anything. */
-export function personaFor(base: Persona, template: PersonaTemplate | null, profile: PersonaProfile): { persona: Persona; gated: boolean } {
-  // A template may come from a stored or shared file: the merge goes back through the checker before the gate.
-  const merged = template ? checked(applyTemplate(base, template)) ?? base : base
-  const persona = gatePersona(merged, profile)
-  return { persona, gated: persona.dials.humour !== merged.dials.humour }
-}
-
-/** May this profile have crude humour? Asked of gatePersona, the rule's only owner. */
-export function crudeAllowed(profile: PersonaProfile): boolean {
-  const p = fallbackPersona('', 'helper')
-  return gatePersona({ ...p, dials: { ...p.dials, humour: 'crude' } }, profile).dials.humour === 'crude'
-}
-
-export const HUMOUR_STEPS = ['clean', 'cheeky', 'crude'] as const
+/** Where the sliders start for a persona when the host sent none: the middle for warmth and play, chatty from its cards, jokes from its lean. */
+export const dialsOf = (p: Persona) => ({ warmth: 0.5, playful: 0.5, chatty: (p.lengths.card - 1) / 2, humour: p.humour.lean === 'cheeky' ? 0.5 : 0 })
 
 /** The lines it says when tuned, chosen by its dials: competent adults, dry or warm, never baby talk. */
 const LINES = {
@@ -56,12 +50,11 @@ export function tunedLine(dials: { warmth: number; playful: number; chatty: numb
 }
 
 /** Short lines for the pattern sheet's pinned note, in plain grown-up words. */
-export function personaNotes(p: Persona, template: PersonaTemplate | null): string[] {
+export function personaNotes(p: Persona, pattern: string | null): string[] {
   const out: string[] = []
-  if (p.role || p.speciality) out.push([p.role, p.speciality].filter(Boolean).join(': '))
-  const humour = p.humour === 'none' ? 'no jokes' : `${p.humour} humour`
-  out.push(`${p.temperament}, ${p.register}, ${humour}${p.dials.humour === 'clean' ? '' : `, ${p.dials.humour}`}`)
-  if (template) out.push(`pattern: ${template.name}`)
-  for (const q of p.quirks.slice(0, template ? 1 : 2)) out.push(q)
+  out.push([p.role, p.speciality].filter(Boolean).join(': '))
+  out.push(`${p.temperament}; ${p.humour.style}${p.humour.lean === 'cheeky' ? ', cheeky' : ''}`)
+  if (pattern) out.push(`pattern: ${pattern}`)
+  for (const q of p.quirks.slice(0, pattern ? 1 : 2)) out.push(q)
   return out
 }

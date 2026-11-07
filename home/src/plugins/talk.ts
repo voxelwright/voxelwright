@@ -6,9 +6,12 @@ import { KINDS } from '../villagers/kinds'
 import { Villager, type Task } from '../villagers/rig'
 import { contactShadows, stepCrowd } from '../villagers/cast'
 import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
-import { projects as listProjects, route, say as sayTo } from '../villager'
-import { alwaysOn, type Variant } from '../talk/input'
+import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
+import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
+import { mayRoute } from '../talk/route-check'
+import { placeFor } from '../talk/place'
+import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
 
@@ -20,8 +23,22 @@ const params = new URLSearchParams(location.search)
 const ON = params.get('talk') === 'npc'
 /** ?slip=always keeps your paper slip on screen with no talk open, addressed to your own villager. */
 const SLIP_ALWAYS = params.get('slip') === 'always'
-/** ?input=held|speech: the always-on input (#42) in place of the slip. Lines to your own villager are routed by it. */
-const INPUT: Variant | null = ON && (params.get('input') === 'held' || params.get('input') === 'speech') ? params.get('input') as Variant : null
+/**
+ * The always-on input (#42): the held notepad by default, ?input=speech for the speech card,
+ * ?input=slip for the paper slip that shows only during a talk. Lines to your own villager are routed by it.
+ */
+const INPUT: Variant | null = inputVariant(params)
+/**
+ * Which path a line to your own villager takes (#42). By default a trusted check on the page
+ * (route-check.ts) sends lines that may change the room to the router and plain chat straight to
+ * the villager (one call). ?route=separate routes every line first; ?route=reply asks the villager
+ * to route in its own reply (one call, unreliable on Haiku: it answered "I can't add furniture").
+ */
+const ROUTE_MODE = params.get('route') === 'separate' ? 'separate' : params.get('route') === 'reply' ? 'reply' : 'check'
+/** After your line at the table, the villagers carry it for at most this many turns, then wait for you. */
+const MAX_ROUND = 4
+/** A reply that is only a short action in parentheses: a pass, shown as a nod, not words. */
+const PASS = /^\s*\(([^()]{1,60})\)\s*$/
 /** Asking the villager you are talking with to the table, typed instead of the chip. */
 const SIT = /^\s*(?:(?:come|let'?s|will you|would you|do you want to)\s+)?(?:come\s+)?(?:and\s+)?sit (?:down )?(?:with (?:me|us)|at the table)\b[\s\S]{0,20}$/i
 const KIND = KINDS[params.get('villager') ?? ''] ? params.get('villager')! : 'b'
@@ -42,7 +59,7 @@ declare module 'cordis' {
     /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
     'village/said-stop'(stop: { villager: string }): void
     /** Open the journal, at a villager's pages or a section (the always-on input, #42). */
-    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' }): void
+    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' | 'sketches' }): void
   }
 }
 
@@ -88,7 +105,14 @@ const BOOSTER = 0.12/** The table from above and to the right, close enough for 
 const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
 const KEPT = 'village.talk.kept'
 
-interface Speech { text: string; done: boolean; away?: string }
+interface Speech {
+  text: string
+  done: boolean
+  away?: string
+  /** When it was asked and when its first words came, for the round's timings. */
+  asked?: number
+  first?: number
+}
 
 interface Member extends Person {
   name: string
@@ -206,10 +230,19 @@ class Card {
     this.muted = true
   }
 
+  /** An action, not words (a pass at the table): shown, but never announced as words to the voices. */
+  beat(text: string) {
+    this.reset()
+    this.muted = true
+    this.el.classList.add('beat')
+    this.set(text, true)
+  }
+
   /** Start fresh words. */
   reset() {
     this.stop()
     this.muted = false
+    this.el.classList.remove('beat')
     this.count = this.told = 0
     this.full = this.paged = ''
     this.from = this.shown = this.end = this.visible = 0
@@ -666,6 +699,7 @@ export default {
         m.seat = null
         m.v.release(0.3 + Math.random() * 0.6)
         m.v.speaking = m.v.thinking = false
+        m.v.listenTo = null
       }
       seated.length = 0
       lastRound = []
@@ -727,17 +761,21 @@ export default {
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
-    const ask = (m: Member, text: string, context?: string): Speech => {
-      const speech: Speech = { text: '', done: false }
-      void sayTo(m.person, text, (t) => (speech.text += t), context).then((said) => {
-        if (said.ok) speech.text = said.reply
+    const ask = (m: Member, text: string, context?: string, routing?: Routing, sketch?: SketchRef): Speech => {
+      const speech: Speech = { text: '', done: false, asked: performance.now() }
+      void sayTo(m.person, text, (t) => {
+        speech.first ??= performance.now()
+        speech.text += t
+      }, context, routing, sketch).then((said) => {
+        if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true
       })
       return speech
     }
 
-    const send = async (text: string) => {
+    /** Send a line to whoever it is addressed to. `prepared` is a reply already asked for (the one-call route answered). */
+    const send = async (text: string, prepared?: Speech) => {
       text = text.trim()
       if (!text || pending) return
       // A line written with no talk open goes to your own villager, who turns to you.
@@ -754,7 +792,7 @@ export default {
         if (bye) await farewell()
         else if (mode === 'talk' && partner) {
           const m = partner
-          const ok = await perform(m, ask(m, text), text)
+          const ok = await perform(m, prepared ?? ask(m, text), text)
           if (!ok) restoreLine(text)
         } else if (mode === 'table' && seated.length) {
           await table(text)
@@ -782,10 +820,20 @@ export default {
       speaker = m
       m.v.thinking = true
       hide(m)
-      // Even a quick answer gets its beat: eyes up, a tap of the chin, then words.
-      const beat = clock + 0.5
+      // Even a quick answer gets its beat: eyes up, a tap of the chin, then words (shorter when they are already in).
+      const beat = clock + (speech.text || speech.done ? 0.3 : 0.5)
       while ((!speech.text && !speech.done) || clock < beat) await frame()
+      // A reply that opens with "(" may be a pass: wait for the whole of it before showing anything.
+      while (!speech.done && /^\s*\([^)]*$/.test(speech.text)) await frame()
       m.v.thinking = false
+      if (speech.done && !speech.away && PASS.test(speech.text)) {
+        m.v.nod()
+        m.card.beat(speech.text.trim())
+        show(m, 'speaking')
+        voice.textContent = `${m.name} ${speech.text.trim().replace(/[()]/g, '')}`
+        await pause(1.3)
+        return true
+      }
       if (speech.away) {
         keep(m.person, said)
         speak(m, inCharacter(speech.away))
@@ -795,6 +843,7 @@ export default {
       }
       m.v.speaking = true
       speak(m, speech.text, speech.done && !speech.away)
+      timing?.set(m, performance.now())
       while (!speech.done || !m.card.finished) {
         // The host failing mid-reply cuts the words short where they are.
         if (speech.away) {
@@ -813,33 +862,98 @@ export default {
       return true
     }
 
-    /** The table: everyone answers in turn, or only the one named first. */
+    /** Seated villagers in the order a text names them. */
+    const namedOrder = (text: string, among: Member[]) => among
+      .map((m) => ({ m, at: text.search(new RegExp(`\\b${m.name}\\b`, 'i')) }))
+      .filter((x) => x.at >= 0)
+      .sort((a, b) => a.at - b.at)
+      .map((x) => x.m)
+    /** Who opens the next round when nobody is named: it rotates round the table. */
+    let opener = 0
+    /** The last round as the checks see it: who spoke, what they heard as context, whether they passed, and when. */
+    let roundLog: { speaker: string; context: string; text?: string; pass?: boolean; asked: number; first?: number; done?: number; card?: number; finished?: number }[] = []
+    /** When each speaker's card started, for the round's timings. */
+    let timing: Map<Member, number> | null = null
+    /** What a villager hears at the table: who is there, the round so far (your line and the replies), and that it is their turn. */
+    const roundContext = (m: Member, text: string, round: { name: string; text: string; pass: boolean }[]) => {
+      const others = seated.filter((o) => o !== m).map((o) => o.name)
+      const owner = primary().owner
+      const before = lastRound.length ? ` Before that: ${lastRound.map((r) => `${r.name} said "${r.text.slice(0, 120)}"`).join('; ')}.` : ''
+      const so = round.map((r) => (r.pass ? ` ${r.name} ${r.text.replace(/[()]/g, '').trim()}.` : ` ${r.name} said "${r.text.slice(0, 300)}".`)).join('')
+      return `you are ${m.name}, at the kitchen table with ${owner}${others.length ? ` and ${others.join(' and ')}` : ''}.${before} The round so far: ${owner} said "${text.slice(0, 300)}".${so} It is your turn, ${m.name}.`.slice(0, 2000)
+    }
+
+    /**
+     * The table (#42): your line starts a round. Whoever it names first speaks
+     * first, otherwise the opener rotates; each speaker hears your line and the
+     * replies so far as context, may turn to another by name (who then speaks
+     * next) or pass with a nod. As soon as one reply's text is complete the next
+     * speaker is asked, while the card is still being revealed. At most
+     * MAX_ROUND turns, then they wait for you.
+     */
     const table = async (text: string) => {
-      const named = seated.find((m) => new RegExp(`^\\s*${m.name}\\b`, 'i').test(text))
-      const turn = named ? [named] : [...seated]
+      const first = namedOrder(text, seated)[0]
+      const k = first ? seated.indexOf(first) : opener++ % seated.length
+      const queue = [...seated.slice(k), ...seated.slice(0, k)]
       for (const m of seated) hide(m)
-      // Every request starts at once; they speak one at a time. Each hears only
-      // the person's line and, marked as context, what the others said last round.
-      const asks = turn.map((m) => {
-        const others = lastRound.filter((r) => r.name !== m.name)
-        const context = others.length ? `at the kitchen table just now, ${others.map((r) => `${r.name} said "${r.text.slice(0, 160)}"`).join(' and ')}.` : undefined
-        return { m, speech: ask(m, text, context) }
-      })
-      const round: { name: string; text: string }[] = []
+      const round: { m: Member; name: string; text: string; pass: boolean }[] = []
+      roundLog = []
+      timing = new Map()
       let failed = false
-      for (const [k, { m, speech }] of asks.entries()) {
-        for (const o of seated) o.tag.classList.toggle('lit', o === m)
+      const start = (m: Member) => {
+        const context = roundContext(m, text, round)
+        const speech = ask(m, text, context)
+        const entry: (typeof roundLog)[number] = { speaker: m.person, context, asked: speech.asked! }
+        roundLog.push(entry)
+        return { m, speech, entry }
+      }
+      let current: ReturnType<typeof start> | null = start(queue.shift()!)
+      while (current) {
+        const { m, speech, entry } = current
+        // The next speaker is asked the moment this reply is complete.
+        const upcoming = (async () => {
+          while (!speech.done) await frame()
+          entry.first = speech.first
+          entry.done = performance.now()
+          if (speech.away) return null
+          const pass = PASS.test(speech.text)
+          entry.pass = pass
+          entry.text = speech.text.trim()
+          round.push({ m, name: m.name, text: speech.text.trim(), pass })
+          if (round.length >= MAX_ROUND) return null
+          // Turned to by name: that villager is next, even if it already spoke.
+          const named = pass ? undefined : namedOrder(speech.text, seated.filter((o) => o !== m))[0]
+          if (named) {
+            const i = queue.indexOf(named)
+            if (i >= 0) queue.splice(i, 1)
+            queue.unshift(named)
+          }
+          const next = queue.shift()
+          return next && mode === 'table' ? start(next) : null
+        })()
+        for (const o of seated) {
+          o.tag.classList.toggle('lit', o === m)
+          // The others turn their heads to whoever is speaking.
+          o.v.listenTo = o === m ? null : m.v.pos
+        }
         const ok = await perform(m, speech, text)
-        if (ok) round.push({ name: m.name, text: speech.text })
-        else failed = true
-        if (k < asks.length - 1) {
-          await pause(0.9)
-          show(m, 'said')
+        entry.card = timing.get(m)
+        entry.finished = performance.now()
+        if (!ok) failed = true
+        current = await upcoming
+        if (current && mode === 'table') {
+          await pause(0.45)
+          if (showing.get(m)) show(m, 'said')
         }
       }
       speaker = null
-      for (const o of seated) o.tag.classList.remove('lit')
-      if (round.length) lastRound = round
+      timing = null
+      for (const o of seated) {
+        o.tag.classList.remove('lit')
+        o.v.listenTo = null
+      }
+      const spoken = round.filter((r) => !r.pass).map((r) => ({ name: r.name, text: r.text }))
+      if (spoken.length) lastRound = spoken
       if (failed && !line.value) restoreLine(text)
     }
 
@@ -891,24 +1005,35 @@ export default {
       }), `talk entry ${m.entry}`)
     }
 
-    // ── Input ───────────────────────────────────────────────────────────────
+    // ── Keys: the one keyboard path of the talk page ────────────────────────
+    // Every key on the talk page comes through onKey, in this order:
+    //   1. The always-on input (input.key): while a line has the keyboard every key is
+    //      the line's; with nothing written, `j` opens the journal and a printable key
+    //      starts a line. Escape with words clears them (the field's own handler).
+    //   2. Room navigation (arrows, WASD) belongs here, after the input: only when
+    //      nothing is being written (`!input?.writing`). Not built yet; the
+    //      connected-house branch adds it in this slot.
+    //   3. Escape at the table leaves it (when no entry is open, so entries' own Escape wins).
+    // The slip variant (?input=slip) keeps its own form field, and only step 3 applies.
     const onSubmit = (e: Event) => {
       e.preventDefault()
       void send(line.value)
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return
-      if (mode === 'table' && !entries.active) {
+      if (e.defaultPrevented) return
+      if (input?.key(e)) return
+      // 2. Navigation slot (see above).
+      if (e.key === 'Escape' && mode === 'table' && !entries.active) {
         e.preventDefault()
         leaveTable()
       }
     }
     ctx.effect(() => {
       slip.addEventListener('submit', onSubmit)
-      addEventListener('keydown', onKey)
+      addEventListener('keydown', onKey, true)
       return () => {
         slip.removeEventListener('submit', onSubmit)
-        removeEventListener('keydown', onKey)
+        removeEventListener('keydown', onKey, true)
       }
     }, 'talk input')
     ctx.effect(() => () => {
@@ -979,7 +1104,10 @@ export default {
         taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
       }
       // The always-on input holds the bottom centre of the view.
-      if (INPUT) taken.push({ l: innerWidth * 0.27, t: innerHeight * 0.76, w: innerWidth * 0.46, h: innerHeight * 0.24 })
+      if (input) {
+        const r = input.padRect()
+        if (r.width) taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
+      }
       // Cards never cover the face of anyone else in the conversation.
       const faces = new Map<Member, Omit<Spot, 'tail'>>()
       for (const o of mode === 'talk' && partner ? [partner] : seated) {
@@ -1111,6 +1239,7 @@ export default {
       }
       placeCards(dt)
       input?.frame(dt, t)
+      sketch?.frame(dt, t)
       furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
@@ -1120,16 +1249,36 @@ export default {
 
     // ── The always-on input (#42): routed by your own villager ───────────────
     let routing = false
-    const routes: { text: string; route: string; ms: number; models?: string[]; costUsd?: number | null }[] = []
-    /** A short line from a villager in the room, which folds away a little after it has been read. */
+    /** Each line your own villager routed: the route, ms from Enter to the decision, and how many model calls it took. */
+    const routes: { text: string; route: string; /** chat (the page's check said plain chat), router, or reply (?route=reply). */ path: string; ms: number; calls: number; models?: string[]; costUsd?: number | null }[] = []
+    /**
+     * A short line from a villager in the room, which folds away once it has been read. Lines
+     * queue: each stays up long enough to read before the next one replaces it, so a route's
+     * line, a note and a failure never flash past one another.
+     */
+    let quips = Promise.resolve()
+    /** When each quip went up, for the checks. */
+    const quipLog: { text: string; at: number }[] = []
+    const wait = (seconds: number) => new Promise<void>((r) => setTimeout(r, seconds * 1000))
+    let quipCount = 0
     const quip = (m: Member, text: string) => {
-      speak(m, text)
-      voice.textContent = `${m.name}: ${text}`
-      void (async () => {
+      let mine = 0
+      const shown = quips.then(async () => {
+        mine = ++quipCount
+        quipLog.push({ text, at: Math.round(performance.now()) })
+        speak(m, text)
+        voice.textContent = `${m.name}: ${text}`
         while (showing.get(m) && m.card.text === text && !m.card.finished) await frame()
-        await pause(3.5)
-        if (showing.get(m) && m.card.text === text && mode === 'room') hide(m)
-      })()
+        // About a third of a second a word, and never under three seconds.
+        // Wall-clock time, since reading takes real seconds whatever the frame rate.
+        await wait(Math.max(3, 1 + text.split(/\s+/).length * 0.3))
+      })
+      quips = shown.then(() => {}, () => {})
+      void shown.then(async () => {
+        await wait(1.5)
+        // Only if nothing has been said since: the same words said again keep their own time.
+        if (showing.get(m) && m.card.text === text && quipCount === mine && mode === 'room') hide(m)
+      }, () => {})
     }
     const restoreLine = (text: string) => {
       if (INPUT) {
@@ -1164,8 +1313,36 @@ export default {
       blocked: () => entries.active === 'notebook',
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
+      enter: (): boolean => sketch?.enter() ?? false,
+    }) : null
+    // ── Sketching on the held notepad (#42, src/talk/sketch.ts) ──────────────
+    /** Whom the pad is addressed to, as a villager (the table counts as the first seated). */
+    const padTo = () => (mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] ?? primary() : primary())
+    const sketch: Sketcher | null = INPUT === 'held' && input && furnish ? sketcher(stage, input, furnish, {
+      person: primary().person,
+      maker: primary().name,
+      to: () => {
+        const m = padTo()
+        return { person: m.person, name: m.name, colour: m.colour }
+      },
+      // A drawing goes with no route: nothing drawn on it can choose who hears what.
+      give: async (person, text, ref) => {
+        const m = cast.find((c) => c.person === person)
+        if (!m || pending || routing) return false
+        if (!(mode === 'talk' && partner === m)) choose(m, false)
+        pending = true
+        try {
+          return await perform(m, ask(m, text, undefined, undefined, ref), text)
+        } finally {
+          pending = false
+        }
+      },
+      figure: (person) => cast.find((c) => c.person === person)?.v.fig.root ?? null,
+      say: (text) => quip(primary(), text),
+      blocked: () => entries.active === 'notebook',
     }) : null
     ctx.effect(() => () => {
+      sketch?.dispose()
       input?.dispose()
       furnish?.dispose()
     }, 'talk always-on input')
@@ -1174,37 +1351,81 @@ export default {
       if (r.ok) for (const p of r.projects) furnish?.parcel(p.what, p.where)
     })
 
-    /** Your own villager decides what a line meant, and the room shows it. */
+    /** A villager other than your own that the person's own words name (trusted: a name match on the page, never the model's say-so). */
+    const nameIn = (text: string) => cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text)) ?? null
+
+    /**
+     * Your own villager decides what a line meant, and the room shows it. By
+     * default one call does both (#42): the villager answers, or its reply is a
+     * route the host has checked, and the page acts on it as soon as it comes.
+     * ?route=separate asks the router first and then the villager (two calls).
+     */
     const submitLine = async (text: string, t0: number) => {
       if (!text || pending || routing) return restoreLine(text)
       const me = primary()
       const elsewhere = (mode === 'talk' && partner && partner !== me) || mode === 'table'
       if (mode === 'talk' && partner && SIT.test(text)) return invite(partner)
       if (elsewhere || (FAREWELL.test(text) && text.length <= 40 && mode !== 'room')) return send(text)
+      const villagers = cast.map((m) => ({ id: m.person, name: m.name, role: m.role }))
+      // Plain chat: one call, straight to your villager. Only the router acts on the room.
+      if (ROUTE_MODE === 'check' && !mayRoute({ text, others: cast.filter((m) => m !== me).map((m) => m.name) })) {
+        routes.push({ text, route: 'answer', path: 'chat', ms: 0, calls: 1 })
+        return send(text)
+      }
       const guess = furnish!.hint(text, t0)
       routing = true
       routingText = text
       me.v.thinking = true
-      const r = await route(me.person, text, me.name, cast.map((m) => ({ id: m.person, name: m.name, role: m.role })))
+      if (ROUTE_MODE === 'reply') {
+        let routed: Routed | null = null
+        const speech = ask(me, text, undefined, { route: { primary: me.name, villagers }, onRoute: (r) => (routed = r) })
+        // The first words, a route or the end decide.
+        while (!speech.text && !routed && !speech.done) await frame()
+        routing = false
+        routingText = ''
+        const ms = Math.round(performance.now() - t0)
+        if (routed) {
+          me.v.thinking = false
+          routes.push({ text, route: (routed as Routed).route, path: 'reply', ms, calls: 1 })
+          return act(routed, text, t0, guess)
+        }
+        if (speech.away) {
+          me.v.thinking = false
+          routes.push({ text, route: `failed (${speech.away})`, path: 'reply', ms, calls: 1 })
+          return didNotRoute(text, guess, speech.away)
+        }
+        routes.push({ text, route: 'answer', path: 'reply', ms, calls: 1 })
+        furnish!.dismiss(guess)
+        return send(text, speech)
+      }
+      const r = await route(me.person, text, me.name, villagers)
       me.v.thinking = false
       routing = false
       routingText = ''
-      routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, ms: Math.round(r.ms), ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
-      if (!r.ok) {
-        furnish!.dismiss(guess)
-        keep(me.person, text)
-        restoreLine(text)
-        quip(me, r.why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
-        return
-      }
-      const routed = r.routed
+      routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, path: 'router', ms: Math.round(r.ms), calls: r.ok && r.routed.route === 'answer' ? 2 : 1, ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
+      if (!r.ok) return didNotRoute(text, guess, r.why)
+      return act(r.routed, text, t0, guess)
+    }
+
+    const didNotRoute = (text: string, guess: ReturnType<NonNullable<typeof furnish>['hint']>, why: string) => {
+      const me = primary()
+      furnish!.dismiss(guess)
+      keep(me.person, text)
+      restoreLine(text)
+      quip(me, why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+    }
+
+    /** What a route does in the room. The model's route is data: it never chooses who hears the person's words. */
+    const act = async (routed: Routed, text: string, t0: number, guess: ReturnType<NonNullable<typeof furnish>['hint']>) => {
+      const me = primary()
       const to = cast.find((m) => m.person === routed.to)
       switch (routed.route) {
         case 'talk':
           furnish!.dismiss(guess)
-          if (!to || to === me) return send(text)
+          // Only to a villager the person's own words name, and with their own words, never the model's paraphrase (Sentinel, #42).
+          if (!to || to === me || to !== nameIn(text)) return send(text)
           choose(to, !routed.message)
-          if (routed.message) await send(routed.message)
+          if (routed.message) await send(text)
           return
         case 'answer':
           furnish!.dismiss(guess)
@@ -1245,11 +1466,18 @@ export default {
           }])),
           lit: seated.filter((m) => m.tag.classList.contains('lit')).map((m) => m.person),
           focused: view.focused,
-          input: input ? { ...input.state(), routing, routes: routes.slice(), furnish: furnish!.state(), journalRect: input.journalRect() } : null,
+          input: input ? { ...input.state(), routing, routes: routes.slice(), quips: quipLog.slice(), furnish: furnish!.state(), journalRect: input.journalRect(), padRect: input.padRect() } : null,
+          sketch: sketch?.state() ?? null,
+          round: roundLog.map((r) => ({ ...r })),
         }),
         /** For the checks: what "here" and "that" point at, as a click on the room would set it. */
         pickAt: (x: number, y: number, z: number, name?: string) => furnish?.pickAt(x, y, z, name),
+        /** The trusted first placement (place.ts), for the checks and for build mode. */
+        placeFor,
+        mayRoute,
         keep: () => furnish?.keep(),
+        /** Sketching (#42): the page's tools, and where a page point is on screen, for the checks. */
+        sketch: sketch ? { open: sketch.open, undo: sketch.undo, clear: sketch.clear, tool: sketch.setTool, make: sketch.make, give: sketch.give, at: sketch.screenAt } : null,
         undo: () => furnish?.undo(),
         again: () => furnish?.again(),
         notify: (person: string) => {
@@ -1352,8 +1580,10 @@ function css() {
   .talk-card .cue i:nth-child(3) { animation-delay: 0.36s; }
   @keyframes talk-cue { 0%, 70%, 100% { translate: 0 0; opacity: 0.45; } 30% { translate: 0 -3px; opacity: 1; } }
   /* Said, while someone else speaks: one dimmed line, so it never covers the speaker. */
-  .talk-card.said { max-width: 280px; padding: 18px 18px 10px; opacity: 0.9; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.16); }
-  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; color: #6a5442; }
+  /* A pass: an action, not words. */
+  .talk-card.beat .words { font-style: italic; font-size: 17px; color: #6a5442; }
+  .talk-card.said { max-width: 300px; padding: 18px 18px 10px; opacity: 0.9; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.16); }
+  .talk-card.said .words { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 16px; color: #6a5442; }
   .talk-card.said .before, .talk-card.said .more, .talk-card.said .cue { display: none; }
   .talk-card.said .nametag { box-shadow: none; scale: 0.9; transform-origin: 0 100%; opacity: 0.85; }
   .talk-ruler { position: fixed; left: -9999px; top: 0; width: ${TEXT_WIDTH}px; margin: 0; visibility: hidden; pointer-events: none; white-space: pre-wrap; font: ${words}; }

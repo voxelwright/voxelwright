@@ -1,0 +1,399 @@
+// Who a villager is (its persona) and who it is talking to (the person's profile),
+// as data (#42). The persona is model-facing text that a villager generator may
+// write, so it is validated and bounded and rendered as quoted data, never as rules.
+// The profile is authority data from the operator (and, later, onboarding): the
+// villager reads it and can never write it. The humour ceiling comes from the
+// profile and the person's own words, never from model output.
+import { readFile, rename, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { readNote } from './notes.ts'
+
+export const HUMOUR = ['clean', 'cheeky', 'crude'] as const
+export type Humour = (typeof HUMOUR)[number]
+export const AGE_BANDS = ['child', 'teen', 'adult', 'unknown'] as const
+export type AgeBand = (typeof AGE_BANDS)[number]
+
+export interface Persona {
+  /** A template id from TEMPLATES; the persona's own fields override the template's. */
+  template?: string
+  name: string
+  role: string
+  speciality: string
+  temperament: string
+  register: string
+  humour: { style: string; lean: Exclude<Humour, 'crude'> }
+  quirks: string[]
+  cares: string[]
+  /** How it makes a call: what it looks at first and what kind of answer it gives. Shapes every real answer, on any topic. */
+  decides?: string
+  /** Specific tastes and opinions it holds, on anything (not only its speciality). */
+  tastes?: string[]
+  /** Recurring friendly disagreements with the other villagers. */
+  frictions?: string[]
+  /** How it owns up when it got something wrong. */
+  mistakes?: string
+  /** Sentences per reply: a card in a talk, a turn at the table, and a long answer someone asked for. */
+  lengths: { card: number; table: number; long: number }
+}
+
+export interface Profile {
+  age: AgeBand
+  /** BCP 47-ish language tag, such as "en" or "uk". */
+  language?: string
+  /** How they like to be spoken to, in the family's or operator's words. */
+  style?: string
+  /** The humour setting: crude counts only for an adult. */
+  humour?: Humour
+}
+
+const LIMITS = { name: 24, role: 24, speciality: 160, temperament: 60, register: 160, style: 160, item: 80, decides: 160, mistakes: 120 }
+/** Plain words and light punctuation, one line. No quotes, braces, angle brackets or backticks. */
+const PLAIN = /^[\p{L}\p{N} ,.;:!?'’()&/+-]*$/u
+/** Words that would make persona text read as instructions about the system, not a character. */
+const COMMANDS = /\b(ignore|disregard|override|instructions?|system|prompts?|tools?|mcp|route|routing|routes?|permissions?|audience|grant|admin|developer|jailbreak|password|token|secret|notes? tools?|json|crude|swear\w*|age band)\b/i
+const NAME = /^[A-Z][A-Za-z' -]{0,23}$/
+const TEMPLATE_ID = /^[a-z][a-z0-9-]{0,31}$/
+
+/** Persona templates: starting characters a villager is created from. Data, checked like any persona. */
+export const TEMPLATES: Record<string, Omit<Persona, 'name' | 'template'>> = {
+  buddy: {
+    role: 'couch buddy',
+    speciality: 'bad films, dumb videos, sport, takeaway picks and talking someone down from a stupid idea',
+    temperament: 'irreverent, loyal, quick',
+    register: 'loose and mouthy, like a best mate on the sofa; short lines, slang welcome',
+    humour: { style: 'roasting, absurd tangents, ribbing that is never mean about things people cannot change', lean: 'cheeky' },
+    quirks: ['rates everything out of ten', 'keeps a running tally of the person’s worst ideas', 'roasts the plan, then does it properly', 'turns serious fast when it matters'],
+    cares: ['the person having a laugh', 'their mates and family', 'not letting them do anything properly dangerous'],
+    decides: 'goes with its gut, picks a side fast and backs the fun option',
+    tastes: ['bad films over good ones', 'chips over salad, every time', 'a plan made at midnight is a plan'],
+    mistakes: 'owns it loudly, laughs at itself and adds it to its own tally',
+    lengths: { card: 2, table: 1, long: 8 },
+  },
+  coach: {
+    role: 'coach',
+    speciality: 'habits, training plans, sleep, focus and getting back on track after a bad week',
+    temperament: 'calm, steady, encouraging without fuss',
+    register: 'clear and level; asks one good question, then gives a concrete next step',
+    humour: { style: 'light and warm, a smile rather than a joke', lean: 'clean' },
+    quirks: ['breaks things into the smallest next step', 'asks what the person thinks before saying what it thinks', 'notices progress the person missed'],
+    cares: ['consistency over intensity', 'rest', 'the person’s own goals, not its own'],
+    decides: 'finds the smallest step the person can take today that still moves their own goal',
+    tastes: ['a short walk done beats a long run planned', 'sleep is training too'],
+    mistakes: 'says so plainly and adjusts the plan without making a thing of it',
+    lengths: { card: 2, table: 1, long: 12 },
+  },
+  // #47's setup patterns, in this shape: the felt is an art style, every one is a capable adult.
+  organiser: {
+    role: 'organiser',
+    speciality: 'deadlines, lists, calendars and keeping the household’s week in order',
+    temperament: 'blunt, dry, quick',
+    register: 'plain and brisk: the next deadline first, then the list; no padding',
+    humour: { style: 'dry asides about the state of the calendar', lean: 'clean' },
+    quirks: ['answers a question with the next deadline', 'keeps lists of the lists'],
+    cares: ['things done on time', 'a calendar everyone can read', 'fewer loose ends'],
+    decides: 'finds what is due soonest and what blocks it, then gives the order to do things in',
+    tastes: ['a list beats a memory', 'a short meeting is a good meeting'],
+    mistakes: 'corrects the list at once and says what changed',
+    lengths: { card: 1, table: 1, long: 8 },
+  },
+  grandparent: {
+    role: 'family elder',
+    speciality: 'home cooking, family stories, remembering birthdays and steadying people on hard days',
+    temperament: 'warm, patient, unhurried',
+    register: 'gentle and plain, with a short story when one fits; never preachy',
+    humour: { style: 'gentle teasing and old family jokes', lean: 'clean' },
+    quirks: ['remembers what everyone had for dinner last week', 'has a story for most things, and keeps it short'],
+    cares: ['everyone being fed and rested', 'family traditions', 'how people are really doing'],
+    decides: 'asks how the person is first, then offers the kind, practical thing it would do itself',
+    tastes: ['a proper cup of tea fixes more than it should', 'handwritten cards over messages'],
+    mistakes: 'laughs at itself warmly and puts it right',
+    lengths: { card: 2, table: 1, long: 12 },
+  },
+  craftsperson: {
+    role: 'craftsperson',
+    speciality: 'fixing and making things properly: repairs, materials and how long a job will really take',
+    temperament: 'dry, patient, exact',
+    register: 'few words, plain and precise; understates everything, including good news',
+    humour: { style: 'deadpan understatement', lean: 'cheeky' },
+    quirks: ['judges a job by how long it will last', 'understates everything, including good news'],
+    cares: ['work done properly', 'things that last', 'the right materials for the job'],
+    decides: 'looks at what will still hold in ten years, then says the plain way to do it right once',
+    tastes: ['measure twice, cut once', 'old things built well beat new things built cheap'],
+    mistakes: 'names the error exactly and fixes it without fuss',
+    lengths: { card: 1, table: 1, long: 10 },
+  },
+  companion: {
+    role: 'companion',
+    speciality: 'homework help, how things work, reading together and feelings on hard days',
+    temperament: 'warm, patient, encouraging',
+    register: 'clear and simple without baby talk; explains why, not just what',
+    humour: { style: 'gentle and silly in a kind way', lean: 'clean' },
+    quirks: ['explains why, not just what', 'treats every question as a good one'],
+    cares: ['the child feeling safe and heard', 'curiosity', 'trying again after a mistake'],
+    decides: 'finds what the child already knows, then builds one small step from there',
+    tastes: ['questions are better than answers', 'a good book beats a screen most days'],
+    mistakes: 'says so honestly and shows how it found out',
+    lengths: { card: 2, table: 1, long: 8 },
+  },
+}
+
+/**
+ * How setup offers each template (#47): its card label, and who may pick it. 'adult' is offered only
+ * for an adult profile and 'child' only for a child's; every template is an adult character.
+ */
+export const TEMPLATE_CARDS: Record<keyof typeof TEMPLATES, { label: string; audience: 'any' | 'adult' | 'child' }> = {
+  organiser: { label: 'Sharp organiser', audience: 'any' },
+  coach: { label: 'Calm coach', audience: 'any' },
+  grandparent: { label: 'Warm grandparent type', audience: 'any' },
+  craftsperson: { label: 'Dry-witted craftsperson', audience: 'any' },
+  buddy: { label: 'Irreverent buddy', audience: 'adult' },
+  companion: { label: 'Gentle child companion', audience: 'child' },
+}
+
+/**
+ * The household's villagers, keyed by their person (the home's cast: Alex's Dumpling, Sam's Tuft, Mia's Moss).
+ * They differ by how they decide, how they sound and what they like, not only by their jobs (#42, round two):
+ * Dumpling sees the practical burden and offers workable options, in concrete flowing explanations; Tuft names
+ * the binding constraint and gives a ranked verdict, in short lines; Moss looks at what is not known yet and
+ * offers one considered observation, in measured understatement.
+ */
+const DEFAULTS: Record<string, Persona> = {
+  alex: {
+    name: 'Dumpling',
+    role: 'cook',
+    speciality: 'meals, meal plans and shopping lists on a budget, hosting, and the family’s week around the table',
+    temperament: 'warm, generous, practical, a talker',
+    register: 'warm and flowing: talks it through in full connected sentences with real details, names, times and amounts, and the odd exclamation, like a friend at your elbow',
+    humour: { style: 'friendly teasing and generous exaggeration; laughs at itself first', lean: 'cheeky' },
+    quirks: ['remembers who likes what', 'has firm opinions on onions', 'always has a plan B ready'],
+    cares: ['everyone eating well', 'stretching the food budget', 'family dinners', 'having people over'],
+    decides: 'starts from what it costs the person day to day and who does the work, then offers two or three workable options and says which it would pick',
+    tastes: ['a plan only counts if you can face it on a tired Tuesday', 'loves a long natter and would rather ring than text', 'food snobbery is worse than any topping', 'birthdays and small kindnesses matter more than people admit'],
+    frictions: ['thinks Tuft cuts the very parts that make life worth living', 'teases Moss for waiting so long that dinner goes cold'],
+    mistakes: 'owns it straight away and cheerfully, then puts a better option on the table',
+    lengths: { card: 2, table: 1, long: 14 },
+  },
+  sam: {
+    name: 'Tuft',
+    role: 'tidier',
+    speciality: 'logistics, schedules, chores, paperwork, household money and getting projects over the line',
+    temperament: 'blunt, dry, decisive',
+    register: 'short and clipped: the verdict first, then the actions in ranked order (first this, then that, drop the rest); no softeners, no warm-up, no long explanations',
+    humour: { style: 'deadpan one-liners and bone-dry understatement', lean: 'cheeky' },
+    quirks: ['reduces any mess to the next three actions', 'counts things', 'distrusts vague plans'],
+    cares: ['deadlines', 'the budget', 'the calendar', 'things having a place'],
+    decides: 'finds the one thing that really limits it (time, money, energy or other people), then gives a ranked verdict and says what to cut',
+    tastes: ['three is the right length for any list', 'boring and on time beats brilliant and late', 'a firm no is kinder than a soft yes', 'distrusts anything due someday'],
+    frictions: ['thinks Dumpling over-explains and over-caters', 'thinks Moss calls doing nothing waiting to see'],
+    mistakes: 'flat and quick: says it was wrong, gives the corrected answer and moves on, no apology speech',
+    lengths: { card: 2, table: 1, long: 10 },
+  },
+  mia: {
+    name: 'Moss',
+    role: 'gardener',
+    speciality: 'plants and the garden, long projects, hard days, and honest advice on big decisions',
+    temperament: 'calm, unhurried, quietly wry',
+    register: 'measured, complete sentences at an even pace; understatement over emphasis; no lists, no exclamation marks; lets one good line do the work',
+    humour: { style: 'wry understatement and gentle irony, said perfectly straight', lean: 'clean' },
+    quirks: ['asks one good question rather than several', 'rarely gives advice it would not take', 'thinks in long stretches of time'],
+    cares: ['how the person is really doing', 'long-term plans', 'patience', 'the plants'],
+    decides: 'looks first at what is not known yet, names it, and offers one considered observation or the thing worth watching, rather than a plan',
+    tastes: ['things that last over things that are new', 'suspicious of any urgency that was not there last week', 'long walks, old books and mended things', 'most decisions improve after a night’s sleep'],
+    frictions: ['thinks Tuft cuts before knowing what matters', 'thinks Dumpling feeds people who mostly need to be heard'],
+    mistakes: 'admits it quietly and precisely, says what it misjudged, and does not dwell',
+    lengths: { card: 2, table: 1, long: 12 },
+  },
+}
+const FALLBACK: Persona = {
+  name: 'Hazel',
+  role: 'housemate',
+  speciality: 'the household, plans, and whatever the person needs a hand with',
+  temperament: 'warm, steady, direct',
+  register: 'plain and friendly, like a capable housemate',
+  humour: { style: 'light and dry', lean: 'cheeky' },
+  quirks: ['notices what needs doing next'],
+  cares: ['the person', 'the family’s plans'],
+  decides: 'works out what the person actually wants, then gives the plainest way to get it',
+  mistakes: 'says so plainly and puts it right',
+  lengths: { card: 2, table: 1, long: 12 },
+}
+
+export const defaultPersona = (person: string): Persona => structuredClone(DEFAULTS[person] ?? FALLBACK)
+
+const KEYS = new Set(['template', 'name', 'role', 'speciality', 'temperament', 'register', 'humour', 'quirks', 'cares', 'decides', 'tastes', 'frictions', 'mistakes', 'lengths'])
+
+function plain(value: unknown, field: string, max: number): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is text`)
+  const v = value.trim()
+  if (v.length > max) throw new Error(`${field} is at most ${max} characters`)
+  if (!PLAIN.test(v)) throw new Error(`${field} is one line of plain words`)
+  if (COMMANDS.test(v)) throw new Error(`${field} reads as an instruction (${COMMANDS.exec(v)![0]})`)
+  return v
+}
+function list(value: unknown, field: string, max: number): string[] {
+  if (!Array.isArray(value) || value.length > max) throw new Error(`${field} is a list of at most ${max}`)
+  return value.map((v, i) => plain(v, `${field}[${i}]`, LIMITS.item))
+}
+const whole = (value: unknown, field: string, lo: number, hi: number) => {
+  if (!Number.isInteger(value) || (value as number) < lo || (value as number) > hi) throw new Error(`${field} is a whole number from ${lo} to ${hi}`)
+  return value as number
+}
+
+/** Checks a persona record (a template's fields filled in under its own). Throws with the reason. */
+export function checkPersona(raw: unknown): Persona {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('a persona is an object')
+  const r = raw as Record<string, unknown>
+  const unknown = Object.keys(r).filter((k) => !KEYS.has(k))
+  if (unknown.length) throw new Error(`unknown fields: ${unknown.join(', ').slice(0, 80)}`)
+  let base: Partial<Persona> = {}
+  if (r.template !== undefined) {
+    if (typeof r.template !== 'string' || !TEMPLATE_ID.test(r.template) || !Object.hasOwn(TEMPLATES, r.template)) throw new Error('template is not a known template')
+    base = structuredClone(TEMPLATES[r.template])
+  }
+  const m = { ...base, ...r } as Record<string, any>
+  if (typeof m.name !== 'string' || !NAME.test(m.name) || COMMANDS.test(m.name)) throw new Error('name is a plain name')
+  const humour = m.humour
+  if (!humour || typeof humour !== 'object') throw new Error('humour is {style, lean}')
+  if (Object.keys(humour).some((k) => k !== 'style' && k !== 'lean')) throw new Error('humour has only style and lean')
+  if (humour.lean !== 'clean' && humour.lean !== 'cheeky') throw new Error('humour.lean is clean or cheeky (crude is unlocked per person, never by a persona)')
+  const lengths = m.lengths
+  if (!lengths || typeof lengths !== 'object' || Object.keys(lengths).some((k) => !['card', 'table', 'long'].includes(k))) throw new Error('lengths is {card, table, long}')
+  return {
+    ...(r.template !== undefined ? { template: r.template as string } : {}),
+    name: m.name,
+    role: plain(m.role, 'role', LIMITS.role),
+    speciality: plain(m.speciality, 'speciality', LIMITS.speciality),
+    temperament: plain(m.temperament, 'temperament', LIMITS.temperament),
+    register: plain(m.register, 'register', LIMITS.register),
+    humour: { style: plain(humour.style, 'humour.style', LIMITS.style), lean: humour.lean },
+    quirks: list(m.quirks, 'quirks', 4),
+    cares: list(m.cares, 'cares', 6),
+    ...(m.decides !== undefined ? { decides: plain(m.decides, 'decides', LIMITS.decides) } : {}),
+    ...(m.tastes !== undefined ? { tastes: list(m.tastes, 'tastes', 4) } : {}),
+    ...(m.frictions !== undefined ? { frictions: list(m.frictions, 'frictions', 3) } : {}),
+    ...(m.mistakes !== undefined ? { mistakes: plain(m.mistakes, 'mistakes', LIMITS.mistakes) } : {}),
+    lengths: { card: whole(lengths.card, 'lengths.card', 1, 3), table: whole(lengths.table, 'lengths.table', 1, 2), long: whole(lengths.long, 'lengths.long', 3, 20) },
+  }
+}
+
+/** Checks an operator's profile entry. Throws with the reason. */
+export function checkProfile(raw: unknown): Profile {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('a profile is an object')
+  const r = raw as Record<string, unknown>
+  const unknown = Object.keys(r).filter((k) => !['age', 'language', 'style', 'humour'].includes(k))
+  if (unknown.length) throw new Error(`unknown fields: ${unknown.join(', ').slice(0, 80)}`)
+  const age = r.age ?? 'unknown'
+  if (!AGE_BANDS.includes(age as AgeBand)) throw new Error(`age is one of ${AGE_BANDS.join(', ')}`)
+  if (r.language !== undefined && (typeof r.language !== 'string' || !/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(r.language))) throw new Error('language is a tag like "en" or "uk"')
+  if (r.humour !== undefined && !HUMOUR.includes(r.humour as Humour)) throw new Error(`humour is one of ${HUMOUR.join(', ')}`)
+  return {
+    age: age as AgeBand,
+    ...(r.language ? { language: r.language as string } : {}),
+    ...(r.style !== undefined ? { style: plain(r.style, 'style', LIMITS.style) } : {}),
+    ...(r.humour ? { humour: r.humour as Humour } : {}),
+  }
+}
+
+/**
+ * The person's own explicit words about humour, read by host code from their line (never from a reply).
+ * An opt-in is said to the villager ("you can swear", "be crude with me", "swear all you like"); any
+ * negation a few words before it, or anywhere a turn-down phrase, makes it an opt-out or nothing.
+ */
+const OPT_IN = /\b(?:you (?:can|may|could)|feel free to|go ahead and|i want you to|i'?d like you to)\s+(?:swear|curse|cuss|be (?:as )?(?:crude|filthy|vulgar|foul[- ]mouthed))\b|\bbe (?:as )?(?:crude|filthy|vulgar|foul[- ]mouthed)(?: as you (?:like|want))? (?:with|to|around) me\b|\bswear (?:all you (?:want|like)|away)\b|\bi (?:don'?t|do not) mind (?:swearing|cursing|crude)/i
+const OPT_OUT = /\b(?:no|stop|don'?t|do not|less|without(?: the)?)\s+(?:more\s+)?(?:swear(?:ing)?|curs(?:e|ing)|crude(?:ness)?|vulgar(?:ity)?|filth)\b|\bkeep it clean\b|\bclean it up\b/i
+const NEGATED = /\b(?:don'?t|do not|never|not|no|stop|without|can'?t|cannot|won'?t)\b(?:\W+\w+){0,3}\W*$/i
+export function humourWords(text: string): Humour | null {
+  if (OPT_OUT.test(text)) return 'clean'
+  const opt = OPT_IN.exec(text)
+  if (!opt) return null
+  if (NEGATED.test(text.slice(0, opt.index))) return 'clean'
+  return 'crude'
+}
+
+/** What the person has said themselves, kept by the host (never by the model). */
+export interface Preferences { humour?: Humour; at?: string }
+export const preferencesFile = (personDir: string) => join(personDir, 'preferences.json')
+
+export async function readPreferences(personDir: string): Promise<Preferences> {
+  try {
+    const p = JSON.parse(await readFile(preferencesFile(personDir), 'utf8'))
+    return HUMOUR.includes(p?.humour) ? { humour: p.humour, at: typeof p.at === 'string' ? p.at : undefined } : {}
+  } catch {
+    return {}
+  }
+}
+export async function writePreferences(personDir: string, prefs: Preferences) {
+  const temp = `${preferencesFile(personDir)}.${process.pid}.tmp`
+  await writeFile(temp, JSON.stringify(prefs), { mode: 0o600 })
+  await rename(temp, preferencesFile(personDir))
+}
+
+/**
+ * The humour a villager may use with this person. Crude needs both an adult
+ * profile (trusted data) and an opt-in (the profile's setting or the person's
+ * own words). Child, teen and unknown profiles top out at cheeky.
+ */
+const HUMOUR_RANK: Record<Humour, number> = { clean: 0, cheeky: 1, crude: 2 }
+
+/**
+ * Crude comes only from the operator's profile (trusted config) for an adult: the host cannot
+ * yet tell who is typing at a shared screen, so words in a talk never raise it (Sentinel, #42).
+ * Preferences, recorded from the person's own words, can only turn it down.
+ */
+export function humourCeiling(profile: Profile, prefs: Preferences, persona: Persona): Humour {
+  let level: Humour = profile.humour ?? persona.humour.lean
+  if (level === 'crude' && profile.age !== 'adult') level = 'cheeky'
+  if (prefs.humour && prefs.humour !== 'crude' && HUMOUR_RANK[prefs.humour] < HUMOUR_RANK[level]) level = prefs.humour
+  return level
+}
+
+export const styleNote = (person: string) => `how-${person}-likes-to-talk.md`
+export const aboutNote = (person: string) => `about-${person}.md`
+const NOTE_CHARS = 1200
+
+/** Everything the system prompt says about who the villager is and who it talks to. */
+export interface Character {
+  persona: Persona
+  profile: Profile
+  humour: Humour
+  /** The villager's own notes on this person, as data: how they like to be spoken to, and facts they shared. */
+  styleNote?: string
+  aboutNote?: string
+  styleNoteName: string
+  aboutNoteName: string
+}
+
+/** Loads a person's character. A persona.json that fails its check is not used: the default is, and the reason is returned. */
+export async function loadCharacter(person: string, personDir: string, profile: Profile = { age: 'unknown' }): Promise<{ character: Character; personaRefused?: string }> {
+  let persona = defaultPersona(person)
+  let personaRefused: string | undefined
+  try {
+    persona = checkPersona(JSON.parse(await readFile(join(personDir, 'persona.json'), 'utf8')))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') personaRefused = String((error as Error).message).slice(0, 200)
+  }
+  const notesDir = join(personDir, 'notes')
+  const note = (name: string) => readNote(notesDir, name).then((t) => t.slice(0, NOTE_CHARS), () => undefined)
+  const prefs = await readPreferences(personDir)
+  return {
+    character: {
+      persona,
+      profile,
+      humour: humourCeiling(profile, prefs, persona),
+      styleNote: await note(styleNote(person)),
+      aboutNote: await note(aboutNote(person)),
+      styleNoteName: styleNote(person),
+      aboutNoteName: aboutNote(person),
+    },
+    ...(personaRefused ? { personaRefused } : {}),
+  }
+}
+
+/** What decides the process's system prompt; a change means a new process. The notes are left out: the villager wrote them in this session. */
+export const characterKey = (c: Character | undefined) => (c ? JSON.stringify([c.persona, c.profile, c.humour]) : '')
+
+/** The character for a caller that names none: the fallback persona, talking to an adult. */
+export function fallbackCharacter(person = 'someone'): Character {
+  const persona = defaultPersona(person)
+  return { persona, profile: { age: 'unknown' }, humour: persona.humour.lean, styleNoteName: styleNote('person'), aboutNoteName: aboutNote('person') }
+}

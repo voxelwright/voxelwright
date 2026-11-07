@@ -2,12 +2,12 @@
 // the dev server: /villager/launch gives the per-launch token and
 // /villager/api/* is forwarded to the host on 127.0.0.1.
 
-export type Said = { ok: true; reply: string } | { ok: false; why: 'away' | 'busy' | 'failed' }
+export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'route' }
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
 let token: string | null = null
 
-async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
+export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!token) {
       const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
@@ -31,13 +31,30 @@ export async function conversation(person: string): Promise<Line[] | null> {
   return res?.ok ? (await res.json()).lines : null
 }
 
-/** `context` is background the person did not say (the table's last round): the villager hears it, the conversation never stores it. */
-export async function say(person: string, text: string, onText: (t: string) => void, context?: string): Promise<Said> {
+export interface Routing {
+  /** Your own villager's name and the cast: the line may be routed in its reply (#42). */
+  route: { primary: string; villagers: { id: string; name: string; role: string }[] }
+  /** Called once, as soon as the host has read a route in the reply. */
+  onRoute(routed: Routed): void
+}
+
+/**
+ * `context` is background the person did not say (the table's round so far): the villager hears it, the conversation never stores it.
+ * With `routing`, one call either answers (text streams) or names a route (`onRoute`, no text).
+ */
+export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing, sketch?: { from: string; id: string }): Promise<Said> {
   const res = await authorized(`/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
+    // A drawing handed over (#42, sketch.ts) goes by reference, the drawer's id and the sketch's.
+    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
   })
+  let routed: Routed | undefined
+  const onRoute = (r: Routed) => {
+    if (routed) return
+    routed = r
+    routing?.onRoute(r)
+  }
   if (!res) return { ok: false, why: 'away' }
   if (res.status === 409) return { ok: false, why: 'busy' }
   if (!res.ok || !res.body) return { ok: false, why: 'failed' }
@@ -55,8 +72,11 @@ export async function say(person: string, text: string, onText: (t: string) => v
         const name = /^event: (.*)$/m.exec(block)?.[1]
         const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
         if (name === 'text') onText(data.t)
-        else if (name === 'done') return { ok: true, reply: data.reply }
-        else if (name === 'failed') return { ok: false, why: 'failed' }
+        else if (name === 'route' && routing) onRoute(data.routed)
+        else if (name === 'done') {
+          if (data.routed && routing) onRoute(data.routed)
+          return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
+        } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
       }
     }
   } catch {
@@ -79,6 +99,8 @@ export interface Routed {
   where?: string
   count?: number
   size?: [number, number, number]
+  /** furnish: how it is mounted, as the router proposed it; place.ts checks it. */
+  mount?: string
   replace?: string
   copy?: boolean
   library?: string
@@ -86,7 +108,7 @@ export interface Routed {
 }
 export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
 
-async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
+export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
   const t0 = performance.now()
   const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const ms = performance.now() - t0
@@ -116,26 +138,30 @@ export const startProject = (person: string, what: string, where: string | undef
 export const projects = (person: string) => call<{ projects: { id: string; what: string; where?: string; state: string }[] }>(`/people/${person}/projects`)
 
 // ── #47 villager setup (dev only) ───────────────────────────────────────────
-/** A villager written by the model from a description, as module text for the prop sandbox, and its record id. */
-export const makeVillager = (person: string, description: string, accent: string) =>
-  call<{ item: string; module: string; persona: unknown; models: string[]; costUsd: number | null; outputTokens: number | null }>(`/people/${person}/villagers`, { description, accent })
-/** The slider values chosen for a made villager, kept beside its module text. */
-export const tuneVillager = (person: string, item: string, tuning: Record<string, number>) =>
-  call<{ ok: true }>(`/people/${person}/villagers/${item}/tuning`, tuning)
-/** Persona templates (#47): the person's own saved patterns and their profile, the family's shared ones, and saving one. All data, gated by the host. */
-export interface SavedTemplate { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child'; shared: boolean; maker: string }
-export const personaTemplates = async (person: string) => {
-  const r = await call<{ templates: SavedTemplate[]; profile?: unknown }>(`/people/${person}/persona-templates`)
-  return r.ok ? { ...r, profile: profileOf(r.profile) } : r
-}
-/** The host's profile of a person as plain data: two booleans, or null (unknown) for anything else. */
-const profileOf = (v: unknown): { adult: boolean; crudeOptIn: boolean } | null =>
-  v !== null && typeof v === 'object' && typeof (v as { adult?: unknown }).adult === 'boolean' && typeof (v as { crudeOptIn?: unknown }).crudeOptIn === 'boolean'
-    ? { adult: (v as { adult: boolean }).adult, crudeOptIn: (v as { crudeOptIn: boolean }).crudeOptIn }
-    : null
-/** A made villager the home's checks refused, made again once with the reason. Module text for the sandbox, as makeVillager. */
+/**
+ * A villager written by the model from a description (and a pattern: a built-in id, or "<maker>:<id>"), as module
+ * text for the prop sandbox, its record id, and its persona checked by the host (#42's checkPersona) or the reason
+ * it was refused. `dials` are where the setup's sliders start.
+ */
+export interface MadeVillager { item: string; module: string; persona: unknown; personaRefused?: string; dials: Record<string, number> | null; models: string[]; costUsd: number | null; outputTokens: number | null }
+export const makeVillager = (person: string, description: string, accent: string, template?: string) =>
+  call<MadeVillager>(`/people/${person}/villagers`, { description, accent, ...(template ? { template } : {}) })
+/** A made villager whose module the home's checks, or whose persona the host's check, refused: made again once with the reason. */
 export const remakeVillager = (person: string, item: string, reason: string) =>
-  call<{ item: string; module: string; persona: unknown; models: string[]; costUsd: number | null; outputTokens: number | null }>(`/people/${person}/villagers/${item}/remake`, { reason })
-export const familyTemplates = (person: string) => call<{ templates: SavedTemplate[] }>(`/family/persona-templates?for=${person}`)
-export const saveTemplate = (person: string, name: string, persona: unknown, shared: boolean) =>
-  call<{ template: SavedTemplate }>(`/people/${person}/persona-templates`, { name, persona, shared })
+  call<MadeVillager>(`/people/${person}/villagers/${item}/remake`, { reason })
+/** "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice. */
+export const sendOffVillager = (person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>) =>
+  call<{ ok: true; name: string; persona: unknown }>(`/people/${person}/villagers/${item}/send-off`, { tuning, voice })
+/** The person's villager now, and its babble voice, as the host keeps them. */
+export const currentVillager = (person: string) => call<{ persona: unknown; voice: Record<string, number> | null }>(`/people/${person}/villager`)
+
+/** Patterns (#47): the built-in ones this person may pick, their own saved ones, their profile and the jokes dial, all from the host. */
+export interface PatternData { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child'; shared?: boolean; maker?: string }
+/** The jokes dial as the host's humourCeiling decides it: locked at a level (by the admin's setting, or the person's own words) or free. */
+export interface HumourDial { locked: 'clean' | 'cheeky' | 'crude' | null; by?: 'admin' | 'asked' }
+export const personaTemplates = (person: string) =>
+  call<{ builtin: PatternData[]; templates: PatternData[]; profile: unknown; humour: HumourDial }>(`/people/${person}/persona-templates`)
+export const familyTemplates = (person: string) => call<{ templates: PatternData[] }>(`/family/persona-templates?for=${person}`)
+/** Saved as a whole persona with the dials beside it; the host maps the dials in and checks it. */
+export const saveTemplate = (person: string, name: string, persona: unknown, dials: Record<string, number>, shared: boolean) =>
+  call<{ template: PatternData }>(`/people/${person}/persona-templates`, { name, persona, dials, shared })

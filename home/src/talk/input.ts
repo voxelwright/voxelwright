@@ -2,14 +2,18 @@
 // A keypress anywhere starts writing; Enter sends the line on its way to whoever
 // it is addressed to (your own villager unless you have turned to someone else).
 //
-//   held    your own small notepad, held at the bottom of the view like a hand in
-//           a game: a real 3D object riding with the camera, lit by the room.
-//           Your words are written on it in your ink; Enter tears the note off and
-//           it flies to its recipient.
+//   held    (the default) your own small notepad, held at the bottom of the view
+//           like a hand in a game: a real 3D object riding with the camera, lit by
+//           the room. At rest it is small and tucked at the bottom edge, showing
+//           only whom it is to; the first keypress or a click raises it to writing
+//           size, and it settles back after sending or Escape. Your words are
+//           written on it in your ink; Enter tears the note off and it flies to
+//           its recipient.
 //   speech  no box at all until you type: your words rise from the bottom centre
 //           as your own speech card, kin to the villagers' cards but clearly yours.
 //
 // Both keep a tiny felt journal beside the input: one click (or J) opens the journal.
+// Keys reach this file only through `key(e)`, called from talk.ts's one keyboard path.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { releaseGpu, type Stage } from '../kernel'
@@ -17,6 +21,14 @@ import type { Entries } from '../plugins/entries'
 import { canvas, paintLinen, toTexture } from '../paint'
 
 export type Variant = 'held' | 'speech'
+/**
+ * The one rule for which input a page has (#42): with ?talk=npc the held notepad by default,
+ * ?input=speech for the speech card, and none (the paper slip) with ?input=slip or ?slip=always.
+ */
+export function inputVariant(query: URLSearchParams): Variant | null {
+  if (query.get('talk') !== 'npc' || query.get('input') === 'slip' || query.get('slip') === 'always') return null
+  return query.get('input') === 'speech' ? 'speech' : 'held'
+}
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
@@ -40,6 +52,8 @@ export interface InputHooks {
   journal: string
   /** Open the journal where it makes sense (the last conversation). */
   openJournal(): void
+  /** Sketching (#42, sketch.ts): Enter while drawing is the page's, not a line's. True when it took the key. */
+  enter?(): boolean
 }
 
 export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
@@ -51,6 +65,20 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   field.maxLength = 600
   field.autocomplete = 'off'
   field.setAttribute('aria-label', 'Write a line')
+  field.enterKeyHint = 'send'
+  field.placeholder = 'Write a line…'
+  // On a touch screen no key press can focus a hidden field, so a tap shows this one as a real line
+  // and focuses it inside the tap, which is what raises the phone's keyboard (#42).
+  const touch = matchMedia('(pointer: coarse)')
+  const showField = (on: boolean) => field.classList.toggle('touch', on && touch.matches)
+  const vv = window.visualViewport
+  /** Keep the line just above the keyboard: the visual viewport shrinks and scrolls while it is up. */
+  const placeField = () => {
+    if (!vv) return
+    field.style.bottom = `${Math.max(0, innerHeight - (vv.offsetTop + vv.height))}px`
+  }
+  vv?.addEventListener('resize', placeField)
+  vv?.addEventListener('scroll', placeField)
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
@@ -141,12 +169,15 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   hud.add(mark(pad))
 
   // The torn note on its way.
-  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#ffffff', emissiveIntensity: 0.3 })
+  // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
+  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
   const flyer = new THREE.Mesh(new THREE.PlaneGeometry(PADW, PADH * 0.62), flyMat)
   flyer.name = 'talk note in flight'
   flyer.visible = false
   scene.add(mark(flyer))
   let flight: { t: number; from: THREE.Matrix4; to: THREE.Vector3 } | null = null
+  /** Where the pad's paper is on screen, so the villagers' cards keep clear of it. */
+  let padRect = { left: 0, top: 0, width: 0, height: 0 }
 
   // ── The speech card (speech variant) ─────────────────────────────────────
   const speech = document.createElement('div')
@@ -175,6 +206,13 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   journalButton.setAttribute('aria-label', 'Open the journal (J)')
   journalButton.title = 'Journal (J)'
   document.body.append(journalButton)
+  // The resting pad is a real button too: a click raises it for writing.
+  const padButton = document.createElement('button')
+  padButton.type = 'button'
+  padButton.className = 'talk-pad'
+  padButton.setAttribute('aria-label', 'Write a line')
+  padButton.hidden = hooks.variant !== 'held'
+  document.body.append(padButton)
 
   // ── Writing ──────────────────────────────────────────────────────────────
   let text = ''
@@ -223,24 +261,33 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.moveTo(96, 0)
     g.lineTo(96, PH)
     g.stroke()
-    // To whom, in their colour, top right like the address on a note.
+    // To whom, in their colour, like the address on a note: large and on the left at rest, so it reads small; top right while writing.
     const to = hooks.addressee()
-    g.font = `italic 44px ${HAND}`
-    g.textAlign = 'right'
-    g.fillStyle = 'rgba(70, 50, 36, 0.7)'
+    const resting = !writing()
     const name = to.label
-    g.font = `700 58px ${HAND}`
+    const big = resting ? 96 : 58, small = resting ? 70 : 44
+    g.font = `700 ${big}px ${HAND}`
     const nameW = g.measureText(name).width
-    g.font = `italic 44px ${HAND}`
-    g.fillText('to ', PW - 60 - nameW, 92)
-    g.font = `700 58px ${HAND}`
+    g.font = `italic ${small}px ${HAND}`
+    const toW = g.measureText('to ').width
+    const x0 = resting ? 130 : PW - 60 - nameW - toW
+    const y0 = resting ? 128 : 92
+    g.textAlign = 'left'
+    g.fillStyle = 'rgba(70, 50, 36, 0.7)'
+    g.fillText('to ', x0, y0)
+    g.font = `700 ${big}px ${HAND}`
     g.fillStyle = to.colour
-    g.fillText(name, PW - 60, 92)
+    g.fillText(name, x0 + toW, y0)
+    if (resting) return
     g.textAlign = 'left'
     g.font = `56px ${HAND}`
     if (!text) {
       g.fillStyle = 'rgba(70, 50, 36, 0.42)'
       g.font = `italic 50px ${HAND}`
+      if (sketching) {
+        if (sketchHint) g.fillText(sketchHint, 120, 180)
+        return
+      }
       g.fillText('just start typing…', 120, 180)
       if (caretOn) {
         g.fillStyle = INK
@@ -266,24 +313,42 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     speech.classList.toggle('shown', text.length > 0)
   }
 
-  const start = (e: KeyboardEvent) => {
-    if (hooks.blocked()) return
+  /**
+   * One key from talk.ts's keyboard path. True when the input owns it: any key
+   * while the line has the keyboard (Escape only while there are words to clear),
+   * `j` with nothing written (the journal), and a printable key, which starts a line.
+   */
+  const key = (e: KeyboardEvent): boolean => {
+    if (hooks.blocked()) return false
     const t = e.target as HTMLElement | null
-    if (t && t !== field && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return
-    // J (lowercase, nothing written yet) opens the journal; a capital J still starts a line.
-    if (e.key === 'j' && !field.value) {
+    if (t === field || document.activeElement === field) return e.key !== 'Escape' || field.value.length > 0
+    // A line put back after a failed send waits on the pad without the keyboard: Escape clears it.
+    if (e.key === 'Escape' && field.value) {
       e.preventDefault()
-      openJournal()
-      return
+      field.value = ''
+      onInput()
+      return true
     }
-    if (document.activeElement === field) return
-    if (e.key === ' ') return
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return false
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || e.key === ' ') return false
+    // j (lowercase, nothing written yet) opens the journal; a capital J still starts a line.
     e.preventDefault()
+    if (e.key === 'j' && !field.value) {
+      openJournal()
+      return true
+    }
     field.focus({ preventScroll: true })
     field.value += e.key
     onInput()
+    return true
   }
+  /** Raised for writing: the field has the keyboard, or words are on the pad, or you are drawing on it. */
+  const writing = () => document.activeElement === field || text.length > 0 || sketching
+  // ── Sketching (#42, sketch.ts owns the drawing): the pad grows to drawing size ──
+  let sketching = false
+  let sketchHint = ''
+  /** 0 writing size, 1 drawing size. */
+  let draw = 0
   const onInput = () => {
     text = field.value
     caretOn = true
@@ -293,19 +358,25 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const onFieldKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
+      // Sketching (#42): while drawing, Enter makes or gives the page (sketch.ts).
+      if (sketching && hooks.enter?.()) return
       const line = field.value.trim()
       if (!line) return
       const t0 = performance.now()
       send()
+      // Sent: the pad settles back; the next keypress (or tap) raises it again.
+      field.blur()
+      showField(false)
       hooks.submit(line, t0)
     } else if (e.key === 'Escape') {
-      // Escape clears the line first; with nothing written it goes on to the room.
+      // Escape clears the line and settles the pad; with nothing written it goes on to the room.
       if (field.value) {
         e.preventDefault()
         e.stopPropagation()
         field.value = ''
         onInput()
-      } else field.blur()
+      }
+      field.blur()
     }
   }
   /** The note leaves: the pad tears it off and it flies to the recipient; the speech card rises toward them. */
@@ -346,9 +417,24 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     hooks.openJournal()
   }
   journalButton.addEventListener('click', openJournal)
+  // Focus inside the tap or click itself: on a phone that is what raises the keyboard.
+  const writeHere = () => {
+    showField(true)
+    placeField()
+    field.focus({ preventScroll: true })
+  }
+  padButton.addEventListener('click', writeHere)
   field.addEventListener('input', onInput)
   field.addEventListener('keydown', onFieldKey)
-  addEventListener('keydown', start, true)
+  // Focus changes raise and settle the pad, and repaint it between its two looks.
+  const repaint = () => {
+    dirty = true
+  }
+  field.addEventListener('focus', repaint)
+  field.addEventListener('blur', () => {
+    repaint()
+    if (!field.value) showField(false)
+  })
 
   // ── Each frame: ride with the camera, paint, fly ─────────────────────────
   const fwd = new THREE.Vector3()
@@ -357,6 +443,20 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const scl = new THREE.Vector3()
   let hover = 0
   let lift = 0
+  /** 0 at rest, tucked small at the bottom edge; 1 raised to writing size. */
+  let raise = 0
+  const screenBox = (o: THREE.Object3D) => {
+    o.updateWorldMatrix(true, true)
+    const box = new THREE.Box3().setFromObject(o)
+    const r = stage.renderer.domElement.getBoundingClientRect()
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+      const p = tmp.set(x, y, z).project(camera)
+      const sx = r.left + ((p.x + 1) / 2) * r.width, sy = r.top + ((1 - p.y) / 2) * r.height
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+    }
+    return { x0, y0, x1, y1: Math.min(y1, innerHeight) }
+  }
   const frame = (dt: number, t: number) => {
     const away = hooks.blocked()
     hud.visible = !away
@@ -372,11 +472,18 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     hud.position.copy(tmp).addScaledVector(fwd, d)
     hud.quaternion.copy(q)
     hud.scale.setScalar(h)
-    // Breathing, as a held thing does, and a lift while you write.
-    lift += ((text ? 1 : 0) - lift) * (1 - Math.exp(-dt * 6))
-    const breathe = reducedMotion.matches ? 0 : Math.sin(t * 1.3) * 0.006
-    pad.position.set(0.05, -0.93 + lift * 0.1 + breathe, 0)
-    pad.rotation.set(-0.62 + lift * 0.12, 0.02, 0.03)
+    // Breathing, as a held thing does; it rises to writing size while you write and settles after.
+    const ease = (goal: number, rate: number, v: number) => reducedMotion.matches ? goal : v + (goal - v) * (1 - Math.exp(-dt * rate))
+    raise = ease(writing() ? 1 : 0, 9, raise)
+    lift = ease(text ? 1 : 0, 6, lift)
+    draw = ease(sketching ? 1 : 0, 8, draw)
+    const breathe = reducedMotion.matches ? 0 : Math.sin(t * 1.3) * 0.006 * (1 - draw)
+    // At rest about a third of its writing size, and mostly below the edge: only its top line, "to Dumpling", shows.
+    // Drawing (#42): nearly facing you, as large as fits, lower middle of the view.
+    const big = Math.min(1.75, (2 * aspect * 0.92) / 1.04, 1.25 / 0.65)
+    pad.scale.setScalar(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.42, 1, raise), big, draw))
+    pad.position.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 0.05, raise), 0, draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.03, -0.93, raise) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
+    pad.rotation.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.42, -0.62, raise) + lift * 0.12, -0.1, draw), 0.02 * (1 - draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.05, 0.03, raise), 0, draw))
     const jx = -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
     journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
@@ -393,6 +500,15 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     journalButton.style.width = `${Math.max(24, x1 - x0)}px`
     journalButton.style.height = `${Math.max(24, Math.min(innerHeight, y1) - y0)}px`
     journalButton.hidden = away
+    if (hooks.variant === 'held') {
+      const p = screenBox(sheet)
+      padRect = { left: p.x0, top: p.y0, width: p.x1 - p.x0, height: Math.max(0, p.y1 - p.y0) }
+      padButton.style.left = `${p.x0}px`
+      padButton.style.top = `${p.y0}px`
+      padButton.style.width = `${Math.max(24, p.x1 - p.x0)}px`
+      padButton.style.height = `${Math.max(24, p.y1 - p.y0)}px`
+      padButton.hidden = away || document.activeElement === field || sketching
+    }
 
     blink += dt
     if (blink > 0.55) {
@@ -443,8 +559,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   }
 
   const dispose = () => {
-    removeEventListener('keydown', start, true)
+    vv?.removeEventListener('resize', placeField)
+    vv?.removeEventListener('scroll', placeField)
     field.remove()
+    padButton.remove()
     speech.remove()
     journalButton.remove()
     hint.remove()
@@ -460,6 +578,25 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     frame,
     dispose,
     focus: () => field.focus({ preventScroll: true }),
+    key,
+    /** Words are being written, so navigation keys are for the line, not the room. */
+    get writing() {
+      return writing()
+    },
+    padRect: () => ({ ...padRect }),
+    /** Sketching (#42, sketch.ts): the pad's paper, to draw on. */
+    parts: () => ({ pad, PADW, PADH }),
+    /** Sketching (#42): grow the pad to drawing size (or settle it back); `hint` is pencilled on an empty page. */
+    setSketching: (on: boolean, hint = '') => {
+      if (sketching !== on || sketchHint !== hint) dirty = true
+      sketching = on
+      sketchHint = hint
+    },
+    /** Sketching (#42): the words went with the page; the pad is fresh. */
+    clearText: () => {
+      field.value = ''
+      onInput()
+    },
     get text() {
       return text
     },
@@ -468,7 +605,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       field.value = line
       onInput()
     },
-    state: () => ({ variant: hooks.variant, text, to: hooks.addressee().label, flying: Boolean(flight) || document.querySelector('.talk-mine.flying') !== null, speechShown: speech.classList.contains('shown'), padVisible: pad.visible && hud.visible, focused: document.activeElement === field, sentAgo: sent }),
+    state: () => ({ variant: hooks.variant, text, to: hooks.addressee().label, flying: Boolean(flight) || document.querySelector('.talk-mine.flying') !== null, speechShown: speech.classList.contains('shown'), padVisible: pad.visible && hud.visible, focused: document.activeElement === field, sentAgo: sent, raise, padScale: pad.scale.x }),
     /** The journal button's place on screen, for the checks. */
     journalRect: () => journalButton.getBoundingClientRect().toJSON(),
   }
@@ -478,11 +615,19 @@ function css() {
   const paper = `radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%)`
   return `
   .talk-input-field { position: fixed; left: -9999px; top: 0; width: 200px; opacity: 0; }
+  /* Touch: the same field as a real line of paper just above the keyboard, at least 44 px tall. */
+  .talk-input-field.touch { left: 12px; right: 12px; top: auto; bottom: 0; width: auto; opacity: 1; z-index: 6; box-sizing: border-box; min-height: 48px; margin-bottom: 8px;
+    padding: 10px 14px; border: 0; border-radius: 12px; outline: none; background: #fbf3e1; color: ${INK}; font: 18px/1.3 ${BOOK};
+    box-shadow: 0 6px 18px rgba(60, 30, 10, 0.28), inset 0 0 0 1.5px rgba(150, 100, 60, 0.35); }
+  .talk-input-field.touch::placeholder { color: rgba(70, 50, 36, 0.55); font-style: italic; }
   .talk-input-hint { position: fixed; z-index: 4; left: 50%; bottom: 30px; translate: -50% 0; pointer-events: none; opacity: 0; transition: opacity 400ms ease;
     font: italic 22px ${HAND}; color: #fff8ec; text-shadow: 0 1px 2px rgba(60, 30, 10, 0.6), 0 0 14px rgba(60, 30, 10, 0.4); white-space: nowrap; }
   .talk-input-hint.shown { opacity: 0.92; }
   .talk-journal { position: fixed; z-index: 5; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 10px; }
   .talk-journal:focus-visible { outline: 3px solid rgba(255, 236, 200, 0.9); outline-offset: 2px; }
+  .talk-pad { position: fixed; z-index: 4; padding: 0; border: 0; background: none; cursor: text; border-radius: 8px; }
+  .talk-pad:focus-visible { outline: 3px solid rgba(255, 236, 200, 0.9); outline-offset: 2px; }
+  .talk-pad[hidden] { display: none; }
   .talk-mine { position: fixed; z-index: 5; left: 50%; bottom: 26px; box-sizing: border-box; width: fit-content; min-width: 220px; max-width: min(520px, calc(100vw - 32px));
     padding: 22px 24px 16px; border-radius: 16px; color: #23395a; background: ${paper};
     box-shadow: 0 12px 28px rgba(30, 40, 70, 0.26), 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 -3px 0 rgba(60, 90, 138, 0.14) inset;

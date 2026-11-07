@@ -19,7 +19,7 @@ Materials: only `new THREE.MeshStandardMaterial({ color: '#rrggbb', roughness })
   - held: the prop, placed in front of one hand; it moves with the nearest hand.
 - villager.mark(object) returns the object: marks a mesh or group (inside any slot) as the role's mark, the one cue from the role table. Mark all of the mark's parts and nothing else; the tidier marks its duster's plume.
 - villager.gait({ speed: 0.2..0.6 m/s, stride: 0.14..0.34 per two steps, bob: 0..0.08, stepped: true, fidget: 0..1 })
-- villager.about({ name, role, bark, voice, persona }): role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..560 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }; persona is { role, speciality, temperament, register, humour, quirks: [], topics: [], dials: { warmth, playful, chatty, humour } } as described above.
+- villager.about({ name, role, bark, voice }): name is the persona's name; role is one of cook, gardener, tidier, keeper, tutor, messenger, maker, carer; voice is { pitch: 90..560 Hz, range: 0.5..7 semitones, formant: 0.75 (big, dark)..1.6 (tiny, bright), rate: 4..16 syllables/s, breath: 0..0.6, wobble: 0..1.2, wobbleRate: 3..9 Hz, tilt: 0.8 (buzzy)..2.6 (round, dark), gain: 0.6..1.2 }.
 Numbers outside these ranges are clamped.
 
 The request gives a starting voice worked out from the description. Start from it and change only what the character calls for; say what you changed and why in one comment line just above villager.about(), starting `// voice:`.
@@ -83,14 +83,12 @@ export default function (villager, api) {
   villager.about({
     name: 'Dumpling', role: 'cook', bark: "Soup's on for Thursday. Shall I add bread to the list?",
     voice: { pitch: 240, range: 3, formant: 1.1, rate: 10, breath: 0.1, wobble: 0.25, wobbleRate: 5, tilt: 1.6, gain: 0.9 },
-    persona: {
-      role: 'Runs the kitchen and the weekly menu', speciality: 'Cooking for a week from one big shop',
-      temperament: 'warm', register: 'plain', humour: 'gentle',
-      quirks: ['Plans meals around what is about to go off', 'Keeps a running tally of who skipped breakfast'],
-      topics: ["the week's menu", 'what is in season', 'the shopping list'],
-      dials: { warmth: 0.8, playful: 0.3, chatty: 0.5, humour: 'clean' },
-    },
   })
 }
 
-Fence the answer as ```js.
+Its persona block, after the module:
+```json
+{"name":"Dumpling","role":"cook","speciality":"meals, meal plans and shopping lists on a budget, hosting, and the family's week around the table","temperament":"warm, generous, practical, a talker","register":"warm and flowing: talks it through in full connected sentences with real details, names, times and amounts","humour":{"style":"friendly teasing and generous exaggeration; laughs at itself first","lean":"cheeky"},"quirks":["remembers who likes what","has firm opinions on onions","always has a plan B ready"],"cares":["everyone eating well","stretching the food budget","family dinners"],"decides":"starts from what it costs the person day to day and who does the work, then offers two or three workable options and says which it would pick","tastes":["a plan only counts if you can face it on a tired Tuesday","food snobbery is worse than any topping"],"frictions":["thinks Tuft cuts the very parts that make life worth living"],"mistakes":"owns it straight away and cheerfully, then puts a better option on the table","lengths":{"card":2,"table":1,"long":14}}
+```
+
+Fence the module as ```js, then the persona, in the shape above, as a second block fenced ```json.

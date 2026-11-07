@@ -6,7 +6,7 @@ import * as THREE from 'three/webgpu'
 import { canvas, rng, toTexture } from '../../paint'
 import { buttonEye, faceTexture, feltKit, feltTexture, fuzzFill, hand, mesh, part, prop as heldBase, skeleton, srgb, stitchPath, type Prop } from '../kinds'
 import type { Figure, Villager } from '../rig'
-import { ENUMS, PERSONA_TEXT, RANGES, type Accessory, type BodyShape, type HeldProp, type VillagerSpec, type VoiceSpec } from './spec'
+import { ENUMS, PERSONA_TEXT, RANGES, type Accessory, type BodyShape, type HeldProp, type Persona, type VillagerSpec, type VoiceSpec } from './spec'
 
 // ─── check ────────────────────────────────────────────────────────────────
 
@@ -123,36 +123,31 @@ export function check(raw: unknown): Checked {
   }
   const persona = own(raw, 'persona')
   if (persona !== undefined) {
-    const dials = own(persona, 'dials')
-    const P = PERSONA_TEXT
-    // Arrays are cut to their cap before anything looks at their items.
-    const list = (k: string, n: number, max: number) => {
-      const a = own(persona, k)
-      if (!Array.isArray(a)) {
-        fixes.push(`persona.${k}: not a list`)
-        return []
-      }
-      if (a.length > n) fixes.push(`persona.${k}: kept ${n} of ${a.length}`)
-      // Duplicates dropped: a repeated quirk reads as a glitch.
-      return [...new Set(a.slice(0, n).map((x) => (typeof x === 'string' ? cap(x, max) : '')).filter(Boolean))]
-    }
-    spec.persona = {
-      role: text(persona, 'role', P.role, spec.role, 'persona.role'),
-      speciality: text(persona, 'speciality', P.speciality, spec.role, 'persona.speciality'),
-      temperament: pick(persona, 'temperament', ENUMS.temperament, 'calm', 'persona.temperament'),
-      register: pick(persona, 'register', ENUMS.register, 'plain', 'persona.register'),
-      humour: pick(persona, 'humour', ENUMS.humour, 'none', 'persona.humour'),
-      quirks: list('quirks', P.quirks, P.quirk),
-      topics: list('topics', P.topics, P.topic),
-      dials: {
-        warmth: num(dials, 'warmth', RANGES.persona.warmth, 0.5, 'persona.dials.warmth'),
-        playful: num(dials, 'playful', RANGES.persona.playful, 0.3, 'persona.dials.playful'),
-        chatty: num(dials, 'chatty', RANGES.persona.chatty, 0.4, 'persona.dials.chatty'),
-        humour: pick(dials, 'humour', ENUMS.humourDial, 'clean', 'persona.dials.humour'),
-      },
-    }
+    const shaped = personaShape(persona)
+    if (shaped) spec.persona = shaped
+    else fixes.push('persona: not in the persona.json shape, left out')
   }
   return { spec, fixes }
+}
+
+/**
+ * A persona of #42's persona.json shape, for display, or null. The host's checkPersona is the authority
+ * (it also refuses instruction-like words); this only keeps types and lengths sane on the page.
+ */
+export function personaShape(raw: unknown): Persona | null {
+  const P = PERSONA_TEXT
+  const str = (v: unknown, max: number) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
+  const strs = (v: unknown, n: number) => Array.isArray(v) && v.length <= n && v.every((x) => str(x, P.item))
+  const int = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const p = raw as Record<string, unknown>
+  const h = p.humour as Record<string, unknown> | undefined, l = p.lengths as Record<string, unknown> | undefined
+  const ok = typeof p.name === 'string' && /^[A-Z][A-Za-z' -]{0,23}$/.test(p.name) && str(p.role, P.role) && str(p.speciality, P.speciality) && str(p.temperament, P.temperament) && str(p.register, P.register)
+    && !!h && str(h.style, P.style) && (h.lean === 'clean' || h.lean === 'cheeky') && strs(p.quirks, P.quirks) && strs(p.cares, P.cares)
+    && !!l && int(l.card, 1, 3) && int(l.table, 1, 2) && int(l.long, 3, 20)
+    && (p.decides === undefined || str(p.decides, P.decides)) && (p.mistakes === undefined || str(p.mistakes, P.mistakes))
+    && (p.tastes === undefined || strs(p.tastes, P.tastes)) && (p.frictions === undefined || strs(p.frictions, P.frictions))
+  return ok ? structuredClone(p) as unknown as Persona : null
 }
 
 // ─── shapes ───────────────────────────────────────────────────────────────

@@ -29,10 +29,12 @@ mkdirSync(cwd, { recursive: true })
 /** Synthetic descriptions, each with its fixed owner and role. The accent is an input to generation, never the model's choice. */
 export const SETS = JSON.parse(readFileSync(join(here, 'descriptions.json'), 'utf8'))
 const DESCRIPTIONS = SETS[set]
-/** Synthetic owner profiles: who may get crude humour (templates.ts gatePersona). */
+/** Synthetic owner profiles of the round sets, recorded with each result for reading only: humour is the host's rule (host/src/persona.ts humourCeiling). */
 const PROFILES = SETS.profiles ?? {}
 // Templates for the ask, read from the source so the prompt and the merge use the same data.
-const TEMPLATES = Object.fromEntries((await import('../../src/villagers/gen/templates.ts').catch(() => null))?.BUILTIN_TEMPLATES?.map((t) => [t.id, t]) ?? [])
+// The personality patterns are the host's (host/src/persona.ts TEMPLATES and their card labels).
+const personas = await import('../../../host/src/persona.ts').catch(() => null)
+const TEMPLATES = Object.fromEntries(Object.entries(personas?.TEMPLATE_CARDS ?? {}).map(([id, c]) => [id, { id, name: c.label, persona: personas.TEMPLATES[id] }]))
 if (!DESCRIPTIONS) throw new Error(`no description set "${set}"`)
 const style = readFileSync(join(here, 'style.md'), 'utf8')
 const system = { code: `${style}\n${readFileSync(join(here, 'arm-code.md'), 'utf8')}`, spec: `${style}\n${readFileSync(join(here, 'arm-spec.md'), 'utf8')}` }

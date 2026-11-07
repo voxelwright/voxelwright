@@ -26,7 +26,7 @@ const LABEL: Record<Key, { tag: string; aria: string; low: string; high: string;
   warmth: { tag: 'manner', aria: 'Manner, from blunt to warm, a ribbon with a button', low: 'blunter', high: 'warmer', ends: ['blunt', 'warm'] },
   playful: { tag: 'play', aria: 'Humour, from serious to playful, a ribbon with a button', low: 'more serious', high: 'more playful', ends: ['serious', 'playful'] },
   chatty: { tag: 'talk', aria: 'Talk, from brief to chatty, a ribbon with a button', low: 'briefer', high: 'chattier', ends: ['brief', 'chatty'] },
-  humour: { tag: 'jokes', aria: 'Humour, clean, cheeky or crude, a three-position stitch dial', low: 'cleaner', high: 'cruder', ends: ['', ''] },
+  humour: { tag: 'jokes', aria: 'Jokes, clean or cheeky, a stitch dial; crude only when the household admin sets it', low: 'cleaner', high: 'cheekier', ends: ['', ''] },
 }
 const RIBBONS: Key[] = ['warmth', 'playful', 'chatty']
 
@@ -435,8 +435,10 @@ export interface Controls {
   set(key: Key, v: number): void
   /** Lay the tools at a villager's starting values, without firing input. */
   init(values: Partial<Record<Key, number>>): void
-  /** Lock a stepped tool's top position (crude humour): the dial stops one short and shows a padlock. */
+  /** Lock a stepped tool's top position (crude humour): the dial stops one short, shows a padlock, and its tag leaves the word out. */
   lock(key: Key, on: boolean): void
+  /** Pin a tool at a value it cannot be moved from (a jokes level the host locks), or free it with null. */
+  fix(key: Key, v: number | null): void
   /** 'off' hides the tags, 'preview' shows them quietly with nothing to grab, 'on' makes the tools work. */
   mode(state: 'off' | 'preview' | 'on'): void
   /** Lay the tools out for a wide screen (one row along the near edge) or a narrow one (a grid before the mat). */
@@ -510,6 +512,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   ]
   const toolOf = (key: Key) => tools.find((t) => t.key === key)!
   const locked = new Set<Key>()
+  const fixed = new Map<Key, number>()
   let nudged = false
   const values = Object.fromEntries(KEYS.map((k) => [k, 0.5])) as Record<Key, number>
   for (const tool of tools) {
@@ -661,7 +664,12 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     v = Math.min(1, Math.max(0, v))
     const tool = toolOf(key)
     if (tool.steps) v = Math.round(v * (tool.steps - 1)) / (tool.steps - 1)
-    if (locked.has(key) && v >= 1) {
+    if (fixed.has(key)) {
+      const at = fixed.get(key)!
+      if (v !== at && (values[key] !== v || !nudged)) hooks.locked(key)
+      nudged = v !== at
+      v = at
+    } else if (locked.has(key) && v >= 1) {
       v = (tool.steps! - 2) / (tool.steps! - 1)
       if (values[key] !== v || !nudged) hooks.locked(key)
       nudged = true
@@ -786,14 +794,18 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   const anchor = new THREE.Vector3()
   let shown: 'off' | 'preview' | 'on' = 'off'
   let cover: DOMRect | null = null
-  const pin = (el: HTMLElement, at: THREE.Vector3, tool: Tool, r: DOMRect) => {
+  /** Pins a tag to a point on its tool, its middle no higher than minY; returns where its middle went. */
+  const pin = (el: HTMLElement, at: THREE.Vector3, tool: Tool, r: DOMRect, minY = -Infinity) => {
     anchor.copy(at).applyMatrix4(tool.group.matrixWorld).project(stage.camera)
     const x = Math.round(r.left + ((anchor.x + 1) / 2) * r.width)
-    const y = Math.round(r.top + ((1 - anchor.y) / 2) * r.height)
+    const y = Math.max(Math.round(r.top + ((1 - anchor.y) / 2) * r.height), Math.round(minY))
     // A ribbon's tags hang off its ends, outward; every other tag hangs under its tool.
     const t = el.classList.contains('lo') ? `calc(${x}px - 100%) calc(${y}px - 50%)` : el.classList.contains('hi') ? `${x}px calc(${y}px - 50%)` : el.classList.contains('up') ? `calc(${x}px - 50%) calc(${y}px - 100%)` : `calc(${x}px - 50%) ${y}px`
     if (el.style.translate !== t) el.style.translate = t
+    return y
   }
+  const heights = new Map<HTMLElement, number>()
+  const heightOf = (el: HTMLElement) => heights.get(el) || (heights.set(el, el.offsetHeight), el.offsetHeight)
 
   /** A tool's stitched arrow, in page pixels: a double-headed curve beside its axis, or most of a ring round its turning point. */
   const arrow = (tool: Tool) => {
@@ -872,8 +884,21 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       if (on) locked.add(key)
       else locked.delete(key)
       toolOf(key).lock?.(on)
-      if (key === 'humour') marks.at(-1)!.classList.toggle('locked', on)
-      if (on && values[key] >= 1) apply(key, 1)
+      // Crude is shown on the tag only as a level the household's admin set (fix), never as a choice.
+      if (key === 'humour') marks.at(-1)!.hidden = on && fixed.get(key) !== 1
+      if (on && values[key] >= 1 && !fixed.has(key)) apply(key, 1)
+    },
+    fix(key, v) {
+      if (v === null) fixed.delete(key)
+      else fixed.set(key, v)
+      toolOf(key).lock?.(v !== null || locked.has(key))
+      // Pinned, the tag shows only the level it is pinned at; free, clean and cheeky (crude only if not locked).
+      if (key === 'humour') for (const m of marks) m.hidden = v !== null ? m.dataset.step !== HUMOUR[Math.round(v * 2)] : m === marks.at(-1) && locked.has(key)
+      if (v !== null) {
+        values[key] = v
+        toolOf(key).show(v)
+        read(key, v)
+      }
     },
     focus(key) {
       tags.get(key)!.focus({ preventScroll: true })
@@ -928,11 +953,16 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       }
       if (shown === 'off') return
       const r = canvas.getBoundingClientRect()
+      // The ribbons' rows of end tags stack: when the camera is far (a phone, a tall villager) a row never rides up onto the one above.
+      let floor = -Infinity
       for (const tool of tools) {
         tool.group.updateMatrixWorld()
-        pin(tags.get(tool.key)!, layout === 'narrow' && tool.key === 'humour' ? DIAL_FRONT : tool.tagAt, tool, r)
+        const row = RIBBONS.includes(tool.key) ? floor : -Infinity
+        const tag = tags.get(tool.key)!
+        const y = pin(tag, layout === 'narrow' && tool.key === 'humour' ? DIAL_FRONT : tool.tagAt, tool, r, row)
         const end = ends.get(tool.key)
-        if (end && tool.endAt) pin(end, tool.endAt, tool, r)
+        if (end && tool.endAt) pin(end, tool.endAt, tool, r, row)
+        if (RIBBONS.includes(tool.key)) floor = y + heightOf(tag) + 2
       }
       // The arrows: for the tool being hovered, focused or dragged, and those in the coming-out sequence.
       const focused = (document.activeElement as HTMLElement | null)?.dataset?.key

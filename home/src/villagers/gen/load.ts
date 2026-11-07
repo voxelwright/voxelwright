@@ -24,14 +24,11 @@ import { build, check } from './build'
 import { inspect, type Measures } from './checks'
 import { COVERAGE } from './originals'
 import type { Persona, VoiceSpec } from './spec'
-import { applyTemplate, BUILTIN_TEMPLATES, gatePersona, type PersonaProfile } from './templates'
 
 export interface Meta {
   arm: 'spec' | 'code'; file: string; accent: string; owner?: string; description?: string
-  /** A built-in persona template merged over the generated persona (templates.ts applyTemplate). */
+  /** The personality pattern the runner asked for (an id from host/src/persona.ts TEMPLATES); provenance only. */
   template?: string
-  /** Who the villager is for; decides crude humour (templates.ts gatePersona). Missing means unknown. */
-  profile?: PersonaProfile
 }
 interface Made { fig: Figure; name: string; role?: string; bark: string; voice: VoiceSpec | null; persona?: Persona; fixes: string[]; measures?: Measures; timing?: Record<string, number> }
 
@@ -74,11 +71,9 @@ async function make(id: string, phys: boolean, seed: number, meta?: Meta, base?:
   const res = await fetch(`${base}/${meta.file}`)
   if (!res.ok) throw new Error(`could not read ${meta.file}: ${res.status}`)
   const text = await res.text()
-  const m = await fromFile(text, meta, phys, seed)
-  // Template, then the crude-humour gate: model output and templates never grant crude on their own.
-  const template = BUILTIN_TEMPLATES.find((t) => t.id === meta.template)
-  const persona = m.persona && template ? applyTemplate(m.persona, template) : m.persona
-  return { ...m, persona: gatePersona(persona, meta.profile ?? null) }
+  // A saved result's persona is shown as written (the spec arm's, in the persona.json shape); the host's
+  // checkPersona decides what a live villager becomes, and humour is never decided here.
+  return fromFile(text, meta, phys, seed)
 }
 
 async function fromFile(text: string, meta: Meta, phys: boolean, seed: number): Promise<Made> {

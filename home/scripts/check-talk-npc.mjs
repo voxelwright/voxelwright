@@ -133,7 +133,7 @@ try {
 
   if (agent === 'claude') {
     // One real talk and one two-villager table exchange, recorded if asked.
-    await open(page, '?talk=npc&q=high')
+    await open(page, '?talk=npc&input=slip&q=high')
     await page.waitForTimeout(7000)
     await clickVillager(page, 'alex')
     await until(page, (s) => s.mode === 'talk')
@@ -177,7 +177,8 @@ try {
     })()
 
     // Life: three felt villagers doing chores in the room view.
-    await open(page, '?talk=npc&q=low')
+    // The slip variant (?input=slip): these checks drive its form field; the held notepad has its own check.
+    await open(page, '?talk=npc&input=slip&q=low')
     const start = await state(page)
     const fov = await page.evaluate(() => window.village.kernel.root.get('stage').camera.fov)
     check('?talk=npc shows three villagers in the room view', Object.keys(start.cast).join() === 'alex,sam,mia' && fov === 20 && start.mode === 'room', { fov, cast: Object.keys(start.cast) })
@@ -319,16 +320,45 @@ try {
     const returned = await until(page, (s) => !s.cast.mia.crowding && s.cast.mia.fade > 0.95, 25_000)
     check('a walker that comes between the camera and the table fades out, then back in once clear', crowded.cast.mia.crowding && crowded.cast.mia.fade < 0.05 && returned.cast.mia.fade > 0.95, { crowded: crowded.cast.mia, returned: { fade: returned.cast.mia.fade, crowding: returned.cast.mia.crowding } })
 
-    // Starting with a name addresses only that villager, with last round as marked context.
+    // A round (#42): whoever is named first speaks first, the next hears the round so far as context, a villager with nothing to add nods.
+    // The "village/said" listener added above is still on: start its record afresh.
+    await page.evaluate(() => (window.__said = []))
     const named = { alex: (await jsonl('alex', 'conversation.jsonl')).length, sam: (await jsonl('sam', 'conversation.jsonl')).length }
-    await typeLine(page, 'Tuft, can you tidy the counter after?')
+    await typeLine(page, 'Tuft, can you tidy the counter after? [stub-pass:Alex]')
     const one = await watchTurn(page, 30_000)
     const samLines = (await jsonl('sam', 'conversation.jsonl')).slice(named.sam)
     const alexLines = (await jsonl('alex', 'conversation.jsonl')).slice(named.alex)
-    check('starting with a name asks only that villager', alexLines.length === 0 && samLines.length === 2 && [...new Set(one.filter((s) => s.speaker).map((s) => s.speaker))].join() === 'sam', { alexLines, samLines })
-    const heard = await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8').catch(() => '')
+    const firstRound = (await state(page)).round
+    const nodded = one.find((s) => s.speaker === 'alex' && s.cards.alex)
+    const saidWords = await page.evaluate(() => window.__said)
+    check('a line naming Tuft makes Tuft speak first, then the round goes on', firstRound.map((r) => r.speaker).join() === 'sam,alex' && samLines.length === 2 && alexLines.length === 2, { round: firstRound.map((r) => r.speaker), samLines, alexLines })
+    check('a villager with nothing to add passes with a nod, not words, and no voice', firstRound[1]?.pass === true && nodded?.cards.alex.text === '(nods)' && !saidWords.some((e) => e.villager === 'alex' && e.word), { pass: firstRound[1], card: nodded?.cards.alex, alexWords: saidWords.filter((e) => e.villager === 'alex').length })
+    const samHeard = firstRound[0]?.context ?? ''
+    const alexHeard = firstRound[1]?.context ?? ''
+    check("the second speaker hears the person's line and the first reply as context", alexHeard.includes('The round so far: Alex said "Tuft, can you tidy') && alexHeard.includes(`Tuft said "${samLines[1]?.text.slice(0, 40)}`) && samHeard.includes('Before that: Dumpling said "'), { samHeard, alexHeard })
     const samAll = await jsonl('sam', 'conversation.jsonl')
-    check("the other villager's last words reach it only as context, never stored as the person's line", samLines[0]?.text === 'Tuft, can you tidy the counter after?' && /Dumpling said "/.test(heard) && !samAll.some((l) => /Context|Dumpling said/.test(l.text ?? '')), { stored: samLines[0]?.text, heard })
+    const alexAll = await jsonl('alex', 'conversation.jsonl')
+    check("in-round replies are never stored as the person's line", samLines[0]?.text === 'Tuft, can you tidy the counter after? [stub-pass:Alex]' && alexLines[0]?.text === samLines[0]?.text && ![...samAll, ...alexAll].some((l) => l.from === 'person' && /Context|said "/.test(l.text ?? '')), { stored: samLines[0]?.text })
+    const hostHeard = await readFile(join(root, 'people', 'alex', 'stub-last-context.txt'), 'utf8').catch(() => '')
+    check('the in-round context the page sent is what the villager heard', hostHeard === alexHeard, { hostHeard })
+
+    // Turning to each other by name: they hand the line back and forth, then stop at four turns and wait for you.
+    await page.evaluate(() => (window.__said = []))
+    await typeLine(page, 'Who goes next? [stub-handoff:Alex>Tuft] [stub-handoff:Sam>Dumpling]')
+    const handed = await watchTurn(page, 40_000)
+    const longRound = (await state(page)).round
+    const speakers = longRound.map((r) => r.speaker)
+    check('a villager turned to by name speaks next, and a round stops at four turns', speakers.length === 4 && speakers.every((p, i) => i === 0 || p !== speakers[i - 1]) && !handed.at(-1).pending, speakers)
+    const lastHeard = longRound.at(-1)?.context ?? ''
+    check('each later speaker hears every reply so far in the round', (lastHeard.match(/ said "/g) ?? []).length >= 4, lastHeard)
+    // Prefetch: the next speaker is asked the moment the previous reply is complete, while its card is still being revealed.
+    const gaps = longRound.slice(1).map((r, i) => ({ askAfterDone: Math.round(r.asked - longRound[i].done), askBeforeCardEnd: Math.round(longRound[i].finished - r.asked), wait: Math.round(r.card - longRound[i].finished) }))
+    check('the next speaker is asked as soon as the reply before is complete, before its card finishes', gaps.every((g) => g.askAfterDone < 150 && g.askBeforeCardEnd > 0), gaps)
+    // Words still fire in order, one speaker after another, never interleaved.
+    const words = await page.evaluate(() => window.__said)
+    const runs = words.reduce((acc, e) => (acc.at(-1)?.v === e.villager ? acc.at(-1).n++ : acc.push({ v: e.villager, n: 1 }), acc), [])
+    const ordered = words.every((e, i) => i === 0 || e.villager !== words[i - 1].villager ? e.index === 0 : e.index === words[i - 1].index + 1)
+    check('"village/said" words come in order, one speaker at a time, never interleaved', runs.length === 4 && runs.map((r) => r.v).join() === speakers.join() && ordered, { runs, ordered, words: words.map((e) => `${e.villager}:${e.index}:${e.word}`).join(" ") })
 
     // Host down: the villager says so in character and the line is kept.
     await stop(host)
@@ -413,14 +443,14 @@ try {
     await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.
-    // ?talk=npc also turns on the babble voices (babble.ts), so both plugins go.
+    // ?talk=npc also turns on the babble voices and the music (babble.ts, music.ts), so all three go.
     const counts = []
     for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => { window.village.unload('talk'); window.village.unload('babble') })
+      await page.evaluate(() => { window.village.unload('talk'); window.village.unload('babble'); window.village.unload('music') })
       await page.waitForTimeout(300)
       counts.push(await page.evaluate(() => ({ ...window.village.snapshot(), talk: 'talk' in window.village, talkDom: document.querySelectorAll('.talk-card, .talk-slip, .talk-tag, .talk-voice').length })))
       if (i < 2) {
-        await page.evaluate(() => { window.village.load('talk'); window.village.load('babble') })
+        await page.evaluate(() => { window.village.load('talk'); window.village.load('babble'); window.village.load('music') })
         await page.waitForTimeout(800)
       }
     }

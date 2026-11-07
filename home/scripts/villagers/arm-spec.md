@@ -22,9 +22,7 @@ Write a JSON villager spec. Trusted code builds it; you cannot run code. Every n
   "voice": { "pitch": 90..560, "range": 0.5..7, "formant": 0.75..1.6, "rate": 4..16, "breath": 0..0.6, "wobble": 0..1.2, "wobbleRate": 3..9, "tilt": 0.8..2.6, "gain": 0.6..1.2 }
     // pitch Hz; range semitones per word; formant 0.75 big and dark to 1.6 tiny and bright; rate syllables a second;
     // breath noise; wobble vibrato semitones at wobbleRate Hz; tilt 0.8 buzzy to 2.6 round and dark; gain level
-  "persona": { "role": string ≤40, "speciality": string ≤60, "temperament": "dry"|"upbeat"|"calm"|"blunt"|"warm"|"wry",
-    "register": "plain"|"formal"|"casual", "humour": "none"|"dry"|"deadpan"|"wordplay"|"gentle",
-    "quirks": [ up to 3 strings ≤60 ], "topics": [ up to 5 strings ≤40 ], "dials": { "warmth": 0..1, "playful": 0..1, "chatty": 0..1, "humour": "clean"|"cheeky" } }
+  "persona": { "name", "role", "speciality", "temperament", "register", "humour": { "style", "lean": "clean"|"cheeky" }, "quirks", "cares", "decides", "tastes", "frictions", "mistakes", "lengths": { "card", "table", "long" } }   // the persona fields above
 }
 
 Example (Dumpling, the existing cook):
@@ -34,7 +32,6 @@ Example (Dumpling, the existing cook):
  "palette":{"felt":"#e2b98a","belly":"#f6e6cc","inner":"#e8a3a0"},"accessories":[],"prop":"spoon",
  "gait":{"speed":0.38,"stride":0.24,"bob":0.04,"stepped":true,"fidget":0.3},
  "voice":{"pitch":240,"range":3,"formant":1.1,"rate":10,"breath":0.1,"wobble":0.25,"wobbleRate":5,"tilt":1.6,"gain":0.9},
- "persona":{"role":"Runs the kitchen and the weekly menu","speciality":"Cooking for a week from one big shop","temperament":"warm","register":"plain","humour":"gentle",
-  "quirks":["Plans meals around what is about to go off"],"topics":["the week's menu","what is in season"],"dials":{"warmth":0.8,"playful":0.3,"chatty":0.5,"humour":"clean"}}}
+ "persona":{"name":"Dumpling","role":"cook","speciality":"meals, meal plans and shopping lists on a budget, hosting, and the family's week around the table","temperament":"warm, generous, practical, a talker","register":"warm and flowing: talks it through in full connected sentences with real details, names, times and amounts","humour":{"style":"friendly teasing and generous exaggeration; laughs at itself first","lean":"cheeky"},"quirks":["remembers who likes what","has firm opinions on onions","always has a plan B ready"],"cares":["everyone eating well","stretching the food budget","family dinners"],"decides":"starts from what it costs the person day to day and who does the work, then offers two or three workable options and says which it would pick","tastes":["a plan only counts if you can face it on a tired Tuesday","food snobbery is worse than any topping"],"frictions":["thinks Tuft cuts the very parts that make life worth living"],"mistakes":"owns it straight away and cheerfully, then puts a better option on the table","lengths":{"card":2,"table":1,"long":14}}}
 
 Fence the answer as ```json.
