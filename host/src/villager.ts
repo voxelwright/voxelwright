@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
+import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
 
 export interface Config {
   root: string
@@ -31,6 +32,8 @@ export interface Config {
   /** The always-on input's router and prop maker (#42). Without them those endpoints answer 503. */
   router?: Router
   maker?: Maker
+  /** Sketching (#42, sketch.ts): a drawing to a prop module. Without it a sketch on /props answers 503. */
+  sketchMaker?: SketchMaker
 }
 
 /** A stored prop. The module is text the home runs in its sandbox; the host never imports or evaluates it. */
@@ -131,14 +134,15 @@ export default {
       res.end(JSON.stringify(value))
     }
 
-    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse) {
+    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse, sketch?: { from: string; id: string; image: SketchImage }) {
       const dir = personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
       const stateFile = join(dir, 'villager.json')
       const state = await readJson<SessionState>(stateFile, {})
       const at = new Date().toISOString()
-      await appendJsonl(join(dir, 'conversation.jsonl'), { at, from: 'person', text })
+      // A drawing handed over is kept as a reference beside the person's line, never its bytes.
+      await appendJsonl(join(dir, 'conversation.jsonl'), { at, from: 'person', text, ...(sketch ? { sketch: { from: sketch.from, id: sketch.id } } : {}) })
 
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
       res.flushHeaders()
@@ -174,7 +178,7 @@ export default {
         }
       }
       try {
-        const result = await config.agent({ name: people[id], text, context, route, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
+        const result = await config.agent({ name: people[id], text, context, route, ...(sketch ? { image: sketch.image } : {}), sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
         if (held !== null && !routed) {
           routed = routeInReply(held, ids, items)
@@ -247,11 +251,19 @@ export default {
       }
       if (what === 'props' && req.method === 'POST') {
         if (!config.maker) return send(res, 503, { error: 'no maker' })
-        let b: { what?: unknown; size?: unknown; variant?: unknown }
+        let b: { what?: unknown; size?: unknown; variant?: unknown; sketch?: unknown }
         try {
           b = ((await body(req)) ?? {}) as typeof b
         } catch {
-          return send(res, 400, { error: 'expected JSON {"what", "size"?, "variant"?}' })
+          return send(res, 400, { error: 'expected JSON {"what", "size"?, "variant"?, "sketch"?}' })
+        }
+        // Sketching (#42): "sketch" names one of this person's own drawings; a vision maker reads it.
+        let image: SketchImage | null = null
+        if (b.sketch !== undefined) {
+          if (typeof b.sketch !== 'string' || !SKETCH.test(b.sketch)) return send(res, 400, { error: 'sketch is a sketch id' })
+          if (!config.sketchMaker) return send(res, 503, { error: 'no sketch maker' })
+          image = await loadSketch(dir, b.sketch)
+          if (!image) return send(res, 404, { error: 'no such sketch' })
         }
         if (typeof b.what !== 'string' || !b.what.trim() || b.what.length > 200) return send(res, 400, { error: 'what is 1 to 200 characters' })
         const size = Array.isArray(b.size) && b.size.length === 3 && b.size.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 4) ? b.size as [number, number, number] : undefined
@@ -261,11 +273,14 @@ export default {
         making.add(id)
         const started = Date.now()
         try {
-          const made = await config.maker({ what: b.what.trim(), size, variant, signal: AbortSignal.timeout(90_000) })
+          const made = image
+            ? await config.sketchMaker!({ what: b.what.trim(), words: b.what.trim(), image, size, variant, signal: AbortSignal.timeout(120_000) })
+            : await config.maker({ what: b.what.trim(), size, variant, signal: AbortSignal.timeout(90_000) })
           const ms = Date.now() - started
           if (typeof made.module !== 'string' || !made.module.trim() || made.module.length > MAX_MODULE) return send(res, 422, { error: 'the maker returned no usable module', ms })
           // Stored as text for the home's sandbox; never imported, evaluated or run by the host.
-          const entry: LibraryItem = { id: randomBytes(6).toString('hex'), name: cleanName(b.what), module: made.module, size, models: made.models, costUsd: made.costUsd, ms, at: new Date().toISOString(), kept: false }
+          const entry: LibraryItem = { id: randomBytes(6).toString('hex'), name: cleanName(image ? made.name || b.what : b.what), module: made.module, size, models: made.models, costUsd: made.costUsd, ms, at: new Date().toISOString(), kept: false }
+          if (image) await noteSketch(dir, { id: b.sketch as string, made: entry.id })
           await mkdir(libraryDir(id), { recursive: true, mode: 0o700 })
           await writeFile(join(libraryDir(id), `${entry.id}.json`), JSON.stringify(entry), { mode: 0o600 })
           await pruneDrafts(id, entry.id)
@@ -330,6 +345,14 @@ export default {
     async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      // Sketching (#42, sketch.ts): a person's own drawings.
+      const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
+      if (sketchMatch) {
+        const [, id, sid] = sketchMatch
+        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
+        await mkdir(personDir(id), { recursive: true, mode: 0o700 })
+        return sketchRoute(personDir(id), sid, req, res, send)
+      }
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch
@@ -346,9 +369,9 @@ export default {
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
       }
       if (what === 'messages' && req.method === 'POST') {
-        let text: unknown, context: unknown, route: unknown
+        let text: unknown, context: unknown, route: unknown, sketchRef: unknown
         try {
-          ({ text, context, route } = ((await body(req)) ?? {}) as { text?: unknown; context?: unknown; route?: unknown })
+          ({ text, context, route, sketch: sketchRef } = ((await body(req)) ?? {}) as { text?: unknown; context?: unknown; route?: unknown; sketch?: unknown })
         } catch {
           return send(res, 400, { error: 'expected JSON {"text": "...", "context"?: "...", "route"?: {"primary", "villagers"}}' })
         }
@@ -363,11 +386,23 @@ export default {
           if (typeof primary !== 'string' || !VILLAGER_NAME.test(primary) || !known) return send(res, 400, { error: 'route is {"primary": a villager name, "villagers": [{id, name, role}] of listed people}' })
           ask = { name: people[id], primary, villagers: known, library: [] }
         }
+        // Sketching (#42): a drawing handed over, by its drawer's id and the sketch's. It never comes with a route,
+        // so nothing drawn on it can steer who hears what.
+        let sketch: { from: string; id: string; image: SketchImage } | undefined
+        if (sketchRef !== undefined) {
+          const { from, id: sid } = (sketchRef ?? {}) as { from?: unknown; id?: unknown }
+          if (route !== undefined) return send(res, 400, { error: 'a drawing is never routed' })
+          if (typeof from !== 'string' || !PERSON.test(from) || !Object.hasOwn(people, from) || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": a listed person, "id": a sketch id}' })
+          const image = await loadSketch(personDir(from), sid)
+          if (!image) return send(res, 404, { error: 'no such sketch' })
+          sketch = { from, id: sid, image }
+        }
         if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
         busy.add(id)
         const turn = (async () => {
           if (ask) ask.library = (await listLibrary(id)).map((l) => ({ id: l.id, name: cleanName(l.name) }))
-          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res)
+          if (sketch) await noteSketch(personDir(sketch.from), { id: sketch.id, given: id })
+          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res, sketch)
         })().finally(() => {
           busy.delete(id)
           turns.delete(turn)

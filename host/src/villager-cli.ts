@@ -1,4 +1,4 @@
-// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--port 5190] [--root ~/.village]
+// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village]
 // warm (the default, #42) keeps one Claude Code process per person between turns; claude starts one per turn.
 // VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the synthetic people; the default is alex:Alex.
 import { homedir } from 'node:os'
@@ -8,6 +8,7 @@ import { Context } from 'cordis'
 import villager, { parsePeople } from './villager.ts'
 import { claudeAgent, stubAgent, warmAgent } from './villager-agent.ts'
 import { claudeMaker, claudeRouter, stubMaker, stubRouter } from './villager-input.ts'
+import { claudeSketchMaker, stubSketchMaker } from './sketch.ts'
 
 const { values } = parseArgs({
   options: {
@@ -16,6 +17,8 @@ const { values } = parseArgs({
     thinking: { type: 'boolean', default: false },
     'router-model': { type: 'string', default: 'sonnet' },
     'maker-model': { type: 'string', default: 'sonnet' },
+    'sketch-model': { type: 'string', default: 'sonnet' },
+    'sketch-effort': { type: 'string', default: 'low' },
     port: { type: 'string', default: '5190' },
     root: { type: 'string', default: join(homedir(), '.village') },
   },
@@ -41,6 +44,7 @@ const fiber = root.plugin(villager, {
   agent: values.agent === 'stub' ? stubAgent() : (values.agent === 'warm' ? warmAgent : claudeAgent)({ model: values.model, thinking: values.thinking }),
   router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
+  sketchMaker: values.agent === 'stub' ? stubSketchMaker() : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
 })
 await fiber.await()
 console.log(`villager (${values.agent}${values.agent === 'stub' ? '' : `, ${values.model}`}) for ${Object.keys(people ?? { alex: 1 }).join(', ')} listening on 127.0.0.1:${root.villager.port}`)

@@ -5,7 +5,7 @@
 // is checked field by field here, and the maker's module text is stored and
 // returned, never imported or run by the host (the home runs it in its prop
 // sandbox). `stub` versions stand in for both in checks.
-import { query, type SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKSystemMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { initProblem } from './villager-agent.ts'
 import { allowedEnv } from './proc.ts'
 
@@ -209,13 +209,15 @@ export function build(api) {
 
 Answer with the module only, in one \`\`\`js fenced block.`
 
-/** One tool-less model call. Text out, timings and cost alongside. */
-async function oneShot(model: string, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<{ text: string } & Call> {
+/** One tool-less model call. Text out, timings and cost alongside. A prompt of content blocks (an image, #42 sketch.ts) goes as one streamed user message. */
+export async function oneShot(model: string, systemPrompt: string, prompt: string | Exclude<SDKUserMessage['message']['content'], string>, signal: AbortSignal, effort: 'low' | 'medium' | 'high' = 'low'): Promise<{ text: string } & Call> {
   const abortController = new AbortController()
   signal.addEventListener('abort', () => abortController.abort(), { once: true })
   let init: SDKSystemMessage | undefined
   const stream = query({
-    prompt,
+    prompt: typeof prompt === 'string' ? prompt : (async function* () {
+      yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null } as SDKUserMessage
+    })(),
     options: {
       abortController,
       model,
@@ -228,7 +230,7 @@ async function oneShot(model: string, systemPrompt: string, prompt: string, sign
       permissionMode: 'dontAsk',
       persistSession: false,
       maxTurns: 1,
-      effort: 'low',
+      effort,
     },
   })
   try {
