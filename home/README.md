@@ -619,11 +619,11 @@ room, and with it the slip stays addressed to your villager, which wears the
 outline and turns to you while you write, re-addresses itself and sends there;
 unloading `talk` three times leaves the same objects, geometries, textures,
 frame hooks, DOM and entries as a `?cam=iso` page. 32 of 32 passed (stub host,
-November 7, 2026). `--agent=claude`
+November 6, 2026). `--agent=claude`
 runs one real talk, one two-villager table exchange and a typed farewell
 instead, and `--video=dir` records it.
 
-Real model, November 7, 2026, M1 Pro (Sonnet 5.5 with a Haiku helper call),
+Real model, November 6, 2026, M1 Pro (Sonnet 5.5 with a Haiku helper call),
 times measured in the host from the start of each turn, last of three
 recorded runs:
 
