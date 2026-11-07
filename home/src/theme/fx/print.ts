@@ -8,8 +8,8 @@
 //                dark ones, hatching instead of shading.
 import * as THREE from 'three/webgpu'
 import {
-  Fn, If, Loop, dot, float, floor, fract, int, length, log2, luminance, max, mix, screenCoordinate, screenSize, sin,
-  smoothstep, sRGBTransferOETF, step, uniform, uniformArray, uv, vec2, vec3, vec4,
+  Fn, If, Loop, dot, float, floor, fract, getViewPosition, int, length, log2, luminance, max, min, mix, normalize, pow,
+  screenCoordinate, screenSize, sin, smoothstep, sRGBTransferOETF, step, uniform, uniformArray, unpackRGBToNormal, uv, vec2, vec3, vec4,
 } from 'three/tsl'
 import type { Fx } from './index'
 import type { Stage } from '../tokens'
@@ -23,6 +23,7 @@ type V3 = THREE.Node<'vec3'>
 
 const FOV = 40
 const DEBUG = new URLSearchParams(location.search).get('printdbg') === '1'
+const POOL_DEBUG = new URLSearchParams(location.search).get('printdbg') === '2'
 
 const toDisplay = new THREE.Color()
 function displayRgb(hex: string): THREE.Vector3 {
@@ -86,7 +87,8 @@ export function print(spec: Spec): Fx {
   const paperHex = spec.paper ?? '#f6ecd4'
   const inkHex = spec.ink ?? '#1e1a1c'
   return {
-    quiet: spec.style === 'tones' ? { grain: true } : { grain: true, bloom: true, vignette: true },
+    // Print has no airbrush: bloom's soft halo round a lamp read as digital, not printed.
+    quiet: spec.style === 'tones' ? { grain: true, bloom: true } : { grain: true, bloom: true, vignette: true },
     scene({ scenePass }) {
       withAlbedo(scenePass)
     },
@@ -123,26 +125,7 @@ export function print(spec: Spec): Fx {
           const cov = (pr.covs as unknown as { element(i: unknown): THREE.Node<'vec4'> }).element(int(index.mul(3).add(int(lightStep)))).toVar()
           return vec4(plates(cov as unknown as THREE.Node<'vec4'>, p, cellPx, pr), 1)
         }
-        if (spec.style === 'tones') {
-          const pal = spec.palette ?? TONES
-          const labs = uniformArray(pal.map((h) => oklabCpu(new THREE.Color(h))), 'vec3')
-          const rgbs = uniformArray(pal.map(displayRgb), 'vec3')
-          // The surface's own colour where there is one; the frame's colour (sky, glass) elsewhere.
-          const lab = mix(oklab(c as unknown as V3), oklabLinear(alb.rgb as unknown as V3), has)
-          const { best } = nearest(lab as unknown as V3, labs, rgbs, pal.length)
-          // Three flat light steps from the toon light: sunlit, the room's ambient, shadow.
-          const mid = smoothstep(-0.95, -1.05, stops).mul(has)
-          const shadow = smoothstep(-1.85, -1.95, stops).mul(has)
-          const shade = vec3(0.3, 0.24, 0.42) // the shadow ink, a cool plum
-          const toned = best.mul(mix(float(1), float(0.93), mid)).mul(mix(float(1), float(0.82), shadow))
-          // Dots print the shade: a fine screen in the ambient step, merging in the shadow step.
-          const radius = mix(float(0.17), float(0.5), shadow)
-          const dots = dotMask(p, 45, cellPx, radius).mul(mid)
-          const printed = mix(toned, toned.mul(shade).mul(1.1), dots.mul(mix(float(0.45), float(0.8), shadow)))
-          // Bright light (a lamp's glow, the window card's sky) prints as paper.
-          const bulb = smoothstep(1.2, 2.2, stops).mul(has)
-          return vec4(mix(printed, vec(spec.paper ?? '#fff8e8'), bulb), 1)
-        }
+        if (spec.style === 'tones') return tones(spec, { c, alb, has, stops, p, cellPx, at, scenePass, camera, scene: stage.scene })
         // 'line': paper, spot colour on saturated things, spotted blacks on dark ones, hatching.
         const labs = uniformArray(SPOTS.map((h) => oklabCpu(new THREE.Color(h))), 'vec3')
         const rgbs = uniformArray(SPOTS.map(displayRgb), 'vec3')
@@ -246,4 +229,116 @@ function plates(cov: THREE.Node<'vec4'>, p: V2, cellPx: F, pr: ReturnType<typeof
     out.assign(out.mul(mix(vec3(1, 1, 1), ink, mask.mul(density))))
   })
   return out
+}
+
+/** Practical lights the tones style reads its warm pools from: the brightest few in the scene. */
+const POOLS = 3
+
+interface TonesIn {
+  c: V3; alb: THREE.Node<'vec4'>; has: F; stops: F; p: V2; cellPx: F; at: V2
+  scenePass: THREE.PassNode; camera: THREE.PerspectiveCamera; scene: THREE.Scene
+}
+
+/**
+ * C1, the comic look's print: every surface's own colour snapped to one shared set of inks,
+ * printed in flat light steps. Lamps light warm pools: from the scene's real point lights
+ * (position, colour, intensity, range and decay, read every frame) and each pixel's position
+ * and normal, the light a lamp lays on a surface prints as a clean warm flat with no dots.
+ * Walls and floors in the room's ambient print flat, with a fine screen that grows only as
+ * the lamps' light falls away; dense dots print only the shadow step (shadow sides, cast and
+ * contact shadows). Call inside an Fn.
+ */
+function tones(spec: Spec, i: TonesIn) {
+  const { c, alb, has, stops, p, cellPx, at, scenePass, camera, scene } = i
+  const pal = spec.palette ?? TONES
+  const labs = uniformArray(pal.map((h) => oklabCpu(new THREE.Color(h))), 'vec3')
+  const rgbs = uniformArray(pal.map(displayRgb), 'vec3')
+  // The surface's own colour where there is one; the frame's colour (sky, glass) elsewhere.
+  const lab = mix(oklab(c), oklabLinear(alb.rgb as unknown as V3), has)
+  const { best } = nearest(lab as unknown as V3, labs, rgbs, pal.length)
+
+  // The lamps, in view space, refreshed every frame from the lights themselves.
+  const lights = Array.from({ length: POOLS }, () => ({ at: new THREE.Vector3(), colour: new THREE.Vector3(), law: new THREE.Vector3() }))
+  const up = new THREE.Vector3()
+  const found: THREE.PointLight[] = []
+  let frame = 0
+  const world = new THREE.Vector3()
+  const refresh = () => {
+    if (frame++ % 30 === 0) {
+      found.length = 0
+      scene.traverseVisible((o) => { if ((o as THREE.PointLight).isPointLight) found.push(o as THREE.PointLight) })
+      found.sort((a, b) => b.intensity - a.intensity)
+    }
+    lights.forEach((l, k) => {
+      const light = found[k]
+      if (!light) return void l.law.set(0, 1, 1)
+      light.getWorldPosition(world)
+      l.at.copy(world.applyMatrix4(camera.matrixWorldInverse))
+      l.colour.set(light.color.r, light.color.g, light.color.b)
+      l.law.set(light.intensity, light.distance || 1e4, light.decay)
+    })
+  }
+  const projInv = uniform(new THREE.Matrix4()).onRenderUpdate(() => { refresh(); return camera.projectionMatrixInverse })
+  // World up, in view space: which surfaces are floors.
+  const viewUp = uniform(up).onRenderUpdate(() => up.set(0, 1, 0).transformDirection(camera.matrixWorldInverse))
+  const u = lights.map((l) => ({ at: uniform(l.at), colour: uniform(l.colour), law: uniform(l.law) }))
+
+  const depth = scenePass.getTextureNode('depth').sample(at).x.toVar()
+  const pos = getViewPosition(at, depth, projInv).toVar()
+  const normals = scenePass.getMRT()?.has('normal') ? scenePass.getTextureNode('normal') : null
+  const n = normals ? (unpackRGBToNormal(normals.sample(at).rgb) as unknown as V3).toVar() : null
+  // Light each lamp lays here, as three's punctual lights do: inverse power of distance,
+  // cut smoothly to zero at its range, times the cosine to the surface. Each lamp counts at
+  // up to its unit intensity, so its pool follows its own range and decay and a brighter lamp
+  // in the next room doesn't swallow the table's; a dimmed or switched-off lamp shrinks its pool.
+  const pool = float(0).toVar()
+  const warmth = vec3(0, 0, 0).toVar()
+  for (const l of u) {
+    const to = l.at.sub(pos)
+    const d = length(to)
+    const range = pow(max(float(1).sub(pow(d.div(l.law.y), 4)), 0), 2)
+    const falloff = float(1).div(max(pow(d, l.law.z), 0.01))
+    const facing = n ? max(dot(n, normalize(to)), 0) : float(1)
+    const e = min(l.law.x, 1).mul(falloff).mul(range).mul(facing)
+    pool.addAssign(e)
+    warmth.addAssign(l.colour.mul(e))
+  }
+  const onSurface = has.mul(step(depth, 0.99999))
+  // The pool in two flats: a warm core and a softer rim, as a colourist would lay it.
+  const core = smoothstep(0.55, 0.62, pool).mul(onSurface).toVar()
+  const rim = smoothstep(0.27, 0.32, pool).mul(onSurface).toVar()
+  // How far the lamps' light has fallen away: 0 in a pool, 1 well outside every pool.
+  const away = smoothstep(0.3, 0.07, pool).mul(onSurface)
+  // Floors take the falloff screen in full; walls only a faint one, so they print nearly flat.
+  const floorish = n ? smoothstep(0.55, 0.8, dot(n, viewUp)) : float(1)
+  // Lamplight: each ink lightened towards a pale paper in the lamps' own hue, as a lighter flat.
+  const hue = warmth.div(max(max(warmth.x, warmth.y), max(warmth.z, 1e-4)))
+  const lamp = mix(vec3(1, 0.97, 0.9), hue, 0.3)
+  const glow = mix(float(0.28), float(0.5), core).mul(rim)
+
+  // Light steps from the toon light: sunlit, the room's ambient, shadow, deep shadow.
+  const mid = smoothstep(-0.95, -1.05, stops).mul(has).mul(float(1).sub(core))
+  // Shadow sits well below the walls' ambient, so plain walls never cross into it.
+  const shadow = smoothstep(-2.2, -2.32, stops).mul(has)
+  const deep = smoothstep(-2.9, -3.1, stops).mul(has)
+  const shade = vec3(0.3, 0.24, 0.42) // the shadow ink, a cool plum
+  const toned = mix(best, mix(best, lamp, 0.8).mul(mix(vec3(1, 1, 1), hue, 0.12)), glow).mul(mix(float(1), float(0.9), mid)).mul(mix(float(1), float(0.84), shadow))
+  // Dots: none in a lamp's pool; a fine screen in the ambient that grows away from the
+  // lamps; merging dots in shadow, nearly solid in deep shadow.
+  // The ambient screen grows with the shading itself (none where the sun or a lamp reaches,
+  // larger towards the shadow step) and with distance from the lamps; walls take less of it.
+  const dim = smoothstep(-1.2, -2.25, stops)
+  const ambientR = dim.mul(0.3).add(away.mul(0.1)).mul(mix(float(0.55), float(1), floorish)).mul(float(1).sub(rim))
+  const radius = mix(mix(ambientR, float(0.5), shadow), float(0.62), deep)
+  const dots = dotMask(p, 45, cellPx, radius).mul(max(mid, shadow))
+  const strength = mix(float(0.5), mix(float(0.8), float(0.9), deep), shadow)
+  const printed = mix(toned, toned.mul(shade).mul(1.1), dots.mul(strength))
+  // Very bright light (a bulb, the window card's sky) prints as paper.
+  const bulb = smoothstep(3, 3.8, stops).mul(has)
+  if (POOL_DEBUG) {
+    // Pools as bands: red core, yellow rim, green between, blue well away; no normals: magenta.
+    const band = mix(mix(vec3(0.2, 0.4, 1), vec3(0.2, 0.8, 0.3), float(1).sub(away)), mix(vec3(1, 0.9, 0.2), vec3(1, 0.2, 0.2), core), rim)
+    return vec4(mix(c, n ? band : vec3(1, 0, 1), onSurface.mul(0.85)), 1)
+  }
+  return vec4(mix(printed, vec(spec.paper ?? '#fff8e8'), bulb), 1)
 }

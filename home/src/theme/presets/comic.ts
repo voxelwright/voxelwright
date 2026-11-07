@@ -19,8 +19,9 @@ const VARIANTS: Record<string, { stages: Stage[]; shade?: 'toon' }> = {
     shade: 'toon',
     stages: [
       { kind: 'chroma', offset: 0.0005, angle: 35 },
-      { kind: 'print', style: 'tones', cell: 120 },
-      { kind: 'ink', width: 3, depth: 1, normal: 0.85, color: '#1a1014' },
+      { kind: 'print', style: 'tones', cell: 100 },
+      // Contours at 2.4 px, doubling where a shape stands clear of what's behind; folds finer, at 1.4.
+      { kind: 'ink', width: 2.4, depth: 1, normal: 0.8, color: '#1a1014', crease: 1.4 },
     ],
   },
   // C2: the frame as a printed page: process-ink plates, Ben-Day tints, misregistration, newsprint.
