@@ -33,7 +33,7 @@ const base = {
   furniture: [],
 }
 const hex = (c: string, n: number) => c.repeat(n)
-const ROOT = hex('a', 16), V2 = hex('b', 16), V3 = hex('c', 16)
+const ROOT = hex('a', 16), V2 = hex('b', 16), V3 = hex('c', 16), V4 = hex('9', 16)
 
 try {
   let host = await start()
@@ -75,28 +75,32 @@ try {
   check('undo moves the head when it expects the right one', (await post('/head', { head: ROOT, expect: V2 })).status === 200)
   const branch = await post('/versions', { version: { id: V3, parent: ROOT, edits: [{ op: 'bendWall', wallId: 'r.w2', sagitta: 0.5 }], hash: hex('3', 64) } })
   check('a commit after checkout branches from it', branch.status === 200 && branch.json.version.parent === ROOT)
+  const plain = { op: 'addRoom', room: { id: 'p', label: 'Pantry' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2 } }
+  const v4 = await post('/versions', { version: { id: V4, parent: V3, edits: [plain], hash: hex('5', 64) } })
+  check('addRoom with a plain opening (no leaves) is stored as sent', v4.status === 200 && JSON.stringify(v4.json.version.edits[0]) === JSON.stringify(plain), v4)
   check('a name is stored', (await post('/names', { id: V2, name: 'Wider room' })).status === 200)
   check('a name for a missing version is refused', (await post('/names', { id: hex('e', 16), name: 'x' })).status === 404)
 
   // Bad input: nothing is stored.
   const before = (await readdir(join(dir, 'events'))).length
   const bad: [string, unknown][] = [
-    ['an unknown op', { version: { id: hex('f', 16), parent: V3, edits: [{ op: 'deleteHouse' }], hash: hex('4', 64) } }],
-    ['an unknown edit field', { version: { id: hex('f', 16), parent: V3, edits: [{ ...move, run: 'rm -rf' }], hash: hex('4', 64) } }],
-    ['a number out of range', { version: { id: hex('f', 16), parent: V3, edits: [{ ...move, by: 1e9 }], hash: hex('4', 64) } }],
-    ['a non-number', { version: { id: hex('f', 16), parent: V3, edits: [{ ...move, by: '1' }], hash: hex('4', 64) } }],
-    ['a path in an id', { version: { id: hex('f', 16), parent: V3, edits: [{ ...move, wallId: '../x' }], hash: hex('4', 64) } }],
-    ['a bad version id', { version: { id: '../../etc', parent: V3, edits: [move], hash: hex('4', 64) } }],
-    ['a bad hash', { version: { id: hex('f', 16), parent: V3, edits: [move], hash: 'nope' } }],
-    ['no edits', { version: { id: hex('f', 16), parent: V3, edits: [], hash: hex('4', 64) } }],
-    ['too many edits', { version: { id: hex('f', 16), parent: V3, edits: Array(51).fill(move), hash: hex('4', 64) } }],
-    ['a base on a non-root', { version: { id: hex('f', 16), parent: V3, edits: [move], base, hash: hex('4', 64) } }],
-    ['a control character in a note', { version: { id: hex('f', 16), parent: V3, edits: [move], note: 'a\u0000b', hash: hex('4', 64) } }],
-    ['a duplicate id', { version: { id: V2, parent: V3, edits: [move], hash: hex('4', 64) } }],
+    ['an unknown op', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'deleteHouse' }], hash: hex('4', 64) } }],
+    ['an unknown edit field', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, run: 'rm -rf' }], hash: hex('4', 64) } }],
+    ['a number out of range', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: 1e9 }], hash: hex('4', 64) } }],
+    ['a non-number', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: '1' }], hash: hex('4', 64) } }],
+    ['a path in an id', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, wallId: '../x' }], hash: hex('4', 64) } }],
+    ['a bad version id', { version: { id: '../../etc', parent: V4, edits: [move], hash: hex('4', 64) } }],
+    ['a bad hash', { version: { id: hex('f', 16), parent: V4, edits: [move], hash: 'nope' } }],
+    ['no edits', { version: { id: hex('f', 16), parent: V4, edits: [], hash: hex('4', 64) } }],
+    ['too many edits', { version: { id: hex('f', 16), parent: V4, edits: Array(51).fill(move), hash: hex('4', 64) } }],
+    ['a base on a non-root', { version: { id: hex('f', 16), parent: V4, edits: [move], base, hash: hex('4', 64) } }],
+    ['a control character in a note', { version: { id: hex('f', 16), parent: V4, edits: [move], note: 'a\u0000b', hash: hex('4', 64) } }],
+    ['a door with three leaves', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'addRoom', room: { id: 'p', label: 'P' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2, leaves: 3 } }], hash: hex('4', 64) } }],
+    ['a duplicate id', { version: { id: V2, parent: V4, edits: [move], hash: hex('4', 64) } }],
   ]
   for (const [what, body] of bad) {
     const r = await post('/versions', body)
-    check(`${what} is refused`, r.status === 400 || r.status === 409, r)
+    check(`${what} is refused`, r.status === (what === 'a duplicate id' ? 409 : 400), r)
   }
   check('a name with a newline is refused', (await post('/names', { id: V2, name: 'a\nb' })).status === 400)
   check('a body over 256 KB is refused', (await api('/people/alex/plans/versions', undefined, host.token, JSON.stringify({ pad: 'x'.repeat(300_000) }))).status === 413)
@@ -112,7 +116,7 @@ try {
   await link(join(dir, 'tmp', 'other.json'), join(dir, 'events', `${next}.json`))
   await rm(join(dir, 'tmp', 'other.json'))
   const after = await (await api('/people/alex/plans')).json()
-  check('a torn scratch file is never an event', after.versions.length === 3 && after.head === head && after.names[V3] === 'From another host', after)
+  check('a torn scratch file is never an event', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
 
   // Modes.
   const mode = async (p: string) => (await stat(p)).mode & 0o777
@@ -125,7 +129,7 @@ try {
   await host.fiber.dispose()
   host = await start()
   const reloaded = await (await api('/people/alex/plans')).json()
-  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V3)
+  check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V4)
 
   // A damaged log fails loudly instead of folding around a gap.
   await rm(join(dir, 'events', '00000002.json'))

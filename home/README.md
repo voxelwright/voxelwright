@@ -1425,7 +1425,7 @@ removed and changed corners, walls, openings, rooms and furniture by id.
   and `POST .../plans/names {id, name}` cover the rest.
 
 ```sh
-cd host && npm ci && npm run check-plans          # 35/35: token, create, append, stale head, bad input, torn write, modes, restart
+cd host && npm ci && npm run check-plans          # 37/37: token, create, append, stale head, bad input, torn write, modes, restart
 cd home && node scripts/check-plan-history.mjs    # 38/38: memory store, failure paths, diff, then hostStore on a real host (stub agent)
 ```
 

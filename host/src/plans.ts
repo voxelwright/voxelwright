@@ -93,9 +93,13 @@ function edit(v: unknown, at: string): Obj {
         wallId: id(e.wallId, `${at}.wallId`), from: num(e.from, `${at}.from`), to: num(e.to, `${at}.to`), depth: num(e.depth, `${at}.depth`),
       }
       if (e.door !== undefined) {
-        const d = only(e.door, `${at}.door`, ['id', 'from', 'to', 'leaves'], ['head'])
-        if (d.leaves !== 1 && d.leaves !== 2) refuse(`${at}.door.leaves is 1 or 2`)
-        out.door = { id: id(d.id, `${at}.door.id`), from: num(d.from, `${at}.door.from`), to: num(d.to, `${at}.door.to`), leaves: d.leaves, ...(d.head === undefined ? {} : { head: num(d.head, `${at}.door.head`) }) }
+        // No leaves is a plain opening.
+        const d = only(e.door, `${at}.door`, ['id', 'from', 'to'], ['leaves', 'head'])
+        if (d.leaves !== undefined && d.leaves !== 1 && d.leaves !== 2) refuse(`${at}.door.leaves is 1 or 2`)
+        out.door = {
+          id: id(d.id, `${at}.door.id`), from: num(d.from, `${at}.door.from`), to: num(d.to, `${at}.door.to`),
+          ...(d.leaves === undefined ? {} : { leaves: d.leaves }), ...(d.head === undefined ? {} : { head: num(d.head, `${at}.door.head`) }),
+        }
       }
       return out
     }
