@@ -407,7 +407,13 @@ try {
     })
     check('fixtures: a query after the first scan is under 5 ms', tq.queryMs < 5, tq)
     const dom = await B(page, () => ({ dims: [...document.querySelectorAll('.build-dim.shown')].map((e) => e.textContent), choice: document.querySelector('.build-choice.shown .title')?.textContent }))
-    check('outline: size tags and the choice tag show the numbers', dom.dims.length === 2 && /m²/.test(dom.choice ?? ''), dom)
+    check('outline: the size tags show metres and the choice tag says the size in words', dom.dims.length === 2 && dom.dims.every((t) => / m$/.test(t)) && /(smaller|bigger|as big|half|twice)[^·]* the kitchen/.test(dom.choice ?? '') && !/m²/.test(dom.choice ?? ''), dom)
+    const ghosts = await B(page, () => {
+      const scene = window.village.kernel.root.get('stage').scene
+      const g = scene.getObjectByName('build outline ghosts')
+      return { pieces: window.villageBuild.outline.pieces().map((f) => f.id), shown: g ? g.children.filter((c) => c.visible).map((c) => c.name) : [] }
+    })
+    check('outline: the first pieces stand inside as ghosts (sofa, table, rug at least)', ['sofa', 'low-table', 'rug'].every((k) => ghosts.pieces.includes(`living-room.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
     await page.keyboard.press('Escape')
     await frames(page, 4)
     // The notepad's furnishing guess for the line fades out on its own (#42); give it the time.
@@ -475,6 +481,53 @@ try {
     const yardBuilt = await yardInside(page)
     const yardBuiltNow = await yardNow(page)
     check('built: no fence picket or rail, flower, stone or shrub stands inside the new room or its walls (and some were moved aside)', yardBuilt.rooms === 1 && yardBuilt.total === 0 && Object.keys(yard0).some((k) => yardBuiltNow[k] !== yard0[k]), { yardBuilt, changed: Object.keys(yard0).filter((k) => yardBuiltNow[k] !== yard0[k]) })
+    // The first pieces are plan furniture in that same version, drawn from the plan, clear of each other and inside the room.
+    const pieces = () => B(page, async () => {
+      const P = await import('/src/build/plan.ts')
+      const p = window.villageBuild.plan()
+      const scene = window.village.kernel.root.get('stage').scene
+      const things = scene.getObjectByName('placed things')
+      const ids = p.furniture.filter((f) => f.id.startsWith('living-room.')).map((f) => f.id)
+      const drawn = things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('living-room.'))
+      const room = p.rooms.find((r) => r.id === 'living-room')
+      const ring = room ? P.floorOf(p, room) : []
+      const boxes = drawn.filter((c) => !/picture/.test(c.userData.furniture)).map((c) => {
+        c.updateMatrixWorld(true)
+        const box = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }
+        c.traverse((o) => {
+          if (!o.isMesh) return
+          o.geometry.computeBoundingBox()
+          const bb = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)
+          for (let i = 0; i < 3; i++) {
+            box.min[i] = Math.min(box.min[i], bb.min.getComponent(i))
+            box.max[i] = Math.max(box.max[i], bb.max.getComponent(i))
+          }
+        })
+        return { id: c.userData.furniture, box }
+      })
+      const overlaps = []
+      const solid = boxes.filter((b) => !/rug/.test(b.id))
+      for (let i = 0; i < solid.length; i++) for (let j = i + 1; j < solid.length; j++) {
+        const a = solid[i].box, b = solid[j].box
+        const o = [0, 1, 2].map((k) => Math.min(a.max[k], b.max[k]) - Math.max(a.min[k], b.min[k]))
+        if (o.every((v) => v > 0.005)) overlaps.push([solid[i].id, solid[j].id, o.map((v) => +v.toFixed(3))])
+      }
+      // Every floor piece's world box, corner by corner, inside the room's floor.
+      const outside = boxes.filter(({ box }) => [[box.min[0], box.min[2]], [box.max[0], box.min[2]], [box.max[0], box.max[2]], [box.min[0], box.max[2]]].some((q) => !P.inside(ring, q))).map((b) => b.id)
+      return { ids, drawn: drawn.map((c) => c.userData.furniture), overlaps, outside }
+    })
+    const firstPieces = await pieces()
+    check('built: the room arrives with its first pieces as plan furniture in the same version, all drawn', ['sofa', 'low-table', 'rug', 'armchair', 'floor-lamp', 'picture'].every((k) => firstPieces.ids.includes(`living-room.${k}`)) && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
+    check('built: the pieces do not overlap one another and stand inside the room', firstPieces.overlaps.length === 0 && firstPieces.outside.length === 0, firstPieces)
+    const covered = await B(page, async () => {
+      const P = await import('/src/build/plan.ts')
+      const p = window.villageBuild.plan()
+      const lawn = window.villageBuild.lawn()
+      if (!lawn) return { lawn: null }
+      const out = p.rooms.flatMap((r) => P.outline(p, r, -0.2).filter((q) => !P.inside(lawn, q)).map((q) => [r.id, q]))
+      return { lawn: lawn.length, out }
+    })
+    check('the lawn has grown and holds every room with its walls', covered.lawn && covered.out.length === 0, covered)
     check('the shared wall is one wall with the door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.kind === 'door') && built.bent !== 0, built)
     // The door is a real gap in the generated walls: a level ray at 1 m through its middle, from 1 m inside one room
     // to 1 m inside the other, meets no wall; the same ray 0.3 m past a jamb meets the shared wall.
@@ -519,6 +572,8 @@ try {
       if (i === 0) {
         const back = await yardNow(page)
         check('undo: with the room gone, the yard is exactly as diorama.ts drew it', Object.keys(yard0).every((k) => back[k] === yard0[k]), Object.keys(yard0).filter((k) => back[k] !== yard0[k]))
+        const gone = await pieces()
+        check('one undo takes the room and its first pieces away together', gone.ids.length === 0 && gone.drawn.length === 0, gone)
       }
       await page.keyboard.press('Control+Shift+z')
       s = await until(page, (x) => x.rooms.length === 2)
@@ -529,6 +584,18 @@ try {
     }
     // The first round trip warms the room's pieces; from then on every rebuild returns to the same count.
     check('Ctrl+Z takes the room away and Shift+Ctrl+Z brings it back, geometries and textures flat', counts.every((c) => c.undone === 1 && c.floors === 2) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures), { gBefore, counts })
+
+    // A reload draws the first pieces again from the stored plan.
+    {
+      const again = await open('?talk=npc&build=1&route=separate&q=low', context)
+      const back = await B(again.page, () => {
+        const p = window.villageBuild.plan()
+        const things = window.village.kernel.root.get('stage').scene.getObjectByName('placed things')
+        return { ids: p.furniture.filter((f) => f.id.startsWith('living-room.')).map((f) => f.id), drawn: things.children.filter((c) => String(c.userData.furniture ?? '').startsWith('living-room.')).length }
+      })
+      check('reload: the first pieces are still there, drawn from the plan', back.ids.length === firstPieces.ids.length && back.drawn === back.ids.length, back)
+      await again.page.close()
+    }
 
     // The README's second example, against the room just added.
     await say(page, STUDY)

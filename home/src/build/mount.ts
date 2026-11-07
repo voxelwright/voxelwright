@@ -24,6 +24,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { paintPhoto } from '../paint'
 import { curveOf, floorOf, inside, normalAt, segmentsCross, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { NEAR, fixturesOf, type Fixture } from './fixtures'
+import { LIVING } from './pieces'
 
 export const SURFACE_MIN = 0.3
 /** How far below the ceiling a hung thing's top is. */
@@ -441,8 +442,9 @@ export interface Kind { mount: Mount; label: string; build: () => THREE.Object3D
 
 const wood = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.75 })
 
-/** Things the home builds itself: the demo set, one per mount. */
+/** Things the home builds itself: the demo set, one per mount, and a living room's first pieces (pieces.ts). */
 export const KINDS: Record<string, Kind> = {
+  ...LIVING,
   crate: {
     mount: 'floor', label: 'apple crate',
     build: () => {
