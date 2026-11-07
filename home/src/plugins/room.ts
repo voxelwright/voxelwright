@@ -18,6 +18,7 @@ export default {
       new THREE.PlaneGeometry(9, 9),
       new THREE.MeshStandardMaterial({ map: floorTex, roughness: FLOOR_ROUGHNESS }),
     )
+    floor.material.userData.themeRole = 'floor'
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
     floor.userData.seatOnly = true // runs past the walls; iso stands on the diorama's own floor (#42)
@@ -28,6 +29,7 @@ export default {
     const W0 = -3.4, W1 = 3.4, H = 3.0
     const plaster = paintPlaster(5, [244, 239, 230], 1536, 768, 0.45)
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
+    wallMat.userData.themeRole = 'wall'
     const T = 0.18
     const { x0, x1, y0, y1 } = WINDOW
     const { x0: d0, x1: d1, top } = DOORWAY

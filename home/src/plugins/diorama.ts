@@ -20,6 +20,7 @@ export default {
     // The side wall in room.ts is centred on x = -3.4, so its inner face is at -3.31.
     const x0 = -3.4 + T / 2, x1 = 3.4, z0 = WALL_Z, z1 = WALL_Z + 6, height = 3
     const plaster = new THREE.MeshStandardMaterial({ map: paintPlaster(5, [244, 239, 230], 1536, 768, 0.45), roughness: 0.95 })
+    plaster.userData.themeRole = 'wall'
     group.add(shell({
       x0, x1, z0, z1, height, thickness: T,
       wall: plaster,
@@ -59,6 +60,7 @@ export default {
     pool.rotation.x = -Math.PI / 2
     pool.position.set(0.42, TABLE_TOP + 0.004, 0.35)
     pool.name = 'lamp pool'
+    pool.material.userData.themeRole = 'beam'
     group.add(pool)
 
     // A garden plot on the base behind the kitchen: the window looks down onto it, and

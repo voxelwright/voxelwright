@@ -150,6 +150,7 @@ export function floor(x0: number, x1: number, z0: number, z1: number, map: THREE
   m.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2)
   m.receiveShadow = true
   m.name = 'diorama floor'
+  m.material.userData.themeRole = 'floor'
   return m
 }
 

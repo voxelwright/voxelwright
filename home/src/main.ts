@@ -30,6 +30,8 @@ import loungediorama from './plugins/loungediorama'
 import furnish from './plugins/furnish'
 import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
+import themePlugin from './theme/plugin'
+import { THEMED } from './theme'
 
 const params = new URLSearchParams(location.search)
 const listed = {
@@ -51,9 +53,9 @@ PLANS.kitchen.plugins.push(...Object.keys(extra))
 const catalog: Record<string, Loadable> = { ...listed, ...extra }
 // ?room=living starts in another room.
 const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
-const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start) }
+const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start), theme: themePlugin }
 /** Loaded for the whole visit; the rooms service loads and unloads the rest. */
-const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx', ...(THEMED ? ['theme'] : [])]
 // ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
 const only = params.get('plugins')?.split(',')
 // With rooms listed too, each room brings only its listed plugins, so the Elder's
