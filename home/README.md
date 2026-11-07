@@ -1115,17 +1115,55 @@ node scripts/villagers/measure-marks.mjs r7-
 40 of 40 (one earlier run 39 of 40, not reproduced in two reruns), host `node test/villager-make.ts` passes 81 of 81
 (stub maker). `npm run typecheck` fails only in `setup-d.ts` (`sizeAt` missing from `setup-b`), builder N's files.
 
-### Look regroup 2: the trusted felt kit (behind `&kit=1`)
+### The trusted felt kit (the default since the kit council)
 
 `gen/kit.ts` makes the face (button eyes with a highlight, set on the felt along the model's own eye line, and
 cheeks) and the role's mark (toque, mortarboard, sun hat, duster plume, post flag, pencil, lens, stocking cap)
-in the owner's felt, sized against the head. The model's eyes and marked parts are dropped. It is off unless
-asked for: `?villager=gen&gen=<ids>&kit=1`, `readability.mjs ... --kit`, `measure-marks.mjs <prefix> --kit`.
-Numbers and sheets: `screenshots/villager-gen/LEARNING-look.md` and `screenshots/villager-gen/regroup-look-2/`.
+in the owner's felt, sized against the head. In a blind test both Opus and GPT-6.1 Sol preferred it to round 7 in
+all six close pairs, so it is on for runs, for live making through the host and for the setup scene (`assemble()`
+defaults `kit` to true). `&kit=0`, `readability.mjs --no-kit` and `measure-marks.mjs --no-kit` show the model's own
+eyes and mark, for debugging only.
+
+- **Prompt** (`style.md`, `arm-code.md`): the model no longer builds eyes or the mark. It tags a small dark disc for
+  each eye and passes one small felt anchor to `villager.mark()`: a button on the crown (cook, tutor, gardener,
+  carer), a button above one ear (keeper, maker), a patch on the back (messenger), or a knot on the top end of the
+  duster handle it holds (tidier). The role table, the bent-cap recipe and the mark checks are gone from the prompt;
+  Dumpling's example marks an anchor. The old prompt is kept as `scripts/villagers/fixtures/round7-arm-code.md` for
+  the checks on model-built marks.
+- **Role**: the requested role is trusted data. `run.mjs` writes it into `meta.json`, the host takes an optional
+  `role` on `POST /people/:id/villagers` (the home's `ENUMS.role`), puts it in the request, stores and returns it,
+  and `assemble(..., kit, requested)` uses it for the kit and the checks. When `about()` disagrees, the fix line reads
+  `role: the model declared "x"; the requested "y" is used`. The setup scene sends no role yet, so there the model's
+  `about()` decides.
+- **Hats**: the board is 0.95 of the head's width with its ears at the crown (1.04 to 1.18 head cores), 0.055 thick,
+  lying on the skullcap. The sun hat's brim is 1.6 head widths, sits on the head and tilts its front up (up to 0.5
+  rad) until the face clears; it slides back only after that. Ears, horns and eye stalks come up through stitched
+  felt holes (grommets) in the crown, the skullcap, the board, the brim or the stocking cap, and the toque narrows
+  between ears (to 0.22 of the head at least).
+- **Lens**: a thicker rim on a bigger ring, a longer arm from the temple with knobs at both ends, and a pale glass disc.
+- **Held props**: the prop moves (at most 0.08) so its handle runs through the middle of the holding mitten, and a felt
+  wrap in the mitten's colour closes round it; a prop with no handle is moved until the mitten overlaps its edge. A
+  duster handle that ends below the head is lengthened so the plume clears it. The prop's size check measures
+  against the villager without its mark (the kit's toque made Dumpling's spoon "too small").
+
+#### Round 8: the kit as the default
+
+Real Sonnet through `claude -p` (code arm, not mocked), concurrency 3, dev server 5332, the readability 20, with the
+new prompts. Sheets and closes in `screenshots/villager-gen/round8/`; `rabbit-hat-r7-04-body-kit-close.jpg` is round 7's long-eared rabbit under the final kit (round 8's rabbit gardener came out with short ears).
+
+| Measure | Round 7 | Round 8 |
+| --- | --- | --- |
+| Usable, repaired | 20, 3 | 20, 4: species (walrus), species plus the kit's pencil at 98 px (beaver; the pencil is thicker since), a sandbox error (sparrow), and the kit's plume too close to the hedgehog's head (a short handle is lengthened since). Repairs are from the run-time kit; owner colour and the sheets are from the final one |
+| Median first-call latency | 85 s | 65 s |
+| Median first-call output tokens | not recorded (round 6: 8,128) | 6,148 |
+| Cost | $2.29 | $1.79 |
+| Owner colour, min / median px (trusted) | 136 / 425 | 143 / 704 |
+| Model declared the requested role | 20 of 20 | 20 of 20 |
 
 ```sh
-node scripts/villagers/measure-marks.mjs r7- --kit
-node scripts/villagers/readability.mjs <out> http://localhost:5332/ --kit --seed=61 --close=r7-11,r7-12,r7-04,r7-07,r7-08,r7-01
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r8- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=81 --close=r8-11,r8-12,r8-04,r8-07,r8-08,r8-01
+node scripts/villagers/measure-marks.mjs r8-
 ```
 
 ## Villager setup: the felt workshop (#47, November 7, 2026)

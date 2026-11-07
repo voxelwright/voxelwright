@@ -67,10 +67,10 @@ try {
   check('humour dial: a child profile set to crude by mistake is still only cheeky', humourDial('sam', { age: 'child', humour: 'crude' }, {}).locked === 'cheeky')
   check('humour dial: the person\'s own "keep it clean" locks it at clean', JSON.stringify(humourDial('jo', PROFILES.jo, { humour: 'clean' })) === JSON.stringify({ locked: 'clean', by: 'asked' }))
 
-  let calls: { description: string; owner: string; accent: string; pattern?: { label: string }; repair?: { module: string; persona?: string; reason: string } }[] = []
+  let calls: { description: string; owner: string; accent: string; role?: string; pattern?: { label: string }; repair?: { module: string; persona?: string; reason: string } }[] = []
   const stub = stubVillagerMaker(60)
   const counting: VillagerMaker = async (ask) => {
-    calls.push({ description: ask.description, owner: ask.owner, accent: ask.accent, ...(ask.pattern ? { pattern: ask.pattern } : {}), ...(ask.repair ? { repair: ask.repair } : {}) })
+    calls.push({ description: ask.description, owner: ask.owner, accent: ask.accent, ...(ask.role ? { role: ask.role } : {}), ...(ask.pattern ? { pattern: ask.pattern } : {}), ...(ask.repair ? { repair: ask.repair } : {}) })
     return stub(ask)
   }
   let host = await start(counting)
@@ -98,9 +98,19 @@ try {
   check('a made villager comes back as module text with an item id', res.status === 200 && /^[a-f0-9]{12}$/.test(made.item) && made.module.includes('export default function (villager, api)'), { status: res.status, item: made.item })
   check('its persona comes back checked, with the dials\' starting positions beside it', made.persona?.name === 'Biscuit' && JSON.stringify(made.dials) === JSON.stringify(dialsOf(STUB_PERSONA)), { persona: made.persona, dials: made.dials })
   check('the maker saw the tidied description, the person\'s name and the accent', calls.length === 1 && calls[0].description === 'a sleepy hedgehog who bakes bread' && calls[0].owner === 'Alex' && calls[0].accent === '#3d7cc8', calls)
-  check('the stub module wears no owner colour: the home dyes its marked toque in the accent', !made.module.includes('#3d7cc8') && !made.module.includes('#c8553d') && made.module.includes('villager.mark('))
+  check('the stub module wears no owner colour: it marks only an anchor, and the home sews the mark in the accent', !made.module.includes('#3d7cc8') && !made.module.includes('#c8553d') && made.module.includes('villager.mark('))
   const stored = JSON.parse(await readFile(join(root, 'people', 'alex', 'villagers', `${made.item}.json`), 'utf8'))
   check('it is stored under the person, as text', stored.module === made.module && stored.description === 'a sleepy hedgehog who bakes bread' && stored.accent === '#3d7cc8' && typeof stored.ms === 'number', { ms: Date.now() - t0 })
+  check('without a requested role, none is asked for, stored or returned (the home reads the model\'s own)', calls[0].role === undefined && stored.role === undefined && !('role' in made) && !villagerAsk('a fox', 'Alex', '#c8553d').includes('Its role is'))
+  // A requested role (#47 kit): trusted data, so it is in the request, stored, and returned for the home's felt kit.
+  const roleRes = await api('/people/jo/villagers', { body: { description: 'a careful owl', accent: '#6a9a4a', role: 'tutor' } })
+  const roleMade = await roleRes.json() as { item: string; role?: string }
+  const roleStored = JSON.parse(await readFile(join(root, 'people', 'jo', 'villagers', `${roleMade.item}.json`), 'utf8'))
+  const roleGot = await (await api(`/people/jo/villagers/${roleMade.item}`)).json() as { role?: string }
+  check('a requested role goes to the maker, is stored, and comes back on make and read', roleRes.status === 200 && calls.at(-1)?.role === 'tutor' && roleMade.role === 'tutor' && roleStored.role === 'tutor' && roleGot.role === 'tutor', { status: roleRes.status, made: roleMade.role, stored: roleStored.role, read: roleGot.role })
+  check('the request names the role before the owner', villagerAsk('a careful owl', 'Jo', '#6a9a4a', undefined, 'tutor') === 'Make a villager: a careful owl.\n\nIts role is tutor. Its owner is Jo; the owner\'s accent colour is #6a9a4a.')
+  const callsBefore = calls.length
+  check('a role outside the home\'s list is refused before any model call', (await api('/people/jo/villagers', { body: { description: 'a careful owl', accent: '#6a9a4a', role: 'wizard' } })).status === 400 && calls.length === callsBefore)
   check('nothing is stored under another person', !(await readdir(join(root, 'people')).catch((): string[] => [])).includes('sam'))
 
   // One at a time per person.

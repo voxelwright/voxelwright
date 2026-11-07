@@ -12,7 +12,7 @@ import { BLUSH, feltKit as makeKit } from './kit'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
 import { awayFromOwners, inspect, OWNER_ACCENTS, type Measures } from './checks'
-import type { VillagerSpec } from './spec'
+import { ENUMS, type VillagerSpec } from './spec'
 
 /**
  * Owner colour (#47 look regroup, screenshots/villager-gen/LEARNING-look.md, strategy C): shape says the role,
@@ -42,8 +42,13 @@ function near(a: string, b: string, tol = 8) {
 const own = (o: unknown, k: string): unknown => (o !== null && typeof o === 'object' && !Array.isArray(o) && Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined)
 const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).getHexString()
 
-/** Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason. */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = false): Assembled {
+/**
+ * Checked wire data (with roles) and the raw `villager` block to a Figure, or a thrown reason.
+ * `kit` (the default since the kit council): trusted code makes the face and the role's mark (./kit.ts).
+ * `requested`: the role the runner or the host asked for. It is trusted data, so it decides the kit's mark and the
+ * checks over the model's own `villager.about({ role })`, which only says what the model thought it was making.
+ */
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -58,6 +63,10 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const persona = own(about, 'persona')
   const checked = check({ name: own(about, 'name'), role: own(about, 'role'), bark: own(about, 'bark'), voice: own(about, 'voice'), gait: own(meta, 'gait'), ...(persona === undefined ? {} : { persona }) })
   const fixes = checked.fixes.filter((f) => /^(name|role|bark|gait|voice|persona)/.test(f))
+  const asked = (ENUMS.role as readonly string[]).includes(requested ?? '') ? requested as VillagerSpec['role'] : null
+  if (requested !== undefined && !asked) fixes.push(`role: the requested role "${String(requested).slice(0, 24)}" is not a role; the model's "${checked.spec.role}" is used`)
+  if (asked && asked !== checked.spec.role) fixes.push(`role: the model declared "${checked.spec.role}"; the requested "${asked}" is used`)
+  const role = asked ?? checked.spec.role
 
   // Trusted rebuild of the geometry; its materials are replaced below.
   const group = rebuild(prop)
@@ -84,7 +93,12 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   // Regroup 2: the trusted felt kit makes the face and the role's mark; the model's eyes and marked parts go.
   const added: { mesh: THREE.Mesh; slot: Role }[] = []
   if (kit) {
-    const k = makeKit({ meshes: model.map(({ mesh, w }) => ({ mesh, slot: (w.role ?? 'body') as Role, mark: w.mark === true })), role: checked.spec.role, accent, felt: (c, map) => felt(c, map ?? feltTexture(c, seed + 29, { band: false })), seed, blush: awayFromOwners(BLUSH, accents) })
+    // Each part's felt as it will show (off the owners' hues), so the kit's mitten wrap matches the hand it closes.
+    const shownColour = (w: PropData['meshes'][number]) => {
+      const m = prop.materials[w.material], c = hex(m.color)
+      return m.roughness >= 0.5 && m.metalness < 0.5 && w.role !== 'held' ? awayFromOwners(c, accents) : c
+    }
+    const k = makeKit({ meshes: model.map(({ mesh, w }) => ({ mesh, slot: (w.role ?? 'body') as Role, mark: w.mark === true, colour: shownColour(w) })), role, accent, felt: (c, map) => felt(c, map ?? feltTexture(c, seed + 29, { band: false })), seed, blush: awayFromOwners(BLUSH, accents) })
     for (const m of k.remove) m.removeFromParent()
     model = model.filter(({ mesh }) => !k.remove.has(mesh))
     for (const part of k.add) group.add(part.mesh)
@@ -179,7 +193,7 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   // Caught here rather than shown: a hidden face, a floating part, a speck of a prop, odd proportions,
   // the default round body instead of the species, a role mark inside the outline (`species` and `mark`
   // false only for plumbing probes and results that predate them).
-  const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role: checked.spec.role })
+  const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role })
   if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
   const g = checked.spec.gait
@@ -191,6 +205,6 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     root, pose, head, eyes, feet, hands, height: box('head').max.y, hip, side,
     stride: g.stride, speed: g.speed, bob: g.bob, stepped: g.stepped, outline, touch,
   }
-  const { name, role, bark, voice } = checked.spec
+  const { name, bark, voice } = checked.spec
   return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures }
 }

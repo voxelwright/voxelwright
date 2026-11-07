@@ -171,9 +171,13 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   let heldRatio: number | null = null
   if (held && inHeld.size) {
     const hb = new THREE.Box3().setFromObject(held, true).getSize(new THREE.Vector3())
-    heldRatio = Math.max(hb.x, hb.y, hb.z) / Math.max(height, 1e-6)
-    if (heldRatio < LIMITS.held[0]) failures.push(`the held prop is ${Math.max(hb.x, hb.y, hb.z).toFixed(2)} long, too small to read at a distance; make its longest side at least ${(LIMITS.held[0] * height).toFixed(2)} (a third of the villager's height)`)
-    if (heldRatio > LIMITS.held[1]) failures.push(`the held prop is longer than the villager is tall; keep it under ${(LIMITS.held[1] * height).toFixed(2)}`)
+    // Against the villager without its role mark: the felt kit's toque or plume is sewn on after the model sized its prop.
+    const bare = new THREE.Box3()
+    for (const m of meshes) if (!inHeld.has(m) && !m.userData.mark) bare.expandByObject(m, true)
+    const tall = bare.isEmpty() ? height : bare.max.y
+    heldRatio = Math.max(hb.x, hb.y, hb.z) / Math.max(tall, 1e-6)
+    if (heldRatio < LIMITS.held[0]) failures.push(`the held prop is ${Math.max(hb.x, hb.y, hb.z).toFixed(2)} long, too small to read at a distance; make its longest side at least ${(LIMITS.held[0] * tall).toFixed(2)} (a third of the villager's height)`)
+    if (heldRatio > LIMITS.held[1]) failures.push(`the held prop is longer than the villager is tall; keep it under ${(LIMITS.held[1] * tall).toFixed(2)}`)
   }
   // The held prop in a hand, not beside it: touching the body is not enough (Opus and Sol saw tools floating beside villagers).
   const handMeshes: THREE.Mesh[] = []

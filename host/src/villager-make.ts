@@ -4,8 +4,8 @@
 // in #42's persona.json shape. The host stores and returns the module as text and
 // never imports or runs it; the home runs it in its prop sandbox.
 //
-//   POST /people/:id/villagers               {description, accent, template?} -> {item, module, persona, personaRefused?, dials, ms, models, costUsd, outputTokens}
-//   GET  /people/:id/villagers/:item         -> {id, description, accent, module, persona, personaRefused?, dials, tuning}
+//   POST /people/:id/villagers               {description, accent, template?, role?} -> {item, module, role?, persona, personaRefused?, dials, ms, models, costUsd, outputTokens}
+//   GET  /people/:id/villagers/:item         -> {id, description, accent, role?, module, persona, personaRefused?, dials, tuning}
 //   POST /people/:id/villagers/:item/remake  {reason}  -> as the first POST, once per villager
 //   POST /people/:id/villagers/:item/tuning  {size, hue, pitch, pace, energy, warmth, playful, chatty, humour} each 0..1 -> {ok, persona}
 //   POST /people/:id/villagers/:item/send-off {tuning, voice} -> {ok, name}  writes people/<id>/persona.json (the old one kept as persona.prev.json) and voice.json
@@ -34,6 +34,10 @@
 // warmth and playful add words to temperament and register, chatty sets lengths, and the jokes
 // dial sets humour.lean (below 0.25 clean, else cheeky; the dial's crude end is stored as cheeky).
 //
+// Role: the page may ask for one of the home's roles (home/src/villagers/gen/spec.ts ENUMS.role). It goes into the
+// request, is stored with the record and returned, so the home's felt kit sews that role's mark whatever the model's
+// villager.about() says. Without one, the model picks the role and the home reads it from about().
+//
 // Stored under <root>/people/<id>/villagers/<item>.json, each write to a temporary file in the
 // same directory and then renamed over the record, so a crash never leaves half a record.
 // Model failures answer 422; storage failures answer 500.
@@ -44,10 +48,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { checkPersona, defaultPersona, humourCeiling, readPreferences, TEMPLATE_CARDS, TEMPLATES, type Humour, type Persona, type Profile } from './persona.ts'
 import { extractModule, oneShot, type Call } from './villager-input.ts'
+import { ENUMS } from '../../home/src/villagers/gen/spec.ts'
+
+/** A role the page may ask for: the home's closed list, one owner for it. */
+export type VillagerRole = (typeof ENUMS.role)[number]
+const isRole = (v: unknown): v is VillagerRole => typeof v === 'string' && (ENUMS.role as readonly string[]).includes(v)
 
 /** A pattern as the model and applyPattern see it: a whole persona's manner, under its card label. */
 export interface Pattern { label: string; persona: Omit<Persona, 'name' | 'template'>; builtin?: string }
-export interface VillagerAsk { description: string; owner: string; accent: string; signal: AbortSignal; pattern?: Pattern; repair?: { module: string; persona?: string; reason: string } }
+export interface VillagerAsk { description: string; owner: string; accent: string; signal: AbortSignal; role?: VillagerRole; pattern?: Pattern; repair?: { module: string; persona?: string; reason: string } }
 /** `text` is the model's whole answer, read here for the persona block; a maker without one has no persona. */
 export type VillagerMaker = (ask: VillagerAsk) => Promise<{ module: string; text?: string } & Call>
 export type { Persona }
@@ -57,7 +66,7 @@ export interface Dials { warmth: number; playful: number; chatty: number; humour
 type Audience = 'any' | 'adult' | 'child'
 
 interface Stored {
-  id: string; description: string; accent: string; template?: string; module: string
+  id: string; description: string; accent: string; template?: string; role?: VillagerRole; module: string
   persona: Persona | null; personaRefused?: string; personaBlock?: string
   models: string[]; costUsd: number | null; outputTokens: number | null; ms: number; at: string
   tuning?: Record<string, number>
@@ -203,15 +212,15 @@ export function villagerPrompt(): string {
   return `${readFileSync(join(prompts, 'style.md'), 'utf8')}\n${readFileSync(join(prompts, 'arm-code.md'), 'utf8')}`
 }
 
-/** The request as the round-1 runner wrote it, and the picked pattern's manner after it when there is one. */
-export const villagerAsk = (description: string, owner: string, accent: string, pattern?: Pattern) => `Make a villager: ${description}.\n\nIts owner is ${owner}; the owner's accent colour is ${accent}.${pattern ? `\n\nPersonality pattern "${pattern.label}": write the persona's temperament, register, humour, decides, mistakes and lengths in this manner, and the rest from the description:\n\`\`\`json\n${JSON.stringify(pattern.persona)}\n\`\`\`` : ''}`
+/** The request as the runner writes it (its role when one is asked for), and the picked pattern's manner after it when there is one. */
+export const villagerAsk = (description: string, owner: string, accent: string, pattern?: Pattern, role?: VillagerRole) => `Make a villager: ${description}.\n\n${role ? `Its role is ${role}. ` : ''}Its owner is ${owner}; the owner's accent colour is ${accent}.${pattern ? `\n\nPersonality pattern "${pattern.label}": write the persona's temperament, register, humour, decides, mistakes and lengths in this manner, and the rest from the description:\n\`\`\`json\n${JSON.stringify(pattern.persona)}\n\`\`\`` : ''}`
 /** The repair request as the round-1 runner wrote it: the ask, the previous module (and persona block) and why it was refused. */
 export const repairAsk = (ask: string, module: string, reason: string, persona?: string) => `${ask}\n\nYour previous file:\n\`\`\`js\n${module}\n\`\`\`\n${persona ? `\nYour previous persona block:\n\`\`\`json\n${persona}\`\`\`\n` : ''}\nIt failed with this error:\n${reason}\n\nReturn the corrected complete file${persona !== undefined ? ' and the persona block' : ''}.`
 
 export function claudeVillagerMaker(model = 'sonnet'): VillagerMaker {
   const system = villagerPrompt()
   return async (ask) => {
-    const first = villagerAsk(ask.description, ask.owner, ask.accent, ask.pattern)
+    const first = villagerAsk(ask.description, ask.owner, ask.accent, ask.pattern, ask.role)
     const { text, ...call } = await oneShot(model, system, ask.repair ? repairAsk(first, ask.repair.module, ask.repair.reason, ask.repair.persona ?? '') : first, ask.signal)
     return { module: extractModule(text), text, ...call }
   }
@@ -226,7 +235,7 @@ export const STUB_PERSONA: Persona = {
 }
 
 /**
- * Stand-in for checks: the Dumpling example from arm-code.md (no owner colour: the home dyes its toque), given a pup's
+ * Stand-in for checks: the Dumpling example from arm-code.md (no owner colour: the home's felt kit sews the mark on its anchor), given a pup's
  * snout and tall ears so it passes the home's species check (gen/checks.ts: the example alone is
  * the round template the check refuses). "[stub-fail]" fails. "[stub-mark-head]" first returns it with
  * the whole head tagged as the role mark (the home's mark check refuses it), and the plain one on repair.
@@ -381,7 +390,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     return { ...made, ms, persona, personaRefused, personaBlock: found.block }
   }
   const answer = (r: Stored, made: { ms: number; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }) => ({
-    item: r.id, module: r.module, persona: r.persona, ...(r.personaRefused ? { personaRefused: r.personaRefused } : {}), dials: r.persona ? dialsOf(r.persona) : null,
+    item: r.id, module: r.module, ...(isRole(r.role) ? { role: r.role } : {}), persona: r.persona, ...(r.personaRefused ? { personaRefused: r.personaRefused } : {}), dials: r.persona ? dialsOf(r.persona) : null,
     ms: made.ms, models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, apiMs: made.apiMs,
   })
 
@@ -449,20 +458,22 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       try {
         b = await body(req)
       } catch {
-        return send(res, 400, { error: 'expected JSON {"description", "accent", "template"?}' }), true
+        return send(res, 400, { error: 'expected JSON {"description", "accent", "template"?, "role"?}' }), true
       }
       const description = typeof b.description === 'string' ? b.description.trim().replace(/\s+/g, ' ') : ''
       if (!description || description.length > MAX_DESCRIPTION) return send(res, 400, { error: `description is 1 to ${MAX_DESCRIPTION} characters` }), true
       if (typeof b.accent !== 'string' || !ACCENT.test(b.accent)) return send(res, 400, { error: 'accent is a #rrggbb colour' }), true
+      if (b.role !== undefined && !isRole(b.role)) return send(res, 400, { error: `role is one of ${ENUMS.role.join(', ')}` }), true
+      const role = b.role as VillagerRole | undefined
       const pattern = await patternFor(id, b.template)
       if (pattern === 'refused') return send(res, 400, { error: 'template is not a pattern this person can pick' }), true
       if (making.has(id)) return send(res, 409, { error: 'already making a villager' }), true
       making.add(id)
       try {
-        const made = await makeOnce(res, { description, owner: config.people[id], accent: b.accent, ...(pattern ? { pattern } : {}) })
+        const made = await makeOnce(res, { description, owner: config.people[id], accent: b.accent, ...(role ? { role } : {}), ...(pattern ? { pattern } : {}) })
         if (!made) return true
         // Stored and returned as text for the home's sandbox; never imported, evaluated or run here.
-        const record: Stored = { id: randomBytes(6).toString('hex'), description, accent: b.accent, ...(pattern ? { template: b.template as string } : {}), module: made.module, persona: made.persona, ...(made.personaRefused ? { personaRefused: made.personaRefused } : {}), ...(made.personaBlock ? { personaBlock: made.personaBlock } : {}), models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, ms: made.ms, at: new Date().toISOString() }
+        const record: Stored = { id: randomBytes(6).toString('hex'), description, accent: b.accent, ...(role ? { role } : {}), ...(pattern ? { template: b.template as string } : {}), module: made.module, persona: made.persona, ...(made.personaRefused ? { personaRefused: made.personaRefused } : {}), ...(made.personaBlock ? { personaBlock: made.personaBlock } : {}), models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, ms: made.ms, at: new Date().toISOString() }
         // A storage failure throws past here to the host's 500, never the maker's 422.
         await write(id, record)
         return send(res, 200, answer(record, made)), true
@@ -488,7 +499,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       if (making.has(id)) return send(res, 409, { error: 'already making a villager' }), true
       making.add(id)
       try {
-        const made = await makeOnce(res, { description: found.description, owner: config.people[id], accent: found.accent, ...(pattern && pattern !== 'refused' ? { pattern } : {}), repair: { module: found.module, reason, ...(found.personaBlock ? { persona: found.personaBlock } : {}) } })
+        const made = await makeOnce(res, { description: found.description, owner: config.people[id], accent: found.accent, ...(isRole(found.role) ? { role: found.role } : {}), ...(pattern && pattern !== 'refused' ? { pattern } : {}), repair: { module: found.module, reason, ...(found.personaBlock ? { persona: found.personaBlock } : {}) } })
         if (!made) return true
         // The repair's persona, else the first one if it was good; a refusal again is kept with its reason.
         const persona = made.persona ?? stillGood(found.persona)
@@ -503,7 +514,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       const found = await read(id, item)
       if (!found) return send(res, 404, { error: 'no such villager' }), true
       const persona = stillGood(found.persona)
-      return send(res, 200, { id: found.id, description: found.description, accent: found.accent, module: found.module, persona, ...(found.personaRefused ? { personaRefused: found.personaRefused } : {}), dials: persona ? dialsOf(persona) : null, tuning: found.tuning ?? null, tuned: tunedOf(found) }), true
+      return send(res, 200, { id: found.id, description: found.description, accent: found.accent, ...(isRole(found.role) ? { role: found.role } : {}), module: found.module, persona, ...(found.personaRefused ? { personaRefused: found.personaRefused } : {}), dials: persona ? dialsOf(persona) : null, tuning: found.tuning ?? null, tuned: tunedOf(found) }), true
     }
     if (item && (action === 'tuning' || action === 'send-off') && req.method === 'POST') {
       const found = await read(id, item)

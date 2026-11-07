@@ -21,6 +21,12 @@
 // 20 degrees steeper than the dollhouse view, and a duster of 5 feathers on a knot passes; a board or brim too wide or too
 // small, a hat that clears the eyes only 15 degrees steeper, a one-ball plume, and round 6's elephant (board 1.47), hippo
 // (brim 2.10) and hedgehog (one-ball plume) and round 5's giraffe (one-ball plume) are refused, each naming the mark.
+// The felt kit as the default (kit council, November 7): checks.ts now guards the kit's own marks, so the mark tests
+// above run on the round-7 prompt (fixtures/round7-arm-code.md) with the kit off. With it on, the new prompt example marks
+// only an anchor and passes in every role but the tidier's (it holds a spoon, not a duster), the setup stub's tall ears
+// get stitched holes in the board and the sun hat, the requested role wins over the model's about() with a fix line, a
+// marked head is refused with the anchor named, a spoon 6 cm off the mitten is moved into it and wrapped, and a duster
+// handle held up beside the head gets the kit's plume.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -31,7 +37,12 @@ import { chromium } from 'playwright'
 const here = dirname(fileURLToPath(import.meta.url))
 const base = process.argv[2] ?? 'http://localhost:5332/'
 const fixture = (name) => readFileSync(join(here, 'villagers/fixtures', name), 'utf8')
-const example = readFileSync(join(here, 'villagers/arm-code.md'), 'utf8').split('Example (')[1].match(/export default function \(villager, api\) \{[\s\S]*?\n\}/)[0]
+const exampleOf = (md) => md.split('Example (')[1].match(/export default function \(villager, api\) \{[\s\S]*?\n\}/)[0]
+/** The round-7 prompt, whose example builds its own toque: the checks on a model-built mark are tested on it, kit off. */
+const round7 = readFileSync(join(here, 'villagers/fixtures/round7-arm-code.md'), 'utf8')
+const example = exampleOf(round7)
+/** Today's prompt: the example marks only an anchor, and the felt kit sews the mark. */
+const kitExample = exampleOf(readFileSync(join(here, 'villagers/arm-code.md'), 'utf8'))
 
 const checks = []
 const check = (name, pass, detail) => {
@@ -75,7 +86,8 @@ try {
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)))
   await page.goto(`${base}?plugins=renderer,camera&q=low&villager=gen&gen=none`)
   await page.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
-  const trial = (code, opts = {}) => page.evaluate(([c, o]) => window.villagerGen.trial(c, o), [code, opts])
+  // Kit off unless asked for: most of these test the checks on a model-built mark (the round-7 prompt).
+  const trial = (code, opts = {}) => page.evaluate(([c, o]) => window.villagerGen.trial(c, o), [code, { kit: false, ...opts }])
 
   // Passing: the hand-made plush, their specs, the prompt's example, a sound probe and a round-1 frog.
   for (const id of ['hand:dumpling', 'hand:tuft', 'hand:moss', 'spec:dumpling', 'spec:tuft', 'spec:moss']) {
@@ -138,7 +150,7 @@ try {
   const pencil = example.replace(toque, `  villager.mark(add(head, new THREE.CylinderGeometry(0.006, 0.006, 0.26, 8), white, 0.14, 0.2, 0)).rotation.z = -0.7\n`)
   await refused('the example with a thin pencil as its mark (too little owner colour)', pencil, /the cook's toque shows only \d+ pixels of the owner's colour from the dollhouse view \(at least 100\)/, { mark: true })
   await refused('a spoon held 6 cm in front of the mitten (it touches the body, not the hand)', plush({ off: 0.06 }), /the held prop near .* does not touch either hand/)
-  const capRecipe = /A bent cap in one piece[^\n]*\n\n```js\n([\s\S]*?)```/.exec(readFileSync(join(here, 'villagers/arm-code.md'), 'utf8'))?.[1]
+  const capRecipe = /A bent cap in one piece[^\n]*\n\n```js\n([\s\S]*?)```/.exec(round7)?.[1]
   if (!capRecipe) throw new Error('arm-code.md has no bent-cap recipe block')
   const capped = await trial(asRole(example.replace(toque, capRecipe), 'carer'), { mark: true, accent: '#3d7cc8' })
   check('the prompt\'s bent stocking cap is one piece, breaks the outline, and its pom-pom sits on its blunt end', capped.ok && capped.measures.pieces === 1 && capped.measures.mark.above >= 0.1 && capped.measures.ownerPx >= 100 && capped.measures.loose.length === 0, capped.ok ? { pieces: capped.measures.pieces, mark: capped.measures.mark, ownerPx: capped.measures.ownerPx, loose: capped.measures.loose } : capped.reason)
@@ -210,6 +222,35 @@ ${tufts ? `  for (let k = 0; k < 5; k++) {
   await refused('the prompt\'s pom-pom moved 0.14 off the cap\'s end', asRole(example.replace(toque, capRecipe.replace('0.17, 0.31, -0.02))', '0.3, 0.36, -0.02))')), 'carer'), /the carer's stocking cap has a #9a8a7a head part near \(0\.30, [\d.]+, -0\.02\) standing 0\.0\d+ clear of everything it could sit on/, { mark: true, accent: '#3d7cc8' })
   await refused('round 5\'s sheep carer (its pom-pom on the cone\'s needle point)', fixture('round5-sheep-pompom.code.txt'), /the carer's stocking cap has a #9a8a7a head part near .* meets what holds it only at a point/, { mark: true, species: true, accent: '#3d7cc8' })
   await refused('round 5\'s ox maker (its lens ring 0.01 off its arm)', fixture('round5-ox-lens.code.txt'), /the maker's swung-up lens has a #ecdfc6 head part near .* standing 0\.0\d+ clear of everything it could sit on.*join the lens ring to its arm/, { mark: true, species: true, accent: '#6a9a4a' })
+
+  // The felt kit, on by default: the model marks an anchor, trusted code sews the mark, the requested role decides it.
+  const anchors = (kitExample.match(/villager\.mark\(/g) ?? []).length
+  check('today\'s prompt example marks one anchor and builds no mark of its own', anchors === 1 && !/TorusGeometry|ConeGeometry|CylinderGeometry\(0\.0[67]/.test(kitExample), { anchors })
+  const kitStub = kitExample.replace('\n  villager.add(head)\n', `\n  villager.add(head)
+  add(head, new THREE.CapsuleGeometry(0.045, 0.06, 6, 10), felt('#f6e6cc'), 0, -0.06, 0.17).rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(head, new THREE.CapsuleGeometry(0.03, 0.12, 6, 10), felt('#e2b98a'), s * 0.1, 0.2, -0.02).rotation.z = -s * 0.2
+`)
+  for (const role of ['cook', 'tutor', 'gardener', 'carer', 'keeper', 'maker', 'messenger']) {
+    const r = await trial(kitExample, { kit: true, mark: true, role, accent: '#3d7cc8' })
+    const s = await trial(kitStub, { kit: true, mark: true, species: true, role, accent: '#3d7cc8' })
+    const fix = `role: the model declared "cook"; the requested "${role}" is used`
+    const swapped = role === 'cook' ? !r.fixes?.some((f) => f.startsWith('role:')) : r.fixes?.includes(fix)
+    check(`kit: the example and the setup stub asked for as a ${role} pass with the kit's ${role} mark${role === 'cook' ? '' : ', the requested role over the model\'s'}`, r.ok && s.ok && r.role === role && swapped && r.measures.ownerPx >= 100 && r.measures.loose.length === 0, r.ok && s.ok ? { role: r.role, ownerPx: r.measures.ownerPx, fixes: r.fixes.filter((f) => /^(role|kit: hat)/.test(f)) } : r.reason ?? s.reason)
+    if (role === 'tutor' || role === 'gardener') check(`kit: the stub's tall ears come up through stitched holes in the ${role === 'tutor' ? 'mortarboard' : 'sun hat'}`, s.ok && s.fixes.some((f) => /^kit: hat: .*\d+ stitched hole\(s\) for ears/.test(f)), s.ok ? s.fixes.filter((f) => f.startsWith('kit: hat')) : s.reason)
+    if (role === 'tutor') check('kit: the board is a cap, about the head\'s width (1.0 to 1.2 head cores) and on the head', s.ok && s.measures.place.board.width >= 1.0 && s.measures.place.board.width <= 1.2 && s.measures.place.board.lift <= 0.02, s.ok ? s.measures.place : s.reason)
+  }
+  await refused('kit: the example with its whole head marked', kitExample.replace("villager.tag(new THREE.Group(), 'head')", "villager.mark(villager.tag(new THREE.Group(), 'head'))"), /the head itself is tagged with villager\.mark\(\); the home makes the role's mark, so pass villager\.mark\(\) only the small anchor/, { kit: true, mark: true })
+  const moved = await trial(plush({ off: 0.06 }), { kit: true })
+  check('kit: a spoon held 6 cm in front of the mitten is moved so its handle runs through the mitten, and wrapped', moved.ok && moved.measures.heldInHand && moved.fixes.some((f) => /^kit: held prop moved 0\.0\d+ so its handle runs through the mitten$/.test(f)) && moved.fixes.includes('kit: held prop wrapped in the mitten'), moved.ok ? moved.fixes.filter((f) => f.startsWith('kit: held')) : moved.reason)
+  const kitDuster = kitExample.replace(/  const spoon = villager\.tag[\s\S]*?\n  villager\.gait/, `  const duster = villager.tag(new THREE.Group(), 'held')
+  duster.position.set(-0.196, 0.158, 0.02)
+  duster.rotation.z = 0.35
+  villager.add(duster)
+  add(duster, new THREE.CylinderGeometry(0.01, 0.012, 0.36, 8), felt('#a8703a'), 0, 0.12, 0)
+  villager.mark(add(duster, new THREE.SphereGeometry(0.02, 12, 8), felt('#a8703a'), 0, 0.3, 0))
+  villager.gait`)
+  const dusted = await trial(kitDuster, { kit: true, mark: true, role: 'tidier', accent: '#e0b53a' })
+  check('kit: a duster handle held up beside the head, its knot marked, gets the kit\'s plume out beside the head', dusted.ok && dusted.measures.place.plume.parts >= 6 && dusted.measures.place.plume.offset >= 0.75 && dusted.measures.loose.length === 0, dusted.ok ? dusted.measures.place : dusted.reason)
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

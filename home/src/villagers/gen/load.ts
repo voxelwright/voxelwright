@@ -29,6 +29,8 @@ export interface Meta {
   arm: 'spec' | 'code'; file: string; accent: string; owner?: string; description?: string
   /** The personality pattern the runner asked for (an id from host/src/persona.ts TEMPLATES); provenance only. */
   template?: string
+  /** The role the runner asked for: trusted, so it decides the kit's mark over the model's own about(). */
+  role?: string
 }
 interface Made { fig: Figure; name: string; role?: string; bark: string; voice: VoiceSpec | null; persona?: Persona; fixes: string[]; measures?: Measures; timing?: Record<string, number> }
 
@@ -40,10 +42,10 @@ const LINE = { x: -0.25, z: 1.15 }
 let box: PropBox | null = null
 /** `&checks=off` shows a villager the checks would refuse, to look at what they caught. */
 const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
-/** `&kit=1` (look regroup 2): trusted code makes the face and the role's mark (./kit.ts); the model's eyes and mark are dropped. */
-const kitOn = new URLSearchParams(location.search).get('kit') === '1'
+/** The trusted felt kit (./kit.ts) makes the face and the role's mark by default; `&kit=0` shows the model's own, for debugging only. */
+const kitOn = new URLSearchParams(location.search).get('kit') !== '0'
 
-async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn): Promise<Made> {
+async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn, role?: string): Promise<Made> {
   box ??= new PropBox()
   const t0 = performance.now()
   const result = await box.run(code)
@@ -51,7 +53,7 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit)
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit, role)
   return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
 }
 
@@ -88,7 +90,7 @@ async function fromFile(text: string, meta: Meta, phys: boolean, seed: number): 
     }
     return fromSpec(raw, phys, meta.accent, seed)
   }
-  return fromCode(text, phys, meta.accent, seed)
+  return fromCode(text, phys, meta.accent, seed, true, true, kitOn, meta.role)
 }
 
 function measure(root: THREE.Object3D) {
@@ -164,9 +166,10 @@ export default {
         // Width across the view: the spread along the row's direction.
         const ts = placed.map(({ v }) => v.pos.x * Math.cos(CAMERA_YAW) - v.pos.z * Math.sin(CAMERA_YAW))
         const width = Math.max(...ts) - Math.min(...ts) + 0.7
-        const tall = Math.max(...placed.map(({ v }) => v.fig.height * SCALE))
+        // The whole figure, held prop and mark included: a duster raised overhead or a tall toque stays in frame.
+        const tall = Math.max(...placed.map(({ v }) => Math.max(v.fig.height * SCALE, new THREE.Box3().setFromObject(v.fig.root).max.y - v.fig.root.position.y)))
         c.y = tall * 0.5
-        const dist = placed.length === 1 ? 1.35 : Math.max(2.2, width / 0.6 + 0.6)
+        const dist = placed.length === 1 ? Math.max(1.35, 1.55 * tall) : Math.max(2.2, width / 0.6 + 0.6)
         const dir = new THREE.Vector3(Math.sin(CAMERA_YAW), 0.42, Math.cos(CAMERA_YAW)).normalize()
         ctx.view.focus({ position: c.clone().addScaledVector(dir, dist), look: c }, 60)
       }
@@ -191,10 +194,10 @@ export default {
      * check-villager-gen.mjs. The species and role-mark checks are off unless asked for: the sandbox's
      * plumbing probe is a plain round figure on purpose, and the round 1 to 3 fixtures predate villager.mark().
      */
-    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean } = {}) => {
+    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string } = {}) => {
       try {
-        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn)
-        const r = { ok: true, name: m.name, persona: m.persona, measures: m.measures, fixes: m.fixes, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
+        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role)
+        const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
         releaseGpu(m.fig.root)
         return r
       } catch (error) {
