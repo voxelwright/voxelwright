@@ -94,13 +94,32 @@ headless cap) in every mode:
 
 ## Engine: GPU time, features and tiers (#41, November 6, 2026)
 
-`npm run measure -- --perf --gpu` adds `?gpu=1` and reports, per frame, GPU ms
-(submit to `device.queue.onSubmittedWorkDone()`), the summed three.js timestamp
-pass durations, and CPU ms (frame hooks plus draw). Chrome launches with
-`--enable-webgpu-developer-features`; timestamp sums were then not on 100 us
-steps. GPU ms is quantized to 0.1 ms by `performance.now()`. The timestamp sums
-are not frame cost on this Mac: bloom mips of a few pixels each read about 5 ms
-and a frame summed to 60 to 70 ms while holding 60 fps, so passes overlap.
+`npm run measure -- --perf --gpu` adds `?gpu=1` and reports, per frame, GPU ms,
+the summed pass durations, submit-to-done ms and CPU ms (frame hooks plus draw).
+
+GPU ms (#42) is GPU busy time from WebGPU timestamp queries (`src/gpu-time.js`):
+every render and compute pass gets a begin and end timestamp, and a frame's GPU ms
+is the union of its pass intervals. Summed pass durations are not frame cost on
+this Mac: under Metal a pass's begin is written while earlier passes still run, so
+a frame summed to 60 to 150 ms while holding 60 fps. Submit-to-done (the wait from
+the last submit to `onSubmittedWorkDone()`, the measure before #42) counts the main
+thread's delay in delivering the callback. Checked in headless Chrome, kitchen,
+`?q=high`, 4 s per run:
+
+| Ground truth | GPU ms p50 | Submit-to-done p50 / p95 | Frame |
+| --- | --- | --- | --- |
+| none | 7.7 to 9.1 | 8.9 to 10.5 / 10.6 to 16.5 | 60 fps |
+| 12 ms CPU loop per frame | 7.8 to 8.0 | 16.7 / 17.8 to 31.5 | 60 fps |
+| GPU-bound: extra full-screen passes, 4 / 6 / 8 | 18.3 / 24.6 / 31.1 | 107 / 145 / 183 | 18.3 / 24.8 / 31.3 ms |
+
+When the GPU is the bottleneck, GPU ms matches the frame interval within 0.2 ms.
+Below that, small loads add less than their isolated cost (one pass +2.2 ms, two
++2.6 ms), consistent with the GPU raising its clock under load. Results were the
+same with and without `--enable-webgpu-developer-features`: busy times were not on
+100 us steps either way, so the flag is no longer passed.
+
+The tables below this point, up to the performance gate, were measured with
+submit-to-done.
 
 `?fx=phys,csm,gtao,traa,ssgi` runs exactly the named features: physical
 materials (lacquered fridge, transmissive window glass, glazed mug and ceramics),
@@ -132,7 +151,9 @@ SSGI is not usable here; baked lighting is the next step for bounce light.
 Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
 medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
 skips 15 frames, takes the median GPU ms of 45 frames (or of 2 s, at least 8),
-and steps down when high exceeds 13 ms or medium exceeds 12 ms. Stepping down
+and steps down when high exceeds 13 ms or medium exceeds 12 ms (GPU busy ms since
+#42; without timestamp queries it falls back to submit-to-done). With a 12 ms CPU
+loop per frame the kitchen now stays high (8.8 and 10.1 ms). Stepping down
 lowers the pixel ratio and rebuilds postfx; scene content keeps its load-time
 detail. `?q=high|medium|low` skips calibration, and `?q=low` behaves as before.
 `?fx=ssgi` with no `?q=` proved the step-down: 294 ms at high moved to medium.
@@ -157,8 +178,10 @@ gate, 2 on an error.
 
 How it measures. A probe added before the app's code seeds `Math.random`, wraps
 `requestAnimationFrame` (CPU ms is each frame's callbacks; a paused page's callbacks are
-held) and hooks `GPUQueue.submit` (GPU ms is the wait from a frame's last submit to
-`onSubmittedWorkDone()`, the renderer's own measure, without `?gpu=1`'s timestamp queries).
+held), and injects `src/gpu-time.js` so GPU ms is the frame's GPU busy time from
+timestamp queries, the renderer's own measure, for base and head alike. Submit-to-done is
+reported next to it for reference. `--port <n>` serves the base on n and the head on n + 1
+(default 5430).
 Each page has its own browser context. After `ready()` it renders until 20 frames in a row
 arrive on time (pipelines keep compiling for a few seconds; pausing earlier stalled the next
 page for 7 s), then pauses. Only one page renders at a time. Base and head alternate
@@ -177,7 +200,7 @@ Gates:
 | Gate | Rule |
 | --- | --- |
 | 60 fps (head, every scene) | under 1% of intervals over 20 ms; p99 at most 20 ms; no long task over 50 ms; at least 90% of 60 Hz frames measured |
-| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). It warns and does not gate: submit-to-done GPU ms includes the main thread's delay delivering the callback (a 12 ms CPU loop read as 39 ms of GPU), so at the 60 Hz cap p95 settles near one frame on main too. It gates again once GPU ms is timed from the first pass start to the last pass end. |
+| Headroom (head, high tier), warning only | GPU p95 under the high tier's `maxGpuMs` (13 ms, read from `renderer.ts`). GPU ms measures GPU work since #42, but the kitchen's p95 is 13.6 to 14.3 ms on main and 12.2 to 14.5 ms on the head, so this warns rather than blocking every merge. |
 | Relative (head against base) | growth at most the larger of 10% and a floor: GPU p50 3 ms, GPU p95 8 ms, CPU p50 0.5 ms, draw calls 10 |
 
 Noise, base against base (`--base X --head X`), M1 Pro, with 3 to 8 other agents' headless
@@ -202,12 +225,19 @@ Deliberate regressions, not committed: a 5 ms busy loop per frame in the rendere
 `home` CPU p50 (+5.2 ms against +0.5) while frames still held 60 fps; a 12 ms loop failed
 `villagers` with 17% of frames over 20 ms and p99 33.4 ms. Both exited 1.
 
+With GPU busy ms (#42), against cb1d565, five runs, 1 to 2 other headless Chrome instances
+running: GPU p50 / p95 at high, `home` head 7.8 to 10.0 / 12.2 to 14.5 ms, main 8.7 to 9.9 /
+13.6 to 14.3 ms; `villagers` 7.8 to 9.2 / 9.5 to 13.3 ms; `talk` 8.3 to 9.7 / 9.9 to 14.4 ms.
+Submit-to-done p95 on the same frames was 14.7 to 17.8 ms. Every run passed. The kitchen's
+cost, by the ms each pass adds to GPU ms (p50 / p95, `?q=high`, 240 frames, 28 passes):
+the first scene render context 2.7 / 4.5, the first post pass after `output` 2.1 / 3.3,
+the full-resolution `output` pass 1.1 / 1.9, the next post pass 0.8 / 1.1, the first
+full-resolution pass 0.6 / 1.0; the 13 bloom mips together under 0.2.
+
 What it cannot see: displays above 60 Hz (headless Chrome caps at 60 Hz, so intervals show
 missed frames, not spare time), phones and other GPUs, the WebGL2 fallback, dev-only features
 (the prop sandbox, `village.kernel`), the villager host (no `/villager/*` routes, so no model
-replies or table rounds), page load time (reported in the JSON, not gated) and audio. GPU ms
-includes the main thread's delay in delivering the callback: a 12 ms CPU loop read as 39 ms
-of GPU, and at a 60 Hz cap p95 tends to land near one frame (16 to 17 ms).
+replies or table rounds), page load time (reported in the JSON, not gated) and audio.
 
 ## Camera variants (#42 probe)
 
