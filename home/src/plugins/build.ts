@@ -10,6 +10,7 @@ import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
 import { draftEdits, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
+import { makeFixtures } from '../build/fixtures'
 
 declare module 'cordis' {
   interface Events {
@@ -37,6 +38,8 @@ const ENABLED = new URLSearchParams(location.search).get('build') === '1'
 const WALL = 'kitchen.right'
 const STUB = 0.42
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
+/** A door keeps clear of built-ins that reach below this (the clock above a doorway is fine). */
+const DOOR_HEAD = 2.3
 
 export default {
   name: 'build',
@@ -59,6 +62,7 @@ export default {
       // The host is there but the house could not be opened: say why once; every change is refused.
       if (h.readOnly) say(h.readOnly)
       offHistory = h.onChange((p) => {
+        fixtures.invalidate()
         if (!drag) plan = p
         // The outline's own commit is not a change under it.
         if (!committing) outline.refit()
@@ -436,6 +440,19 @@ export default {
       if (!p) return null
       return plan.rooms.find((r) => contains(ringOf(plan, r), [p.x, p.z]))?.id ?? null
     }
+    // What the plugins' built-in furniture holds against each wall: placed things are in the plan, and the outline is ours.
+    const fixtures = makeFixtures(scene, () => [scene.getObjectByName('placed things'), scene.getObjectByName('build outline')].filter((o): o is THREE.Object3D => Boolean(o)))
+    /** Where a door on this wall must not go: built-ins against either face, below a door's head. */
+    const occupied = (wallId: string) => {
+      // One stretch per built-in: its parts' stretches merged where they meet.
+      const out: Array<{ from: number; to: number; name: string }> = []
+      for (const f of fixtures.on(history?.plan ?? plan, wallId).filter((k) => k.y0 < DOOR_HEAD).sort((p, q) => p.from - q.from)) {
+        const same = out.find((o) => o.name === f.name && f.from <= o.to + 0.02)
+        if (same) same.to = Math.max(same.to, f.to)
+        else out.push({ from: f.from, to: f.to, name: f.name })
+      }
+      return out.map((o) => ({ ...o, from: Math.round(o.from * 1000) / 1000, to: Math.round(o.to * 1000) / 1000 }))
+    }
     const outline = makeOutline(ctx.stage, {
       base: () => history?.plan ?? plan,
       say,
@@ -460,10 +477,10 @@ export default {
     const take = (raw: unknown, ack?: string) => {
       const checked = checkIntent(raw)
       if ('reason' in checked) return say("I didn't quite catch where the room should go. Could you say it another way?")
-      const r = resolve(history?.plan ?? plan, checked.intent, { view: view(), selected: selected && { wallId: selected.wallId, t: selected.t }, current: inView() })
+      const r = resolve(history?.plan ?? plan, checked.intent, { view: view(), selected: selected && { wallId: selected.wallId, t: selected.t }, current: inView(), occupied })
       if ('ask' in r) return say(r.ask)
       if (!outline.open(r.draft)) return
-      say(ack ?? 'Like this?')
+      say(r.note ?? ack ?? 'Like this?')
     }
     ctx.on('village/build-intent', (request) => {
       request.handled = true
@@ -577,6 +594,9 @@ export default {
         /** An intent as the notepad would deliver it, without the notepad. */
         intent: (raw: unknown) => take(raw),
         said: () => said.slice(),
+        /** Built-ins against a wall's faces in the house as it stands, and how long each scan took (ms). */
+        fixtures: (wallId: string) => fixtures.on(history?.plan ?? plan, wallId),
+        fixtureScans: () => fixtures.times(),
         selected: () => selected && { wallId: selected.wallId, t: selected.t },
         /** A wall point on screen (CSS px), y metres up, d metres off the centreline toward the room it bounds first. */
         wallPoint: (wallId: string, t: number, y = 1.2, d = 0) => {

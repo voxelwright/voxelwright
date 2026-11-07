@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu'
 import type { Stage } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
 import { BEND_SNAP, curveOf, outline as ringOf, pointAt, roomArea, type P, type Plan } from './plan'
-import { SNAP, draftGeometry, fit, placeDoor, type Draft } from './resolve'
+import { SNAP, blockerOf, draftGeometry, fit, placeDoor, type Draft } from './resolve'
 
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const MIN = 1.5
@@ -560,7 +560,14 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
         next = { ...s, to, door: { ...s.door, ...placeDoor(s.from, to, dw, doorAt) } }
         break
       }
-      case 'door': next = { ...s, door: { ...s.door, ...placeDoor(s.from, s.to, dw, v('door')) } }; break
+      case 'door': {
+        // The door stops only where it keeps clear of the built-ins; over one, the tag says what is there.
+        const wanted = blockerOf(placeDoor(s.from, s.to, dw, v('door')), s.keepOut)
+        next = { ...s, door: { ...s.door, ...placeDoor(s.from, s.to, dw, v('door'), s.keepOut) } }
+        if (JSON.stringify(next) !== JSON.stringify(draft)) accept(next)
+        titleArea.textContent = wanted ? ` · the ${wanted.name} is in the way` : ` · ${roomArea(made!, draft.roomId).toFixed(1)} m²`
+        return
+      }
     }
     if (JSON.stringify(next) !== JSON.stringify(draft)) accept(next)
   }

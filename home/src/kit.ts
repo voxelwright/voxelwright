@@ -26,6 +26,9 @@ function plain(geo: THREE.BufferGeometry): THREE.BufferGeometry {
  */
 export class Kit {
   private buckets = new Map<THREE.Material, THREE.BufferGeometry[]>()
+  /** What the parts added from now on are ("dresser"), so a merged kit can still say what stands where. */
+  label: string | null = null
+  private regions: Array<{ name: string | null; box: THREE.Box3 }> = []
   readonly finishes: Record<Finish, THREE.Material>
   constructor(phys: boolean) {
     const tint = (roughness: number, metalness = 0) => new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness })
@@ -50,6 +53,8 @@ export class Kit {
     this.push(material, plain(geo.applyMatrix4(m)))
   }
   private push(material: THREE.Material, g: THREE.BufferGeometry) {
+    g.computeBoundingBox()
+    this.regions.push({ name: this.label, box: g.boundingBox!.clone() })
     const list = this.buckets.get(material) ?? []
     list.push(g)
     this.buckets.set(material, list)
@@ -57,6 +62,8 @@ export class Kit {
   build(name: string): THREE.Group {
     const group = new THREE.Group()
     group.name = name
+    // Each part's box and label, in the group's frame: placing and build mode name what stands where (src/build/mount.ts).
+    group.userData.regions = this.regions
     for (const [material, list] of this.buckets) {
       const mesh = new THREE.Mesh(mergeGeometries(list), material)
       for (const g of list) g.dispose()

@@ -20,6 +20,11 @@
 //   door on it.
 // - A door is single (0.9 m) unless asked for double doors (1.4 m), centred on the
 //   shared stretch or at the clicked point. An "opening" is a doorway with no leaves.
+// - A door keeps 10 cm clear of the built-ins against either face of the shared
+//   wall (`occupied`, from fixtures.ts). Blocked where it was asked for, it moves to
+//   the nearest clear spot, sliding the room along the wall if it must. Double doors
+//   with no clear spot become a single door that has one, and the villager says so;
+//   when nothing fits, the resolver asks and names what is in the way.
 import { DOORWAY } from '../layout'
 import { MIN_WALL, PlanError, apply, curveOf, normalAt, outline, roomArea, roomWalls, type Edit, type Id, type P, type Plan, type Room, type Wall } from './plan'
 import type { Intent, Side } from './intent'
@@ -31,7 +36,12 @@ export interface ResolveContext {
   selected?: { wallId: Id; t: number } | null
   /** The room in view, for "this room". */
   current?: Id | null
+  /** Built-ins a door must keep clear of on a wall, either face, in metres from its corner a. */
+  occupied?: (wallId: Id) => Occupied[]
 }
+
+/** A stretch of a wall something built in stands against, from its corner a. */
+export interface Occupied { from: number; to: number; name: string }
 
 /** A room being drawn, before it is applied. Every length is in metres and snapped to 10 cm. */
 export interface Draft {
@@ -46,9 +56,12 @@ export interface Draft {
   bend: number
   /** A door in the shared stretch, in the host wall's frame; no leaves is a plain opening. */
   door: { from: number; to: number; leaves?: 1 | 2 }
+  /** What stands against the host wall, which the door keeps clear of (not part of the plan). */
+  keepOut?: Occupied[]
 }
 
-export type Resolved = { draft: Draft; plan: Plan; edits: Edit[] } | { ask: string }
+/** `note`: what the villager says with the outline instead of the usual line, when it is not quite what was asked. */
+export type Resolved = { draft: Draft; plan: Plan; edits: Edit[]; note?: string } | { ask: string }
 
 export const SNAP = 0.1
 const DOOR_WIDTH = { 1: 0.9, 2: 1.4, opening: 1.2 } as const
@@ -56,6 +69,8 @@ const DEFAULT = { w: 3.6, d: 3 }
 const TIE = 0.15
 /** A door keeps this far from the shared stretch's ends. */
 const JAMB = 0.15
+/** And this far from a built-in. */
+export const CLEAR = 0.1
 
 const snap = (v: number) => Math.round(v / SNAP) * SNAP
 const round = (v: number) => Math.round(v * 1e6) / 1e6
@@ -89,6 +104,8 @@ export function fit(plan: Plan, d: Draft): { plan: Plan } | { ask: string } {
     throw e
   }
   if (Math.abs(Math.abs(curveOf(next, next.walls.find((w) => w.id === `${d.roomId}.w2`)!).sagitta) - Math.abs(d.bend)) > 1e-6) return { ask: "That far wall can't curve so much. A gentler bend?" }
+  const block = blockerOf(d.door, d.keepOut)
+  if (block) return { ask: `The ${block.name} is in the way of the door there.` }
   const room = next.rooms.find((r) => r.id === d.roomId)!
   const mine = outline(next, room, 0.05)
   for (const other of next.rooms) {
@@ -150,6 +167,8 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
   const centre = bySelection && sel && sel.wallId === host.id ? sel.t : L / 2
   const free = freeStretches(host, L)
   let from: number | null = null
+  /** Every place along the wall the room may start. */
+  const starts: number[] = []
   for (const [a, b] of free) {
     if (b - a < w - 1e-9) continue
     const lo = Math.ceil((a - 1e-9) / SNAP) * SNAP, hi = Math.floor((b - w + 1e-9) / SNAP) * SNAP
@@ -160,32 +179,78 @@ export function resolve(plan: Plan, intent: Intent, ctx: ResolveContext): Resolv
     for (const f of steps) {
       const rest = L - (f + w)
       if ((f > 1e-9 && f < MIN_WALL - 1e-9) || (rest > 1e-9 && rest < MIN_WALL - 1e-9) || f < a - 1e-9 || f + w > b + 1e-9) continue
+      starts.push(f)
       if (from === null || Math.abs(f + w / 2 - centre) < Math.abs(from + w / 2 - centre) - 1e-9) from = f
     }
   }
   if (from === null) return { ask: `There's a window or a door along that wall, so a ${fmt(w)} m room won't fit there. Narrower, maybe?` }
-  const to = round(from + w)
+  let to = round(from + w)
 
-  // The door.
+  // The door, clear of what stands against the wall; the room slides along the wall if the door must.
   const kind = intent.connect?.kind ?? 'door'
-  const leaves = kind === 'opening' ? undefined : intent.connect?.leaves ?? 1
-  const dw = DOOR_WIDTH[leaves ?? 'opening']
-  const doorAt = intent.connect?.at === 'selected-point' && sel && sel.wallId === host.id ? sel.t : (from + to) / 2
-  const door = placeDoor(from, to, dw, doorAt)
+  let leaves = kind === 'opening' ? undefined : intent.connect?.leaves ?? 1
+  const atPoint = intent.connect?.at === 'selected-point' && sel && sel.wallId === host.id
+  const doorAt = atPoint ? sel.t : (from + to) / 2
+  const keepOut = ctx.occupied?.(host.id) ?? []
+  /** The room start nearest where it was asked for that holds a clear door this wide, and that door. */
+  const clearDoor = (dw: number) => {
+    const here = placeDoor(from!, to, dw, doorAt, keepOut)
+    if (!blockerOf(here, keepOut)) return { f: from!, door: here }
+    const order = starts.filter((f) => f !== from).sort((p, q) => Math.abs(p + w / 2 - centre) - Math.abs(q + w / 2 - centre))
+    for (const f of order) {
+      const door = placeDoor(f, round(f + w), dw, atPoint ? doorAt : f + w / 2, keepOut)
+      if (!blockerOf(door, keepOut)) return { f, door }
+    }
+    return null
+  }
+  let note: string | undefined
+  const name = blockerOf(placeDoor(from, to, DOOR_WIDTH[leaves ?? 'opening'], doorAt), keepOut)?.name
+  let found = clearDoor(DOOR_WIDTH[leaves ?? 'opening'])
+  if (!found && leaves === 2 && (found = clearDoor(DOOR_WIDTH[1]))) {
+    leaves = 1
+    note = `The ${name} is in the way of double doors, so I drew a single door beside it. Like this?`
+  }
+  if (!found) return { ask: `The ${name ?? 'furniture'} is in the way there, and that wall has no clear spot for a door. Another wall, maybe?` }
+  from = found.f
+  to = round(from + w)
+  const door = found.door
 
   const label = intent.label ? intent.label.replace(/^\p{Ll}/u, (ch) => ch.toUpperCase()) : 'New room'
-  const draft: Draft = { roomId: freshId(plan, intent.label ?? 'room'), label, wallId: host.id, from, to, depth: d, bend: 0, door: { ...door, ...(leaves ? { leaves } : {}) } }
+  const draft: Draft = { roomId: freshId(plan, intent.label ?? 'room'), label, wallId: host.id, from, to, depth: d, bend: 0, door: { ...door, ...(leaves ? { leaves } : {}) }, ...(keepOut.length ? { keepOut } : {}) }
   const fitted = fit(plan, draft)
   if ('ask' in fitted) return fitted
-  return { draft, plan: fitted.plan, edits: draftEdits(plan, draft) }
+  return { draft, plan: fitted.plan, edits: draftEdits(plan, draft), ...(note ? { note } : {}) }
 }
 
-/** A door of width dw centred near `at`, kept inside the stretch [from, to] and snapped. */
-export function placeDoor(from: number, to: number, dw: number, at: number): { from: number; to: number } {
+/**
+ * A door of width dw centred near `at`, kept inside the stretch [from, to] and snapped.
+ * With `keepOut`, the nearest 10 cm step whose door stays CLEAR of every built-in;
+ * when none does, the plain answer, which blockerOf then names.
+ */
+export function placeDoor(from: number, to: number, dw: number, at: number, keepOut: Occupied[] = []): { from: number; to: number } {
   const w = Math.min(dw, to - from - 2 * JAMB)
   const lo = from + JAMB, hi = to - JAMB - w
   const f = round(Math.min(hi, Math.max(lo, snap(at - w / 2))))
-  return { from: f, to: round(f + w) }
+  const plain = { from: f, to: round(f + w) }
+  if (!keepOut.length || !blockerOf(plain, keepOut)) return plain
+  let best: { from: number; to: number } | null = null
+  for (let k = Math.ceil((lo - 1e-9) / SNAP); k * SNAP <= hi + 1e-9; k++) {
+    const g = round(k * SNAP)
+    const door = { from: g, to: round(g + w) }
+    if (blockerOf(door, keepOut)) continue
+    if (!best || Math.abs(g - (at - w / 2)) < Math.abs(best.from - (at - w / 2)) - 1e-9) best = door
+  }
+  return best ?? plain
+}
+
+/** The built-in a door at [from, to] comes within CLEAR of, if any: the one most in the way. */
+export function blockerOf(door: { from: number; to: number }, keepOut: Occupied[] = []): Occupied | null {
+  let best: Occupied | null = null, most = -Infinity
+  for (const o of keepOut) {
+    const over = Math.min(door.to, o.to + CLEAR) - Math.max(door.from, o.from - CLEAR)
+    if (over > 1e-9 && over > most) [best, most] = [o, over]
+  }
+  return best
 }
 
 function anchorRoom(plan: Plan, said: string | undefined, ctx: ResolveContext): { room: Room } | { ask: string } {

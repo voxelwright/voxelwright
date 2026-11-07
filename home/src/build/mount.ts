@@ -23,6 +23,7 @@ import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { curveOf, inside, normalAt, outline, pointAt, roomAt, roomWalls, tangentAt, type Anchor, type Id, type Mount, type P, type Plan, type Room, type Wall } from './plan'
 import { paintPhoto } from '../paint'
+import { fixturesOf, type Fixture } from './fixtures'
 
 export const SURFACE_MIN = 0.3
 /** How far below the ceiling a hung thing's top is. */
@@ -176,12 +177,24 @@ export function obstacles(scene: THREE.Scene, skip: THREE.Object3D[] = []): Obst
   const skipped = new Set(skip)
   for (const top of scene.children) {
     if (NOT_FURNITURE.test(top.name) || skipped.has(top)) continue
+    const kits = new Set<THREE.Object3D>()
     top.traverse((o) => {
       const m = o as THREE.Mesh
       if (!m.isMesh || !m.geometry || skipped.has(m)) return
-      for (let p: THREE.Object3D | null = m; p; p = p.parent) if (!p.visible || skipped.has(p)) return
+      for (let p: THREE.Object3D | null = m; p; p = p.parent) if (!p.visible || skipped.has(p) || p.userData.seatOnly) return
       const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material
       if (mat && mat.transparent && !mat.depthWrite) return
+      // A kit (src/kit.ts) merges its parts by material but keeps each part's box and label: use those, once per kit.
+      const regions = m.parent?.userData.regions as Array<{ name: string | null; box: THREE.Box3 }> | undefined
+      if (regions) {
+        if (kits.has(m.parent!)) return
+        kits.add(m.parent!)
+        for (const r of regions) {
+          const box = r.box.clone().applyMatrix4(m.parent!.matrixWorld)
+          if (box.max.y - box.min.y >= 0.02) out.push({ box, name: r.name ?? top.name })
+        }
+        return
+      }
       if (!m.geometry.boundingBox) m.geometry.computeBoundingBox()
       const box = m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld)
       if (box.isEmpty() || box.max.y - box.min.y < 0.02) return
@@ -333,6 +346,16 @@ function doorways(plan: Plan, room: Room): P[][] {
 
 export interface Fit { ok: boolean; why?: string }
 
+/** The built-ins on a wall's faces, from these obstacles, worked out once per obstacle list, plan and wall. */
+const faceCache = new WeakMap<Obstacle[], { plan: Plan; byWall: Map<Id, Fixture[]> }>()
+function faceFixtures(list: Obstacle[], plan: Plan, wall: Wall): Fixture[] {
+  let c = faceCache.get(list)
+  if (!c || c.plan !== plan) faceCache.set(list, c = { plan, byWall: new Map() })
+  let got = c.byWall.get(wall.id)
+  if (!got) c.byWall.set(wall.id, got = fixturesOf(curveOf(plan, wall), wall, list))
+  return got
+}
+
 export interface FitContext {
   plan: Plan
   size: Size
@@ -356,6 +379,12 @@ export function fit(ctx: FitContext, at: Anchor): Fit {
         return { ok: false, why: `It would cover the ${o.kind}` }
       }
     }
+    // What stands against or hangs on this face, flattened onto it: a bay bent out past the shelf still has the shelf in front.
+    const nrm = normalAt(curveOf(plan, f.wall), at.along)
+    const side = f.inward[0] * nrm[0] + f.inward[1] * nrm[1] > 0 ? 1 : -1
+    const lo = at.along - ww / 2, hi = at.along + ww / 2, y0 = at.height - hh / 2, y1 = at.height + hh / 2
+    const held = faceFixtures(ctx.obstacles, plan, f.wall).find((x) => x.side === side && !x.through && x.from < hi - 0.01 && x.to > lo + 0.01 && x.y0 < y1 - 0.01 && x.y1 > y0 + 0.01)
+    if (held) return { ok: false, why: `It bumps into ${named(held.name)}` }
     const pose = poseOf(plan, at, ctx.size)!
     const back = f.thickness / 2 + 0.004 + standOff(f, ww)
     const fx = f.point[0] + f.inward[0] * back, fz = f.point[1] + f.inward[1] * back

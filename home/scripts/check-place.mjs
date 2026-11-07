@@ -247,20 +247,33 @@ try {
   const win = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 2.7, 1.6, 0.1))
   s = await dragTo(page, win)
   check('wall: over the window it is red', !s.ok && /window/.test(s.why ?? ''), s)
+  // The shelf over the dresser is built in (furnish.ts), not in the plan: its stretch of the left wall is taken.
+  s = await dragTo(page, await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 3.0, 1.5, 0.1)))
+  check('wall: onto the shelf over the dresser it is red and names the shelf', !s.ok && s.at.wallId === 'kitchen.left' && /shelf/.test(s.why ?? ''), { at: s.at, why: s.why })
+  s = await dragTo(page, await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 4.3, 1.5, 0.1)))
+  check('wall: along the left wall clear of the shelf it is fine', s.ok && s.at.wallId === 'kitchen.left' && near(s.at.along, 4.3, 0.15), { at: s.at, why: s.why })
   await page.keyboard.press('Escape')
   d = await done(page)
   check('wall: Escape cancels', d.status === 'cancelled')
   await page.evaluate(async () => (await window.villageBuild.history()).commit([{ op: 'bendWall', wallId: 'kitchen.left', sagitta: 0.6 }], 'Bent the wall'))
   await page.waitForTimeout(600)
   await begin(page, 'picture')
-  const curved = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 3.6, 1.5, 0.1))
+  // Clear of the shelf, which stays where furnish.ts put it when the wall bends out behind it.
+  const curved = await page.evaluate(() => window.villageBuild.wallPoint('kitchen.left', 4.4, 1.5, 0.1))
   s = await dragTo(page, curved)
   const facing = await page.evaluate((at) => {
     const plan = window.villagePlace.plan()
     const w = plan.walls.find((k) => k.id === 'kitchen.left')
     return { sagitta: w.sagitta }
   }, s.at)
-  check('wall: on the bent left wall it hangs there, facing the room', s.ok && s.at.wallId === 'kitchen.left' && facing.sagitta !== 0 && Math.sin(s.pose.yaw) > 0.5, { at: s.at, pose: s.pose, facing })
+  console.log('DEBUG2', JSON.stringify(await page.evaluate(async () => {
+    const M = await import('/src/build/mount.ts')
+    const scene = window.village.kernel.root.get('stage').scene
+    const st = window.villagePlace.state()
+    const obs = M.obstacles(scene, [scene.getObjectByName('placement')]).filter((o) => o.name === 'shelf' || Math.abs(o.box.min.x + 3.5) < 1).map((o) => [o.name, o.box.min.toArray().map((v) => +v.toFixed(2)), o.box.max.toArray().map((v) => +v.toFixed(2))])
+    return { st: { at: st.at, why: st.why, size: st.size, pose: st.pose }, obs, tops: scene.children.map((c) => c.name) }
+  })))
+  check('wall: on the bent left wall it hangs there, facing the room', s.ok && s.at.wallId === 'kitchen.left' && facing.sagitta !== 0 && Math.sin(s.pose.yaw) > 0.5, { at: s.at, why: s.why, pose: s.pose, facing })
   await shot(page, 'wall-curved')
   await page.keyboard.press('KeyQ')
   s = await S(page)

@@ -255,6 +255,11 @@ try {
         noSelection: go(K, { op: 'addRoom', anchor: { wall: 'selected' } }).ask,
         tooWide: go(K, { op: 'addRoom', anchor: { side: 'left' }, size: { w: 9, d: 3 } }).ask,
       }
+      // Built-ins along the wall (fixtures.ts measures them in the page; here they are given): the whole wall, then all but a single door's gap.
+      const LEFT_INTENT = { op: 'addRoom', anchor: { room: 'this', side: 'left' }, size: { fraction: 2 / 3 }, connect: { kind: 'door', leaves: 2 } }
+      out.blocked = go(K, LEFT_INTENT, { occupied: () => [{ from: 0, to: 6.18, name: 'dresser' }] }).ask
+      const gap = go(K, LEFT_INTENT, { occupied: () => [{ from: 0, to: 3.7, name: 'dresser' }, { from: 4.95, to: 6.18, name: 'bench' }] })
+      out.single = { door: gap.draft?.door, note: gap.note }
       out.refused = { op: I.checkIntent({ op: 'deleteHouse' }), shape: I.checkIntent({ op: 'addRoom', anchor: {}, shape: 'L' }) }
       out.clamped = I.checkIntent({ op: 'addRoom', label: 'x<script>', anchor: { side: 'up', room: 'this' }, size: { w: 400, d: -3 }, connect: { leaves: 7 }, extra: 1 })
       const snapped = go(K, { op: 'addRoom', anchor: { side: 'right' }, size: { w: 3.33, d: 2.77 } })
@@ -267,6 +272,8 @@ try {
     check('resolver: "a 4 by 3 m study behind the living room" goes on the living room, 12 m²', unit.study.draft && unit.study.owner?.[0] === 'living-room' && Math.abs(unit.study.area - 12) < 1e-6 && unit.study.draft.to - unit.study.draft.from === 4, unit.study)
     check('resolver: "this wall" and the clicked point: the room and its door centre on that point', unit.selected.draft?.wallId === 'kitchen.right' && Math.abs(unit.selected.doorCentre - 2.0) < 0.06, unit.selected)
     for (const [name, ask] of Object.entries(unit.asks)) check(`resolver asks, one line: ${name}`, typeof ask === 'string' && ask.length < 140 && !ask.includes('\n'), ask)
+    check('resolver: a wall blocked end to end gets one line naming what is in the way, and no outline', /^The dresser is in the way there/.test(unit.blocked ?? '') && !unit.blocked.includes('\n'), unit.blocked)
+    check('resolver: double doors with only a single door\'s gap become a single door in the gap, and the villager says so', unit.single.door?.leaves === 1 && unit.single.door.from >= 3.8 - 1e-9 && unit.single.door.to <= 4.85 + 1e-9 && /dresser.*single door/.test(unit.single.note ?? ''), unit.single)
     check('intent: unknown changes and shapes are refused', 'reason' in unit.refused.op && 'reason' in unit.refused.shape, unit.refused)
     check('intent: out-of-range numbers clamp, unknown values and fields drop', JSON.stringify(unit.clamped) === JSON.stringify({ intent: { op: 'addRoom', anchor: { room: 'this' }, size: { w: 12, d: 1.5 }, connect: { kind: 'door', leaves: 1 } } }), unit.clamped)
     const sn = unit.snapped
@@ -285,15 +292,32 @@ try {
     check('notepad: a build line draws the outline within 400 ms of Enter (stub router)', s.draft && enterToOutline < 400, { enterToOutline: Math.round(enterToOutline), enterToRoute: routeMs, draft: s.draft })
     await page.waitForTimeout(150)
     s = await state(page)
-    check('notepad: your villager says the route\'s one line', /sketch/i.test(s.card ?? ''), s.card)
+    check('notepad: double doors do not fit by the dresser, so your villager says it drew a single door', /dresser.*single door/i.test(s.card ?? '') && s.draft.door.leaves === 1, s.card)
+    // The door against the kitchen's real built-ins, both faces of the shared wall, measured from the scene.
+    const clear = await B(page, () => {
+      const d = window.villageBuild.outline.draft()
+      const all = window.villageBuild.fixtures(d.wallId)
+      const hit = all.filter((f) => f.y0 < 2.3 && d.door.from < f.to + 0.1 - 1e-6 && d.door.to > f.from - 0.1 + 1e-6)
+      return { door: d.door, hit, near: [...new Set(all.map((f) => `${f.name}@${f.side}`))], scans: window.villageBuild.fixtureScans() }
+    })
+    check('the door keeps 10 cm clear of every built-in on either face (dresser, shelf, bench, coat pegs...)', clear.hit.length === 0 && clear.near.some((n) => /dresser/.test(n)) && clear.near.some((n) => /shelf/.test(n)), clear)
+    const tq = await B(page, () => {
+      const d = window.villageBuild.outline.draft()
+      const t0 = performance.now()
+      for (let i = 0; i < 100; i++) window.villageBuild.fixtures(d.wallId)
+      return { firstScanMs: window.villageBuild.fixtureScans()[0], queryMs: (performance.now() - t0) / 100 }
+    })
+    check('fixtures: a query after the first scan is under 5 ms', tq.queryMs < 5, tq)
     const dom = await B(page, () => ({ dims: [...document.querySelectorAll('.build-dim.shown')].map((e) => e.textContent), choice: document.querySelector('.build-choice.shown .title')?.textContent }))
     check('outline: size tags and the choice tag show the numbers', dom.dims.length === 2 && /m²/.test(dom.choice ?? ''), dom)
     await page.keyboard.press('Escape')
     await frames(page, 4)
+    // The notepad's furnishing guess for the line fades out on its own (#42); give it the time.
+    await page.waitForTimeout(800)
     s = await state(page)
     const v1 = await versions(page)
     const plan1 = await B(page, () => JSON.stringify(window.villageBuild.plan()))
-    check('Escape: no trace (plan, history and scene object list unchanged)', !s.draft && plan1 === plan0 && v1.length === v0.length && JSON.stringify(s.objects) === JSON.stringify(s0.objects), { versions: [v0.length, v1.length], objects: [s0.objects.length, s.objects.length] })
+    check('Escape: no trace (plan, history and scene object list unchanged)', !s.draft && plan1 === plan0 && v1.length === v0.length && JSON.stringify(s.objects) === JSON.stringify(s0.objects), { versions: [v0.length, v1.length], objects: [s0.objects.length, s.objects.length], added: s.objects.filter((o) => !s0.objects.includes(o)), gone: s0.objects.filter((o) => !s.objects.includes(o)) })
 
     // Adjust: drag the far wall, move the door, type a width.
     await say(page, LEFT)
@@ -308,9 +332,20 @@ try {
     check('drag the far wall 1 m in: depth -1.0 m, snapped', Math.abs(s.draft.depth - (before.depth - 1)) < 1e-6, { before: before.depth, after: s.draft.depth })
     const d1 = s.draft
     g = await grips(page)
-    await drag(page, g.door, await floorPoint(page, (d1.door.from + d1.door.to) / 2 + 1, 0))
-    s = await state(page)
-    check('drag the door 1 m along the shared wall', Math.abs((s.draft.door.from + s.draft.door.to) / 2 - (d1.door.from + d1.door.to) / 2 - 1) < 0.051 && s.draft.door.to - s.draft.door.from === d1.door.to - d1.door.from, { before: d1.door, after: s.draft.door })
+    // 1 m along is the bench: the door will not stop there, and the tag says why while it is held.
+    {
+      const to = await floorPoint(page, (d1.door.from + d1.door.to) / 2 + 1, 0)
+      await page.mouse.move(...g.door)
+      await frames(page, 3)
+      await page.mouse.down()
+      await page.mouse.move(...to, { steps: 20 })
+      await frames(page, 3)
+      const held = await B(page, () => ({ door: window.villageBuild.outline.draft().door, tag: document.querySelector('.build-choice .title .area')?.textContent }))
+      await page.mouse.up()
+      await page.waitForTimeout(1300)
+      s = await state(page)
+      check('drag the door 1 m onto the bench: it stays clear and the tag names the bench', held.door.from === d1.door.from && held.door.to === d1.door.to && /bench/.test(held.tag ?? '') && s.draft.door.from === d1.door.from, { before: d1.door, held, after: s.draft.door })
+    }
     await page.click('.build-dim[data-dim="w"]')
     await page.keyboard.press('Backspace')
     await page.keyboard.type('4.5')
@@ -338,23 +373,39 @@ try {
       const shared = p.walls.filter((w) => p.rooms.filter((r) => r.loop.includes(w.a) && r.loop.includes(w.b)).length === 2)
       return { shared: shared.map((w) => ({ id: w.id, openings: w.openings })), bent: p.walls.find((w) => w.id === 'living-room.w2')?.sagitta }
     })
-    check('the shared wall is one wall with the double door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.leaves === 2) && built.bent !== 0, built)
+    check('the shared wall is one wall with the door; the far wall is bent', built.shared.length === 1 && built.shared[0].openings.some((o) => o.kind === 'door') && built.bent !== 0, built)
     // The door is a real gap in the generated walls: a level ray at 1 m through its middle, from 1 m inside one room
     // to 1 m inside the other, meets no wall; the same ray 0.3 m past a jamb meets the shared wall.
     const gap = await B(page, async () => {
       const P = await import('/src/build/plan.ts')
       const p = window.villageBuild.plan()
-      const w = p.walls.find((x) => x.openings.some((o) => o.leaves === 2))
-      const o = w.openings.find((x) => x.leaves === 2)
+      const M = await import('/src/build/mount.ts')
+      const w = p.walls.find((x) => x.openings.some((o) => o.id === 'living-room.door'))
+      const o = w.openings.find((x) => x.id === 'living-room.door')
       const c = P.curveOf(p, w)
       const ray = (t, s) => {
         const [x, z] = P.pointAt(c, t), [nx, nz] = P.normalAt(c, t)
         return window.villageBuild.wallHit([x - nx * s, 1, z - nz * s], [nx * s, 0, nz * s], 2)
       }
       const mid = (o.from + o.to) / 2
-      return { door: [o.from, o.to], through: [ray(mid, 1), ray(mid, -1)], jamb: [ray(o.from - 0.3, 1), ray(o.to + 0.3, -1)] }
+      // And no built-in: the same level ray, from 1 m inside one room to 1 m inside the other, against everything solid but the house.
+      const scene = window.village.kernel.root.stage.scene
+      const [x, z] = P.pointAt(c, mid), [nx, nz] = P.normalAt(c, mid)
+      // Each solid part's world box (mount.ts's obstacles: the house, people and light are not in it), against the segment, by slabs.
+      const things = M.obstacles(scene, [scene.getObjectByName('placed things')]).flatMap(({ box, name }) => {
+        if (box.min.y > 1 || box.max.y < 1) return []
+        let t0 = -1, t1 = 1
+        for (const [p, d, lo, hi] of [[x, nx, box.min.x, box.max.x], [z, nz, box.min.z, box.max.z]]) {
+          if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) return []; continue }
+          const a = (lo - p) / d, b = (hi - p) / d
+          t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b))
+        }
+        return t0 <= t1 ? [{ name, at: +t0.toFixed(2) }] : []
+      })
+      return { door: [o.from, o.to], through: [ray(mid, 1), ray(mid, -1)], jamb: [ray(o.from - 0.3, 1), ray(o.to + 0.3, -1)], things }
     })
     check('the doorway is open from both rooms (a ray through it hits no wall; 0.3 m past each jamb it hits the shared wall)', gap.through.every((h) => h === null) && gap.jamb.every((h) => h && built.shared.some((w) => w.id === h.wall)), gap)
+    check('and no built-in: the level ray at 1 m through the door\'s middle meets nothing within 1 m of the wall on either side', gap.things.length === 0, gap.things)
 
     // Undo and redo, geometries flat.
     const counts = []
@@ -400,7 +451,12 @@ try {
     check('clicking a wall selects it and remembers the point', s.selected?.wallId === 'kitchen.right' && Math.abs(s.selected.t - 2.0) < 0.15, s.selected)
     await say(page, 'open a door here into a new room')
     s = await until(page, (x) => x.draft)
-    check('"open a door here into a new room" hangs the room on that wall, the door at that point', s.draft?.wallId === 'kitchen.right' && Math.abs((s.draft.door.from + s.draft.door.to) / 2 - (await state(page)).selected.t) < 0.11, { draft: s.draft, selected: s.selected })
+    // The cupboard by the stove reaches to about 1.9 m along: the door takes the nearest clear spot past it.
+    const rightClear = await B(page, () => {
+      const d = window.villageBuild.outline.draft()
+      return d && window.villageBuild.fixtures('kitchen.right').filter((f) => f.y0 < 2.3 && d.door.from < f.to + 0.1 - 1e-6 && d.door.to > f.from - 0.1 + 1e-6).map((f) => f.name)
+    })
+    check('"open a door here into a new room" hangs the room on that wall, the door at the nearest clear spot to that point', s.draft?.wallId === 'kitchen.right' && rightClear?.length === 0 && Math.abs((s.draft.door.from + s.draft.door.to) / 2 - (await state(page)).selected.t) < 0.7, { draft: s.draft, selected: s.selected, rightClear })
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 4 && x.floors === 4)
     check('and Enter builds it', s.rooms.length === 4 && s.floors === 4, s.rooms)
