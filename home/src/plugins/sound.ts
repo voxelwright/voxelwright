@@ -5,7 +5,7 @@ import { mixFor, type Mix } from '../voice/buses'
 import { ALL_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 import { Player, renderOffline, type Logged, type OfflinePlay, type PlayOptions } from '../sound/player'
 import { MAP, SOUND_EVENTS, whereOf } from '../sound/map'
-import { PALETTE } from '../sound/palette'
+import { PALETTE, SAMPLE_CREDITS } from '../sound/palette'
 import type { BusName, CueName, Where } from '../sound/contract'
 
 // #52: the home's sounds, on for every visit. Plugins announce what happened
@@ -30,7 +30,13 @@ const WIDTH = 0.6
 const SPEAKER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path class="cone" d="M4 9.5h3.2L12 5.6v12.8l-4.8-3.9H4z"/><path class="waves" d="M15 9.2c1 .8 1.5 1.7 1.5 2.8s-.5 2-1.5 2.8M17.4 7c1.7 1.4 2.6 3.1 2.6 5s-.9 3.6-2.6 5"/><path class="hush" d="M15.5 9.5l5 5m0-5l-5 5"/></svg>`
 
 const CSS = `
-.babble-toggle { position: fixed; left: 16px; bottom: 16px; z-index: 30; width: 40px; height: 40px; border-radius: 50%;
+.sound-note { position: fixed; left: 16px; bottom: 16px; z-index: 30; }
+.sound-credit { position: absolute; left: 0; bottom: 100%; padding-bottom: 8px; opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  font: 12px/1.4 Georgia, 'Iowan Old Style', serif; color: #4a3520; width: max-content; max-width: min(320px, calc(100vw - 32px)); }
+.sound-credit span { display: block; padding: 6px 10px; border-radius: 6px; background: #f3e4c8; box-shadow: 0 2px 6px rgba(60, 40, 20, .25); }
+.sound-credit a { color: #6b4a2b; text-underline-offset: 2px; }
+.sound-note:hover .sound-credit, .sound-note:focus-within .sound-credit { opacity: 1; pointer-events: auto; }
+.babble-toggle { display: block; width: 40px; height: 40px; border-radius: 50%;
   border: 0; padding: 0; cursor: pointer; display: grid; place-items: center;
   background: radial-gradient(circle at 35% 30%, #f3e4c8, #e2c9a0 70%, #cfb085);
   box-shadow: 0 2px 6px rgba(60, 40, 20, .25), inset 0 0 0 3px rgba(255, 250, 240, .35);
@@ -42,7 +48,7 @@ const CSS = `
 .babble-toggle .hush { display: none; }
 .babble-toggle[aria-pressed="true"] .waves { display: none; }
 .babble-toggle[aria-pressed="true"] .hush { display: inline; }
-@media (prefers-reduced-motion: reduce) { .babble-toggle { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .babble-toggle, .sound-credit { transition: none; } }
 `
 
 /** Variant picks: the listening page's stored ones, then ?sfx= on top. */
@@ -88,6 +94,26 @@ export default {
     button.type = 'button'
     button.className = 'babble-toggle'
     button.innerHTML = SPEAKER
+    // The recordings' credit shows on hover or focus, like the music's. Built from parts, not
+    // markup, so no credit text is ever read as HTML.
+    const note = document.createElement('div')
+    note.className = 'sound-note'
+    const credit = document.createElement('div')
+    credit.className = 'sound-credit'
+    const line = document.createElement('span')
+    line.append('Sounds made in code, with recordings by ')
+    SAMPLE_CREDITS.forEach((c, i) => {
+      const a = document.createElement('a')
+      a.href = c.source
+      a.target = '_blank'
+      a.rel = 'noopener'
+      a.textContent = c.author
+      a.title = `${c.title} (${c.licence})`
+      line.append(i ? (i === SAMPLE_CREDITS.length - 1 ? ' and ' : ', ') : '', a)
+    })
+    line.append(` (${[...new Set(SAMPLE_CREDITS.map((c) => c.licence))].join(', ')}, Freesound)`)
+    credit.append(line)
+    note.append(button, credit)
     const style = document.createElement('style')
     style.textContent = CSS
     const show = () => {
@@ -128,7 +154,7 @@ export default {
 
     ctx.effect(() => {
       document.head.append(style)
-      document.body.append(button)
+      document.body.append(note)
       addEventListener('keydown', onKey)
       addEventListener('storage', onStorage)
       shared = acquireAudio({
@@ -144,7 +170,7 @@ export default {
       return () => {
         removeEventListener('keydown', onKey)
         removeEventListener('storage', onStorage)
-        button.remove()
+        note.remove()
         style.remove()
         player = null
         shared?.release()
