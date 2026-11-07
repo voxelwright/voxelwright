@@ -109,13 +109,6 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       g.fillStyle = r() > 0.5 ? 'rgba(255,255,255,0.35)' : 'rgba(150,110,60,0.08)'
       g.fillRect(x0 + r() * w, y0 + r() * h, 1 + r() * 6, 0.6)
     }
-    // A soft crease across the middle, as a folded slip has.
-    g.strokeStyle = 'rgba(150, 110, 60, 0.12)'
-    g.lineWidth = 1
-    g.beginPath()
-    g.moveTo(x0, y0 + h * 0.52)
-    g.lineTo(x1, y0 + h * 0.48)
-    g.stroke()
     g.restore()
     g.strokeStyle = 'rgba(120, 85, 50, 0.35)'
     g.lineWidth = 0.8
@@ -234,18 +227,12 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
   return { frame, dispose }
 }
 
-/** The slips, and the talk page's controls laid out around the held pad. */
+/** The slips' styles: the card stays in the page unseen, and the name ribbons give way to the slips' tape. */
 export function paperCss() {
   return `
   .talk-card { opacity: 0 !important; }
   .talk-paper { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; opacity: 0;
     filter: drop-shadow(0 6px 10px rgba(60, 30, 10, 0.22)) drop-shadow(0 1px 1px rgba(60, 30, 10, 0.18)); }
   .talk-tag.shown:not(.hover) { opacity: 0; }
-  .babble-toggle, .music-note { opacity: 0.55; }
-  @media (max-width: 600px) {
-    .babble-toggle, .music-note { top: 14px; bottom: auto; left: auto; }
-    .babble-toggle { right: 64px; }
-    .music-note { right: 16px; }
-  }
   `
 }

@@ -170,29 +170,26 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
   // The torn note on its way.
   // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
-  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.FrontSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
+  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.FrontSide, emissive: '#b8a888', emissiveIntensity: 0.12 })
   const NOTEH = PADH * 0.62
-  // Look a (#42 regroup): the note folds in three, like a letter, before it flies.
-  // The back of the paper is blank: a folded third shows paper, not mirrored words.
+  // The note folds its right third over as it lifts (#42 regroup); the back of the paper is blank.
   const backMat = new THREE.MeshStandardMaterial({ color: '#efe3c8', roughness: 0.95, side: THREE.BackSide, transparent: true, emissive: '#8a7a5a', emissiveIntensity: 0.25 })
-  const third = (i: number) => {
-    const g = new THREE.PlaneGeometry(PADW / 3, NOTEH)
+  const part = (u0: number, u1: number) => {
+    const g = new THREE.PlaneGeometry(PADW * (u1 - u0), NOTEH)
     const uv = g.attributes.uv
-    for (let k = 0; k < uv.count; k++) uv.setX(k, (i + uv.getX(k)) / 3)
+    for (let k = 0; k < uv.count; k++) uv.setX(k, u0 + uv.getX(k) * (u1 - u0))
     const face = new THREE.Mesh(g, flyMat)
     face.add(new THREE.Mesh(g, backMat))
     return face
   }
-  const hingeL = new THREE.Group(), hingeR = new THREE.Group()
   const flyer = new THREE.Group()
-  const [left, middle, right] = [third(0), third(1), third(2)]
-  hingeL.position.x = -PADW / 6
-  left.position.x = -PADW / 6
-  hingeL.add(left)
-  hingeR.position.x = PADW / 6
-  right.position.x = PADW / 6
-  hingeR.add(right)
-  flyer.add(middle, hingeL, hingeR)
+  const flat = part(0, 2 / 3), flap = part(2 / 3, 1)
+  flat.position.x = -PADW / 6
+  const hinge = new THREE.Group()
+  hinge.position.set(PADW / 6, 0, 0.002)
+  flap.position.x = PADW / 6
+  hinge.add(flap)
+  flyer.add(flat, hinge)
   flyer.name = 'talk note in flight'
   flyer.visible = false
   scene.add(mark(flyer))
@@ -307,7 +304,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.fillText(name, x0 + toW, y0)
     if (resting) {
       g.font = `italic 50px ${HAND}`
-      g.fillStyle = 'rgba(70, 50, 36, 0.5)'
+      g.fillStyle = 'rgba(70, 50, 36, 0.7)'
       g.fillText('just start typing…', 130, 272)
     }
     if (resting) return
@@ -530,8 +527,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     pad.rotation.set(THREE.MathUtils.lerp(pose(3) + lift * 0.12, -0.1, draw), pose(4) * (1 - draw), THREE.MathUtils.lerp(pose(5), 0, draw))
     const jx = -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
-    // On a phone the journal goes to the top left (the sound buttons to the top right, paper.ts), leaving the bottom to the pad.
-    journal.position.set(narrow ? -aspect + 0.2 : jx, (narrow ? 0.76 : -0.8) + hover * 0.06, 0.02)
+    journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
     journal.scale.setScalar(0.55 + hover * 0.04)
     // The real button sits over the felt journal on screen.
     journal.updateWorldMatrix(true, true)
@@ -595,12 +591,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyer.rotateZ(Math.sin(k * 9) * 0.18 * (1 - k))
       flyer.rotateX(-0.5 * lifted - k * 0.6)
       flyer.scale.copy(scl).multiplyScalar(1 - 0.7 * e)
-      // Folded while it lifts: the right third over, then the left third on top, then away.
-      const fold = (from: number, to: number) => THREE.MathUtils.smoothstep(flight!.t, from, to)
-      hingeR.rotation.y = -Math.PI * 0.985 * fold(0.04, 0.2)
-      hingeL.rotation.y = Math.PI * 0.97 * fold(0.14, 0.3)
-      hingeR.position.z = 0.002
-      hingeL.position.z = 0.004
+      // Folded once while it lifts, the right third over, so the words still show on its way.
+      hinge.rotation.y = -Math.PI * 0.985 * THREE.MathUtils.smoothstep(flight.t, 0.04, 0.22)
       flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
       backMat.opacity = flyMat.opacity
       flyer.visible = true

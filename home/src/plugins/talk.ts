@@ -579,11 +579,33 @@ export default {
     const eye = new THREE.Vector3()
     // Line of sight for the two-shot: anything solid but the villager in the shot blocks it, other villagers too.
     const raycaster = new THREE.Raycaster()
+    // Every layer: a wall cut away from the current view sits on the shadow-only layer, yet may stand in the next shot.
+    raycaster.layers.enableAll()
+    /** While a shot is searched: where its camera would stand and what it looks at, to tell which cut-away walls it would see. */
+    let posed: { from: THREE.Vector3; at: THREE.Vector3 } | null = null
+    const wallAt = new THREE.Vector3()
+    /**
+     * Whether a cut-away wall (or its stub) would be drawn from the posed camera, by camera.ts's rule:
+     * a wall between rooms stands when the camera and what it looks at are on the same side of it, an
+     * outer wall when the camera is inside it; a stub stands in for a wall that is cut.
+     */
+    const standsInShot = (n: THREE.Object3D, from: THREE.Vector3, at: THREE.Vector3) => {
+      const wall = n.userData.interior as { x: number } | undefined
+      const inward = n.userData.inward as THREE.Vector3 | undefined
+      const facing = wall ? Math.sign(from.x - wall.x) === Math.sign(at.x - wall.x) : wallAt.copy(from).sub(n.getWorldPosition(wallAt)).dot(inward!) > 0
+      return n.userData.cutaway ? !facing : facing
+    }
     let subject: THREE.Object3D | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
-      // The held pad rides with the camera; it never blocks a shot.
-      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject || n.userData.hud) return false
+      // The held pad rides with the camera; it never blocks a shot. A cut-away wall blocks one only if it would stand in it.
+      let wall: THREE.Object3D | null = null
+      for (let n: THREE.Object3D | null = o; n; n = n.parent) {
+        if (n === subject || n.userData.hud) return false
+        if (n.userData.interior || n.userData.inward) wall ??= n
+        else if (!n.visible) return false
+      }
+      if (wall ? !(posed ? standsInShot(wall, posed.from, posed.at) : wall.visible && o.layers.isEnabled(0)) : !o.layers.isEnabled(0)) return false
       return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
     }
     /** While a shot is searched, only the meshes near its subject are tested: far fewer rays to cast. */
@@ -593,7 +615,11 @@ export default {
       const sphere = new THREE.Sphere()
       stage.scene.traverse((o) => {
         const mesh = o as THREE.Mesh
-        if (!mesh.isMesh || !solid(mesh)) return
+        if (!mesh.isMesh) return
+        // Cut-away walls too: hidden from this view, they may stand in the shot being searched.
+        let wall = false
+        for (let n: THREE.Object3D | null = mesh; n && !wall; n = n.parent) wall = Boolean(n.userData.interior || n.userData.inward)
+        if (!wall && !solid(mesh)) return
         if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere()
         sphere.copy(mesh.geometry.boundingSphere!).applyMatrix4(mesh.matrixWorld)
         if (sphere.center.distanceTo(at) - sphere.radius < reach) found.push(mesh)
@@ -670,6 +696,7 @@ export default {
         for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4])
           for (const dist of [1.5, 1.15]) {
             const pose = shot(base + turn, dist)
+            posed = { from: pose.position, at: pose.look }
             if (!(clear(pose.position, head) && clear(pose.position, body) && clear(head, pose.position))) continue
             const n = clutter(pose, head, least)
             if (n === 0) return pose
@@ -681,6 +708,7 @@ export default {
           }
       } finally {
         nearby = null
+        posed = null
       }
       return best ?? shot(base, 1.5)
     }
@@ -1191,10 +1219,13 @@ export default {
         const r = input.padRect()
         if (r.width) taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
       }
-      // Cards never cover the face of anyone else in the conversation.
+      // Cards never cover anyone else's face in view, in the conversation or not (#42 regroup: a reply
+      // sat on Moss's face while the camera waited wide for the sent note to land).
       const faces = new Map<Member, Omit<Spot, 'tail'>>()
-      for (const o of mode === 'talk' && partner ? [partner] : seated) {
+      for (const o of cast) {
+        if (o.fade < 0.5 || !o.v.fig.root.visible) continue
         const f = headBox(o)
+        if (f.x1 < 0 || f.x0 > innerWidth || f.y1 < 0 || f.y0 > innerHeight) continue
         faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
       }
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
