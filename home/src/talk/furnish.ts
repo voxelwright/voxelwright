@@ -41,7 +41,11 @@ interface Job {
   grow: number
   state: 'ghost' | 'placed' | 'kept' | 'gone'
   timing: Timing
+  /** Sketching (#42, sketch.ts): this job's maker, in place of makeProp (a drawing's maker). */
+  make?: Make
 }
+/** A maker for one job: module text for the sandbox and its library id. */
+export type Make = (variant: number) => ReturnType<typeof makeProp>
 
 export interface FurnishHooks {
   /** Your own villager says a short line in the room. */
@@ -247,7 +251,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
    * The furnish route: ghost (kept from the guess, or now), then the real thing
    * from the library, a copy, or the maker through the sandbox; then keep or undo.
    */
-  const furnish = async (routed: Routed, text: string, t0: number, guess: Job | null) => {
+  const furnish = async (routed: Routed, text: string, t0: number, guess: Job | null, make?: Make) => {
     const what = routed.what ?? 'thing'
     const replacing = Boolean(routed.replace && /table/i.test(routed.replace))
     // Where, from the router's words and the person's own: trusted code picks the place either way.
@@ -261,6 +265,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       job = j
     }
     j.routed = routed
+    j.make = make
     // The route knows better than the guess: re-place the ghosts at the right size and places.
     clearGhosts(j)
     j.places = list
@@ -297,7 +302,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
           j.item = routed.library
           j.timing.source = 'library'
         } else {
-          const res = await makeProp(hooks.person, what, j.size, j.variant)
+          const res = await (j.make ? j.make(j.variant) : makeProp(hooks.person, what, j.size, j.variant))
           j.timing.makeMs = res.ms
           if (!res.ok) return fail(j, `maker ${res.why}`, res.why === 'away' ? "I'm out for a moment, so nothing's been made or moved." : res.why === 'busy' ? "I'm still making the last thing. One at a time!" : "I couldn't make that one, sorry. Nothing's been moved.")
           module = res.module

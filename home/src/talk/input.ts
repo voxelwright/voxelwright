@@ -52,6 +52,8 @@ export interface InputHooks {
   journal: string
   /** Open the journal where it makes sense (the last conversation). */
   openJournal(): void
+  /** Sketching (#42, sketch.ts): Enter while drawing is the page's, not a line's. True when it took the key. */
+  enter?(): boolean
 }
 
 export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
@@ -282,6 +284,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     if (!text) {
       g.fillStyle = 'rgba(70, 50, 36, 0.42)'
       g.font = `italic 50px ${HAND}`
+      if (sketching) {
+        if (sketchHint) g.fillText(sketchHint, 120, 180)
+        return
+      }
       g.fillText('just start typing…', 120, 180)
       if (caretOn) {
         g.fillStyle = INK
@@ -336,8 +342,13 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     onInput()
     return true
   }
-  /** Raised for writing: the field has the keyboard, or words are on the pad. */
-  const writing = () => document.activeElement === field || text.length > 0
+  /** Raised for writing: the field has the keyboard, or words are on the pad, or you are drawing on it. */
+  const writing = () => document.activeElement === field || text.length > 0 || sketching
+  // ── Sketching (#42, sketch.ts owns the drawing): the pad grows to drawing size ──
+  let sketching = false
+  let sketchHint = ''
+  /** 0 writing size, 1 drawing size. */
+  let draw = 0
   const onInput = () => {
     text = field.value
     caretOn = true
@@ -347,6 +358,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const onFieldKey = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
+      // Sketching (#42): while drawing, Enter makes or gives the page (sketch.ts).
+      if (sketching && hooks.enter?.()) return
       const line = field.value.trim()
       if (!line) return
       const t0 = performance.now()
@@ -463,11 +476,14 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const ease = (goal: number, rate: number, v: number) => reducedMotion.matches ? goal : v + (goal - v) * (1 - Math.exp(-dt * rate))
     raise = ease(writing() ? 1 : 0, 9, raise)
     lift = ease(text ? 1 : 0, 6, lift)
-    const breathe = reducedMotion.matches ? 0 : Math.sin(t * 1.3) * 0.006
+    draw = ease(sketching ? 1 : 0, 8, draw)
+    const breathe = reducedMotion.matches ? 0 : Math.sin(t * 1.3) * 0.006 * (1 - draw)
     // At rest about a third of its writing size, and mostly below the edge: only its top line, "to Dumpling", shows.
-    pad.scale.setScalar(THREE.MathUtils.lerp(0.42, 1, raise))
-    pad.position.set(THREE.MathUtils.lerp(0.32, 0.05, raise), THREE.MathUtils.lerp(-1.03, -0.93, raise) + lift * 0.1 + breathe, 0)
-    pad.rotation.set(THREE.MathUtils.lerp(-0.42, -0.62, raise) + lift * 0.12, 0.02, THREE.MathUtils.lerp(-0.05, 0.03, raise))
+    // Drawing (#42): nearly facing you, as large as fits, lower middle of the view.
+    const big = Math.min(1.75, (2 * aspect * 0.92) / 1.04, 1.25 / 0.65)
+    pad.scale.setScalar(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.42, 1, raise), big, draw))
+    pad.position.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 0.05, raise), 0, draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.03, -0.93, raise) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
+    pad.rotation.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.42, -0.62, raise) + lift * 0.12, -0.1, draw), 0.02 * (1 - draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.05, 0.03, raise), 0, draw))
     const jx = -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
     journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
@@ -491,7 +507,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       padButton.style.top = `${p.y0}px`
       padButton.style.width = `${Math.max(24, p.x1 - p.x0)}px`
       padButton.style.height = `${Math.max(24, p.y1 - p.y0)}px`
-      padButton.hidden = away || document.activeElement === field
+      padButton.hidden = away || document.activeElement === field || sketching
     }
 
     blink += dt
@@ -568,6 +584,19 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       return writing()
     },
     padRect: () => ({ ...padRect }),
+    /** Sketching (#42, sketch.ts): the pad's paper, to draw on. */
+    parts: () => ({ pad, PADW, PADH }),
+    /** Sketching (#42): grow the pad to drawing size (or settle it back); `hint` is pencilled on an empty page. */
+    setSketching: (on: boolean, hint = '') => {
+      if (sketching !== on || sketchHint !== hint) dirty = true
+      sketching = on
+      sketchHint = hint
+    },
+    /** Sketching (#42): the words went with the page; the pad is fresh. */
+    clearText: () => {
+      field.value = ''
+      onInput()
+    },
     get text() {
       return text
     },
