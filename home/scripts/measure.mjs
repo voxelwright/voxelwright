@@ -1,6 +1,7 @@
 // Scripted run in Google Chrome, headless by default so no window takes focus.
 // --headed shows the window; the README perf numbers were taken headed.
-// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--gpu] [--unload] [--headed]
+// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--gpu] [--unload] [--headed] [--place=crate]
+// --place=<kind> begins placing a built-in thing (?build=1) before measuring, so the ghost is in the frame.
 // --gpu adds ?gpu=1 and reports, per frame, GPU busy ms (the union of the frame's pass
 // intervals from timestamp queries, src/gpu-time.js), the summed pass durations (they
 // overlap, so they overcount) and submit-to-done ms (includes main-thread delay).
@@ -26,6 +27,12 @@ page.on('pageerror', (e) => errors.push(String(e)))
 await page.goto(url)
 const readiness = await page.evaluate(() => window.village.ready())
 await page.waitForTimeout(2000)
+const placing = args.find((a) => a.startsWith('--place='))?.slice(8)
+if (placing) {
+  await page.waitForFunction(() => window.villagePlace?.history(), null, { timeout: 20_000 })
+  await page.evaluate((k) => window.villagePlace.begin(k), placing)
+  await page.waitForTimeout(1000)
+}
 
 const result = { url, readiness }
 result.loaded = await page.evaluate(() => {

@@ -6,18 +6,18 @@
 // lets it go. Nothing here touches the plan: applying is the caller's commit.
 import * as THREE from 'three/webgpu'
 import type { Stage } from '../kernel'
-import { canvas, paintGlow, toTexture } from '../paint'
+import { canvas, toTexture } from '../paint'
+import { CHALK_RED, HAND, drawKnob, paperGrain, tagCss } from './sketch'
 import { BEND_SNAP, curveOf, outline as ringOf, pointAt, roomArea, type P, type Plan } from './plan'
 import { SNAP, blockerOf, draftGeometry, fit, placeDoor, type Draft } from './resolve'
 
-const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const MIN = 1.5
 const PX = 1024
 const INK = 'rgba(78, 52, 34, 0.95)'
 /** Carpenter's red pencil, for the measurements. */
-const PENCIL = 'rgba(110, 70, 44, 0.85)'
+const PENCIL = 'rgba(96, 62, 40, 0.8)'
 // Darker than it looks: the scene's exposure and bloom lift it to a warm tracing-paper cream.
-const PAPER = 'rgba(196, 176, 146, 0.9)'
+const PAPER = 'rgba(204, 186, 156, 0.86)'
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
 
@@ -81,23 +81,81 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   sheet.name = 'build outline sheet'
 
   // Translucent wall ghosts, warm like furnishing's.
-  const ghostMat = new THREE.MeshStandardMaterial({ color: '#efe2c8', emissive: '#ffd9a6', emissiveIntensity: 0.12, roughness: 1, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide })
+  const ghostMat = new THREE.MeshStandardMaterial({ color: '#f3e7cf', emissive: '#ffe2b8', emissiveIntensity: 0.18, roughness: 1, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide })
   const ghosts = new THREE.Mesh(new THREE.BufferGeometry(), ghostMat)
   ghosts.name = 'build outline walls'
   ghosts.renderOrder = 2
   // Their edges in pencil: tops and the far corners' uprights, so the walls read through the haze.
-  const edgeMat = new THREE.LineBasicMaterial({ color: '#6a4630', transparent: true, opacity: 0.8, depthWrite: false })
+  const edgeMat = new THREE.LineBasicMaterial({ color: '#7a5236', transparent: true, opacity: 0.28, depthWrite: false })
   const edges = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMat)
   edges.name = 'build outline edges'
   edges.renderOrder = 2
 
-  // The bend dot, as the right wall's.
-  const knobMat = new THREE.MeshBasicMaterial({ map: paintGlow(), transparent: true, opacity: 0.85, depthWrite: false, fog: false })
-  const knob = new THREE.Mesh(new THREE.CircleGeometry(0.3, 40), knobMat)
-  knob.rotation.x = -Math.PI / 2
-  knob.renderOrder = 4
-  knob.name = 'build outline bend'
-  group.add(sheet, ghosts, edges, knob)
+  group.add(sheet, ghosts, edges)
+  /** Tracing-paper grain, painted once and laid over the paper on every redraw. */
+  const grain = paperGrain(512)
+  /** A refused drag flashes the walls chalk red for a moment. */
+  let refusedAt = -Infinity
+
+  // The yard's fence and flowers step aside under the paper while it is out (runtime only: diorama.ts is untouched).
+  const YARD = ['picket fence', 'yard plants', 'yard blooms']
+  const tucked = new Map<THREE.InstancedMesh, Float32Array>()
+  const hidden = new THREE.Matrix4().makeScale(0, 0, 0)
+  const m4 = new THREE.Matrix4(), at4 = new THREE.Vector3()
+  const inside = (p: P, poly: P[]) => {
+    let inn = false
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, zi] = poly[i], [xj, zj] = poly[j]
+      if ((zi > p[1]) !== (zj > p[1]) && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) inn = !inn
+    }
+    return inn
+  }
+  const tidyYard = (poly: P[] | null) => {
+    if (poly) for (const name of YARD) {
+      const m = stage.scene.getObjectByName(name) as THREE.InstancedMesh | undefined
+      if (m?.isInstancedMesh && !tucked.has(m)) tucked.set(m, (m.instanceMatrix.array as Float32Array).slice())
+    }
+    for (const [m, saved] of tucked) {
+      m.updateMatrixWorld()
+      for (let i = 0; i < m.count; i++) {
+        m4.fromArray(saved, i * 16)
+        at4.setFromMatrixPosition(m4).applyMatrix4(m.matrixWorld)
+        m.setMatrixAt(i, poly && inside([at4.x, at4.z], poly) ? hidden : m4)
+      }
+      m.instanceMatrix.needsUpdate = true
+      if (!poly) m.computeBoundingSphere()
+    }
+    if (!poly) tucked.clear()
+    else for (const m of tucked.keys()) m.computeBoundingSphere()
+    // The fence's rails are one merged mesh: a rail that runs under the paper is left out while it is there.
+    if (poly && !rails) {
+      const fence = stage.scene.getObjectByName('picket fence') as THREE.Mesh | undefined
+      const rail = fence?.parent?.children.find((c) => (c as THREE.Mesh).isMesh && c !== fence && (c as THREE.Mesh).material === fence.material) as THREE.Mesh | undefined
+      if (rail?.geometry.index) rails = { mesh: rail, index: rail.geometry.index }
+    }
+    if (!rails) return
+    const { mesh, index } = rails
+    if (!poly) {
+      mesh.geometry.setIndex(index)
+      rails = null
+      return
+    }
+    const pos = mesh.geometry.attributes.position
+    mesh.updateMatrixWorld()
+    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+    const keep: number[] = []
+    for (let t = 0; t < index.count; t += 3) {
+      for (let j = 0; j < 3; j++) v[j].fromBufferAttribute(pos, index.getX(t + j)).applyMatrix4(mesh.matrixWorld)
+      let under = false
+      for (let j = 0; j < 3 && !under; j++) for (let s = 0; s <= 12 && !under; s++) {
+        const a = v[j], b = v[(j + 1) % 3], f = s / 12
+        under = inside([a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f], poly)
+      }
+      if (!under) keep.push(index.getX(t), index.getX(t + 1), index.getX(t + 2))
+    }
+    mesh.geometry.setIndex(keep)
+  }
+  let rails: { mesh: THREE.Mesh; index: THREE.BufferAttribute } | null = null
 
   // ── Paper tags: the two sizes, and the choice ────────────────────────────
   const style = document.createElement('style')
@@ -146,7 +204,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   }
   const row = document.createElement('div')
   row.className = 'row'
-  row.append(button('Build it', 'apply', () => confirm()), button('Not now', 'cancel', () => cancel()))
+  row.append(button('Not now', 'cancel', () => cancel()), button('Build it', 'apply', () => confirm()))
   choice.append(title, row)
   document.body.append(choice)
 
@@ -166,6 +224,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const fitted = fit(hooks.base(), next)
     if ('ask' in fitted) {
       if (!quiet) hooks.say(fitted.ask)
+      if (drag) {
+        refusedAt = performance.now()
+        draw()
+        setTimeout(() => draft && draw(), 650)
+      }
       return false
     }
     draft = next
@@ -224,30 +287,39 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       path.forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
       if (close) g.closePath()
     }
-    // A pencil stroke: the path cut into short runs that wander a little, drawn twice, like a carpenter's pencil.
+    // A carpenter's pencil: each run bows a little and wanders slowly, overshoots its ends, and is gone over twice.
     let seed = 7
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5
-    const wander = (path: P[]): P[] => {
+    const wander = (path: P[], over = 0): P[] => {
       const out: P[] = []
       path.forEach((p, i) => {
-        if (i === 0) return out.push(p)
+        if (i === 0) return
         const q = path[i - 1]
-        const n = Math.max(1, Math.round(Math.hypot(p[0] - q[0], p[1] - q[1]) / 0.25))
-        for (let s = 1; s <= n; s++) {
-          const t = s / n
-          out.push([q[0] + (p[0] - q[0]) * t + (s < n ? rnd() * 0.014 : 0), q[1] + (p[1] - q[1]) * t + (s < n ? rnd() * 0.014 : 0)])
+        const L = Math.hypot(p[0] - q[0], p[1] - q[1]) || 1
+        const u: P = [(p[0] - q[0]) / L, (p[1] - q[1]) / L], nrm: P = [-u[1], u[0]]
+        const bow = rnd() * Math.min(0.03, L * 0.012)
+        const a0 = i === 1 ? -over : 0, a1 = L + (i === path.length - 1 ? over : 0)
+        const n = Math.max(2, Math.round((a1 - a0) / 0.12))
+        const phase = rnd() * 6
+        for (let s = 0; s <= n; s++) {
+          if (s === 0 && out.length) continue
+          const t = a0 + ((a1 - a0) * s) / n, f = t / L
+          const off = Math.sin(Math.PI * Math.max(0, Math.min(1, f))) * bow + Math.sin(f * 7 + phase) * 0.004 + rnd() * 0.002
+          out.push([q[0] + u[0] * t + nrm[0] * off, q[1] + u[1] * t + nrm[1] * off])
         }
       })
       return out
     }
-    const chalk = (path: P[], width: number, alpha = 1, colour = INK, dash: number[] = []) => {
+    const refused = performance.now() - refusedAt < 600
+    const chalk = (path: P[], width: number, alpha = 1, colour = INK, dash: number[] = [], over = 0) => {
       g.setLineDash(dash.map((v) => v * k))
       for (let pass = 0; pass < 2; pass++) {
         g.save()
-        g.globalAlpha = alpha * (pass ? 0.5 : 0.9)
-        g.strokeStyle = colour
-        g.lineWidth = width * k * (pass ? 0.6 : 1)
-        trace(wander(path))
+        g.globalAlpha = alpha * (pass ? 0.45 : 0.85)
+        g.strokeStyle = refused && colour === INK ? CHALK_RED : colour
+        g.lineWidth = width * k * (pass ? 0.55 : 1)
+        if (pass) g.translate(0.006 * k, 0.004 * k)
+        trace(wander(path, over * (pass ? 0.6 : 1)))
         g.stroke()
         g.restore()
       }
@@ -268,27 +340,33 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       g.globalAlpha = 1
     }
 
-    // Tracing paper laid on the ground under the new room, with a soft shadow where it meets the ground.
-    const sheetRing = ringOf(made, room, -T / 2 - 0.4)
+    // Tracing paper laid on the ground under the new room: a soft shadow, a slightly torn edge, and grain.
+    const sheetRing = wander([...ringOf(made, room, -T / 2 - 0.4), ringOf(made, room, -T / 2 - 0.4)[0]])
+    tidyYard(offsetPath(sheetRing, 0.12))
     g.save()
-    g.filter = `blur(${Math.round(0.1 * k)}px)`
-    g.translate(0.04 * k, 0.06 * k)
+    g.filter = `blur(${Math.round(0.08 * k)}px)`
+    g.translate(0.05 * k, 0.07 * k)
     trace(sheetRing, true)
-    g.fillStyle = 'rgba(70, 40, 20, 0.28)'
+    g.fillStyle = 'rgba(70, 40, 20, 0.3)'
     g.fill()
     g.restore()
     g.save()
     trace(sheetRing, true)
     g.fillStyle = PAPER
     g.fill()
+    g.clip()
+    g.globalCompositeOperation = 'multiply'
+    g.globalAlpha = 0.9
+    g.fillStyle = g.createPattern(grain, 'repeat')!
+    g.fillRect(0, 0, PX, PX)
     g.restore()
     // The floor: faint squared paper, half a metre a square, running with the wall it hangs on.
     g.save()
     trace(inner, true)
     g.clip()
     g.strokeStyle = INK
-    g.lineWidth = 0.01 * k
-    g.globalAlpha = 0.2
+    g.lineWidth = 0.008 * k
+    g.globalAlpha = 0.14
     const o = geo.at(0)
     for (let a = -30; a <= 30; a++) for (const [u, v] of [[geo.dir, geo.out], [geo.out, geo.dir]] as Array<[P, P]>) {
       const c0 = add(o, u, a * 0.5)
@@ -300,18 +378,28 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     g.globalAlpha = 1
     g.restore()
 
+    // A graphite smudge where the side of the pencil dragged along the walls.
+    g.save()
+    g.filter = `blur(${Math.round(0.07 * k)}px)`
+    g.globalAlpha = 0.18
+    g.strokeStyle = 'rgb(70, 52, 40)'
+    g.lineWidth = T * 2.4 * k
+    trace(offsetPath(centre, (side > 0 ? -1 : 1) * T * 0.9))
+    g.stroke()
+    g.restore()
+
     // The new walls: both faces in pencil, the band between them hatched closer.
     g.save()
     g.beginPath()
     ;[...wallOut, ...[...wallIn].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
     g.closePath()
-    g.fillStyle = 'rgba(170, 140, 108, 0.55)'
+    g.fillStyle = refused ? 'rgba(214, 120, 96, 0.4)' : 'rgba(170, 140, 108, 0.45)'
     g.fill()
     g.clip()
-    hatch(0.06, 0.5, 0.012, -1)
+    hatch(0.07, 0.42, 0.011, -1)
     g.restore()
-    chalk(wallOut, 0.04)
-    chalk(wallIn, 0.032, 0.9)
+    chalk(wallOut, 0.036, 1, INK, [], 0.1)
+    chalk(wallIn, 0.028, 0.9, INK, [], 0.08)
 
     // The door: jambs across the shared wall, and each leaf with its swing into the new room.
     for (const t of [d.door.from, d.door.to]) chalk([geo.at(t, -T / 2 - 0.04), geo.at(t, T / 2 + 0.04)], 0.03)
@@ -322,65 +410,57 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     for (const h of hinges) {
       const hinge = geo.at(h.at, T / 2)
       const open = add(hinge, geo.out, h.r)
-      chalk([hinge, open], 0.028)
+      chalk([hinge, open], 0.024)
       const arcPts: P[] = Array.from({ length: 17 }, (_, i) => {
         const a = (i / 16) * Math.PI / 2
         return add(add(hinge, geo.dir, h.dir * h.r * Math.cos(a)), geo.out, h.r * Math.sin(a))
       })
-      chalk(arcPts, 0.014, 0.8, INK, [0.07, 0.06])
+      chalk(arcPts, 0.013, 0.7, INK, [0.06, 0.07])
     }
-    if (!d.door.leaves) chalk([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.014, 0.8, INK, [0.07, 0.06])
+    if (!d.door.leaves) chalk([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.013, 0.7, INK, [0.06, 0.07])
 
-    // Dimension lines in carpenter's pencil: extension lines, the run, and slashed ends.
-    const dimension = (a: P, b: P, from: P, to: P) => {
-      chalk([from, a], 0.012, 0.8, PENCIL)
-      chalk([to, b], 0.012, 0.8, PENCIL)
-      chalk([a, b], 0.016, 0.9, PENCIL)
-      const u: P = [(b[0] - a[0]) / Math.hypot(b[0] - a[0], b[1] - a[1]), (b[1] - a[1]) / Math.hypot(b[0] - a[0], b[1] - a[1])]
-      const slash: P = [(u[0] - u[1]) * 0.09, (u[1] + u[0]) * 0.09]
-      for (const p of [a, b]) chalk([add(p, slash, -1), add(p, slash)], 0.022, 1, PENCIL)
+    // Sizes as a carpenter jots them: a light pencil run with a small tick across each end; the number is the tag.
+    const dimension = (a: P, b: P) => {
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+      const u: P = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], nrm: P = [-u[1], u[0]]
+      chalk([add(a, u, 0.05), add(b, u, -0.05)], 0.011, 0.75, PENCIL)
+      for (const p of [a, b]) chalk([add(add(p, nrm, -0.07), u, -0.015), add(add(p, nrm, 0.07), u, 0.015)], 0.014, 0.9, PENCIL)
     }
-    dimension(wA, wB, geo.at(d.from, d.depth + T / 2 + 0.1), geo.at(d.to, d.depth + T / 2 + 0.1))
-    dimension(dA, dB, add(geo.at(tSide, 0), sideDir, T / 2 + 0.1), add(geo.at(tSide, d.depth), sideDir, T / 2 + 0.1))
+    dimension(wA, wB)
+    dimension(dA, dB)
 
-    // Grips: small rings at the middle of each wall that moves, and a diamond on the door.
-    // A pushpin: a shadow, a red head and a glint.
-    const ring = (p: P, r: number, live: boolean) => {
-      const [x, y] = px(p)
+    // Grips: the same cream knobs as the turn handle when placing, on each wall that moves, the door and the bend.
+    const active = drag?.handle ?? hover
+    const knob = (p: P, r: number, live: boolean) => drawKnob(g, ...px(p), r * k, live)
+    knob(mid, 0.15, active === 'far')
+    knob(geo.at(d.from, d.depth / 2), 0.15, active === 'from')
+    knob(geo.at(d.to, d.depth / 2), 0.15, active === 'to')
+    const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
+    knob(dc, 0.13, active === 'door')
+    // The bend knob carries a little bowed arrow: pull to curve the wall.
+    knob(knobAt, 0.18, active === 'bend')
+    {
+      const [x, y] = px(knobAt), r = 0.08 * k
+      const [ux, uy] = [geo.out[0], geo.out[1]]
+      g.save()
+      g.translate(x, y)
+      g.rotate(Math.atan2(uy, ux))
+      g.strokeStyle = 'rgba(106, 70, 48, 0.9)'
+      g.lineWidth = 0.018 * k
+      g.lineCap = 'round'
       g.beginPath()
-      g.arc(x + 0.03 * k, y + 0.04 * k, r * k, 0, Math.PI * 2)
-      g.fillStyle = 'rgba(60, 30, 14, 0.3)'
-      g.fill()
-      g.beginPath()
-      g.arc(x, y, r * k, 0, Math.PI * 2)
-      g.fillStyle = live ? '#e0703f' : '#b8442c'
-      g.fill()
-      g.lineWidth = 0.015 * k
-      g.strokeStyle = 'rgba(70, 24, 12, 0.7)'
+      g.moveTo(-r, -r * 0.8)
+      g.quadraticCurveTo(r * 0.6, 0, -r, r * 0.8)
       g.stroke()
       g.beginPath()
-      g.arc(x - r * k * 0.35, y - r * k * 0.35, r * k * 0.3, 0, Math.PI * 2)
-      g.fillStyle = 'rgba(255, 236, 214, 0.75)'
-      g.fill()
+      g.moveTo(r * 0.85, 0)
+      g.lineTo(r * 0.35, -r * 0.35)
+      g.moveTo(r * 0.85, 0)
+      g.lineTo(r * 0.35, r * 0.35)
+      g.stroke()
+      g.restore()
     }
-    const active = drag?.handle ?? hover
-    ring(mid, 0.13, active === 'far')
-    ring(geo.at(d.from, d.depth / 2), 0.13, active === 'from')
-    ring(geo.at(d.to, d.depth / 2), 0.13, active === 'to')
-    const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
-    g.save()
-    g.translate(...px(dc))
-    g.rotate(Math.PI / 4)
-    g.fillStyle = active === 'door' ? 'rgba(240, 190, 120, 1)' : 'rgba(252, 244, 228, 1)'
-    g.fillRect(-0.06 * k, -0.06 * k, 0.12 * k, 0.12 * k)
-    g.strokeStyle = 'rgba(110, 70, 40, 0.55)'
-    g.lineWidth = 0.02 * k
-    g.strokeRect(-0.06 * k, -0.06 * k, 0.12 * k, 0.12 * k)
-    g.restore()
     sheetMap.needsUpdate = true
-
-    knob.position.set(knobAt[0], 0.03, knobAt[1])
-    knobMat.opacity = active === 'bend' ? 1 : 0.8
 
     // Ghost walls: both faces and the top of each new wall.
     const H = geo.height
@@ -400,7 +480,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const line: number[] = []
     for (const face of [wallIn, wallOut]) {
       for (let i = 0; i < face.length - 1; i++) line.push(face[i][0], H, face[i][1], face[i + 1][0], H, face[i + 1][1])
-      for (const p of [face[1], face[face.length - 2]]) line.push(p[0], 0, p[1], p[0], H, p[1])
     }
     const edgeGeo = new THREE.BufferGeometry()
     edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(line, 3))
@@ -434,6 +513,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     hover = null
     editing = null
     group.removeFromParent()
+    tidyYard(null)
     ghosts.geometry.dispose()
     ghosts.geometry = new THREE.BufferGeometry()
     edges.geometry.dispose()
@@ -653,7 +733,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     at(tags.w, inX(wx), inY(wy))
     at(tags.d, inX(dx), inY(dy))
     const [tx, ty] = screen(anchors.title)
-    at(choice, Math.min(innerWidth - 130, Math.max(130, tx)), Math.max(16, ty), '-50%', '-100%')
+    // On a phone the choice docks to the bottom, in reach of a thumb, as placing's tag does.
+    const docked = innerWidth < 700 && innerHeight > innerWidth
+    choice.classList.toggle('docked', docked)
+    if (docked) choice.style.translate = ''
+    else at(choice, Math.min(innerWidth - 150, Math.max(150, tx)), Math.max(16, ty), '-50%', '-100%')
     if (editing) {
       const [ex, ey] = editing === 'w' ? [wx, wy] : [dx, dy]
       at(field, ex, ey)
@@ -672,9 +756,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     sheetMap.dispose()
     ghostMat.dispose()
     edgeMat.dispose()
-    knob.geometry.dispose()
-    knobMat.map?.dispose()
-    knobMat.dispose()
   }
 
   /** Screen points (CSS px) of each grip, for the checks. */
@@ -722,34 +803,29 @@ export type Outline = ReturnType<typeof makeOutline>
 function css() {
   return `
   .build-dim, .build-choice, .build-dim-field { position: fixed; z-index: 6; left: 0; top: 0; opacity: 0; pointer-events: none; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.9; }
-  .build-dim { padding: 3px 11px 5px; border: 0; border-radius: 9px; cursor: text; rotate: -2deg;
-    background: radial-gradient(120% 100% at 20% 0%, #fffaf0 0%, #f8ecd4 100%); color: #4a3428; font: 700 20px ${HAND};
-    box-shadow: 0 6px 14px rgba(60, 30, 10, 0.22), 0 1px 0 rgba(255, 255, 255, 0.7) inset; }
-  .build-dim[data-dim='d'] { rotate: 2deg; }
-  .build-dim::after { content: '✎'; margin-left: 6px; font-size: 14px; opacity: 0.45; }
-  .build-dim:hover, .build-dim:focus-visible { outline: none; text-decoration: underline wavy rgba(120, 80, 50, 0.5); }
+  .build-dim { min-height: 44px; padding: 4px 10px 6px; border: 0; background: none; cursor: text; rotate: -3deg; color: #4f3322; font: 700 23px ${HAND};
+    text-shadow: 0 0 2px #fbf1dd, 0 0 5px #fbf1dd, 0 0 9px rgba(251, 241, 221, 0.9); }
+  .build-dim[data-dim='d'] { rotate: 4deg; }
+  .build-dim::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 8px; height: 2px; border-radius: 2px; opacity: 0.35;
+    background: repeating-linear-gradient(90deg, #6a4630 0 6px, transparent 6px 10px); }
+  .build-dim:hover::after, .build-dim:focus-visible::after { opacity: 0.8; }
+  .build-dim:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; border-radius: 8px; }
   .build-dim.shown, .build-choice.shown, .build-dim-field.shown { opacity: 1; scale: 1; pointer-events: auto; }
   .build-dim.editing { opacity: 0; pointer-events: none; }
   .build-dim-field { width: 92px; padding: 3px 10px 5px; border: 1.5px dashed rgba(150, 100, 60, 0.5); border-radius: 9px; text-align: center;
     background: #fffaf0; color: #4a3428; font: 700 20px ${HAND}; box-shadow: 0 6px 14px rgba(60, 30, 10, 0.22); outline: none; }
-  .build-choice { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 14px 10px; border-radius: 14px; transform-origin: 50% 100%;
-    background: radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 60%, #f3e3c4 100%); color: #46301f;
-    box-shadow: 0 10px 24px rgba(60, 30, 10, 0.24), 0 2px 0 rgba(255, 255, 255, 0.7) inset; }
-  .build-choice::before { content: ''; position: absolute; inset: 5px; border: 1.5px dashed rgba(150, 100, 60, 0.36); border-radius: 10px; pointer-events: none; }
+  .build-choice { display: grid; gap: 6px; min-width: 220px; padding: 14px 18px 12px 20px; transform-origin: 50% 100%; rotate: -1.2deg; }
+  ${tagCss('.build-choice', ".build-choice button[data-choice='apply']", ".build-choice button[data-choice='cancel']", '[aria-disabled=true]')}
   .build-choice::after { content: ''; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; margin-left: -8px; rotate: 45deg;
-    background: #f5e7cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
-  .build-choice .title { padding: 0 6px; white-space: nowrap; color: #6a4a34; }
-  .build-choice .title .name { font: 700 21px ${HAND}; color: #4a3428; }
-  .build-choice .title .area { font: italic 16px ${HAND}; }
-  .build-choice .row { display: flex; gap: 6px; }
-  .build-choice button { position: relative; padding: 2px 8px 4px; border: 0; background: none; cursor: pointer; color: #6a4a34; font: 700 21px ${HAND};
-    transition: translate 120ms ease; }
-  .build-choice button + button::before { content: '·'; position: absolute; left: -7px; color: rgba(120, 80, 50, 0.5); }
-  .build-choice button[data-choice='apply'] { min-height: 44px; padding: 4px 16px 6px; margin: 2px 4px 0 0; color: #3f6a35; rotate: -2deg;
-    border: 2px solid rgba(63, 106, 53, 0.75); border-radius: 8px; background: rgba(63, 106, 53, 0.07); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset; }
-  .build-choice button[data-choice='cancel'] { min-height: 44px; font-weight: 400; font-size: 18px; color: #7a5a44; }
-  .build-choice button[data-choice='cancel']::before { display: none; }
-  .build-choice button:hover, .build-choice button:focus-visible { translate: 0 -1px; outline: none; text-decoration: underline wavy rgba(120, 80, 50, 0.5); }
+    background: #f4e6cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
+  .build-choice .title { white-space: nowrap; color: #6a4a34; }
+  .build-choice .title .name { font: 700 20px/1.1 ${HAND}; color: #4a3428; letter-spacing: 0.01em; }
+  .build-choice .title .area { font: italic 600 17px ${HAND}; color: #5e4434; }
+  .build-choice .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; position: relative; z-index: 1; }
+  .build-choice.docked { z-index: 40; left: 12px; right: 12px; top: auto; bottom: calc(14px + env(safe-area-inset-bottom)); rotate: -0.6deg; transform-origin: 50% 100%; }
+  .build-choice.docked::after { display: none; }
+  .build-choice.docked .title { white-space: normal; }
+  .build-choice.docked .row button { flex: 1; min-height: 48px; font-size: 18px; }
   @media (prefers-reduced-motion: reduce) { .build-dim, .build-choice, .build-dim-field { transition: none; } }
   `
 }

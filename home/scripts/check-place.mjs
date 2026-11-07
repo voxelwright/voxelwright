@@ -266,13 +266,6 @@ try {
     const w = plan.walls.find((k) => k.id === 'kitchen.left')
     return { sagitta: w.sagitta }
   }, s.at)
-  console.log('DEBUG2', JSON.stringify(await page.evaluate(async () => {
-    const M = await import('/src/build/mount.ts')
-    const scene = window.village.kernel.root.get('stage').scene
-    const st = window.villagePlace.state()
-    const obs = M.obstacles(scene, [scene.getObjectByName('placement')]).filter((o) => o.name === 'shelf' || Math.abs(o.box.min.x + 3.5) < 1).map((o) => [o.name, o.box.min.toArray().map((v) => +v.toFixed(2)), o.box.max.toArray().map((v) => +v.toFixed(2))])
-    return { st: { at: st.at, why: st.why, size: st.size, pose: st.pose }, obs, tops: scene.children.map((c) => c.name) }
-  })))
   check('wall: on the bent left wall it hangs there, facing the room', s.ok && s.at.wallId === 'kitchen.left' && facing.sagitta !== 0 && Math.sin(s.pose.yaw) > 0.5, { at: s.at, why: s.why, pose: s.pose, facing })
   await shot(page, 'wall-curved')
   await page.keyboard.press('KeyQ')
