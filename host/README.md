@@ -178,10 +178,13 @@ token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
 on stop; every request needs `Authorization: Bearer <token>`.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
-- `POST /people/<id>/messages {"text"}`: server-sent events, `text` pieces
+- `POST /people/<id>/messages {"text", "context"?}`: server-sent events, `text` pieces
   then `done` with the reply, or `failed`. One turn at a time per person
   (409), 3-minute deadline. A turn finishes and is recorded even if the page
   leaves.
+  An optional `"context"` (at most 2000 characters, such as what others said
+  at the table) is passed to the villager's turn as background, never stored
+  as the person's line.
 
 Each turn runs the official Claude Code binary through the Claude Agent SDK
 (`src/villager-agent.ts`, pack `.agents/skills/claude-agent-sdk`) on the

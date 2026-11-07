@@ -61,6 +61,12 @@ export class Villager {
   paused = false
   /** Sent somewhere by the person (a chair at the table): stays there until released. */
   held = false
+  /** Stays at its chore a while longer (out of someone else's conversation). */
+  linger = false
+  /** Sideways step off its path, to pass around someone in the way; set by the crowd. */
+  readonly sidestep = new THREE.Vector3()
+  /** Where the path itself is, before any sidestep. */
+  readonly onPath = new THREE.Vector3()
   /** Waiting on its own words: looks up and taps its chin. */
   thinking = false
   /** Saying something right now: leans in and nods. */
@@ -100,17 +106,22 @@ export class Villager {
   private pending: string | null = null
   /** Progress of the short "oh, hello" hop; 1 is at rest. */
   private beatU = 1
+  /** Progress of a glance and a little wave at the person; 1 is at rest. */
+  private greetU = 1
+  /** Height it sits at on a chair: the bare seat, or a booster cushion on it. */
+  readonly seatY: number
 
   /** `idle` villagers stay where they are put (the lineup). */
-  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number; paths?: Paths }) {
+  constructor(fig: Figure, tasks: Task[], opts: { start: string; seated?: boolean; idle?: boolean; wait?: number; at?: [number, number]; yaw?: number; paths?: Paths; seatY?: number }) {
     this.fig = fig
+    this.seatY = opts.seatY ?? SEAT_Y
     this.tasks = tasks
     this.spot = opts.start
     this.idle = Boolean(opts.idle)
     this.paths = opts.paths ?? 'kitchen'
     const s = SPOTS[opts.start]
     if (opts.seated && s.seat) {
-      this.pos.set(s.seat.x, SEAT_Y, s.seat.z)
+      this.pos.set(s.seat.x, this.seatY, s.seat.z)
       this.yaw = s.seat.yaw
       this.state = 'sit'
       this.seated = 1
@@ -187,6 +198,11 @@ export class Villager {
     this.beatU = 0
   }
 
+  /** Look up from the chore, turn a little to the person and wave. */
+  greet() {
+    if (this.greetU >= 1) this.greetU = 0
+  }
+
   /** How far it would walk to reach a spot from where it stands. */
   distanceTo(spot: string) {
     return this.spot === spot ? 0 : routeFrom(this.pos.x, this.pos.z, spot, this.paths).getLength()
@@ -210,7 +226,7 @@ export class Villager {
   private beginHop(onto: boolean) {
     const s = SPOTS[this.spot]
     const seat = s.seat!
-    const to = onto ? new THREE.Vector3(seat.x, SEAT_Y, seat.z) : new THREE.Vector3(s.at[0], 0, s.at[1])
+    const to = onto ? new THREE.Vector3(seat.x, this.seatY, seat.z) : new THREE.Vector3(s.at[0], 0, s.at[1])
     const yaw1 = onto ? seat.yaw : s.face
     this.hop = { from: this.pos.clone(), to, yaw0: this.yaw, yaw1: this.yaw + wrap(yaw1 - this.yaw), u: 0, onto }
     this.state = 'hop'
@@ -234,7 +250,10 @@ export class Villager {
       this.v = Math.max(0, this.v)
       this.s = Math.min(this.len, this.s + this.v * dt)
       const p = this.curve.getPointAt(this.s / this.len)
-      this.pos.set(p.x, 0, p.z)
+      this.onPath.set(p.x, 0, p.z)
+      // The sidestep fades in the last half metre, so it arrives exactly at the spot.
+      const fade = Math.min(1, remaining / 0.5)
+      this.pos.set(p.x + this.sidestep.x * fade, 0, p.z + this.sidestep.z * fade)
       const tan = this.curve.getTangentAt(Math.min(0.999, this.s / this.len))
       goalYaw = Math.atan2(tan.x, tan.z)
       if (this.s >= this.len - 1e-3) {
@@ -246,7 +265,7 @@ export class Villager {
       }
     } else if (this.state === 'work') {
       goalYaw = SPOTS[this.spot]?.face ?? this.yaw
-      if (!this.chosen && !this.idle && !this.held) {
+      if (!this.chosen && !this.idle && !this.held && !this.linger) {
         this.timer -= dt
         if (this.timer <= 0) {
           this.onDone?.(this.spot)
@@ -284,6 +303,8 @@ export class Villager {
       }
     }
     // A chosen villager turns to the person; seated ones only turn their head.
+    const greeting = this.greetU < 1 && this.state === 'work' ? Math.sin(Math.PI * Math.min(1, this.greetU * 1.25)) : 0
+    if (greeting) goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.8, 0.8) * 0.7 * greeting
     if (this.chosen && this.state !== 'sit' && this.state !== 'hop') goalYaw = toCamera
     // Speaking from a chair, it turns part way round to the person.
     else if (this.speaking && this.state === 'sit') goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.7, 0.7) * 0.8
@@ -298,6 +319,7 @@ export class Villager {
     this.think += ((this.thinking ? 1 : 0) - this.think) * (1 - Math.exp(-dt * 7))
     this.speak += ((this.speaking ? 1 : 0) - this.speak) * (1 - Math.exp(-dt * 6))
     this.beatU = Math.min(1, this.beatU + dt / 0.42)
+    this.greetU = Math.min(1, this.greetU + dt / 1.8)
     if (this.state === 'sit') this.seated = 1
     else if (this.state !== 'hop') this.seated = 0
     this.phase += (this.v * dt) / (fig.stride * this.k)
@@ -411,6 +433,9 @@ export class Villager {
       y += Math.sin(Math.min(1, u / 0.7) * Math.PI) * 0.045
       sy *= 1 - 0.12 * Math.sin(Math.min(1, u / 0.18) * Math.PI) * (u < 0.18 ? 1 : 0) + 0.07 * Math.sin(Math.min(1, u / 0.7) * Math.PI) - 0.08 * (u > 0.7 ? Math.sin(((u - 0.7) / 0.3) * Math.PI) : 0)
     }
+    // The little wave: up from the chore, the near hand raised and waggling.
+    const greet = this.greetU < 1 && this.state === 'work' ? Math.sin(Math.PI * Math.min(1, this.greetU * 1.25)) : 0
+    lean -= (this.working * 0.2 + 0.04) * greet
     pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
     pose.rotation.set(lean, 0, roll)
     const sxz = 1 + (1 - sy) * 0.5
@@ -424,6 +449,10 @@ export class Villager {
       h.position.y += 0.07 * this.seated
       h.position.z += Math.sin(2 * Math.PI * p) * s * fig.stride * 0.18 * w
       h.position.y += (Math.sin(t * 5 + i * Math.PI) * 0.02 * this.working) + 0.03 * this.talking * (i ? 0 : 1) * (0.6 + 0.4 * Math.sin(t * 5))
+      if (i === 0 && greet > 0) {
+        h.position.y += fig.height * 0.32 * greet
+        h.position.x += Math.sin(t * 13) * fig.height * 0.05 * greet
+      }
       // Speaking: the free hand opens out now and then.
       h.position.y += 0.035 * this.speak * (i ? 1 : 0) * Math.max(0, Math.sin(t * 2.3))
       // Thinking: the free hand comes up to the chin and taps.
@@ -439,7 +468,7 @@ export class Villager {
       this.glanceGoal = Math.random() < 0.35 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1, 1) : (Math.random() - 0.5) * 1.0
       this.nextGlance = 1.8 + Math.random() * 3
     }
-    const headGoal = this.chosen || this.speak > 0.5 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
+    const headGoal = this.chosen || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
     head.rotation.y = this.glance
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2)

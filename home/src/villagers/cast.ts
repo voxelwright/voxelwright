@@ -2,7 +2,6 @@
 // each one, and walkers that yield to whoever is just ahead.
 import * as THREE from 'three/webgpu'
 import { canvas, toTexture } from '../paint'
-import { SEAT_Y } from './world'
 import type { Villager } from './rig'
 
 /** A soft contact shadow per villager: a dark core where it touches and a wide falloff. */
@@ -40,14 +39,35 @@ export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number
       return d < 0.5 * scale && ahead > 0.4 && !(mutual && i < j)
     })
   })
+  // Walkers step around anyone standing still (at a chore, chosen, seated), then rejoin their path.
+  for (const v of villagers) {
+    let x = 0, z = 0
+    if (v.state === 'walk') {
+      const keep = 0.42 * scale
+      for (const o of villagers) {
+        if (o === v || o.state === 'walk') continue
+        const dx = v.onPath.x - o.pos.x, dz = v.onPath.z - o.pos.z
+        const d = Math.hypot(dx, dz)
+        if (d >= keep) continue
+        // Out sideways, across the walker's heading, on the side it already is.
+        const sx = Math.cos(v.yaw), sz = -Math.sin(v.yaw)
+        const side = dx * sx + dz * sz >= 0 ? 1 : -1
+        x += sx * side * (keep - d)
+        z += sz * side * (keep - d)
+      }
+    }
+    const k = 1 - Math.exp(-dt * 5)
+    v.sidestep.x += (x - v.sidestep.x) * k
+    v.sidestep.z += (z - v.sidestep.z) * k
+  }
   villagers.forEach((v, i) => {
     v.update(dt, t, eye)
     const blob = blobs[i]
     const sitting = v.seated > 0.5
     const r = v.fig.side * 3.0 * scale + 0.12
     const lift = v.fig.floats ? 0.12 + v.fig.hip : 0
-    const air = Math.max(0, v.pos.y - (sitting ? SEAT_Y : 0)) + lift
-    blob.position.set(v.pos.x, (sitting ? SEAT_Y + 0.045 : 0) + 0.004, v.pos.z)
+    const air = Math.max(0, v.pos.y - (sitting ? v.seatY : 0)) + lift
+    blob.position.set(v.pos.x, (sitting ? v.seatY + 0.045 : 0) + 0.004, v.pos.z)
     blob.scale.setScalar(r * (1 + air * 1.5) * (sitting ? 0.8 : 1))
     ;(blob.material as THREE.MeshBasicMaterial).opacity = Math.max(0.15, 1 - air * 3)
   })
