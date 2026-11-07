@@ -404,7 +404,7 @@ const ghost = {
         const g = new GainNode(a, { gain: 0 })
         const rate = 7 + 2 * i + p.random()
         const body = swell(0.3, 1.5)
-        g.gain.setValueCurveAtTime(Float32Array.from({ length: 1200 }, (_, k) => {
+        g.gain.setValueCurveAtTime(Array.from({ length: 1200 }, (_, k) => {
           const u = k / 1199
           return p.gain * (0.3 - 0.07 * i) * body(u) * (0.7 + 0.3 * Math.cos(2 * Math.PI * u * dur * rate))
         }), at, dur)
@@ -474,7 +474,7 @@ const undone = {
       const osc = new OscillatorNode(a, { frequency: NOTE.G5 * p.rate })
       const g = new GainNode(a, { gain: 0 })
       const rise = swell(0.82, 2.2)
-      g.gain.setValueCurveAtTime(Float32Array.from({ length: 800 }, (_, k) => p.gain * 0.3 * rise(k / 799)), at, dur)
+      g.gain.setValueCurveAtTime(Array.from({ length: 800 }, (_, k) => p.gain * 0.3 * rise(k / 799)), at, dur)
       osc.connect(g).connect(out)
       osc.start(at)
       osc.stop(at + dur)

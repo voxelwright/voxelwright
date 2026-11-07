@@ -30,11 +30,17 @@ export const db = (d: number) => 10 ** (d / 20)
 /** A time rounded to a whole sample of this context. */
 export const snap = (ctx: BaseAudioContext, t: number) => Math.round(t * ctx.sampleRate) / ctx.sampleRate
 
-/** Samples a shape over [0, 1] into a curve, about 2000 points a second (Chrome interpolates linearly between them). */
-export function curve(dur: number, fn: (u: number) => number, perSecond = 2000): Float32Array {
+/**
+ * Samples a shape over [0, 1] into a curve, about 2000 points a second (Chrome interpolates linearly between them).
+ * A plain array, not a Float32Array: setValueCurveAtTime takes a sequence<float>, and Chrome
+ * converts a typed array through its iterator at about 200 ns a point (0.8 ms for a 4000-point
+ * envelope) but a packed array about six times faster. The values reach the param as the same
+ * floats either way (each double rounds to the nearest float once).
+ */
+export function curve(dur: number, fn: (u: number) => number, perSecond = 2000): number[] {
   const n = Math.max(16, Math.ceil(dur * perSecond))
-  const c = new Float32Array(n)
-  for (let i = 0; i < n; i++) c[i] = fn(i / (n - 1))
+  const c: number[] = []
+  for (let i = 0; i < n; i++) c.push(fn(i / (n - 1)))
   return c
 }
 
@@ -228,13 +234,11 @@ function roomResponse(ctx: BaseAudioContext): AudioBuffer {
 const sends = new WeakMap<BaseAudioContext, GainNode>()
 
 /**
- * A little wooden room for tonal cues: returns a node to play into that feeds `out` dry and
- * sends `wet` of it to the context's one shared room, which joins the mix at the master
- * (so mute still covers the tail; the tail is centred, not panned). One convolver per
- * context, not per play: Chrome prepares a convolver's kernel on the main thread when it
- * gets its buffer, which cost about 1 ms per tonal cue and doubled the offline render cost.
+ * The context's room: its send, built once. The player builds it with the context (about
+ * 1.5 ms: the response and the convolver's kernel), so the first tonal cue does not pay
+ * for it inside an event.
  */
-export function room(ctx: BaseAudioContext, out: AudioNode, wet = 0.22): AudioNode {
+export function roomSend(ctx: BaseAudioContext): GainNode {
   let send = sends.get(ctx)
   if (!send) {
     send = new GainNode(ctx)
@@ -242,6 +246,18 @@ export function room(ctx: BaseAudioContext, out: AudioNode, wet = 0.22): AudioNo
     send.connect(conv).connect(mixFor(ctx).master)
     sends.set(ctx, send)
   }
+  return send
+}
+
+/**
+ * A little wooden room for tonal cues: returns a node to play into that feeds `out` dry and
+ * sends `wet` of it to the context's one shared room, which joins the mix at the master
+ * (so mute still covers the tail; the tail is centred, not panned). One convolver per
+ * context, not per play: Chrome prepares a convolver's kernel on the main thread when it
+ * gets its buffer, which cost about 1 ms per tonal cue and doubled the offline render cost.
+ */
+export function room(ctx: BaseAudioContext, out: AudioNode, wet = 0.22): AudioNode {
+  const send = roomSend(ctx)
   const input = new GainNode(ctx)
   input.connect(out)
   input.connect(new GainNode(ctx, { gain: wet })).connect(send)

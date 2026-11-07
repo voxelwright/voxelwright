@@ -8,6 +8,7 @@
 import type { BusName, Cue, CueName, Kit, Palette, Play } from './contract'
 import { busFor, mixFor } from '../voice/buses'
 import { CHOSEN } from './palette'
+import { roomSend } from './palette/synth'
 
 /** Seconds from the event to the first sample: enough for the render quantum, under 20 ms with the context's latency. */
 const LEAD = 0.004
@@ -55,6 +56,7 @@ export class Player {
 
   constructor(readonly audio: BaseAudioContext, readonly palette: Palette, readonly seed = 1, public picks: Partial<Record<CueName, string>> = {}) {
     mixFor(audio)
+    roomSend(audio)
     const noise = new AudioBuffer({ length: audio.sampleRate, sampleRate: audio.sampleRate, numberOfChannels: 1 })
     const rand = seeded(hash('village sfx noise'))
     const data = noise.getChannelData(0)
