@@ -82,13 +82,17 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     return out
   }
 
+  const soften = (v: unknown): { soften?: number } => {
+    const k = optNum(v, 'light.key.soften', 0.25, 4)
+    return k === undefined ? {} : { soften: k }
+  }
   const L = own(data, 'light')
   const fillIn = own(L, 'fill')
   const fill: Lighting['fill'] = shift(fillIn, 'light.fill')
   const ground = color(own(fillIn, 'ground'), 'light.fill.ground')
   if (ground) fill.ground = ground
   const light: Lighting = {
-    key: shift(own(L, 'key'), 'light.key'),
+    key: { ...shift(own(L, 'key'), 'light.key'), ...soften(own(own(L, 'key'), 'soften')) },
     fill,
     rim: shift(own(L, 'rim'), 'light.rim'),
     practical: shift(own(L, 'practical'), 'light.practical'),
@@ -104,7 +108,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     glow: surface(own(S, 'glow'), 'surfaces.glow'),
     other: surface(own(S, 'other'), 'surfaces.other'),
   }
-  for (const role of ['trim', 'backdrop'] as const) {
+  for (const role of ['trim', 'backdrop', 'foliage'] as const) {
     const v = own(S, role)
     if (isObj(v)) surfaces[role] = surface(v, `surfaces.${role}`)
     else if (v !== undefined) note(`surfaces.${role}`)
@@ -187,7 +191,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
       case 'brush':
         return { kind: 'brush', radius: n('radius', 1, 10, 4), strength: n('strength', 0, 1, 0.7) }
       case 'paper':
-        return extra({ kind: 'paper', grain: n('grain', 0, 1, 0.4), edges: n('edges', 0, 1, 0.4) }, { tint: c('tint') })
+        return extra({ kind: 'paper', grain: n('grain', 0, 1, 0.4), edges: n('edges', 0, 1, 0.4) }, { tint: c('tint'), shadow: c('shadow') })
       default:
         return null
     }
@@ -200,6 +204,8 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     if (rawId !== undefined) note('id')
     id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 40) || 'written'
   }
+  const skyPaint = own(own(data, 'sky'), 'paint')
+  if (own(data, 'sky') !== undefined && !(typeof skyPaint === 'string' && Object.hasOwn(PAINTERS, skyPaint))) note('sky')
   const fps = own(own(data, 'motion'), 'characterFps')
   const costumes = own(data, 'costumes'), props = own(data, 'props')
   const theme: Theme = {
@@ -210,6 +216,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
     surfaces,
     fog: shift(own(data, 'fog'), 'fog'),
     post,
+    ...(typeof skyPaint === 'string' && Object.hasOwn(PAINTERS, skyPaint) ? { sky: { paint: skyPaint } } : {}),
     motion: fps === undefined ? {} : { characterFps: Math.round(num(fps, 'motion.characterFps', 4, 60, 12)) },
     costumes: {
       follow: own(costumes, 'follow') === false ? false : true,

@@ -7,12 +7,22 @@ import type { Shift, Surface, Surfaces, Theme } from './tokens'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
-const SURFACE_ROLES: ReadonlySet<string> = new Set<SurfaceRole>(['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop'])
+const SURFACE_ROLES: ReadonlySet<string> = new Set<SurfaceRole>(['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage'])
 
-interface LightBase { role: LightRole; color: THREE.Color; ground?: THREE.Color }
+/**
+ * The painted sky stands on the worktable around the dollhouse's yard (x -6.2 to 6.2,
+ * z -8.6 to 6.6 in ../plugins/diorama.ts), just outside its corners. It is a card, not a
+ * horizon: the dollhouse camera looks down at about 30 degrees and sees its lowest few
+ * metres, so the painter lays the hills and clouds low.
+ */
+const SKY = { x: 0, z: -1, radius: 10.2, height: 3.5, base: -0.345 }
+
+interface LightBase { role: LightRole; color: THREE.Color; ground?: THREE.Color; radius?: number }
 interface MaterialBase { role: SurfaceRole; color?: THREE.Color; emissive?: THREE.Color; roughness?: number; metalness?: number; map?: THREE.Texture | null }
+/** A painter's texture as one material wears it: its own copy, with that material's repeat, offset, rotation and wrap. */
+interface Worn { painter: string; map: THREE.Texture }
 
-type Lit = THREE.Light & { groundColor?: THREE.Color; castShadow: boolean }
+type Lit = THREE.Light & { groundColor?: THREE.Color; castShadow: boolean; shadow?: THREE.LightShadow }
 type Painted = THREE.Material & { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity?: number; roughness?: number; metalness?: number; map?: THREE.Texture | null }
 
 /** How often (frames) the scene is walked for lights and materials added since. */
@@ -60,12 +70,74 @@ export default {
     const lights = new WeakMap<THREE.Light, LightBase>()
     const materials = new WeakMap<THREE.Material, MaterialBase>()
     const fogs = new WeakMap<THREE.Fog, THREE.Color>()
-    // Textures painted for a theme's `paint`, one per painter, disposed on unload.
+    // A theme's `paint`: each painter paints once (`painted`), and every material that names it
+    // wears its own clone (`worn`), so a floor tiled 8 times and a table tiled once can share a
+    // painter. Clones go when a material stops wearing them; painters nothing wears go after
+    // each theme change; both go on unload.
     const painted = new Map<string, THREE.Texture>()
-    const paint = (name: string) => {
-      let tex = painted.get(name)
-      if (!tex && Object.hasOwn(PAINTERS, name)) painted.set(name, (tex = PAINTERS[name]()))
-      return tex
+    const worn = new Map<Painted, Worn>()
+    const unwear = (m: Painted) => {
+      const w = worn.get(m)
+      if (!w) return
+      w.map.dispose()
+      worn.delete(m)
+    }
+    /** The painter's texture for this material, laid out as the material's own map was (none for a map it never had). */
+    const wear = (m: Painted, painter: string, own: THREE.Texture | null): THREE.Texture | null => {
+      const w = worn.get(m)
+      if (w?.painter === painter) return w.map
+      if (!Object.hasOwn(PAINTERS, painter)) return null
+      let source = painted.get(painter)
+      if (!source) painted.set(painter, (source = PAINTERS[painter]()))
+      const map = source.clone()
+      if (own) {
+        map.wrapS = own.wrapS
+        map.wrapT = own.wrapT
+        map.repeat.copy(own.repeat)
+        map.offset.copy(own.offset)
+        map.center.copy(own.center)
+        map.rotation = own.rotation
+        map.channel = own.channel
+        map.matrixAutoUpdate = own.matrixAutoUpdate
+        if (!own.matrixAutoUpdate) map.matrix.copy(own.matrix)
+      }
+      unwear(m)
+      worn.set(m, { painter, map })
+      return map
+    }
+    /** Painters nothing wears any more (the sky's is its own). */
+    const sweep = () => {
+      const used = new Set([...worn.values()].map((w) => w.painter))
+      for (const [name, tex] of painted) if (!used.has(name)) {
+        tex.dispose()
+        painted.delete(name)
+      }
+    }
+
+    // The theme's painted sky: one open cylinder seen from inside, unlit and out of the fog,
+    // which nothing picks or shadows. Released when a theme drops it and on unload.
+    let sky: { painter: string; mesh: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial> } | null = null
+    const dropSky = () => {
+      if (!sky) return
+      sky.mesh.removeFromParent()
+      sky.mesh.geometry.dispose()
+      sky.mesh.material.map?.dispose()
+      sky.mesh.material.dispose()
+      sky = null
+    }
+    const placeSky = (t: Theme) => {
+      const painter = t.sky?.paint
+      if (sky?.painter === painter) return
+      dropSky()
+      if (!painter || !Object.hasOwn(PAINTERS, painter)) return
+      const geometry = new THREE.CylinderGeometry(SKY.radius, SKY.radius, SKY.height, 128, 1, true).translate(0, SKY.height / 2, 0)
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: PAINTERS[painter](), side: THREE.BackSide, fog: false }))
+      mesh.position.set(SKY.x, SKY.base, SKY.z)
+      mesh.name = 'theme sky'
+      mesh.userData.themeOwned = true
+      mesh.raycast = () => {}
+      scene.add(mesh)
+      sky = { painter, mesh }
     }
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
@@ -76,11 +148,13 @@ export default {
       if (!base) {
         const role = lightRole(l)
         if (!role) return
-        base = { role, color: l.color.clone(), ground: l.groundColor?.clone() }
+        base = { role, color: l.color.clone(), ground: l.groundColor?.clone(), radius: l.shadow?.radius }
         lights.set(l, base)
       }
       const shift = t.light[base.role]
       shifted(base.color, shift, l.color)
+      // The shadow's blur radius is a uniform, so a softer key costs no rebuild.
+      if (base.role === 'key' && l.shadow && base.radius !== undefined) l.shadow.radius = base.radius * (t.light.key.soften ?? 1)
       if (l.groundColor && base.ground) {
         const fill = t.light.fill
         shifted(base.ground, { color: fill.ground ?? fill.color, tint: fill.tint, gain: fill.gain }, l.groundColor)
@@ -107,12 +181,14 @@ export default {
       }
       if (base.roughness !== undefined) m.roughness = s.roughness ?? base.roughness
       if (base.metalness !== undefined) m.metalness = s.metalness ?? base.metalness
-      if (base.map) {
-        const map = (s.paint && paint(s.paint)) || base.map
+      // A material with a map slot (`null` when empty) can wear a painter; without one, nothing to paint.
+      if (base.map !== undefined) {
+        const map = (s.paint && wear(m, s.paint, base.map)) || base.map
         if (m.map !== map) {
           m.map = map
           m.needsUpdate = true
         }
+        if (map === base.map) unwear(m)
       }
     }
 
@@ -122,6 +198,7 @@ export default {
       if (!lb) return
       l.color.copy(lb.color)
       if (l.groundColor && lb.ground) l.groundColor.copy(lb.ground)
+      if (l.shadow && lb.radius !== undefined) l.shadow.radius = lb.radius
       lights.delete(l)
     }
     const restoreMaterial = (m: Painted) => {
@@ -131,10 +208,11 @@ export default {
       if (mb.emissive && m.emissive) m.emissive.copy(mb.emissive)
       if (mb.roughness !== undefined) m.roughness = mb.roughness
       if (mb.metalness !== undefined) m.metalness = mb.metalness
-      if (mb.map && m.map !== mb.map) {
+      if (mb.map !== undefined && m.map !== mb.map) {
         m.map = mb.map
         m.needsUpdate = true
       }
+      unwear(m)
       materials.delete(m)
     }
 
@@ -143,6 +221,7 @@ export default {
     // it shares with something else stays its own too, so the two never fight.
     const keptLights: Lit[] = [], keptMats = new Set<Painted>(), themedLights: Lit[] = [], themedMats: Painted[] = []
     const gather = (o: THREE.Object3D, keep: boolean) => {
+      if (o.userData.themeOwned) return
       const k = keep || o.userData.keepCostume === true
       if ((o as THREE.Light).isLight) (k ? keptLights : themedLights).push(o as Lit)
       const mats = (o as THREE.Mesh).material
@@ -155,6 +234,11 @@ export default {
       for (const m of keptMats) restoreMaterial(m)
       for (const l of themedLights) light(l, t, force)
       for (const m of themedMats) if (!keptMats.has(m)) material(m, t, force)
+      // A material that left the scene (a room unloaded) gives back its painted copy.
+      if (worn.size) {
+        const seen = new Set(themedMats)
+        for (const m of [...worn.keys()]) if (!seen.has(m)) restoreMaterial(m)
+      }
       keptLights.length = themedLights.length = themedMats.length = 0
       keptMats.clear()
       const fog = scene.fog
@@ -163,6 +247,8 @@ export default {
         shifted(fogs.get(fog)!, t.fog, fog.color)
       }
       renderer.toneMappingExposure = t.light.exposure
+      placeSky(t)
+      if (force) sweep()
     }
 
     let frame = 0
@@ -187,8 +273,9 @@ export default {
       const fog = scene.fog
       if (fog instanceof THREE.Fog && fogs.has(fog)) fog.color.copy(fogs.get(fog)!)
       renderer.toneMappingExposure = exposure
-      for (const tex of painted.values()) tex.dispose()
-      painted.clear()
+      for (const m of [...worn.keys()]) unwear(m)
+      sweep()
+      dropSky()
     }, 'theme')
   },
 }
