@@ -73,10 +73,10 @@ const keepRooms = params.get('rooms') !== 'unload'
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
 root.on('village/tier', () => void replace(postfx))
 // A live theme change (src/theme setTheme): the theme plugin shifts the scene; postfx blends
-// its uniforms, or is rebuilt behind a held frame when the post chain changes shape.
+// its uniforms, or compiles the next chain ahead and swaps it in when the chain changes shape.
 root.on('village/theme', (previous, next) => {
   load(themePlugin)
-  void ease(root.get('stage'), previous as Theme, next as Theme, () => replace(postfx))
+  void ease(root.get('stage'), previous as Theme, next as Theme)
 })
 
 /** What is registered right now: used by the unload proof and the perf run. */

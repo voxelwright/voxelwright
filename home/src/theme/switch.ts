@@ -1,14 +1,15 @@
 // How a live theme switch is eased on screen, and measured.
 //
 // Same post chain shape: the theme plugin blends the tokens and postfx reads them as
-// uniforms, so nothing is rebuilt. Another shape: postfx must be rebuilt, which leaves
-// frames drawn without post-processing (the rebuild is async) and stalls on the first
-// frame of the new chain while its shaders compile. So the last frame is copied to a
-// canvas laid over the scene first, held until the new chain has drawn and the GPU has
-// finished that frame, then faded out.
+// uniforms, so nothing is rebuilt. Another shape: postfx builds the next look's chain and
+// compiles it off screen with async pipelines while the current chain keeps drawing the
+// room live (./index.ts holds the shown look until then). Once it is ready, the last frame
+// is copied to a canvas laid over the scene, the new chain and the new look are swapped in
+// under it in the same frame, and the copy fades out.
 import type { Stage } from '../kernel'
 import { root } from '../kernel'
-import { noteSwitch, release, switching, type SwitchReport } from './index'
+import { prepare } from '../plugins/postfx'
+import { noteSwap, noteSwitch, release, switching, type SwitchReport } from './index'
 import { sameShape } from './blend'
 import type { Theme } from './tokens'
 
@@ -18,6 +19,8 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const SETTLED_FRAME_MS = 25
 
 let overlay: HTMLCanvasElement | null = null
+/** Raised by every hold, so a fade that a later hold took over leaves the overlay alone. */
+let holds = 0
 let generation = 0
 
 const nextFrame = () => new Promise<void>((done) => {
@@ -28,11 +31,14 @@ const nextFrame = () => new Promise<void>((done) => {
 })
 
 /**
- * Copy what the canvas shows into a 2D canvas laid over it. A WebGPU canvas can only be
- * read while its frame is current (read later it comes back blank), so the copy runs in a
- * microtask queued from the frame event: after this frame's draw, before it is presented.
+ * Copy what the canvas shows into a 2D canvas laid over it, then run `swap`. A WebGPU canvas
+ * can only be read while its frame is current (read later it comes back blank), so the copy
+ * runs in a microtask queued from the frame event: after this frame's draw, before it is
+ * presented. `swap` runs in the same microtask, so the next frame is the new chain's, under
+ * the copy. The copy is redrawn on every hold: an overlay still fading from an earlier switch
+ * would otherwise show the look before last.
  */
-function hold(stage: Stage): Promise<HTMLCanvasElement> {
+function hold(stage: Stage, swap: () => void): Promise<HTMLCanvasElement> {
   return new Promise((done) => {
     const off = root.on('village/frame', () => {
       off()
@@ -42,20 +48,34 @@ function hold(stage: Stage): Promise<HTMLCanvasElement> {
         if (copy !== overlay) {
           copy.className = 'village-theme-hold'
           copy.setAttribute('aria-hidden', 'true')
-          Object.assign(copy.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', pointerEvents: 'none', opacity: '1' })
-          copy.width = source.width
-          copy.height = source.height
-          copy.getContext('2d')!.drawImage(source, 0, 0)
+          Object.assign(copy.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', pointerEvents: 'none' })
           // Just above the scene canvas and below every DOM layer added after it.
           source.after(copy)
           overlay = copy
         }
+        copy.width = source.width
+        copy.height = source.height
+        copy.getContext('2d')!.drawImage(source, 0, 0)
         copy.style.transition = 'none'
         copy.style.opacity = '1'
+        holds++
+        swap()
         done(copy)
       })
     })
   })
+}
+
+function fadeOut(copy: HTMLCanvasElement) {
+  const mine = holds
+  const fade = reducedMotion.matches ? 0 : FADE_MS
+  copy.style.transition = `opacity ${fade}ms ease-in-out`
+  copy.style.opacity = '0'
+  setTimeout(() => {
+    if (mine !== holds || overlay !== copy) return
+    copy.remove()
+    overlay = null
+  }, fade + 30)
 }
 
 /** Frame intervals from now until `until()` holds and one ordinary frame has followed. */
@@ -74,11 +94,8 @@ function watch(until: () => boolean, started: number) {
   })
 }
 
-/**
- * Ease the change from `previous` to `next` (both already chosen through setTheme).
- * `rebuild` replaces postfx; it is called only when the chain's shape changes.
- */
-export async function ease(stage: Stage | undefined, previous: Theme, next: Theme, rebuild: () => Promise<void>) {
+/** Ease the change from `previous` to `next` (both already chosen through setTheme). */
+export async function ease(stage: Stage | undefined, previous: Theme, next: Theme) {
   const started = performance.now()
   const base = { from: previous.id, to: next.id }
   if (sameShape(previous, next)) {
@@ -89,32 +106,37 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
     return
   }
   const mine = ++generation
-  noteSwitch({ ...base, path: 'rebuild', worstMs: 0, settledMs: 0, frames: 0, done: false })
-  if (!stage) {
-    release()
-    await rebuild()
+  let fading = true
+  const report: SwitchReport = { ...base, path: 'rebuild', worstMs: 0, settledMs: 0, frames: 0, done: false }
+  noteSwitch(report)
+  const measured = watch(() => mine !== generation || !fading, started)
+  // The current chain keeps drawing the room while the next one compiles.
+  const ready = await prepare(next)
+  const compiledMs = +(performance.now() - started).toFixed(1)
+  if (mine !== generation) {
+    // A later switch took over: this chain is never shown.
+    ready?.chain.dispose()
     return
   }
-  const measured = watch(() => mine !== generation || !overlay, started)
-  const copy = await hold(stage)
-  release()
-  await rebuild()
-  // The new chain is in once postfx has added its draw pass; the frame after that one has
-  // drawn with it (the first draw compiles its shaders), and the GPU has finished it.
-  while (stage.drawPasses() === 0) await nextFrame()
+  if (!ready || !stage) {
+    // No postfx to rebuild (?plugins= without it): the look changes on the next frame.
+    release()
+    fading = false
+    noteSwitch({ ...report, ...(await measured), compiledMs, done: true })
+    return
+  }
+  const copy = await hold(stage, () => {
+    release()
+    if (ready.take()) noteSwap(next.id)
+    else ready.chain.dispose()
+  })
+  // The new chain draws from the next frame; wait until the GPU has finished that frame.
   await nextFrame()
   await nextFrame()
   const device = (stage.renderer.backend as unknown as { device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }).device
   await device?.queue.onSubmittedWorkDone()
   const firstFrameMs = +(performance.now() - started).toFixed(1)
-  if (mine !== generation) return
-  const fade = reducedMotion.matches ? 0 : FADE_MS
-  copy.style.transition = `opacity ${fade}ms ease-in-out`
-  copy.style.opacity = '0'
-  setTimeout(() => {
-    if (mine !== generation || overlay !== copy) return
-    copy.remove()
-    overlay = null
-  }, fade + 30)
-  noteSwitch({ ...base, path: 'rebuild', ...(await measured), firstFrameMs, done: true })
+  fadeOut(copy)
+  fading = false
+  noteSwitch({ ...report, ...(await measured), compiledMs, firstFrameMs, done: true })
 }

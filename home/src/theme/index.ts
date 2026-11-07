@@ -50,7 +50,8 @@ export const THEMED = first !== HOME
 let target: Theme = first
 /** The look on screen: the target, or a blend on its way there. */
 let shown: Theme = first
-let blending: { from: Theme; to: Theme; t: number } | null = null
+/** A blend under way: from, to, and when it started (performance.now() ms). */
+let blending: { from: Theme; to: Theme; start: number } | null = null
 /** A switch that changes the post chain's shape waits for ./switch.ts to hold the last frame first. */
 let held = false
 export const BLEND_MS = 1500
@@ -83,7 +84,10 @@ export function setTheme(next: Theme) {
   } else if (reducedMotion.matches) {
     blending = null
     shown = next
-  } else blending = { from: previous, to: next, t: 0 }
+  } else {
+    blending = { from: previous, to: next, start: performance.now() }
+    requestAnimationFrame(run)
+  }
   root.emit('village/theme', previous, next)
 }
 
@@ -96,19 +100,27 @@ export function release() {
 /** True while a blend or a held switch is under way. */
 export const switching = () => Boolean(blending) || held
 
-/** Advance a blend by dt seconds; the theme plugin calls this every frame. */
-export function tick(dt: number) {
+/**
+ * Bring a blend up to the clock. It runs on its own animation frames, so it finishes with
+ * or without the theme plugin; the plugin also calls this before it applies a frame's look,
+ * and a second call in the same frame changes nothing.
+ */
+export function tick() {
   if (!blending) return
   const b = blending
-  b.t = Math.min(1, b.t + (dt * 1000) / BLEND_MS)
-  if (b.t >= 1) {
+  const t = Math.min(1, (performance.now() - b.start) / BLEND_MS)
+  if (t >= 1) {
     shown = b.to
     blending = null
     return
   }
-  const k = b.t * b.t * (3 - 2 * b.t)
+  const k = t * t * (3 - 2 * t)
   shown = blend(b.from, b.to, k)
   origin.set(shown, origin.get(b.to) ?? 'home')
+}
+function run() {
+  tick()
+  if (blending) requestAnimationFrame(run)
 }
 
 // Keeping a costume: a villager's figure root carries userData.villagerId and, when the
@@ -146,6 +158,8 @@ export interface SwitchReport {
   worstMs: number
   /** From the switch to the first ordinary frame after it finished, ms. */
   settledMs: number
+  /** Rebuild only: from the switch until the next chain was compiled, while the old one drew, ms. */
+  compiledMs?: number
   /** Rebuild only: from the switch until the new chain had drawn a frame, ms. */
   firstFrameMs?: number
   frames: number
@@ -153,6 +167,9 @@ export interface SwitchReport {
 }
 let report: SwitchReport | null = null
 export const noteSwitch = (r: SwitchReport) => (report = r)
+/** Each post chain swapped in by a rebuild, with when (performance.now() ms), for the checks. */
+const swaps: { look: string; at: number }[] = []
+export const noteSwap = (look: string) => swaps.push({ look, at: performance.now() }) > 200 && swaps.splice(0, 100)
 
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'look'
 
@@ -204,7 +221,10 @@ export const themes = {
     if (was && (target === was || shown === was)) target = shown = find(id) ?? target
     return true
   },
-  /** Delete one of the person's looks; a built-in cannot be. The look stays on screen until another is chosen. */
+  /**
+   * Delete one of the person's looks; a built-in cannot be. Deleting the look on screen
+   * switches to the look it was made from (or the home's), so a card is always marked.
+   */
   remove(id: string): boolean {
     const record = records.find((r) => r.id === id)
     if (!record) return false
@@ -212,12 +232,14 @@ export const themes = {
     if (!writeSaved(records)) return false
     reload()
     if (readLast() === id) writeLast(record.from)
+    if (target.id === id) setTheme(find(record.from) ?? HOME)
     return true
   },
   keepCostume,
   keepsCostume: (id: string) => costumes[id] === true,
   switching,
   lastSwitch: () => report,
+  swaps: () => swaps.slice(),
 }
 
 export { HOME }
