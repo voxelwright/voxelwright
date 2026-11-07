@@ -96,6 +96,58 @@ const onScreen = (page, x, z) => page.evaluate(async ([x, z]) => {
   await context.close()
 }
 
+// ── A delayed key event must not turn a tap into a hold ──────────────────────
+// When the main thread stalls (or the keyup is slow to arrive), the 170 ms hold timer fires
+// before the queued keyup or next keydown is handled, so only the events' own timeStamps
+// tell a tap from a hold. "add a lamp" once became "dd a lamp". A busy loop in the page does
+// not reproduce it (Chrome runs the queued input before the expired timer), so each event
+// goes in through CDP with the time the key really went down, and the late one is sent 300 ms on.
+{
+  const drift = (a, b) => Math.hypot(b.x - a.x, b.z - a.z) + Math.abs(b.yaw - a.yaw)
+  const keys = { a: ['KeyA', 65], d: ['KeyD', 68] }
+  const press = async (cdp, type, key, ms) => {
+    const [code, windowsVirtualKeyCode] = keys[key]
+    await cdp.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode, ...(type === 'keyDown' && { text: key }), timestamp: ms / 1000 })
+  }
+  {
+    const { context, page } = await open('talk=npc&input=held&q=low')
+    const cdp = await context.newCDPSession(page)
+    const t0 = Date.now()
+    await press(cdp, 'keyDown', 'a', t0)
+    await page.waitForTimeout(300) // the hold timer fires; the keyup, stamped 40 ms after the keydown, is not here yet
+    await press(cdp, 'keyUp', 'a', t0 + 40)
+    const first = await text(page)
+    await settle(page) // the view eases to a stop; a little nudge from the 130 ms of "hold" is fine
+    const a = await frame(page)
+    await page.keyboard.type('dd a lamp', { delay: 40 })
+    await page.waitForTimeout(200)
+    const line = await text(page)
+    await settle(page)
+    const b = await frame(page)
+    check('a tap whose keyup is 300 ms late still writes its letter', first === 'a' && line === 'add a lamp', { first, line })
+    check('and the view does not keep moving after it', drift(a, b) < 0.01, { a, b })
+    await context.close()
+  }
+  {
+    const { context, page } = await open('talk=npc&input=held&q=low')
+    const cdp = await context.newCDPSession(page)
+    const t0 = Date.now()
+    await press(cdp, 'keyDown', 'a', t0)
+    await page.waitForTimeout(300)
+    await press(cdp, 'keyDown', 'd', t0 + 50) // pressed 50 ms after A, handled 300 ms later
+    await press(cdp, 'keyUp', 'a', t0 + 90)
+    await press(cdp, 'keyUp', 'd', t0 + 100)
+    const line = await text(page)
+    await settle(page)
+    const a = await frame(page)
+    await settle(page)
+    const b = await frame(page)
+    check('a second key that was pressed 50 ms after A but arrives late types both, in order', line === 'ad', line)
+    check('and neither key leaves the view moving', drift(a, b) < 0.01, { a, b })
+    await context.close()
+  }
+}
+
 // ── Pointer ──────────────────────────────────────────────────────────────────
 {
   const { context, page } = await open('talk=npc&q=low')
