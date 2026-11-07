@@ -1,31 +1,13 @@
-// The talk looks tried in the #42 regroup (ui-craft, "Plateau: regroup"), behind ?talk=npc&look=:
-//   a  paper in the world: the pad held in perspective, a sent line folds into a note and
-//      flies, replies are paper slips standing in the room beside their speaker, lit by it.
-//   b  cinematic staging: an eye-level close-up with shallow depth of field, the table cuts
-//      to whoever speaks, replies are inked comic balloons of one width.
-//   c  no interface: no cards, tags or buttons; one felt caption strip says who speaks and what,
-//      and the pad appears only while you write.
-// Without ?look= the current look. Nothing here runs without ?talk=npc.
-// The speech cards stay in the page in every look (the checks and the layout read them);
-// a look only changes how they are drawn.
-import { uniform } from 'three/tsl'
+// Paper (#42 regroup, November 7, 2026): the villagers' words as slips of torn paper, the look
+// that won the regroup against cinematic staging and a caption strip (README, "Talk regroup").
 import { canvas, rng } from '../paint'
-
-export type Look = 'a' | 'b' | 'c' | null
-const query = new URLSearchParams(location.search)
-const asked = query.get('look')
-export const LOOK: Look = query.get('talk') === 'npc' && (asked === 'a' || asked === 'b' || asked === 'c') ? asked : null
 
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 
-/** Look b's depth of field: talk.ts sets where the focus is and how much, postfx reads them. */
-export const focus = { distance: uniform(3), amount: uniform(0) }
-
-/** What a look needs to know of a card's speaker. */
+/** Who a slip belongs to. */
 export interface Speaker { colour: string; name: string }
 
-// ── a: paper slips ─────────────────────────────────────────────────────────
 interface Slip {
   c: HTMLCanvasElement
   g: CanvasRenderingContext2D
@@ -41,8 +23,10 @@ const SCALE = 2
 /**
  * Each villager's card drawn as a slip of torn paper where the card is, a little crooked and
  * turned toward its speaker, with a paper tab toward them and the name on a strip of tape in
- * their colour. Painted in a canvas on the page, over the room: as a mesh in the room, bloom
- * bleached it under the lamp (round 1) and temporal anti-aliasing ghosted its words (round 2).
+ * their colour. The card itself stays in the page, unseen under the slip: it lays the words out,
+ * takes clicks ("go on", the page before) and is what screen readers and the checks read.
+ * Painted in a canvas on the page, over the room: as a mesh in the room, bloom bleached it under
+ * the lamp and temporal anti-aliasing ghosted its words (the #42 regroup's rounds 1 and 2).
  */
 export function paperSlips(speaker: (person: string) => Speaker | null) {
   const slips = new Map<string, Slip>()
@@ -162,21 +146,48 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.textBaseline = 'middle'
     g.fillText(who.name, 13, th / 2 + 1)
     g.restore()
+    // The page before, if one has turned: one dimmed italic line over a pencilled rule (all of it once opened).
+    const before = el.querySelector<HTMLElement>('.before')
+    g.textBaseline = 'alphabetic'
+    if (before && !before.hidden && !said) {
+      g.font = `italic 16px ${BOOK}`
+      g.fillStyle = 'rgba(107, 83, 64, 0.75)'
+      let kept = wrap(g, before.textContent ?? '', w - 44)
+      if (!before.classList.contains('open') && kept.length > 1) kept = [kept[0].replace(/\s*\S*$/, '') + ' …']
+      kept.forEach((l, i) => g.fillText(l, x0 + 22, y0 + before.offsetTop + 16 + i * 21.6))
+      const ruleY = y0 + before.offsetTop + before.offsetHeight - 2
+      g.strokeStyle = 'rgba(150, 100, 60, 0.3)'
+      g.setLineDash([5, 4])
+      g.beginPath()
+      g.moveTo(x0 + 22, ruleY)
+      g.lineTo(x1 - 22, ruleY)
+      g.stroke()
+      g.setLineDash([])
+    }
     // The words, in ink, where the card has them.
     const words = el.querySelector('.said')?.textContent ?? ''
+    const top = el.querySelector<HTMLElement>('.words')?.offsetTop ?? 22
     const px = said ? 16 : 19
     g.font = `${beat ? 'italic ' : ''}${px}px ${BOOK}`
     g.fillStyle = said ? '#46321f' : '#24170f'
-    g.textBaseline = 'alphabetic'
     let lines = wrap(g, words, w - 44)
     if (said && lines.length > 3) lines = [...lines.slice(0, 2), lines[2].replace(/\s*\S*$/, '') + ' …']
     const lead = px * 1.42
-    lines.forEach((l, i) => g.fillText(l, x0 + 22, y0 + 24 + px + i * lead))
+    lines.forEach((l, i) => g.fillText(l, x0 + 22, y0 + top + px + i * lead - 2))
+    // "go on", where the card's button is (the invisible card under the slip takes the click).
+    const more = el.querySelector<HTMLElement>('.more')
+    if (more && !more.hidden && !said) {
+      g.font = `italic 700 17px ${HAND}`
+      g.fillStyle = who.colour
+      g.textAlign = 'right'
+      g.fillText('go on ▸', x0 + more.offsetLeft + more.offsetWidth - 4, y0 + more.offsetTop + 18)
+      g.textAlign = 'left'
+    }
     // Still talking: three ink dots after the last word.
     const cue = el.querySelector('.cue') as HTMLElement | null
     if (cue && !cue.hidden && !said) {
       const last = lines.at(-1) ?? ''
-      const cx = x0 + 22 + g.measureText(last).width + 10, cy = y0 + 24 + px + (Math.max(1, lines.length) - 1) * lead - 5
+      const cx = x0 + 22 + g.measureText(last).width + 10, cy = y0 + top + px + (Math.max(1, lines.length) - 1) * lead - 7
       g.fillStyle = who.colour
       for (let i = 0; i < 3; i++) {
         g.beginPath()
@@ -202,7 +213,9 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const w = el.offsetWidth, h = el.offsetHeight
       const words = el.querySelector('.said')?.textContent ?? ''
       const cue = (el.querySelector('.cue') as HTMLElement | null)?.hidden
-      const key = [w, h, words, cue, el.className, el.dataset.tail, el.style.getPropertyValue('--tail')].join('|')
+      const before = el.querySelector<HTMLElement>('.before')
+      const more = (el.querySelector('.more') as HTMLElement | null)?.hidden
+      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, el.className, el.dataset.tail, el.style.getPropertyValue('--tail')].join('|')
       if (key !== slip.key) {
         slip.key = key
         paint(slip, el, who, w, h)
@@ -221,89 +234,18 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
   return { frame, dispose }
 }
 
-// ── c: one felt caption strip ──────────────────────────────────────────────
-/** The words of whoever is speaking now, on a felt strip at the bottom of the view, in their colour. */
-export function captionStrip() {
-  const el = document.createElement('div')
-  el.className = 'talk-caption'
-  el.setAttribute('aria-hidden', 'true')
-  const name = document.createElement('b')
-  const words = document.createElement('span')
-  el.append(name, words)
-  document.body.append(el)
-  let current: HTMLElement | null = null
-  let since = 0
-  const frame = (dt: number, writing: boolean) => {
-    const cards = [...document.querySelectorAll<HTMLElement>('.talk-card.shown:not(.said)')]
-    const card = cards.at(-1) ?? null
-    if (card !== current) {
-      current = card
-      since = 0
-    }
-    since += dt
-    if (card) {
-      const tag = card.querySelector('.nametag b')?.textContent ?? ''
-      el.style.setProperty('--c', card.style.getPropertyValue('--c'))
-      if (name.textContent !== tag) name.textContent = tag
-      const text = card.querySelector('.said')?.textContent ?? ''
-      if (words.textContent !== text) words.textContent = text
-      el.classList.toggle('beat', card.classList.contains('beat'))
-    }
-    el.classList.toggle('shown', Boolean(card && words.textContent) && !writing)
-  }
-  return { frame, dispose: () => el.remove() }
-}
-
-/** The styles each look adds; the cards' own styles live in talk.ts. */
-export function lookCss(look: Look) {
-  if (look === 'a') return `
-  body.look-a .talk-card { opacity: 0 !important; }
+/** The slips, and the talk page's controls laid out around the held pad. */
+export function paperCss() {
+  return `
+  .talk-card { opacity: 0 !important; }
   .talk-paper { position: fixed; left: 0; top: 0; z-index: 3; pointer-events: none; opacity: 0;
     filter: drop-shadow(0 6px 10px rgba(60, 30, 10, 0.22)) drop-shadow(0 1px 1px rgba(60, 30, 10, 0.18)); }
-  body.look-a .talk-tag:not(.hover) { display: none; }
-  body.look-a .babble-toggle, body.look-a .music-note { opacity: 0.55; }
+  .talk-tag.shown:not(.hover) { opacity: 0; }
+  .babble-toggle, .music-note { opacity: 0.55; }
   @media (max-width: 600px) {
-    body.look-a .babble-toggle, body.look-a .music-note { top: 14px; bottom: auto; left: auto; }
-    body.look-a .babble-toggle { right: 64px; }
-    body.look-a .music-note { right: 16px; }
+    .babble-toggle, .music-note { top: 14px; bottom: auto; left: auto; }
+    .babble-toggle { right: 64px; }
+    .music-note { right: 16px; }
   }
   `
-  if (look === 'b') return `
-  body.look-b .talk-card { width: 340px; min-width: 340px; max-width: min(340px, calc(100vw - 32px)); border-radius: 48% 52% 46% 54% / 56% 50% 50% 44%;
-    padding: 26px 34px 24px; background: #fffdf6; box-shadow: 0 0 0 2.6px #2b1d14, 0 0 0 5px rgba(255, 252, 244, 0.9), 0 10px 22px rgba(30, 18, 8, 0.28); }
-  body.look-b .talk-card::before { display: none; }
-  body.look-b .talk-card::after { background: #fffdf6; width: 22px; height: 26px; border-radius: 0 0 4px 0; box-shadow: 2.6px 2.6px 0 #2b1d14; }
-  body.look-b .talk-card[data-tail='left']::after, body.look-b .talk-card[data-tail='right']::after { background: #fffdf6; box-shadow: none; outline: 2.6px solid #2b1d14; clip-path: polygon(0 0, 100% 100%, 0 100%); }
-  body.look-b .talk-card .words { font: 700 19px/1.38 ${HAND}; color: #21160f; text-align: center; letter-spacing: 0.01em; }
-  body.look-b .talk-card .tab { left: 50%; top: -14px; translate: -50% 0; }
-  body.look-b .talk-card .nametag { border-radius: 4px; padding: 2px 10px 3px; box-shadow: 0 0 0 2px #2b1d14; }
-  body.look-b .talk-card .nametag::after { display: none; }
-  body.look-b .talk-card .nametag b { font: 700 15px/1.1 ${HAND}; letter-spacing: 0.06em; text-transform: uppercase; }
-  body.look-b .talk-card.said { width: 260px; min-width: 260px; opacity: 0.82; box-shadow: 0 0 0 2px #5a4636, 0 6px 12px rgba(30, 18, 8, 0.18); }
-  body.look-b .talk-card.said .words { font-size: 16px; color: #5a4636; }
-  body.look-b .talk-tag { display: none; }
-  body.look-b .babble-toggle, body.look-b .music-note { display: none; }
-  body.look-b::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 3;
-    box-shadow: inset 0 0 160px rgba(30, 14, 4, 0.32); opacity: 0; transition: opacity 600ms ease; }
-  body.look-b.talk-close::after { opacity: 1; }
-  `
-  if (look === 'c') return `
-  body.look-c .talk-card, body.look-c .talk-tag:not(.hover), body.look-c .talk-journal, body.look-c .babble-toggle, body.look-c .music-note,
-  body.look-c .talk-pad { opacity: 0 !important; pointer-events: none !important; }
-  .talk-caption { position: fixed; z-index: 4; left: 50%; bottom: 34px; translate: -50% 12px; width: min(760px, calc(100vw - 28px)); box-sizing: border-box;
-    display: flex; gap: 14px; align-items: baseline; padding: 16px 26px 18px; border-radius: 6px 10px 7px 9px;
-    background: color-mix(in oklab, var(--c, #8a6a48) 78%, #2a1608);
-    background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.2px), radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1.2px);
-    background-size: 5px 5px, 7px 7px; background-position: 0 0, 2px 3px;
-    box-shadow: 0 10px 24px rgba(40, 20, 8, 0.3), inset 0 -3px 0 rgba(0, 0, 0, 0.14);
-    color: #fff8ec; opacity: 0; pointer-events: none; transition: opacity 260ms ease, translate 300ms cubic-bezier(.2, 1.3, .4, 1); }
-  .talk-caption::before { content: ''; position: absolute; inset: 6px; border: 2px dashed rgba(255, 244, 222, 0.55); border-radius: 4px 7px 5px 6px; }
-  .talk-caption.shown { opacity: 1; translate: -50% 0; }
-  .talk-caption b { flex: none; font: 700 22px/1.2 ${HAND}; color: #fff3da; }
-  .talk-caption b::after { content: ':'; }
-  .talk-caption span { font: 21px/1.4 ${BOOK}; text-shadow: 0 1px 1px rgba(30, 14, 4, 0.4); }
-  .talk-caption.beat span { font-style: italic; opacity: 0.9; }
-  @media (max-width: 600px) { .talk-caption { bottom: 18px; padding: 12px 18px 14px; flex-direction: column; gap: 2px; } .talk-caption span { font-size: 18px; } }
-  `
-  return ''
 }
