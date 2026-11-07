@@ -569,7 +569,8 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
     if (!forward && cid === host.b && next === host.a) ownerLoop.push(...[q, p].filter((k) => k !== host.a && k !== host.b))
   })
   const rooms = plan.rooms.map((r) => (r === owner ? { ...r, loop: ownerLoop } : r))
-  rooms.push({ id, label: edit.room.label, loop: forward ? [q, p, pf, qf] : [p, q, qf, pf] })
+  // Trimmed as the host stores it, so the saved plan is the plan this page made.
+  rooms.push({ id, label: edit.room.label.trim(), loop: forward ? [q, p, pf, qf] : [p, q, qf, pf] })
   const next: Plan = { ...plan, corners, walls, rooms, furniture }
   reasons.push(...validate(next))
   if (reasons.length) throw new PlanError(reasons)
