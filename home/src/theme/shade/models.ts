@@ -40,7 +40,7 @@ function toonGradient() {
 
 /** A map's mean colour (linear) and whether it is a picture (much colour variance) rather than a material's grain. */
 const means = new WeakMap<THREE.Texture, { mean: THREE.Color; picture: boolean }>()
-function meanOf(map: THREE.Texture) {
+export function meanOf(map: THREE.Texture) {
   const known = means.get(map)
   if (known) return known
   const out = { mean: new THREE.Color(1, 1, 1), picture: false }
@@ -70,7 +70,7 @@ function meanOf(map: THREE.Texture) {
 }
 
 /** What every twin shares with its original and has to follow. */
-function follow(twin: Lit, o: Lit) {
+export function follow(twin: Lit, o: Lit) {
   twin.side = o.side
   twin.transparent = o.transparent
   twin.alphaTest = o.alphaTest
@@ -89,7 +89,7 @@ function follow(twin: Lit, o: Lit) {
 }
 
 /** Values that change while the home runs: copied every frame. */
-function live(twin: Lit, o: Lit) {
+export function live(twin: Lit, o: Lit) {
   twin.color.copy(o.color)
   twin.emissive.copy(o.emissive)
   twin.emissiveIntensity = o.emissiveIntensity

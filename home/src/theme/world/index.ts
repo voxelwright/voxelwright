@@ -119,9 +119,13 @@ export function worlds(scene: THREE.Scene) {
     next?.world.dispose()
     next = want && { key: want.key, world: build(want.name, want.house) }
   }
-  const place = (t: Theme) => {
+  /** Stands the theme's world (or puts the yard back) and returns what stands, for ../interior/sun.ts. */
+  const place = (t: Theme): { house: House; group: THREE.Group } | null => {
     const want = wanted(t)
-    if (!want) return clear()
+    if (!want) {
+      clear()
+      return null
+    }
     if (stood?.key !== want.key) {
       unstand()
       let world = next?.key === want.key ? next.world : null
@@ -136,6 +140,7 @@ export function worlds(scene: THREE.Scene) {
         hidden.add(o)
       }
     })
+    return { house: want.house, group: stood!.world.group }
   }
   return { ahead, place, drop }
 }
