@@ -10,7 +10,7 @@
 import * as THREE from 'three/webgpu'
 import { CUT, FLOOR_ROUGHNESS, YARD_TOP } from '../diorama'
 import { canvas, floorPlanks, paintPlaster, toTexture } from '../paint'
-import { KITCHEN, curveOf, floorOf, normalAt, outline, pointAt, roomWalls, segmentsOf, type Curve, type Opening, type Plan, type Room, type Wall } from './plan'
+import { HOUSE_PLAN, curveOf, floorOf, normalAt, outline, pointAt, roomWalls, segmentsOf, type Curve, type Opening, type Plan, type Room, type Wall } from './plan'
 
 const STUB = 0.42
 const BASE = 0.3
@@ -146,8 +146,8 @@ function around(openings: Opening[], t0: number, t1: number, height: number): Ar
   return out
 }
 
-/** The base kitchen's openings (KITCHEN), which room.ts and its plugins dress; any other was opened by a build edit. */
-const KITCHEN_OPENINGS = new Set(KITCHEN.walls.flatMap((w) => w.openings.map((o) => o.id)))
+/** The base kitchen's openings (HOUSE_PLAN), which room.ts and its plugins dress; any other was opened by a build edit. */
+const KITCHEN_OPENINGS = new Set(HOUSE_PLAN.walls.flatMap((w) => w.openings.map((o) => o.id)))
 const CASING = 0.075
 /**
  * Timber round each door a build edit opened in this wall: a jamb each side and a head on both
@@ -202,7 +202,7 @@ const SEATED = ['back', 'left']
 
 // Board density of the dollhouse floor: diorama.ts laid 5.4 × 4.2 repeats over the 6 × 6.71 m kitchen.
 const KITCHEN_FLOOR = (() => {
-  const ring = floorOf(KITCHEN, KITCHEN.rooms[0])
+  const ring = floorOf(HOUSE_PLAN, HOUSE_PLAN.rooms[0])
   const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1])
   return { w: Math.max(...xs) - Math.min(...xs), d: Math.max(...zs) - Math.min(...zs) }
 })()

@@ -165,7 +165,7 @@ if (!args.includes('--skip-drag')) {
   // The model, imported straight from the dev server.
   const model = await page.evaluate(async () => {
     const P = await import('/src/build/plan.ts')
-    const K = P.KITCHEN
+    const K = P.HOUSE_PLAN
     const out = { kitchen: P.validate(K), roundTrip: JSON.stringify(JSON.parse(JSON.stringify(K))) === JSON.stringify(K) }
     out.kitchenArea = +P.roomArea(K, 'kitchen').toFixed(4)
     const added = P.apply(K, { op: 'addRoom', room: { id: 'pantry', label: 'Pantry' }, wallId: 'kitchen.left', from: 1, to: 5, depth: 3, door: { id: 'pantry.door', from: 2.25, to: 3.75, leaves: 2 } })
@@ -271,7 +271,7 @@ if (!args.includes('--skip-drag')) {
   const expected = await page.evaluate(async () => {
     const P = await import('/src/build/plan.ts')
     const p = window.villageBuild.plan()
-    return { segment: P.segmentArea(P.curveOf(p, P.wallOf(p, 'kitchen.right'))), planGrowth: P.roomArea(p, 'kitchen') - P.roomArea(P.KITCHEN, 'kitchen') }
+    return { segment: P.segmentArea(P.curveOf(p, P.wallOf(p, 'kitchen.right'))), planGrowth: P.roomArea(p, 'kitchen') - P.roomArea(P.HOUSE_PLAN, 'kitchen') }
   })
   const grew = bent.floor - w0.floor
   await jpg(page, 'bend.jpg')

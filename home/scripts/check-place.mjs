@@ -36,7 +36,7 @@ const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
 {
   const vite = await createServer({ root: homeDir, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true } })
   const P = await vite.ssrLoadModule('/src/build/plan.ts')
-  const { KITCHEN, apply, validate, PlanError } = P
+  const { HOUSE_PLAN, apply, validate, PlanError } = P
   const refused = (fn) => {
     try {
       fn()
@@ -47,7 +47,7 @@ const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
   }
   const crate = { id: 'f.crate', item: { kind: 'crate' }, at: { mount: 'floor', x: 0, z: 1.5, yaw: 0.3 } }
   const pic = { id: 'f.pic', item: { library: 'a1b2c3d4e5f6', person: 'alex' }, at: { mount: 'wall', wallId: 'kitchen.back', roomId: 'kitchen', along: 4, height: 1.5, spin: 0 } }
-  const p1 = apply(KITCHEN, { op: 'placeItem', furniture: { ...crate, extra: 1, at: { ...crate.at, junk: 2 } } })
+  const p1 = apply(HOUSE_PLAN, { op: 'placeItem', furniture: { ...crate, extra: 1, at: { ...crate.at, junk: 2 } } })
   check('plan: placeItem adds the thing, rebuilt from its known fields', JSON.stringify(p1.furniture) === JSON.stringify([crate]) && !validate(p1).length, p1.furniture)
   const p2 = apply(p1, { op: 'placeItem', furniture: pic })
   check('plan: a wall thing on a wall of its room is placed', p2.furniture.length === 2)
@@ -69,7 +69,7 @@ const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
   check('plan: validate reports a thing hung on a wall that is gone', validate(dangling).some((r) => /hangs on wall kitchen.back/.test(r)))
   // The floor keeps 0.6 m in front of a door clear (the living-room door, back wall at x -3.0 to -2.3).
   const M = await vite.ssrLoadModule('/src/build/mount.ts')
-  const crateAt = (z) => M.fit({ plan: KITCHEN, size: [0.4, 0.4, 0.4], obstacles: [], supportAt: () => null }, { mount: 'floor', x: -2.65, z, yaw: 0 })
+  const crateAt = (z) => M.fit({ plan: HOUSE_PLAN, size: [0.4, 0.4, 0.4], obstacles: [], supportAt: () => null }, { mount: 'floor', x: -2.65, z, yaw: 0 })
   const nearDoor = crateAt(-1.55), clearOfDoor = crateAt(-1.3)
   check('floor: the 0.6 m in front of a door stays clear', nearDoor.why === "It's in the way of the door" && clearOfDoor.ok, { nearDoor, clearOfDoor })
   await vite.close()

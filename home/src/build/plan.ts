@@ -6,9 +6,10 @@
 // first-class, so one wall can bound two rooms (a shared wall with a door in it).
 // Every id is a stable string, never an array index. Edits are small JSON objects
 // applied by apply(plan, edit) -> plan; a version stores the plan that results.
-import { DOORWAY, WALL_Z, WINDOW } from '../layout'
+import { DOORWAY, HOUSE, HOUSE_H, KITCHEN as KITCHEN_FACES, WALL_T, WINDOW, WORKSHOP_DOOR } from '../layout'
 
-export const PLAN_SCHEMA = 1
+/** 2: the plan is the whole house (kitchen and living room), not the kitchen alone (history.ts UPGRADES[1]). */
+export const PLAN_SCHEMA = 2
 
 export type Id = string
 
@@ -140,42 +141,58 @@ export class PlanError extends Error {
   }
 }
 
+/** Metres to the micrometre: what edits store, so one house has one stored text. */
+export const round = (v: number) => Math.round(v * 1e6) / 1e6
+
 export const MIN_WALL = 0.5
 /** A wall move stops before any wall it drags along gets shorter than this. */
 export const MIN_ROOM_SIDE = 2
 export const MOVE_SNAP = 0.1
 export const BEND_SNAP = 0.05
 
-// The built-in kitchen. The left wall is centred on x = -3.4 and the right wall's inner
-// face is at x = 3.4 (room.ts and diorama.ts), so the centrelines are not symmetric.
-const T = 0.18
-const H = 3
-const back = WALL_Z - T / 2
-const front = WALL_Z + 6 + T / 2
-const left = -3.4
-const right = 3.4 + T / 2
+// The built-in house (layout.ts): the kitchen and the living room side by side on one
+// back wall, all 6 m deep. Corners are wall centrelines, so they sit half a wall
+// outside the inner faces. The kitchen's right wall is the wall it shares with the
+// living room (it keeps the id it had when the kitchen stood alone, so things hung
+// on it stay put); the doorway between the rooms is in it. The living room's right
+// wall holds the Workshop's door, closed until that room is built beyond it.
+const T = WALL_T
+const back = round(HOUSE.z0 + T / 2)
+const front = round(HOUSE.z1 - T / 2)
+const left = round(HOUSE.x0 + T / 2)
+const shared = round(KITCHEN_FACES.x1 + T / 2)
+const right = round(HOUSE.x1 - T / 2)
+const straight = (id: Id, a: Id, b: Id, openings: Opening[] = []): Wall => ({ id, a, b, thickness: T, height: HOUSE_H, sagitta: 0, openings })
 
-export const KITCHEN: Plan = {
+export const HOUSE_PLAN: Plan = {
   schema: PLAN_SCHEMA,
   corners: [
     { id: 'kitchen.back-left', x: left, z: back },
-    { id: 'kitchen.back-right', x: right, z: back },
-    { id: 'kitchen.front-right', x: right, z: front },
+    { id: 'kitchen.back-right', x: shared, z: back },
+    { id: 'kitchen.front-right', x: shared, z: front },
     { id: 'kitchen.front-left', x: left, z: front },
+    { id: 'living.back-right', x: right, z: back },
+    { id: 'living.front-right', x: right, z: front },
   ],
   walls: [
-    {
-      id: 'kitchen.back', a: 'kitchen.back-left', b: 'kitchen.back-right', thickness: T, height: H, sagitta: 0,
-      openings: [
-        { id: 'kitchen.door-living', kind: 'door', from: DOORWAY.x0 - left, to: DOORWAY.x1 - left, sill: 0, head: DOORWAY.top, leaves: 1 },
-        { id: 'kitchen.window', kind: 'window', from: WINDOW.x0 - left, to: WINDOW.x1 - left, sill: WINDOW.y0, head: WINDOW.y1 },
-      ],
-    },
-    { id: 'kitchen.right', a: 'kitchen.back-right', b: 'kitchen.front-right', thickness: T, height: H, sagitta: 0, openings: [] },
-    { id: 'kitchen.front', a: 'kitchen.front-right', b: 'kitchen.front-left', thickness: T, height: H, sagitta: 0, openings: [] },
-    { id: 'kitchen.left', a: 'kitchen.front-left', b: 'kitchen.back-left', thickness: T, height: H, sagitta: 0, openings: [] },
+    straight('kitchen.back', 'kitchen.back-left', 'kitchen.back-right', [
+      { id: 'kitchen.window', kind: 'window', from: round(WINDOW.x0 - left), to: round(WINDOW.x1 - left), sill: WINDOW.y0, head: WINDOW.y1 },
+    ]),
+    straight('kitchen.right', 'kitchen.back-right', 'kitchen.front-right', [
+      { id: 'kitchen.door-living', kind: 'door', from: round(DOORWAY.z0 - back), to: round(DOORWAY.z1 - back), sill: 0, head: DOORWAY.top, leaves: 1 },
+    ]),
+    straight('kitchen.front', 'kitchen.front-right', 'kitchen.front-left'),
+    straight('kitchen.left', 'kitchen.front-left', 'kitchen.back-left'),
+    straight('living.back', 'kitchen.back-right', 'living.back-right'),
+    straight('living.right', 'living.back-right', 'living.front-right', [
+      { id: 'living.door-workshop', kind: 'door', from: round(WORKSHOP_DOOR.z - WORKSHOP_DOOR.w / 2 - back), to: round(WORKSHOP_DOOR.z + WORKSHOP_DOOR.w / 2 - back), sill: 0, head: WORKSHOP_DOOR.h, leaves: 1 },
+    ]),
+    straight('living.front', 'living.front-right', 'kitchen.front-right'),
   ],
-  rooms: [{ id: 'kitchen', label: 'Kitchen', loop: ['kitchen.back-left', 'kitchen.back-right', 'kitchen.front-right', 'kitchen.front-left'] }],
+  rooms: [
+    { id: 'kitchen', label: 'Kitchen', loop: ['kitchen.back-left', 'kitchen.back-right', 'kitchen.front-right', 'kitchen.front-left'] },
+    { id: 'living', label: 'Living room', loop: ['kitchen.back-right', 'living.back-right', 'living.front-right', 'kitchen.front-right'] },
+  ],
   furniture: [],
 }
 
@@ -474,7 +491,6 @@ export function validate(plan: Plan): string[] {
 
 // ── Edits ───────────────────────────────────────────────────────────────────
 const snap = (v: number, step: number) => Math.round(v / step) * step
-const round = (v: number) => Math.round(v * 1e6) / 1e6
 /** An angle in (-π, π], so one orientation has one stored value (the host bounds angles, and a full turn is no change). */
 export const angle = (a: number) => {
   const r = round(Math.atan2(Math.sin(a), Math.cos(a)))

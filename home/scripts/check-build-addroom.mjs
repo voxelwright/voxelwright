@@ -308,7 +308,7 @@ try {
     const { page, errors } = await open('?talk=npc&build=1&route=separate&q=low', context)
     const unit = await B(page, async () => {
       const P = await import('/src/build/plan.ts'), R = await import('/src/build/resolve.ts'), I = await import('/src/build/intent.ts')
-      const K = P.KITCHEN
+      const K = P.HOUSE_PLAN
       // The default dollhouse view: yaw 0.6 rad off looking down -z.
       const view = [-Math.sin(0.6), -Math.cos(0.6)]
       const go = (plan, raw, ctx = {}) => {
@@ -574,7 +574,7 @@ try {
       await B(page, async (d) => {
         const H = await import('/src/build/history.ts'), P = await import('/src/build/plan.ts')
         const { token } = await (await fetch('/villager/launch')).json()
-        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.KITCHEN)
+        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.HOUSE_PLAN)
         await other.commit([{ op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: d.wallId, from: d.from, to: d.to, depth: 2 }], 'Added the nook')
       }, denDraft)
       await B(page, () => window.villageBuild.outline.confirm())

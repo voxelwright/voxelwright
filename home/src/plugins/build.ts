@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
-import { KITCHEN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
+import { HOUSE_PLAN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
 import { build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
 import { HAND, tagCss } from '../build/sketch'
@@ -52,9 +52,9 @@ export default {
     const kit = makeKit()
     const group = own(ctx, new THREE.Group())
     group.name = 'build'
-    const room = KITCHEN.rooms[0].id
+    const room = HOUSE_PLAN.rooms[0].id
     /** What is drawn: the history's head, or a drag's live preview on top of it. */
-    let plan: Plan = KITCHEN
+    let plan: Plan = HOUSE_PLAN
     let history: PlanHistory | null = null
     let offHistory = () => {}
     let committing = false
