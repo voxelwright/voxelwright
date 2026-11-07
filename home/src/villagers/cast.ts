@@ -39,6 +39,27 @@ export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number
       return d < 0.5 * scale && ahead > 0.4 && !(mutual && i < j)
     })
   })
+  // Walkers step around anyone standing still (at a chore, chosen, seated), then rejoin their path.
+  for (const v of villagers) {
+    let x = 0, z = 0
+    if (v.state === 'walk') {
+      const keep = 0.42 * scale
+      for (const o of villagers) {
+        if (o === v || o.state === 'walk') continue
+        const dx = v.onPath.x - o.pos.x, dz = v.onPath.z - o.pos.z
+        const d = Math.hypot(dx, dz)
+        if (d >= keep) continue
+        // Out sideways, across the walker's heading, on the side it already is.
+        const sx = Math.cos(v.yaw), sz = -Math.sin(v.yaw)
+        const side = dx * sx + dz * sz >= 0 ? 1 : -1
+        x += sx * side * (keep - d)
+        z += sz * side * (keep - d)
+      }
+    }
+    const k = 1 - Math.exp(-dt * 5)
+    v.sidestep.x += (x - v.sidestep.x) * k
+    v.sidestep.z += (z - v.sidestep.z) * k
+  }
   villagers.forEach((v, i) => {
     v.update(dt, t, eye)
     const blob = blobs[i]

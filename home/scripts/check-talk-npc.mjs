@@ -292,11 +292,13 @@ try {
     await page.waitForTimeout(2500) // the camera settles back over the room
     await page.evaluate(() => window.village.talk.notify('mia'))
     const shown = await until(page, (s) => s.cast.mia.glyph > 0.8, 3000)
-    let m = await page.evaluate(() => window.village.talk.screen('mia', 0.75))
-    await page.mouse.move(m.x, m.y)
-    await page.waitForTimeout(400)
-    m = await page.evaluate(() => window.village.talk.screen('mia', 0.75))
-    await page.mouse.move(m.x, m.y)
+    // Moss may be behind the plant's leaves for a moment, which rightly blocks the pointer: keep following it until it is hovered.
+    for (let tries = 0; tries < 50; tries++) {
+      const m = await page.evaluate(() => window.village.talk.screen('mia', 0.75))
+      await page.mouse.move(m.x, m.y)
+      await page.waitForTimeout(150)
+      if (await page.evaluate(() => window.village.kernel.root.get('entries').hovered === 'villager-mia')) break
+    }
     const faded = await until(page, (s) => s.cast.mia.glyph === 0 && !s.cast.mia.news, 4000)
     await page.evaluate(() => window.village.talk.notify('mia'))
     await page.waitForTimeout(600)
@@ -328,7 +330,7 @@ try {
     const direct = await until(page2, (s) => s.mode === 'talk' && s.partner === 'alex' && !s.pending && s.cards.alex?.finished, 20_000)
     const toAlex = (await jsonl('alex', 'conversation.jsonl')).slice(before2)
     check('without ?slip=always the slip is hidden in the room', !roomSlip, roomSlip)
-    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "DumplingAlex's" && /Write to Alex's villager/.test(idle.placeholder) && toSam.to === 'sam' && toSam.tab === "TuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
+    check('?slip=always: the slip stays in the room addressed to your own villager, re-addresses to whoever you turn to, and a line goes to your villager', idle.shown && idle.to === 'alex' && idle.tab === "toDumplingAlex's" && /Write to Alex's villager/.test(idle.placeholder) && toSam.to === 'sam' && toSam.tab === "toTuftSam's" && backIdle.shown && backIdle.to === 'alex' && direct.mode === 'talk' && toAlex[0]?.text === 'Remind me what we said about dinner?' && toAlex[1]?.from === 'villager', { idle, toSam, backIdle, toAlex: toAlex.map((l) => l.from) })
     await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.

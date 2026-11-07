@@ -288,7 +288,7 @@ export default {
     line.type = 'text'
     line.maxLength = 600
     line.autocomplete = 'off'
-    line.setAttribute('aria-label', 'Say something')
+    line.setAttribute('aria-label', 'Write a line')
     const mine = document.createElement('p')
     mine.className = 'mine'
     // The slip's tab says who the line goes to; it changes as you turn to a villager or the table.
@@ -350,6 +350,9 @@ export default {
       m.card.set(text, done)
       show(m, 'speaking')
     }
+    /** Chips already said are not offered again. */
+    const used = new Set<string>()
+    const chipsFor = (m: Member) => [...m.chips.filter((c) => !used.has(`${m.person}:${c}`)), ...(m.seat ? [] : [INVITE])]
     const setChips = (labels: string[]) => {
       chips.replaceChildren(...labels.map((label) => {
         const b = document.createElement('button')
@@ -362,8 +365,12 @@ export default {
     }
     /** Address the slip to one villager or the whole table. */
     const address = (who: Member | 'table') => {
-      const tag = who === 'table' ? nameTag('The table', null, '#8a6a48') : nameTag(who.name, who.owner, who.colour)
-      tag.classList.add('tab')
+      // Written to, not spoken by: a paper tag in the addressee's ink, never its felt ribbon.
+      const tag = who === 'table' ? nameTag('the table', null, '#8a6a48') : nameTag(who.name, who.owner, who.colour)
+      const toWord = document.createElement('i')
+      toWord.textContent = 'to'
+      tag.prepend(toWord)
+      tag.classList.add('tab', 'to')
       slip.dataset.to = who === 'table' ? 'table' : who.person
       to.replaceWith(tag)
       to = tag
@@ -453,7 +460,7 @@ export default {
       if (news) clearNews(m)
       if (greet || news) speak(m, news ?? m.hello)
       const invited = Boolean(m.seat)
-      openSlip(`Say something to ${m.name}…`, [...m.chips, ...(invited ? [] : [INVITE])], m)
+      openSlip(`Write to ${m.name}…`, chipsFor(m), m)
     }
 
     /** Back to chores, or to the table if anyone is sitting there. */
@@ -482,7 +489,7 @@ export default {
       mode = 'table'
       view.focus(TABLE_SHOT, 5)
       const names = seated.map((m) => m.name)
-      openSlip(seated.length > 1 ? `Say something, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS], seated.length > 1 ? 'table' : seated[0]!)
+      openSlip(seated.length > 1 ? `Write to the table, or start with a name…` : `Write to ${names[0]}…`, ["What's everyone up to?", THANKS].filter((c) => c === THANKS || !used.has(c)), seated.length > 1 ? 'table' : seated[0]!)
     }
 
     const invite = (m: Member) => {
@@ -557,7 +564,10 @@ export default {
 
     const chip = (label: string) => {
       if (label === INVITE && partner) invite(partner)
-      else void send(label)
+      else {
+        used.add(mode === 'talk' && partner ? `${partner.person}:${label}` : label)
+        void send(label)
+      }
     }
 
     // ── Sending lines ───────────────────────────────────────────────────────
@@ -608,8 +618,10 @@ export default {
       } finally {
         pending = false
         slip.classList.remove('waiting')
-        if (mode === 'talk' && partner) line.placeholder = `Say something to ${partner.name}…`
-        else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Say something, or start with a name…' : `Say something to ${seated[0]?.name ?? ''}…`
+        if (mode === 'talk' && partner) {
+          line.placeholder = `Write to ${partner.name}…`
+          setChips(chipsFor(partner))
+        } else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Write to the table, or start with a name…' : `Write to ${seated[0]?.name ?? ''}…`
       }
     }
 
@@ -833,7 +845,8 @@ export default {
         }
         // Name tags over everyone at the table; the speaker's is lit and carries the card. In the room, over the one hovered.
         const hover = mode === 'room' && entries.hovered === m.entry
-        const tagged = (mode === 'table' && m.seat !== null && m.v.seated > 0.5 && !showing.has(m)) || hover
+        // While someone speaks only the speaker's tag shows, so the others' tags never sit on its face.
+        const tagged = (mode === 'table' && m.seat !== null && m.v.seated > 0.5 && !showing.has(m) && (!speaker || speaker === m)) || hover
         m.tag.classList.toggle('shown', tagged)
         m.tag.classList.toggle('hover', hover)
         if (tagged) {
@@ -933,6 +946,7 @@ function css() {
   .talk-card { position: fixed; left: 0; top: 0; width: 330px; max-width: calc(100vw - 32px); padding: 24px 22px 14px;
     opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1), filter 300ms ease; scale: 0.94; transform-origin: 0 50%; }
   .talk-card.shown { opacity: 1; scale: 1; pointer-events: auto; }
+  .talk-card.said:not(.beside) { transform-origin: var(--tail, 50%) 100%; }
   .talk-card.said { opacity: 0.95; scale: 0.8; filter: saturate(0.5) brightness(0.93); }
   .talk-card.said .nametag { box-shadow: none; }
   .talk-card::after { content: ''; position: absolute; left: var(--tail, 50%); bottom: -10px; width: 20px; height: 20px; margin-left: -10px;
@@ -960,6 +974,11 @@ function css() {
   .nametag small { font: 700 15px/1.15 ${HAND}; color: #fff3df; }
   .nametag small::before { content: '· '; opacity: 0.7; }
   .talk-card .tab, .talk-slip .tab { position: absolute; left: 18px; top: -19px; }
+  .nametag.to { background: #fbf3e2; color: color-mix(in oklab, var(--c) 82%, #2a1608); text-shadow: none;
+    box-shadow: 0 3px 8px rgba(60, 30, 10, 0.18), inset 0 0 0 1.5px color-mix(in oklab, var(--c) 45%, transparent); }
+  .nametag.to::after { border-color: color-mix(in oklab, var(--c) 45%, transparent); }
+  .nametag.to small { color: inherit; opacity: 0.85; }
+  .nametag.to i { font: italic 15px/1.15 ${HAND}; opacity: 0.75; }
 
   .talk-tag { position: fixed; left: 0; top: 0; pointer-events: none; opacity: 0; scale: 0.86; transform-origin: 50% 100%;
     transition: opacity 200ms ease, scale 260ms cubic-bezier(.2, 1.5, .4, 1), filter 200ms ease; filter: saturate(0.7); }

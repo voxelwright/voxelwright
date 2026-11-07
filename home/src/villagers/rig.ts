@@ -63,6 +63,10 @@ export class Villager {
   held = false
   /** Stays at its chore a while longer (out of someone else's conversation). */
   linger = false
+  /** Sideways step off its path, to pass around someone in the way; set by the crowd. */
+  readonly sidestep = new THREE.Vector3()
+  /** Where the path itself is, before any sidestep. */
+  readonly onPath = new THREE.Vector3()
   /** Waiting on its own words: looks up and taps its chin. */
   thinking = false
   /** Saying something right now: leans in and nods. */
@@ -246,7 +250,10 @@ export class Villager {
       this.v = Math.max(0, this.v)
       this.s = Math.min(this.len, this.s + this.v * dt)
       const p = this.curve.getPointAt(this.s / this.len)
-      this.pos.set(p.x, 0, p.z)
+      this.onPath.set(p.x, 0, p.z)
+      // The sidestep fades in the last half metre, so it arrives exactly at the spot.
+      const fade = Math.min(1, remaining / 0.5)
+      this.pos.set(p.x + this.sidestep.x * fade, 0, p.z + this.sidestep.z * fade)
       const tan = this.curve.getTangentAt(Math.min(0.999, this.s / this.len))
       goalYaw = Math.atan2(tan.x, tan.z)
       if (this.s >= this.len - 1e-3) {
