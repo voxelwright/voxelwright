@@ -193,16 +193,23 @@ files hot-swap as before. Nothing in `home/` changes for this.
 `promote` needs `--approve` on the command line; nothing a candidate or model
 wrote counts as approval. It also needs `result.json` with `passed`,
 `controller-files` passing, and the per-file sha256 that runs now record
-under `files` at check time. Every changed path must be under
-`home/src/plugins/`, and the working tree, the candidate commit's blobs and
-the recorded hashes must agree. The live install must have no uncommitted
-changes. It copies the files, appends a promotion entry (candidate, files,
-hashes before and after, the live commit before) to `promotions.jsonl`, and
-commits with the hardened git flags. `rollback` restores each file from that
-earlier live commit, checks it against the recorded hash, and records a
-rollback entry. It refuses when any promoted file no longer has the hash the
-promotion gave it (a hand edit or a later promotion). Every attempt, refused
-or not, appends a line with a plain message to `results.jsonl`.
+under `files` at check time. Every changed path must match
+`^home/src/plugins/[\w-]+\.ts$` (so no `.gitignore` or subfolder), and the
+working tree, the candidate commit's blobs and the recorded hashes must agree.
+The live install must have no uncommitted changes. It writes the committed
+blobs it hashed, never the candidate's working files, appends a promotion
+entry (candidate, files, hashes before and after, the live commit before) to
+`promotions.jsonl`, and commits only those paths and `promotions.jsonl` with
+the hardened git flags. `rollback` restores each file from that earlier live
+commit, checks it against the recorded hash, and records a rollback entry. It
+refuses when any promoted file no longer has the hash the promotion gave it
+(a hand edit or a later promotion). Each promotion or rollback holds
+`<live>/.git/village-promote.lock` (created exclusively, removed when done), so
+a second one at the same time is refused; a lock left by a crash names its pid
+and says to check `status` before deleting it. If writing or committing fails,
+the live tree is reset to the commit before and the attempt is a refusal.
+Every attempt, refused or not, appends a line with a plain message to
+`results.jsonl`.
 
 `npm run check-promote` (November 6, 2026, headless Chrome, 1280×800,
 `?q=low`): 19 of 19 steps. The promote command took 1.2 s; the candidate's red
@@ -214,12 +221,19 @@ missing, failed, edited after the check, uncommitted live changes, rollback
 over a hand edit) exited 1 and wrote its entry. Proof:
 `proof/20261106T234036-promote.json`. `npm run regressions`: 24 of 24.
 
+Regressions in the same run (November 7, 2026): the live server sends the
+home's Content Security Policy; two promotions at once give one promotion and
+one `live-busy` refusal with one new commit; a leftover lock is refused and
+named; a candidate file swapped right after its hash check never reaches live
+(the committed bytes are promoted instead); a failed write is a recorded
+refusal with live at the same commit and clean; a candidate that adds
+`home/src/plugins/.gitignore` is refused as `controller-owned`. 25 of 25. The
+proof JSON is written to `proof/` and not committed.
+
 Not yet: rollback has only been proved for an added file (restoring an
-earlier version is untested), and a hash failure partway through a
-promotion or rollback stops with an error and leaves the live tree dirty,
-which the next attempt refuses. A hot-added plugin is loaded globally, not into a room plan, until
-the next page load; `ready()` does not list it. Two promotions at once are not
-locked against each other. The live server runs Vite dev, not a production
+earlier version is untested). A hot-added plugin is loaded globally, not into a room plan, until
+the next page load; `ready()` does not list it. The lock is only advisory to
+Village's own commands. The live server runs Vite dev, not a production
 build, and is not sandboxed (it runs only controller-owned config; promoted
 plugin code runs in the browser). `village.kernel` is reachable by any page
 script in dev builds.
@@ -227,9 +241,12 @@ script in dev builds.
 # Villager (#40)
 
 `npm run villager -- [--agent claude|stub] [--model sonnet] [--port 5190] [--root ~/.village]`
-serves a person's villager on 127.0.0.1 only. Each start writes a random
-token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
-on stop; every request needs `Authorization: Bearer <token>`.
+serves each person's villager on 127.0.0.1 only. Each start gives every person
+a new random token, writes the tokens and the port to
+`<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
+per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
+Every request needs `Authorization: Bearer <token>`, and a token opens only its
+own person: any other person id is refused with 403.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
 - `POST /people/<id>/messages {"text"}`: server-sent events, `text` pieces
@@ -250,12 +267,14 @@ records the line as unanswered and keeps the stored session.
 
 `npm run check-villager` (stub agent, no model): token, streaming, usage
 log, one turn at a time, launch-file cleanup, a new token per launch,
-resuming after a restart, failed turns, person ids, eight attempts to leave
-the notes folder (`../`, `a/../../`, absolute, symlinks, dotfiles) and the
-init guard. 34 of 34 passed (November 6, 2026).
+resuming after a restart, failed turns, person ids, person-scoped tokens
+(Alex's token can neither read nor write Sam's villager, and the reverse),
+eight attempts to leave the notes folder (`../`, `a/../../`, absolute,
+symlinks, dotfiles) and the init guard. 38 of 38 passed (November 7, 2026).
 
 Not yet: session transcripts live in the operator's `~/.claude/projects/`,
 not the person's folder; every person shares the operator's subscription and
-OS user, so this is not family isolation; the dev-server token handoff
-trusts any same-origin page on localhost:5181; the villager cannot remind or
-act yet.
+OS user, so this is not family isolation; any script in a page (a promoted
+plugin included) can read that tab's token from `sessionStorage` and use that
+one person's villager, and the policy does not stop it navigating the page
+away to another origin; the villager cannot remind or act yet.
