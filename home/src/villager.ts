@@ -98,6 +98,8 @@ export interface Routed {
   where?: string
   count?: number
   size?: [number, number, number]
+  /** furnish: how it is mounted, as the router proposed it; place.ts checks it. */
+  mount?: string
   replace?: string
   copy?: boolean
   library?: string
