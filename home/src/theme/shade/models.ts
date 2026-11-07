@@ -4,7 +4,7 @@
 // plugin's shifts and the entries hover glow keep working on the original.
 import * as THREE from 'three/webgpu'
 import {
-  cameraViewMatrix, color, float, luminance, reflectVector, materialColor, materialEmissive, mix, normalView, positionViewDirection,
+  cameraViewMatrix, color, float, fract, fwidth, luminance, reflectVector, materialColor, materialEmissive, mix, normalView, positionViewDirection, uv,
   smoothstep, texture, uniform, vec3, vec4,
 } from 'three/tsl'
 import type { MaterialClass } from './classify'
@@ -69,6 +69,52 @@ export function meanOf(map: THREE.Texture) {
   return out
 }
 
+/**
+ * How many boards a map is painted with (paintWood's planks: dark seam rows evenly spaced
+ * down the image), or 0 when it isn't boards. Only floors are painted with four or more.
+ */
+const boards = new WeakMap<THREE.Texture, number>()
+function boardsOf(map: THREE.Texture): number {
+  const known = boards.get(map)
+  if (known !== undefined) return known
+  let count = 0
+  const img = map.image as CanvasImageSource & { width?: number; height?: number } | undefined
+  try {
+    if (img && img.width && img.height && img.height >= 256) {
+      const W = 32, H = img.height
+      const g = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true })!
+      g.drawImage(img, 0, 0, W, H)
+      const d = g.getImageData(0, 0, W, H).data
+      const rows = Array.from({ length: H }, (_, y) => {
+        let sum = 0
+        for (let x = 0; x < W; x++) sum += d[(y * W + x) * 4] + d[(y * W + x) * 4 + 1]
+        return sum / W
+      })
+      const median = [...rows].sort((a, b) => a - b)[H >> 1]
+      const seams: number[] = []
+      rows.forEach((v, y) => { if (v < median * 0.6 && (seams.length === 0 || y - seams[seams.length - 1] > 4)) seams.push(y) })
+      const gap = (seams[seams.length - 1] - seams[0]) / Math.max(1, seams.length - 1)
+      // Boards are evenly spaced; a street's kerbs and dashes are not.
+      const even = seams.every((y, k) => k === 0 || Math.abs(y - seams[k - 1] - gap) < gap * 0.15)
+      const n = Math.round(H / gap)
+      if (seams.length >= 4 && even && n >= 4 && n <= 16) count = n
+    }
+  } catch { /* unreadable: no boards */ }
+  boards.set(map, count)
+  return count
+}
+
+/** Board seams in ink, one line a pixel or so wide at any distance, from the map's own layout. */
+function seamLines(map: THREE.Texture, planks: number) {
+  map.updateMatrix()
+  const m = uniform(map.matrix)
+  const t = m.mul(vec3(uv(), 1)).y.mul(planks)
+  const across = fract(t.add(0.5)).sub(0.5).abs()
+  const w = fwidth(t)
+  // Lines thin out when boards shrink to a few pixels, before they'd moire.
+  return smoothstep(0.9, 0.35, across.div(w)).mul(smoothstep(0.3, 0.12, w))
+}
+
 /** What every twin shares with its original and has to follow. */
 export function follow(twin: Lit, o: Lit) {
   twin.side = o.side
@@ -128,6 +174,8 @@ function toon(o: Lit, cls: MaterialClass): Twin {
       const l = luminance(tex.rgb)
       const dark = smoothstep(lm.mul(0.8), lm.mul(0.65), l)
       fill = materialColor.rgb.mul(m).mul(mix(float(1), float(0.6), dark))
+      const planks = boardsOf(map)
+      if (planks) fill = (fill as THREE.Node<'vec3'>).mul(mix(float(1), float(0.7), seamLines(map, planks)))
     }
   }
   if (fill) t.colorNode = fill as never

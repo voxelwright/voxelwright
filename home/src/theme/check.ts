@@ -187,7 +187,7 @@ export function checkTheme(data: unknown): { theme: Theme; clamped: string[] } |
       case 'halftone':
         return extra({ kind: 'halftone', cell: n('cell', 40, 400, 150), angle: n('angle', -180, 180, 45), strength: n('strength', 0, 1, 0.6) }, { ink: c('ink'), paper: c('paper') })
       case 'ink':
-        return extra({ kind: 'ink', width: n('width', 0.5, 6, 1.5), depth: n('depth', 0, 1, 0.5), normal: n('normal', 0, 1, 0.5) }, { color: c('color') })
+        return extra({ kind: 'ink', width: n('width', 0.5, 6, 1.5), depth: n('depth', 0, 1, 0.5), normal: n('normal', 0, 1, 0.5) }, { color: c('color'), crease: opt('crease', 0.5, 6) })
       case 'chroma':
         return extra({ kind: 'chroma', offset: n('offset', 0, 8, 1.5) }, { angle: opt('angle', -180, 180) })
       case 'print': {

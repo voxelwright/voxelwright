@@ -108,7 +108,7 @@ export type Stage =
   /** `cell` is rows of dots up the screen (about 150), so the screen is the same at any DPR. */
   | { kind: 'halftone'; cell: number; angle: number; strength: number; ink?: Hex; paper?: Hex }
   /** Ink lines from depth and normal edges. Implemented in ./fx/ink.ts. */
-  | { kind: 'ink'; width: number; depth: number; normal: number; color?: Hex }
+  | { kind: 'ink'; width: number; depth: number; normal: number; color?: Hex; crease?: number }
   /** Mis-registered colour plates (chromatic offset). Implemented in ./fx/chroma.ts. */
   | { kind: 'chroma'; offset: number; angle?: number }
   /** Painterly smoothing (a Kuwahara-style filter): flattens texture into brush patches. Implemented in ./fx/brush.ts. */

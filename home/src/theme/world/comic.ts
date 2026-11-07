@@ -22,8 +22,16 @@ const BACK = 8 // the panel reaches further behind the house, for the street and
 const GUTTER = 0.7
 const BORDER = 0.14
 const PX_PER_M = 48
-/** House fronts, printed a step paler than the room's colours. */
-const FLAT = ['#e07a62', '#6fb3ac', '#eabf6a', '#a994cf', '#7fb0dc', '#e996b0']
+/**
+ * House fronts in the room's own inks (../fx/print.ts snaps every colour to them), only the
+ * quiet ones: tan, sage, grey, a pale pink, oak. Saturated blues and oranges made the street
+ * out-shout the kitchen in the dollhouse view.
+ */
+const FLAT = ['#e6c08a', '#8fa66a', '#a3a1a8', '#ee9fb4', '#b89a74', '#e6c08a']
+/** The same street through the window, each front one step bolder (ochre, green, slate, pink, orange): the window is small in frame and carries the page's punch. */
+const CARD = ['#f2c14e', '#5ba84c', '#7fb0dc', '#ee9fb4', '#e8893a', '#e6c08a']
+/** Windows: a pale grey the house's colour multiplies, so a row of them reads as texture, not as holes. */
+const PANE = '#d4d0d8'
 
 /** Ben-Day dots over a rectangle: a grid of round dots, `size` 0 to 1 of the pitch. */
 function dots(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, colour: string, pitch: number, size: (u: number, v: number) => number) {
@@ -111,16 +119,16 @@ function paintPanels() {
   // 2: a city skyline at dusk, flat silhouettes.
   {
     const [x, y] = cell(2)
-    g.fillStyle = '#f4c6d2'; g.fillRect(x, y, H, H)
-    dots(g, x, y, H, H, '#e4a2b8', 8, (_u, v) => v * 0.55)
+    g.fillStyle = '#f6e6c4'; g.fillRect(x, y, H, H)
+    dots(g, x, y, H, H, '#e8cfa0', 8, (_u, v) => v * 0.55)
     const r = rng(5)
-    g.fillStyle = '#8a7cb4'; g.lineWidth = 4
+    g.fillStyle = '#b4b0b8'; g.lineWidth = 4
     for (let bx = x; bx < x + H; ) {
       const bw = 40 + r() * 70, bh = H * (0.25 + r() * 0.45)
       g.fillRect(bx, y + H - bh, bw, bh); g.strokeRect(bx, y + H - bh, bw, bh)
       g.fillStyle = '#f6e6a0'
       for (let wy = y + H - bh + 16; wy < y + H - 20; wy += 26) for (let wx = bx + 10; wx < bx + bw - 14; wx += 20) if (r() < 0.35) g.fillRect(wx, wy, 9, 12)
-      g.fillStyle = '#8a7cb4'
+      g.fillStyle = '#b4b0b8'
       bx += bw + 4
     }
   }
@@ -139,7 +147,7 @@ function paintFacade() {
   g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 256)
   g.strokeStyle = LINE; g.lineWidth = 5
   for (const [x, y] of [[40, 40], [148, 40], [40, 148], [148, 148]]) {
-    g.fillStyle = '#56609a'; g.fillRect(x, y, 68, 72); g.strokeRect(x, y, 68, 72)
+    g.fillStyle = PANE; g.fillRect(x, y, 68, 72); g.strokeRect(x, y, 68, 72)
     g.fillStyle = '#cbe8fb'; g.fillRect(x + 8, y + 8, 16, 40)
     g.beginPath(); g.moveTo(x + 34, y); g.lineTo(x + 34, y + 72); g.stroke()
   }
@@ -190,7 +198,7 @@ function paintView() {
   const base = H * 0.54
   for (let x = -30; x < W;) {
     const w = 96 + r() * 70, h = 64 + r() * 36
-    const fill = FLAT[Math.floor(r() * FLAT.length)]
+    const fill = CARD[Math.floor(r() * CARD.length)]
     g.fillStyle = fill
     g.strokeStyle = LINE; g.lineWidth = 4
     g.beginPath()
@@ -210,7 +218,7 @@ function paintView() {
     for (let k = 0; k < cols; k++) for (let j = 0; j < 2; j++) {
       const wx = x + 12 + k * ((w - 24) / cols), wy = base - h + 12 + j * (h * 0.44)
       if (j === 1 && k === 0) continue
-      g.fillStyle = '#56609a'; g.fillRect(wx, wy, 20, 24); g.strokeRect(wx, wy, 20, 24)
+      g.fillStyle = PANE; g.fillRect(wx, wy, 20, 24); g.strokeRect(wx, wy, 20, 24)
       g.fillStyle = '#cbe8fb'; g.fillRect(wx + 3, wy + 3, 5, 13)
     }
     g.fillStyle = '#7a5a4a'; g.fillRect(x + 12, base - 38, 18, 38); g.strokeRect(x + 12, base - 38, 18, 38)
