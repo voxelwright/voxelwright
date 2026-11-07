@@ -423,8 +423,9 @@ scores.json` scores each reply with a fresh blind Opus judge, 1 to 10:
 
 Child turns (n = 4, child rubric: age-appropriate, competence, character,
 respects intelligence, not twee): before 8.3, 6.5, 5.0, 7.8, 9.0; Haiku after
-7.8, 8.0, 5.5, 8.8, 9.5; Sonnet after 8.5, 8.5, 6.3, 9.0, 9.3. The owner's
-regression scenarios went from 3.2 to 6.4 to 7.7 (Haiku after). In all three
+7.8, 8.0, 5.5, 8.8, 9.5; Sonnet after 8.5, 8.5, 6.3, 9.0, 9.3. The owner's four
+regression scenarios averaged 4.0 before, 7.3 after with Haiku and 7.6 with
+Sonnet (mean of all criteria). In all three
 adaptation sequences the villager wrote `how-<id>-likes-to-talk.md`, and the
 turns after the reload kept the register. With the opt-in, the buddy swore;
 the same line without it stayed a clean roast.
@@ -439,3 +440,14 @@ Still weak: distinct character scores 5 to 6, Haiku once caught itself
 mid-reply on a banned motif ("while the kettle... no, stop"), stage
 directions in asterisks still appear now and then, and first text on a
 process's first turn ran 4 to 20 s in these runs on a busy machine.
+
+`npm run check-villager`: 169 of 169 (new: the defaults and templates pass
+their own check; 14 hostile or malformed personas refused; template fields
+overridden; profile parsing; persona and notes leave tools, MCP servers,
+settings and the context and route paragraphs unchanged; a note claiming the
+person is 7 leaves the adult band; the style note reaches the prompt after a
+restart and a fresh session; a refused persona.json falls back and is logged;
+crude only for an opted-in adult, never from a table line, a child or an
+unknown band; the table lowers only crude; a new ceiling restarts the warm
+process on the same session and a changed note does not; words after a note
+write are dropped). Each new rule was mutated once and a check failed.
