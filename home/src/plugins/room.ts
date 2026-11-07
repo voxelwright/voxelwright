@@ -57,6 +57,7 @@ export default {
 
     // Skirting board
     const trim = new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 })
+    trim.userData.themeRole = 'trim'
     for (const [xa, xb] of [[W0, d0], [d1, W1]]) {
       const skirt = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, 0.1, 0.02), trim)
       skirt.position.set((xa + xb) / 2, 0.06, WALL_Z + 0.015)
