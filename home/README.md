@@ -1030,10 +1030,9 @@ turns it off; without `?talk=npc` the plugin adds nothing.
   unloaded, and on `pagehide`. See `.agents/skills/web-audio-voice/SKILL.md`.
 - `src/plugins/babble.ts` listens for `village/said` (`{ villager, word, index,
   last }`, sent by talk.ts as each word appears) and `village/said-stop`
-  (`{ villager }`) and builds the voices on the shared context.
-  `M` or the felt speaker button at the bottom left mutes all sound (the voices and the
-  music); the choice is kept in `localStorage` (`village.babble.muted`). Hidden tabs,
-  `pagehide` and unloading the plugin stop the voice.
+  (`{ villager }`) and builds the voices on the shared context, into the voices bus
+  (see Sound below). `M` and the felt speaker button now belong to `src/plugins/sound.ts`.
+  Hidden tabs, `pagehide` and unloading the plugin stop the voice.
 - `?babble=demo` (dev only) plays a scripted exchange between the three at
   talk.ts's reveal pace, without talk.ts or a model.
 
@@ -1069,17 +1068,17 @@ note beside the speaker button, and is in `CREDITS.md` and `public/audio/CREDITS
   is exactly eight bars at 90 BPM (1,024,000 samples at 48 kHz), so it loops as it is, with no trim
   or crossfade: `loopStart` 0, `loopEnd` the buffer's duration. The step at the loop point is
   -65 dBFS, about twice the median step of the music itself.
-- `src/voice/bed.ts` plays it through Web Audio on any context (source, level, duck, mute), at
-  a gain of 0.26: -32 LUFS integrated (the file alone is -20.3), peak -15.8 dBFS. It fades in over
-  2 s, and drops 6 dB (80 ms down) while a villager speaks. `src/plugins/music.ts` shares the
-  voices' AudioContext (`src/voice/context.ts`: made at load, suspended, silent until a gesture
-  resumes it), fetches the loop on the first touch or key press, and listens for `village/said`
-  and `village/said-stop`: the duck is released 0.6 s after the last word (250 ms time constant
-  back). A hidden tab suspends the context; unloading the music stops and disconnects the bed, and
-  the context closes once the voices have unloaded too.
-- Switches: `M` and the speaker button (babble.ts) mute everything and tell the music with
-  `village/muted`; Shift+M or the note mutes the music alone (`village.music.muted`). Both survive a
-  reload. With `?babble=off` there are no voices, so nothing ducks and the music takes `M` itself.
+- `src/voice/bed.ts` plays it through Web Audio on any context (source, level, mute) into the
+  music bus, at a gain of 0.26: -32 LUFS integrated (the file alone is -20.3), peak -15.8 dBFS. It
+  fades in over 2 s. The music bus drops 6 dB (80 ms down) while a villager speaks and comes back
+  0.6 s after the last word (250 ms time constant): `src/voice/buses.ts`, driven by babble.ts.
+  `src/plugins/music.ts` shares the one AudioContext (`src/voice/context.ts`: made at load,
+  suspended, silent until a gesture resumes it) and fetches the loop on the first touch or key
+  press. A hidden tab suspends the context; unloading the music stops and disconnects the bed, and
+  the context closes once every other user has unloaded too.
+- Switches: `M` and the speaker button (`src/plugins/sound.ts`) mute everything and tell the music
+  with `village/muted`; Shift+M or the note mutes the music alone (`village.music.muted`). Both
+  survive a reload. With `?babble=off` there are no voices, so nothing ducks.
 
 ```sh
 node scripts/check-music.mjs [base-url]   # 30 headless checks, dev server on 5322 by default
@@ -1092,6 +1091,53 @@ Now: no long task and a largest timer gap of 20 to 26 ms (two runs) from the key
 for a second; at load the context costs 0.5 to 1.3 ms of main thread, with the device opening
 off the main thread over 0.6 to 5.9 s (the dev scene's own load is slow). Not heard: the output
 after `setSinkId('')` was verified for state and a running clock, not by ear on a device.
+
+## Sound (#52)
+
+Every visit has sound now, not only `?talk=npc`. Plugins say what happened and never name a
+sound; one map turns that into a cue; one player plays it into a bus of one mix.
+
+- **Events** (`src/sound/contract.ts`): `village/hover` (glow starts), `chose`, `backed`,
+  `glide` (camera eases), `turned`, `greeted`, `card` (page 0 or the next page), `pad` (up or
+  down), `wrote` (`added` characters), `sent`, `routed` (`ok` false when a note found nowhere),
+  `furnish` (ghost, placed, kept, undone, failed), `book`, `page`, `sat`, `farewell`, `news`,
+  `walk` (leave, arrive) and `refused` (the closed Workshop door). Each carries a world
+  position `at` where one exists, and `seconds` (0 under reduced motion) for timed motions.
+- **Map** (`src/sound/map.ts`): one line per event. Choices to know: `greeted` plays `hover`
+  (villagers are entries, so the hover fires with the wave and the cue's gap keeps one),
+  `farewell` plays `sat` (the hop reversed), and a walk sounds on `leave` only.
+- **Buses** (`src/voice/buses.ts`): ui, world, voices and music, then the master (mute, a 20 ms
+  ramp) and one stateless soft limiter (linear to 0.6, never above -1 dBFS), built lazily once
+  per context. The voices duck the music: -6 dB, 80 ms down, back 0.6 s after the last word.
+- **Player** (`src/sound/player.ts`, `src/plugins/sound.ts`): plays on the event's own tick at
+  `currentTime` + 4 ms rounded to a sample, with the cue's level, seeded pitch and volume jitter,
+  a round-robin index, its `gap`, and stereo pan from `at` through the camera (±0.6, 0 off
+  screen). Samples in `public/audio/sfx/` are fetched after the first gesture; a cue whose sample
+  is not decoded yet plays nothing. Silent while the context is suspended or the tab hidden.
+  `sound.ts` owns `M` and the speaker button (same look, place and `village.babble.muted` key).
+  `sound` is a global plugin (main.ts `GLOBAL`) so mute and cues outlive a room.
+- **Adding a sound** (other threads): add the event to `contract.ts`, emit it at the moment it
+  happens (one line), add its line to `map.ts`, and a cue to the palette. Never play a clip
+  from a plugin.
+- **Variants**: `?sfx=chose:b,sent:c` picks variants for a visit; a listening page can store
+  picks as JSON under `village.sfx.picks`. Default `a`.
+- Dev handle `window.village.sound`: `audio`, `mix`, `play(name, variant, opts)`, `log` (cue,
+  variant, bus, start, context time when asked, pan), `handled` (main-thread ms per event) and
+  `render(plays, seconds, seed, solo)` (offline, same chain, base64 Float32 at 48 kHz).
+- The palette in `src/sound/palette/index.ts` is a stand-in (one synthesized blip per cue) until
+  the designed palette lands.
+
+```sh
+node scripts/check-sound.mjs [base-url]   # 15 headless checks, dev server on 5490 by default
+```
+
+Measured with the stand-in palette (headless Chrome 158, M1 Pro, November 7, 2026): event to
+first audible sample 2.7 to 5.3 ms on the audio clock (baseLatency 10 ms); a scripted minute of
+use (112 plays) -40.8 LUFS at the master (ui -41.2, world -43.4), peak -22.5 dBFS; each cue -57 to
+-36 LUFS, loudest peak -23.6 dBFS; consecutive takes of every cue differ (closest -41 dBFS sample
+peak); offline render 15 to 41 ms per audio second (machine load varies); 0.2 ms median and
+about 1 ms worst main thread per event; `public/audio/sfx` 0 KB of a 400 KB budget. The shared
+context is now made on every page load (Chrome's silent sink): 0.4 to 0.8 ms in its constructor.
 
 ## Always-on input (#42 prototype)
 
