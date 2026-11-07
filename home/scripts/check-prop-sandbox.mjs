@@ -212,6 +212,24 @@ try {
     ${CUBE}`))
   check('no WebGPU, no WebGL and no nested workers in the worker', gpu.ok && ['webgpu undefined', 'webgl2 blocked', 'webgl blocked', 'redefine blocked', 'Worker undefined, SharedWorker undefined'].every((n) => gpu.notes.includes(n)), gpu.notes)
 
+  // Sentinel (#42): steal the real getContext by patching Function.prototype.call and
+  // Reflect.apply while asking for a 2d context, then use it for WebGL2.
+  const steal = await trial(wrap(`
+    let orig = null
+    const realCall = Function.prototype.call, realApply = Reflect.apply
+    Function.prototype.call = function (...a) { if (!orig && a[1] === '2d') orig = this; return realApply(this, a[0], a.slice(1)) }
+    Reflect.apply = function (f, t, args) { if (!orig && args && args[0] === '2d') orig = f; return realApply(f, t, args) }
+    new OffscreenCanvas(4, 4).getContext('2d')
+    Function.prototype.call = realCall; Reflect.apply = realApply
+    let res = 'not stolen'
+    if (orig) { try { res = realApply(orig, new OffscreenCanvas(4, 4), ['webgl2']) ? 'REACHED' : 'null' } catch { res = 'blocked' } }
+    prop.note('stolen ' + res)
+    ${CUBE}`))
+  check('the 2d-only rule holds when the module patches Function.prototype.call and Reflect.apply', steal.ok && steal.notes.some((n) => /^stolen (not stolen|blocked)$/.test(n)), steal.notes)
+  // Sentinel (#42): a huge type name must not reach the page as a huge note.
+  const longType = await trial(wrap(`const o = new THREE.Object3D(); o.type = 'x'.repeat(40 * 1024 * 1024); prop.add(o); ${CUBE}`), { timeoutMs: 8000 })
+  check('a huge type name is cut short in the box and does not stall the page', longType.notes.every((n) => n.length <= 200) && longType.gap < 250, { ok: longType.ok, reason: longType.reason, maxGapMs: longType.gap, longest: Math.max(0, ...longType.notes.map((n) => n.length)) })
+
   // 5. Runaway code.
   const loop = await trial(wrap('while (true) {}'), { timeoutMs: 1500 })
   check('an infinite loop is stopped and the home stays responsive', !loop.ok && /stopped/.test(loop.reason) && loop.gap < 150, { reason: loop.reason, maxGapMs: loop.gap })

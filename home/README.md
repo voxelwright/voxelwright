@@ -431,7 +431,12 @@ What the box relies on:
   That gives it no new reach: they run in the same worker under the same CSP.
 - The worker's narrowing (2D only, no nested workers) is done in the worker's
   own realm before the module runs; the module cannot redefine `getContext`.
-  It relies on there being no other way to get a fresh realm in a worker.
+  It relies on there being no other way to get a fresh realm in a worker, and
+  on the narrowing code touching no prototype or global the module can patch:
+  the wrapper captures `getContext` and `Reflect.apply` up front and uses no
+  `.call` or spread (Sentinel found a `Function.prototype.call` bypass, fixed).
+- The relay counts strings and object keys toward the 64 MB budget, and type
+  names are cut to 40 characters, so a huge string cannot stall the page.
 
 Not isolated, or unproven:
 

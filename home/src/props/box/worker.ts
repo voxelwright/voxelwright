@@ -21,11 +21,14 @@ const now = () => performance.now()
 // nested workers, so: 2D canvases only (no WebGL, so no GPU work from the box), and
 // no nested workers (a nested worker would start with fresh, unnarrowed globals).
 // WebGPU is already absent here (navigator.gpu is undefined in the sealed worker).
+// Capture what the wrapper calls now: model code can patch Function.prototype.call and
+// Array.prototype[Symbol.iterator] (spread), so the wrapper uses neither (Sentinel, #42).
 const getContext = OffscreenCanvas.prototype.getContext as (this: OffscreenCanvas, ...args: unknown[]) => unknown
+const apply = Reflect.apply
 Object.defineProperty(OffscreenCanvas.prototype, 'getContext', {
-  value(this: OffscreenCanvas, type: unknown, ...rest: unknown[]) {
+  value(this: OffscreenCanvas, type: unknown, options?: unknown) {
     if (type !== '2d') throw new Error('only 2d canvases are available in the prop sandbox')
-    return getContext.call(this, type, ...rest)
+    return apply(getContext, this, [type, options])
   },
   writable: false,
   configurable: false,

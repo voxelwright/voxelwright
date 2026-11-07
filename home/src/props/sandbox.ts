@@ -45,11 +45,13 @@ function measure(value) {
   while (stack.length) {
     const v = stack.pop()
     if (++values > MAX_VALUES) return { error: 'the result has too many values' }
+    // Strings and keys count too, or a huge string would reach the page unmeasured (Sentinel, #42).
+    if (typeof v === 'string') { bytes += v.length * 2; if (bytes > MAX_BYTES) return { error: 'the result is larger than ' + (MAX_BYTES >> 20) + ' MB' }; continue }
     if (v === null || typeof v !== 'object') continue
     if (ArrayBuffer.isView(v)) {
       if (!buffers.has(v.buffer)) { buffers.add(v.buffer); bytes += v.buffer.byteLength; transfer.push(v.buffer) }
     } else if (v instanceof ImageBitmap) { bytes += v.width * v.height * 4; transfer.push(v) }
-    else if (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype) for (const k of Object.keys(v)) stack.push(v[k])
+    else if (Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype) for (const k of Object.keys(v)) { bytes += k.length * 2; stack.push(v[k]) }
     else return { error: 'the result holds a ' + Object.prototype.toString.call(v).slice(8, -1) + ', which is not allowed' }
     if (bytes > MAX_BYTES) return { error: 'the result is larger than ' + (MAX_BYTES >> 20) + ' MB' }
   }

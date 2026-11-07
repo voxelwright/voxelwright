@@ -109,7 +109,7 @@ export async function serialize(root: THREE.Object3D): Promise<{ data: PropData;
     if (materials.has(m)) return materials.get(m)!
     const s = m as THREE.MeshStandardMaterial
     // Only the standard preset exists; the home rejects anything else by name.
-    const preset = s.isMeshStandardMaterial ? 'standard' : String(m.type)
+    const preset = s.isMeshStandardMaterial ? 'standard' : String(m.type).slice(0, 40)
     data.materials.push({
       preset,
       color: rgb(s.color),
@@ -156,7 +156,10 @@ export async function serialize(root: THREE.Object3D): Promise<{ data: PropData;
   const skipped = new Map<string, number>()
   root.traverseVisible((o) => {
     if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh)
-    else if (o !== root && !(o as THREE.Group).isGroup && o.type !== 'Object3D') skipped.set(o.type, (skipped.get(o.type) ?? 0) + 1)
+    else if (o !== root && !(o as THREE.Group).isGroup && o.type !== 'Object3D') {
+      const type = String(o.type).slice(0, 40)
+      skipped.set(type, (skipped.get(type) ?? 0) + 1)
+    }
   })
   for (const [type, n] of skipped) data.notes.push(`skipped ${n} ${type}`)
   for (const mesh of meshes) {
