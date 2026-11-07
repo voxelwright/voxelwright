@@ -235,19 +235,22 @@ a clock are on its table and wall); compare `room-seat-before.jpg` and
   reading chair, blanket basket, plant, pouf and board games, all left of or
   behind the seated view's line.
 - Everything keeps clear of the corridors in `villagers/world.ts`; no waypoint
-  moved. Rugs are 3 mm thick so the villagers' 4 mm contact shadows stay on top.
+  moved. Rugs sit 2.5 mm up and furniture decals 3.5 mm, so the villagers' 4 mm
+  contact shadows stay on top.
 - Props are built with `src/kit.ts`: each part's transform and colour are baked
   into vertices and parts merge by material, so the kitchen's furniture is
   about a dozen draws. Things hung on the side walls sit in their own groups
   tagged `inward`, so they hide with their wall when the camera stands outside it.
 - Contact shadows: one merged decal mesh per room (a wide and a tight quad per
-  footprint) under furniture, the same at `?q=low`.
+  footprint) under furniture, the same at `?q=low`. Furniture meshes are never
+  frustum-culled: small pieces first drawn when a room walk turned the camera to
+  them added a geometry on the second cycle of `check-entries`.
 - Materials: floor roughness 0.86 and boards about 14 cm wide with staggered
   joints (`floorPlanks()`, shared by the seated and dollhouse floors); tabletop
   roughness 0.74 and the lamp's light pool at 55%, which removed the white
   hotspot; cabinets in grained eggshell paint over a darker carcass, so door
-  gaps read; brushed steel fridge without the clear coat; the lamp arm painted
-  cream and thinner.
+  gaps read; brushed steel fridge without the clear coat. The lamp arm is now
+  cream and thinner, which round 3 read as a stray white line: still open.
 
 Frame cost, headless Chrome, 1440x900, WebGPU, M1 Pro, `npm run measure --
 '<url>' --perf --gpu`, one 6 s run each while the villagers walked (GPU p50
