@@ -14,6 +14,7 @@ node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5350/   # build mode (#48): pixels, plan model, drag and bend
 npm run typecheck
 npm run build
+npm run perf-gate                    # before merging to main; see "Performance gate"
 ```
 
 `?plugins=renderer,room` loads only the named plugins; when `rooms` is listed, each room brings only its listed plugins. `window.village` exposes
@@ -94,13 +95,32 @@ headless cap) in every mode:
 
 ## Engine: GPU time, features and tiers (#41, November 6, 2026)
 
-`npm run measure -- --perf --gpu` adds `?gpu=1` and reports, per frame, GPU ms
-(submit to `device.queue.onSubmittedWorkDone()`), the summed three.js timestamp
-pass durations, and CPU ms (frame hooks plus draw). Chrome launches with
-`--enable-webgpu-developer-features`; timestamp sums were then not on 100 us
-steps. GPU ms is quantized to 0.1 ms by `performance.now()`. The timestamp sums
-are not frame cost on this Mac: bloom mips of a few pixels each read about 5 ms
-and a frame summed to 60 to 70 ms while holding 60 fps, so passes overlap.
+`npm run measure -- --perf --gpu` adds `?gpu=1` and reports, per frame, GPU ms,
+the summed pass durations, submit-to-done ms and CPU ms (frame hooks plus draw).
+
+GPU ms (#42) is GPU busy time from WebGPU timestamp queries (`src/gpu-time.js`):
+every render and compute pass gets a begin and end timestamp, and a frame's GPU ms
+is the union of its pass intervals. Summed pass durations are not frame cost on
+this Mac: under Metal a pass's begin is written while earlier passes still run, so
+a frame summed to 60 to 150 ms while holding 60 fps. Submit-to-done (the wait from
+the last submit to `onSubmittedWorkDone()`, the measure before #42) counts the main
+thread's delay in delivering the callback. Checked in headless Chrome, kitchen,
+`?q=high`, 4 s per run:
+
+| Ground truth | GPU ms p50 | Submit-to-done p50 / p95 | Frame |
+| --- | --- | --- | --- |
+| none | 7.7 to 9.1 | 8.9 to 10.5 / 10.6 to 16.5 | 60 fps |
+| 12 ms CPU loop per frame | 7.8 to 8.0 | 16.7 / 17.8 to 31.5 | 60 fps |
+| GPU-bound: extra full-screen passes, 4 / 6 / 8 | 18.3 / 24.6 / 31.1 | 107 / 145 / 183 | 18.3 / 24.8 / 31.3 ms |
+
+When the GPU is the bottleneck, GPU ms matches the frame interval within 0.2 ms.
+Below that, small loads add less than their isolated cost (one pass +2.2 ms, two
++2.6 ms), consistent with the GPU raising its clock under load. Results were the
+same with and without `--enable-webgpu-developer-features`: busy times were not on
+100 us steps either way, so the flag is no longer passed.
+
+The tables below this point, up to the performance gate, were measured with
+submit-to-done.
 
 `?fx=phys,csm,gtao,traa,ssgi` runs exactly the named features: physical
 materials (lacquered fridge, transmissive window glass, glazed mug and ceramics),
@@ -132,7 +152,9 @@ SSGI is not usable here; baked lighting is the next step for bounce light.
 Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
 medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
 skips 15 frames, takes the median GPU ms of 45 frames (or of 2 s, at least 8),
-and steps down when high exceeds 13 ms or medium exceeds 12 ms. Stepping down
+and steps down when high exceeds 13 ms or medium exceeds 12 ms (GPU busy ms since
+#42; without timestamp queries it falls back to submit-to-done). With a 12 ms CPU
+loop per frame the kitchen now stays high (8.8 and 10.1 ms). Stepping down
 lowers the pixel ratio and rebuilds postfx; scene content keeps its load-time
 detail. `?q=high|medium|low` skips calibration, and `?q=low` behaves as before.
 `?fx=ssgi` with no `?q=` proved the step-down: 294 ms at high moved to medium.
@@ -145,6 +167,81 @@ shadow change. GPT was not available. Screenshots: `screenshots/engine-before.pn
 
 Ally (Linux, AMD Phoenix1): no Chromium, Chrome or Node installed, so nothing
 was measured there.
+
+## Performance gate (#42, November 6, 2026)
+
+`npm run perf-gate` builds the base (default: the merge base with `origin/main`) and the
+working tree for production, serves both on 127.0.0.1:5430 and :5431, and measures them in
+one headless Chrome at 1440x900, DPR 2. Options: `--base <ref>`, `--head <ref>`,
+`--scenes home,talk`, `--full` (adds `home-low`), `--seconds 2`, `--json path`. It prints a
+table (base, head, delta, limit, verdict), writes `perf-gate.json` and exits 1 on a failed
+gate, 2 on an error.
+
+How it measures. A probe added before the app's code seeds `Math.random`, wraps
+`requestAnimationFrame` (CPU ms is each frame's callbacks; a paused page's callbacks are
+held), and injects `src/gpu-time.js` so GPU ms is the frame's GPU busy time from
+timestamp queries, the renderer's own measure, for base and head alike. Submit-to-done is
+reported next to it for reference. `--port <n>` serves the base on n and the head on n + 1
+(default 5430).
+Each page has its own browser context. After `ready()` it renders until 20 frames in a row
+arrive on time (pipelines keep compiling for a few seconds; pausing earlier stalled the next
+page for 7 s), then pauses. Only one page renders at a time. Base and head alternate
+(B, H, B, H), 2 s of steady frames per version per scene after a 0.3 s warm-up.
+Builds are cached in `~/.cache/village/perf-gate`: a base by commit (`git archive`, `npm ci`,
+`vite build`), the working tree by the hash of its `home/` tree, untracked files included.
+
+Scenes: `home` (`?q=high`, kitchen seat view), `villagers` (`?talk=npc&q=high`, walking),
+`talk` (the same page after clicking Alex's villager: the close-up), and with `--full`
+`home-low` (`?q=low`). A scene that needs a plugin the base lacks (villagers, talk: main has
+no villagers yet) runs on the head only, with the absolute gates; one the head lacks is
+skipped and listed.
+
+Gates:
+
+| Gate | Rule |
+| --- | --- |
+| 60 fps (head, every scene) | under 1% of intervals over 20 ms; p99 at most 20 ms; no long task over 50 ms; at least 90% of 60 Hz frames measured |
+| Headroom (head, high tier) | GPU p50 under the high tier's `maxGpuMs` (13 ms, the median threshold calibration uses, read from `renderer.ts`) and GPU p95 under 16 ms (inside one 60 Hz frame). GPU ms measures GPU work (`src/gpu-time.js`). Kitchen medians are 8 to 10 ms; p95 is 9.8 to 14.3 ms on main and 12.2 to 14.5 ms on this branch. |
+| Relative (head against base) | growth at most the larger of 10% and a floor: GPU p50 3 ms, GPU p95 8 ms, CPU p50 0.5 ms, draw calls 10 |
+
+Noise, base against base (`--base X --head X`), M1 Pro, with 3 to 8 other agents' headless
+Chrome checks running on the same machine: GPU p50 moved by up to 2.4 ms and GPU p95 by up to
+7.3 ms; CPU p50 0.1 ms; draw calls 0; frame intervals none. The GPU floors sit just above that
+spread. Remeasure on a quiet machine and tighten them.
+
+Time, base build cached, three runs (the first also built the head, 2.0 s): 25.0 to 26.6 s
+inside the script, 27.6 to 29.7 s wall clock (page loads 11.8 to 13.4 s, measuring 11.2 s). An uncached head adds a
+2 to 5 s build, which runs while the base pages load. The first base build adds 17 s
+(`npm ci` and `vite build`). `--full` does not fit in 30 s.
+
+Today (5f89124 plus the gate, against cb1d565, three runs): every scene holds 60 fps except
+one `talk` run (3 of 116 intervals over 20 ms, p99 33 ms). GPU p95 at high is 16 to 19 ms in
+`home`, `villagers` and `talk` on the old submit-to-done measure; that measure counted callback delay, and the headroom rule now uses GPU ms that measures GPU work (see the table above).
+GPU p50 swings between 7 and 17 ms for the same build from run to run under contention.
+`home` CPU p50 is 0.3 to 0.6 ms above main every run (draw calls 482 to 526, triangles
+52k to 84k, from the furnishing), which is at the 0.5 ms limit. `home-low` draw calls are 412 to 457,
+over the 10% limit.
+
+Deliberate regressions, not committed: a 5 ms busy loop per frame in the renderer failed
+`home` CPU p50 (+5.2 ms against +0.5) while frames still held 60 fps; a 12 ms loop failed
+`villagers` with 17% of frames over 20 ms and p99 33.4 ms. Both exited 1.
+
+With GPU busy ms (#42), against cb1d565 (main), four runs on a quiet machine, GPU p95 at
+high: `home` main 10.2, 10.4, 9.8, 13.4 ms, head 13.7, 12.5, 13.6, 13.8 ms (p50 8.0 to 10.0
+on main, 8.3 to 10.4 on the head); `villagers` 12.4 to 13.7 ms; `talk` 11.6 to 14.0 ms.
+Submit-to-done p95 on the same frames was 11.4 to 17.8 ms. Five earlier runs, with 0 to 1
+other headless Chrome instances, read main 13.6 to 14.3 and head 12.2 to 14.5 ms (the gate's
+count of other instances was one too high until #42). Every run passed every gating rule.
+The kitchen's typical cost, by the ms each pass adds to GPU ms (p50 / p95 per pass; the
+p95s do not fall in the same frames; `?q=high`, 240 frames, 28 passes):
+the first scene render context 2.7 / 4.5, the first post pass after `output` 2.1 / 3.3,
+the full-resolution `output` pass 1.1 / 1.9, the next post pass 0.8 / 1.1, the first
+full-resolution pass 0.6 / 1.0; the 13 bloom mips together under 0.2.
+
+What it cannot see: displays above 60 Hz (headless Chrome caps at 60 Hz, so intervals show
+missed frames, not spare time), phones and other GPUs, the WebGL2 fallback, dev-only features
+(the prop sandbox, `village.kernel`), the villager host (no `/villager/*` routes, so no model
+replies or table rounds), page load time (reported in the JSON, not gated) and audio.
 
 ## Camera variants (#42 probe)
 

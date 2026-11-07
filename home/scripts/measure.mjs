@@ -1,9 +1,9 @@
 // Scripted run in Google Chrome, headless by default so no window takes focus.
 // --headed shows the window; the README perf numbers were taken headed.
 // Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--gpu] [--unload] [--headed]
-// --gpu adds ?gpu=1 and reports GPU time per frame (submit to queue done) and
-// the summed WebGPU timestamp-query pass durations. Chrome rounds timestamps to 100 us unless WebGPU developer features
-// are on, so --gpu launches with --enable-webgpu-developer-features.
+// --gpu adds ?gpu=1 and reports, per frame, GPU busy ms (the union of the frame's pass
+// intervals from timestamp queries, src/gpu-time.js), the summed pass durations (they
+// overlap, so they overcount) and submit-to-done ms (includes main-thread delay).
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -17,7 +17,6 @@ const browser = await chromium.launch({
   headless: !flag('headed'),
   args: [
     '--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist', '--window-position=0,0',
-    ...(args.includes('--gpu') ? ['--enable-webgpu-developer-features'] : []),
   ],
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
@@ -40,7 +39,7 @@ if (flag('perf')) {
       new Promise((resolve) => {
         const deltas = []
         const timing = window.village.timing()
-        const from = { gpu: timing?.gpu.length ?? 0, passSum: timing?.passSum.length ?? 0, cpu: timing?.cpu.length ?? 0 }
+        const from = { gpu: timing?.gpu.length ?? 0, passSum: timing?.passSum.length ?? 0, submitToDone: timing?.submitToDone?.length ?? 0, cpu: timing?.cpu.length ?? 0 }
         let last = performance.now()
         const end = last + 6000
         const step = (now) => {
@@ -61,8 +60,9 @@ if (flag('perf')) {
             resolve({
               gpu: stats(gpu),
               timestampPassSum: stats(passSum),
-              // Timestamps quantized to 100 us would all land on multiples of 0.1 ms.
-              timestampsQuantized: passSum.length ? passSum.every((ms) => Math.abs(ms * 10 - Math.round(ms * 10)) < 1e-6) : null,
+              submitToDone: stats(timing?.submitToDone?.slice(from.submitToDone) ?? []),
+              // Timestamps quantized to 100 us would put every busy time on a multiple of 0.1 ms.
+              timestampsQuantized: gpu.length ? gpu.every((ms) => Math.abs(ms * 10 - Math.round(ms * 10)) < 1e-6) : null,
               cpuFrame: stats(timing?.cpu.slice(from.cpu) ?? []),
               quality: s.quality,
               features: s.features,
