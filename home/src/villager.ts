@@ -65,3 +65,52 @@ export async function say(person: string, text: string, onText: (t: string) => v
   // The stream ended without an answer: the host went away mid-reply.
   return { ok: false, why: 'away' }
 }
+
+// ── The always-on input (#42 prototype) ─────────────────────────────────────
+// Everything that comes back is model output the host checked or stored as text:
+// the page treats it as data. Prop modules only ever run in the prop sandbox.
+
+export interface Routed {
+  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal'
+  to?: string
+  say?: string
+  message?: string
+  what?: string
+  where?: string
+  count?: number
+  size?: [number, number, number]
+  replace?: string
+  copy?: boolean
+  library?: string
+  section?: 'talk' | 'tasks'
+}
+export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
+
+async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
+  const t0 = performance.now()
+  const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const ms = performance.now() - t0
+  if (!res) return { ok: false, why: 'away', ms }
+  if (res.status === 409) return { ok: false, why: 'busy', ms }
+  if (!res.ok) return { ok: false, why: 'failed', ms }
+  try {
+    return { ok: true, ms, ...((await res.json()) as T) }
+  } catch {
+    return { ok: false, why: 'failed', ms }
+  }
+}
+
+/** Your own villager decides what a line meant. */
+export const route = (person: string, text: string, primary: string, villagers: { id: string; name: string; role: string }[]) =>
+  call<{ routed: Routed; models: string[]; costUsd: number | null }>(`/people/${person}/route`, { text, primary, villagers })
+
+/** A prop made by the model, as module text for the sandbox, and its library id. */
+export const makeProp = (person: string, what: string, size?: number[], variant = 0) =>
+  call<{ item: string; name: string; module: string; costUsd: number | null }>(`/people/${person}/props`, { what, ...(size ? { size } : {}), variant })
+
+export const libraryItem = (person: string, item: string) => call<{ id: string; name: string; module: string; size?: number[] }>(`/people/${person}/library/${item}`)
+export const keepItem = (person: string, item: string) => call<{ ok: true }>(`/people/${person}/library/${item}/keep`, {})
+export const library = (person: string) => call<{ items: { id: string; name: string }[] }>(`/people/${person}/library`)
+export const startProject = (person: string, what: string, where: string | undefined, text: string) =>
+  call<{ project: { id: string; what: string; state: string } }>(`/people/${person}/projects`, { what, where, text })
+export const projects = (person: string) => call<{ projects: { id: string; what: string; where?: string; state: string }[] }>(`/people/${person}/projects`)

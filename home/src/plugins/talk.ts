@@ -6,7 +6,9 @@ import { KINDS } from '../villagers/kinds'
 import { Villager, type Task } from '../villagers/rig'
 import { contactShadows, stepCrowd } from '../villagers/cast'
 import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
-import { say as sayTo } from '../villager'
+import { projects as listProjects, route, say as sayTo } from '../villager'
+import { alwaysOn, type Variant } from '../talk/input'
+import { furnisher } from '../talk/furnish'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
 
@@ -18,6 +20,10 @@ const params = new URLSearchParams(location.search)
 const ON = params.get('talk') === 'npc'
 /** ?slip=always keeps your paper slip on screen with no talk open, addressed to your own villager. */
 const SLIP_ALWAYS = params.get('slip') === 'always'
+/** ?input=held|speech: the always-on input (#42) in place of the slip. Lines to your own villager are routed by it. */
+const INPUT: Variant | null = ON && (params.get('input') === 'held' || params.get('input') === 'speech') ? params.get('input') as Variant : null
+/** Asking the villager you are talking with to the table, typed instead of the chip. */
+const SIT = /^\s*(?:(?:come|let'?s|will you|would you|do you want to)\s+)?(?:come\s+)?(?:and\s+)?sit (?:down )?(?:with (?:me|us)|at the table)\b[\s\S]{0,20}$/i
 const KIND = KINDS[params.get('villager') ?? ''] ? params.get('villager')! : 'b'
 const SCALE = 1.3
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
@@ -35,6 +41,8 @@ declare module 'cordis' {
     'village/said'(said: Said): void
     /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
     'village/said-stop'(stop: { villager: string }): void
+    /** Open the journal, at a villager's pages or a section (the always-on input, #42). */
+    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' }): void
   }
 }
 
@@ -506,6 +514,8 @@ export default {
     }
     const openSlip = (placeholder: string, labels: string[], who: Member | 'table') => {
       address(who)
+      // The always-on input replaces the slip: it re-addresses itself from the same state.
+      if (INPUT) return
       folded = false
       line.placeholder = placeholder
       setChips(labels)
@@ -518,6 +528,7 @@ export default {
     const closeSlip = () => {
       mine.classList.remove('shown')
       line.blur()
+      if (INPUT) return
       if (!SLIP_ALWAYS) {
         slip.classList.remove('shown')
         return
@@ -580,6 +591,7 @@ export default {
     const talk = (m: Member, greet = true) => {
       if (partner && partner !== m) endTalk(false)
       partner = m
+      lastTalked = m
       mode = 'talk'
       m.v.chosen = true
       m.v.beat()
@@ -729,7 +741,8 @@ export default {
       text = text.trim()
       if (!text || pending) return
       // A line written with no talk open goes to your own villager, who turns to you.
-      if (mode === 'room' && SLIP_ALWAYS) talk(primary(), false)
+      if (mode === 'room' && INPUT) choose(primary(), false)
+      else if (mode === 'room' && SLIP_ALWAYS) talk(primary(), false)
       const bye = FAREWELL.test(text) && text.length <= 40 && (mode === 'table' || mode === 'talk')
       cover(text)
       pending = true
@@ -742,7 +755,7 @@ export default {
         else if (mode === 'talk' && partner) {
           const m = partner
           const ok = await perform(m, ask(m, text), text)
-          if (!ok) line.value = text
+          if (!ok) restoreLine(text)
         } else if (mode === 'table' && seated.length) {
           await table(text)
         }
@@ -827,7 +840,7 @@ export default {
       speaker = null
       for (const o of seated) o.tag.classList.remove('lit')
       if (round.length) lastRound = round
-      if (failed && !line.value) line.value = text
+      if (failed && !line.value) restoreLine(text)
     }
 
     // ── The "!" glyph: one quiet signal, never repeated or escalated ────────
@@ -842,6 +855,14 @@ export default {
       m.news = null
     }
 
+    /** Whether the next talk opened through the entries layer starts with a greeting. */
+    let greetNext = true
+    /** Open a talk as a click would, so Escape and clicks elsewhere end it as usual. */
+    const choose = (m: Member, greet: boolean) => {
+      greetNext = greet
+      entries.choose(m.entry)
+      greetNext = true
+    }
     // ── Entries: hover glow and name, click or Tab and Enter to talk ────────
     for (const m of cast) {
       ctx.effect(() => entries.add({
@@ -860,7 +881,8 @@ export default {
             })
             return
           }
-          talk(m)
+          talk(m, greetNext)
+          greetNext = true
         },
         leave() {
           if (quietLeave) return
@@ -956,6 +978,8 @@ export default {
         const r = slip.getBoundingClientRect()
         taken.push({ l: r.left, t: r.top - TAB, w: r.width, h: r.height + TAB })
       }
+      // The always-on input holds the bottom centre of the view.
+      if (INPUT) taken.push({ l: innerWidth * 0.27, t: innerHeight * 0.76, w: innerWidth * 0.46, h: innerHeight * 0.24 })
       // Cards never cover the face of anyone else in the conversation.
       const faces = new Map<Member, Omit<Spot, 'tail'>>()
       for (const o of mode === 'talk' && partner ? [partner] : seated) {
@@ -1070,11 +1094,11 @@ export default {
           m.tag.style.setProperty('--tail', `${THREE.MathUtils.clamp(head.cx - (x - tw / 2), 12, tw - 12)}px`)
         }
         // A soft outline in the owner's colour on the one pointed at, and on the one the slip is written to.
-        const addressed = SLIP_ALWAYS && mode === 'room' && slip.dataset.to === m.person
+        const addressed = INPUT ? mode === 'room' && m === primary() : SLIP_ALWAYS && mode === 'room' && slip.dataset.to === m.person
         const glowGoal = hover ? 1 : addressed ? 0.6 : 0
         m.glow += (glowGoal - m.glow) * (1 - Math.exp(-dt * 8))
         if (m.v.fig.outline) m.v.fig.outline.value = m.glow * 0.8
-        m.v.attending = addressed && (document.activeElement === line || line.value.length > 0)
+        m.v.attending = addressed && (INPUT ? Boolean(input?.text) || routing : document.activeElement === line || line.value.length > 0)
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
         if (m.fade !== fadeGoal) {
@@ -1086,11 +1110,121 @@ export default {
         blob.opacity *= m.fade
       }
       placeCards(dt)
+      input?.frame(dt, t)
+      furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
         done()
       }
     })
+
+    // ── The always-on input (#42): routed by your own villager ───────────────
+    let routing = false
+    const routes: { text: string; route: string; ms: number; models?: string[]; costUsd?: number | null }[] = []
+    /** A short line from a villager in the room, which folds away a little after it has been read. */
+    const quip = (m: Member, text: string) => {
+      speak(m, text)
+      voice.textContent = `${m.name}: ${text}`
+      void (async () => {
+        while (showing.get(m) && m.card.text === text && !m.card.finished) await frame()
+        await pause(3.5)
+        if (showing.get(m) && m.card.text === text && mode === 'room') hide(m)
+      })()
+    }
+    const restoreLine = (text: string) => {
+      if (INPUT) {
+        if (!input?.text) input?.restore(text)
+      } else line.value = text
+    }
+    const headAt = new THREE.Vector3()
+    /** In the room, a line that names another villager is on its way to them, even before your villager has routed it. */
+    const namedIn = (text: string) => mode === 'room' ? cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text || (routing ? routingText : ''))) ?? null : null
+    /** The line being routed: it keeps its addressee on the input until the route is back. */
+    let routingText = ''
+    /** Whom you last talked with: J opens the journal at their pages. */
+    let lastTalked: Member | null = null
+    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text) }) : null
+    const input = INPUT ? alwaysOn(stage, entries, {
+      variant: INPUT,
+      journal: 'notebook',
+      addressee: () => {
+        const named = namedIn(input?.text ?? '')
+        if (named) return { label: named.name, colour: named.colour }
+        if (mode === 'table') return { label: seated.length > 1 ? 'the table' : seated[0]?.name ?? 'the table', colour: seated.length > 1 ? '#8a6a48' : seated[0]?.colour ?? '#8a6a48' }
+        const m = mode === 'talk' && partner ? partner : primary()
+        return { label: m.name, colour: m.colour }
+      },
+      target: () => {
+        const named = namedIn(input?.text ?? '')
+        if (named) return named.v.fig.head.getWorldPosition(headAt)
+        if (mode === 'table' && seated.length > 1) return headAt.set(-0.25, 1.0, 0.15)
+        const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
+        return m ? m.v.fig.head.getWorldPosition(headAt) : null
+      },
+      blocked: () => entries.active === 'notebook',
+      openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
+      submit: (text, t0) => void submitLine(text, t0),
+    }) : null
+    ctx.effect(() => () => {
+      input?.dispose()
+      furnish?.dispose()
+    }, 'talk always-on input')
+    // Projects already being made stand where they will go, as wrapped parcels.
+    if (INPUT) void listProjects(primary().person).then((r) => {
+      if (r.ok) for (const p of r.projects) furnish?.parcel(p.what, p.where)
+    })
+
+    /** Your own villager decides what a line meant, and the room shows it. */
+    const submitLine = async (text: string, t0: number) => {
+      if (!text || pending || routing) return restoreLine(text)
+      const me = primary()
+      const elsewhere = (mode === 'talk' && partner && partner !== me) || mode === 'table'
+      if (mode === 'talk' && partner && SIT.test(text)) return invite(partner)
+      if (elsewhere || (FAREWELL.test(text) && text.length <= 40 && mode !== 'room')) return send(text)
+      const guess = furnish!.hint(text, t0)
+      routing = true
+      routingText = text
+      me.v.thinking = true
+      const r = await route(me.person, text, me.name, cast.map((m) => ({ id: m.person, name: m.name, role: m.role })))
+      me.v.thinking = false
+      routing = false
+      routingText = ''
+      routes.push({ text, route: r.ok ? r.routed.route : `failed (${r.why})`, ms: Math.round(r.ms), ...(r.ok ? { models: r.models, costUsd: r.costUsd } : {}) })
+      if (!r.ok) {
+        furnish!.dismiss(guess)
+        keep(me.person, text)
+        restoreLine(text)
+        quip(me, r.why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+        return
+      }
+      const routed = r.routed
+      const to = cast.find((m) => m.person === routed.to)
+      switch (routed.route) {
+        case 'talk':
+          furnish!.dismiss(guess)
+          if (!to || to === me) return send(text)
+          choose(to, !routed.message)
+          if (routed.message) await send(routed.message)
+          return
+        case 'answer':
+          furnish!.dismiss(guess)
+          return send(text)
+        case 'furnish':
+          if (mode === 'talk') endTalk()
+          if (routed.say) quip(me, routed.say)
+          return furnish!.furnish(routed, text, t0, guess)
+        case 'project':
+          furnish!.dismiss(guess)
+          if (mode === 'talk') endTalk()
+          if (routed.say) quip(me, routed.say)
+          await furnish!.project(routed, text)
+          return
+        case 'journal':
+          furnish!.dismiss(guess)
+          ctx.emit('village/journal', { person: to?.person, section: routed.section })
+          return
+      }
+    }
 
     // ── Inspection, for the checks ──────────────────────────────────────────
     ctx.effect(() => {
@@ -1111,7 +1245,13 @@ export default {
           }])),
           lit: seated.filter((m) => m.tag.classList.contains('lit')).map((m) => m.person),
           focused: view.focused,
+          input: input ? { ...input.state(), routing, routes: routes.slice(), furnish: furnish!.state(), journalRect: input.journalRect() } : null,
         }),
+        /** For the checks: what "here" and "that" point at, as a click on the room would set it. */
+        pickAt: (x: number, y: number, z: number, name?: string) => furnish?.pickAt(x, y, z, name),
+        keep: () => furnish?.keep(),
+        undo: () => furnish?.undo(),
+        again: () => furnish?.again(),
         notify: (person: string) => {
           const m = cast.find((c) => c.person === person)
           if (m) notify(m)

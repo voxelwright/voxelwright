@@ -33,6 +33,8 @@ export interface Entries {
   readonly hovered: string | null
   /** Leave the active entry, as Escape does. */
   back(): void
+  /** Choose an entry by id, as a click on it would. False when there is no such entry. */
+  choose(id: string): boolean
   /** Show a short line of text at the bottom of the screen, or hide it with null. */
   say(text: string | null): void
   /** Put the keyboard order in screen order, left to right, then top to bottom. */
@@ -307,6 +309,11 @@ export default {
         return hovered?.id ?? null
       },
       back,
+      choose(id: string) {
+        const e = live.get(id)
+        if (e) choose(e)
+        return Boolean(e)
+      },
       say,
       sort,
       list: () => [...live.values()].map((e) => ({ id: e.id, label: e.label, ...toScreen(center(e)) })),
