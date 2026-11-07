@@ -156,6 +156,69 @@ try {
   const refusedV1 = await refusal(async () => upgrade(onRightV1))
   check('v1 upgrade: a room added on the right wall, where the living room stands, is refused with why', /living room now stands/.test(refusedV1?.message ?? ''), refusedV1?.message)
   {
+    // Codd findings on the 1 -> 2 upgrade (#53).
+    const rightLength = (plan) => P.curveOf(plan, P.wallOf(plan, 'kitchen.right')).length
+    const door = (plan) => P.wallOf(plan, 'kitchen.right').openings.find((o) => o.id === 'kitchen.door-living')
+    // 1. The doorway stays at the house's doorway, shifted along to fit when the right wall got shorter.
+    for (const wallId of ['kitchen.front', 'kitchen.back']) {
+      const moved = v1Edit({ op: 'moveWall', wallId, by: -0.8 })
+      const got = await refusal(async () => upgrade(moved))
+      const up = got ? null : upgrade(moved)
+      check(`v1 upgrade: a kitchen with its ${wallId.slice(8)} wall moved in 0.8 m upgrades with the doorway on the shared wall`,
+        Math.abs(rightLength(moved) - 5.38) < 1e-6 && up && P.validate(up).length === 0 && door(up).from >= 0.3 - 1e-9 && door(up).to <= rightLength(up) - 0.3 + 1e-9 &&
+          (wallId === 'kitchen.back' ? Math.abs(door(up).from - 3.94) < 1e-6 : Math.abs(door(up).to - 5.08) < 1e-6),
+        got?.message ?? door(up))
+    }
+    // 2. A room of the person's own that the living room would collide with keeps its shape and things under a fresh id and name.
+    const ownRoom = (id, label) => {
+      const added = P.apply({ ...structuredClone(KITCHEN_V1), schema: P.PLAN_SCHEMA }, { ...pantry, room: { id, label }, door: { id: `${id}.door`, from: 2.25, to: 3.75, leaves: 2 } })
+      const wall = added.walls.find((w) => w.id.startsWith(`${id}.`) && w.a !== 'kitchen.front-left' && w.b !== 'kitchen.back-left' && w.id !== `${id}.door`)
+      return asV1(P.apply(added, { op: 'placeItem', furniture: hang(`${id}.picture`, wall.id, 1, id) }))
+    }
+    for (const [id, label] of [['living-room', 'Living room'], ['living', 'Den']]) {
+      const before = ownRoom(id, label)
+      const got = await refusal(async () => upgrade(before))
+      const up = got ? null : upgrade(before)
+      const theirs = up?.rooms.find((r) => r.id !== 'kitchen' && r.id !== 'living')
+      const pic = up?.furniture.find((f) => f.at.mount === 'wall' && f.at.roomId === theirs?.id)
+      check(`v1 upgrade: a room of the person's own with id ${id} called ${label} upgrades beside the living room, kept under a fresh id and name`,
+        up && P.validate(up).length === 0 && up.rooms.find((r) => r.id === 'living')?.label === 'Living room' && theirs &&
+          (id === 'living' ? theirs.id === 'living-2' && theirs.label === 'Den' : theirs.id === 'living-room' && theirs.label === 'Living room 2') &&
+          Math.abs(P.roomArea(up, theirs.id) - P.roomArea({ ...before, schema: P.PLAN_SCHEMA }, id)) < 1e-6 && pic && P.validate(up).length === 0,
+        got?.message ?? theirs)
+    }
+    // 3. A right wall bowed deep into the kitchen still upgrades; rooms that really share floor are still refused.
+    for (const depth of [1.5, 2, 3]) {
+      const bowed = v1Edit({ op: 'bendWall', wallId: 'kitchen.right', sagitta: -depth })
+      const got = await refusal(async () => upgrade(bowed))
+      check(`v1 upgrade: the right wall bent ${depth} m into the kitchen upgrades`, P.wallOf(bowed, 'kitchen.right').sagitta === -depth && !got, got?.message ?? P.wallOf(bowed, 'kitchen.right').sagitta)
+    }
+    const den = structuredClone(HOUSE_PLAN)
+    const dc = [['den.a', -5, 0], ['den.b', -3.1, 0], ['den.c', -3.1, 2], ['den.d', -5, 2]]
+    den.corners.push(...dc.map(([id, x, z]) => ({ id, x, z })))
+    den.walls.push(...dc.map(([id], i) => ({ id: `${id}-wall`, a: id, b: dc[(i + 1) % 4][0], thickness: 0.18, height: 3, sagitta: 0, openings: [] })))
+    den.rooms.push({ id: 'den', label: 'Den', loop: dc.map(([id]) => id) })
+    check('a room reaching 0.3 m into the kitchen is still refused as an overlap', P.validate(den).some((r) => /room den overlaps room kitchen/.test(r)), P.validate(den))
+    // 4. Schema 2's living room and doorway are frozen in the upgrade: a page whose layout.ts moved the doorway and the living room still upgrades old kitchens to the same house.
+    const moved = await createServer({
+      root: new URL('..', import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true },
+      plugins: [{ name: 'moved-layout', transform: (code, id) => (id.endsWith('/src/layout.ts') ? code.replace('z0: 2.45, z1: 3.15', 'z0: 1.45, z1: 2.15').replace('WALL_T + 3.2', 'WALL_T + 4.2') : undefined) }],
+    })
+    try {
+      const PM = await moved.ssrLoadModule('/src/build/plan.ts')
+      const HM = await moved.ssrLoadModule('/src/build/history.ts')
+      check('v1 upgrade: a later change to layout.ts moves HOUSE_PLAN but not an upgraded old kitchen',
+        !same(PM.HOUSE_PLAN, HOUSE_PLAN) && same(HM.upgrade(KITCHEN_V1), upgrade(KITCHEN_V1)) && same(upgrade(KITCHEN_V1), HOUSE_PLAN), canonical(HM.upgrade(KITCHEN_V1)))
+    } finally {
+      await moved.close()
+    }
+    // 5. Things hung where the doorway is cut move to just beside it.
+    const over = upgrade(v1Edit({ op: 'placeItem', furniture: hang('f.over', 'kitchen.right', 5.1, 'kitchen') }))
+    const at = over.furniture.find((f) => f.id === 'f.over').at
+    check('v1 upgrade: a picture hung at 5.1 m on the right wall, where the doorway is cut, moves clear of it',
+      P.validate(over).length === 0 && at.wallId === 'kitchen.right' && (at.along <= door(over).from - 0.5 + 1e-9 || at.along >= door(over).to + 0.5 - 1e-9), at)
+  }
+  {
     // A store saved by the kitchen-only page: its root and a moved wall read as the house; the room on the right is listed but unreadable.
     const v1Store = memoryStore()
     const seed = await PlanHistory.open(v1Store, HOUSE_PLAN)

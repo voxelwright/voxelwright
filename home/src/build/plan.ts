@@ -472,9 +472,11 @@ export function validate(plan: Plan): string[] {
     else labels.set(key, r.id)
   }
   // roomAt finds a floor thing's room from where it stands, so two rooms may not share floor.
+  // Both outlines are pulled in: a wall bowed deep into one room puts a reflex corner of
+  // the one-sided outline across the centreline, so neighbours that only share walls overlapped.
   const good = plan.rooms.filter((r) => goodRooms.has(r.id))
   for (let i = 0; i < good.length; i++) for (let j = i + 1; j < good.length; j++) {
-    if (polygonsOverlap(outline(plan, good[i], 0.05), outline(plan, good[j]))) reasons.push(`room ${good[j].id} overlaps room ${good[i].id}`)
+    if (polygonsOverlap(outline(plan, good[i], 0.05), outline(plan, good[j], 0.05))) reasons.push(`room ${good[j].id} overlaps room ${good[i].id}`)
   }
   // A wall thing stays on its wall (moving and bending walls, and adding rooms, carry it or
   // stop before it falls off). A floor or ceiling thing a wall move leaves outside its room
