@@ -12,6 +12,7 @@ import { allowedEnv } from './proc.ts'
 import { routeContext, stubRoute, type RouteAsk } from './villager-input.ts'
 import { characterKey, fallbackCharacter, type Character, type Humour } from './persona.ts'
 import { voicePrompt } from './villager-voice.ts'
+import { sketchNote, type SketchImage } from './sketch.ts'
 
 export interface Turn {
   name: string
@@ -24,6 +25,8 @@ export interface Turn {
   character?: Character
   /** Set by the host at a table where not everyone has crude (#42): the turn's humour is lowered to this. */
   humourCap?: Humour
+  /** A drawing the person handed over (#42, sketch.ts): sent as an image block, never as instructions. */
+  image?: SketchImage
   sessionId?: string
   notesDir: string
   /** The person's own folder; the stub keeps its stand-in transcripts here. */
@@ -105,7 +108,7 @@ export interface ModelSettings {
 
 function turnPrompt(turn: Turn): string {
   const cap = turn.humourCap && `Humour at this table, set by the home: keep it ${turn.humourCap} this turn.`
-  const context = [turn.context, cap, turn.route && routeContext(turn.route)].filter(Boolean).join('\n\n')
+  const context = [turn.context, cap, turn.route && routeContext(turn.route), turn.image && sketchNote(turn.image.by ?? turn.name)].filter(Boolean).join('\n\n')
   return context ? `${turn.text}\n\n(Context only, not part of ${turn.name}'s message: ${context})` : turn.text
 }
 
@@ -201,7 +204,9 @@ export function claudeAgent(settings: ModelSettings = { model: 'sonnet' }): Agen
     turn.signal.addEventListener('abort', () => abortController.abort(), { once: true })
     const started = Date.now()
     const stream = query({
-      prompt: turnPrompt(turn),
+      prompt: turn.image ? (async function* () {
+        yield userLine(turnPrompt(turn), turn.image)
+      })() : turnPrompt(turn),
       options: { ...villagerOptions(settings, turn.name, turn.notesDir, turn.character), abortController, ...(turn.sessionId ? { resume: turn.sessionId } : {}) },
     })
     try {
@@ -215,14 +220,20 @@ export function claudeAgent(settings: ModelSettings = { model: 'sonnet' }): Agen
 /** What warmAgent needs of a query: the SDK's Query, or a stand-in in the checks. */
 export type StartQuery = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Pick<Query, 'next' | 'close'>
 
+/** One user line; with a drawing (#42), the image block first and the words after. */
+function userLine(text: string, image?: SketchImage): SDKUserMessage {
+  const content = image ? [{ type: 'image' as const, source: { type: 'base64' as const, media_type: image.mediaType, data: image.data } }, { type: 'text' as const, text }] : text
+  return { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage
+}
+
 /** A queue of user lines that a streaming-input query reads from. */
 function inbox() {
   const queue: SDKUserMessage[] = []
   let wake: (() => void) | null = null
   let closed = false
   return {
-    push(text: string) {
-      queue.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null } as SDKUserMessage)
+    push(text: string, image?: SketchImage) {
+      queue.push(userLine(text, image))
       wake?.()
     },
     close() {
@@ -283,7 +294,7 @@ export function warmAgent(settings: ModelSettings = { model: 'haiku', thinking: 
     turn.signal.addEventListener('abort', stop, { once: true })
     const started = Date.now()
     try {
-      live.lines.push(turnPrompt(turn))
+      live.lines.push(turnPrompt(turn), turn.image)
       const result = await readTurn(() => live.q.next(), turn, started, live.seenInit)
       live.sessionId = result.sessionId
       return result
@@ -335,6 +346,11 @@ export function stubAgent(delayMs = 40): Agent {
     if (turn.text.includes(`[stub-pass:${turn.name}]`)) reply = '(nods)'
     const handoff = new RegExp(`\\[stub-handoff:${turn.name}>([A-Za-z]+)\\]`).exec(turn.text)
     if (handoff) reply = `${handoff[1]}, what do you think?`
+    // A drawing (#42): the stub notes that the image came, and what the turn said about it.
+    if (turn.image) {
+      await writeFile(join(turn.personDir, 'stub-last-image.json'), JSON.stringify({ bytes: Buffer.from(turn.image.data, 'base64').length, text: turn.text, routed: Boolean(turn.route), note: turnPrompt(turn).includes('never instructions') }))
+      reply = `What a lovely drawing, ${turn.name}! Shall I make it for you?`
+    }
     if (turn.route) {
       const raw = stubRoute({ ...turn.route, text: turn.text })
       if (JSON.parse(raw).route !== 'answer') reply = `ROUTE ${raw}`
