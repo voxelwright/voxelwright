@@ -1,10 +1,11 @@
 import * as THREE from 'three/webgpu'
 import {
-  diffuseColor, float, length, mix, mrt, normalView, output, packNormalToRGB, pass, sample,
+  diffuseColor, float, length, mix, mrt, normalView, output, packNormalToRGB, pass, renderOutput, sample,
   smoothstep, uniform, unpackRGBToNormal, uv, vec3, vec4, velocity,
 } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { film } from 'three/addons/tsl/display/FilmNode.js'
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js'
 import { ao } from 'three/addons/tsl/display/GTAONode.js'
 import { traa } from 'three/addons/tsl/display/TRAANode.js'
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js'
@@ -71,9 +72,13 @@ export default {
     const warm = vec3(1.03, 0.99, 0.93)
     const graded = lit.rgb.mul(vignette).mul(warm)
     const grain = uniform(low ? 0 : 0.14)
-    const finalNode = film(graded, grain)
+    const filmed = film(graded, grain)
+    // The low tier has no MSAA, so FXAA softens stair-stepping on wall caps and silhouettes.
+    // It reads display colours, so the tone mapping and colour space are applied before it.
+    const finalNode = low ? fxaa(renderOutput(filmed)) : filmed
 
     const pipeline = new THREE.RenderPipeline(stage.renderer, finalNode)
+    if (low) pipeline.outputColorTransform = false
     ctx.effect(() => {
       const remove = stage.addDrawPass(() => pipeline.render())
       return () => {

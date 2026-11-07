@@ -738,8 +738,21 @@ export default {
       const ahead = 0.55
       return inShot(m.v.pos.x + Math.sin(m.v.yaw) * ahead, m.v.pos.z + Math.cos(m.v.yaw) * ahead, reach) && !inShot(m.v.pos.x, m.v.pos.z, reach)
     }
+    // Now and then one villager at its chore looks up and waves: an invitation to talk, in the room itself.
+    let nextGreet = 6
+    let hovered: string | null = null
     ctx.on('village/frame', (dt, t) => {
       clock += dt
+      if (mode === 'room' && (nextGreet -= dt) <= 0) {
+        const free = cast.filter((m) => m.v.state === 'work' && !m.glyph.visible && entries.hovered !== m.entry)
+        free[Math.floor(Math.random() * free.length)]?.v.greet()
+        nextGreet = 9 + Math.random() * 6
+      }
+      // Hovering one makes it look up and wave back.
+      if (entries.hovered !== hovered) {
+        hovered = entries.hovered
+        if (mode === 'room') cast.find((m) => m.entry === hovered)?.v.greet()
+      }
       stage.camera.getWorldPosition(eye)
       // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
       if (released && entries.hovered !== released.entry) released = null
