@@ -97,6 +97,7 @@ await page.evaluate(() => window.village.ready(5000))
 // window.renderBed(seconds, ops, fade) -> channel samples (base64) and the decoded buffer's shape.
 await page.evaluate(async (SR) => {
   const { Bed, LEVEL } = await import('/src/voice/bed.ts')
+  const { busFor, mixFor } = await import('/src/voice/buses.ts')
   const bytes = await (await fetch('/audio/groove-music.ogg')).arrayBuffer()
   const b64 = (f32) => {
     const raw = new Uint8Array(f32.buffer)
@@ -108,10 +109,10 @@ await page.evaluate(async (SR) => {
   window.renderBed = async (seconds, ops = [], fade = 0, ship = true) => {
     const off = new OfflineAudioContext(2, Math.round(seconds * SR), SR)
     const buffer = await off.decodeAudioData(bytes.slice(0))
-    const bed = new Bed(off, buffer, off.destination)
+    const bed = new Bed(off, buffer, busFor(off, 'music'))
     bed.start(0, fade)
-    // Each duck is made when the render reaches it (as the plugin does), so it starts from the gain the render has by then.
-    for (const op of ops) off.suspend(op.t).then(() => { bed.duck(op.duck, off.currentTime); off.resume() })
+    // Each duck is made when the render reaches it (as the voices do), so it starts from the gain the render has by then.
+    for (const op of ops) off.suspend(op.t).then(() => { mixFor(off).duck(op.duck, off.currentTime); off.resume() })
     const out = await off.startRendering()
     const a = out.getChannelData(0)
     const b = out.getChannelData(1)
@@ -122,7 +123,7 @@ await page.evaluate(async (SR) => {
     const off = new OfflineAudioContext(2, 1, SR)
     const n = (await off.decodeAudioData(bytes.slice(0))).length
     const two = new OfflineAudioContext(2, 2 * n, SR)
-    const bed = new Bed(two, await two.decodeAudioData(bytes.slice(0)), two.destination)
+    const bed = new Bed(two, await two.decodeAudioData(bytes.slice(0)), busFor(two, 'music'))
     bed.start(0, 0)
     const out = await two.startRendering()
     const stats = []
@@ -198,18 +199,18 @@ check(
 await page.close()
 
 // ── the live plugin ─────────────────────────────────────────────────────────
-const URL_ALL = `${base}?talk=npc&plugins=babble,music`
-// A worklet on the bed's output reports each 128-sample block's sum of squares with its audio time.
+const URL_ALL = `${base}?talk=npc&plugins=babble,music,sound`
+// A worklet on the music bus after its duck (voice/buses.ts) reports each 128-sample block's sum of squares with its audio time.
 async function tap(p) {
   await p.evaluate(async () => {
-    const { audio, bed } = window.village.music
+    const { audio, bed, mix } = window.village.music
     const code = `registerProcessor('music-tap', class extends AudioWorkletProcessor {
       process(inputs) { const ch = inputs[0][0]; let s = 0, p = 0; if (ch) for (let i = 0; i < ch.length; i++) { s += ch[i] * ch[i]; p = Math.max(p, Math.abs(ch[i])) }
         this.port.postMessage([currentTime, s, p]); return true } })`
     await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
     const node = new AudioWorkletNode(audio, 'music-tap')
     const sink = new GainNode(audio, { gain: 0 })
-    bed.output.connect(node).connect(sink).connect(audio.destination)
+    mix.ducked.connect(node).connect(sink).connect(audio.destination)
     window.blocks = []
     node.port.onmessage = (m) => window.blocks.push(m.data)
     // The reference: the same music, un-ducked and at full fade, from the decoded buffer's first channel.
@@ -294,9 +295,9 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await said(live, 12, 100)
   const tb = await now(live)
   const down = await measured(live, ta + 0.7, tb)
-  const duringBed = await live.evaluate(() => window.village.music.bed.ducking)
+  const duringBed = await live.evaluate(() => window.village.music.mix.ducking)
   await live.waitForTimeout(300)
-  const stillDown = await live.evaluate(() => window.village.music.bed.ducking)
+  const stillDown = await live.evaluate(() => window.village.music.mix.ducking)
   await live.waitForTimeout(2400)
   const tc = await now(live)
   await live.waitForTimeout(600)
@@ -311,10 +312,10 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
     const root = window.village.kernel.root
     root.emit('village/said', { villager: 'Moss', word: 'hello', index: 0, last: false })
     await new Promise((r) => setTimeout(r, 300))
-    const down = window.village.music.bed.ducking
+    const down = window.village.music.mix.ducking
     root.emit('village/said-stop', { villager: 'Moss' })
     await new Promise((r) => setTimeout(r, 2600))
-    return { down, back: window.village.music.bed.ducking }
+    return { down, back: window.village.music.mix.ducking }
   })
   check('A cut-short reply releases the duck too', cut.down < 0.6 && cut.back > 0.97, JSON.stringify(cut))
 
@@ -427,11 +428,12 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
       shiftMInert: localStorage.getItem('village.music.muted') === before,
     }
     await window.village.unload('babble')
+    await window.village.unload('sound')
     await new Promise((r) => setTimeout(r, 150))
     return { ...result, stateAfterBothLeft: audio.state }
   })
   check(
-    'Unload stops the loop and removes the note, credit and handle; the shared context stays open for the voices and closes when both have left',
+    'Unload stops the loop and removes the note, credit and handle; the shared context stays open for the voices and the sounds and closes when all have left',
     gone.stateWhileVoicesLoaded !== 'closed' && gone.voicesStillHaveIt && gone.stateAfterBothLeft === 'closed' && gone.stopped && !gone.handle && !gone.note && !gone.style && gone.shiftMInert,
     JSON.stringify(gone),
   )
@@ -497,11 +499,11 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await cold.close()
 }
 
-// ?babble=off: no voices to duck for and no speaker button, so the music takes M itself.
+// ?babble=off: no voices to duck for; M (plugins/sound.ts) still mutes the music.
 {
   const p = await context.newPage()
   p.on('pageerror', (e) => errors.push(String(e)))
-  await p.goto(`${base}?talk=npc&babble=off&plugins=music`)
+  await p.goto(`${base}?talk=npc&babble=off&plugins=music,sound`)
   await p.evaluate(() => window.village.ready(5000))
   await p.evaluate(() => localStorage.clear())
   await p.reload()
@@ -511,13 +513,13 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await tap(p)
   await p.evaluate(() => window.village.kernel.root.emit('village/said', { villager: 'Dumpling', word: 'hello', index: 0, last: true }))
   await p.waitForTimeout(500)
-  const gain = await p.evaluate(() => window.village.music.bed.ducking)
+  const gain = await p.evaluate(() => window.village.music.mix.ducking)
   await p.keyboard.press('m')
   const t = (await now(p)) + 0.5
   await p.waitForTimeout(1300)
   const silent = await measured(p, t, t + 0.6)
   const stored = await p.evaluate(() => ({ all: localStorage.getItem('village.babble.muted'), muted: window.village.music.muted, babbleButton: Boolean(document.querySelector('.babble-toggle')) }))
-  check('?babble=off: no ducking, no speaker button, and M still mutes the music (kept under the same key)', gain === 1 && !stored.babbleButton && stored.all === '1' && stored.muted && silent.peak < 1e-5, `gain ${gain}, ${JSON.stringify(stored)}`)
+  check('?babble=off: no ducking, and M (the speaker button\'s key) still mutes the music, kept under the same key', gain === 1 && stored.babbleButton && stored.all === '1' && stored.muted && silent.peak < 1e-5, `gain ${gain}, ${JSON.stringify(stored)}`)
   await p.close()
 }
 

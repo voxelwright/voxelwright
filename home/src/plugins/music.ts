@@ -1,21 +1,19 @@
 import type { Context } from 'cordis'
 import { Bed } from '../voice/bed'
 import { acquireAudio, type SharedAudio } from '../voice/context'
+import { busFor, mixFor, type Mix } from '../voice/buses'
 import { ALL_MUTED, MUSIC_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 
 // #42: a quiet looped bed under the villagers' voices. On with ?talk=npc; ?music=off
 // turns it off. It starts on the first touch or key press, like the voices (on the one
 // AudioContext they share, voice/context.ts), fades in over
-// two seconds, drops 6 dB while a villager speaks and comes back 0.6 s after the last word.
-// `M` and the felt speaker button (babble.ts) mute everything; Shift+M or the note beside
-// the speaker mutes the music alone. The recording is CC BY 4.0: public/audio/CREDITS.md.
+// two seconds, and plays into the music bus (voice/buses.ts), which drops 6 dB while a
+// villager speaks. `M` and the felt speaker button (plugins/sound.ts) mute everything;
+// Shift+M or the note beside the speaker mutes the music alone. The recording is CC BY
+// 4.0: public/audio/CREDITS.md.
 const params = new URLSearchParams(location.search)
 const ON = params.get('music') !== 'off' && params.get('talk') === 'npc'
-/** With ?babble=off there are no voices to duck for, and no speaker button, so this plugin takes `M` itself. */
-const VOICES = params.get('babble') !== 'off'
 const SRC = `${import.meta.env.BASE_URL}audio/groove-music.ogg`
-/** Seconds after the last word before the bed comes back. */
-const HOLD = 0.6
 
 export const CREDIT = {
   title: 'Groove Music',
@@ -54,6 +52,8 @@ export interface MusicApi {
   /** Silenced by either switch. */
   readonly muted: boolean
   readonly musicMuted: boolean
+  /** The context's mix, for the duck and the post-duck tap. */
+  readonly mix: Mix | null
   setMusicMuted(muted: boolean): void
 }
 
@@ -66,7 +66,6 @@ export default {
     let bed: Bed | null = null
     let allMuted = storedFlag(ALL_MUTED)
     let musicMuted = storedFlag(MUSIC_MUTED)
-    let release: ReturnType<typeof setTimeout> | undefined
 
     const wrap = document.createElement('div')
     wrap.className = 'music-note'
@@ -116,7 +115,7 @@ export default {
         if (!response.ok) throw new Error(`${response.status}`)
         const buffer = await a.decodeAudioData(await response.arrayBuffer())
         if (audio !== a || a.state === 'closed') return
-        bed = new Bed(a, buffer, a.destination, { muted: silenced() })
+        bed = new Bed(a, buffer, busFor(a, 'music'), { muted: silenced() })
         bed.start(a.currentTime + 0.05)
       } catch (error) {
         console.warn('music: could not load the loop', error)
@@ -125,14 +124,8 @@ export default {
     // The context exists from page load but silent; the loop is fetched on the first gesture.
     const onKey = (e: KeyboardEvent) => {
       if (isMuteKey(e, true)) setMusicMuted(!musicMuted)
-      else if (!VOICES && isMuteKey(e, false)) {
-        allMuted = !allMuted
-        storeFlag(ALL_MUTED, allMuted)
-        apply()
-      }
     }
     const close = () => {
-      clearTimeout(release)
       bed?.dispose()
       bed = null
     }
@@ -162,24 +155,10 @@ export default {
       }
     }, 'music audio and toggle')
 
-    // The speaker button and `M` live in babble.ts; this follows them.
+    // The speaker button and `M` live in plugins/sound.ts; this follows them.
     ctx.on('village/muted', (e) => {
       allMuted = e.muted
       apply()
-    })
-
-    // Duck for a speaker, and come back HOLD seconds after the last word (a comma's pause keeps it down).
-    const hold = () => {
-      clearTimeout(release)
-      release = setTimeout(() => bed?.duck(false), HOLD * 1000)
-    }
-    ctx.on('village/said', () => {
-      if (!VOICES || !bed || audio?.state !== 'running' || document.hidden) return
-      bed.duck(true)
-      hold()
-    })
-    ctx.on('village/said-stop', () => {
-      if (bed) hold()
     })
 
     if (import.meta.env.DEV) {
@@ -188,6 +167,7 @@ export default {
         get audio() { return audio },
         get muted() { return silenced() },
         get musicMuted() { return musicMuted },
+        get mix() { return audio && mixFor(audio) },
         setMusicMuted,
       }
       // window.village appears once main.ts has loaded the first plugins, so attach on the next tick.

@@ -1,23 +1,23 @@
 import type { Context } from 'cordis'
 import { Babbler, type Said } from '../voice/engine'
 import { acquireAudio, type SharedAudio } from '../voice/context'
+import { busFor, mixFor, voicesSpoke, voicesStopped } from '../voice/buses'
 import { voiceKey } from '../voice/profiles'
 import { runDemo } from '../voice/demo'
-import { ALL_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
+import { ALL_MUTED, storedFlag } from '../voice/mute'
 
 // #42: villagers babble in time with their words when no voice model is connected.
 // talk.ts announces each revealed word with `village/said`; this plugin turns it
 // into a short run of synthesized syllables in that villager's voice. On with
 // ?talk=npc; ?babble=off turns it off; ?babble=demo (dev only) plays a scripted
-// exchange without talk.ts.
+// exchange without talk.ts. The voices play into the voices bus (voice/buses.ts), which
+// ducks the music while they speak; mute and the speaker button are plugins/sound.ts's.
 declare module 'cordis' {
   interface Events {
     /** A villager's word has just appeared on its card. `word` keeps its trailing punctuation. */
     'village/said'(e: { villager: string; word: string; index: number; last: boolean }): void
     /** A villager's reply was cut short: stop its voice now. */
     'village/said-stop'(e: { villager: string }): void
-    /** All sound (the voices and the music) was muted or unmuted, by `M` or the speaker button. */
-    'village/muted'(e: { muted: boolean }): void
   }
 }
 
@@ -26,28 +26,11 @@ const MODE = params.get('babble')
 const DEMO = import.meta.env.DEV && MODE === 'demo'
 const ON = MODE !== 'off' && (params.get('talk') === 'npc' || DEMO)
 
-const SPEAKER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path class="cone" d="M4 9.5h3.2L12 5.6v12.8l-4.8-3.9H4z"/><path class="waves" d="M15 9.2c1 .8 1.5 1.7 1.5 2.8s-.5 2-1.5 2.8M17.4 7c1.7 1.4 2.6 3.1 2.6 5s-.9 3.6-2.6 5"/><path class="hush" d="M15.5 9.5l5 5m0-5l-5 5"/></svg>`
-
-const CSS = `
-.babble-toggle { position: fixed; left: 16px; bottom: 16px; z-index: 30; width: 40px; height: 40px; border-radius: 50%;
-  border: 0; padding: 0; cursor: pointer; display: grid; place-items: center;
-  background: radial-gradient(circle at 35% 30%, #f3e4c8, #e2c9a0 70%, #cfb085);
-  box-shadow: 0 2px 6px rgba(60, 40, 20, .25), inset 0 0 0 3px rgba(255, 250, 240, .35);
-  outline: 1.5px dashed rgba(110, 80, 50, .45); outline-offset: -6px; transition: transform .15s ease; }
-.babble-toggle:hover { transform: scale(1.06); }
-.babble-toggle:focus-visible { outline: 2px solid #6b4a2b; outline-offset: 2px; }
-.babble-toggle svg { width: 22px; height: 22px; fill: none; stroke: #6b4a2b; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.babble-toggle .cone { fill: #6b4a2b; }
-.babble-toggle .hush { display: none; }
-.babble-toggle[aria-pressed="true"] .waves { display: none; }
-.babble-toggle[aria-pressed="true"] .hush { display: inline; }
-`
-
 export interface BabbleApi {
   readonly babbler: Babbler | null
   readonly audio: AudioContext | null
+  /** All sound is muted (plugins/sound.ts owns the switch). */
   readonly muted: boolean
-  setMuted(muted: boolean): void
 }
 
 export default {
@@ -56,34 +39,7 @@ export default {
     if (!ON) return
     let shared: SharedAudio | null = null
     let babbler: Babbler | null = null
-    let muted = storedFlag(ALL_MUTED)
 
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'babble-toggle'
-    button.innerHTML = SPEAKER
-    const style = document.createElement('style')
-    style.textContent = CSS
-    const show = () => {
-      button.setAttribute('aria-pressed', String(muted))
-      button.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on')
-      button.title = `${muted ? 'Sound off' : 'Sound on'} (M)`
-    }
-    const setMuted = (value: boolean) => {
-      muted = value
-      storeFlag(ALL_MUTED, muted)
-      babbler?.setMuted(muted)
-      show()
-      ctx.emit('village/muted', { muted })
-    }
-    show()
-    button.addEventListener('click', () => setMuted(!muted))
-
-    // The context is shared with the music (voice/context.ts): made at load, suspended, and
-    // resumed by the first gesture. The voices only build their graph on it.
-    const onKey = (e: KeyboardEvent) => {
-      if (isMuteKey(e, false)) setMuted(!muted)
-    }
     const onVisibility = () => document.hidden && babbler?.stop()
     const drop = () => {
       babbler?.dispose()
@@ -91,42 +47,38 @@ export default {
     }
 
     ctx.effect(() => {
-      document.head.append(style)
-      document.body.append(button)
-      addEventListener('keydown', onKey)
       document.addEventListener('visibilitychange', onVisibility)
       shared = acquireAudio({
         ready: (a) => {
-          babbler = new Babbler(a, a.destination, { muted })
+          babbler = new Babbler(a, busFor(a, 'voices'))
         },
         closed: drop,
       })
       return () => {
-        removeEventListener('keydown', onKey)
         document.removeEventListener('visibilitychange', onVisibility)
-        button.remove()
-        style.remove()
         drop()
         shared?.release()
         shared = null
       }
-    }, 'babble audio and toggle')
+    }, 'babble audio')
 
     ctx.on('village/said', (e: Said) => {
-      if (!babbler || shared?.context?.state !== 'running' || document.hidden) return
+      const a = shared?.context
+      if (!babbler || a?.state !== 'running' || document.hidden) return
       babbler.said(e)
+      voicesSpoke(a)
     })
     // A stop for someone who is not speaking leaves the speaker alone.
     ctx.on('village/said-stop', (e) => {
       if (babbler?.speaking === (voiceKey(e.villager) ?? e.villager)) babbler.stop()
+      if (shared?.context) voicesStopped(shared.context)
     })
 
     if (import.meta.env.DEV) {
       const api: BabbleApi = {
         get babbler() { return babbler },
         get audio() { return shared?.context ?? null },
-        get muted() { return muted },
-        setMuted,
+        get muted() { return shared?.context ? mixFor(shared.context).muted : storedFlag(ALL_MUTED) },
       }
       // window.village appears once main.ts has loaded the first plugins, so attach on the next tick.
       ctx.effect(() => {

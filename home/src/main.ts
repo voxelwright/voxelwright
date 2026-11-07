@@ -47,13 +47,13 @@ const known = new Set<Loadable>(Object.values(listed))
 const extra = Object.fromEntries(
   Object.values(discovered).filter((p) => p && !known.has(p) && !(p.name in listed)).map((p) => [p.name, p]),
 )
-PLANS.kitchen.plugins.push(...Object.keys(extra))
+/** Loaded for the whole visit; the rooms service loads and unloads the rest. `sound` is here so mute and the cues outlive a room (#52). */
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx', 'sound']
+PLANS.kitchen.plugins.push(...Object.keys(extra).filter((n) => !GLOBAL.includes(n)))
 const catalog: Record<string, Loadable> = { ...listed, ...extra }
 // ?room=living starts in another room.
 const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
 const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start) }
-/** Loaded for the whole visit; the rooms service loads and unloads the rest. */
-const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
 // ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
 const only = params.get('plugins')?.split(',')
 // With rooms listed too, each room brings only its listed plugins, so the Elder's

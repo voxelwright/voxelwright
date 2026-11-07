@@ -53,28 +53,16 @@ const BURST = (() => {
   return env
 })()
 
-/** Linear to 0.6, then a tanh shoulder towards 0.89 (-1 dBFS); input beyond ±1 holds the end value. */
-const SOFT_CLIP = (() => {
-  const n = 4097
-  const curve = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1
-    const a = Math.abs(x)
-    curve[i] = Math.sign(x) * (a <= 0.6 ? a : 0.6 + 0.29 * Math.tanh((a - 0.6) / 0.29))
-  }
-  return curve
-})()
-
 interface Bus { gain: GainNode; speaker: string }
 
 /**
  * Speaks revealed words in a villager's voice. One speaker at a time: a word
- * from someone else fades the previous speaker out. Master level and mute live
- * on `master`; `output` is the limiter, the point to tap for measurement.
+ * from someone else fades the previous speaker out. `output` sets the voices' level
+ * and connects to `destination`: the voices bus (voice/buses.ts), which owns mute
+ * and the limiter.
  */
 export class Babbler {
-  readonly master: GainNode
-  readonly output: WaveShaperNode
+  readonly output: GainNode
   private noiseBuffer: AudioBuffer
   private waves = new Map<number, PeriodicWave>()
   private bus: Bus | null = null
@@ -82,19 +70,11 @@ export class Babbler {
   private cursor = 0
   private position = new Map<string, number>()
   private live = new Set<AudioScheduledSourceNode>()
-  private level: number
-  private isMuted = false
   private warned = new Set<string>()
 
-  constructor(readonly ctx: BaseAudioContext, destination: AudioNode = ctx.destination, opts: { level?: number; muted?: boolean } = {}) {
-    this.level = opts.level ?? LEVEL
-    this.isMuted = Boolean(opts.muted)
-    this.master = new GainNode(ctx, { gain: this.isMuted ? 0 : this.level })
-    // A gentle limiter: a soft clip, transparent below -4.4 dBFS (where speech sits) and
-    // never above -1 dBFS. Stateless, unlike a DynamicsCompressorNode, whose
-    // adaptive release and makeup gain would make a word depend on what came before.
-    this.output = new WaveShaperNode(ctx, { curve: SOFT_CLIP })
-    this.master.connect(this.output).connect(destination)
+  constructor(readonly ctx: BaseAudioContext, destination: AudioNode, opts: { level?: number } = {}) {
+    this.output = new GainNode(ctx, { gain: opts.level ?? LEVEL })
+    this.output.connect(destination)
     const rand = seeded('village babble noise')
     this.noiseBuffer = new AudioBuffer({ length: ctx.sampleRate, sampleRate: ctx.sampleRate, numberOfChannels: 1 })
     const data = this.noiseBuffer.getChannelData(0)
@@ -119,19 +99,6 @@ export class Babbler {
   /** Who is speaking, by voice key (or the raw name for an unknown villager). */
   get speaking(): string | null {
     return this.speaker
-  }
-
-  get muted(): boolean {
-    return this.isMuted
-  }
-
-  /** Mute or unmute with a 20 ms ramp, so neither clicks. */
-  setMuted(muted: boolean, at = this.ctx.currentTime): void {
-    this.isMuted = muted
-    const g = this.master.gain
-    g.cancelScheduledValues(at)
-    g.setValueAtTime(g.value, at)
-    g.linearRampToValueAtTime(muted ? 0 : this.level, at + 0.02)
   }
 
   /**
@@ -164,7 +131,7 @@ export class Babbler {
     this.cursor = start + plan.length
     if (!this.bus) {
       const gain = new GainNode(this.ctx, { gain: 1 })
-      gain.connect(this.master)
+      gain.connect(this.output)
       this.bus = { gain, speaker: name }
     }
     for (const note of plan.notes) this.blip(note, voice, start + this.sample(note.at), this.bus)
@@ -184,12 +151,11 @@ export class Babbler {
     for (const s of this.live) if ((s as unknown as { bus: Bus }).bus === bus) s.stop(at + STOP_FADE + 0.004)
   }
 
-  /** Stop at once and disconnect the master chain. The context is the caller's to close. */
+  /** Stop at once and disconnect. The context is the caller's to close. */
   dispose(): void {
     const now = this.ctx.currentTime
     this.stop(now)
     for (const s of this.live) s.stop(now)
-    this.master.disconnect()
     this.output.disconnect()
   }
 

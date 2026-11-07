@@ -185,6 +185,7 @@ await page.evaluate(() => window.village.ready(5000))
 // Installs window.render(events, seconds) -> base64 mono float32 at 48 kHz, plus the render's wall time.
 await page.evaluate(async (SR) => {
   const { Babbler } = await import('/src/voice/engine.ts')
+  const { busFor } = await import('/src/voice/buses.ts')
   const { timeline } = await import('/src/voice/demo.ts')
   const b64 = (f32) => {
     const bytes = new Uint8Array(f32.buffer)
@@ -194,7 +195,7 @@ await page.evaluate(async (SR) => {
   }
   window.render = async (events, seconds, opts = {}) => {
     const off = new OfflineAudioContext(1, Math.ceil(seconds * SR), SR)
-    const babbler = new Babbler(off, off.destination, opts)
+    const babbler = new Babbler(off, busFor(off, 'voices'), opts)
     for (const { t, e } of events) babbler.said(e, t)
     const t0 = performance.now()
     const buf = await off.startRendering()
@@ -285,7 +286,7 @@ const demo = await page.evaluate(async () => {
 }
 
 // ── the live plugin ─────────────────────────────────────────────────────────
-// A worklet on the limiter's output reports each 128-sample block's peak with its audio time.
+// A worklet on the mix's limiter (voice/buses.ts) reports each 128-sample block's peak with its audio time.
 async function tap(p) {
   return p.evaluate(async () => {
     const audio = window.village.babble.audio
@@ -295,7 +296,7 @@ async function tap(p) {
     await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
     const node = new AudioWorkletNode(audio, 'babble-tap')
     const sink = new GainNode(audio, { gain: 0 })
-    window.village.babble.babbler.output.connect(node).connect(sink).connect(audio.destination)
+    window.village.sound.mix.output.connect(node).connect(sink).connect(audio.destination)
     window.blocks = []
     node.port.onmessage = (m) => window.blocks.push(m.data)
     await new Promise((r) => setTimeout(r, 100))
@@ -312,7 +313,7 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
 {
   const live = await context.newPage()
   live.on('pageerror', (e) => errors.push(String(e)))
-  await live.goto(`${base}?talk=npc&plugins=babble`)
+  await live.goto(`${base}?talk=npc&plugins=babble,sound`)
   await live.evaluate(() => window.village.ready(5000))
   await live.waitForTimeout(150)
   // The rule is no sound before a gesture, not no context: the context is made at load so its
@@ -446,18 +447,21 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
     const babbler = window.village.babble.babbler
     window.village.kernel.root.emit('village/said', { villager: 'Moss', word: 'goodbye', index: 0, last: true })
     await window.village.unload('babble')
+    const openForSound = audio.state !== 'closed'
+    await window.village.unload('sound')
     await new Promise((r) => setTimeout(r, 100))
     const storedBefore = localStorage.getItem('village.babble.muted')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm' }))
     return {
+      openForSound,
       state: audio.state,
-      handle: 'babble' in window.village,
+      handle: 'babble' in window.village || 'sound' in window.village,
       toggle: Boolean(document.querySelector('.babble-toggle')),
       mInert: localStorage.getItem('village.babble.muted') === storedBefore,
       sourcesTracked: babbler.active,
     }
   })
-  check('Unload closes the AudioContext, removes the toggle and handle, and M goes inert', unloaded.state === 'closed' && !unloaded.handle && !unloaded.toggle && unloaded.mInert, JSON.stringify(unloaded))
+  check('Unloading the voices leaves the shared context open for the sounds; unloading both closes it, removes the toggle and handles, and M goes inert', unloaded.openForSound && unloaded.state === 'closed' && !unloaded.handle && !unloaded.toggle && unloaded.mInert, JSON.stringify(unloaded))
   await live.close()
 }
 
