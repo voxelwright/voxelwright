@@ -830,7 +830,7 @@ carry that person's colour: Dumpling (cook, Alex), Tuft (tidier, Sam), Moss
 (gardener, Mia). Start the host with all three:
 
 ```sh
-cd host && VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia npm run villager
+cd host && VILLAGER_PEOPLE=alex:Alex:adult,sam:Sam:adult,mia:Mia:adult npm run villager
 ```
 
 What works:
