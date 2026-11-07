@@ -5,7 +5,7 @@ description: Synthesized character voices and short UI sounds with the Web Audio
 
 # Web Audio voices
 
-Version 2, November 6, 2026 (the shared context and the first-context cost). Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
+Version 3, November 7, 2026 (buses, cues, sample sprites and their costs). Version 2 added the shared context and the first-context cost. Scope: sound made in code in the browser, as in `home/src/voice/` (#42). No
 samples, no dependencies. Verified on headless Chrome 158 (Playwright 1.65,
 `channel: 'chrome'`) on macOS; Safari and Firefox are not verified.
 
@@ -133,6 +133,33 @@ audio clock (about 2.7 ms resolution), not with rAF. See
 in black until the sound starts, find the cover's end with ffmpeg
 `blackdetect`, render the WAV offline from the logged event times, and mux with
 `-itsoffset`. See `home/scripts/demo-babble.mjs`.
+
+## Cues and the mix (#52)
+
+- One mix per context (`home/src/voice/buses.ts`): ui, world, voices and music buses into a
+  master (mute) and one stateless soft limiter. Build it lazily with `mixFor(ctx)` so plugin
+  load order never matters. The voices bus ducks the music bus (-6 dB, 80 ms down, back 0.6 s
+  after the last word).
+- Plugins emit "what happened" events (`home/src/sound/contract.ts`); `home/src/sound/map.ts`
+  alone turns them into cues. A new interaction adds an event and a map line, never a clip.
+- **Never make a ConvolverNode per play.** Chrome prepares the kernel on the main thread when
+  the buffer is set: one per tonal cue cost about 1 ms of main thread per event and doubled the
+  offline render cost (84 to 50 ms per audio second). Share one room per context as a send.
+- Decode every sample after the first gesture, never on first play. Several takes of one sound
+  go in one mono Ogg Opus file with a take table (sprite); round-robin picks a take. Eight CC0
+  Freesound recordings came to 104 KB at 48 to 64 kb/s.
+- Event to first audible sample: 2.7 to 8 ms on the audio clock (scheduled at
+  `currentTime + 4 ms`, rounded to a sample). A cue's `gap` rate-limits it; if two events map to
+  the same cue, the gap eats the second, so give each moment its own cue.
+- Short cues read about 9 dB quieter on BS.1770 short-term loudness than they sound; compare
+  momentary maxima. Round 1 levels: UI cues about -38, world -34 LUFS momentary, voices -24.
+- Freesound: search pages, sound pages and HQ previews are public; originals need a login. In
+  the T3 preview browser, a hidden iframe per `/people/<user>/sounds/<id>/download/` URL
+  downloads each original to the tab's downloads list. Record the licence from the sound page
+  at download time.
+- Listening rounds: `home/sound-lab.html` plays every variant live and saves picks through a
+  dev middleware; `home/scripts/record-sound-lab.mjs` muxes offline renders onto headless
+  videos (sync 0.8 to 30 ms).
 
 ## Limits
 
