@@ -457,6 +457,12 @@ export interface Controls {
   rects(): { key: Key; left: number; top: number; right: number; bottom: number }[]
   /** Where a tool's handle (its value's end of the axis) is on screen, for the checks. */
   screen(key: Key): { x: number; y: number }
+  /** #47 regroup: show the tags of only these tools (null: all), so one tool can be used at a time. */
+  only(keys: Key[] | null): void
+  /** #47 regroup: put one tool somewhere else than its place on the bench (in a tin, held up), or back with null. */
+  override(key: Key, at: { pos: THREE.Vector3; turn: number; scale: number; tilt?: number; quat?: THREE.Quaternion } | null): void
+  /** #47 regroup: a tool's two ends on screen (its axis, or either side of a dial), for labelling them. */
+  ends(key: Key): [{ x: number; y: number }, { x: number; y: number }]
   frame(dt: number, t: number): void
   dispose(): void
 }
@@ -498,7 +504,7 @@ const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
 /** Narrow: the stitch dial's tag lies in front of it, as every grid tool's does. */
 const DIAL_FRONT = new THREE.Vector3(0, 0, 0.13)
 
-export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void }): Controls {
+export function controls(stage: Stage, hooks: { input(key: Key, v: number): void; release(key: Key, v: number): void; locked(key: Key): void; grab?(key: Key): boolean }): Controls {
   const group = new THREE.Group()
   group.name = 'villager workshop controls'
   const rail = spoolRail()
@@ -523,11 +529,16 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
   let layout: Layout = 'wide'
   let lift: Partial<Record<Key, number>> = {}
+  const overrides = new Map<Key, { pos: THREE.Vector3; turn: number; scale: number; tilt?: number; quat?: THREE.Quaternion }>()
+  let only: Set<Key> | null = null
+  const baseY = (key: Key) => overrides.get(key)?.pos.y ?? TOP
   const place = () => {
     for (const tool of tools) {
-      const [x, z, ry, k] = PLACES[layout][tool.key]
-      tool.group.position.set(x, TOP + (lift[tool.key] ?? 0) * 0.008, z)
-      tool.group.rotation.y = ry
+      const o = overrides.get(tool.key)
+      const [x, z, ry, k] = o ? [o.pos.x, o.pos.z, o.turn, o.scale] : PLACES[layout][tool.key]
+      tool.group.position.set(x, baseY(tool.key) + (lift[tool.key] ?? 0) * 0.008, z)
+      if (o?.quat) tool.group.quaternion.copy(o.quat)
+      else tool.group.rotation.set(o?.tilt ?? 0, ry, 0, 'YXZ')
       tool.group.scale.setScalar(k)
     }
   }
@@ -647,7 +658,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       m.emissiveIntensity = on * 0.35
     }
     lift[tool.key] = on
-    tool.group.position.y = TOP + on * 0.008
+    tool.group.position.y = baseY(tool.key) + on * 0.008
     tags.get(tool.key)!.classList.toggle('on', on > 0)
     ends.get(tool.key)?.classList.toggle('on', on > 0)
   }
@@ -755,6 +766,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     const tool = hit(e)
     if (!tool) return
     e.preventDefault()
+    if (hooks.grab?.(tool.key)) return
     begin(tool, e, hitPart ?? undefined)
   }
   const onTagDown = (e: PointerEvent) => {
@@ -931,6 +943,27 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       const q = toScreen(p.applyMatrix4(tool.group.matrixWorld))
       return { x: q.x, y: q.y }
     },
+    only(keys) {
+      only = keys ? new Set(keys) : null
+      for (const [key, el] of [...tags, ...ends]) el.hidden = Boolean(only && !only.has(key))
+    },
+    override(key, at) {
+      if (at) overrides.set(key, at)
+      else overrides.delete(key)
+      place()
+    },
+    ends(key) {
+      const tool = toolOf(key)
+      tool.group.updateMatrixWorld(true)
+      if (tool.axis) {
+        const a = toScreen(tool.axis[0].clone().applyMatrix4(tool.group.matrixWorld)), b = toScreen(tool.axis[1].clone().applyMatrix4(tool.group.matrixWorld))
+        return [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]
+      }
+      const turn = tool.gesture === 'drag' ? { turn: new THREE.Vector3(), radius: 0.04 } : tool.gesture
+      const a = toScreen(turn.turn.clone().add(new THREE.Vector3(-turn.radius * 1.6, 0, 0)).applyMatrix4(tool.group.matrixWorld))
+      const b = toScreen(turn.turn.clone().add(new THREE.Vector3(turn.radius * 1.6, 0, 0)).applyMatrix4(tool.group.matrixWorld))
+      return [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]
+    },
     frame(dt, t) {
       clock = t
       for (const tool of tools) tool.tick?.(dt, t)
@@ -969,7 +1002,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       for (const tool of tools) {
         const path = hintPath.get(tool.key)!
         const h = timed.get(tool.key)
-        const on = shown === 'on' && (tool.key === hover || tool.key === focused || drag?.tool === tool || Boolean(h && t >= h.from))
+        const on = shown === 'on' && (!only || only.has(tool.key)) && (tool.key === hover || tool.key === focused || drag?.tool === tool || Boolean(h && t >= h.from))
         path.classList.toggle('shown', on)
         if (on) path.setAttribute('d', arrow(tool))
       }
@@ -1031,6 +1064,7 @@ function css() {
   .vs-tools.shown .vs-tool, .vs-tools.shown .vs-end { opacity: 1; pointer-events: auto; }
   .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { opacity: 0.6; }
   .vs-tools.preview .under { opacity: 0; }
+  .vs-tools [hidden] { display: none !important; }
   /* Before there is a villager the first choice is the slip or a pattern card: the tools carry no labels yet. */
   .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { display: none; }
   .vs-hints { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

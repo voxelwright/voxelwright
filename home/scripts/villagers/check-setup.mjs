@@ -6,8 +6,10 @@
 // returning to baseline, the one repair pass (a refused module or a refused persona), the jokes dial as
 // the host's humourCeiling locks it, patterns from the host, and the send-off writing persona.json.
 // --live adds one real Sonnet make (and at most one remake) through the host and the page.
-// Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900]
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+// --strategy=a|b|c|1 runs only the #47 regroup's flow for that way of tuning (1 is the bench), at each of --viewports
+// (default 1440x900,1024x768,390x844), with captures in <shots>/<wide|tablet|narrow>/.
+// Usage: node scripts/villagers/check-setup.mjs [--port=5334] [--from=code-1] [--live] [--shots=dir] [--viewport=1440x900] [--strategy=a]
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,7 +21,8 @@ const port = Number(arg('port', 5334))
 const FROM = arg('from', 'code-1')
 const live = process.argv.includes('--live')
 const shots = arg('shots', null)
-const [vw, vh] = arg('viewport', '1440x900').split('x').map(Number)
+let [vw, vh] = arg('viewport', '1440x900').split('x').map(Number)
+const strategy = arg('strategy', null)
 const root = await mkdtemp(join(tmpdir(), 'villager-setup-'))
 
 // The host, in this process: the real routes and token, a stub villager maker that takes 3 s.
@@ -45,7 +48,8 @@ const hostPort = hostCtx.villager.port
 process.env.VILLAGE_ROOT = root
 process.env.VILLAGER_PORT = String(hostPort)
 const { createServer } = await import(join(homeDir, 'node_modules/vite/dist/node/index.js'))
-const vite = await createServer({ root: homeDir, configFile: join(homeDir, 'vite.config.ts'), logLevel: 'warn', server: { port, strictPort: true } })
+// No watcher and no hot reload: an edit elsewhere in the checkout must not reload the pages mid-check.
+const vite = await createServer({ root: homeDir, configFile: join(homeDir, 'vite.config.ts'), logLevel: 'warn', server: { port, strictPort: true, hmr: false, watch: null } })
 await vite.listen()
 const base = `http://localhost:${port}/`
 
@@ -58,7 +62,7 @@ async function open(query, opts = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`${base}?q=low&villager=gen&setup=1${query}`)
+  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? '1'}${query}`)
   await page.waitForFunction(() => window.villagerSetup && window.village, null, { timeout: 60000 })
   await page.waitForTimeout(400)
   return { context, page, errors }
@@ -71,7 +75,9 @@ const until = (page, states, timeout = 30000) => page.waitForFunction((s) => s.i
  * the name, save and send-off tags) lies inside the screen and overlaps no other, nor the villager's projected
  * bounds; and no tool on the table lies under the slip. Run at every captured moment.
  */
-const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done', '.vs-saved']
+const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done', '.vs-saved',
+  // The regroup's strategies: A's held card, end words and tin hint; B's frame controls and swatches; C's examples and change notes.
+  '.vs-held', '.vs-heldend', '.vs-tinhint', '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch', '.vs-examples', '.vs-change']
 const layout = (page) => page.evaluate((selectors) => {
   const boxes = []
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
@@ -93,10 +99,11 @@ const layout = (page) => page.evaluate((selectors) => {
   if (slip) for (const t of window.villagerSetup.toolBounds()) if (hit(slip.r, t)) overlaps.push(`.vs-slip × tool ${t.key}`)
   return { labels, outside, overlaps }
 }, LABELS)
+let shotDir = shots
 const shot = async (page, name) => {
   const l = await layout(page)
-  check(`layout at ${name} (${vw}×${vh}): ${l.labels} labels, all on screen, none overlapping`, l.labels > 0 && !l.outside.length && !l.overlaps.length, l)
-  if (shots) await page.screenshot({ path: join(shots, `${name}.jpg`), type: 'jpeg', quality: 82 })
+  check(`${strategy ? `[${strategy}] ` : ''}layout at ${name} (${vw}×${vh}): ${l.labels} labels, all on screen, none overlapping`, l.labels > 0 && !l.outside.length && !l.overlaps.length, l)
+  if (shotDir) await page.screenshot({ path: join(shotDir, `${name}.jpg`), type: 'jpeg', quality: 82 })
 }
 const seat = [0.1, 1.45, 2.7]
 /** Write on the slip; after a send-off it is a small "make another" tag first, opened by its button. */
@@ -106,7 +113,152 @@ const write = async (page, text) => {
 }
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
+/**
+ * #47 regroup: one strategy's whole flow at one size. Describe or pick a pattern, wait, stitch, tune all nine values
+ * through the strategy's own surface, send off and watch it walk; captures at the same moments for every strategy.
+ */
+async function regroup(s) {
+  const tag = `[${s}] ${vw}×${vh}`
+  const settle = (page) => page.waitForFunction(async () => {
+    const a = window.villagerSetup.camera()
+    await new Promise((r) => setTimeout(r, 250))
+    return window.villagerSetup.camera().every((v, i) => Math.abs(v - a[i]) < 1e-4)
+  }, null, { timeout: 15000 }).catch(() => {})
+  {
+    const { context, page, errors } = await open(`&from=${FROM}&person=jo`, { setup: s })
+    await page.waitForTimeout(2200)
+    await settle(page)
+    await shot(page, '1-empty')
+    await page.click(s === 'b' ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
+    await page.waitForTimeout(700)
+    check(`${tag}: picking a pattern shows it on the slip`, (await st(page)).rack.picked === 'coach' && (await page.textContent('.vs-slip .chip')).includes('Calm coach'))
+    await shot(page, '1b-picked')
+    await page.focus('.vs-slip:not(.vs-say) .line')
+    await page.keyboard.press('Enter')
+    await until(page, ['tuning'])
+    await page.waitForTimeout(1200)
+    const before = await st(page)
+    const v0 = before.values
+    if (s === 'a') {
+      // The tin: click the tape measure out of it, pull the tape, then each other tool in turn by keyboard.
+      const at = await page.evaluate(() => window.villagerSetup.tinAt('size'))
+      await page.mouse.click(at.x, at.y)
+      await page.waitForTimeout(500)
+      check(`${tag}: clicking the tape measure in the tin holds it out, alone`, await page.evaluate(() => window.villagerSetup.out()) === 'size' && await page.evaluate(() => [...document.querySelectorAll('.vs-tool, .vs-end')].filter((e) => getComputedStyle(e).display !== 'none').length) === 1)
+      await settle(page)
+      const h = await page.evaluate(() => window.villagerSetup.screen('size'))
+      await page.mouse.move(h.x, h.y)
+      await page.mouse.down()
+      await page.mouse.move(h.x + 90, h.y, { steps: 6 })
+      await page.mouse.up()
+      await page.waitForTimeout(900)
+      await shot(page, '3-tuning')
+      const steps = [['hue', ['ArrowLeft', 6]], ['pitch', ['ArrowUp', 5]], ['pace', ['PageDown', 1]], ['energy', ['End', 1]], ['manner', ['Home', 1, 'Tab', 1, 'Home', 1, 'Tab', 1, 'Home', 1]], ['humour', ['End', 1]]]
+      for (const [item, keys] of steps) {
+        await page.evaluate((i) => window.villagerSetup.pick(i), item)
+        await page.waitForTimeout(250)
+        for (let i = 0; i < keys.length; i += 2) for (let n = 0; n < keys[i + 1]; n++) await page.keyboard.press(keys[i])
+      }
+      const lockedNote = (await st(page)).note
+      await page.keyboard.press('Escape')
+      check(`${tag}: crude is refused with the household's admin note; Escape puts the tool back`, /household's admin/.test(lockedNote ?? '') && await page.evaluate(() => window.villagerSetup.out()) === null, lockedNote)
+    } else if (s === 'b') {
+      // The frame: the size marker dragged up to a taller head, a colour dot, the dials turned, the ribbons and the jokes switch.
+      const v = await page.evaluate(() => window.villagerSetup.bounds())
+      const tape = await page.evaluate(() => window.villagerSetup.control('size'))
+      await page.mouse.click(tape.x, v.top - 50)
+      await page.click('.vs-mirror .dot:first-of-type')
+      for (const [key, dx] of [['pitch', 70], ['pace', -70], ['energy', 90]]) {
+        const k = await page.evaluate((key) => window.villagerSetup.control(key), key)
+        await page.mouse.move(k.x, k.y)
+        await page.mouse.down()
+        await page.mouse.move(k.x + dx, k.y, { steps: 5 })
+        await page.mouse.up()
+      }
+      await page.waitForTimeout(900)
+      await shot(page, '3-tuning')
+      for (const key of ['warmth', 'playful', 'chatty']) {
+        const r = await page.evaluate((key) => window.villagerSetup.control(key), key)
+        await page.mouse.click(r.x - r.w / 2 + 2, r.y)
+      }
+      await page.click('.vs-mirror .step:last-of-type')
+      check(`${tag}: crude on the jokes switch is refused with the household's admin note`, /household's admin/.test((await st(page)).note ?? ''), (await st(page)).note)
+    } else if (s === 'c') {
+      // Talking: phrases on the slip, Enter each; one is undone.
+      const say = async (text) => {
+        await page.locator('.vs-say .line').fill(text)
+        await page.locator('.vs-say .line').press('Enter')
+        await page.waitForTimeout(250)
+      }
+      await say('a bit taller, and a lower voice')
+      await page.waitForTimeout(900)
+      await shot(page, '3-tuning')
+      for (const text of ['make them greener', 'talk slower', 'livelier', 'much blunter', 'more serious', 'less chatty']) await say(text)
+      await say('crude jokes please')
+      const lockedNote = (await st(page)).note
+      check(`${tag}: "crude jokes" is refused with the household's admin note, and its change note says so`, /household's admin/.test(lockedNote ?? '') && /set by the household/.test(await page.textContent('.vs-change')), lockedNote)
+      await say('keep the jokes clean')
+      await say('a bit livelier')
+      const pre = (await st(page)).values.energy
+      await page.click('.vs-change .undo')
+      check(`${tag}: Undo puts the last change back`, (await st(page)).values.energy < pre, { pre, now: (await st(page)).values.energy })
+      await say('blorp the wibble')
+      check(`${tag}: a phrase it can't read changes nothing and says so`, /didn't catch/i.test(await page.textContent('.vs-say .status')))
+    } else {
+      await page.waitForTimeout(400)
+      await shot(page, '3-tuning')
+      for (const [k, v] of [['size', 0.7], ['hue', 0.2], ['pitch', 0.75], ['pace', 0.3], ['energy', 1], ['warmth', 0], ['playful', 0], ['chatty', 0], ['humour', 1]]) await page.evaluate(([k, v]) => window.villagerSetup.set(k, v), [k, v])
+    }
+    await page.waitForTimeout(500)
+    const after = await st(page)
+    const v1 = after.values
+    const moved = { size: v1.size > v0.size + 0.05 && after.scale > before.scale * 1.03, hue: Math.abs(v1.hue - v0.hue) > 0.1 && Math.abs(after.hue - before.hue) > 0.1, pitch: Math.abs(v1.pitch - v0.pitch) > 0.1 && after.voice.pitch !== before.voice.pitch, pace: v1.pace < v0.pace - 0.1 && after.voice.rate < before.voice.rate, energy: v1.energy > v0.energy + 0.1 && after.gait.speed > before.gait.speed, warmth: v1.warmth < v0.warmth - 0.1, playful: v1.playful < v0.playful - 0.1, chatty: v1.chatty < v0.chatty - 0.1, humour: v1.humour <= 0.5 }
+    check(`${tag}: all nine values change through this way of tuning, and the villager with them`, Object.values(moved).every(Boolean), { moved, v0, v1 })
+    if (s !== '1') check(`${tag}: it answers a change in a short line`, (await pg(page)).card?.length > 2, (await pg(page)).card)
+    await page.click('.vs-done')
+    await page.waitForTimeout(2600)
+    const s3 = await st(page)
+    const w0 = s3.walkers[0]
+    await page.waitForTimeout(2500)
+    const w1 = (await st(page)).walkers[0]
+    check(`${tag}: "Off you go" sends it off at its tuned size, walking in view`, s3.walkers.length === 1 && w1 && Math.hypot(w1.x - w0.x, w1.z - w0.z) > 0.05 && Math.abs(w1.scale - after.scale) < 1e-6 && w0.seen && w1.seen && s3.kept[0]?.tuning.size === v1.size, { walkers: s3.walkers, w1 })
+    await shot(page, '5-walking')
+    check(`${tag}: no page errors`, errors.length === 0, errors)
+    await context.close()
+  }
+  {
+    // The waiting, through the stub host (slow), so a piece is already cut.
+    const { context, page, errors } = await open('&person=jo', { setup: s })
+    await page.locator('.vs-slip:not(.vs-say) .line').fill('a sleepy hedgehog who bakes bread before dawn')
+    slow = true
+    await page.focus('.vs-slip:not(.vs-say) .line')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(6500)
+    await settle(page)
+    const w = await st(page)
+    check(`${tag}: waiting shows the cutting on the mat`, w.state === 'waiting' && w.cut >= 1, { state: w.state, cut: w.cut })
+    await shot(page, '2-waiting')
+    await until(page, ['tuning', 'failed'])
+    slow = false
+    check(`${tag}: the stub host's villager is stitched after the wait`, (await st(page)).state === 'tuning')
+    check(`${tag} (waiting): no page errors`, errors.length === 0, errors)
+    await context.close()
+  }
+}
+
 try {
+  if (strategy) {
+    const sizes = arg('viewports', '1440x900,1024x768,390x844').split(',')
+    for (const size of sizes) {
+      ;[vw, vh] = size.split('x').map(Number)
+      if (shots) {
+        shotDir = join(shots, vw < vh ? 'narrow' : vw >= 1300 ? 'wide' : 'tablet')
+        await mkdir(shotDir, { recursive: true })
+      }
+      // One size failing to finish is a failed check, and the other sizes still run.
+      await regroup(strategy).catch((e) => check(`[${strategy}] ${vw}×${vh}: the flow runs to the end`, false, String(e).split('\n')[0]))
+    }
+  } else {
   // ── &from=: the whole scene without a model ────────────────────────────
   {
     // As Jo, so every capture shows the same five pattern cards an adult sees.
@@ -469,6 +621,7 @@ try {
     check('live: Sonnet writes the villager, it is stitched on the table (after at most one remake)', s.state === 'tuning', { text, wallMs: Date.now() - t0, state: s.state, name: s.name, failure: s.failure, refusal: s.refusal, timings: s.timings, pieces: s.pieces, firstCostUsd: liveRecord?.costUsd, firstMs: liveRecord?.ms, remake: liveRecord?.repair ? { ms: liveRecord.repair.ms, costUsd: liveRecord.repair.costUsd, outputTokens: liveRecord.repair.outputTokens } : null })
     check('live: no page errors', errors.length === 0, errors)
     await context.close()
+  }
   }
 } finally {
   await browser.close()

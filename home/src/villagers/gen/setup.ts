@@ -31,6 +31,8 @@ import { checked, dialsOf, fallbackPersona, personaNotes, tunedLine, type Person
 import { footFor, rack, refOf, type RackCard } from './setup-rack'
 import { HAND, MAT, TOP, workshop } from './workshop'
 import type { Meta } from './load'
+import { strategyFor, type Strategy } from './setup-strategy'
+import { rotateHue } from './sliders'
 
 type State = 'empty' | 'waiting' | 'stitching' | 'tuning' | 'leaving' | 'failed'
 export type Tuning = Record<Key, number>
@@ -44,6 +46,8 @@ const FROM = params.get('from')
 const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : 'alex'
 const ACCENT = /^#[0-9a-f]{6}$/i.test(params.get('accent') ?? '') ? params.get('accent')! : '#c8553d'
 const OWNER = PERSON.charAt(0).toUpperCase() + PERSON.slice(1)
+/** #47 regroup: &setup=a|b|c tries a radically different way to tune (one tool at a time, a fitting mirror, talking); 1 is the bench. */
+const STRATEGY = params.get('setup') ?? '1'
 /** Where it lands when it hops off the table: a spot the walk routes know. */
 const LANDING = 'seatNear'
 
@@ -82,6 +86,8 @@ export default {
     /** The host's profile of this person and its jokes dial (GET persona-templates). Until it answers, the dial is clean or cheeky. */
     let PROFILE: unknown = null
     let HUMOUR_DIAL: HumourDial = { locked: null }
+    /** The regroup's strategy, when &setup= names one; null is the bench (round 6). */
+    let S: Strategy | null = null
 
     const tools = controls(stage, {
       input: (key, v) => applyTuning(key, v),
@@ -89,9 +95,10 @@ export default {
         if (!made) return
         say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
         // A bigger or smaller villager: the camera eases to frame it again (never during the drag).
-        if (key === 'size' && state === 'tuning') atTable()
+        if (key === 'size' && state === 'tuning' && !S) atTable()
       },
       locked: () => note(lockedNote()),
+      grab: (key) => S?.grab?.(key) ?? false,
     })
     group.add(tools.group)
     // Crude is never chosen on the table: it is only ever the household admin's setting for a grown-up.
@@ -215,6 +222,8 @@ export default {
     const poseFor = () => {
       const aspect = innerWidth / innerHeight
       const narrow = layout === 'narrow'
+      const own = S?.pose?.(state)
+      if (own) return own
       if (!narrow && state === 'waiting') {
         // Wide, while the pattern is made: close over the mat, so the cutting and the words on the sheet read.
         lens(seatFov)
@@ -241,9 +250,61 @@ export default {
       return { position: look.clone().addScaledVector(dir, dist), look }
     }
     /** Where the villager stands on the mat: narrow, further back, so the ribbons before it stay clear. */
-    const standAt = () => new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - (layout === 'narrow' ? 0.24 : 0.07))
+    const standAt = () => S?.standAt?.() ?? new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - (layout === 'narrow' ? 0.24 : 0.07))
     /** How far it stands turned from the camera: three quarters on a wide screen, nearly square on to a phone. */
-    const turn = () => (layout === 'narrow' ? 0.18 : 0.35)
+    const turn = () => S?.turn?.() ?? (layout === 'narrow' ? 0.18 : 0.35)
+    /**
+     * Regroup: a pose that frames the villager, at its biggest size so a change of size shows, centred between these page
+     * rows and columns. The camera pans (look and position together) and steps back until it fits.
+     */
+    const front = (o: { top: number; bottom: number; left?: number; right?: number; slope: number; fov?: number }) => {
+      const fov = o.fov ?? seatFov
+      lens(fov)
+      const left = o.left ?? 0, right = o.right ?? innerWidth
+      const at = standAt()
+      const dir = new THREE.Vector3(0, o.slope, 1).normalize()
+      if (!body) return { position: at.clone().add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(dir, 1.6), look: at.clone().add(new THREE.Vector3(0, 0.12, 0)) }
+      fitCam.fov = fov
+      fitCam.aspect = innerWidth / innerHeight
+      fitCam.near = 0.05
+      fitCam.far = 60
+      fitCam.updateProjectionMatrix()
+      const k = SCALE * tune.size(1)
+      fitAt.compose(at, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -turn()), new THREE.Vector3(k, k, k))
+      const look = at.clone().add(new THREE.Vector3(0, body.max.y * k * 0.5, 0))
+      const wantX = (left + right) / 2, wantY = (o.top + o.bottom) / 2
+      const tan = Math.tan(THREE.MathUtils.degToRad(fov / 2))
+      const near = new THREE.Vector3()
+      // Nearest first: at each distance the view pans until the villager is centred, and the first distance where it fits wins.
+      let dist = 0.3
+      for (let n = 0; n < 90; n++, dist *= 1.03) {
+        let r = { left: 0, top: 0, right: 0, bottom: 0 }
+        let ahead = true
+        for (let i = 0; i < 40; i++) {
+          fitCam.position.copy(look).addScaledVector(dir, dist)
+          fitCam.lookAt(look)
+          fitCam.updateMatrixWorld(true)
+          // Every corner must be in front of the lens, or its projection means nothing.
+          for (let c = 0; c < 8 && ahead; c++) ahead = near.set(c & 1 ? body.max.x : body.min.x, c & 2 ? body.max.y : body.min.y, c & 4 ? body.max.z : body.min.z).applyMatrix4(fitAt).applyMatrix4(fitCam.matrixWorldInverse).z < -0.06
+          if (!ahead) break
+          r = rectOf(body, fitAt, fitCam)
+          const wpp = (2 * dist * tan) / innerHeight
+          const dx = (r.left + r.right) / 2 - wantX, dy = (r.top + r.bottom) / 2 - wantY
+          if (Math.abs(dx) < 1 && Math.abs(dy) < 1) break
+          look.x += THREE.MathUtils.clamp(dx * wpp * 0.8, -0.04, 0.04)
+          look.y -= THREE.MathUtils.clamp(dy * wpp * 0.8, -0.04, 0.04)
+        }
+        if (ahead && r.bottom - r.top <= o.bottom - o.top && r.right - r.left <= right - left - 24 && r.top >= o.top - 2) break
+      }
+      return { position: look.clone().addScaledVector(dir, dist), look }
+    }
+    /** Regroup: close over the mat at every size, so the waiting is about the cutting. */
+    const overMat = () => {
+      lens(seatFov)
+      const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(seatFov / 2)) * (innerWidth / innerHeight))
+      const look = new THREE.Vector3(MAT.x + 0.02, TOP, MAT.z - 0.07)
+      return { position: look.clone().addScaledVector(new THREE.Vector3(0, 0.8, 1).normalize(), (MAT.w / 2 + (layout === 'narrow' ? 0.03 : 0.25)) / Math.tan(half)), look }
+    }
     const arrange = () => {
       layout = layoutFor()
       shop.arrange(layout)
@@ -650,13 +711,14 @@ export default {
         nametag.append(from)
       }
       nametag.classList.add('shown')
-      tools.mode('on')
+      if (!S?.tuning) tools.mode('on')
       patterns.enable('off')
       done.classList.add('shown')
       saveTag.classList.add('shown')
       setStatus('')
       // Keyboard users land on the first tool; Tab walks the rest and then the send-off tag.
-      if (slip.contains(document.activeElement) || document.activeElement === document.body) tools.focus('size')
+      if (S?.tuning) S.tuning()
+      else if (slip.contains(document.activeElement) || document.activeElement === document.body) tools.focus('size')
       await wait(reducedMotion.matches ? 0 : 450)
       say(bark)
     }
@@ -720,6 +782,7 @@ export default {
       if (state !== 'tuning' || !fig || !puppet || !made) return
       state = 'leaving'
       tools.mode('off')
+      S?.leaving?.()
       done.classList.remove('shown')
       saveTag.classList.remove('shown')
       nametag.classList.remove('shown')
@@ -778,6 +841,8 @@ export default {
 
     // ── Patterns: A's built-in templates for this profile, then the person's and the family's from the host ──
     let lastSaved: string | null = null
+    /** The cards on the rack, as set (a strategy may show them its own way). */
+    let shownCards: RackCard[] = []
     const loadPatterns = async () => {
       const [mine, family] = await Promise.all([personaTemplates(PERSON), familyTemplates(PERSON)])
       PROFILE = mine.ok ? mine.profile : null
@@ -790,7 +855,8 @@ export default {
       // Newest saved patterns first after the built-in ones, so a fresh save is on the rack.
       const builtIn = list.filter((c) => c.source === 'built-in')
       const saved = list.filter((c) => c.source !== 'built-in').reverse()
-      patterns.set([...saved.slice(0, 2), ...builtIn].slice(0, 7))
+      shownCards = [...saved.slice(0, 2), ...builtIn].slice(0, 7)
+      patterns.set(shownCards)
       return list
     }
     const patternsReady = loadPatterns()
@@ -833,6 +899,47 @@ export default {
     }
     saveButton.addEventListener('click', () => void saveAsPattern())
 
+    // ── The regroup's strategy, if one is asked for ──────────────────────
+    const target = new THREE.PerspectiveCamera()
+    S = strategyFor(STRATEGY, {
+      stage, group, tools, patterns, slip, line, sew,
+      state: () => state,
+      layout: () => layout,
+      made: () => made,
+      villager: () => villagerRect(),
+      target: () => {
+        const p = lastPose ?? poseFor()
+        target.fov = stage.camera.fov
+        target.aspect = innerWidth / innerHeight
+        target.near = 0.05
+        target.far = 60
+        target.updateProjectionMatrix()
+        target.position.copy(p.position)
+        target.lookAt(p.look)
+        target.updateMatrixWorld(true)
+        return target
+      },
+      front,
+      overMat,
+      lens: (fov) => {
+        lens(fov ?? seatFov)
+        return fov ?? seatFov
+      },
+      reflow: () => atTable(),
+      say: (text, short) => say(text, short),
+      tuned: () => {
+        if (made) say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
+      },
+      note: (text) => note(text),
+      hueAt: (v) => {
+        const c = hueShift ? rotateHue(hueShift.main, tune.hue(v)) : null
+        return c ? `#${c.getHexString()}` : null
+      },
+      cards: () => shownCards,
+      watching: () => watching !== null,
+    })
+    if (S) document.documentElement.dataset.vsStrategy = S.id
+
     // ── Wiring ─────────────────────────────────────────────────────────────
     /** The slip opens out of the "make another" tag. */
     const openSlip = () => {
@@ -871,7 +978,7 @@ export default {
         fig.root.scale.setScalar(SCALE * tune.size(made.tuning.size) * bench)
       }
       if (view.focused && !watching && state !== 'leaving') atTable()
-      if (state === 'tuning') tools.mode('on')
+      if (state === 'tuning' && !S?.tuning) tools.mode('on')
     }
     addEventListener('resize', onResize)
 
@@ -882,6 +989,8 @@ export default {
       line.focus({ preventScroll: true })
       return () => {
         leaveTable()
+        S?.dispose()
+        delete document.documentElement.dataset.vsStrategy
         removeEventListener('pointerdown', wake, true)
         removeEventListener('keydown', wake, true)
         removeEventListener('resize', onResize)
@@ -921,7 +1030,9 @@ export default {
         // The slip lies on the mat, or sits at the near edge; either way inside the screen.
         const w = slip.offsetWidth, h = slip.offsetHeight
         let x = innerWidth / 2, y = innerHeight - h / 2 - (innerWidth < 600 ? 16 : 24)
-        if (slipAt === 'mat') {
+        const own = slipAt !== 'front' ? S?.slip?.(w, h) : null
+        if (own) ({ x, y } = own)
+        else if (slipAt === 'mat') {
           // As wide as the mat looks (within reason), so it lies on it and clear of the ribbons' tags.
           const l = matAt.set(MAT.x - MAT.w / 2, TOP, MAT.z + MAT.d / 2).project(stage.camera).x
           const r = matAt.set(MAT.x + MAT.w / 2, TOP, MAT.z + MAT.d / 2).project(stage.camera).x
@@ -941,7 +1052,7 @@ export default {
           y = ((1 - matAt.y) / 2) * innerHeight + h / 2 + 10
         } else if (slip.style.width) slip.style.width = ''
         // On the mat it keeps clear of the ribbons' tags to its right.
-        const right = slipAt === 'mat' ? Math.min(innerWidth - 16, tools.ribbonsLeft() - 10) : innerWidth - 16
+        const right = slipAt === 'mat' && !own ? Math.min(innerWidth - 16, tools.ribbonsLeft() - 10) : innerWidth - 16
         x = Math.round(THREE.MathUtils.clamp(x, w / 2 + 16, right - w / 2))
         y = Math.round(THREE.MathUtils.clamp(y, h / 2 + 30, innerHeight - h / 2 - 16))
         const at = `calc(${x}px - 50%) calc(${y}px - 50%)`
@@ -950,7 +1061,8 @@ export default {
       } else tools.under(null)
       // The tools come out once there is a villager to tune. Before that only a wide screen keeps them on the table, as
       // props beyond the slip; a tablet's or a phone's slip would lie over them, so the table shows only the start.
-      tools.group.visible = (layout === 'wide' && innerWidth / innerHeight >= 1.5) || state === 'stitching' || state === 'tuning' || state === 'leaving'
+      tools.group.visible = S?.toolsVisible ? S.toolsVisible() : (layout === 'wide' && innerWidth / innerHeight >= 1.5) || state === 'stitching' || state === 'tuning' || state === 'leaving'
+      S?.frame?.(step, t)
       shop.frame(step, t)
       tools.frame(step, t)
       patterns.frame()
@@ -966,19 +1078,23 @@ export default {
         // Below the name tag when they would meet; the camera's fit leaves room for both above the villager.
         const under = x - card.offsetWidth / 2 < edge + nametag.offsetWidth + 12 ? edge + nametag.offsetHeight + 22 : 24
         const y = Math.round(THREE.MathUtils.clamp(v.top - 4, card.offsetHeight + under, innerHeight - 120))
-        const at = `calc(${x}px - 50%) calc(${y}px - 100%)`
+        const ownCard = S?.place?.('card', card.offsetWidth, card.offsetHeight)
+        const at = ownCard ? `${Math.round(ownCard.x)}px ${Math.round(ownCard.y)}px` : `calc(${x}px - 50%) calc(${y}px - 100%)`
         if (card.style.translate !== at) card.style.translate = at
-        const nat = `${edge}px ${edge}px`
+        const ownName = S?.place?.('name', nametag.offsetWidth, nametag.offsetHeight)
+        const nat = ownName ? `${Math.round(ownName.x)}px ${Math.round(ownName.y)}px` : `${edge}px ${edge}px`
         if (nametag.style.translate !== nat) nametag.style.translate = nat
       }
       // The save tag and the send-off tag sit in the bottom corners, clear of the tools' tags.
       const edge = layout === 'narrow' ? 16 : 24
       if (saveTag.classList.contains('shown')) {
-        const sat = `${edge}px ${innerHeight - edge - saveTag.offsetHeight}px`
+        const ownSave = S?.place?.('save', saveTag.offsetWidth, saveTag.offsetHeight)
+        const sat = ownSave ? `${Math.round(ownSave.x)}px ${Math.round(ownSave.y)}px` : `${edge}px ${innerHeight - edge - saveTag.offsetHeight}px`
         if (saveTag.style.translate !== sat) saveTag.style.translate = sat
       }
       if (done.classList.contains('shown')) {
-        const dat = `${innerWidth - edge - done.offsetWidth}px ${innerHeight - edge - done.offsetHeight}px`
+        const ownDone = S?.place?.('done', done.offsetWidth, done.offsetHeight)
+        const dat = ownDone ? `${Math.round(ownDone.x)}px ${Math.round(ownDone.y)}px` : `${innerWidth - edge - done.offsetWidth}px ${innerHeight - edge - done.offsetHeight}px`
         if (done.style.translate !== dat) done.style.translate = dat
       }
     })
@@ -1035,6 +1151,8 @@ export default {
         reloadPatterns: () => loadPatterns().then(() => patterns.state()),
         save: (shared: boolean) => { share.checked = shared; return saveAsPattern() },
         keys: KEYS,
+        strategy: STRATEGY,
+        ...S?.api,
       }
       Object.assign(window, { villagerSetup: api })
       return () => delete (window as { villagerSetup?: unknown }).villagerSetup

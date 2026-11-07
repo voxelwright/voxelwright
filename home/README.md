@@ -1093,7 +1093,14 @@ and person scoping as the props endpoints; model failures answer 422:
 ```sh
 node test/villager-make.ts [--live]                 # in host/: 81 checks, stub maker; --live adds one Sonnet call
 node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
+node scripts/villagers/check-setup.mjs --strategy=a|b|c|1 [--shots=dir] [--viewports=1440x900,1024x768,390x844]
 ```
+
+Regroup 1 (prototypes, November 7): `&setup=a` (one tool at a time, from a sewing tin), `&setup=b`
+(a fitting mirror with the controls in its frame) and `&setup=c` (no tools: tune by talking, read by
+`setup-talk.ts` with no model call) share everything but the tuning surface with `&setup=1`.
+`--strategy=` runs one of them through the whole flow at each size. Captures, sheets and the
+learning log: `screenshots/villager-gen/setup/regroup-1/` and `LEARNING.md`.
 
 `check-setup.mjs` starts its own dev server (5334) and a host in-process with a stub
 maker, then proves headless: the workshop, the stitch order and pace, focus on the first
