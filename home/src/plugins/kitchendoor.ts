@@ -35,8 +35,10 @@ export default {
       m.userData.interior = interior
       group.add(m)
       if (MODE !== 'iso') return
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(WALL_T + 0.004, 0.02, zb - za), cut)
-      cap.position.set(xc, yb + 0.01, m.position.z)
+      // Stop 2 mm short of the back and front walls' caps, so no two caps share a top face.
+      const ca = za === WALL_Z ? za + 0.002 : za, cb = zb === FRONT_Z ? zb - 0.002 : zb
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(WALL_T + 0.004, 0.02, cb - ca), cut)
+      cap.position.set(xc, yb + 0.01, (ca + cb) / 2)
       cap.castShadow = true
       cap.userData.interior = interior
       group.add(cap)

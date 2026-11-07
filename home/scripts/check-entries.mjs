@@ -228,7 +228,7 @@ for (const room of ['kitchen', 'living']) {
   const w = await watch(page)
   await waitStill(page)
   const s = await state(page)
-  check('seated view: the walk to the living room goes through the doorway, smoothly, with no fade', s.room === 'living' && w.covered === 0 && !w.veil && smooth(w.xs, 0.4) && w.xs[0] < 3.4 && w.xs.at(-1) > 3.58, { room: s.room, from: w.xs[0], to: w.xs.at(-1), frames: w.frames })
+  check('seated view (walk started directly; the seat cannot see the doorway): it goes through the doorway, smoothly, with no fade', s.room === 'living' && w.covered === 0 && !w.veil && smooth(w.xs, 0.4) && w.xs[0] < 3.4 && w.xs.at(-1) > 3.58, { room: s.room, from: w.xs[0], to: w.xs.at(-1), frames: w.frames })
   await context.close()
 }
 
