@@ -2,11 +2,20 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { paintBackdrop } from '../paint'
+import { HOUSE } from '../layout'
 
 /** Where the camera stands and what it looks at. */
 export interface Pose {
   position: THREE.Vector3
   look: THREE.Vector3
+}
+
+/** Where the dollhouse view rests: a floor point, a zoom (0 the whole house, 1 close up) and, optionally, a turn. */
+export interface Frame {
+  x: number
+  z: number
+  zoom: number
+  yaw?: number
 }
 
 /** Lets other plugins ask the camera to frame something, and to come back. */
@@ -24,6 +33,15 @@ export interface View {
    * jump with 0. Resolves on arrival. Instant when the person prefers reduced motion.
    */
   travel(pose: Pose, seconds: number): Promise<void>
+  /**
+   * Dollhouse view: glide over the house to a frame, or jump with 0. Resolves on
+   * arrival, or when someone takes the camera on the way. Instant under reduced motion.
+   */
+  glide(frame: Frame, seconds: number): Promise<void>
+  /** The floor point the view rests on (dollhouse) or looks at (other modes). */
+  readonly looking: THREE.Vector3
+  /** The dollhouse view's current frame, eased. */
+  readonly frame: Required<Frame>
 }
 
 declare module 'cordis' {
@@ -35,23 +53,46 @@ declare module 'cordis' {
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
 /**
- * #42 probe. ?cam=iso looks down on the room like a dollhouse (narrow field of
- * view from far away, drag or Q/E to orbit a little, scroll to zoom from the
- * whole room to the table). ?cam=third stands behind and above a point on the
- * floor that walks to what you click. Without ?cam= the seated view is unchanged.
- * Both rigs hang off the resting pose that travel() moves, so room walks and
- * focus poses work in every mode.
+ * Keys the dollhouse view has taken for moving around. The always-on input checks
+ * this before it turns a key into writing (talk.ts `blocked`), so a held W pans
+ * instead of writing "w". A tapped W still writes: see `onKeyDown` below.
+ */
+export const navigation = {
+  claims: () => false,
+  /** Set by talk.ts: a line is being written (words on the pad, the field focused, or a sketch), so keys are the line's. */
+  writing: () => false,
+}
+
+/**
+ * ?cam=iso (the default with ?talk=npc) looks down on the whole house like a
+ * dollhouse you move around freely; ?cam=third stands behind and above a point on
+ * the floor that walks to what you click. Without ?cam= the seated view is unchanged.
+ * Every rig hangs off a resting pose, so focus poses work in every mode.
  */
 const query = new URLSearchParams(location.search)
-// The #42 talk prototype looks at the room from above unless ?cam= says otherwise (?cam=seat is today's view).
+// The #42 talk prototype looks at the house from above unless ?cam= says otherwise (?cam=seat is today's view).
 const cam = query.get('cam') ?? (query.get('talk') === 'npc' ? 'iso' : null)
 export const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ? cam : 'seat'
 /** Layer for walls cut away from the camera: the sun's shadow camera still sees them, the view does not. */
 export const SHADOW_ONLY = 1
 const SEAT_FOV = 40
-const ISO = { fov: 20, far: 19.6, near: 5.6, pitchFar: 0.66, pitchNear: 0.5, yaw: 0.6, yawMin: -0.5, yawMax: 1.4 }
+/**
+ * The dollhouse rig. Distance runs from `far` (the whole house and its yard) to
+ * `near` (one corner of a room), evenly in ratio so each wheel notch feels the same.
+ * Pitch flattens a little as you come close; dragging up or down tilts within `tilt`.
+ */
+const ISO = { fov: 20, far: 36, near: 5.6, pitchFar: 0.74, pitchNear: 0.5, tilt: [-0.22, 0.32] as const }
+/** The whole-house frame the dollhouse opens on. */
+export const OVERVIEW: Required<Frame> = { x: (HOUSE.x0 + HOUSE.x1) / 2, z: (HOUSE.z0 + HOUSE.z1) / 2 + 0.2, zoom: 0, yaw: 0.42 }
+/** The view rests on the house and its yard, never past them. */
+const BOUNDS = { x0: HOUSE.x0 - 1, x1: HOUSE.x1 + 1, z0: HOUSE.z0 - 1.5, z1: HOUSE.z1 + 1.5 }
 const THIRD = { fov: 50, ahead: 1.3, back: 2.4, up: 2.2, lookAhead: 1.6, lookUp: 0.7, reach: 3.2 }
 const UP = new THREE.Vector3(0, 1, 0)
+/** Letters that move the dollhouse view while held: WASD pan, Q and E turn. */
+const LETTERS: Record<string, [number, number, number]> = { w: [0, 1, 0], s: [0, -1, 0], a: [-1, 0, 0], d: [1, 0, 0], q: [0, 0, -1], e: [0, 0, 1] }
+const ARROWS: Record<string, [number, number, number]> = { ArrowUp: [0, 1, 0], ArrowDown: [0, -1, 0], ArrowLeft: [-1, 0, 0], ArrowRight: [1, 0, 0] }
+/** How long a letter must stay down before it moves the view instead of writing. */
+const HOLD_MS = 170
 
 /** Seated view across the table, with a slow breath and pointer parallax. Provides the view service. */
 export default {
@@ -73,9 +114,12 @@ export default {
     const to = { position: new THREE.Vector3(), look: new THREE.Vector3() }
     const last: Pose = { position: new THREE.Vector3(), look: new THREE.Vector3() }
 
-    // Rig state for ?cam=iso and ?cam=third: goals set by input, eased each frame.
-    const orbit = { yaw: ISO.yaw, goal: ISO.yaw, zoom: 0, zoomGoal: 0 }
-    const walk = { at: new THREE.Vector3(), goal: new THREE.Vector3() } // offset from the rest pose's standing point
+    // Dollhouse rig: goals set by input, eased each frame.
+    const rig = { ...OVERVIEW, tilt: 0 }
+    const goal = { ...OVERVIEW, tilt: 0 }
+    let glide: { from: Required<Frame>; to: Required<Frame>; u: number; seconds: number; done: () => void } | null = null
+    const held = new Map<string, [number, number, number]>()
+    const walk = { at: new THREE.Vector3(), goal: new THREE.Vector3() } // third: offset from the rest pose's standing point
     const forward = new THREE.Vector3()
     const ground = new THREE.Vector3()
     // Iso sits the diorama on a painted warm card; third person looks out into a warm haze.
@@ -94,49 +138,81 @@ export default {
       const el = document.activeElement as HTMLElement | null
       return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
     }
+    const written = () => {
+      const el = document.activeElement as HTMLInputElement | null
+      return navigation.writing() || (typing() && Boolean(el?.value ?? el?.textContent))
+    }
+    const clampGoal = () => {
+      goal.x = THREE.MathUtils.clamp(goal.x, BOUNDS.x0, BOUNDS.x1)
+      goal.z = THREE.MathUtils.clamp(goal.z, BOUNDS.z0, BOUNDS.z1)
+      goal.zoom = THREE.MathUtils.clamp(goal.zoom, 0, 1)
+      goal.tilt = THREE.MathUtils.clamp(goal.tilt, ISO.tilt[0], ISO.tilt[1])
+    }
+    /** Someone took the camera: an unfinished glide stops where it is. */
+    const takeOver = () => {
+      if (!glide) return
+      const { done } = glide
+      glide = null
+      Object.assign(goal, { x: rig.x, z: rig.z, zoom: rig.zoom, yaw: rig.yaw })
+      done()
+    }
     const settle = () => {
+      clampGoal()
       if (!reducedMotion.matches) return
-      orbit.yaw = orbit.goal
-      orbit.zoom = orbit.zoomGoal
+      Object.assign(rig, goal)
       walk.at.copy(walk.goal)
     }
+    const distance = (zoom: number) => ISO.far * Math.pow(ISO.near / ISO.far, zoom)
+    /** Pan the goal by screen-relative amounts in metres: +x right, +y away from the viewer. */
+    const pan = (right: number, away: number) => {
+      const s = Math.sin(goal.yaw), c = Math.cos(goal.yaw)
+      goal.x += right * c - away * s
+      goal.z += -right * s - away * c
+    }
 
-    // Iso: drag past the entries' 10 px click threshold orbits; Q and E step; the wheel zooms.
-    let drag: { x: number; yaw: number; moved: boolean; focused: boolean } | null = null
+    // Pointer: a left drag past the entries' click threshold turns and tilts; a right
+    // drag, a shift drag or two fingers pan; the wheel or a pinch zooms; a double click glides there.
+    const pointers = new Map<number, { x: number; y: number }>()
+    let drag: { x: number; y: number; moved: boolean; pan: boolean; focused: boolean } | null = null
+    let pinch = 0
     const onDown = (e: PointerEvent) => {
-      if (e.button === 0) drag = { x: e.clientX, yaw: orbit.goal, moved: false, focused: target !== null }
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()]
+        pinch = Math.hypot(a.x - b.x, a.y - b.y)
+      }
+      if (e.button === 0 || e.button === 2 || e.button === 1) drag = { x: e.clientX, y: e.clientY, moved: false, pan: e.button !== 0 || e.shiftKey || pointers.size > 1, focused: target !== null }
     }
     const onDrag = (e: PointerEvent) => {
-      if (!drag) return
-      if (Math.abs(e.clientX - drag.x) > 10) drag.moved = true
-      if (drag.moved && !target) {
-        orbit.goal = THREE.MathUtils.clamp(drag.yaw - (e.clientX - drag.x) * 0.004, ISO.yawMin, ISO.yawMax)
-        settle()
+      const p = pointers.get(e.pointerId)
+      if (!drag || !p) return
+      const dx = e.clientX - p.x, dy = e.clientY - p.y
+      p.x = e.clientX
+      p.y = e.clientY
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 10) drag.moved = true
+      if (!drag.moved || target || MODE !== 'iso') return
+      takeOver()
+      if (pointers.size > 1) {
+        // Two fingers: the midpoint pans, the spread zooms.
+        const [a, b] = [...pointers.values()]
+        const spread = Math.hypot(a.x - b.x, a.y - b.y)
+        if (pinch) goal.zoom += Math.log(spread / pinch) * 0.9
+        pinch = spread
+        drag.pan = true
       }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (target || typing() || e.metaKey || e.ctrlKey || e.altKey) return
-      const step = e.key === 'q' || e.key === 'Q' ? -0.35 : e.key === 'e' || e.key === 'E' ? 0.35 : 0
-      if (!step) return
-      orbit.goal = THREE.MathUtils.clamp(orbit.goal + step, ISO.yawMin, ISO.yawMax)
+      if (drag.pan) {
+        const perPixel = (2 * distance(rig.zoom) * Math.tan(THREE.MathUtils.degToRad(ISO.fov) / 2)) / innerHeight / (pointers.size > 1 ? 2 : 1)
+        pan(-dx * perPixel, dy * perPixel / Math.sin(pitchOf(rig.zoom, rig.tilt)))
+      } else {
+        goal.yaw -= dx * 0.006
+        goal.tilt += dy * 0.003
+      }
       settle()
-    }
-    const onWheel = (e: WheelEvent) => {
-      if (target) return
-      e.preventDefault()
-      orbit.zoomGoal = THREE.MathUtils.clamp(orbit.zoomGoal - e.deltaY * 0.0015, 0, 1)
-      settle()
-    }
-
-    // Third: a click (not a drag) walks to the floor point, or to a step in front of a thing.
-    const raycaster = new THREE.Raycaster()
-    const ndc = new THREE.Vector2()
-    const solid = (object: THREE.Object3D) => {
-      if (!(object as THREE.Mesh).isMesh) return false
-      for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false
-      return ([] as THREE.Material[]).concat((object as THREE.Mesh).material).some((m) => m.visible && m.depthWrite)
     }
     const onUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId)
+      if (pointers.size < 2) pinch = 0
+      if (pointers.size) return
       const was = drag
       drag = null
       // The entries layer may already have chosen what was clicked; walk there all the same.
@@ -154,6 +230,98 @@ export default {
       walk.goal.copy(offset)
       settle()
     }
+    const onContext = (e: Event) => e.preventDefault()
+    const onWheel = (e: WheelEvent) => {
+      if (target) return
+      e.preventDefault()
+      takeOver()
+      // A trackpad pinch arrives as a wheel with ctrl held, in much smaller steps.
+      const lines = e.deltaMode === 1 ? 33 : 1
+      goal.zoom -= e.deltaY * lines * (e.ctrlKey ? 0.01 : 0.0015)
+      settle()
+    }
+    const floorPoint = new THREE.Vector3()
+    const floorPlane = new THREE.Plane(UP, 0)
+    const onDouble = (e: MouseEvent) => {
+      if (target || MODE !== 'iso') return
+      const rect = renderer.domElement.getBoundingClientRect()
+      ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(ndc, camera)
+      if (!raycaster.ray.intersectPlane(floorPlane, floorPoint)) return
+      void view.glide({ x: floorPoint.x, z: floorPoint.z, zoom: Math.max(goal.zoom, 0.55) }, 0.9)
+    }
+
+    // Keyboard. Arrows pan whenever nothing is being written. Letters belong to the
+    // always-on input: a tapped letter writes, as before; held for HOLD_MS, a WASD or
+    // QE letter moves the view instead, until it is let go. A second key during the
+    // wait means someone is typing, so the first letter is written and typing goes on.
+    let pending: { key: string; timer: ReturnType<typeof setTimeout> } | null = null
+    let replaying = false
+    navigation.claims = () => pending !== null || [...held.keys()].some((k) => k in LETTERS)
+    const write = () => {
+      if (!pending) return
+      const { key, timer } = pending
+      clearTimeout(timer)
+      pending = null
+      replaying = true
+      try {
+        dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      } finally {
+        replaying = false
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (replaying || MODE !== 'iso' || e.metaKey || e.ctrlKey || e.altKey) return
+      if (target) return
+      const arrow = ARROWS[e.key]
+      if (arrow) {
+        if (written()) return
+        e.preventDefault()
+        takeOver()
+        held.set(e.key, arrow)
+        return
+      }
+      const letter = LETTERS[e.key]
+      if (!letter || typing() || navigation.writing()) {
+        write()
+        return
+      }
+      if (e.repeat || held.has(e.key)) {
+        e.preventDefault()
+        return
+      }
+      if (pending) {
+        write()
+        return
+      }
+      e.preventDefault()
+      const key = e.key
+      pending = {
+        key,
+        timer: setTimeout(() => {
+          pending = null
+          takeOver()
+          held.set(key, letter)
+        }, HOLD_MS),
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (pending?.key === e.key) write()
+      held.delete(e.key)
+    }
+    const onBlur = () => {
+      if (pending) clearTimeout(pending.timer)
+      pending = null
+      held.clear()
+    }
+
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    const solid = (object: THREE.Object3D) => {
+      if (!(object as THREE.Mesh).isMesh) return false
+      for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false
+      return ([] as THREE.Material[]).concat((object as THREE.Mesh).material).some((m) => m.visible && m.depthWrite)
+    }
 
     ctx.effect(() => {
       const saved = { position: camera.position.clone(), quaternion: camera.quaternion.clone(), fov: camera.fov }
@@ -163,19 +331,34 @@ export default {
         canvas.addEventListener('pointerdown', onDown)
         addEventListener('pointermove', onDrag)
         addEventListener('pointerup', onUp)
+        addEventListener('pointercancel', onUp)
       }
       if (MODE === 'iso') {
-        addEventListener('keydown', onKey)
+        // Capture on window, registered before the always-on input's own listener.
+        addEventListener('keydown', onKeyDown, true)
+        addEventListener('keyup', onKeyUp, true)
+        addEventListener('blur', onBlur)
         canvas.addEventListener('wheel', onWheel, { passive: false })
+        canvas.addEventListener('dblclick', onDouble)
+        canvas.addEventListener('contextmenu', onContext)
+        canvas.style.touchAction = 'none'
       }
       return () => {
         trip?.done()
+        glide?.done()
+        onBlur()
+        navigation.claims = () => false
         removeEventListener('pointermove', onMove)
         canvas.removeEventListener('pointerdown', onDown)
         removeEventListener('pointermove', onDrag)
         removeEventListener('pointerup', onUp)
-        removeEventListener('keydown', onKey)
+        removeEventListener('pointercancel', onUp)
+        removeEventListener('keydown', onKeyDown, true)
+        removeEventListener('keyup', onKeyUp, true)
+        removeEventListener('blur', onBlur)
         canvas.removeEventListener('wheel', onWheel)
+        canvas.removeEventListener('dblclick', onDouble)
+        canvas.removeEventListener('contextmenu', onContext)
         for (const [fog, [near, far]] of fogs) Object.assign(fog, { near, far })
         if (scene.background === backdrop) scene.background = roomBackground
         for (const o of cutaway) {
@@ -190,7 +373,8 @@ export default {
       }
     }, 'camera rig')
 
-    ctx.provide('view', {
+    const rigLook = new THREE.Vector3()
+    const view: View = {
       focus(pose: Pose | null, speed = 3.2) {
         // About 1 s at the default rate, 0.4 s at 7 (the ease is exponential); instant under reduced motion.
         if (pose || target) ctx.emit('village/glide', { seconds: reducedMotion.matches ? 0 : 3.2 / speed, to: pose?.look })
@@ -219,12 +403,35 @@ export default {
           trip = { from: { position: home.clone(), look: look.clone() }, to: pose, u: 0, seconds, done }
         })
       },
-    })
+      glide(frame: Frame, seconds: number) {
+        takeOver()
+        // A frame's turn is reached the short way round, however many times the view has been turned.
+        const yaw = frame.yaw === undefined ? goal.yaw : rig.yaw + THREE.MathUtils.euclideanModulo(frame.yaw - rig.yaw + Math.PI, Math.PI * 2) - Math.PI
+        const end = { x: frame.x, z: frame.z, zoom: frame.zoom, yaw, tilt: goal.tilt }
+        Object.assign(goal, end)
+        clampGoal()
+        if (seconds <= 0 || reducedMotion.matches) {
+          Object.assign(rig, goal)
+          return Promise.resolve()
+        }
+        ctx.emit('village/glide', { seconds, to: { x: frame.x, y: 0, z: frame.z } })
+        return new Promise<void>((done) => {
+          glide = { from: { x: rig.x, z: rig.z, zoom: rig.zoom, yaw: rig.yaw }, to: { x: goal.x, z: goal.z, zoom: goal.zoom, yaw: goal.yaw }, u: 0, seconds, done }
+        })
+      },
+      get looking() {
+        return rigLook
+      },
+      get frame() {
+        return { x: rig.x, z: rig.z, zoom: rig.zoom, yaw: rig.yaw }
+      },
+    }
+    ctx.provide('view', view)
 
+    const pitchOf = (zoom: number, tilt: number) => THREE.MathUtils.lerp(ISO.pitchFar, ISO.pitchNear, zoom) + tilt
     camera.fov = MODE === 'iso' ? ISO.fov : MODE === 'third' ? THIRD.fov : SEAT_FOV
     camera.updateProjectionMatrix()
     const rigPosition = new THREE.Vector3()
-    const rigLook = new THREE.Vector3()
     const toCamera = new THREE.Vector3()
     ctx.on('village/frame', (dt, t) => {
       if (trip) {
@@ -240,27 +447,56 @@ export default {
         }
       }
       if (MODE === 'seat') eased.lerp(pointer, 1 - Math.exp(-dt * 2.5))
-      const goal = target ? 1 : 0
-      blend += (goal - blend) * (1 - Math.exp(-dt * rate))
-      if (Math.abs(goal - blend) < 0.001) blend = goal
+      const goalBlend = target ? 1 : 0
+      blend += (goalBlend - blend) * (1 - Math.exp(-dt * rate))
+      if (Math.abs(goalBlend - blend) < 0.001) blend = goalBlend
       const k = blend * blend * (3 - 2 * blend)
       const calm = 1 - k
-      const ease = 1 - Math.exp(-dt * 5)
       let rigFov = SEAT_FOV
       if (MODE === 'iso') {
-        orbit.yaw += (orbit.goal - orbit.yaw) * ease
-        orbit.zoom += (orbit.zoomGoal - orbit.zoom) * ease
-        const z = orbit.zoom * orbit.zoom * (3 - 2 * orbit.zoom)
-        const distance = THREE.MathUtils.lerp(ISO.far, ISO.near, z)
-        const pitch = THREE.MathUtils.lerp(ISO.pitchFar, ISO.pitchNear, z)
-        rigLook.copy(standing(THREE.MathUtils.lerp(2.9, 2.55, z))).setY(THREE.MathUtils.lerp(1.05, 0.75, z))
-        // Whole-room framing centres the diorama, which sits a little to the left of the seat's line.
-        rigLook.x += forward.z * 0.7 * (1 - z)
-        rigLook.z -= forward.x * 0.7 * (1 - z)
-        toCamera.copy(forward).negate().applyAxisAngle(UP, orbit.yaw).multiplyScalar(Math.cos(pitch) * distance)
-        toCamera.y = Math.sin(pitch) * distance
+        // Held keys move the goal at a pace that scales with how far away the view is.
+        if (held.size && !target) {
+          let right = 0, away = 0, turn = 0
+          for (const [x, y, r] of held.values()) {
+            right += x
+            away += y
+            turn += r
+          }
+          const speed = distance(rig.zoom) * 0.45 * dt
+          pan(right * speed, away * speed)
+          goal.yaw += turn * 1.6 * dt
+          settle()
+        }
+        if (glide) {
+          glide.u = Math.min(1, glide.u + dt / glide.seconds)
+          const u = glide.u
+          const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2
+          const { from: a, to: b } = glide
+          // A long glide lifts a little on the way, so it reads as moving over the house.
+          const span = Math.hypot(b.x - a.x, b.z - a.z)
+          rig.x = THREE.MathUtils.lerp(a.x, b.x, e)
+          rig.z = THREE.MathUtils.lerp(a.z, b.z, e)
+          rig.yaw = THREE.MathUtils.lerp(a.yaw, b.yaw, e)
+          rig.zoom = THREE.MathUtils.lerp(a.zoom, b.zoom, e) - Math.sin(Math.PI * u) * Math.min(0.18, span * 0.025)
+          if (u === 1) {
+            const { done } = glide
+            glide = null
+            done()
+          }
+        } else {
+          const ease = 1 - Math.exp(-dt * 6)
+          rig.x += (goal.x - rig.x) * ease
+          rig.z += (goal.z - rig.z) * ease
+          rig.yaw += (goal.yaw - rig.yaw) * ease
+          rig.zoom += (goal.zoom - rig.zoom) * ease
+        }
+        rig.tilt += (goal.tilt - rig.tilt) * (1 - Math.exp(-dt * 6))
+        const d = distance(rig.zoom)
+        const pitch = pitchOf(rig.zoom, rig.tilt)
+        rigLook.set(rig.x, THREE.MathUtils.lerp(0.9, 0.75, rig.zoom), rig.z)
+        toCamera.set(Math.sin(rig.yaw), 0, Math.cos(rig.yaw)).multiplyScalar(Math.cos(pitch) * d)
+        toCamera.y = Math.sin(pitch) * d
         rigPosition.copy(rigLook).add(toCamera)
-        rigPosition.y += Math.sin(t * 0.25) * 0.01
         rigFov = ISO.fov
       } else if (MODE === 'third') {
         walk.at.lerp(walk.goal, 1 - Math.exp(-dt * 2.2))
@@ -283,7 +519,8 @@ export default {
       camera.position.lerpVectors(from.position, to.position, k)
       // Off the seat a focus move arcs up on the way, so it comes down onto its pose instead of through the furniture.
       if (MODE !== 'seat') camera.position.y += Math.sin(Math.PI * k) * Math.min(1.2, 0.3 * from.position.distanceTo(to.position))
-      camera.lookAt(from.look.lerp(to.look, k))
+      const looked = from.look.lerp(to.look, k)
+      camera.lookAt(looked)
       if (MODE === 'seat') return
       // Focus poses were framed at the seat's field of view, so every rig blends back to it.
       const fov = THREE.MathUtils.lerp(rigFov, SEAT_FOV, k)
@@ -291,21 +528,28 @@ export default {
         camera.fov = fov
         camera.updateProjectionMatrix()
       }
-      atmosphere(rigPosition.distanceTo(rigLook) * calm + 3.6 * k)
+      atmosphere(rigPosition.distanceTo(rigLook) * calm + 3.6 * k, looked, MODE === 'iso' ? Math.max(rig.zoom, k) : 1)
     })
 
     /**
      * The rooms' fog was tuned for a viewer 3.6 m from what they look at, so it
-     * slides back with the rig. Walls the camera stands behind leave the view but
-     * keep casting shadows, and a cut stub (`userData.cutaway`, iso's diorama) takes
-     * their place. Iso sits on a warm backdrop instead of the dark beyond the room.
+     * slides back with the rig. Iso sits on a warm backdrop instead of the dark beyond the house.
+     *
+     * Cutaway. Outer walls (`userData.inward`) the camera stands behind leave the view
+     * but keep casting shadows, and a cut stub (`userData.cutaway`) takes their place.
+     * Interior walls (`userData.interior`, between two rooms) have two insides, so they
+     * follow a different rule: they stand at full height only when the view is close in
+     * (zoom over 0.5, or a focus pose) and the wall is behind what you look at, so it is
+     * that room's backdrop. Otherwise they are stubs, and the next room shows over them.
      */
-    const atmosphere = (distance: number) => {
+    const lookAt = new THREE.Vector3()
+    const atmosphere = (distanceToLook: number, looked: THREE.Vector3, closeness: number) => {
+      lookAt.copy(looked)
       const fog = scene.fog
       if (fog instanceof THREE.Fog) {
         if (!fogs.has(fog)) fogs.set(fog, [fog.near, fog.far])
         const [near, far] = fogs.get(fog)!
-        const extra = Math.max(0, distance - 3.6)
+        const extra = Math.max(0, distanceToLook - 3.6)
         fog.near = near + extra
         fog.far = far + extra
       }
@@ -315,7 +559,7 @@ export default {
       }
       if (--refresh <= 0) {
         refresh = 30
-        scene.traverse((o) => (o.userData.inward || (MODE === 'iso' && o.userData.seatOnly)) && cutaway.add(o))
+        scene.traverse((o) => (o.userData.inward || o.userData.interior || (MODE === 'iso' && o.userData.seatOnly)) && cutaway.add(o))
       }
       for (const o of cutaway) {
         if (!o.parent) {
@@ -326,9 +570,15 @@ export default {
           o.visible = false
           continue
         }
-        o.getWorldPosition(toCamera)
-        toCamera.subVectors(camera.position, toCamera)
-        const facing = toCamera.dot(o.userData.inward as THREE.Vector3) > 0
+        let facing: boolean
+        if (o.userData.interior) {
+          const x = (o.userData.interior as { x: number }).x
+          facing = closeness > 0.5 && Math.sign(camera.position.x - x) === Math.sign(lookAt.x - x)
+        } else {
+          o.getWorldPosition(toCamera)
+          toCamera.subVectors(camera.position, toCamera)
+          facing = toCamera.dot(o.userData.inward as THREE.Vector3) > 0
+        }
         if (o.userData.cutaway) o.visible = !facing
         else if (o.layers.isEnabled(0) !== facing) o.traverse((n) => n.layers.set(facing ? 0 : SHADOW_ONLY))
       }
