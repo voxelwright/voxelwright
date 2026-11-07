@@ -173,8 +173,18 @@ const residue = (page) => page.evaluate(() => {
   ])))
   await page.reload()
   await page.evaluate(() => window.village.ready())
-  const tampered = await page.evaluate(() => window.village.theme.list().filter((l) => l.mine))
-  check('storage: records with a changed post chain or a bad id are refused', tampered.length === 0, tampered)
+  const tampered = await page.evaluate(() => ({
+    mine: window.village.theme.list().filter((l) => l.mine).map((l) => l.id),
+    stages: JSON.stringify(window.village.theme.get('mine-bad')?.post.stages),
+  }))
+  const expected = await page.evaluate(async () => {
+    const { check } = await import('/src/theme/index.ts')
+    const c = check({ post: { stages: [{ kind: 'pixel', height: 1, palette: ['#000000'], dither: 0 }] } })
+    return typeof c === 'string' ? null : JSON.stringify(c.post.stages)
+  })
+  // Stored looks go through check(): a bad id is refused; a changed post chain is data like any
+  // other (a look written from a sentence may carry stages) and loads exactly as check() returns it.
+  check('storage: a bad id is refused; a changed post chain loads only as check() returns it', tampered.mine.length === 1 && tampered.mine[0] === 'mine-bad' && expected !== null && tampered.stages === expected, { tampered, expected })
   await page.evaluate(() => localStorage.clear())
   await context.close()
 }

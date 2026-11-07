@@ -1492,5 +1492,3 @@ cards from the fan on the sill instead of floating them over the table; compile 
 before holding the frame, so the rebuild doesn't read as a freeze then a jump; let the lamp
 become the key light at dusk; fewer, smaller dust motes outside the beam. Below the 9/10 bar.
 
-Not built yet: characters on twos from `motion.characterFps`, a theme written from a sentence
-(the `check()` and `ask()` unit), and the comic-book and hand-painted looks.

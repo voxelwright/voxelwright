@@ -68,6 +68,9 @@ const ask = (page, text) => page.evaluate(async (text) => {
   const t0 = performance.now()
   const r = await window.village.theme.ask(text)
   await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+  // A switch blends in (1.5 s) or holds the last frame while postfx rebuilds; wait until it has landed.
+  const until = performance.now() + 8000
+  while (window.village.theme.switching?.() && performance.now() < until) await new Promise((done) => setTimeout(done, 50))
   return { ...r, appliedMs: Math.round(performance.now() - t0) }
 }, text)
 const current = (page) => page.evaluate(async () => {
