@@ -52,12 +52,14 @@ export default {
     let plan: Plan = KITCHEN
     let history: PlanHistory | null = null
     let offHistory = () => {}
+    let committing = false
     const opened = house().then((h) => {
       history = h
       plan = h.plan
       offHistory = h.onChange((p) => {
         if (!drag) plan = p
-        outline.refit()
+        // The outline's own commit is not a change under it.
+        if (!committing) outline.refit()
       })
       return h
     })
@@ -439,10 +441,15 @@ export default {
         const h = history
         if (!h) return
         const note = d.label === 'New room' ? 'Added a room' : `Added the ${d.label.toLowerCase()}`
+        committing = true
         h.commit(draftEdits(h.plan, d), note).then(() => {
+          committing = false
           outline.close()
           selectWall(null)
-        }, () => say('Something moved while I was drawing that. Shall we try again?'))
+        }, () => {
+          committing = false
+          say('Something moved while I was drawing that. Shall we try again?')
+        })
       },
     })
     /** Resolve an intent now; the outline is up before this returns, or one line says why not. */
@@ -494,7 +501,10 @@ export default {
         camera.updateMatrixWorld()
         const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
         let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, depth = 0, n = 0
-        for (const r of shown.rooms) for (const [x, z] of ringOf(shown, r, -0.6)) for (const y of [0, 3]) {
+        // While a room is drawn, the view centres on it (a phone cannot take in the whole house); after, on the house.
+        const drafted = outline.draft()
+        const fitted = drafted ? shown.rooms.filter((r) => r.id === drafted.roomId) : shown.rooms
+        for (const r of fitted) for (const [x, z] of ringOf(shown, r, drafted ? -1.4 : -0.6)) for (const y of [0, 3]) {
           q.set(x, y, z).applyMatrix4(camera.matrixWorldInverse)
           x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y)
           depth += -q.z
@@ -502,7 +512,8 @@ export default {
         }
         depth /= n
         const need = Math.max((x1 - x0) / 2 / (tan * camera.aspect), (y1 - y0) / 2 / tan) * 1.12
-        goal = { right: (x0 + x1) / 2, up: (y0 + y1) / 2, back: Math.max(0, need - depth) }
+        // At most 10 m further: on a narrow phone the whole house would put the camera past the far plane.
+        goal = { right: (x0 + x1) / 2, up: (y0 + y1) / 2, back: Math.min(10, Math.max(0, need - depth)) }
       } else goal = { right: 0, up: 0, back: 0 }
       held = goal
       const e = 1 - Math.exp(-dt * 3)

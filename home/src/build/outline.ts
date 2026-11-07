@@ -13,8 +13,11 @@ import { SNAP, draftGeometry, fit, placeDoor, type Draft } from './resolve'
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const MIN = 1.5
 const PX = 1024
-const CHALK = 'rgba(255, 251, 242, 0.95)'
-const PENCIL = 'rgba(92, 58, 36, 0.55)'
+const INK = 'rgba(78, 52, 34, 0.95)'
+/** Carpenter's red pencil, for the measurements. */
+const PENCIL = 'rgba(110, 70, 44, 0.85)'
+// Darker than it looks: the scene's exposure and bloom lift it to a warm tracing-paper cream.
+const PAPER = 'rgba(196, 176, 146, 0.9)'
 
 export type Handle = 'far' | 'from' | 'to' | 'bend' | 'door'
 
@@ -57,7 +60,8 @@ function offsetPath(path: P[], d: number): P[] {
     if (!n0) return add(p, n1!, d)
     if (!n1) return add(p, n0, d)
     const m: P = [n0[0] + n1[0], n0[1] + n1[1]]
-    const k = dot(m, n0) || 1
+    // A sharp joint (a side wall meeting a deep bay) would spike; the mitre stops at twice the offset.
+    const k = Math.max(0.5, dot(m, n0) || 1)
     return add(p, m, d / k)
   })
 }
@@ -77,18 +81,23 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   sheet.name = 'build outline sheet'
 
   // Translucent wall ghosts, warm like furnishing's.
-  const ghostMat = new THREE.MeshStandardMaterial({ color: '#fff3dc', emissive: '#ffd9a6', emissiveIntensity: 0.25, roughness: 1, transparent: true, opacity: 0.11, depthWrite: false, side: THREE.DoubleSide })
+  const ghostMat = new THREE.MeshStandardMaterial({ color: '#efe2c8', emissive: '#ffd9a6', emissiveIntensity: 0.12, roughness: 1, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide })
   const ghosts = new THREE.Mesh(new THREE.BufferGeometry(), ghostMat)
   ghosts.name = 'build outline walls'
   ghosts.renderOrder = 2
+  // Their edges in pencil: tops and the far corners' uprights, so the walls read through the haze.
+  const edgeMat = new THREE.LineBasicMaterial({ color: '#6a4630', transparent: true, opacity: 0.8, depthWrite: false })
+  const edges = new THREE.LineSegments(new THREE.BufferGeometry(), edgeMat)
+  edges.name = 'build outline edges'
+  edges.renderOrder = 2
 
   // The bend dot, as the right wall's.
-  const knobMat = new THREE.MeshBasicMaterial({ map: paintGlow(), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })
+  const knobMat = new THREE.MeshBasicMaterial({ map: paintGlow(), transparent: true, opacity: 0.85, depthWrite: false, fog: false })
   const knob = new THREE.Mesh(new THREE.CircleGeometry(0.3, 40), knobMat)
   knob.rotation.x = -Math.PI / 2
   knob.renderOrder = 4
   knob.name = 'build outline bend'
-  group.add(sheet, ghosts, knob)
+  group.add(sheet, ghosts, edges, knob)
 
   // ── Paper tags: the two sizes, and the choice ────────────────────────────
   const style = document.createElement('style')
@@ -119,6 +128,11 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   choice.setAttribute('role', 'group')
   const title = document.createElement('div')
   title.className = 'title'
+  const titleName = document.createElement('span')
+  titleName.className = 'name'
+  const titleArea = document.createElement('span')
+  titleArea.className = 'area'
+  title.append(titleName, titleArea)
   const button = (label: string, kind: string, act: () => void) => {
     const b = document.createElement('button')
     b.type = 'button'
@@ -174,7 +188,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     const room = made.rooms.find((r) => r.id === d.roomId)!
     const inner = ringOf(made, room, T / 2)
     const bulge = Math.max(0, d.bend)
-    const dimOff = T / 2 + 1.0
+    const dimOff = T / 2 + 0.7
     // The new room's inside is to the right of p → pf → qf → q when the room is on the host's left of travel, and so on: pick by area sign.
     const side = Math.sign(dot([geo.out[0], geo.out[1]], [-geo.dir[1], geo.dir[0]])) || 1
     const wallIn = offsetPath(centre, (side > 0 ? -1 : 1) * T / 2)
@@ -210,73 +224,94 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       path.forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
       if (close) g.closePath()
     }
-    // A chalk stroke: a soft shadow for contrast on pale boards, then three passes that wobble a little.
+    // A pencil stroke: the path cut into short runs that wander a little, drawn twice, like a carpenter's pencil.
     let seed = 7
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5
-    const chalk = (path: P[], width: number, alpha = 1, colour = CHALK, dash: number[] = []) => {
+    const wander = (path: P[]): P[] => {
+      const out: P[] = []
+      path.forEach((p, i) => {
+        if (i === 0) return out.push(p)
+        const q = path[i - 1]
+        const n = Math.max(1, Math.round(Math.hypot(p[0] - q[0], p[1] - q[1]) / 0.25))
+        for (let s = 1; s <= n; s++) {
+          const t = s / n
+          out.push([q[0] + (p[0] - q[0]) * t + (s < n ? rnd() * 0.014 : 0), q[1] + (p[1] - q[1]) * t + (s < n ? rnd() * 0.014 : 0)])
+        }
+      })
+      return out
+    }
+    const chalk = (path: P[], width: number, alpha = 1, colour = INK, dash: number[] = []) => {
       g.setLineDash(dash.map((v) => v * k))
-      g.save()
-      g.strokeStyle = 'rgba(80, 48, 26, 0.22)'
-      g.lineWidth = width * k * 1.9
-      g.translate(0, 0.012 * k)
-      trace(path)
-      g.stroke()
-      g.restore()
-      for (let pass = 0; pass < 3; pass++) {
+      for (let pass = 0; pass < 2; pass++) {
         g.save()
-        g.globalAlpha = alpha * (pass ? 0.45 : 0.85)
+        g.globalAlpha = alpha * (pass ? 0.5 : 0.9)
         g.strokeStyle = colour
-        g.lineWidth = width * k * (pass ? 0.7 : 1)
-        g.translate(rnd() * 0.012 * k, rnd() * 0.012 * k)
-        trace(path)
+        g.lineWidth = width * k * (pass ? 0.6 : 1)
+        trace(wander(path))
         g.stroke()
         g.restore()
       }
       g.setLineDash([])
     }
+    /** Hatching by hand: uneven spacing, each stroke a little off the angle. */
+    const hatch = (gap: number, alpha: number, width: number, dir: 1 | -1) => {
+      g.strokeStyle = INK
+      g.lineWidth = width * k
+      for (let s = -PX; s < PX * 2; s += gap * k * (0.75 + Math.abs(rnd()))) {
+        g.globalAlpha = alpha * (0.7 + rnd() * 0.6)
+        const lean = rnd() * 0.08 * PX
+        g.beginPath()
+        g.moveTo(s, 0)
+        g.lineTo(s + dir * PX + lean, PX)
+        g.stroke()
+      }
+      g.globalAlpha = 1
+    }
 
-    // The building site: a patch of packed sand under the new room, feathered at its edge, so the chalk has ground to sit on.
+    // Tracing paper laid on the ground under the new room, with a soft shadow where it meets the ground.
+    const sheetRing = ringOf(made, room, -T / 2 - 0.4)
     g.save()
-    g.filter = `blur(${Math.round(0.18 * k)}px)`
-    trace(ringOf(made, room, -T / 2 - 0.35), true)
-    g.fillStyle = 'rgba(206, 172, 128, 0.78)'
+    g.filter = `blur(${Math.round(0.1 * k)}px)`
+    g.translate(0.04 * k, 0.06 * k)
+    trace(sheetRing, true)
+    g.fillStyle = 'rgba(70, 40, 20, 0.28)'
     g.fill()
     g.restore()
-    // A light wash on the new floor, with loose hatching like a sketch.
+    g.save()
+    trace(sheetRing, true)
+    g.fillStyle = PAPER
+    g.fill()
+    g.restore()
+    // The floor: faint squared paper, half a metre a square, running with the wall it hangs on.
     g.save()
     trace(inner, true)
-    g.fillStyle = 'rgba(255, 246, 228, 0.22)'
-    g.fill()
     g.clip()
-    g.strokeStyle = 'rgba(255, 252, 244, 0.26)'
-    g.lineWidth = 0.018 * k
-    for (let s = -PX; s < PX * 2; s += 0.32 * k) {
+    g.strokeStyle = INK
+    g.lineWidth = 0.01 * k
+    g.globalAlpha = 0.2
+    const o = geo.at(0)
+    for (let a = -30; a <= 30; a++) for (const [u, v] of [[geo.dir, geo.out], [geo.out, geo.dir]] as Array<[P, P]>) {
+      const c0 = add(o, u, a * 0.5)
       g.beginPath()
-      g.moveTo(s, 0)
-      g.lineTo(s + PX, PX)
+      g.moveTo(...px(add(c0, v, -30)))
+      g.lineTo(...px(add(c0, v, 30)))
       g.stroke()
     }
+    g.globalAlpha = 1
     g.restore()
 
-    // The new walls: both faces in chalk, the band between them hatched closer.
+    // The new walls: both faces in pencil, the band between them hatched closer.
     g.save()
     g.beginPath()
     ;[...wallOut, ...[...wallIn].reverse()].forEach((p, i) => (i ? g.lineTo(...px(p)) : g.moveTo(...px(p))))
     g.closePath()
-    g.fillStyle = 'rgba(255, 248, 236, 0.32)'
+    g.fillStyle = 'rgba(170, 140, 108, 0.55)'
     g.fill()
     g.clip()
-    g.strokeStyle = 'rgba(255, 252, 244, 0.6)'
-    g.lineWidth = 0.014 * k
-    for (let s = -PX; s < PX * 2; s += 0.07 * k) {
-      g.beginPath()
-      g.moveTo(s, 0)
-      g.lineTo(s - PX, PX)
-      g.stroke()
-    }
+    hatch(0.06, 0.5, 0.012, -1)
     g.restore()
-    chalk(wallOut, 0.03)
-    chalk(wallIn, 0.024, 0.9)
+    chalk(wallOut, 0.04)
+    chalk(wallIn, 0.032, 0.9)
 
     // The door: jambs across the shared wall, and each leaf with its swing into the new room.
     for (const t of [d.door.from, d.door.to]) chalk([geo.at(t, -T / 2 - 0.04), geo.at(t, T / 2 + 0.04)], 0.03)
@@ -292,9 +327,9 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
         const a = (i / 16) * Math.PI / 2
         return add(add(hinge, geo.dir, h.dir * h.r * Math.cos(a)), geo.out, h.r * Math.sin(a))
       })
-      chalk(arcPts, 0.016, 0.85, CHALK, [0.07, 0.06])
+      chalk(arcPts, 0.014, 0.8, INK, [0.07, 0.06])
     }
-    if (!d.door.leaves) chalk([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.016, 0.8, CHALK, [0.07, 0.06])
+    if (!d.door.leaves) chalk([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.014, 0.8, INK, [0.07, 0.06])
 
     // Dimension lines in carpenter's pencil: extension lines, the run, and slashed ends.
     const dimension = (a: P, b: P, from: P, to: P) => {
@@ -309,24 +344,34 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     dimension(dA, dB, add(geo.at(tSide, 0), sideDir, T / 2 + 0.1), add(geo.at(tSide, d.depth), sideDir, T / 2 + 0.1))
 
     // Grips: small rings at the middle of each wall that moves, and a diamond on the door.
+    // A pushpin: a shadow, a red head and a glint.
     const ring = (p: P, r: number, live: boolean) => {
+      const [x, y] = px(p)
       g.beginPath()
-      g.arc(...px(p), r * k, 0, Math.PI * 2)
-      g.fillStyle = live ? 'rgba(255, 214, 150, 0.95)' : 'rgba(255, 249, 236, 0.9)'
+      g.arc(x + 0.03 * k, y + 0.04 * k, r * k, 0, Math.PI * 2)
+      g.fillStyle = 'rgba(60, 30, 14, 0.3)'
       g.fill()
-      g.lineWidth = 0.02 * k
-      g.strokeStyle = 'rgba(110, 70, 40, 0.55)'
+      g.beginPath()
+      g.arc(x, y, r * k, 0, Math.PI * 2)
+      g.fillStyle = live ? '#e0703f' : '#b8442c'
+      g.fill()
+      g.lineWidth = 0.015 * k
+      g.strokeStyle = 'rgba(70, 24, 12, 0.7)'
       g.stroke()
+      g.beginPath()
+      g.arc(x - r * k * 0.35, y - r * k * 0.35, r * k * 0.3, 0, Math.PI * 2)
+      g.fillStyle = 'rgba(255, 236, 214, 0.75)'
+      g.fill()
     }
     const active = drag?.handle ?? hover
-    ring(mid, 0.075, active === 'far')
-    ring(geo.at(d.from, d.depth / 2), 0.075, active === 'from')
-    ring(geo.at(d.to, d.depth / 2), 0.075, active === 'to')
+    ring(mid, 0.13, active === 'far')
+    ring(geo.at(d.from, d.depth / 2), 0.13, active === 'from')
+    ring(geo.at(d.to, d.depth / 2), 0.13, active === 'to')
     const dc = geo.at((d.door.from + d.door.to) / 2, T / 2 + 0.22)
     g.save()
     g.translate(...px(dc))
     g.rotate(Math.PI / 4)
-    g.fillStyle = active === 'door' ? 'rgba(255, 214, 150, 0.95)' : 'rgba(255, 249, 236, 0.9)'
+    g.fillStyle = active === 'door' ? 'rgba(240, 190, 120, 1)' : 'rgba(252, 244, 228, 1)'
     g.fillRect(-0.06 * k, -0.06 * k, 0.12 * k, 0.12 * k)
     g.strokeStyle = 'rgba(110, 70, 40, 0.55)'
     g.lineWidth = 0.02 * k
@@ -335,7 +380,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     sheetMap.needsUpdate = true
 
     knob.position.set(knobAt[0], 0.03, knobAt[1])
-    knobMat.opacity = active === 'bend' ? 1 : 0.7
+    knobMat.opacity = active === 'bend' ? 1 : 0.8
 
     // Ghost walls: both faces and the top of each new wall.
     const H = geo.height
@@ -352,6 +397,15 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     ghostGeo.computeVertexNormals()
     ghosts.geometry.dispose()
     ghosts.geometry = ghostGeo
+    const line: number[] = []
+    for (const face of [wallIn, wallOut]) {
+      for (let i = 0; i < face.length - 1; i++) line.push(face[i][0], H, face[i][1], face[i + 1][0], H, face[i + 1][1])
+      for (const p of [face[1], face[face.length - 2]]) line.push(p[0], 0, p[1], p[0], H, p[1])
+    }
+    const edgeGeo = new THREE.BufferGeometry()
+    edgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(line, 3))
+    edges.geometry.dispose()
+    edges.geometry = edgeGeo
 
     // Tags.
     anchors.w.set((wA[0] + wB[0]) / 2, 0.05, (wA[1] + wB[1]) / 2)
@@ -360,7 +414,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     anchors.title.set(c[0], H + 0.35, c[1])
     if (editing !== 'w') tags.w.textContent = `${fmt(d.to - d.from)} m`
     if (editing !== 'd') tags.d.textContent = `${fmt(d.depth)} m`
-    title.textContent = `${d.label === 'New room' ? 'A new room' : `The ${d.label.toLowerCase()}`} · ${roomArea(made, d.roomId).toFixed(1)} m²`
+    titleName.textContent = d.label === 'New room' ? 'A new room' : `The new ${d.label.toLowerCase()}`
+    titleArea.textContent = ` · ${roomArea(made, d.roomId).toFixed(1)} m²`
   }
 
   // ── Opening, closing, applying ────────────────────────────────────────────
@@ -381,6 +436,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     group.removeFromParent()
     ghosts.geometry.dispose()
     ghosts.geometry = new THREE.BufferGeometry()
+    edges.geometry.dispose()
+    edges.geometry = new THREE.BufferGeometry()
     for (const el of [tags.w, tags.d, choice, field]) el.classList.remove('shown')
     stage.renderer.domElement.style.cursor = ''
   }
@@ -584,8 +641,10 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const place = () => {
     if (!draft) return
     const [wx, wy] = screen(anchors.w), [dx, dy] = screen(anchors.d)
-    at(tags.w, wx, wy)
-    at(tags.d, dx, dy)
+    // Tags stay on screen, whole, however the room sits in the view.
+    const inX = (x: number) => Math.min(innerWidth - 60, Math.max(60, x)), inY = (y: number) => Math.min(innerHeight - 24, Math.max(24, y))
+    at(tags.w, inX(wx), inY(wy))
+    at(tags.d, inX(dx), inY(dy))
     const [tx, ty] = screen(anchors.title)
     at(choice, Math.min(innerWidth - 130, Math.max(130, tx)), Math.max(16, ty), '-50%', '-100%')
     if (editing) {
@@ -605,6 +664,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     ;(sheet.material as THREE.Material).dispose()
     sheetMap.dispose()
     ghostMat.dispose()
+    edgeMat.dispose()
     knob.geometry.dispose()
     knobMat.map?.dispose()
     knobMat.dispose()
@@ -671,12 +731,17 @@ function css() {
   .build-choice::before { content: ''; position: absolute; inset: 5px; border: 1.5px dashed rgba(150, 100, 60, 0.36); border-radius: 10px; pointer-events: none; }
   .build-choice::after { content: ''; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; margin-left: -8px; rotate: 45deg;
     background: #f5e7cb; border-radius: 0 0 4px 0; box-shadow: 3px 3px 5px rgba(60, 30, 10, 0.12); }
-  .build-choice .title { font: italic 18px ${HAND}; color: #6a4a34; padding: 0 6px; white-space: nowrap; }
+  .build-choice .title { padding: 0 6px; white-space: nowrap; color: #6a4a34; }
+  .build-choice .title .name { font: 700 21px ${HAND}; color: #4a3428; }
+  .build-choice .title .area { font: italic 16px ${HAND}; }
   .build-choice .row { display: flex; gap: 6px; }
   .build-choice button { position: relative; padding: 2px 8px 4px; border: 0; background: none; cursor: pointer; color: #6a4a34; font: 700 21px ${HAND};
     transition: translate 120ms ease; }
   .build-choice button + button::before { content: '·'; position: absolute; left: -7px; color: rgba(120, 80, 50, 0.5); }
-  .build-choice button[data-choice='apply'] { color: #3f6a35; }
+  .build-choice button[data-choice='apply'] { min-height: 44px; padding: 4px 16px 6px; margin: 2px 4px 0 0; color: #3f6a35; rotate: -2deg;
+    border: 2px solid rgba(63, 106, 53, 0.75); border-radius: 8px; background: rgba(63, 106, 53, 0.07); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset; }
+  .build-choice button[data-choice='cancel'] { min-height: 44px; font-weight: 400; font-size: 18px; color: #7a5a44; }
+  .build-choice button[data-choice='cancel']::before { display: none; }
   .build-choice button:hover, .build-choice button:focus-visible { translate: 0 -1px; outline: none; text-decoration: underline wavy rgba(120, 80, 50, 0.5); }
   @media (prefers-reduced-motion: reduce) { .build-dim, .build-choice, .build-dim-field { transition: none; } }
   `

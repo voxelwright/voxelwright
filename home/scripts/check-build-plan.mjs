@@ -265,10 +265,34 @@ if (!args.includes('--skip-drag')) {
   const ms = await page.evaluate(() => window.villageBuild.rebuildMs().slice(1).sort((a, b) => a - b))
   check('rebuild time per change (ms, median / max)', true, [ms[Math.floor(ms.length / 2)], ms[ms.length - 1]].map((v) => +v.toFixed(2)))
 
+  // More than one room: a pantry on the left wall is drawn with its own floor, and the shared wall once.
+  await page.evaluate(() => {
+    window.villageBuild.intent({ op: 'addRoom', label: 'pantry', anchor: { side: 'left' }, size: { w: 4, d: 3 }, connect: { kind: 'door', leaves: 2 } })
+    window.villageBuild.outline.confirm()
+  })
+  await page.waitForTimeout(800)
+  await frames()
+  const multi = await page.evaluate(() => {
+    const p = window.villageBuild.plan()
+    const scene = window.village.kernel.root.get('stage').scene
+    const shared = p.walls.filter((w) => p.rooms.filter((r) => r.loop.includes(w.a) && r.loop.includes(w.b)).length === 2).map((w) => w.id)
+    const drawn = {}
+    scene.getObjectByName('build').traverse((o) => {
+      if (!shared.includes(o.userData.wall) || o.userData.cutaway || !o.geometry || o.geometry.parameters?.height < 0.1) return
+      const part = o.parent.name
+      drawn[part] = (drawn[part] ?? 0) + 1
+    })
+    return { rooms: p.rooms.map((r) => r.id), floors: window.villageBuild.floors(), shared, drawn }
+  })
+  check('two rooms: each has its floor, and the shared wall is drawn by one room only', multi.rooms.length === 2 && multi.floors === 2 && multi.shared.length === 1 && Object.keys(multi.drawn).length === 1, multi)
+  await jpg(page, 'two-rooms.jpg')
+
   await page.evaluate(() => window.village.unload('build'))
   await frames()
   const after = await page.evaluate(() => window.village.snapshot())
-  const sameObjects = JSON.stringify(after.objects) === JSON.stringify(today.objects)
+  // Other plugins that load only under ?build=1 (placing things, #48) keep their own objects; compare the rest.
+  const others = /^Group:(placed things|placement)$/
+  const sameObjects = JSON.stringify(after.objects.filter((o) => !others.test(o))) === JSON.stringify(today.objects)
   check('unload: today\'s room is back (scene object list equal to a page without build)', sameObjects, { objects: [today.objects.length, after.objects.length], geometries: [today.geometries, after.geometries] })
   check('drag page: no console errors', errors.length === 0, errors.slice(0, 3))
   const video = page.video()

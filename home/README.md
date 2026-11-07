@@ -1387,6 +1387,80 @@ isn't saved, and there is no undo UI. Screenshots are in `screenshots/build/`:
 `iso-` and `seat-` `baseline`, `generated` and `diff`, plus `drag-out`,
 `drag-in`, `bend-drag` and `bend` (jpg). The clip is `drag.mp4`.
 
+### Adding rooms
+
+Say it on the notepad in `?talk=npc&build=1`: "add a room to the left side,
+connected by double doors, 2/3 the size of the current room", or "add a 4 by
+3 metre study behind the living room". Or click a wall and say "open a door
+here into a new room". The router (`host/src/villager-input.ts`, route `build`)
+writes an intent as data, never geometry: `{op: 'addRoom', label, anchor: {room,
+side, wall}, size: {w, d} | {fraction}, connect: {kind, leaves, at}}`. The host
+keeps only known keys and plain values; `src/build/intent.ts` checks enums and
+ranges again. `src/build/resolve.ts` (pure) turns it into a draft against the
+plan and the view, or into one line your villager says:
+
+- Sides are relative to the camera: its view direction on the floor is
+  "behind", turned a quarter left or right is "left" or "right". When the
+  camera looks at a corner (two faces within 0.15 in cosine), it asks you to
+  click the wall.
+- `w` runs along the shared wall, `d` away from it. "2/3 the size" is 2/3 of
+  the anchor room's centreline floor area: `w` starts at the wall's length
+  times the square root of the fraction, and the 10 cm pair closest to the
+  target area wins (0.12% off for the kitchen). Everything snaps to 10 cm.
+- The room centres on the wall or the clicked point, then slides to the
+  nearest stretch with no window or door. It asks when the side curves, the
+  room would run into another room, no stretch fits, the room or side is
+  unclear, or the wall is too short.
+
+`src/build/outline.ts` draws the draft at once: pencil walls on tracing paper
+laid on the ground, squared half-metre paper inside, the door's swing dashed,
+translucent wall ghosts with pencil edges, and handwritten size tags. Drag a
+wall or the door, pull the pin inside the far wall to bend it, or click a size
+and type. Enter or "Build it" commits one version ("Added the study"); Escape
+or "Not now" leaves no trace. Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through
+versions. Every room renders with its floor and base, and a shared wall is
+drawn once. In iso the view eases to the room being drawn, then to the house.
+The plan history is `src/build/house.ts`: the host's store when the host is
+running, memory otherwise.
+
+```sh
+node scripts/check-build-addroom.mjs                  # stub host and router, 34 checks
+node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg, addroom.mp4
+node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
+```
+
+Stub (November 7, 2026): 34 of 34. Enter to outline is 209 ms with the stub
+router on `?route=separate`; the outline is drawn in the same call that
+receives the route. On the default one-call path the stub villager streams its
+ROUTE reply six letters at a time, so it measures about 1.8 s there.
+
+Real router (Sonnet through the Agent SDK, 7 lines): 7 of 7 intents correct,
+including the two that should ask ("a study behind the kitchen" hits the window
+stretch; "add a room" has no side). Enter to route: median 17.5 s (10.3 to
+30.7 s). Enter to outline less the router call: 35 to 180 ms on four lines, 1.6 s
+on the first line of a fresh page. The router call, not the house, is the wait.
+
+| Line | Result |
+| --- | --- |
+| a room to the left, double doors, 2/3 the size | left wall, 4.9 x 5.8 m, double door |
+| a 4 by 3 m study behind the kitchen | asks: window or door on that wall |
+| a small pantry on the right, about 3 by 2 m | right wall, 3 x 2 m |
+| a bedroom in front of the kitchen, single door | front wall, 3.6 x 3 m |
+| a playroom to the right, half this room, open archway | right wall, 4.1 x 5.2 m, opening |
+| add a room | asks which side |
+| a 5 by 4 m office to the left, double doors | left wall, 5 x 4 m, double door |
+
+Look (Opus scorer, shots only, ui-craft rubric plus "a hand-drawn blueprint
+that feels part of a cozy home"): 4.5, 4.5 and 5 out of 10 over three rounds.
+It still finds the paper flat and the dimension lines too CAD-like.
+
+Missing or approximate: the new room lands on the yard. The fence, path and
+grass run through it and the sun's shadow box doesn't cover it. There's no
+threshold in a doorway between rooms, so the base shows. The size tags edit
+width and depth only, not the bend. On a phone the view centres on the new room
+but can't take in the whole house. Rooms are rectangles on straight walls only.
+Furniture is left to the placement unit.
+
 ### Plan versions
 
 `src/build/history.ts` (no three.js) keeps the house's plan as versions.
