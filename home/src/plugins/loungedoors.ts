@@ -24,6 +24,7 @@ export default {
     workshop.name = 'workshop door'
     workshop.rotation.y = -Math.PI / 2
     workshop.position.set(LIVING_X + LOUNGE.right, 0, LOUNGE.back + 1.75)
+    workshop.userData.inward = new THREE.Vector3(-1, 0, 0) // leaves with its wall when a wider view cuts it away (#42)
     own(ctx, workshop)
 
     const through = {

@@ -21,6 +21,7 @@ export default {
     )
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = true
+    floor.userData.seatOnly = true // runs past the walls; iso stands on the diorama's own floor (#42)
     room.add(floor)
 
     // One plaster map stretched over the whole back wall, never repeated, so
