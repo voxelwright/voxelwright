@@ -136,6 +136,8 @@ const RUNS: Record<string, () => Promise<Turn[]>> = {
   'warm-haiku-nothink': () => warm('haiku', false, { thinking: { type: 'disabled' } }),
   // The default since #42: warm, Haiku, thinking off, notes on, no helper call.
   'default': () => warm('haiku', true, { thinking: { type: 'disabled' } }, { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }),
+  // The same with Sonnet, for the persona comparison (#42).
+  'default-sonnet': () => warm('sonnet', true, { thinking: { type: 'disabled' } }, { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }),
   // The default before #42: a process per turn, Sonnet, notes on, the helper call.
   'before': () => cold('sonnet', {}, {}, true),
   'warm-haiku': () => warm('haiku'),

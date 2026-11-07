@@ -6,6 +6,8 @@
 // Per person, under <root>/people/<id>/:
 //   notes/*.md          the villager's private notes (its only tools)
 //   villager.json       the Agent SDK session id to resume, and its running cost
+//   persona.json        who the villager is (#42), written by a villager generator; checked, never trusted as rules
+//   preferences.json    what the person said they want (the humour dial), written by host code from their own words
 //   conversation.jsonl  what each side said (the person's own lines only, never context)
 //   usage.jsonl         one line per turn: model, tokens, cost, timings
 //   routes.jsonl        the separate router (#42, ?route=separate): each line routed, the checked route, timings
@@ -23,6 +25,7 @@ import type { Context } from 'cordis'
 import { planStore } from './plans.ts'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
+import { checkProfile, humourWords, loadCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 
 export interface Config {
   root: string
@@ -31,6 +34,8 @@ export interface Config {
   port?: number
   /** Person id to the name the villager uses. Synthetic until isolation is proven. */
   people?: Record<string, string>
+  /** Person id to their profile (#42): trusted operator data the villager reads and never writes. A missing one is age "unknown". */
+  profiles?: Record<string, Profile>
   turnTimeoutMs?: number
   /** The always-on input's router and prop maker (#42). Without them those endpoints answer 503. */
   router?: Router
@@ -58,17 +63,26 @@ const MAX_MODULE = 120_000
  * that silently answers for the wrong people.
  */
 export function parsePeople(spec: string): Record<string, string> {
+  return parsePeopleSpec(spec).people
+}
+
+/** The same list with each person's profile: `alex:Alex:adult:en`, where the age band and language are optional. */
+export function parsePeopleSpec(spec: string): { people: Record<string, string>; profiles: Record<string, Profile> } {
   const people: Record<string, string> = {}
+  const profiles: Record<string, Profile> = {}
   for (const entry of spec.split(',').map((e) => e.trim()).filter(Boolean)) {
-    const at = entry.indexOf(':')
-    const id = at < 0 ? entry : entry.slice(0, at).trim()
-    const name = at < 0 ? '' : entry.slice(at + 1).trim()
-    if (!PERSON.test(id) || !name || name.length > 40) throw new Error(`"${entry}" is not id:Name with a lowercase id`)
+    const [id, name = '', age, language, ...rest] = entry.split(':').map((p) => p.trim())
+    if (!PERSON.test(id) || !name || name.length > 40 || rest.length) throw new Error(`"${entry}" is not id:Name[:age[:language]] with a lowercase id`)
     if (Object.hasOwn(people, id)) throw new Error(`"${id}" is listed twice`)
     people[id] = name
+    try {
+      profiles[id] = checkProfile({ age: (age || 'unknown') as AgeBand, ...(language ? { language } : {}) })
+    } catch (error) {
+      throw new Error(`"${entry}": ${(error as Error).message}`)
+    }
   }
   if (!Object.keys(people).length) throw new Error('no people listed')
-  return people
+  return { people, profiles }
 }
 
 declare module 'cordis' {
@@ -136,12 +150,27 @@ export default {
       res.end(JSON.stringify(value))
     }
 
+    const profileOf = (id: string): Profile => config.profiles?.[id] ?? { age: 'unknown' }
+    /** Who the villager is and who it is talking to, from trusted files and config; the humour ceiling never comes from a reply. */
+    const characterOf = (id: string) => loadCharacter(id, personDir(id), profileOf(id))
+
     async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse) {
       const dir = personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
       const stateFile = join(dir, 'villager.json')
       const state = await readJson<SessionState>(stateFile, {})
+      // The humour dial (#42): only the person's own line to their own villager sets it, never a table round,
+      // where the line came from someone else, and never a reply. Crude still needs an adult profile.
+      const asked = context === undefined ? humourWords(text) : null
+      if (asked) await writePreferences(dir, { humour: asked, at: new Date().toISOString() })
+      const { character, personaRefused } = await characterOf(id)
+      // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
+      let humourCap: Humour | undefined
+      if (context !== undefined && character.humour === 'crude') {
+        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map(async (p) => (await characterOf(p)).character.humour))
+        if (others.some((h) => h !== 'crude')) humourCap = 'cheeky'
+      }
       const at = new Date().toISOString()
       await appendJsonl(join(dir, 'conversation.jsonl'), { at, from: 'person', text })
 
@@ -179,7 +208,7 @@ export default {
         }
       }
       try {
-        const result = await config.agent({ name: people[id], text, context, route, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
+        const result = await config.agent({ name: people[id], text, context, route, character, humourCap, sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
         if (held !== null && !routed) {
           routed = routeInReply(held, ids, items)
@@ -193,7 +222,7 @@ export default {
         // A routed line is stored with the route's spoken line, never the JSON; a refused route is not acted on.
         const said = r && 'routed' in r ? r.routed.say ?? `(${r.routed.route})` : r ? '' : result.reply
         await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', ...(r && 'reason' in r ? { unanswered: true } : { text: said }), ...(r && 'routed' in r ? { route: r.routed.route } : {}) })
-        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
+        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: character.humour, ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
         if (r && 'reason' in r) event('failed', { reason: 'route' })
         else event('done', { reply: said, ttftMs: result.ttftMs, totalMs, ...(r ? { routed: r.routed } : {}) })
       } catch (error) {
@@ -405,7 +434,7 @@ export default {
       const dir = personDir(id)
       await mkdir(join(dir, 'notes'), { recursive: true, mode: 0o700 })
       const { sessionId } = await readJson<SessionState>(join(dir, 'villager.json'), {})
-      config.agent.warm({ name: people[id], notesDir: join(dir, 'notes'), personDir: dir, sessionId })
+      config.agent.warm({ name: people[id], notesDir: join(dir, 'notes'), personDir: dir, sessionId, character: (await characterOf(id)).character })
     }
 
     ctx.effect(() => async () => {

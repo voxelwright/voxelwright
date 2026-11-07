@@ -385,7 +385,8 @@ try {
     for (const [line, want] of [['add a room somewhere', /which side|which room/i], ['add a pantry behind the kitchen', /window or a door/i]]) {
       const n = (await state(page)).said.length
       await say(page, line)
-      s = await until(page, (x) => x.said.length > n && /\?|\./.test(x.card ?? '') && !/sketch/i.test(x.card ?? ''), 5000)
+      // Your villager's lines queue (#42: each stays up at least 3 s), so wait for this one to reach the card.
+      s = await until(page, (x) => x.said.length > n && x.card === x.said.at(-1), 12000)
       check(`ambiguous or impossible: "${line}" gets one clarifying line from your villager, and no outline`, !s.draft && want.test(s.said.at(-1)) && s.card === s.said.at(-1), { said: s.said.at(-1), card: s.card })
       await page.waitForTimeout(200)
     }

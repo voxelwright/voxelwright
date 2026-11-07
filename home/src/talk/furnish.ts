@@ -10,41 +10,16 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
 import { canvas, toTexture } from '../paint'
-import { DOORWAY, WALL_Z } from '../layout'
+import { ANCHORS, CEILING, placeFor, sizeOf, TABLE, type Pose } from './place'
 import { keepItem, libraryItem, makeProp, startProject, type Routed } from '../villager'
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 
-/** The kitchen table, as table.ts places it. */
-const TABLE = { x: -0.25, z: 0.15 }
-/** Free places around the table for a chair, nearest the table's open sides first. */
-const AROUND_TABLE: [number, number][] = [[-1.4, 0.2], [-0.75, 1.0], [0.85, 0.85], [-1.25, -0.55]]
-interface Anchor { x: number; y: number; z: number; ry: number; wall?: boolean; note?: string }
-/** Named places, resolved by trusted code. The model only ever names them. */
-const ANCHORS: Record<string, Anchor> = {
-  floor: { x: -1.55, y: 0, z: 1.85, ry: 0.4 },
-  window: { x: -0.85, y: 0, z: -1.72, ry: 0 },
-  corner: { x: 1.75, y: 0, z: 2.15, ry: -0.6 },
-  counter: { x: 2.75, y: 0.9, z: -1.85, ry: 0 },
-  wall: { x: 0.45, y: 0, z: WALL_Z + 0.006, ry: 0, wall: true },
-  table: { x: TABLE.x, y: 0, z: TABLE.z, ry: 0 },
-  // The living room is another room; until it can be furnished from here, its door stands in for it.
-  livingDoor: { x: (DOORWAY.x0 + DOORWAY.x1) / 2 + 0.35, y: 0, z: WALL_Z + 0.75, ry: 0.55 },
-}
-/** Rough sizes by kind, for the ghost when the router gave none. */
-const SIZES: [RegExp, [number, number, number]][] = [
-  [/\btables?\b/, [1.1, 0.76, 1.1]], [/\barm ?chairs?|sofa|couch/, [0.85, 0.9, 0.8]], [/\bchairs?|stools?\b/, [0.46, 0.92, 0.48]],
-  [/\blamps?\b/, [0.4, 1.5, 0.4]], [/\bplants?|fern|tree\b/, [0.5, 1.1, 0.5]], [/\brugs?|carpet\b/, [1.6, 0.03, 1.1]],
-  [/\bshel(f|ves)|bookcase\b/, [0.9, 1.6, 0.35]], [/\bwallpaper\b/, [1.2, 2.4, 0.02]], [/\bpinball\b/, [0.75, 1.3, 1.35]],
-]
 /** A line that looks like furnishing, for the ghost before the villager has decided. Only a guess: the route decides. */
 const FURNISH_GUESS = /^(?:(?:please|ok|let'?s|can (?:we|you)|could you|i'?d like to|i want to)\s+)*(?:add|put|place|bring|get|replace|swap|another|wallpaper)\b/i
 
-export const sizeOf = (what: string, given?: number[]): [number, number, number] =>
-  (given?.length === 3 ? given : SIZES.find(([re]) => re.test(what.toLowerCase()))?.[1] ?? [0.6, 0.6, 0.6]) as [number, number, number]
-
-interface Placement { x: number; y: number; z: number; ry: number; wall?: boolean }
+type Placement = Pose
 export interface Timing { text: string; route?: string; ghostMs?: number; finalMs?: number; makeMs?: number; boxMs?: number; source?: string; ok: boolean; why?: string; costUsd?: number | null }
 
 /** One furnishing request on stage: its ghosts, then its props, then a keep or undo. */
@@ -60,6 +35,8 @@ interface Job {
   item?: string
   hidden: THREE.Object3D[]
   places: Placement[]
+  /** The ghost's size, as placed (a wall piece faces out of the wall). */
+  size: [number, number, number]
   variant: number
   grow: number
   state: 'ghost' | 'placed' | 'kept' | 'gone'
@@ -118,37 +95,18 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     stage.camera.getWorldPosition(camPos)
     return Math.atan2(camPos.x - x, camPos.z - z)
   }
-  /** Trusted placement from the words the person used. */
-  const places = (where: string, what: string, count: number, replacing: boolean, said = where): { list: Placement[]; note?: string } => {
-    const w = where.toLowerCase()
-    const n = Math.max(1, Math.min(6, count))
-    if (replacing) return { list: [ANCHORS.table] }
-    if (/around|at the table|by the table/.test(w)) {
-      const free = AROUND_TABLE.filter(([x, z]) => !job?.places.some((p) => Math.hypot(p.x - x, p.z - z) < 0.3))
-      return { list: free.slice(0, n).map(([x, z]) => ({ x, y: 0, z, ry: Math.atan2(TABLE.x - x, TABLE.z - z) })) }
-    }
-    let base: Anchor = ANCHORS.floor
-    let note: string | undefined
-    if (/wallpaper|on the wall/.test(`${w} ${what.toLowerCase()}`)) base = ANCHORS.wall
-    else if (/window/.test(w)) base = ANCHORS.window
-    else if (/corner/.test(w)) base = ANCHORS.corner
-    else if (/counter|worktop/.test(w)) base = ANCHORS.counter
-    else if (/living ?room|lounge/.test(w)) {
-      base = ANCHORS.floor
-      note = "The living room isn't open from here yet, so it's here in the kitchen for now."
-    } else if (/\b(here|there|that spot)\b/i.test(said) && picked && performance.now() - picked.at < 5 * 60_000) {
-      // Only when the person said "here": the router says "here" for anything unplaced.
-      // A wall or a side was pointed at: stand it on the floor in front of that spot.
-      const p = picked.point.clone()
-      if (picked.normal.y < 0.7) p.addScaledVector(picked.normal.clone().setY(0).normalize(), Math.max(...sizeOf(what).filter((_, i) => i !== 1)) / 2 + 0.05).setY(0)
-      base = { x: p.x, y: Math.max(0, p.y), z: p.z, ry: facing(p.x, p.z) }
-    }
-    const size = sizeOf(what)
-    const list = Array.from({ length: n }, (_, i) => {
-      const off = (i - (n - 1) / 2) * (size[0] + 0.15)
-      return { ...base, x: base.x + Math.cos(base.ry) * off, z: base.z - Math.sin(base.ry) * off }
-    })
-    return { list, note }
+  /** Base points of what already stands in the room, so a new piece keeps clear of them. */
+  const taken = () => {
+    const out: { x: number; y: number; z: number }[] = []
+    for (const o of group.children) if (o.name.startsWith('talk furnishing ') && o.name !== 'talk furnishing ghost' && o.name !== 'talk furnishing cord') out.push({ x: o.position.x, y: o.position.y, z: o.position.z })
+    return out
+  }
+  /** Trusted placement from the words the person used (place.ts), with "here" the last surface pointed at. */
+  const places = (where: string, what: string, count: number, replacing: boolean, mount?: unknown, size?: number[]) => {
+    if (replacing) return { list: [{ x: TABLE.x, y: 0, z: TABLE.z, ry: 0, mount: 'floor', anchor: 'table' } as Placement], size: sizeOf(what, size) }
+    const here = picked && performance.now() - picked.at < 5 * 60_000 ? picked : null
+    const placed = placeFor(what, where, mount, { count, size, here, taken: taken(), face: facing })
+    return { list: placed.poses, size: placed.size, note: placed.note }
   }
 
   // ── Ghosts ───────────────────────────────────────────────────────────────
@@ -157,8 +115,18 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const round = /\bround|circular|stool|lamp|plant|pot\b/i.test(job?.routed?.what ?? job?.text ?? '')
     const g = new THREE.Mesh(round ? new THREE.CylinderGeometry(w / 2, w / 2, h, 40) : new RoundedBoxGeometry(w, h, Math.max(d, 0.03), 3, Math.min(0.06, Math.min(w, h, d) / 3)), ghostMat)
     g.name = 'talk furnishing ghost'
-    g.position.set(at.x, at.y + h / 2, at.wall ? at.z + d / 2 : at.z)
+    // A wall piece's back is on the wall: its centre is half its depth out along the way it faces.
+    const out = at.wall ? Math.max(d, 0.03) / 2 : 0
+    g.position.set(at.x + Math.sin(at.ry) * out, at.y + h / 2, at.z + Math.cos(at.ry) * out)
     g.rotation.y = at.ry
+    // A hanging piece hangs on a cord from the ceiling line.
+    if (at.mount === 'ceiling') {
+      const len = Math.max(0.05, CEILING - at.y - h)
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, len, 6), ghostMat)
+      cord.name = 'talk furnishing cord'
+      cord.position.y = h / 2 + len / 2
+      g.add(cord)
+    }
     g.renderOrder = 3
     g.raycast = () => {}
     group.add(g)
@@ -167,7 +135,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const clearGhosts = (j: Job) => {
     for (const g of j.ghosts) {
       g.removeFromParent()
-      g.geometry.dispose()
+      g.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
     }
     j.ghosts = []
   }
@@ -184,22 +152,29 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const where = /\b(around|by|near|in|on|at) (the )?[a-z ]+$/.exec(lower)?.[0] ?? (/\bhere\b/.test(lower) ? 'here' : '')
     const count = /\b(couple|two|pair)\b/.test(lower) ? 2 : /\bthree\b/.test(lower) ? 3 : 1
     const what = replacing ? 'table' : lower
-    const { list } = places(where, what, count, replacing, text)
-    const j: Job = { text, t0, routed: null, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
+    const { list, size } = places(where, what, count, replacing)
+    const j: Job = { text, t0, routed: null, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, size, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
     job = j
-    j.ghosts = list.map((p) => ghost(sizeOf(what), p))
+    j.ghosts = list.map((p) => ghost(size, p))
     j.timing.ghostMs = performance.now() - t0
     showMaking(j)
     return j
   }
 
-  /** The guess was wrong: the ghost dissolves. */
+  /** Ghosts on their way out: they fade over half a second rather than blink away. */
+  const fading: { ghosts: THREE.Mesh[]; mat: THREE.MeshStandardMaterial; t: number }[] = []
+  /** The guess was wrong: the ghost dissolves, slowly enough to see it go. */
   const dismiss = (j: Job | null) => {
     if (!j || j.state !== 'ghost') return
     choice.classList.remove('shown', 'busy')
     j.state = 'gone'
     j.timing.why = 'not furnishing'
-    clearGhosts(j)
+    if (j.ghosts.length && !reducedMotion.matches) {
+      const mat = ghostMat.clone()
+      for (const g of j.ghosts) g.traverse((o) => ((o as THREE.Mesh).material &&= mat))
+      fading.push({ ghosts: j.ghosts, mat, t: 0 })
+      j.ghosts = []
+    } else clearGhosts(j)
     if (job === j) job = null
   }
 
@@ -216,6 +191,21 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     return rebuild(checked.prop)
   }
   /** Ground the object on y = 0 and centre it (a wall piece keeps its back on the wall). */
+  /**
+   * A wall piece the maker built lying flat (its thinnest side up, as a TV on its back)
+   * is stood up so its face looks out of the wall.
+   */
+  const upright = (object: THREE.Object3D, at?: Placement) => {
+    if (at?.mount !== 'wall') return object
+    const s = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
+    if (s.y < s.z && s.y < s.x * 0.5) {
+      const holder = new THREE.Group()
+      holder.add(object)
+      object.rotation.x -= Math.PI / 2
+      return holder
+    }
+    return object
+  }
   const ground = (object: THREE.Object3D, wall?: boolean) => {
     const holder = new THREE.Group()
     holder.add(object)
@@ -261,18 +251,21 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const what = routed.what ?? 'thing'
     const replacing = Boolean(routed.replace && /table/i.test(routed.replace))
     // Where, from the router's words and the person's own: trusted code picks the place either way.
-    const { list, note } = places(`${routed.where ?? ''} | ${text}`, what, routed.count ?? 1, replacing, text)
+    // Only the person's "here" counts: the router says "here" for anything unplaced.
+    const where = `${(routed.where ?? '').replace(/\b(here|there)\b/gi, '')} | ${text}`
+    const { list, size, note } = places(where, what, routed.count ?? 1, replacing, routed.mount, routed.size)
     let j = guess && guess.state === 'ghost' ? guess : null
     if (!j) {
       if (job?.state === 'placed') keep()
-      j = { text, t0, routed, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
+      j = { text, t0, routed, ghosts: [], ghostFade: 1, props: [], owned: false, hidden: [], places: list, size, variant: 0, grow: 0, state: 'ghost', timing: { text, ok: false } }
       job = j
     }
     j.routed = routed
     // The route knows better than the guess: re-place the ghosts at the right size and places.
     clearGhosts(j)
     j.places = list
-    j.ghosts = list.map((p) => ghost(sizeOf(what, routed.size), p))
+    j.size = size
+    j.ghosts = list.map((p) => ghost(size, p))
     j.timing.ghostMs ??= performance.now() - t0
     showMaking(j)
     j.timing.route = 'furnish'
@@ -304,7 +297,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
           j.item = routed.library
           j.timing.source = 'library'
         } else {
-          const res = await makeProp(hooks.person, what, sizeOf(what, routed.size), j.variant)
+          const res = await makeProp(hooks.person, what, j.size, j.variant)
           j.timing.makeMs = res.ms
           if (!res.ok) return fail(j, `maker ${res.why}`, res.why === 'away' ? "I'm out for a moment, so nothing's been made or moved." : res.why === 'busy' ? "I'm still making the last thing. One at a time!" : "I couldn't make that one, sorry. Nothing's been moved.")
           module = res.module
@@ -314,7 +307,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
         }
         if (j.state !== 'ghost') return
         const tb = performance.now()
-        made = ground(await fromModule(module), j.places[0]?.wall)
+        made = ground(upright(await fromModule(module), j.places[0]), j.places[0]?.wall)
         j.timing.boxMs = performance.now() - tb
         j.owned = true
       }
@@ -340,6 +333,15 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       o.name = `talk furnishing ${what}`
       o.position.set(p.x, p.y, p.z)
       o.rotation.y = p.ry
+      if (p.mount === 'ceiling' && i === 0) {
+        // Its cord to the ceiling line, in the house's dark flex, like the lamp's (measured at full size; clones share it).
+        const top = new THREE.Box3().setFromObject(o).max.y
+        const len = Math.max(0.05, CEILING - top)
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, len, 6), new THREE.MeshStandardMaterial({ color: '#2b2420' }))
+        cord.name = 'talk furnishing hanging cord'
+        cord.position.y = top - p.y + len / 2
+        o.add(cord)
+      }
       o.scale.setScalar(reducedMotion.matches ? 1 : 0.86)
       group.add(o)
       return o
@@ -400,7 +402,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.state = 'ghost'
     j.t0 = performance.now()
     j.timing = { text: `${j.text} (take ${j.variant + 1})`, ok: false, route: 'furnish' }
-    j.ghosts = j.places.map((p) => ghost(sizeOf(j.routed!.what ?? '', j.routed!.size), p))
+    j.ghosts = j.places.map((p) => ghost(j.size, p))
     j.ghostFade = 1
     j.timing.ghostMs = performance.now() - j.t0
     await realise(j)
@@ -464,6 +466,17 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   // ── Each frame ───────────────────────────────────────────────────────────
   const top = new THREE.Vector3()
   const frame = (dt: number, t: number) => {
+    for (const f of [...fading]) {
+      f.t += dt / 0.5
+      f.mat.opacity = 0.3 * Math.max(0, 1 - f.t)
+      if (f.t < 1) continue
+      for (const g of f.ghosts) {
+        g.removeFromParent()
+        g.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
+      }
+      f.mat.dispose()
+      fading.splice(fading.indexOf(f), 1)
+    }
     const j = job
     if (j?.state === 'ghost') {
       ghostMat.opacity = 0.24 + 0.12 * (0.5 + 0.5 * Math.sin(t * 3.2))
@@ -492,6 +505,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
 
   const dispose = () => {
     stage.renderer.domElement.removeEventListener('pointerdown', onDown)
+    for (const f of fading.splice(0)) f.mat.dispose()
     for (const remove of removers) remove()
     if (job) {
       for (const o of job.hidden) o.visible = true
@@ -523,6 +537,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       timings: timings.slice(),
       parcels: parcels.map((p) => p.name),
       choice: choice.classList.contains('shown'),
+      fading: fading.length,
       tableVisible: stage.scene.getObjectByName('table')?.visible ?? null,
       placed: group.children.filter((o) => o.name.startsWith('talk furnishing ') && o.name !== 'talk furnishing ghost').length,
       picked: picked ? { x: picked.point.x, y: picked.point.y, z: picked.point.z, object: picked.object?.name ?? null } : null,
