@@ -10,9 +10,9 @@ export interface Spec { name: string; bark: string }
 export interface Look { accent?: string }
 export interface Kind { title: string; specs: Spec[]; build(i: number, phys: boolean, look?: Look): Figure }
 
-type Prop = 'spoon' | 'duster' | 'can' | 'letter' | 'pouch'
+export type Prop = 'spoon' | 'duster' | 'can' | 'letter' | 'pouch'
 
-function part<T extends THREE.Object3D>(parent: THREE.Object3D, o: T, x = 0, y = 0, z = 0): T {
+export function part<T extends THREE.Object3D>(parent: THREE.Object3D, o: T, x = 0, y = 0, z = 0): T {
   o.position.set(x, y, z)
   o.traverse((n) => {
     n.castShadow = true
@@ -21,8 +21,8 @@ function part<T extends THREE.Object3D>(parent: THREE.Object3D, o: T, x = 0, y =
   parent.add(o)
   return o
 }
-const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]) => new THREE.Mesh(geo, mat)
-function skeleton(name: string) {
+export const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]) => new THREE.Mesh(geo, mat)
+export function skeleton(name: string) {
   const root = new THREE.Group()
   root.name = `villager ${name}`
   const pose = new THREE.Group()
@@ -31,14 +31,14 @@ function skeleton(name: string) {
   pose.add(head)
   return { root, pose, head }
 }
-function hand(pose: THREE.Object3D, o: THREE.Object3D, x: number, y: number, z: number) {
+export function hand(pose: THREE.Object3D, o: THREE.Object3D, x: number, y: number, z: number) {
   part(pose, o, x, y, z)
   o.userData.rest = new THREE.Vector3(x, y, z)
   return o
 }
 
 /** A held prop, built from the villager's own materials. Its origin is the grip. */
-function prop(kind: Prop, mat: (c: string, rough?: number) => THREE.Material, scale = 1): THREE.Group {
+export function prop(kind: Prop, mat: (c: string, rough?: number) => THREE.Material, scale = 1): THREE.Group {
   const g = new THREE.Group()
   if (kind === 'spoon') {
     const wood = mat('#c8935a', 0.6)
@@ -76,7 +76,7 @@ function prop(kind: Prop, mat: (c: string, rough?: number) => THREE.Material, sc
 
 // ─── a: peg dolls ──────────────────────────────────────────────────────────
 
-type RGB = [number, number, number]
+export type RGB = [number, number, number]
 
 function woodGrain(g: CanvasRenderingContext2D, w: number, h: number, seed: number, base: RGB, vertical = true) {
   const n = makeNoise(seed, 64)
@@ -149,7 +149,7 @@ function pegBodyTexture(s: PegSpec, seed: number) {
   return toTexture(c)
 }
 
-function faceTexture(skin: RGB, hair: string | null, seed: number, opts: { mouth?: 'smile' | 'stitch'; cheeks?: string; fuzz?: boolean } = {}) {
+export function faceTexture(skin: RGB, hair: string | null, seed: number, opts: { mouth?: 'smile' | 'stitch'; cheeks?: string; fuzz?: boolean } = {}) {
   const W = 256, H = 128
   const [c, g] = canvas(W, H)
   if (opts.fuzz) fuzzFill(g, W, H, seed, skin)
@@ -251,7 +251,7 @@ function pegDoll(i: number, phys: boolean): Figure {
 
 // ─── b: felt plush ─────────────────────────────────────────────────────────
 
-function fuzzFill(g: CanvasRenderingContext2D, w: number, h: number, seed: number, base: RGB) {
+export function fuzzFill(g: CanvasRenderingContext2D, w: number, h: number, seed: number, base: RGB) {
   const n = makeNoise(seed, 64)
   const img = g.createImageData(w, h)
   const r = rng(seed)
@@ -267,13 +267,13 @@ function fuzzFill(g: CanvasRenderingContext2D, w: number, h: number, seed: numbe
   g.putImageData(img, 0, 0)
 }
 /** A CSS colour as 0..255 sRGB channels for the canvas painters. */
-function srgb(c: string): RGB {
+export function srgb(c: string): RGB {
   const k = new THREE.Color(c).convertLinearToSRGB()
   return [k.r * 255, k.g * 255, k.b * 255]
 }
 
 /** Felt with fuzz and a running stitch down the front seam (u = 0.25 faces +z). */
-function feltTexture(base: string, seed: number, opts: { belly?: string; band?: boolean } = {}) {
+export function feltTexture(base: string, seed: number, opts: { belly?: string; band?: boolean } = {}) {
   const W = 256, H = 128
   const [c, g] = canvas(W, H)
   fuzzFill(g, W, H, seed, srgb(base))
@@ -288,7 +288,7 @@ function feltTexture(base: string, seed: number, opts: { belly?: string; band?: 
   if (opts.band !== false) stitchPath(g, (t) => [t * W, H * 0.5 + Math.sin(t * Math.PI * 4) * 1.5], 40)
   return toTexture(c)
 }
-function stitchPath(g: CanvasRenderingContext2D, at: (t: number) => [number, number], n: number) {
+export function stitchPath(g: CanvasRenderingContext2D, at: (t: number) => [number, number], n: number) {
   g.strokeStyle = 'rgba(70, 45, 35, 0.75)'
   g.lineWidth = 1.6
   g.lineCap = 'round'
@@ -303,22 +303,25 @@ function stitchPath(g: CanvasRenderingContext2D, at: (t: number) => [number, num
 }
 
 /** `rim` is the strength of the warm rim light: stronger on the cooler felts so they don't sink into the shade. */
-interface PlushSpec extends Spec { felt: string; belly: string; inner: string; r: number; tall: number; ears: 'floppy' | 'tuft' | 'round'; prop: Prop; rim: number }
-const PLUSH: PlushSpec[] = [
+export interface PlushSpec extends Spec { felt: string; belly: string; inner: string; r: number; tall: number; ears: 'floppy' | 'tuft' | 'round'; prop: Prop; rim: number }
+export const PLUSH: PlushSpec[] = [
   { name: 'Dumpling, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", felt: '#e2b98a', belly: '#f6e6cc', inner: '#e8a3a0', r: 0.2, tall: 0.9, ears: 'floppy', prop: 'spoon', rim: 0.28 },
   { name: 'Tuft, the tidier', bark: 'I found three socks and a crayon under the sofa.', felt: '#8a9cba', belly: '#e6dccb', inner: '#e3a92b', r: 0.14, tall: 1.5, ears: 'tuft', prop: 'duster', rim: 0.55 },
   { name: 'Moss, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', felt: '#97a85e', belly: '#ece3c0', inner: '#5f7f42', r: 0.17, tall: 1.1, ears: 'round', prop: 'can', rim: 0.45 },
 ]
 
-function plush(i: number, phys: boolean, look: Look = {}): Figure {
-  const s = PLUSH[i]
-  const { root, pose, head } = skeleton(s.name)
+/**
+ * The felt look shared by the hand-made plush and generated villagers (#47): sheen on
+ * phys tiers, a warm rim of strength `rimStrength`, and a soft outline in `outlineColour`
+ * whose strength is the returned uniform. `plain` paints a fuzz texture with one seam.
+ */
+export function feltKit(phys: boolean, rimStrength: number, outlineColour: string, seed: number) {
   // A warm rim on every felt part, added to emissive so the entries glow still works.
-  const rim = () => color('#ffc58a').mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.5)).mul(s.rim)
+  const rim = () => color('#ffc58a').mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.5)).mul(rimStrength)
   // A soft outline in the owner's colour, raised when the villager is pointed at or written to.
   const outline = uniform(0)
-  const outlineColour = color(look.accent ?? s.felt)
-  const edge = () => outlineColour.mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.2)).mul(outline)
+  const edgeColour = color(outlineColour)
+  const edge = () => edgeColour.mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.2)).mul(outline)
   const felt = (c: string, map: THREE.Texture | null = null) => {
     const m = phys
       ? new THREE.MeshPhysicalNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
@@ -328,7 +331,22 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
     m.emissiveIntensity = 0.5
     return m
   }
-  const plain = (c: string) => felt(c, feltTexture(c, 95 + i, { band: false }))
+  const plain = (c: string) => felt(c, feltTexture(c, seed, { band: false }))
+  return { felt, plain, outline }
+}
+
+/** Button eyes: dark glossy discs, turned slightly out. */
+export function buttonEye(head: THREE.Object3D, hr: number, sx: number, size = 1) {
+  const e = part(head, mesh(new THREE.CylinderGeometry(hr * 0.13 * size, hr * 0.13 * size, 0.012, 18), new THREE.MeshStandardMaterial({ color: '#241a18', roughness: 0.25 })), sx * hr * 0.4, hr * 0.12, hr * 0.86)
+  e.rotation.x = Math.PI / 2 - 0.15
+  e.rotation.z = sx * 0.35
+  return e
+}
+
+function plush(i: number, phys: boolean, look: Look = {}): Figure {
+  const s = PLUSH[i]
+  const { root, pose, head } = skeleton(s.name)
+  const { felt, plain, outline } = feltKit(phys, s.rim, look.accent ?? s.felt, 95 + i)
   const hip = 0.035
   const R = s.r
   const bodyH = R * 2 * s.tall * 0.62
@@ -344,12 +362,7 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   muzzle.scale.set(1.15, 0.75, 0.6)
   part(head, mesh(new THREE.SphereGeometry(hr * 0.1, 12, 8), plain('#4a2e28')), 0, -hr * 0.1, hr * 0.98).scale.set(1.3, 0.8, 0.8)
   for (const sx of [-1, 1]) part(head, mesh(new THREE.CircleGeometry(hr * 0.13, 16), plain('#e88f8a')), sx * hr * 0.58, -hr * 0.2, hr * 0.8).rotation.y = sx * 0.6
-  const eyes = [-1, 1].map((sx) => {
-    const e = part(head, mesh(new THREE.CylinderGeometry(hr * 0.13, hr * 0.13, 0.012, 18), new THREE.MeshStandardMaterial({ color: '#241a18', roughness: 0.25 })), sx * hr * 0.4, hr * 0.12, hr * 0.86)
-    e.rotation.x = Math.PI / 2 - 0.15
-    e.rotation.z = sx * 0.35
-    return e
-  })
+  const eyes = [-1, 1].map((sx) => buttonEye(head, hr, sx))
   if (s.ears === 'floppy') {
     for (const sx of [-1, 1]) {
       const ear = part(head, mesh(new THREE.CapsuleGeometry(hr * 0.2, hr * 0.9, 6, 12), felt(s.felt)), sx * hr * 1.0, -hr * 0.1, -hr * 0.05)

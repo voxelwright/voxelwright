@@ -46,11 +46,17 @@ export interface WireGeometry {
   index: Uint16Array | Uint32Array | null
 }
 
+/** #47: the slots a generated villager's meshes may be tagged with; untagged meshes are body. A closed list, checked by name in rebuild.ts. */
+export const ROLES = ['body', 'head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right', 'held'] as const
+export type Role = (typeof ROLES)[number]
+
 export interface WireMesh {
   geometry: number
   material: number
   /** Column-major 4x4 matrix relative to the prop's root. */
   matrix: number[]
+  /** #47: the villager slot this mesh belongs to, from villager.tag(); absent for props. */
+  role?: string
 }
 
 export interface PropData {
@@ -60,6 +66,8 @@ export interface PropData {
   textures: WireTexture[]
   /** Short text from the producer (skipped objects, prop.note()). Shown as text only. */
   notes: string[]
+  /** #47: plain data from villager.gait() and villager.about(); checked by the villager assembler, ignored by props. */
+  villager?: unknown
 }
 
 const WRAPS: Record<number, Wrap> = { 1000: 'repeat', 1001: 'clamp', 1002: 'mirror' }
@@ -73,7 +81,7 @@ type Image = HTMLCanvasElement | OffscreenCanvas | ImageBitmap | { width: number
  * that cannot be expressed in the wire format is skipped with a note, or thrown
  * for what would make the prop wrong (a multi-material mesh, a texture with no image).
  */
-export async function serialize(root: THREE.Object3D): Promise<{ data: PropData; transfer: Transferable[] }> {
+export async function serialize(root: THREE.Object3D, roles?: Map<THREE.Object3D, string>): Promise<{ data: PropData; transfer: Transferable[] }> {
   const data: PropData = { meshes: [], geometries: [], materials: [], textures: [], notes: [] }
   const transfer: Transferable[] = []
   const geometries = new Map<unknown, number>()
@@ -165,7 +173,13 @@ export async function serialize(root: THREE.Object3D): Promise<{ data: PropData;
   for (const mesh of meshes) {
     if (Array.isArray(mesh.material)) throw new Error('a mesh has several materials; use one per mesh')
     const matrix = rootInverse.clone().multiply(mesh.matrixWorld)
-    data.meshes.push({ geometry: geometry(mesh.geometry), material: await material(mesh.material), matrix: [...matrix.elements] })
+    const wire: WireMesh = { geometry: geometry(mesh.geometry), material: await material(mesh.material), matrix: [...matrix.elements] }
+    // #47: the nearest tagged ancestor (or the mesh itself) names its villager slot.
+    if (roles?.size) for (let o: THREE.Object3D | null = mesh; o && o !== root; o = o.parent) if (roles.has(o)) {
+      wire.role = roles.get(o)
+      break
+    }
+    data.meshes.push(wire)
   }
   return { data, transfer }
 }

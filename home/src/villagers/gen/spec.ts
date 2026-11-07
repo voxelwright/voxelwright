@@ -15,7 +15,8 @@ export type Tail = 'none' | 'stub' | 'curl' | 'long' | 'fluffy'
 export type Back = 'none' | 'shell' | 'wings' | 'quilt'
 export type Snout = 'none' | 'button' | 'muzzle' | 'beak' | 'long'
 export type Pattern = 'plain' | 'belly' | 'spots' | 'stripes' | 'patches'
-export type Accessory = 'none' | 'glasses' | 'hat' | 'beret' | 'bow' | 'apron' | 'satchel' | 'headphones' | 'flower'
+/** `leaf` (#47, added by the builder) is Moss's sprig, so the hand-made three can be written as specs. */
+export type Accessory = 'none' | 'glasses' | 'hat' | 'beret' | 'bow' | 'apron' | 'satchel' | 'headphones' | 'flower' | 'leaf'
 /** Held props: the existing five plus a few more. Speciality reads from the prop. */
 export type HeldProp = 'spoon' | 'duster' | 'can' | 'letter' | 'pouch' | 'book' | 'calendar' | 'pencil' | 'basket' | 'mug' | 'wrench' | 'none'
 
@@ -100,6 +101,6 @@ export const ENUMS = {
   tail: ['none', 'stub', 'curl', 'long', 'fluffy'],
   back: ['none', 'shell', 'wings', 'quilt'],
   pattern: ['plain', 'belly', 'spots', 'stripes', 'patches'],
-  accessory: ['none', 'glasses', 'hat', 'beret', 'bow', 'apron', 'satchel', 'headphones', 'flower'],
+  accessory: ['none', 'glasses', 'hat', 'beret', 'bow', 'apron', 'satchel', 'headphones', 'flower', 'leaf'],
   prop: ['spoon', 'duster', 'can', 'letter', 'pouch', 'book', 'calendar', 'pencil', 'basket', 'mug', 'wrench', 'none'],
 } as const

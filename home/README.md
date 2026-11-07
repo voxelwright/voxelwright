@@ -440,7 +440,7 @@ start in this frame. A `data:` worker also inherits the CSP; it is not used.
 `node scripts/check-prop-sandbox.mjs` starts its own dev server on 5304
 (through Vite's API, counting requests) on a temporary `VILLAGE_ROOT` with a
 synthetic villager token, plus an "outside" server on a random port. It
-proves, headless, 33 checks: a plain module builds; fetch, XHR, WebSocket,
+proves, headless, 33 checks (39 since #47, below): a plain module builds; fetch, XHR, WebSocket,
 `importScripts`, `import()`, EventSource and sendBeacon never reach the outside
 server; the villager token is never requested; the worker has no `document`,
 `window`, `parent`, `top`, storage, cookies, indexedDB or caches, and its origin
@@ -532,6 +532,78 @@ Not isolated, or unproven:
   with `'*'` (an opaque origin cannot be named). That message carries only
   the port and the public worker source, and anything coming back on the port
   is still checked.
+
+## Generated villagers (#47 experiment, November 6, 2026)
+
+Question: can a model make a felt-plush villager from one line of text that
+belongs next to Dumpling, Moss and Tuft? Two arms, same five synthetic
+descriptions, Sonnet, `scripts/villagers/style.md` (silhouette = role, colour
+= owner, prop = speciality; the owner's accent is an input, worn as the scarf
+and the outline):
+
+- **Spec**: JSON against `src/villagers/gen/spec.ts`. `gen/build.ts` clamps
+  every number to `RANGES`, replaces unknown enum values, checks `#rrggbb`
+  colours, keeps at most 3 accessories, and builds the Figure with the
+  `kinds.ts` felt kit (sheen, warm rim, owner outline, stitched textures,
+  button eyes). `gen/originals.ts` writes the hand-made three as specs; they
+  render almost identically (`screenshots/villager-gen/coverage.jpg`), after
+  adding one accessory, `leaf`, for Moss.
+- **Code**: a module `default(villager, api)` run in the prop sandbox.
+  `villager.tag(object, slot)` puts parts in the rig's slots, `villager.gait()`
+  and `villager.about()` return plain data. Wire meshes carry an optional
+  `role` from a closed list (`ROLES` in `wire.ts`, checked in `validate()`);
+  `gen/assemble.ts` refuses a missing slot, derives height, hip and side from
+  the geometry and replaces every material with the home's felt (or a glossy
+  bead when roughness is under 0.5).
+
+`?villager=gen&gen=<run-id>[,...]` places results from `generated/villagers/`
+walking the kitchen routines; `&lineup=1` stands them in a row, `&close=1`
+frames them. `hand:<key>` and `spec:<key>` (dumpling, tuft, moss) place a
+hand-made plush and its spec. Dev builds only; the loader lives in
+`src/villagers/gen/load.ts` because `main.ts` bundles every file in
+`plugins/`. Run, with the dev server on 5330:
+
+```sh
+node scripts/villagers/run.mjs <out>      # claude -p --model sonnet, 5 at a time, one repair pass; results.json, voices.json
+node scripts/villagers/capture.mjs <out>  # iso + close per result, rows, coverage, silhouette IoU, results.md
+```
+
+| # | Arm | Name | Latency s | API s | First try | Out tokens | Cost $ | Triangles | Draw calls | Max IoU |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 tortoise | spec | Brindle Sol | 34.9 | 5.2 | yes | 358 | 0.025 | 8180 | 57 | 0.76 |
+| 1 tortoise | code | Brindle | 84.3 | 49.6 | yes | 6110 | 0.068 | 9336 | 75 | 0.76 |
+| 2 mouse | spec | Pip Postmouse | 32.8 | 5.2 | yes | 355 | 0.025 | 7936 | 55 | 0.76 |
+| 2 mouse | code | Nib | 72.1 | 35.7 | yes | 4206 | 0.049 | 7700 | 73 | 0.77 |
+| 3 bear | spec | Honey Bun | 34.7 | 6.8 | yes | 584 | 0.027 | 8308 | 57 | 0.67 |
+| 3 bear | code | Biscuit | 85.7 | 39.9 | repaired | 5525 | 0.093 | 8932 | 53 | 0.77 |
+| 4 heron | spec | Heron Pell | 31.9 | 4.7 | yes | 349 | 0.037 | 7336 | 49 | 0.66 |
+| 4 heron | code | Professor Reed | 68.3 | 32.1 | yes | 3709 | 0.044 | 5996 | 57 | 0.57 |
+| 5 frog | spec | Puddle Pip | 32.1 | 6.0 | yes | 353 | 0.025 | 5888 | 39 | 0.78 |
+| 5 frog | code | Puddle | 64.0 | 26.7 | yes | 3133 | 0.038 | 7548 | 51 | 0.82 |
+
+Latency is wall clock with 5 `claude -p` calls at once; on this machine the
+CLI added about 27 s to every call (wall 32 s against 5 s of API time for the
+spec arm). Draw calls and triangles are the `?cam=iso&q=high` frame minus a
+frame without villagers (602 draw calls), shadow passes included. Max IoU is
+the closest silhouette among the ten and the hand-made three: each figure
+flat black on white from the dollhouse heading (fov 20), bottom- and
+centre-aligned, 128 px.
+
+Findings:
+
+- The spec arm is 7x faster in model time and half the cost (median 5.2 s API, about 350
+  tokens, $0.14 for five) and needed no clamping or repair. The code arm
+  takes 27 to 50 s API and 3,100 to 6,100 tokens ($0.29), and one of five
+  needed a repair (`RoundedBoxGeometry` used as `THREE.RoundedBoxGeometry`).
+- The code arm reads as more characterful: a real domed shell, a long heron
+  neck, wide frog lips. Its weak spots are model geometry the home cannot
+  fix, such as Biscuit's oversized scarf ring.
+- Silhouettes are not yet distinct enough. Round bodies dominate: 9 pairs
+  are above 0.75, Puddle (code) against Dumpling is 0.82, and the hand-made
+  Dumpling and Moss are 0.76 themselves. Only the herons (0.57 and 0.66)
+  and the spec bear (0.67) stand clearly apart.
+- Build time in the page is noisy (60 ms to 4.7 s with two pages loading at
+  once); the code arm includes a cold sandbox start of about 0.4 to 1.3 s.
 
 ## Measured, kitchen scene (November 6, 2026)
 
