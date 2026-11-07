@@ -13,8 +13,9 @@ import { isofit } from './isofit'
 import { sunFit } from './sun'
 
 const query = new URLSearchParams(location.search)
-const POOLS_ON = query.get('pools') === '1'
-const ISOFIT_ON = query.get('isofit') === '1'
+// Regroup 3 (#50): pools and isofit won the council (neon +1.25, 16-bit +0.65); &pools=0 and &isofit=0 turn them off for comparison.
+const POOLS_ON = query.get('pools') !== '0'
+const ISOFIT_ON = query.get('isofit') !== '0'
 
 export function interior(ctx: Context) {
   const { scene } = ctx.stage
