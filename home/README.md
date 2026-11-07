@@ -848,6 +848,12 @@ with no exclamation marks, "yay" or "hehe". The blind silhouette test with Opus 
 `node scripts/check-villager-gen.mjs` passes 33 of 33, `node scripts/check-prop-sandbox.mjs --port=5336`
 passes 40 of 40, and `npm run typecheck` passes.
 
+Silhouette role test, round 4 (same method as round 3, a new shuffle, the new legend): Opus 17 of
+20, GPT-6.1 Sol 17 of 20 (round 3: 11 and 11; chance 2.5). Both named every cook, tutor, tidier,
+keeper and messenger. Both missed the same three, each a mark lost against the species' own
+outline: the hedgehog maker's lens among its spines, the snail gardener's sun hat against its
+shell, and the sheep carer's stocking cap against its wool.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
