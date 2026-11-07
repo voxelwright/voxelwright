@@ -1,14 +1,14 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { canvas, toTexture } from '../paint'
 import { KINDS } from '../villagers/kinds'
-import { SEAT_Y } from '../villagers/world'
+import { contactShadows, stepCrowd } from '../villagers/cast'
 import { Villager, type Task } from '../villagers/rig'
 
 // Prototype for #42: villager art directions in the kitchen, only with ?villager=a|b|c|d|lineup.
+// With ?talk=npc the talk plugin owns the cast instead.
 const params = new URLSearchParams(location.search)
-const flag = params.get('villager')
+const flag = params.get('talk') === 'npc' ? null : params.get('villager')
 const shot = params.get('shot')
 
 /** Synthetic routines: the cook starts at the table, the tidier crosses the room, the gardener tends the window side. */
@@ -54,22 +54,10 @@ export default {
       })
     }
     // A soft contact shadow under each one keeps them on the floor or the seat.
-    const [blobCanvas, b] = canvas(128, 128)
-    const grad = b.createRadialGradient(64, 64, 4, 64, 64, 62)
-    grad.addColorStop(0, 'rgba(60, 32, 14, 0.8)')
-    grad.addColorStop(0.45, 'rgba(60, 32, 14, 0.4)')
-    grad.addColorStop(1, 'rgba(70, 40, 20, 0)')
-    b.fillStyle = grad
-    b.fillRect(0, 0, 128, 128)
-    const blobMap = toTexture(blobCanvas)
-    const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
-    const blobs = villagers.map(({ v }) => {
-      group.add(v.fig.root)
-      const blob = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map: blobMap, transparent: true, depthWrite: false }))
-      blob.renderOrder = -1
-      group.add(blob)
-      return blob
-    })
+    const crowd = villagers.map(({ v }) => v)
+    const blobs = contactShadows(crowd)
+    for (const v of crowd) group.add(v.fig.root)
+    group.add(...blobs)
     own(ctx, group)
 
     // A speech bubble over the chosen villager's head.
@@ -146,29 +134,8 @@ export default {
 
     const eye = new THREE.Vector3()
     ctx.on('village/frame', (dt, t) => {
-      const step = Math.min(dt, 0.05)
       stage.camera.getWorldPosition(eye)
-      // Walkers wait for whoever is just ahead; of two facing each other, the first goes.
-      villagers.forEach(({ v }, i) => {
-        v.blocked = villagers.some(({ v: o }, j) => {
-          if (o === v || o.seated > 0.5) return false
-          const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z
-          const d = Math.hypot(dx, dz)
-          const ahead = (dx * Math.sin(v.yaw) + dz * Math.cos(v.yaw)) / (d || 1)
-          const mutual = (-dx * Math.sin(o.yaw) - dz * Math.cos(o.yaw)) / (d || 1) > 0.4 && o.walk > 0.1
-          return d < 0.5 * SCALE && ahead > 0.4 && !(mutual && i < j)
-        })
-      })
-      villagers.forEach(({ v }, i) => {
-        v.update(step, t, eye)
-        const blob = blobs[i]
-        const r = v.fig.side * 3.2 * SCALE + 0.16
-        const lift = v.fig.floats ? 0.12 + v.fig.hip : 0
-        const air = Math.max(0, v.pos.y - (v.seated > 0.5 ? SEAT_Y : 0)) + lift
-        blob.position.set(v.pos.x, (v.seated > 0.5 ? SEAT_Y : 0) + 0.004, v.pos.z)
-        blob.scale.setScalar(r * (1 + air * 1.5) * (v.seated > 0.5 ? 0.85 : 1))
-        ;(blob.material as THREE.MeshBasicMaterial).opacity = Math.max(0.15, 1 - air * 3)
-      })
+      stepCrowd(crowd, blobs, Math.min(dt, 0.05), t, eye, SCALE)
       place()
     })
   },

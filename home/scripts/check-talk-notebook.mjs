@@ -198,14 +198,14 @@ try {
 
   // Clean unload and load again.
   const snap = await page.evaluate(() => window.village.snapshot())
-  await page.evaluate(() => window.village.unload('talk'))
+  await page.evaluate(() => window.village.unload('talkbook'))
   await page.waitForTimeout(300)
   const gone = await page.evaluate(() => {
     const scene = window.village.kernel.root.get('stage').scene
     return { s: window.village.snapshot(), talk: Boolean(scene.getObjectByName('talk notebook')), table: scene.getObjectByName('notebook')?.visible, dom: document.querySelectorAll('.village-offscreen, [data-talk], [data-entry="notebook"]').length }
   })
   check('unloading removes the book, its controls, entry and frame hook, and gives the table book back', !gone.talk && gone.table === true && gone.dom === 0 && gone.s.frameHooks === snap.frameHooks - 1 && gone.s.geometries < snap.geometries, { gone: { ...gone, s: undefined }, hooks: [snap.frameHooks, gone.s.frameHooks], geometries: [snap.geometries, gone.s.geometries] })
-  await page.evaluate(() => window.village.load('talk'))
+  await page.evaluate(() => window.village.load('talkbook'))
   await settle(page)
   const again = await page.evaluate(() => {
     const scene = window.village.kernel.root.get('stage').scene

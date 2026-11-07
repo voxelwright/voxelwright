@@ -1,1162 +1,815 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { canvas, makeNoise, paintLinen, paintPageEdges, paintPaper, paintRibbon, rng, toTexture } from '../paint'
-import { conversation, say } from '../villager'
+import { canvas, toTexture } from '../paint'
+import { KINDS } from '../villagers/kinds'
+import { Villager, type Task } from '../villagers/rig'
+import { contactShadows, stepCrowd } from '../villagers/cast'
+import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
+import { say as sayTo } from '../villager'
+import { makeChair, pineMaterial } from './chairs'
+import type { Pose } from './camera'
 
-// The richer kitchen notebook (#42 prototype), only with ?talk=notebook. The
-// table's notebook steps aside (notebook.ts returns early on the same flag and
-// this plugin hides the table's book) and this one takes its place: a closed
-// linen book that opens when chosen, a ribbon per villager, paper tabs for
-// Talk and Tasks, and real page turns. Everything is painted on the paper; the
-// only DOM is one off-screen input and one polite live region.
-
-type RGB = [number, number, number]
-type Section = 'talk' | 'tasks'
-type Mark = 'sprig' | 'sun' | 'moon'
-interface Villager { id: string; name: string; awake: boolean; ribbon: RGB; mark: Mark }
-
-// Synthetic people until family isolation is proven (AGENTS.md). Only alex has
-// a villager on the host; June and Bram are painted placeholders that say so.
-const VILLAGERS: Villager[] = [
-  { id: 'alex', name: 'Alex', awake: true, ribbon: [46, 96, 66], mark: 'sprig' },
-  { id: 'june', name: 'June', awake: false, ribbon: [190, 138, 44], mark: 'sun' },
-  { id: 'bram', name: 'Bram', awake: false, ribbon: [64, 82, 138], mark: 'moon' },
-]
-// Synthetic sample tasks. Nothing reads or writes them but this page.
-const TASKS: Record<string, { id: string; text: string }[]> = {
-  alex: [
-    { id: 'fern', text: 'Water the fern by the window' },
-    { id: 'books', text: 'Return the library books' },
-    { id: 'flour', text: 'Flour, eggs and lemons' },
-    { id: 'tap', text: 'Ask about the dripping tap' },
-    { id: 'pancakes', text: 'Pancakes on Saturday' },
-    { id: 'gran', text: 'Call Gran on Sunday' },
-  ],
-}
-
-const TASKS_KEY = 'village.talk.tasks'
-const UNSENT_KEY = 'village.talk.unsent'
-const AT_KEY = 'village.talk.at'
-const LEARNED_KEY = 'village.talk.learned'
-
-// Book-local metres; the book is scaled like the table's (1.3).
-const W = 0.29, D = 0.4, BLOCK = 0.011, BOARD = 0.0035
-// Page canvases: rules every ROW px from TOP; text sits just above a rule.
-const PW = 1024, PH = 1412, TOP = 200, ROW = 70, ROWS = 15
-const baseline = (row: number) => TOP + ROW * (row + 1) - 8
-const PERSON_HAND = 'italic 58px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
-const VILLAGER_HAND = '600 italic 56px "Snell Roundhand", "Apple Chancery", "Segoe Script", cursive'
-const PENCIL = '42px "Bradley Hand", "Segoe Print", cursive'
-const SMALL_PENCIL = '34px "Bradley Hand", "Segoe Print", cursive'
-const INK = 'rgba(28, 44, 100, 0.95)'
-const VILLAGER_INK = 'rgba(30, 80, 50, 0.96)'
-const PENCIL_INK = 'rgba(74, 68, 62, 0.88)'
-const WRITE_RATE = 32 // characters a second, so chunky arrivals still read as writing
-const AWAY = 'Alex\'s villager is out for a moment. Your line is kept here, not sent.'
+// #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
+// Three felt villagers, each the villager of one synthetic person, do chores in
+// the room. Click one (or Tab to it and press Enter) to talk; invite them to the
+// table and the table becomes a group conversation.
+const params = new URLSearchParams(location.search)
+const ON = params.get('talk') === 'npc'
+const KIND = KINDS[params.get('villager') ?? ''] ? params.get('villager')! : 'b'
+const SCALE = 1.3
+const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
+/** Villagers' words: a warm book face, easier to read at length than handwriting. */
+const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
+/** Letters a second: a readable pace that still keeps up with a streaming reply. */
+const TYPE_RATE = 42
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
-interface Said { from: 'person' | 'villager' | 'note'; text: string; unsent?: boolean; writing?: boolean }
-interface Row { text: string; font: string; ink: string; x: number; nib?: boolean }
-
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? 'null')
-    return value ?? fallback
-  } catch {
-    return fallback
-  }
+interface Person {
+  person: string
+  owner: string
+  colour: string
+  start: string
+  wait: number
+  tasks: Task[]
+  hello: string
+  chips: string[]
 }
-function writeJson(key: string, value: unknown): boolean {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-    return true
-  } catch {
-    return false
-  }
-}
+/** Synthetic household. Colour is the owner's; the villager's silhouette is its role. */
+const PEOPLE: Person[] = [
+  { person: 'alex', owner: 'Alex', colour: '#c4503a', start: 'sink', wait: 1, tasks: [{ spot: 'fridge', stay: 5 }, { spot: 'sink', stay: 7 }],
+    hello: "Oh! Hello. The soup can mind itself for a minute.", chips: ["What's for dinner?", 'How was your day?'] },
+  { person: 'sam', owner: 'Sam', colour: '#d29a26', start: 'shelf', wait: 2, tasks: [{ spot: 'counter', stay: 6 }, { spot: 'shelf', stay: 6 }],
+    hello: "Hi! Just putting the toys back. What's up?", chips: ['Anything need doing?', 'How was your day?'] },
+  { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }],
+    hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'] },
+]
+/** The synthetic "something for you" a villager carries after a chore. */
+const NEWS: Record<string, string> = { mia: 'The basil by the window has a new leaf. I thought you would like to know.' }
+/** Seats in the order they fill: the far side first, so faces turn to you. */
+const SEATS = ['seatMid', 'seatLeft', 'seatRight', 'seatNear']
+const INVITE = 'Come sit with me'
+const THANKS = 'Thanks, everyone'
+/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
+const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
+const KEPT = 'village.talk.kept'
 
-const rgb = (c: RGB, k: number) => new THREE.Color().setRGB(...(c.map((v) => Math.min(1, (v * k) / 255)) as RGB), THREE.SRGBColorSpace)
-const tint = (c: RGB, k: number, a = 1) => `rgba(${c.map((v) => Math.round(Math.min(255, v * k))).join(',')},${a})`
+interface Speech { text: string; done: boolean; away?: string }
 
-/** A villager's mark in watercolour: a wash, then the ink drawing. */
-function paintMark(g: CanvasRenderingContext2D, mark: Mark, cx: number, cy: number, r: number, color: RGB, seed: number) {
-  const rand = rng(seed)
-  g.save()
-  for (let i = 0; i < 7; i++) {
-    g.fillStyle = tint(color, 1.35, 0.09)
-    g.beginPath()
-    g.ellipse(cx + (rand() - 0.5) * r * 0.2, cy + (rand() - 0.5) * r * 0.2, r * (0.86 + rand() * 0.16), r * (0.82 + rand() * 0.16), rand() * 3, 0, Math.PI * 2)
-    g.fill()
-  }
-  g.lineCap = 'round'
-  g.lineJoin = 'round'
-  const ink = tint(color, 0.7, 0.9)
-  const wash = tint(color, 1.15, 0.55)
-  if (mark === 'sprig') {
-    g.strokeStyle = ink
-    g.lineWidth = r * 0.05
-    g.beginPath()
-    g.moveTo(cx - r * 0.1, cy + r * 0.7)
-    g.quadraticCurveTo(cx - r * 0.05, cy, cx + r * 0.12, cy - r * 0.62)
-    g.stroke()
-    for (const [t, side] of [[0.2, -1], [0.35, 1], [0.5, -1], [0.65, 1], [0.82, -1]] as const) {
-      const x = cx - r * 0.1 + t * r * 0.22, y = cy + r * 0.7 - t * r * 1.32
-      g.save()
-      g.translate(x, y)
-      g.rotate(side * 0.9 - 0.2)
-      g.fillStyle = wash
-      g.beginPath()
-      g.ellipse(side * r * 0.2, 0, r * 0.22, r * 0.09, 0, 0, Math.PI * 2)
-      g.fill()
-      g.strokeStyle = ink
-      g.lineWidth = r * 0.02
-      g.stroke()
-      g.restore()
-    }
-  } else if (mark === 'sun') {
-    g.fillStyle = wash
-    g.beginPath()
-    g.arc(cx, cy, r * 0.36, 0, Math.PI * 2)
-    g.fill()
-    g.strokeStyle = ink
-    g.lineWidth = r * 0.04
-    g.stroke()
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2 + 0.1
-      const l = i % 2 ? 0.66 : 0.76
-      g.beginPath()
-      g.moveTo(cx + Math.cos(a) * r * 0.48, cy + Math.sin(a) * r * 0.48)
-      g.lineTo(cx + Math.cos(a) * r * l, cy + Math.sin(a) * r * l)
-      g.stroke()
-    }
-  } else {
-    g.fillStyle = wash
-    g.beginPath()
-    g.arc(cx - r * 0.06, cy, r * 0.5, Math.PI * 0.32, Math.PI * 1.68)
-    g.arc(cx + r * 0.16, cy - r * 0.08, r * 0.42, Math.PI * 1.5, Math.PI * 0.5, true)
-    g.closePath()
-    g.fill()
-    g.strokeStyle = ink
-    g.lineWidth = r * 0.035
-    g.stroke()
-    g.beginPath()
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2 - Math.PI / 2
-      const l = i % 2 ? r * 0.06 : r * 0.15
-      g.lineTo(cx + r * 0.5 + Math.cos(a) * l, cy - r * 0.38 + Math.sin(a) * l)
-    }
-    g.closePath()
-    g.fillStyle = ink
-    g.fill()
-  }
-  g.restore()
+interface Member extends Person {
+  name: string
+  role: string
+  entry: string
+  v: Villager
+  seat: string | null
+  news: string | null
+  /** Seconds the person has looked at the "!" glyph. */
+  looked: number
+  glyph: THREE.Sprite
+  card: Card
+  tag: HTMLDivElement
 }
 
-/** A pressed flower taped onto the page: flattened petals, a stem, two strips of paper tape. */
-function paintPressedFlower(g: CanvasRenderingContext2D, cx: number, cy: number, seed: number) {
-  const rand = rng(seed)
-  g.save()
-  g.strokeStyle = 'rgba(96, 112, 64, 0.75)'
-  g.lineWidth = 6
-  g.lineCap = 'round'
-  g.beginPath()
-  g.moveTo(cx, cy + 40)
-  g.bezierCurveTo(cx + 20, cy + 140, cx - 30, cy + 220, cx + 10, cy + 320)
-  g.stroke()
-  for (const [y, side] of [[150, -1], [230, 1]] as const) {
-    g.save()
-    g.translate(cx + side * 6, cy + y)
-    g.rotate(side * 0.7)
-    g.fillStyle = 'rgba(120, 136, 76, 0.55)'
-    g.beginPath()
-    g.ellipse(side * 44, 0, 52, 16, 0, 0, Math.PI * 2)
-    g.fill()
-    g.restore()
-  }
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 9) * Math.PI * 2 + rand() * 0.2
-    g.save()
-    g.translate(cx, cy)
-    g.rotate(a)
-    g.fillStyle = `rgba(${196 + rand() * 20}, ${150 + rand() * 20}, ${196 + rand() * 20}, 0.5)`
-    g.beginPath()
-    g.ellipse(0, -52, 22 + rand() * 6, 50, 0, 0, Math.PI * 2)
-    g.fill()
-    g.strokeStyle = 'rgba(140, 96, 120, 0.35)'
-    g.lineWidth = 2
-    g.stroke()
-    g.restore()
-  }
-  g.fillStyle = 'rgba(214, 168, 70, 0.85)'
-  g.beginPath()
-  g.arc(cx, cy, 20, 0, Math.PI * 2)
-  g.fill()
-  for (let i = 0; i < 24; i++) {
-    g.fillStyle = 'rgba(150, 100, 40, 0.5)'
-    g.fillRect(cx + (rand() - 0.5) * 30, cy + (rand() - 0.5) * 30, 3, 3)
-  }
-  for (const [x, y, a] of [[cx - 10, cy + 180, -0.35], [cx + 20, cy + 300, 0.25]] as const) {
-    g.save()
-    g.translate(x, y)
-    g.rotate(a)
-    g.fillStyle = 'rgba(226, 190, 168, 0.6)'
-    g.beginPath()
-    g.moveTo(-90, -22)
-    for (let k = 0; k <= 6; k++) g.lineTo(-90 + k * 30, -22 + (k % 2 ? 4 : 0))
-    for (let k = 6; k >= 0; k--) g.lineTo(90 - (6 - k) * 30, 22 - (k % 2 ? 4 : 0))
-    g.closePath()
-    g.fill()
-    g.restore()
-  }
-  g.restore()
-}
+/** A speech card anchored to a villager: a stitched paper card with a felt name tab in the owner's colour. */
+class Card {
+  el = document.createElement('div')
+  private words = document.createElement('p')
+  private more = document.createElement('button')
+  private full = ''
+  private done = true
+  private from = 0
+  private shown = 0
+  private end = 0
+  /** Seconds since the words stopped changing; lets the table pass to the next speaker. */
+  still = 0
+  private reading = 0
 
-/** Write a line in ink that bleeds a little into the paper. */
-function inkText(g: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, ink: string, maxWidth?: number) {
-  g.font = font
-  g.fillStyle = ink
-  g.shadowColor = ink.replace(/[\d.]+\)$/, '0.35)')
-  g.shadowBlur = 2.5
-  g.fillText(text, x, y, maxWidth)
-  g.shadowBlur = 0
-}
-
-const measure = canvas(8, 8)[1]
-function wrap(text: string, font: string, width: number): string[] {
-  measure.font = font
-  const rows: string[] = []
-  for (const paragraph of text.split('\n')) {
-    let row = ''
-    for (const word of paragraph.split(' ')) {
-      const next = row ? `${row} ${word}` : word
-      if (row && measure.measureText(next).width > width) {
-        rows.push(row)
-        row = word
-      } else row = next
-    }
-    rows.push(row)
+  constructor(m: { name: string; owner: string; colour: string; person: string }) {
+    this.el.className = 'talk-card'
+    this.el.dataset.talkCard = m.person
+    this.el.style.setProperty('--c', m.colour)
+    const tab = document.createElement('div')
+    tab.className = 'tab'
+    tab.innerHTML = `<b></b><small></small>`
+    tab.querySelector('b')!.textContent = m.name
+    tab.querySelector('small')!.textContent = `${m.owner}'s`
+    this.words.className = 'words'
+    this.more.type = 'button'
+    this.more.className = 'more'
+    this.more.textContent = 'go on'
+    this.more.hidden = true
+    this.more.addEventListener('click', () => this.next())
+    this.el.append(tab, this.words, this.more)
   }
-  return rows
-}
 
-/** A page that dips into the gutter and lifts gently beside it. s is 0 at the spine, 1 at the outer edge. */
-const lift = (s: number) => Math.sin((Math.min(s, 0.35) / 0.35) * Math.PI / 2) * 0.0068 - s * 0.0034 - (1 - Math.min(s * 8, 1)) * 0.003
-
-function pageGeometry(side: 1 | -1) {
-  const g = new THREE.PlaneGeometry(W, D, 28, 1)
-  const pos = g.attributes.position as THREE.BufferAttribute
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i) + (side * W) / 2
-    pos.setXYZ(i, x, lift(Math.abs(x) / W), -pos.getY(i))
+  /** Start fresh words. */
+  reset() {
+    this.full = ''
+    this.from = this.shown = this.end = 0
+    this.words.textContent = ''
   }
-  g.computeVertexNormals()
-  return g
-}
 
-function boxWith(w: number, h: number, d: number, materials: THREE.Material[]) {
-  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materials)
+  /** The words so far, streaming or whole; `done` once the speaker has finished. */
+  set(text: string, done: boolean) {
+    this.full = text
+    this.done = done
+    this.still = 0
+    this.paginate()
+  }
+
+  get text() {
+    return this.full
+  }
+
+  /** Every word of the current page is on the card and the speaker has finished. */
+  get finished() {
+    return this.done && this.shown >= this.end && !this.full.slice(this.end).trim()
+  }
+
+  /** At most two sentences at a time; "go on" turns the page. */
+  private paginate() {
+    const rest = this.full.slice(this.from)
+    const stops = [...rest.matchAll(/[.!?…]+["')]?(\s+|$)/g)]
+    const second = stops[1]
+    const cut = second && (second.index! + second[0].length < rest.length || this.done) ? second.index! + second[0].trimEnd().length : rest.length
+    this.end = this.from + cut
+  }
+
+  next() {
+    this.reading = 0
+    if (this.end >= this.full.length) return
+    this.from = this.end
+    while (/\s/.test(this.full[this.from] ?? '')) this.from++
+    this.shown = this.from
+    this.paginate()
+  }
+
+  get hasMore() {
+    return this.shown >= this.end && this.full.slice(this.end).trim().length > 0
+  }
+
+  tick(dt: number) {
+    const before = this.shown
+    this.shown = reducedMotion.matches ? this.end : Math.min(this.end, this.shown + dt * TYPE_RATE)
+    if (Math.floor(this.shown) !== Math.floor(before) || this.words.textContent === '') this.words.textContent = this.full.slice(this.from, Math.floor(this.shown))
+    this.more.hidden = !this.hasMore
+    // A finished page turns by itself once there has been time to read it.
+    if (this.hasMore) {
+      this.reading += dt
+      if (this.reading > 1.4 + (this.end - this.from) / 16) this.next()
+    } else this.reading = 0
+    if (this.finished) this.still += dt
+  }
 }
 
 export default {
   name: 'talk',
-  inject: ['stage', 'view', 'entries'],
+  inject: ['stage', 'entries', 'view'],
   apply(ctx: Context) {
-    if (new URLSearchParams(location.search).get('talk') !== 'notebook') return
-    const { scene, camera, renderer } = ctx.stage
-    const { view, entries } = ctx
-    const phys = ctx.stage.features().has('phys')
+    if (!ON) return
+    const { stage, entries, view } = ctx
+    const phys = stage.features().has('phys')
+    const group = new THREE.Group()
+    group.name = 'talk'
 
-    // Where we are in the book, remembered between visits.
-    const saved = readJson<{ villager?: string; section?: Section }>(AT_KEY, {})
-    let vi = Math.max(0, VILLAGERS.findIndex((v) => v.id === saved.villager))
-    let section: Section = saved.section === 'tasks' ? 'tasks' : 'talk'
-    let spread = -1 // talk spreads: -1 follows the latest
-    const ticked = readJson<Record<string, boolean>>(TASKS_KEY, {})
-    const unsent = readJson<{ person: string; text: string }[]>(UNSENT_KEY, [])
-    const said: Said[] = []
-    let hostAway = false
-    let draft = ''
-    let caretOn = true
-    let open = false
-    let openness = 0
-    let focus = -1 // index into controls(), -1 is the pen on the page
-    let talking = false
-    let writing: Said | null = null
-    let shown = 0
-    let pen = 0
-    let dirty = true
-    let learned = readJson<boolean>(LEARNED_KEY, false)
-    const learn = () => {
-      if (learned) return
-      learned = true
-      writeJson(LEARNED_KEY, true)
-    }
-
-    // ---- materials and the book ----
-    const linen = toTexture(paintLinen(42, [126, 62, 44]), { repeat: [3, 3] })
-    const linenMat = new THREE.MeshStandardMaterial({ map: linen, roughness: 0.92 })
-    const [labelCanvas, lg] = canvas(512, 512)
-    lg.drawImage(paintLinen(43, [126, 62, 44]), 0, 0)
-    {
-      // A paper label pasted on the cover: "Kitchen notebook".
-      lg.save()
-      // The board is flipped over the spine when closed, so the label is drawn upside down.
-      lg.translate(256, 300)
-      lg.rotate(Math.PI)
-      lg.fillStyle = 'rgba(60, 24, 14, 0.25)'
-      lg.fillRect(-196, -86, 400, 184)
-      lg.fillStyle = '#efe3c8'
-      lg.fillRect(-200, -92, 396, 180)
-      lg.strokeStyle = 'rgba(126, 62, 44, 0.7)'
-      lg.lineWidth = 4
-      lg.strokeRect(-186, -78, 368, 152)
-      lg.textAlign = 'center'
-      inkText(lg, 'Kitchen', -2, -10, 'italic 600 70px "Snell Roundhand", "Apple Chancery", cursive', 'rgba(60, 30, 22, 0.95)')
-      inkText(lg, 'notebook', -2, 52, 'italic 600 58px "Bradley Hand", cursive', 'rgba(60, 30, 22, 0.9)')
-      lg.restore()
-    }
-    const coverTop = new THREE.MeshStandardMaterial({ map: toTexture(labelCanvas), roughness: 0.9 })
-    const edges = new THREE.MeshStandardMaterial({ map: toTexture(paintPageEdges(44)), roughness: 0.95 })
-    const edgesAcross = new THREE.MeshStandardMaterial({ map: toTexture(paintPageEdges(45)), roughness: 0.95 })
-    edgesAcross.map!.rotation = Math.PI / 2
-    edgesAcross.map!.center.set(0.5, 0.5)
-    const plain = new THREE.MeshStandardMaterial({ color: '#cfc3ad', roughness: 1 })
-
-    const paperL = paintPaper(201, -1, PW, PH, TOP, ROW)
-    const paperR = paintPaper(202, 1, PW, PH, TOP, ROW)
-    const [leftCanvas] = canvas(PW, PH)
-    const [rightCanvas] = canvas(PW, PH)
-    const leftTex = toTexture(leftCanvas)
-    const rightTex = toTexture(rightCanvas)
-    // Paper a shade under white, so the afternoon sun and bloom don't wash the ink out.
-    const pageMat = (map: THREE.Texture) => new THREE.MeshStandardMaterial({ map, color: '#e4d9c6', roughness: 1 })
-
-    const book = new THREE.Group()
-    book.name = 'talk notebook'
-    const coverW = W + 0.012, coverD = D + 0.02
-    // Right half: cover board, page block, the right page.
-    const coverR = boxWith(coverW, BOARD, coverD, [linenMat, linenMat, linenMat, linenMat, linenMat, linenMat])
-    coverR.position.set(coverW / 2 - 0.002, BOARD / 2, 0)
-    // The block stops short of the spine, where the pages dip into the gutter, so its top never shows.
-    const GUTTER = 0.04
-    const blockR = boxWith(W - GUTTER, BLOCK - BOARD, D - 0.004, [edges, plain, plain, plain, edgesAcross, edgesAcross])
-    blockR.position.set(GUTTER + (W - GUTTER) / 2, BOARD + (BLOCK - BOARD) / 2, 0)
-    const rightPage = new THREE.Mesh(pageGeometry(1), pageMat(rightTex))
-    rightPage.name = 'talk right page'
-    rightPage.position.y = BLOCK + 0.0003
-    book.add(coverR, blockR, rightPage)
-    // Left half pivots at the spine, so it can close over the right.
-    const leftHalf = new THREE.Group()
-    leftHalf.name = 'talk left half'
-    leftHalf.position.y = BLOCK
-    leftHalf.rotation.z = -Math.PI // closed until chosen
-    const coverL = boxWith(coverW, BOARD, coverD, [linenMat, linenMat, linenMat, coverTop, linenMat, linenMat])
-    coverL.position.set(-coverW / 2 + 0.002, BOARD / 2 - BLOCK, 0)
-    const blockL = boxWith(W - GUTTER, BLOCK - BOARD, D - 0.004, [plain, edges, plain, plain, edgesAcross, edgesAcross])
-    blockL.position.set(-GUTTER - (W - GUTTER) / 2, BOARD + (BLOCK - BOARD) / 2 - BLOCK, 0)
-    const leftPage = new THREE.Mesh(pageGeometry(-1), pageMat(leftTex))
-    leftPage.name = 'talk left page'
-    leftPage.position.y = 0.0003
-    leftHalf.add(coverL, blockL, leftPage)
-    book.add(leftHalf)
-    // A cloth spine joining the covers, seen while the book is closed or turning.
-    const spine = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, coverD, 16, 1, true, Math.PI, Math.PI), linenMat)
-    spine.rotation.x = Math.PI / 2
-    spine.position.set(-0.001, BLOCK, 0)
-    book.add(spine)
-
-    // Turning sheets: half-resolution paper that carries the old and new page while it turns.
-    const SW = 512, SH = 706
-    const [blankSheet, bg] = canvas(SW, SH)
-    bg.drawImage(paperR, 0, 0, SW, SH)
-    const blankTex = toTexture(blankSheet)
-    const sheetFronts = [0, 1, 2, 3].map(() => canvas(SW, SH)[0])
-    const sheetBacks = [0, 1, 2, 3].map(() => canvas(SW, SH)[0])
-    const sheetGeoBase = new THREE.PlaneGeometry(W, D, 28, 6)
-    const sheets = [0, 1, 2, 3].map((k) => {
-      const geo = sheetGeoBase.clone()
-      const frontTex = toTexture(sheetFronts[k])
-      const backTex = toTexture(sheetBacks[k])
-      const front = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: frontTex, color: '#e4d9c6', roughness: 1, side: THREE.FrontSide }))
-      const back = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: backTex, color: '#e4d9c6', roughness: 1, side: THREE.BackSide }))
-      const group = new THREE.Group()
-      group.name = `talk sheet ${k}`
-      group.add(front, back)
-      group.visible = false
-      group.position.y = BLOCK + 0.0009 + k * 0.0004
-      book.add(group)
-      return { group, geo, front, back, frontTex, backTex, theta: 0 }
+    // ── The cast ──────────────────────────────────────────────────────────
+    const glyphMap = stitchedBang()
+    const cast: Member[] = PEOPLE.map((p, i) => {
+      const spec = KINDS[KIND].specs[i]
+      const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
+      fig.root.scale.setScalar(SCALE)
+      const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open' })
+      const [name, role] = spec.name.split(', ')
+      const glyph = new THREE.Sprite(new THREE.SpriteMaterial({ map: glyphMap, transparent: true, depthWrite: false, opacity: 0 }))
+      glyph.name = `${name} news glyph`
+      glyph.scale.setScalar(0.15)
+      glyph.visible = false
+      glyph.renderOrder = 5
+      group.add(fig.root, glyph)
+      const m: Member = { ...p, name, role, entry: `villager-${p.person}`, v, seat: null, news: null, looked: 0, glyph, card: null!, tag: document.createElement('div') }
+      m.card = new Card(m)
+      m.tag.className = 'talk-tag'
+      m.tag.style.setProperty('--c', p.colour)
+      m.tag.textContent = name
+      v.onDone = (spot) => {
+        // Synthetic trigger: finishing the first watering, the gardener has news.
+        if (NEWS[p.person] && spot === 'plant' && !told.has(p.person)) notify(m)
+      }
+      return m
     })
-    const base = sheetGeoBase.attributes.position as THREE.BufferAttribute
-    const bendSheet = (sheet: (typeof sheets)[number], theta: number) => {
-      const pos = sheet.geo.attributes.position as THREE.BufferAttribute
-      const cols = 29, rowsZ = 7
-      for (let r = 0; r < rowsZ; r++) {
-        const zIndex = r * cols
-        const z = -base.getY(zIndex)
-        const near = z / D + 0.5 // 1 at the near edge, where a hand lifts the corner
-        // The outer edge curls ahead of the spine side, the near corner most, as when a hand turns it.
-        const lead = Math.sin(theta) * 0.8 * (0.6 + 0.8 * near)
-        let x = 0, y = 0
-        for (let c = 0; c < cols; c++) {
-          const s = c / (cols - 1)
-          if (c > 0) {
-            const phi = theta + lead * Math.pow(s, 1.5)
-            const ds = W / (cols - 1)
-            x += Math.cos(phi) * ds
-            y += Math.sin(phi) * ds
-          }
-          pos.setXYZ(zIndex + c, x, Math.max(0, y) + lift(s) * Math.cos(theta) ** 2, z)
-        }
-      }
-      pos.needsUpdate = true
-      sheet.geo.computeVertexNormals()
-    }
+    const told = new Set<string>()
+    const crowd = cast.map((m) => m.v)
+    const blobs = contactShadows(crowd)
+    group.add(...blobs)
+    // A fourth chair on the near side, so four can sit at the table.
+    const chair = makeChair(pineMaterial(), new THREE.MeshStandardMaterial({ color: '#e3dccf', roughness: 0.95 }))
+    chair.name = 'talk near chair'
+    chair.position.set(NEAR_CHAIR.x, 0, NEAR_CHAIR.z)
+    chair.rotation.y = NEAR_CHAIR.yaw
+    group.add(chair)
+    own(ctx, group)
 
-    // Ribbons: one per villager, from between the pages over the near edge onto the table, each ending in a sewn tag.
-    const ribbons = VILLAGERS.map((v, i) => {
-      const fan = (i - 1) * 0.085
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.012, BLOCK * 0.7, D / 2 - 0.02),
-        new THREE.Vector3(0.012 + fan * 0.05, BLOCK * 0.55, D / 2 + 0.004),
-        new THREE.Vector3(0.012 + fan * 0.25, 0.0006, D / 2 + 0.018),
-        new THREE.Vector3(0.012 + fan * 0.7, -0.0006, D / 2 + 0.04),
-        new THREE.Vector3(0.012 + fan, -0.0007, D / 2 + 0.06),
-      ])
-      const pts = curve.getPoints(48)
-      const dir = new THREE.Vector3().subVectors(pts.at(-1)!, pts[0]).setY(0).normalize()
-      const sideV = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(0.0085)
-      const positions: number[] = [], uvs: number[] = [], index: number[] = []
-      pts.forEach((p, k) => {
-        positions.push(p.x - sideV.x, p.y + 0.0004 * (i % 2), p.z - sideV.z, p.x + sideV.x, p.y + 0.0004 * (i % 2), p.z + sideV.z)
-        uvs.push(0, k / 48, 1, k / 48)
-        if (k) index.push(2 * k - 2, 2 * k - 1, 2 * k, 2 * k - 1, 2 * k + 1, 2 * k)
-      })
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-      geo.setIndex(index)
-      geo.computeVertexNormals()
-      const cloth = toTexture(paintRibbon(300 + i, v.ribbon))
-      const ribbonMat = phys
-        ? new THREE.MeshPhysicalMaterial({ map: cloth, roughness: 0.62, sheen: 0.8, sheenColor: rgb(v.ribbon, 1.8), sheenRoughness: 0.4, side: THREE.DoubleSide })
-        : new THREE.MeshStandardMaterial({ map: cloth, roughness: 0.6, side: THREE.DoubleSide })
-      const strip = new THREE.Mesh(geo, ribbonMat)
-      strip.name = `talk ribbon ${v.id}`
-      // The tag: cream cotton sewn on the end, with the villager's mark and name.
-      const [tc, tg] = canvas(256, 320)
-      const n = makeNoise(500 + i, 32)
-      const img = tg.createImageData(256, 320)
-      for (let p = 0; p < 256 * 320; p++) {
-        const x = p % 256, y = Math.floor(p / 256)
-        const t = 0.93 + (n(x / 10, y / 10, 3) - 0.5) * 0.08 + (((x + y) & 3) === 0 ? -0.025 : 0)
-        img.data.set([248 * t, 240 * t, 222 * t, 255], p * 4)
-      }
-      tg.putImageData(img, 0, 0)
-      tg.setLineDash([10, 8])
-      tg.strokeStyle = tint(v.ribbon, 0.9, 0.85)
-      tg.lineWidth = 5
-      tg.strokeRect(16, 16, 224, 288)
-      paintMark(tg, v.mark, 128, 122, 78, v.ribbon, 600 + i)
-      tg.textAlign = 'center'
-      inkText(tg, v.name, 128, 270, 'italic 68px "Snell Roundhand", "Apple Chancery", cursive', tint(v.ribbon, 0.55, 0.95))
-      const tagFace = new THREE.MeshStandardMaterial({ map: toTexture(tc), color: '#e8ddcb', roughness: 0.95 })
-      const tagSide = new THREE.MeshStandardMaterial({ color: rgb(v.ribbon, 1), roughness: 0.8 })
-      const tag = boxWith(0.05, 0.0016, 0.0625, [tagSide, tagSide, tagFace, tagSide, tagSide, tagSide])
-      tag.name = `talk tag ${v.id}`
-      const end = pts.at(-1)!
-      tag.position.set(end.x + dir.x * 0.026, -0.0002 + 0.0004 * (i % 2), end.z + dir.z * 0.026)
-      tag.rotation.y = Math.atan2(dir.x, dir.z)
-      const group = new THREE.Group()
-      group.add(strip, tag)
-      book.add(group)
-      // The chosen villager's ribbon also lies down the gutter of the open spread: you are at their bookmark.
-      const markerGeo = new THREE.PlaneGeometry(0.011, D - 0.014, 6, 1)
-      const mp = markerGeo.attributes.position as THREE.BufferAttribute
-      for (let k = 0; k < mp.count; k++) {
-        const x = mp.getX(k) + 0.0085
-        mp.setXYZ(k, x, BLOCK + 0.0011 + lift(x / W), -mp.getY(k))
-      }
-      markerGeo.computeVertexNormals()
-      const marker = new THREE.Mesh(markerGeo, ribbonMat)
-      marker.name = `talk bookmark ${v.id}`
-      marker.position.z = 0.006
-      marker.visible = false
-      book.add(marker)
-      return { group, strip, tag, marker, materials: [ribbonMat, tagFace, tagSide] as THREE.MeshStandardMaterial[], lifted: 0 }
-    })
-
-    // Paper index tabs on the right page's fore-edge.
-    const SECTIONS: { id: Section; label: string }[] = [{ id: 'talk', label: 'Talk' }, { id: 'tasks', label: 'Tasks' }]
-    const tabs = SECTIONS.map((s, i) => {
-      const [c, g] = canvas(256, 160)
-      g.drawImage(paperR, 300, 300, 256, 160, 0, 0, 256, 160)
-      g.textAlign = 'center'
-      inkText(g, s.label, 168, 104, 'italic 600 66px "Bradley Hand", "Segoe Print", cursive', 'rgba(36, 28, 22, 0.95)')
-      const face = new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.9 })
-      const edge = new THREE.MeshStandardMaterial({ color: '#e6d6b6', roughness: 0.9 })
-      const tab = boxWith(0.058, 0.0007, 0.075, [edge, edge, face, edge, edge, edge])
-      tab.name = `talk tab ${s.id}`
-      tab.position.set(W + 0.012, BLOCK - 0.0012 - i * 0.0006, -0.13 + i * 0.085)
-      book.add(tab)
-      return { tab, face, edge }
-    })
-
-    // ---- what is on the pages ----
-    const v = () => VILLAGERS[vi]
-    const tasks = () => TASKS[v().id] ?? []
-
-    const talkRows = (): Row[] => {
-      const rows: Row[] = []
-      const width = PW - 220
-      for (const line of said) {
-        if (line.from === 'person') {
-          for (const text of wrap(line.text, PERSON_HAND, width)) rows.push({ text, font: PERSON_HAND, ink: INK, x: 120 })
-          if (line.unsent) rows.push({ text: 'kept here, not sent', font: SMALL_PENCIL, ink: PENCIL_INK, x: 600 })
-        } else {
-          const text = line === writing ? line.text.slice(0, shown) : line.text
-          const font = line.from === 'villager' ? VILLAGER_HAND : PENCIL
-          const ink = line.from === 'villager' ? VILLAGER_INK : PENCIL_INK
-          const wrapped = text ? wrap(text, font, width - 40) : ['…']
-          for (const t of wrapped) rows.push({ text: t, font, ink, x: 160 })
-          rows.push({ text: '', font, ink, x: 160 })
-        }
-      }
-      if (v().awake) rows.push({ text: draft, font: PERSON_HAND, ink: INK, x: 120, nib: open && focus < 0 })
-      return rows
-    }
-    // Page 0 is the first right-hand page; spread s shows pages 2s-1 (left) and 2s (right).
-    const talkPages = () => {
-      const rows = talkRows()
-      const pages: Row[][] = []
-      for (let i = 0; i < Math.max(rows.length, 1); i += ROWS) pages.push(rows.slice(i, i + ROWS))
-      return pages
-    }
-    const latestSpread = () => Math.ceil((talkPages().length - 1) / 2)
-    const currentSpread = () => (spread < 0 ? latestSpread() : Math.min(spread, latestSpread()))
-
-    type PageView = { kind: 'card' } | { kind: 'talk'; page: number; spread: number; last: number } | { kind: 'tasks' } | { kind: 'asleep' }
-    const leftView = (): PageView => {
-      if (section === 'tasks' || !v().awake) return { kind: 'card' }
-      const s = currentSpread()
-      return s === 0 ? { kind: 'card' } : { kind: 'talk', page: 2 * s - 1, spread: s, last: latestSpread() }
-    }
-    const rightView = (): PageView => {
-      if (!v().awake) return { kind: 'asleep' }
-      if (section === 'tasks') return { kind: 'tasks' }
-      const s = currentSpread()
-      return { kind: 'talk', page: 2 * s, spread: s, last: latestSpread() }
-    }
-
-    /** A page title in the person's hand with a wavy underline, the same on every section. */
-    const title = (g: CanvasRenderingContext2D, text: string) => {
-      g.textAlign = 'left'
-      inkText(g, text, 120, 160, 'italic 600 80px "Bradley Hand", "Segoe Print", cursive', INK)
-      measure.font = 'italic 600 80px "Bradley Hand", "Segoe Print", cursive'
-      const end = 130 + measure.measureText(text).width
-      g.strokeStyle = 'rgba(28, 44, 100, 0.45)'
-      g.lineWidth = 3
-      g.beginPath()
-      for (let x = 120; x < end; x += 8) g.lineTo(x, 180 + Math.sin(x / 14) * 3)
-      g.stroke()
-    }
-
-    const paintCard = (g: CanvasRenderingContext2D) => {
-      const who = v()
-      g.textAlign = 'center'
-      paintMark(g, who.mark, 470, 420, 170, who.ribbon, 700 + vi)
-      inkText(g, who.name, 470, 720, 'italic 120px "Snell Roundhand", "Apple Chancery", cursive', tint(who.ribbon, 0.6, 0.92))
-      inkText(g, `${who.name}'s villager`, 470, 800, PENCIL, PENCIL_INK)
-      if (who.awake) {
-        inkText(g, 'Write on the right-hand page.', 470, 920, PENCIL, PENCIL_INK)
-        inkText(g, 'Answers come back in green ink.', 470, 972, PENCIL, PENCIL_INK)
-      } else {
-        inkText(g, 'Not awake yet.', 470, 920, PENCIL, PENCIL_INK)
-        inkText(g, 'Nothing on these pages is sent.', 470, 972, PENCIL, PENCIL_INK)
-      }
-      // A pencilled reminder of the keys, rubbed out once someone has used them.
-      if (!learned) {
-        inkText(g, '← → another villager   ↑ ↓ talk or tasks', 470, 1260, SMALL_PENCIL, 'rgba(86, 80, 74, 0.6)')
-        inkText(g, 'PgUp PgDn earlier pages   Esc close the book', 470, 1306, SMALL_PENCIL, 'rgba(86, 80, 74, 0.6)')
-      }
-    }
-
-    const paintTalk = (g: CanvasRenderingContext2D, side: 'left' | 'right', p: Extract<PageView, { kind: 'talk' }>) => {
-      const page = talkPages()[p.page] ?? []
-      g.textAlign = 'left'
-      if (p.page === 0) title(g, 'Talk')
-      else inkText(g, `Talk · ${v().name}'s villager`, side === 'left' ? 110 : 120, 150, SMALL_PENCIL, 'rgba(86, 80, 74, 0.55)')
-      if (p.page === 0 && hostAway && said.length === 0) inkText(g, AWAY.split('.')[0] + '.', 160, baseline(0), PENCIL, PENCIL_INK)
-      page.forEach((row, i) => {
-        inkText(g, row.text, row.x, baseline(i), row.font, row.ink, PW - row.x - 60)
-        if (row.nib && !row.text) {
-          // An empty line waits for you: a faint pencilled guide where the next words go.
-          g.strokeStyle = 'rgba(86, 80, 74, 0.35)'
-          g.lineWidth = 2
-          g.setLineDash([14, 10])
-          g.beginPath()
-          g.moveTo(row.x + 24, baseline(i) + 4)
-          g.lineTo(PW - 140, baseline(i) + 4)
-          g.stroke()
-          g.setLineDash([])
-        }
-        if (row.nib) {
-          // The pen rests where the next word goes, with a little ink pooling at its tip.
-          measure.font = row.font
-          const x = row.x + Math.min(measure.measureText(row.text).width, PW - row.x - 60) + (row.text ? 14 : 0), y = baseline(i)
-          g.fillStyle = `rgba(28, 44, 100, ${caretOn ? 0.55 : 0.3})`
-          g.beginPath()
-          g.ellipse(x + 2, y - 2, 5, 3.5, 0, 0, Math.PI * 2)
-          g.fill()
-          g.save()
-          g.translate(x, y - 4)
-          g.rotate(-0.75)
-          g.fillStyle = 'rgba(70, 64, 60, 0.8)'
-          g.beginPath()
-          g.moveTo(0, 0)
-          g.lineTo(-9, -34)
-          g.quadraticCurveTo(0, -42, 9, -34)
-          g.closePath()
-          g.fill()
-          g.strokeStyle = 'rgba(240, 230, 210, 0.8)'
-          g.lineWidth = 1.5
-          g.beginPath()
-          g.moveTo(0, -4)
-          g.lineTo(0, -26)
-          g.stroke()
-          g.restore()
-        }
-      })
-      g.textAlign = 'center'
-      inkText(g, String(p.page + 1), side === 'left' ? 140 : PW - 140, PH - 46, SMALL_PENCIL, 'rgba(86, 80, 74, 0.55)')
-      if (side === 'left' && p.spread > 0) inkText(g, '↩ earlier', 470, PH - 46, SMALL_PENCIL, 'rgba(86, 80, 74, 0.7)')
-      if (side === 'right' && p.spread < p.last) inkText(g, 'later ↪', 560, PH - 46, SMALL_PENCIL, 'rgba(86, 80, 74, 0.7)')
-    }
-
-    const taskTop = 1
-    const paintTasks = (g: CanvasRenderingContext2D) => {
-      g.textAlign = 'left'
-      title(g, 'Tasks')
-      const r = rng(900)
-      tasks().forEach((task, i) => {
-        const y = baseline(taskTop + i)
-        const done = Boolean(ticked[`${v().id}.${task.id}`])
-        // A hand-drawn box.
-        g.strokeStyle = 'rgba(28, 44, 100, 0.8)'
-        g.lineCap = 'round'
-        const bx = 114, by = y - 42, s = 42
-        for (let pass = 0; pass < 2; pass++) {
-          g.lineWidth = pass ? 2 : 3.5
-          g.beginPath()
-          g.moveTo(bx + r() * 4 - 2, by + r() * 4 - 3)
-          g.lineTo(bx + s + r() * 4, by + r() * 4 - 1)
-          g.lineTo(bx + s + r() * 4 - 1, by + s + r() * 4)
-          g.lineTo(bx + r() * 4 - 1, by + s + r() * 4 - 1)
-          g.lineTo(bx + r() * 4 - 1, by + r() * 4 + 2)
-          g.stroke()
-        }
-        if (done) {
-          g.strokeStyle = 'rgba(40, 88, 60, 0.9)'
-          g.lineWidth = 6
-          g.lineCap = 'round'
-          g.beginPath()
-          g.moveTo(bx + 6, by + 18)
-          g.lineTo(bx + 17, by + 34)
-          g.lineTo(bx + s + 10, by - 12)
-          g.stroke()
-        }
-        inkText(g, task.text, 190, y, PERSON_HAND, done ? 'rgba(36, 54, 108, 0.45)' : INK, PW - 260)
-        if (done) {
-          measure.font = PERSON_HAND
-          const wdt = Math.min(measure.measureText(task.text).width, PW - 260)
-          g.strokeStyle = 'rgba(36, 54, 108, 0.5)'
-          g.lineWidth = 3
-          g.beginPath()
-          g.moveTo(186, y - 16)
-          g.quadraticCurveTo(190 + wdt / 2, y - 22, 194 + wdt, y - 15)
-          g.stroke()
-        }
-        const chosen = focus >= 0 ? controls()[focus] : null
-        if (chosen?.kind === 'task' && chosen.index === i) {
-          g.strokeStyle = 'rgba(150, 80, 34, 0.8)'
-          g.lineWidth = 5
-          g.beginPath()
-          g.ellipse(PW / 2 + 20, y - 18, PW / 2 - 70, 36, -0.01, 0, Math.PI * 2)
-          g.stroke()
-        }
-      })
-      g.textAlign = 'left'
-      inkText(g, 'A sample list for now.', 120, PH - 120, SMALL_PENCIL, 'rgba(86, 80, 74, 0.6)')
-    }
-
-    const paintAsleep = (g: CanvasRenderingContext2D) => {
-      const who = v()
-      paintPressedFlower(g, 520, 380, 800 + vi)
-      g.textAlign = 'center'
-      const lines = section === 'talk'
-        ? [`${who.name}'s villager`, 'is not awake yet.', '', 'When they wake,', 'you can write to them here.']
-        : ['No tasks yet.', '', `They come when ${who.name}'s`, 'villager wakes.']
-      lines.forEach((t, i) => inkText(g, t, 520, 860 + i * 60, 'italic 46px "Bradley Hand", "Segoe Print", cursive', PENCIL_INK))
-    }
-
-    const paintPage = (side: 'left' | 'right', target: HTMLCanvasElement) => {
-      const g = target.getContext('2d')!
-      g.save()
-      g.scale(target.width / PW, target.height / PH)
-      g.drawImage(side === 'left' ? paperL : paperR, 0, 0)
-      const pv = side === 'left' ? leftView() : rightView()
-      if (pv.kind === 'card') paintCard(g)
-      else if (pv.kind === 'talk') paintTalk(g, side, pv)
-      else if (pv.kind === 'tasks') paintTasks(g)
-      else paintAsleep(g)
-      g.restore()
-    }
-
-    // ---- page turns ----
-    let held: 'left' | 'right' | null = null
-    let turn: { dir: 1 | -1; t: number; n: number } | null = null
-    const TURN = 0.42, STAGGER = 0.075
-    const mirrorInto = (src: HTMLCanvasElement, dst: HTMLCanvasElement) => {
-      const g = dst.getContext('2d')!
-      g.save()
-      g.setTransform(-1, 0, 0, 1, dst.width, 0)
-      g.drawImage(src, 0, 0, dst.width, dst.height)
-      g.restore()
-    }
-    const copyInto = (src: HTMLCanvasElement, dst: HTMLCanvasElement) => dst.getContext('2d')!.drawImage(src, 0, 0, dst.width, dst.height)
-    const [scratch] = canvas(PW, PH)
-
-    /** Change what the book shows; `change` mutates the view. Turns forward (1) or back (-1) through n sheets. */
-    const turnTo = (change: () => void, dir: 1 | -1, n: number) => {
-      const before = { left: leftView(), right: rightView(), vi, section }
-      if (turn) finishTurn()
-      const oldLeft = canvas(SW, SH)[0], oldRight = canvas(SW, SH)[0]
-      copyInto(leftCanvas, oldLeft)
-      copyInto(rightCanvas, oldRight)
-      change()
-      writeJson(AT_KEY, { villager: v().id, section })
-      focus = -1
-      if (JSON.stringify([before.left, before.right, before.vi, before.section]) === JSON.stringify([leftView(), rightView(), vi, section])) return
-      if (reducedMotion.matches || !open) {
-        dirty = true
-        return
-      }
-      paintPage(dir === 1 ? 'left' : 'right', scratch)
-      sheets.forEach((s, k) => {
-        s.group.visible = k < n
-        const frontMat = s.front.material as THREE.MeshStandardMaterial
-        const backMat = s.back.material as THREE.MeshStandardMaterial
-        frontMat.map = blankTex
-        backMat.map = blankTex
-        if (k >= n) return
-        // The first leaf lifts the old page and the last one lands the new page; leaves between are blank paper.
-        const lifts = k === 0, lands = k === n - 1
-        if (dir === 1) {
-          if (lifts) { copyInto(oldRight, sheetFronts[k]); frontMat.map = s.frontTex }
-          if (lands) { mirrorInto(scratch, sheetBacks[k]); backMat.map = s.backTex }
-        } else {
-          if (lifts) { mirrorInto(oldLeft, sheetBacks[k]); backMat.map = s.backTex }
-          if (lands) { copyInto(scratch, sheetFronts[k]); frontMat.map = s.frontTex }
-        }
-        frontMat.map.needsUpdate = true
-        backMat.map.needsUpdate = true
-        frontMat.needsUpdate = backMat.needsUpdate = true
-        s.theta = dir === 1 ? 0 : Math.PI
-        bendSheet(s, s.theta)
-      })
-      held = dir === 1 ? 'left' : 'right'
-      turn = { dir, t: 0, n }
-      dirty = true
-    }
-    const finishTurn = () => {
-      for (const s of sheets) s.group.visible = false
-      turn = null
-      held = null
-      dirty = true
-    }
-
-    // ---- controls: ribbons, tabs, tasks ----
-    type Control = { kind: 'ribbon'; index: number } | { kind: 'tab'; section: Section } | { kind: 'task'; index: number }
-    const controls = (): Control[] => [
-      ...VILLAGERS.map((_, index) => ({ kind: 'ribbon' as const, index })),
-      ...SECTIONS.map((s) => ({ kind: 'tab' as const, section: s.id })),
-      ...(section === 'tasks' && v().awake ? tasks().map((_, index) => ({ kind: 'task' as const, index })) : []),
-    ]
-    const describe = (c: Control) =>
-      c.kind === 'ribbon' ? `${VILLAGERS[c.index].name}'s ribbon` : c.kind === 'tab' ? `${c.section === 'talk' ? 'Talk' : 'Tasks'} tab` : `${tasks()[c.index].text}, ${ticked[`${v().id}.${tasks()[c.index].id}`] ? 'ticked' : 'not ticked'}`
-
-    const voice = document.createElement('p')
-    voice.className = 'village-offscreen'
+    // ── The page: speech cards, the person's slip, name tags ───────────────
+    const slip = document.createElement('form')
+    slip.className = 'talk-slip'
+    slip.setAttribute('aria-label', 'Your line')
+    const chips = document.createElement('div')
+    chips.className = 'chips'
+    const line = document.createElement('input')
+    line.className = 'line'
+    line.type = 'text'
+    line.maxLength = 600
+    line.autocomplete = 'off'
+    line.setAttribute('aria-label', 'Say something')
+    const mine = document.createElement('p')
+    mine.className = 'mine'
+    slip.append(mine, chips, line)
+    const voice = document.createElement('div')
+    voice.className = 'talk-voice'
+    voice.setAttribute('role', 'status')
     voice.setAttribute('aria-live', 'polite')
-    voice.dataset.talk = 'quiet'
-    const announce = (text: string) => (voice.textContent = text)
-
-    const pickVillager = (index: number) => {
-      const next = (index + VILLAGERS.length) % VILLAGERS.length
-      if (next === vi) return
-      const dir = next > vi ? 1 : -1
-      turnTo(() => {
-        vi = next
-        spread = -1
-      }, dir, 4)
-      updateInput()
-      announce(`${v().name}'s pages. ${v().awake ? (section === 'talk' ? 'Talk' : 'Tasks') : 'Not awake yet'}.`)
-    }
-    const pickSection = (next: Section) => {
-      if (next === section) return
-      turnTo(() => {
-        section = next
-        spread = -1
-      }, next === 'tasks' ? 1 : -1, 1)
-      updateInput()
-      announce(next === 'talk' ? `Talk with ${v().name}` : `${v().name}'s tasks`)
-    }
-    const turnSpread = (dir: 1 | -1) => {
-      if (section !== 'talk' || !v().awake) return
-      const s = currentSpread() + dir
-      if (s < 0 || s > latestSpread()) return
-      turnTo(() => (spread = s === latestSpread() ? -1 : s), dir, 1)
-      announce(s === latestSpread() ? 'The latest page' : `Earlier pages, ${2 * s} and ${2 * s + 1}`)
-    }
-    const tick = (index: number) => {
-      const task = tasks()[index]
-      if (!task) return
-      const key = `${v().id}.${task.id}`
-      if (ticked[key]) delete ticked[key]
-      else ticked[key] = true
-      const kept = writeJson(TASKS_KEY, ticked)
-      announce(`${task.text}: ${ticked[key] ? 'ticked' : 'not ticked'}${kept ? '' : ', but this browser could not keep it'}`)
-      dirty = true
-    }
-    const activate = (c: Control) => {
-      if (c.kind === 'ribbon') pickVillager(c.index)
-      else if (c.kind === 'tab') pickSection(c.section)
-      else tick(c.index)
-    }
-
-    // ---- the one input ----
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.maxLength = 300
-    input.autocomplete = 'off'
-    input.className = 'village-offscreen'
     const style = document.createElement('style')
-    style.textContent = '.village-offscreen { position: fixed; left: 50%; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; font-size: 16px; }'
-    const updateInput = () => {
-      const who = v()
-      input.setAttribute('aria-label', !who.awake
-        ? `${who.name}'s pages. Their villager is not awake yet. Arrow keys change villager, Escape closes.`
-        : section === 'talk'
-          ? `A line for ${who.name}'s villager. Enter sends. Tab reaches ribbons and tabs, Escape closes.`
-          : `${who.name}'s tasks. Tab to a task, Enter ticks it. Escape closes.`)
-    }
-
-    const send = async () => {
-      const text = draft.trim()
-      if (!text || !v().awake || section !== 'talk') return
-      if (talking) return announce(`${v().name}'s villager is still writing`)
-      const who = v()
-      draft = ''
-      input.value = ''
-      const mine: Said = { from: 'person', text }
-      const reply: Said = { from: 'villager', text: '', writing: true }
-      said.push(mine, reply)
-      spread = -1
-      writing = reply
-      shown = 0
-      talking = true
-      voice.dataset.talk = 'writing'
-      dirty = true
-      const result = await say(who.id, text, (t) => {
-        reply.text += t
-        dirty = true
-      })
-      talking = false
-      reply.writing = false
-      if (result.ok) {
-        reply.text = result.reply
-        voice.dataset.talk = 'answered'
-        if (reducedMotion.matches) shown = reply.text.length
-        announce(result.reply)
-      } else {
-        writing = null
-        reply.from = 'note'
-        voice.dataset.talk = result.why
-        if (result.why === 'failed') reply.text = 'No answer came that time. Your line is kept; try again in a moment.'
-        else {
-          reply.text = result.why === 'busy' ? `${who.name}'s villager is still writing another answer. Your line is kept here, not sent.` : AWAY
-          mine.unsent = true
-          unsent.push({ person: who.id, text })
-          writeJson(UNSENT_KEY, unsent)
-        }
-        announce(reply.text)
-      }
-      dirty = true
-    }
-
-    const onInput = () => {
-      if (!v().awake || section !== 'talk') {
-        input.value = ''
-        return
-      }
-      draft = input.value
-      focus = -1
-      caretOn = true
-      dirty = true
-    }
-    const moveFocus = (step: number) => {
-      const list = controls()
-      // -1 (the pen) sits between the last control and the first.
-      const at = focus + 1 + step
-      const size = list.length + 1
-      focus = ((at % size) + size) % size - 1
-      announce(focus < 0 ? (v().awake && section === 'talk' ? 'Writing' : 'The page') : describe(list[focus]))
-      dirty = true
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (!open) return
-      const textEditing = focus < 0 && section === 'talk' && v().awake && draft.length > 0
-      if (e.key === 'Tab') {
-        e.preventDefault()
-        moveFocus(e.shiftKey ? -1 : 1)
-      } else if (e.key === 'Enter' || (e.key === ' ' && focus >= 0)) {
-        e.preventDefault()
-        if (focus >= 0) {
-          const c = controls()[focus]
-          activate(c)
-          // Keep the pen on the same control after a turn, when it still exists.
-          const again = controls().findIndex((k) => JSON.stringify(k) === JSON.stringify(c))
-          focus = again
-          dirty = true
-        } else void send()
-      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !textEditing) {
-        e.preventDefault()
-        learn()
-        pickVillager(vi + (e.key === 'ArrowRight' ? 1 : -1))
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        learn()
-        pickSection(e.key === 'ArrowDown' ? 'tasks' : 'talk')
-      } else if (e.key === 'PageUp' || e.key === 'PageDown') {
-        e.preventDefault()
-        turnSpread(e.key === 'PageDown' ? 1 : -1)
-      }
-      // Escape bubbles to the entries layer, which leaves and refocuses the notebook's entry.
-    }
-
-    // ---- opening, closing and the camera ----
-    const tableBook = () => scene.getObjectByName('notebook')
-    const focusPose = () => {
-      book.updateWorldMatrix(true, false)
-      const look = book.localToWorld(new THREE.Vector3(0.025, BLOCK, 0.11))
-      const position = book.localToWorld(new THREE.Vector3(0.01, 0.6, 0.45))
-      return { position, look }
-    }
-    const enter = () => {
-      if (open) return
-      open = true
-      focus = -1
-      view.focus(focusPose())
-      updateInput()
-      input.value = draft
-      input.focus({ preventScroll: true })
-      dirty = true
-      announce(`The notebook is open at ${v().name}'s pages.`)
-    }
-    const leave = () => {
-      if (!open) return
-      open = false
-      focus = -1
-      input.blur()
-      view.focus(null)
-      dirty = true
-    }
-
-    // Pointer: ribbons, tabs, tasks and page corners. The entries layer still owns hover,
-    // choosing the book and backing out when the click lands off it.
-    const raycaster = new THREE.Raycaster()
-    const ndc = new THREE.Vector2()
-    let down: { x: number; y: number } | null = null
-    const onDown = (e: PointerEvent) => (down = { x: e.clientX, y: e.clientY })
-    const onUp = (e: PointerEvent) => {
-      if (!open || !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) return
-      down = null
-      // A click on the canvas takes focus from the pen; give it back so typing keeps writing.
-      input.focus({ preventScroll: true })
-      const rect = renderer.domElement.getBoundingClientRect()
-      ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
-      raycaster.setFromCamera(ndc, camera)
-      const hit = raycaster.intersectObject(book, true).find((h) => h.object.visible && h.object.parent?.visible !== false)
-      if (!hit) return
-      const name = hit.object.name
-      const ribbon = ribbons.findIndex((r) => r.strip === hit.object || r.tag === hit.object)
-      if (ribbon >= 0) return pickVillager(ribbon)
-      const tab = tabs.findIndex((t) => t.tab === hit.object)
-      if (tab >= 0) return pickSection(SECTIONS[tab].id)
-      if (!hit.uv) return
-      const x = hit.uv.x * PW, y = (1 - hit.uv.y) * PH
-      if (name === 'talk right page') {
-        if (section === 'tasks' && v().awake) {
-          const row = Math.floor((y - TOP) / ROW) - taskTop
-          if (row >= 0 && row < tasks().length) tick(row)
-        } else if (y > PH - 130 && x > PW - 520) turnSpread(1)
-        input.focus({ preventScroll: true })
-      } else if (name === 'talk left page') {
-        if (y > PH - 130 && x < 600) turnSpread(-1)
-        input.focus({ preventScroll: true })
-      }
-    }
-
+    style.textContent = css()
     ctx.effect(() => {
       document.head.append(style)
-      document.body.append(input, voice)
-      input.addEventListener('input', onInput)
-      input.addEventListener('keydown', onKey)
-      renderer.domElement.addEventListener('pointerdown', onDown)
-      renderer.domElement.addEventListener('pointerup', onUp)
+      document.body.append(slip, voice, ...cast.flatMap((m) => [m.card.el, m.tag]))
       return () => {
-        if (open) view.focus(null)
-        renderer.domElement.removeEventListener('pointerdown', onDown)
-        renderer.domElement.removeEventListener('pointerup', onUp)
-        input.remove()
+        for (const m of cast) {
+          m.card.el.remove()
+          m.tag.remove()
+        }
+        slip.remove()
         voice.remove()
         style.remove()
-        const old = tableBook()
-        if (old) old.visible = true
-        if (pencil && pencilWas) {
-          pencil.position.copy(pencilWas.position)
-          pencil.rotation.copy(pencilWas.rotation)
-        }
       }
-    }, 'talk notebook controls')
+    }, 'talk page')
 
-    let removeEntry: (() => void) | null = null
-    ctx.effect(() => () => removeEntry?.(), 'talk notebook entry')
+    // ── State ──────────────────────────────────────────────────────────────
+    type Mode = 'room' | 'talk' | 'table'
+    let mode: Mode = 'room'
+    let partner: Member | null = null
+    /** Seated at the table, in seat order. */
+    const seated: Member[] = []
+    /** Cards on screen and whether each is the current speaker. */
+    const showing = new Map<Member, 'speaking' | 'said'>()
+    let speaker: Member | null = null
+    let pending = false
+    let quietLeave = false
+    let lastRound: { name: string; text: string }[] = []
+    /** The villager just let go of: hover does not pause it again until the pointer leaves. */
+    let released: Member | null = null
 
-    // History: what was said with Alex, then lines this browser kept but could not send.
-    const loadHistory = async () => {
-      const lines = await conversation('alex')
-      hostAway = lines === null
-      for (const l of lines ?? []) {
-        if (l.from === 'person' && l.text) said.push({ from: 'person', text: l.text })
-        else if (l.from === 'villager') said.push(l.text ? { from: 'villager', text: l.text } : { from: 'note', text: 'No answer came that time.' })
-      }
-      for (const u of unsent) if (u.person === 'alex') said.push({ from: 'person', text: u.text, unsent: true })
-      const last = said.filter((l) => l.from === 'villager').pop()
-      if (last && voice.dataset.talk === 'quiet') {
-        voice.dataset.talk = 'remembered'
-        announce(last.text)
-      }
-      dirty = true
+    const show = (m: Member, as: 'speaking' | 'said') => {
+      showing.set(m, as)
+      m.card.el.classList.add('shown')
+      m.card.el.classList.toggle('said', as === 'said')
+    }
+    const hide = (m: Member) => {
+      showing.delete(m)
+      m.card.el.classList.remove('shown', 'said')
+    }
+    const hideAll = () => {
+      for (const m of cast) hide(m)
+    }
+    const speak = (m: Member, text: string, done = true) => {
+      m.card.reset()
+      m.card.set(text, done)
+      show(m, 'speaking')
+    }
+    const setChips = (labels: string[]) => {
+      chips.replaceChildren(...labels.map((label) => {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'chip'
+        b.textContent = label
+        b.addEventListener('click', () => chip(label))
+        return b
+      }))
+    }
+    const openSlip = (placeholder: string, labels: string[]) => {
+      line.placeholder = placeholder
+      setChips(labels)
+      slip.classList.add('shown')
+      if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => line.focus({ preventScroll: true }), 30)
+    }
+    const closeSlip = () => {
+      slip.classList.remove('shown')
+      mine.classList.remove('shown')
+      line.blur()
     }
 
-    // The table's pencil lay across the old book's page; here it rests beside the book.
-    let pencil: THREE.Object3D | undefined
-    let pencilWas: { position: THREE.Vector3; rotation: THREE.Euler } | undefined
-    let placed = false
-    let blink = 0
-    ctx.on('village/frame', (dt) => {
-      const old = tableBook()
-      if (!old) return
-      if (!placed) {
-        // Take the table book's place, then hide it.
-        placed = true
-        old.updateWorldMatrix(true, false)
-        old.matrixWorld.decompose(book.position, book.quaternion, book.scale)
-        book.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) o.castShadow = o.receiveShadow = true
-        })
-        own(ctx, book)
-        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: book, select: enter, leave })
-        pencil = old.parent?.children.find((o) => o.type === 'Group' && o !== old)
-        if (pencil) {
-          pencilWas = { position: pencil.position.clone(), rotation: pencil.rotation.clone() }
-          pencil.position.set(old.position.x + 0.53, old.position.y + 0.006, old.position.z + 0.08)
-          pencil.rotation.set(Math.PI / 2, 0, -0.25)
+    // ── Camera ─────────────────────────────────────────────────────────────
+    const eye = new THREE.Vector3()
+    // Line of sight for the two-shot: anything solid but the villager in the shot blocks it, other villagers too.
+    const raycaster = new THREE.Raycaster()
+    let subject: THREE.Object3D | null = null
+    const solid = (o: THREE.Object3D) => {
+      if (!(o as THREE.Mesh).isMesh) return false
+      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject) return false
+      return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
+    }
+    const clear = (from: THREE.Vector3, to: THREE.Vector3) => {
+      const d = to.clone().sub(from)
+      raycaster.set(from, d.clone().normalize())
+      raycaster.far = d.length()
+      raycaster.camera = stage.camera
+      return !raycaster.intersectObject(stage.scene, true).some((h) => solid(h.object))
+    }
+    /**
+     * A close two-shot: the villager on the left third, room for its card on the
+     * right. Starts from the side the room is seen from and turns until nothing
+     * stands between the camera and the villager.
+     */
+    const twoShot = (m: Member): Pose => {
+      const p = m.v.pos
+      subject = m.v.fig.root
+      stage.camera.getWorldPosition(eye)
+      const base = Math.atan2(eye.x - p.x, eye.z - p.z)
+      const floor = m.v.seated > 0.5 ? SEAT_Y : 0
+      const head = new THREE.Vector3(p.x, floor + m.v.fig.height * SCALE * 0.72, p.z)
+      const body = head.clone().setY(floor + m.v.fig.height * SCALE * 0.35)
+      const shot = (a: number, dist: number) => {
+        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a))
+        const right = new THREE.Vector3(dir.z, 0, -dir.x)
+        return {
+          position: head.clone().addScaledVector(dir, dist).addScaledVector(right, -0.15).setY(head.y + 0.42),
+          look: head.clone().setY(head.y - 0.06).addScaledVector(right, 0.3),
         }
-        void loadHistory()
       }
-      if (old.visible) old.visible = false
+      for (const dist of [1.5, 1.15])
+        for (const turn of [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.4, -2.4]) {
+          const pose = shot(base + turn, dist)
+          if (clear(pose.position, head) && clear(pose.position, body)) return pose
+        }
+      return shot(base, 1.5)
+    }
 
-      // Open and close: the left half swings over the spine.
-      const goal = open ? 1 : 0
-      if (openness !== goal) {
-        openness = reducedMotion.matches ? goal : Math.max(0, Math.min(1, openness + Math.sign(goal - openness) * dt / 0.7))
-        const k = openness < 0.5 ? 4 * openness ** 3 : 1 - (-2 * openness + 2) ** 3 / 2
-        leftHalf.rotation.z = -(1 - k) * Math.PI
-        spine.visible = k < 0.98
+    // ── Talking with one villager ───────────────────────────────────────────
+    const talk = (m: Member) => {
+      if (partner && partner !== m) endTalk(false)
+      partner = m
+      mode = 'talk'
+      m.v.chosen = true
+      m.v.beat()
+      for (const o of showing.keys()) if (o !== m) hide(o)
+      mine.classList.remove('shown')
+      view.focus(twoShot(m), 7)
+      const news = m.news
+      if (news) clearNews(m)
+      speak(m, news ?? m.hello)
+      const invited = Boolean(m.seat)
+      openSlip(`Say something to ${m.name}…`, [...m.chips, ...(invited ? [] : [INVITE])])
+    }
+
+    /** Back to chores, or to the table if anyone is sitting there. */
+    const endTalk = (moveCamera = true) => {
+      const m = partner
+      if (!m) return
+      partner = null
+      released = m
+      m.v.chosen = false
+      m.v.thinking = m.v.speaking = false
+      hide(m)
+      if (!moveCamera) return
+      if (seated.length) toTable()
+      else toRoom()
+    }
+
+    const toRoom = () => {
+      mode = 'room'
+      view.focus(null, 4)
+      closeSlip()
+      hideAll()
+      for (const m of cast) m.tag.classList.remove('shown', 'lit')
+    }
+
+    const toTable = () => {
+      mode = 'table'
+      view.focus(TABLE_SHOT, 5)
+      const names = seated.map((m) => m.name)
+      openSlip(seated.length > 1 ? `Say something to the table, or start with a name…` : `Say something to ${names[0]}…`, ["What's everyone up to?", THANKS])
+    }
+
+    const invite = (m: Member) => {
+      // The nearest free chair, so nobody walks around the whole table.
+      const free = SEATS.filter((s) => !cast.some((o) => o.seat === s))
+      // Far-side chairs face the room, so they win unless they are much further away.
+      const cost = (seat: string) => m.v.distanceTo(seat) + (seat === 'seatNear' ? 3 : seat === 'seatRight' ? 1 : 0)
+      const seat = free.sort((a, b) => cost(a) - cost(b))[0]
+      if (!seat) {
+        speak(m, 'The table is full! Maybe next time.')
+        return
       }
+      m.seat = seat
+      seated.push(m)
+      seated.sort((a, b) => SEATS.indexOf(a.seat!) - SEATS.indexOf(b.seat!))
+      // Leave the talk without sending anyone back to chores.
+      if (partner === m) {
+        partner = null
+        quietLeave = true
+        entries.back()
+        quietLeave = false
+      }
+      m.v.thinking = m.v.speaking = false
+      m.v.sendTo(seat)
+      speak(m, 'Coming!')
+      setTimeout(() => showing.get(m) && m.card.text === 'Coming!' && hide(m), 1600)
+      toTable()
+    }
 
-      if (turn) {
-        turn.t += dt
-        let done = true
-        sheets.forEach((s, k) => {
-          if (k >= turn!.n) return
-          const u = Math.max(0, Math.min(1, (turn!.t - k * STAGGER) / TURN))
-          if (u < 1) done = false
-          const e = u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2
-          const theta = turn!.dir === 1 ? e * Math.PI : (1 - e) * Math.PI
-          if (theta !== s.theta) {
-            s.theta = theta
-            bendSheet(s, theta)
+    const leaveTable = () => {
+      for (const m of seated) {
+        m.seat = null
+        m.v.release(0.3 + Math.random() * 0.6)
+        m.v.speaking = m.v.thinking = false
+      }
+      seated.length = 0
+      lastRound = []
+      speaker = null
+      toRoom()
+    }
+
+    const chip = (label: string) => {
+      if (label === INVITE && partner) invite(partner)
+      else if (label === THANKS) leaveTable()
+      else send(label)
+    }
+
+    // ── Sending lines ───────────────────────────────────────────────────────
+    const keep = (person: string, text: string) => {
+      try {
+        const kept = JSON.parse(localStorage.getItem(KEPT) ?? '[]')
+        kept.push({ person, text, at: new Date().toISOString() })
+        localStorage.setItem(KEPT, JSON.stringify(kept.slice(-50)))
+      } catch {
+        // Storage can be unavailable (private windows); the line also stays in the slip.
+      }
+    }
+    const inCharacter = (why: string) =>
+      why === 'busy' ? "Hold on, I'm still thinking about the last thing."
+        : why === 'failed' ? 'I lost my thread there. Could you say that again?'
+          : "Sorry, I'm out for a moment. I've kept what you said."
+
+    /** Ask one villager and stream its words into a speech record. */
+    const ask = (m: Member, text: string): Speech => {
+      const speech: Speech = { text: '', done: false }
+      void sayTo(m.person, text, (t) => (speech.text += t)).then((said) => {
+        if (said.ok) speech.text = said.reply
+        else speech.away = said.why
+        speech.done = true
+      })
+      return speech
+    }
+
+    const send = async (text: string) => {
+      text = text.trim()
+      if (!text || pending) return
+      pending = true
+      line.value = ''
+      mine.textContent = text
+      mine.classList.add('shown')
+      slip.classList.add('waiting')
+      try {
+        if (mode === 'talk' && partner) {
+          const m = partner
+          const ok = await perform(m, ask(m, text), text)
+          if (!ok) line.value = text
+        } else if (mode === 'table' && seated.length) {
+          await table(text)
+        }
+      } finally {
+        pending = false
+        slip.classList.remove('waiting')
+        if (mode === 'talk' && partner) line.placeholder = `Say something to ${partner.name}…`
+        else if (mode === 'table') line.placeholder = seated.length > 1 ? 'Say something to the table, or start with a name…' : `Say something to ${seated[0]?.name ?? ''}…`
+      }
+    }
+
+    /**
+     * One villager's turn on stage: a thinking beat (eyes up, a tap of the chin)
+     * until the first words, then the card types them out while it leans in.
+     * Resolves when the words are on the card. False if the host could not answer.
+     */
+    const perform = async (m: Member, speech: Speech, said: string): Promise<boolean> => {
+      speaker = m
+      m.v.thinking = true
+      hide(m)
+      // Even a quick answer gets its beat: eyes up, a tap of the chin, then words.
+      const beat = clock + 0.5
+      while ((!speech.text && !speech.done) || clock < beat) await frame()
+      m.v.thinking = false
+      if (speech.away) {
+        keep(m.person, said)
+        speak(m, inCharacter(speech.away))
+        voice.textContent = `${m.name}: ${m.card.text}`
+        while (!m.card.finished) await frame()
+        return false
+      }
+      m.v.speaking = true
+      speak(m, speech.text, speech.done)
+      while (!speech.done || !m.card.finished) {
+        m.card.set(speech.text, speech.done)
+        await frame()
+      }
+      m.v.speaking = false
+      voice.textContent = `${m.name}: ${speech.text}`
+      return true
+    }
+
+    /** The table: everyone answers in turn, or only the one named first. */
+    const table = async (text: string) => {
+      const named = seated.find((m) => new RegExp(`^\\s*${m.name}\\b`, 'i').test(text))
+      const turn = named ? [named] : [...seated]
+      for (const m of seated) hide(m)
+      // Every request starts at once; they speak one at a time. Each hears only
+      // the person's line and, marked as context, what the others said last round.
+      const asks = turn.map((m) => {
+        const others = lastRound.filter((r) => r.name !== m.name)
+        const note = others.length ? `\n\n(Context only, not part of the message: at the kitchen table just now, ${others.map((r) => `${r.name} said "${r.text.slice(0, 160)}"`).join(' and ')}.)` : ''
+        return { m, speech: ask(m, text + note) }
+      })
+      const round: { name: string; text: string }[] = []
+      let failed = false
+      for (const [k, { m, speech }] of asks.entries()) {
+        for (const o of seated) o.tag.classList.toggle('lit', o === m)
+        const ok = await perform(m, speech, text)
+        if (ok) round.push({ name: m.name, text: speech.text })
+        else failed = true
+        if (k < asks.length - 1) {
+          await pause(0.9)
+          show(m, 'said')
+        }
+      }
+      speaker = null
+      for (const o of seated) o.tag.classList.remove('lit')
+      if (round.length) lastRound = round
+      if (failed && !line.value) line.value = text
+    }
+
+    // ── The "!" glyph: one quiet signal, never repeated or escalated ────────
+    const notify = (m: Member) => {
+      if (told.has(m.person) || m.news) return
+      m.news = NEWS[m.person] ?? 'I finished up. Nothing urgent.'
+      m.looked = 0
+      m.glyph.visible = true
+    }
+    const clearNews = (m: Member) => {
+      told.add(m.person)
+      m.news = null
+    }
+
+    // ── Entries: hover glow and name, click or Tab and Enter to talk ────────
+    for (const m of cast) {
+      ctx.effect(() => entries.add({
+        id: m.entry,
+        label: m.name,
+        object: m.v.fig.root,
+        select() {
+          if (mode === 'table' && m.seat && m.v.seated > 0.5) {
+            // At the table, choosing someone seated addresses them by name.
+            line.value = `${m.name}, `
+            line.focus({ preventScroll: true })
+            quietLeave = true
+            queueMicrotask(() => {
+              entries.back()
+              quietLeave = false
+            })
+            return
           }
-        })
-        if (done) finishTurn()
+          talk(m)
+        },
+        leave() {
+          if (quietLeave) return
+          if (partner === m) endTalk()
+        },
+      }), `talk entry ${m.entry}`)
+    }
+
+    // ── Input ───────────────────────────────────────────────────────────────
+    const onSubmit = (e: Event) => {
+      e.preventDefault()
+      void send(line.value)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (mode === 'table' && !entries.active) {
+        e.preventDefault()
+        leaveTable()
       }
+    }
+    ctx.effect(() => {
+      slip.addEventListener('submit', onSubmit)
+      addEventListener('keydown', onKey)
+      return () => {
+        slip.removeEventListener('submit', onSubmit)
+        removeEventListener('keydown', onKey)
+      }
+    }, 'talk input')
+    ctx.effect(() => () => {
+      if (mode !== 'room') view.focus(null)
+    }, 'talk camera')
 
-      // Ribbons: the chosen villager's tag sits a little proud; keyboard focus glows warm.
-      const focused = focus >= 0 ? controls()[focus] : null
-      ribbons.forEach((r, i) => {
-        const goalLift = i === vi ? 1 : 0
-        r.lifted += (goalLift - r.lifted) * Math.min(1, dt * 8)
-        r.group.position.y = r.lifted * 0.0018
-        r.group.position.z = r.lifted * 0.008
-        r.marker.visible = i === vi && openness > 0.9
-        const glow = focused?.kind === 'ribbon' && focused.index === i ? 0.22 : i === vi ? 0.05 : 0
-        for (const m of r.materials) m.emissive.setRGB(glow, glow * 0.8, glow * 0.55)
-      })
-      tabs.forEach((t, i) => {
-        const active = SECTIONS[i].id === section
-        t.tab.position.y = BLOCK - 0.0012 - i * 0.0006 + (active ? 0.0009 : 0)
-        t.tab.position.x += ((active ? W + 0.026 : W + 0.015) - t.tab.position.x) * Math.min(1, dt * 10)
-        t.face.color.set(active ? '#e4d9c6' : '#b89c74')
-        const glow = focused?.kind === 'tab' && focused.section === SECTIONS[i].id ? 0.2 : 0
-        t.face.emissive.setRGB(glow, glow * 0.8, glow * 0.55)
-      })
-
-      // The villager's pen writes what has arrived so far.
-      if (writing && shown < writing.text.length) {
-        pen += WRITE_RATE * dt
-        const step = Math.floor(pen)
-        if (step > 0) {
-          pen -= step
-          shown = Math.min(writing.text.length, shown + step)
-          dirty = true
+    // ── Each frame ──────────────────────────────────────────────────────────
+    const waiters = new Set<() => void>()
+    const frame = () => new Promise<void>((done) => waiters.add(done))
+    const pause = async (seconds: number) => {
+      const until = clock + seconds
+      while (clock < until) await frame()
+    }
+    let clock = 0
+    const at = new THREE.Vector3()
+    const rect = () => stage.renderer.domElement.getBoundingClientRect()
+    const screen = (m: Member, above: number) => {
+      const { root } = m.v.fig
+      at.set(0, m.v.fig.height + above - m.v.fig.hip * m.v.seated, 0)
+      root.localToWorld(at)
+      at.project(stage.camera)
+      const r = rect()
+      return { x: r.left + ((at.x + 1) / 2) * r.width, y: r.top + ((1 - at.y) / 2) * r.height, behind: at.z > 1 }
+    }
+    ctx.on('village/frame', (dt, t) => {
+      clock += dt
+      stage.camera.getWorldPosition(eye)
+      // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
+      if (released && entries.hovered !== released.entry) released = null
+      for (const m of cast) m.v.paused = entries.hovered === m.entry && m !== released && mode === 'room'
+      stepCrowd(crowd, blobs, Math.min(dt, 0.05), t, eye, SCALE)
+      for (const m of cast) {
+        // The glyph bobs over the head and fades once looked at for a second.
+        if (m.glyph.visible) {
+          at.set(0, m.v.fig.height + 0.16, 0)
+          m.v.fig.root.localToWorld(at)
+          // About the same size on screen from the room view as up close, floating just clear of the head.
+          const size = THREE.MathUtils.clamp(eye.distanceTo(at) * 0.03, 0.13, 0.46)
+          m.glyph.scale.setScalar(size)
+          m.glyph.position.copy(at).setY(at.y + size * 0.25 + Math.sin(t * 2.4) * 0.015)
+          const mat = m.glyph.material
+          if (entries.hovered === m.entry && m.news) m.looked += dt
+          if (m.looked >= 1 && m.news) clearNews(m)
+          const goal = m.news ? 1 : 0
+          mat.opacity += (goal - mat.opacity) * (1 - Math.exp(-dt * (goal ? 5 : 3)))
+          if (!m.news && mat.opacity < 0.02) m.glyph.visible = false
         }
-      } else if (writing && !writing.writing) writing = null
-
-      if (open && focus < 0 && v().awake && section === 'talk') {
-        blink += dt
-        if (blink > 0.53) {
-          blink = 0
-          caretOn = !caretOn
-          dirty = true
+        m.card.tick(dt)
+        // Cards sit beside the speaker in a talk, above their head at the table.
+        if (showing.has(m)) {
+          const s = screen(m, 0.02)
+          const card = m.card.el
+          if (mode === 'talk' && partner === m) {
+            const w = card.offsetWidth, h = card.offsetHeight
+            const left = Math.min(innerWidth - w - 16, Math.max(16, s.x + 70))
+            const top = Math.min(innerHeight - h - 150, Math.max(24, s.y - 10))
+            card.style.transform = `translate(${left}px, ${top}px)`
+            card.classList.add('beside')
+            card.style.setProperty('--tail', `${Math.max(18, Math.min(h - 18, s.y + 30 - top))}px`)
+          } else {
+            const w = card.offsetWidth, h = card.offsetHeight
+            const left = Math.min(innerWidth - w - 12, Math.max(12, s.x - w / 2))
+            const top = Math.max(12, s.y - h - 22)
+            card.style.transform = `translate(${left}px, ${top}px)`
+            card.style.setProperty('--tail', `${Math.max(22, Math.min(w - 22, s.x - left))}px`)
+            card.classList.remove('beside')
+          }
+        }
+        // Name tags over everyone at the table; the speaker's is lit and carries the card.
+        const tagged = mode === 'table' && m.seat !== null && m.v.seated > 0.5 && !showing.has(m)
+        m.tag.classList.toggle('shown', tagged)
+        if (tagged) {
+          const s = screen(m, 0.06)
+          m.tag.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`
         }
       }
-      if (dirty) {
-        dirty = false
-        if (held !== 'left') {
-          paintPage('left', leftCanvas)
-          leftTex.needsUpdate = true
-        }
-        if (held !== 'right') {
-          paintPage('right', rightCanvas)
-          rightTex.needsUpdate = true
-        }
+      for (const done of [...waiters]) {
+        waiters.delete(done)
+        done()
       }
     })
+
+    // ── Inspection, for the checks ──────────────────────────────────────────
+    ctx.effect(() => {
+      const village = (window as unknown as { village: Record<string, unknown> }).village
+      village.talk = {
+        state: () => ({
+          mode,
+          partner: partner?.person ?? null,
+          speaker: speaker?.person ?? null,
+          seated: seated.map((m) => m.person),
+          pending,
+          line: line.value,
+          cards: Object.fromEntries([...showing].map(([m, as]) => [m.person, { as, text: m.card.text, finished: m.card.finished }])),
+          cast: Object.fromEntries(cast.map((m) => [m.person, {
+            name: m.name, state: m.v.state, seated: m.v.seated > 0.5, seat: m.seat, spot: m.v.spot, thinking: m.v.thinking, speaking: m.v.speaking,
+            news: Boolean(m.news), glyph: m.glyph.visible ? m.glyph.material.opacity : 0, x: m.v.pos.x, z: m.v.pos.z,
+          }])),
+          lit: seated.filter((m) => m.tag.classList.contains('lit')).map((m) => m.person),
+          focused: view.focused,
+        }),
+        notify: (person: string) => {
+          const m = cast.find((c) => c.person === person)
+          if (m) notify(m)
+        },
+        screen: (person: string) => {
+          const m = cast.find((c) => c.person === person)!
+          const box = new THREE.Box3().setFromObject(m.v.fig.root)
+          const c = box.getCenter(new THREE.Vector3())
+          c.project(stage.camera)
+          const r = rect()
+          return { x: r.left + ((c.x + 1) / 2) * r.width, y: r.top + ((1 - c.y) / 2) * r.height }
+        },
+      }
+      return () => {
+        delete village.talk
+      }
+    }, 'talk inspection')
   },
+}
+
+/** A round felt patch with a stitched "!", painted in code. */
+function stitchedBang() {
+  const [c, g] = canvas(128, 128)
+  g.fillStyle = '#f2cf6b'
+  g.beginPath()
+  g.arc(64, 64, 56, 0, Math.PI * 2)
+  g.fill()
+  for (let i = 0; i < 900; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 54
+    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(120,70,20,0.12)'
+    g.fillRect(64 + Math.cos(a) * r, 64 + Math.sin(a) * r, 1.5, 1.5)
+  }
+  g.strokeStyle = 'rgba(110, 66, 30, 0.85)'
+  g.lineWidth = 3
+  g.setLineDash([7, 6])
+  g.beginPath()
+  g.arc(64, 64, 47, 0, Math.PI * 2)
+  g.stroke()
+  g.setLineDash([])
+  g.fillStyle = '#5a3420'
+  g.beginPath()
+  g.roundRect(56, 26, 16, 50, 7)
+  g.fill()
+  g.beginPath()
+  g.arc(64, 92, 9, 0, Math.PI * 2)
+  g.fill()
+  g.strokeStyle = 'rgba(255, 236, 200, 0.55)'
+  g.lineWidth = 1.6
+  for (let y = 31; y < 72; y += 7) {
+    g.beginPath()
+    g.moveTo(60, y)
+    g.lineTo(68, y + 3)
+    g.stroke()
+  }
+  return toTexture(c)
+}
+
+function css() {
+  return `
+  .talk-card { position: fixed; left: 0; top: 0; width: 330px; max-width: calc(100vw - 32px); box-sizing: border-box;
+    padding: 22px 22px 14px; border-radius: 16px; color: #46301f; font: 21px/1.32 ${HAND};
+    background: radial-gradient(120% 90% at 20% 0%, #fffaf0 0%, #fbf1dd 55%, #f3e3c4 100%);
+    box-shadow: 0 14px 34px rgba(60, 30, 10, 0.3), 0 2px 0 rgba(255, 255, 255, 0.7) inset, 0 -3px 0 rgba(150, 105, 60, 0.18) inset;
+    opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.94; transform-origin: 0 50%; }
+  .talk-card::before { content: ''; position: absolute; inset: 7px; border: 2px dashed rgba(150, 100, 60, 0.38); border-radius: 11px; pointer-events: none; }
+  .talk-card.shown { opacity: 1; scale: 1; pointer-events: auto; }
+  .talk-card.said { scale: 0.82; filter: saturate(0.75) brightness(0.97); }
+  .talk-card::after { content: ''; position: absolute; left: var(--tail, 50%); bottom: -10px; width: 20px; height: 20px; margin-left: -10px;
+    background: #f5e7cb; rotate: 45deg; border-radius: 0 0 5px 0; box-shadow: 4px 4px 6px rgba(60, 30, 10, 0.14); }
+  .talk-card.beside::after { left: -10px; top: var(--tail, 40px); bottom: auto; margin: -10px 0 0; background: #fcf4e3; border-radius: 0 0 0 5px; box-shadow: -3px 3px 5px rgba(60, 30, 10, 0.12); }
+  .talk-card .tab { position: absolute; left: 18px; top: -19px; padding: 4px 14px 5px; border-radius: 11px 11px 5px 5px;
+    background: var(--c); color: #fff8ec; font: 700 19px/1.15 ${HAND}; letter-spacing: 0.01em;
+    box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25), inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
+  .talk-card .tab::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.55); border-radius: 8px 8px 3px 3px; }
+  .talk-card .tab small { font-weight: 400; font-size: 14px; opacity: 0.85; margin-left: 7px; }
+  .talk-card .words { margin: 0; min-height: 1.4em; white-space: pre-wrap; font: 19px/1.42 ${BOOK}; color: #3d2a1c; }
+  .talk-card .more { display: block; margin: 4px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
+    font: italic 700 17px ${HAND}; color: var(--c); }
+  .talk-card .more::after { content: ' \\25B8'; }
+  .talk-card .more[hidden] { display: none; }
+  .talk-slip { position: fixed; left: 50%; bottom: 22px; width: min(600px, calc(100vw - 32px)); display: flex; flex-direction: column;
+    align-items: center; gap: 12px; opacity: 0; translate: -50% 14px; pointer-events: none; transition: opacity 220ms ease, translate 240ms ease; }
+  .talk-slip.shown { opacity: 1; translate: -50% 0; pointer-events: auto; }
+  .talk-slip .chips { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .talk-slip .chip { position: relative; padding: 7px 16px 8px; border: 0; border-radius: 999px; cursor: pointer;
+    background: #f6ead2; color: #553a26; font: 18px ${HAND}; box-shadow: 0 4px 12px rgba(60, 30, 10, 0.22), inset 0 -2px 0 rgba(150, 105, 60, 0.15);
+    transition: translate 120ms ease, background 120ms ease; }
+  .talk-slip .chip::before { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(150, 100, 60, 0.35); border-radius: 999px; }
+  .talk-slip .chip:hover, .talk-slip .chip:focus-visible { background: #fff6e4; translate: 0 -2px; outline: none; }
+  .talk-slip .line { box-sizing: border-box; width: 100%; padding: 12px 20px; border: 0; border-radius: 14px; outline: none;
+    background: linear-gradient(transparent 0 calc(100% - 14px), rgba(150, 100, 60, 0.28) calc(100% - 14px) calc(100% - 12.5px), transparent calc(100% - 12.5px)), #fbf3e2;
+    color: #46301f; font: 22px ${HAND}; box-shadow: 0 10px 28px rgba(60, 30, 10, 0.26); }
+  .talk-slip .line::placeholder { color: rgba(90, 64, 48, 0.5); font-style: italic; }
+  .talk-slip.waiting .line { opacity: 0.75; }
+  .talk-slip .mine { margin: 0; max-width: 100%; padding: 6px 16px 7px; border-radius: 10px; rotate: -0.6deg; display: none;
+    background: #fdf8ec; color: #2f4a6b; font: italic 20px/1.3 ${HAND}; box-shadow: 0 4px 12px rgba(60, 30, 10, 0.18); }
+  .talk-slip .mine::before { content: 'You: '; font-style: normal; font-weight: 700; color: #6b4b35; }
+  .talk-slip .mine.shown { display: block; }
+  .talk-tag { position: fixed; left: 0; top: 0; padding: 3px 13px 4px; border-radius: 999px; pointer-events: none; opacity: 0;
+    background: rgba(251, 243, 226, 0.88); color: #6b4b35; font: 700 17px ${HAND}; box-shadow: 0 3px 10px rgba(60, 30, 10, 0.2);
+    transition: opacity 200ms ease, background 200ms ease, color 200ms ease; white-space: nowrap; }
+  .talk-tag.shown { opacity: 1; }
+  .talk-tag.lit { background: var(--c); color: #fff8ec; }
+  .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } }
+  `
 }
 
 if (import.meta.hot) import.meta.hot.accept((m) => m && replace(m.default))

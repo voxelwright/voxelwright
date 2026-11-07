@@ -6,7 +6,9 @@ import { canvas, makeNoise, rng, toTexture } from '../paint'
 import type { Figure, Villager } from './rig'
 
 export interface Spec { name: string; bark: string }
-export interface Kind { title: string; specs: Spec[]; build(i: number, phys: boolean): Figure }
+/** Per-villager touches: `accent` is the owner's colour, worn as a scarf where the direction has one. */
+export interface Look { accent?: string }
+export interface Kind { title: string; specs: Spec[]; build(i: number, phys: boolean, look?: Look): Figure }
 
 type Prop = 'spoon' | 'duster' | 'can' | 'letter' | 'pouch'
 
@@ -300,19 +302,28 @@ function stitchPath(g: CanvasRenderingContext2D, at: (t: number) => [number, num
   }
 }
 
-interface PlushSpec extends Spec { felt: string; belly: string; inner: string; r: number; tall: number; ears: 'floppy' | 'tuft' | 'round'; prop: Prop }
+/** `rim` is the strength of the warm rim light: stronger on the cooler felts so they don't sink into the shade. */
+interface PlushSpec extends Spec { felt: string; belly: string; inner: string; r: number; tall: number; ears: 'floppy' | 'tuft' | 'round'; prop: Prop; rim: number }
 const PLUSH: PlushSpec[] = [
-  { name: 'Dumpling, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", felt: '#e2b98a', belly: '#f6e6cc', inner: '#e8a3a0', r: 0.2, tall: 0.9, ears: 'floppy', prop: 'spoon' },
-  { name: 'Tuft, the tidier', bark: 'I found three socks and a crayon under the sofa.', felt: '#8a9cba', belly: '#e6dccb', inner: '#e3a92b', r: 0.14, tall: 1.5, ears: 'tuft', prop: 'duster' },
-  { name: 'Moss, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', felt: '#97a85e', belly: '#ece3c0', inner: '#5f7f42', r: 0.17, tall: 1.1, ears: 'round', prop: 'can' },
+  { name: 'Dumpling, the cook', bark: "Soup's on for Thursday. Shall I add bread to the list?", felt: '#e2b98a', belly: '#f6e6cc', inner: '#e8a3a0', r: 0.2, tall: 0.9, ears: 'floppy', prop: 'spoon', rim: 0.28 },
+  { name: 'Tuft, the tidier', bark: 'I found three socks and a crayon under the sofa.', felt: '#8a9cba', belly: '#e6dccb', inner: '#e3a92b', r: 0.14, tall: 1.5, ears: 'tuft', prop: 'duster', rim: 0.55 },
+  { name: 'Moss, the gardener', bark: 'The basil on the sill is thirsty. I am on it.', felt: '#97a85e', belly: '#ece3c0', inner: '#5f7f42', r: 0.17, tall: 1.1, ears: 'round', prop: 'can', rim: 0.45 },
 ]
 
-function plush(i: number, phys: boolean): Figure {
+function plush(i: number, phys: boolean, look: Look = {}): Figure {
   const s = PLUSH[i]
   const { root, pose, head } = skeleton(s.name)
-  const felt = (c: string, map: THREE.Texture | null = null) => phys
-    ? new THREE.MeshPhysicalMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
-    : new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : c, map, roughness: 1 })
+  // A warm rim on every felt part, added to emissive so the entries glow still works.
+  const rim = () => color('#ffc58a').mul(pow(float(1).sub(max(dot(normalView, positionViewDirection), 0)), 2.5)).mul(s.rim)
+  const felt = (c: string, map: THREE.Texture | null = null) => {
+    const m = phys
+      ? new THREE.MeshPhysicalNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
+      : new THREE.MeshStandardNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1 })
+    m.emissiveNode = materialEmissive.add(rim())
+    // The entries hover glow lifts emissive; on soft felt half of it reads as a glow rather than a bleach.
+    m.emissiveIntensity = 0.5
+    return m
+  }
   const plain = (c: string) => felt(c, feltTexture(c, 95 + i, { band: false }))
   const hip = 0.035
   const R = s.r
@@ -349,11 +360,6 @@ function plush(i: number, phys: boolean): Figure {
       const strand = part(head, mesh(new THREE.CapsuleGeometry(0.012, 0.07, 4, 8), yarn), Math.sin(a) * 0.03, hr * 0.95 + 0.03, Math.cos(a) * -0.01)
       strand.rotation.z = -a * 1.4
     }
-    // A long stripy scarf.
-    const scarf = part(pose, mesh(new THREE.TorusGeometry(R * 0.78, 0.022, 10, 28), plain('#c8553d')), 0, hip + bodyH * 0.96, 0)
-    scarf.rotation.x = Math.PI / 2
-    const tail = part(pose, mesh(new THREE.CapsuleGeometry(0.022, 0.16, 4, 8), plain('#c8553d')), R * 0.45, hip + bodyH * 0.78, R * 0.62)
-    tail.rotation.z = 0.25
   } else {
     for (const sx of [-1, 1]) {
       const ear = part(head, mesh(new THREE.SphereGeometry(hr * 0.32, 16, 12), felt(s.felt)), sx * hr * 0.7, hr * 0.72, -hr * 0.1)
@@ -363,6 +369,16 @@ function plush(i: number, phys: boolean): Figure {
     const leaf = part(head, mesh(new THREE.SphereGeometry(0.05, 12, 8), plain('#4f8a3a')), 0.02, hr * 1.02, 0)
     leaf.scale.set(0.5, 0.12, 1)
     leaf.rotation.set(0.5, 0.4, 0.6)
+  }
+  // A scarf in the owner's colour; Tuft always wore one.
+  const scarfColour = look.accent ?? (s.ears === 'tuft' ? '#c8553d' : null)
+  if (scarfColour) {
+    const wool = plain(scarfColour)
+    const scarf = part(pose, mesh(new THREE.TorusGeometry(R * 0.8, 0.024, 10, 28), wool), 0, hip + bodyH * 0.96, 0)
+    scarf.rotation.x = Math.PI / 2
+    scarf.scale.set(1, 0.9, 1)
+    const tail = part(pose, mesh(new THREE.CapsuleGeometry(0.024, 0.15, 4, 8), wool), R * 0.42, hip + bodyH * 0.8, R * 0.66)
+    tail.rotation.z = 0.25
   }
   const handY = hip + bodyH * 0.55
   const hands = [-1, 1].map((sx) => {

@@ -355,7 +355,7 @@ in `screenshots/talk/`.
 ## Notebook, richer (#42 prototype)
 
 `?talk=notebook` swaps the table's notebook for a closed linen book
-(`src/plugins/talk.ts`; `notebook.ts` returns early on the same flag). Choose
+(`src/plugins/talkbook.ts`; `notebook.ts` returns early on the same flag). Choose
 it and the cover swings open while the camera eases down. A cloth ribbon per
 villager spills from the pages onto the table, each ending in a sewn tag with
 the villager's mark and name; the chosen one also lies down the gutter. Paper
@@ -397,3 +397,114 @@ Look, ui-craft rounds (fresh Opus each round, screenshots at `?q=high` and
 Opus only; no GPT reviewer this slice. Still named: motion polish of the
 multi-leaf flip, the sun band across the writing page, and the key note
 printed on the paper.
+
+## Talking to villagers (#42 prototype)
+
+`?talk=npc` turns on three felt villagers (direction `b`) and the iso room
+view. `?cam=` and `?villager=` still win: `?talk=npc&cam=seat` is today's
+seated view, `?talk=npc&villager=a` uses the peg dolls. Without `?talk=` the
+home is exactly as before, and `?villager=` alone still shows the art
+directions.
+
+Each villager belongs to one synthetic person, and its scarf and name tab
+carry that person's colour: Dumpling (cook, Alex), Tuft (tidier, Sam), Moss
+(gardener, Mia). Start the host with all three:
+
+```sh
+cd host && VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia npm run villager
+```
+
+What works:
+
+- Life: they do chores on their own paths (Dumpling between the sink and the
+  fridge photos, Tuft between the toy shelf and the counter, crossing the room
+  in front of the table, Moss tending the big plant). Walkers yield to each
+  other and walk past (and may clip through) anyone busy at a chore. Hovering one makes it pause,
+  so it is easy to click.
+- Talk in one step: hover glows it and shows its name; click, or Tab and
+  Enter. It stops, hops, turns to you, and the camera eases (rate 7, about
+  0.4 s) into a close two-shot that turns until nothing stands in the way. A
+  stitched paper card with the name tab sits beside it. Replies type out at
+  42 letters a second, two sentences at a time, with "go on" for more. You
+  type a line (Enter sends) or use one of three chips. While the model works
+  the villager looks up and taps its chin for at least half a second; there is
+  no spinner. Escape or a click elsewhere sends it back to its chores.
+- The table: "Come sit with me" walks the villager (hurrying) to the nearest
+  free chair, far side first; the talk prototype adds a fourth chair on the
+  near side. With anyone seated the camera frames the table from above and
+  the line goes to the table. Every seated villager answers in turn: their
+  requests start together, they speak one at a time with a lit name tag and a
+  lean-in. Starting a line with a name ("Tuft, ...") asks only that one;
+  clicking a seated villager fills in its name. "Thanks, everyone" or Escape
+  sends them all back to chores.
+- Villagers do not share memory with each other. At the table each one gets
+  your line and, marked "(Context only, not part of the message: ...)", what
+  the others said in the previous round. The host still talks to each villager
+  as its own person, and its system prompt still speaks of the notebook.
+- When the host is down the villager says "Sorry, I'm out for a moment. I've
+  kept what you said."; the line stays on the slip and in
+  `village.talk.kept` in local storage.
+- One in-world signal: a villager with something for you shows a stitched
+  felt "!" over its head (synthetic trigger: Moss after its first watering).
+  It fades after about a second of hovering or when you talk to it, and
+  never comes back or escalates.
+- Felt polish: a warm fresnel rim on every felt part (stronger on the cooler
+  Tuft and Moss), a contact shadow with a dark core, and half-strength hover
+  glow on felt so it does not bleach.
+
+Not done: dragging a villager onto a chair (only the chip seats them),
+villagers talking among themselves, voice, and keeping talk history on screen.
+
+`node scripts/check-talk-npc.mjs` starts its own stub host and dev server on
+ports 5296 and 5295 with a temporary `VILLAGE_ROOT` and proves, headless:
+nothing changes without the flag; the three walk their chores; hover names;
+a click talks in one step and focuses the line; the thinking beat shows and
+the reply streams onto the card; at most two sentences per card page; Escape
+returns to chores; Tab and Enter talk; two are invited and seated; a table
+line is answered by both in turn with one speaker and one lit tag at a time;
+a name asks only that villager and the other's words arrive only as marked
+context; the host down is said in character and the line kept; Escape at the
+table releases everyone; the glyph shows, fades after a second of looking and
+never returns; unloading `talk` three times leaves the same objects,
+geometries, textures, frame hooks, DOM and entries as a `?cam=iso` page.
+20 of 20 passed (stub host, November 6, 2026). `--agent=claude` runs one real
+talk and one two-villager table exchange instead, and `--video=dir` records it.
+
+Real model, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet 5.5 with a
+Haiku helper call), times measured in the host from the start of each turn:
+
+| Turn | Villager | First text | Whole turn | Cost |
+| --- | --- | --- | --- | --- |
+| single talk, first turn of the session | Dumpling (alex) | 10.0 s | 10.9 s | $0.0052 |
+| table, two seated | Dumpling (alex) | 6.4 s | 7.0 s | $0.0063 |
+| table, two seated | Moss (mia) | 4.8 s | 5.5 s | $0.0052 |
+
+The thinking beat covers the wait, but 5 to 10 s to first words is far from
+the 1 to 2 s the research asks for. Replies run three to four sentences, so
+pages turn by themselves.
+
+Frame cost, headless Chrome, 1440x900, WebGPU, `npm run measure -- '<url>'
+--perf --gpu`, one 6 s run each, taken while the villagers walked (GPU p50
+varies 1 to 3 ms between runs of the same page):
+
+| Page | Tier | Draw calls | Triangles | GPU p50 / p95 ms |
+| --- | --- | --- | --- | --- |
+| no flag | high | 482 | 52,124 | 10.8 / 16.3 |
+| `?cam=iso` | high | 491 | 52,856 | 7.8 / 10.4 |
+| `?talk=npc` | high | 658 | 93,870 | 7.9 / 9.0 |
+| no flag | low | 412 | 48,893 | 3.4 / 5.1 |
+| `?cam=iso` | low | 421 | 49,625 | 4.9 / 5.7 |
+| `?talk=npc` | low | 588 | 90,639 | 5.1 / 6.6 |
+
+Three felt villagers, their glyphs and shadows and the fourth chair add about
+167 draw calls and 41,000 triangles to the iso view.
+
+Look: a fresh Opus scorer per round saw only the eight `npc-*.jpg`
+screenshots and the ui-craft rubric plus character appeal, game not app,
+friction and who is speaking. Means over eleven categories: 6.1, 6.4, 6.0;
+stopped on the plateau. Character appeal rose from 7 to 8. The scores held
+down by the room itself (floor grain, sun wedges, bloom, the beige void, no
+rug or clutter) belong to the iso scene work in `room.ts`, `sunbeam.ts` and
+`window.ts`. The last round also said the villagers sound like assistants
+("tell me what you enjoy"), which is the host's system prompt. Screenshots:
+`screenshots/talk/npc-*.jpg` (real replies).

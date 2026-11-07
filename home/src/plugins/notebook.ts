@@ -45,7 +45,7 @@ export default {
   name: 'notebook',
   inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
-    // ?talk=notebook: the richer notebook (talk.ts) takes the book instead (#42 prototype).
+    // ?talk=notebook: the richer notebook (talkbook.ts) takes the book instead (#42 prototype).
     if (new URLSearchParams(location.search).get('talk') === 'notebook') return
     const { scene } = ctx.stage
     const { view, entries } = ctx

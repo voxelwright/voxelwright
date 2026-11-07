@@ -6,16 +6,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from 'cordis'
 import { listNotes, readNote, writeNote } from '../src/notes.ts'
-import villager from '../src/villager.ts'
+import villager, { parsePeople } from '../src/villager.ts'
 import { initProblem, stubAgent } from '../src/villager-agent.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'villager-check-'))
 const checks: { name: string; pass: boolean; detail?: unknown }[] = []
 const check = (name: string, pass: unknown, detail?: unknown) => checks.push({ name, pass: Boolean(pass), detail })
 
-async function start() {
+async function start(people?: Record<string, string>) {
   const ctx = new Context()
-  const fiber = ctx.plugin(villager, { root, agent: stubAgent(30), port: 0 })
+  const fiber = ctx.plugin(villager, { root, agent: stubAgent(30), port: 0, people })
   await fiber.await()
   const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
   return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
@@ -98,6 +98,20 @@ try {
 
   // Person ids.
   for (const id of ['..%2Falex', 'Alex', 'sam']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 404)
+  await host.fiber.dispose()
+
+  // The operator can list synthetic people (VILLAGER_PEOPLE); each keeps its own folder.
+  const listed = parsePeople(' alex:Alex, sam:Sam ,mia:Mia')
+  check('VILLAGER_PEOPLE parses into ids and names', JSON.stringify(listed) === JSON.stringify({ alex: 'Alex', sam: 'Sam', mia: 'Mia' }), listed)
+  for (const bad of ['', 'Sam:Sam', 'sam', 'sam:', '../x:X', 'sam:Sam,sam:Sammy']) {
+    const outcome = (() => { try { parsePeople(bad); return 'accepted' } catch { return 'refused' } })()
+    check(`VILLAGER_PEOPLE refuses ${JSON.stringify(bad)}`, outcome === 'refused', outcome)
+  }
+  host = await start(listed)
+  const samReply = (await say(host.base, host.token, 'hello from the table', 'sam')).events.find((e) => e.name === 'done')?.data.reply ?? ''
+  check('a listed person is answered under their own name', /I hear you, Sam\. That makes 1 line/.test(samReply), samReply)
+  check("a listed person's villager does not see another's lines", existsSync(join(root, 'people', 'sam', 'conversation.jsonl')) && !samReply.includes('water the plants'))
+  check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 404)
   await host.fiber.dispose()
 
   // Notes cannot leave the person folder.
