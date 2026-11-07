@@ -123,7 +123,7 @@ function shape(x) {
   }
   let atk = 0
   for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) >= 0.9 * p) { atk = i; break }
-  return { length: (last - Math.max(0, first)) / SR, attackMs: ((atk - Math.max(0, first)) / SR) * 1000 }
+  return { length: (last - Math.max(0, first)) / SR, start: Math.max(0, first) / SR, attackMs: ((atk - Math.max(0, first)) / SR) * 1000 }
 }
 /** The largest sample step relative to peak: a click shows as a step far above the signal's own. */
 function maxStep(x) {
@@ -242,6 +242,12 @@ try {
     page: { seconds: 0.3, leaves: 1, dir: 1 }, sat: { seconds: 0.25 }, card: { page: 0 }, writing: { added: 1 },
   }
 
+  /** The longest event per timed cue, for the check that a cue ends within its declared `length`. */
+  const LONGEST = {
+    glide: { seconds: 2.5 }, sent: { seconds: 1.0 }, walk: { seconds: 2, phase: 'leave' }, 'book-close': { seconds: 0.35, open: false },
+    page: { seconds: 0.6, leaves: 5, dir: 1 }, sat: { seconds: 1 }, writing: { added: 40 }, card: { page: 0 },
+  }
+
   const babble = decode(await page.evaluate(() => window.renderBabble()))
   const voice = loudness(babble)
   wav(babble, join(out, 'babble-reference.wav'))
@@ -288,6 +294,11 @@ try {
     if (row.shortMax > MAX_SHORT_LUFS) fails.push(`short-term ${row.shortMax} LUFS`)
     if (row.momentaryMax > voice.momentaryMax) fails.push(`louder than the voices (${row.momentaryMax} > ${voice.momentaryMax.toFixed(1)} LUFS momentary)`)
     if (rr < 1e-4) fails.push('consecutive plays identical')
+    // Ends within its declared length at its longest event (the player and checks size renders by it).
+    const longest = await page.evaluate(([n, v, e, s]) => window.renderCue(n, v, [{ at: 0, index: 0, event: e }], s), [name, v, LONGEST[name] ?? event, span + 2])
+    const longestLength = shape(decode(longest.pre)).length + shape(decode(longest.pre)).start
+    row.longestLengthS = +longestLength.toFixed(2)
+    if (longestLength > length) fails.push(`rings ${longestLength.toFixed(2)} s, longer than its length ${length}`)
     row.fails = fails
     if (sampled) {
       // The synthesized stand-in that plays until the files have loaded: its level beside the recording's.
@@ -335,8 +346,8 @@ try {
   if (errors.length) failed++
   writeFileSync(join(out, 'measurements.json'), JSON.stringify({ summary, rows }, null, 2))
   const pad = (s, n) => String(s).padEnd(n)
-  console.log(pad('cue', 14), pad('bus', 6), pad('M max', 7), pad('S max', 7), pad('peak', 6), pad('cent', 6), pad('>3k%', 5), pad('len s', 6), pad('atk ms', 7), pad('rr dB', 6), pad('step', 5), 'fails')
-  for (const r of rows) console.log(pad(r.cue, 14), pad(r.bus, 6), pad(r.momentaryMax, 7), pad(r.shortMax, 7), pad(r.peakDbfs, 6), pad(r.centroidHz, 6), pad(r.above3kPct, 5), pad(r.lengthS, 6), pad(r.attackMs, 7), pad(r.roundRobinDiffDb, 6), pad(r.maxStepDb, 5), r.fails.join('; '))
+  console.log(pad('cue', 14), pad('bus', 6), pad('M max', 7), pad('S max', 7), pad('peak', 6), pad('cent', 6), pad('>3k%', 5), pad('len s', 6), pad('atk ms', 7), pad('rr dB', 6), pad('step', 5), pad('max s', 6), pad('rms', 5), 'fails')
+  for (const r of rows) console.log(pad(r.cue, 14), pad(r.bus, 6), pad(r.momentaryMax, 7), pad(r.shortMax, 7), pad(r.peakDbfs, 6), pad(r.centroidHz, 6), pad(r.above3kPct, 5), pad(r.lengthS, 6), pad(r.attackMs, 7), pad(r.roundRobinDiffDb, 6), pad(r.maxStepDb, 5), pad(r.longestLengthS, 6), pad(r.renderMsPerPlay, 5), r.fails.join('; '))
   console.log(JSON.stringify(summary))
   console.log(`WAVs, spectrograms and measurements.json in ${out}`)
 } finally {

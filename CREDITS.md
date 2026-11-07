@@ -1,6 +1,6 @@
 # Credits
 
-Village's own sounds and pictures are made in code. Third-party material used in the project:
+Village's own pictures, and most of its sounds, are made in code. Third-party material used in the project:
 
 ## Music: "Groove Music" by benpm
 

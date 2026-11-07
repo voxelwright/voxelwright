@@ -98,7 +98,7 @@ const hover = {
 
 const chose = {
   a: cue({
-    bus: 'ui', level: -20.5, gap: 0.05, length: 0.5, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -20.5, gap: 0.05, length: 0.6, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // A wooden tock with a small kalimba G above it.
       tock(a, out, kit, p.at, { freq: NOTE.G4 * p.rate * (1 + 0.01 * (p.random() - 0.5)), gain: p.gain * 0.7, random: p.random })
@@ -127,7 +127,7 @@ const chose = {
 
 const backed = {
   a: cue({
-    bus: 'ui', level: -21.5, gap: 0.05, length: 0.45, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -21.5, gap: 0.05, length: 0.55, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // The inverse of chose: a lower, duller tock and a kalimba C that sags a few cents.
       tock(a, out, kit, p.at, { freq: NOTE.C4 * p.rate, gain: p.gain * 0.55, random: p.random, click: 0.3, band: 900 })
@@ -173,13 +173,13 @@ const card = {
     },
   }),
   b: cue({
-    bus: 'ui', level: -17, gap: 0.06, length: 0.6, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -17, gap: 0.06, length: 0.65, jitter: { cents: 3, db: 1 },
     samples: [S.slide.file],
     play(a, out, p, kit) {
       // Hybrid: a recorded sheet sliding (three takes, cut short), and on a new reply a quiet glass E.
       const slid = sample(a, out, kit.sample(S.slide.file), p.at, pick(p, S.slide.takes), { gain: p.gain * 0.6, rate: p.rate * (0.95 + 0.1 * p.random()), len: 0.3 })
       if (!slid) flick(a, out, kit, p.at, p, { gain: p.gain * 0.7, freq: 2500, dur: 0.09 })
-      if (Number(p.event.page ?? 0) === 0) pluck(a, room(a, out, 0.25), p.at + 0.03, NOTE.E6 * p.rate, BODY.glass, { gain: p.gain * 0.18, attack: 0.012, dur: 0.5 })
+      if (Number(p.event.page ?? 0) === 0) pluck(a, room(a, out, 0.25), p.at + 0.03, NOTE.E6 * p.rate, BODY.glass, { gain: p.gain * 0.18, attack: 0.012, dur: 0.35 })
     },
   }),
   c: cue({
@@ -272,7 +272,7 @@ const sent = {
     },
   }),
   c: cue({
-    bus: 'world', level: -19, length: 1.4, jitter: { cents: 3, db: 1 },
+    bus: 'world', level: -19, length: 1.8, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // Torn off, then a kalimba run (C E G) across the flight that lands on the high C.
       tear(a, out, kit, p.at, p, p.gain * 0.7)
@@ -280,14 +280,14 @@ const sent = {
       const r = room(a, out, 0.22)
       const notes = [NOTE.C5, NOTE.E5, NOTE.G5]
       notes.forEach((f, i) => pluck(a, r, p.at + 0.1 + (fly * i) / notes.length, f * p.rate, BODY.kalimba, { gain: p.gain * (0.22 + 0.04 * i), dur: 0.35 }))
-      pluck(a, r, p.at + 0.1 + fly, NOTE.C6 * p.rate, BODY.kalimba, { gain: p.gain * 0.35, dur: 0.6 })
+      pluck(a, r, p.at + 0.1 + fly, NOTE.C6 * p.rate, BODY.kalimba, { gain: p.gain * 0.35, dur: 0.35 })
     },
   }),
 }
 
 const routed = {
   a: cue({
-    bus: 'ui', level: -22.5, gap: 0.2, length: 0.6, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -22.5, gap: 0.2, length: 0.8, jitter: { cents: 3, db: 1 },
     play(a, out, p) {
       // Found its place: kalimba G then C, a fourth up.
       const r = room(a, out, 0.2)
@@ -299,7 +299,7 @@ const routed = {
 
 const unrouted = {
   a: cue({
-    bus: 'ui', level: -21.5, gap: 0.2, length: 0.6, jitter: { cents: 3, db: 1 },
+    bus: 'ui', level: -21.5, gap: 0.2, length: 0.8, jitter: { cents: 3, db: 1 },
     play(a, out, p) {
       // "Hm": two soft marimba notes, E down to D, a thoughtful step rather than an error.
       const r = room(a, out, 0.2)
@@ -371,11 +371,11 @@ const placed = {
 
 const kept = {
   a: cue({
-    bus: 'world', level: -19.5, gap: 0.3, length: 1.1, jitter: { cents: 3, db: 1 },
+    bus: 'world', level: -19.5, gap: 0.3, length: 1.2, jitter: { cents: 3, db: 1 },
     play(a, out, p) {
       // A small reward: kalimba C E G rolled quickly, the G left ringing.
       const r = room(a, out, 0.25)
-      ;[NOTE.C5, NOTE.E5, NOTE.G5].forEach((f, i) => pluck(a, r, p.at + i * 0.07, f * p.rate, BODY.kalimba, { gain: p.gain * (0.35 + 0.05 * i), dur: i === 2 ? 0.95 : 0.5 }))
+      ;[NOTE.C5, NOTE.E5, NOTE.G5].forEach((f, i) => pluck(a, r, p.at + i * 0.07, f * p.rate, BODY.kalimba, { gain: p.gain * (0.35 + 0.05 * i), dur: i === 2 ? 0.8 : 0.5 }))
     },
   }),
 }
@@ -401,7 +401,7 @@ const undone = {
 
 const failed = {
   a: cue({
-    bus: 'world', level: -21, gap: 0.3, length: 0.7, jitter: { cents: 3, db: 1 },
+    bus: 'world', level: -21, gap: 0.3, length: 0.85, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // Soft and sympathetic: a felt bump and a marimba E falling gently to C.
       thump(a, out, kit, p.at, { from: 180, to: 110, dur: 0.1, gain: p.gain * 0.4, random: p.random, puff: 0.4 })
@@ -448,7 +448,7 @@ const page = {
     },
   }),
   b: cue({
-    bus: 'ui', level: -18, gap: 0.05, length: 0.9, jitter: { cents: 100, db: 1 },
+    bus: 'ui', level: -18, gap: 0.05, length: 1.3, jitter: { cents: 100, db: 1 },
     samples: [S.page.file],
     play(a, out, p, kit) {
       // Recorded: a real page turn, its flip only; earlier leaves of a riffle are short slices of it.
@@ -505,7 +505,7 @@ const news = {
       // A friendly call: kalimba G then the C above it, the second left to ring.
       const r = room(a, out, 0.3)
       pluck(a, r, p.at, NOTE.G5 * p.rate, BODY.kalimba, { gain: p.gain * 0.42, dur: 0.5 })
-      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, [{ ratio: 1, amp: 1, tau: 0.42 }, ...BODY.kalimba.slice(1)], { gain: p.gain * 0.48, dur: 0.95 })
+      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, [{ ratio: 1, amp: 1, tau: 0.42 }, ...BODY.kalimba.slice(1)], { gain: p.gain * 0.48, dur: 0.85 })
     },
   }),
   b: cue({
@@ -516,10 +516,10 @@ const news = {
       const r = room(a, out, 0.3)
       const box = kit.sample(S.musicBox.file)
       const first = sample(a, r, box, p.at, S.musicBox.takes[0], { gain: p.gain * 2.4, rate: p.rate, len: 0.45 })
-      const second = sample(a, r, box, p.at + 0.16, S.musicBox.takes[0], { gain: p.gain * 2.7, rate: p.rate * 2 ** (5 / 12), len: 0.95 * 2 ** (5 / 12) })
+      const second = sample(a, r, box, p.at + 0.16, S.musicBox.takes[0], { gain: p.gain * 2.7, rate: p.rate * 2 ** (5 / 12), len: 0.85 * 2 ** (5 / 12) })
       if (first && second) return
       pluck(a, r, p.at, NOTE.G5 * p.rate, BODY.musicBox, { gain: p.gain * 0.35, dur: 0.45 })
-      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, BODY.musicBox, { gain: p.gain * 0.4, dur: 0.95 })
+      pluck(a, r, p.at + 0.16, NOTE.C6 * p.rate, BODY.musicBox, { gain: p.gain * 0.4, dur: 0.85 })
     },
   }),
   c: cue({
@@ -546,7 +546,7 @@ const walk = {
       const step = 60 / 90 / 2
       const count = arrive ? 2 : Math.min(5, Math.max(2, Math.round(span / step)))
       for (let i = 0; i < count; i++) {
-        const t = p.at + i * step + 0.012 * (p.random() - 0.5)
+        const t = p.at + i * step + (i ? 0.012 * (p.random() - 0.5) : 0)
         const soft = i % 2 ? 0.8 : 1
         thump(a, out, kit, t, { from: 150 * p.rate, to: 85, dur: 0.09, gain: p.gain * 0.55 * soft * (arrive && i === 1 ? 0.6 : 1), random: p.random, puff: 0.9, cut: 700 })
       }
