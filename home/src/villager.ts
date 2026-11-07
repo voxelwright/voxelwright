@@ -7,7 +7,7 @@ export interface Line { from: 'person' | 'villager'; text?: string; unanswered?:
 
 let token: string | null = null
 
-async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
+export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!token) {
       const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
@@ -42,11 +42,12 @@ export interface Routing {
  * `context` is background the person did not say (the table's round so far): the villager hears it, the conversation never stores it.
  * With `routing`, one call either answers (text streams) or names a route (`onRoute`, no text).
  */
-export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing): Promise<Said> {
+export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing, sketch?: { from: string; id: string }): Promise<Said> {
   const res = await authorized(`/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}) }),
+    // A drawing handed over (#42, sketch.ts) goes by reference, the drawer's id and the sketch's.
+    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
   })
   let routed: Routed | undefined
   const onRoute = (r: Routed) => {
@@ -107,7 +108,7 @@ export interface Routed {
 }
 export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
 
-async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
+export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
   const t0 = performance.now()
   const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const ms = performance.now() - t0

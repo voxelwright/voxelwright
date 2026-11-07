@@ -12,6 +12,7 @@ import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
 import { mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
+import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import type { Pose } from './camera'
 import { tagVillager } from '../theme'
@@ -60,7 +61,7 @@ declare module 'cordis' {
     /** A villager's reply was cut short before its last word: Escape, the host failing, a goodbye. */
     'village/said-stop'(stop: { villager: string }): void
     /** Open the journal, at a villager's pages or a section (the always-on input, #42). */
-    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' }): void
+    'village/journal'(at: { person?: string; section?: 'talk' | 'tasks' | 'sketches' }): void
   }
 }
 
@@ -763,12 +764,12 @@ export default {
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
-    const ask = (m: Member, text: string, context?: string, routing?: Routing): Speech => {
+    const ask = (m: Member, text: string, context?: string, routing?: Routing, sketch?: SketchRef): Speech => {
       const speech: Speech = { text: '', done: false, asked: performance.now() }
       void sayTo(m.person, text, (t) => {
         speech.first ??= performance.now()
         speech.text += t
-      }, context, routing).then((said) => {
+      }, context, routing, sketch).then((said) => {
         if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true
@@ -1241,6 +1242,7 @@ export default {
       }
       placeCards(dt)
       input?.frame(dt, t)
+      sketch?.frame(dt, t)
       furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
@@ -1314,8 +1316,36 @@ export default {
       blocked: () => entries.active === 'notebook',
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
+      enter: (): boolean => sketch?.enter() ?? false,
+    }) : null
+    // ── Sketching on the held notepad (#42, src/talk/sketch.ts) ──────────────
+    /** Whom the pad is addressed to, as a villager (the table counts as the first seated). */
+    const padTo = () => (mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] ?? primary() : primary())
+    const sketch: Sketcher | null = INPUT === 'held' && input && furnish ? sketcher(stage, input, furnish, {
+      person: primary().person,
+      maker: primary().name,
+      to: () => {
+        const m = padTo()
+        return { person: m.person, name: m.name, colour: m.colour }
+      },
+      // A drawing goes with no route: nothing drawn on it can choose who hears what.
+      give: async (person, text, ref) => {
+        const m = cast.find((c) => c.person === person)
+        if (!m || pending || routing) return false
+        if (!(mode === 'talk' && partner === m)) choose(m, false)
+        pending = true
+        try {
+          return await perform(m, ask(m, text, undefined, undefined, ref), text)
+        } finally {
+          pending = false
+        }
+      },
+      figure: (person) => cast.find((c) => c.person === person)?.v.fig.root ?? null,
+      say: (text) => quip(primary(), text),
+      blocked: () => entries.active === 'notebook',
     }) : null
     ctx.effect(() => () => {
+      sketch?.dispose()
       input?.dispose()
       furnish?.dispose()
     }, 'talk always-on input')
@@ -1448,6 +1478,7 @@ export default {
           lit: seated.filter((m) => m.tag.classList.contains('lit')).map((m) => m.person),
           focused: view.focused,
           input: input ? { ...input.state(), routing, routes: routes.slice(), quips: quipLog.slice(), furnish: furnish!.state(), journalRect: input.journalRect(), padRect: input.padRect() } : null,
+          sketch: sketch?.state() ?? null,
           round: roundLog.map((r) => ({ ...r })),
         }),
         /** For the checks: what "here" and "that" point at, as a click on the room would set it. */
@@ -1456,6 +1487,8 @@ export default {
         placeFor,
         mayRoute,
         keep: () => furnish?.keep(),
+        /** Sketching (#42): the page's tools, and where a page point is on screen, for the checks. */
+        sketch: sketch ? { open: sketch.open, undo: sketch.undo, clear: sketch.clear, tool: sketch.setTool, make: sketch.make, give: sketch.give, at: sketch.screenAt } : null,
         undo: () => furnish?.undo(),
         again: () => furnish?.again(),
         notify: (person: string) => {
