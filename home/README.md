@@ -1305,8 +1305,11 @@ placement) is a later unit; the speech variant has no touch path.
 
 ## Themes (#50 prototype)
 
-`?theme=<id>` restyles the whole home: `sixteen-bit` (16-bit pixel art), `neon-night`
-(a rain-soaked neon night) or `comic` (comic-book halftone). Without `?theme=` nothing changes: the theme plugin isn't loaded
+`?theme=<id>` restyles the whole home: `blue-hour` (dusk), `sixteen-bit` (16-bit pixel art),
+`neon-night` (a rain-soaked neon night), `comic` (comic-book halftone) or `pastoral` (hand-painted
+summer countryside). The swatch book on the window sill switches live, saves your own looks, and
+takes a written request ("make it cozier"), as does the always-on input. Final captures of every
+look: `screenshots/themes/final/`. Without `?theme=` nothing changes: the theme plugin isn't loaded
 and postfx reads the default theme, whose values are its old literals. A seeded, clock-fixed
 `?q=low` capture against the code before themes differs by a mean of 0.30 to 0.34 (seat) and
 0.30 (iso), against 0.17 to 1.68 between two runs of the old code.
@@ -1369,6 +1372,15 @@ walls; separate wood, paint and plaster by value; keep tiny objects legible at 2
 night: much less cyan on the wall tops; a little warm fill so the household survives; the iso
 exterior and window still show a garden. Below the 9/10 bar; this round proves the mechanism.
 
+Polish round (November 7). 16-bit: a pixel snaps to its nearest palette colour and dithers only
+near the boundary between its two nearest colours (OKLab), narrowed where the light is flat, so
+walls and the fridge are flat and seams dither; `dither` is now that band's width (`check()`
+defaults it to 0.3). A flat `pixel-plaster` painter, two clean whites (38 colours), bloom back for
+the lamp, and creases need a depth bend too (the sunbeam's normals drew diagonal lines). Opus 6.5
+then 6. Neon night: trim glow 1.0 to 0.12 so the table leads, warm floor bounce in the fill,
+moonlight 0.03 (no floor glare), floor roughness 0.42, two signs in the city view. Opus 6.5 and
+6.5. Thin neon tubes need geometry or a glow-map path; tokens can't draw them.
+
 `node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
 browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
 
@@ -1384,8 +1396,14 @@ leaves stages out to measure them. Measured GPU p50 / p95: seated high 7.4 / 11.
 7.8 / 11.1 in the same session), iso high 6.5 / 8.1 (6.5 / 8.6), seated low 3.7 / 4.9
 (3.1 / 4.7). Look, three fresh Opus rounds, category means 5.1, 5.3 and 5.6: the scorers still
 want flatter texture (wood grain, rug), less specular, lighter ink on thin geometry in iso,
-and no dots behind the steam. Known fault: halftone without ink (`?drop=ink`) renders at under
-1 fps on both tiers, reproducible; the preset always has both, and the cause is not found.
+and no dots behind the steam. The polish round flattened texture (an edge-preserving average of
+surface colour), wrote the colour and normal buffers from opaque surfaces only (no dots behind the
+steam) and lightened ink on thin strips: seated high 8.9 / 10.5, iso high 7.7 / 8.7, seated low
+4.4 / 6.1; Opus 5.5 then 6. The reported "halftone without ink runs under 1 fps" was not the theme:
+several headless Chromes starting at once were still compiling startup shaders when the measure
+window began, so a whole 6 s run sometimes held 0.3 to 2 fps with normal per-frame GPU and CPU time.
+`scripts/measure.mjs` now waits for 30 frames in a row under 50 ms (at most 20 s) and reports
+`settleMs`.
 
 Hand-painted pastoral (`?theme=pastoral`): gouache painters (`src/theme/paint.ts`) for the walls,
 the window view, the floorboards (`gouache-planks`), the yard, garden and worktable (`gouache-meadow`)
