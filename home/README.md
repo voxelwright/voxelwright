@@ -185,12 +185,12 @@ Chrome checks running on the same machine: GPU p50 moved by up to 2.4 ms and GPU
 7.3 ms; CPU p50 0.1 ms; draw calls 0; frame intervals none. The GPU floors sit just above that
 spread. Remeasure on a quiet machine and tighten them.
 
-Time, base and head builds cached: 25.0 to 26.6 s inside the script, 27.6 to 29.7 s wall
-clock, three runs (page loads 11.8 to 13.4 s, measuring 11.2 s). An uncached head adds a
+Time, base build cached, three runs (the first also built the head, 2.0 s): 25.0 to 26.6 s
+inside the script, 27.6 to 29.7 s wall clock (page loads 11.8 to 13.4 s, measuring 11.2 s). An uncached head adds a
 2 to 5 s build, which runs while the base pages load. The first base build adds 17 s
 (`npm ci` and `vite build`). `--full` does not fit in 30 s.
 
-Today (working tree at 5f89124 against cb1d565, three runs): every scene holds 60 fps except
+Today (5f89124 plus the gate, against cb1d565, three runs): every scene holds 60 fps except
 one `talk` run (3 of 116 intervals over 20 ms, p99 33 ms). GPU p95 at high is 16 to 19 ms in
 `home`, `villagers` and `talk`, so the headroom gate fails; main fails it too (15.6 to 17 ms).
 GPU p50 swings between 7 and 17 ms for the same build from run to run under contention.
