@@ -320,6 +320,8 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
       ? new THREE.MeshPhysicalNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1, sheen: 1, sheenColor: new THREE.Color(c).lerp(new THREE.Color('#ffffff'), 0.55), sheenRoughness: 0.55 })
       : new THREE.MeshStandardNodeMaterial({ color: map ? '#ffffff' : c, map, roughness: 1 })
     m.emissiveNode = materialEmissive.add(rim())
+    // The entries hover glow lifts emissive; on soft felt half of it reads as a glow rather than a bleach.
+    m.emissiveIntensity = 0.5
     return m
   }
   const plain = (c: string) => felt(c, feltTexture(c, 95 + i, { band: false }))

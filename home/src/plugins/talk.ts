@@ -80,6 +80,7 @@ class Card {
   private end = 0
   /** Seconds since the words stopped changing; lets the table pass to the next speaker. */
   still = 0
+  private reading = 0
 
   constructor(m: { name: string; owner: string; colour: string; person: string }) {
     this.el.className = 'talk-card'
@@ -120,7 +121,7 @@ class Card {
 
   /** Every word of the current page is on the card and the speaker has finished. */
   get finished() {
-    return this.done && this.shown >= this.end
+    return this.done && this.shown >= this.end && !this.full.slice(this.end).trim()
   }
 
   /** At most two sentences at a time; "go on" turns the page. */
@@ -133,6 +134,7 @@ class Card {
   }
 
   next() {
+    this.reading = 0
     if (this.end >= this.full.length) return
     this.from = this.end
     while (/\s/.test(this.full[this.from] ?? '')) this.from++
@@ -149,6 +151,11 @@ class Card {
     this.shown = reducedMotion.matches ? this.end : Math.min(this.end, this.shown + dt * TYPE_RATE)
     if (Math.floor(this.shown) !== Math.floor(before) || this.words.textContent === '') this.words.textContent = this.full.slice(this.from, Math.floor(this.shown))
     this.more.hidden = !this.hasMore
+    // A finished page turns by itself once there has been time to read it.
+    if (this.hasMore) {
+      this.reading += dt
+      if (this.reading > 1.4 + (this.end - this.from) / 16) this.next()
+    } else this.reading = 0
     if (this.finished) this.still += dt
   }
 }
@@ -212,7 +219,9 @@ export default {
     line.maxLength = 600
     line.autocomplete = 'off'
     line.setAttribute('aria-label', 'Say something')
-    slip.append(chips, line)
+    const mine = document.createElement('p')
+    mine.className = 'mine'
+    slip.append(mine, chips, line)
     const voice = document.createElement('div')
     voice.className = 'talk-voice'
     voice.setAttribute('role', 'status')
@@ -283,6 +292,7 @@ export default {
     }
     const closeSlip = () => {
       slip.classList.remove('shown')
+      mine.classList.remove('shown')
       line.blur()
     }
 
@@ -339,6 +349,7 @@ export default {
       m.v.chosen = true
       m.v.beat()
       for (const o of showing.keys()) if (o !== m) hide(o)
+      mine.classList.remove('shown')
       view.focus(twoShot(m), 7)
       const news = m.news
       if (news) clearNews(m)
@@ -452,7 +463,8 @@ export default {
       if (!text || pending) return
       pending = true
       line.value = ''
-      line.placeholder = text
+      mine.textContent = text
+      mine.classList.add('shown')
       slip.classList.add('waiting')
       try {
         if (mode === 'talk' && partner) {
@@ -624,7 +636,10 @@ export default {
         if (m.glyph.visible) {
           at.set(0, m.v.fig.height + 0.16, 0)
           m.v.fig.root.localToWorld(at)
-          m.glyph.position.copy(at).setY(at.y + Math.sin(t * 2.4) * 0.015)
+          // About the same size on screen from the room view as up close, floating just clear of the head.
+          const size = THREE.MathUtils.clamp(eye.distanceTo(at) * 0.045, 0.13, 0.7)
+          m.glyph.scale.setScalar(size)
+          m.glyph.position.copy(at).setY(at.y + size * 0.4 + Math.sin(t * 2.4) * 0.015)
           const mat = m.glyph.material
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
@@ -643,11 +658,13 @@ export default {
             const top = Math.min(innerHeight - h - 150, Math.max(24, s.y - 10))
             card.style.transform = `translate(${left}px, ${top}px)`
             card.classList.add('beside')
+            card.style.setProperty('--tail', `${Math.max(18, Math.min(h - 18, s.y + 30 - top))}px`)
           } else {
             const w = card.offsetWidth, h = card.offsetHeight
             const left = Math.min(innerWidth - w - 12, Math.max(12, s.x - w / 2))
-            const top = Math.max(12, s.y - h - 18)
+            const top = Math.max(12, s.y - h - 22)
             card.style.transform = `translate(${left}px, ${top}px)`
+            card.style.setProperty('--tail', `${Math.max(22, Math.min(w - 22, s.x - left))}px`)
             card.classList.remove('beside')
           }
         }
@@ -750,7 +767,10 @@ function css() {
     opacity: 0; pointer-events: none; transition: opacity 180ms ease, scale 220ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.94; transform-origin: 0 50%; }
   .talk-card::before { content: ''; position: absolute; inset: 7px; border: 2px dashed rgba(150, 100, 60, 0.38); border-radius: 11px; pointer-events: none; }
   .talk-card.shown { opacity: 1; scale: 1; pointer-events: auto; }
-  .talk-card.said { opacity: 0.72; scale: 0.88; }
+  .talk-card.said { scale: 0.82; filter: saturate(0.75) brightness(0.97); }
+  .talk-card::after { content: ''; position: absolute; left: var(--tail, 50%); bottom: -10px; width: 20px; height: 20px; margin-left: -10px;
+    background: #f5e7cb; rotate: 45deg; border-radius: 0 0 5px 0; box-shadow: 4px 4px 6px rgba(60, 30, 10, 0.14); }
+  .talk-card.beside::after { left: -10px; top: var(--tail, 40px); bottom: auto; margin: -10px 0 0; background: #fcf4e3; border-radius: 0 0 0 5px; box-shadow: -3px 3px 5px rgba(60, 30, 10, 0.12); }
   .talk-card .tab { position: absolute; left: 18px; top: -19px; padding: 4px 14px 5px; border-radius: 11px 11px 5px 5px;
     background: var(--c); color: #fff8ec; font: 700 19px/1.15 ${HAND}; letter-spacing: 0.01em;
     box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25), inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
@@ -775,6 +795,10 @@ function css() {
     color: #46301f; font: 22px ${HAND}; box-shadow: 0 10px 28px rgba(60, 30, 10, 0.26); }
   .talk-slip .line::placeholder { color: rgba(90, 64, 48, 0.5); font-style: italic; }
   .talk-slip.waiting .line { opacity: 0.75; }
+  .talk-slip .mine { margin: 0; max-width: 100%; padding: 6px 16px 7px; border-radius: 10px; rotate: -0.6deg; display: none;
+    background: #fdf8ec; color: #2f4a6b; font: italic 20px/1.3 ${HAND}; box-shadow: 0 4px 12px rgba(60, 30, 10, 0.18); }
+  .talk-slip .mine::before { content: 'You: '; font-style: normal; font-weight: 700; color: #6b4b35; }
+  .talk-slip .mine.shown { display: block; }
   .talk-tag { position: fixed; left: 0; top: 0; padding: 3px 13px 4px; border-radius: 999px; pointer-events: none; opacity: 0;
     background: rgba(251, 243, 226, 0.88); color: #6b4b35; font: 700 17px ${HAND}; box-shadow: 0 3px 10px rgba(60, 30, 10, 0.2);
     transition: opacity 200ms ease, background 200ms ease, color 200ms ease; white-space: nowrap; }

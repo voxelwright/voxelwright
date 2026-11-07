@@ -285,6 +285,8 @@ export class Villager {
     }
     // A chosen villager turns to the person; seated ones only turn their head.
     if (this.chosen && this.state !== 'sit' && this.state !== 'hop') goalYaw = toCamera
+    // Speaking from a chair, it turns part way round to the person.
+    else if (this.speaking && this.state === 'sit') goalYaw += THREE.MathUtils.clamp(wrap(toCamera - goalYaw), -0.7, 0.7) * 0.8
     if (this.idle && !this.chosen) goalYaw = this.yaw
     if (this.state !== 'hop') this.yaw += wrap(goalYaw - this.yaw) * (1 - Math.exp(-dt * (this.state === 'walk' ? 6 : 5)))
     this.yawRate = THREE.MathUtils.lerp(this.yawRate, wrap(this.yaw - yaw0) / Math.max(dt, 1e-3), 1 - Math.exp(-dt * 8))

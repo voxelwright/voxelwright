@@ -327,3 +327,75 @@ distinctness and fit with the room. Means over seven categories:
 Every round asked for better grounding (contact shadows, warm rim light) and
 complained when furniture hid villagers from the seated view. Screenshots are
 in `screenshots/talk/`.
+
+## Talking to villagers (#42 prototype)
+
+`?talk=npc` turns on three felt villagers (direction `b`) and the iso room
+view. `?cam=` and `?villager=` still win: `?talk=npc&cam=seat` is today's
+seated view, `?talk=npc&villager=a` uses the peg dolls. Without `?talk=` the
+home is exactly as before, and `?villager=` alone still shows the art
+directions.
+
+Each villager belongs to one synthetic person, and its scarf and name tab
+carry that person's colour: Dumpling (cook, Alex), Tuft (tidier, Sam), Moss
+(gardener, Mia). Start the host with all three:
+
+```sh
+cd host && VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia npm run villager
+```
+
+What works:
+
+- Life: they do chores on their own paths (Dumpling between the sink and the
+  fridge photos, Tuft between the toy shelf and the counter, crossing the room
+  in front of the table, Moss tending the big plant). Walkers yield to each
+  other and step around anyone busy at a chore. Hovering one makes it pause,
+  so it is easy to click.
+- Talk in one step: hover glows it and shows its name; click, or Tab and
+  Enter. It stops, hops, turns to you, and the camera eases (rate 7, about
+  0.4 s) into a close two-shot that turns until nothing stands in the way. A
+  stitched paper card with the name tab sits beside it. Replies type out at
+  42 letters a second, two sentences at a time, with "go on" for more. You
+  type a line (Enter sends) or use one of three chips. While the model works
+  the villager looks up and taps its chin for at least half a second; there is
+  no spinner. Escape or a click elsewhere sends it back to its chores.
+- The table: "Come sit with me" walks the villager (hurrying) to the nearest
+  free chair, far side first; the talk prototype adds a fourth chair on the
+  near side. With anyone seated the camera frames the table from above and
+  the line goes to the table. Every seated villager answers in turn: their
+  requests start together, they speak one at a time with a lit name tag and a
+  lean-in. Starting a line with a name ("Tuft, ...") asks only that one;
+  clicking a seated villager fills in its name. "Thanks, everyone" or Escape
+  sends them all back to chores.
+- Villagers do not share memory with each other. At the table each one gets
+  your line and, marked "(Context only, not part of the message: ...)", what
+  the others said in the previous round. The host still talks to each villager
+  as its own person, and its system prompt still speaks of the notebook.
+- When the host is down the villager says "Sorry, I'm out for a moment. I've
+  kept what you said."; the line stays on the slip and in
+  `village.talk.kept` in local storage.
+- One in-world signal: a villager with something for you shows a stitched
+  felt "!" over its head (synthetic trigger: Moss after its first watering).
+  It fades after about a second of hovering or when you talk to it, and
+  never comes back or escalates.
+- Felt polish: a warm fresnel rim on every felt part (stronger on the cooler
+  Tuft and Moss), a contact shadow with a dark core, and half-strength hover
+  glow on felt so it does not bleach.
+
+Not done: dragging a villager onto a chair (only the chip seats them),
+villagers talking among themselves, voice, and keeping talk history on screen.
+
+`node scripts/check-talk-npc.mjs` starts its own stub host and dev server on
+ports 5296 and 5295 with a temporary `VILLAGE_ROOT` and proves, headless:
+nothing changes without the flag; the three walk their chores; hover names;
+a click talks in one step and focuses the line; the thinking beat shows and
+the reply streams onto the card; at most two sentences per card page; Escape
+returns to chores; Tab and Enter talk; two are invited and seated; a table
+line is answered by both in turn with one speaker and one lit tag at a time;
+a name asks only that villager and the other's words arrive only as marked
+context; the host down is said in character and the line kept; Escape at the
+table releases everyone; the glyph shows, fades after a second of looking and
+never returns; unloading `talk` three times leaves the same objects,
+geometries, textures, frame hooks, DOM and entries as a `?cam=iso` page.
+20 of 20 passed (stub host, November 6, 2026). `--agent=claude` runs one real
+talk and one two-villager table exchange instead, and `--video=dir` records it.
