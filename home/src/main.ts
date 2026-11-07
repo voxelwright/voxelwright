@@ -32,6 +32,7 @@ import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
 import themePlugin from './theme/plugin'
 import { THEMED } from './theme'
+import { attachAsk } from './theme/ask'
 
 const params = new URLSearchParams(location.search)
 const listed = {
@@ -147,3 +148,4 @@ interface Readiness {
 // Dev builds also expose the kernel so scripts/check-kernel.mjs can load test plugins.
 if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload } })
 Object.assign(window, { village })
+attachAsk()

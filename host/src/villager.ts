@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
+import { themeRequest, type Themer } from './villager-theme.ts'
 
 export interface Config {
   root: string
@@ -31,6 +32,8 @@ export interface Config {
   /** The always-on input's router and prop maker (#42). Without them those endpoints answer 503. */
   router?: Router
   maker?: Maker
+  /** Writes a theme from a sentence (#50). Without it /people/:id/theme answers 503. */
+  themer?: Themer
 }
 
 /** A stored prop. The module is text the home runs in its sandbox; the host never imports or evaluates it. */
@@ -209,6 +212,7 @@ export default {
     /** The always-on input's endpoints. Everything a model wrote is checked or stored as text; nothing is run. */
     async function input(id: string, what: string, item: string | undefined, req: IncomingMessage, res: ServerResponse) {
       const dir = personDir(id)
+      if (what === 'theme' && req.method === 'POST') return themeRequest(config.themer, id, dir, req, res, send)
       if (what === 'route' && req.method === 'POST') {
         if (!config.router) return send(res, 503, { error: 'no router' })
         let b: { text?: unknown; primary?: unknown; villagers?: unknown }
@@ -330,7 +334,7 @@ export default {
     async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
-      const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
+      const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library|theme)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch
         if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })

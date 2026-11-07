@@ -38,14 +38,7 @@ export function setTheme(next: Theme) {
   root.emit('village/theme', previous, next)
 }
 
-/**
- * Untrusted data to a Theme, or the reason it was refused. Everything that did not come
- * from a preset module (local storage, a model, an edit) goes through here: known keys
- * only, numbers clamped, colours #rrggbb, stage kinds from the list in tokens.ts.
- * Placeholder until #50's theme-from-a-sentence unit: accepts nothing.
- */
-export function check(_data: unknown): Theme | string {
-  return 'theme checking is not built yet'
-}
+/** Untrusted data to a Theme, or the reason it was refused (./check.ts). */
+export { check, checkTheme } from './check'
 
 export { HOME }
