@@ -1243,6 +1243,13 @@ one 6 s run each, same session (neon seated is the second of two repeats after a
 16-bit is cheaper than the default because the scene renders at about 225 rows. SSR at half
 resolution cost 4 to 7 ms and once broke the 13 ms step-down; at a third it costs about 1 ms.
 
+Look (ui-craft, overall out of 10): 16-bit, a fresh Opus scorer 6 then 6.5 (two rounds),
+GPT-6.1 Sol 6; neon night, Opus category means 5.4, 5.7 and 5.9 (three rounds), GPT-6.1 Sol 6.
+Both reviewers asked for the same fixes. In 16-bit: dither only at transitions, not across flat
+walls; separate wood, paint and plaster by value; keep tiny objects legible at 225 rows. In neon
+night: much less cyan on the wall tops; a little warm fill so the household survives; the iso
+exterior and window still show a garden. Below the 9/10 bar; this round proves the mechanism.
+
 `node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
 browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
 
