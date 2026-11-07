@@ -1386,3 +1386,51 @@ rectangle around a bay. Corners use today's butt joints, not mitres. The plan
 isn't saved, and there is no undo UI. Screenshots are in `screenshots/build/`:
 `iso-` and `seat-` `baseline`, `generated` and `diff`, plus `drag-out`,
 `drag-in`, `bend-drag` and `bend` (jpg). The clip is `drag.mp4`.
+
+### Plan versions
+
+`src/build/history.ts` (no three.js) keeps the house's plan as versions.
+`PlanHistory.open(store, KITCHEN)` saves the base as the root on first open.
+After that, the stored root wins. `commit(edits, note?)` applies the edits on top of the
+head, validates the result and saves it. `undo`, `redo`, `checkout` (branch from
+any version), `rename` and `refresh` cover the rest, and `diff(a, b)` lists added,
+removed and changed corners, walls, openings, rooms and furniture by id.
+
+- The edits are the record. A version holds `{id, parent, edits, at, by, note?, hash}`,
+  and only the root holds a whole plan (`base`). `hash` is the SHA-256 of the
+  plan the version produced, using JSON with sorted keys. On open, every version is
+  replayed. If plan.ts has changed and a version no longer gives the same plan,
+  open throws a `HistoryError` naming that version, so the page never shows a
+  different house without saying so.
+- A version exists only once the store has accepted it. A failed save throws
+  and leaves the head, the versions and the plan as they were. If the answer is
+  lost after the host saved the version, the next commit is refused as stale and
+  `refresh()` adopts the saved version. Nothing is sent twice.
+- Every head move is a compare-and-set. A commit names its parent, and undo, redo
+  and checkout name the head they expect. A page on a stale head gets `StaleHead`
+  and changes nothing, and nothing is merged. Redo is per page. The head is shared,
+  so a reload keeps an undo.
+- On the host (`host/src/plans.ts`), the house is shared, so one store is
+  `<root>/house/plans/events/<seq>.json`: an append-only log of `version`, `head`
+  and `name` events. Directories are 0700 and files 0600. Each event is written whole to `tmp/` and then
+  hard-linked to its number, which fails if the number is taken. A cut-short
+  write leaves only a scratch file, and two writers can't take the same number.
+  A gap or an unreadable event makes reads fail rather than fold around it. The host sets
+  `by` from the path and `at` from its clock. It checks every field against the four edit
+  ops, id patterns, finite numbers within limits, at most 50 edits and 256 KB per request,
+  and never runs a plan.
+- Endpoints, behind the per-launch token and the person check: `GET
+  /people/:id/plans` returns `{versions, head, names}`. `POST .../plans/versions {version}`
+  answers 409 with `head` if the parent isn't the head. `POST .../plans/head {head, expect}`
+  and `POST .../plans/names {id, name}` cover the rest.
+
+```sh
+cd host && npm ci && npm run check-plans          # 35/35: token, create, append, stale head, bad input, torn write, modes, restart
+cd home && node scripts/check-plan-history.mjs    # 38/38: memory store, failure paths, diff, then hostStore on a real host (stub agent)
+```
+
+The home check loads the TypeScript through Vite in-process, with no port and no browser.
+Its last part runs the real villager host with synthetic people. Two pages share one
+root, a stale page is refused, and a restarted host reopens to the same head,
+plans and names. Not wired into the page yet. `diff` reports the host wall that
+`addRoom` splits as changed, because it keeps its id, while the new pieces are added.

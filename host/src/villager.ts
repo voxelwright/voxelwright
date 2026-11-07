@@ -11,12 +11,16 @@
 //   routes.jsonl        the separate router (#42, ?route=separate): each line routed, the checked route, timings
 //   library/<item>.json props made for them: module text (never run here) and metadata
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
+//
+// The house is shared: <root>/house/plans/ holds its plan versions (plans.ts),
+// reached through /people/<id>/plans so the same token and person check apply.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import type { Context } from 'cordis'
+import { planStore } from './plans.ts'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
 
@@ -121,6 +125,7 @@ export default {
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
+    const plans = planStore(config.root)
 
     const authorized = (req: IncomingMessage) => {
       const given = Buffer.from(req.headers.authorization ?? '')
@@ -330,6 +335,12 @@ export default {
     async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      const plansMatch = /^\/people\/([^/]+)\/plans(?:\/(versions|head|names))?$/.exec(path)
+      if (plansMatch) {
+        const [, id, what] = plansMatch
+        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
+        return plans(id, what, req, res)
+      }
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch

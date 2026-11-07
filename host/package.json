@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "regressions": "node test/regressions.ts",
     "villager": "node src/villager-cli.ts",
-    "check-villager": "node test/villager.ts"
+    "check-villager": "node test/villager.ts",
+    "check-plans": "node test/plans.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.319",
