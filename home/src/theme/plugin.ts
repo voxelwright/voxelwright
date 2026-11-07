@@ -105,7 +105,8 @@ export default {
           else m.emissive.copy(base.emissive)
         }
       }
-      if (base.roughness !== undefined) m.roughness = s.roughness ?? base.roughness
+      // A theme's roughness never frosts glass: a transmissive pane keeps its own.
+      if (base.roughness !== undefined) m.roughness = (m as { transmission?: number }).transmission ? base.roughness : s.roughness ?? base.roughness
       if (base.metalness !== undefined) m.metalness = s.metalness ?? base.metalness
       if (base.map) {
         const map = (s.paint && paint(s.paint)) || base.map

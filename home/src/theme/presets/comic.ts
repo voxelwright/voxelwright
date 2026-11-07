@@ -6,7 +6,7 @@ const STAGES: Stage[] = [
   // Dots in the mid and dark tones, overprinted in a warm plum ink.
   { kind: 'halftone', cell: 150, angle: 45, strength: 0.8, ink: '#6a4a78', paper: '#fff4e0' },
   // Bold outlines from depth jumps, finer creases from normals.
-  { kind: 'ink', width: 1.6, depth: 1, normal: 0.6, color: '#22161c' },
+  { kind: 'ink', width: 2, depth: 1, normal: 0.6, color: '#22161c' },
 ]
 
 // ?drop=halftone,ink measures a stage's cost by leaving it out (debug only).
@@ -34,12 +34,16 @@ export const COMIC: Theme = {
   surfaces: {
     // Plaster a touch warmer and flatter, so the walls print as one clean colour.
     wall: { color: '#fbecd2', tint: 0.5, gain: 1.1, roughness: 1 },
-    floor: {},
+    // Print has no gloss: every surface is matte, so a lit face is one colour, not a sheen.
+    // Metals stay metal (the fridge keeps its dark steel), only without the shine.
+    floor: { roughness: 1 },
     view: { gain: 0.8 },
     // The sunbeam stays, a little lighter, so it prints as a shape rather than a haze.
     beam: { gain: 0.4 },
     glow: {},
-    other: {},
+    other: { roughness: 1 },
+    trim: { roughness: 1 },
+    backdrop: { roughness: 1 },
   },
   fog: { color: '#e8c8a0', tint: 0.3 },
   post: {
