@@ -9,10 +9,12 @@ import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
 import { house } from '../build/house'
 import { checkIntent } from '../build/intent'
-import { OPENING_HEAD, draftEdits, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
+import { OPENING_HEAD, draftEdits, draftGeometry, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
+import { makeLot } from '../build/lot'
+import { LOOK } from '../build/look'
 import { MODE } from './camera'
 
 declare module 'cordis' {
@@ -91,10 +93,13 @@ export default {
 
     // Until the yard follows the plan, its fence, flowers, stones and shrubs step aside from every added room and its walls, and from the sketch paper.
     const yard = makeYard(scene)
+    // ?look=lot: the lawn and fence grow to hold every room and the one being staked out.
+    const lot = LOOK === 'lot' ? makeLot(scene, group) : null
     let paper: P[] | null = null
     const tidyYard = () => {
       const p = builtPlan
       const areas = p ? p.rooms.filter((r) => r.id !== room).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
+      lot?.grow(paper ? [...areas, paper] : areas)
       yard.hide(paper ? [...areas, paper] : areas)
     }
     /** A room just built rises from the paper: its new walls grow up from the floor (instant with reduced motion). */
@@ -514,8 +519,10 @@ export default {
         }
         const what = /^New room( \d+)?$/.test(draft.label) ? 'Added a room' : `Added the ${draft.label.toLowerCase()}`
         committing = true
+        const geo = lot && draftGeometry(h.plan, draft)
         h.commit(draftEdits(h.plan, draft), what).then(() => {
           rising = { room: draft.roomId, at: performance.now() }
+          if (lot && geo) lot.furnish(draft.roomId, (along, across) => geo.at(along, across), draft.from, draft.to, draft.depth, geo.dir)
           committing = false
           outline.close()
           selectWall(null)
@@ -614,6 +621,10 @@ export default {
       if (!roomGroup) return trySwap()
       if (plan !== builtPlan) rebuild(plan, false)
       raise()
+      if (lot) {
+        lot.frame(dt)
+        lot.framePieces(builtPlan?.rooms.map((r) => r.id) ?? [])
+      }
       if (built?.shell) {
         const c = curveOf(plan, wallOf(plan, WALL))
         const [x, z] = pointAt(c, c.length / 2)
@@ -718,6 +729,7 @@ export default {
         ;(mark.material as THREE.Material).dispose()
         for (const m of glowOf.values()) m.dispose()
         yard.restore()
+        lot?.dispose()
         restore()
         for (const m of [kit.seatWall, kit.shellWall, kit.handleWall, kit.trim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.shadow]) {
           m.map?.dispose()
