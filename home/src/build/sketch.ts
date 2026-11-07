@@ -8,7 +8,7 @@
 import * as THREE from 'three/webgpu'
 import { normalLocal, positionLocal } from 'three/tsl'
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js'
-import { canvas, makeNoise, rng, toTexture } from '../paint'
+import { canvas, rng, toTexture } from '../paint'
 
 export const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 export const CHALK = '#fff4dc'

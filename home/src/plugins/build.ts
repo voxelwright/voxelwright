@@ -661,6 +661,8 @@ export default {
       }
       if (!roomGroup) return trySwap()
       if (plan !== builtPlan) rebuild(plan, false)
+      // The sun may come after the first rebuild on a page that opens with rooms already built.
+      if (!sunWas && builtPlan && builtPlan.rooms.length > 1) fitSun(builtPlan)
       raise()
       settle()
       lot.frame(dt)
