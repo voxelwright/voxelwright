@@ -413,14 +413,14 @@ try {
     await page2.close()
 
     // Clean unload: the same as a page that never had the flag, three times over.
-    // ?talk=npc also turns on the babble voices (babble.ts), so both plugins go.
+    // ?talk=npc also turns on the babble voices and the music (babble.ts, music.ts), so all three go.
     const counts = []
     for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => { window.village.unload('talk'); window.village.unload('babble') })
+      await page.evaluate(() => { window.village.unload('talk'); window.village.unload('babble'); window.village.unload('music') })
       await page.waitForTimeout(300)
       counts.push(await page.evaluate(() => ({ ...window.village.snapshot(), talk: 'talk' in window.village, talkDom: document.querySelectorAll('.talk-card, .talk-slip, .talk-tag, .talk-voice').length })))
       if (i < 2) {
-        await page.evaluate(() => { window.village.load('talk'); window.village.load('babble') })
+        await page.evaluate(() => { window.village.load('talk'); window.village.load('babble'); window.village.load('music') })
         await page.waitForTimeout(800)
       }
     }
