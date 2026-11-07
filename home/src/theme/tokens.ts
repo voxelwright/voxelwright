@@ -131,6 +131,8 @@ export interface Theme {
    * so the dollhouse view has a sky and a horizon. `paint` names a painter in ../paint.ts. Unset: none.
    */
   sky?: { paint: string }
+  /** A world the theme stands around the house in place of the yard (./world, regroup S1 prototype, `&world=1`). Unset: the yard. */
+  world?: string
   /** Character animation: poses per second for villagers (12 is "on twos"); unset keeps each direction's own. */
   motion: { characterFps?: number }
   /** Villagers follow the theme unless they keep their costume (per villager, later). */

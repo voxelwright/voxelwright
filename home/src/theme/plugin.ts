@@ -3,6 +3,7 @@ import type { Context } from 'cordis'
 import { replace } from '../kernel'
 import { costumeVersion, theme, tick } from './index'
 import { PAINTERS } from './paint'
+import { worlds } from './world'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
 import { shade } from './shade/apply'
 
@@ -140,6 +141,7 @@ export default {
       scene.add(mesh)
       sky = { painter, mesh }
     }
+    const world = worlds(scene)
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
     shade(ctx)
@@ -251,6 +253,7 @@ export default {
       }
       renderer.toneMappingExposure = t.light.exposure
       placeSky(t)
+      world.place(t)
       if (force) sweep()
     }
 
@@ -279,6 +282,7 @@ export default {
       for (const m of [...worn.keys()]) unwear(m)
       sweep()
       dropSky()
+      world.drop()
     }, 'theme')
   },
 }

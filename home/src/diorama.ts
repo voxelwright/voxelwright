@@ -179,6 +179,7 @@ export type TreeSpot = [number, number, number, number]
 export function trees(spots: TreeSpot[], y = 0): THREE.Group {
   const group = new THREE.Group()
   group.name = 'garden trees'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const bark: THREE.BufferGeometry[] = []
   const clumps: THREE.BufferGeometry[][] = [[], []]
   for (const [tx, tz, scale, turn] of spots) {
@@ -222,6 +223,7 @@ export function yard(spec: Yard): THREE.Group {
   const { x0, x1, z0, z1 } = spec
   const group = new THREE.Group()
   group.name = 'diorama yard'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const r = rng(spec.seed)
   const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2
 
