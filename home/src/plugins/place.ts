@@ -74,6 +74,8 @@ export default {
       } else delete d.holder.userData.inward
     }
     const show = (f: Furniture, d: Drawn) => {
+      // Placing reads this to know which placed thing a top belongs to (a surface anchor's `on`).
+      d.holder.userData.furniture = f.id
       withCord(d.holder, f.at.mount)
       things.add(d.holder)
       drawn.set(f.id, d)
@@ -157,6 +159,7 @@ export default {
         shadows(holder)
         // Held (not posed from the plan) and unkeyed until the session ends; settleAdopted takes it from there.
         things.add(holder)
+        holder.userData.furniture = id
         drawn.set(id, { holder, size, label, key: '', held: true })
       },
       forget(id) {

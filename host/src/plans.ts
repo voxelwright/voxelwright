@@ -1,27 +1,30 @@
 // The house's plan versions (#48). The house is shared by the family, so there is
-// one store, <root>/house/plans/, reached through /people/<id>/plans so the
-// per-launch token and person check apply; each version records who made it.
+// one store, <root>/house/plans/, served at /house/plans behind the per-launch
+// token. Nobody is named on a version yet: the host does not know who is at the
+// page (every page shares one token), so it records no one rather than the wrong one.
 //
 // The store is an append-only event log, one file per event:
 //   events/<seq>.json   {seq, kind: 'version', version}  a version; the head moves to it
-//                       {seq, kind: 'head', head, by, at} undo, redo or checkout
-//                       {seq, kind: 'name', id, name, by, at}
-// An event is written whole to tmp/ and then hard-linked to its sequence number,
-// which fails if that number exists. A write cut short leaves only a file in tmp/,
-// never an event; two writers can never both take a number. Every head move is a
-// compare-and-set against the head folded from the log: a version names its parent,
-// a head move names the head it expects. A mismatch answers 409 with the current
-// head; nothing is merged.
+//                       {seq, kind: 'head', head, at}     undo, redo or checkout
+//                       {seq, kind: 'name', id, name, at}
+// A version is {id, parent, edits, at, note?, plan}: `plan` is the house it is (the
+// fact), `edits` what was asked (a description). An event is written whole to tmp/
+// and then hard-linked to its sequence number, which fails if that number exists. A
+// write cut short leaves only a file in tmp/, never an event; two writers can never
+// both take a number. Every head move is a compare-and-set against the head folded
+// from the log: a version names its parent, a head move names the head it expects.
+// A mismatch answers 409 with the current head; nothing is merged. Sending a version
+// the store holds, same in every field, answers it again (a retry after a lost answer).
 //
-// The host checks the shape of everything and never runs or interprets a plan:
-// the page replays edits with plan.ts and checks each version's hash.
+// The host checks the shape of everything, and that every library item a version
+// places is kept, but never runs or interprets a plan: whether it is a valid house
+// is plan.ts's call, on the page.
 import { randomBytes } from 'node:crypto'
 import { link, mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 
 const VERSION_ID = /^[a-f0-9]{16}$/
-const HASH = /^[a-f0-9]{64}$/
 /** Plan ids: `kitchen.back-left`, `pantry.c1`. */
 const PLAN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const SEQ = /^(\d{8})\.json$/
@@ -34,11 +37,11 @@ const MAX_LABEL = 40
 /** Metres; a house plan has no business beyond this. */
 const MAX_METRES = 1000
 
-export interface Version { id: string; parent: string | null; edits: unknown[]; at: string; by: string; note?: string; base?: unknown; hash: string }
+export interface Version { id: string; parent: string | null; edits: unknown[]; at: string; note?: string; plan: unknown }
 type Event =
   | { seq: number; kind: 'version'; version: Version }
-  | { seq: number; kind: 'head'; head: string; by: string; at: string }
-  | { seq: number; kind: 'name'; id: string; name: string; by: string; at: string }
+  | { seq: number; kind: 'head'; head: string; at: string }
+  | { seq: number; kind: 'name'; id: string; name: string; at: string }
 interface State { versions: Version[]; head: string | null; names: Record<string, string>; seq: number }
 
 class Refused extends Error {
@@ -50,6 +53,18 @@ class Refused extends Error {
 }
 const refuse = (message: string, status = 400): never => {
   throw new Refused(status, message)
+}
+/** The head moved under the request: the one 409 that carries the head, so the page reloads. */
+class Stale extends Error {}
+
+/** JSON with object keys sorted, so equal values always give equal text (history.ts canonical). */
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 // ---------------------------------------------------------------- shapes
@@ -122,6 +137,8 @@ function edit(v: unknown, at: string): Obj {
 
 /** A library item is 12 hex characters in one person's library; a kind is one the home builds itself. */
 const LIBRARY_ITEM = /^[a-f0-9]{12}$/
+/** villager.ts's person ids; a library ref's person is a path segment. */
+const PERSON = /^[a-z][a-z0-9-]{0,31}$/
 const KIND = /^[a-z][a-z0-9-]{0,31}$/
 const ANGLE = 100
 
@@ -134,7 +151,7 @@ function furniture(v: unknown, at: string): Obj {
     item: item.library !== undefined
       ? {
           library: typeof item.library === 'string' && LIBRARY_ITEM.test(item.library) ? item.library : refuse(`${at}.item.library is 12 hex characters`),
-          person: id(item.person, `${at}.item.person`),
+          person: typeof item.person === 'string' && PERSON.test(item.person) ? item.person : refuse(`${at}.item.person is a person id`),
         }
       : { kind: typeof item.kind === 'string' && KIND.test(item.kind) ? item.kind : refuse(`${at}.item.kind is a lowercase word`) },
     at: anchor(f.at, `${at}.at`),
@@ -150,8 +167,12 @@ function anchor(v: unknown, at: string): Obj {
       return { mount: a.mount, x: num(a.x, `${at}.x`), z: num(a.z, `${at}.z`), yaw: num(a.yaw, `${at}.yaw`, ANGLE) }
     }
     case 'surface': {
-      const a = only(v, at, ['mount', 'x', 'y', 'z', 'yaw'])
-      return { mount: a.mount, x: num(a.x, `${at}.x`), y: num(a.y, `${at}.y`, 50), z: num(a.z, `${at}.z`), yaw: num(a.yaw, `${at}.yaw`, ANGLE) }
+      // `on`: the placed thing it stands on, when the top is one.
+      const a = only(v, at, ['mount', 'x', 'y', 'z', 'yaw'], ['on'])
+      return {
+        mount: a.mount, x: num(a.x, `${at}.x`), y: num(a.y, `${at}.y`, 50), z: num(a.z, `${at}.z`), yaw: num(a.yaw, `${at}.yaw`, ANGLE),
+        ...(a.on === undefined ? {} : { on: id(a.on, `${at}.on`) }),
+      }
     }
     case 'wall': {
       const a = only(v, at, ['mount', 'wallId', 'roomId', 'along', 'height', 'spin'])
@@ -165,34 +186,34 @@ function anchor(v: unknown, at: string): Obj {
   }
 }
 
-/** A whole plan (the root's base), rebuilt from its known fields. Whether it is a valid house is plan.ts's call, on the page. */
+/** A whole plan (every version's), rebuilt from its known fields. Whether it is a valid house is plan.ts's call, on the page. */
 function plan(v: unknown): Obj {
-  const p = only(v, 'base', ['version', 'corners', 'walls', 'rooms', 'furniture'])
-  if (!Number.isInteger(p.version) || (p.version as number) < 1 || (p.version as number) > 1000) refuse('base.version is a positive integer')
+  const p = only(v, 'plan', ['version', 'corners', 'walls', 'rooms', 'furniture'])
+  if (!Number.isInteger(p.version) || (p.version as number) < 1 || (p.version as number) > 1000) refuse('plan.version is a positive integer')
   return {
     version: p.version,
-    corners: list(p.corners, 'base.corners').map((c, i) => {
-      const o = only(c, `base.corners[${i}]`, ['id', 'x', 'z'])
+    corners: list(p.corners, 'plan.corners').map((c, i) => {
+      const o = only(c, `plan.corners[${i}]`, ['id', 'x', 'z'])
       return { id: id(o.id, 'corner id'), x: num(o.x, 'corner x'), z: num(o.z, 'corner z') }
     }),
-    walls: list(p.walls, 'base.walls').map((w, i) => {
-      const o = only(w, `base.walls[${i}]`, ['id', 'a', 'b', 'thickness', 'height', 'sagitta', 'openings'])
+    walls: list(p.walls, 'plan.walls').map((w, i) => {
+      const o = only(w, `plan.walls[${i}]`, ['id', 'a', 'b', 'thickness', 'height', 'sagitta', 'openings'])
       return {
         id: id(o.id, 'wall id'), a: id(o.a, 'wall a'), b: id(o.b, 'wall b'),
         thickness: num(o.thickness, 'thickness', 5), height: num(o.height, 'height', 50), sagitta: num(o.sagitta, 'sagitta'),
         openings: list(o.openings, 'openings', 50).map((x, j) => {
-          const k = only(x, `base.walls[${i}].openings[${j}]`, ['id', 'kind', 'from', 'to', 'sill', 'head'], ['leaves'])
+          const k = only(x, `plan.walls[${i}].openings[${j}]`, ['id', 'kind', 'from', 'to', 'sill', 'head'], ['leaves'])
           if (k.kind !== 'door' && k.kind !== 'window') refuse('an opening is a door or a window')
           if (k.leaves !== undefined && k.leaves !== 1 && k.leaves !== 2) refuse('leaves is 1 or 2')
           return { id: id(k.id, 'opening id'), kind: k.kind, from: num(k.from, 'from'), to: num(k.to, 'to'), sill: num(k.sill, 'sill', 50), head: num(k.head, 'head', 50), ...(k.leaves === undefined ? {} : { leaves: k.leaves }) }
         }),
       }
     }),
-    rooms: list(p.rooms, 'base.rooms').map((r, i) => {
-      const o = only(r, `base.rooms[${i}]`, ['id', 'label', 'loop'])
+    rooms: list(p.rooms, 'plan.rooms').map((r, i) => {
+      const o = only(r, `plan.rooms[${i}]`, ['id', 'label', 'loop'])
       return { id: id(o.id, 'room id'), label: text(o.label, 'room label', MAX_LABEL), loop: list(o.loop, 'loop', 200).map((c) => id(c, 'loop corner')) }
     }),
-    furniture: list(p.furniture, 'base.furniture').map((f, i) => furniture(f, `base.furniture[${i}]`)),
+    furniture: list(p.furniture, 'plan.furniture').map((f, i) => furniture(f, `plan.furniture[${i}]`)),
   }
 }
 
@@ -252,7 +273,7 @@ export function planStore(root: string) {
     try {
       await link(scratch, join(events, `${String(seq).padStart(8, '0')}.json`))
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') refuse('another writer saved first', 409)
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Stale('another writer saved first')
       throw error
     } finally {
       await unlink(scratch).catch(() => {})
@@ -264,8 +285,27 @@ export function planStore(root: string) {
     res.end(JSON.stringify(value))
   }
 
-  /** /people/<person>/plans[/<what>]; the caller has checked the token and the person. */
-  return async function plans(person: string, what: string | undefined, req: IncomingMessage, res: ServerResponse) {
+  /** Refuses 409 unless every library item the plan or its placeItem edits name is in that person's library and kept. */
+  async function checkKept(edits: Obj[], house: Obj) {
+    const refs = new Map<string, { library: string; person: string }>()
+    const add = (f: unknown) => {
+      const item = (f as Obj).item as Obj
+      if (typeof item.library === 'string') refs.set(`${item.person}/${item.library}`, item as { library: string; person: string })
+    }
+    for (const e of edits) if (e.op === 'placeItem') add(e.furniture)
+    for (const f of house.furniture as unknown[]) add(f)
+    for (const { library, person } of refs.values()) {
+      const raw = await readFile(join(root, 'people', person, 'library', `${library}.json`), 'utf8').catch(() => null)
+      let kept = false
+      try {
+        kept = raw !== null && (JSON.parse(raw) as { kept?: unknown }).kept === true
+      } catch {}
+      if (!kept) refuse(`library item ${library} is not one ${person} has kept`, 409)
+    }
+  }
+
+  /** /house/plans[/<what>]; the caller has checked the token. */
+  return async function plans(what: string | undefined, req: IncomingMessage, res: ServerResponse) {
     try {
       if (what === undefined && req.method === 'GET') {
         const { versions, head, names } = await load()
@@ -277,42 +317,47 @@ export function planStore(root: string) {
         const state = await load()
         const at = new Date().toISOString()
         if (what === 'versions') {
-          const v = only(only(b, 'body', ['version']).version, 'version', ['id', 'parent', 'edits', 'hash'], ['note', 'base'])
+          const v = only(only(b, 'body', ['version']).version, 'version', ['id', 'parent', 'edits', 'plan'], ['note'])
           if (typeof v.id !== 'string' || !VERSION_ID.test(v.id)) refuse('version.id is 16 lowercase hex characters')
           if (v.parent !== null && (typeof v.parent !== 'string' || !VERSION_ID.test(v.parent))) refuse('version.parent is a version id or null')
-          if (typeof v.hash !== 'string' || !HASH.test(v.hash)) refuse('version.hash is a SHA-256 in hex')
           const edits = list(v.edits, 'version.edits', MAX_EDITS).map((e, i) => edit(e, `edits[${i}]`))
-          // The root carries a base plan and no edits; every other version the reverse.
-          if (v.parent === null ? v.base === undefined || edits.length : v.base !== undefined || !edits.length) refuse('the root carries base and no edits; every other version carries edits and no base')
-          if (state.versions.some((k) => k.id === v.id)) refuse(`version ${v.id} exists`, 409)
-          if (v.parent !== state.head) return send(res, 409, { error: 'the house plan moved on', head: state.head })
-          const version: Version = {
-            id: v.id as string, parent: v.parent as string | null, edits, at, by: person,
-            ...(v.note === undefined ? {} : { note: text(v.note, 'version.note', MAX_NOTE) }),
-            ...(v.base === undefined ? {} : { base: plan(v.base) }),
-            hash: v.hash as string,
+          // The root is a plan with no edits; every other version says what changed.
+          if (v.parent === null ? edits.length : !edits.length) refuse('the root carries no edits; every other version carries at least one')
+          const house = plan(v.plan)
+          const note = v.note === undefined ? undefined : text(v.note, 'version.note', MAX_NOTE)
+          const sent = { id: v.id as string, parent: v.parent as string | null, edits, ...(note === undefined ? {} : { note }), plan: house }
+          const held = state.versions.find((k) => k.id === v.id)
+          if (held) {
+            // A retry of a version already saved (its answer was lost) gets the same answer; anything else with its id is refused.
+            const { at: _, ...rest } = held
+            if (canonical(rest) === canonical(sent)) return send(res, 200, { version: held })
+            refuse(`version ${v.id} exists`, 409)
           }
+          if (v.parent !== state.head) throw new Stale('the house plan moved on')
+          await checkKept(edits, house)
+          const version: Version = { ...sent, at }
           await append(state, { kind: 'version', version })
           return send(res, 200, { version })
         }
         if (what === 'head') {
           const h = only(b, 'body', ['head', 'expect'])
           if (typeof h.head !== 'string' || !state.versions.some((k) => k.id === h.head)) refuse('head is a stored version', 404)
-          if (h.expect !== state.head) return send(res, 409, { error: 'the house plan moved on', head: state.head })
-          await append(state, { kind: 'head', head: h.head, by: person, at })
+          if (h.expect !== state.head) throw new Stale('the house plan moved on')
+          await append(state, { kind: 'head', head: h.head, at })
           return send(res, 200, { head: h.head })
         }
         if (what === 'names') {
           const n = only(b, 'body', ['id', 'name'])
           if (typeof n.id !== 'string' || !state.versions.some((k) => k.id === n.id)) refuse('id is a stored version', 404)
           const name = text(n.name, 'name', MAX_NAME)
-          await append(state, { kind: 'name', id: n.id, name, by: person, at })
+          await append(state, { kind: 'name', id: n.id, name, at })
           return send(res, 200, { id: n.id, name })
         }
         return send(res, 404, { error: 'not found' })
       })
     } catch (error) {
-      if (error instanceof Refused) return send(res, error.status, error.status === 409 ? { error: error.message, head: (await load().catch(() => null))?.head ?? null } : { error: error.message })
+      if (error instanceof Stale) return send(res, 409, { error: error.message, head: (await load().catch(() => null))?.head ?? null })
+      if (error instanceof Refused) return send(res, error.status, { error: error.message })
       throw error
     }
   }

@@ -1,6 +1,6 @@
 // Headless checks of the house plan store (#48) through the villager API: no model is called.
 // npm run check-plans
-import { link, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from 'cordis'
@@ -43,40 +43,52 @@ try {
       headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
       body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
     })
-  const post = async (path: string, body: unknown, person = 'alex') => {
-    const res = await api(`/people/${person}/plans${path}`, body)
+  const post = async (path: string, body: unknown) => {
+    const res = await api(`/house/plans${path}`, body)
     return { status: res.status, json: await res.json() }
+  }
+  const library = async (person: string, item: string, kept: boolean) => {
+    await mkdir(join(root, 'people', person, 'library'), { recursive: true })
+    await writeFile(join(root, 'people', person, 'library', `${item}.json`), JSON.stringify({ id: item, name: 'Lamp', module: '', models: [], costUsd: null, ms: 0, at: new Date().toISOString(), kept }))
   }
   const dir = join(root, 'house', 'plans')
 
-  // Token and person.
-  check('reading plans needs the token', (await api('/people/alex/plans', undefined, null)).status === 401)
-  check('a wrong token is refused', (await api('/people/alex/plans/versions', { version: {} }, 'f'.repeat(64))).status === 401)
-  check('an unlisted person is refused', (await api('/people/mia/plans')).status === 404)
-  const empty = await (await api('/people/alex/plans')).json()
+  // Token; the store is the house's, at /house/plans, not under a person (F4).
+  check('reading plans needs the token', (await api('/house/plans', undefined, null)).status === 401)
+  check('a wrong token is refused', (await api('/house/plans/versions', { version: {} }, 'f'.repeat(64))).status === 401)
+  check('F4: plans are not under a person any more', (await api('/people/alex/plans')).status === 404)
+  const empty = await (await api('/house/plans')).json()
   check('an empty house has no versions and no head', empty.versions.length === 0 && empty.head === null, empty)
 
   // Create the root.
-  const created = await post('/versions', { version: { id: ROOT, parent: null, edits: [], base, hash: hex('1', 64) } })
-  check('the root is created with by and at from the host', created.status === 200 && created.json.version.by === 'alex' && !Number.isNaN(Date.parse(created.json.version.at)), created)
-  check('a second root is refused as stale', (await post('/versions', { version: { id: hex('d', 16), parent: null, edits: [], base, hash: hex('1', 64) } })).status === 409)
+  const created = await post('/versions', { version: { id: ROOT, parent: null, edits: [], plan: base } })
+  check('F4: the root is created with at from the host and no one named', created.status === 200 && !('by' in created.json.version) && !Number.isNaN(Date.parse(created.json.version.at)) && JSON.stringify(created.json.version.plan) === JSON.stringify(base), created)
+  const second = await post('/versions', { version: { id: hex('d', 16), parent: null, edits: [], plan: base } })
+  check('a second root is refused as stale, with the head', second.status === 409 && second.json.head === ROOT, second)
 
-  // Append, by another person; `by` is taken from the path, never the body.
+  // Append. Every version carries the plan it is (the host checks its shape, not whether it follows from the edits).
   const move = { op: 'moveWall', wallId: 'r.w2', by: 0.5 }
-  const v2 = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'wider', hash: hex('2', 64) } }, 'sam')
-  check('a version appends on the head', v2.status === 200 && v2.json.version.by === 'sam' && v2.json.version.parent === ROOT, v2)
-  check('a body cannot set by', (await post('/versions', { version: { id: V3, parent: V2, edits: [move], hash: hex('3', 64), by: 'alex' } })).status === 400)
+  const wider = { ...base, corners: base.corners.map((c) => (c.x === 4 ? { ...c, x: 4.5 } : c)) }
+  const v2 = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'wider', plan: wider } })
+  check('a version appends on the head', v2.status === 200 && v2.json.version.parent === ROOT && JSON.stringify(v2.json.version.plan) === JSON.stringify(wider), v2)
+  check('F4: a body cannot set by', (await post('/versions', { version: { id: V3, parent: V2, edits: [move], plan: base, by: 'alex' } })).status === 400)
+
+  // F7: a retry of a saved version gets the same answer; another version with its id is a 409 without a head.
+  const retry = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'wider', plan: wider } })
+  check('F7: a retried version (same id, parent and content) answers 200 with the stored one', retry.status === 200 && JSON.stringify(retry.json.version) === JSON.stringify(v2.json.version), retry)
+  const clash = await post('/versions', { version: { id: V2, parent: ROOT, edits: [move], note: 'other', plan: wider } })
+  check('F7: a different version with a taken id is 409 without a head (not stale)', clash.status === 409 && !('head' in clash.json), clash)
 
   // Stale head: a page that still thinks the root is the head.
-  const stale = await post('/versions', { version: { id: V3, parent: ROOT, edits: [move], hash: hex('3', 64) } })
+  const stale = await post('/versions', { version: { id: V3, parent: ROOT, edits: [move], plan: base } })
   check('a version on a stale head is refused with the current head', stale.status === 409 && stale.json.head === V2, stale)
   const staleHead = await post('/head', { head: ROOT, expect: ROOT })
   check('a head move on a stale head is refused', staleHead.status === 409 && staleHead.json.head === V2, staleHead)
   check('undo moves the head when it expects the right one', (await post('/head', { head: ROOT, expect: V2 })).status === 200)
-  const branch = await post('/versions', { version: { id: V3, parent: ROOT, edits: [{ op: 'bendWall', wallId: 'r.w2', sagitta: 0.5 }], hash: hex('3', 64) } })
+  const branch = await post('/versions', { version: { id: V3, parent: ROOT, edits: [{ op: 'bendWall', wallId: 'r.w2', sagitta: 0.5 }], plan: base } })
   check('a commit after checkout branches from it', branch.status === 200 && branch.json.version.parent === ROOT)
   const plain = { op: 'addRoom', room: { id: 'p', label: 'Pantry' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2 } }
-  const v4 = await post('/versions', { version: { id: V4, parent: V3, edits: [plain], hash: hex('5', 64) } })
+  const v4 = await post('/versions', { version: { id: V4, parent: V3, edits: [plain], plan: base } })
   check('addRoom with a plain opening (no leaves) is stored as sent', v4.status === 200 && JSON.stringify(v4.json.version.edits[0]) === JSON.stringify(plain), v4)
   check('a name is stored', (await post('/names', { id: V2, name: 'Wider room' })).status === 200)
   check('a name for a missing version is refused', (await post('/names', { id: hex('e', 16), name: 'x' })).status === 404)
@@ -84,50 +96,63 @@ try {
   // Bad input: nothing is stored.
   const before = (await readdir(join(dir, 'events'))).length
   const bad: [string, unknown][] = [
-    ['an unknown op', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'deleteHouse' }], hash: hex('4', 64) } }],
-    ['an unknown edit field', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, run: 'rm -rf' }], hash: hex('4', 64) } }],
-    ['a number out of range', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: 1e9 }], hash: hex('4', 64) } }],
-    ['a non-number', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: '1' }], hash: hex('4', 64) } }],
-    ['a path in an id', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, wallId: '../x' }], hash: hex('4', 64) } }],
-    ['a bad version id', { version: { id: '../../etc', parent: V4, edits: [move], hash: hex('4', 64) } }],
-    ['a bad hash', { version: { id: hex('f', 16), parent: V4, edits: [move], hash: 'nope' } }],
-    ['no edits', { version: { id: hex('f', 16), parent: V4, edits: [], hash: hex('4', 64) } }],
-    ['too many edits', { version: { id: hex('f', 16), parent: V4, edits: Array(51).fill(move), hash: hex('4', 64) } }],
-    ['a base on a non-root', { version: { id: hex('f', 16), parent: V4, edits: [move], base, hash: hex('4', 64) } }],
-    ['a control character in a note', { version: { id: hex('f', 16), parent: V4, edits: [move], note: 'a\u0000b', hash: hex('4', 64) } }],
-    ['a door with three leaves', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'addRoom', room: { id: 'p', label: 'P' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2, leaves: 3 } }], hash: hex('4', 64) } }],
-    ['a duplicate id', { version: { id: V2, parent: V4, edits: [move], hash: hex('4', 64) } }],
+    ['an unknown op', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'deleteHouse' }], plan: base } }],
+    ['an unknown edit field', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, run: 'rm -rf' }], plan: base } }],
+    ['a number out of range', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: 1e9 }], plan: base } }],
+    ['a non-number', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, by: '1' }], plan: base } }],
+    ['a path in an id', { version: { id: hex('f', 16), parent: V4, edits: [{ ...move, wallId: '../x' }], plan: base } }],
+    ['a bad version id', { version: { id: '../../etc', parent: V4, edits: [move], plan: base } }],
+    ['a version with no plan', { version: { id: hex('f', 16), parent: V4, edits: [move] } }],
+    ['a plan with an unknown field', { version: { id: hex('f', 16), parent: V4, edits: [move], plan: { ...base, rooms: [{ ...base.rooms[0], owner: 'alex' }] } } }],
+    ['a hash (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, edits: [move], plan: base, hash: hex('4', 64) } }],
+    ['no edits', { version: { id: hex('f', 16), parent: V4, edits: [], plan: base } }],
+    ['too many edits', { version: { id: hex('f', 16), parent: V4, edits: Array(51).fill(move), plan: base } }],
+    ['a base (no longer part of a version)', { version: { id: hex('f', 16), parent: V4, edits: [move], base, plan: base } }],
+    ['a control character in a note', { version: { id: hex('f', 16), parent: V4, edits: [move], note: 'a\u0000b', plan: base } }],
+    ['a door with three leaves', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'addRoom', room: { id: 'p', label: 'P' }, wallId: 'r.w3', from: 1, to: 3, depth: 2, door: { id: 'p.d', from: 1.2, to: 2, leaves: 3 } }], plan: base } }],
+    ['a duplicate id', { version: { id: V2, parent: V4, edits: [move], plan: base } }],
+    ['a library item whose person is a path', { version: { id: hex('f', 16), parent: V4, edits: [{ op: 'placeItem', furniture: { id: 'f.x', item: { library: 'a1b2c3d4e5f6', person: '../alex' }, at: { mount: 'floor', x: 1, z: 1, yaw: 0 } } }], plan: base } }],
   ]
   for (const [what, body] of bad) {
     const r = await post('/versions', body)
-    check(`${what} is refused`, r.status === (what === 'a duplicate id' ? 409 : 400), r)
+    check(`${what} is refused`, r.status === (what === 'a duplicate id' ? 409 : 400) && !('head' in r.json), r)
   }
   check('a name with a newline is refused', (await post('/names', { id: V2, name: 'a\nb' })).status === 400)
-  check('a body over 256 KB is refused', (await api('/people/alex/plans/versions', undefined, host.token, JSON.stringify({ pad: 'x'.repeat(300_000) }))).status === 413)
-  check('malformed JSON is refused', (await api('/people/alex/plans/versions', undefined, host.token, '{')).status === 400)
-  check('GET on versions is not allowed', (await api('/people/alex/plans/versions')).status === 405)
+  check('a body over 256 KB is refused', (await api('/house/plans/versions', undefined, host.token, JSON.stringify({ pad: 'x'.repeat(300_000) }))).status === 413)
+  check('malformed JSON is refused', (await api('/house/plans/versions', undefined, host.token, '{')).status === 400)
+  check('GET on versions is not allowed', (await api('/house/plans/versions')).status === 405)
   check('refused requests store nothing', (await readdir(join(dir, 'events'))).length === before)
 
   // An interrupted write leaves only a scratch file; another writer's event at the next number wins.
   await writeFile(join(dir, 'tmp', 'torn.json'), '{"seq": 99, "kind": "vers', { mode: 0o600 })
   const next = String(before + 1).padStart(8, '0')
-  await writeFile(join(dir, 'tmp', 'other.json'), JSON.stringify({ seq: before + 1, kind: 'name', id: V3, name: 'From another host', by: 'sam', at: new Date().toISOString() }), { mode: 0o600 })
-  const head = (await (await api('/people/alex/plans')).json()).head
+  await writeFile(join(dir, 'tmp', 'other.json'), JSON.stringify({ seq: before + 1, kind: 'name', id: V3, name: 'From another host', at: new Date().toISOString() }), { mode: 0o600 })
+  const head = (await (await api('/house/plans')).json()).head
   await link(join(dir, 'tmp', 'other.json'), join(dir, 'events', `${next}.json`))
   await rm(join(dir, 'tmp', 'other.json'))
-  const after = await (await api('/people/alex/plans')).json()
+  const after = await (await api('/house/plans')).json()
   check('a torn scratch file is never an event', after.versions.length === 4 && after.head === head && after.names[V3] === 'From another host', after)
 
   // Placed things (placeItem, moveItem, removeItem): stored as sent, every field checked.
   const V5 = hex('5', 16), V6 = hex('6', 16), V7 = hex('7', 16)
   const lamp = { id: 'f.lamp', item: { library: 'a1b2c3d4e5f6', person: 'alex' }, at: { mount: 'floor', x: 1, z: 2, yaw: 0.5 } }
   const picture = { id: 'f.picture', item: { kind: 'picture' }, at: { mount: 'wall', wallId: 'r.w3', roomId: 'r', along: 2, height: 1.5, spin: 0 } }
-  const placed = await post('/versions', { version: { id: V5, parent: V4, edits: [{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }], note: 'Placed the lamp', hash: hex('6', 64) } })
+  const placing = { id: V5, parent: V4, edits: [{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }], note: 'Placed the lamp', plan: { ...base, furniture: [lamp, picture] } }
+  // F6: the host refuses a placed library item that is missing or not kept.
+  const eventsNow = (await readdir(join(dir, 'events'))).length
+  const missingItem = await post('/versions', { version: placing })
+  await library('alex', 'a1b2c3d4e5f6', false)
+  const draftItem = await post('/versions', { version: placing })
+  const inPlanOnly = await post('/versions', { version: { ...placing, edits: [{ op: 'removeItem', furnitureId: 'f.other' }] } })
+  check('F6: placing a library item that is missing or not kept is refused 409, and nothing is stored', missingItem.status === 409 && draftItem.status === 409 && /not one alex has kept/.test(draftItem.json.error) && inPlanOnly.status === 409 && !('head' in draftItem.json) && (await readdir(join(dir, 'events'))).length === eventsNow, { missingItem, draftItem, inPlanOnly })
+  await library('alex', 'a1b2c3d4e5f6', true)
+  const placed = await post('/versions', { version: placing })
   check('placeItem is stored as sent (a library item on the floor, a kind on a wall)', placed.status === 200 && JSON.stringify(placed.json.version.edits) === JSON.stringify([{ op: 'placeItem', furniture: lamp }, { op: 'placeItem', furniture: picture }]), placed)
-  const moveTo = { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 0.76, z: 2, yaw: 0 } }
-  const moved = await post('/versions', { version: { id: V6, parent: V5, edits: [moveTo], hash: hex('7', 64) } })
-  check('moveItem is stored as sent', moved.status === 200 && JSON.stringify(moved.json.version.edits[0]) === JSON.stringify(moveTo), moved)
-  const removed = await post('/versions', { version: { id: V7, parent: V6, edits: [{ op: 'removeItem', furnitureId: 'f.picture' }], hash: hex('8', 64) } })
+  check('F6: once kept, it is placed', placed.status === 200, placed)
+  const moveTo = { op: 'moveItem', furnitureId: 'f.lamp', at: { mount: 'surface', x: 1, y: 0.76, z: 2, yaw: 0, on: 'f.table' } }
+  const moved = await post('/versions', { version: { id: V6, parent: V5, edits: [moveTo], plan: { ...base, furniture: [{ ...lamp, at: moveTo.at }, picture] } } })
+  check('F5: moveItem onto placed furniture (surface `on`) is stored as sent', moved.status === 200 && JSON.stringify(moved.json.version.edits[0]) === JSON.stringify(moveTo) && moved.json.version.plan.furniture[0].at.on === 'f.table', moved)
+  const removed = await post('/versions', { version: { id: V7, parent: V6, edits: [{ op: 'removeItem', furnitureId: 'f.picture' }], plan: { ...base, furniture: [{ ...lamp, at: moveTo.at }] } } })
   check('removeItem is stored as sent', removed.status === 200, removed)
   const itemsBefore = (await readdir(join(dir, 'events'))).length
   const badItems: [string, unknown][] = [
@@ -145,7 +170,7 @@ try {
     ['a removeItem with an extra field', { op: 'removeItem', furnitureId: 'f.lamp', all: true }],
   ]
   for (const [what, e] of badItems) {
-    const r = await post('/versions', { version: { id: hex('f', 16), parent: V7, edits: [e], hash: hex('4', 64) } })
+    const r = await post('/versions', { version: { id: hex('f', 16), parent: V7, edits: [e], plan: base } })
     check(`${what} is refused`, r.status === 400, r)
   }
   check('refused item edits store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
@@ -157,15 +182,15 @@ try {
   check('dirs are 0700 and event files 0600', modes.plans === 0o700 && modes.events === 0o700 && modes.files.length === 1 && modes.files[0] === 0o600, Object.fromEntries(Object.entries(modes).map(([k, v]) => [k, Array.isArray(v) ? v.map((m) => m.toString(8)) : v.toString(8)])))
 
   // Reload: a new host process folds the same log to the same state.
-  const snapshot = JSON.stringify(await (await api('/people/alex/plans')).json())
+  const snapshot = JSON.stringify(await (await api('/house/plans')).json())
   await host.fiber.dispose()
   host = await start()
-  const reloaded = await (await api('/people/alex/plans')).json()
+  const reloaded = await (await api('/house/plans')).json()
   check('a restarted host reads back the same versions, head and names', JSON.stringify(reloaded) === snapshot && reloaded.head === V7)
 
   // A damaged log fails loudly instead of folding around a gap.
   await rm(join(dir, 'events', '00000002.json'))
-  check('a gap in the log is an error, not a shorter history', (await api('/people/alex/plans')).status === 500)
+  check('a gap in the log is an error, not a shorter history', (await api('/house/plans')).status === 500)
   await host.fiber.dispose()
 } finally {
   await rm(root, { recursive: true, force: true })

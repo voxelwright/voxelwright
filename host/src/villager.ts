@@ -13,7 +13,7 @@
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
 //
 // The house is shared: <root>/house/plans/ holds its plan versions (plans.ts),
-// reached through /people/<id>/plans so the same token and person check apply.
+// served at /house/plans behind the same token.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -335,12 +335,8 @@ export default {
     async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
-      const plansMatch = /^\/people\/([^/]+)\/plans(?:\/(versions|head|names))?$/.exec(path)
-      if (plansMatch) {
-        const [, id, what] = plansMatch
-        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
-        return plans(id, what, req, res)
-      }
+      const plansMatch = /^\/house\/plans(?:\/(versions|head|names))?$/.exec(path)
+      if (plansMatch) return plans(plansMatch[1], req, res)
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch

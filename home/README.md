@@ -1470,43 +1470,64 @@ head, validates the result and saves it. `undo`, `redo`, `checkout` (branch from
 any version), `rename` and `refresh` cover the rest, and `diff(a, b)` lists added,
 removed and changed corners, walls, openings, rooms and furniture by id.
 
-- The edits are the record. A version holds `{id, parent, edits, at, by, note?, hash}`,
-  and only the root holds a whole plan (`base`). `hash` is the SHA-256 of the
-  plan the version produced, using JSON with sorted keys. On open, every version is
-  replayed. If plan.ts has changed and a version no longer gives the same plan,
-  open throws a `HistoryError` naming that version, so the page never shows a
-  different house without saying so.
+- A version is the house it made. It holds `{id, parent, edits, at, note?, plan}`:
+  `plan` is the fact, and `edits` only say what was asked (for people and `diff`;
+  empty on the root). Open reads each stored plan and replays nothing, so a change
+  to plan.ts (snapping, `MIN_ROOM_SIDE`, a new rule) never changes a saved house.
+- Migration hook: `UPGRADES[n]` in history.ts turns a version-`n` plan into the
+  next version, and `upgrade(plan)` runs the steps up to `PLAN_VERSION` (identity
+  at 1 today; add a step whenever `PLAN_VERSION` goes up). A version this page
+  cannot read (no step, or saved by a newer home) is listed but cannot be shown
+  or checked out. Only an unreadable head stops open with a `HistoryError`.
+- Plans and versions the history hands out are deep-frozen.
 - A version exists only once the store has accepted it. A failed save throws
-  and leaves the head, the versions and the plan as they were. If the answer is
-  lost after the host saved the version, the next commit is refused as stale and
-  `refresh()` adopts the saved version. Nothing is sent twice.
+  and leaves the head, the versions and the plan as they were. Resending the
+  same version (same id, parent and content) answers the stored one; another
+  version with a taken id is a 409 without a head.
 - Every head move is a compare-and-set. A commit names its parent, and undo, redo
   and checkout name the head they expect. A page on a stale head gets `StaleHead`
-  and changes nothing, and nothing is merged. Redo is per page. The head is shared,
+  and saves nothing, and nothing is merged; the history has already reloaded, so
+  trying again builds on the new head. Placing keeps the ghost and says the house
+  changed; an added room keeps its outline. Redo is per page. The head is shared,
   so a reload keeps an undo.
+- `house()` (src/build/house.ts) opens the host's store when the host is running
+  and an in-memory one when it isn't. When the host is there but its plan can't be
+  opened, the house is read-only: `history.readOnly` is one warm line to show,
+  every change is refused with `ReadOnly` carrying that line, and `history.failure`
+  keeps the error for the Workshop and the console. Placing shows the line; build
+  mode does not show it yet.
+- Wall things move with walls: a wall move shifts a picture on a wall whose corner
+  `a` moved, as it does openings, and stops early rather than push one off its
+  wall; adding a room moves each picture to the split piece it is on. `validate`
+  refuses a wall thing off its wall.
+- A surface anchor names a placed support with `on`. Moving the support carries
+  what stands on it (the same shift and turn, at any depth), and it cannot be
+  removed while anything stands on it. Built-in tables and counters have no id,
+  so a thing on them keeps only its stored height.
 - On the host (`host/src/plans.ts`), the house is shared, so one store is
   `<root>/house/plans/events/<seq>.json`: an append-only log of `version`, `head`
   and `name` events. Directories are 0700 and files 0600. Each event is written whole to `tmp/` and then
   hard-linked to its number, which fails if the number is taken. A cut-short
   write leaves only a scratch file, and two writers can't take the same number.
   A gap or an unreadable event makes reads fail rather than fold around it. The host sets
-  `by` from the path and `at` from its clock. It checks every field against the four edit
-  ops, id patterns, finite numbers within limits, at most 50 edits and 256 KB per request,
-  and never runs a plan.
-- Endpoints, behind the per-launch token and the person check: `GET
-  /people/:id/plans` returns `{versions, head, names}`. `POST .../plans/versions {version}`
-  answers 409 with `head` if the parent isn't the head. `POST .../plans/head {head, expect}`
-  and `POST .../plans/names {id, name}` cover the rest.
+  `at` from its clock and names no one: every page shares one token, so it cannot
+  yet know who is at the page. It checks every field and every plan's shape, at
+  most 50 edits and 256 KB per request, refuses 409 a version that places a library
+  item the person has not kept, and never runs a plan.
+- Endpoints, behind the per-launch token: `GET /house/plans` returns
+  `{versions, head, names}`. `POST /house/plans/versions {version}` answers 409
+  with `head` if the parent isn't the head. `POST /house/plans/head {head, expect}`
+  and `POST /house/plans/names {id, name}` cover the rest.
 
 ```sh
-cd host && npm ci && npm run check-plans          # 53/53: token, create, append, stale head, bad input, placed things, torn write, modes, restart
-cd home && node scripts/check-plan-history.mjs    # 38/38: memory store, failure paths, diff, then hostStore on a real host (stub agent)
+cd host && npm ci && npm run check-plans          # 60/60: token, create, append, retry, stale head, bad input, kept items, placed things, torn write, modes, restart
+cd home && node scripts/check-plan-history.mjs    # 62/62: memory store, stored plans and upgrades, frozen history, read-only house, wall things, supports, diff, then hostStore on a real host (stub agent)
 ```
 
 The home check loads the TypeScript through Vite in-process, with no port and no browser.
 Its last part runs the real villager host with synthetic people. Two pages share one
-root, a stale page is refused, and a restarted host reopens to the same head,
-plans and names. Not wired into the page yet. `diff` reports the host wall that
+root, a stale page is refused and takes the new head, and a restarted host reopens
+to the same head, plans and names. `diff` reports the host wall that
 `addRoom` splits as changed, because it keeps its id, while the new pieces are added.
 
 ### Placing items
@@ -1549,7 +1570,7 @@ Undo and redo come from the versions.
   built-in thing. `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
 
 ```sh
-cd home && node scripts/check-place.mjs           # 56/56: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, swap while making, move, undo, reload
+cd home && node scripts/check-place.mjs           # 57/57: plan ops, each mount dragged, red and refused, Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
 cd home && node scripts/check-place.mjs --look    # also screenshots/build/place-*.jpg and place.mp4
 ```
 

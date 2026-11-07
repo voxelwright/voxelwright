@@ -72,6 +72,9 @@ export type ItemRef = { library: string; person: Id } | { kind: string }
  * surface: the centre of its footprint and the height of the top it stands on. The
  *          height is stored because supports are found by looking (any upward face
  *          above 0.3 m), and today's tables and counters have no id in the plan.
+ *          When the top is a placed thing, `on` names it: moving that thing carries
+ *          this one with it (x, y, z and yaw by the same move), and it cannot be
+ *          removed while this one stands on it.
  * wall:    the centre of its back on the face of wallId that looks into roomId:
  *          `along` metres from the wall's corner a (arc length when curved), `height`
  *          metres above the floor. It always faces into the room; `spin` turns it
@@ -82,7 +85,7 @@ export type ItemRef = { library: string; person: Id } | { kind: string }
  */
 export type Anchor =
   | { mount: 'floor'; x: number; z: number; yaw: number }
-  | { mount: 'surface'; x: number; y: number; z: number; yaw: number }
+  | { mount: 'surface'; x: number; y: number; z: number; yaw: number; on?: Id }
   | { mount: 'wall'; wallId: Id; roomId: Id; along: number; height: number; spin: number }
   | { mount: 'ceiling'; x: number; z: number; yaw: number }
 
@@ -412,13 +415,20 @@ export function validate(plan: Plan): string[] {
     if (selfIntersects(ring)) reasons.push(`room ${r.id} crosses itself`)
   }
   for (const [id, n] of bounding) if (n > 2) reasons.push(`wall ${id} bounds ${n} rooms`)
-  // Only references here: a wall that moves later may leave a thing off its wall or outside
-  // its room, and the house is still valid (the home clamps it when drawing). The edits that
-  // place and move things check the fit (anchorReasons).
+  // A wall thing stays on its wall (moving and bending walls, and adding rooms, carry it or
+  // stop before it falls off). A floor or ceiling thing a wall move leaves outside its room
+  // is still a valid house (the home clamps it when drawing); the edits that place and move
+  // things check the fit (anchorReasons).
   const roomIds = new Set(plan.rooms.map((r) => r.id))
   for (const f of plan.furniture) {
+    if (f.at.mount === 'surface' && f.at.on !== undefined) reasons.push(...supportReasons(plan, f.id, f.at.on))
     if (f.at.mount !== 'wall') continue
-    if (!plan.walls.some((w) => w.id === (f.at as { wallId: Id }).wallId)) reasons.push(`furniture ${f.id} hangs on wall ${f.at.wallId}, which does not exist`)
+    const wall = plan.walls.find((w) => w.id === (f.at as { wallId: Id }).wallId)
+    if (!wall) reasons.push(`furniture ${f.id} hangs on wall ${f.at.wallId}, which does not exist`)
+    else if (goodWalls.has(wall.id)) {
+      const { length } = curveOf(plan, wall)
+      if (!(f.at.along >= -1e-9 && f.at.along <= length + 1e-9)) reasons.push(`furniture ${f.id} is ${f.at.along.toFixed(2)} m along wall ${wall.id}, which is ${length.toFixed(2)} m long`)
+    }
     if (!roomIds.has(f.at.roomId)) reasons.push(`furniture ${f.id} faces room ${f.at.roomId}, which does not exist`)
   }
   return reasons
@@ -450,11 +460,17 @@ function moveWall(plan: Plan, wallId: Id, by: number): Plan {
     const moved = new Set([wall.a, wall.b])
     const corners = plan.corners.map((c) => (moved.has(c.id) ? { ...c, x: round(c.x + normal[0] * d), z: round(c.z + normal[1] * d) } : c))
     const next: Plan = { ...plan, corners }
-    // Openings on a wall whose corner a moved stay where they are in the room.
+    // Openings and wall things on a wall whose corner a moved stay where they are in the room.
+    const shifts = new Map<Id, number>()
+    for (const w of plan.walls) if (moved.has(w.a) && w.id !== wallId) shifts.set(w.id, curveOf(next, w).length - curveOf(plan, w).length)
     next.walls = plan.walls.map((w) => {
-      if (!moved.has(w.a) || w.id === wallId || !w.openings.length) return w
-      const shift = curveOf(next, w).length - curveOf(plan, w).length
+      const shift = shifts.get(w.id)
+      if (shift === undefined || !w.openings.length) return w
       return { ...w, openings: w.openings.map((o) => ({ ...o, from: round(o.from + shift), to: round(o.to + shift) })) }
+    })
+    next.furniture = plan.furniture.map((f) => {
+      const shift = f.at.mount === 'wall' ? shifts.get(f.at.wallId) : undefined
+      return shift === undefined || f.at.mount !== 'wall' ? f : { ...f, at: { ...f.at, along: round(f.at.along + shift) } }
     })
     if (touching.some((w) => curveOf(next, w).chord < MIN_ROOM_SIDE - 1e-9)) return null
     return validate(next).length ? null : next
@@ -529,6 +545,13 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
     openings: host.openings.filter((o) => o.from >= k.t0 - 1e-9 && o.to <= k.t1 + 1e-9).map((o) => ({ ...o, from: round(o.from - k.t0), to: round(o.to - k.t0) })),
   }))
   for (const o of host.openings) if (!split.some((w) => w.openings.some((x) => x.id === o.id))) reasons.push(`opening ${o.id} straddles a new corner`)
+  // Things hung on the host move to the piece they are on, measured from its corner a.
+  const furniture = plan.furniture.map((f) => {
+    if (f.at.mount !== 'wall' || f.at.wallId !== host.id) return f
+    const along = f.at.along
+    const k = pieces.find((k) => along >= k.t0 - 1e-9 && along <= k.t1 + 1e-9)
+    return k ? { ...f, at: { ...f.at, wallId: k.id, along: round(along - k.t0) } } : f
+  })
   if (edit.door) {
     const shared = split.find((w) => w.id === sharedId)!
     shared.openings.push({ id: edit.door.id, kind: 'door', from: round(edit.door.from - from), to: round(edit.door.to - from), sill: 0, head: edit.door.head ?? DOORWAY.top, ...(edit.door.leaves ? { leaves: edit.door.leaves } : {}) })
@@ -547,7 +570,7 @@ function addRoom(plan: Plan, edit: Extract<Edit, { op: 'addRoom' }>): Plan {
   })
   const rooms = plan.rooms.map((r) => (r === owner ? { ...r, loop: ownerLoop } : r))
   rooms.push({ id, label: edit.room.label, loop: forward ? [q, p, pf, qf] : [p, q, qf, pf] })
-  const next: Plan = { ...plan, corners, walls, rooms }
+  const next: Plan = { ...plan, corners, walls, rooms, furniture }
   reasons.push(...validate(next))
   if (reasons.length) throw new PlanError(reasons)
   return next
@@ -599,9 +622,24 @@ export function anchorReasons(plan: Plan, id: Id, item: ItemRef | null, at: Anch
   }
   const y = at.mount === 'surface' ? at.y : 0
   if (!finite(at.x, at.z, at.yaw, y)) return [...reasons, `furniture ${id} has a position that is not a number`]
+  if (at.mount === 'surface' && at.on !== undefined) reasons.push(...supportReasons(plan, id, at.on))
   if (at.mount === 'surface' && (y < 0 || y > 3)) reasons.push(`furniture ${id} stands on a top ${y.toFixed(2)} m up`)
   if (!roomAt(plan, at.x, at.z)) reasons.push(`furniture ${id} at ${at.x.toFixed(2)}, ${at.z.toFixed(2)} is not in a room`)
   return reasons
+}
+
+/** Why furniture `id` cannot stand on furniture `on`: it must exist, stand on the floor or a top, and not stand (at any depth) on `id`. */
+function supportReasons(plan: Plan, id: Id, on: Id): string[] {
+  const seen = new Set<Id>([id])
+  for (let at: Id | undefined = on; at !== undefined; ) {
+    if (seen.has(at)) return [`furniture ${id} stands on ${on}, which stands on it`]
+    seen.add(at)
+    const support = plan.furniture.find((k) => k.id === at)
+    if (!support) return [`furniture ${id} stands on ${at}, which is not in the house`]
+    if (support.at.mount !== 'floor' && support.at.mount !== 'surface') return [`furniture ${id} stands on ${at}, which is on the ${support.at.mount}`]
+    at = support.at.mount === 'surface' ? support.at.on : undefined
+  }
+  return []
 }
 
 // Rebuilt from their known fields, as the host stores them, so a replay hashes the same.
@@ -609,7 +647,7 @@ const itemOf = (item: ItemRef): ItemRef => ('library' in item ? { library: item.
 function anchorOf(at: Anchor): Anchor {
   switch (at.mount) {
     case 'floor': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
-    case 'surface': return { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: at.yaw }
+    case 'surface': return { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: at.yaw, ...(at.on === undefined ? {} : { on: at.on }) }
     case 'wall': return { mount: at.mount, wallId: at.wallId, roomId: at.roomId, along: at.along, height: at.height, spin: at.spin }
     case 'ceiling': return { mount: at.mount, x: at.x, z: at.z, yaw: at.yaw }
   }
@@ -629,10 +667,30 @@ function moveItem(plan: Plan, furnitureId: Id, at: Anchor): Plan {
   if (f.at.mount !== at.mount) throw new PlanError([`furniture ${furnitureId} is mounted on the ${f.at.mount}, not the ${at.mount}`])
   const reasons = anchorReasons(plan, furnitureId, null, at)
   if (reasons.length) throw new PlanError(reasons)
-  return { ...plan, furniture: plan.furniture.map((k) => (k === f ? { ...k, at: anchorOf(at) } : k)) }
+  const moved = new Map<Id, Anchor>([[furnitureId, anchorOf(at)]])
+  carry(plan, f, moved.get(furnitureId)!, moved)
+  return { ...plan, furniture: plan.furniture.map((k) => (moved.has(k.id) ? { ...k, at: moved.get(k.id)! } : k)) }
+}
+
+/** What stands on `support` (at any depth) moves with it: the same shift, and turned about its centre by the same turn. */
+function carry(plan: Plan, support: Furniture, to: Anchor, moved: Map<Id, Anchor>) {
+  const from = support.at
+  if ((from.mount !== 'floor' && from.mount !== 'surface') || (to.mount !== 'floor' && to.mount !== 'surface')) return
+  const dy = (to.mount === 'surface' ? to.y : 0) - (from.mount === 'surface' ? from.y : 0)
+  const turn = to.yaw - from.yaw
+  const c = Math.cos(turn), s = Math.sin(turn)
+  for (const g of plan.furniture) {
+    if (g.at.mount !== 'surface' || g.at.on !== support.id || moved.has(g.id)) continue
+    const ox = g.at.x - from.x, oz = g.at.z - from.z
+    const next: Anchor = { ...g.at, x: round(to.x + ox * c + oz * s), y: round(g.at.y + dy), z: round(to.z - ox * s + oz * c), yaw: round(g.at.yaw + turn) }
+    moved.set(g.id, next)
+    carry(plan, g, next, moved)
+  }
 }
 
 function removeItem(plan: Plan, furnitureId: Id): Plan {
   if (!plan.furniture.some((k) => k.id === furnitureId)) throw new PlanError([`furniture ${furnitureId} does not exist`])
+  const standing = plan.furniture.filter((k) => k.at.mount === 'surface' && k.at.on === furnitureId).map((k) => k.id)
+  if (standing.length) throw new PlanError([`furniture ${furnitureId} has ${standing.join(', ')} standing on it; move that first`])
   return { ...plan, furniture: plan.furniture.filter((k) => k.id !== furnitureId) }
 }

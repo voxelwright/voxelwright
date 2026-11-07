@@ -308,9 +308,21 @@ try {
   await page.evaluate(() => {
     window.villagePlace.history().commit = window.__commit
   })
+  // F7: another page changes the house first (a real second history on the same host store): StaleHead, then the history has the new head.
+  const otherHead = await page.evaluate(async () => {
+    const H = await import('/src/build/history.ts')
+    const { token } = await (await fetch('/villager/launch')).json()
+    const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), window.villagePlace.plan())
+    return (await other.commit([{ op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.2 }], 'Bent the wall')).id
+  })
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(600)
+  s = await S(page)
+  const headNow = await page.evaluate(() => window.villagePlace.history().head)
+  check('F7: when another page moved the house, the ghost stays, says so, and the page already has the new head', s.state === 'placing' && /house changed/.test(s.hint) && headNow === otherHead && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore, { s, headNow, otherHead })
   await page.keyboard.press('Enter')
   d = await done(page)
-  check('after the failure, confirming again places it once', d.status === 'confirmed' && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore + 1)
+  check('after the failures, confirming again places it once, on the other page’s version', (await page.evaluate(() => window.villagePlace.history().versions().at(-1).parent)) === otherHead && d.status === 'confirmed' && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore + 1)
 
   // ---- a thing still being made: confirm waits, swap keeps the pose and names the library item
   await page.evaluate(() => {

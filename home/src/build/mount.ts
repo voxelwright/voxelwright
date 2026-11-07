@@ -8,8 +8,9 @@
 //          the face is found by casting rays down at the footprint's middle and
 //          four corners against what the room draws, so today's table, counters and
 //          shelves work without tags. Limits: a face must be within 2.5 cm level at
-//          all five points (a bowl's rim or a slatted top fails), and the support is
-//          not remembered (stored as a height; move the table and the vase stays).
+//          all five points (a bowl's rim or a slatted top fails). A built-in support is
+//          not remembered (stored as a height); a placed one is named by `on` and
+//          carries what stands on it (plan.ts).
 // wall     hangs flat on a wall face the camera can see whole (a cut-away wall is
 //          not offered), clear of doors, windows and what already hangs there. On a
 //          curved wall it faces the wall's normal at its middle and stands off the

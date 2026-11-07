@@ -14,9 +14,11 @@
 // its library item, then keeps that item on the host (so drafts pruning leaves it)
 // and commits. Until the store has accepted the version the thing still looks
 // unplaced (the ghost stays and says it could not be placed); nothing is retried.
+// When someone else changed the house first, the history has already taken their
+// version; the ghost stays and one line asks the person to place it again.
 import * as THREE from 'three/webgpu'
 import type { Stage } from '../kernel'
-import type { PlanHistory } from './history'
+import { ReadOnly, StaleHead, type PlanHistory } from './history'
 import { roomAt, type Anchor, type Furniture, type ItemRef, type Mount, type Plan } from './plan'
 import {
   CORD, KINDS, SURFACE_MIN, cord, alongOf, ceilingOf, faceOf, fit, floorOf, obstacles, poseOf, roomsOf, seat, setPose, supports, wallHeight,
@@ -189,6 +191,17 @@ export function placement(deps: PlaceDeps): Placement & {
   const upward = (hit: THREE.Intersection) => {
     if (!hit.face) return 0
     return hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y
+  }
+  /** The placed thing whose top the anchor stands on, if the top is one (plugins/place.ts tags each holder with its id). */
+  const supportUnder = (s: Session, at: Extract<Anchor, { mount: 'surface' }>): string | undefined => {
+    down.set(new THREE.Vector3(at.x, at.y + 0.08, at.z), new THREE.Vector3(0, -1, 0))
+    down.far = 0.2
+    const hit = down.intersectObjects(s.supports, false).find((h) => upward(h) > 0.7)
+    for (let o: THREE.Object3D | null = hit?.object ?? null; o; o = o.parent) {
+      const id = o.userData.furniture
+      if (typeof id === 'string' && id !== s.moving && deps.plan().furniture.some((f) => f.id === id)) return id
+    }
+    return undefined
   }
   /** The top under (x, z), looking down from just above y. */
   const supportAt = (s: Session) => (x: number, y: number, z: number) => {
@@ -722,7 +735,7 @@ export function placement(deps: PlaceDeps): Placement & {
     s.state = 'confirming'
     s.message = ''
     paint(s)
-    const at = s.at
+    let at = s.at
     // A thing still being made: wait for swap() to name it (or cancel()).
     const ref = s.ref ?? (await new Promise<ItemRef | null>((r) => (s.waiting = r)))
     s.waiting = null
@@ -734,6 +747,8 @@ export function placement(deps: PlaceDeps): Placement & {
       if ('library' in ref && !s.moving && !(await deps.keep(ref.person, ref.library))) throw new Error('the library item could not be kept')
       if (session !== s || s.state !== 'confirming') return
       const history = await deps.history()
+      const support = at.mount === 'surface' ? supportUnder(s, at) : undefined
+      if (at.mount === 'surface') at = { mount: at.mount, x: at.x, y: at.y, z: at.z, yaw: at.yaw, ...(support ? { on: support } : {}) }
       const edit = s.moving
         ? { op: 'moveItem' as const, furnitureId: id, at }
         : { op: 'placeItem' as const, furniture: { id, item: ref, at } satisfies Furniture }
@@ -755,7 +770,9 @@ export function placement(deps: PlaceDeps): Placement & {
       // Still a ghost: nothing looks placed that the house does not have.
       s.state = 'placing'
       ghost(s)
-      s.message = "Couldn't place it just now. Try again?"
+      s.message = error instanceof StaleHead
+        ? 'The house changed while you were placing this. Place it again?'
+        : error instanceof ReadOnly ? error.reasons[0] : "Couldn't place it just now. Try again?"
       paint(s)
     }
   }
