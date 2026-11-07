@@ -11,7 +11,8 @@ npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
-node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels, plan model, drag and bend
+node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
+node scripts/check-navigation.mjs http://localhost:5181/ --build   # navigation and entries on the plan-built house (check-entries takes --build too)
 node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
@@ -1514,15 +1515,23 @@ little message") with no route and nothing sent to Sam.
 
 ## Build mode (#48 experiment, November 6, 2026)
 
-`?build=1` builds the kitchen's walls, floor and dollhouse shell from a floor
-plan instead of `room.ts` and `diorama.ts`. With `?cam=iso` you can drag the
-right wall to move it (snaps to 10 cm) or pull the glowing dot at its middle to
+`?build=1` builds the house's walls, floors and dollhouse shell from a floor
+plan instead of `room.ts`, `kitchendoor.ts`'s shared wall, `lounge.ts`'s walls
+and floor and `diorama.ts`'s shell (#53: both seated views are bit-identical to
+the house without the flag; the dollhouse differs in about 140 edge pixels where
+the plan lays one box per wall and the diorama one per side). With `?cam=iso` you
+can drag the house's right wall (the living room's, with the Workshop's door) to move it (snaps to 10 cm) or pull the glowing dot at its middle to
 bend it into a bay (snaps to 5 cm of bulge). The size and floor area show on a
 handwritten paper tag while you drag. Escape cancels a drag. Without the flag,
 `plugins/build.ts` does nothing.
 
 The plan (`src/build/plan.ts`, pure, no three.js) is a JSON document,
-`schema: 1`, with stable string ids:
+`schema: 2`, with stable string ids. `HOUSE_PLAN` is the house: the kitchen and
+the living room sharing one wall (`kitchen.right`) with the doorway in it, the
+kitchen window, and the Workshop's door in the living room's right wall. Schema 1
+was the kitchen alone; `UPGRADES[1]` in `history.ts` moves its doorway onto the
+shared wall and builds the living room against it, and a saved kitchen whose
+right side no longer leaves room for it is listed but cannot be shown.
 
 - `corners` {id, x, z}: where wall centrelines meet. A position is stored only here.
 - `walls` {id, a, b, thickness, height, sagitta, openings}. `sagitta` is how
@@ -1705,7 +1714,7 @@ but can't take in the whole house. Rooms are rectangles on straight walls only.
 ### Plan versions
 
 `src/build/history.ts` (no three.js) keeps the house's plan as versions.
-`PlanHistory.open(store, KITCHEN)` saves the base as the root on first open.
+`PlanHistory.open(store, HOUSE_PLAN)` saves the base as the root on first open.
 After that, the stored root wins. `commit(edits, note?)` applies the edits on top of the
 head, validates the result and saves it. `undo`, `redo`, `checkout` (branch from
 any version), `rename` and `refresh` cover the rest, and `diff(a, b)` lists added,

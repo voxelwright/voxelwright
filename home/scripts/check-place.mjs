@@ -67,10 +67,10 @@ const near = (a, b, e = 0.06) => Math.abs(a - b) <= e
   check('plan: removeItem of a missing thing is refused', /does not exist/.test(refused(() => apply(p4, { op: 'removeItem', furnitureId: 'f.pic' })) ?? ''))
   const dangling = { ...p2, walls: p2.walls.map((w) => (w.id === 'kitchen.back' ? { ...w, id: 'kitchen.back2' } : w)) }
   check('plan: validate reports a thing hung on a wall that is gone', validate(dangling).some((r) => /hangs on wall kitchen.back/.test(r)))
-  // The floor keeps 0.6 m in front of a door clear (the living-room door, back wall at x -3.0 to -2.3).
+  // The floor keeps 0.6 m in front of a door clear (the doorway to the living room, in the shared wall at z 2.45 to 3.15, its kitchen face at x 3.4).
   const M = await vite.ssrLoadModule('/src/build/mount.ts')
-  const crateAt = (z) => M.fit({ plan: HOUSE_PLAN, size: [0.4, 0.4, 0.4], obstacles: [], supportAt: () => null }, { mount: 'floor', x: -2.65, z, yaw: 0 })
-  const nearDoor = crateAt(-1.55), clearOfDoor = crateAt(-1.3)
+  const crateAt = (x) => M.fit({ plan: HOUSE_PLAN, size: [0.4, 0.4, 0.4], obstacles: [], supportAt: () => null }, { mount: 'floor', x, z: 2.8, yaw: 0 })
+  const nearDoor = crateAt(2.65), clearOfDoor = crateAt(2.45)
   check('floor: the 0.6 m in front of a door stays clear', nearDoor.why === "It's in the way of the door" && clearOfDoor.ok, { nearDoor, clearOfDoor })
   await vite.close()
 }
@@ -440,15 +440,16 @@ try {
     const scene = window.village.kernel.root.get('stage').scene
     const fp = M.footprint(s.at.x, s.at.z, s.size[0], s.size[2], s.at.yaw)
     const xs = fp.map((p) => p[0]), zs = fp.map((p) => p[1])
-    let nearest = Infinity, overlap = null
+    let nearest = Infinity, overlap = null, near = null
     for (const o of M.obstacles(scene, [scene.getObjectByName('placement')])) {
       if (o.box.min.y >= s.size[1] || o.box.max.y <= 0) continue
       const dx = Math.max(o.box.min.x - Math.max(...xs), Math.min(...xs) - o.box.max.x, 0)
       const dz = Math.max(o.box.min.z - Math.max(...zs), Math.min(...zs) - o.box.max.z, 0)
       if (dx === 0 && dz === 0 && M.overlaps(fp, [[o.box.min.x, o.box.min.z], [o.box.max.x, o.box.min.z], [o.box.max.x, o.box.max.z], [o.box.min.x, o.box.max.z]], 0.01)) overlap = o.name
+      if (Math.hypot(dx, dz) < nearest) near = o.name
       nearest = Math.min(nearest, Math.hypot(dx, dz))
     }
-    return { nearest: +nearest.toFixed(3), overlap }
+    return { nearest: +nearest.toFixed(3), overlap, near, at: s.at }
   }, s)
   check(`phone: the accepted crate overlaps nothing in its height (nearest ${clearance.nearest} m)`, s.ok && !clearance.overlap && clearance.nearest > 0.05, clearance)
   await tp.screenshot({ path: look ? join(OUT, 'place-phone-floor.jpg') : join(root, 'phone.jpg'), quality: 86 })
