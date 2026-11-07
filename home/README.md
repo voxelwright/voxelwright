@@ -399,3 +399,42 @@ never returns; unloading `talk` three times leaves the same objects,
 geometries, textures, frame hooks, DOM and entries as a `?cam=iso` page.
 20 of 20 passed (stub host, November 6, 2026). `--agent=claude` runs one real
 talk and one two-villager table exchange instead, and `--video=dir` records it.
+
+Real model, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet 5.5 with a
+Haiku helper call), times measured in the host from the start of each turn:
+
+| Turn | Villager | First text | Whole turn | Cost |
+| --- | --- | --- | --- | --- |
+| single talk, first turn of the session | Dumpling (alex) | 10.0 s | 10.9 s | $0.0052 |
+| table, two seated | Dumpling (alex) | 6.4 s | 7.0 s | $0.0063 |
+| table, two seated | Moss (mia) | 4.8 s | 5.5 s | $0.0052 |
+
+The thinking beat covers the wait, but 5 to 10 s to first words is far from
+the 1 to 2 s the research asks for. Replies run three to four sentences, so
+pages turn by themselves.
+
+Frame cost, headless Chrome, 1440x900, WebGPU, `npm run measure -- '<url>'
+--perf --gpu`, one 6 s run each, taken while the villagers walked (GPU p50
+varies 1 to 3 ms between runs of the same page):
+
+| Page | Tier | Draw calls | Triangles | GPU p50 / p95 ms |
+| --- | --- | --- | --- | --- |
+| no flag | high | 482 | 52,124 | 10.8 / 16.3 |
+| `?cam=iso` | high | 491 | 52,856 | 7.8 / 10.4 |
+| `?talk=npc` | high | 658 | 93,870 | 7.9 / 9.0 |
+| no flag | low | 412 | 48,893 | 3.4 / 5.1 |
+| `?cam=iso` | low | 421 | 49,625 | 4.9 / 5.7 |
+| `?talk=npc` | low | 588 | 90,639 | 5.1 / 6.6 |
+
+Three felt villagers, their glyphs and shadows and the fourth chair add about
+167 draw calls and 41,000 triangles to the iso view.
+
+Look: a fresh Opus scorer per round saw only the eight `npc-*.jpg`
+screenshots and the ui-craft rubric plus character appeal, game not app,
+friction and who is speaking. Means over eleven categories: 6.1, 6.4, 6.0;
+stopped on the plateau. Character appeal rose from 7 to 8. The scores held
+down by the room itself (floor grain, sun wedges, bloom, the beige void, no
+rug or clutter) belong to the iso scene work in `room.ts`, `sunbeam.ts` and
+`window.ts`. The last round also said the villagers sound like assistants
+("tell me what you enjoy"), which is the host's system prompt. Screenshots:
+`screenshots/talk/npc-*.jpg` (real replies).

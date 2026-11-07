@@ -19,6 +19,8 @@ const ON = params.get('talk') === 'npc'
 const KIND = KINDS[params.get('villager') ?? ''] ? params.get('villager')! : 'b'
 const SCALE = 1.3
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
+/** Villagers' words: a warm book face, easier to read at length than handwriting. */
+const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 /** Letters a second: a readable pace that still keeps up with a streaming reply. */
 const TYPE_RATE = 42
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -298,12 +300,12 @@ export default {
 
     // ── Camera ─────────────────────────────────────────────────────────────
     const eye = new THREE.Vector3()
-    // Line of sight for the two-shot: anything solid but the villagers blocks it.
+    // Line of sight for the two-shot: anything solid but the villager in the shot blocks it, other villagers too.
     const raycaster = new THREE.Raycaster()
-    const figures = new Set<THREE.Object3D>(cast.map((m) => m.v.fig.root))
+    let subject: THREE.Object3D | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
-      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || figures.has(n)) return false
+      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject) return false
       return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
     }
     const clear = (from: THREE.Vector3, to: THREE.Vector3) => {
@@ -320,6 +322,7 @@ export default {
      */
     const twoShot = (m: Member): Pose => {
       const p = m.v.pos
+      subject = m.v.fig.root
       stage.camera.getWorldPosition(eye)
       const base = Math.atan2(eye.x - p.x, eye.z - p.z)
       const floor = m.v.seated > 0.5 ? SEAT_Y : 0
@@ -637,9 +640,9 @@ export default {
           at.set(0, m.v.fig.height + 0.16, 0)
           m.v.fig.root.localToWorld(at)
           // About the same size on screen from the room view as up close, floating just clear of the head.
-          const size = THREE.MathUtils.clamp(eye.distanceTo(at) * 0.045, 0.13, 0.7)
+          const size = THREE.MathUtils.clamp(eye.distanceTo(at) * 0.03, 0.13, 0.46)
           m.glyph.scale.setScalar(size)
-          m.glyph.position.copy(at).setY(at.y + size * 0.4 + Math.sin(t * 2.4) * 0.015)
+          m.glyph.position.copy(at).setY(at.y + size * 0.25 + Math.sin(t * 2.4) * 0.015)
           const mat = m.glyph.material
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
@@ -776,7 +779,7 @@ function css() {
     box-shadow: 0 4px 10px rgba(60, 30, 10, 0.25), inset 0 0 0 2px rgba(255, 255, 255, 0.12); }
   .talk-card .tab::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.55); border-radius: 8px 8px 3px 3px; }
   .talk-card .tab small { font-weight: 400; font-size: 14px; opacity: 0.85; margin-left: 7px; }
-  .talk-card .words { margin: 0; min-height: 1.3em; white-space: pre-wrap; }
+  .talk-card .words { margin: 0; min-height: 1.4em; white-space: pre-wrap; font: 19px/1.42 ${BOOK}; color: #3d2a1c; }
   .talk-card .more { display: block; margin: 4px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
     font: italic 700 17px ${HAND}; color: var(--c); }
   .talk-card .more::after { content: ' \\25B8'; }
