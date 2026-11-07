@@ -137,4 +137,6 @@ export interface Theme {
   costumes: { follow: boolean; hint: string }
   /** What newly made props should look like, handed to the prop maker's prompt. */
   props: { hint: string }
+  /** Shading model by material class (./shade, regroup S2, behind ?shade=1): 'toon' or 'wet'. Unset uses the preset's default. */
+  shade?: 'toon' | 'wet'
 }

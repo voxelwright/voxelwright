@@ -4,6 +4,7 @@ import { replace } from '../kernel'
 import { costumeVersion, theme, tick } from './index'
 import { PAINTERS } from './paint'
 import type { Shift, Surface, Surfaces, Theme } from './tokens'
+import { shade } from './shade/apply'
 
 type LightRole = 'key' | 'fill' | 'rim' | 'practical'
 type SurfaceRole = keyof Surfaces
@@ -141,6 +142,7 @@ export default {
     }
     const exposure = renderer.toneMappingExposure
     let applied: Theme | null = null
+    shade(ctx)
 
     const light = (l: Lit, t: Theme, force: boolean) => {
       let base = lights.get(l)
