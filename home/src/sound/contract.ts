@@ -98,8 +98,9 @@ export type CueName =
   | 'book-open' | 'book-close' | 'page' | 'sat' | 'farewell' | 'news' | 'walk' | 'refused'
 
 /**
- * Every cue's variants; `a` is the default. `?sfx=chose:b,sent:c` (or the listening page's
- * picks) chooses another for a visit. src/sound/palette/index.ts exports one of these.
+ * Every cue's variants. The palette's CHOSEN names the owner's pick per cue, and `a` plays
+ * for any cue it does not name. `?sfx=chose:b,sent:c` (or the listening page's stored picks)
+ * chooses another for a visit. src/sound/palette/index.ts exports one of these.
  */
 export type Palette = Record<CueName, Record<string, Cue>>
 

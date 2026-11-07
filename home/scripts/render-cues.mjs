@@ -3,9 +3,10 @@
 // headless Chrome page, renders each variant with OfflineAudioContext at 48 kHz, writes WAVs
 // and spectrogram PNGs, and prints a table: loudness (BS.1770 momentary and short-term max),
 // peak before the limiter, spectral centroid, length to -60 dB below peak, and how different
-// four consecutive round-robin plays are. Renders the villagers' babble the same way as the
-// reference the cues must stay under.
-// Usage: node scripts/render-cues.mjs [--out=dir] [--only=cue]   (exits non-zero when a target fails)
+// four consecutive round-robin plays are, plus two harshness proxies: the share of power
+// between 2 and 5 kHz and the 10-90% rise time of the envelope. Renders the villagers'
+// babble the same way as the reference the cues must stay under.
+// Usage: node scripts/render-cues.mjs [--out=dir] [--only=cue,cue]   (exits non-zero when a target fails)
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -16,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
 const arg = (k) => args.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3)
 const out = resolve(arg('out') ?? join(here, '../generated/cues'))
-const only = arg('only')
+const only = arg('only')?.split(',')
 const SR = 48000
 const PORT = 5495
 const base = `http://localhost:${PORT}/`
@@ -95,9 +96,9 @@ function fft(re, im) {
     }
   }
 }
-/** Power-weighted spectral centroid over every frame, and the share of power above 3 kHz. */
+/** Power-weighted spectral centroid over every frame, and the shares of power above 3 kHz and between 2 and 5 kHz. */
 function spectrum(x) {
-  let num = 0, den = 0, high = 0
+  let num = 0, den = 0, high = 0, presence = 0
   for (let i = 0; i + FRAME <= x.length; i += FRAME / 2) {
     const re = new Float64Array(FRAME), im = new Float64Array(FRAME)
     for (let j = 0; j < FRAME; j++) re[j] = x[i + j] * (0.5 - 0.5 * Math.cos((2 * Math.PI * j) / (FRAME - 1)))
@@ -107,9 +108,10 @@ function spectrum(x) {
       const pw = re[k] ** 2 + im[k] ** 2
       num += f * pw; den += pw
       if (f > 3000) high += pw
+      if (f >= 2000 && f <= 5000) presence += pw
     }
   }
-  return { centroid: den ? num / den : 0, above3k: den ? high / den : 0 }
+  return { centroid: den ? num / den : 0, above3k: den ? high / den : 0, band2to5k: den ? presence / den : 0 }
 }
 /** Seconds from the first sample to the last 5 ms window within 60 dB of the peak; and the attack (first sample to 90% of peak). */
 function shape(x) {
@@ -124,6 +126,23 @@ function shape(x) {
   let atk = 0
   for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) >= 0.9 * p) { atk = i; break }
   return { length: (last - Math.max(0, first)) / SR, start: Math.max(0, first) / SR, attackMs: ((atk - Math.max(0, first)) / SR) * 1000 }
+}
+/**
+ * The first onset's rise time in ms: on a 1 ms peak-hold envelope, from 10% to 90% of the
+ * highest point within 60 ms of where the sound first passes 10% of its peak (a softer attack rises slower).
+ */
+function rise(x) {
+  const w = SR / 1000
+  const env = []
+  for (let i = 0; i + w <= x.length; i += w) {
+    let m = 0
+    for (let j = 0; j < w; j++) m = Math.max(m, Math.abs(x[i + j]))
+    env.push(m)
+  }
+  const top = Math.max(...env)
+  const start = env.findIndex((v) => v >= 0.1 * top)
+  const local = Math.max(...env.slice(start, start + 60))
+  return env.findIndex((v) => v >= 0.9 * local) - env.findIndex((v) => v >= 0.1 * local)
 }
 /** The largest sample step relative to peak: a click shows as a step far above the signal's own. */
 function maxStep(x) {
@@ -256,7 +275,7 @@ try {
   const alignment = await page.evaluate(() => window.spriteAlignment())
   const standIns = []
   for (const { name, v, length, bus, level, description, sampled } of await page.evaluate(() => window.cueList())) {
-    if (only && name !== only) continue
+    if (only && !only.includes(name)) continue
     const event = EVENTS[name] ?? {}
     const span = Math.max(3.5, length + 0.5)
     // Four plays, each alone, for the measurements and the round-robin difference.
@@ -286,7 +305,7 @@ try {
     spectrogram(join(out, `${file}.wav`), join(out, `${file}.png`))
     const row = {
       cue: `${name}:${v}`, bus, level, momentaryMax: +ld.momentaryMax.toFixed(1), shortMax: +ld.shortMax.toFixed(1), peakDbfs: +peak.toFixed(1),
-      centroidHz: Math.round(sp.centroid), above3kPct: +(sp.above3k * 100).toFixed(0), lengthS: +sh.length.toFixed(2), attackMs: +sh.attackMs.toFixed(1),
+      centroidHz: Math.round(sp.centroid), above3kPct: +(sp.above3k * 100).toFixed(0), band2to5kPct: +(sp.band2to5k * 100).toFixed(1), rise1090Ms: rise(x), lengthS: +sh.length.toFixed(2), attackMs: +sh.attackMs.toFixed(1),
       maxStepDb: +(db(maxStep(x)) - db(peakOf(x))).toFixed(0), roundRobinDiffDb: +db(rr).toFixed(0), renderMsPerPlay: +(ms / 4).toFixed(1), description,
     }
     const fails = []
@@ -312,7 +331,7 @@ try {
 
   // Typing: 2 s of keystrokes about 9 a second, dropped inside the cue's gap as the player does,
   // to show the grains joining into one scratch, and its level.
-  if (!only || only === 'writing') {
+  if (!only || only.includes('writing')) {
     const { gap } = (await page.evaluate(() => window.cueList())).find((c) => c.name === 'writing') ?? {}
     const keys = []
     let last = -Infinity
@@ -346,8 +365,8 @@ try {
   if (errors.length) failed++
   writeFileSync(join(out, 'measurements.json'), JSON.stringify({ summary, rows }, null, 2))
   const pad = (s, n) => String(s).padEnd(n)
-  console.log(pad('cue', 14), pad('bus', 6), pad('M max', 7), pad('S max', 7), pad('peak', 6), pad('cent', 6), pad('>3k%', 5), pad('len s', 6), pad('atk ms', 7), pad('rr dB', 6), pad('step', 5), pad('max s', 6), pad('rms', 5), 'fails')
-  for (const r of rows) console.log(pad(r.cue, 14), pad(r.bus, 6), pad(r.momentaryMax, 7), pad(r.shortMax, 7), pad(r.peakDbfs, 6), pad(r.centroidHz, 6), pad(r.above3kPct, 5), pad(r.lengthS, 6), pad(r.attackMs, 7), pad(r.roundRobinDiffDb, 6), pad(r.maxStepDb, 5), pad(r.longestLengthS, 6), pad(r.renderMsPerPlay, 5), r.fails.join('; '))
+  console.log(pad('cue', 14), pad('bus', 6), pad('M max', 7), pad('S max', 7), pad('peak', 6), pad('cent', 6), pad('>3k%', 5), pad('2-5k%', 6), pad('rise', 5), pad('len s', 6), pad('atk ms', 7), pad('rr dB', 6), pad('step', 5), pad('max s', 6), pad('rms', 5), 'fails')
+  for (const r of rows) console.log(pad(r.cue, 14), pad(r.bus, 6), pad(r.momentaryMax, 7), pad(r.shortMax, 7), pad(r.peakDbfs, 6), pad(r.centroidHz, 6), pad(r.above3kPct, 5), pad(r.band2to5kPct, 6), pad(r.rise1090Ms, 5), pad(r.lengthS, 6), pad(r.attackMs, 7), pad(r.roundRobinDiffDb, 6), pad(r.maxStepDb, 5), pad(r.longestLengthS, 6), pad(r.renderMsPerPlay, 5), r.fails.join('; '))
   console.log(JSON.stringify(summary))
   console.log(`WAVs, spectrograms and measurements.json in ${out}`)
 } finally {

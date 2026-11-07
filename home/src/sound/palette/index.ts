@@ -3,7 +3,7 @@
 // key (C major / A minor at A = 440, measured by chroma), using its pentatonic notes so they
 // sit over any of the bed's chords. Most cues end within 0.6 s, rewards within 1.2 s.
 //
-// Variants: `a` is the default. chose, sent, card, news, placed and page have b and c for a
+// Variants: CHOSEN (below) names the owner's pick per cue, else `a` plays. chose, sent, card, news, placed and page have b and c for a
 // listening round (`?sfx=chose:b`): each `b` is recorded or hybrid (Freesound CC0 takes in
 // public/audio/sfx/, with the synthesized sound as a stand-in until the file has loaded), and
 // `a` and `c` are two different synthesized characters.
@@ -589,6 +589,12 @@ export const PALETTE: Palette = {
   ghost, placed, kept, undone, failed,
   'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused,
 }
+
+/**
+ * The owner's picks from the listening room, the default for every visit. The player falls back
+ * to 'a' for a cue not named here; the page's stored picks and `?sfx=` still win over these.
+ */
+export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c', sent: 'b', placed: 'a', page: 'b', news: 'a' }
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {

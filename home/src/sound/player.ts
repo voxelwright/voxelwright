@@ -1,12 +1,13 @@
 // Plays cues (#52). Framework-free and on any BaseAudioContext, so plugins/sound.ts plays
 // it live and the checks render the very same thing offline.
 //
-// One play: the cue's variant (default 'a', or a pick), a seeded random, the cue's level
+// One play: the cue's variant (a pick, else the palette's CHOSEN one, else 'a'), a seeded random, the cue's level
 // with volume and pitch jitter, a round-robin index, and a StereoPannerNode into the
 // cue's bus. Scheduled at currentTime + LEAD rounded to a whole sample, with no awaits
 // between the event and `start`.
 import type { BusName, Cue, CueName, Kit, Palette, Play } from './contract'
 import { busFor, mixFor } from '../voice/buses'
+import { CHOSEN } from './palette'
 
 /** Seconds from the event to the first sample: enough for the render quantum, under 20 ms with the context's latency. */
 const LEAD = 0.004
@@ -61,11 +62,10 @@ export class Player {
     this.kit = { noise, sample: (name) => this.samples.get(name) }
   }
 
-  /** The variant a play uses: asked for, else picked, else 'a' (and 'a' when the pick does not exist). */
+  /** The variant a play uses: the first that exists of asked for, picked, the palette's CHOSEN one, and 'a'. */
   variant(name: CueName, asked?: string): string {
     const variants = this.palette[name]
-    const want = asked ?? this.picks[name] ?? 'a'
-    return variants[want] ? want : 'a'
+    return [asked, this.picks[name], CHOSEN[name]].find((v) => v !== undefined && Object.hasOwn(variants, v)) ?? 'a'
   }
 
   /** Every sample file the palette names. */
