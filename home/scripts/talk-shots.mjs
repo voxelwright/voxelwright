@@ -135,8 +135,8 @@ async function seatThree(page) {
 async function tableRound(page, shot) {
   await page.keyboard.type('Shall we plant some herbs this weekend?', { delay: 25 })
   await page.keyboard.press('Enter')
-  // Mid-round: one card said, the next speaker half-way through its words.
-  await until(page, (s) => Object.values(s.cards).some((c) => c.as === 'said') && Object.values(s.cards).some((c) => c.as === 'speaking' && !c.finished && c.text.length > 20), 40_000)
+  // Mid-round: one villager has spoken, the next is half-way through its words.
+  await until(page, (s) => s.round.length >= 2 && s.speaker === s.round[1].speaker && s.cards[s.speaker]?.as === 'speaking' && !s.cards[s.speaker].finished && s.cards[s.speaker].text.length > 20, 40_000)
   await page.waitForTimeout(700)
   await shot('table')
 }

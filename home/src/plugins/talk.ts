@@ -583,7 +583,8 @@ export default {
     let subject: THREE.Object3D | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
-      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject) return false
+      // The held pad rides with the camera; it never blocks a shot.
+      for (let n: THREE.Object3D | null = o; n; n = n.parent) if (!n.visible || n === subject || n.userData.hud) return false
       return ([] as THREE.Material[]).concat((o as THREE.Mesh).material).some((mat) => mat.visible && mat.depthWrite)
     }
     const clear = (from: THREE.Vector3, to: THREE.Vector3) => {
