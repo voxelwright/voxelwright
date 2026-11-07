@@ -87,7 +87,14 @@ const layout = (page) => page.evaluate((selectors) => {
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
     const cs = getComputedStyle(e)
     if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) continue
-    const r = e.getBoundingClientRect()
+    let r = e.getBoundingClientRect()
+    // A label inside a scrolling list counts only where the list shows it.
+    for (let a = e.parentElement; a; a = a.parentElement) {
+      if (!/(auto|scroll|hidden)/.test(getComputedStyle(a).overflowY)) continue
+      const c = a.getBoundingClientRect()
+      const l = Math.max(r.left, c.left), t = Math.max(r.top, c.top), rr = Math.min(r.right, c.right), b = Math.min(r.bottom, c.bottom)
+      r = new DOMRect(l, t, Math.max(0, rr - l), Math.max(0, b - t))
+    }
     if (r.width && r.height) boxes.push({ what: `${s}${e.dataset.key ? `[${e.dataset.key}]` : e.dataset.template ? `[${e.dataset.template}]` : ''}`, r })
   }
   const labels = boxes.length
@@ -104,7 +111,7 @@ const layout = (page) => page.evaluate((selectors) => {
   return { labels, outside, overlaps }
 }, LABELS)
 /** Visible words under 14 px inside these elements (the phone's floor). */
-const small = (page, sel) => page.evaluate((sel) => {
+const small = (page, sel, floor = 13.95) => page.evaluate(([sel, floor]) => {
   const out = []
   for (const root of document.querySelectorAll(sel)) {
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -113,11 +120,11 @@ const small = (page, sel) => page.evaluate((sel) => {
       if (!n.textContent.trim() || !e) continue
       const cs = getComputedStyle(e)
       if (cs.visibility === 'hidden' || cs.display === 'none' || !e.getClientRects().length) continue
-      if (parseFloat(cs.fontSize) < 13.95) out.push(`${n.textContent.trim().slice(0, 20)}: ${cs.fontSize}`)
+      if (parseFloat(cs.fontSize) < floor) out.push(`${n.textContent.trim().slice(0, 20)}: ${cs.fontSize}`)
     }
   }
   return out
-}, sel)
+}, [sel, floor])
 let shotDir = shots
 const shot = async (page, name) => {
   const l = await layout(page)
@@ -153,6 +160,26 @@ async function regroup(s) {
     if (cheval) {
       check(`${tag}: before there is a villager the controls are put away: nothing to tab to`, await page.evaluate(() => [...document.querySelectorAll('.vs-fit [tabindex="0"]')].every((e) => getComputedStyle(e).visibility === 'hidden')))
       check(`${tag}: no word on the swatches or the slip is under 14 px`, (await small(page, '.vs-fit, .vs-slip')).length === 0, await small(page, '.vs-fit, .vs-slip'))
+      // Every pattern has one swatch, the built-in ones first, no two alike, and each can be brought into view and picked.
+      const sw = await page.evaluate(async () => {
+        const cards = window.villagerSetup.state().rack.cards
+        const swatches = [...document.querySelectorAll('.vs-fit .vs-swatch')]
+        const names = swatches.map((b) => b.textContent)
+        const sources = swatches.map((b) => cards.find((c) => c.id === b.dataset.template)?.source)
+        const hang = document.querySelector('.vs-fit .hang')
+        const unreachable = []
+        for (const b of swatches) {
+          b.scrollIntoView({ block: 'nearest' })
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          const r = b.getBoundingClientRect(), h = hang.getBoundingClientRect()
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.vs-swatch')
+          if (r.top < h.top - 1 || r.bottom > h.bottom + 1 || hit !== b) unreachable.push(b.dataset.template)
+        }
+        hang.scrollTop = 0
+        return { count: swatches.length, cards: cards.length, names, sources, unreachable, scrolls: hang.scrollHeight > hang.clientHeight + 1 }
+      })
+      const builtInFirst = sw.sources.slice(Math.max(0, sw.sources.findIndex((x) => x !== 'built-in'))).every((x) => x !== 'built-in') || sw.sources.every((x) => x === 'built-in')
+      check(`${tag}: each pattern has one swatch (${sw.count}), the built-in ones first, none alike, every one reachable`, sw.count === sw.cards && new Set(sw.names).size === sw.names.length && builtInFirst && sw.unreachable.length === 0, sw)
     }
     // The mirrors hang the patterns as swatches in the glass; the bench stands them on the rack.
     const glass = s === 'b' || cheval
@@ -206,6 +233,38 @@ async function regroup(s) {
     if (cheval) {
       check(`${tag}: every control fits inside its face of the furniture`, (await page.evaluate(() => window.villagerSetup.spill())).length === 0, await page.evaluate(() => window.villagerSetup.spill()))
       check(`${tag}: no word on the furniture is under 14 px`, (await small(page, '.vs-fit')).length === 0, await small(page, '.vs-fit'))
+      const fill = await page.evaluate(() => {
+        const v = window.villagerSetup.bounds(), g = window.villagerSetup.glass()
+        return { height: +((v.bottom - v.top) / g.height).toFixed(2), width: +((v.right - v.left) / g.width).toFixed(2), clear: v.left >= g.left - 1 && v.right <= g.right + 1 }
+      })
+      check(`${tag}: the villager fills the glass (${Math.round(fill.height * 100)}% of its height, ${Math.round(fill.width * 100)}% of its width) and keeps clear of both rails`, fill.clear && Math.max(fill.height, fill.width) >= 0.7, fill)
+      // The save and send-off tags are tied to the furniture: within a short thread of it.
+      const near = await page.evaluate(() => {
+        const f = window.villagerSetup.furniture()
+        return ['.vs-save', '.vs-done'].map((s) => {
+          const r = document.querySelector(s).getBoundingClientRect()
+          return Math.round(Math.max(f.left - r.right, r.left - f.right, f.top - r.bottom, r.top - f.bottom, 0))
+        })
+      })
+      check(`${tag}: "Save as a pattern" and "Off you go" sit beside the furniture (${near.join(' and ')} px away)`, near.every((d) => d <= 40), near)
+      if (vw < vh) {
+        check(`${tag}: no word on the phone's furniture is under 16 px`, (await small(page, '.vs-fit', 15.95)).length === 0, await small(page, '.vs-fit', 15.95))
+        // Each control's touch target, probed with elementFromPoint from its middle outward: 44 px or more each way.
+        const targets = await page.evaluate(() => {
+          const probe = (e) => {
+            const b = e.getBoundingClientRect(), cx = b.left + b.width / 2, cy = b.top + b.height / 2
+            const reach = (dx, dy) => {
+              let n = 0
+              while (n < 40 && document.elementFromPoint(cx + dx * (n + 1), cy + dy * (n + 1))?.closest('[data-key]') === e) n++
+              return n
+            }
+            return { what: `${e.dataset.key}${e.textContent ? ` ${e.textContent.trim()}` : ''}`, w: reach(-1, 0) + reach(1, 0) + 1, h: reach(0, -1) + reach(0, 1) + 1 }
+          }
+          return [...document.querySelectorAll('.vs-fit .marker, .vs-fit .knob, .vs-fit .ribbon, .vs-fit .dot, .vs-fit .step:not(.locked)')].map(probe)
+        })
+        const short = targets.filter((t) => t.w < 44 || t.h < (t.what.startsWith('hue') ? 30 : 44))
+        check(`${tag}: every control on the phone is a finger-sized target (44 px; the seven colour dots 44 across but only 30 apart)`, short.length === 0, { short, targets })
+      }
       // Keyboard: Tab walks the nine values in order (the colours and the jokes are one stop each), then the save and send-off tags.
       await page.focus('.vs-fit .marker')
       const order = []
@@ -225,7 +284,12 @@ async function regroup(s) {
       check(`${tag}: "Save as a pattern" keeps it on the host`, /Kept as a pattern/.test((await st(page)).note ?? ''), (await st(page)).note)
     }
     await page.click('.vs-done')
-    await page.waitForTimeout(2600)
+    if (cheval) {
+      // It turns to you and waves goodbye (1.4 s) before the hop down (1.1 s).
+      await page.waitForTimeout(800)
+      await shot(page, '4-waving')
+      await page.waitForTimeout(3200)
+    } else await page.waitForTimeout(4000)
     const s3 = await st(page)
     const w0 = s3.walkers[0]
     await page.waitForTimeout(2500)
@@ -260,7 +324,9 @@ async function regroup(s) {
   {
     // The waiting, through the stub host (slow), so a piece is already cut.
     const { context, page, errors } = await open('&person=jo', { setup: s })
-    await page.locator('.vs-slip:not(.vs-say) .line').fill('a sleepy hedgehog who bakes bread before dawn')
+    // Words that match the stub's villager (Biscuit, a pup who bakes, in a cook's toque).
+    const typed = 'a calm pup in a white toque who has the bread baked before anyone is up'
+    await page.locator('.vs-slip:not(.vs-say) .line').fill(typed)
     slow = true
     await page.focus('.vs-slip:not(.vs-say) .line')
     await page.keyboard.press('Enter')
@@ -268,11 +334,21 @@ async function regroup(s) {
     await settle(page)
     const w = await st(page)
     check(`${tag}: waiting shows the cutting on the mat`, w.state === 'waiting' && w.cut >= 1, { state: w.state, cut: w.cut })
+    if (cheval) {
+      const paper = await page.evaluate(() => window.villagerSetup.paper())
+      check(`${tag}: while waiting the glass holds the person's own words, whole and readable (16 px or more on the page)`, paper.shown && paper.text === typed && paper.whole && paper.inGlass && paper.onScreen && paper.px >= 16, paper)
+    }
     await shot(page, '2-waiting')
     await until(page, ['tuning', 'failed'])
     slow = false
     const sw = await st(page)
     check(`${tag}: the stub host's villager is stitched after the wait`, sw.state === 'tuning', { state: sw.state, failure: sw.failure, refusal: sw.refusal })
+    if (cheval && sw.state === 'tuning') {
+      // A second saved pattern under another name, so the next size has seven patterns to show.
+      await page.waitForTimeout(600)
+      await page.click('.vs-save button')
+      await page.waitForFunction(() => /Kept as a pattern/.test(window.villagerSetup.state().note ?? ''), null, { timeout: 8000 }).catch(() => {})
+    }
     check(`${tag} (waiting): no page errors`, errors.length === 0, errors)
     await context.close()
   }
@@ -384,7 +460,8 @@ try {
     await page.keyboard.press('Tab')
     const onDone = await page.evaluate(() => document.activeElement?.classList.contains('vs-done') ? 'vs-done' : document.activeElement?.className)
     await page.keyboard.press('Enter')
-    await page.waitForTimeout(2600)
+    // It waves goodbye (1.4 s) before the hop down (1.1 s).
+    await page.waitForTimeout(4000)
     const s3 = await st(page)
     check('Tab reaches "Off you go"; it hops down and walks the kitchen', onDone === 'vs-done' && s3.walkers.length === 1 && s3.state === 'empty', { onDone, walkers: s3.walkers })
     const w0 = s3.walkers[0]

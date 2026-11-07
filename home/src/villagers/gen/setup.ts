@@ -327,14 +327,31 @@ export default {
     let slipAt: 'mat' | 'edge' | 'front' = 'mat'
     // After the send-off the camera watches the new villager walk off for a while, then comes back.
     let watching: { walker: Villager; until: number } | null = null
-    const watchPose = (p: THREE.Vector3) => {
+    /** The heading the watching camera keeps ahead of, eased so a corner on the walker's route doesn't swing the view. */
+    let watchHeading: number | null = null
+    /** The walker's height on the floor, metres. */
+    let watchSize = 0.4
+    const watchPose = (w: Villager) => {
       const narrow = layout === 'narrow'
       lens(narrow ? 58 : seatFov)
-      // From the front left at a grown-up's eye height, looking past it toward the counter, its first chore: the
-      // reading lamp stays to the right, out of frame, and the floor shows round its feet.
-      const towards = new THREE.Vector3(SPOTS.counter.at[0], 0, SPOTS.counter.at[1])
-      const look = new THREE.Vector3().lerpVectors(new THREE.Vector3(p.x, 0, p.z), towards, 0.35).setY(0.3)
-      return { position: look.clone().add(new THREE.Vector3(narrow ? -0.45 : -0.85, narrow ? 1.25 : 1.12, narrow ? 2.3 : 2.15)), look }
+      // Ahead of it and to one side, at about its own height, so its face and front show as it walks, not its back.
+      // The side is whichever keeps the camera inside the kitchen.
+      const p = w.pos
+      const yaw = w.fig.root.rotation.y
+      watchHeading = watchHeading === null ? yaw : watchHeading + Math.atan2(Math.sin(yaw - watchHeading), Math.cos(yaw - watchHeading)) * 0.06
+      // Far enough back to see all of it and the floor round it; of the angles that keep the camera inside the kitchen,
+      // the most frontal.
+      const size = watchSize
+      const reach = Math.max(1.7, size * (narrow ? 5.2 : 4.4))
+      const at = (a: number) => new THREE.Vector3(p.x + Math.sin(watchHeading! + a) * reach, 0, p.z + Math.cos(watchHeading! + a) * reach)
+      const inside = (v: THREE.Vector3) => Math.abs(v.x) <= 2.2 && v.z >= -1.3 && v.z <= 2.6
+      const angles = [0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.65, -1.65]
+      const cam = angles.map(at).find(inside) ?? at(1.65)
+      cam.x = THREE.MathUtils.clamp(cam.x, -2.2, 2.2)
+      cam.z = THREE.MathUtils.clamp(cam.z, -1.3, 2.6)
+      cam.y = Math.max(0.75, size * 2.4)
+      const look = new THREE.Vector3(p.x, size * 0.45, p.z)
+      return { position: cam, look }
     }
     const leaveTable = (rate?: number) => {
       lens(seatFov)
@@ -806,6 +823,13 @@ export default {
         })
       }
       const spot = SPOTS[LANDING]
+      // Before it goes: square on to you, its face up, a wave goodbye.
+      if (!reducedMotion.matches) {
+        say('Bye for now!', true)
+        await puppet.wave(1.4)
+        for (const t of sayTimers) clearTimeout(t)
+        card.classList.remove('shown')
+      }
       puppet.looking = false
       // Down it hops, growing from its bench size to its own as it goes.
       await puppet.leap(new THREE.Vector3(spot.at[0], 0, spot.at[1]), reducedMotion.matches ? 0.01 : 1.1, 0.35, SCALE * tune.size(record.tuning.size))
@@ -821,6 +845,8 @@ export default {
       blobs = contactShadows(walkers)
       group.add(...blobs)
       // Watch it go: the camera follows it across the kitchen to its first chore, then comes back to the table.
+      watchHeading = null
+      watchSize = body ? (body.max.y - body.min.y) * fig.root.scale.x : 0.4
       watching = { walker, until: performance.now() + 11000 }
       puppet = null
       fig = null
@@ -856,10 +882,15 @@ export default {
       const list: RackCard[] = mine.ok ? mine.builtin.map((template) => ({ template, source: 'built-in' as const })) : []
       if (mine.ok) list.push(...mine.templates.map((template) => ({ template, source: 'mine' as const })))
       if (family.ok) list.push(...family.templates.filter((t) => t.maker !== PERSON).map((template) => ({ template, source: 'family' as const, maker: (template.maker ?? '').charAt(0).toUpperCase() + (template.maker ?? '').slice(1) })))
-      // Newest saved patterns first after the built-in ones, so a fresh save is on the rack.
+      // The built-in patterns first, then the two newest saved ones (a fresh save is on the rack). One card per name and
+      // maker: saving "Like Brindle" twice keeps the newer one, not two cards that look the same.
       const builtIn = list.filter((c) => c.source === 'built-in')
-      const saved = list.filter((c) => c.source !== 'built-in').reverse()
-      shownCards = [...saved.slice(0, 2), ...builtIn].slice(0, 7)
+      const seen = new Set<string>()
+      const saved = list.filter((c) => c.source !== 'built-in').reverse().filter((c) => {
+        const key = `${c.source}|${c.maker ?? ''}|${c.template.name.trim().toLowerCase()}`
+        return !seen.has(key) && Boolean(seen.add(key))
+      })
+      shownCards = [...builtIn, ...saved.slice(0, 2)]
       patterns.set(shownCards)
       return list
     }
@@ -932,7 +963,8 @@ export default {
       reflow: () => atTable(),
       say: (text, short) => say(text, short),
       tuned: () => {
-        if (made) say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
+        // Only while it is being tuned: a late answer must not talk over its goodbye.
+        if (made && state === 'tuning') say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
       },
       note: (text) => note(text),
       hueAt: (v) => {
@@ -1029,7 +1061,7 @@ export default {
           atTable()
           openSlip()
         }
-        else view.focus(watchPose(watching.walker.pos), 1.6)
+        else view.focus(watchPose(watching.walker), 1.6)
       }
       if (slip.classList.contains('shown')) {
         // The slip lies on the mat, or sits at the near edge; either way inside the screen.

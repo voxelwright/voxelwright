@@ -144,6 +144,13 @@ export class Puppet {
     this.hopU = 0
   }
 
+  /** Square on to you, a hand up and waggling: goodbye. Resolved when the hand is down again. */
+  wave(seconds = 1.4): Promise<void> {
+    this.looking = true
+    return new Promise((done) => (this.waving = { u: 0, seconds, done }))
+  }
+  private waving: { u: number; seconds: number; done: () => void } | null = null
+
   /** A long hop to somewhere else (off the table), growing to `scale` on the way, resolved on landing. */
   leap(to: THREE.Vector3, seconds: number, height: number, scale = this.fig.root.scale.x): Promise<void> {
     return new Promise((done) => (this.jump = { from: this.at.clone(), to: to.clone(), u: 0, seconds, height, scale0: this.fig.root.scale.x, scale1: scale, done }))
@@ -175,7 +182,18 @@ export class Puppet {
       }
     } else if (this.looking) {
       const toCam = Math.atan2(camera.x - this.at.x, camera.z - this.at.z)
-      this.yaw += wrap(toCam - this.yaw) * (1 - Math.exp(-dt * 4))
+      this.yaw += wrap(toCam - this.yaw) * (1 - Math.exp(-dt * (this.waving ? 7 : 4)))
+    }
+    let wave = 0
+    if (this.waving) {
+      const w = this.waving
+      w.u = Math.min(1, w.u + dt / w.seconds)
+      // Up, three waggles, down.
+      wave = Math.sin(Math.PI * Math.min(1, w.u * 1.15)) ** 0.6
+      if (w.u >= 1) {
+        this.waving = null
+        w.done()
+      }
     }
     this.hopU = Math.min(1, this.hopU + dt / 0.6)
     if (this.hopU < 1) {
@@ -202,7 +220,7 @@ export class Puppet {
       this.glanceGoal = (Math.random() - 0.5) * 0.9
       this.nextGlance = (2.2 + Math.random() * 2.5) / e
     }
-    const goal = this.looking && (this.speaking || Math.sin(t * 0.37) > -0.3) ? 0 : this.glanceGoal
+    const goal = this.looking && (wave > 0 || this.speaking || Math.sin(t * 0.37) > -0.3) ? 0 : this.glanceGoal
     this.glance += (goal - this.glance) * 0.35
     fig.head.rotation.y = this.glance
     fig.head.rotation.x = -0.12 + (this.speaking ? 0.06 * Math.sin(t * 6) : 0)
@@ -212,6 +230,12 @@ export class Puppet {
       if (!rest) return
       h.position.copy(rest)
       h.position.y += Math.sin(t * 2.4 * e + i * Math.PI) * 0.006 * e + (this.speaking && i === 1 ? 0.03 * Math.max(0, Math.sin(t * 2.3)) : 0)
+      if (i === 0 && wave > 0) {
+        // The near hand up beside the head, waggling side to side.
+        h.position.y += fig.height * 0.34 * wave
+        h.position.x += Math.sin(t * 13) * fig.height * 0.06 * wave
+        h.position.z += fig.height * 0.06 * wave
+      }
     })
     this.blinkAt -= 1 / 12
     const closed = this.blinkAt < 0.12

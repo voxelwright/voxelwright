@@ -477,10 +477,10 @@ export function workshop(): Workshop {
     if (benchAt) {
       // On the stool's top: the felt sheet left of the pad's middle, the scrap and the needle at its right, the
       // reel on the table beside the stool.
-      ks = 0.6
+      ks = 0.78
       wy = benchAt.y + 0.007
-      reel.group.position.set(benchAt.x + 0.235, benchAt.y, benchAt.z - 0.085)
-      workAt.set(benchAt.x - 0.06, wy + 0.002, benchAt.z - 0.035)
+      reel.group.position.set(benchAt.x + 0.25, benchAt.y, benchAt.z - 0.085)
+      workAt.set(benchAt.x - 0.03, wy + 0.002, benchAt.z - 0.02)
       scrap.position.set(benchAt.x + 0.17, wy + 0.002, benchAt.z - 0.05)
       rest.set(benchAt.x + 0.19, wy + 0.005, benchAt.z - 0.03)
     } else {

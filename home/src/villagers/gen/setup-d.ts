@@ -18,19 +18,29 @@ import { BOOK, el, fittingControls } from './setup-controls'
 
 /** Where the mirror stands: the table's left end, square to the room. */
 const AT = new THREE.Vector3(-0.8, TOP, 0.04)
-/** Its measures (metres, in its own space: x across, y up from the table, z toward the room). */
-const F = { w: 0.58, bottom: 0.29, top: 0.91, rail: 0.06, topRail: 0.055, bottomRail: 0.04, pivot: 0.6, tilt: 0.04, z: -0.02 }
-const POST = 0.31
-/** The fitting stool: its top, the drawer's front, the legs (where the ribbons are tied) and the foot rail. */
-const S = { w: 0.56, d: 0.26, z: 0.15, top: 0.32, board: 0.015, drawer: [0.172, 0.302], legs: [0.05, 0.168], foot: [0.004, 0.046], leg: 0.03 }
-const FRONT = S.z + S.d / 2
-/** The glass, in the frame's space (its middle at the pivot). */
-const GLASS = { left: -F.w / 2 + F.rail, right: F.w / 2 - F.rail, bottom: F.bottom + F.bottomRail, top: F.top - F.topRail }
-const GW = GLASS.right - GLASS.left, GH = GLASS.top - GLASS.bottom
-/** How much bigger the villager looks than the glass behind it (across, and up): it stands on the stool, in front of the frame. */
-const NEARER = { w: 1.22, h: 1.12 }
+/**
+ * The furniture's measures (metres; x across, y up from the table, z toward the room), one set per layout. A phone is
+ * narrow, so the furniture is as wide as the screen and has height to spare: there the stool stands taller (a dressing
+ * table), so its drawer, legs and foot rail hold finger-sized controls. The mirror rides up on its posts to match.
+ */
+function dims(narrow: boolean) {
+  /** The fitting stool: its top, the drawer's front, the legs (where the ribbons are tied) and the foot rail. */
+  const S = narrow
+    ? { w: 0.62, d: 0.26, z: 0.15, top: 0.64, board: 0.015, drawer: [0.388, 0.622], legs: [0.09, 0.378], foot: [0.006, 0.084], leg: 0.03 }
+    : { w: 0.62, d: 0.26, z: 0.15, top: 0.32, board: 0.015, drawer: [0.172, 0.302], legs: [0.05, 0.168], foot: [0.004, 0.046], leg: 0.03 }
+  const lift = S.top - 0.32
+  const F = { w: 0.64, bottom: 0.29 + lift, top: 0.91 + lift, rail: 0.06, topRail: 0.055, bottomRail: 0.04, pivot: 0.6 + lift, tilt: 0.04, z: -0.02 }
+  /** The glass, in the frame's space (its middle at the pivot). */
+  const GLASS = { left: -F.w / 2 + F.rail, right: F.w / 2 - F.rail, bottom: F.bottom + F.bottomRail, top: F.top - F.topRail }
+  return { S, F, GLASS, POST: F.w / 2 + 0.02, FRONT: S.z + S.d / 2, GW: GLASS.right - GLASS.left, GH: GLASS.top - GLASS.bottom, narrow }
+}
+type Dims = ReturnType<typeof dims>
+const WIDE = dims(false), NARROW = dims(true)
+/** How far the frame swings forward on its pivots while the pattern is drafted, so the paper in it faces the work. */
+const WAIT_TILT = 0.34
 
-function furniture() {
+function furniture(D: Dims) {
+  const { S, F, GLASS, POST, FRONT, GW, GH } = D
   const g = new THREE.Group()
   g.name = 'workshop mirror'
   g.position.copy(AT)
@@ -125,16 +135,47 @@ function furniture() {
 
 export function fitting(scene: Scene): Strategy {
   const { patterns, stage, shop } = scene
-  const room = furniture()
+  const narrow = () => scene.layout() === 'narrow'
+  const dimsNow = () => (narrow() ? NARROW : WIDE)
+  let D = dimsNow()
+  let room = furniture(D)
   scene.group.add(room.group)
   // While the pattern is made, the cutting happens on the stool's top.
-  shop.bench(AT.clone().add(new THREE.Vector3(0, S.top, S.z)))
+  const benchAt = () => AT.clone().add(new THREE.Vector3(0, D.S.top, D.S.z))
+  shop.bench(benchAt())
+  /** A phone turned to a wide screen (or back): the furniture for that layout. */
+  const rebuild = () => {
+    const tilt = room.frame.rotation.x
+    room.group.removeFromParent()
+    room.dispose()
+    D = dimsNow()
+    room = furniture(D)
+    room.frame.rotation.x = tilt
+    scene.group.add(room.group)
+    shop.bench(benchAt())
+  }
 
   const root = el('div', 'vs-fit')
   const dim = el('div', 'dim', root)
   /** One layer per face of the furniture; each is laid over its face every frame. */
   const face = (name: string) => el('div', `face ${name}`, root)
   const topRail = face('top'), leftRail = face('left'), rightRail = face('right'), drawer = face('drawer'), legs = face('legs'), foot = face('foot'), glassFace = face('glass')
+  // While the pattern is drafted, the person's own words on tissue paper, pinned in the glass as it tips toward the work.
+  const paper = el('div', 'paper', root)
+  paper.setAttribute('aria-hidden', 'true')
+  el('small', 'paper-head', paper).textContent = 'your words'
+  const words = el('p', 'paper-words', paper)
+  // The two tags tied to the furniture with thread: the save tag to the left post, the send-off to the right.
+  const strings = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  strings.setAttribute('class', 'strings')
+  strings.setAttribute('aria-hidden', 'true')
+  const thread = () => {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    strings.append(p)
+    return p
+  }
+  const saveString = thread(), doneString = thread()
+  root.append(strings)
   const style = document.createElement('style')
   style.textContent = css()
   document.head.append(style)
@@ -157,29 +198,36 @@ export function fitting(scene: Scene): Strategy {
 
   // ── Projection: the furniture's faces on the page ──
   const v = new THREE.Vector3()
+  const toPage = (p: THREE.Vector3, cam: THREE.Camera) => {
+    p.project(cam)
+    return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight }
+  }
   /** A face of the furniture (corners in its own space) as a page rectangle through a camera. */
   const rectOf = (pts: [number, number, number][], cam: THREE.Camera, obj: THREE.Object3D = room.group): Rect => {
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
     obj.updateMatrixWorld(true)
     for (const p of pts) {
-      v.set(...p).applyMatrix4(obj.matrixWorld).project(cam)
-      const x = ((v.x + 1) / 2) * innerWidth, y = ((1 - v.y) / 2) * innerHeight
-      left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y)
+      const q = toPage(v.set(...p).applyMatrix4(obj.matrixWorld), cam)
+      left = Math.min(left, q.x); right = Math.max(right, q.x); top = Math.min(top, q.y); bottom = Math.max(bottom, q.y)
     }
     return { left, top, right, bottom }
   }
   const quad = (x0: number, x1: number, y0: number, y1: number, z: number): [number, number, number][] => [[x0, y0, z], [x1, y0, z], [x0, y1, z], [x1, y1, z]]
-  const fy = (y: number) => y - F.pivot
-  const inner = S.w / 2 - S.leg
+  const fy = (y: number) => y - D.F.pivot
   const FACES = {
-    top: () => rectOf(quad(-F.w / 2, F.w / 2, fy(GLASS.top), fy(F.top), 0.016), stage.camera, room.frame),
-    left: () => rectOf(quad(-F.w / 2, GLASS.left, fy(GLASS.bottom), fy(GLASS.top), 0.016), stage.camera, room.frame),
-    right: () => rectOf(quad(GLASS.right, F.w / 2, fy(GLASS.bottom), fy(GLASS.top), 0.016), stage.camera, room.frame),
-    glass: () => rectOf(quad(GLASS.left, GLASS.right, fy(GLASS.bottom), fy(GLASS.top), 0.001), stage.camera, room.frame),
-    drawer: () => rectOf(quad(-S.w / 2, S.w / 2, S.drawer[0] + 0.01, S.drawer[1], FRONT), stage.camera),
-    legs: () => rectOf(quad(-inner, inner, S.legs[0], S.legs[1], FRONT), stage.camera),
-    foot: () => rectOf(quad(-inner, inner, S.foot[0], S.foot[1], FRONT), stage.camera),
-    all: () => rectOf(BOUNDS, stage.camera),
+    top: () => rectOf(quad(-D.F.w / 2, D.F.w / 2, fy(D.GLASS.top), fy(D.F.top), 0.016), stage.camera, room.frame),
+    left: () => rectOf(quad(-D.F.w / 2, D.GLASS.left, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.016), stage.camera, room.frame),
+    right: () => rectOf(quad(D.GLASS.right, D.F.w / 2, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.016), stage.camera, room.frame),
+    glass: () => rectOf(quad(D.GLASS.left, D.GLASS.right, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.001), stage.camera, room.frame),
+    drawer: () => rectOf(quad(-D.S.w / 2, D.S.w / 2, D.S.drawer[0] + 0.01, D.S.drawer[1], D.FRONT), stage.camera),
+    legs: () => rectOf(quad(-(D.S.w / 2 - D.S.leg), D.S.w / 2 - D.S.leg, D.S.legs[0], D.S.legs[1], D.FRONT), stage.camera),
+    foot: () => rectOf(quad(-(D.S.w / 2 - D.S.leg), D.S.w / 2 - D.S.leg, D.S.foot[0], D.S.foot[1], D.FRONT), stage.camera),
+    all: () => rectOf(bounds(D), stage.camera),
+  }
+  /** A point on the furniture (its own space) on the page. */
+  const pointAt = (x: number, y: number, z: number) => {
+    room.group.updateMatrixWorld(true)
+    return toPage(v.set(x, y, z).applyMatrix4(room.group.matrixWorld), stage.camera)
   }
   const lay = (e: HTMLElement, r: Rect) => {
     const at = `${Math.round(r.left)}px ${Math.round(r.top)}px`
@@ -187,6 +235,24 @@ export function fitting(scene: Scene): Strategy {
     const w = `${Math.round(r.right - r.left)}px`, h = `${Math.round(r.bottom - r.top)}px`
     if (e.style.width !== w) e.style.width = w
     if (e.style.height !== h) e.style.height = h
+  }
+  /**
+   * Lay a page layer exactly on a quad of the frame (corners in the frame's space), however the frame is tipped: the
+   * square-to-quad projective map (Heckbert), written as a CSS matrix3d.
+   */
+  const layQuad = (e: HTMLElement, x0: number, x1: number, y0: number, y1: number) => {
+    room.frame.updateMatrixWorld(true)
+    const c = [[x0, y1], [x1, y1], [x1, y0], [x0, y0]].map(([x, y]) => toPage(v.set(x, y, 0.003).applyMatrix4(room.frame.matrixWorld), stage.camera))
+    const [p0, p1, p2, p3] = c
+    const dx1 = p1.x - p2.x, dx2 = p3.x - p2.x, dx3 = p0.x - p1.x + p2.x - p3.x
+    const dy1 = p1.y - p2.y, dy2 = p3.y - p2.y, dy3 = p0.y - p1.y + p2.y - p3.y
+    const den = dx1 * dy2 - dx2 * dy1
+    const g = Math.abs(den) < 1e-9 ? 0 : (dx3 * dy2 - dx2 * dy3) / den
+    const h = Math.abs(den) < 1e-9 ? 0 : (dx1 * dy3 - dx3 * dy1) / den
+    const a = p1.x - p0.x + g * p1.x, b = p3.x - p0.x + h * p3.x, d = p1.y - p0.y + g * p1.y, ee = p3.y - p0.y + h * p3.y
+    const w = e.offsetWidth || 1, hh = e.offsetHeight || 1
+    const m = [a / w, d / w, 0, g / w, b / hh, ee / hh, 0, h / hh, 0, 0, 1, 0, p0.x, p0.y, 0, 1]
+    e.style.transform = `matrix3d(${m.map((n) => +n.toFixed(6)).join(',')})`
   }
 
   // ── The camera: square on to the mirror, the whole of it and the stool in a page rectangle ──
@@ -196,10 +262,15 @@ export function fitting(scene: Scene): Strategy {
     for (const xx of [-x, x]) for (const y of [y0, y1]) for (const z of [z0, z1]) out.push([xx, y, z])
     return out
   }
-  const BOUNDS = box(POST + 0.022, 0, 0.972, F.z - 0.02, FRONT)
-  /** The stool's top and the glass's lower half, for the waiting. */
-  const WORK = box(S.w / 2 + 0.01, S.top, S.top + 0.05, S.z - S.d / 2, FRONT)
-  const narrow = () => scene.layout() === 'narrow'
+  const bounds = (d: Dims) => box(d.POST + 0.022, 0, d.F.top + 0.062, d.F.z - 0.02, d.FRONT)
+  /** The frame's point (frame space y, z) in the furniture's space, tipped forward by `tilt`. */
+  const tipped = (x: number, y: number, z: number, tilt: number): [number, number, number] =>
+    [x, D.F.pivot + y * Math.cos(tilt) - z * Math.sin(tilt), D.F.z + y * Math.sin(tilt) + z * Math.cos(tilt)]
+  /** The waiting: the stool's top, where the pattern is cut, and the tipped glass above it with the words. */
+  const work = (): [number, number, number][] => [
+    ...box(D.S.w / 2 + 0.01, D.S.top, D.S.top + 0.03, D.S.z - D.S.d / 2, D.FRONT),
+    tipped(D.GLASS.left, fy(D.GLASS.top), 0, WAIT_TILT), tipped(D.GLASS.right, fy(D.GLASS.top), 0, WAIT_TILT),
+  ]
   /** These bounds fitted between page rows and columns, by stepping back and panning. */
   const frameIt = (pts: [number, number, number][], o: { top: number; bottom: number; left: number; right: number; fov: number; slope: number; lookY: number }) => {
     scene.lens(o.fov)
@@ -209,7 +280,7 @@ export function fitting(scene: Scene): Strategy {
     fit.far = 60
     fit.updateProjectionMatrix()
     const dir = new THREE.Vector3(0, o.slope, 1).normalize()
-    const look = AT.clone().add(new THREE.Vector3(0, o.lookY, S.z))
+    const look = AT.clone().add(new THREE.Vector3(0, o.lookY, D.S.z))
     const tan = Math.tan(THREE.MathUtils.degToRad(o.fov / 2))
     let dist = 0.5
     for (let n = 0; n < 90; n++, dist *= 1.03) {
@@ -229,39 +300,96 @@ export function fitting(scene: Scene): Strategy {
     }
     return { position: look.clone().addScaledVector(dir, dist), look }
   }
-  const at = () => (narrow()
-    // A phone: close, the furniture the width of the screen; room above for the name, below for the two tags.
-    ? frameIt(BOUNDS, { top: 120, bottom: innerHeight - 86, left: 4, right: innerWidth - 4, fov: 46, slope: 0.1, lookY: 0.5 })
-    // Wide or a tablet: the furniture the height of the screen, the kitchen a border round it.
-    : frameIt(BOUNDS, { top: 22, bottom: innerHeight - 14, left: 0, right: innerWidth, fov: 34, slope: 0.1, lookY: 0.5 }))
-  // The waiting: down at the stool's top, where the pattern is cut; the glass behind it.
-  const work = () => frameIt(WORK, narrow()
-    ? { top: 200, bottom: innerHeight - 150, left: 8, right: innerWidth - 8, fov: 46, slope: 1.5, lookY: S.top }
-    : { top: 170, bottom: innerHeight - 110, left: innerWidth * 0.18, right: innerWidth * 0.82, fov: 34, slope: 1.5, lookY: S.top })
+  // The rebuilt furniture must be the one the camera frames: the layout may have changed since the last frame.
+  const fresh = () => {
+    if (dimsNow() !== D) rebuild()
+  }
+  const at = () => {
+    fresh()
+    const s = scene.state()
+    if (narrow() && (s === 'empty' || s === 'failed')) {
+      // A phone before there is a villager: close on the glass, the swatches big in it, the slip below.
+      const g = D.GLASS, t = D.F.tilt
+      const pts = [tipped(g.left, fy(g.top), 0, t), tipped(g.right, fy(g.top), 0, t), tipped(g.left, fy(g.bottom), 0, t), tipped(g.right, fy(g.bottom), 0, t)]
+      return frameIt(pts, { top: 40, bottom: innerHeight - scene.slip.offsetHeight - 36, left: 10, right: innerWidth - 10, fov: 46, slope: 0.1, lookY: D.F.pivot })
+    }
+    return narrow()
+      // A phone: close, the furniture the width of the screen; room above for the name, below for the two tags.
+      ? frameIt(bounds(D), { top: 96, bottom: innerHeight - 84, left: 4, right: innerWidth - 4, fov: 46, slope: 0.1, lookY: 0.6 })
+      // Wide or a tablet: the furniture the height of the screen, the kitchen a border round it.
+      : frameIt(bounds(D), { top: 22, bottom: innerHeight - 14, left: 0, right: innerWidth, fov: 34, slope: 0.1, lookY: 0.5 })
+  }
+  // The waiting: looking down at the stool's top, where the pattern is cut, the glass tipped toward it with the words.
+  const waitPose = () => {
+    fresh()
+    return frameIt(work(), narrow()
+      // A phone crops the stool's ends a little, so the cutting and the words are bigger.
+      ? { top: 70, bottom: innerHeight - 110, left: -34, right: innerWidth + 34, fov: 46, slope: 0.72, lookY: D.S.top + 0.2 }
+      : { top: 40, bottom: innerHeight - 96, left: innerWidth * 0.14, right: innerWidth * 0.86, fov: 34, slope: 0.72, lookY: D.S.top + 0.2 })
+  }
 
+  const waiting = () => scene.state() === 'waiting'
   const showing = () => {
     const s = scene.state()
-    return !scene.watching() && (s === 'empty' || s === 'failed' || s === 'stitching' || s === 'tuning')
+    // While it waves goodbye from the stool the furniture keeps its controls, resting.
+    return !scene.watching() && (s === 'empty' || s === 'failed' || s === 'stitching' || s === 'tuning' || s === 'leaving')
   }
   const tuningNow = () => scene.state() === 'tuning' || scene.state() === 'stitching'
   const card = () => document.querySelector<HTMLElement>('.vs-card')
+  const tagOf = (what: 'save' | 'done') => document.querySelector<HTMLElement>(what === 'save' ? '.vs-save' : '.vs-done')
   let revealTimer = 0
+  let wordsShown = ''
+  /** The paper's words at the biggest size that fits it. */
+  const write = () => {
+    const picked = patterns.picked?.template.name
+    const text = scene.line.value.trim().replace(/\s+/g, ' ') || (picked ? `the ${picked.toLowerCase()} pattern` : '')
+    if (text === wordsShown) return
+    wordsShown = text
+    words.textContent = text
+    for (let size = 34; size >= 18; size -= 2) {
+      words.style.fontSize = `${size}px`
+      if (words.scrollHeight <= words.clientHeight + 1 && words.scrollWidth <= words.clientWidth + 1) break
+    }
+  }
 
   return {
     id: 'd',
-    standAt: () => AT.clone().add(new THREE.Vector3(0, S.top + 0.007, S.z)),
+    standAt: () => AT.clone().add(new THREE.Vector3(0, dimsNow().S.top + 0.007, dimsNow().S.z)),
     turn: () => 0.06,
-    // The mirror is furniture, not resized to the villager: a villager is shown at the size that, at its biggest,
-    // stands inside the glass clear of both rails, with room above its head for what it says.
+    // The mirror is furniture, not resized to the villager. A villager is shown at the size that, at its biggest and
+    // seen through the camera that will frame it, stands inside the glass clear of both rails, with a band above its head
+    // for what it says. Measured on the page, so a villager standing nearer the camera than the glass is allowed for.
     fit(body) {
-      const big = SCALE * 2 ** 0.32
-      const w = Math.max(body.max.x - body.min.x, (body.max.z - body.min.z) * 0.7) * big
-      const h = (body.max.y - Math.min(0, body.min.y)) * big
-      return Math.min(1.6, (GW - 0.03) / NEARER.w / w, (GH * 0.84) / NEARER.h / h)
+      const pose = at()
+      fit.position.copy(pose.position)
+      fit.lookAt(pose.look)
+      fit.updateMatrixWorld(true)
+      const glass = rectOf(quad(D.GLASS.left, D.GLASS.right, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.001), fit, room.frame)
+      const gw = glass.right - glass.left, gh = glass.bottom - glass.top
+      const m = new THREE.Matrix4()
+      const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -0.06)
+      const place = new THREE.Vector3(0, D.S.top + 0.007, D.S.z).add(AT)
+      const corners = Array.from({ length: 8 }, (_, c) => new THREE.Vector3(c & 1 ? body.max.x : body.min.x, c & 2 ? body.max.y : body.min.y, c & 4 ? body.max.z : body.min.z))
+      const fits = (k: number) => {
+        m.compose(place, yaw, new THREE.Vector3(1, 1, 1).multiplyScalar(SCALE * 2 ** 0.32 * k))
+        let left = Infinity, right = -Infinity, top = Infinity
+        for (const p of corners) {
+          const q = toPage(v.copy(p).applyMatrix4(m), fit)
+          left = Math.min(left, q.x); right = Math.max(right, q.x); top = Math.min(top, q.y)
+        }
+        return left >= glass.left + gw * 0.015 && right <= glass.right - gw * 0.015 && top >= glass.top + gh * 0.12
+      }
+      let lo = 0.2, hi = 1.8
+      for (let i = 0; i < 24; i++) {
+        const k = (lo + hi) / 2
+        if (fits(k)) lo = k
+        else hi = k
+      }
+      return lo
     },
     toolsVisible: () => false,
     pose(state) {
-      if (state === 'waiting') return work()
+      if (state === 'waiting') return waitPose()
       if (state === 'empty' || state === 'failed' || state === 'stitching' || state === 'tuning') return at()
       return null
     },
@@ -273,18 +401,19 @@ export function fitting(scene: Scene): Strategy {
       marker.focus({ preventScroll: true })
     },
     leaving() {
-      root.classList.remove('tuning', 'reveal')
+      root.classList.remove('reveal')
+      kit.dispose()
       const c = card()
       if (c) c.style.maxWidth = ''
     },
     slip(w) {
       void w
       const h = scene.slip.offsetHeight
-      if (scene.state() === 'waiting') {
+      if (waiting()) {
         // The progress tag lies on the table just in front of the stool.
-        const f = FACES.foot()
+        const f = FACES.drawer()
         if (scene.slip.style.width) scene.slip.style.width = ''
-        return { x: (f.left + f.right) / 2, y: Math.min(innerHeight - h / 2 - 16, f.bottom + h / 2 + 14) }
+        return { x: (f.left + f.right) / 2, y: Math.min(innerHeight - h / 2 - 16, Math.max(f.top + h / 2 + 8, innerHeight - 70)) }
       }
       if (!showing()) return null
       // Against the stool's front (a phone: at the screen's foot), below the swatches in the glass, inside the screen.
@@ -305,18 +434,36 @@ export function fitting(scene: Scene): Strategy {
         const x = THREE.MathUtils.clamp((r.left + r.right) / 2 - w / 2, g.left + 4, Math.max(g.left + 4, g.right - 4 - w))
         return { x, y: Math.max(8, r.top - h - 6) }
       }
-      if (narrow() || what === 'name') return null
-      // Wide or a tablet: the save tag and the send-off stand on the table either side of the stool.
-      const s = FACES.legs(), all = FACES.all()
-      const y = Math.min(innerHeight - 14 - h, s.bottom - h)
-      return what === 'save' ? { x: Math.max(16, all.left - 28 - w), y } : { x: Math.min(innerWidth - 16 - w, all.right + 28), y }
+      if (what === 'name') return null
+      // The save tag and the send-off are tied to the furniture: beside the posts at the stool's height on a wide screen,
+      // on a phone on the table under the stool's two front legs.
+      const all = FACES.all(), dr = FACES.drawer(), ft = FACES.foot()
+      if (narrow()) {
+        const y = Math.min(innerHeight - 12 - h, ft.bottom + 22)
+        return what === 'save' ? { x: 10, y } : { x: innerWidth - 10 - w, y }
+      }
+      const y = Math.min(innerHeight - 14 - h, dr.top + 26)
+      return what === 'save' ? { x: Math.max(16, all.left - 18 - w), y } : { x: Math.min(innerWidth - 16 - w, all.right + 18), y }
     },
-    frame() {
-      const on = showing()
-      root.classList.toggle('shown', on)
-      root.classList.toggle('tuning', tuningNow())
+    frame(dt) {
+      fresh()
+      const on = showing(), wait = waiting() && !scene.watching()
+      // The frame tips forward on its pivots while the pattern is drafted, and back upright for the fitting.
+      const tilt = wait ? WAIT_TILT : D.F.tilt
+      room.frame.rotation.x += (tilt - room.frame.rotation.x) * (1 - Math.exp(-dt * 3))
+      root.classList.toggle('shown', on || wait)
+      root.classList.toggle('waiting', wait)
+      root.classList.toggle('tuning', tuningNow() || scene.state() === 'leaving')
+      root.classList.toggle('leaving', scene.state() === 'leaving')
       patterns.group.visible = false
-      if (!on) return
+      if (wait) {
+        write()
+        layQuad(paper, D.GLASS.left + 0.035, D.GLASS.right - 0.035, fy(D.GLASS.bottom) + 0.04, fy(D.GLASS.top) - 0.03)
+      }
+      if (!on) {
+        strings.classList.remove('shown')
+        return
+      }
       drawSwatches()
       lay(topRail, FACES.top())
       lay(leftRail, FACES.left())
@@ -331,20 +478,53 @@ export function fitting(scene: Scene): Strategy {
       dim.style.setProperty('--y', `${Math.round((all.top + all.bottom) / 2)}px`)
       dim.style.setProperty('--w', `${Math.round((all.right - all.left) * 0.95 + 60)}px`)
       dim.style.setProperty('--h', `${Math.round((all.bottom - all.top) * 0.78 + 60)}px`)
-      // Before there is a villager, the swatches keep clear of the slip below them.
+      // Before there is a villager, the swatches keep clear of the slip below them; more than the glass holds scroll.
       if (!tuningNow()) {
         const slipTop = scene.slip.getBoundingClientRect().top
         const g = glassFace.getBoundingClientRect()
-        hang.style.maxHeight = `${Math.max(60, Math.round(slipTop - g.top - 14))}px`
-        // A swatch the glass can't hold whole is put away, not shown cut off.
-        for (const b of hang.children as HTMLCollectionOf<HTMLElement>) b.style.visibility = b.offsetTop - hang.offsetTop + b.offsetHeight > hang.clientHeight + 1 ? 'hidden' : ''
+        hang.style.maxHeight = `${Math.max(60, Math.round(Math.min(g.bottom - 10, slipTop - 14) - g.top - 10))}px`
+        hang.classList.toggle('more', hang.scrollTop + hang.clientHeight < hang.scrollHeight - 2)
       }
-      kit.sync(parts)
+      // The tags' threads: from each tag's eyelet up to where it is tied.
+      const tied = tuningNow()
+      strings.classList.toggle('shown', tied)
+      if (tied) {
+        const knot = (what: 'save' | 'done', p: SVGPathElement) => {
+          const tag = tagOf(what)
+          if (!tag || !tag.classList.contains('shown')) return p.setAttribute('d', '')
+          const r = tag.getBoundingClientRect()
+          const s = what === 'save' ? -1 : 1
+          const eye = { x: what === 'save' ? r.right - 9 : r.left + 9, y: r.top + r.height / 2 }
+          // Wide: round the post at the drawer's top; a phone: up to the stool's front leg, above the foot rail.
+          const to = narrow()
+            ? pointAt(s * (D.S.w / 2 - D.S.leg / 2), D.S.foot[1] + 0.01, D.FRONT)
+            : pointAt(s * D.POST, D.S.drawer[1] + 0.02, D.F.z + 0.016)
+          const sag = Math.max(10, Math.abs(to.x - eye.x) * 0.35)
+          p.setAttribute('d', `M${eye.x.toFixed(1)} ${eye.y.toFixed(1)} Q${((eye.x + to.x) / 2).toFixed(1)} ${(Math.max(eye.y, to.y) + sag).toFixed(1)} ${to.x.toFixed(1)} ${to.y.toFixed(1)}`)
+        }
+        knot('save', saveString)
+        knot('done', doneString)
+      }
+      // Waving goodbye: the controls rest as tuning left them (the marker at its head, not where the size would put it).
+      if (scene.state() !== 'leaving') kit.sync(parts)
     },
     api: {
       /** A control's middle on the page, to click or drag it. */
       control: (key: Key) => kit.control(parts, key),
       glass: () => glassFace.getBoundingClientRect().toJSON(),
+      /** The whole furniture on the page. */
+      furniture: () => FACES.all(),
+      /** The paper in the glass while waiting: its words, their size on the page, and whether they fit it whole. */
+      paper: () => {
+        const r = paper.getBoundingClientRect(), g = rectOf(quad(D.GLASS.left, D.GLASS.right, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.001), stage.camera, room.frame)
+        const scale = r.height / Math.max(1, paper.offsetHeight)
+        return {
+          text: words.textContent, shown: getComputedStyle(paper).display !== 'none' && root.classList.contains('shown'),
+          px: parseFloat(getComputedStyle(words).fontSize) * scale, whole: words.scrollHeight <= words.clientHeight + 1 && words.scrollWidth <= words.clientWidth + 1,
+          inGlass: r.left >= g.left - 2 && r.right <= g.right + 2 && r.top >= g.top - 2 && r.bottom <= g.bottom + 2,
+          onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+        }
+      },
       /** Each face's content against its face (page px): content that spills out of its face is a layout defect. */
       spill: () => [topRail, leftRail, rightRail, drawer, legs, foot].flatMap((f) => {
         const r = f.getBoundingClientRect()
@@ -458,7 +638,11 @@ function css() {
   @keyframes vs-fit-pop { 50% { scale: 1.25; } }
   /* The swatches tucked into the glass: felt samples with pinked edges. */
   .vs-fit .glass { padding: 12px; }
-  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden; width: 100%; }
+  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden auto; width: 100%; padding: 4px 0 6px;
+    overscroll-behavior: contain; scrollbar-width: none; }
+  .vs-fit .hang::-webkit-scrollbar { display: none; }
+  /* More patterns than the glass holds: the last row fades out, so it reads as more below. */
+  .vs-fit .hang.more { mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); }
   .vs-fit .vs-swatch { position: relative; width: calc(50% - 6px); max-width: 150px; min-height: 64px; padding: 12px 6px 14px; border: 0; cursor: pointer; background: var(--felt, #7b9a6e); color: #fffaf0;
     clip-path: polygon(0 0, 100% 0, 100% 88%, 95% 100%, 90% 88%, 85% 100%, 80% 88%, 75% 100%, 70% 88%, 65% 100%, 60% 88%, 55% 100%, 50% 88%, 45% 100%, 40% 88%, 35% 100%, 30% 88%, 25% 100%, 20% 88%, 15% 100%, 10% 88%, 5% 100%, 0 88%);
     text-align: center; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35); transform-origin: 50% 0; transition: rotate 200ms ease, translate 200ms ease; }
@@ -470,21 +654,55 @@ function css() {
   .vs-fit .vs-swatch[aria-pressed=true] { translate: 0 5px; rotate: 0deg; filter: brightness(1.08); }
   .vs-fit .vs-swatch[aria-pressed=true] b { text-decoration: underline 1.5px; text-underline-offset: 3px; }
   .vs-fit .vs-swatch:focus-visible { outline: 3px dashed #fffaf0; outline-offset: 2px; }
-  /* A phone: tighter rows on the narrower faces. */
+  /* Finger-sized hit areas round the small felt parts (the parts stay their size; the pseudo-element takes the touch). */
+  .vs-fit .dot::after { content: ''; position: absolute; inset: -9px -12px; }
+  .vs-fit .ribbon::before { content: ''; position: absolute; inset: -15px 0; }
+  .vs-fit .marker::before { content: ''; position: absolute; inset: -12px -4px; }
+  /* The tags tied to the furniture: thread from each eyelet to the post (a phone: to the stool's front leg). */
+  .vs-fit .strings { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; opacity: 0; transition: opacity 320ms ease; }
+  .vs-fit .strings.shown { opacity: 1; }
+  .vs-fit .strings path { fill: none; stroke: #c9b48c; stroke-width: 1.6; stroke-linecap: round; filter: drop-shadow(0 1px 1px rgba(40, 25, 10, 0.5)); }
+  [data-vs-strategy=d] .vs-save { padding: 8px 20px 8px 14px; }
+  [data-vs-strategy=d] .vs-save::before { left: auto; right: 6px; }
+  /* The paper pinned in the glass while the pattern is drafted: the person's own words, in their ink. */
+  .vs-fit .paper { display: none; position: absolute; left: 0; top: 0; width: 360px; height: 340px; box-sizing: border-box; transform-origin: 0 0; padding: 26px 26px 20px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 360 340'%3E%3Cg fill='none' stroke='%23964632' stroke-opacity='0.32' stroke-width='2' stroke-dasharray='9 6'%3E%3Cellipse cx='292' cy='252' rx='52' ry='66'/%3E%3Cellipse cx='292' cy='150' rx='38' ry='32'/%3E%3Cellipse cx='236' cy='292' rx='26' ry='20'/%3E%3C/g%3E%3C/svg%3E") no-repeat, #f3e7cf;
+    box-shadow: 0 6px 14px rgba(40, 25, 10, 0.35); clip-path: polygon(0 1%, 100% 0, 99% 100%, 1% 99%); }
+  .vs-fit.waiting .paper { display: flex; flex-direction: column; }
+  .vs-fit .paper::before, .vs-fit .paper::after { content: ''; position: absolute; top: 9px; width: 9px; height: 9px; border-radius: 50%; background: #c4553f; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+  .vs-fit .paper::before { left: 14px; } .vs-fit .paper::after { right: 14px; }
+  .vs-fit .paper-head { font: italic 15px/1 ${BOOK}; color: #8a3b2a; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .vs-fit .paper-words { flex: 1; min-height: 0; margin: 0; overflow: hidden; overflow-wrap: anywhere; font: 34px/1.28 ${HAND}; color: #2b3f60; }
+  .vs-fit.waiting .face, .vs-fit.waiting .dim { display: none; }
+  /* Waving goodbye: the controls rest, untouchable. */
+  .vs-fit.leaving .face > * { pointer-events: none; opacity: 0.6; transition: opacity 300ms ease; }
+  /* A phone: the stool is a dressing table, so the controls have room to be finger-sized and the words bigger. */
   @media (max-aspect-ratio: 9/10) {
-    .vs-fit .ribbon-row { grid-template-columns: 54px 1fr 54px; gap: 4px; }
-    .vs-fit .ribbon { height: 12px; }
-    .vs-fit .ribbon .button { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
-    .vs-fit .ribbon .button::after { line-height: 18px; }
-    .vs-fit .step { padding: 2px 8px 3px; font-size: 14px; }
-    .vs-fit .dot { width: 22px; height: 22px; }
-    .vs-fit .tag, .vs-fit .dial-name, .vs-fit .jokes-name { font-size: 14px; }
-    .vs-fit .dial { column-gap: 8px; row-gap: 1px; }
-    .vs-fit .knob { --k: clamp(26px, calc(100cqh - 34px), 44px); }
+    .vs-fit .ribbon-row { grid-template-columns: 64px 1fr 64px; gap: 6px; font-size: 16px; }
+    .vs-fit .ribbon { height: 16px; }
+    .vs-fit .ribbon .button { width: 26px; height: 26px; margin: -13px 0 0 -13px; }
+    .vs-fit .ribbon .button::after { line-height: 26px; }
+    .vs-fit .step { padding: 0 12px; min-height: 38px; font-size: 17px; }
+    .vs-fit .step::before { content: ''; position: absolute; inset: 0 -2px -6px; }
+    .vs-fit .step { position: relative; }
+    .vs-fit .dot { width: 28px; height: 28px; }
+    .vs-fit .tag, .vs-fit .dial-name, .vs-fit .jokes-name { font-size: 17px; }
+    .vs-fit .dial-ends span { font-size: 16px; line-height: 16px; }
+    .vs-fit .dial { column-gap: 14px; row-gap: 3px; }
+    .vs-fit .knob { --k: clamp(44px, calc(100cqh - 46px), 64px); }
+    .vs-fit .tape .end { font-size: 16px; line-height: 16px; }
+    .vs-fit .tape { width: min(28px, 82%); }
+    .vs-fit .legs { justify-content: stretch; padding: 0; }
+    .vs-fit .legs .ribbon-row { flex: 1; }
+    .vs-fit .ribbon::before { inset: -14px 0; }
+    .vs-fit .dot::after { inset: -2px -12px; }
+    .vs-fit .marker { height: 26px; margin-top: -13px; width: 50px; }
+    .vs-fit .marker::after { line-height: 26px; }
     .vs-fit .glass { padding: 8px; }
-    .vs-fit .hang { gap: 8px 8px; }
-    .vs-fit .vs-swatch { min-height: 50px; padding: 9px 4px 11px; }
-    .vs-fit .vs-swatch b { font-size: 15px; }
+    .vs-fit .hang { gap: 12px 10px; }
+    .vs-fit .vs-swatch { min-height: 66px; padding: 15px 6px 17px; }
+    .vs-fit .vs-swatch b { font-size: 18px; }
+    .vs-fit .vs-swatch small { font-size: 15px; }
   }
   @media (prefers-reduced-motion: reduce) { .vs-fit, .vs-fit .marker, .vs-fit .vs-swatch, .vs-fit .dot { transition: none; } .vs-fit.reveal * { animation: none !important; } }
   `
