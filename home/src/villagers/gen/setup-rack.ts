@@ -15,6 +15,9 @@ export const feltFor = (i: number) => FELTS[i % FELTS.length]
 /** Who a card is for or from, in a few words; empty for a plain built-in one. */
 export const footFor = (card: RackCard) => card.source === 'built-in' ? (card.template.audience === 'adult' ? 'for grown-ups' : card.template.audience === 'child' ? 'for a child' : '') : card.source === 'mine' ? 'saved by you' : `shared by ${card.maker ?? 'family'}`
 const W = 0.15, H = 0.19, GAP = 0.162
+/** A phone's two-step rack: the back step's height and how far behind the front one it stands. */
+const STEP = 0.22, BACK = 0.1
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 
 const FELTS: string[] = ['#c97b63', '#7b9a6e', '#d6b45c', '#6f86a8', '#b5654b', '#8a76a0', '#9db08a', '#d9a35f']
 const MAX = 7
@@ -71,7 +74,38 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
   ledge.position.y = 0.009
   const lip = new THREE.Mesh(new THREE.BoxGeometry(5 * GAP + 0.03, 0.03, 0.008), wood)
   lip.position.set(0, 0.015, 0.024)
-  group.add(ledge, lip)
+  // A phone's rack is a two-step stand: three cards on the raised back step, the rest on the front one, so each card is
+  // big enough to read instead of five squeezed across.
+  const riser = new THREE.Mesh(new THREE.BoxGeometry(1, STEP, 0.07), wood)
+  const ledge2 = ledge.clone()
+  const lip2 = lip.clone()
+  group.add(ledge, lip, riser, ledge2, lip2)
+  let layout: 'wide' | 'narrow' = 'wide'
+  /** Card size and where card i of n stands (its centre's x, the step it stands on, and how far back). */
+  const slots = (n: number) => {
+    if (layout === 'narrow' && n > 3) {
+      const k = 1.22, gap = GAP * k * 1.1, front = n - 3
+      return { k, rows: 2, at: (i: number) => (i < 3 ? { x: (i - 1) * gap, y: STEP, z: -BACK } : { x: (i - 3 - (front - 1) / 2) * gap, y: 0, z: 0 }) }
+    }
+    // One row, as large as fits about a metre (a little under the gap between the vase and the fruit bowl).
+    const k = layout === 'narrow' ? 1.3 : Math.min(1.22, 1.0 / (Math.max(n, 3) * GAP))
+    return { k, rows: 1, at: (i: number) => ({ x: (i - (n - 1) / 2) * GAP * k, y: 0, z: 0 }) }
+  }
+  const build = () => {
+    const n = cards.length
+    const { k, rows } = slots(n)
+    const row = (count: number) => (Math.max(count, rows === 2 ? 1 : 3) * GAP * k + 0.03) / (5 * GAP + 0.03)
+    ledge.scale.x = lip.scale.x = row(rows === 2 ? n - 3 : n)
+    ledge.scale.z = lip.scale.z = k
+    for (const o of [riser, ledge2, lip2]) o.visible = rows === 2
+    ledge2.scale.x = lip2.scale.x = row(3)
+    riser.scale.x = row(3) * (5 * GAP + 0.03)
+    ledge2.scale.z = lip2.scale.z = k
+    riser.position.set(0, STEP / 2, -BACK)
+    ledge2.position.set(0, STEP + 0.009, -BACK)
+    lip2.position.set(0, STEP + 0.015, -BACK + 0.024 * k)
+    lip.position.z = 0.024 * k
+  }
   group.traverse((n) => { n.castShadow = n.receiveShadow = true })
   const shelf = document.createElement('div')
   shelf.className = 'vs-rack'
@@ -81,8 +115,15 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
   style.textContent = css()
   document.head.append(style)
   document.body.append(shelf)
+  // A just-saved pattern drops into the rack with a stitched tag that says so.
+  const savedTag = document.createElement('div')
+  savedTag.className = 'vs-saved vs-tag'
+  savedTag.setAttribute('aria-hidden', 'true')
+  savedTag.textContent = 'saved'
+  document.body.append(savedTag)
+  let saved: { id: string; at: number } | null = null
 
-  let cards: { card: RackCard; felt: string; mesh: THREE.Mesh; button: HTMLButtonElement; plain: THREE.Texture; named: THREE.Texture }[] = []
+  let cards: { card: RackCard; felt: string; mesh: THREE.Mesh; button: HTMLButtonElement; plain: THREE.Texture; named: THREE.Texture; y: number }[] = []
   // 'on': the names are page text you can pick; 'quiet': the same text, nothing to pick; 'off': no page
   // text (something stands in front of the rack), so the names are painted on the cards instead.
   let mode: 'on' | 'quiet' | 'off' = 'off'
@@ -107,14 +148,10 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
     set(list: RackCard[]) {
       clear()
       const shown = list.slice(0, MAX)
-      // The ledge is as long as the row of cards.
-      const k = (Math.max(shown.length, 3) * GAP + 0.03) / (5 * GAP + 0.03)
-      ledge.scale.x = lip.scale.x = k
       shown.forEach((card, i) => {
         const felt = feltFor(i)
         const plain = paintCard(felt), named = paintCard(felt, card.template.name)
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.004), new THREE.MeshStandardMaterial({ map: mode === 'off' ? named : plain, roughness: 0.95 }))
-        mesh.position.set((i - (shown.length - 1) / 2) * GAP, H / 2 + 0.014, 0)
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.004), new THREE.MeshStandardMaterial({ map: mode === 'on' ? plain : named, roughness: 0.95 }))
         mesh.rotation.x = -0.28
         mesh.castShadow = true
         mesh.name = `rack card ${card.template.id}`
@@ -136,26 +173,31 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
         }
         button.addEventListener('click', () => api.pick(picked?.template.id === card.template.id ? null : card))
         shelf.append(button)
-        cards.push({ card, felt, mesh, button, plain, named })
+        cards.push({ card, felt, mesh, button, plain, named, y: 0 })
       })
+      build()
       if (picked && !cards.some((c) => c.card.template.id === picked!.template.id)) api.pick(null)
       else api.pick(picked)
     },
     pick(card: RackCard | null, notify = true) {
       picked = card
-      const last = (cards.length - 1) / 2
+      const { k, at } = slots(cards.length)
+      // While a villager is on the mat (off), the cards lie down in the ledge, out of its way; the one it was made from
+      // and a just-saved one stand at the rack's right end, their names painted on, clear of the fruit bowl.
+      const standing = cards.filter((c) => c.card.template.id === card?.template.id || c.card.template.id === saved?.id)
       for (const c of cards) {
         const on = c.card.template.id === card?.template.id
-        const i = cards.indexOf(c) - last
         // The picked card stands up out of the rack, a little bigger, facing you; the others sit back.
-        // While a villager is on the mat (off), the others lie down in the ledge, out of its way, and the
-        // one it was made from stands at the rack's right end, its name painted on, beside the villager.
-        const down = mode === 'off' && !on
-        c.mesh.position.x = mode === 'off' && on ? (last + 0.6) * GAP : i * GAP
-        c.mesh.position.y = down ? 0.02 : H / 2 + 0.014 + (on ? 0.045 : 0)
-        c.mesh.position.z = on ? 0.03 : down ? -0.05 : 0
-        c.mesh.rotation.x = on ? -0.08 : down ? -1.45 : -0.28
-        c.mesh.scale.setScalar(on ? 1.12 : 1)
+        const stands = mode === 'off' && standing.includes(c)
+        const down = mode === 'off' && !stands
+        // Standing cards (while a villager is on the mat) take the last places: the right end of the (front) row.
+        const slot = at(stands ? cards.length - standing.length + standing.indexOf(c) : cards.indexOf(c))
+        c.mesh.position.x = slot.x
+        c.y = slot.y + (down ? 0.02 : (H * k) / 2 + 0.014 + (on ? 0.045 : 0))
+        c.mesh.position.y = c.y
+        c.mesh.position.z = slot.z + (on || stands ? 0.03 : down ? -0.05 : 0)
+        c.mesh.rotation.x = on || stands ? -0.08 : down ? -1.45 : -0.28
+        c.mesh.scale.setScalar(k * (on ? 1.12 : 1))
         const m = c.mesh.material as THREE.MeshStandardMaterial
         m.emissive.set('#ffcf8a')
         m.emissiveIntensity = on ? 0.18 : 0
@@ -174,31 +216,58 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
     },
     /** How wide the row of cards is, in metres. */
     width() {
-      return Math.max(cards.length, 3) * GAP
+      const { k, rows } = slots(cards.length)
+      return (rows === 2 ? 3 : Math.max(cards.length, 3)) * GAP * k
     },
-    arrange(layout: 'wide' | 'narrow') {
-      group.position.set(MAT.x, TOP, layout === 'wide' ? -0.285 : -0.305)
+    arrange(next: 'wide' | 'narrow') {
+      layout = next
+      // A phone's two-step stand reaches back to the table's far edge.
+      group.position.set(MAT.x, TOP, layout === 'wide' ? -0.285 : -0.21)
+      build()
+      api.pick(picked, false)
     },
     enable(next: 'on' | 'quiet' | 'off') {
       const was = mode
       mode = next
+      // Back to choosing: the saved card is one of the rack's now.
+      if (next !== 'off') saved = null
       if ((was === 'off') !== (next === 'off')) api.pick(picked, false)
       shelf.classList.toggle('shown', next === 'on')
       shelf.classList.toggle('quiet', next === 'quiet')
       for (const c of cards) {
         c.button.tabIndex = next === 'on' ? 0 : -1
         const m = c.mesh.material as THREE.MeshStandardMaterial
-        const map = next === 'off' ? c.named : c.plain
+        // Quiet (the mat is busy) shows the names painted on, with nothing to pick.
+        const map = next === 'on' ? c.plain : c.named
         if (m.map !== map) {
           m.map = map
           m.needsUpdate = true
         }
       }
     },
+    /** A pattern just saved: it drops into the rack (standing at its end while a villager is on the mat) with a "saved" tag. */
+    saved(id: string) {
+      saved = { id, at: performance.now() }
+      api.pick(picked, false)
+    },
     /** The lowest card's bottom edge on screen, so the slip can lie clear of the rack (0 when no names show). */
     bottom: 0,
     frame() {
-      if (mode === 'off') {
+      const fresh = saved && cards.find((c) => c.card.template.id === saved!.id)
+      if (fresh) {
+        // Down from above the rack, landing with a small bounce.
+        const u = Math.min(1, (performance.now() - saved!.at) / (reducedMotion.matches ? 1 : 700))
+        const fall = u < 0.75 ? (1 - u / 0.75) ** 2 : 0
+        const bounce = u >= 0.75 ? Math.sin(((u - 0.75) / 0.25) * Math.PI) * 0.012 : 0
+        fresh.mesh.position.y = fresh.y + fall * 0.32 + bounce
+        fresh.mesh.updateMatrixWorld()
+        const r = stage.renderer.domElement.getBoundingClientRect()
+        corner.set(0, H / 2, 0).applyMatrix4(fresh.mesh.matrixWorld).project(stage.camera)
+        const at = `calc(${Math.round(r.left + ((corner.x + 1) / 2) * r.width)}px - 50%) calc(${Math.round(r.top + ((1 - corner.y) / 2) * r.height)}px - 100% - 6px)`
+        if (savedTag.style.translate !== at) savedTag.style.translate = at
+        savedTag.classList.toggle('shown', u >= 0.75)
+      } else savedTag.classList.remove('shown')
+      if (mode !== 'on') {
         api.bottom = 0
         return
       }
@@ -231,6 +300,7 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
     dispose() {
       clear()
       shelf.remove()
+      savedTag.remove()
       style.remove()
     },
   }
@@ -246,10 +316,13 @@ function css() {
   .vs-pattern b { font-weight: 700; }
   .vs-pattern small { font: 600 0.72em/1 ${HAND}; color: rgba(70, 48, 30, 0.75); }
   .vs-rack.shown .vs-pattern { pointer-events: auto; opacity: 1; }
-  .vs-rack.quiet .vs-pattern { opacity: 1; }
   .vs-pattern:hover { box-shadow: 0 0 0 2px rgba(255, 236, 200, 0.9); }
   .vs-pattern.on, .vs-pattern:focus-visible { outline: none; box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.8); }
   .vs-pattern.on::after { content: ''; position: absolute; inset: 3px; border: 1.6px dashed rgba(47, 74, 107, 0.75); border-radius: 3px; }
-  @media (prefers-reduced-motion: reduce) { .vs-pattern { transition: none; } }
+  .vs-saved { position: fixed; z-index: 5; left: 0; top: 0; padding: 3px 10px 4px; font-size: 15px; color: #3f6a35; rotate: -3deg; pointer-events: none;
+    opacity: 0; transition: opacity 200ms ease; }
+  .vs-saved::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(63, 106, 53, 0.6); border-radius: 3px 7px 7px 3px; }
+  .vs-saved.shown { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .vs-pattern, .vs-saved { transition: none; } }
   `
 }

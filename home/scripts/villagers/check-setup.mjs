@@ -66,9 +66,10 @@ const pg = (page) => page.evaluate(() => window.villagerSetup.page())
 const until = (page, states, timeout = 30000) => page.waitForFunction((s) => s.includes(window.villagerSetup.state().state), states, { timeout })
 /**
  * The layout gate: every visible label (tool tags, ribbon ends, pattern names, the slip, the speech card,
- * the name, save and send-off tags) lies inside the screen and overlaps no other. Run at every captured moment.
+ * the name, save and send-off tags) lies inside the screen and overlaps no other, nor the villager's projected
+ * bounds; and no tool on the table lies under the slip. Run at every captured moment.
  */
-const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done']
+const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.vs-name', '.vs-save', '.vs-done', '.vs-saved']
 const layout = (page) => page.evaluate((selectors) => {
   const boxes = []
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
@@ -77,13 +78,18 @@ const layout = (page) => page.evaluate((selectors) => {
     const r = e.getBoundingClientRect()
     if (r.width && r.height) boxes.push({ what: `${s}${e.dataset.key ? `[${e.dataset.key}]` : e.dataset.template ? `[${e.dataset.template}]` : ''}`, r })
   }
+  const labels = boxes.length
   const outside = boxes.filter(({ r }) => r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight).map((b) => b.what)
+  // The villager on the table is a box too: no label may lie over it.
+  const v = window.villagerSetup.bounds()
+  if (v && window.villagerSetup.state().state === 'tuning') boxes.push({ what: 'villager', r: v })
+  const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1
   const overlaps = []
-  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-    const a = boxes[i].r, b = boxes[j].r
-    if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
-  }
-  return { labels: boxes.length, outside, overlaps }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (hit(boxes[i].r, boxes[j].r)) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
+  // The slip is paper over the table: no tool may lie under it.
+  const slip = boxes.find((b) => b.what === '.vs-slip')
+  if (slip) for (const t of window.villagerSetup.toolBounds()) if (hit(slip.r, t)) overlaps.push(`.vs-slip × tool ${t.key}`)
+  return { labels, outside, overlaps }
 }, LABELS)
 const shot = async (page, name) => {
   const l = await layout(page)
@@ -344,6 +350,10 @@ try {
     const afterSave = await st(page)
     const savedFiles = await readdir(join(root, 'people', 'alex', 'persona-templates')).catch(() => [])
     check('save: the tuned persona is kept on the host as a pattern and appears on the rack', savedFiles.length === 1 && afterSave.rack.cards.some((c) => c.source === 'mine' && c.id === afterSave.saved) && /Kept as a pattern/.test(afterSave.note ?? ''), { files: savedFiles, rack: afterSave.rack.cards, note: afterSave.note })
+    // Saving is seen: the new card drops into the rack, standing at its end, with a "saved" tag.
+    await page.waitForTimeout(900)
+    check('save: the saved card stands in the rack with a "saved" tag', await page.evaluate(() => document.querySelector('.vs-saved')?.classList.contains('shown')))
+    await shot(page, '4b-saved')
     const pattern = JSON.parse(await readFile(join(root, 'people', 'alex', 'persona-templates', savedFiles[0]), 'utf8'))
     check('save: an opted-in adult keeps crude and the tuned warmth', pattern.persona.dials.humour === 'crude' && pattern.persona.dials.warmth === 0.2 && pattern.shared === true, pattern.persona.dials)
     await page.evaluate(() => window.villagerSetup.sendOff())

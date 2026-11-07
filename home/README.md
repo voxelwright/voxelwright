@@ -953,9 +953,10 @@ the send-off and its walk staying in view, reduced motion, failures leaving noth
 placed, the stub host's waiting (a piece cut and pinned) and 422, the profile taken from
 the host whatever the URL says, one repair after a refused module, and three unload and
 reload cycles back to baseline. At every captured moment (`1-empty`, `1b-picked`,
-`2-waiting`, `3-tuning`, `4-pattern`, `5-walking`) a layout gate checks that every
-visible label is on screen and overlaps no other; run it at `--viewport=390x844` and
-`1024x768` as well as the default. Captures: `screenshots/villager-gen/setup/round-N/`,
+`2-waiting`, `3-tuning`, `4-pattern`, `4b-saved`, `5-walking`) a layout gate checks that
+every visible label is on screen and overlaps no other or the villager's projected
+bounds, and that no tool on the table lies under the slip; run it at `--viewport=390x844`
+and `1024x768` as well as the default. Captures: `screenshots/villager-gen/setup/round-N/`,
 scores and changes per round in its `NOTES.md`.
 
 ## Measured, kitchen scene (November 6, 2026)

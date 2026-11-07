@@ -85,7 +85,12 @@ export default {
 
     const tools = controls(stage, {
       input: (key, v) => applyTuning(key, v),
-      release: () => made && say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true),
+      release: (key) => {
+        if (!made) return
+        say(tunedLine({ warmth: made.tuning.warmth, playful: made.tuning.playful, chatty: made.tuning.chatty }, seq++), true)
+        // A bigger or smaller villager: the camera eases to frame it again (never during the drag).
+        if (key === 'size' && state === 'tuning') atTable()
+      },
       locked: () => note('Crude jokes stay locked here. They need a grown-up profile that has opted in.'),
     })
     group.add(tools.group)
@@ -117,9 +122,98 @@ export default {
     // mat and the grid of tools before it, about a metre across, from higher up so the rows stack down the screen.
     const layoutFor = (): Layout => (innerWidth / innerHeight < 0.9 ? 'narrow' : 'wide')
     let layout: Layout = layoutFor()
-    const pose = () => {
+    /** Narrow, the camera looks down this slope (up per metre toward you): low enough to see a villager's face, not its back. */
+    const NARROW_SLOPE = 0.8
+    // The villager's bounds in its root's own space (set when it is stitched).
+    let body: THREE.Box3 | null = null
+    const corner = new THREE.Vector3()
+    const centre = new THREE.Vector3()
+    /**
+     * A villager's box through a matrix and a camera, as a rectangle on the page. The top face is taken at half its
+     * width and depth: a figure narrows to its crown, and a box's back top corners would read as head room it doesn't use.
+     */
+    const rectOf = (box: THREE.Box3, matrix: THREE.Matrix4, camera: THREE.Camera) => {
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+      box.getCenter(centre)
+      for (let i = 0; i < 8; i++) {
+        const k = i & 2 ? 0.5 : 1
+        corner.set(centre.x + ((i & 1 ? box.max.x : box.min.x) - centre.x) * k, i & 2 ? box.max.y : box.min.y, centre.z + ((i & 4 ? box.max.z : box.min.z) - centre.z) * k).applyMatrix4(matrix).project(camera)
+        const x = ((corner.x + 1) / 2) * innerWidth, y = ((1 - corner.y) / 2) * innerHeight
+        left = Math.min(left, x); right = Math.max(right, x); top = Math.min(top, y); bottom = Math.max(bottom, y)
+      }
+      return { left, top, right, bottom }
+    }
+    /** Where the villager is on screen now, or null. */
+    const villagerRect = () => {
+      if (!fig || !body) return null
+      fig.root.updateMatrixWorld()
+      return rectOf(body, fig.root.matrixWorld, stage.camera)
+    }
+    /**
+     * On a phone or a tablet the tools need the near half of the table, so a big villager is shown smaller while it is on the bench
+     * (down to about two fifths); its tuned size is unchanged, and it grows to it as it hops down (sendOff).
+     */
+    let bench = 1
+    let fitBench = false
+    // Fitting the camera to the villager: a stand-in camera tried at growing distances until the villager, at its tuned
+    // size, fits between the speech note's room at the top and the tools below it.
+    const fitCam = new THREE.PerspectiveCamera()
+    const fitAt = new THREE.Matrix4()
+    const fitTo = (look: THREE.Vector3, dir: THREE.Vector3, dist: number, fov: number) => {
+      if (!body || !made) return dist
+      const narrow = layout === 'narrow'
+      fitCam.fov = fov
+      fitCam.aspect = innerWidth / innerHeight
+      fitCam.near = 0.05
+      fitCam.far = 60
+      fitCam.updateProjectionMatrix()
+      // Room at the top for the speech note (and, narrow, the name tag above it, a line taller with a pattern's name).
+      const top = narrow ? (made.template ? 215 : 180) : 132
+      // The front of the first ribbon (sliders.ts PLACES.narrow.warmth), where its end tags begin.
+      const ribbon = new THREE.Vector3(-0.21, TOP, 0.14)
+      // Wide, the tool row's tags begin about here; a phone's ribbons are its own limit.
+      const toolRow = new THREE.Vector3(-0.17, TOP, 0.53)
+      const room = (p: THREE.Vector3) => ((1 - p.clone().project(fitCam).y) / 2) * innerHeight
+      const fits = () => {
+        // Turned as the puppet will stand: toward the camera, a little to one side.
+        const k = SCALE * tune.size(made!.tuning.size) * bench
+        fitAt.compose(standAt(), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -turn()), new THREE.Vector3(k, k, k))
+        fitCam.position.copy(look).addScaledVector(dir, dist)
+        fitCam.lookAt(look)
+        fitCam.updateMatrixWorld(true)
+        const r = rectOf(body!, fitAt, fitCam)
+        // Narrow: above the ribbons' tags; wide: above the row of tools along the near edge.
+        const bottom = narrow ? room(ribbon) - 16 : room(toolRow) - 6
+        return r.top >= top && r.bottom <= bottom && r.left >= 12 && r.right <= innerWidth - 12
+      }
+      /** Wide: whether the tools' tags still have room below if the view tilts up a little. */
+      const slack = () => room(new THREE.Vector3(-0.17, TOP, 0.66)) + 50 < innerHeight - 96
+      if (fitBench) {
+        // Once, as it is stitched: the bench size for a phone or a tablet; a roomy wide screen shows it at its own size.
+        bench = 1
+        if (narrow || innerWidth / innerHeight < 1.5) while (bench > 0.4 && !fits()) bench *= 0.95
+        fitBench = false
+      }
+      // A tall villager: first tilt the view up (the table slides down the screen, where there is room), then step back.
+      for (let i = 0; i < 24 && !fits(); i++) {
+        if (!narrow && slack()) look.y += 0.02
+        else dist *= 1.05
+      }
+      return dist
+    }
+    /** The last pose the camera was sent to, so the villager can turn to where the camera will be. */
+    let lastPose: { position: THREE.Vector3; look: THREE.Vector3 } | null = null
+    const pose = () => (lastPose = poseFor())
+    const poseFor = () => {
       const aspect = innerWidth / innerHeight
       const narrow = layout === 'narrow'
+      if (!narrow && state === 'waiting') {
+        // Wide, while the pattern is made: close over the mat, so the cutting and the words on the sheet read.
+        lens(seatFov)
+        const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(seatFov / 2)) * aspect)
+        const look = new THREE.Vector3(MAT.x + 0.02, TOP, MAT.z - 0.07)
+        return { position: look.clone().addScaledVector(new THREE.Vector3(0, 0.8, 1).normalize(), (MAT.w / 2 + 0.25) / Math.tan(half)), look }
+      }
       if (narrow && (state === 'empty' || state === 'failed' || state === 'waiting')) {
         // Narrow, before there is a villager: the rack and the mat (where the pattern is made), with the slip on the near half of the table.
         lens(56)
@@ -131,14 +225,17 @@ export default {
       const fov = narrow ? 56 : seatFov
       lens(fov)
       const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * aspect)
-      const dist = narrow ? 0.42 / Math.tan(half) : THREE.MathUtils.clamp(1.08 / Math.tan(half), 1.85, 4.4)
+      let dist = narrow ? 0.42 / Math.tan(half) : THREE.MathUtils.clamp(1.08 / Math.tan(half), 1.85, 4.4)
       // Narrow: the villager at the top, then the ribbons, then the two rows of tools down to the table's edge.
       const look = narrow ? new THREE.Vector3(-0.21, TOP, MAT.z + 0.07) : new THREE.Vector3(-0.17, TOP + 0.1, MAT.z - 0.02)
-      // Narrow looks at the villager's feet, so the table's front edge falls near the bottom and the tools fill the lower screen.
-      return { position: look.clone().addScaledVector(new THREE.Vector3(0, narrow ? 1.25 : 0.5, 1).normalize(), dist), look }
+      const dir = new THREE.Vector3(0, narrow ? NARROW_SLOPE : 0.5, 1).normalize()
+      if (state === 'stitching' || state === 'tuning') dist = fitTo(look, dir, dist, fov)
+      return { position: look.clone().addScaledVector(dir, dist), look }
     }
     /** Where the villager stands on the mat: narrow, further back, so the ribbons before it stay clear. */
-    const standAt = () => new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - (layout === 'narrow' ? 0.19 : 0.07))
+    const standAt = () => new THREE.Vector3(MAT.x - 0.1, TOP + 0.006, MAT.z - (layout === 'narrow' ? 0.24 : 0.07))
+    /** How far it stands turned from the camera: three quarters on a wide screen, nearly square on to a phone. */
+    const turn = () => (layout === 'narrow' ? 0.18 : 0.35)
     const arrange = () => {
       layout = layoutFor()
       shop.arrange(layout)
@@ -165,9 +262,11 @@ export default {
     const watchPose = (p: THREE.Vector3) => {
       const narrow = layout === 'narrow'
       lens(narrow ? 58 : seatFov)
-      // From high up and in front, looking down over the chairs and the reading lamp.
-      const look = new THREE.Vector3(p.x, 0.35, p.z - 0.2)
-      return { position: look.clone().add(new THREE.Vector3(narrow ? 0.1 : 0.15, narrow ? 2.3 : 2.05, narrow ? 2.2 : 2.45)), look }
+      // From the front left at a grown-up's eye height, looking past it toward the counter, its first chore: the
+      // reading lamp stays to the right, out of frame, and the floor shows round its feet.
+      const towards = new THREE.Vector3(SPOTS.counter.at[0], 0, SPOTS.counter.at[1])
+      const look = new THREE.Vector3().lerpVectors(new THREE.Vector3(p.x, 0, p.z), towards, 0.35).setY(0.3)
+      return { position: look.clone().add(new THREE.Vector3(narrow ? -0.45 : -0.85, narrow ? 1.25 : 1.12, narrow ? 2.3 : 2.15)), look }
     }
     const leaveTable = (rate?: number) => {
       lens(seatFov)
@@ -233,8 +332,10 @@ export default {
     noteEl.setAttribute('role', 'status')
     noteEl.setAttribute('aria-live', 'polite')
     let noteTimer = 0
-    const note = (text: string) => {
+    /** A note; `heard` only for one the scene already shows (the saved card's tag): read out, not drawn over the speech. */
+    const note = (text: string, heard = false) => {
       noteEl.textContent = text
+      noteEl.classList.toggle('heard', heard)
       noteEl.classList.add('shown')
       clearTimeout(noteTimer)
       noteTimer = window.setTimeout(() => noteEl.classList.remove('shown'), 6000)
@@ -482,11 +583,20 @@ export default {
       slip.classList.remove('shown', 'waiting')
       slip.inert = true
       patterns.enable('off')
+      // Its bounds, in its own space and made round about the up axis, so the camera can frame it however it turns.
+      fig.root.position.set(0, 0, 0)
+      fig.root.rotation.set(0, 0, 0)
+      fig.root.scale.setScalar(1)
+      fig.root.updateMatrixWorld(true)
+      body = new THREE.Box3().setFromObject(fig.root)
+      body.min.y = Math.min(0, body.min.y)
+      fitBench = true
       atTable()
       const at = standAt()
-      const cam = stage.camera.position
-      puppet = new Puppet(fig, at, Math.atan2(cam.x - at.x, cam.z - at.z) - 0.35)
-      fig.root.scale.setScalar(SCALE)
+      // It turns to where the camera is going, not where it is on the way.
+      const cam = lastPose?.position ?? stage.camera.position
+      puppet = new Puppet(fig, at, Math.atan2(cam.x - at.x, cam.z - at.z) - turn())
+      fig.root.scale.setScalar(SCALE * bench)
       group.add(fig.root)
       fig.root.updateMatrixWorld(true)
       // Its voice: the model's, pulled into range; registered under a key that cannot collide.
@@ -570,7 +680,7 @@ export default {
       if (!fig || !made || !base) return
       made.tuning[key] = v
       const voice = voiceKey ? VOICES[voiceKey] : null
-      if (key === 'size') fig.root.scale.setScalar(SCALE * tune.size(v))
+      if (key === 'size') fig.root.scale.setScalar(SCALE * tune.size(v) * bench)
       if (key === 'hue' && hueShift) hueShift.shift.value = tune.hue(v)
       if (key === 'pitch' && voice) voice.pitch = clampVoice({ ...voice, pitch: base.voice.pitch * 2 ** (tune.pitch(v) / 12) }).pitch
       if (key === 'pace' && voice) {
@@ -602,19 +712,24 @@ export default {
       if (record.source.item) void tuneVillager(PERSON, record.source.item, { ...record.tuning })
       const spot = SPOTS[LANDING]
       puppet.looking = false
-      await puppet.leap(new THREE.Vector3(spot.at[0], 0, spot.at[1]), reducedMotion.matches ? 0.01 : 1.1, 0.35)
+      // Down it hops, growing from its bench size to its own as it goes.
+      await puppet.leap(new THREE.Vector3(spot.at[0], 0, spot.at[1]), reducedMotion.matches ? 0.01 : 1.1, 0.35, SCALE * tune.size(record.tuning.size))
+      bench = 1
       // The second routine's chores, counter first: that way leads across open floor, in view, not behind a chair.
       const tasks = [...ROUTINES[1].tasks]
       tasks.unshift(...tasks.splice(tasks.findIndex((t) => t.spot === 'counter'), 1))
+      // Its contact shadow reaches out past a wide body (a shell, a skirt) so it reads as standing on the floor.
+      if (body) fig.root.userData.footprint = Math.max(body.max.x - body.min.x, body.max.z - body.min.z) * fig.root.scale.x * 1.15
       const walker = new Villager(fig, tasks, { start: LANDING, wait: 0.8 })
       walkers.push(walker)
       for (const b of blobs) b.removeFromParent()
       blobs = contactShadows(walkers)
       group.add(...blobs)
-      // Watch it go: the camera follows it across the kitchen for a few seconds, then comes back to the table.
-      watching = { walker, until: performance.now() + 9000 }
+      // Watch it go: the camera follows it across the kitchen to its first chore, then comes back to the table.
+      watching = { walker, until: performance.now() + 11000 }
       puppet = null
       fig = null
+      body = null
       hueShift = null
       base = null
       made = null
@@ -668,7 +783,8 @@ export default {
       }
       // How the two combine: the words say who they are, the pattern how they talk.
       line.placeholder = card ? 'Who are they? e.g. a hedgehog who bakes bread' : 'e.g. a sleepy hedgehog who bakes bread before dawn'
-      if (state === 'empty' || state === 'failed') setStatus(card ? `Your words say who they are; ${card.template.name} sets how they talk.` : READY)
+      // The words say who they are (the line's example says so); the pattern, how they talk.
+      if (state === 'empty' || state === 'failed') setStatus(card ? `${card.template.name} sets how they talk.` : READY)
       chip.setAttribute('aria-label', card ? `Pattern ${card.template.name}. Click to put it back.` : '')
       if (card && card.template.persona.dials?.humour === 'crude' && !crudeAllowed(PROFILE)) note(`${card.template.name} will be cheeky here, not crude. Crude jokes need a grown-up profile that has opted in.`)
     }
@@ -682,8 +798,9 @@ export default {
       saveButton.disabled = false
       if (!saved.ok) return note(saved.why === 'away' ? "Couldn't keep the pattern: the workshop's helper isn't in just now." : "Couldn't keep the pattern this time.")
       lastSaved = saved.template.id
-      note(`Kept as a pattern: ${saved.template.name}${saved.template.shared ? ', shared with the family' : ''}.`)
+      note(`Kept as a pattern: ${saved.template.name}${saved.template.shared ? ', shared with the family' : ''}.`, true)
       await loadPatterns()
+      patterns.saved(saved.template.id)
     }
     saveButton.addEventListener('click', () => void saveAsPattern())
 
@@ -716,7 +833,14 @@ export default {
     line.addEventListener('focus', onFocusLine)
     done.addEventListener('click', onDone)
     const onResize = () => {
+      const was = layout
       arrange()
+      // Turned from a phone to a wide screen or back while tuning: the bench size is fitted again.
+      if (layout !== was && state === 'tuning' && fig && made) {
+        fitBench = true
+        pose()
+        fig.root.scale.setScalar(SCALE * tune.size(made.tuning.size) * bench)
+      }
       if (view.focused && !watching && state !== 'leaving') atTable()
       if (state === 'tuning') tools.mode('on')
     }
@@ -754,7 +878,6 @@ export default {
 
     // ── Each frame ─────────────────────────────────────────────────────────
     const eye = new THREE.Vector3()
-    const head = new THREE.Vector3()
     const matAt = new THREE.Vector3()
     ctx.on('village/frame', (dt, t) => {
       const step = Math.min(dt, 0.05)
@@ -777,8 +900,11 @@ export default {
           if (slip.style.width !== width) slip.style.width = width
           matAt.set(MAT.x, TOP, MAT.z + 0.02).project(stage.camera)
           x = ((matAt.x + 1) / 2) * innerWidth
-          // Centred on the mat, but never over the rack's cards behind it.
-          y = Math.max(((1 - matAt.y) / 2) * innerHeight, patterns.bottom + 12 + h / 2)
+          // Centred on the mat, but never over the rack's cards behind it (its tab stands 18 px above it), and above the
+          // tools in front of it when they are on the table.
+          const front = tools.group.visible ? tools.rects().filter((t) => ['size', 'pace', 'hue', 'pitch', 'energy'].includes(t.key)) : []
+          const below = Math.min(innerHeight, ...front.filter((t) => t.right > x - w / 2 && t.left < x + w / 2).map((t) => t.top))
+          y = Math.max(Math.min(((1 - matAt.y) / 2) * innerHeight, below - 6 - h / 2), patterns.bottom + 30 + h / 2)
         } else if (slipAt === 'front') {
           if (slip.style.width) slip.style.width = ''
           matAt.set(MAT.x, TOP, MAT.z + MAT.d / 2).project(stage.camera)
@@ -793,36 +919,28 @@ export default {
         if (slip.style.translate !== at) slip.style.translate = at
         tools.under(new DOMRect(x - w / 2, y - h / 2, w, h))
       } else tools.under(null)
-      // Narrow, the tools come out once there is a villager to tune: before that, the phone shows only the start.
-      tools.group.visible = layout === 'wide' || state === 'stitching' || state === 'tuning' || state === 'leaving'
+      // The tools come out once there is a villager to tune. Before that only a wide screen keeps them on the table, as
+      // props beyond the slip; a tablet's or a phone's slip would lie over them, so the table shows only the start.
+      tools.group.visible = (layout === 'wide' && innerWidth / innerHeight >= 1.5) || state === 'stitching' || state === 'tuning' || state === 'leaving'
       shop.frame(step, t)
       tools.frame(step, t)
       patterns.frame()
       stage.camera.getWorldPosition(eye)
       if (puppet && state !== 'stitching') puppet.update(step, t, eye)
       if (walkers.length) stepCrowd(walkers, blobs, step, t, eye, SCALE)
-      // The card and the name tag follow the villager's head on screen.
+      // The card stands over the villager's head (the top of its bounds, ears and hats included); the name tag heads the screen at the top left.
       if (fig && (card.classList.contains('shown') || nametag.classList.contains('shown'))) {
-        fig.root.updateMatrixWorld()
-        head.set(0, fig.height * 1.08, 0).applyMatrix4(fig.root.matrixWorld).project(stage.camera)
-        const r = stage.renderer.domElement.getBoundingClientRect()
+        const v = villagerRect()!
+        const edge = layout === 'narrow' ? 16 : 24
         const cw = card.offsetWidth / 2 + 12
-        const x = Math.round(THREE.MathUtils.clamp(r.left + ((head.x + 1) / 2) * r.width, cw, innerWidth - cw))
-        // Narrow, the name tag heads the screen: the card stays below it.
-        const y = Math.round(THREE.MathUtils.clamp(r.top + ((1 - head.y) / 2) * r.height, card.offsetHeight + (layout === 'narrow' ? 16 + nametag.offsetHeight + 22 : 24), innerHeight - 120))
+        const x = Math.round(THREE.MathUtils.clamp((v.left + v.right) / 2, cw, innerWidth - cw))
+        // Below the name tag when they would meet; the camera's fit leaves room for both above the villager.
+        const under = x - card.offsetWidth / 2 < edge + nametag.offsetWidth + 12 ? edge + nametag.offsetHeight + 22 : 24
+        const y = Math.round(THREE.MathUtils.clamp(v.top - 4, card.offsetHeight + under, innerHeight - 120))
         const at = `calc(${x}px - 50%) calc(${y}px - 100%)`
         if (card.style.translate !== at) card.style.translate = at
-        // The name tag lies on the mat just in front of its feet; narrow, it heads the screen at the top left.
-        if (layout === 'narrow') {
-          const nat = '16px 16px'
-          if (nametag.style.translate !== nat) nametag.style.translate = nat
-        } else {
-        foot2.set(fig.root.position.x, TOP, fig.root.position.z + fig.side * fig.root.scale.x + 0.11).project(stage.camera)
-        const nx = Math.round(r.left + ((foot2.x + 1) / 2) * r.width)
-        const ny = Math.round(r.top + ((1 - foot2.y) / 2) * r.height)
-        const nat = `calc(${nx}px - 50%) ${Math.min(innerHeight - 60, ny)}px`
+        const nat = `${edge}px ${edge}px`
         if (nametag.style.translate !== nat) nametag.style.translate = nat
-        }
       }
       // The save tag and the send-off tag sit in the bottom corners, clear of the tools' tags.
       const edge = layout === 'narrow' ? 16 : 24
@@ -835,7 +953,6 @@ export default {
         if (done.style.translate !== dat) done.style.translate = dat
       }
     })
-    const foot2 = new THREE.Vector3()
 
     // ── For the checks ─────────────────────────────────────────────────────
     /** Whether a walker's middle is inside the camera's view. */
@@ -853,7 +970,9 @@ export default {
           rack: patterns.state(),
           note: noteEl.classList.contains('shown') ? noteEl.textContent : null,
           saved: lastSaved,
-          scale: fig?.root.scale.x ?? null,
+          // Its tuned size (on a phone's bench it is shown smaller: bench).
+          scale: fig && made ? SCALE * tune.size(made.tuning.size) : null,
+          bench,
           hue: hueShift?.shift.value ?? null,
           hueMaterials: hueShift?.count ?? 0,
           voice: voiceKey && VOICES[voiceKey] ? { ...VOICES[voiceKey] } : null,
@@ -875,6 +994,10 @@ export default {
         set: (key: Key, v: number) => tools.set(key, v),
         screen: (key: Key) => tools.screen(key),
         camera: () => stage.camera.position.toArray(),
+        /** The villager's projected bounds on the page, for the layout gate; null when there is none. */
+        bounds: () => villagerRect(),
+        /** The tools' projected bounds while they are on the table, for the layout gate. */
+        toolBounds: () => (tools.group.visible ? tools.rects() : []),
         page: () => ({ slip: slip.classList.contains('shown'), slipText: line.value, slipReadOnly: line.readOnly, card: card.classList.contains('shown') ? card.textContent : null, nametag: nametag.classList.contains('shown') ? nametag.textContent : null, done: done.classList.contains('shown'), focus: (document.activeElement as HTMLElement | null)?.dataset?.key ?? document.activeElement?.className ?? null, aside: aside.map((o) => o.visible) }),
         sendOff,
         patterns: () => patternsReady.then(() => patterns.state()),
@@ -915,6 +1038,8 @@ function css() {
   .vs-slip .tab b { font: 700 21px/1.15 ${HAND}; }
   .vs-slip .tab i { font: 700 16px/1.15 ${HAND}; opacity: 0.75; font-style: normal; }
   .vs-slip .ruled { display: block; position: relative; }
+  /* With a pattern's card stitched on, the slip packs a little closer so it stays on the mat. */
+  .vs-slip.patterned { padding-top: 22px; padding-bottom: 10px; gap: 3px; }
   .vs-slip .line { box-sizing: border-box; width: 100%; resize: none; padding: 2px 2px 4px; border: 0; outline: none; background: none;
     color: #23395a; caret-color: #23395a; font: 21px/31px ${HAND};
     background-image: repeating-linear-gradient(transparent 0 29px, rgba(90, 60, 38, 0.32) 29px 31px); background-attachment: local; }
@@ -931,7 +1056,9 @@ function css() {
   .vs-slip .sew:hover, .vs-slip .sew:focus-visible { translate: 0 -1px; background: #b04a35; outline: none; }
   .vs-slip .sew:focus-visible { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6); }
   /* Waiting: a small progress tag on the bench, the words already on the pattern sheet. */
-  .vs-slip.waiting { width: auto; max-width: calc(100vw - 32px); padding: 9px 16px 9px; border-radius: 6px; rotate: 0.6deg; }
+  /* The seconds are honest but secondary: a small tag, so the cutting on the mat is the thing to watch. */
+  .vs-slip.waiting { width: auto; max-width: calc(100vw - 32px); padding: 6px 12px 7px; border-radius: 5px; rotate: 0.6deg; box-shadow: 0 4px 10px rgba(60, 30, 10, 0.18); }
+  .vs-slip.waiting .status { font-size: 14px; color: #7a6450; }
   .vs-slip.waiting::before { inset: 4px; border-radius: 4px; }
   .vs-slip.waiting .tab, .vs-slip.waiting .ruled, .vs-slip.waiting .chip, .vs-slip.waiting .sew { display: none; }
   .vs-slip.waiting .foot { min-height: 0; }
@@ -939,7 +1066,7 @@ function css() {
   .vs-slip.invite { width: auto; padding: 10px 12px 10px 16px; border-radius: 8px; }
   .vs-slip.invite::before { inset: 4px; border-radius: 6px; }
   .vs-slip.invite .tab, .vs-slip.invite .ruled, .vs-slip.invite .chip { display: none; }
-  .vs-slip.waiting .status::after { content: ''; display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: -2px;
+  .vs-slip.waiting .status::after { content: ''; display: inline-block; width: 11px; height: 11px; margin-left: 7px; vertical-align: -2px;
     border: 2px dotted rgba(122, 59, 42, 0.6); border-radius: 50%; animation: vs-spin 2.4s linear infinite; }
   @keyframes vs-spin { to { rotate: 1turn; } }
 
@@ -1003,6 +1130,7 @@ function css() {
   .vs-note::before { content: ''; position: absolute; left: 50%; top: -6px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #c4553f;
     box-shadow: 0 2px 3px rgba(60, 30, 10, 0.35); }
   .vs-note.shown { opacity: 1; translate: -50% 0; }
+  .vs-note.heard { clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; white-space: nowrap; }
 
   @media (max-width: 600px) {
     .vs-slip { padding: 24px 16px 12px; }

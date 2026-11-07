@@ -132,7 +132,7 @@ export class Puppet {
   private glance = 0
   private glanceGoal = 0
   private nextGlance = 1.2
-  private jump: { from: THREE.Vector3; to: THREE.Vector3; u: number; seconds: number; height: number; done: () => void } | null = null
+  private jump: { from: THREE.Vector3; to: THREE.Vector3; u: number; seconds: number; height: number; scale0: number; scale1: number; done: () => void } | null = null
 
   constructor(readonly fig: Figure, at: THREE.Vector3, yaw: number) {
     this.at.copy(at)
@@ -144,9 +144,9 @@ export class Puppet {
     this.hopU = 0
   }
 
-  /** A long hop to somewhere else (off the table), resolved on landing. */
-  leap(to: THREE.Vector3, seconds: number, height: number): Promise<void> {
-    return new Promise((done) => (this.jump = { from: this.at.clone(), to: to.clone(), u: 0, seconds, height, done }))
+  /** A long hop to somewhere else (off the table), growing to `scale` on the way, resolved on landing. */
+  leap(to: THREE.Vector3, seconds: number, height: number, scale = this.fig.root.scale.x): Promise<void> {
+    return new Promise((done) => (this.jump = { from: this.at.clone(), to: to.clone(), u: 0, seconds, height, scale0: this.fig.root.scale.x, scale1: scale, done }))
   }
 
   private place() {
@@ -165,6 +165,7 @@ export class Puppet {
       const fly = smooth(Math.max(0, (j.u - 0.15) / 0.85))
       this.at.lerpVectors(j.from, j.to, fly)
       lift = Math.sin(fly * Math.PI) * j.height
+      fig.root.scale.setScalar(j.scale0 + (j.scale1 - j.scale0) * fly)
       squash = j.u < 0.15 ? Math.sin((j.u / 0.15) * Math.PI) * 0.14 : 0
       const heading = Math.atan2(j.to.x - j.from.x, j.to.z - j.from.z)
       this.yaw += wrap(heading - this.yaw) * (1 - Math.exp(-dt * 8))

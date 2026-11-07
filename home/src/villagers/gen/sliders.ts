@@ -75,6 +75,12 @@ interface Tool {
   steps?: number
   /** Show or hide a lock on the top position. */
   lock?(on: boolean): void
+  /** Tapping a part sets the value directly (a xylophone bar, a spool); null for any other part. */
+  pick?(part: THREE.Object3D): number | null
+  /** How to use it, shown as a stitched arrow: along its axis (drag), or round a point (turn). */
+  gesture: 'drag' | { turn: THREE.Vector3; radius: number }
+  /** Show the tool nudged a little off its value (d in -1..1) without changing it. */
+  wiggle?(d: number): void
   glow: THREE.MeshStandardMaterial[]
 }
 
@@ -112,7 +118,7 @@ function tapeMeasure(): Tool {
   g.add(tape, tab)
   const x0 = 0.035, span = 0.24
   return {
-    key: 'size', group: g, glow: [caseMat],
+    key: 'size', group: g, glow: [caseMat], gesture: 'drag',
     axis: [new THREE.Vector3(x0 + 0.03, 0, 0), new THREE.Vector3(x0 + 0.03 + span, 0, 0)],
     tagAt: new THREE.Vector3(0.05, 0, 0.07),
     show(v) {
@@ -149,7 +155,11 @@ function spoolRail(): Tool & { colours(c: THREE.Color[]): void } {
   const x0 = -((n - 1) / 2) * gap, x1 = ((n - 1) / 2) * gap
   let current = 0.5
   return {
-    key: 'hue', group: g, glow: [wood],
+    key: 'hue', group: g, glow: [wood], gesture: 'drag',
+    pick(part) {
+      const i = spools.findIndex((s) => { let o: THREE.Object3D | null = part; while (o && o !== s.group) o = o.parent; return o === s.group })
+      return i < 0 ? null : i / (n - 1)
+    },
     axis: [new THREE.Vector3(x0, 0, 0), new THREE.Vector3(x1, 0, 0)],
     tagAt: new THREE.Vector3(0, 0, 0.06),
     show(v) {
@@ -196,7 +206,11 @@ function xylophone(): Tool {
   g.add(mallet)
   const x0 = -((n - 1) / 2) * gap, x1 = ((n - 1) / 2) * gap
   return {
-    key: 'pitch', group: g, glow: [frame],
+    key: 'pitch', group: g, glow: [frame], gesture: 'drag',
+    pick(part) {
+      const i = bars.findIndex((b) => b === part)
+      return i < 0 ? null : i / (n - 1)
+    },
     axis: [new THREE.Vector3(x0, 0, 0), new THREE.Vector3(x1, 0, 0)],
     tagAt: new THREE.Vector3(0, 0, 0.085),
     show(v) {
@@ -232,7 +246,7 @@ function metronome(): Tool & { rate: number } {
   const top = 0.115, bottom = 0.035
   let phase = 0
   const tool: Tool & { rate: number } = {
-    key: 'pace', group: g, glow: [wood], rate: 1,
+    key: 'pace', group: g, glow: [wood], rate: 1, gesture: 'drag',
     // The weight's travel, from slow at the top to quick at the bottom.
     axis: [new THREE.Vector3(0, 0.03 + top, 0.03), new THREE.Vector3(0, 0.03 + bottom, 0.03)],
     tagAt: new THREE.Vector3(0, 0, 0.07),
@@ -277,6 +291,7 @@ function windupKey(): Tool {
   return {
     key: 'energy', group: g, glow: [brass],
     axis: null,
+    gesture: { turn: new THREE.Vector3(0.05, 0.028, 0), radius: 0.03 },
     tagAt: new THREE.Vector3(0.01, 0, 0.07),
     show(v) {
       key.rotation.x = v * Math.PI * 1.6
@@ -339,12 +354,18 @@ function stitchDial(): Tool {
   padlock.rotation.y = -0.95
   padlock.visible = false
   g.add(padlock)
+  let at = 0.5
   return {
     key: 'humour', group: g, glow: [wood], steps: 3,
     axis: null,
+    gesture: { turn: new THREE.Vector3(0, 0.03, 0), radius: 0.055 },
     tagAt: new THREE.Vector3(0, 0, -0.14),
     show(v) {
+      at = v
       knob.rotation.y = -(Math.round(v * 2) - 1) * 0.95
+    },
+    wiggle(d) {
+      knob.rotation.y = -(Math.round(at * 2) - 1) * 0.95 - d * 0.3
     },
     lock(on) {
       padlock.visible = on
@@ -397,7 +418,7 @@ function ribbon(key: Key, ground: string): Tool {
   g.add(button)
   const x0 = -0.11, x1 = 0.11
   return {
-    key, group: g, glow: [disc.material as THREE.MeshStandardMaterial],
+    key, group: g, glow: [disc.material as THREE.MeshStandardMaterial], gesture: 'drag',
     axis: [new THREE.Vector3(x0, 0, 0), new THREE.Vector3(x1, 0, 0)],
     tagAt: new THREE.Vector3(-0.185, 0, 0),
     endAt: new THREE.Vector3(0.185, 0, 0),
@@ -430,6 +451,8 @@ export interface Controls {
   ribbonsLeft(): number
   /** Paper lying over the table (the slip): quiet preview tags under it are hidden, as the paper would hide them. */
   under(rect: DOMRect | null): void
+  /** Each tool's bounds on the page, for the layout gate. */
+  rects(): { key: Key; left: number; top: number; right: number; bottom: number }[]
   /** Where a tool's handle (its value's end of the axis) is on screen, for the checks. */
   screen(key: Key): { x: number; y: number }
   frame(dt: number, t: number): void
@@ -447,9 +470,9 @@ export type Layout = 'wide' | 'narrow'
 const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
   wide: {
     size: [-0.99, 0.5, 0.2, 1],
-    pace: [-0.6, 0.48, -0.15, 1],
-    hue: [-0.3, 0.53, 0.02, 1],
-    pitch: [0.07, 0.52, 0, 1],
+    pace: [-0.6, 0.5, -0.15, 1],
+    hue: [-0.3, 0.575, 0.02, 1],
+    pitch: [0.07, 0.545, 0, 1],
     energy: [0.45, 0.56, -0.45, 1],
     warmth: [0.47, 0.11, -0.04, 1],
     playful: [0.47, 0.235, -0.04, 1],
@@ -457,15 +480,15 @@ const PLACES: Record<Layout, Record<Key, [number, number, number, number]>> = {
     humour: [-0.98, 0.25, 0.15, 1],
   },
   narrow: {
-    size: [-0.46, 0.43, 0.1, 0.7],
-    hue: [-0.21, 0.43, 0, 0.62],
-    pitch: [0.04, 0.43, 0, 0.62],
-    pace: [-0.43, 0.585, -0.2, 0.72],
-    humour: [-0.21, 0.59, 0, 0.62],
-    energy: [0.01, 0.585, -0.4, 0.72],
-    warmth: [-0.21, 0.13, 0, 0.62],
-    playful: [-0.21, 0.22, 0, 0.62],
-    chatty: [-0.21, 0.31, 0, 0.62],
+    size: [-0.46, 0.45, 0.1, 0.7],
+    hue: [-0.21, 0.45, 0, 0.62],
+    pitch: [0.04, 0.45, 0, 0.62],
+    pace: [-0.4, 0.595, -0.2, 0.72],
+    humour: [-0.21, 0.6, 0, 0.62],
+    energy: [-0.01, 0.595, -0.4, 0.72],
+    warmth: [-0.21, 0.17, 0, 0.62],
+    playful: [-0.21, 0.25, 0, 0.62],
+    chatty: [-0.21, 0.33, 0, 0.62],
   },
 }
 
@@ -586,6 +609,35 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   document.head.append(style)
   document.body.append(shelf)
 
+  // How to use each tool: a stitched thread-blue arrow beside it (along its axis for a drag, round it for a turn),
+  // and the tool nudging itself once. Shown on hover or focus, and once for each tool as the tools come out.
+  const SVG = 'http://www.w3.org/2000/svg'
+  const hints = document.createElementNS(SVG, 'svg')
+  hints.classList.add('vs-hints')
+  hints.setAttribute('aria-hidden', 'true')
+  const hintPath = new Map<Key, SVGPathElement>()
+  for (const tool of tools) {
+    const path = document.createElementNS(SVG, 'path')
+    path.classList.add('vs-hint')
+    hints.append(path)
+    hintPath.set(tool.key, path)
+  }
+  shelf.append(hints)
+  /** The frame clock, so events can start a nudge in the frame's own time. */
+  let clock = 0
+  const nudges = new Map<Key, number>()
+  /** Hints shown for a while: as the tools come out, or on hover. */
+  const timed = new Map<Key, { from: number; until: number }>()
+  let hover: Key | null = null
+  const nudge = (key: Key) => {
+    if (!reducedMotion.matches && !nudges.has(key)) nudges.set(key, clock)
+  }
+  const hoverTo = (key: Key | null) => {
+    if (key === hover) return
+    hover = key
+    if (key) nudge(key)
+  }
+
   const glow = (tool: Tool, on: number) => {
     for (const m of tool.glow) {
       m.emissive.set('#ffcf8a')
@@ -641,8 +693,15 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
   }
   for (const tag of tags.values()) {
     tag.addEventListener('keydown', onKey)
-    tag.addEventListener('focus', () => glow(toolOf(tag.dataset.key as Key), 1))
+    tag.addEventListener('focus', () => {
+      glow(toolOf(tag.dataset.key as Key), 1)
+      nudge(tag.dataset.key as Key)
+    })
     tag.addEventListener('blur', () => glow(toolOf(tag.dataset.key as Key), 0))
+  }
+  for (const el of [...tags.values(), ...ends.values()]) {
+    el.addEventListener('pointerenter', () => enabled && hoverTo(el.dataset.key as Key))
+    el.addEventListener('pointerleave', () => hoverTo(null))
   }
 
   // Pointer: grab a tool (or its tag) and drag along its own axis, as it appears on screen.
@@ -655,15 +714,21 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     const q = p.clone().project(stage.camera)
     return new THREE.Vector2(r.left + ((q.x + 1) / 2) * r.width, r.top + ((1 - q.y) / 2) * r.height)
   }
+  let hitPart: THREE.Object3D | null = null
   const hit = (e: PointerEvent): Tool | null => {
     const r = canvas.getBoundingClientRect()
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
     raycaster.setFromCamera(ndc, stage.camera)
     const found = raycaster.intersectObject(group, true)[0]
+    hitPart = found?.object ?? null
     if (!found) return null
     return tools.find((t) => { let o: THREE.Object3D | null = found.object; while (o && o !== t.group) o = o.parent; return o === t.group }) ?? null
   }
-  const begin = (tool: Tool, e: PointerEvent) => {
+  const begin = (tool: Tool, e: PointerEvent, part?: THREE.Object3D) => {
+    // A tap on a bar or a spool sets it there; the drag goes on from that value.
+    const tapped = part && tool.pick ? tool.pick(part) : null
+    if (tapped !== null) apply(tool.key, tapped)
+    nudges.delete(tool.key)
     let dir = new THREE.Vector2(170, 0)
     if (tool.axis) {
       tool.group.updateMatrixWorld(true)
@@ -682,7 +747,7 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     const tool = hit(e)
     if (!tool) return
     e.preventDefault()
-    begin(tool, e)
+    begin(tool, e, hitPart ?? undefined)
   }
   const onTagDown = (e: PointerEvent) => {
     if (!enabled || e.button !== 0) return
@@ -698,7 +763,11 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       apply(drag.tool.key, drag.v + dv)
       return
     }
-    if (enabled && e.pointerType !== 'touch') canvas.style.cursor = hit(e) ? 'grab' : canvas.style.cursor === 'grab' ? '' : canvas.style.cursor
+    if (enabled && e.pointerType !== 'touch' && e.target === canvas) {
+      const over = hit(e)
+      canvas.style.cursor = over ? 'grab' : canvas.style.cursor === 'grab' ? '' : canvas.style.cursor
+      hoverTo(over?.key ?? null)
+    }
   }
   const onUp = (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.id) return
@@ -726,6 +795,36 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
     if (el.style.translate !== t) el.style.translate = t
   }
 
+  /** A tool's stitched arrow, in page pixels: a double-headed curve beside its axis, or most of a ring round its turning point. */
+  const arrow = (tool: Tool) => {
+    tool.group.updateMatrixWorld()
+    const head = (tip: THREE.Vector2, along: THREE.Vector2) => {
+      const a = along.clone().normalize().multiplyScalar(-7)
+      const l = a.clone().rotateAround(new THREE.Vector2(), 0.55).add(tip), m = a.clone().rotateAround(new THREE.Vector2(), -0.55).add(tip)
+      return ` M ${l.x.toFixed(1)} ${l.y.toFixed(1)} L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)} L ${m.x.toFixed(1)} ${m.y.toFixed(1)}`
+    }
+    if (tool.gesture === 'drag' && tool.axis) {
+      const a = toScreen(tool.axis[0].clone().applyMatrix4(tool.group.matrixWorld))
+      const b = toScreen(tool.axis[1].clone().applyMatrix4(tool.group.matrixWorld))
+      const d = b.clone().sub(a)
+      // Beside the axis, on the screen's upper side (or left of an upright one), clear of the tool itself.
+      let n = new THREE.Vector2(-d.y, d.x).normalize()
+      if (n.y > 0.2 || (Math.abs(n.y) <= 0.2 && n.x > 0)) n.negate()
+      const lift = layout === 'narrow' ? 12 : 16
+      const p = a.clone().addScaledVector(d, 0.08).addScaledVector(n, lift), q = a.clone().addScaledVector(d, 0.92).addScaledVector(n, lift)
+      const c = p.clone().add(q).multiplyScalar(0.5).addScaledVector(n, 6)
+      return `M ${p.x.toFixed(1)} ${p.y.toFixed(1)} Q ${c.x.toFixed(1)} ${c.y.toFixed(1)} ${q.x.toFixed(1)} ${q.y.toFixed(1)}` + head(q, q.clone().sub(c)) + head(p, p.clone().sub(c))
+    }
+    const turn = tool.gesture === 'drag' ? { turn: new THREE.Vector3(), radius: 0.04 } : tool.gesture
+    const o = toScreen(turn.turn.clone().applyMatrix4(tool.group.matrixWorld))
+    const edge = toScreen(turn.turn.clone().add(new THREE.Vector3(turn.radius, 0, 0)).applyMatrix4(tool.group.matrixWorld))
+    const rad = Math.max(14, Math.min(60, o.distanceTo(edge) + 8))
+    // From the left, over the top, round to the right: a turn.
+    const at = (a: number) => new THREE.Vector2(o.x + Math.cos(a) * rad, o.y + Math.sin(a) * rad * 0.62)
+    const from = at(Math.PI * 0.95), to = at(Math.PI * 2.15), mid = at(Math.PI * 1.55)
+    return `M ${from.x.toFixed(1)} ${from.y.toFixed(1)} A ${rad.toFixed(1)} ${(rad * 0.62).toFixed(1)} 0 1 1 ${to.x.toFixed(1)} ${to.y.toFixed(1)}` + head(to, to.clone().sub(mid).rotateAround(new THREE.Vector2(), -0.9))
+  }
+
   return {
     group,
     values,
@@ -739,6 +838,13 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       }
     },
     mode(state) {
+      // The tools coming out: each shows how it is used, once, one after another.
+      if (state === 'on' && shown !== 'on') tools.forEach((tool, i) => timed.set(tool.key, { from: clock + 0.6 + i * 0.32, until: clock + 2.4 + i * 0.32 }))
+      if (state !== 'on') {
+        timed.clear()
+        hover = null
+        for (const path of hintPath.values()) path.classList.remove('shown')
+      }
       shown = state
       enabled = state === 'on'
       shelf.classList.toggle('shown', state === 'on')
@@ -776,8 +882,22 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       cover = rect
     },
     ribbonsLeft() {
-      if (shown === 'off') return Infinity
+      // Their tags show only while tuning; before that there is nothing of theirs for the slip to keep clear of.
+      if (shown !== 'on') return Infinity
       return Math.min(...RIBBONS.map((k) => tags.get(k)!.getBoundingClientRect().left))
+    },
+    rects() {
+      const box = new THREE.Box3()
+      const p = new THREE.Vector3()
+      return tools.map((tool) => {
+        box.setFromObject(tool.group)
+        let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+        for (let i = 0; i < 8; i++) {
+          const q = toScreen(p.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z))
+          left = Math.min(left, q.x); right = Math.max(right, q.x); top = Math.min(top, q.y); bottom = Math.max(bottom, q.y)
+        }
+        return { key: tool.key, left, top, right, bottom }
+      })
     },
     screen(key) {
       const tool = toolOf(key)
@@ -787,7 +907,25 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
       return { x: q.x, y: q.y }
     },
     frame(dt, t) {
+      clock = t
       for (const tool of tools) tool.tick?.(dt, t)
+      for (const [key, from] of nudges) {
+        const u = (t - from) / 0.9
+        const tool = toolOf(key)
+        if (u >= 1 || drag?.tool === tool) {
+          nudges.delete(key)
+          tool.show(values[key])
+          continue
+        }
+        // Out one way and back, easing off: about a tenth of the way along, or a click of the dial.
+        const d = Math.sin(u * Math.PI * 2) * (1 - u) * 1.3
+        if (tool.wiggle) tool.wiggle(d)
+        else tool.show(Math.min(1, Math.max(0, values[key] + d * 0.09)))
+      }
+      for (const [key, h] of timed) {
+        if (t >= h.from && t < h.from + 0.1) nudge(key)
+        if (t >= h.until) timed.delete(key)
+      }
       if (shown === 'off') return
       const r = canvas.getBoundingClientRect()
       for (const tool of tools) {
@@ -795,6 +933,15 @@ export function controls(stage: Stage, hooks: { input(key: Key, v: number): void
         pin(tags.get(tool.key)!, layout === 'narrow' && tool.key === 'humour' ? DIAL_FRONT : tool.tagAt, tool, r)
         const end = ends.get(tool.key)
         if (end && tool.endAt) pin(end, tool.endAt, tool, r)
+      }
+      // The arrows: for the tool being hovered, focused or dragged, and those in the coming-out sequence.
+      const focused = (document.activeElement as HTMLElement | null)?.dataset?.key
+      for (const tool of tools) {
+        const path = hintPath.get(tool.key)!
+        const h = timed.get(tool.key)
+        const on = shown === 'on' && (tool.key === hover || tool.key === focused || drag?.tool === tool || Boolean(h && t >= h.from))
+        path.classList.toggle('shown', on)
+        if (on) path.setAttribute('d', arrow(tool))
       }
       if (shown === 'preview') {
         for (const el of [...tags.values(), ...ends.values()]) {
@@ -854,14 +1001,18 @@ function css() {
   .vs-tools.shown .vs-tool, .vs-tools.shown .vs-end { opacity: 1; pointer-events: auto; }
   .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { opacity: 0.6; }
   .vs-tools.preview .under { opacity: 0; }
-  /* Narrow, before there is a villager, the tools wait off the table (setup.ts); nothing to label. */
-  .vs-tools.preview[data-layout=narrow] .vs-tool, .vs-tools.preview[data-layout=narrow] .vs-end { display: none; }
+  /* Before there is a villager the first choice is the slip or a pattern card: the tools carry no labels yet. */
+  .vs-tools.preview .vs-tool, .vs-tools.preview .vs-end { display: none; }
+  .vs-hints { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .vs-hint { fill: none; stroke: #2f4a6b; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 5 4;
+    filter: drop-shadow(0 1px 0 rgba(255, 250, 235, 0.85)); opacity: 0; transition: opacity 220ms ease; }
+  .vs-hint.shown { opacity: 0.85; }
   .vs-tools.shown .vs-tag:hover { transform: translateY(-1px); }
   .vs-tools[data-layout=narrow] .vs-tag { font-size: 15px; padding: 3px 8px 4px; }
   .vs-tools[data-layout=narrow] .vs-tool { padding-left: 11px; }
   .vs-tools[data-layout=narrow] .vs-end.hi { padding-right: 11px; }
   .vs-tools[data-layout=narrow] .vs-tool .ga { font-size: 12px; gap: 3px; }
   .vs-tools[data-layout=narrow] .vs-tool .tr { width: 22px; }
-  @media (prefers-reduced-motion: reduce) { .vs-tool, .vs-end { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .vs-tool, .vs-end, .vs-hint { transition: none; } }
   `
 }

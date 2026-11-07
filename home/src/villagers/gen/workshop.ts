@@ -362,7 +362,7 @@ export function workshop(): Workshop {
     return pin
   })
   const workAt = new THREE.Vector3()
-  const slotAt = (i: number) => new THREE.Vector3(MAT.x - 0.3 + (i % 6) * 0.085, y + 0.007, MAT.z + 0.15 + Math.floor(i / 6) * 0.065)
+  const slotAt = (i: number) => new THREE.Vector3(MAT.x - 0.25 + (i % 6) * 0.085, y + 0.007, MAT.z + 0.13 + Math.floor(i / 6) * 0.065)
 
   // Scissors: two blades and finger loops about a pivot.
   const scissors = new THREE.Group()
@@ -429,12 +429,15 @@ export function workshop(): Workshop {
   let cut = 0
   /** The felt sheet and scissors: on the middle of the mat while working, else back at the front right. */
   const sheetRest = new THREE.Vector3()
+  let wide = true
   const lay = () => {
     const working = state === 'working'
-    // While the pattern is drafted, its tissue sheet (the words, then the name) lies on the mat's back left, by the cutting.
-    sheet.position.copy(working ? new THREE.Vector3(MAT.x - 0.19, y + 0.0045, MAT.z - 0.1) : sheetRest)
-    sheet.scale.setScalar(working ? 0.68 : 1)
-    sheet.rotation.z = working ? -0.06 : 0.1
+    // While the pattern is drafted, its tissue sheet (the words, then the name) lies on the mat's back left, by the
+    // cutting, where the close camera can read it. A phone cannot read it at that size, so there it stays aside.
+    const onMat = working && wide
+    sheet.position.copy(onMat ? new THREE.Vector3(MAT.x - 0.2, y + 0.0045, MAT.z - 0.095) : sheetRest)
+    sheet.scale.setScalar(onMat ? 0.72 : 1)
+    sheet.rotation.z = onMat ? -0.04 : 0.1
     sheetFelt.position.copy(working ? workAt : new THREE.Vector3(MAT.x + 0.26, y + 0.009, MAT.z + 0.16))
     sheetFelt.rotation.y = working ? 0 : 0.25
     scissors.position.set(MAT.x + 0.28, y + 0.015, MAT.z + 0.15)
@@ -448,7 +451,7 @@ export function workshop(): Workshop {
   const arrange = (layout: 'wide' | 'narrow') => {
     MAT.z = MAT_Z[layout]
     matMesh.position.set(MAT.x, y + 0.003, MAT.z)
-    const wide = layout === 'wide'
+    wide = layout === 'wide'
     sheetRest.set(wide ? -0.63 : -0.98, y + 0.0035, wide ? -0.16 : -0.1)
     pencil.position.set(wide ? -0.4 : -0.75, y + 0.009, wide ? -0.02 : 0.05)
     cushionAt.position.set(wide ? -0.82 : -0.95, y, wide ? -0.27 : 0.25)
