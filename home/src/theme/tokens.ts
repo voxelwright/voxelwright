@@ -56,7 +56,7 @@ export interface Surfaces {
   other: Surface
   /** Thin edges of the house: skirting, window frames, the dollhouse's wall caps (tagged `'trim'`). Falls back to `other`. */
   trim?: Surface
-  /** The unlit painted ground beyond the house, the worktable in the dollhouse view (tagged `'backdrop'`). Falls back to `other`. */
+  /** The ground beyond the house in the dollhouse view: the yard's lawn and the worktable (tagged `'backdrop'`). Falls back to `other`. */
   backdrop?: Surface
 }
 
