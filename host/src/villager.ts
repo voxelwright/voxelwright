@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, type Maker, type Router } from './villager-input.ts'
+import { parseProfiles, villagerRoutes, type VillagerMaker } from './villager-make.ts'
 
 export interface Config {
   root: string
@@ -31,6 +32,10 @@ export interface Config {
   /** The always-on input's router and prop maker (#42). Without them those endpoints answer 503. */
   router?: Router
   maker?: Maker
+  /** #47: writes a villager from a description (villager-make.ts). Without it that endpoint answers 503. */
+  villagerMaker?: VillagerMaker
+  /** #47: synthetic profiles for persona gating (villager-make.ts parseProfiles). Unlisted people are unknown. */
+  profiles?: ReturnType<typeof parseProfiles>
 }
 
 /** A stored prop. The module is text the home runs in its sandbox; the host never imports or evaluates it. */
@@ -268,9 +273,11 @@ export default {
       return items.filter((i): i is LibraryItem => Boolean(i?.kept)).sort((a, b) => b.at.localeCompare(a.at))
     }
 
+    const villagers = villagerRoutes({ root: config.root, people, maker: config.villagerMaker, profiles: config.profiles })
     async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!authorized(req)) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      if (await villagers(path, req, res)) return
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch

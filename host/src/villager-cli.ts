@@ -7,6 +7,7 @@ import { Context } from 'cordis'
 import villager, { parsePeople } from './villager.ts'
 import { claudeAgent, stubAgent } from './villager-agent.ts'
 import { claudeMaker, claudeRouter, stubMaker, stubRouter } from './villager-input.ts'
+import { claudeVillagerMaker, parseProfiles, stubVillagerMaker } from './villager-make.ts'
 
 const { values } = parseArgs({
   options: {
@@ -39,6 +40,8 @@ const fiber = root.plugin(villager, {
   agent: values.agent === 'stub' ? stubAgent() : claudeAgent(values.model),
   router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
+  villagerMaker: values.agent === 'stub' ? stubVillagerMaker() : claudeVillagerMaker(values['maker-model']),
+  profiles: parseProfiles(process.env.VILLAGER_PROFILES),
 })
 await fiber.await()
 console.log(`villager (${values.agent}) for ${Object.keys(people ?? { alex: 1 }).join(', ')} listening on 127.0.0.1:${root.villager.port}`)

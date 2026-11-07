@@ -166,7 +166,7 @@ export function build(api) {
 Answer with the module only, in one \`\`\`js fenced block.`
 
 /** One tool-less model call. Text out, timings and cost alongside. */
-async function oneShot(model: string, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<{ text: string } & Call> {
+export async function oneShot(model: string, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<{ text: string } & Call> {
   const abortController = new AbortController()
   signal.addEventListener('abort', () => abortController.abort(), { once: true })
   let init: SDKSystemMessage | undefined

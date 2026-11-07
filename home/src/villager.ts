@@ -114,3 +114,17 @@ export const library = (person: string) => call<{ items: { id: string; name: str
 export const startProject = (person: string, what: string, where: string | undefined, text: string) =>
   call<{ project: { id: string; what: string; state: string } }>(`/people/${person}/projects`, { what, where, text })
 export const projects = (person: string) => call<{ projects: { id: string; what: string; where?: string; state: string }[] }>(`/people/${person}/projects`)
+
+// ── #47 villager setup (dev only) ───────────────────────────────────────────
+/** A villager written by the model from a description, as module text for the prop sandbox, and its record id. */
+export const makeVillager = (person: string, description: string, accent: string) =>
+  call<{ item: string; module: string; persona: unknown; models: string[]; costUsd: number | null; outputTokens: number | null }>(`/people/${person}/villagers`, { description, accent })
+/** The slider values chosen for a made villager, kept beside its module text. */
+export const tuneVillager = (person: string, item: string, tuning: Record<string, number>) =>
+  call<{ ok: true }>(`/people/${person}/villagers/${item}/tuning`, tuning)
+/** Persona templates (#47): the person's own saved patterns and their profile, the family's shared ones, and saving one. All data, gated by the host. */
+export interface SavedTemplate { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child'; shared: boolean; maker: string }
+export const personaTemplates = (person: string) => call<{ templates: SavedTemplate[] }>(`/people/${person}/persona-templates`)
+export const familyTemplates = (person: string) => call<{ templates: SavedTemplate[] }>(`/family/persona-templates?for=${person}`)
+export const saveTemplate = (person: string, name: string, persona: unknown, shared: boolean) =>
+  call<{ template: SavedTemplate }>(`/people/${person}/persona-templates`, { name, persona, shared })
