@@ -771,6 +771,27 @@ scarf (53 px). Personas (`round3/personas-*.md`) stay adult and specific.
 `node scripts/check-villager-gen.mjs` 28 of 28, `node scripts/villagers/check-setup.mjs --port=5334`
 52 of 52 (also at `--viewport=390x844`), `npm run typecheck` passes.
 
+Silhouette role test (the TF2 test), round 3: Opus and GPT-6.1 Sol each saw only
+`round3/readability-silhouettes.jpg` (20 numbered flat-black figures at the dollhouse angle) and the
+legend of the eight role marks, and named a role for each. Each scored 11 of 20 (chance 2.5 of 20).
+
+| Role | Opus | Sol |
+| --- | --- | --- |
+| cook | 2 of 3 | 1 of 3 |
+| gardener | 2 of 3 | 1 of 3 |
+| tidier | 2 of 2 | 2 of 2 |
+| keeper | 2 of 2 | 2 of 2 |
+| tutor | 1 of 2 | 2 of 2 |
+| maker | 1 of 3 | 2 of 3 |
+| messenger | 0 of 2 | 0 of 2 |
+| carer | 1 of 3 | 1 of 3 |
+
+Both read both messengers as keepers: the mail bag and the ledger satchel are both a bag at the
+hip. Hats above the head (toque, mortarboard, duster plume) read; marks inside the body outline
+(goggles, tool belt, hood) do not, and a snail's shell reads as a carer's hood. Next: give every
+role a mark that breaks the outline above or beside the head, and no two roles the same kind of
+shape.
+
 ## Villager setup: the felt workshop (#47, November 7, 2026)
 
 `?villager=gen&setup=1` (dev builds only; the production build contains none of it,
