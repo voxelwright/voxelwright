@@ -135,9 +135,10 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   await page.waitForTimeout(800)
   const waiting = await page.evaluate(() => ({ outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'), state: document.querySelector('[data-villager]').dataset.villager }))
   check('with the host away the line waits in the outbox', waiting.outbox.join() === 'Buy milk' && waiting.state === 'away', waiting)
-  // The host comes back (a stand-in on the page's routes); the first reply is slow.
+  // The host comes back (a stand-in on the page's routes) and its link is opened in
+  // the same tab, which changes only the fragment; the first reply is slow.
   const sent = []
-  await page.route('**/villager/launch', (r) => r.fulfill({ json: { token: 't' } }))
+  await page.evaluate(() => (location.hash = 'token=t'))
   await page.route('**/villager/api/people/alex/messages', async (r) => {
     sent.push(JSON.parse(r.request().postData()).text)
     if (sent.length === 1) await new Promise((x) => setTimeout(x, 1500))
