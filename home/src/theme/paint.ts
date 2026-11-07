@@ -68,6 +68,17 @@ export function paintNightCity(seed: number) {
   row(0.7, 160, 340, '#2a1e4e', 0.18, 0.4, 6)
   row(0.78, 200, 440, '#181233', 0.14, 0.45, 8)
   row(0.9, 260, 520, '#0d0a1e', 0.0, 0.5, 11)
+  // Two signs placed where the kitchen window looks (about x 0.41 to 0.62, y 0.31 to 0.65),
+  // so the seated view always carries one magenta and one cyan tube.
+  const sign = (x: number, y: number, sw: number, sh: number, color: string) => {
+    g.fillStyle = color
+    g.shadowColor = color
+    g.shadowBlur = 30
+    g.fillRect(w * x, h * y, sw, sh)
+    g.shadowBlur = 0
+  }
+  sign(0.455, 0.4, 12, 190, '#ff3ab8')
+  sign(0.535, 0.52, 150, 10, '#2ef2ff')
 
   // Street glow at the bottom.
   const street = g.createLinearGradient(0, h * 0.84, 0, h)
