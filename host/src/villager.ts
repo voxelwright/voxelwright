@@ -1,7 +1,8 @@
 // The villager service: a loopback-only HTTP API through which a person talks
-// to their villager. Every request needs the per-launch token, which is
-// written with mode 0600 to <root>/villager/launch.json for the home's dev
-// server to hand to the page. Replies stream as server-sent events.
+// to their villager. Each launch gives every person their own token, which
+// opens that person's villager and no other. The tokens are written with mode
+// 0600 to <root>/villager/launch.json, and the CLI prints each person's link
+// (the token rides in the URL fragment). Replies stream as server-sent events.
 //
 // Per person, under <root>/people/<id>/:
 //   notes/*.md          the villager's private notes (its only tools)
@@ -31,12 +32,11 @@ interface SessionState {
   sessionCostUsd?: number
 }
 
-const PERSON = /^[a-z][a-z0-9-]{0,31}$/
 const MAX_TEXT = 2000
 
 declare module 'cordis' {
   interface Context {
-    villager: { port: number; launchFile: string }
+    villager: { port: number; launchFile: string; tokens: Record<string, string> }
   }
 }
 
@@ -72,15 +72,18 @@ export default {
   name: 'villager',
   async apply(ctx: Context, config: Config) {
     const people = config.people ?? { alex: 'Alex' }
-    const token = randomBytes(32).toString('hex')
-    const expected = Buffer.from(`Bearer ${token}`)
+    const tokens = Object.fromEntries(Object.keys(people).map((id) => [id, randomBytes(32).toString('hex')]))
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
 
-    const authorized = (req: IncomingMessage) => {
+    /** The person whose token the request carries, or undefined. */
+    const holder = (req: IncomingMessage) => {
       const given = Buffer.from(req.headers.authorization ?? '')
-      return given.length === expected.length && timingSafeEqual(given, expected)
+      return Object.keys(tokens).find((id) => {
+        const expected = Buffer.from(`Bearer ${tokens[id]}`)
+        return given.length === expected.length && timingSafeEqual(given, expected)
+      })
     }
     const send = (res: ServerResponse, status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -124,11 +127,12 @@ export default {
     }
 
     async function handle(req: IncomingMessage, res: ServerResponse) {
-      if (!authorized(req)) return send(res, 401, { error: 'token required' })
+      const person = holder(req)
+      if (!person) return send(res, 401, { error: 'token required' })
       const match = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(new URL(req.url ?? '/', 'http://x').pathname)
       if (!match) return send(res, 404, { error: 'not found' })
       const [, id, what] = match
-      if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
+      if (id !== person) return send(res, 403, { error: 'this token is for another person' })
       if (what === 'conversation' && req.method === 'GET') {
         const lines = await readJsonl(join(personDir(id), 'conversation.jsonl'))
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
@@ -166,8 +170,8 @@ export default {
     const port = (server.address() as AddressInfo).port
     const launchFile = join(config.root, 'villager', 'launch.json')
     await mkdir(join(config.root, 'villager'), { recursive: true, mode: 0o700 })
-    await writeFile(launchFile, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 })
-    ctx.provide('villager', { port, launchFile })
+    await writeFile(launchFile, JSON.stringify({ port, tokens, pid: process.pid }), { mode: 0o600 })
+    ctx.provide('villager', { port, launchFile, tokens })
 
     ctx.effect(() => async () => {
       await rm(launchFile, { force: true })

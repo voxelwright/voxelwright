@@ -1,34 +1,41 @@
 // The page's side of the villager API (host/src/villager.ts), reached through
-// the dev server: /villager/launch gives the per-launch token and
-// /villager/api/* is forwarded to the host on 127.0.0.1.
+// the dev server, which forwards /villager/api/* to the host on 127.0.0.1.
+//
+// The token comes from the link the host prints (http://localhost:5181/#token=…).
+// A fragment never reaches a server; the page keeps the token for this tab in
+// sessionStorage and takes it out of the address bar.
 
 /** away: the host was not reached, so the line can be sent again. cut: the reply broke off or stalled after the host had the line. */
 export type Said = { ok: true; reply: string } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' }
 /** A reply that sends nothing for this long is abandoned. */
 const IDLE_MS = 30_000
+const TOKEN_KEY = 'village.villager.token'
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
 let token: string | null = null
+try {
+  token = sessionStorage.getItem(TOKEN_KEY)
+} catch {}
+/** Takes a token from the address bar's #token=…, keeps it for this tab and clears it from the bar. */
+function adoptLink() {
+  const linked = new URLSearchParams(location.hash.slice(1)).get('token')
+  if (!linked) return
+  token = linked
+  try {
+    sessionStorage.setItem(TOKEN_KEY, linked)
+  } catch {}
+  history.replaceState(history.state, '', location.pathname + location.search)
+}
+adoptLink()
+// A new link opened in the same tab (after the host restarts) changes only the fragment.
+addEventListener('hashchange', adoptLink)
 
+/** Null when there is no token, the host is unreachable, or the token is from an earlier launch (open the new link). */
 async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!token) {
-      const launch = await fetch('/villager/launch', { cache: 'no-store', signal: init.signal }).catch(() => null)
-      if (!launch?.ok) return null
-      // A server without the launch route (vite preview) answers with the page itself.
-      token = ((await launch.json().catch(() => null)) as { token?: string } | null)?.token ?? null
-      if (!token) return null
-    }
-    const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
-    if (!res || res.status >= 500) return null
-    // The host restarted with a new token: fetch it once and try again.
-    if (res.status === 401) {
-      token = null
-      continue
-    }
-    return res
-  }
-  return null
+  if (!token) return null
+  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
+  if (!res || res.status >= 500 || res.status === 401) return null
+  return res
 }
 
 export async function conversation(person: string): Promise<Line[] | null> {

@@ -15,10 +15,10 @@ const check = (name: string, pass: unknown, detail?: unknown) => checks.push({ n
 
 async function start() {
   const ctx = new Context()
-  const fiber = ctx.plugin(villager, { root, agent: stubAgent(30), port: 0 })
+  const fiber = ctx.plugin(villager, { root, agent: stubAgent(30), port: 0, people: { alex: 'Alex', sam: 'Sam' } })
   await fiber.await()
   const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: (launch.tokens?.alex ?? launch.token) as string, samToken: (launch.tokens?.sam ?? launch.token) as string }
 }
 
 interface Streamed { status: number; events: { name: string; data: any; at: number }[] }
@@ -96,8 +96,14 @@ try {
   const after = await say(host.base, host.token, 'still there?')
   check('the next turn resumes the same session', /4 lines/.test(after.events.find((e) => e.name === 'done')?.data.reply ?? ''))
 
-  // Person ids.
-  for (const id of ['..%2Falex', 'Alex', 'sam']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 404)
+  // Person ids: a token opens one person's villager and no other.
+  for (const id of ['..%2Falex', 'Alex', 'nobody']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 403)
+  const crossRead = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })
+  check("person-scoped token: Alex's token cannot read Sam's conversation", crossRead.status === 403, crossRead.status)
+  check("person-scoped token: Alex's token cannot write to Sam's villager", (await say(host.base, host.token, 'hi', 'sam')).status === 403)
+  check("person-scoped token: Sam's token cannot read Alex's conversation", (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).status === 403)
+  const samOwn = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })
+  check("person-scoped token: Sam's token reads Sam's conversation", samOwn.status === 200 && (await samOwn.json()).name === 'Sam')
   await host.fiber.dispose()
 
   // Notes cannot leave the person folder.
