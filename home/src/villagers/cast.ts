@@ -27,14 +27,16 @@ export function contactShadows(villagers: Villager[]): THREE.Mesh[] {
 
 /** One frame for a group: yielding, the rig, and the shadows following. */
 export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number, t: number, eye: THREE.Vector3, scale: number) {
-  // Walkers wait for whoever is just ahead; of two facing each other, the first goes.
+  // Walkers wait for whoever is just ahead.
   villagers.forEach((v, i) => {
     v.blocked = villagers.some((o, j) => {
-      if (o === v || o.seated > 0.5) return false
+      // Someone busy at a chore is stepped around, not waited for.
+      if (o === v || o.seated > 0.5 || o.state === 'work') return false
       const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z
       const d = Math.hypot(dx, dz)
       const ahead = (dx * Math.sin(v.yaw) + dz * Math.cos(v.yaw)) / (d || 1)
-      const mutual = (-dx * Math.sin(o.yaw) - dz * Math.cos(o.yaw)) / (d || 1) > 0.4 && o.walk > 0.1
+      // Two walkers facing each other: the first goes, even when both have already stopped.
+      const mutual = (-dx * Math.sin(o.yaw) - dz * Math.cos(o.yaw)) / (d || 1) > 0.4 && o.state === 'walk'
       return d < 0.5 * scale && ahead > 0.4 && !(mutual && i < j)
     })
   })

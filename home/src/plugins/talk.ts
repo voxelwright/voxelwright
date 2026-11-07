@@ -245,6 +245,8 @@ export default {
     let pending = false
     let quietLeave = false
     let lastRound: { name: string; text: string }[] = []
+    /** The villager just let go of: hover does not pause it again until the pointer leaves. */
+    let released: Member | null = null
 
     const show = (m: Member, as: 'speaking' | 'said') => {
       showing.set(m, as)
@@ -277,7 +279,7 @@ export default {
       line.placeholder = placeholder
       setChips(labels)
       slip.classList.add('shown')
-      if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => line.focus({ preventScroll: true }), 0)
+      if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => line.focus({ preventScroll: true }), 30)
     }
     const closeSlip = () => {
       slip.classList.remove('shown')
@@ -350,6 +352,7 @@ export default {
       const m = partner
       if (!m) return
       partner = null
+      released = m
       m.v.chosen = false
       m.v.thinking = m.v.speaking = false
       hide(m)
@@ -476,7 +479,9 @@ export default {
       speaker = m
       m.v.thinking = true
       hide(m)
-      while (!speech.text && !speech.done) await frame()
+      // Even a quick answer gets its beat: eyes up, a tap of the chin, then words.
+      const beat = clock + 0.5
+      while ((!speech.text && !speech.done) || clock < beat) await frame()
       m.v.thinking = false
       if (speech.away) {
         keep(m.person, said)
@@ -610,7 +615,9 @@ export default {
     ctx.on('village/frame', (dt, t) => {
       clock += dt
       stage.camera.getWorldPosition(eye)
-      for (const m of cast) m.v.paused = entries.hovered === m.entry
+      // Hovering pauses a walker so it is easy to click; one just let go walks on until the pointer leaves it.
+      if (released && entries.hovered !== released.entry) released = null
+      for (const m of cast) m.v.paused = entries.hovered === m.entry && m !== released && mode === 'room'
       stepCrowd(crowd, blobs, Math.min(dt, 0.05), t, eye, SCALE)
       for (const m of cast) {
         // The glyph bobs over the head and fades once looked at for a second.

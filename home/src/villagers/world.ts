@@ -22,6 +22,9 @@ const OPEN_EDGES: [string, string][] = [
   ['l0', 'f0'], ['f0', 'f1'], ['f1', 'f2'], ['f2', 'f3'], ['f3', 'r1'],
 ]
 export type Paths = 'kitchen' | 'open'
+/** On open paths some spots are reached from a different node, so the walk avoids others' workplaces. */
+const OPEN_VIA: Record<string, string> = { counter: 'r1' }
+const via = (spot: string, paths: Paths) => (paths === 'open' && OPEN_VIA[spot]) || SPOTS[spot].via
 
 export interface Spot {
   at: [number, number]
@@ -81,13 +84,13 @@ function nodes(from: string, to: string, paths: Paths): string[] {
 
 /** A smooth floor path from one spot to another through the corridor. */
 export function route(from: string, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
-  return curve(SPOTS[from].at, SPOTS[from].via, to, paths)
+  return curve(SPOTS[from].at, via(from, paths), to, paths)
 }
 
 /** A path from wherever a villager stands, through its nearest corridor node, to a spot. */
 export function routeFrom(x: number, z: number, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
   const used = new Set((paths === 'open' ? OPEN_EDGES : EDGES).flat())
-  let near = SPOTS[to].via, best = Infinity
+  let near = via(to, paths), best = Infinity
   for (const n of used) {
     const d = Math.hypot(NODES[n][0] - x, NODES[n][1] - z)
     if (d < best) [near, best] = [n, d]
@@ -98,8 +101,7 @@ export function routeFrom(x: number, z: number, to: string, paths: Paths = 'kitc
 function curve(start: [number, number], via0: string, to: string, paths: Paths): THREE.CatmullRomCurve3 {
   const b = SPOTS[to]
   const points: [number, number][] = [start]
-  const via = nodes(via0, b.via, paths)
-  for (const n of via) points.push(NODES[n])
+  for (const n of nodes(via0, via(to, paths), paths)) points.push(NODES[n])
   points.push(b.at)
   const clean = points.filter((p, i) => i === 0 || Math.hypot(p[0] - points[i - 1][0], p[1] - points[i - 1][1]) > 0.12)
   if (clean.length === 2) clean.splice(1, 0, [(clean[0][0] + clean[1][0]) / 2, (clean[0][1] + clean[1][1]) / 2])
