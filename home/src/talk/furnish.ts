@@ -261,7 +261,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const p = prev.placing
     if (prev.state === 'placed' && p.fits) p.confirm()
     else end(prev)
-    // A failed save leaves it open; the next line goes ahead (and its placement ends this one), saying so.
+    // A failed save leaves it open: it is let go, saying so, and the next line goes ahead.
     const stuck = new Promise<void>((r) => {
       const old = prev.unstick
       prev.unstick = () => {
@@ -269,7 +269,10 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
         r()
       }
     })
-    return Promise.race([p.done, stuck.then(() => hooks.say(`The ${label(prev)} wasn't saved, so I've let it go.`))])
+    return Promise.race([p.done, stuck.then(() => {
+      hooks.say(`The ${label(prev)} wasn't saved, so I've let it go.`)
+      end(prev)
+    })])
   }
   /**
    * `next` begins after every earlier line has had its turn. Each line chains behind the one before, and wakes to

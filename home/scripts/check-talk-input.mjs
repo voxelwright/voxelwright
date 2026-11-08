@@ -179,6 +179,31 @@ async function fixes() {
   s = await state(page)
   check('batch 2 R1: three lines queued behind a piece being made are each made in turn, and none is lost', JSON.stringify(turns) === JSON.stringify(queued) && props.calls - callsBefore === 4 && s.input.furnish.job === null, { turns, calls: props.calls - callsBefore })
 
+  // R4 (batch 2): a line written after a Keep that would not save lets the unsaved piece go, says so once, and goes ahead.
+  await fresh()
+  const callsR4 = props.calls
+  // On the floor at a spot nothing else stands on, so the piece fits and Keep really tries to save it.
+  await page.evaluate(() => window.village.talk.pickAt(1.1, 0, 1.3))
+  await write(page, 'add a hatstand here')
+  await until(page, (x) => x.input.furnish.job?.state === 'placed', 10_000)
+  await page.evaluate(() => {
+    const h = window.villagePlace.history()
+    window.__commit = h.commit
+    h.commit = () => Promise.reject(new Error('the host could not be reached'))
+  })
+  const rowsR4 = (await furniture(page)).length
+  await until(page, (x) => !x.pending && !x.input.routing, 10_000)
+  await page.waitForTimeout(700)
+  await write(page, 'add a teapot here')
+  s = await until(page, (x) => x.input.furnish.timings.some((t) => /teapot/.test(t.text)) && x.input.furnish.job?.state === 'placed', 15_000)
+  await quipped(/wasn't saved, so I've let it go/, 12_000)
+  await page.waitForTimeout(500)
+  s = await state(page)
+  const letGo = s.input.quips.filter((q) => /wasn't saved, so I've let it go/.test(q.text)).length
+  await page.evaluate(() => (window.villagePlace.history().commit = window.__commit))
+  check('batch 2 R4: a line after a Keep that would not save lets the unsaved piece go, says so once, and goes ahead', letGo === 1 && s.input.furnish.job?.state === 'placed' && s.input.furnish.placed.length === 0 && (await furniture(page)).length === rowsR4 && props.calls - callsR4 === 2, { letGo, job: s.input.furnish.job, placed: s.input.furnish.placed, calls: props.calls - callsR4, quips: s.input.quips.slice(-4).map((q) => q.text), timings: s.input.furnish.timings.map((t) => t.text), routes: s.input.routes.slice(-2) })
+  await page.evaluate(() => window.village.talk.undo())
+
   // Fixes 7 and 13 (Keep waiting on the host, Keep during the settle-in) are now the house's placement: its own checks (check-place) cover a refused save and the settle-in.
 
   // fix 8: Try another keeps the piece until the new one is ready, and keeps it when the new one fails.
@@ -520,7 +545,7 @@ try {
     check('undo restores the table', s.input.furnish.tableVisible === true && s.input.furnish.job === null, s.input.furnish)
 
     // A couple: one placement per piece, one after the other, each kept as plan furniture.
-    // (The stub router sizes a line by its first noun, so a line saying "the table" is table-sized: these name none.)
+    // (The stub router sizes a line by the thing it names.)
     await write(page, 'add a couple of green chairs in the middle')
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
     check('"a couple of ... chairs": two first poses, the first piece placed first', s.input.furnish.job.places.length === 2 && s.input.furnish.job.piece === 0, s.input.furnish.job)
