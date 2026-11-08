@@ -949,6 +949,10 @@ export default {
     const inCharacter = (why: string) =>
       why === 'busy' ? "Hold on, I'm still thinking about the last thing."
         : why === 'failed' ? 'I lost my thread there. Could you say that again?'
+          // 403 (#40): the tab's token is someone else's, not this page's person's; nothing was sent.
+          : why === 'refused' ? "This page was opened with someone else's link, so that didn't reach me."
+          // 401 or no token: a link from an earlier launch. Resending won't help until the latest link is opened.
+          : why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again."
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
@@ -957,7 +961,7 @@ export default {
       void sayTo(m.person, text, (t) => {
         speech.first ??= performance.now()
         speech.text += t
-      }, context, routing, sketch).then((said) => {
+      }, { context, routing, sketch }).then((said) => {
         if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true
@@ -1782,7 +1786,7 @@ export default {
       furnish!.dismiss(guess)
       keep(me.person, text)
       restoreLine(text)
-      quip(me, why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+      quip(me, why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
     }
 
     /** What a route does in the room. The model's route is data: it never chooses who hears the person's words. */

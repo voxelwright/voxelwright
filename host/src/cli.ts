@@ -1,9 +1,13 @@
 // npm run elder -- "put a small radio on the windowsill" [--executor codex] [--timeout-ms 360000]
+// npm run elder -- promote <candidate-id> --approve [--live DIR]
+// npm run elder -- rollback [promotion-id|last] [--live DIR]
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { Context } from 'cordis'
 import { core } from './elder.ts'
+import { DEFAULT_LIVE } from './live.ts'
+import { promote, rollback } from './promote.ts'
 import claudeCode from './plugins/claude-code.ts'
 import codex, { codexDisabled } from './plugins/codex.ts'
 import homeChecks from './plugins/home-checks.ts'
@@ -16,8 +20,20 @@ const { values, positionals } = parseArgs({
     executor: { type: 'string', default: 'claude-code' },
     'timeout-ms': { type: 'string', default: String(6 * 60_000) },
     candidates: { type: 'string', default: join(homedir(), '.village', 'candidates') },
+    approve: { type: 'boolean', default: false },
+    live: { type: 'string', default: DEFAULT_LIVE },
   },
 })
+const [command, target] = positionals
+if (command === 'promote' || command === 'rollback') {
+  const outcome =
+    command === 'promote'
+      ? await promote({ candidate: target ?? '', approve: values.approve, candidatesRoot: values.candidates, live: values.live })
+      : await rollback({ target: target ?? 'last', live: values.live })
+  console.log(outcome.message)
+  console.log(JSON.stringify(outcome, null, 2))
+  process.exit(outcome.result === 'refused' ? 1 : 0)
+}
 const request = positionals.join(' ').trim()
 if (!request) {
   console.error('Usage: npm run elder -- "<request>" [--executor claude-code|codex] [--timeout-ms N] [--candidates DIR]')

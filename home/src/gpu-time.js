@@ -12,8 +12,9 @@
 // same way. One timer per device; a second call returns the same timer.
 
 /**
- * @typedef {{ busyMs: number, spanMs: number, sumMs: number, passes: Array<[string, number]> }} GpuFrame
+ * @typedef {{ busyMs: number, spanMs: number, sumMs: number, passes: Array<[string, number]>, endedAt?: number }} GpuFrame
  *   passes: in encode order, each pass's label and the ms it adds to busyMs (they sum to it).
+ *   endedAt: performance.now() when the frame was closed, after its submits.
  * @typedef {{ listeners: Set<(frame: GpuFrame) => void>, endFrame: () => void, skipped: number }} GpuPassTimer
  */
 
@@ -75,6 +76,7 @@ export function gpuPassTimer(device) {
     if (!next) return
     const count = next
     const names = labels
+    const endedAt = performance.now()
     next = 0
     labels = []
     if (overflow) {
@@ -103,7 +105,10 @@ export function gpuPassTimer(device) {
         target.unmap()
         free.push(target)
         const frame = measure(t, names)
-        if (frame) for (const listener of timer.listeners) listener(frame)
+        if (frame) {
+          frame.endedAt = endedAt
+          for (const listener of timer.listeners) listener(frame)
+        }
         else timer.skipped++
       },
       () => timer.skipped++,

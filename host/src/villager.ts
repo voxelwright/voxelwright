@@ -1,7 +1,10 @@
 // The villager service: a loopback-only HTTP API through which a person talks
-// to their villager. Every request needs the per-launch token, which is
-// written with mode 0600 to <root>/villager/launch.json for the home's dev
-// server to hand to the page. Replies stream as server-sent events.
+// to their villager. Each launch gives every person their own token, which
+// opens only that person's paths, /people/<id>/…; any other person's answer 403.
+// Talking with someone else's villager is a visit, at /people/<id>/visits/<owner>/,
+// kept under the visitor and shown only the owner's persona. The tokens are written with mode
+// 0600 to <root>/villager/launch.json, and the CLI prints each person's link
+// (the token rides in the URL fragment). Replies stream as server-sent events.
 //
 // Per person, under <root>/people/<id>/:
 //   notes/*.md          the villager's private notes (its only tools)
@@ -13,6 +16,9 @@
 //   routes.jsonl        the separate router (#42, ?route=separate): each line routed, the checked route, timings
 //   library/<item>.json props made for them: module text (never run here) and metadata
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
+//   visits/<owner>/     this person's talks with another person's villager (#42): its own conversation,
+//                       usage, session and notes. A visit reads only the owner's persona.json, and
+//                       writes the visitor's own preferences.json and sketches.jsonl as on any turn.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -21,7 +27,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
-import { checkProfile, humourWords, loadCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
+import { checkProfile, humourOf, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
 
 export interface Config {
@@ -86,7 +92,7 @@ export function parsePeopleSpec(spec: string): { people: Record<string, string>;
 
 declare module 'cordis' {
   interface Context {
-    villager: { port: number; launchFile: string }
+    villager: { port: number; launchFile: string; tokens: Record<string, string> }
   }
 }
 
@@ -133,15 +139,18 @@ export default {
   name: 'villager',
   async apply(ctx: Context, config: Config) {
     const people = config.people ?? { alex: 'Alex' }
-    const token = randomBytes(32).toString('hex')
-    const expected = Buffer.from(`Bearer ${token}`)
+    const tokens = Object.fromEntries(Object.keys(people).map((id) => [id, randomBytes(32).toString('hex')]))
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
 
-    const authorized = (req: IncomingMessage) => {
+    /** The person whose token the request carries, or undefined. */
+    const holder = (req: IncomingMessage) => {
       const given = Buffer.from(req.headers.authorization ?? '')
-      return given.length === expected.length && timingSafeEqual(given, expected)
+      return Object.keys(tokens).find((id) => {
+        const expected = Buffer.from(`Bearer ${tokens[id]}`)
+        return given.length === expected.length && timingSafeEqual(given, expected)
+      })
     }
     const send = (res: ServerResponse, status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -151,9 +160,15 @@ export default {
     const profileOf = (id: string): Profile => config.profiles?.[id] ?? { age: 'unknown' }
     /** Who the villager is and who it is talking to, from trusted files and config; the humour ceiling never comes from a reply. */
     const characterOf = (id: string) => loadCharacter(id, personDir(id), profileOf(id))
+    /** A visit (#42): `visitor` talking with `owner`'s villager. Everything it writes is the visitor's, under their folder. */
+    const visitDir = (visitor: string, owner: string) => join(personDir(visitor), 'visits', owner)
+    const visitCharacterOf = (visitor: string, owner: string) =>
+      loadVisitCharacter({ person: visitor, personDir: personDir(visitor), profile: profileOf(visitor) }, { person: owner, personDir: personDir(owner), name: people[owner] }, visitDir(visitor, owner))
 
-    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse, sketch?: { from: string; id: string; image: SketchImage }) {
-      const dir = personDir(id)
+    /** A turn with `id`'s villager. With `visitor`, it is their visit: the turn reads and writes only under the visitor. */
+    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse, sketch?: { from: string; id: string; image: SketchImage }, visitor?: string) {
+      const talker = visitor ?? id
+      const dir = visitor ? visitDir(visitor, id) : personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
       const stateFile = join(dir, 'villager.json')
@@ -161,12 +176,13 @@ export default {
       // The humour dial (#42): words in a direct talk can only turn it down. The host cannot tell who is
       // typing at a shared screen, so crude comes only from the operator's profile (Sentinel, #42).
       const asked = context === undefined ? humourWords(text) : null
-      if (asked === 'clean') await writePreferences(dir, { humour: 'clean', at: new Date().toISOString() })
-      const { character, personaRefused } = await characterOf(id)
+      if (asked === 'clean') await writePreferences(personDir(talker), { humour: 'clean', at: new Date().toISOString() })
+      const { character, personaRefused } = visitor ? await visitCharacterOf(visitor, id) : await characterOf(id)
       // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
+      // Each other person's level comes from their profile, preferences and persona only, never their notes.
       let humourCap: Humour | undefined
       if (context !== undefined && character.humour === 'crude') {
-        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map(async (p) => (await characterOf(p)).character.humour))
+        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map((p) => humourOf(p, personDir(p), profileOf(p))))
         if (others.some((h) => h !== 'crude')) humourCap = 'cheeky'
       }
       const at = new Date().toISOString()
@@ -207,7 +223,7 @@ export default {
         }
       }
       try {
-        const result = await config.agent({ name: people[id], text, context, route, character, humourCap, ...(sketch ? { image: sketch.image } : {}), sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
+        const result = await config.agent({ name: people[talker], text, context, route, character, humourCap, ...(sketch ? { image: sketch.image } : {}), sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
         if (held !== null && !routed) {
           routed = routeInReply(held, ids, items)
@@ -221,7 +237,7 @@ export default {
         // A routed line is stored with the route's spoken line, never the JSON; a refused route is not acted on.
         const said = r && 'routed' in r ? r.routed.say ?? `(${r.routed.route})` : r ? '' : result.reply
         await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', ...(r && 'reason' in r ? { unanswered: true } : { text: said }), ...(r && 'routed' in r ? { route: r.routed.route } : {}) })
-        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: character.humour, ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
+        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: humourCap ?? character.humour, ...(visitor ? { visiting: id } : {}), ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
         if (r && 'reason' in r) event('failed', { reason: 'route' })
         else event('done', { reply: said, ttftMs: result.ttftMs, totalMs, ...(r ? { routed: r.routed } : {}) })
       } catch (error) {
@@ -372,29 +388,36 @@ export default {
     }
 
     async function handle(req: IncomingMessage, res: ServerResponse) {
-      if (!authorized(req)) return send(res, 401, { error: 'token required' })
+      const person = holder(req)
+      if (!person) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40).
+      // A visit (#42) is explicit and under the visitor: /people/<me>/visits/<owner>/(conversation|messages).
+      const first = /^\/people\/([^/]+)\//.exec(path)?.[1]
+      if (first === undefined) return send(res, 404, { error: 'not found' })
+      if (first !== person) return send(res, 403, { error: 'this token is for another person' })
+      const visitMatch = /^\/people\/[^/]+\/visits\/([^/]+)\/(conversation|messages)$/.exec(path)
+      if (visitMatch && (visitMatch[1] === person || !PERSON.test(visitMatch[1]) || !Object.hasOwn(people, visitMatch[1]))) return send(res, 404, { error: 'no such villager' })
+      const visitor = visitMatch ? person : undefined
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {
         const [, id, sid] = sketchMatch
-        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
         await mkdir(personDir(id), { recursive: true, mode: 0o700 })
         return sketchRoute(personDir(id), sid, req, res, send)
       }
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch
-        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
         if (item !== undefined && !ITEM.test(item)) return send(res, 404, { error: 'no such item' })
         return input(id, plain ?? (keep ? 'keep' : 'library'), item, req, res)
       }
-      const match = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(path)
-      if (!match) return send(res, 404, { error: 'not found' })
-      const [, id, what] = match
-      if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
+      const own = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(path)
+      if (!own && !visitMatch) return send(res, 404, { error: 'not found' })
+      // On a visit, `id` is the visited villager's person; everything is read and written under `visitor`.
+      const [id, what] = visitMatch ? [visitMatch[1], visitMatch[2]] : [own![1], own![2]]
       if (what === 'conversation' && req.method === 'GET') {
-        const lines = await readJsonl(join(personDir(id), 'conversation.jsonl'))
+        const lines = await readJsonl(join(visitor ? visitDir(visitor, id) : personDir(id), 'conversation.jsonl'))
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
       }
       if (what === 'messages' && req.method === 'POST') {
@@ -410,6 +433,8 @@ export default {
         // The always-on input (#42): the line may be routed in the villager's own reply.
         let ask: Omit<RouteAsk, 'text' | 'signal'> | undefined
         if (route !== undefined) {
+          // Only your own villager routes your line; a visit is a conversation and nothing more.
+          if (visitor) return send(res, 400, { error: 'a visit is never routed' })
           const { primary, villagers } = (route ?? {}) as { primary?: unknown; villagers?: unknown }
           const known = castOf(villagers, people)
           if (typeof primary !== 'string' || !VILLAGER_NAME.test(primary) || !known) return send(res, 400, { error: 'route is {"primary": a villager name, "villagers": [{id, name, role}] of listed people}' })
@@ -421,19 +446,23 @@ export default {
         if (sketchRef !== undefined) {
           const { from, id: sid } = (sketchRef ?? {}) as { from?: unknown; id?: unknown }
           if (route !== undefined) return send(res, 400, { error: 'a drawing is never routed' })
-          if (typeof from !== 'string' || !PERSON.test(from) || !Object.hasOwn(people, from) || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": a listed person, "id": a sketch id}' })
+          if (typeof from !== 'string' || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": your own id, "id": a sketch id}' })
+          // Only the token holder's own drawing (#40): another person's sketches are theirs to hand over.
+          if (from !== person) return send(res, 403, { error: 'this token is for another person' })
           const image = await loadSketch(personDir(from), sid)
           if (!image) return send(res, 404, { error: 'no such sketch' })
           sketch = { from, id: sid, image: { ...image, by: people[from] } }
         }
-        if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
-        busy.add(id)
+        // One turn at a time per conversation: your own, or each of your visits (so a visit never blocks the owner).
+        const conversationKey = visitor ? `${visitor}>${id}` : id
+        if (busy.has(conversationKey)) return send(res, 409, { error: 'the villager is still writing' })
+        busy.add(conversationKey)
         const turn = (async () => {
           if (ask) ask.library = (await listLibrary(id)).map((l) => ({ id: l.id, name: cleanName(l.name) }))
           if (sketch) await noteSketch(personDir(sketch.from), { id: sketch.id, given: id })
-          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res, sketch)
+          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res, sketch, visitor)
         })().finally(() => {
-          busy.delete(id)
+          busy.delete(conversationKey)
           turns.delete(turn)
         })
         turns.add(turn)
@@ -455,8 +484,8 @@ export default {
     const port = (server.address() as AddressInfo).port
     const launchFile = join(config.root, 'villager', 'launch.json')
     await mkdir(join(config.root, 'villager'), { recursive: true, mode: 0o700 })
-    await writeFile(launchFile, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 })
-    ctx.provide('villager', { port, launchFile })
+    await writeFile(launchFile, JSON.stringify({ port, tokens, pid: process.pid }), { mode: 0o600 })
+    ctx.provide('villager', { port, launchFile, tokens })
     // Warm agents start each listed person's process now, so their first line skips the start-up.
     if (config.agent.warm) for (const id of Object.keys(people)) {
       const dir = personDir(id)

@@ -65,7 +65,7 @@ export const listSketches = (person: string) =>
   call<{ sketches: { id: string; at: string; words?: string; given: string[]; made: string[] }[] }>(`/people/${person}/sketches`)
 export async function sketchImage(person: string, id: string): Promise<ImageBitmap | null> {
   const res = await authorized(`/people/${person}/sketches/${id}`)
-  if (!res?.ok || res.headers.get('content-type') !== 'image/png') return null
+  if (!res || res === 'link' || !res.ok || res.headers.get('content-type') !== 'image/png') return null
   return createImageBitmap(await res.blob()).catch(() => null)
 }
 /** A prop from a drawing: the same maker endpoint, with the stored sketch. */

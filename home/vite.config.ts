@@ -1,45 +1,49 @@
+import { randomBytes } from 'node:crypto'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { build, defineConfig, type Plugin } from 'vite'
+import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
 
-// The villager host (host/src/villager.ts) writes its port and per-launch token
-// to <VILLAGE_ROOT>/villager/launch.json. The dev server hands the token to
-// same-origin pages at /villager/launch and forwards /villager/api/* to the host,
-// so the page and the API share an origin.
-const root = process.env.VILLAGE_ROOT ?? join(homedir(), '.village')
+// The villager host (host/src/villager.ts) listens on 127.0.0.1. The dev server
+// forwards /villager/api/* to it, so the page and the API share an origin. The
+// page gets its person's token from the link the host prints, never from here.
 const port = Number(process.env.VILLAGER_PORT ?? 5190)
 
-const villagerLaunch: Plugin = {
-  name: 'villager-launch',
-  configureServer(server) {
-    server.middlewares.use('/villager/launch', async (req, res) => {
-      res.setHeader('cache-control', 'no-store')
-      const site = req.headers['sec-fetch-site']
-      if (site && site !== 'same-origin') {
-        res.statusCode = 403
-        return res.end()
-      }
-      try {
-        const { token } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ token }))
-      } catch {
-        res.statusCode = 503
-        res.end()
-      }
-    })
-  },
-}
+// Page scripts, promoted plugins included, may fetch and open sockets only to this
+// origin: the API and Vite's HMR websocket ('self' covers ws: on the same host and
+// port). The policy does not stop a script navigating the page to another origin.
+// Styles stay inline-capable because Vite injects CSS as <style> tags in dev.
+const csp = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "connect-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join('; ')
 
 // #42 prop sandbox, dev only: `virtual:prop-box` is the sandbox worker bundled into one
 // self-contained script (three core, the painters, the serializer) and exported as a
 // string. The sealed iframe has no network, so the page hands it this text to start
 // its worker from a blob. Only src/props/load.ts imports it, behind the ?props= flag.
+// BOX_PATH is the iframe's relay document, served with its own policy in place of the
+// home's (src/props/relay.ts), so the home's CSP keeps no inline script or blob worker.
 const propBox: Plugin = {
   name: 'prop-box',
   apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use(BOX_PATH, (_req, res) => {
+      const nonce = randomBytes(16).toString('hex')
+      res.setHeader('content-security-policy', boxPolicy(nonce))
+      res.setHeader('content-type', 'text/html; charset=utf-8')
+      res.setHeader('cache-control', 'no-store')
+      res.end(boxDocument(nonce))
+    })
+  },
   resolveId: (id) => (id === 'virtual:prop-box' ? '\0virtual:prop-box' : undefined),
   async load(id) {
     if (id !== '\0virtual:prop-box') return
@@ -163,8 +167,9 @@ const soundLab: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [villagerLaunch, propBox, soundLab],
+  plugins: [propBox, soundLab],
   server: {
+    headers: { 'content-security-policy': csp },
     proxy: {
       '/villager/api': {
         target: `http://127.0.0.1:${port}`,

@@ -39,6 +39,7 @@ const SHARED_X = KITCHEN.x1 + WALL_T / 2
 const GLIDE = 1.3 // seconds, dollhouse
 const STEP = 0.9 // seconds per leg, seated view
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
+const SETTLE_QUIET_MS = 400
 
 export const PLANS: Record<string, RoomPlan> = {
   kitchen: {
@@ -78,12 +79,15 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
       let seated = PLANS[start] ? start : 'kitchen'
       let moving = false
       let lastMove: Rooms['lastMove'] = null
+      let disposed = false
 
       ctx.effect(() => {
         const atmosphere = { fog: scene.fog, background: scene.background }
         scene.background = new THREE.Color('#2a1d16')
         scene.fog = new THREE.Fog('#e8c49a', 6, 22)
         return () => {
+          // Pending loads and moves stop here, so none resumes after disposal.
+          disposed = true
           scene.fog = atmosphere.fog
           scene.background = atmosphere.background
           // The rooms this service loaded leave with it.
@@ -136,26 +140,33 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           return lastMove
         },
         async go(name: string) {
-          if (moving || !PLANS[name]) return
+          if (moving || !PLANS[name] || disposed) return
           if (MODE !== 'iso' && name === seated) return
           moving = true
-          const t0 = performance.now()
-          ctx.entries.back()
-          ctx.entries.say(null)
-          if (MODE === 'iso') await view.glide(PLANS[name].frame, GLIDE)
-          else {
-            show()
-            ctx.emit('village/walk', { phase: 'leave', from: seated, to: name, seconds: reducedMotion.matches ? 0 : STEP * 2.7 })
-            // Through the real doorway: to this side of it, across, then into the room.
-            await view.travel(SIDES[seated], STEP)
-            await view.travel(SIDES[seated === 'kitchen' ? 'living' : 'kitchen'], STEP * 0.7)
-            seated = name
-            await view.travel(PLANS[name].home, STEP)
-            cull(name)
+          // Tier calibration pauses during the move (#37).
+          const release = ctx.stage.hold()
+          try {
+            const t0 = performance.now()
+            ctx.entries.back()
+            ctx.entries.say(null)
+            if (MODE === 'iso') await view.glide(PLANS[name].frame, GLIDE)
+            else {
+              show()
+              ctx.emit('village/walk', { phase: 'leave', from: seated, to: name, seconds: reducedMotion.matches ? 0 : STEP * 2.7 })
+              // Through the real doorway: to this side of it, across, then into the room.
+              await view.travel(SIDES[seated], STEP)
+              await view.travel(SIDES[seated === 'kitchen' ? 'living' : 'kitchen'], STEP * 0.7)
+              seated = name
+              await view.travel(PLANS[name].home, STEP)
+              cull(name)
+            }
+            if (disposed) return
+            lastMove = { glide: Math.round(performance.now() - t0) }
+            ctx.entries.sort()
+          } finally {
+            moving = false
+            release()
           }
-          lastMove = { glide: Math.round(performance.now() - t0) }
-          ctx.entries.sort()
-          moving = false
         },
       })
 
@@ -166,13 +177,31 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
       if (MODE === 'iso') void view.glide(asked && PLANS[asked] ? PLANS[asked].frame : OVERVIEW, 0)
       else void view.travel(PLANS[seated].home, 0)
       const all = [seated, ...Object.keys(PLANS).filter((n) => n !== seated)].flatMap((name) => PLANS[name].plugins)
+      // Tier calibration pauses while the rooms load and compile (#37).
+      const release = ctx.stage.hold()
       for (const n of all) load(catalog[n])
       // Walls the dollhouse cuts away are drawn only into the sun's shadow until you come
       // close, and their stubs only once you stand behind them. Compile all of it now, so
       // the first glide into a room does not stall on new pipelines (450 ms, #42).
       void (async () => {
+        // Done when every plugin is active or failed. A plugin still waiting for a service, with
+        // nothing else loading and no change for SETTLE_QUIET_MS, will not be rescued by waiting
+        // longer: it is reported and the house opens without it (#37).
         const deadline = performance.now() + 15000
-        while (!all.every((n) => ['active', 'failed'].includes(pluginStates()[n]?.state ?? '')) && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50))
+        let quiet = { key: '', since: performance.now() }
+        for (;;) {
+          if (disposed) return release()
+          const states = pluginStates()
+          const stuck = all.filter((n) => states[n]?.state !== 'active' && states[n]?.state !== 'failed')
+          const key = stuck.map((n) => `${n}:${states[n]?.state}`).join()
+          if (key !== quiet.key) quiet = { key, since: performance.now() }
+          const onlyWaiting = stuck.every((n) => states[n]?.state === 'waiting')
+          if (!stuck.length || (onlyWaiting && performance.now() - quiet.since > SETTLE_QUIET_MS) || performance.now() > deadline) {
+            if (stuck.length) console.warn(`Village house opened without: ${stuck.map((n) => `${n} (${states[n]?.state ?? 'missing'})`).join(', ')}`)
+            break
+          }
+          await new Promise((r) => setTimeout(r, 50))
+        }
         const { renderer, camera } = ctx.stage
         const shown: THREE.Object3D[] = []
         scene.traverse((o) => {
@@ -188,7 +217,8 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
           camera.layers.disable(SHADOW_ONLY)
           for (const o of shown) o.visible = false
           // After compiling, so the walk into the other room finds its pipelines ready.
-          if (!moving) cull(seated)
+          if (!moving && !disposed) cull(seated)
+          release()
         }
       })()
     },

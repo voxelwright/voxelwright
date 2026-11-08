@@ -138,11 +138,17 @@ export default {
       order.sort((a, b) => a.s.x - b.s.x || a.s.y - b.s.y)
       return order.map((o) => o.e)
     }
-    // Moving a focused button in the DOM would drop its focus, so reorder only when none has it.
+    // DOM order follows screen order, so Tab past either end leaves the entries the
+    // browser's own way. Moving a focused button drops its focus, so it is restored.
     const sort = () => {
       const shown = inView()
       for (const e of live.values()) e.button.hidden = !shown.includes(e)
-      if (!nav.contains(document.activeElement)) for (const e of shown) nav.append(e.button)
+      const buttons = [...nav.children]
+      if (shown.some((e, i) => buttons[i] !== e.button)) {
+        const focused = nav.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null
+        for (const e of shown) nav.append(e.button)
+        focused?.focus({ preventScroll: true })
+      }
       return shown
     }
     let sortIn = 0 // frames until the next sort, once new entries have a camera to be seen from
@@ -208,7 +214,8 @@ export default {
       setHover(null)
     }
 
-    // Keyboard: Tab wraps around the entries; Escape backs out from anywhere.
+    // Keyboard: Tab moves through the entries in screen order and, past either end,
+    // leaves the page as usual (no keyboard trap, WCAG 2.1.2); Escape backs out from anywhere.
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !event.defaultPrevented && active) {
         const was = active
@@ -219,10 +226,10 @@ export default {
         const buttons = sort().map((e) => e.button)
         if (!buttons.length) return
         const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
-        const step = event.shiftKey ? -1 : 1
         if (at === -1 && document.activeElement !== document.body && document.activeElement !== null) return
+        const next = at === -1 ? (event.shiftKey ? buttons.length - 1 : 0) : at + (event.shiftKey ? -1 : 1)
+        if (next < 0 || next >= buttons.length) return
         event.preventDefault()
-        const next = at === -1 ? (event.shiftKey ? buttons.length - 1 : 0) : (at + step + buttons.length) % buttons.length
         buttons[next].focus({ preventScroll: true })
       }
     }

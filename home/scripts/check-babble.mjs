@@ -290,10 +290,8 @@ const demo = await page.evaluate(async () => {
 async function tap(p) {
   return p.evaluate(async () => {
     const audio = window.village.babble.audio
-    const code = `registerProcessor('babble-tap', class extends AudioWorkletProcessor {
-      process(inputs) { const ch = inputs[0][0]; let p = 0; if (ch) for (let i = 0; i < ch.length; i++) p = Math.max(p, Math.abs(ch[i]));
-        this.port.postMessage([currentTime, p]); return true } })`
-    await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
+    // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
+    await audio.audioWorklet.addModule('/scripts/babble-tap.js')
     const node = new AudioWorkletNode(audio, 'babble-tap')
     const sink = new GainNode(audio, { gain: 0 })
     window.village.sound.mix.output.connect(node).connect(sink).connect(audio.destination)

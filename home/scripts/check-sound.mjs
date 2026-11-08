@@ -215,10 +215,8 @@ await page.close()
 const tap = (p) =>
   p.evaluate(async () => {
     const { audio, mix } = window.village.sound
-    const code = `registerProcessor('sound-tap', class extends AudioWorkletProcessor {
-      process(inputs) { let p = 0; for (const ch of inputs[0] ?? []) for (let i = 0; i < ch.length; i++) p = Math.max(p, Math.abs(ch[i]));
-        this.port.postMessage([currentTime, p]); return true } })`
-    await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
+    // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
+    await audio.audioWorklet.addModule('/scripts/sound-tap.js')
     const taps = {}
     for (const [name, node] of [['output', mix.output], ['music', mix.ducked]]) {
       const t = new AudioWorkletNode(audio, 'sound-tap')

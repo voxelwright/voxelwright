@@ -55,12 +55,12 @@ try {
   // Tap the master and play chose:b.
   await page.evaluate(async () => {
     const { audio, mix } = window.soundLab
-    const code = `registerProcessor('lab-tap', class extends AudioWorkletProcessor { process(inputs) { let p = 0; for (const ch of inputs[0] ?? []) for (let i = 0; i < ch.length; i++) p = Math.max(p, Math.abs(ch[i])); this.port.postMessage(p); return true } })`
-    await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
-    const tap = new AudioWorkletNode(audio, 'lab-tap')
+    // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
+    await audio.audioWorklet.addModule('/scripts/sound-tap.js')
+    const tap = new AudioWorkletNode(audio, 'sound-tap')
     mix.output.connect(tap).connect(new GainNode(audio, { gain: 0 })).connect(audio.destination)
     window.peak = 0
-    tap.port.onmessage = (m) => (window.peak = Math.max(window.peak, m.data))
+    tap.port.onmessage = (m) => (window.peak = Math.max(window.peak, m.data[1]))
   })
   const quiet = await page.evaluate(() => new Promise((r) => setTimeout(() => r(window.peak), 300)))
   await page.click('section[data-cue="news"] button.play[data-variant="f"]')

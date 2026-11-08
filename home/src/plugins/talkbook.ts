@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { inputVariant } from '../talk/input'
 import { own, replace } from '../kernel'
 import { canvas, makeNoise, paintLinen, paintPageEdges, paintPaper, paintRibbon, rng, toTexture } from '../paint'
-import { conversation, say } from '../villager'
+import { conversation, ME, say } from '../villager'
 import { listSketches, sketchImage } from '../talk/sketch'
 
 // The richer kitchen notebook (#42 prototype), only with ?talk=notebook. The
@@ -706,17 +706,17 @@ export default {
     type Kept = { id: string; words?: string; given: string[]; made: string[]; img: ImageBitmap | null }
     let drawings: Kept[] = []
     const loadSketches = async () => {
-      const list = await listSketches('alex')
+      const list = await listSketches(ME)
       if (!list.ok) return
       const known = new Map(drawings.map((d) => [d.id, d.img]))
-      drawings = await Promise.all(list.sketches.slice(0, 6).map(async (d) => ({ ...d, img: known.get(d.id) ?? await sketchImage('alex', d.id) })))
+      drawings = await Promise.all(list.sketches.slice(0, 6).map(async (d) => ({ ...d, img: known.get(d.id) ?? await sketchImage(ME, d.id) })))
       dirty = true
     }
     /** Your drawings on your own ribbon; on a villager's, the ones you gave them. Pinned on the page like cuttings. */
     const paintSketches = (g: CanvasRenderingContext2D) => {
       g.textAlign = 'left'
       title(g, 'Sketches')
-      const mine = v().id === 'alex'
+      const mine = v().id === ME
       const shown = drawings.filter((d) => mine || d.given.includes(v().id))
       if (!shown.length) {
         g.textAlign = 'center'
@@ -944,6 +944,10 @@ export default {
         reply.from = 'note'
         voice.dataset.talk = result.why
         if (result.why === 'failed') reply.text = 'No answer came that time. Your line is kept; try again in a moment.'
+        // 403 (#40): the tab's token is someone else's, not this page's person's. Not kept to resend: it would be refused again.
+        else if (result.why === 'refused') reply.text = 'This notebook was opened with someone else\'s link. Nothing was sent.'
+        // 401 or no token: a link from an earlier launch. Not kept to resend: only the latest link will work.
+        else if (result.why === 'link') reply.text = 'This notebook needs your latest link from the host. Nothing was sent; open it and write again.'
         else {
           reply.text = result.why === 'busy' ? `${who.name}'s villager is still writing another answer. Your line is kept here, not sent.` : AWAY
           mine.unsent = true
@@ -1122,7 +1126,7 @@ export default {
     const loadHistory = async () => {
       for (const who of VILLAGERS.filter((x) => x.awake)) {
         const lines = await conversation(who.id)
-        if (who.id === 'alex') hostAway = lines === null
+        if (who.id === ME) hostAway = lines === null
         const said = saidOf(who.id)
         for (const l of lines ?? []) {
           if (l.from === 'person' && l.text) said.push({ from: 'person', text: l.text })
@@ -1130,7 +1134,7 @@ export default {
         }
         for (const u of unsent) if (u.person === who.id) said.push({ from: 'person', text: u.text, unsent: true })
       }
-      const last = saidOf('alex').filter((l) => l.from === 'villager').pop()
+      const last = saidOf(ME).filter((l) => l.from === 'villager').pop()
       if (last && voice.dataset.talk === 'quiet') {
         voice.dataset.talk = 'remembered'
         announce(last.text)
