@@ -3,6 +3,7 @@
 // frame a theme's version stands in, so the new piece keeps the original's place,
 // footprint and height. Nothing here changes the plugins that made the originals.
 import * as THREE from 'three/webgpu'
+import { TALK } from '../../features'
 
 /** One place a theme's version stands: hide these, and stand the new piece in `frame` over `box` (frame space). */
 export interface Slot { frame: THREE.Object3D; hide: THREE.Object3D[]; box: THREE.Box3 }
@@ -129,9 +130,9 @@ export const ACCESSORIES = [
   what: `${kind} for a round plush toy head about 0.3 m wide; it sits on top of the head, base at y = 0, front +z`,
 }))
 
-/** The felt plush cast (kind b): ?villager=b, or the talk prototype's default. */
+/** The felt plush cast (kind b): ?villager=b, or the default while talk is on. */
 const params = new URLSearchParams(location.search)
-export const FELT = (params.get('villager') ?? (params.get('talk') === 'npc' ? 'b' : '')) === 'b'
+export const FELT = (params.get('villager') ?? (TALK ? 'b' : '')) === 'b'
 
 /** Each tagged villager's head (every kind's skeleton puts it first under the pose) and its skull, the head's first mesh. */
 export function heads(scene: THREE.Scene): { root: THREE.Object3D; head: THREE.Object3D; skull: THREE.Object3D }[] {

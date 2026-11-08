@@ -62,7 +62,8 @@ const dev = await run('npx', ['vite', '--port', String(devPort), '--strictPort']
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 
 async function openNotebook(page, url) {
-  await page.goto(url)
+  // Talk and build mode are on by default (#72); this checks the table notebook, so it opts out.
+  await page.goto(url.includes('?') ? url : url.replace('#', '?talk=off&build=0#'))
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(600)
   await page.focus('[data-entry="notebook"]')

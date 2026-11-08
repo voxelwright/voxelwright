@@ -76,13 +76,15 @@ const RELATIVE = {
 }
 
 /**
+ * The `home` scenes are the quiet seated kitchen: talk and build mode are on by default (#72), so they opt out, and an
+ * older base that ignores the unknown parameters renders the same page.
  * Scenes. Each `page` is loaded once per version; scenes on the same page run in order.
  * `needs` names a plugin the base must have for the scene to be compared; without it the
  * scene runs on the head only (absolute gates).
  */
 const SCENES = [
-  { name: 'home', page: 'home', query: '?q=high', tier: 'high' },
-  { name: 'home-low', page: 'low', query: '?q=low', tier: 'low', full: true },
+  { name: 'home', page: 'home', query: '?talk=off&build=0&q=high', tier: 'high' },
+  { name: 'home-low', page: 'low', query: '?talk=off&build=0&q=low', tier: 'low', full: true },
   { name: 'villagers', page: 'npc', query: '?talk=npc&q=high', tier: 'high', needs: 'talk' },
   { name: 'talk', page: 'npc', query: '?talk=npc&q=high', tier: 'high', needs: 'talk', setup: openTalk },
 ]

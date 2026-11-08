@@ -463,8 +463,8 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
   await live.close()
 }
 
-// Gating: without ?talk=npc, or with ?babble=off, the plugin adds nothing.
-for (const query of ['plugins=babble', 'talk=npc&babble=off&plugins=babble']) {
+// Gating: with ?talk=off, or with ?babble=off, the plugin adds nothing.
+for (const query of ['talk=off&plugins=babble', 'talk=npc&babble=off&plugins=babble']) {
   const p = await context.newPage()
   await p.goto(`${base}?${query}`)
   await p.evaluate(() => window.village.ready(5000))

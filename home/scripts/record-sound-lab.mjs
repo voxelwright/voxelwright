@@ -64,7 +64,7 @@ async function sendToMoss(p) {
 /** Each clip: how it is made, and what the page says about it. */
 const CLIPS = [
   {
-    cue: 'chose', how: 'real', note: 'Real: the pointer moves onto the notebook and clicks it (the plain home, without the villagers or music).', query: '',
+    cue: 'chose', how: 'real', note: 'Real: the pointer moves onto the notebook and clicks it (the plain home, without the villagers or music).', query: 'talk=off&build=0',
     async act(p) {
       const book = await spot(p, 'notebook')
       await p.mouse.move(book.x - 120, book.y + 60)
@@ -129,7 +129,7 @@ async function record(clip) {
   p.on('pageerror', (e) => errors.push(`${clip.cue}: ${e}`))
   await p.goto(`${base}?${clip.query ?? 'talk=npc'}`)
   await p.evaluate(() => window.village.ready(15000))
-  await p.waitForFunction((talk) => window.village.sound && (!talk || window.village.talk), (clip.query ?? 'talk=npc').includes('talk'), { timeout: 8000 })
+  await p.waitForFunction((talk) => window.village.sound && (!talk || window.village.talk), (clip.query ?? 'talk=npc').includes('talk=npc'), { timeout: 8000 })
   await p.mouse.click(5, 5)
   await p.waitForFunction(() => window.village.sound.audio?.state === 'running', null, { timeout: 8000 })
   await p.evaluate(async () => {

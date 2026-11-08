@@ -521,8 +521,8 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await p.close()
 }
 
-// Gating: without ?talk=npc, or with ?music=off, the plugin adds nothing.
-for (const query of ['plugins=music', 'talk=npc&music=off&plugins=music']) {
+// Gating: with ?talk=off, or with ?music=off, the plugin adds nothing.
+for (const query of ['talk=off&plugins=music', 'talk=npc&music=off&plugins=music']) {
   const p = await context.newPage()
   await p.goto(`${base}?${query}`)
   await p.evaluate(() => window.village.ready(5000))

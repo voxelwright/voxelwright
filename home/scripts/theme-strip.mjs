@@ -9,7 +9,7 @@ const base = argv.find((a) => a.startsWith('--base='))?.slice(7) ?? 'http://loca
 const [out, from, to, ...times] = argv.filter((a) => !a.startsWith('--'))
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-await page.goto(`${base}?q=high&theme=${from}`)
+await page.goto(`${base}?talk=off&build=0&q=high&theme=${from}`)
 await page.evaluate(() => { localStorage.clear(); return window.village.ready() })
 await page.waitForTimeout(3000)
 const url = await page.evaluate(([times, to]) => new Promise((done) => {

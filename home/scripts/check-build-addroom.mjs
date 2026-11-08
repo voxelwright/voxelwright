@@ -312,7 +312,7 @@ try {
 
     // The new doorway from inside the kitchen (seated view), framed on it.
     const doorContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-    const { page: dp } = await open('?build=1&q=high', doorContext)
+    const { page: dp } = await open('?talk=off&build=1&q=high', doorContext)
     await B(dp, async () => {
       const P = await import('/src/build/plan.ts')
       const p = window.villageBuild.plan()

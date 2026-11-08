@@ -107,7 +107,7 @@ await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, {
 const tokens = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens
 const link = async (url) => `${url}#token=${(await tokens()).alex}`
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist'] })
-const QUERY = '?build=1&cam=iso&q=high'
+const QUERY = '?talk=off&build=1&cam=iso&q=high'
 
 const S = (page) => page.evaluate(() => window.villagePlace.state())
 const versions = (page) => page.evaluate(async () => (await window.villageBuild.history()).versions().length)

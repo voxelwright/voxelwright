@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { replace } from '../kernel'
 import { paintBackdrop } from '../paint'
 import { HOUSE } from '../layout'
@@ -64,14 +65,14 @@ export const navigation = {
 }
 
 /**
- * ?cam=iso (the default with ?talk=npc) looks down on the whole house like a
+ * ?cam=iso (the default while talk is on) looks down on the whole house like a
  * dollhouse you move around freely; ?cam=third stands behind and above a point on
- * the floor that walks to what you click. Without ?cam= the seated view is unchanged.
+ * the floor that walks to what you click. With ?talk=off and no ?cam= the seated view is unchanged.
  * Every rig hangs off a resting pose, so focus poses work in every mode.
  */
 const query = new URLSearchParams(location.search)
-// The #42 talk prototype looks at the house from above unless ?cam= says otherwise (?cam=seat is today's view).
-const cam = query.get('cam') ?? (query.get('talk') === 'npc' ? 'iso' : null)
+// With talk on (the default) the page looks at the house from above unless ?cam= says otherwise (?cam=seat is the seated view).
+const cam = query.get('cam') ?? (TALK ? 'iso' : null)
 export const MODE: 'seat' | 'iso' | 'third' = cam === 'iso' || cam === 'third' ? cam : 'seat'
 /** Layer for walls cut away from the camera: the sun's shadow camera still sees them, the view does not. */
 export const SHADOW_ONLY = 1

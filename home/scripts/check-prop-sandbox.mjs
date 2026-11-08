@@ -57,7 +57,7 @@ page.on('console', (m) => {
 })
 
 try {
-  await page.goto(`${base}?cam=iso&q=low&props=none#token=${token}`)
+  await page.goto(`${base}?cam=iso&q=low&props=none&talk=off&build=0#token=${token}`)
   check('the page holds the synthetic token for its tab', (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === token)
   await page.waitForFunction(() => window.village && window.villageProps, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())

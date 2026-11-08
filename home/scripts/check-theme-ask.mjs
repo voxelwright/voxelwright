@@ -60,7 +60,7 @@ const { tokens } = JSON.parse(await readFile(join(root, 'villager', 'launch.json
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 
 async function open(page, query) {
-  await page.goto(`${base}${query}#token=${tokens.alex}`)
+  await page.goto(`${base}${query}${/talk=/.test(query) ? '' : (query ? '&' : '?') + 'talk=off&build=0'}#token=${tokens.alex}`)
   await page.evaluate(() => window.village.ready())
   await page.waitForFunction(() => typeof window.village?.theme?.ask === 'function')
   await page.waitForTimeout(500)

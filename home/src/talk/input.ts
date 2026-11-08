@@ -1,4 +1,4 @@
-// The always-on input (#42 prototype), behind ?talk=npc&input=held|speech.
+// The always-on input (#42 prototype), on by default with talk (?input=held|speech picks the variant).
 // A keypress anywhere starts writing; Enter sends the line on its way to whoever
 // it is addressed to (your own villager unless you have turned to someone else).
 //
@@ -15,6 +15,7 @@
 // Keys reach this file only through `key(e)`, called from talk.ts's one keyboard path.
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { releaseGpu, type Stage } from '../kernel'
 import type { Entries } from '../plugins/entries'
@@ -22,11 +23,11 @@ import { canvas, paintLinen, toTexture } from '../paint'
 
 export type Variant = 'held' | 'speech'
 /**
- * The one rule for which input a page has (#42): with ?talk=npc the held notepad by default,
+ * The one rule for which input a page has (#42): with talk on (the default) the held notepad by default,
  * ?input=speech for the speech card, and none (the paper slip) with ?input=slip or ?slip=always.
  */
 export function inputVariant(query: URLSearchParams): Variant | null {
-  if (query.get('talk') !== 'npc' || query.get('input') === 'slip' || query.get('slip') === 'always') return null
+  if (!TALK || query.get('input') === 'slip' || query.get('slip') === 'always') return null
   return query.get('input') === 'speech' ? 'speech' : 'held'
 }
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')

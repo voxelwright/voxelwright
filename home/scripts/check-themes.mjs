@@ -3,8 +3,8 @@
 // a villager can keep its costume, the swatch book works by keyboard and pointer, theme
 // load and unload cycles leave nothing behind, and without ?theme= nothing changes.
 // Usage: node scripts/check-themes.mjs [base-url] [--before=<png>] [--shots=dir]   (dev server running)
-//   --before: a ?q=low capture of the code before this change, taken with
-//   `node scripts/theme-shots.mjs <dir> before='<base-url>?q=low'` on that commit.
+//   --before: a ?talk=off&build=0&q=low capture of the code before this change, taken with
+//   `node scripts/theme-shots.mjs <dir> before='<base-url>?talk=off&build=0&q=low'` on that commit.
 //   Without it the no-op diff is reported as not run.
 import { chromium } from 'playwright'
 import { execFileSync } from 'node:child_process'
@@ -28,7 +28,7 @@ async function open(query = '', { reducedMotion = 'no-preference', context = nul
   page.on('pageerror', (e) => errors.push(String(e)))
   // With no villager host running, /villager/* answers 503 by design (#40).
   page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && !m.text().includes('503') && errors.push(m.text()))
-  await page.goto(`${base}?${query}`)
+  await page.goto(`${base}?${query}${/(^|&)talk=/.test(query) ? '' : '&talk=off&build=0'}`)
   const ready = await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
   // A person opens the swatch book or asks for a look before a switch, and that loads the theme
@@ -359,7 +359,7 @@ const residue = (page) => page.evaluate(() => {
   await page.waitForTimeout(500)
   const restored = await page.evaluate(() => ({ current: window.village.theme.current(), active: window.village.snapshot().plugins.active }))
   check('last look: neon night comes back after a reload', restored.current === 'neon-night' && restored.active.includes('theme') && restored.active.includes('postfx'), restored)
-  await page.goto(`${base}?q=low&theme=home`)
+  await page.goto(`${base}?q=low&theme=home&talk=off&build=0`)
   await page.evaluate(() => window.village.ready())
   const asked = await page.evaluate(() => ({ current: window.village.theme.current(), shown: window.village.theme.get(window.village.theme.current())?.id }))
   check('?theme= wins over the last look', asked.current === 'home' && asked.shown === 'home', asked)
@@ -570,7 +570,7 @@ if (before) {
     Math.random = () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646
   })
   await page.clock.setFixedTime(new Date('2026-11-07T17:30:00'))
-  await page.goto(`${base}?q=low`)
+  await page.goto(`${base}?q=low&talk=off&build=0`)
   await page.waitForFunction(() => window.village, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.village.unload('swatchbook'))

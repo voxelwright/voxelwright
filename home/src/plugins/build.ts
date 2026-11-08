@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
+import { BUILD } from '../features'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
 import { HOUSE_PLAN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
@@ -31,7 +32,7 @@ declare module 'cordis' {
 export interface BuildRequest { intent: unknown; say?: string; reply: (text: string) => void; handled?: boolean; /** Whose villager asked: they move into the room. */ person?: string }
 
 /**
- * #48 experiment, ?build=1 only: the kitchen's walls and floor come from a floor
+ * #48, on by default (?build=0 or ?talk=off turns it off): the kitchen's walls and floor come from a floor
  * plan (src/build/plan.ts) instead of room.ts and diorama.ts, and in ?cam=iso the
  * right wall can be dragged (moves it) or pulled at its middle (bends it).
  * The house is a versioned plan (src/build/history.ts): a drag, a bend or an added
@@ -40,9 +41,9 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
  * door here into a new room", draws the room's outline to adjust, then build or
  * let go (src/build/outline.ts). While the outline shows, the dollhouse view frames it with the
  * shared wall and the door; once built, the villager who asked walks in (src/build/movein.ts).
- * Without the flag this plugin does nothing.
+ * With ?build=0 (or ?talk=off) this plugin does nothing.
  */
-const ENABLED = new URLSearchParams(location.search).get('build') === '1'
+const ENABLED = BUILD
 /** The wall that drags and bends: the house's right wall, where the Workshop will go. */
 const WALL = 'living.right'
 /** Screen boxes (NDC) the proposal fills: the top is left for its card, the bottom for the notepad. */

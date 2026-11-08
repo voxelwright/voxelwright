@@ -1,10 +1,11 @@
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { Bed } from '../voice/bed'
 import { acquireAudio, type SharedAudio } from '../voice/context'
 import { busFor, mixFor, type Mix } from '../voice/buses'
 import { ALL_MUTED, MUSIC_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 
-// #42: a quiet looped bed under the villagers' voices. On with ?talk=npc; ?music=off
+// #42: a quiet looped bed under the villagers' voices. On by default (?talk=off removes it); ?music=off
 // turns it off. It starts on the first touch or key press, like the voices (on the one
 // AudioContext they share, voice/context.ts), fades in over
 // two seconds, and plays into the music bus (voice/buses.ts), which drops 6 dB while a
@@ -12,7 +13,7 @@ import { ALL_MUTED, MUSIC_MUTED, isMuteKey, storedFlag, storeFlag } from '../voi
 // Shift+M or the note beside the speaker mutes the music alone. The recording is CC BY
 // 4.0: public/audio/CREDITS.md.
 const params = new URLSearchParams(location.search)
-const ON = params.get('music') !== 'off' && params.get('talk') === 'npc'
+const ON = params.get('music') !== 'off' && TALK
 const SRC = `${import.meta.env.BASE_URL}audio/groove-music.ogg`
 
 export const CREDIT = {
