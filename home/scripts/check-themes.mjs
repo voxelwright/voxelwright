@@ -3,8 +3,8 @@
 // a villager can keep its costume, the swatch book works by keyboard and pointer, theme
 // load and unload cycles leave nothing behind, and without ?theme= nothing changes.
 // Usage: node scripts/check-themes.mjs [base-url] [--before=<png>] [--shots=dir]   (dev server running)
-//   --before: a ?q=low capture of the code before this change, taken with
-//   `node scripts/theme-shots.mjs <dir> before='<base-url>?q=low'` on that commit.
+//   --before: a ?talk=off&build=0&q=low capture of the code before this change, taken with
+//   `node scripts/theme-shots.mjs <dir> before='<base-url>?talk=off&build=0&q=low'` on that commit.
 //   Without it the no-op diff is reported as not run.
 import { chromium } from 'playwright'
 import { execFileSync } from 'node:child_process'
