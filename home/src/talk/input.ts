@@ -330,6 +330,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       }
       return
     }
+    // A firm hand: lighter strokes were hard to read on the held pad before sending (#42 paper climb).
+    g.font = `700 56px ${HAND}`
     g.fillStyle = INK
     const lines = wrap(g, text, PW - 190).slice(-4)
     lines.forEach((l, i) => g.fillText(l, 120, 180 + i * 92))
