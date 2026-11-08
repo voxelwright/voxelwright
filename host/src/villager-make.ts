@@ -439,7 +439,8 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     if (persona.template && Object.hasOwn(TEMPLATE_CARDS, persona.template)) out.push(TEMPLATE_CARDS[persona.template].audience)
     // No record named and no built-in template: the source cannot be traced (it may have been another person's adults-only
     // pattern), so it stays within the maker's own age band; the page leaving `item` out never widens it (review, round 2).
-    // A built-in template named in the body narrows it further but never replaces the band (review, round 3).
+    // A built-in template named in the body is added beside the band, never instead of it: the result is the most
+    // restrictive of the two, so an adults-only template still makes it adults-only (review, rounds 3 and 4).
     if (item === undefined) return [...out, maker.age === 'child' ? 'child' : 'adult']
     if (typeof item !== 'string' || !ITEM.test(item)) return 'refused'
     const r = await read(id, item)
