@@ -21,7 +21,9 @@ You need a recent Node (measured on 25.1), Google Chrome and a signed-in
 Claude Code.
 
 ```sh
-# The home, at http://localhost:5181
+# The home, at http://localhost:5181: the iso dollhouse with walking villagers, talk, music and
+# build mode, all on by default. ?talk=off is the quiet seated kitchen, ?build=0 turns build mode
+# off, ?cam=seat keeps the seated view.
 cd home && npm install && npm run dev
 
 # The villager: prints one link per person, such as http://localhost:5181/#token=...

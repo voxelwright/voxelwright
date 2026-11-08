@@ -21,7 +21,7 @@ interface Villager { id: string; name: string; awake: boolean; ribbon: RGB; mark
 // Synthetic people until family isolation is proven (AGENTS.md). Only alex has
 // a villager on the host; June and Bram are painted placeholders that say so.
 const query = new URLSearchParams(location.search)
-/** With the always-on input (?talk=npc, held or speech, #42) this book is the journal: one ribbon per villager in the room, all awake. */
+/** With the always-on input (talk on, held or speech, #42) this book is the journal: one ribbon per villager in the room, all awake. */
 const JOURNAL = inputVariant(query) !== null
 const VILLAGERS: Villager[] = JOURNAL ? [
   { id: 'alex', name: 'Dumpling', awake: true, ribbon: [178, 74, 54], mark: 'sprig' },

@@ -9,6 +9,9 @@ All textures are painted in code in `src/paint.ts`.
 ```sh
 npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
+# Talk, villagers, the iso view, babble, music and build mode are on by default (#72; src/features.ts).
+# Opt-outs: ?talk=off (quiet seated kitchen), ?build=0 (no build mode), ?cam=seat (seated view).
+# ?talk=npc and ?build=1 still work. Scripts that need the old plain page add ?talk=off&build=0.
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
@@ -202,9 +205,9 @@ page for 7 s), then pauses. Only one page renders at a time. Base and head alter
 Builds are cached in `~/.cache/village/perf-gate`: a base by commit (`git archive`, `npm ci`,
 `vite build`), the working tree by the hash of its `home/` tree, untracked files included.
 
-Scenes: `home` (`?q=high`, kitchen seat view), `villagers` (`?talk=npc&q=high`, walking),
+Scenes: `home` (`?talk=off&build=0&q=high`, kitchen seat view), `villagers` (`?talk=npc&q=high`, walking),
 `talk` (the same page after clicking Alex's villager: the close-up), and with `--full`
-`home-low` (`?q=low`). A scene that needs a plugin the base lacks (villagers, talk: main has
+`home-low` (`?talk=off&build=0&q=low`). A scene that needs a plugin the base lacks (villagers, talk: main has
 no villagers yet) runs on the head only, with the absolute gates; one the head lacks is
 skipped and listed.
 
@@ -261,8 +264,8 @@ replies or table rounds), page load time (reported in the JSON, not gated) and a
 (the stage camera stays perspective, so postfx and entries keep working). Its
 navigation is described in "One house" below. `?cam=third` stands 2.4 m behind and 2.2 m above a
 point on the floor; clicking the floor walks there, clicking an object walks to
-a step in front of it (and chooses it, if it is an entry). Without `?cam=`
-nothing changes. Both rigs hang off the resting pose that `travel()` moves, so
+a step in front of it (and chooses it, if it is an entry). With `?talk=off`
+and no `?cam=` nothing changes (the seated view). Both rigs hang off the resting pose that `travel()` moves, so
 room walks work, and focus poses blend the field of view back to 40°. Q/E are
 ignored while typing, so the notebook still takes the letter q.
 
@@ -1735,11 +1738,13 @@ printed on the paper.
 
 ## Talking to villagers (#42 prototype)
 
-`?talk=npc` turns on three felt villagers (direction `b`) and the iso room
-view. `?cam=` and `?villager=` still win: `?talk=npc&cam=seat` is today's
-seated view, `?talk=npc&villager=a` uses the peg dolls. Without `?talk=` the
-home is exactly as before, and `?villager=` alone still shows the art
-directions.
+Since #72 this is on by default (`src/features.ts` holds the rule): three felt
+villagers (direction `b`), the iso room view, babble, music and build mode.
+`?talk=off` is the quiet page as it was before, `?build=0` turns build mode
+off, and `?cam=` and `?villager=` still win: `?cam=seat` is the seated view,
+`?villager=a` uses the peg dolls. `?talk=npc` and `?build=1` keep their old
+meaning (an explicit `?talk=npc` does not add build mode). With `?talk=off`,
+`?villager=` alone still shows the art directions.
 
 Each villager belongs to one synthetic person, and its scarf and name tab
 carry that person's colour: Dumpling (cook, Alex), Tuft (tidier, Sam), Moss

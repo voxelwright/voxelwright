@@ -26,8 +26,8 @@ declare module 'cordis' {
  * furniture in the house plan: built-in kinds at once, library items rebuilt from their
  * module text through the prop sandbox (dev builds). The placer itself (its decals,
  * styles and listeners) is made on the first begin or move, so an idle house pays only
- * for opening the plan and drawing what it holds. Wall editing stays behind ?build=1
- * (plugins/build.ts).
+ * for opening the plan and drawing what it holds. Wall editing stays behind build mode
+ * (plugins/build.ts; on by default, ?build=0 turns it off).
  */
 
 interface Drawn { holder: THREE.Group; size: Size; label: string; key: string; held: boolean }

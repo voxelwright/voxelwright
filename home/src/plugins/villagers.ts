@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { own, replace } from '../kernel'
 import { KINDS } from '../villagers/kinds'
 import { contactShadows, stepCrowd } from '../villagers/cast'
@@ -7,9 +8,9 @@ import { Villager, type Task } from '../villagers/rig'
 import { tagVillager } from '../theme'
 
 // Prototype for #42: villager art directions in the kitchen, only with ?villager=a|b|c|d|lineup.
-// With ?talk=npc the talk plugin owns the cast instead.
+// With talk on (the default) the talk plugin owns the cast instead.
 const params = new URLSearchParams(location.search)
-const flag = params.get('talk') === 'npc' ? null : params.get('villager')
+const flag = TALK ? null : params.get('villager')
 const shot = params.get('shot')
 
 /** Synthetic routines: the cook starts at the table, the tidier crosses the room, the gardener tends the window side. */

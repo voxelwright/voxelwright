@@ -87,7 +87,7 @@ export default {
         // Base render: the unmodified home, built and shot before the executor runs.
         const built = await build(c, join(c.runDir, 'base-build.log'))
         if (!built.ok) return void baseRenders.set(c.id, `Base build failed: ${JSON.stringify(built.detail)}`)
-        const shot = await withPage(c, '', async (page) => ({ pass: true, detail: await page.screenshot() }))
+        const shot = await withPage(c, QUIET, async (page) => ({ pass: true, detail: await page.screenshot() }))
         if (!shot.pass || !Buffer.isBuffer(shot.detail)) return void baseRenders.set(c.id, `Base render failed: ${JSON.stringify(shot.detail)}`)
         await writeFile(join(c.runDir, 'base.png'), shot.detail)
         baseRenders.set(c.id, shot.detail)
@@ -95,7 +95,7 @@ export default {
       async run(c) {
         const base = baseRenders.get(c.id)
         if (!Buffer.isBuffer(base)) return { pass: false, detail: base ?? 'No base render' }
-        return withPage(c, '', async (page, pageErrors) => {
+        return withPage(c, QUIET, async (page, pageErrors) => {
           const path = join(c.runDir, 'screenshot.png')
           const shot = await page.screenshot({ path })
           const image = PNG.sync.read(shot)
@@ -122,7 +122,7 @@ export default {
         const proof: Record<string, unknown> = {}
         let pass = true
         for (const name of added) {
-          const result = await withPage(c, '', async (page, pageErrors) => {
+          const result = await withPage(c, QUIET, async (page, pageErrors) => {
             const before = await snapshot(page)
             if (!before.plugins.active.includes(name)) return { pass: false, detail: `Plugin ${name} is not active`, plugins: before.plugins }
             await page.evaluate((n) => (window as any).village.unload(n), name)
@@ -132,7 +132,7 @@ export default {
             await page.waitForTimeout(300)
             const reloaded = await snapshot(page)
             const others = before.plugins.active.filter((p) => p !== name).join(',')
-            const baseline = await withPage(c, `?plugins=${others}`, async (p) => ({ pass: true, detail: await snapshot(p) }))
+            const baseline = await withPage(c, `${QUIET}&plugins=${others}`, async (p) => ({ pass: true, detail: await snapshot(p) }))
             const unloadMatchesBaseline = baseline.pass && same(unloaded, baseline.detail as Snap)
             const reloadMatchesBefore = same(reloaded, before)
             return {
@@ -242,6 +242,13 @@ function launchChrome(proxyBypass: string, tmp: string) {
  * Chrome and wait for the home. Preview and browser share one cleanup scope
  * and one deadline; both are stopped however fn ends.
  */
+/**
+ * Talk, villagers and build mode are on by default in the home (#72). The renders and plugin checks load the page
+ * with them off: walking villagers would change the pixels by themselves and pass the differs-from-base gate. A base
+ * without these switches ignores the unknown parameters.
+ */
+const QUIET = '?talk=off&build=0'
+
 async function withPage(c: Candidate, query: string, fn: (page: Page, pageErrors: string[]) => Promise<PageResult>): Promise<PageResult> {
   if (!existsSync(join(home(c), 'dist', 'index.html'))) return { pass: false, detail: 'No build output to serve' }
   const sandbox = await createSandbox({ repo: c.repo, network: 'loopback' })

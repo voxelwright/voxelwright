@@ -13,7 +13,7 @@ const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), d
 async function open(reducedMotion) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, reducedMotion })
   const page = await context.newPage()
-  await page.goto(base)
+  await page.goto(`${base}?talk=off&build=0`)
   await page.evaluate(() => localStorage.removeItem('village.notebook.lines'))
   await page.reload()
   const ready = await page.evaluate(() => window.village.ready())

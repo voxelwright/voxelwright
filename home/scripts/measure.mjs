@@ -8,7 +8,7 @@
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
-let url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5181/'
+let url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5181/?talk=off&build=0'
 if (args.includes('--gpu')) url += (url.includes('?') ? '&' : '?') + 'gpu=1'
 const shot = args.find((a) => a.startsWith('--shot='))?.slice(7)
 const flag = (name) => args.includes(`--${name}`)

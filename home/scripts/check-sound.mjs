@@ -103,7 +103,7 @@ const errors = []
 const open = async (query) => {
   const p = await context.newPage()
   p.on('pageerror', (e) => errors.push(String(e)))
-  await p.goto(`${base}?${query}`)
+  await p.goto(`${base}?${query}${/(^|&)talk=/.test(query) ? '' : '&talk=off&build=0'}`)
   await p.evaluate(() => window.village.ready(15000))
   await p.waitForFunction(() => window.village.sound, null, { timeout: 5000 })
   return p

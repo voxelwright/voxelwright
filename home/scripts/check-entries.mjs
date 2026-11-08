@@ -10,7 +10,7 @@ const args = process.argv.slice(2)
 const base = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5181/'
 const shots = args.find((a) => a.startsWith('--shots='))?.slice(8)
 // --build runs it on the house build mode generates from the plan (#53).
-const extra = args.includes('--build') ? '&build=1' : ''
+const extra = args.includes('--build') ? '&talk=off&build=1' : '&talk=off&build=0'
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })

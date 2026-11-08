@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { own, replace } from '../kernel'
 import { TABLE_TOP, WALL_Z } from '../layout'
 import { paintBraid, paintClockFace, paintFabric, paintRunner, paintWicker, paintWood } from '../paint'
@@ -9,7 +10,7 @@ import { Kit, at, ball, basketPlant, box, contactDecals, cyl } from '../kit'
 
 const LEFT = -3.31 // inner face of the left wall
 const RIGHT = 3.4 // inner face of the right wall
-const talk = new URLSearchParams(location.search).get('talk') === 'npc'
+const talk = TALK
 
 /**
  * Daily life in the kitchen (#42 room): a braided rug under the table, a runner

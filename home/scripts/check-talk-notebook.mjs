@@ -90,7 +90,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const page = await context.newPage()
-    await page.goto(await link(`${base}?q=low`))
+    await page.goto(await link(`${base}?q=low&talk=off&build=0`))
     const ready = await page.evaluate(() => window.village.ready())
     await settle(page)
     const s = await page.evaluate(() => {

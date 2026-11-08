@@ -1,4 +1,5 @@
 import type { Context } from 'cordis'
+import { TALK } from '../features'
 import { Babbler, type Said } from '../voice/engine'
 import { acquireAudio, type SharedAudio } from '../voice/context'
 import { busFor, mixFor, voicesSpoke, voicesStopped } from '../voice/buses'
@@ -8,8 +9,8 @@ import { ALL_MUTED, storedFlag } from '../voice/mute'
 
 // #42: villagers babble in time with their words when no voice model is connected.
 // talk.ts announces each revealed word with `village/said`; this plugin turns it
-// into a short run of synthesized syllables in that villager's voice. On with
-// ?talk=npc; ?babble=off turns it off; ?babble=demo (dev only) plays a scripted
+// into a short run of synthesized syllables in that villager's voice. On by default
+// (?talk=off removes it); ?babble=off turns it off; ?babble=demo (dev only) plays a scripted
 // exchange without talk.ts. The voices play into the voices bus (voice/buses.ts), which
 // ducks the music while they speak; mute and the speaker button are plugins/sound.ts's.
 declare module 'cordis' {
@@ -24,7 +25,7 @@ declare module 'cordis' {
 const params = new URLSearchParams(location.search)
 const MODE = params.get('babble')
 const DEMO = import.meta.env.DEV && MODE === 'demo'
-const ON = MODE !== 'off' && (params.get('talk') === 'npc' || DEMO)
+const ON = MODE !== 'off' && (TALK || DEMO)
 
 export interface BabbleApi {
   readonly babbler: Babbler | null

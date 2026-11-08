@@ -27,6 +27,8 @@ const check = (name, pass, detail) => {
   console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${detail === undefined ? '' : ` (${typeof detail === 'string' ? detail : JSON.stringify(detail)})`}`)
 }
 
+/** Talk and build mode are on by default (#72): this check compares the quiet seated house, so each URL opts out unless it asks. */
+const quiet = (q) => `${q}${/[?&]talk=/.test(q) ? '' : '&talk=off'}${/[?&]build=/.test(q) ? '' : '&build=0'}`
 async function open(query, { video, frozen } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1,
@@ -60,7 +62,7 @@ async function open(query, { video, frozen } = {}) {
   const errors = []
   page.on('console', (m) => m.type() === 'error' && !m.text().includes('503') && errors.push(m.text()))
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(base + query)
+  await page.goto(base + quiet(query))
   const ready = await page.evaluate(() => window.village.ready())
   if (frozen) {
     await page.waitForTimeout(1500)
@@ -364,7 +366,7 @@ if (!args.includes('--skip-drag')) {
   const root = '0123456789abcdef'
   const unreadable = { versions: [{ id: root, parent: null, at: '2026-11-07T00:00:00.000Z', plan: { schema: 2, corners: [], walls: [], rooms: [{ id: 'r', label: 'R', loop: ['x', 'y', 'z'] }], furniture: [] } }], head: root, names: {} }
   await rp.route('**/villager/api/house/plans', (r) => r.fulfill({ status: 200, json: unreadable }))
-  await rp.goto(`${base}?cam=iso&q=low&fx=&build=1#token=${'a'.repeat(64)}`)
+  await rp.goto(`${base}?cam=iso&q=low&fx=&talk=off&build=1#token=${'a'.repeat(64)}`)
   await rp.evaluate(() => window.village.ready())
   await rp.evaluate(() => window.villageBuild.history())
   await rp.waitForTimeout(1500)

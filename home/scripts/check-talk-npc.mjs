@@ -172,11 +172,11 @@ try {
     }, null, 2))
   } else {
     // No flag: the home is as before.
-    await open(page, '')
+    await open(page, '?talk=off&build=0')
     const plain = await page.evaluate(() => ({ talk: 'talk' in window.village, cards: document.querySelectorAll('.talk-card, .talk-slip, .talk-tag').length, entries: window.village.snapshot().entries.map((e) => e.id).filter((id) => id.startsWith('villager')), fov: window.village.kernel.root.get('stage').camera.fov }))
     check('without ?talk= nothing is added and the seated view is unchanged', !plain.talk && plain.cards === 0 && plain.entries.length === 0 && plain.fov === 40, plain)
     const isoBaseline = await (async () => {
-      await open(page, '?cam=iso&q=low')
+      await open(page, '?cam=iso&q=low&talk=off&build=0')
       await page.waitForTimeout(1500)
       return page.evaluate(() => window.village.snapshot())
     })()

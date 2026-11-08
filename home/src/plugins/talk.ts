@@ -8,6 +8,7 @@ import { contactShadows, stepCrowd } from '../villagers/cast'
 import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
 import { TABLE_TOP } from '../layout'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
+import { TALK } from '../features'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
@@ -20,12 +21,12 @@ import { navigation, type Pose } from './camera'
 import { tagVillager } from '../theme'
 import { paperCss, paperSlips } from '../talk/paper'
 
-// #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
+// #42: talking to villagers like characters in a game (on by default; ?talk=off turns it off, features.ts).
 // Three felt villagers, each the villager of one synthetic person, do chores in
 // the room. Click one (or Tab to it and press Enter) to talk; invite them to the
 // table and the table becomes a group conversation.
 const params = new URLSearchParams(location.search)
-const ON = params.get('talk') === 'npc'
+const ON = TALK
 /** ?slip=always keeps your paper slip on screen with no talk open, addressed to your own villager. */
 const SLIP_ALWAYS = params.get('slip') === 'always'
 /**
