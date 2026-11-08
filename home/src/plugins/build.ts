@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
 import { HOUSE_PLAN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
-import { BASE_ROOMS, build, makeKit, type Built } from '../build/walls'
+import { BASE_ROOMS, JAMB_WALL, build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
 import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
@@ -241,9 +241,10 @@ export default {
      */
     const shareWalls = (p: Plan) => {
       if (!built) return
-      // Per shared wall: its x, and where its door's front edge is (z). From there back, the wall stands as the kitchen's
-      // own side does (the camera on the house's side keeps it): the door's frame, the wall over it and the stretch behind
-      // it to the back corner, so the doorway is a real opening and the back wall turns one corner, not two.
+      // Per shared wall: its x, and where the jamb wall in front of its door ends (z; walls.ts cuts the wall there). From
+      // there back, the wall stands as the kitchen's own side does (the camera on the house's side keeps it): full wall
+      // either side of the door, its frame and the wall over it, and the stretch behind it to the back corner, so the
+      // doorway is an opening cut into a wall and the back wall turns one corner, not two. In front it is knee high.
       const shared = new Map<string, { x: number; front: number; z0: number; z1: number }>()
       for (const w of p.walls) {
         const rooms = roomsOf(p, w.id)
@@ -251,7 +252,7 @@ export default {
         const c = curveOf(p, w)
         if (Math.abs(c.dir[0]) > 0.2) continue
         const doors = w.openings.filter((o) => o.kind === 'door').map((o) => Math.max(pointAt(c, o.from)[1], pointAt(c, o.to)[1]))
-        shared.set(w.id, { x: (c.a[0] + c.b[0]) / 2, front: doors.length ? Math.max(...doors) : -Infinity, z0: Math.min(c.a[1], c.b[1]), z1: Math.max(c.a[1], c.b[1]) })
+        shared.set(w.id, { x: (c.a[0] + c.b[0]) / 2, front: doors.length ? Math.max(...doors) + JAMB_WALL : -Infinity, z0: Math.min(c.a[1], c.b[1]), z1: Math.max(c.a[1], c.b[1]) })
       }
       // A short leftover of the same house wall in front of the new room (under a metre) goes low with it, or it stands
       // alone as a pillar; one behind it stands, joining the new room's back wall to the house's.
@@ -957,13 +958,13 @@ export default {
           }
           return a
         },
-        /** Every generated wall piece as drawn now: its wall, timber (a door's frame) or plaster, its box, and whether it shows. */
+        /** Every generated wall piece as drawn now: its wall, timber (a door's frame), a door's threshold or plaster, its box, and whether it shows. */
         walls: () => {
           const box = new THREE.Box3()
           const seen = (o: THREE.Object3D) => shown(o) && o.layers.isEnabled(0)
           return (built ? meshes(built) : []).filter((m) => m.userData.wall).map((m) => {
             box.setFromObject(m)
-            return { wall: m.userData.wall as string, timber: m.material === kit.timber, stub: Boolean(m.userData.cutaway), x: +((box.min.x + box.max.x) / 2).toFixed(3), z0: +box.min.z.toFixed(3), z1: +box.max.z.toFixed(3), y0: +box.min.y.toFixed(3), y1: +box.max.y.toFixed(3), shown: seen(m) }
+            return { wall: m.userData.wall as string, timber: m.material === kit.timber, threshold: m.name === 'build door threshold', stub: Boolean(m.userData.cutaway), x: +((box.min.x + box.max.x) / 2).toFixed(3), z0: +box.min.z.toFixed(3), z1: +box.max.z.toFixed(3), y0: +box.min.y.toFixed(3), y1: +box.max.y.toFixed(3), shown: seen(m) }
           })
         },
         /** The house's things hung on a wall now cut low, which go and come back with it: their box and whether they show. */
@@ -996,7 +997,7 @@ export default {
           sun.shadow.camera.updateProjectionMatrix()
         }
         restore()
-        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow, kit.glass, kit.daylight]) {
+        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.threshold, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow, kit.glass, kit.daylight]) {
           m.map?.dispose()
           m.dispose()
         }

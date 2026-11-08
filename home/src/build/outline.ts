@@ -1,8 +1,8 @@
 // The outline of a room being added (#48): the room staked out on the lawn, the way
 // one is marked out on grass. A flour line runs round the walls to be built (the far
 // wall as an arc when it bends) and along the shared wall, broken where the door goes,
-// with the doorway standing in the shared wall as a felt ghost; a taut string on stakes runs over the
-// flour; the room's first pieces stand inside as soft felt ghosts; wooden pegs sit on
+// with the doorway standing in the shared wall as a felt ghost; stakes stand at its corners on the
+// flour line, which is the one outline; the room's first pieces stand inside as soft felt ghosts; wooden pegs sit on
 // the walls they move, and handwritten tags give the sizes and the choice. Trusted code
 // draws it from a draft (resolve.ts); the person adjusts it directly: drag a peg or a
 // wall, pull the sage peg to bend the far wall, slide the door, or click a size and
@@ -18,12 +18,12 @@ import { KINDS, obstacles, poseOf, seat, setPose, type Obstacle } from './mount'
 import { firstPieces } from './firstroom'
 import { YARD_TOP } from '../diorama'
 
-/** Flour poured along the string, the way a room is marked out on grass. */
+/** Flour poured round the walls to be, the way a room is marked out on grass. */
 const FLOUR = 'rgba(252, 248, 238, 0.96)'
 /** The drawing and the pegs lie on the lawn. */
 const GROUND = YARD_TOP + 0.006
-/** The string's height over the flour, and the stakes' height. */
-const STRING_Y = 0.2, STAKE_H = 0.3
+/** The stakes' height. */
+const STAKE_H = 0.3
 
 const MIN = 1.5
 const PX = 1024
@@ -180,22 +180,19 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     pegMeshes.set(h, { group: pg, head, top })
     group.add(pg)
   }
-  // Stakes at the corners of the walls to be built, and a taut mason's string over the flour.
+  // Stakes at the corners of the walls to be built, standing on the flour line (no string: one outline, not two).
   const stakeGeo = new THREE.BoxGeometry(0.06, STAKE_H, 0.06)
   stakeGeo.translate(0, STAKE_H / 2, 0)
   const stakeTip = new THREE.ConeGeometry(0.05, 0.05, 4)
   stakeTip.rotateY(Math.PI / 4)
   stakeTip.translate(0, STAKE_H + 0.025, 0)
-  const stringGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 6)
   const stakeWood = new THREE.MeshStandardMaterial({ color: '#d2a873', roughness: 0.8 })
-  const stringMat = new THREE.MeshStandardMaterial({ color: '#f07a3e', roughness: 0.6, emissive: '#c04a14', emissiveIntensity: 0.45 })
-  const stakes: THREE.Group[] = [], strings: THREE.Mesh[] = []
+  const stakes: THREE.Group[] = []
   const stakeGroup = new THREE.Group()
   stakeGroup.name = 'build outline stakes'
   group.add(stakeGroup)
-  /** Stakes at the given points, and the string from stake to stake along `line`. */
-  const stakeOut = (line: P[], at: P[]) => {
-    const yUp = new THREE.Vector3(0, 1, 0), a = new THREE.Vector3(), b = new THREE.Vector3()
+  /** Stakes at the given points. */
+  const stakeOut = (at: P[]) => {
     at.forEach((p, i) => {
       if (!stakes[i]) {
         const s = new THREE.Group()
@@ -210,21 +207,6 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
       m.rotation.set((i % 2 ? 1 : -1) * 0.03, i * 0.7, (i % 3 ? 1 : -1) * 0.025)
     })
     for (let i = at.length; i < stakes.length; i++) stakes[i].visible = false
-    for (let i = 0; i < line.length - 1; i++) {
-      if (!strings[i]) {
-        strings[i] = new THREE.Mesh(stringGeo, stringMat)
-        strings[i].castShadow = true
-        stakeGroup.add(strings[i])
-      }
-      const m = strings[i]
-      m.visible = true
-      a.set(line[i][0], YARD_TOP + STRING_Y, line[i][1])
-      b.set(line[i + 1][0], YARD_TOP + STRING_Y, line[i + 1][1])
-      m.position.copy(a).add(b).multiplyScalar(0.5)
-      m.scale.set(1, a.distanceTo(b), 1)
-      m.quaternion.setFromUnitVectors(yUp, b.sub(a).normalize())
-    }
-    for (let i = line.length - 1; i < strings.length; i++) strings[i].visible = false
   }
 
   // ── The first pieces, as soft felt ghosts inside the flour ────────────────
@@ -233,7 +215,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   group.add(ghosts)
   // Warm felt, half there, with a soft pencil rim, so the pieces read on grass in sun or shade.
   const ghostFelt = new THREE.MeshStandardMaterial({ color: '#d99a62', emissive: '#7a4220', emissiveIntensity: 0.18, roughness: 1, transparent: true, opacity: 0.62 })
-  const ghostRug = new THREE.MeshStandardMaterial({ color: '#f0c79a', roughness: 1, transparent: true, opacity: 0.7, depthWrite: false })
+  const ghostRug = new THREE.MeshStandardMaterial({ color: '#d99a62', emissive: '#7a4220', emissiveIntensity: 0.18, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false })
   const ghostRim = new THREE.MeshBasicMaterial({ color: '#5c3a22', side: THREE.BackSide, transparent: true, opacity: 0.6, fog: false })
   /** The doorway to be, as a felt ghost standing in the shared wall: two posts and a lintel (placed by layout below). */
   const DOOR_POST = 0.1
@@ -266,9 +248,9 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
           m.visible = false
           return
         }
-        // The rug keeps its braid, warm and faint; everything else is plain felt with a rim.
-        if (kind.endsWith('rug') && was.map) {
-          ghostRug.map = was.map
+        // A rug is a flat amber patch, as faint as the felt; everything else is plain felt with a rim.
+        if (kind.endsWith('rug')) {
+          was.map?.dispose()
           m.material = ghostRug
         } else {
           was.map?.dispose()
@@ -510,10 +492,10 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     }
 
     hooks.yard(ringOf(made, room, -T / 2 - 0.08))
-    // Stakes at the outer corners (and along a bend), the string over the outer flour line.
+    // Stakes at the outer corners (and along a bend), on the outer flour line.
     {
       const corners: P[] = [wallOut[0], wallOut[1], ...(n > 1 ? [wallOut[1 + n / 2]] : []), wallOut[wallOut.length - 2], wallOut[wallOut.length - 1]]
-      stakeOut(wallOut, corners)
+      stakeOut(corners)
     }
 
     // The walls to be built: a light band of flour between their two faces, a firm line on each.
@@ -937,9 +919,8 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     markMap.dispose()
     ;(sheet.material as THREE.Material).dispose()
     sheetMap.dispose()
-    for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive, stakeGeo, stakeTip, stringGeo, stakeWood, stringMat]) x.dispose()
+    for (const x of [pegBody, pegHead, pegWood, pegTop, pegSage, pegLive, stakeGeo, stakeTip, stakeWood]) x.dispose()
     for (const h of ghostOf.values()) releaseGpu(h)
-    ghostRug.map?.dispose()
     for (const m of [ghostFelt, ghostRug, ghostRim]) m.dispose()
     doorBox.dispose()
   }

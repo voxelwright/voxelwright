@@ -41,6 +41,8 @@ export interface Kit {
   glass: THREE.MeshStandardMaterial
   /** The patch of daylight such a window throws on the floor. */
   daylight: THREE.MeshBasicMaterial
+  /** The darker oak strip across the floor under such a door. */
+  threshold: THREE.MeshStandardMaterial
 }
 
 export function makeKit(): Kit {
@@ -71,6 +73,7 @@ export function makeKit(): Kit {
     shadow: new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false }),
     shadowSize: '',
     glass: new THREE.MeshStandardMaterial({ color: '#dff0f2', roughness: 0.08, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false }),
+    threshold: new THREE.MeshStandardMaterial({ color: '#9a6a44', roughness: 0.55 }),
     daylight: new THREE.MeshBasicMaterial({ map: daylightPatch(), color: '#ffe2a8', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }),
   }
 }
@@ -217,9 +220,11 @@ function doorTrim(f: Frame, kit: Kit): THREE.Mesh[] {
       piece(f, o.from, o.from + 0.018, 0, o.head, T + 0.02, 0, kit.timber),
       piece(f, o.to - 0.018, o.to, 0, o.head, T + 0.02, 0, kit.timber),
       piece(f, o.from, o.to, o.head - 0.018, o.head, T + 0.02, 0, kit.timber),
-      // A threshold board across the floor, so the base never shows between the rooms.
-      piece(f, o.from, o.to, 0, 0.014, T + 0.06, 0, kit.timber),
     )
+    // A threshold strip across the floor, proud of both floors and wider than the wall, so the two rooms read as two.
+    const sill = piece(f, o.from - 0.02, o.to + 0.02, 0, 0.026, T + 0.16, 0, kit.threshold)
+    sill.name = 'build door threshold'
+    out.push(sill)
   }
   for (const m of out) m.castShadow = m.receiveShadow = true
   return out
@@ -269,6 +274,21 @@ function windowTrim(f: Frame, kit: Kit, o: Opening): THREE.Mesh[] {
   patch.name = 'build window daylight'
   out.push(patch)
   return out
+}
+
+/** The full wall a doorway into a new room keeps on each side, so it reads as an opening cut into a wall. */
+export const JAMB_WALL = 0.55
+/** Where a wall a new room backs is cut: a jamb wall's width out from each door, inside the wall. */
+function jambCuts(openings: Opening[], t0: number, t1: number): number[] {
+  return openings.filter((o) => o.kind === 'door').flatMap((o) => [o.from - JAMB_WALL, o.to + JAMB_WALL]).filter((t) => t > t0 + 0.05 && t < t1 - 0.05)
+}
+/** Pieces (t from, t to, ...rest) cut at the given points along the wall. */
+function cutAt<T extends [number, number, ...number[]]>(pieces: T[], cuts: number[]): T[] {
+  if (!cuts.length) return pieces
+  return pieces.flatMap((p) => {
+    const at = [p[0], ...cuts.filter((t) => t > p[0] + 1e-6 && t < p[1] - 1e-6).sort((a, b) => a - b), p[1]]
+    return at.slice(1).map((b, i) => [at[i], b, ...p.slice(2)] as unknown as T)
+  })
 }
 
 /** Stretches between openings that come down to the floor below `below`. */
@@ -379,6 +399,9 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
     const [t0, t1] = extent(f, room, style)
     const openings = f.wall.openings.filter((o) => !CLOSED.has(o.id))
     const handle = options.handle === f.wall.id
+    // A house wall a new room backs is cut into stretches a door's jamb wall away from each door (build.ts stands
+    // the stretch round the door and keeps the rest low); any other wall is one stretch between its openings.
+    const cuts = style !== 'shared' && style !== 'front' && roomsOf(plan, f.wall.id).length === 2 && !isBase(f.wall) ? jambCuts(openings, t0, t1) : []
     if (style === 'front') {
       // diorama.ts's shell: full walls round the openings, a cap on full walls and lintels, a low stub for the cutaway.
       const wallMat = handle ? kit.handleWall : kit.shellWall
@@ -445,7 +468,11 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
           for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * scale, uv.getY(i))
         }
       }
-      for (const [a, b, y0, y1] of around(openings, t0, t1, H)) seat.add(shadowed(piece(f, a, b, y0, y1, T, 0, wallMat, uvMap)))
+      for (const [a, b, y0, y1] of cutAt(around(openings, t0, t1, H), cuts)) {
+        seat.add(shadowed(piece(f, a, b, y0, y1, T, 0, wallMat, uvMap)))
+        // A wall cut into stretches gets a cap per full-height stretch, so each cap goes and stays with its wall.
+        if (options.iso && cuts.length && y1 >= H) shell.add(capOf(f, a <= t0 + 1e-9 && !f.alongX ? a + 0.002 : a, b >= t1 - 1e-9 && !f.alongX ? b - 0.002 : b, y1, false))
+      }
       for (const m of doorTrim(f, kit)) seat.add(m)
       // Skirting along the room's face, broken by doors: room.ts's on the kitchen's back wall, lounge.ts's on the living room's walls.
       if (style !== 'kitchen-side') {
@@ -460,8 +487,8 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
     }
     if (!options.iso) continue
     // The shell's caps over the house's own walls (side caps 2 mm short), and every outer wall's cut stub.
-    if (style !== 'front') shell.add(capOf(f, t0, t1, H, !f.alongX))
-    for (const [a, b] of spans(openings.filter((o) => o.sill < STUB), t0, t1, STUB)) {
+    if (style !== 'front' && !cuts.length) shell.add(capOf(f, t0, t1, H, !f.alongX))
+    for (const [a, b] of cutAt(spans(openings.filter((o) => o.sill < STUB), t0, t1, STUB), cuts)) {
       const m = piece(f, a, b, 0, STUB, T, 0, kit.shellWall, world8(H))
       m.castShadow = m.receiveShadow = true
       for (const o of [m, capOf(f, a, b, STUB, !f.alongX)]) {
