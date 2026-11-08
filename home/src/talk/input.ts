@@ -36,6 +36,8 @@ const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 const INK = '#23395a'
 /** The owner's colour (Alex), worn by your mitten and your speech card's tab. */
 const MINE = '#3c5a8a'
+/** Seconds a torn note takes from the pad to its reader's paws or the table, its lift and fold included. */
+const FLIGHT = 1.7
 
 export interface Addressee { label: string; colour: string }
 export interface InputHooks {
@@ -466,7 +468,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       requestAnimationFrame(() => requestAnimationFrame(() => ghost.classList.add('go')))
       setTimeout(() => ghost.remove(), 750)
     }
-    hooks.emit('village/sent', { seconds: reducedMotion.matches || !target ? 0 : hooks.variant === 'held' ? 1.25 : 0.75, at: target ?? undefined })
+    hooks.emit('village/sent', { seconds: reducedMotion.matches || !target ? 0 : hooks.variant === 'held' ? FLIGHT : 0.75, from: hooks.variant === 'held' ? sheet.getWorldPosition(new THREE.Vector3()) : undefined, at: target ?? undefined })
     text = '' // the line left with the note: clearing the field is not writing
     field.value = ''
     onInput()
@@ -611,7 +613,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
     // The torn note: up off the pad, then a curve to the reader's paws (or down onto the table).
     if (flight) {
-      flight.t += dt / 1.7
+      flight.t += dt / FLIGHT
       // First the note lifts off the pad and turns to face its way, then it flies.
       const lifted = Math.min(1, flight.t / 0.28)
       const k = Math.max(0, Math.min(1, (flight.t - 0.34) / 0.66))

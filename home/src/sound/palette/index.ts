@@ -318,12 +318,15 @@ const sketch = {
   }),
 }
 
-/** The flight of a sent slip, shared by the three `sent` variants: `seconds` long, at least 0.25 s. */
-const flight = (p: Play) => Math.max(0.25, seconds(p.seconds, 0.7, 1.0))
+/**
+ * The flight of a sent slip after its 0.1 s tear, shared by the three `sent` variants, so it lands `seconds`
+ * after the event (the held note flies for 1.7 s, the paper climb), at least 0.25 s.
+ */
+const flight = (p: Play) => Math.max(0.25, seconds(p.seconds, 0.8, 2.0) - 0.1)
 
 const sent = {
   a: cue({
-    bus: 'world', level: -11, length: 1.2, jitter: { cents: 100, db: 1 },
+    bus: 'world', level: -11, length: 2.3, jitter: { cents: 100, db: 1 },
     play(a, out, p, kit) {
       // Torn off, then a paper flutter that fades as it flies and a soft tap as it lands.
       tear(a, out, kit, p.at, p, p.gain * 0.8)
@@ -335,7 +338,7 @@ const sent = {
     },
   }),
   b: cue({
-    bus: 'world', level: -16, length: 1.3, jitter: { cents: 100, db: 1 },
+    bus: 'world', level: -16, length: 2.3, jitter: { cents: 100, db: 1 },
     samples: [S.tear.file, S.swish.file],
     play(a, out, p, kit) {
       // Recorded: a real paper tear (four takes, cut short) and a sheet waved through the air
@@ -357,7 +360,7 @@ const sent = {
     },
   }),
   c: cue({
-    bus: 'world', level: -19, length: 1.8, jitter: { cents: 3, db: 1 },
+    bus: 'world', level: -19, length: 2.5, jitter: { cents: 3, db: 1 },
     play(a, out, p, kit) {
       // Torn off, then a kalimba run (C E G) across the flight that lands on the high C.
       tear(a, out, kit, p.at, p, p.gain * 0.7)
