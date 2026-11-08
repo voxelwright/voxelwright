@@ -288,6 +288,13 @@ try {
     const clamped = p.events().slice(-200).filter((e) => e.kind === 'clamped' && e.thing === 'drift/ball' && e.reset)
     out.drift = { resets: clamped.length, position: p.thing('drift/ball').position }
     p.preset('normal')
+    // A counter wired into itself: the loop is cut 64 wires from its physical cause, the queue drains, and a dropped event says so.
+    engine.addToy({ ...toy('loop', [ball({ at: [0, 0.3, 0] }), { id: 'floor', shape: { kind: 'box', half: [0.3, 0.02, 0.3] }, material: 'maple', motion: 'static', at: [0, 0, 0] }], [{ id: 's', kind: 'sensor', part: 'floor', knobs: { threshold: 0.0001 } }, { id: 'c', kind: 'counter', knobs: { step: 1 } }]), wires: [{ from: 's.hit', to: 'c.add' }, { from: 'c.changed', to: 'c.add' }] })
+    p.advance(2)
+    const loopCount = p.counters()['loop/c']
+    p.advance(1)
+    out.loop = { first: loopCount, later: p.counters()['loop/c'], dropped: p.events().filter((e) => e.kind === 'dropped').length }
+    engine.removeToy?.('loop')
     // A flipper's travel follows the swing slider (and the slider survives a snapshot).
     p.reset()
     p.preset('normal')
@@ -324,6 +331,7 @@ try {
   check('A toy that cannot be built is refused whole: no bodies, meshes or joints stay, its id can be built again, and a second toy with the same id is refused', /needs a part/.test(bad.noPart ?? '') && bad.afterNoPart.meshes === 0 && bad.reused === null && /already built/.test(bad.duplicate ?? '') && /flaky setup/.test(bad.flaky ?? '') && bad.flakyLeft === 0, bad)
   check('NaN, zero and huge numbers in a toy, a hinge with no axis and a place far outside the world are refused', /finite sizes/.test(bad.nan ?? '') && /finite sizes/.test(bad.zero ?? '') && /inside the world/.test(bad.huge ?? '') && /direction/.test(bad.axis ?? '') && bad.placeFar === false, bad)
   check('A thing that leaves the world bound is put back and a clamped reset event says so', bad.drift.resets > 0 && bad.drift.position.every((v) => Number.isFinite(v) && Math.abs(v) <= 50), bad.drift)
+  check('A gadget wired into itself stops within 64 wires of its cause and a dropped event says so', bad.loop.first > 0 && bad.loop.later - bad.loop.first <= 65 && bad.loop.dropped > 0, bad.loop)
   check('The swing slider changes the flipper\'s travel (about the knob in radians, both ways)', Math.abs(bad.swing.wide - 1.2) < 0.15 && Math.abs(bad.swing.narrow - 0.4) < 0.15, bad.swing)
   check('Restoring a bad snapshot clamps its rules and knobs, skips a pose outside the world, lists them and emits the clamped rules once', bad.restore.rules.gravity[0] === 30 && bad.restore.rules.kick === 4 && bad.restore.event.length >= 3 && bad.restore.events === 1 && bad.restore.clamped.some((c) => c.startsWith('things.')) && bad.restore.knobs.torque === 20 && bad.restore.ball.every((v, i) => Math.abs(v - bad.restore.ballBefore[i]) < 1e-3), bad.restore)
 

@@ -25,6 +25,8 @@ const STRIDE = 0.32
 const SIGNALS_PER_STEP = 200
 /** Signals waiting past this are dropped (a loop of wires feeding itself faster than it drains). */
 const SIGNALS_WAITING = 1000
+/** A signal more than this many wires away from a physical cause is dropped: a loop of wires feeding itself ends here however slowly it fills the queue. */
+const SIGNAL_HOPS = 64
 
 interface Thing {
   key: string
@@ -67,7 +69,9 @@ export class World implements WorldApi {
   private joints = new Map<string, number[]>()
   private droppedAt = -1
   private inputs = new Set<string>()
-  private queue: { from: string; signal: Signal }[] = []
+  private queue: { from: string; signal: Signal; hops: number }[] = []
+  /** How many wires the signal being delivered has crossed; 0 outside delivery. */
+  private hops = 0
   private respawns = new Map<string, number>()
   private followers = new Map<string, Follower>()
   private pairs = new Map<string, readonly [number, number]>()
@@ -403,22 +407,21 @@ export class World implements WorldApi {
     this.core.step(h, this.rules.substeps)
     for (const c of this.core.contacts()) this.contact(c)
     for (let n = 0; this.queue.length && n < SIGNALS_PER_STEP; n++) {
-      const { from, signal } = this.queue.shift()!
-      for (const to of this.wires.get(from) ?? []) {
-        const dot = to.lastIndexOf('.')
-        const g = this.gadgets.get(to.slice(0, dot))
-        if (g) gadgetKind(g.spec.kind)?.receive?.(g, to.slice(dot + 1), signal, this)
+      const { from, signal, hops } = this.queue.shift()!
+      this.hops = hops
+      try {
+        for (const to of this.wires.get(from) ?? []) {
+          const dot = to.lastIndexOf('.')
+          const g = this.gadgets.get(to.slice(0, dot))
+          if (g) gadgetKind(g.spec.kind)?.receive?.(g, to.slice(dot + 1), signal, this)
+        }
+      } finally {
+        this.hops = 0
       }
     }
     // The rest wait for the next step. A loop of wires feeding itself faster than that drains is cut here, and said so.
-    if (this.queue.length > SIGNALS_WAITING) {
-      const signals = this.queue.length - SIGNALS_WAITING
-      this.queue.length = SIGNALS_WAITING
-      if (this.clock - this.droppedAt > 0.25) {
-        this.droppedAt = this.clock
-        this.emit({ kind: 'dropped', signals })
-      }
-    }
+    if (this.queue.length > SIGNALS_WAITING) this.drop(this.queue.splice(SIGNALS_WAITING).length)
+    else if (this.dropping) this.drop(0)
     for (const [key, t] of this.respawns) {
       if (t > this.clock) continue
       this.respawns.delete(key)
@@ -478,7 +481,19 @@ export class World implements WorldApi {
     const from = `${gadget.id}.${port}`
     this.tally.set(from, (this.tally.get(from) ?? 0) + 1)
     this.emit({ kind: 'signal', gadget: gadget.id, port, value: signal.value, ...(signal.thing ? { thing: signal.thing } : {}), ...(signal.at ? { at: at(signal.at) } : {}) })
-    this.queue.push({ from, signal })
+    const hops = this.hops + 1
+    if (hops > SIGNAL_HOPS) this.drop(1)
+    else this.queue.push({ from, signal, hops })
+  }
+
+  /** Dropped signals are said at most four times a second, with the count since the last saying. */
+  private dropping = 0
+  private drop(signals: number) {
+    this.dropping += signals
+    if (this.clock - this.droppedAt <= 0.25) return
+    this.droppedAt = this.clock
+    this.emit({ kind: 'dropped', signals: this.dropping })
+    this.dropping = 0
   }
 
   /** Too fast is slowed to the speed limit, lost (below the floor, past the world bound) or broken is put back home: never an explosion. */
