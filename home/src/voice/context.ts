@@ -45,6 +45,13 @@ let context: AudioContext | null = null
 let unlocked = false
 let idle: { cancel(): void } | null = null
 
+/**
+ * A resume() or suspend() still pending when the last user leaves rejects with "AudioContext is
+ * closed" once close() runs. That is the expected end of a context, not an error: swallow it
+ * instead of leaving an unhandled rejection (seen intermittently in check-babble's unload test).
+ */
+const settle = (p: Promise<void>) => void p.catch(() => {})
+
 const quietSink = () => typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype
 
 function create() {
@@ -58,7 +65,7 @@ function create() {
   const a = new AudioContext(options)
   context = a
   // Headless Chrome starts a context running without a gesture; browsers that enforce the policy start it suspended.
-  if (!unlocked) void a.suspend()
+  if (!unlocked) settle(a.suspend())
   // The device opens here, off the main thread. A resume() made meanwhile settles when it is open.
   if (quiet) (a as SinkContext).setSinkId!('').catch((error) => console.warn('audio: could not open the output device', error))
   for (const user of users) user.ready(a)
@@ -78,7 +85,7 @@ function activate() {
 }
 
 function resume() {
-  if (context && context.state !== 'running' && !document.hidden) void context.resume()
+  if (context && context.state !== 'running' && !document.hidden) settle(context.resume())
 }
 
 // Not every gesture grants activation (a touch's pointerdown, Escape), so every later one
@@ -92,7 +99,7 @@ const onGesture = () => {
 // A background tab plays nothing: the context sleeps and wakes with the page.
 const onVisibility = () => {
   if (!context) return
-  if (document.hidden) void context.suspend()
+  if (document.hidden) settle(context.suspend())
   else if (unlocked) resume()
 }
 
@@ -101,7 +108,7 @@ const onPageHide = () => {
   context = null
   told.clear()
   for (const user of users) user.closed()
-  if (a && a.state !== 'closed') void a.close()
+  if (a && a.state !== 'closed') settle(a.close())
 }
 
 function listen() {
@@ -166,7 +173,7 @@ export function acquireAudio(user: AudioUser): SharedAudio {
       const a = context
       context = null
       told.clear()
-      if (a && a.state !== 'closed') void a.close()
+      if (a && a.state !== 'closed') settle(a.close())
     },
   }
 }
