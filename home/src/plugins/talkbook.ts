@@ -287,6 +287,8 @@ export default {
     const saidBy = new Map<string, Said[]>()
     const saidOf = (id: string) => saidBy.get(id) ?? saidBy.set(id, []).get(id)!
     let hostAway = false
+    /** A reply was cut short: the next opening reads history again, which has the rest. */
+    let stale = false
     let draft = ''
     let caretOn = true
     let open = false
@@ -948,6 +950,11 @@ export default {
         else if (result.why === 'refused') reply.text = 'This notebook was opened with someone else\'s link. Nothing was sent.'
         // 401 or no token: a link from an earlier launch. Not kept to resend: only the latest link will work.
         else if (result.why === 'link') reply.text = 'This notebook needs your latest link from the host. Nothing was sent; open it and write again.'
+        // Cut short (as notebook.ts): the host already has the line, so it is not kept to send twice. History has the rest.
+        else if (result.why === 'cut') {
+          stale = true
+          reply.text = `The answer was cut short. Your line reached ${who.name}'s villager; close and reopen the notebook to read the rest from history.`
+        }
         else {
           reply.text = result.why === 'busy' ? `${who.name}'s villager is still writing another answer. Your line is kept here, not sent.` : AWAY
           mine.unsent = true
@@ -1022,7 +1029,8 @@ export default {
       if (open) return
       open = true
       ctx.emit('village/book', { open: true, seconds: reducedMotion.matches ? 0 : 0.7 })
-      if (JOURNAL && !talking) {
+      if ((JOURNAL || stale) && !talking) {
+        stale = false
         saidBy.clear()
         void loadHistory()
       }

@@ -13,6 +13,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { releaseGpu, type Stage } from '../kernel'
+import { FRONT_Z, KITCHEN, LIVING_X, WALL_T, WALL_Z } from '../layout'
 import type { Entries } from '../plugins/entries'
 import type { PlacementService } from '../plugins/place'
 import type { Placing } from '../build/place'
@@ -60,8 +61,21 @@ interface Job {
   told: boolean
   /** Told when keeping failed, so a line waiting on this job goes ahead. */
   unstick?: () => void
+  /** Resolves once the job is kept or gone: a furnishing line written while it is being made waits for it (#42). */
+  settled: Promise<void>
+  settle: () => void
+  /** A Try another is being made; the piece you have stays until it is ready. */
+  retrying?: boolean
   /** Sketching (#42, sketch.ts): this job's maker, in place of makeProp (a drawing's maker). */
   make?: Make
+}
+/** What making a piece came to: the grounded object and where it came from, or why not and the line that says so. */
+type Produced = { made: THREE.Object3D; ref: ItemRef | null; owned: boolean; source: string; item?: string; makeMs?: number; costUsd?: number | null; boxMs?: number } | { why: string; line: string }
+/** The two halves of a job's `settled` promise. */
+function settling() {
+  let settle = () => {}
+  const settled = new Promise<void>((r) => (settle = r))
+  return { settled, settle }
 }
 /** A maker for one job: module text for the sandbox and its library id. */
 export type Make = (variant: number) => ReturnType<typeof makeProp>
@@ -95,6 +109,10 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   /** Furniture ids furnishing placed on this page, newest last. */
   const placed: string[] = []
   let picked: { point: THREE.Vector3; normal: THREE.Vector3; object: THREE.Object3D | null; at: number } | null = null
+  /** Set by dispose: work still in flight places nothing and starts no sandbox (#42). */
+  let disposed = false
+  /** Pieces whose waiting line has been told "one at a time". */
+  const toldWaiting = new WeakSet<Job>()
   /** How many placements furnishing has begun (for the checks). */
   let begun = 0
   /** A job waiting to begin goes after the one before it has settled. */
@@ -185,6 +203,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
         return begin(j, j.made.clone(true))
       }
       j.state = 'kept'
+      j.settle()
       if (job === j) job = null
     })
     return placing
@@ -194,6 +213,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     if (j.state === 'gone' || j.state === 'kept') return
     // Pieces kept before this one stay; with none kept, the job leaves no trace.
     j.state = j.kept.length ? 'kept' : 'gone'
+    j.settle()
     dropGhost(j)
     if (!j.kept.length) {
       if (j.owned && j.made) releaseGpu(j.made)
@@ -223,7 +243,14 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   /** A piece still open from an earlier line is kept if it can be (as Keep would), else let go; then `next` begins. */
   const after = (j: Job, next: () => void) => {
     const prev = job
-    if (prev && prev !== j && prev.placing) {
+    if (prev && prev !== j && prev.placing && prev.state === 'ghost' && prev.routed && !disposed) {
+      // One piece at a time: a piece still being made is not cut short by the next line; this one starts once it is kept or undone.
+      if (!toldWaiting.has(prev)) {
+        toldWaiting.add(prev)
+        hooks.say(`One at a time: I'll start on that once you've kept or undone the ${label(prev)}.`)
+      }
+      queue = prev.settled
+    } else if (prev && prev !== j && prev.placing) {
       prev.places = prev.places.slice(0, prev.index + 1)
       const p = prev.placing
       if (prev.state === 'placed' && p.fits) p.confirm()
@@ -248,7 +275,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const count = /\b(couple|two|pair)\b/.test(lower) ? 2 : /\bthree\b/.test(lower) ? 3 : 1
     const what = replacing ? 'table' : lower
     const { list, size, mount } = places(where, what, count, replacing)
-    const j: Job = { text, t0, routed: null, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
+    if (!list.length) return null
+    const j: Job = { text, t0, routed: null, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false, ...settling() }
     void after(j, () => {
       // Routed before its ghost began: furnish() begins it at the routed place instead.
       if (j.state !== 'ghost' || j.routed) return
@@ -274,8 +302,10 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const fromModule = async (module: string) => {
     if (!tools) throw new Error('the prop sandbox is only in dev builds')
     const [{ PropBox }, { validate, rebuild }] = await tools
+    if (disposed) throw new Error('the room was closed')
     box ??= new PropBox()
     const result = await box.run(module)
+    if (disposed) throw new Error('the room was closed')
     if (!result.ok) throw new Error(`sandbox: ${result.reason}`)
     const checked = validate(result.data)
     if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
@@ -320,13 +350,20 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const where = `${(routed.where ?? '').replace(/\b(here|there)\b/gi, '')} | ${text}`
     const { list, size, mount, note } = places(where, what, routed.count ?? 1, replacing, routed.mount, routed.size)
     let j = guess && guess.state === 'ghost' ? guess : null
+    // Nowhere free (every place around the table taken): nothing is made, and the person hears why.
+    if (!list.length) {
+      const spot = /table/i.test(where) ? 'around the table' : 'there'
+      const nj = j ?? { text, t0, routed, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost' as const, timing: { text, ok: false }, told: false, ...settling() }
+      nj.routed = routed
+      return fail(nj, 'no room', `There's no room left ${spot}. Tell me another spot, like by the window, and I'll make it there.`)
+    }
     if (j) {
       // The route knows better than the guess: its ghost goes, and the piece begins again at the routed place and size.
       const p = j.placing
       j.placing = null
       p?.cancel()
       dropGhost(j)
-    } else j = { text, t0, routed, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
+    } else j = { text, t0, routed, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false, ...settling() }
     const k = j
     k.routed = routed
     k.make = make
@@ -357,13 +394,13 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.placing?.note(what ? `${hooks.maker} is making ${what.length > 30 ? `${what.slice(0, 29)}…` : what}…` : `${hooks.maker} is thinking…`)
   }
 
-  const realise = async (j: Job) => {
+  /**
+   * The piece itself: a copy, from the library, or from the maker through the sandbox, grounded.
+   * Null when it is no longer wanted by the time it comes (anything made is released then).
+   */
+  const produce = async (j: Job, variant: number, wanted: () => boolean): Promise<Produced | null> => {
     const routed = j.routed!
     const what = routed.what ?? 'thing'
-    const tm = performance.now()
-    const variant = j.variant
-    let made: THREE.Object3D
-    let ref: ItemRef | null
     try {
       if (routed.copy) {
         // Only plan furniture can be copied: it is what the house can keep again.
@@ -371,59 +408,78 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
         const from = (picked?.object && service?.itemOf(picked.object)) || (placed.length ? service?.itemOf(holders().find((o) => o.userData.furniture === placed.at(-1)) ?? new THREE.Object3D()) : null)
         const source = from && holders().find((o) => o.userData.furniture === from.furnitureId)
         const inner = source?.children.find((c) => c.name !== 'cord')
-        if (!from || !inner) return fail(j, 'nothing to copy', "Point at one of the things we've placed first, then I'll copy it.")
-        made = inner.clone(true)
-        ref = from.item
-        j.owned = false
-        j.timing.source = 'copy'
-        if ('library' in from.item) j.item = from.item.library
-      } else {
-        let module: string
-        if (routed.library) {
-          const item = await libraryItem(hooks.person, routed.library)
-          if (!item.ok) return fail(j, `library ${item.why}`, "I couldn't find that one in your things. Nothing's been moved.")
-          module = item.module
-          j.item = routed.library
-          j.timing.source = 'library'
-        } else {
-          const res = await (j.make ? j.make(j.variant) : makeProp(hooks.person, what, j.size, j.variant))
-          j.timing.makeMs = res.ms
-          if (!res.ok) return fail(j, `maker ${res.why}`, res.why === 'away' ? "I'm out for a moment, so nothing's been made or moved." : res.why === 'busy' ? "I'm still making the last thing. One at a time!" : "I couldn't make that one, sorry. Nothing's been moved.")
-          module = res.module
-          j.item = res.item
-          j.timing.costUsd = res.costUsd
-          j.timing.source = 'made'
-        }
-        if (j.state !== 'ghost' || j.variant !== variant) return
-        const tb = performance.now()
-        made = upright(await fromModule(module), j.mount)
-        ref = { library: j.item!, person: hooks.person }
-        j.timing.boxMs = performance.now() - tb
-        j.owned = true
+        if (!from || !inner) return { why: 'nothing to copy', line: "Point at one of the things we've placed first, then I'll copy it." }
+        return { made: inner.clone(true), ref: from.item, owned: false, source: 'copy', item: 'library' in from.item ? from.item.library : undefined }
       }
+      let module: string, item: string, source: string, makeMs: number | undefined, costUsd: number | null | undefined
+      if (routed.library) {
+        const found = await libraryItem(hooks.person, routed.library)
+        if (!found.ok) return { why: `library ${found.why}`, line: "I couldn't find that one in your things. Nothing's been moved." }
+        module = found.module
+        item = routed.library
+        source = 'library'
+      } else {
+        const res = await (j.make ? j.make(variant) : makeProp(hooks.person, what, j.size, variant))
+        if (!res.ok) return { why: `maker ${res.why}`, line: res.why === 'away' ? "I'm out for a moment, so nothing's been made or moved." : res.why === 'busy' ? "I'm still making the last thing. One at a time!" : "I couldn't make that one, sorry. Nothing's been moved." }
+        module = res.module
+        item = res.item
+        costUsd = res.costUsd
+        makeMs = res.ms
+        source = 'made'
+      }
+      if (!wanted()) return null
+      const tb = performance.now()
+      const object = await fromModule(module)
+      if (!wanted()) {
+        releaseGpu(object)
+        return null
+      }
+      return { made: upright(object, j.mount), ref: { library: item, person: hooks.person }, owned: true, source, item, makeMs, costUsd, boxMs: performance.now() - tb }
     } catch (error) {
+      if (!wanted()) return null
       console.warn('furnishing failed:', error)
-      return fail(j, String(error instanceof Error ? error.message : error).slice(0, 200), "That one didn't come out right, so I've put nothing down.")
+      return { why: String(error instanceof Error ? error.message : error).slice(0, 200), line: "That one didn't come out right, so I've put nothing down." }
     }
-    if (j.state !== 'ghost' || !j.placing || j.variant !== variant) {
-      if (j.owned) releaseGpu(made)
+  }
+
+  const realise = async (j: Job) => {
+    const tm = performance.now()
+    const variant = j.variant
+    const r = await produce(j, variant, () => j.state === 'ghost' && j.variant === variant && !disposed)
+    if (!r) return
+    if ('why' in r) return fail(j, r.why, r.line)
+    if (!j.placing) {
+      if (r.owned) releaseGpu(r.made)
       return
     }
+    settleIn(j, r, tm)
+  }
+
+  /** The made piece goes into the open placement in place of the box. */
+  const settleIn = (j: Job, r: Extract<Produced, { made: THREE.Object3D }>, tm: number) => {
+    const placing = j.placing!
+    const made = r.made
+    j.owned = r.owned
+    j.item = r.item
+    j.timing.source = r.source
+    if (r.makeMs !== undefined) j.timing.makeMs = r.makeMs
+    if (r.costUsd !== undefined) j.timing.costUsd = r.costUsd
+    if (r.boxMs !== undefined) j.timing.boxMs = r.boxMs
     shadows(made)
     j.made = made
-    j.ref = ref
+    j.ref = r.ref
     // Placed before the swap repaints the tag, so it offers Try another.
     j.state = 'placed'
     announce('placed', j.places[j.index])
-    j.placing.swap(made, undefined, ref)
+    placing.swap(made, undefined, r.ref)
     j.object = made
-    j.placing.note('')
+    placing.note('')
     dropGhost(j)
     j.timing.ok = true
     j.timing.finalMs = performance.now() - j.t0
     j.timing.makeMs ??= performance.now() - tm
     timings.push(j.timing)
-    if (!j.placing.fits && !j.told) {
+    if (!placing.fits && !j.told) {
       hooks.say(NO_ROOM)
       j.told = true
     }
@@ -437,36 +493,53 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const j = job
     if (j?.placing) j.placing.cancel()
   }
+  /** Try another: the piece you have stays until the new one is ready, and stays if it does not come. */
   const again = async () => {
     const j = job
-    if (!j || j.state !== 'placed' || !j.routed || !j.placing || j.index !== 0) return
-    // The same placement, a new prop: the ghost while it is made, and nothing to keep until it is.
-    const old = j.made
-    j.variant++
-    j.state = 'ghost'
-    announce('ghost', j.places[0])
-    j.t0 = performance.now()
-    j.timing = { text: `${j.text} (take ${j.variant + 1})`, ok: false, route: 'furnish' }
-    j.ghost = boxGhost(j)
-    j.placing.swap(j.ghost, j.size, null)
-    j.object = j.ghost
-    j.made = null
-    if (j.owned && old) releaseGpu(old)
-    showMaking(j)
-    j.timing.ghostMs = performance.now() - j.t0
-    await realise(j)
+    if (!j || j.state !== 'placed' || !j.routed || !j.placing || j.index !== 0 || j.retrying) return
+    const placing = j.placing
+    j.retrying = true
+    placing.note(`${hooks.maker} is making another…`)
+    const tm = performance.now()
+    const variant = j.variant + 1
+    const r = await produce(j, variant, () => j.placing === placing && j.state === 'placed' && !disposed)
+    j.retrying = false
+    if (!r) return
+    placing.note('')
+    if ('why' in r) return hooks.say("Another one didn't come out, so the one you had is still here.")
+    const old = j.made, wasOwned = j.owned
+    j.variant = variant
+    j.t0 = tm
+    j.timing = { text: `${j.text} (take ${variant + 1})`, ok: false, route: 'furnish' }
+    settleIn(j, r, tm)
+    if (wasOwned && old) releaseGpu(old)
   }
 
   // ── Projects: a parcel where it will go ──────────────────────────────────
   const parcels: THREE.Object3D[] = []
   const removers: (() => void)[] = []
+  /** Parcels standing at each anchor: side by side along it, then a second layer on top (#42). */
+  const parcelsAt = new Map<string, number>()
+  /** A parcel is 0.62 x 0.5 x 0.52 m at scale 1.25; its half diagonal keeps it clear of the walls. */
+  const PARCEL_H = 0.5 * 1.25, PARCEL_STEP = 0.82, PARCEL_CLEAR = 0.55
+  /** A parcel where the project will go, or null when that anchor is full (the project is still on the host's list). */
   const parcel = (what: string, where: string | undefined) => {
     const lower = (where ?? '').toLowerCase()
-    const at = /living ?room|lounge/.test(lower) ? ANCHORS.livingFloor : /corner/.test(lower) ? ANCHORS.corner : /window/.test(lower) ? ANCHORS.window : ANCHORS.floor
+    const name = /living ?room|lounge/.test(lower) ? 'livingFloor' : /corner/.test(lower) ? 'corner' : /window/.test(lower) ? 'window' : 'floor'
+    const at = ANCHORS[name]
+    const offsets = [0, PARCEL_STEP, -PARCEL_STEP].filter((o) => Math.abs(o) <= at.span + 0.3)
+    const n = parcelsAt.get(name) ?? 0
+    if (n >= offsets.length * 2) return null
+    parcelsAt.set(name, n + 1)
+    const off = offsets[n % offsets.length], layer = Math.floor(n / offsets.length)
+    // Inside the anchor's own room, clear of its walls.
+    const [x0, x1] = at.x < KITCHEN.x1 ? [KITCHEN.x0, KITCHEN.x1] : [KITCHEN.x1 + WALL_T, LIVING_X + 1.6]
+    const x = THREE.MathUtils.clamp(at.x + Math.cos(at.ry) * off, x0 + PARCEL_CLEAR, x1 - PARCEL_CLEAR)
+    const z = THREE.MathUtils.clamp(at.z - Math.sin(at.ry) * off, WALL_Z + PARCEL_CLEAR, FRONT_Z - PARCEL_CLEAR)
     const p = makeParcel(what)
     p.scale.setScalar(1.25)
-    p.position.set(at.x + parcels.length * 0.8, 0, at.z + parcels.length * 0.3)
-    p.rotation.y = at.ry
+    p.position.set(x, layer * PARCEL_H, z)
+    p.rotation.y = at.ry + layer * 0.2
     p.name = `talk project ${what}`
     group.add(p)
     parcels.push(p)
@@ -488,7 +561,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       hooks.say(saved.why === 'away' ? "I'm out for a moment, so I couldn't write that project down. Say it again soon?" : "I couldn't write that project down just now. Nothing's started.")
       return false
     }
-    parcel(what, routed.where)
+    if (!parcel(what, routed.where)) hooks.say("It's on my list. There's no more floor for parcels there, so this one won't stand in the room.")
     return true
   }
 
@@ -513,6 +586,9 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   stage.renderer.domElement.addEventListener('pointerdown', onDown)
 
   const dispose = () => {
+    disposed = true
+    // A line waiting its turn wakes, sees the room closed and does nothing.
+    job?.settle()
     stage.renderer.domElement.removeEventListener('pointerdown', onDown)
     for (const remove of removers) remove()
     if (job) end(job)
@@ -533,6 +609,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     keep,
     undo,
     again,
+    /** A piece is being made or waits for its Keep or Undo. */
+    busy: () => job !== null,
     dispose,
     /** The piece being placed now and what it holds, for sketching's pinned page. */
     placing: () => (job?.placing && job.object ? { placing: job.placing, object: job.object } : null),
@@ -541,6 +619,12 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       job: job ? { state: job.state, open: Boolean(job.placing), piece: job.index, places: job.places, source: job.timing.source, item: job.item, kept: job.kept.slice() } : null,
       timings: timings.slice(),
       parcels: parcels.map((p) => p.name),
+      /** Each parcel's footprint in the room, and the Tab entries that stand for them (#42). */
+      parcelBoxes: parcels.filter((p) => p.parent).map((p) => {
+        const b = new THREE.Box3().setFromObject(p)
+        return { x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z, y1: b.max.y }
+      }),
+      parcelEntries: entries.list().filter((e) => e.id.startsWith('project-')).length,
       tableVisible: stage.scene.getObjectByName('table')?.visible ?? null,
       /** Furniture ids furnishing placed on this page. */
       placed: placed.slice(),

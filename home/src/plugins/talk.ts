@@ -118,6 +118,8 @@ const TABLE_SPOTS = [[-0.3, 0.44], [-0.75, 0.44], [0.2, 0.44], [-0.3, 0.12], [-0
 /** Your ink, the same blue-black as the pad's (input.ts). */
 const MY_INK = '#23395a'
 const KEPT = 'village.talk.kept'
+/** A reply cut short: the line reached the host, and the journal reads the answer back from its history. */
+const CUT_SHORT = 'My answer got cut short. Your line reached me; press J to read the rest in the journal.'
 
 interface Speech {
   text: string
@@ -976,11 +978,13 @@ export default {
     }
 
     /** Send a line to whoever it is addressed to. `prepared` is a reply already asked for (the one-call route answered). */
-    const send = async (text: string, prepared?: Speech) => {
+    const send = async (text: string, prepared?: Speech, to?: Member) => {
       text = text.trim()
       if (!text || pending) return
+      // A routed line goes to whom it was written for when it was sent, wherever the person has clicked since.
+      if (to && !(mode === 'talk' && partner === to)) choose(to, false)
       // A line written with no talk open goes to your own villager, who turns to you.
-      if (mode === 'room' && INPUT) choose(primary(), false)
+      else if (mode === 'room' && INPUT) choose(primary(), false)
       else if (mode === 'room' && SLIP_ALWAYS) talk(primary(), false)
       const bye = FAREWELL.test(text) && text.length <= 40 && (mode === 'table' || mode === 'talk')
       cover(text)
@@ -1056,6 +1060,7 @@ export default {
         await pause(1.3)
         return true
       }
+      if (speech.away === 'cut') return cutShort(m)
       if (speech.away) {
         keep(m.person, said)
         speak(m, inCharacter(speech.away))
@@ -1070,6 +1075,10 @@ export default {
       timing?.set(m, performance.now())
       while (!speech.done || !m.card.finished) {
         // The host failing mid-reply cuts the words short where they are.
+        if (speech.away === 'cut') {
+          m.v.speaking = false
+          return cutShort(m)
+        }
         if (speech.away) {
           m.v.speaking = false
           keep(m.person, said)
@@ -1083,6 +1092,17 @@ export default {
       }
       m.v.speaking = false
       voice.textContent = `${m.name}: ${speech.text}`
+      return true
+    }
+
+    /**
+     * The reply stopped partway: the host already has the line, so it is not kept to send again
+     * (that would say it twice). The rest of the answer is in the journal's history. True: the line was said.
+     */
+    const cutShort = async (m: Member) => {
+      speak(m, CUT_SHORT)
+      voice.textContent = `${m.name}: ${m.card.text}`
+      while (!m.card.finished) await frame()
       return true
     }
 
@@ -1228,6 +1248,15 @@ export default {
         label: m.name,
         object: m.v.fig.root,
         select() {
+          // Your own villager is still deciding what your last line meant: its answer stays with it.
+          if (routing) {
+            quietLeave = true
+            queueMicrotask(() => {
+              entries.back()
+              quietLeave = false
+            })
+            return
+          }
           if (mode === 'table' && m.seat && m.v.seated > 0.5) {
             // At the table, choosing someone seated addresses them by name.
             line.value = `${m.name}, `
@@ -1708,9 +1737,11 @@ export default {
         return { person: m.person, name: m.name, colour: m.colour }
       },
       // A drawing goes with no route: nothing drawn on it can choose who hears what.
+      busy: () => pending || routing,
       give: async (person, text, ref) => {
         const m = cast.find((c) => c.person === person)
-        if (!m || pending || routing) return false
+        if (!m) return false
+        if (pending || routing) return 'busy'
         if (!(mode === 'talk' && partner === m)) choose(m, false)
         pending = true
         try {
@@ -1782,7 +1813,7 @@ export default {
         }
         routes.push({ text, route: 'answer', path: 'reply', ms, calls: 1 })
         furnish!.dismiss(guess)
-        return send(text, speech)
+        return send(text, speech, me)
       }
       const r = await route(me.person, text, me.name, villagers)
       me.v.thinking = false
@@ -1797,6 +1828,8 @@ export default {
       const me = primary()
       ctx.emit('village/routed', { route: 'none', ok: false })
       furnish!.dismiss(guess)
+      // Cut short: the host has the line already; it is not put back to be sent twice.
+      if (why === 'cut') return quip(me, CUT_SHORT)
       keep(me.person, text)
       restoreLine(text)
       quip(me, why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
@@ -1811,13 +1844,13 @@ export default {
         case 'talk':
           furnish!.dismiss(guess)
           // Only to a villager the person's own words name, and with their own words, never the model's paraphrase (Sentinel, #42).
-          if (!to || to === me || to !== nameIn(text)) return send(text)
+          if (!to || to === me || to !== nameIn(text)) return send(text, undefined, me)
           choose(to, !routed.message)
-          if (routed.message) await send(text)
+          if (routed.message) await send(text, undefined, to)
           return
         case 'answer':
           furnish!.dismiss(guess)
-          return send(text)
+          return send(text, undefined, me)
         case 'furnish':
           if (mode === 'talk') endTalk()
           if (routed.say) quip(me, routed.say)

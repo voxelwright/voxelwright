@@ -46,8 +46,10 @@ export interface SketchHooks {
   maker: string
   /** Whom the pad is addressed to now: a villager's person id and name. */
   to(): { person: string; name: string; colour: string }
-  /** Give the drawing to a villager: they turn to you, hold it up and answer. False if it could not be said. */
-  give(person: string, text: string, sketch: SketchRef): Promise<boolean>
+  /** Give the drawing to a villager: they turn to you, hold it up and answer. 'busy' while another line is on its way, false if it could not be said. */
+  give(person: string, text: string, sketch: SketchRef): Promise<true | false | 'busy'>
+  /** Another line is on its way or being routed: a drawing waits. */
+  busy(): boolean
   /** Where a given page flies and is held: that villager's figure root. */
   figure(person: string): THREE.Object3D | null
   /** A short line from your own villager. */
@@ -285,6 +287,17 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     redrawDone()
     hooks.emit('village/sketched', { tool: 'clear' })
     input.setSketching(sketching, sketching ? 'draw here, or write a few words' : '')
+  }
+  /** The page as it is now, to put back if it does not get where it was going. */
+  const keepPage = () => ({ steps: steps.slice(), text: words() })
+  /** Back on the pad, unless something new is already on it. */
+  const putBack = (page: { steps: Step[]; text: string }) => {
+    if (steps.length || input.text || live) return false
+    steps = page.steps
+    redrawDone()
+    if (page.text) input.restore(page.text)
+    input.setSketching(sketching, '')
+    return true
   }
   /** The page is on its way: a fresh one under it. */
   const fresh = () => {
@@ -537,6 +550,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       if (!inked()) hooks.say('Draw it on the pad first, then I can make it.')
       return
     }
+    if (furnish.busy()) return hooks.say("I'm still on the last piece. Keep it or undo it, then I'll make your drawing.")
     const t0 = performance.now()
     const png = toPng()
     const text = words()
@@ -553,6 +567,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       results.push({ id: '', ok: false, why: `save ${saved.why}`, ms: performance.now() - t0 })
       return hooks.say(saved.why === 'away' ? "I'm out for a moment, so I couldn't take your drawing. It's still on your pad." : "I couldn't keep that drawing just now. It's still on your pad.")
     }
+    const page = keepPage()
     const pin = tearOff(true)
     fresh()
     open(false)
@@ -576,6 +591,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     pin.state = kept && pin.box ? 'melting' : 'falling'
     if (pin.state === 'melting') pin.into = pin.box!.getCenter(new THREE.Vector3())
     pin.t = 0
+    if (!ok && putBack(page)) hooks.say('Your drawing is back on your pad.')
   }
 
   // ── Give: the page flies to whoever the pad is addressed to ──────────────
@@ -588,6 +604,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     const to = hooks.to()
     const png = toPng()
     if (!png) return hooks.say("That drawing is too big to carry. Could you simplify it?")
+    if (hooks.busy()) return hooks.say('Finish the current line first, then give it. Your drawing stays on your pad.')
     giving = true
     const text = words()
     const saved = await saveSketch(hooks.person, png, text)
@@ -596,15 +613,23 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       results.push({ id: '', ok: false, why: `save ${saved.why}`, ms: 0 })
       return hooks.say(saved.why === 'away' ? "I'm out for a moment. Your drawing is still on your pad." : "I couldn't take that drawing just now. It's still on your pad.")
     }
+    const page = keepPage()
     const pin = tearOff(false)
     pin.held = hooks.figure(to.person) ?? undefined
     hooks.emit('village/sent', { seconds: reducedMotion.matches ? 0 : 0.9, to: to.person, at: pin.held?.getWorldPosition(new THREE.Vector3()) })
     fresh()
     open(false)
     // Your words go with it as your line; with none, only a plain note that you handed it over.
-    const ok = await hooks.give(to.person, text || '(hands you a drawing)', { from: hooks.person, id: saved.id })
+    const given = await hooks.give(to.person, text || '(hands you a drawing)', { from: hooks.person, id: saved.id })
     giving = false
-    results.push({ id: saved.id, ok, ms: 0 })
+    const ok = given === true
+    results.push({ id: saved.id, ok, ms: 0, ...(ok ? {} : { why: given === 'busy' ? 'busy' : 'not said' }) })
+    if (!ok) {
+      const back = putBack(page)
+      hooks.say(given === 'busy'
+        ? `Finish the current line first, then give it.${back ? ' Your drawing is back on your pad.' : ''}`
+        : `That didn't reach ${to.name}.${back ? ' Your drawing is back on your pad.' : ''}`)
+    }
     // Held a while after the answer, then put down.
     setTimeout(() => {
       if (pin.state === 'pinned' && pins.includes(pin)) {

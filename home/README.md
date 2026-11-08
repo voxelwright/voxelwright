@@ -2179,8 +2179,10 @@ the parcel after a reload; three clean unloads with the table restored; the
 speech card, its live re-addressing and its flight. 39 of 39 passed (stub
 host, November 6, 2026). `--agent=claude --variant=held|speech
 [--shots=dir] [--video=file]` runs the real session, and `--agent=claude
---furnish` times five furnishing requests. 70 of 70 passed (stub host,
-November 7, 2026, `--dev=5353 --host=5354`).
+--furnish` times five furnishing requests. `--only=fixes` runs just the
+checks for the #42 review's fixes (one piece at a time, no room, Keep and Try
+another waiting on their results, parcels in bounds, a closed room, a routed
+reply, a reply cut short), which the full run also ends with.
 
 Routing, 15 written lines, `node test/route-bench.ts haiku sonnet` in `host/`
 (operator login, M1 Pro, one call at a time; wall time includes the CLI

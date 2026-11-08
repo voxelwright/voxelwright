@@ -302,6 +302,46 @@ try {
   check('unloading leaves no ink, pencil, card or tools, every time', counts.every((c) => c.sketchObjects === 0 && c.sketchDom === 0 && c.objects === counts[0].objects && c.geometries === counts[0].geometries && c.textures === counts[0].textures && c.hooks === counts[0].hooks && c.dom === counts[0].dom), { counts, baseline: { objects: baseline.sceneObjects } })
   await context.close()
 
+  // #42 fix 10: a drawing that is not made, or cannot be given yet, stays on the pad with its words, and you hear why.
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const page = await context.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    const quipped = (x, re) => x.input.quips.some((q) => re.test(q.text))
+    await open(page, '?talk=npc')
+    await page.evaluate(() => window.village.talk.sketch.open(true))
+    await until(page, (x) => x.input.padScale > 1.4)
+    await drawWithMouse(page, SKETCHES.vase)
+    await page.keyboard.type('a tall vase [stub-make-fail]')
+    const drawn = (await state(page)).sketch.strokes
+    await page.evaluate(() => window.village.talk.sketch.make())
+    let s = await until(page, (x) => !x.sketch.making && quipped(x, /back on your pad/), 15_000)
+    check('#42 fix 10: a drawing the maker could not make goes back on the pad with its words, and your villager says so', drawn > 0 && s.sketch.strokes === drawn && s.input.text === 'a tall vase [stub-make-fail]' && quipped(s, /back on your pad/), { drawn, strokes: s.sketch.strokes, text: s.input.text, quips: s.input.quips.map((q) => q.text) })
+
+    // Give while a line to your villager is still on its way.
+    await page.goto('about:blank')
+    await open(page, '?talk=npc')
+    await page.route('**/messages', async (r) => {
+      await new Promise((x) => setTimeout(x, 6000))
+      return r.continue()
+    })
+    await page.keyboard.type('Hello there')
+    await page.keyboard.press('Enter')
+    await until(page, (x) => x.pending, 5000)
+    await page.evaluate(() => window.village.talk.sketch.open(true))
+    await until(page, (x) => x.input.padScale > 1.4)
+    await drawWithMouse(page, DOODLE)
+    await page.keyboard.type('for you')
+    const before = await state(page)
+    await page.evaluate(() => window.village.talk.sketch.give())
+    s = await until(page, (x) => quipped(x, /Finish the current line first/), 8000)
+    check('#42 fix 10: giving a drawing while another line is on its way keeps it on the pad and says why', before.pending && before.sketch.strokes > 0 && s.sketch.strokes === before.sketch.strokes && s.input.text === 'for you' && quipped(s, /Finish the current line first/), { pending: before.pending, strokes: [before.sketch.strokes, s.sketch.strokes], text: s.input.text, quips: s.input.quips.map((q) => q.text) })
+    await page.unroute('**/messages')
+    check('#42 fix 10: no page errors', errors.length === 0, errors)
+    await context.close()
+  }
+
   // Phone: a finger draws, and neither the page nor the camera moves.
   {
     const phone = await browser.newContext({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 })

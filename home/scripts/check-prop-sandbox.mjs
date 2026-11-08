@@ -89,6 +89,14 @@ try {
   const CUBE = 'const m = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({ color: "#c96" })); prop.add(m)'
   const wrap = (body) => `export default async function (prop, { THREE, paint }) {\n${body}\n}`
 
+  // #42 fix 3: a box that never says it is ready fails its run; the next run starts a new box rather than failing forever.
+  await page.route('**/prop-box.html*', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>silent</title>' }))
+  const dead = await trial(wrap(CUBE))
+  await page.unroute('**/prop-box.html*')
+  const retried = await trial(wrap(CUBE))
+  const frames = await page.evaluate(() => document.querySelectorAll('iframe').length)
+  check('#42 fix 3: a box that failed to start is cleared, and the next run starts afresh with one frame', !dead.ok && retried.ok && frames === 1, { dead: dead.reason, retried: retried.ok ? 'ok' : retried.reason, frames })
+
   // 0. A plain module works, so the cases below fail for their own reasons.
   const plain = await trial(wrap(CUBE), { place: true })
   check('a plain module builds and is placed', plain.ok && plain.meshes === 1, { ok: plain.ok, reason: plain.reason, toFrameMs: Math.round(plain.toFrameMs) })
@@ -263,6 +271,33 @@ try {
   check('a 16384-wide texture under the byte cap is rejected by the size limit', !wide.ok && /2048/.test(wide.reason), wide.reason)
   const shaderMat = await trial(wrap('prop.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), new THREE.ShaderMaterial({ vertexShader: "void main(){}", fragmentShader: "void main(){}" })))'))
   check('a ShaderMaterial (unknown preset) is rejected', !shaderMat.ok && /preset/.test(shaderMat.reason), shaderMat.reason)
+
+  // #42 fix 1: one 12 MB index buffer listed in 50 geometry entries (no mesh uses them) counts 50 times, and is refused before any copy.
+  const dup = await trial(wrap(`
+    const push = Array.prototype.push
+    Array.prototype.push = function (...a) {
+      const o = a[0]
+      if (o && o.position instanceof Float32Array && !this.__dup) {
+        this.__dup = 1
+        push.apply(this, a)
+        const big = { position: new Float32Array(9), normal: null, uv: null, index: new Uint32Array(3000000) }
+        for (let i = 0; i < 50; i++) push.call(this, big)
+        return this.length
+      }
+      return push.apply(this, a)
+    }
+    ${CUBE}`), { timeoutMs: 8000 })
+  check('#42 fix 1: one buffer listed in many geometry entries counts once per entry and is refused', !dup.ok && /MB/.test(dup.reason) && dup.gap < 150, { ok: dup.ok, reason: dup.reason, maxGapMs: dup.gap })
+  // #42 fix 2: colours with holes (delete a[0]) are refused, not turned into NaN.
+  const holes = await trial(wrap(`
+    const push = Array.prototype.push
+    Array.prototype.push = function (...a) {
+      const o = a[0]
+      if (o && o.emissive && o.color) { delete o.color[0]; delete o.color[1]; delete o.color[2]; delete o.emissive[0] }
+      return push.apply(this, a)
+    }
+    ${CUBE}`))
+  check('#42 fix 2: a material colour with holes is refused', !holes.ok && /gap/.test(holes.reason), { ok: holes.ok, reason: holes.reason })
 
   // 7. Modules that do nothing or nothing useful.
   const nothing = await trial('export function build(api) { }')

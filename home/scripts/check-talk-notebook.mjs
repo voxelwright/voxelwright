@@ -193,6 +193,21 @@ try {
   const convo = await conversationFile()
   check('Enter sends the line and the reply is written onto the page', answered.state === 'answered' && convo.at(-1)?.from === 'villager' && answered.text === convo.at(-1).text && convo.at(-2)?.text === 'I keep forgetting to water the plants', { answered, last: convo.at(-1) })
   check('the reply appears gradually, as if written', states.size >= 8, { distinctPages: states.size })
+
+  // #42 fix 12: a reply cut short (the stream ends with no "done"): the host has the line, so it is not kept to send again.
+  await page.route('**/messages', async (r) => {
+    const response = await r.fetch()
+    const body = (await response.text()).split('\n\n').filter((block) => !/^event: done$/m.test(block)).join('\n\n')
+    return r.fulfill({ response, body })
+  })
+  await page.keyboard.type('Tell me about bread')
+  await page.keyboard.press('Enter')
+  let cut = await voice(page)
+  for (const end = Date.now() + 15_000; (cut.state === 'writing' || cut.state === 'answered') && Date.now() < end; cut = await voice(page)) await page.waitForTimeout(100)
+  await page.unroute('**/messages')
+  const unsent = await page.evaluate(() => JSON.parse(localStorage.getItem('village.talk.unsent') ?? '[]'))
+  const bread = (await conversationFile()).filter((l) => l.from === 'person' && l.text === 'Tell me about bread')
+  check('#42 fix 12: a reply cut short says so and is not kept as unsent (so history shows it once); the host has the line once', cut.state === 'cut' && /cut short/.test(cut.text) && !unsent.some((u) => u.text === 'Tell me about bread') && bread.length === 1, { cut, unsent, bread: bread.length })
   if (shot) await page.screenshot({ path: join(shot, 'check-replied.png') })
 
   // Tasks: ArrowDown opens the Tasks tab; tick one with the keyboard and one with the pointer.
@@ -221,7 +236,8 @@ try {
   await settle(page, 1500)
   const kept = await page.evaluate(() => ({ ticks: JSON.parse(localStorage.getItem('village.talk.tasks') ?? '{}'), at: JSON.parse(localStorage.getItem('village.talk.at') ?? '{}') }))
   const remembered = await voice(page)
-  check('after a reload the ticks, the place in the book and the last answer are kept', kept.ticks['alex.fern'] && kept.ticks['alex.books'] && kept.at.section === 'tasks' && remembered.state === 'remembered' && remembered.text === convo.at(-1).text, { kept, remembered })
+  const lastAnswer = (await conversationFile()).filter((l) => l.from === 'villager').at(-1)
+  check('after a reload the ticks, the place in the book and the last answer are kept', kept.ticks['alex.fern'] && kept.ticks['alex.books'] && kept.at.section === 'tasks' && remembered.state === 'remembered' && remembered.text === lastAnswer?.text, { kept, remembered })
 
   // Clean unload and load again.
   const snap = await page.evaluate(() => window.village.snapshot())

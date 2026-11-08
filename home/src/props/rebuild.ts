@@ -31,10 +31,21 @@ class Reject extends Error {}
 const fail = (reason: string): never => { throw new Reject(reason) }
 const own = (o: object, key: string): unknown => (Object.hasOwn(o, key) ? (o as Record<string, unknown>)[key] : undefined)
 const obj = (v: unknown, what: string): object => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : fail(`${what} is not an object`))
+/**
+ * A dense copy of a list: every index from 0 to its length is its own property.
+ * Array methods skip holes, so a sparse list (new Array(3)) would pass unread.
+ */
 const list = (v: unknown, what: string, max: number): unknown[] => {
   if (!Array.isArray(v)) fail(`${what} is not a list`)
-  if ((v as unknown[]).length > max) fail(`${what} has ${(v as unknown[]).length} entries, more than ${max}`)
-  return v as unknown[]
+  const a = v as unknown[]
+  const n = a.length
+  if (n > max) fail(`${what} has ${n} entries, more than ${max}`)
+  const out: unknown[] = []
+  for (let i = 0; i < n; i++) {
+    if (!Object.hasOwn(a, i)) fail(`${what} has a gap at ${i}`)
+    out.push(a[i])
+  }
+  return out
 }
 const finite = (v: unknown, what: string): number => (typeof v === 'number' && Number.isFinite(v) ? v : fail(`${what} is not a finite number`))
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
@@ -44,7 +55,9 @@ const index = (v: unknown, size: number, what: string): number => (Number.isInte
 const numbers = (v: unknown, n: number, what: string, lo: number, hi: number): number[] => {
   const a = list(v, what, n)
   if (a.length !== n) fail(`${what} needs ${n} numbers`)
-  return a.map((x, i) => clamp(finite(x, `${what}[${i}]`), lo, hi))
+  const out: number[] = []
+  for (let i = 0; i < n; i++) out.push(clamp(finite(a[i], `${what}[${i}]`), lo, hi))
+  return out
 }
 function floats(v: unknown, what: string, required: boolean): Float32Array | null {
   if (v === null && !required) return null
@@ -123,17 +136,20 @@ export function validate(input: unknown): { prop: PropData } | { reason: string 
     const pixels = textures.reduce((sum, t) => sum + t.image.width * t.image.height, 0)
     if (pixels > LIMITS.texturePixels) fail(`textures hold ${pixels} pixels, more than ${LIMITS.texturePixels}`)
     const rawGeometries = list(own(d, 'geometries'), 'geometries', LIMITS.geometries)
-    // Byte budget before copying: count each distinct buffer once.
-    const buffers = new Set<ArrayBufferLike>()
-    let bytes = pixels * 4
-    for (const g of rawGeometries) if (g && typeof g === 'object') for (const k of ['position', 'normal', 'uv', 'index']) {
-      const a = own(g, k)
-      if (ArrayBuffer.isView(a) && !buffers.has(a.buffer)) { buffers.add(a.buffer); bytes += a.buffer.byteLength }
+    // Byte and vertex budgets before copying anything. Each entry is copied and scanned on its
+    // own, so each entry counts in full, even when several entries name the same buffer.
+    let bytes = pixels * 4, vertices = 0
+    for (const g of rawGeometries) if (g && typeof g === 'object') {
+      for (const k of ['position', 'normal', 'uv', 'index']) {
+        const a = own(g, k)
+        if (ArrayBuffer.isView(a)) bytes += a.byteLength
+      }
+      const position = own(g, 'position')
+      if (position instanceof Float32Array) vertices += Math.floor(position.length / 3)
     }
     if (bytes > LIMITS.bytes) fail(`the prop is ${Math.round(bytes / 1048576)} MB, more than ${LIMITS.bytes / 1048576} MB`)
-    const geometries = rawGeometries.map(geometry)
-    const vertices = geometries.reduce((sum, g) => sum + g.position.length / 3, 0)
     if (vertices > LIMITS.vertices) fail(`the prop has ${vertices} vertices, more than ${LIMITS.vertices}`)
+    const geometries = rawGeometries.map(geometry)
     const materials = list(own(d, 'materials'), 'materials', LIMITS.materials).map((m, i) => material(m, i, textures.length))
     let triangles = 0, placed = 0
     const box = new THREE.Box3()

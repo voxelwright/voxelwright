@@ -6,6 +6,7 @@
 //     session instead (idle, talk to Moss, a round oak table, a pinball project, the
 //     journal), printing the route and furnishing timings.
 //   --agent=claude --furnish: five furnishing requests, timed from Enter to ghost and to the final prop.
+//   --only=fixes: only the checks for the #42 review's fixes (also run at the end of the full check).
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
@@ -97,6 +98,135 @@ const placing = (page) => page.evaluate(() => window.villagePlace.state())
 const furniture = (page) => page.evaluate(() => window.villagePlace.plan().furniture)
 const holders = (page) => page.evaluate(() => window.village.kernel.root.get('stage').scene.getObjectByName('placed things').children.length)
 const tagButtons = (page) => page.evaluate(() => [...document.querySelectorAll('.place-tag button')].filter((b) => !b.hidden).map((b) => b.textContent))
+/** The #42 review's fixes (round 1): each of these failed before its fix. A fresh page for each, so one cannot spoil the next. */
+async function fixes() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  // Every maker request is counted; the next one can be held back, and any can be made to fail.
+  const props = { calls: 0, hold: 0, fail: false }
+  await page.route('**/props', async (r) => {
+    props.calls++
+    if (props.fail) return r.fulfill({ status: 500, body: '{}' })
+    if (props.hold) {
+      const ms = props.hold
+      props.hold = 0
+      await new Promise((x) => setTimeout(x, ms))
+    }
+    return r.continue()
+  })
+  // A new document each time: the same link again would only be a hash change.
+  const fresh = async (query = '?talk=npc&q=low') => {
+    await page.goto('about:blank')
+    await open(page, query)
+  }
+  const quipped = (re, ms = 10_000) => until(page, (x) => x.input.quips.some((q) => re.test(q.text)), ms)
+  let s
+
+  // fix 5: a second furnishing line while the first is being made waits its turn; each piece gets its own Undo.
+  await fresh()
+  props.hold = 4000
+  await write(page, 'add a lamp by the window')
+  await until(page, (x) => x.input.furnish.job?.open, 5000)
+  await page.waitForTimeout(1500)
+  await write(page, 'put a toy cow on the table')
+  await page.waitForTimeout(2000)
+  const callsWhileMaking = props.calls
+  s = await until(page, (x) => x.input.furnish.job?.state === 'placed', 15_000)
+  const first = s.input.furnish.job?.places?.[0]?.anchor
+  await page.evaluate(() => window.village.talk.undo())
+  s = await until(page, (x) => x.input.furnish.job?.state === 'placed', 15_000)
+  const second = s.input.furnish.job?.places?.[0]?.anchor
+  await page.evaluate(() => window.village.talk.undo())
+  const waited = (await quipped(/One at a time/)).input.quips.some((q) => /One at a time/.test(q.text))
+  await page.waitForTimeout(800)
+  s = await state(page)
+  check('#42 fix 5: a second furnishing line waits while the first is made, and Undo on each leaves nothing behind', callsWhileMaking === 1 && first === 'window' && second === 'table' && waited && s.input.furnish.placed.length === 0 && s.input.furnish.job === null, { callsWhileMaking, first, second, waited, placed: s.input.furnish.placed })
+
+  // Fixes 7 and 13 (Keep waiting on the host, Keep during the settle-in) are now the house's placement: its own checks (check-place) cover a refused save and the settle-in.
+
+  // fix 8: Try another keeps the piece until the new one is ready, and keeps it when the new one fails.
+  // (Things never kept elsewhere in this check, so the router makes them rather than taking them from the library.)
+  await fresh()
+  await write(page, 'add a footstool by the window')
+  s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
+  await page.waitForTimeout(600)
+  props.fail = true
+  await page.evaluate(() => window.village.talk.again())
+  props.fail = false
+  const afterRetry = await state(page)
+  const toldKept = (await quipped(/the one you had is still here/)).input.quips.some((q) => /the one you had is still here/.test(q.text))
+  check('#42 fix 8: a Try another that fails leaves the piece you had, and says so truthfully', afterRetry.input.furnish.job?.state === 'placed' && afterRetry.input.furnish.job.open && toldKept, { job: afterRetry.input.furnish.job, quips: afterRetry.input.quips })
+  await page.evaluate(() => window.village.talk.undo())
+
+  // Fix 6 (no place left around the table: nothing is made, your villager says so) has no check here yet: under the house's placement a pair of chairs
+  // around the table does not fit, so no place ever fills. furnish.ts keeps the no-room path.
+
+  // fix 9: many projects stand inside the room, in bounded slots, with a Tab entry for each one shown.
+  await page.evaluate(async () => {
+    const token = sessionStorage.getItem('village.villager.token')
+    for (let i = 0; i < 9; i++) {
+      await fetch('/villager/api/people/alex/projects', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ what: `a pinball machine ${i}`, where: i % 2 ? 'living room' : 'here', text: 'seeded by the check' }) })
+    }
+  })
+  await fresh()
+  s = await until(page, (x) => x.input.furnish.parcelBoxes.length > 0, 5000)
+  await page.waitForTimeout(500)
+  s = await state(page)
+  const inside = (b) => ((b.x0 >= -3.31 && b.x1 <= 3.4) || (b.x0 >= 3.58 && b.x1 <= 8.38)) && b.z0 >= -2.2 && b.z1 <= 3.8
+  const boxes = s.input.furnish.parcelBoxes
+  check('#42 fix 9: parcels stand inside their room, in bounded slots, with one Tab entry for each one shown', boxes.length >= 2 && boxes.every(inside) && s.input.furnish.parcelEntries === boxes.length, { shown: boxes.length, entries: s.input.furnish.parcelEntries, outside: boxes.filter((b) => !inside(b)) })
+
+  // fix 4: a piece still being made when the room closes starts no sandbox afterwards.
+  await fresh()
+  props.hold = 3000
+  await write(page, 'add a hatstand by the window')
+  await until(page, (x) => x.input.furnish.job?.open, 5000)
+  await page.waitForTimeout(500)
+  const framesBefore = await page.evaluate(() => document.querySelectorAll('iframe').length)
+  await page.evaluate(() => window.village.unload('talk'))
+  await page.waitForTimeout(4500)
+  const framesAfter = await page.evaluate(() => document.querySelectorAll('iframe').length)
+  check('#42 fix 4: furnishing in flight when the room closes leaves no sandbox frame behind', framesAfter <= framesBefore, { framesBefore, framesAfter })
+
+  // fix 11: a click on another villager while your line is being routed does not move the reply.
+  await fresh('?talk=npc&route=reply&q=low')
+  await page.route('**/messages', async (r) => {
+    await new Promise((x) => setTimeout(x, 2500))
+    return r.continue()
+  })
+  const samBefore = (await jsonl('sam', 'conversation.jsonl')).length
+  await write(page, 'How are you today?')
+  await page.waitForTimeout(600)
+  const sam = await page.evaluate(() => window.village.talk.screen('sam', 0.5))
+  await page.mouse.click(sam.x, sam.y)
+  s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text) && !x.pending, 15_000)
+  await page.unroute('**/messages')
+  check('#42 fix 11: a click on Tuft while your line is routed leaves the reply with your own villager', /I hear you, Alex/.test(s.cards.alex?.text ?? '') && !/I hear you/.test(s.cards.sam?.text ?? '') && (await jsonl('sam', 'conversation.jsonl')).length === samBefore, { partner: s.partner, alex: s.cards.alex?.text, sam: s.cards.sam?.text })
+
+  // fix 12: a reply cut short (the stream ends with no "done") is not put back on the pad or kept to resend.
+  await fresh()
+  await write(page, 'I want to chat with Tuft')
+  await until(page, (x) => x.mode === 'talk' && x.partner === 'sam' && !x.pending, 15_000)
+  await page.waitForTimeout(600)
+  await page.route('**/messages', async (r) => {
+    const response = await r.fetch()
+    const body = (await response.text()).split('\n\n').filter((block) => !/^event: done$/m.test(block)).join('\n\n')
+    return r.fulfill({ response, body })
+  })
+  const samLinesBefore = (await jsonl('sam', 'conversation.jsonl')).length
+  await write(page, 'Tell me about bread')
+  s = await until(page, (x) => !x.pending && /cut short/.test(x.cards.sam?.text ?? ''), 15_000)
+  await page.unroute('**/messages')
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('village.talk.kept') ?? '[]'))
+  const said = (await jsonl('sam', 'conversation.jsonl')).slice(samLinesBefore).filter((l) => l.from === 'person')
+  check('#42 fix 12: a reply cut short says so; the line is not put back or kept to resend, and the host has it once', /cut short/.test(s.cards.sam?.text ?? '') && s.input.text === '' && !kept.some((k) => k.text === 'Tell me about bread') && said.length === 1, { card: s.cards.sam?.text, text: s.input.text, kept, said })
+
+  check('#42 fixes: no page errors', errors.length === 0, errors)
+  await context.close()
+}
+
 try {
   if (agent === 'claude') {
     const variant = opt('variant') ?? 'held'
@@ -171,6 +301,8 @@ try {
       const v = await page.video()?.path()
       if (v) await (await import('node:fs/promises')).rename(v, video)
     }
+  } else if (opt('only') === 'fixes') {
+    await fixes()
   } else {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const page = await context.newPage()
@@ -564,6 +696,7 @@ try {
     check('phone: typing and send reaches your villager, and the line hides again', phoneLines[0]?.text === 'Hello from my phone' && sentPhone.partner === 'alex' && !(await tp.evaluate(() => document.querySelector('.talk-input-field').classList.contains('touch'))), { phoneLines })
     check('phone: no page errors', phoneErrors.length === 0, phoneErrors)
     await phone.close()
+    await fixes()
   }
 } finally {
   await browser.close()
