@@ -25,6 +25,7 @@ const GAP = 0.08
  * The takes, in seconds of each original, picked from measured event windows (not by ear).
  * `cents` retunes a tonal sample to the palette's key before encoding; `reverse` plays a take
  * backwards (cut, then reversed, then faded, so its fade-out lands on the reversed end).
+ * `parts` builds one sprite from several originals, their takes in the order listed.
  */
 const SPRITES = {
   'wood-clicks': { id: '565027', takes: [[0.19, 0.38], [0.57, 0.76], [1.39, 1.58], [1.81, 2.0], [2.27, 2.46], [2.71, 2.9]] },
@@ -38,6 +39,13 @@ const SPRITES = {
   // A wooden chair sat on, reversed: the seat's creak and thump become a lift.
   'chair-lift': { id: '429327', takes: [[0.97, 1.75], [0.97, 1.45]], reverse: true },
   'sock-steps': { id: '369837', takes: [[0.88, 1.25], [1.43, 1.8], [1.93, 2.3], [2.48, 2.85], [2.98, 3.35], [3.53, 3.9]] },
+  // Four small bubble pops from four recordists, each a round upward "bloop" (about 0.6 to 1.2 kHz).
+  'bubble-pops': { parts: [
+    { id: '868712', takes: [[0.0, 0.042]] },
+    { id: '733264', takes: [[0.0, 0.075]] },
+    { id: '762781', takes: [[0.203, 0.26]] },
+    { id: '776443', takes: [[0.14, 0.2]] },
+  ] },
 }
 
 const kWeight = (x) => {
@@ -83,30 +91,33 @@ const table = {}
 const used = []
 let total = 0
 for (const [name, spec] of Object.entries(SPRITES)) {
-  const dir = join(samples, spec.id)
-  const file = readdirSync(dir).find((f) => f !== 'meta.json')
-  const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'))
-  const { x, rate } = decode(join(dir, file), spec.cents ?? 0)
   const parts = []
   const takes = []
   let cursor = GAP
-  for (const [from, to] of spec.takes) {
-    // A retune shortens the take in time by its rate.
-    const a = Math.round((from / rate) * SR)
-    const b = Math.min(x.length, Math.round((to / rate) * SR))
-    const t = Float32Array.from(x.subarray(a, b))
-    if (spec.reverse) t.reverse()
-    const fadeIn = Math.round(0.004 * SR)
-    const fadeOut = Math.min(Math.round(0.06 * SR), Math.floor(t.length / 3))
-    for (let i = 0; i < fadeIn; i++) t[i] *= cos(i / fadeIn)
-    for (let i = 0; i < fadeOut; i++) t[t.length - 1 - i] *= cos(i / fadeOut)
-    let g = 10 ** ((TARGET - loudest(t)) / 20)
-    const peak = t.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
-    g = Math.min(g, 10 ** (-1 / 20) / peak)
-    for (let i = 0; i < t.length; i++) t[i] *= g
-    takes.push([+cursor.toFixed(4), +(t.length / SR).toFixed(4)])
-    parts.push(new Float32Array(Math.round(GAP * SR)), t)
-    cursor += t.length / SR + GAP
+  for (const source of spec.parts ?? [spec]) {
+    const dir = join(samples, source.id)
+    const file = readdirSync(dir).find((f) => f !== 'meta.json')
+    const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'))
+    const { x, rate } = decode(join(dir, file), spec.cents ?? 0)
+    for (const [from, to] of source.takes) {
+      // A retune shortens the take in time by its rate.
+      const a = Math.round((from / rate) * SR)
+      const b = Math.min(x.length, Math.round((to / rate) * SR))
+      const t = Float32Array.from(x.subarray(a, b))
+      if (spec.reverse) t.reverse()
+      const fadeIn = Math.round(0.004 * SR)
+      const fadeOut = Math.min(Math.round(0.06 * SR), Math.floor(t.length / 3))
+      for (let i = 0; i < fadeIn; i++) t[i] *= cos(i / fadeIn)
+      for (let i = 0; i < fadeOut; i++) t[t.length - 1 - i] *= cos(i / fadeOut)
+      let g = 10 ** ((TARGET - loudest(t)) / 20)
+      const peak = t.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
+      g = Math.min(g, 10 ** (-1 / 20) / peak)
+      for (let i = 0; i < t.length; i++) t[i] *= g
+      takes.push([+cursor.toFixed(4), +(t.length / SR).toFixed(4)])
+      parts.push(new Float32Array(Math.round(GAP * SR)), t)
+      cursor += t.length / SR + GAP
+    }
+    used.push({ name, id: source.id, file, meta, takes: source.takes, cents: spec.cents ?? 0, reverse: Boolean(spec.reverse) })
   }
   parts.push(new Float32Array(Math.round(GAP * SR)))
   const n = parts.reduce((s, p) => s + p.length, 0)
@@ -121,8 +132,8 @@ for (const [name, spec] of Object.entries(SPRITES)) {
   const kb = statSync(ogg).size / 1024
   total += kb
   table[name] = { file: `${name}.ogg`, takes }
-  used.push({ name, id: spec.id, file, meta, takes: spec.takes, cents: spec.cents ?? 0, reverse: Boolean(spec.reverse) })
-  console.log(`${name}.ogg  ${spec.takes.length} takes  ${(n / SR).toFixed(2)} s  ${kb.toFixed(1)} KB  from ${spec.id} (${meta.author})`)
+  const from = used.filter((u) => u.name === name).map((u) => `${u.id} (${u.meta.author})`).join(', ')
+  console.log(`${name}.ogg  ${takes.length} takes  ${(n / SR).toFixed(2)} s  ${kb.toFixed(1)} KB  from ${from}`)
 }
 rmSync(tmp, { recursive: true, force: true })
 

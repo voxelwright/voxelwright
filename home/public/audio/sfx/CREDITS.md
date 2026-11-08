@@ -1,7 +1,7 @@
 # Sound-effect credits
 
 Most of Village's sound effects are synthesized in code (`home/src/sound/palette/`). The recorded
-variants (`b` of chose, card, sent, placed, page and news, `d` of hover, `b` and `c` of farewell) play takes from these Freesound
+variants (`b` of chose, card, sent, placed, page and news, `d` of hover, `b` and `c` of farewell, `f`, `g` and `i` of news) play takes from these Freesound
 originals. All are Creative Commons CC0 1.0 Universal (Public Domain Dedication),
 https://creativecommons.org/publicdomain/zero/1.0/ ; credit is given anyway.
 
@@ -17,6 +17,10 @@ https://creativecommons.org/publicdomain/zero/1.0/ ; credit is given anyway.
 | `page-turn.ogg` | Page Turn | davidbain (https://freesound.org/people/davidbain/) | https://freesound.org/s/136778/ | 0.06-1.66 |
 | `chair-lift.ogg` | 18-sentandose silla de madera.wav | Tomycatts (https://freesound.org/people/Tomycatts/) | https://freesound.org/s/429327/ | 0.97-1.75, 0.97-1.45, each reversed |
 | `sock-steps.ogg` | 01-32 Footsteps, Wood, Socks, Slow Pace.wav | SpliceSound (https://freesound.org/people/SpliceSound/) | https://freesound.org/s/369837/ | 0.88-1.25, 1.43-1.80, 1.93-2.30, 2.48-2.85, 2.98-3.35, 3.53-3.90 |
+| `bubble-pops.ogg` (take 1) | Bubble_4 | BenParamoreAudio (https://freesound.org/people/BenParamoreAudio/) | https://freesound.org/s/868712/ | 0.000-0.042 |
+| `bubble-pops.ogg` (take 2) | Bubble_Pop | arttim (https://freesound.org/people/arttim/) | https://freesound.org/s/733264/ | 0.000-0.075 |
+| `bubble-pops.ogg` (take 3) | BubblePopping | Sess8it (https://freesound.org/people/Sess8it/) | https://freesound.org/s/762781/ | 0.203-0.260 |
+| `bubble-pops.ogg` (take 4) | pop out, bubble, soft bursting | chaferwitt (https://freesound.org/people/chaferwitt/) | https://freesound.org/s/776443/ | 0.140-0.200 |
 
 Changes made, by `home/scripts/make-sfx.mjs`: mixed to mono, resampled to 48 kHz, high-passed at
 90 Hz and low-passed at 11 kHz, the listed takes cut out with a 4 ms fade-in and up to 60 ms
@@ -24,4 +28,5 @@ fade-out, each take matched in loudness (K-weighted RMS of its loudest 50 ms to 
 under -1 dBFS), the takes of one sound laid end to end with 80 ms of silence as one sprite, and
 encoded to Ogg Opus at 56 kb/s. The music-box note was also lowered 28 cents, and the chair's takes
 reversed (a sit played backwards, as a lift). The palette then
-plays takes shorter, quieter, retuned and filtered (for example the music-box note as G and C).
+plays takes shorter, quieter, retuned and filtered (for example the music-box note as G and C, and
+the bubble pops slowed or tuned to G).
