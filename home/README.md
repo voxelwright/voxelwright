@@ -1663,9 +1663,10 @@ plan and the view, or into one line your villager says:
 built. A flour line runs along both faces of the walls to be built (the far
 wall as an arc when it bends) and along the shared wall, broken where the door
 goes; the door's jambs are firm lines, and the doorway itself stands in the shared
-wall as a felt ghost (two posts and a lintel, the door's width and height). An
-orange string on corner stakes runs over the outer line. The room's first
-pieces stand inside as warm felt ghosts with a darker rim. The doorway to be is
+wall as a felt ghost (two posts and a lintel, the door's width and height).
+Stakes stand at the corners on the outer line, which is the one outline (no
+string over it). The room's first pieces stand inside as warm felt ghosts with a
+darker rim, the play rug as a flat amber patch. The doorway to be is
 also taped out, in orange masking tape over a warm shade, on whichever face of
 the shared wall the camera sees. The bubble gives the size in words ("a bit
 smaller than the kitchen") and stands beside the outline, never over it: left,
@@ -1684,7 +1685,7 @@ rise from the floor in 0.7 s (at once with reduced motion). The room arrives
 with a window in the middle of its far wall (an `addOpening` edit, 42% of the
 wall, 0.9 to 2.2 m; a curved window when the wall bends) and its first pieces
 (`src/build/firstroom.ts`), chosen by its name. A playroom gets a patchwork play
-rug with a little table and two stools on it, a toy chest under the window, a
+rug (ochre, sage, terracotta and cream, stitched seams) with a little table and two stools on it, a toy chest by the quiet wall, a
 play tent in the far corner, and bunting, drawings, a book ledge and a growth
 chart on its back wall; a study a desk and chair under the window, a rug,
 and an armchair and floor lamp; a bedroom a bed with its head to the side wall,
@@ -1714,7 +1715,7 @@ once that nothing built will outlast the page.
 
 Every room renders with its floor and base, and a shared wall is drawn once. A
 door that a build edit opens gets a timber casing on both faces, lined reveals
-and a threshold board. A window it opens gets a frame with glazing bars, a pane,
+and a darker oak threshold strip, proud of both floors and wider than the wall. A window it opens gets a frame with glazing bars, a pane,
 a timber sill inside and a painted one outside, and a soft patch of daylight on
 the floor below it. The kitchen's own openings stay as room.ts draws them.
 The lot answers the plan (`src/build/lot.ts`): while any room or the staked-out
@@ -1736,17 +1737,20 @@ built, the villager who asked walks from where they are through the new doorway 
 piece: a stool at the play table, the sofa, the desk chair or the bed's edge, each cushioned
 to the villager's sitting height (0.635 m). They say one short line, and the view glides to
 a three-quarter view of the room and follows them in, the room about two thirds of the frame.
-The shared wall is cut to its stub in front of the door; from the door back it stands as the
-kitchen's own side does, so the doorway is a real opening (posts, trim, a lintel and the wall
-over it) and the house's wall joins the new room's back wall in one corner. What the kitchen
-hung on the low stretch (furnish.ts's shelf and coat pegs, one kit) goes with the wall and comes
-back when it stands. While the view is held the other villagers' "!" waits (talk.ts `hush`) and
-the new room's window throws a warmer patch of sun. A drag, the wheel, a held WASD or arrow key
+The house wall a new room backs is cut into stretches (walls.ts `JAMB_WALL`, 0.55 m out from each
+door), each with its own cap. From the jamb wall in front of the door back it stands as the
+kitchen's own side does, so the doorway is cut into full wall (0.55 m of it in front, the wall
+over it, posts, trim and a lintel) and the house's wall joins the new room's back wall in one
+corner; in front of that it is a knee-high stretch with the front walls' cut top, meeting the new
+room's front wall at the corner. What the kitchen hung on the low stretch (furnish.ts's shelf and
+coat pegs, one kit) goes with the wall and comes back when it stands. While the view is held the
+other villagers' "!" waits and the held pad is put away (talk.ts `hush`; a typed letter brings the
+pad back and goes on the line), and the new room's window throws a warmer patch of sun. A drag, the wheel, a held WASD or arrow key
 ends the hold; the "Back to the house" tag in the top left corner, or Escape, glides out to the
 whole house.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 71 checks (the doorway standing, the back junction closed, nothing hung floating, quiet "!" markers during the reward, first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 75 checks (the doorway cut into full wall with no cap in mid-air, the threshold, the held pad away during the reward, the doorway standing, the back junction closed, nothing hung floating, quiet "!" markers during the reward, first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg (outline, adjusted, close, reveal, built, door, phone), addroom.mp4
 node scripts/check-build-addroom.mjs --look --variant=<name>   # a look prototype (&look=<name>): addroom-{outline,reveal,built}-<name>.jpg
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
