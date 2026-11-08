@@ -77,6 +77,11 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   let lastPlaced: THREE.Object3D | null = null
   /** Set by dispose: work still in flight places nothing and starts no sandbox. */
   let disposed = false
+  /**
+   * A piece the person kept while the host saves it. It is decided, so it leaves `job` and the
+   * next line can show its ghost; it comes back undecided only if the host does not take it.
+   */
+  let keeping: Job | null = null
   // The sandbox and the checks live in dev builds only, as the prop experiment does.
   let box: import('../props/sandbox').PropBox | null = null
   const tools = import.meta.env.DEV ? Promise.all([import('../props/sandbox'), import('../props/rebuild')]) : null
@@ -287,6 +292,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const what = routed.what ?? 'thing'
     // One piece at a time: a new line keeps a piece that stands undecided (as writing on always has),
     // and waits while another is still being made or kept, so every piece gets its own Keep or Undo.
+    while (keeping?.keeping) await keeping.keeping
     if (job && job !== guess && job.state === 'placed') await keep()
     if (job && job !== guess) {
       const ahead = (job.routed?.what ?? 'last one').replace(/^(a|an|the|some) /i, '')
@@ -447,31 +453,46 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   }
   /** Keep: a made piece is saved to the person's library first; only once the host has it is it kept. */
   const keep = (): Promise<boolean> => {
+    if (keeping?.keeping) return keeping.keeping
     const j = job
-    if (!j || j.state !== 'placed') return Promise.resolve(false)
-    if (j.busy === 'keeping' && j.keeping) return j.keeping
-    if (j.busy) return Promise.resolve(false)
+    if (!j || j.state !== 'placed' || j.busy) return Promise.resolve(false)
     j.keeping = keepNow(j)
     return j.keeping
   }
   const keepNow = async (j: Job) => {
     finishSettle(j)
-    if (j.item && j.timing.source === 'made') {
-      j.busy = 'keeping'
-      making.textContent = 'Keeping it…'
-      choice.classList.add('busy')
-      const saved = await keepItem(hooks.person, j.item)
-      if (j.busy !== 'keeping' || j.state !== 'placed' || disposed) return false
-      j.busy = undefined
-      choice.classList.remove('busy')
-      if (!saved.ok) {
-        hooks.say(saved.why === 'away' ? "I'm out for a moment, so I couldn't put that in your things. It's still here: keep it or undo it." : "I couldn't put that in your things just now. It's still here: keep it or undo it.")
-        return false
-      }
+    if (!(j.item && j.timing.source === 'made')) {
+      choice.classList.remove('shown', 'busy')
+      end(j, 'kept')
+      return true
     }
-    choice.classList.remove('shown', 'busy')
+    j.busy = 'keeping'
+    keeping = j
+    if (job === j) job = null
+    making.textContent = 'Keeping it…'
+    choice.classList.add('busy')
+    const saved = await keepItem(hooks.person, j.item)
+    keeping = null
+    if (disposed || j.busy !== 'keeping') return false
+    j.busy = undefined
+    if (saved.ok) {
+      if (!job) choice.classList.remove('shown', 'busy')
+      end(j, 'kept')
+      return true
+    }
+    // Not saved: undecided again. A ghost guessed for the next line meanwhile makes way; that line waits its turn.
+    if (job && job.state === 'ghost' && !job.routed) dismiss(job)
+    if (!job) {
+      job = j
+      choice.classList.remove('busy')
+      choice.classList.add('shown')
+      hooks.say(saved.why === 'away' ? "I'm out for a moment, so I couldn't put that in your things. It's still here: keep it or undo it." : "I couldn't put that in your things just now. It's still here: keep it or undo it.")
+      return false
+    }
+    // Another piece is already on its way (it should have waited): this one stays in the room, and you hear that it is not saved.
+    hooks.say("I couldn't put that in your things just now, so it's only in the room, not saved.")
     end(j, 'kept')
-    return true
+    return false
   }
   const undo = () => {
     const j = job
@@ -649,7 +670,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     parcel,
     keep,
     /** A piece is being made or waits for its Keep or Undo. */
-    busy: () => job !== null,
+    busy: () => job !== null || keeping !== null,
     undo,
     again,
     frame,
