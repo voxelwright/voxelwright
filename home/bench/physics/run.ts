@@ -45,19 +45,20 @@ for (const [name, make, subs, hasCcd] of engines) {
 out()
 out('## Pinball at the best setting per engine')
 out()
-out('| engine | setting | tunnelled at 25 m/s | bounce out/in (expect 0.50) | bumper contacts seen | ball speed after bumper kick (m/s) | impulse at bumper (N·s) | flipper launch speed median / min (m/s) | flipper tunnelled | deterministic rerun |')
-out('|---|---|---|---|---|---|---|---|---|---|')
+out('| engine | setting | tunnelled at 25 m/s | bounce out/in at 10 m/s (expect 0.50) | at 25 m/s | bumper contacts seen | ball speed after bumper kick (m/s) | impulse at bumper (N·s) | flipper launch speed median / min (m/s) | flipper tunnelled | deterministic rerun |')
+out('|---|---|---|---|---|---|---|---|---|---|---|')
 for (const [name, make] of engines) {
   const cfg = best[name]
   // Every world is disposed after use: Jolt worlds hold their own wasm heap.
   const use = <T,>(fn: (c: PhysicsCore) => T): T => { const c = make(); c.setRules(cfg); const r = fn(c); c.dispose(); return r }
   const fast = use(c => pinballShots(c, SHOTS / 2, 25, 9))
   const bounce = use(c => bounceShots(c, 100))
+  const bounce25 = use(c => bounceShots(c, 100, 25))
   const bump = use(c => bumperShots(c, 200))
   const flip = use(c => flipperShots(c, 200))
   const d1 = use(c => pinballShots(c, 50, 10, 5).final), d2 = use(c => pinballShots(c, 50, 10, 5).final)
   const same = d1.every((x, i) => Object.is(x, d2[i]))
-  out(`| ${name} | ${cfg.ccd ? 'ccd, ' : ''}${cfg.substeps} substep${cfg.substeps > 1 ? 's' : ''} | ${fast.tunneled}/${SHOTS / 2} | ${f(bounce.median)} | ${bump.detected}/${bump.shots} | ${f(bump.outMean, 2)} ± ${f(bump.outSd, 2)} | ${f(bump.impulseMedian)} | ${f(flip.speedMedian, 2)} / ${f(flip.speedMin, 2)} | ${flip.tunneled}/200 | ${same ? 'identical' : 'differs'} |`)
+  out(`| ${name} | ${cfg.ccd ? 'ccd, ' : ''}${cfg.substeps} substep${cfg.substeps > 1 ? 's' : ''} | ${fast.tunneled}/${SHOTS / 2} | ${f(bounce.median)} | ${f(bounce25.median)} | ${bump.detected}/${bump.shots} | ${f(bump.outMean, 2)} ± ${f(bump.outSd, 2)} | ${f(bump.impulseMedian)} | ${f(flip.speedMedian, 2)} / ${f(flip.speedMin, 2)} | ${flip.tunneled}/200 | ${same ? 'identical' : 'differs'} |`)
 }
 
 out()

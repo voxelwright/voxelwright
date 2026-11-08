@@ -43,14 +43,20 @@ latest numbers are in [RESULTS.md](RESULTS.md).
 - "Right" after a terrain edit: the box sits within 12 cm of the new surface
   plus its half size. Rapier's awake count is read straight after the edit; it
   wakes the touching bodies on its next step, so all 9 end right.
+- Flipper launch speeds are not comparable: Rapier's velocity motor
+  (`configureMotorVelocity` with a damping factor) and Jolt's torque-limited
+  motor were not tuned to the same peak angular velocity.
 - Times are node, single thread, M1 Pro. No browser numbers yet.
 
 ## Findings that change the design
 
-- Rapier 0.21 did not tunnel at all, even without CCD at one step, because its
-  contacts are speculative. Jolt needs LinearCast CCD (cheapest, 0 tunnelled at
+- Rapier 0.21 did not tunnel at all, even without CCD at one step (observed up
+  to 100 m/s in a probe; the cause is not confirmed from Rapier's source). Jolt needs LinearCast CCD (cheapest, 0 tunnelled at
   25 m/s) or 8 steps. The TS XPBD needs 24 substeps at 10 m/s and still
   tunnels 31% at 25 m/s: custom would need its own CCD.
+- Bounce at speed: square into a wall at 25 m/s, Rapier with CCD returns 0.40
+  of the speed where restitution says 0.50 (0.49 at 10 m/s); Jolt and XPBD
+  return 0.50. Fast balls lose a fifth of their bounce in Rapier.
 - Contact hooks: Jolt's `ContactListenerJS` sets combined friction,
   restitution, inverse mass scales and surface velocity per contact pair. Rapier's JS
   `PhysicsHooks` can only filter pairs, and it has four fixed combine rules.
