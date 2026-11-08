@@ -105,8 +105,12 @@ const FAREWELL = /^\s*(?:(?:ok(?:ay)?|right|well)[\s,]+)?(?:thanks?(?: you)?(?: 
 /** Booster cushions on the chairs, so a seated villager clears the table top. */
 const BOOSTER = 0.12/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
 const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
-/** Where a note to the whole table lands and lies during the round: the clear near-left of the table top. */
-const TABLE_NOTE = new THREE.Vector3(-0.84, TABLE_TOP + 0.004, 0.38)
+/**
+ * Where a note to the whole table can lie during the round, nearest the front first: the first with no face over
+ * it in the table shot is used (#42 paper climb: a fixed spot put it over a chair back, floating).
+ */
+const TABLE_SPOTS = [[-0.3, 0.44], [-0.75, 0.44], [0.2, 0.44], [-0.3, 0.12], [-0.8, 0.12], [0.25, 0.12], [-0.6, -0.15]]
+  .map(([x, z]) => new THREE.Vector3(x, TABLE_TOP + 0.004, z))
 /** Your ink, the same blue-black as the pad's (input.ts). */
 const MY_INK = '#23395a'
 const KEPT = 'village.talk.kept'
@@ -469,7 +473,7 @@ export default {
     myWords.append(mySaid)
     myNote.append(myTo, myWords)
     /** Your line on screen: lying on the table (`card` null), or clipped to the reply it brought (#42 paper climb). */
-    const pinned: { on: boolean; card: Member | null; x: number; y: number; placed: boolean; lost: number } = { on: false, card: null, x: 0, y: 0, placed: false, lost: 0 }
+    const pinned: { on: boolean; card: Member | null; at: number; x: number; y: number; placed: boolean; lost: number } = { on: false, card: null, at: 0, x: 0, y: 0, placed: false, lost: 0 }
     const style = document.createElement('style')
     style.textContent = css() + paperCss()
     ctx.effect(() => {
@@ -1265,8 +1269,8 @@ export default {
     const EDGE = 12
     /** How far a card's name tab sticks up above it. */
     const TAB = 22
-    /** How far your clipped note overlaps the top of the reply it rides on. */
-    const CLIP = 18
+    /** How far your note overlaps the top of the reply it is taped to: just touching, the tape bridges them. */
+    const CLIP = 3
     const camUp = new THREE.Vector3()
     const camRight = new THREE.Vector3()
     const edge = new THREE.Vector3()
@@ -1368,7 +1372,7 @@ export default {
       }
       // Your line, lying on the table near where the note landed, wherever it covers no face and no slip;
       // where there is no such place (a phone), it stays out of the way.
-      // In a talk, your note rides on the reply's top right corner, overlapping its edge like a clipped page.
+      // In a talk, your note sits on the reply's top right corner, taped to it.
       if (pinned.on && pinned.card) {
         const { card } = pinned.card
         const shown = showing.has(pinned.card) && card.placed
@@ -1382,24 +1386,24 @@ export default {
         }
       } else if (pinned.on) {
         const w = myNote.offsetWidth, h = myNote.offsetHeight
-        const a = toPx(edge.copy(TABLE_NOTE))
         const blocked = [...taken, ...faces.values()]
+        const clear = (o: Omit<Spot, 'tail'>) => inside(o) && !blocked.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t < o.t + o.h + 6)
+        // Lying on the table top: the spot it lay on last if it is still clear, else the first clear one from the front.
         let spot: Omit<Spot, 'tail'> | undefined
-        // Over the table top near the note, never floating far above it.
-        for (const dy of [0, 0.4, -0.4, 0.8]) {
-          for (const dx of [0, -0.3, 0.3, -0.6, 0.6, -0.9, 0.9]) {
-            const o = { l: a.x - w / 2 + dx * w, t: a.y - h / 2 + dy * h, w, h }
-            if (inside(o) && !blocked.some((t) => overlaps({ ...o, tail: 'down' }, t))) {
-              spot = o
-              break
-            }
+        for (const i of [pinned.at, ...TABLE_SPOTS.keys()]) {
+          const a = toPx(edge.copy(TABLE_SPOTS[i]))
+          const o = { l: a.x - w / 2, t: a.y - h / 2, w, h }
+          if (clear(o)) {
+            spot = o
+            pinned.at = i
+            break
           }
-          if (spot) break
         }
         // On a phone the table is full of heads: your line goes up on the wall, above the round.
         for (let i = 0; !spot && innerWidth < 600 && i < 3; i++) {
-          const o = { l: (innerWidth - w) / 2, t: EDGE + TAB + i * (h + 12), w, h }
-          if (!blocked.some((t) => overlaps({ ...o, tail: 'down' }, t))) spot = o
+          const o = { l: (innerWidth - w) / 2, t: EDGE + i * (h + 12), w, h }
+          // Clear of the slips below it and of the name tape on top of each.
+          if (!blocked.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t - TAB - 6 < o.t + o.h)) spot = o
         }
         // Heads bob, so a place can come and go by a pixel: it keeps its last place for a moment before it gives way.
         pinned.lost = spot ? 0 : pinned.lost + dt
@@ -1606,7 +1610,8 @@ export default {
       },
       target: () => {
         const m = reader()
-        return m ? paws(m) : headAt.copy(TABLE_NOTE)
+        // To the whole table it lands on the table; its slip then finds a clear place there.
+        return m ? paws(m) : headAt.copy(TABLE_SPOTS[0])
       },
       holder: () => reader()?.v.fig.root ?? null,
       blocked: () => entries.active === 'notebook' || navigation.claims(),
@@ -1888,6 +1893,7 @@ function css() {
   .talk-card.mine::after { display: none; }
   .talk-card.mine .to-line { margin: 0 0 2px; font: italic 15px/1.2 ${HAND}; }
   .talk-card.mine .words { font: 20px/1.3 ${HAND}; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .talk-card.mine:not(.clipped) .words { font-size: 23px; }
   .talk-card .before[hidden], .talk-card .more[hidden], .talk-card .cue[hidden] { display: none; }
   .talk-card .more { display: block; margin: 2px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
     font: italic 700 17px ${HAND}; color: color-mix(in oklab, var(--c) 80%, #2a1608); }

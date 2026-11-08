@@ -228,7 +228,8 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.lineWidth = 1
     const words = el.querySelector<HTMLElement>('.words')
     const top = words?.offsetTop ?? 30
-    for (let y = y0 + top + 22; y < y1; y += 26) {
+    const rule = (words ? parseFloat(getComputedStyle(words).fontSize) || 20 : 20) * 1.3
+    for (let y = y0 + top + rule - 4; y < y1; y += rule) {
       g.beginPath()
       g.moveTo(x0, y)
       g.lineTo(x1, y)
@@ -256,14 +257,27 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       g.fillStyle = el.style.getPropertyValue('--c') || '#8a6a48'
       g.fillText(el.dataset.to ?? '', x0 + 20 + tw, y)
     }
-    g.font = `20px ${HAND}`
+    // Taped to the reply below it: a strip of paper tape across its bottom edge, reaching onto the reply.
+    if (el.classList.contains('clipped')) {
+      g.save()
+      g.translate(x1 - 52, y1 + 1)
+      g.rotate(-0.1)
+      g.fillStyle = 'rgba(236, 214, 168, 0.82)'
+      g.fillRect(-24, -10, 48, 22)
+      g.fillStyle = 'rgba(255, 250, 235, 0.25)'
+      for (let x = -22; x < 24; x += 5) g.fillRect(x, -10, 1.2, 22)
+      g.restore()
+    }
+    // In the page's size: larger lying on the table, where it is seen at a slant.
+    const px = words ? parseFloat(getComputedStyle(words).fontSize) || 20 : 20
+    g.font = `${px}px ${HAND}`
     g.fillStyle = INK
     // Wrapped where the page wraps it, so the paper is as tall as its lines.
     let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', (words?.offsetWidth ?? w - 36) + 2)
     // On a phone, one line in the round's stack, two clipped to a reply; three elsewhere.
     const keep = innerWidth >= 600 ? 3 : el.classList.contains('clipped') ? 2 : 1
     if (lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
-    lines.forEach((l, i) => g.fillText(l, x0 + (words?.offsetLeft ?? 18), y0 + top + 19 + i * 26))
+    lines.forEach((l, i) => g.fillText(l, x0 + (words?.offsetLeft ?? 18), y0 + top + px - 1 + i * px * 1.3))
   }
 
   const frame = (dt: number) => {
@@ -300,7 +314,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       // Your line lies on the table: tipped back, as paper on a table top is seen from a chair.
       // Clipped to a reply it stands with it, turned a little more than a slip is.
       const clipped = el.classList.contains('clipped')
-      const lying = el.classList.contains('mine') && !clipped ? 32 : 0
+      const lying = el.classList.contains('mine') && !clipped ? 44 : 0
       const x = parseFloat(m[1]) - TAB, y = parseFloat(m[2]) - TAB + (said ? 6 : 0)
       if (slip.from) {
         // Opening out of the landed note: from its size and place on screen, unfolding, to the slip's own.
@@ -314,7 +328,9 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
         slip.c.style.transform = `translate(${fx + (x - fx) * p}px, ${fy + (y - fy) * p}px) perspective(900px) rotateX(${(1 - p) * 70 + lying}deg) scale(${sc})`
         if (slip.open >= 1) slip.from = null
       } else slip.c.style.transform = `translate(${x}px, ${y}px) perspective(900px) rotateY(${toward * 9}deg) rotateZ(${slip.tilt + (clipped ? 0.05 : 0)}rad) rotateX(${(1 - slip.fade) * 28 + lying}deg) scale(${said ? 0.93 : 1})`
-      slip.c.style.filter = said ? 'saturate(0.6) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))' : ''
+      // Lying on the table it casts a short, close shadow onto it.
+      slip.c.style.filter = said ? 'saturate(0.6) drop-shadow(0 3px 5px rgba(60, 30, 10, 0.16))'
+        : lying ? 'drop-shadow(0 2px 1px rgba(50, 25, 8, 0.45)) drop-shadow(0 5px 6px rgba(50, 25, 8, 0.2))' : ''
       slip.c.style.opacity = String(slip.from ? Math.min(1, slip.fade * 1.6) : slip.fade)
     }
   }

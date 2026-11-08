@@ -1,9 +1,9 @@
 // Headless proof of the prop sandbox (#42): hostile prop modules are contained,
 // the home stays responsive and nothing hostile is placed or leaks an error.
-// Starts its own dev server on 5304 (Vite's API, with a request counter) on a
+// Starts its own dev server on 5304 by default (Vite's API, with a request counter) on a
 // throwaway VILLAGE_ROOT holding a synthetic villager token, and an "outside"
 // server on a random port that must never be reached. Stops both at the end.
-// Usage: node scripts/check-prop-sandbox.mjs
+// Usage: node scripts/check-prop-sandbox.mjs [--dev=5304]
 // Exits non-zero when any check fails.
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
+const devPort = Number(process.argv.slice(2).find((a) => a.startsWith('--dev='))?.slice(6) ?? 5304)
 const root = await mkdtemp(join(tmpdir(), 'prop-sandbox-'))
 await mkdir(join(root, 'villager'))
 const token = `synthetic-${Math.random().toString(36).slice(2)}`
@@ -26,11 +27,11 @@ const vite = await createServer({
   root: homeDir,
   configFile: join(homeDir, 'vite.config.ts'),
   logLevel: 'warn',
-  server: { port: 5304, strictPort: true },
+  server: { port: devPort, strictPort: true },
   plugins: [{ name: 'count', configureServer(s) { s.middlewares.use((req, _res, next) => { served.push(req.url); next() }) } }],
 })
 await vite.listen()
-const base = 'http://localhost:5304/'
+const base = `http://localhost:${devPort}/`
 
 const outside = []
 const outsideServer = http.createServer((req, res) => {

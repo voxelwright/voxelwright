@@ -300,21 +300,18 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const to = hooks.addressee()
     const resting = !writing()
     g.textAlign = 'left'
-    // While the torn note is on its way the pad shows a fresh sheet: the address went with the note (#42 paper
-    // climb: "to Dumpling" on the note and again on the pad under it read as two labels for one thing).
-    if (flight && resting) return
-    g.font = `italic 52px ${HAND}`
+    g.font = `italic 50px ${HAND}`
     const toW = g.measureText('to ').width
     g.fillStyle = 'rgba(70, 50, 36, 0.7)'
-    g.fillText('to ', 120, 106)
-    g.font = `700 92px ${HAND}`
+    g.fillText('to ', 120, 100)
+    g.font = `700 86px ${HAND}`
     g.fillStyle = to.colour
-    g.fillText(to.label, 120 + toW, 106)
+    g.fillText(to.label, 120 + toW, 100)
     // The pencilled hint only until the first line is sent: after that it would read as a form's placeholder.
     if (resting && !everSent) {
-      g.font = `italic 56px ${HAND}`
+      g.font = `italic 48px ${HAND}`
       g.fillStyle = 'rgba(70, 50, 36, 0.8)'
-      g.fillText('just start typing…', 120, 180)
+      g.fillText('just start typing…', 124, 184)
     }
     if (resting) return
     g.textAlign = 'left'
@@ -440,7 +437,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyer.visible = false
       const holder = hooks.holder?.() ?? null
       // Held: about a postcard to a villager; on the table, a little larger, so it reads from the table shot.
-      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone(), holder, local: holder ? holder.worldToLocal(target.clone()) : target.clone(), size: holder ? 0.22 : 0.3 }
+      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone(), holder, local: holder ? holder.worldToLocal(target.clone()) : target.clone(), size: holder ? 0.28 : 0.3 }
     } else if (target && !reducedMotion.matches) {
       const p = target.clone().project(camera)
       const r = stage.renderer.domElement.getBoundingClientRect()
@@ -618,8 +615,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       // It flutters as paper does, rocking and tipping, and settles as it lands.
       const sway = Math.sin(k * 11) * 0.22 * (1 - k)
       flyer.quaternion.copy(q).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.5 * lifted + Math.sin(k * 7 + 1) * 0.25 * (1 - k), sway * 0.6, sway))).slerp(goal, THREE.MathUtils.smoothstep(k, 0.45, 1))
-      // Half its size by the time it has folded and lifted, then its own size where it lands.
-      flyer.scale.setScalar(THREE.MathUtils.lerp(scl.x * THREE.MathUtils.lerp(1, 0.55, lifted), flight.size, e))
+      // Half its size by the time it has folded and lifted; then its size on screen eases to its size where it
+      // lands, so it is never a speck on the way (#42 paper climb: growing evenly in the world, it was).
+      const away = pos.distanceTo(camAt)
+      const ratio = THREE.MathUtils.lerp((scl.x * THREE.MathUtils.lerp(1, 0.55, lifted)) / Math.max(0.2, start.distanceTo(camAt)), flight.size / Math.max(0.2, end.distanceTo(camAt)), s)
+      flyer.scale.setScalar(ratio * away)
       // Folded once while it lifts, the right third over, so the words still show on its way.
       hinge.rotation.y = -Math.PI * 0.985 * THREE.MathUtils.smoothstep(flight.t, 0.04, 0.22)
       flyMat.opacity = backMat.opacity = 1
