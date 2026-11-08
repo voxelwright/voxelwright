@@ -56,7 +56,9 @@ const stop = (child) => new Promise((resolve) => {
   child.once('exit', resolve)
   process.kill(-child.pid, 'SIGTERM')
 })
-const jsonl = (person, file) => readFile(join(root, 'people', person, file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
+// The page is Alex's (its link's token). Talking with another villager is Alex's visit (#42), kept under Alex.
+const folderOf = (person) => person === 'alex' ? join(root, 'people', 'alex') : join(root, 'people', 'alex', 'visits', person)
+const jsonl = (person, file) => readFile(join(folderOf(person), file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
 
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)

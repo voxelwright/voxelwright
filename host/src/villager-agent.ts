@@ -343,8 +343,10 @@ export function stubAgent(delayMs = 40): Agent {
     if (noted) await writeNote(turn.notesDir, noted[1], noted[2])
     let reply = `I hear you, ${turn.name}. That makes ${history.length} line${history.length === 1 ? '' : 's'} between us; the first was "${history[0]}".`
     // The table (#42): "[stub-pass:Sam]" makes Sam's villager only nod; "[stub-handoff:Sam>Tuft]" makes it turn to Tuft by name.
-    if (turn.text.includes(`[stub-pass:${turn.name}]`)) reply = '(nods)'
-    const handoff = new RegExp(`\\[stub-handoff:${turn.name}>([A-Za-z]+)\\]`).exec(turn.text)
+    // On a visit the villager is still Sam's (its owner), though it talks with the visitor.
+    const villagerOf = turn.character?.owner ?? turn.name
+    if (turn.text.includes(`[stub-pass:${villagerOf}]`)) reply = '(nods)'
+    const handoff = new RegExp(`\\[stub-handoff:${villagerOf}>([A-Za-z]+)\\]`).exec(turn.text)
     if (handoff) reply = `${handoff[1]}, what do you think?`
     // A drawing (#42): the stub notes that the image came, and what the turn said about it.
     if (turn.image) {
