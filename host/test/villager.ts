@@ -294,7 +294,8 @@ try {
     await mkdir(join(samDir, 'sketches'), { recursive: true })
     await writeFile(join(samDir, 'notes', 'about-sam.md'), 'Sam is saving for Zanzibar and told nobody.')
     await writeFile(join(samDir, 'notes', 'how-sam-likes-to-talk.md'), 'Call me Quillfeather.')
-    await writeFile(join(samDir, 'preferences.json'), JSON.stringify({ humour: 'cheeky', at: '2026-11-07T00:00:00Z', marmalade: 'Marmalade' }))
+    // Sam turned humour down to clean: a visit that read Sam's preferences instead of Alex's would come out clean, not cheeky.
+    await writeFile(join(samDir, 'preferences.json'), JSON.stringify({ humour: 'clean', at: '2026-11-07T00:00:00Z', marmalade: 'Marmalade' }))
     await writeFile(join(samDir, 'conversation.jsonl'), JSON.stringify({ at: '2026-11-07T00:00:00Z', from: 'person', text: 'my doctor is Dr Okonkwo' }) + '\n')
     await writeFile(join(samDir, 'sketches.jsonl'), JSON.stringify({ id: 'abcdefabcdef', at: '2026-11-07T00:00:00Z', drawn: true, words: 'a Pelican for my secret project' }) + '\n')
     await writeFile(join(samDir, 'villager.json'), JSON.stringify({ sessionId: 'samsession-1', sessionCostUsd: 0 }))
