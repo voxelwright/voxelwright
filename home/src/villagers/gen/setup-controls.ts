@@ -33,6 +33,30 @@ export function sizeAt(scene: Scene, y: number) {
   return 0.5 + Math.log2(s) / 0.64
 }
 
+/** Embroidery thread for words on felt: dark on a light felt, cream on a dark one. */
+const INK = { dark: '#21170f', cream: '#fffaf0' }
+const luminance = (hex: string) => {
+  const c = new THREE.Color(hex)
+  // THREE.Color holds linear values once parsed from a hex string.
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+}
+const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+/**
+ * A pattern's felt for words sewn on it, and the thread that reads on it at 4.8:1 or more (WCAG AA small text is 4.5:1;
+ * the margin covers a felt's texture and a picked card's lift). A mid felt that neither thread clears is dyed a little
+ * deeper until cream does.
+ */
+export function feltInk(felt: string): { felt: string; ink: string } {
+  const c = new THREE.Color(felt)
+  for (let i = 0; i < 12; i++) {
+    const hex = `#${c.getHexString()}`, l = luminance(hex)
+    if (ratio(l, luminance(INK.dark)) >= 4.8) return { felt: hex, ink: INK.dark }
+    if (ratio(l, luminance(INK.cream)) >= 4.8) return { felt: hex, ink: INK.cream }
+    c.multiplyScalar(0.9)
+  }
+  return { felt: `#${c.getHexString()}`, ink: INK.cream }
+}
+
 export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent?: HTMLElement): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag)
   e.className = cls
@@ -43,6 +67,8 @@ export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, p
 export function fittingControls(scene: Scene) {
   const { tools, patterns } = scene
   const clamp = (v: number) => Math.min(1, Math.max(0, v))
+  /** The host pins the jokes at crude only for a grown-up whose household admin set it. */
+  const crudeShown = () => scene.humour().locked === 'crude'
   // A run of changes ends in one line from the villager.
   let lineTimer = 0
   const changed = () => {
@@ -86,8 +112,8 @@ export function fittingControls(scene: Scene) {
       e.addEventListener('pointercancel', up)
     })
   }
-  /** A radio group with one tab stop: `count` choices, choice i is value i / (count - 1). */
-  const radios = (group: HTMLElement, items: HTMLButtonElement[], key: Key) => {
+  /** A radio group with one tab stop: `count` choices, choice i is value i / (count - 1); the arrows stop at `last()`. */
+  const radios = (group: HTMLElement, items: HTMLButtonElement[], key: Key, last = () => items.length - 1) => {
     const n = items.length - 1
     const pick = (i: number) => {
       tools.set(key, clamp(i / n))
@@ -103,10 +129,10 @@ export function fittingControls(scene: Scene) {
     })
     group.addEventListener('keydown', (ev) => {
       const at = Math.round(tools.values[key] * n)
-      const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: n }[ev.key]
+      const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: last() }[ev.key]
       if (to === undefined) return
       ev.preventDefault()
-      pick(Math.min(n, Math.max(0, to)))
+      pick(Math.min(last(), Math.max(0, to)))
     })
   }
 
@@ -158,8 +184,8 @@ export function fittingControls(scene: Scene) {
     el('span', 'end', row).textContent = RIBBON[key].ends[1]
     slider(strip, key, `${RIBBON[key].ends[0]} to ${RIBBON[key].ends[1]}, a ribbon`)
     drag(strip, key, (ev) => {
-      const r = strip.getBoundingClientRect()
-      return (ev.clientX - r.left) / r.width
+      const r = strip.getBoundingClientRect(), b = button.offsetWidth * (getComputedStyle(strip).getPropertyValue('--b') ? 1 : 0)
+      return (ev.clientX - r.left - b / 2) / Math.max(1, r.width - b)
     })
     return { key, strip, button }
   })
@@ -171,7 +197,9 @@ export function fittingControls(scene: Scene) {
       b.textContent = word
       return b
     })
-    radios(parent, steps, 'humour')
+    // Crude is a position only when the household's admin set it (the host pins the dial there); otherwise the
+    // switch is clean and cheeky, and nobody sees an option they can't use.
+    radios(parent, steps, 'humour', () => (crudeShown() ? 2 : 1))
     return steps
   }
   /** The pattern swatches, felt samples; drawn again only when the cards or the pick change. */
@@ -187,11 +215,15 @@ export function fittingControls(scene: Scene) {
         const b = el('button', 'vs-swatch', hang)
         b.type = 'button'
         b.dataset.template = card.template.id
-        b.style.setProperty('--felt', patterns.feltOf(card))
+        const f = feltInk(patterns.feltOf(card))
+        b.style.setProperty('--felt', f.felt)
+        b.style.setProperty('--ink', f.ink)
         b.setAttribute('aria-pressed', String(patterns.picked?.template.id === card.template.id))
-        el('b', '', b).textContent = card.template.name
+        // The felt is its own layer, so the pinked edge can clip it while the card itself lifts, glows and casts a shadow.
+        const felt = el('span', 'felt', b)
+        el('b', '', felt).textContent = card.template.name
         const foot = footFor(card)
-        if (foot) el('small', '', b).textContent = foot
+        if (foot) el('small', '', felt).textContent = foot
         b.addEventListener('click', () => patterns.pick(patterns.picked?.template.id === card.template.id ? null : card))
       }
     }
@@ -217,7 +249,8 @@ export function fittingControls(scene: Scene) {
       k.knob.setAttribute('aria-valuenow', String(Math.round(v[k.key] * 100)))
     }
     for (const rb of c.ribbons) {
-      rb.button.style.left = `${(v[rb.key] * 100).toFixed(1)}%`
+      // The button travels inside the ribbon (its own width short of each end), so at either end it never covers the word.
+      rb.button.style.left = `calc(${v[rb.key].toFixed(3)} * (100% - var(--b, 0px)) + var(--b, 0px) / 2)`
       rb.strip.setAttribute('aria-valuenow', String(Math.round(v[rb.key] * 100)))
     }
     const level = Math.round(v.humour * 2)
@@ -226,8 +259,14 @@ export function fittingControls(scene: Scene) {
       s.setAttribute('aria-checked', String(i === level))
       s.tabIndex = i === level ? 0 : -1
     })
-    // Crude shows only as a level the household's admin set: otherwise a locked mark, never a choice.
-    c.steps[2].classList.toggle('locked', level !== 2)
+    // Crude shows only as the level the household's admin set; otherwise it is not there at all.
+    c.steps[2].hidden = !crudeShown()
+    const dial = scene.humour()
+    const why = dial.locked === null ? '' : dial.by === 'admin' ? "set by the household's admin" : 'kept clean, as asked'
+    if ((c.steps[0].parentElement!.getAttribute('aria-description') ?? '') !== why) {
+      if (why) c.steps[0].parentElement!.setAttribute('aria-description', why)
+      else c.steps[0].parentElement!.removeAttribute('aria-description')
+    }
   }
 
   /** A control's middle on the page, to click or drag it (for the checks). */

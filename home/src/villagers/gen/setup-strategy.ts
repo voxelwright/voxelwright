@@ -9,6 +9,7 @@
 import type * as THREE from 'three/webgpu'
 import type { Stage } from '../../kernel'
 import type { Pose } from '../../plugins/camera'
+import type { HumourDial } from '../../villager'
 import type { Persona } from './setup-persona'
 import type { rack, RackCard } from './setup-rack'
 import type { Controls, Key, Layout } from './sliders'
@@ -52,6 +53,10 @@ export interface Scene {
   /** The felt's main colour at a colour value, as #rrggbb, or null before there is a villager. */
   hueAt(v: number): string | null
   cards(): RackCard[]
+  /** The jokes dial as the host's humourCeiling decides it for this person: free (clean or cheeky) or pinned at a level. */
+  humour(): HumourDial
+  /** Say why the jokes are pinned (the host's reason, in a short note); nothing when they are free. */
+  explainHumour(): void
   watching(): boolean
   /** Put a strategy's controls in the page's tab order, after the name tag and before the save and send-off tags. */
   mount(e: HTMLElement): void

@@ -81,7 +81,7 @@ const LABELS = ['.vs-tool', '.vs-end', '.vs-pattern', '.vs-slip', '.vs-card', '.
   // B's frame controls and the swatches.
   '.vs-mirror .tape', '.vs-mirror .colours', '.vs-mirror .dial', '.vs-mirror .ribbon-row', '.vs-mirror .jokes', '.vs-swatch',
   // The cheval mirror (the default): the parts on its rails, drawer, legs and foot, and the rails' words.
-  '.vs-fit .tape', '.vs-fit .tag', '.vs-fit .dot', '.vs-fit .dial', '.vs-fit .ribbon-row', '.vs-fit .jokes']
+  '.vs-fit .tape', '.vs-fit .tag', '.vs-fit .dot', '.vs-fit .dial', '.vs-fit .ribbon-row', '.vs-fit .jokes', '.vs-fit .holder']
 const layout = (page) => page.evaluate((selectors) => {
   const boxes = []
   for (const s of selectors) for (const e of document.querySelectorAll(s)) {
@@ -99,12 +99,12 @@ const layout = (page) => page.evaluate((selectors) => {
   }
   const labels = boxes.length
   const outside = boxes.filter(({ r }) => r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight).map((b) => b.what)
-  // The villager on the table is a box too: no label may lie over it.
-  const v = window.villagerSetup.bounds()
-  if (v && window.villagerSetup.state().state === 'tuning') boxes.push({ what: 'villager', r: v })
+  // The villager on the table is boxes too, one per part (a held prop or a role mark reaching out is its own box, so the
+  // gap between it and the body is free): no label may lie over any of them.
+  if (window.villagerSetup.bounds() && window.villagerSetup.state().state === 'tuning') for (const r of window.villagerSetup.parts()) boxes.push({ what: 'villager', r })
   const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1
   const overlaps = []
-  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (hit(boxes[i].r, boxes[j].r)) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (!(boxes[i].what === 'villager' && boxes[j].what === 'villager') && hit(boxes[i].r, boxes[j].r)) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
   // The slip is paper over the table: no tool may lie under it.
   const slip = boxes.find((b) => b.what === '.vs-slip')
   if (slip) for (const t of window.villagerSetup.toolBounds()) if (hit(slip.r, t)) overlaps.push(`.vs-slip × tool ${t.key}`)
@@ -125,6 +125,92 @@ const small = (page, sel, floor = 13.95) => page.evaluate(([sel, floor]) => {
   }
   return out
 }, [sel, floor])
+/**
+ * Label contrast, measured from the screen at each label's own pixels (WCAG 2 contrast ratio; AA small text is 4.5:1).
+ * Each visible text run's box is found with a Range; the text is made transparent (no shadow) for one screenshot, so
+ * the pixels behind the words are what the scene and the label's own ground really draw there. The text colour is the
+ * computed one, blended by its alpha and opacity over that ground. Strict: the ground is the 90th percentile pixel on
+ * the side nearer the text (the lightest tenth behind light words, the darkest tenth behind dark ones).
+ */
+const CONTRAST_ROOTS = ['.vs-fit .face', '.vs-slip .chip', '.vs-save', '.vs-done', '.vs-name', '.vs-card']
+async function contrast(page) {
+  const runs = await page.evaluate((roots) => {
+    const out = []
+    let n = 0
+    for (const root of document.querySelectorAll(roots.join(','))) {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+        const e = t.parentElement
+        if (!t.textContent.trim() || !e) continue
+        const cs = getComputedStyle(e)
+        if (cs.visibility === 'hidden' || !e.getClientRects().length) continue
+        let opacity = 1
+        for (let a = e; a; a = a.parentElement) opacity *= Number(getComputedStyle(a).opacity)
+        if (opacity < 0.3) continue
+        const range = document.createRange()
+        range.selectNodeContents(t)
+        let r = range.getBoundingClientRect()
+        // Only where it shows (a scrolling list, a line cut off with an ellipsis), and on the screen.
+        for (let a = e; a; a = a.parentElement) {
+          if (!/(auto|scroll|hidden)/.test(getComputedStyle(a).overflowY)) continue
+          const c = a.getBoundingClientRect()
+          const l = Math.max(r.left, c.left), tp = Math.max(r.top, c.top)
+          r = new DOMRect(l, tp, Math.min(r.right, c.right) - l, Math.min(r.bottom, c.bottom) - tp)
+        }
+        const l = Math.max(0, r.left), tp = Math.max(0, r.top)
+        r = new DOMRect(l, tp, Math.min(innerWidth, r.right) - l, Math.min(innerHeight, r.bottom) - tp)
+        if (r.width < 4 || r.height < 4) continue
+        // The swatches' last row fades out on purpose (more below, to scroll to): read when scrolled, not measured faded.
+        const more = e.closest('.hang.more')
+        if (more && r.bottom > more.getBoundingClientRect().bottom - 34) continue
+        const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?/.exec(cs.color)
+        e.dataset.contrast = String(n)
+        out.push({ text: t.textContent.trim().slice(0, 24), r: { x: r.left, y: r.top, w: r.width, h: r.height }, rgb: [+m[1], +m[2], +m[3]], alpha: (m[4] === undefined ? 1 : +m[4]) * opacity, px: parseFloat(cs.fontSize) })
+        n++
+      }
+    }
+    const style = document.createElement('style')
+    style.id = 'contrast-probe'
+    style.textContent = '[data-contrast], [data-contrast] * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; text-decoration-color: transparent !important; }'
+    document.head.append(style)
+    return out
+  }, CONTRAST_ROOTS)
+  await page.waitForTimeout(60)
+  const png = (await page.screenshot({ type: 'png' })).toString('base64')
+  return page.evaluate(async ([png, runs]) => {
+    document.getElementById('contrast-probe')?.remove()
+    for (const e of document.querySelectorAll('[data-contrast]')) delete e.dataset.contrast
+    const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob())
+    const c = new OffscreenCanvas(img.width, img.height)
+    const g = c.getContext('2d')
+    g.drawImage(img, 0, 0)
+    const k = img.width / innerWidth
+    const lin = (v) => (v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    const lum = (rgb) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2])
+    const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    return runs.map((run) => {
+      const x0 = Math.round(run.r.x * k), y0 = Math.round(run.r.y * k), w = Math.max(1, Math.round(run.r.w * k)), h = Math.max(1, Math.round(run.r.h * k))
+      const d = g.getImageData(x0, y0, w, h).data
+      const px = []
+      for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]])
+      px.sort((a, b) => lum(a) - lum(b))
+      const mid = px[px.length >> 1]
+      // The text over the ground's middle, by its alpha; then the ground pixel nearest it in light, strictly.
+      const text = run.rgb.map((v, i) => v * run.alpha + mid[i] * (1 - run.alpha))
+      const light = lum(text) > lum(mid)
+      const ground = px[Math.min(px.length - 1, Math.floor(px.length * (light ? 0.9 : 0.1)))]
+      const textAt = run.rgb.map((v, i) => v * run.alpha + ground[i] * (1 - run.alpha))
+      return { text: run.text, px: run.px, ratio: +ratio(lum(textAt), lum(ground)).toFixed(2), ground: `rgb(${ground.join(',')})` }
+    })
+  }, [png, runs])
+}
+const contrastAt = async (page, tag, name) => {
+  const runs = await contrast(page)
+  const low = runs.filter((r) => r.ratio < 4.5)
+  const worst = runs.reduce((a, b) => (b.ratio < a.ratio ? b : a), runs[0] ?? { ratio: 0 })
+  check(`${tag}: every label at ${name} is 4.5:1 or more against what is drawn behind it (${runs.length} runs, lowest ${worst?.ratio} "${worst?.text}")`, runs.length > 0 && low.length === 0, { low, runs: runs.length })
+  if (process.env.CONTRAST_LOG) console.log(name, JSON.stringify(runs.map((r) => `${r.text} ${r.ratio}`)))
+}
 let shotDir = shots
 const shot = async (page, name) => {
   const l = await layout(page)
@@ -158,6 +244,7 @@ async function regroup(s) {
     await settle(page)
     await shot(page, '1-empty')
     if (cheval) {
+      await contrastAt(page, tag, '1-empty')
       check(`${tag}: before there is a villager the controls are put away: nothing to tab to`, await page.evaluate(() => [...document.querySelectorAll('.vs-fit [tabindex="0"]')].every((e) => getComputedStyle(e).visibility === 'hidden')))
       check(`${tag}: no word on the swatches or the slip is under 14 px`, (await small(page, '.vs-fit, .vs-slip')).length === 0, await small(page, '.vs-fit, .vs-slip'))
       // Every pattern has one swatch, the built-in ones first, no two alike, and each can be brought into view and picked.
@@ -185,6 +272,7 @@ async function regroup(s) {
     const glass = s === 'b' || cheval
     await page.click(glass ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
     await page.waitForTimeout(700)
+    if (cheval) await contrastAt(page, tag, '1b-picked')
     check(`${tag}: picking a pattern shows it on the slip`, (await st(page)).rack.picked === 'coach' && (await page.textContent('.vs-slip .chip')).includes('Calm coach'))
     await shot(page, '1b-picked')
     await page.focus('.vs-slip:not(.vs-say) .line')
@@ -213,12 +301,24 @@ async function regroup(s) {
       }
       await page.waitForTimeout(900)
       await shot(page, '3-tuning')
+      if (cheval) await contrastAt(page, tag, '3-tuning')
       for (const key of ['warmth', 'playful', 'chatty']) {
         const r = await page.evaluate((key) => window.villagerSetup.control(key), key)
         await page.mouse.click(r.x - r.w / 2 + 2, r.y)
       }
-      await page.click(`${box} .step:last-of-type`)
-      check(`${tag}: crude on the jokes switch is refused with the household's admin note`, /household's admin/.test((await st(page)).note ?? ''), (await st(page)).note)
+      if (cheval) {
+        // Jo has no admin setting: the switch is clean and cheeky, with no crude and no padlock; the arrows stop at cheeky.
+        const shown = await page.evaluate(() => [...document.querySelectorAll('.vs-fit .step')].filter((b) => b.getClientRects().length).map((b) => b.textContent))
+        await page.click(`${box} .step:nth-of-type(2)`)
+        await page.keyboard.press('ArrowRight')
+        await page.keyboard.press('End')
+        await page.waitForTimeout(150)
+        const j = await st(page)
+        check(`${tag}: the jokes switch is clean and cheeky only, no crude, no padlock; the arrows stop at cheeky`, JSON.stringify(shown) === '["clean","cheeky"]' && j.values.humour === 0.5 && !/household's admin/.test(j.note ?? '') && !(await page.evaluate(() => document.querySelector('.vs-fit .jokes').textContent.includes('🔒'))), { shown, humour: j.values.humour, note: j.note })
+      } else {
+        await page.click(`${box} .step:last-of-type`)
+        check(`${tag}: crude on the jokes switch is refused with the household's admin note`, /household's admin/.test((await st(page)).note ?? ''), (await st(page)).note)
+      }
     } else {
       await page.waitForTimeout(400)
       await shot(page, '3-tuning')
@@ -260,10 +360,10 @@ async function regroup(s) {
             }
             return { what: `${e.dataset.key}${e.textContent ? ` ${e.textContent.trim()}` : ''}`, w: reach(-1, 0) + reach(1, 0) + 1, h: reach(0, -1) + reach(0, 1) + 1 }
           }
-          return [...document.querySelectorAll('.vs-fit .marker, .vs-fit .knob, .vs-fit .ribbon, .vs-fit .dot, .vs-fit .step:not(.locked)')].map(probe)
+          return [...document.querySelectorAll('.vs-fit .marker, .vs-fit .knob, .vs-fit .ribbon, .vs-fit .dot, .vs-fit .step:not([hidden])')].map(probe)
         })
-        const short = targets.filter((t) => t.w < 44 || t.h < (t.what.startsWith('hue') ? 30 : 44))
-        check(`${tag}: every control on the phone is a finger-sized target (44 px; the seven colour dots 44 across but only 30 apart)`, short.length === 0, { short, targets })
+        const short = targets.filter((t) => t.w < 44 || t.h < 44)
+        check(`${tag}: every control on the phone is a finger-sized target, 44 px or more each way (the seven colour dots too)`, short.length === 0, { short, targets })
       }
       // Keyboard: Tab walks the nine values in order (the colours and the jokes are one stop each), then the save and send-off tags.
       await page.focus('.vs-fit .marker')
@@ -319,6 +419,21 @@ async function regroup(s) {
       check(`${tag}: unloading the mirror returns objects, hooks and DOM to baseline; geometries and textures do not grow`, counts.every((c) => c.setup === 0 && c.layers === 0 && c.objects === counts[0].objects && c.hooks === counts[0].hooks && c.dom === counts[0].dom) && counts.slice(1).every((c) => c.geometries === counts[1].geometries && c.textures === counts[1].textures) && counts[1].geometries - counts[0].geometries <= 2 && counts[1].textures - counts[0].textures <= 2, counts)
     }
     check(`${tag}: no page errors`, errors.length === 0, errors)
+    await context.close()
+  }
+  if (cheval) {
+    // Lee's household admin set crude: the switch shows it as the third position, chosen, with a short note why.
+    const { context, page, errors } = await open(`&from=${FROM}&person=lee`, { setup: s })
+    await page.evaluate(() => window.villagerSetup.patterns())
+    await page.evaluate(() => window.villagerSetup.start(''))
+    await until(page, ['tuning'])
+    await page.waitForTimeout(900)
+    const j = await page.evaluate(() => ({
+      shown: [...document.querySelectorAll('.vs-fit .step')].filter((b) => b.getClientRects().length).map((b) => `${b.textContent}${b.getAttribute('aria-checked') === 'true' ? '*' : ''}`),
+      note: window.villagerSetup.state().note, humour: window.villagerSetup.state().values.humour,
+    }))
+    check(`${tag}: for Lee (the admin set crude) the switch shows crude as the third position, chosen, with the admin's note`, JSON.stringify(j.shown) === '["clean","cheeky","crude*"]' && j.humour === 1 && /Crude jokes are on.*household's admin/.test(j.note ?? ''), j)
+    check(`${tag} (Lee): no page errors`, errors.length === 0, errors)
     await context.close()
   }
   {
@@ -612,6 +727,10 @@ try {
     await write(page, 'a wry badger who fixes the bikes')
     await page.keyboard.press('Enter')
     await until(page, ['tuning', 'failed'])
+    // The words ask for a maker; the stub's module says it is a cook. The page asks the host for the role, the host
+    // returns it, and the felt kit sews the maker's mark, not the cook's.
+    const roled = await st(page)
+    check('role: the words pick a role ("fixes the bikes": maker), the host returns it and the felt kit sews that role\'s mark', roled.state === 'tuning' && roled.role === 'maker' && roled.mark === 'maker', { state: roled.state, role: roled.role, mark: roled.mark, failure: roled.failure })
     await page.evaluate(() => window.villagerSetup.set('warmth', 0.2))
     await page.evaluate(() => window.villagerSetup.set('humour', 1))
     check('humour: an adult without an admin setting cannot pick crude (the dial stays at cheeky)', (await st(page)).values.humour === 0.5)

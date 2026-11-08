@@ -4,7 +4,7 @@
 // data; it never decides humour. This file only writes the scene's own lines. The felt is an art
 // style, not a mental age.
 import { personaShape } from './build'
-import type { Persona } from './spec'
+import { ENUMS, type Persona, type Role } from './spec'
 
 export type { Persona }
 
@@ -57,4 +57,31 @@ export function personaNotes(p: Persona, pattern: string | null): string[] {
   if (pattern) out.push(`pattern: ${pattern}`)
   for (const q of p.quirks.slice(0, pattern ? 1 : 2)) out.push(q)
   return out
+}
+
+/**
+ * The role the person's words ask for, one of the home's roles (spec.ts ENUMS.role), or undefined so the model's
+ * about() decides. Only role nouns and unambiguous chores count ("makes the best tea" is not a maker), because a role
+ * sent decides the mark for good. The first role named in the description wins; a built-in pattern's role is used only
+ * when the words name none. The host checks it against the same list; the felt kit sews that role's mark.
+ */
+const ROLE_WORDS: [Role, RegExp][] = [
+  ['cook', /\b(cook|cooks|cooking|chef|baker|bakes?|baking|bread|recipes?)\b/i],
+  ['gardener', /\b(garden\w*|plants?|seeds?|seedlings?|compost)\b/i],
+  ['tidier', /\b(tidy|tidies|tidier|tidying|laundry|dust\w*|sweeps?|declutter\w*)\b/i],
+  ['keeper', /\b(keeper|calendar|diary|schedules?|appointments?|organi[sz]er|bills|budget)\b/i],
+  ['tutor', /\b(tutor\w*|teach\w*|homework|lessons?)\b/i],
+  ['messenger', /\b(messenger|messages?|letters?|reminders?|errands?)\b/i],
+  ['maker', /\b(maker|builds?|builder|fix|fixes|fixing|mends?|repairs?|crafts?|knits?|sews?|woodwork)\b/i],
+  ['carer', /\b(carer|nurse|nursing|looks? after|wellbeing)\b/i],
+]
+const PATTERN_ROLE: Record<string, Role> = { organiser: 'keeper', coach: 'tutor', grandparent: 'carer', craftsperson: 'maker' }
+export function roleFor(description: string, pattern?: string | null): Role | undefined {
+  let best: { role: Role; at: number } | null = null
+  for (const [role, words] of ROLE_WORDS) {
+    const at = description.search(words)
+    if (at >= 0 && (!best || at < best.at)) best = { role, at }
+  }
+  const role = best?.role ?? (pattern ? PATTERN_ROLE[pattern] : undefined)
+  return role && ENUMS.role.includes(role) ? role : undefined
 }

@@ -26,10 +26,14 @@ const AT = new THREE.Vector3(-0.8, TOP, 0.04)
 function dims(narrow: boolean) {
   /** The fitting stool: its top, the drawer's front, the legs (where the ribbons are tied) and the foot rail. */
   const S = narrow
-    ? { w: 0.62, d: 0.26, z: 0.15, top: 0.64, board: 0.015, drawer: [0.388, 0.622], legs: [0.09, 0.378], foot: [0.006, 0.084], leg: 0.03 }
+    ? { w: 0.62, d: 0.26, z: 0.15, top: 0.57, board: 0.015, drawer: [0.352, 0.552], legs: [0.084, 0.346], foot: [0.006, 0.08], leg: 0.03 }
     : { w: 0.62, d: 0.26, z: 0.15, top: 0.32, board: 0.015, drawer: [0.172, 0.302], legs: [0.05, 0.168], foot: [0.004, 0.046], leg: 0.03 }
   const lift = S.top - 0.32
-  const F = { w: 0.64, bottom: 0.29 + lift, top: 0.91 + lift, rail: 0.06, topRail: 0.055, bottomRail: 0.04, pivot: 0.6 + lift, tilt: 0.04, z: -0.02 }
+  // A phone's mirror is taller too (the room above it was empty wall): its right rail holds the seven colour dots 44 px
+  // apart, and the glass holds the pattern swatches with the frame's outline still in view.
+  const taller = narrow ? 0.1 : 0
+  const bottom = 0.29 + lift, top = 0.91 + lift + taller
+  const F = { w: 0.64, bottom, top, rail: 0.06, topRail: 0.055, bottomRail: 0.04, pivot: (bottom + top) / 2, tilt: 0.04, z: -0.02 }
   /** The glass, in the frame's space (its middle at the pivot). */
   const GLASS = { left: -F.w / 2 + F.rail, right: F.w / 2 - F.rail, bottom: F.bottom + F.bottomRail, top: F.top - F.topRail }
   return { S, F, GLASS, POST: F.w / 2 + 0.02, FRONT: S.z + S.d / 2, GW: GLASS.right - GLASS.left, GH: GLASS.top - GLASS.bottom, narrow }
@@ -56,10 +60,12 @@ function furniture(D: Dims) {
   }
   // The stand: two posts on splayed feet, brass finials, a stretcher low between them.
   for (const s of [-1, 1]) {
-    box(0.028, 0.93, 0.028, wood, s * POST, 0.465, F.z)
+    // The posts stand as tall as the frame (a phone's dressing-table mirror rides higher on longer posts).
+    const postH = Math.max(0.93, F.top + 0.02)
+    box(0.028, postH, 0.028, wood, s * POST, postH / 2, F.z)
     box(0.042, 0.022, 0.26, dark, s * POST, 0.011, F.z - 0.02)
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.021, 16, 12), brass)
-    ball.position.set(s * POST, 0.95, F.z)
+    ball.position.set(s * POST, postH + 0.02, F.z)
     g.add(ball)
     // The pivot's brass boss, where the frame swings.
     const boss = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.024, 16), brass)
@@ -188,6 +194,10 @@ export function fitting(scene: Scene): Strategy {
   const { tape, marker } = kit.tape(leftRail, ['short', 'tall'])
   const { dots } = kit.colours(rightRail)
   const knobs = kit.dials(drawer)
+  // Before there is a villager the drawer's brass card holder names the pattern it will be cut from.
+  const holder = el('div', 'holder', drawer)
+  holder.setAttribute('aria-hidden', 'true')
+  let holderText = ''
   const ribbons = kit.ribbons(legs)
   const jokes = el('div', 'jokes', foot)
   el('b', 'jokes-name', jokes).textContent = 'jokes'
@@ -217,7 +227,8 @@ export function fitting(scene: Scene): Strategy {
   const FACES = {
     top: () => rectOf(quad(-D.F.w / 2, D.F.w / 2, fy(D.GLASS.top), fy(D.F.top), 0.016), stage.camera, room.frame),
     left: () => rectOf(quad(-D.F.w / 2, D.GLASS.left, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.016), stage.camera, room.frame),
-    right: () => rectOf(quad(D.GLASS.right, D.F.w / 2, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.016), stage.camera, room.frame),
+    // A phone's colour dots run on down over the bottom rail, so seven fit 44 px apart.
+    right: () => rectOf(quad(D.GLASS.right, D.F.w / 2, fy(D.narrow ? D.F.bottom + 0.006 : D.GLASS.bottom), fy(D.GLASS.top), 0.016), stage.camera, room.frame),
     glass: () => rectOf(quad(D.GLASS.left, D.GLASS.right, fy(D.GLASS.bottom), fy(D.GLASS.top), 0.001), stage.camera, room.frame),
     drawer: () => rectOf(quad(-D.S.w / 2, D.S.w / 2, D.S.drawer[0] + 0.01, D.S.drawer[1], D.FRONT), stage.camera),
     legs: () => rectOf(quad(-(D.S.w / 2 - D.S.leg), D.S.w / 2 - D.S.leg, D.S.legs[0], D.S.legs[1], D.FRONT), stage.camera),
@@ -262,7 +273,21 @@ export function fitting(scene: Scene): Strategy {
     for (const xx of [-x, x]) for (const y of [y0, y1]) for (const z of [z0, z1]) out.push([xx, y, z])
     return out
   }
-  const bounds = (d: Dims) => box(d.POST + 0.022, 0, d.F.top + 0.062, d.F.z - 0.02, d.FRONT)
+  const bounds = (d: Dims) => box(d.POST + 0.022, 0, Math.max(0.93, d.F.top + 0.02) + 0.042, d.F.z - 0.02, d.FRONT)
+  /**
+   * The furniture's real silhouette (finials, the frame's top corners, the stool's front and the posts' feet), tighter
+   * than its bounding box, whose phantom front-top and front-bottom corners leave a phone's screen part empty.
+   */
+  const outline = (d: Dims): [number, number, number][] => {
+    const top = Math.max(0.93, d.F.top + 0.02) + 0.042, half = d.S.w / 2
+    return [
+      ...[-1, 1].flatMap((s): [number, number, number][] => [
+        [s * (d.POST + 0.022), top, d.F.z], [s * (d.POST + 0.022), 0, d.F.z + 0.11], [s * (d.POST + 0.022), 0, d.F.z - 0.15],
+        tipped(s * d.F.w / 2, d.F.top - d.F.pivot, 0.016, d.F.tilt),
+        [s * (half + 0.01), d.S.top, d.FRONT + 0.01], [s * half, 0, d.FRONT],
+      ]),
+    ]
+  }
   /** The frame's point (frame space y, z) in the furniture's space, tipped forward by `tilt`. */
   const tipped = (x: number, y: number, z: number, tilt: number): [number, number, number] =>
     [x, D.F.pivot + y * Math.cos(tilt) - z * Math.sin(tilt), D.F.z + y * Math.sin(tilt) + z * Math.cos(tilt)]
@@ -308,14 +333,16 @@ export function fitting(scene: Scene): Strategy {
     fresh()
     const s = scene.state()
     if (narrow() && (s === 'empty' || s === 'failed')) {
-      // A phone before there is a villager: close on the glass, the swatches big in it, the slip below.
-      const g = D.GLASS, t = D.F.tilt
-      const pts = [tipped(g.left, fy(g.top), 0, t), tipped(g.right, fy(g.top), 0, t), tipped(g.left, fy(g.bottom), 0, t), tipped(g.right, fy(g.bottom), 0, t)]
-      return frameIt(pts, { top: 40, bottom: innerHeight - scene.slip.offsetHeight - 36, left: 10, right: innerWidth - 10, fov: 46, slope: 0.1, lookY: D.F.pivot })
+      // A phone before there is a villager: the whole mirror, its frame's outline and a little kitchen either side, the
+      // swatches in its glass; below it the stool's top and its drawer with the pattern's label, then the slip.
+      const t = D.F.tilt, half = D.F.w / 2
+      const pts = [tipped(-half, fy(D.F.top), 0, t), tipped(half, fy(D.F.top), 0, t), tipped(-half, fy(D.F.bottom), 0, t), tipped(half, fy(D.F.bottom), 0, t),
+        [-half, D.S.drawer[0], D.FRONT] as [number, number, number], [half, D.S.drawer[0], D.FRONT] as [number, number, number]]
+      return frameIt(pts, { top: 30, bottom: innerHeight - scene.slip.offsetHeight - 22, left: 18, right: innerWidth - 18, fov: 46, slope: 0.1, lookY: D.F.pivot })
     }
     return narrow()
       // A phone: close, the furniture the width of the screen; room above for the name, below for the two tags.
-      ? frameIt(bounds(D), { top: 96, bottom: innerHeight - 84, left: 4, right: innerWidth - 4, fov: 46, slope: 0.1, lookY: 0.6 })
+      ? frameIt(outline(D), { top: 78, bottom: innerHeight - 84, left: 4, right: innerWidth - 4, fov: 46, slope: 0.1, lookY: 0.6 })
       // Wide or a tablet: the furniture the height of the screen, the kitchen a border round it.
       : frameIt(bounds(D), { top: 22, bottom: innerHeight - 14, left: 0, right: innerWidth, fov: 34, slope: 0.1, lookY: 0.5 })
   }
@@ -399,6 +426,8 @@ export function fitting(scene: Scene): Strategy {
       clearTimeout(revealTimer)
       revealTimer = window.setTimeout(() => root.classList.remove('reveal'), 2600)
       marker.focus({ preventScroll: true })
+      // Jokes the host pins (crude, set by the household's admin): a short note says so as the controls come out.
+      scene.explainHumour()
     },
     leaving() {
       root.classList.remove('reveal')
@@ -465,6 +494,13 @@ export function fitting(scene: Scene): Strategy {
         return
       }
       drawSwatches()
+      const pattern = patterns.picked ? `${patterns.picked.template.name} pattern` : 'made to measure'
+      if (pattern !== holderText) holder.textContent = holderText = pattern
+      // Where the slip covers the drawer (a tablet, with a pattern's chip on it) the label is tucked away, not half hidden.
+      if (!tuningNow()) {
+        const dr = FACES.drawer()
+        holder.classList.toggle('tucked', scene.slip.getBoundingClientRect().top - dr.top < (dr.bottom - dr.top) * 0.12 + holder.offsetHeight + 10)
+      }
       lay(topRail, FACES.top())
       lay(leftRail, FACES.left())
       lay(rightRail, FACES.right())
@@ -528,7 +564,7 @@ export function fitting(scene: Scene): Strategy {
       /** Each face's content against its face (page px): content that spills out of its face is a layout defect. */
       spill: () => [topRail, leftRail, rightRail, drawer, legs, foot].flatMap((f) => {
         const r = f.getBoundingClientRect()
-        return [...f.querySelectorAll<HTMLElement>(':scope > *, .dial, .ribbon-row, .step')].filter((c) => getComputedStyle(c).visibility !== 'hidden').map((c) => {
+        return [...f.querySelectorAll<HTMLElement>(':scope > *, .dial, .ribbon-row, .step')].filter((c) => getComputedStyle(c).visibility !== 'hidden' && c.getClientRects().length).map((c) => {
           const b = c.getBoundingClientRect()
           const out = Math.max(r.left - b.left, b.right - r.right, r.top - b.top, b.bottom - r.bottom)
           return out > 2 ? `${f.classList[1]} ${c.className || c.tagName}: ${Math.round(out)} px` : ''
@@ -571,7 +607,8 @@ function css() {
   .vs-fit .tape { position: relative; width: min(26px, 76%); border-radius: 2px; cursor: ns-resize; touch-action: none;
     background: repeating-linear-gradient(0deg, #5a3f22 0 1.5px, transparent 1.5px 8px) right / 7px 100% no-repeat, repeating-linear-gradient(0deg, #5a3f22 0 2px, transparent 2px 32px) right / 11px 100% no-repeat, #e9c45a;
     box-shadow: 0 2px 5px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(90, 60, 30, 0.4); }
-  .vs-fit .tape .end { position: absolute; left: 1px; writing-mode: vertical-rl; rotate: 180deg; font: 700 14px/14px ${HAND}; color: #4a3220; pointer-events: none; }
+  .vs-fit .tape .end { position: absolute; left: 1px; writing-mode: vertical-rl; rotate: 180deg; font: 700 14px/14px ${HAND}; color: #2e1f12; pointer-events: none;
+    padding: 3px 1px; border-radius: 2px; background: #edca62; }
   .vs-fit .tape .end.top { top: 6px; } .vs-fit .tape .end.bottom { bottom: 6px; }
   .vs-fit .marker { position: absolute; z-index: 1; left: -9px; width: 46px; height: 20px; margin-top: -10px; border-radius: 3px 10px 10px 3px; background: linear-gradient(180deg, #e2bd6a, #b88a3a);
     box-shadow: 0 2px 5px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255, 240, 200, 0.6); transition: top 120ms ease; cursor: ns-resize; }
@@ -603,7 +640,7 @@ function css() {
   .vs-fit .legs { flex-direction: column; justify-content: space-evenly; padding: 2px 0; }
   .vs-fit .ribbon-row { display: grid; grid-template-columns: 58px 1fr 58px; align-items: center; gap: 6px; ${word} font-size: 14px; color: #fff3dc; text-shadow: 0 1px 2px rgba(30, 20, 10, 0.8); }
   .vs-fit .ribbon-row .end:first-child { text-align: right; }
-  .vs-fit .ribbon { position: relative; height: 14px; border-radius: 2px; cursor: pointer; touch-action: none; background: var(--ground);
+  .vs-fit .ribbon { --b: 20px; position: relative; height: 14px; border-radius: 2px; cursor: pointer; touch-action: none; background: var(--ground);
     background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0 2px, rgba(0,0,0,0.06) 2px 4px); box-shadow: 0 2px 3px rgba(0,0,0,0.35); }
   .vs-fit .ribbon::after { content: ''; position: absolute; inset: 3px 0; border-top: 1.2px dashed rgba(255, 248, 232, 0.6); border-bottom: 1.2px dashed rgba(255, 248, 232, 0.6); }
   .vs-fit .ribbon .button { position: absolute; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; background: #e9dcc0;
@@ -616,8 +653,6 @@ function css() {
   .vs-fit .jokes-name { ${word} margin-right: 3px; }
   .vs-fit .step { white-space: nowrap; padding: 3px 10px 4px; border: 0; border-radius: 4px 9px 9px 4px; cursor: pointer; background: rgba(255, 243, 220, 0.18); color: #fff3dc; font: 700 15px/1.05 ${HAND}; }
   .vs-fit .step.at { background: #fffaf0; color: #23395a; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
-  .vs-fit .step.locked { opacity: 0.6; text-decoration: line-through 1px; }
-  .vs-fit .step.locked::after { content: ' 🔒'; font-size: 11px; text-decoration: none; }
   .vs-fit .step:focus-visible { outline: 3px dashed #fffaf0; outline-offset: 2px; }
   /* Gesture cues: on hover, on focus and once as the controls come out, each shows how it moves. */
   .vs-fit .knob::after { content: '↻'; position: absolute; right: -15px; top: -12px; font: 700 16px/1 ${HAND}; color: #fff3dc; text-shadow: 0 1px 2px rgba(30, 20, 10, 0.8); opacity: 0; transition: opacity 160ms ease; }
@@ -630,7 +665,7 @@ function css() {
   .vs-fit.reveal .ribbon-row:nth-child(2) .button { animation-delay: 0.15s; } .vs-fit.reveal .ribbon-row:nth-child(3) .button { animation-delay: 0.3s; }
   .vs-fit.reveal .dot { animation: vs-fit-pop 0.5s ease-in-out 1; }
   .vs-fit.reveal .step.at { animation: vs-fit-pop 0.6s ease-in-out 0.7s 2; }
-  .vs-fit .step:not(.at):not(.locked):hover { background: rgba(255, 243, 220, 0.32); }
+  .vs-fit .step:not(.at):hover { background: rgba(255, 243, 220, 0.32); }
   ${Array.from({ length: 7 }, (_, i) => `.vs-fit.reveal .dot:nth-child(${i + 1}) { animation-delay: ${(i * 0.08).toFixed(2)}s; }`).join(' ')}
   @keyframes vs-fit-bob { 50% { translate: 0 -6px; } }
   @keyframes vs-fit-turn { 25% { rotate: -14deg; } 75% { rotate: 14deg; } }
@@ -638,21 +673,38 @@ function css() {
   @keyframes vs-fit-pop { 50% { scale: 1.25; } }
   /* The swatches tucked into the glass: felt samples with pinked edges. */
   .vs-fit .glass { padding: 12px; }
-  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden auto; width: 100%; padding: 4px 0 6px;
+  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden auto; width: 100%; box-sizing: border-box; padding: 8px 4px 10px;
     overscroll-behavior: contain; scrollbar-width: none; }
   .vs-fit .hang::-webkit-scrollbar { display: none; }
   /* More patterns than the glass holds: the last row fades out, so it reads as more below. */
   .vs-fit .hang.more { mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); }
-  .vs-fit .vs-swatch { position: relative; width: calc(50% - 6px); max-width: 150px; min-height: 64px; padding: 12px 6px 14px; border: 0; cursor: pointer; background: var(--felt, #7b9a6e); color: #fffaf0;
+  /* The card itself lifts, tilts and glows; its felt (pinked by a clip) is a layer inside it, so the glow isn't clipped. */
+  .vs-fit .vs-swatch { position: relative; width: calc(50% - 6px); max-width: 150px; padding: 0; border: 0; cursor: pointer; background: none; color: var(--ink, #fffaf0);
+    transform-origin: 50% 0; transition: rotate 200ms ease, translate 200ms ease, scale 200ms ease, transform 220ms ease, filter 220ms ease;
+    filter: drop-shadow(0 2px 2px rgba(40, 25, 10, 0.28)); }
+  .vs-fit .vs-swatch .felt { position: relative; display: block; box-sizing: border-box; min-height: 64px; padding: 12px 6px 14px; background: var(--felt, #55724a); text-align: center;
     clip-path: polygon(0 0, 100% 0, 100% 88%, 95% 100%, 90% 88%, 85% 100%, 80% 88%, 75% 100%, 70% 88%, 65% 100%, 60% 88%, 55% 100%, 50% 88%, 45% 100%, 40% 88%, 35% 100%, 30% 88%, 25% 100%, 20% 88%, 15% 100%, 10% 88%, 5% 100%, 0 88%);
-    text-align: center; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35); transform-origin: 50% 0; transition: rotate 200ms ease, translate 200ms ease; }
-  .vs-fit .vs-swatch::before { content: ''; position: absolute; left: 50%; top: 3px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: #e9dcc0; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+  }
+  /* A stitched outline round the chosen one's words. */
+  .vs-fit .vs-swatch .felt::after { content: ''; position: absolute; inset: 7px 6px 13px; border: 1.8px dashed currentColor; border-radius: 3px; opacity: 0; transition: opacity 200ms ease; }
+  .vs-fit .vs-swatch::before { content: ''; position: absolute; z-index: 1; left: 50%; top: 3px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: #e9dcc0; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   .vs-fit .vs-swatch b { display: block; font: 700 16px/1.1 ${HAND}; }
-  .vs-fit .vs-swatch small { display: block; margin-top: 3px; font: italic 14px/1.2 ${BOOK}; opacity: 0.92; }
+  .vs-fit .vs-swatch small { display: block; margin-top: 3px; font: italic 14px/1.2 ${BOOK}; }
+  /* The drawer's brass card holder, before there is a villager: the pattern it will be cut from. */
+  .vs-fit .holder { position: absolute; left: 50%; top: 12%; translate: -50% 0; max-width: 70%; padding: 4px 12px 5px; box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font: 700 16px/1.1 ${HAND}; color: #2e1f12; background: #f1e4c8; border-radius: 2px;
+    box-shadow: 0 0 0 2px #c9a24e, 0 0 0 3px #7a5a22, 0 2px 5px 3px rgba(20, 10, 4, 0.35); }
+  .vs-fit:not(.tuning) .drawer > .holder { visibility: visible; }
+  .vs-fit:not(.tuning) .drawer > .holder.tucked { visibility: hidden; }
+  .vs-fit.tuning .holder { display: none; }
   .vs-fit .vs-swatch:nth-child(odd) { rotate: -1.5deg; } .vs-fit .vs-swatch:nth-child(even) { rotate: 1.2deg; }
   .vs-fit .vs-swatch:hover { translate: 0 2px; }
-  .vs-fit .vs-swatch[aria-pressed=true] { translate: 0 5px; rotate: 0deg; filter: brightness(1.08); }
-  .vs-fit .vs-swatch[aria-pressed=true] b { text-decoration: underline 1.5px; text-underline-offset: 3px; }
+  /* The chosen one is lifted off the glass on its pin: it tips its foot toward you, glows warm and is stitched round. */
+  .vs-fit .vs-swatch[aria-pressed=true] { z-index: 1; translate: 0 -2px; rotate: 0deg; scale: 1.08; transform: perspective(360px) rotateX(18deg);
+    filter: drop-shadow(0 0 4px #fff6df) drop-shadow(0 0 14px rgba(255, 222, 150, 0.95)) drop-shadow(0 10px 8px rgba(40, 25, 10, 0.4)); }
+  /* The others settle back against the glass. */
+  .vs-fit .hang:has([aria-pressed=true]) .vs-swatch:not([aria-pressed=true]) { scale: 0.95; }
+  .vs-fit .vs-swatch[aria-pressed=true] .felt::after { opacity: 0.8; }
   .vs-fit .vs-swatch:focus-visible { outline: 3px dashed #fffaf0; outline-offset: 2px; }
   /* Finger-sized hit areas round the small felt parts (the parts stay their size; the pseudo-element takes the touch). */
   .vs-fit .dot::after { content: ''; position: absolute; inset: -9px -12px; }
@@ -679,7 +731,7 @@ function css() {
   /* A phone: the stool is a dressing table, so the controls have room to be finger-sized and the words bigger. */
   @media (max-aspect-ratio: 9/10) {
     .vs-fit .ribbon-row { grid-template-columns: 64px 1fr 64px; gap: 6px; font-size: 16px; }
-    .vs-fit .ribbon { height: 16px; }
+    .vs-fit .ribbon { height: 16px; --b: 26px; }
     .vs-fit .ribbon .button { width: 26px; height: 26px; margin: -13px 0 0 -13px; }
     .vs-fit .ribbon .button::after { line-height: 26px; }
     .vs-fit .step { padding: 0 12px; min-height: 38px; font-size: 17px; }
@@ -695,15 +747,17 @@ function css() {
     .vs-fit .legs { justify-content: stretch; padding: 0; }
     .vs-fit .legs .ribbon-row { flex: 1; }
     .vs-fit .ribbon::before { inset: -14px 0; }
-    .vs-fit .dot::after { inset: -2px -12px; }
+    .vs-fit .dot::after { inset: -8px -12px; }
     .vs-fit .marker { height: 26px; margin-top: -13px; width: 50px; }
     .vs-fit .marker::after { line-height: 26px; }
     .vs-fit .glass { padding: 8px; }
+    .vs-fit .right { padding: 2px 0; }
+    .vs-fit .colours { justify-content: space-between; }
     .vs-fit .hang { gap: 12px 10px; }
-    .vs-fit .vs-swatch { min-height: 66px; padding: 15px 6px 17px; }
+    .vs-fit .vs-swatch .felt { min-height: 60px; padding: 13px 5px 15px; }
     .vs-fit .vs-swatch b { font-size: 18px; }
     .vs-fit .vs-swatch small { font-size: 15px; }
   }
-  @media (prefers-reduced-motion: reduce) { .vs-fit, .vs-fit .marker, .vs-fit .vs-swatch, .vs-fit .dot { transition: none; } .vs-fit.reveal * { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .vs-fit, .vs-fit .marker, .vs-fit .vs-swatch, .vs-fit .vs-swatch .felt::after, .vs-fit .dot { transition: none; } .vs-fit.reveal * { animation: none !important; } }
   `
 }

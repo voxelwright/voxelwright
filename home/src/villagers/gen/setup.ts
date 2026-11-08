@@ -27,7 +27,8 @@ import { assemble } from './assemble'
 import { build, check } from './build'
 import { accentMeshes, hueTurn, pieces, Puppet, type Piece } from './setup-stitch'
 import { controls, HUE_SPAN, KEYS, TAG_CSS, type Key, type Layout } from './sliders'
-import { checked, dialsOf, fallbackPersona, personaNotes, tunedLine, type Persona } from './setup-persona'
+import { feltInk } from './setup-controls'
+import { checked, dialsOf, fallbackPersona, personaNotes, roleFor, tunedLine, type Persona } from './setup-persona'
 import { footFor, rack, refOf, type RackCard } from './setup-rack'
 import { HAND, MAT, TOP, workshop } from './workshop'
 import type { Meta } from './load'
@@ -331,9 +332,31 @@ export default {
     let watchHeading: number | null = null
     /** The walker's height on the floor, metres. */
     let watchSize = 0.4
+    /** The furniture a watching camera must see past (the chairs and the table), as boxes; found once. */
+    let blockers: THREE.Box3[] | null = null
+    const blocking = () => blockers ??= ['chairs', 'table'].flatMap((name) => {
+      const o = stage.scene.getObjectByName(name)
+      if (!o) return []
+      o.updateMatrixWorld(true)
+      return (name === 'chairs' ? o.children : [o]).map((c) => new THREE.Box3().setFromObject(c).expandByScalar(0.02))
+    })
+    /** The watching camera's last clear spot (its angle off the heading and its height), kept while it stays clear. */
+    let watchSpot: { a: number; h: number } | null = null
+    const ray = new THREE.Ray(), hit = new THREE.Vector3()
+    /** No chair or the table between the camera and the walker: its feet, middle and head, and both sides of its middle. */
+    const clear = (cam: THREE.Vector3, p: THREE.Vector3, size: number) => {
+      const side = new THREE.Vector3(cam.z - p.z, 0, p.x - cam.x).normalize().multiplyScalar(size * 0.45)
+      const points = [0.08, 0.5, 0.95].map((f) => new THREE.Vector3(p.x, size * f, p.z))
+      points.push(points[1].clone().add(side), points[1].clone().sub(side))
+      return blocking().every((b) => !b.containsPoint(cam) && points.every((to) => {
+        ray.origin.copy(cam)
+        ray.direction.copy(to).sub(cam).normalize()
+        return !ray.intersectBox(b, hit) || hit.distanceTo(cam) > to.distanceTo(cam)
+      }))
+    }
     const watchPose = (w: Villager) => {
       const narrow = layout === 'narrow'
-      lens(narrow ? 58 : seatFov)
+      lens(narrow ? 50 : seatFov)
       // Ahead of it and to one side, at about its own height, so its face and front show as it walks, not its back.
       // The side is whichever keeps the camera inside the kitchen.
       const p = w.pos
@@ -345,12 +368,28 @@ export default {
       const reach = Math.max(1.7, size * (narrow ? 5.2 : 4.4))
       const at = (a: number) => new THREE.Vector3(p.x + Math.sin(watchHeading! + a) * reach, 0, p.z + Math.cos(watchHeading! + a) * reach)
       const inside = (v: THREE.Vector3) => Math.abs(v.x) <= 2.2 && v.z >= -1.3 && v.z <= 2.6
-      const angles = [0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.65, -1.65]
-      const cam = angles.map(at).find(inside) ?? at(1.65)
+      // Of those, one with nothing between it and the walker: the most frontal at its own height, else rising over the
+      // chairs (looking down also keeps the dim ceiling out of the frame). The last clear spot is kept while it stays clear,
+      // so the view doesn't hop between equals.
+      const low = Math.max(1.3, size * 3)
+      const spot = (s: { a: number; h: number }) => {
+        const c = at(s.a)
+        c.y = s.h
+        return c
+      }
+      const fits = (s: { a: number; h: number }) => {
+        const c = spot(s)
+        return inside(c) && clear(c, p, size)
+      }
+      if (!watchSpot || !fits(watchSpot)) {
+        const angles = [0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.65, -1.65]
+        const spots = [low, low + 0.35, low + 0.7].flatMap((h) => angles.map((a) => ({ a, h })))
+        watchSpot = spots.find(fits) ?? spots.find((s) => inside(spot(s))) ?? { a: 1.65, h: low + 0.7 }
+      }
+      const cam = spot(watchSpot)
       cam.x = THREE.MathUtils.clamp(cam.x, -2.2, 2.2)
       cam.z = THREE.MathUtils.clamp(cam.z, -1.3, 2.6)
-      cam.y = Math.max(0.75, size * 2.4)
-      const look = new THREE.Vector3(p.x, size * 0.45, p.z)
+      const look = new THREE.Vector3(p.x, size * 0.35, p.z)
       return { position: cam, look }
     }
     const leaveTable = (rate?: number) => {
@@ -513,7 +552,8 @@ export default {
     }
 
     /** Module text (or spec JSON) to a Figure, entirely through the sandbox and the trusted assembler. */
-    const figureFrom = async (arm: 'code' | 'spec', text: string, accent: string) => {
+    /** `role`: the one the host returned for this villager (asked for by the page); it decides the felt kit's mark. */
+    const figureFrom = async (arm: 'code' | 'spec', text: string, accent: string, role?: string) => {
       const seed = 31 + kept.length * 17
       if (arm === 'spec') {
         const raw = JSON.parse(text)
@@ -528,7 +568,9 @@ export default {
       const checked = validate(result.data)
       if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
       // Saved round-1 results predate assemble's look checks, so a replay skips them; live results must pass.
-      const a = assemble(checked.prop, result.data, phys, accent, seed, !FROM)
+      const a = assemble(checked.prop, result.data, phys, accent, seed, !FROM, undefined, undefined, undefined, role)
+      // The kit notes the role whose mark it sewed ("kit: keeper's mark, …"), for the checks.
+      lastMark = a.fixes.map((f) => /^kit: (\w+)'s mark/.exec(f)?.[1]).find(Boolean) ?? null
       return { fig: a.fig, name: a.about.name, role: a.about.role as string, bark: a.about.bark, voice: a.about.voice as VoiceProfile | null, persona: field(field(field(result.data, 'villager'), 'about'), 'persona') }
     }
 
@@ -564,29 +606,33 @@ export default {
       try {
         let arm: 'code' | 'spec' = 'code', text = '', source: Made['source'] = {}, hostPersona: unknown = null, hostRefusal = ''
         let hostDials: Record<string, number> | null = null
+        let role: string | undefined
         if (FROM) {
           const saved = await fetchSaved(FROM)
           arm = saved.meta.arm
           text = saved.text
           source = { from: FROM }
         } else {
-          const answer = await makeVillager(PERSON, description, ACCENT, template ? refOf(patterns.picked!, PERSON) : undefined)
+          // The role the person's words (or the picked pattern) ask for; none, and the model's about() decides.
+          const answer = await makeVillager(PERSON, description, ACCENT, template ? refOf(patterns.picked!, PERSON) : undefined, roleFor(description, template?.id))
           timings.modelMs = answer.ms
           if (!answer.ok) {
             fail = answer.why === 'away' ? 'away' : answer.why === 'busy' ? 'busy' : 'model'
             throw new Error(answer.why)
           }
           text = answer.module
+          role = answer.role
           hostPersona = answer.persona
           hostRefusal = answer.personaRefused ?? ''
           hostDials = answer.dials
           source = { item: answer.item }
           timings.costUsd = answer.costUsd ?? NaN
         }
+        lastRole = role ?? null
         let got: Awaited<ReturnType<typeof figureFrom>> | null = null
         let moduleRefusal = ''
         try {
-          got = await figureFrom(arm, text, ACCENT)
+          got = await figureFrom(arm, text, ACCENT, role)
         } catch (error) {
           if (FROM || !source.item) throw error
           moduleRefusal = String(error instanceof Error ? error.message : error)
@@ -604,11 +650,12 @@ export default {
             throw new Error(`remake: ${again.why} (first: ${reason})`)
           }
           text = again.module
+          role = again.role ?? role
           if (again.personaRefused) throw new Error(`remake: ${again.personaRefused} (first: ${reason})`)
           hostPersona = again.persona
           hostDials = again.dials
           timings.costUsd = (timings.costUsd || 0) + (again.costUsd ?? NaN)
-          got = await figureFrom(arm, text, ACCENT)
+          got = await figureFrom(arm, text, ACCENT, role)
           timings.repaired = 1
         }
         if (!got) throw new Error(moduleRefusal)
@@ -659,6 +706,8 @@ export default {
     let sentOff: string | null = null
     /** The home's checks' reason for refusing the first live module, sent with the one repair request. */
     let lastRefusal = ''
+    let lastRole: string | null = null
+    let lastMark: string | null = null
 
     // ── Stitching, part by part, with a needle pass for each ───────────────
     const stitch = async (made_: Figure, name: string, bark: string, rawVoice: VoiceProfile) => {
@@ -728,7 +777,11 @@ export default {
         from.textContent = `${made!.template} pattern`
         // A strip of the pattern card's own felt, so it matches the card standing at the rack's end.
         const used = patterns.picked
-        if (used) from.style.setProperty('--felt', patterns.feltOf(used))
+        if (used) {
+          const f = feltInk(patterns.feltOf(used))
+          from.style.setProperty('--felt', f.felt)
+          from.style.setProperty('--ink', f.ink)
+        }
         nametag.append(from)
       }
       nametag.classList.add('shown')
@@ -846,6 +899,7 @@ export default {
       group.add(...blobs)
       // Watch it go: the camera follows it across the kitchen to its first chore, then comes back to the table.
       watchHeading = null
+      watchSpot = null
       watchSize = body ? (body.max.y - body.min.y) * fig.root.scale.x : 0.4
       watching = { walker, until: performance.now() + 11000 }
       puppet = null
@@ -909,7 +963,9 @@ export default {
         back.textContent = '✕'
         back.setAttribute('aria-hidden', 'true')
         chip.append(name, about, back)
-        chip.style.setProperty('--felt', patterns.feltOf(card))
+        const f = feltInk(patterns.feltOf(card))
+        chip.style.setProperty('--felt', f.felt)
+        chip.style.setProperty('--ink', f.ink)
       }
       // How the two combine: the words say who they are, the pattern how they talk.
       line.placeholder = card ? 'Who are they? e.g. a hedgehog who bakes bread' : 'e.g. a sleepy hedgehog who bakes bread before dawn'
@@ -972,6 +1028,10 @@ export default {
         return c ? `#${c.getHexString()}` : null
       },
       cards: () => shownCards,
+      humour: () => HUMOUR_DIAL,
+      explainHumour: () => {
+        if (HUMOUR_DIAL.locked !== null) note(lockedNote())
+      },
       watching: () => watching !== null,
       mount: (e) => saveTag.before(e),
     })
@@ -1171,6 +1231,9 @@ export default {
           status: status.textContent,
           failure: lastFailure,
           refusal: lastRefusal,
+          /** The role the host returned for the last make, and the role whose mark the felt kit sewed. */
+          role: lastRole,
+          mark: lastMark,
           timings: { ...timings },
           kept: kept.map((k) => ({ ...k, module: `${k.module.length} chars` })),
         }),
@@ -1180,6 +1243,19 @@ export default {
         camera: () => stage.camera.position.toArray(),
         /** The villager's projected bounds on the page, for the layout gate; null when there is none. */
         bounds: () => villagerRect(),
+        /** Each visible part of the villager on the page (a held prop or a role mark reaching out is its own box), for the layout gate. */
+        parts: () => {
+          if (!fig) return []
+          fig.root.updateMatrixWorld(true)
+          const out: { left: number; top: number; right: number; bottom: number }[] = []
+          fig.root.traverseVisible((o) => {
+            const m = o as THREE.Mesh
+            if (!m.isMesh) return
+            m.geometry.computeBoundingBox()
+            out.push(rectOf(m.geometry.boundingBox!, m.matrixWorld, stage.camera))
+          })
+          return out
+        },
         /** The tools' projected bounds while they are on the table, for the layout gate. */
         toolBounds: () => (tools.group.visible ? tools.rects() : []),
         page: () => ({ slip: slip.classList.contains('shown'), slipText: line.value, slipReadOnly: line.readOnly, card: card.classList.contains('shown') ? card.textContent : null, nametag: nametag.classList.contains('shown') ? nametag.textContent : null, done: done.classList.contains('shown'), focus: (document.activeElement as HTMLElement | null)?.dataset?.key ?? document.activeElement?.className ?? null, aside: aside.map((o) => o.visible) }),
@@ -1259,8 +1335,8 @@ function css() {
   /* The picked pattern: its felt card, stitched across the top of the slip. */
   .vs-slip .chip { position: relative; display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; column-gap: 10px; margin: 0 -4px 2px; box-sizing: border-box;
     padding: 6px 12px 6px 14px; border: 0; border-radius: 6px; cursor: pointer; rotate: 0.8deg; text-align: left;
-    background: var(--felt, #7b9a6e); color: #fffaf0; box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); text-shadow: 0 1px 0 rgba(40, 20, 8, 0.3); }
-  .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed rgba(255, 250, 235, 0.7); border-radius: 4px; pointer-events: none; }
+    background: var(--felt, #55724a); color: var(--ink, #fffaf0); box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); }
+  .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed color-mix(in srgb, currentColor 65%, transparent); border-radius: 4px; pointer-events: none; }
   .vs-slip .chip b { font: 700 19px/1.15 ${HAND}; white-space: nowrap; }
   .vs-slip .chip span { font: italic 14px/1.3 ${BOOK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .vs-slip .chip i { align-self: center; font: 700 15px/1 ${HAND}; font-style: normal; opacity: 0.9; }
@@ -1286,18 +1362,18 @@ function css() {
     background: color-mix(in oklab, #c4553f 88%, #2a1608); color: #fffaf0; font-size: 20px; text-shadow: 0 1px 0 rgba(40, 20, 8, 0.35); }
   .vs-name::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 248, 236, 0.6); border-radius: 3px 7px 7px 3px; }
   .vs-name.shown { opacity: 1; }
-  .vs-name small { font: 700 15px/1.15 ${HAND}; opacity: 0.85; }
+  .vs-name small { font: 700 15px/1.15 ${HAND}; }
   .vs-name i { display: block; width: fit-content; margin: 5px -4px 0; padding: 3px 9px 4px; border-radius: 3px; font: 700 15px/1.2 ${HAND}; font-style: normal;
-    background: var(--felt, rgba(255, 248, 236, 0.18)); box-shadow: inset 0 0 0 1.5px rgba(255, 250, 235, 0.55), 0 2px 4px rgba(40, 20, 8, 0.25); }
+    background: var(--felt, rgba(40, 20, 8, 0.3)); color: var(--ink, #fffaf0); text-shadow: none; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, currentColor 55%, transparent), 0 2px 4px rgba(40, 20, 8, 0.25); }
 
   .vs-done { position: fixed; z-index: 6; left: 0; top: 0; cursor: pointer; opacity: 0; pointer-events: none; border: 0;
-    padding: 9px 20px 10px 30px; background: #6f8f62; color: #fffaf0; font-size: 22px; text-shadow: 0 1px 0 rgba(30, 50, 20, 0.4);
+    padding: 9px 20px 10px 30px; background: #4f6e44; color: #fffaf0; font-size: 22px; text-shadow: 0 1px 0 rgba(30, 50, 20, 0.4);
     transition: opacity 260ms ease, translate 160ms ease; }
   .vs-done.shown { opacity: 1; pointer-events: auto; }
   .vs-done::before { content: ''; position: absolute; left: 11px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%;
     background: #f3e7cf; box-shadow: inset 0 0 0 2px rgba(60, 80, 40, 0.5); }
   .vs-done::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(255, 250, 235, 0.6); border-radius: 3px 7px 7px 3px; pointer-events: none; }
-  .vs-done:hover { background: #658657; }
+  .vs-done:hover { background: #46653c; }
   .vs-done:focus-visible { box-shadow: 0 0 0 3px #fffaf0, 0 0 0 5px rgba(47, 74, 107, 0.6), 0 6px 14px rgba(40, 60, 30, 0.3); }
 
   .vs-save { position: fixed; z-index: 6; left: 0; top: 0; display: flex; flex-direction: column; gap: 3px; padding: 8px 14px 8px 18px;

@@ -141,11 +141,12 @@ export const projects = (person: string) => call<{ projects: { id: string; what:
 /**
  * A villager written by the model from a description (and a pattern: a built-in id, or "<maker>:<id>"), as module
  * text for the prop sandbox, its record id, and its persona checked by the host (#42's checkPersona) or the reason
- * it was refused. `dials` are where the setup's sliders start.
+ * it was refused. `dials` are where the setup's sliders start. A `role` (one of the home's roles) decides the felt kit's
+ * mark; the host stores it and returns it on make, read and remake.
  */
-export interface MadeVillager { item: string; module: string; persona: unknown; personaRefused?: string; dials: Record<string, number> | null; models: string[]; costUsd: number | null; outputTokens: number | null }
-export const makeVillager = (person: string, description: string, accent: string, template?: string) =>
-  call<MadeVillager>(`/people/${person}/villagers`, { description, accent, ...(template ? { template } : {}) })
+export interface MadeVillager { item: string; module: string; role?: string; persona: unknown; personaRefused?: string; dials: Record<string, number> | null; models: string[]; costUsd: number | null; outputTokens: number | null }
+export const makeVillager = (person: string, description: string, accent: string, template?: string, role?: string) =>
+  call<MadeVillager>(`/people/${person}/villagers`, { description, accent, ...(template ? { template } : {}), ...(role ? { role } : {}) })
 /** A made villager whose module the home's checks, or whose persona the host's check, refused: made again once with the reason. */
 export const remakeVillager = (person: string, item: string, reason: string) =>
   call<MadeVillager>(`/people/${person}/villagers/${item}/remake`, { reason })
