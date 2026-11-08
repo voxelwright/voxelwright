@@ -1516,6 +1516,9 @@ little message") with no route and nothing sent to Sam.
 
 ## Talk regroup: paper (#42, November 7, 2026)
 
+The paper climb below (November 8) changed the sending, the replies and the phone layout;
+where the two sections differ, the climb's is current.
+
 The talk look stalled at 5.8 to 7.0 over many rounds of tuning (one Opus scorer, no GPT).
 Following ui-craft's "Plateau: regroup", three looks were prototyped behind a flag,
 scored side by side against the current look by Opus and GPT-6.1 Sol, and the winner,
@@ -1577,8 +1580,8 @@ low tier, input in the world, conversation clarity, phone):
 | 6 | paper / current | 7.2 / 7.1 | not run |
 | 7 | paper as pushed / current | 7.3 / 6.4 | not run |
 
-Screenshots (scripted replies): `screenshots/talk/paper-*.jpg`, the same frames as the
-scorers saw (rest, writing, sent, talk, table, house, low tier, phone talk and table).
+Screenshots: `screenshots/talk/paper-*.jpg` now hold the paper climb's final frames (real
+replies, below).
 
 Paper won the round-1 categories that tuning had not moved: input in the world (9 and 9 to
 10) and motion (9 and 9), with material at 9. The current look won legibility and
@@ -1663,3 +1666,119 @@ started. Changed for the new behaviour: `check-talk-input` expects the resting p
 on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
 was 3), and checks that the camera waits for the sent note to land before turning to its
 reader; its Undo click reports why it missed instead of passing silently.
+
+## Paper climb (#42, November 8, 2026)
+
+Paper was polished toward 9 in every category with the same council (a fresh
+`claude -p --model opus` and GPT-6.1 Sol through T3, read only, rubric only, target hidden),
+with one regroup. What changed:
+
+- **The note lands and is read.** It flies at an even pace on screen (weighted by inverse
+  distance, its arc and size scaled with distance, so it is neither a speck nor gone by
+  0.8 s), casting a shadow. The reader's paws come up to catch it, it is held up in both
+  paws while the reader looks down at it, and the reply opens out of it (`src/talk/input.ts`,
+  the reader's pose in `src/villagers/rig.ts`). A fresh sheet shows on the pad as it tears;
+  the address comes back once the pad settles.
+- **Your line keeps one form**, the slip torn off your pad (ruled, your blue hand, "to
+  Dumpling" at its head): in a talk it is taped to the corner of the reply, and in a round
+  it lies on the table, flat and shadowed, wherever no face covers it
+  (`src/talk/paper.ts`, placement in `src/plugins/talk.ts`).
+- **The pad** has one address, top left, the same size at rest and while writing, and
+  writes in a firmer hand.
+- **The news marker** is a torn paper tag with tape in the villager's colour, not felt.
+- **Slips** keep clear of whole heads, ears included. Above a head they may lift higher
+  with a stretched tab, and a tab that would cross another slip stays short. A reply that
+  steps back shows its first words. The page before is kept, but no longer written as a
+  cut-off grey line over the next page.
+- **Phone:** a page is four lines; what was said stays on a smaller two-line slip near its
+  speaker; your line lies on the table's clear end; the journal is smaller, above the
+  sound buttons.
+- **Passers-by** are judged from the shot the camera is going to and go at once while it
+  moves, so a still frame never shows one glittering half-faded.
+- **Scene:** the fridge handle is brushed (roughness 0.55) and the window's painted garden
+  is toned below the bloom threshold.
+
+Shots: `node scripts/talk-shots.mjs <dir> --dev=5600` now also takes `landed` (just after
+the note arrives) and times the late frame by the page's clock. With `--real` it leaves the
+villager API to a host: start one with `VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia npm run
+villager -- --agent warm --model haiku --port 5612 --root <fresh dir>` in `host/`, and run
+the script with `VILLAGE_ROOT=<that dir> VILLAGER_PORT=5612`. The reference was captured
+from a `git archive` copy of c577195, since the dev server serves the working tree.
+
+Scores (means of ten categories; candidate / reference c577195 within each round):
+
+| Round | What was scored | Opus | GPT-6.1 Sol |
+| --- | --- | --- | --- |
+| 1 | the note lands in the paws and opens into the reply; your line on the table; one address | 7.5 / 6.9 | 8.3 / 8.1 |
+| 2 | the reader reads the note; even flight; the round stays on a phone | 7.5 / 7.1 | 8.6 / 8.3 |
+| 3 | your line in one form, taped or lying | 7.7 / 7.0 | not run |
+| regroup | current / sheet / tabs / from above (phone round) | 7.4 / 7.1 / 6.9 / 6.9 | 8.3 / 8.4 / 7.8 / 7.4 |
+| 4 (real replies) | after the regroup | 8.1 / 7.3 | 8.4 / 8.0 |
+| 5 (real replies, final) | phone pages and faces, no grey lead line, first words | 8.2 / 7.3 | 8.5 / 8.2 |
+
+Round 3 was the plateau trigger (Opus 7.5, 7.5, 7.7, and both models' top complaint the
+phone round's stack of slips), so one regroup of the two allowed was run on the phone
+round. Three prototypes behind a flag, scored with the current look: **sheet** (the round
+written on one sheet passed round), **tabs** (earlier turns fold to name tabs, your line on
+the table) and **from above** (too bold: the table straight down, every slip lying by its
+speaker). Cross-model means: current 7.85, sheet 7.75, tabs 7.35, from above 7.15. The
+current look was kept, with tabs' idea of your line lying on the table; the flag is gone.
+
+Final round, the code as pushed, real Haiku replies, per category (warmth, material,
+lighting, legibility, consistency, motion, low tier, input, conversation, phone): Opus 9, 8,
+8, 8, 8, 8, 7, 9, 9, 8 (mean 8.2); GPT-6.1 Sol 9, 9, 8, 8, 8, 9, 9, 9, 9, 7 (mean 8.5).
+
+Learning log:
+
+- **Moved it:** the sent line as one object that arrives and stays (motion: the reference
+  4 to 5, the candidate 8 to 9; conversation: 6 to 7 against 9 from both, rounds 4 and 5).
+- **Moved it:** your line in one form. As a header inside the reply, a slip on the table
+  and a card on the phone it was three forms (Opus, round 2); one taped slip lifted
+  consistency to 8.
+- **Hurt, then fixed:** the even screen pace kept the note near the camera, where a fixed
+  0.3 m arc carried it out of the top of the frame (round 2's late frame was empty).
+- **Regroup lost:** one sheet read as "a chat log in paper dress" (Opus phone 5); tabs
+  dropped what was said and read as still speaking; from above lost the faces and overflowed.
+- **Real replies showed what scripted ones hid:** a long reply on a phone came down over
+  the face, and a stepped-back slip showed its last page ("will still be there.").
+- **Scorers contradict across rounds:** keep the pad's address after sending (Opus, round 3)
+  and blank it as the note tears (Opus, round 4). It is blank as it tears and comes back once
+  the pad settles.
+
+Still under 9, and why:
+
+- **Phone (Opus 8, GPT 7):** at the table two slips still float over the scene, the
+  speaker's with a long tab down to it, and the pad is cut off at the corner. Both want the
+  villagers to carry the round. The regroup's three other compositions did worse; a closer
+  shot of the speaker on a phone is the untried one.
+- **Consistency (8, 8):** "to Dumpling" shows on the pad and on the note (GPT: only on the
+  note until a new line starts; Opus had asked for the opposite), and an action such as
+  "(nods at Alex)" sits in a speech slip (Opus: an animation with a small caption).
+- **Legibility (8, 8):** finished slips are small (15 to 16 px against 19), and the pencilled
+  "to" is faint.
+- **Motion (Opus 8):** at 0.7 s the note is small and crosses near Moss on its way.
+- **Low tier (Opus 7, GPT 9):** it is the high tier with less glow; Opus asks for a look of
+  its own (baked light, firmer paper outlines). Scene-wide, not this unit.
+- **Lighting and material (8; Opus material 8):** the warm haze, flat sound buttons and
+  procedural floor grain in close-ups belong to the scene and post stack. Only the window
+  card and the fridge handle were touched here.
+- **Close-up framing:** the two-shot can still frame Moss through an easel's legs (both, round
+  4). Its search (and the 31 ms it costs to open a talk) was not changed.
+
+Cost: per frame, the passer-by test projects through a probe camera set to the shot pose (a
+few matrix products per villager); placing your line tests up to eleven table spots. Opening
+a talk was not changed (the two-shot search is the same). `npm run perf-gate` on the final
+code, with 3 other headless Chromes running (GPU ms indicative): against main (cb1d565) PASS,
+`home` CPU p50 3.4 → 3.5 ms, draw calls 482 → 526 (the branch's, as before), every scene at 60
+fps (p99 16.8 ms, no long task), GPU p50/p95 at high 7.4/10.8 (`home`), 7.5/9.2
+(`villagers`), 8.5/12.4 ms (`talk`); against this branch's start (c577195) PASS, `home` CPU p50
+3.9 → 3.5 ms with 526 draw calls on both, `talk` 6.1 → 5.8 ms, `villagers` 7.6 → 7.7 ms.
+
+Checks on the final code (stub host, one at a time): `tsc --noEmit` in `home/` and `host/`,
+`check-kernel` 10/10, `check-entries` 33/33, `check-navigation` 18/18, `check-notebook`
+10/10, `check-talk-npc` 39/39, `check-talk-input` 64/64, `check-talk-notebook` 16/16,
+`check-sketch` 35/35, `check-babble` 28/28, `check-music` 30/30, `check-prop-sandbox` 35/35,
+host `check-villager` 225/225. Earlier in the climb `check-talk-notebook` failed once at 7 of
+8 distinct pages and `check-entries` once on the doorway glide, both under load and both
+passing alone. Changed for the new behaviour: `check-talk-npc` expects the page before kept
+and not shown; `check-talk-notebook` and `check-prop-sandbox` take `--dev`/`--host`.
