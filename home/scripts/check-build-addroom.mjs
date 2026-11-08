@@ -764,9 +764,9 @@ try {
         const spotAfter = await B(page, async () => {
           const W = await import('/src/villagers/world.ts')
           const sp = W.SPOTS.buildMovein
-          return sp ? { floor: Boolean(sp.floor), through: Boolean(sp.through) } : null
+          return sp ? { floor: Boolean(sp.floor), through: Boolean(sp.through), seat: Boolean(sp.seat) } : null
         })
-        check('undo: the move-in spot drops the undone room\'s floor and doorway path', spotAfter && !spotAfter.floor && !spotAfter.through, spotAfter)
+        check('undo: the move-in spot drops the undone room\'s floor, doorway path and seat', spotAfter && !spotAfter.floor && !spotAfter.through && !spotAfter.seat, spotAfter)
       }
       await page.keyboard.press('Control+Shift+z')
       s = await until(page, (x) => x.rooms.length === 3)

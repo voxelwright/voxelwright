@@ -856,7 +856,8 @@ export default {
       if (movein) {
         const m = movein.state()
         // The room was undone or reshaped: the villager goes back to their chores if it is gone, and the spot's floor follows it.
-        if (m.room) movein.sync(plan)
+        // The history's head, not a wall drag's preview: a preview made before the room was built would drop it.
+        if (m.room) movein.sync(history?.plan ?? plan)
         movein.frame()
       }
       // While the reveal holds the view, from the moment the villager steps in, the new room is the lit subject: its

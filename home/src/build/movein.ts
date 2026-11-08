@@ -212,7 +212,8 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     const r = plan.rooms.find((x) => x.id === room)
     if (!r) {
       release()
-      spotDef = { ...spotDef, through: undefined, floor: undefined }
+      // Only where it stood and its corridor node stay: no seat to hop onto, no doorway path, no floor.
+      spotDef = { at: spotDef.at, face: spotDef.face, via: spotDef.via }
       setSpot(SPOT, spotDef)
       room = ''
       return
