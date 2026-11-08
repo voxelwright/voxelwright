@@ -55,8 +55,9 @@ pointer paths, storage, reduced motion and a clean unload and reload.
 
 There is no menu bar. Meaningful objects are entries, registered through the
 `entries` plugin with a label, an object and an action. Pointer hover gives a
-soft warm glow and a handwritten label; click or tap chooses; Tab cycles the
-entries on screen from left to right and wraps, Enter chooses, Escape or a
+soft warm glow and a handwritten label; click or tap chooses; Tab moves through the
+entries on screen from left to right and, past either end, leaves the scene the
+browser's usual way (no keyboard trap), Enter chooses, Escape or a
 click elsewhere backs out. Touch skips hover. The nearest visible, depth-writing mesh under the pointer wins, so furniture blocks the entries behind it; light shafts, glows and hidden rooms do not. With `prefers-reduced-motion`
 glows, labels and camera moves are instant.
 
@@ -150,6 +151,10 @@ one 6 s run each; repeat runs of the same page vary by 1 to 3 ms:
 | living | `?q=low` | 3.2 / 4.5 |
 
 SSGI is not usable here; baked lighting is the next step for bounce light.
+
+`?webgl=1` runs three.js's WebGL2 backend even where WebGPU is available.
+WebGL2 has no GPU timer to calibrate with, so without `?q=` it settles on the
+low tier.
 
 Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
 medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
@@ -804,20 +809,35 @@ After a reload the last answer is already on the page. If the villager host is
 not running, the page says "Your villager is out for a moment" and the line is
 still kept in local storage.
 
-The dev server (`vite.config.ts`) hands same-origin pages the host's
-per-launch token at `/villager/launch`, read from
-`$VILLAGE_ROOT/villager/launch.json` (default `~/.village`), and forwards
-`/villager/api/*` to the host on `127.0.0.1:$VILLAGER_PORT` (default 5190).
-Start the host with `npm run villager` in `host/`.
+Start the host with `npm run villager` in `host/`. It prints one link per
+person, `alex: http://localhost:5181/#token=…`; open it. The token rides in the
+URL fragment, which the browser never sends to a server. The page keeps it in
+`sessionStorage` for that tab and removes it from the address bar with
+`history.replaceState`. After the host restarts, open its new link (in the same
+tab is fine); until then the page says the villager is out. The dev server
+(`vite.config.ts`) only forwards `/villager/api/*` to the host on
+`127.0.0.1:$VILLAGER_PORT` (default 5190). It hands out no token, and with
+`appType: 'mpa'` an unknown path such as `/villager/launch` is a 404.
+
+The dev server, and the live server that uses the same config, sends a Content
+Security Policy: `default-src`, `script-src` and `connect-src` are `'self'`
+(which covers Vite's HMR websocket), images may also be `data:` and `blob:`, and
+styles allow inline because Vite injects CSS as `<style>` tags in dev. A page
+script, a promoted plugin included, can reach the villager API for its tab's
+person but cannot `fetch`, beacon or load an image from another origin.
 
 `node scripts/check-villager.mjs [--shot=path]` starts its own stub host and
-dev server on a temporary root and proves, headless: the token is required
-and not handed to cross-site requests; Enter sends the line and the reply is
-written gradually onto the facing page; the proxy streams without buffering;
-the answer is back after a reload; after a host restart the page fetches the
-new token and the villager resumes the same session; with the host down the
-page says so and keeps the line; both processes stop. 13 of 13 passed
-(November 6, 2026). `--agent=claude` runs one real exchange instead.
+dev server on a temporary root and proves, headless: the token is required;
+`/villager/launch` is a 404 and returns no token; the link's token leaves the
+address bar and stays in the tab; the page is served with the policy, and a
+page script's `fetch`, `sendBeacon` and image to another loopback port are
+blocked (the receiving server saw 0 requests); Enter sends the line and the
+reply is written gradually onto the facing page; the proxy streams without
+buffering; the answer is back after a reload; after a host restart the new
+link opens the same villager, which resumes the session; with the host down
+the page says so and keeps the line; the home reports no other policy
+violations and the HMR socket connects; both processes stop. 17 of 17 passed
+(November 7, 2026). `--agent=claude` runs one real exchange instead.
 
 Real exchange, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet), line "I
 keep forgetting to water the plants": one `write_note` call created
@@ -1272,8 +1292,8 @@ nothing placed, and your villager says so. The host stores and returns module
 text only; it never imports or runs it. The sandbox is dev only, so in a
 production build furnishing fails honestly.
 
-New host endpoints, all behind the per-launch token and under one listed
-person: `POST /people/:id/route` `{text, primary, villagers}`,
+New host endpoints, all behind the person's own token (#40) and under that
+person only: `POST /people/:id/route` `{text, primary, villagers}`,
 `POST /people/:id/props` `{what, size?, variant?}`, `GET /people/:id/library`,
 `GET /people/:id/library/:item`, `POST /people/:id/library/:item/keep`,
 `GET` and `POST /people/:id/projects`. Model failures answer 422, so the page

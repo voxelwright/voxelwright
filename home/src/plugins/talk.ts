@@ -943,7 +943,7 @@ export default {
       void sayTo(m.person, text, (t) => {
         speech.first ??= performance.now()
         speech.text += t
-      }, context, routing, sketch).then((said) => {
+      }, { context, routing, sketch }).then((said) => {
         if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true

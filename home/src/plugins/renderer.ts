@@ -11,6 +11,8 @@ const asked = TIER_NAMES.find((t) => t === params.get('q'))
 const gpuMode = params.get('gpu') === '1'
 /** ?fx=csm,gtao names exactly the features to run, overriding the tier's set, so each one's cost is measured alone. */
 const fxParam = params.get('fx')
+/** ?webgl=1 runs three.js's WebGL2 backend even where WebGPU is available. */
+const forceWebGL = params.get('webgl') === '1'
 
 /**
  * Each tier: device pixel ratio cap and the features it runs. maxGpuMs is the
@@ -40,9 +42,15 @@ export default {
     const renderer = new THREE.WebGPURenderer({
       antialias: quality !== 'low',
       powerPreference: 'high-performance',
+      forceWebGL,
     })
     await renderer.init()
     const backendState = renderer.backend as unknown as { isWebGPUBackend?: boolean; device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }
+    const device = backendState.device
+    // WebGL2 has no queue-done signal to time, and its frame interval is vsync, not
+    // GPU cost. Without a measurement the page takes the light tier instead of guessing.
+    const unmeasurable = calibrating && !device
+    if (unmeasurable) quality = 'low'
     const dpr = () => Math.min(devicePixelRatio, TIERS[quality].dpr)
     renderer.setPixelRatio(dpr())
     renderer.setSize(innerWidth, innerHeight)
@@ -54,11 +62,13 @@ export default {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)
     const backend = backendState.isWebGPUBackend ? 'WebGPU' : 'WebGL2'
-    const device = backendState.device
     const timer = device ? gpuPassTimer(device) : null
-    const timing: Stage['timing'] = { gpu: [], submitToDone: [], passSum: [], cpu: [], tracking: !!timer, tierReason: asked ? `?q=${asked}` : 'calibrating' }
+    const timing: Stage['timing'] = { gpu: [], submitToDone: [], passSum: [], cpu: [], tracking: !!timer, tierReason: asked ? `?q=${asked}` : unmeasurable ? 'WebGL2: no GPU timer, so the light tier' : 'calibrating', tierSettled: !calibrating || unmeasurable }
 
     const passes: Array<() => void> = []
+    // Calibration pauses while anything holds it, and drops a frame submitted before the last release.
+    let holds = 0
+    let releasedAt = 0
     const stage: Stage = {
       renderer,
       scene,
@@ -78,6 +88,16 @@ export default {
         }
       },
       drawPasses: () => passes.length,
+      hold: () => {
+        holds++
+        let held = true
+        return () => {
+          if (!held) return
+          held = false
+          holds--
+          releasedAt = performance.now()
+        }
+      },
     }
 
     const canvas = renderer.domElement
@@ -97,7 +117,7 @@ export default {
     // timestamp queries, calibration falls back to submit-to-done. ?gpu=1 records both.
     let frame = 0
     let waiting = false
-    let settled = !calibrating
+    let settled = !calibrating || unmeasurable
     let samples: number[] = []
     let since = 0
     const settleTier = (median: number) => {
@@ -105,6 +125,7 @@ export default {
       if (median <= TIERS[quality].maxGpuMs || !next) {
         timing.tierReason = `measured ${median.toFixed(2)} ms GPU at ${quality}`
         settled = true
+        timing.tierSettled = true
         return
       }
       timing.tierReason = `${median.toFixed(2)} ms GPU at ${quality} > ${TIERS[quality].maxGpuMs} ms`
@@ -114,8 +135,9 @@ export default {
       samples = []
       frame = 0
     }
-    const timed = (ms: number) => {
-      if (settled || ++frame <= WARMUP_FRAMES) return
+    const timed = (ms: number, submitted: number) => {
+      if (settled || holds > 0 || submitted < releasedAt) return
+      if (++frame <= WARMUP_FRAMES) return
       if (!samples.length) since = performance.now()
       samples.push(ms)
       const enough = samples.length >= CALIBRATION_FRAMES || (samples.length >= 8 && performance.now() - since > CALIBRATION_MS)
@@ -131,7 +153,7 @@ export default {
     const onGpuFrame = (f: GpuFrame) => {
       keep(timing.gpu, f.busyMs)
       keep(timing.passSum, f.sumMs)
-      timed(f.busyMs)
+      timed(f.busyMs, f.endedAt ?? performance.now())
     }
     if (timer && (gpuMode || calibrating)) timer.listeners.add(onGpuFrame)
 
@@ -151,7 +173,7 @@ export default {
           waiting = false
           const ms = performance.now() - submitted
           keep(timing.submitToDone, ms)
-          if (!timer) timed(ms)
+          if (!timer) timed(ms, submitted)
         })
       }
     })

@@ -1,7 +1,8 @@
 // The villager service: a loopback-only HTTP API through which a person talks
-// to their villager. Every request needs the per-launch token, which is
-// written with mode 0600 to <root>/villager/launch.json for the home's dev
-// server to hand to the page. Replies stream as server-sent events.
+// to their villager. Each launch gives every person their own token, which
+// opens that person's villager and no other. The tokens are written with mode
+// 0600 to <root>/villager/launch.json, and the CLI prints each person's link
+// (the token rides in the URL fragment). Replies stream as server-sent events.
 //
 // Per person, under <root>/people/<id>/:
 //   notes/*.md          the villager's private notes (its only tools)
@@ -86,7 +87,7 @@ export function parsePeopleSpec(spec: string): { people: Record<string, string>;
 
 declare module 'cordis' {
   interface Context {
-    villager: { port: number; launchFile: string }
+    villager: { port: number; launchFile: string; tokens: Record<string, string> }
   }
 }
 
@@ -133,15 +134,18 @@ export default {
   name: 'villager',
   async apply(ctx: Context, config: Config) {
     const people = config.people ?? { alex: 'Alex' }
-    const token = randomBytes(32).toString('hex')
-    const expected = Buffer.from(`Bearer ${token}`)
+    const tokens = Object.fromEntries(Object.keys(people).map((id) => [id, randomBytes(32).toString('hex')]))
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
 
-    const authorized = (req: IncomingMessage) => {
+    /** The person whose token the request carries, or undefined. */
+    const holder = (req: IncomingMessage) => {
       const given = Buffer.from(req.headers.authorization ?? '')
-      return given.length === expected.length && timingSafeEqual(given, expected)
+      return Object.keys(tokens).find((id) => {
+        const expected = Buffer.from(`Bearer ${tokens[id]}`)
+        return given.length === expected.length && timingSafeEqual(given, expected)
+      })
     }
     const send = (res: ServerResponse, status: number, value: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -372,27 +376,29 @@ export default {
     }
 
     async function handle(req: IncomingMessage, res: ServerResponse) {
-      if (!authorized(req)) return send(res, 401, { error: 'token required' })
+      const person = holder(req)
+      if (!person) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40).
+      const owner = /^\/people\/([^/]+)\//.exec(path)?.[1]
+      if (owner === undefined) return send(res, 404, { error: 'not found' })
+      if (owner !== person) return send(res, 403, { error: 'this token is for another person' })
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {
         const [, id, sid] = sketchMatch
-        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
         await mkdir(personDir(id), { recursive: true, mode: 0o700 })
         return sketchRoute(personDir(id), sid, req, res, send)
       }
       const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch
-        if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
         if (item !== undefined && !ITEM.test(item)) return send(res, 404, { error: 'no such item' })
         return input(id, plain ?? (keep ? 'keep' : 'library'), item, req, res)
       }
       const match = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(path)
       if (!match) return send(res, 404, { error: 'not found' })
       const [, id, what] = match
-      if (!PERSON.test(id) || !Object.hasOwn(people, id)) return send(res, 404, { error: 'no such person' })
       if (what === 'conversation' && req.method === 'GET') {
         const lines = await readJsonl(join(personDir(id), 'conversation.jsonl'))
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
@@ -421,7 +427,9 @@ export default {
         if (sketchRef !== undefined) {
           const { from, id: sid } = (sketchRef ?? {}) as { from?: unknown; id?: unknown }
           if (route !== undefined) return send(res, 400, { error: 'a drawing is never routed' })
-          if (typeof from !== 'string' || !PERSON.test(from) || !Object.hasOwn(people, from) || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": a listed person, "id": a sketch id}' })
+          if (typeof from !== 'string' || typeof sid !== 'string' || !SKETCH.test(sid)) return send(res, 400, { error: 'sketch is {"from": your own id, "id": a sketch id}' })
+          // Only the token holder's own drawing (#40): another person's sketches are theirs to hand over.
+          if (from !== person) return send(res, 403, { error: 'this token is for another person' })
           const image = await loadSketch(personDir(from), sid)
           if (!image) return send(res, 404, { error: 'no such sketch' })
           sketch = { from, id: sid, image: { ...image, by: people[from] } }
@@ -455,8 +463,8 @@ export default {
     const port = (server.address() as AddressInfo).port
     const launchFile = join(config.root, 'villager', 'launch.json')
     await mkdir(join(config.root, 'villager'), { recursive: true, mode: 0o700 })
-    await writeFile(launchFile, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 })
-    ctx.provide('villager', { port, launchFile })
+    await writeFile(launchFile, JSON.stringify({ port, tokens, pid: process.pid }), { mode: 0o600 })
+    ctx.provide('villager', { port, launchFile, tokens })
     // Warm agents start each listed person's process now, so their first line skips the start-up.
     if (config.agent.warm) for (const id of Object.keys(people)) {
       const dir = personDir(id)

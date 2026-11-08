@@ -8,6 +8,8 @@ export interface GpuFrame {
   sumMs: number
   /** In encode order: each pass's label (or 'render' / 'compute') and the ms it adds to busyMs; they sum to busyMs. */
   passes: Array<[string, number]>
+  /** performance.now() when the frame was closed, after its submits; calibration drops frames closed before a hold's release. */
+  endedAt?: number
 }
 export interface GpuPassTimer {
   listeners: Set<(frame: GpuFrame) => void>

@@ -16,6 +16,8 @@ async function open(reducedMotion) {
   await page.evaluate(() => localStorage.removeItem('village.notebook.lines'))
   await page.reload()
   const ready = await page.evaluate(() => window.village.ready())
+  // Quality calibration may step the tier down and rebuild postfx; wait until it has settled.
+  await page.waitForFunction(() => window.village.snapshot().tierSettled, null, { timeout: 30000 })
   await page.waitForTimeout(800)
   return { context, page, ready }
 }
@@ -86,7 +88,9 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
   // Unload: DOM, listeners and page texture go away cleanly; reload works.
   const controls = '.village-offscreen, [data-entry="notebook"]'
-  const before = await page.evaluate((sel) => ({ ...window.village.snapshot(), controls: document.querySelectorAll(sel).length }), controls)
+  // The input, the villager's polite live region and the entry button.
+  const domBefore = await page.evaluate((sel) => document.querySelectorAll(sel).length, controls)
+  const before = await page.evaluate(() => window.village.snapshot())
   await page.evaluate(() => window.village.unload('notebook'))
   await page.waitForTimeout(300)
   const after = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
@@ -94,7 +98,58 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   await page.evaluate(() => window.village.load('notebook'))
   await page.waitForTimeout(400)
   const again = await page.evaluate((sel) => ({ s: window.village.snapshot(), dom: document.querySelectorAll(sel).length }), controls)
-  check('reload restores it', again.dom === before.controls && before.controls > 0 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
+  check('reload restores it', again.dom === domBefore && domBefore === 3 && again.s.plugins.active.includes('notebook') && again.s.frameHooks === before.frameHooks, { dom: again.dom })
+
+  // The table owns the book: after the table reloads, hover and click still reach the notebook.
+  await page.evaluate(async () => {
+    await window.village.unload('table')
+    window.village.load('table')
+  })
+  await page.waitForTimeout(600)
+  const spot = await page.evaluate(() => {
+    const { scene, camera } = window.village.kernel.root.get('stage')
+    const p = scene.getObjectByName('notebook right page').getWorldPosition(camera.position.clone())
+    p.project(camera)
+    return { x: ((p.x + 1) / 2) * innerWidth + 40, y: ((1 - p.y) / 2) * innerHeight }
+  })
+  await page.mouse.move(spot.x, spot.y)
+  await page.waitForTimeout(200)
+  const hovered = await page.evaluate(() => window.village.kernel.root.get('entries').hovered)
+  await page.mouse.click(spot.x, spot.y)
+  await page.waitForTimeout(150)
+  const chosen = await page.evaluate(() => window.village.kernel.root.get('entries').active)
+  check('after the table reloads, hover and click reach the notebook', hovered === 'notebook' && chosen === 'notebook', { hovered, chosen })
+  await page.mouse.click(40, 40)
+  await context.close()
+}
+
+// The villager is away: a kept line waits in the outbox and is sent once the host
+// answers again; a line typed while it answers waits its turn.
+{
+  const { context, page } = await open('reduce')
+  await page.evaluate(() => localStorage.removeItem('village.notebook.outbox'))
+  await page.focus('[data-entry="notebook"]')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Buy milk')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(800)
+  const waiting = await page.evaluate(() => ({ outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'), state: document.querySelector('[data-villager]').dataset.villager }))
+  check('with the host away the line waits in the outbox', waiting.outbox.join() === 'Buy milk' && waiting.state === 'away', waiting)
+  // The host comes back (a stand-in on the page's routes) and its link is opened in
+  // the same tab, which changes only the fragment; the first reply is slow.
+  const sent = []
+  await page.evaluate(() => (location.hash = 'token=t'))
+  await page.route('**/villager/api/people/alex/messages', async (r) => {
+    sent.push(JSON.parse(r.request().postData()).text)
+    if (sent.length === 1) await new Promise((x) => setTimeout(x, 1500))
+    await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: `heard ${sent.at(-1)}` })}\n\n` })
+  })
+  await page.waitForTimeout(6000)
+  await page.keyboard.type('And eggs')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(3000)
+  const done = await page.evaluate(() => ({ outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'), text: document.querySelector('[data-villager]').textContent }))
+  check('when the host is back the outbox is sent in order and emptied', sent.join() === 'Buy milk,And eggs' && done.outbox.length === 0 && done.text === 'heard And eggs', { sent, done })
   await context.close()
 }
 

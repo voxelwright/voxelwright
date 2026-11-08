@@ -19,14 +19,16 @@ const check = (name: string, pass: unknown, detail?: unknown) => checks.push({ n
 
 async function start(people?: Record<string, string>, maker?: Maker, agent: Agent = stubAgent(30), extra: { turnTimeoutMs?: number; router?: Router } = {}) {
   const ctx = new Context()
-  const fiber = ctx.plugin(villager, { root, agent, port: 0, people, router: extra.router ?? stubRouter(5), maker: maker ?? stubMaker(5), sketchMaker: stubSketchMaker(5), turnTimeoutMs: extra.turnTimeoutMs })
+  const fiber = ctx.plugin(villager, { root, agent, port: 0, people: people ?? { alex: 'Alex', sam: 'Sam' }, router: extra.router ?? stubRouter(5), maker: maker ?? stubMaker(5), sketchMaker: stubSketchMaker(5), turnTimeoutMs: extra.turnTimeoutMs })
   await fiber.await()
   const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens.alex as string, samToken: launch.tokens.sam as string, tokens: launch.tokens as Record<string, string> }
 }
 
 interface Streamed { status: number; events: { name: string; data: any; at: number }[] }
-async function say(base: string, token: string | null, text: string, person = 'alex', context?: unknown, route?: unknown): Promise<Streamed> {
+/** `token` may be every person's tokens, and then the person's own is sent. */
+async function say(base: string, given: string | Record<string, string> | null, text: string, person = 'alex', context?: unknown, route?: unknown): Promise<Streamed> {
+  const token = given && typeof given === 'object' ? given[person] : given
   const res = await fetch(`${base}/people/${person}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -100,8 +102,14 @@ try {
   const after = await say(host.base, host.token, 'still there?')
   check('the next turn resumes the same session', /4 lines/.test(after.events.find((e) => e.name === 'done')?.data.reply ?? ''))
 
-  // Person ids.
-  for (const id of ['..%2Falex', 'Alex', 'sam']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 404)
+  // Person ids: a token opens one person's villager and no other.
+  for (const id of ['..%2Falex', 'Alex', 'nobody']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 403)
+  const crossRead = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })
+  check("person-scoped token: Alex's token cannot read Sam's conversation", crossRead.status === 403, crossRead.status)
+  check("person-scoped token: Alex's token cannot write to Sam's villager", (await say(host.base, host.token, 'hi', 'sam')).status === 403)
+  check("person-scoped token: Sam's token cannot read Alex's conversation", (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).status === 403)
+  const samOwn = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })
+  check("person-scoped token: Sam's token reads Sam's conversation", samOwn.status === 200 && (await samOwn.json()).name === 'Sam')
   await host.fiber.dispose()
 
   // The operator can list synthetic people (VILLAGER_PEOPLE); each keeps its own folder.
@@ -112,20 +120,20 @@ try {
     check(`VILLAGER_PEOPLE refuses ${JSON.stringify(bad)}`, outcome === 'refused', outcome)
   }
   host = await start(listed)
-  const samReply = (await say(host.base, host.token, 'hello from the table', 'sam')).events.find((e) => e.name === 'done')?.data.reply ?? ''
+  const samReply = (await say(host.base, host.tokens, 'hello from the table', 'sam')).events.find((e) => e.name === 'done')?.data.reply ?? ''
   check('a listed person is answered under their own name', /I hear you, Sam\. That makes 1 line/.test(samReply), samReply)
   // Context reaches the turn but is never stored as the person's line.
-  const said = await say(host.base, host.token, 'what shall we cook?', 'sam', 'at the kitchen table just now, Dumpling said "Soup."')
+  const said = await say(host.base, host.tokens, 'what shall we cook?', 'sam', 'at the kitchen table just now, Dumpling said "Soup."')
   const samLines = (await readFile(join(root, 'people', 'sam', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
   const personLines = samLines.filter((l) => l.from === 'person').map((l) => l.text)
   const heard = await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8').catch(() => '')
   check('context reaches the villager turn', said.events.at(-1)?.name === 'done' && heard.includes('Dumpling said "Soup."'), heard)
   check("context is never stored as the person's line", personLines.at(-1) === 'what shall we cook?' && !samLines.some((l) => /Dumpling said|Context/.test(l.text ?? '')), personLines)
-  const readBack = await (await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })).json()
+  const readBack = await (await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.tokens.sam}` } })).json()
   check('the conversation read back has no context in it', !JSON.stringify(readBack).includes("Dumpling said"), readBack.lines.length)
-  for (const bad of [42, 'x'.repeat(2001)]) check(`context ${typeof bad === 'number' ? 'that is not a string' : 'over 2000 characters'} is refused`, (await say(host.base, host.token, 'hi', 'sam', bad)).status === 400)
+  for (const bad of [42, 'x'.repeat(2001)]) check(`context ${typeof bad === 'number' ? 'that is not a string' : 'over 2000 characters'} is refused`, (await say(host.base, host.tokens, 'hi', 'sam', bad)).status === 400)
   check("a listed person's villager does not see another's lines", existsSync(join(root, 'people', 'sam', 'conversation.jsonl')) && !samReply.includes('water the plants'))
-  check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 404)
+  check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 403)
   await host.fiber.dispose()
 
   // The always-on input (#42): route, props, library and projects.
@@ -181,7 +189,7 @@ try {
     const lib = await (await api('/people/alex/library')).json()
     check('a kept prop is listed without its module', lib.items.length === 1 && lib.items[0].id === made.item && !('module' in lib.items[0]), lib)
     check('a kept prop can be fetched again', (await (await api(`/people/alex/library/${made.item}`)).json()).module === made.module)
-    check("another person's library does not see it", (await (await api('/people/sam/library')).json()).items.length === 0 && (await api(`/people/sam/library/${made.item}`)).status === 404)
+    check("another person's library does not see it", (await (await api('/people/sam/library', { token: host.tokens.sam })).json()).items.length === 0 && (await api(`/people/sam/library/${made.item}`, { token: host.tokens.sam })).status === 404)
     const tattle = await (await api('/people/alex/props', { body: { what: 'tattle' } })).json()
     await api(`/people/alex/library/${tattle.item}`)
     await api(`/people/alex/library/${tattle.item}/keep`, { body: {} })
@@ -208,18 +216,72 @@ try {
     check('a project is recorded as being made', project.project?.state === 'being made' && project.project.what === 'a playable pinball machine')
     const projects = await (await api('/people/alex/projects')).json()
     check('projects are listed for the person', projects.projects.length === 1 && projects.projects[0].id === project.project.id)
-    check("another person's projects do not include it", (await (await api('/people/sam/projects')).json()).projects.length === 0)
+    check("another person's projects do not include it", (await (await api('/people/sam/projects', { token: host.tokens.sam })).json()).projects.length === 0)
     check('a project without what is refused', (await api('/people/alex/projects', { body: { where: 'x' } })).status === 400)
-    check('an unlisted person has no input endpoints', (await route('hi')).status === 200 && (await api('/people/zoe/route', { body: { text: 'hi', primary: 'Dumpling', villagers: cast } })).status === 404)
+    check('an unlisted person has no input endpoints', (await route('hi')).status === 200 && (await api('/people/zoe/route', { body: { text: 'hi', primary: 'Dumpling', villagers: cast } })).status === 403)
     await host.fiber.dispose()
   }
 
+
+  // Per-person tokens (#40) on every endpoint #42 added: Alex's token is refused on each of Sam's, writes nothing
+  // under Sam, and Sam's own token is served. A fresh root, so "nothing under Sam" means nothing at all.
+  {
+    const xroot = join(root, 'cross')
+    const ctx = new Context()
+    const fiber = ctx.plugin(villager, { root: xroot, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam' }, router: stubRouter(5), maker: stubMaker(5), sketchMaker: stubSketchMaker(5) })
+    await fiber.await()
+    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const base = `http://127.0.0.1:${launch.port}`
+    const as = (person: string, path: string, body?: unknown) => fetch(`${base}${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${launch.tokens[person]}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    check('launch.json holds one token per person and no shared one', Object.keys(launch.tokens).sort().join() === 'alex,sam' && launch.tokens.alex !== launch.tokens.sam && !('token' in launch))
+    const cast = [{ id: 'alex', name: 'Dumpling', role: 'cook' }, { id: 'sam', name: 'Tuft', role: 'tidier' }]
+    const png = (() => { const p = new PNG({ width: 64, height: 32 }); p.data.fill(240); return PNG.sync.write(p).toString('base64') })()
+    const endpoints: [string, string, unknown?][] = [
+      ['conversation read (journal)', '/people/sam/conversation'],
+      ['talk (SSE)', '/people/sam/messages', { text: 'hi' }],
+      ['table round (context)', '/people/sam/messages', { text: 'hi', context: 'at the kitchen table, Dumpling said "Soup."' }],
+      ['talk with a route', '/people/sam/messages', { text: 'hi', route: { primary: 'Tuft', villagers: cast } }],
+      ['route', '/people/sam/route', { text: 'hi', primary: 'Tuft', villagers: cast }],
+      ['props (furnishing)', '/people/sam/props', { what: 'a chair' }],
+      ['library list', '/people/sam/library'],
+      ['projects list', '/people/sam/projects'],
+      ['projects write', '/people/sam/projects', { what: 'pinball' }],
+      ['sketch write', '/people/sam/sketches', { png }],
+      ['sketch list (journal)', '/people/sam/sketches'],
+    ]
+    for (const [name, path, body] of endpoints) {
+      const res = await as('alex', path, body)
+      await res.text()
+      check(`cross-person: Alex's token is refused on Sam's ${name}`, res.status === 403, res.status)
+    }
+    check("cross-person: nothing was written under Sam, preferences included", !existsSync(join(xroot, 'people', 'sam')))
+    // Sam's own token is served on the same endpoints, which also gives Sam an item and a drawing to aim at.
+    for (const [name, path, body] of endpoints) {
+      const res = await as('sam', path, body)
+      await res.text()
+      check(`own person: Sam's token is served on Sam's ${name}`, res.status === 200, res.status)
+    }
+    const item = (await (await as('sam', '/people/sam/props', { what: 'a stool' })).json()).item
+    const sketch = (await (await as('sam', '/people/sam/sketches', { png })).json()).id
+    for (const [name, path, body] of [['library item', `/people/sam/library/${item}`], ['keep', `/people/sam/library/${item}/keep`, {}], ['sketch read', `/people/sam/sketches/${sketch}`]] as [string, string, unknown?][]) {
+      check(`cross-person: Alex's token is refused on Sam's ${name}`, (await as('alex', path, body)).status === 403)
+      check(`own person: Sam's token is served on Sam's ${name}`, (await as('sam', path, body)).status === 200)
+    }
+    const samConversation = await readFile(join(xroot, 'people', 'sam', 'conversation.jsonl'), 'utf8')
+    check("cross-person: Alex's token cannot hand Sam's drawing to Alex's villager", (await as('alex', '/people/alex/messages', { text: 'look', sketch: { from: 'sam', id: sketch } })).status === 403 && !existsSync(join(xroot, 'people', 'alex', 'stub-last-image.json')))
+    check("cross-person: Sam's folder is unchanged by Alex's attempts", (await readFile(join(xroot, 'people', 'sam', 'conversation.jsonl'), 'utf8')) === samConversation)
+    await fiber.dispose()
+  }
 
   // The table round (#42): a later speaker hears the person's line and the earlier replies as context, never stored as anyone's line.
   {
     host = await start(listed)
     const round = 'at the kitchen table with Alex, Dumpling and Tuft. Round so far: Alex said "Let\'s make a joke together". Dumpling said "Why did the soup blush?". It is your turn, Tuft.'
-    const said = await say(host.base, host.token, "Let's make a joke together", 'sam', round)
+    const said = await say(host.base, host.tokens, "Let's make a joke together", 'sam', round)
     const lines = (await readFile(join(root, 'people', 'sam', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     check('in-round replies reach the next speaker as context', said.events.at(-1)?.name === 'done' && (await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8')).includes('Why did the soup blush?'))
     check("in-round replies are never stored as the person's or the villager's line", lines.at(-2).text === "Let's make a joke together" && !JSON.stringify(lines).includes('soup blush'))
@@ -267,7 +329,7 @@ try {
       const fiber = ctx.plugin(villager, { root: warmRoot, agent, port: 0, people: listed, turnTimeoutMs })
       await fiber.await()
       const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-      return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+      return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens as Record<string, string> }
     }
     let agent = warmAgent({ model: 'fake' }, fake)
     let w = await warmStart(agent, 200)
@@ -434,7 +496,7 @@ try {
       const fiber = ctx.plugin(villager, { root: proot, agent: stubAgent(1), port: 0, people: { alex: 'Alex', leo: 'Leo', kim: 'Kim', mia: 'Mia' }, profiles: { alex: { age: 'adult', humour: 'crude' }, leo: { age: 'child' }, mia: { age: 'adult' } } })
       await fiber.await()
       const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-      return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+      return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens as Record<string, string> }
     }
     const prompt = (id: string) => readFile(join(proot, 'people', id, 'stub-last-prompt.txt'), 'utf8')
     const lastUsage = async (id: string) => JSON.parse((await readFile(join(proot, 'people', id, 'usage.jsonl'), 'utf8')).trim().split('\n').at(-1)!)
@@ -562,7 +624,8 @@ try {
   {
     const host = await start({ alex: 'Alex', sam: 'Sam', mia: 'Mia' })
     const auth = { 'content-type': 'application/json', authorization: `Bearer ${host.token}` }
-    const post = (path: string, value: unknown) => fetch(`${host.base}${path}`, { method: 'POST', headers: auth, body: JSON.stringify(value) })
+    const samAuth = { 'content-type': 'application/json', authorization: `Bearer ${host.tokens.sam}` }
+    const post = (path: string, value: unknown, headers = auth) => fetch(`${host.base}${path}`, { method: 'POST', headers, body: JSON.stringify(value) })
     const pngOf = (w: number, h: number) => {
       const png = new PNG({ width: w, height: h })
       png.data.fill(240)
@@ -580,7 +643,7 @@ try {
     const back = await fetch(`${host.base}/people/alex/sketches/${saved.id}`, { headers: auth })
     const bytes = Buffer.from(await back.arrayBuffer())
     check('the sketch reads back as the same PNG', back.status === 200 && back.headers.get('content-type') === 'image/png' && bytes.equals(Buffer.from(good, 'base64')))
-    check("another person's folder has no such sketch", (await fetch(`${host.base}/people/sam/sketches/${saved.id}`, { headers: auth })).status === 404)
+    check("another person's folder has no such sketch", (await fetch(`${host.base}/people/sam/sketches/${saved.id}`, { headers: samAuth })).status === 404)
     for (const id of ['..%2F..%2Fvillager%2Flaunch.json', 'ABCDEF123456', '../alex']) check(`sketch id ${JSON.stringify(id)} is refused`, [404].includes((await fetch(`${host.base}/people/alex/sketches/${id}`, { headers: auth })).status))
     const made = await (await post('/people/alex/props', { what: 'blue glaze, about 30 cm', sketch: saved.id, size: [0.2, 0.3, 0.2] })).json()
     check('a sketch is made through the vision maker', typeof made.module === 'string' && made.module.includes(`image bytes: ${bytes.length}`) && made.name === 'drawn thing', made.name)
@@ -591,27 +654,31 @@ try {
     check('words on a sketch only describe the prop: the maker answers with a module', injectedMade.status === 200 && 'module' in (await injectedMade.json()))
     const samLines = async () => (await readFile(join(root, 'people', 'sam', 'conversation.jsonl'), 'utf8').catch(() => '')).trim().split('\n').length
     const samBefore = await samLines()
-    const giveRes = await fetch(`${host.base}/people/mia/messages`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'For you', sketch: { from: 'alex', id: injected.id } }) })
+    const giveRes = await fetch(`${host.base}/people/alex/messages`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'For you', sketch: { from: 'alex', id: injected.id } }) })
     const giveText = await giveRes.text()
-    const seen = JSON.parse(await readFile(join(root, 'people', 'mia', 'stub-last-image.json'), 'utf8'))
+    const seen = JSON.parse(await readFile(join(root, 'people', 'alex', 'stub-last-image.json'), 'utf8'))
     check("a drawing reaches the villager's turn as an image, with no route", giveRes.status === 200 && /lovely drawing/.test(giveText) && !giveText.includes('event: route') && seen.bytes === bytes.length && seen.routed === false && seen.note === true, seen)
-    const miaLines = (await readFile(join(root, 'people', 'mia', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
-    const handed = miaLines.find((l) => l.sketch)
-    check('the conversation keeps a reference to the drawing, not its bytes', handed?.text === 'For you' && handed.sketch.from === 'alex' && handed.sketch.id === injected.id && !JSON.stringify(miaLines).includes(good.slice(0, 40)))
+    const alexLines = (await readFile(join(root, 'people', 'alex', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    const handed = alexLines.find((l) => l.sketch)
+    check('the conversation keeps a reference to the drawing, not its bytes', handed?.text === 'For you' && handed.sketch.from === 'alex' && handed.sketch.id === injected.id && !JSON.stringify(alexLines).includes(good.slice(0, 40)))
     check('nothing reached sam', (await samLines()) === samBefore)
-    check('a drawing with a route is refused', (await post('/people/mia/messages', { text: 'x', sketch: { from: 'alex', id: injected.id }, route: { primary: 'Dumpling', villagers: [{ id: 'alex', name: 'Dumpling', role: 'cook' }] } })).status === 400)
-    for (const [name, sketch] of [['from an unlisted person', { from: 'zoe', id: injected.id }], ['with a path for an id', { from: 'alex', id: '../../villager/launch' }], ['as a string', injected.id]] as const)
-      check(`a drawing ${name} is refused`, (await post('/people/mia/messages', { text: 'x', sketch })).status === 400)
-    check('a drawing that does not exist is refused', (await post('/people/mia/messages', { text: 'x', sketch: { from: 'sam', id: injected.id } })).status === 404)
+    check('a drawing with a route is refused', (await post('/people/alex/messages', { text: 'x', sketch: { from: 'alex', id: injected.id }, route: { primary: 'Dumpling', villagers: [{ id: 'alex', name: 'Dumpling', role: 'cook' }] } })).status === 400)
+    for (const [name, sketch] of [['with a path for an id', { from: 'alex', id: '../../villager/launch' }], ['as a string', injected.id]] as const)
+      check(`a drawing ${name} is refused`, (await post('/people/alex/messages', { text: 'x', sketch })).status === 400)
+    // A token hands over only its own person's drawings, and only to its own villager (#40).
+    for (const [name, sketch] of [['from an unlisted person', { from: 'zoe', id: injected.id }], ["from another person", { from: 'sam', id: injected.id }]] as const)
+      check(`a drawing ${name} is refused`, (await post('/people/alex/messages', { text: 'x', sketch })).status === 403)
+    check("a drawing handed to another person's villager is refused", (await post('/people/mia/messages', { text: 'x', sketch: { from: 'alex', id: injected.id } })).status === 403)
+    check('a drawing that does not exist is refused', (await post('/people/alex/messages', { text: 'x', sketch: { from: 'alex', id: 'abcdefabcdef' } })).status === 404)
     const list = await (await fetch(`${host.base}/people/alex/sketches`, { headers: auth })).json()
     const first = list.sketches.find((x: { id: string }) => x.id === saved.id), second = list.sketches.find((x: { id: string }) => x.id === injected.id)
-    check('the journal list folds each drawing with what became of it', list.sketches[0].id === injected.id && first?.words === 'blue glaze, about 30 cm' && first.made.length === 1 && second?.given[0] === 'mia', list.sketches)
-    check("sam's list is empty", (await (await fetch(`${host.base}/people/sam/sketches`, { headers: auth })).json()).sketches.length === 0)
+    check('the journal list folds each drawing with what became of it', list.sketches[0].id === injected.id && first?.words === 'blue glaze, about 30 cm' && first.made.length === 1 && second?.given[0] === 'alex', list.sketches)
+    check("sam's list is empty", (await (await fetch(`${host.base}/people/sam/sketches`, { headers: samAuth })).json()).sketches.length === 0)
     // Sentinel (#42): drawings per person are capped.
     const kept = join(root, 'people', 'sam', 'sketches')
     await mkdir(kept, { recursive: true })
     for (let i = 0; i < MAX_SKETCHES; i++) await writeFile(join(kept, `${i.toString(16).padStart(12, '0')}.png`), '')
-    check(`a person's drawings stop at ${MAX_SKETCHES}`, (await post('/people/sam/sketches', { png: good })).status === 409)
+    check(`a person's drawings stop at ${MAX_SKETCHES}`, (await post('/people/sam/sketches', { png: good }, samAuth)).status === 409)
     await host.fiber.dispose()
   }
 

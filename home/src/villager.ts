@@ -1,29 +1,44 @@
 // The page's side of the villager API (host/src/villager.ts), reached through
-// the dev server: /villager/launch gives the per-launch token and
-// /villager/api/* is forwarded to the host on 127.0.0.1.
+// the dev server, which forwards /villager/api/* to the host on 127.0.0.1.
+//
+// The token comes from the link the host prints (http://localhost:5181/#token=…).
+// A fragment never reaches a server; the page keeps the token for this tab in
+// sessionStorage and takes it out of the address bar.
 
-export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'route' }
+/**
+ * away: the host was not reached, so the line can be sent again. cut: the reply broke off or stalled after the host had the line.
+ * refused: the host answered 403, this tab's token is for another person (#40). route: the reply named a route the host refused.
+ */
+export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' | 'route' | 'refused' }
+/** A reply that sends nothing for this long is abandoned. */
+const IDLE_MS = 30_000
+const TOKEN_KEY = 'village.villager.token'
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
 let token: string | null = null
+try {
+  token = sessionStorage.getItem(TOKEN_KEY)
+} catch {}
+/** Takes a token from the address bar's #token=…, keeps it for this tab and clears it from the bar. */
+function adoptLink() {
+  const linked = new URLSearchParams(location.hash.slice(1)).get('token')
+  if (!linked) return
+  token = linked
+  try {
+    sessionStorage.setItem(TOKEN_KEY, linked)
+  } catch {}
+  history.replaceState(history.state, '', location.pathname + location.search)
+}
+adoptLink()
+// A new link opened in the same tab (after the host restarts) changes only the fragment.
+addEventListener('hashchange', adoptLink)
 
+/** Null when there is no token, the host is unreachable, or the token is from an earlier launch (open the new link). */
 export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!token) {
-      const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
-      if (!launch?.ok) return null
-      token = (await launch.json()).token
-    }
-    const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
-    if (!res || res.status >= 500) return null
-    // The host restarted with a new token: fetch it once and try again.
-    if (res.status === 401) {
-      token = null
-      continue
-    }
-    return res
-  }
-  return null
+  if (!token) return null
+  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
+  if (!res || res.status >= 500 || res.status === 401) return null
+  return res
 }
 
 export async function conversation(person: string): Promise<Line[] | null> {
@@ -38,52 +53,75 @@ export interface Routing {
   onRoute(routed: Routed): void
 }
 
+export interface SayOptions {
+  /** Background the person did not say (the table's round so far): the villager hears it, the conversation never stores it. */
+  context?: string
+  /** With routing, one call either answers (text streams) or names a route (onRoute, no text). */
+  routing?: Routing
+  /** A drawing handed over (#42, sketch.ts), by reference: the drawer's id and the sketch's. */
+  sketch?: { from: string; id: string }
+  signal?: AbortSignal
+}
+
 /**
- * `context` is background the person did not say (the table's round so far): the villager hears it, the conversation never stores it.
- * With `routing`, one call either answers (text streams) or names a route (`onRoute`, no text).
+ * Send a line and stream the reply. Stops when signal aborts, or when the host
+ * sends nothing for IDLE_MS, so a hung host never leaves the page waiting.
  */
-export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing, sketch?: { from: string; id: string }): Promise<Said> {
-  const res = await authorized(`/people/${person}/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    // A drawing handed over (#42, sketch.ts) goes by reference, the drawer's id and the sketch's.
-    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
-  })
+export async function say(person: string, text: string, onText: (t: string) => void, { context, routing, sketch, signal }: SayOptions = {}): Promise<Said> {
+  const stop = new AbortController()
+  const abort = () => stop.abort()
+  signal?.addEventListener('abort', abort)
+  let idle = setTimeout(abort, IDLE_MS)
   let routed: Routed | undefined
   const onRoute = (r: Routed) => {
     if (routed) return
     routed = r
     routing?.onRoute(r)
   }
-  if (!res) return { ok: false, why: 'away' }
-  if (res.status === 409) return { ok: false, why: 'busy' }
-  if (!res.ok || !res.body) return { ok: false, why: 'failed' }
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
-  let buffer = ''
   try {
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += value
-      let cut
-      while ((cut = buffer.indexOf('\n\n')) >= 0) {
-        const block = buffer.slice(0, cut)
-        buffer = buffer.slice(cut + 2)
-        const name = /^event: (.*)$/m.exec(block)?.[1]
-        const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
-        if (name === 'text') onText(data.t)
-        else if (name === 'route' && routing) onRoute(data.routed)
-        else if (name === 'done') {
-          if (data.routed && routing) onRoute(data.routed)
-          return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
-        } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
+    const res = await authorized(`/people/${person}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
+      signal: stop.signal,
+    })
+    // Stopped before an answer began: the host may already have the line.
+    if (!res) return { ok: false, why: stop.signal.aborted ? 'cut' : 'away' }
+    if (res.status === 409) return { ok: false, why: 'busy' }
+    if (res.status === 403) return { ok: false, why: 'refused' }
+    if (!res.ok || !res.body) return { ok: false, why: 'failed' }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buffer = ''
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        clearTimeout(idle)
+        idle = setTimeout(abort, IDLE_MS)
+        buffer += value
+        let cut
+        while ((cut = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 2)
+          const name = /^event: (.*)$/m.exec(block)?.[1]
+          const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
+          if (name === 'text') onText(data.t)
+          else if (name === 'route' && routing) onRoute(data.routed)
+          else if (name === 'done') {
+            if (data.routed && routing) onRoute(data.routed)
+            return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
+          } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
+        }
       }
+    } catch {
+      return { ok: false, why: 'cut' }
     }
-  } catch {
-    return { ok: false, why: 'away' }
+    // The stream ended without an answer: the host went away mid-reply.
+    return { ok: false, why: 'cut' }
+  } finally {
+    clearTimeout(idle)
+    signal?.removeEventListener('abort', abort)
   }
-  // The stream ended without an answer: the host went away mid-reply.
-  return { ok: false, why: 'away' }
 }
 
 // ── The always-on input (#42 prototype) ─────────────────────────────────────
@@ -106,7 +144,7 @@ export interface Routed {
   library?: string
   section?: 'talk' | 'tasks'
 }
-export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
+export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused'; ms: number }
 
 export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
   const t0 = performance.now()
@@ -114,6 +152,7 @@ export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>>
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
   if (res.status === 409) return { ok: false, why: 'busy', ms }
+  if (res.status === 403) return { ok: false, why: 'refused', ms }
   if (!res.ok) return { ok: false, why: 'failed', ms }
   try {
     return { ok: true, ms, ...((await res.json()) as T) }

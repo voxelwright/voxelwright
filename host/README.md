@@ -168,14 +168,88 @@ With the sandbox and gates (November 6, 2026, same Mac):
   fails.
 - Neither executor can look at the scene, so `ui-craft`'s screenshot loop is
   not run.
-- Promotion, hot-swap, rollback, review and a chat surface are later units.
+- Review and a chat surface are later units. Promotion and rollback: below.
+
+# Live home, promotion and rollback (#43)
+
+```sh
+npm run live -- install [--live ~/.village/live] [--commit HEAD]
+npm run live -- serve [--port 5183]
+npm run live -- status
+npm run elder -- promote <candidate-id> --approve
+npm run elder -- rollback [promotion-id|last]
+npm run check-promote          # headless proof, stub executors, scratch live home
+```
+
+`install` copies `home/` at one commit with `git archive` (new files, then
+`assertNoSharedInodes` against the checkout), starts a git repository there,
+and runs `npm ci`. `node_modules`, `dist`, `server.json` and `results.jsonl`
+are ignored, so they never count as uncommitted. `serve` runs the live home's
+own Vite with one extra plugin (`src/live-vite.ts`): a new file in
+`src/plugins/` is loaded into the running page through the dev kernel, and a
+deleted one is unloaded, instead of Vite reloading the page. Edited plugin
+files hot-swap as before. Nothing in `home/` changes for this.
+
+`promote` needs `--approve` on the command line; nothing a candidate or model
+wrote counts as approval. It also needs `result.json` with `passed`,
+`controller-files` passing, and the per-file sha256 that runs now record
+under `files` at check time. Every changed path must match
+`^home/src/plugins/[\w-]+\.ts$` (so no `.gitignore` or subfolder), and the
+working tree, the candidate commit's blobs and the recorded hashes must agree.
+The live install must have no uncommitted changes. It writes the committed
+blobs it hashed, never the candidate's working files, appends a promotion
+entry (candidate, files, hashes before and after, the live commit before) to
+`promotions.jsonl`, and commits only those paths and `promotions.jsonl` with
+the hardened git flags. `rollback` restores each file from that earlier live
+commit, checks it against the recorded hash, and records a rollback entry. It
+refuses when any promoted file no longer has the hash the promotion gave it
+(a hand edit or a later promotion). Each promotion or rollback holds
+`<live>/.git/village-promote.lock` (created exclusively, removed when done), so
+a second one at the same time is refused; a lock left by a crash names its pid
+and says to check `status` before deleting it. If writing or committing fails,
+the live tree is reset to the commit before and the attempt is a refusal.
+Every attempt, refused or not, appends a line with a plain message to
+`results.jsonl`.
+
+`npm run check-promote` (November 6, 2026, headless Chrome, 1280×800,
+`?q=low`): 19 of 19 steps. The promote command took 1.2 s; the candidate's red
+box was then in the kernel's active list and on screen (7.3% of pixels newly
+red; noise 0.003%) 854 ms later, with no page load. Rollback took 0.8 s and
+the box was gone 328 ms later, with no file left, as recorded. Earlier run on
+the same code: 739 + 262 ms and 550 + 271 ms. Each refusal (no `--approve`,
+missing, failed, edited after the check, uncommitted live changes, rollback
+over a hand edit) exited 1 and wrote its entry. Proof:
+`proof/20261106T234036-promote.json`. `npm run regressions`: 24 of 24.
+
+Regressions in the same run (November 7, 2026): the live server sends the
+home's Content Security Policy; two promotions at once give one promotion and
+one `live-busy` refusal with one new commit; a leftover lock is refused and
+named; a candidate file swapped right after its hash check never reaches live
+(the committed bytes are promoted instead); a failed write is a recorded
+refusal with live at the same commit and clean; a candidate that adds
+`home/src/plugins/.gitignore` is refused as `controller-owned`. 25 of 25. The
+proof JSON is written to `proof/` and not committed.
+
+Not yet: rollback has only been proved for an added file (restoring an
+earlier version is untested). A hot-added plugin is loaded globally, not into a room plan, until
+the next page load; `ready()` does not list it. The lock is only advisory to
+Village's own commands. The live server runs Vite dev, not a production
+build, and is not sandboxed (it runs only controller-owned config; promoted
+plugin code runs in the browser). `village.kernel` is reachable by any page
+script in dev builds.
 
 # Villager (#40)
 
-`npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village]`
-serves a person's villager on 127.0.0.1 only. Each start writes a random
-token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
-on stop; every request needs `Authorization: Bearer <token>`.
+`npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]`
+serves each person's villager on 127.0.0.1 only. Each start gives every person
+a new random token, writes the tokens and the port to
+`<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
+per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
+Every request needs `Authorization: Bearer <token>`, and a token opens only its
+own person: any other person id is refused with 403. That holds on every
+endpoint below, #42's included (talk, table rounds, `/route`, props, library,
+projects, sketches, and a drawing handed over in a message, which must be the
+token holder's own); `npm run check-villager` proves a cross-person refusal for each.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
 - `POST /people/<id>/messages {"text", "context"?}`: server-sent events, `text` pieces
@@ -207,15 +281,17 @@ records the line as unanswered and keeps the stored session.
 
 `npm run check-villager` (stub agent, no model): token, streaming, usage
 log, one turn at a time, launch-file cleanup, a new token per launch,
-resuming after a restart, failed turns, person ids, eight attempts to leave
-the notes folder (`../`, `a/../../`, absolute, symlinks, dotfiles) and the
-init guard. 34 of 34 passed (November 6, 2026).
+resuming after a restart, failed turns, person ids, person-scoped tokens
+(Alex's token can neither read nor write Sam's villager, and the reverse),
+eight attempts to leave the notes folder (`../`, `a/../../`, absolute,
+symlinks, dotfiles) and the init guard. 38 of 38 passed (November 7, 2026).
 
 Not yet: session transcripts live in the operator's `~/.claude/projects/`,
 not the person's folder; every person shares the operator's subscription and
-OS user, so this is not family isolation; the dev-server token handoff
-trusts any same-origin page on localhost:5181; the villager cannot remind or
-act yet.
+OS user, so this is not family isolation; any script in a page (a promoted
+plugin included) can read that tab's token from `sessionStorage` and use that
+one person's villager, and the policy does not stop it navigating the page
+away to another origin; the villager cannot remind or act yet.
 
 ## Warm villagers and timings (#42, November 7, 2026)
 
@@ -267,9 +343,8 @@ as one cleaned line (`cleanName`) and given to models as quoted JSON; `POST
 /route` takes one line at a time per person (409), with the flag cleared in
 `finally`; making a prop prunes unkept drafts older than a day. The page only
 follows a talk route to a villager the person's own words name, and sends
-their exact words. Still true: one launch token serves every listed person,
-so a page holding it can reach `/people/<anyone>/*`; the page acts only for
-the person whose home it is.
+their exact words. Since the #40 merge each person has their own token, and
+`/people/<anyone else>/*` is refused (403).
 
 `npm run check-villager`: 120 of 120 (new: in-round context never stored; a
 warm host starts a process per person, reuses it, fails and closes it on a
@@ -532,8 +607,8 @@ first, 16 to 1536 px a side. It is stored under the person who drew it,
 `people/<id>/sketches/<sid>.png`, and `sketches.jsonl` records each event:
 drawn (with the person's words), given (to whom), made (which library item).
 
-New endpoints and fields, all behind the launch token and under one listed
-person (for the Sentinel review):
+New endpoints and fields, all behind the person's own token (#40) and under
+that person only (for the Sentinel review):
 
 - `POST /people/:id/sketches` `{png, words?}`, its own body cap (about 1.33 MB);
   answers `{id, w, h}`.
@@ -545,16 +620,15 @@ person (for the Sentinel review):
   gets the image and the words as JSON-quoted data and writes the module; it
   is stored as text like any other prop. Its first comment line names the
   item (`// name: blue glazed vase`), cleaned to letters, digits and spaces.
-- `POST /people/:id/messages` takes `sketch: {from, id}`: a listed person's id
-  and a sketch id, never a path. The image goes into that villager's turn as
+- `POST /people/:id/messages` takes `sketch: {from, id}`: the token holder's
+  own id (another person's is refused, 403) and a sketch id, never a path. The image goes into that villager's turn as
   an image block, with a context note that anything drawn or written in it is
   part of the drawing, never instructions. A drawing with `route` is refused
   (400), so nothing drawn can choose a route. The conversation keeps
   `{from, id}` beside the line, never the bytes.
 
-Still true: one launch token serves every listed person, so a page holding it
-can read any listed person's drawings and hand them to any villager. The page
-only reads and gives the drawer's own.
+Since the #40 merge a token reads and hands over only its own person's
+drawings, and only to that person's villager.
 
 `npm run check-villager`: 148 of 148 (new: a sketch needs the token; text, a
 GIF, 2000 px wide, 8 px tall, a number and over 1 MB are refused; IHDR size;

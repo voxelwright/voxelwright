@@ -1,8 +1,10 @@
-// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village]
+// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]
 // warm (the default, #42) keeps one Claude Code process per person between turns; claude starts one per turn.
 // VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the synthetic people; the default is alex:Alex.
 // Each entry may add an age band and a language (alex:Alex:adult:en). VILLAGER_PROFILES=<file.json> sets
 // whole profiles ({"alex": {"age": "adult", "language": "en", "style": "...", "humour": "cheeky"}}) and wins.
+// Prints each person's link to the home. The token is in the fragment, which the
+// browser never sends to a server; the page keeps it for the tab and clears it.
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -25,6 +27,7 @@ const { values } = parseArgs({
     'sketch-effort': { type: 'string', default: 'low' },
     port: { type: 'string', default: '5190' },
     root: { type: 'string', default: join(homedir(), '.village') },
+    home: { type: 'string', default: 'http://localhost:5181/' },
   },
 })
 if (values.agent !== 'warm' && values.agent !== 'claude' && values.agent !== 'stub') {
@@ -64,6 +67,7 @@ const fiber = root.plugin(villager, {
 })
 await fiber.await()
 console.log(`villager (${values.agent}${values.agent === 'stub' ? '' : `, ${values.model}`}) for ${Object.keys(people ?? { alex: 1 }).join(', ')} listening on 127.0.0.1:${root.villager.port}`)
+for (const [person, token] of Object.entries(root.villager.tokens)) console.log(`${person}: ${new URL(`#token=${token}`, values.home)}`)
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {
