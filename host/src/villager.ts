@@ -38,6 +38,7 @@ import type { Agent } from './villager-agent.ts'
 import { villagerRoutes, type VillagerMaker } from './villager-make.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
 import { themeRequest, type Themer } from './villager-theme.ts'
+import { rulesRequest, type Ruler } from './villager-physics.ts'
 import { checkProfile, humourOf, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
 
@@ -58,6 +59,8 @@ export interface Config {
   villagerMaker?: VillagerMaker
   /** Writes a theme from a sentence (#50). Without it /people/:id/theme answers 503. */
   themer?: Themer
+  /** Writes world rules from a sentence (#74). Without it /people/:id/physics answers 503. */
+  ruler?: Ruler
   /** Sketching (#42, sketch.ts): a drawing to a prop module. Without it a sketch on /props answers 503. */
   sketchMaker?: SketchMaker
 }
@@ -276,6 +279,7 @@ export default {
     async function input(id: string, what: string, item: string | undefined, req: IncomingMessage, res: ServerResponse) {
       const dir = personDir(id)
       if (what === 'theme' && req.method === 'POST') return themeRequest(config.themer, id, dir, req, res, send)
+      if (what === 'physics' && req.method === 'POST') return rulesRequest(config.ruler, id, dir, req, res, send)
       if (what === 'route' && req.method === 'POST') {
         if (!config.router) return send(res, 503, { error: 'no router' })
         let b: { text?: unknown; primary?: unknown; villagers?: unknown }
@@ -433,7 +437,7 @@ export default {
         await mkdir(personDir(id), { recursive: true, mode: 0o700 })
         return sketchRoute(personDir(id), sid, req, res, send)
       }
-      const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library|theme)|library\/([^/]+)(\/keep)?)$/.exec(path)
+      const inputMatch = /^\/people\/([^/]+)\/(?:(route|props|projects|library|theme|physics)|library\/([^/]+)(\/keep)?)$/.exec(path)
       if (inputMatch) {
         const [, id, plain, item, keep] = inputMatch
         if (item !== undefined && !ITEM.test(item)) return send(res, 404, { error: 'no such item' })

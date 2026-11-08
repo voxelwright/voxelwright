@@ -46,13 +46,19 @@ export interface Contact {
   sensor: boolean
 }
 
-/** A hinge between a body and the world, in world space. */
+/** A hinge between a body and the world, in world space. Its angle is 0 where the body was made. */
 export interface HingeSpec {
   body: BodyId
   anchor: Vec3
   axis: Vec3
-  limits?: [number, number]
-  motor?: { velocity: number; maxTorque: number }
+  limits: [number, number]
+}
+
+/** A slider between a body and the world along `axis`, world space. Its position is 0 where the body was made. */
+export interface SliderSpec {
+  body: BodyId
+  axis: Vec3
+  limits: [number, number]
 }
 
 /** Village's combine rule for a touching pair: [friction, restitution]. Called inside the solver's callback: pure, no body changes. */
@@ -65,8 +71,11 @@ export interface PhysicsCore {
   addBody(spec: BodySpec): BodyId
   removeBody(id: BodyId): void
   addHinge(spec: HingeSpec): JointId
-  setMotor(joint: JointId, velocity: number, maxTorque: number): void
-  hingeAngle(joint: JointId): number
+  addSlider(spec: SliderSpec): JointId
+  /** Drive a joint's motor at a velocity (rad/s or m/s) with at most this torque (N·m) or force (N). */
+  setMotor(joint: JointId, velocity: number, limit: number): void
+  /** A hinge's angle (rad) or a slider's position (m). */
+  jointPosition(joint: JointId): number
   /** One step of dt seconds in `substeps` collision steps. */
   step(dt: number, substeps: number): void
   /** New contacts since the last call. */

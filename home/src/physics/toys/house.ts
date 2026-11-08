@@ -36,7 +36,7 @@ export const HOUSE: ToySpec = {
     { id: 'block-cream', shape: { kind: 'box', half: [0.045, 0.045, 0.045] }, material: 'maple', paint: '#efe4cc', motion: 'dynamic', at: [-0.32, 0.125, 1.47], turn: [0, 0.5, 0] },
     { id: 'cork-ball', shape: { kind: 'sphere', radius: 0.05 }, material: 'cork', motion: 'dynamic', at: [LIVING_X - 1.5, 0.05, 2.1] },
     // Heavy: a walnut toy crate. It moves, slowly, when someone walks into it.
-    { id: 'crate', shape: { kind: 'box', half: [0.16, 0.13, 0.12] }, material: 'walnut', motion: 'dynamic', at: [LIVING_X - 0.35, 0.13, 1.7], turn: [0, 0.3, 0] },
+    { id: 'crate', shape: { kind: 'box', half: [0.16, 0.13, 0.12] }, material: 'walnut', motion: 'dynamic', at: [LIVING_X - 0.1, 0.13, 0.25], turn: [0, 0.3, 0] },
   ],
   gadgets: [],
   wires: [],

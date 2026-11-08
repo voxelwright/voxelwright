@@ -35,7 +35,7 @@ interface Runtime {
   toy: string
   thing?: Thing
   joint?: JointId
-  /** piston: 0..1 while charging; speed while firing. */
+  /** piston: how far it was pulled (0..1) and its forward speed while firing. */
   charge: number
   firing: number
   value: number
@@ -62,7 +62,7 @@ export class World {
   private held = new Set<string>()
   private queue: { from: string; signal: Signal }[] = []
   private respawns: { thing: Thing; t: number }[] = []
-  private villagers = new Map<THREE.Object3D, { body: BodyId; key: string; lift: number }>()
+  private villagers = new Map<THREE.Object3D, { body: BodyId; key: string; lift: number; radius: number; last: THREE.Vector3; walked: number; left: boolean }>()
   private pairs: [number, number][] = []
   private clampedAt = new Map<string, number>()
   private dust: { mesh: THREE.Mesh; life: number; v: THREE.Vector3 }[] = []
@@ -70,6 +70,7 @@ export class World {
   private wood = new Map<string, THREE.Texture>()
   private looks = new Map<string, THREE.Material>()
   private accumulator = 0
+  private tally = new Map<string, number>()
   private clock = 0
   private stepTimes: number[] = []
   private frameTimes: number[] = []
@@ -80,7 +81,7 @@ export class World {
     core.setCombine((a, b) => this.pairs[(this.byBody[a]?.material ?? 0) * MATERIAL_NAMES.length + (this.byBody[b]?.material ?? 0)] ?? [0.5, 0.3])
     this.applyRules(this.rules)
     // A small pool of felt dust for impacts.
-    const dustMat = new THREE.MeshStandardMaterial({ color: '#e9dcc4', roughness: 1, transparent: true, opacity: 0.8, depthWrite: false })
+    const dustMat = new THREE.MeshStandardMaterial({ color: '#e9dcc4', roughness: 1, transparent: true, opacity: 0.45, depthWrite: false })
     const dustGeo = new THREE.SphereGeometry(1, 8, 6)
     for (let i = 0; i < 24; i++) {
       const mesh = new THREE.Mesh(dustGeo, dustMat)
@@ -158,7 +159,11 @@ export class World {
       if (g.kind === 'hinge') {
         const anchor = v3(g.anchor).applyMatrix4(frame)
         const axis = v3(g.axis).transformDirection(frame)
-        rt.joint = this.core.addHinge({ body: rt.thing!.body, anchor: [anchor.x, anchor.y, anchor.z], axis: [axis.x, axis.y, axis.z], limits: [0, g.knobs.swing], motor: { velocity: -g.knobs.speed, maxTorque: g.knobs.torque } })
+        rt.joint = this.core.addHinge({ body: rt.thing!.body, anchor: [anchor.x, anchor.y, anchor.z], axis: [axis.x, axis.y, axis.z], limits: [0, g.knobs.swing] })
+      }
+      if (g.kind === 'piston') {
+        const axis = v3(g.axis).transformDirection(frame)
+        rt.joint = this.core.addSlider({ body: rt.thing!.body, axis: [axis.x, axis.y, axis.z], limits: [-KNOBS.travel.max, KNOBS.travel.max] })
       }
       if (g.kind === 'counter' && g.display) this.display(`${toy.id}/${g.display}`, 0)
       this.gadgets.set(`${toy.id}/${g.id}`, rt)
@@ -251,7 +256,7 @@ export class World {
       const key = `villager/${o.userData.villagerId}`
       const thing: Thing = { key, toy: 'villagers', part: { id: key, shape: { kind: 'capsule', halfHeight: half, radius }, material: 'villager', motion: 'kinematic', at: [0, 0, 0] }, body, material: MATERIAL_NAMES.indexOf('villager'), home: { p: [root.x, root.y + lift, root.z], q: [0, 0, 0, 1] }, wobble: 0 }
       this.byBody[body] = thing
-      this.villagers.set(o, { body, key, lift })
+      this.villagers.set(o, { body, key, lift, radius, last: root.clone(), walked: 0, left: false })
     })
     for (const [o, v] of this.villagers) if (!seen.has(o)) {
       this.core.removeBody(v.body)
@@ -310,13 +315,14 @@ export class World {
     for (const [o, v] of this.villagers) {
       o.getWorldPosition(p)
       this.core.moveKinematic(v.body, [p.x, p.y + v.lift, p.z], [0, 0, 0, 1], h)
+      this.stride(v, p)
     }
     for (const rt of this.gadgets.values()) {
       const g = rt.spec
       if (g.kind === 'hinge') {
         const k = rt.knobs
         this.core.setMotor(rt.joint!, (this.held.has(g.input) ? 1 : -1) * k.speed * Math.min(2, r.kick), k.torque * r.kick)
-      } else if (g.kind === 'piston') this.piston(rt, g, h)
+      } else if (g.kind === 'piston') this.piston(rt, g)
     }
     this.core.step(h, r.substeps)
     for (const c of this.core.contacts()) this.contact(c)
@@ -336,27 +342,37 @@ export class World {
     if (this.stepTimes.length > 1200) this.stepTimes.splice(0, 600)
   }
 
-  /** A kinematic part pulled back along -axis while held, then shot home at a speed set by how long it was held. */
-  private piston(rt: Runtime, g: Extract<GadgetSpec, { kind: 'piston' }>, h: number) {
-    const thing = rt.thing!
+  /**
+   * A part on a slider: pulled back along -axis while held (fully after `charge` s, to `travel`
+   * m), driven forward on release at a speed set by how far it was pulled, through its rest point
+   * by up to `travel` so a shot leaves at that speed, then eased back to rest. A dynamic body, so
+   * the solver sweeps it into what it hits.
+   */
+  private piston(rt: Runtime, g: Extract<GadgetSpec, { kind: 'piston' }>) {
     const k = rt.knobs
-    const frame = this.frames.get(rt.toy)!
-    const axis = v3(g.axis).transformDirection(frame)
-    const home = v3(thing.home.p)
-    if (this.held.has(g.input) && !rt.firing) rt.charge = Math.min(1, rt.charge + h / k.charge)
-    else if (rt.charge > 0 && !rt.firing) rt.firing = Math.max(0.05, k.strength * rt.charge * this.rules.kick)
-    let back = rt.charge * k.travel
+    const pos = this.core.jointPosition(rt.joint!)
+    const held = this.held.has(g.input)
+    let velocity: number, limit: number
     if (rt.firing) {
-      back -= rt.firing * h
-      rt.charge = Math.max(0, back / k.travel)
-      if (back <= 0) {
-        back = 0
-        rt.firing = 0
-        rt.charge = 0
-      }
+      if (pos >= k.travel * 0.9) rt.firing = 0
+      velocity = rt.firing
+      limit = 400
+    } else if (held && pos <= 0.002) {
+      rt.charge = Math.min(1, Math.max(rt.charge, -pos / k.travel))
+      velocity = pos > -k.travel ? -k.travel / k.charge : 0
+      limit = 30
+    } else if (rt.charge > 0.02) {
+      rt.firing = Math.max(0.05, k.strength * rt.charge * this.rules.kick)
+      rt.charge = 0
+      velocity = rt.firing
+      limit = 400
+    } else {
+      // At rest, held there gently so whatever leans on it does not push it back.
+      rt.charge = 0
+      velocity = -pos * 12
+      limit = 30
     }
-    const target = home.addScaledVector(axis, -back)
-    this.core.moveKinematic(thing.body, [target.x, target.y, target.z], thing.home.q, h)
+    this.core.setMotor(rt.joint!, velocity, limit)
   }
 
   private contact(c: Contact) {
@@ -372,7 +388,7 @@ export class World {
     const impulse = c.impulse * this.rules.impact
     if (impulse >= IMPACT_MIN) {
       const ma = MATERIALS[ta.part.material], mb = MATERIALS[tb.part.material]
-      this.emit({ kind: 'impact', a: ta.key, b: tb.key, materials: [ta.part.material, tb.part.material], at: at(c.point), impulse: c.impulse, hardness: Math.max(ma.hardness, mb.hardness), impact: this.rules.impact })
+      this.emit({ kind: 'impact', a: ta.key, b: tb.key, materials: [ta.part.material, tb.part.material], shapes: [ta.part.shape, tb.part.shape], at: at(c.point), normal: at(c.normal), impulse: c.impulse, hardness: Math.max(ma.hardness, mb.hardness), impact: this.rules.impact })
       this.puff(c.point, impulse)
       for (const t of [ta, tb]) if (t.part.motion !== 'dynamic' && t.mesh) t.wobble = Math.min(1, t.wobble + impulse * 4)
     }
@@ -384,11 +400,34 @@ export class World {
     }
   }
 
+  /** A step each stride along the floor, alternating feet either side of the walking line. */
+  private stride(v: { key: string; radius: number; last: THREE.Vector3; walked: number; left: boolean }, p: THREE.Vector3) {
+    const dx = p.x - v.last.x, dz = p.z - v.last.z
+    const d = Math.hypot(dx, dz)
+    // A jump (a seat hop, a teleport) is not walking; nor is standing on a chair.
+    if (d > 0.5 || p.y > 0.05) {
+      v.last.copy(p)
+      v.walked = 0
+      return
+    }
+    v.walked += d
+    v.last.copy(p)
+    const STRIDE = 0.32
+    if (v.walked < STRIDE || d < 1e-5) return
+    v.walked -= STRIDE
+    v.left = !v.left
+    const hx = dx / d, hz = dz / d
+    const side = (v.left ? 1 : -1) * v.radius * 0.45
+    this.emit({ kind: 'step', thing: v.key, material: 'villager', at: { x: p.x - hz * side, y: 0, z: p.z + hx * side }, heading: { x: hx, y: 0, z: hz }, side: v.left ? 'left' : 'right', foot: { length: v.radius * 0.9, width: v.radius * 0.45 } })
+  }
+
   /** A gadget output: reported, then carried along its wires. */
   private fire(gadget: string, port: string, signal: Signal) {
     const thing = signal.body !== undefined ? this.byBody[signal.body]?.key : undefined
     this.emit({ kind: 'signal', gadget, port, value: signal.value, ...(thing ? { thing } : {}), ...(signal.at ? { at: at(signal.at) } : {}) })
-    this.queue.push({ from: `${gadget}.${port}`, signal })
+    const from = `${gadget}.${port}`
+    this.tally.set(from, (this.tally.get(from) ?? 0) + 1)
+    this.queue.push({ from, signal })
   }
 
   private deliver(from: string, signal: Signal) {
@@ -405,7 +444,7 @@ export class World {
         const s = rt.knobs.strength * this.rules.kick
         this.core.setVelocity(signal.body, [v[0] + signal.dir[0] * s, v[1] + signal.dir[1] * s, v[2] + signal.dir[2] * s])
         this.fire(to.slice(0, dot), 'kicked', { value: s, body: signal.body })
-      } else if (g.kind === 'emitter' && port === 'spawn' && rt.thing) {
+      } else if (g.kind === 'emitter' && port === 'spawn' && rt.thing && (signal.body === undefined || signal.body === rt.thing.body)) {
         if (!this.respawns.some((r) => r.thing === rt.thing)) this.respawns.push({ thing: rt.thing, t: this.clock + rt.knobs.delay })
         this.fire(to.slice(0, dot), 'spawned', { value: 1 })
       } else if (g.kind === 'counter' && (port === 'add' || port === 'reset')) {
@@ -447,7 +486,7 @@ export class World {
       d.mesh.visible = true
       d.mesh.position.set(point[0], point[1], point[2])
       d.v.set((Math.random() - 0.5) * 0.3, 0.15 + Math.random() * 0.2, (Math.random() - 0.5) * 0.3).multiplyScalar(Math.min(1, 0.3 + impulse * 3))
-      d.mesh.scale.setScalar(0.004 + Math.min(0.012, impulse * 0.05))
+      d.mesh.scale.setScalar(0.0025 + Math.min(0.004, impulse * 0.02))
     }
   }
 
@@ -472,7 +511,7 @@ export class World {
       if (d.life <= 0) continue
       d.life -= dt * 1.8
       d.mesh.position.addScaledVector(d.v, dt)
-      d.mesh.scale.multiplyScalar(1 + dt * 1.5)
+      d.mesh.scale.multiplyScalar(1 + dt * 0.8)
       if (d.life <= 0) d.mesh.visible = false
     }
   }
@@ -489,8 +528,23 @@ export class World {
     return { position: p, local: [local.x, local.y, local.z] as Vec3, velocity: this.core.velocity(t.body), body: t.body }
   }
 
+  /** Puts a moving thing at a point in its toy's frame, at rest (tests now; picking things up later). */
+  place(key: string, local: Vec3) {
+    const t = this.byKey.get(key)
+    const frame = this.frames.get(t?.toy ?? '')
+    if (!t || !frame || t.part.motion !== 'dynamic' || !local.every(Number.isFinite)) return false
+    const p = v3(local).applyMatrix4(frame)
+    this.core.setState(t.body, [p.x, p.y, p.z], [0, 0, 0], t.home.q)
+    return true
+  }
+
   mesh(key: string) {
     return this.byKey.get(key)?.mesh
+  }
+
+  /** How many times each gadget output has fired since the world started. */
+  signals() {
+    return Object.fromEntries(this.tally)
   }
 
   counters() {

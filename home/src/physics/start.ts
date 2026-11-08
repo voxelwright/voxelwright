@@ -18,7 +18,7 @@ import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 const STORED = 'village.physics.rules'
 const TOYS = [HOUSE, PINBALL, PINBALL_STAND]
 /** Where the view stands to play the table: at its low end, looking down the playfield. */
-const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.62, PINBALL.frame.at[2] + 1.05), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12) }
+const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.78, PINBALL.frame.at[2] + 1.4), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12) }
 
 export async function start(ctx: Context, gone: () => boolean) {
   const t0 = performance.now()
@@ -121,7 +121,9 @@ export async function start(ctx: Context, gone: () => boolean) {
       return range
     },
     thing: (key: string) => world.thing(key),
+    place: (key: string, local: Vec3) => world.place(key, local),
     counters: () => world.counters(),
+    signals: () => world.signals(),
     knobs: () => world.knobs(),
     setKnob: (gadget: string, knob: string, value: number) => world.setKnob(gadget, knob, value),
     reset: () => world.reset(),

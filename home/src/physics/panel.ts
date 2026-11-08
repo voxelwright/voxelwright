@@ -39,9 +39,10 @@ export function panel(world: World, ask: (text: string) => Promise<Asked>, stats
     input.step = String(range.step)
     input.value = String(value)
     const out = document.createElement('output')
-    out.textContent = (+value).toFixed(2)
+    const digits = range.step < 0.01 ? 3 : 2
+    out.textContent = (+value).toFixed(digits)
     input.addEventListener('input', () => {
-      out.textContent = (+input.value).toFixed(2)
+      out.textContent = (+input.value).toFixed(digits)
       set(+input.value)
     })
     label.append(text, input, out)

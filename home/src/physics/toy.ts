@@ -45,11 +45,11 @@ export type GadgetSpec =
   | { id: string; kind: 'kick'; part: string; knobs: { strength: number } }
   /** A motor hinge on a dynamic part: swings to `swing` rad at `speed` rad/s while the input is held, back when released. */
   | { id: string; kind: 'hinge'; part: string; anchor: Vec3; axis: Vec3; input: string; knobs: { speed: number; torque: number; swing: number } }
-  /** A kinematic part pulled back along -axis while the input is held (full after `charge` s, `travel` m), shot forward at up to `strength` m/s on release. */
+  /** A dynamic part on a slider, pulled back along -axis while the input is held (full after `charge` s, `travel` m), shot forward at up to `strength` m/s on release. */
   | { id: string; kind: 'piston'; part: string; axis: Vec3; input: string; knobs: { strength: number; travel: number; charge: number } }
   /** A sensor part: `enter` when a moving thing comes in. */
   | { id: string; kind: 'zone'; part: string }
-  /** On `spawn`, puts its part back where it started, at rest, after `delay` s. */
+  /** On `spawn`, puts its part back where it started, at rest, after `delay` s: when the signal is about that part, or about nothing. */
   | { id: string; kind: 'emitter'; part: string; knobs: { delay: number } }
   /** Adds `step` on `add`, zero on `reset`; `changed` carries the total. Shown on `display` when given (a part's face). */
   | { id: string; kind: 'counter'; display?: string; knobs: { step: number } }

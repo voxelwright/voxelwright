@@ -4,7 +4,7 @@
 // one scratch Vec3/RVec3/Quat, and dispose() frees the whole world.
 import initJolt from 'jolt-physics/wasm'
 import wasmUrl from 'jolt-physics/jolt-physics.wasm.wasm?url'
-import type { BodyId, BodySpec, Combine, Contact, HingeSpec, PhysicsCore, Quat, Vec3 } from './core'
+import type { BodyId, BodySpec, Combine, Contact, HingeSpec, PhysicsCore, Quat, SliderSpec, Vec3 } from './core'
 
 type J = Awaited<ReturnType<typeof initJolt>>
 let J: J
@@ -36,12 +36,19 @@ export function createJolt(): PhysicsCore {
   J.destroy(bpMoving)
   const system = jolt.GetPhysicsSystem()
   const bi = system.GetBodyInterface()
+  // Village's things are toy-sized (a 27 mm ball beside 1 cm walls). Jolt's defaults (2 cm
+  // speculative contacts, 2 cm penetration slop) are for metre-sized things: a speculative
+  // contact with a wall corner the ball only passes stopped it dead (#74). Scale them down.
+  const ps = system.GetPhysicsSettings()
+  ps.mSpeculativeContactDistance = 0.004
+  ps.mPenetrationSlop = 0.001
+  system.SetPhysicsSettings(ps)
 
   const ids: (InstanceType<J['BodyID']> | null)[] = []
   const bodies: (InstanceType<J['Body']> | null)[] = []
   const sensors: boolean[] = []
   const byIndex = new Map<number, BodyId>()
-  const hinges: InstanceType<J['HingeConstraint']>[] = []
+  const jointList: ({ kind: 'hinge'; c: InstanceType<J['HingeConstraint']> } | { kind: 'slider'; c: InstanceType<J['SliderConstraint']> })[] = []
   let fresh: Contact[] = []
   let combine: Combine = () => [0.5, 0.3]
   let optimized = false
@@ -50,6 +57,17 @@ export function createJolt(): PhysicsCore {
   const setV = (a: Vec3) => { tmpV.Set(a[0], a[1], a[2]); return tmpV }
   const setR = (a: Vec3) => { tmpR.Set(a[0], a[1], a[2]); return tmpR }
   const setQ = (q: Quat) => { tmpQ.Set(q[0], q[1], q[2], q[3]); return tmpQ }
+  const body = (id: BodyId) => {
+    const b = bodies[id]
+    if (!b) throw new Error(`no body ${id}`)
+    return b
+  }
+  /** Any unit vector perpendicular to a unit axis. */
+  const normalTo = (ax: Vec3): Vec3 => {
+    const n: Vec3 = Math.abs(ax[1]) < 0.9 ? [-ax[2], 0, ax[0]] : [0, ax[2], -ax[1]]
+    const len = Math.hypot(...n)
+    return [n[0] / len, n[1] / len, n[2] / len]
+  }
   const bid = (id: BodyId) => {
     const b = ids[id]
     if (!b) throw new Error(`no body ${id}`)
@@ -155,41 +173,47 @@ export function createJolt(): PhysicsCore {
       const hs = new J.HingeConstraintSettings()
       hs.mPoint1 = hs.mPoint2 = setR(spec.anchor)
       hs.mHingeAxis1 = hs.mHingeAxis2 = setV(spec.axis)
-      const ax = spec.axis
-      // Any unit vector perpendicular to the axis.
-      const n: Vec3 = Math.abs(ax[1]) < 0.9 ? [-ax[2], 0, ax[0]] : [0, ax[2], -ax[1]]
-      const len = Math.hypot(...n)
-      hs.mNormalAxis1 = hs.mNormalAxis2 = setV([n[0] / len, n[1] / len, n[2] / len])
-      if (spec.limits) {
-        hs.mLimitsMin = spec.limits[0]
-        hs.mLimitsMax = spec.limits[1]
-      }
-      if (spec.motor) {
-        hs.mMotorSettings.mMaxTorqueLimit = spec.motor.maxTorque
-        hs.mMotorSettings.mMinTorqueLimit = -spec.motor.maxTorque
-      }
-      const body = bodies[spec.body]
-      if (!body) throw new Error(`no body ${spec.body}`)
-      const c = J.castObject(hs.Create(jolt.sGetFixedToWorldBody(), body), J.HingeConstraint)
+      hs.mNormalAxis1 = hs.mNormalAxis2 = setV(normalTo(spec.axis))
+      hs.mLimitsMin = spec.limits[0]
+      hs.mLimitsMax = spec.limits[1]
+      const c = J.castObject(hs.Create(jolt.sGetFixedToWorldBody(), body(spec.body)), J.HingeConstraint)
       J.destroy(hs)
       system.AddConstraint(c)
-      if (spec.motor) {
-        c.SetMotorState(J.EMotorState_Velocity)
-        c.SetTargetAngularVelocity(spec.motor.velocity)
+      c.SetMotorState(J.EMotorState_Velocity)
+      jointList.push({ kind: 'hinge', c })
+      return jointList.length - 1
+    },
+    addSlider(spec: SliderSpec) {
+      const ss = new J.SliderConstraintSettings()
+      ss.mAutoDetectPoint = true
+      ss.mSliderAxis1 = ss.mSliderAxis2 = setV(spec.axis)
+      ss.mNormalAxis1 = ss.mNormalAxis2 = setV(normalTo(spec.axis))
+      ss.mLimitsMin = spec.limits[0]
+      ss.mLimitsMax = spec.limits[1]
+      const c = J.castObject(ss.Create(jolt.sGetFixedToWorldBody(), body(spec.body)), J.SliderConstraint)
+      J.destroy(ss)
+      system.AddConstraint(c)
+      c.SetMotorState(J.EMotorState_Velocity)
+      jointList.push({ kind: 'slider', c })
+      return jointList.length - 1
+    },
+    setMotor(joint, velocity, limit) {
+      const j = jointList[joint]
+      const ms = j.c.GetMotorSettings()
+      if (j.kind === 'hinge') {
+        ms.mMaxTorqueLimit = limit
+        ms.mMinTorqueLimit = -limit
+        j.c.SetTargetAngularVelocity(velocity)
+      } else {
+        ms.mMaxForceLimit = limit
+        ms.mMinForceLimit = -limit
+        j.c.SetTargetVelocity(velocity)
       }
-      hinges.push(c)
-      return hinges.length - 1
+      bi.ActivateBody(j.c.GetBody2().GetID())
     },
-    setMotor(joint, velocity, maxTorque) {
-      const c = hinges[joint]
-      const ms = c.GetMotorSettings()
-      ms.mMaxTorqueLimit = maxTorque
-      ms.mMinTorqueLimit = -maxTorque
-      c.SetTargetAngularVelocity(velocity)
-      bi.ActivateBody(c.GetBody2().GetID())
-    },
-    hingeAngle(joint) {
-      return hinges[joint].GetCurrentAngle()
+    jointPosition(joint) {
+      const j = jointList[joint]
+      return j.kind === 'hinge' ? j.c.GetCurrentAngle() : j.c.GetCurrentPosition()
     },
     step(dt, substeps) {
       if (!optimized) {
@@ -243,7 +267,7 @@ export function createJolt(): PhysicsCore {
     dispose() {
       J.destroy(jolt)
       for (const o of [listener, est, tmpV, tmpR, tmpQ]) J.destroy(o)
-      ids.length = bodies.length = hinges.length = 0
+      ids.length = bodies.length = jointList.length = 0
       byIndex.clear()
     },
   }
