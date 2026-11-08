@@ -7,7 +7,12 @@ export interface Line { from: 'person' | 'villager'; text?: string; unanswered?:
 
 let token: string | null = null
 
-export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
+/**
+ * A request to the host, or null when the host is away. With `hostErrors`, a 5xx the host itself answered (JSON; the
+ * dev server's proxy answers plain text when the host is down) is returned, so the caller can say it failed, not that
+ * the host is away.
+ */
+export async function authorized(path: string, init: RequestInit = {}, hostErrors = false): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!token) {
       const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
@@ -15,7 +20,7 @@ export async function authorized(path: string, init: RequestInit = {}): Promise<
       token = (await launch.json()).token
     }
     const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
-    if (!res || res.status >= 500) return null
+    if (!res || (res.status >= 500 && !(hostErrors && res.headers.get('content-type')?.startsWith('application/json')))) return null
     // The host restarted with a new token: fetch it once and try again.
     if (res.status === 401) {
       token = null
@@ -108,9 +113,10 @@ export interface Routed {
 }
 export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
 
-export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
+/** With `hostErrors`, a failure the host answered itself (a 5xx in JSON) is 'failed', not 'away' (see authorized). */
+export async function call<T>(path: string, body?: unknown, hostErrors = false): Promise<Outcome<T>> {
   const t0 = performance.now()
-  const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, hostErrors)
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
   if (res.status === 409) return { ok: false, why: 'busy', ms }
@@ -150,9 +156,12 @@ export const makeVillager = (person: string, description: string, accent: string
 /** A made villager whose module the home's checks, or whose persona the host's check, refused: made again once with the reason. */
 export const remakeVillager = (person: string, item: string, reason: string) =>
   call<MadeVillager>(`/people/${person}/villagers/${item}/remake`, { reason })
-/** "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice. */
+/**
+ * "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice. All or nothing
+ * on the host: 'failed' when it could not store it (nothing changed), 'away' when the host did not answer.
+ */
 export const sendOffVillager = (person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>) =>
-  call<{ ok: true; name: string; persona: unknown }>(`/people/${person}/villagers/${item}/send-off`, { tuning, voice })
+  call<{ ok: true; name: string; persona: unknown }>(`/people/${person}/villagers/${item}/send-off`, { tuning, voice }, true)
 /** The person's villager now, and its babble voice, as the host keeps them. */
 export const currentVillager = (person: string) => call<{ persona: unknown; voice: Record<string, number> | null }>(`/people/${person}/villager`)
 
@@ -163,6 +172,9 @@ export interface HumourDial { locked: 'clean' | 'cheeky' | 'crude' | null; by?: 
 export const personaTemplates = (person: string) =>
   call<{ builtin: PatternData[]; templates: PatternData[]; profile: unknown; humour: HumourDial }>(`/people/${person}/persona-templates`)
 export const familyTemplates = (person: string) => call<{ templates: PatternData[] }>(`/family/persona-templates?for=${person}`)
-/** Saved as a whole persona with the dials beside it; the host maps the dials in and checks it. */
-export const saveTemplate = (person: string, name: string, persona: unknown, dials: Record<string, number>, shared: boolean) =>
-  call<{ template: PatternData }>(`/people/${person}/persona-templates`, { name, persona, dials, shared })
+/**
+ * Saved as a whole persona with the dials beside it; the host maps the dials in and checks it. `item` is the made
+ * villager it came from: the host reads its pattern from there to decide who may see the saved one (the page never says).
+ */
+export const saveTemplate = (person: string, name: string, persona: unknown, dials: Record<string, number> | undefined, shared: boolean, item?: string) =>
+  call<{ template: PatternData }>(`/people/${person}/persona-templates`, { name, persona, ...(dials ? { dials } : {}), shared, ...(item ? { item } : {}) })

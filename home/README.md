@@ -1427,11 +1427,19 @@ pattern, then the host sets its temperament, register, humour, decides, mistakes
 over the model's (`applyPattern`); name, role, speciality, cares and frictions stay the model's;
 quirks are the model's first, four at most. A built-in pattern's id is kept as `template`.
 Saved and family-shared patterns are whole personas, tuned by their dials and checked by the same
-function; a stored file that fails the check is skipped.
+function; a stored file that fails the check is skipped. The host decides who may see a saved
+pattern and ignores any audience the page sends: the most restrictive of the pattern it came from
+(read from the made villager's record), its humour lean and its maker's profile. A cheeky lean,
+an adults-only source or a maker whose admin set crude keeps it to the maker's age band, so it
+never reaches a child from an adult. A remake keeps the pattern the villager was made with (a
+snapshot on its record), even if that pattern is deleted or un-shared since.
 
 "Off you go" for a villager made for person X writes `<root>/people/X/persona.json` (the tuned
-persona, checked) and `voice.json` (its babble voice), keeping the old persona as
-`persona.prev.json` to undo. #42 loads the persona on every turn and its `characterKey` changes,
+persona, checked), `voice.json` (its babble voice) and the record's tuning as one change: all of
+them or none. The old persona is kept as `persona.prev.json` and in `persona-history/` (never
+overwritten), and sending the same villager off again never overwrites the backup with itself.
+When the host cannot store it, it answers 500 in JSON and the villager stays on the stool, tuned,
+with a note that it didn't go and can be tried again; when the host is away, the note says so. #42 loads the persona on every turn and its `characterKey` changes,
 so the warm agent starts a new process and the next talk is the new villager (proved with the
 stub agent: its system prompt names the new villager). Today #42 has one villager per person,
 so a send-off replaces that person's villager. More than one would mean

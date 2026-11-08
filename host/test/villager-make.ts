@@ -3,14 +3,18 @@
 // With --live, one real Sonnet call through the same endpoint (operator login).
 // Profiles are #42's (persona.ts): Alex an adult whose operator setting is crude, Sam a child, Jo an adult.
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { request } from 'node:http'
 import { tmpdir } from 'node:os'
+import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { Context } from 'cordis'
 import villager from '../src/villager.ts'
 import { stubAgent } from '../src/villager-agent.ts'
 import { checkPersona, defaultPersona, TEMPLATES, type Profile } from '../src/persona.ts'
-import { applyPattern, claudeVillagerMaker, dialsOf, humourDial, personaFrom, repairAsk, STUB_PERSONA, stubVillagerMaker, tunePersona, villagerAsk, villagerPrompt, type VillagerMaker } from '../src/villager-make.ts'
+import { applyPattern, claudeVillagerMaker, commitFiles, dialsOf, humourDial, personaFrom, repairAsk, STUB_PERSONA, stubVillagerMaker, tunePersona, villagerAsk, villagerPrompt, type VillagerMaker } from '../src/villager-make.ts'
 
+const execFileP = promisify(execFile)
 const live = process.argv.includes('--live')
 const root = await mkdtemp(join(tmpdir(), 'villager-make-check-'))
 const checks: { name: string; pass: boolean; detail?: unknown }[] = []
@@ -29,7 +33,7 @@ async function start(villagerMaker?: VillagerMaker) {
     headers: { 'content-type': 'application/json', ...(opts.token === null ? {} : { authorization: `Bearer ${opts.token ?? launch.token}` }) },
     body: opts.body === undefined ? undefined : typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body),
   })
-  return { fiber, api }
+  return { fiber, api, base, token: launch.token as string }
 }
 
 try {
@@ -66,6 +70,8 @@ try {
   check('humour dial: an adult without a setting, a child and an unknown profile choose clean or cheeky', humourDial('jo', PROFILES.jo, {}).locked === null && humourDial('sam', PROFILES.sam, {}).locked === null && humourDial('x', { age: 'unknown' }, {}).locked === null)
   check('humour dial: a child profile set to crude by mistake is still only cheeky', humourDial('sam', { age: 'child', humour: 'crude' }, {}).locked === 'cheeky')
   check('humour dial: the person\'s own "keep it clean" locks it at clean', JSON.stringify(humourDial('jo', PROFILES.jo, { humour: 'clean' })) === JSON.stringify({ locked: 'clean', by: 'asked' }))
+  check('humour dial: when the person\'s "keep it clean" lowers the admin\'s crude, the person is the one who locked it', JSON.stringify(humourDial('alex', PROFILES.alex, { humour: 'clean' })) === JSON.stringify({ locked: 'clean', by: 'asked' }), humourDial('alex', PROFILES.alex, { humour: 'clean' }))
+  check('humour dial: a person\'s "cheeky" under the admin\'s clean leaves it the admin\'s', JSON.stringify(humourDial('jo', { age: 'adult', humour: 'clean' }, { humour: 'cheeky' })) === JSON.stringify({ locked: 'clean', by: 'admin' }))
 
   let calls: { description: string; owner: string; accent: string; role?: string; pattern?: { label: string }; repair?: { module: string; persona?: string; reason: string } }[] = []
   const stub = stubVillagerMaker(60)
@@ -175,11 +181,25 @@ try {
   await tpl('alex', { name: 'Grown-ups only', persona: STUB_PERSONA, audience: 'adult', shared: true })
   await tpl('alex', { name: 'Private one', persona: STUB_PERSONA })
   const fam = async (who?: string) => (await (await api(`/family/persona-templates${who ? `?for=${who}` : ''}`)).json() as { templates: { name: string; maker: string }[] }).templates
+  // A clean one, from no pattern, made by an adult without a crude setting: for anyone.
+  const plain = await (await tpl('jo', { name: 'Plain helper', persona: STUB_PERSONA, dials: { warmth: 0.9, playful: 0.5, chatty: 0.5, humour: 0 }, shared: true })).json() as { template: { id: string; audience: string; persona: { temperament: string } } }
   const forSam = await fam('sam')
-  check('family: a shared pattern appears for another person, a private one does not', forSam.some((t) => t.name === 'Late-night buddy' && t.maker === 'alex') && !forSam.some((t) => t.name === 'Private one'), forSam.map((t) => t.name))
+  check('family: a shared clean pattern appears for another person, a private one does not', plain.template.audience === 'any' && forSam.some((t) => t.name === 'Plain helper' && t.maker === 'jo') && !forSam.some((t) => t.name === 'Private one'), forSam.map((t) => t.name))
   check('family: an adults-only pattern is not offered to a child', !forSam.some((t) => t.name === 'Grown-ups only') && (await fam('jo')).some((t) => t.name === 'Grown-ups only'))
-  const samMade = await (await api('/people/sam/villagers', { body: { description: 'an owl', accent: '#c8553d', template: `alex:${mine.template.id}` } })).json() as { persona: { temperament: string } }
-  check('family: a shared pattern can be picked by another person', samMade.persona?.temperament === mine.template.persona.temperament, samMade.persona)
+  const samMade = await (await api('/people/sam/villagers', { body: { description: 'an owl', accent: '#c8553d', template: `jo:${plain.template.id}` } })).json() as { item: string; persona: { temperament: string } }
+  check('family: a shared pattern can be picked by another person', samMade.persona?.temperament === plain.template.persona.temperament, samMade.persona)
+  // #47 review: the audience is the host's. A cheeky lean, an adults-only source pattern or a crude maker is never 'any'.
+  check('audience: a cheeky shared pattern is kept to adults, never offered to a child', !forSam.some((t) => t.name === 'Late-night buddy') && (await fam('jo')).some((t) => t.name === 'Late-night buddy'), forSam.map((t) => t.name))
+  check('audience: an audience the page sends is ignored (cheeky sent as "any" is still adult)', (await (await tpl('jo', { name: 'Says any', persona: STUB_PERSONA, audience: 'any', shared: true })).json() as { template: { audience: string } }).template.audience === 'adult')
+  const fromBuddy = await (await api('/people/jo/villagers', { body: { description: 'a cheerful otter', accent: '#c8553d', template: 'buddy' } })).json() as { item: string; persona: Record<string, unknown> }
+  const buddyClean = tunePersona(checkPersona(fromBuddy.persona), { warmth: 0.5, playful: 0.5, chatty: 0.5, humour: 0 })
+  const { template: _t, ...buddyNoTemplate } = buddyClean
+  const savedBuddy = await (await tpl('jo', { name: 'Like Otter', persona: buddyNoTemplate, item: fromBuddy.item, shared: true })).json() as { template: { audience: string; persona: { humour: { lean: string } } } }
+  check('audience: a clean pattern from an adults-only source (buddy) stays adults-only, even with its template field taken off', savedBuddy.template.persona.humour.lean === 'clean' && savedBuddy.template.audience === 'adult' && !(await fam('sam')).some((t) => t.name === 'Like Otter'), savedBuddy.template)
+  check('audience: a clean persona carrying a built-in adults-only template is adults-only', (await (await tpl('jo', { name: 'Tagged buddy', persona: buddyClean })).json() as { template: { audience: string } }).template.audience === 'adult')
+  check('audience: a clean pattern by an adult whose operator setting is crude is adults-only', (await (await tpl('alex', { name: 'Alex clean', persona: STUB_PERSONA, dials: { warmth: 0.5, playful: 0.5, chatty: 0.5, humour: 0 } })).json() as { template: { audience: string } }).template.audience === 'adult')
+  check('audience: a child\'s cheeky pattern is for children', (await (await tpl('sam', { name: 'Sam cheeky', persona: STUB_PERSONA })).json() as { template: { audience: string } }).template.audience === 'child')
+  check('audience: an item that is not this person\'s villager is refused', (await tpl('sam', { name: 'x', persona: STUB_PERSONA, item: fromBuddy.item })).status === 400)
   const privateId = (await list('alex')).templates.find((t) => t.name === 'Private one')!.id
   check('family: someone else\'s private pattern cannot be picked', (await api('/people/sam/villagers', { body: { description: 'x', accent: '#c8553d', template: `alex:${privateId}` } })).status === 400)
   // A stored file edited by hand so it fails the check is skipped, never served.
@@ -187,7 +207,7 @@ try {
   check('templates: a stored file that fails the check is skipped on load', !(await list('alex')).templates.some((t) => t.id === mine.template.id))
   await mkdir(join(root, 'people', 'sam', 'persona-templates'), { recursive: true })
   await writeFile(join(root, 'people', 'sam', 'persona-templates', 'junk.json'), '{')
-  check('templates: a stray file is ignored', (await list('sam')).templates.length === 0)
+  check('templates: a stray file is ignored', (await list('sam')).templates.length === 1 && (await list('sam')).templates[0].name === 'Sam cheeky')
 
   // Remake: once, with the home's refusal reason; the model sees its previous module and the reason.
   calls = []
@@ -231,6 +251,105 @@ try {
     const r = await (await api('/people/sam/villagers', { body: { description: 'a [stub-bad-persona] vole', accent: '#c8553d' } })).json() as { item: string }
     return (await sendOff('sam', r.item, { tuning: knobs, voice })).status === 409
   })())
+
+  // #47 review: a send-off is all or nothing. voice.json as a directory makes its rename fail after the others are written.
+  const joDir = join(root, 'people', 'jo')
+  const joRecord = join(joDir, 'villagers', `${bad.item}.json`)
+  const snapshot = async () => ({ persona: await readFile(personaFile, 'utf8'), prev: await readFile(join(joDir, 'persona.prev.json'), 'utf8'), record: await readFile(joRecord, 'utf8'), history: (await readdir(join(joDir, 'persona-history')).catch((): string[] => [])).length })
+  const beforeFail = await snapshot()
+  await rm(join(joDir, 'voice.json'))
+  await mkdir(join(joDir, 'voice.json'))
+  const failedSend = await sendOff('jo', bad.item, { tuning: { ...knobs, warmth: 0.1, humour: 0 }, voice })
+  const failedBody = await failedSend.json() as { stored?: boolean; error?: string }
+  const afterFail = await snapshot()
+  const temps = [...await readdir(joDir), ...await readdir(join(joDir, 'villagers')), ...await readdir(join(joDir, 'persona-history')).catch((): string[] => [])].filter((f) => f.endsWith('.tmp'))
+  check('send-off: a failed write answers 500 as JSON with stored: false, and changes nothing (persona.json, the backup, the record\'s tuning)', failedSend.status === 500 && failedSend.headers.get('content-type') === 'application/json' && failedBody.stored === false && JSON.stringify(afterFail) === JSON.stringify(beforeFail) && temps.length === 0, { status: failedSend.status, body: failedBody, same: Object.fromEntries(Object.keys(beforeFail).map((k) => [k, (afterFail as Record<string, unknown>)[k] === (beforeFail as Record<string, unknown>)[k]])), temps })
+  await rm(join(joDir, 'voice.json'), { recursive: true })
+  const retried = await sendOff('jo', bad.item, { tuning: { ...knobs, warmth: 0.1, humour: 0 }, voice })
+  const blunt = await readFile(personaFile, 'utf8')
+  check('send-off: the same send-off again goes through, and the old villager is kept as the backup', retried.status === 200 && /^blunt/.test(JSON.parse(blunt).temperament) && await readFile(join(joDir, 'persona.prev.json'), 'utf8') === beforeFail.persona)
+  await sendOff('jo', bad.item, { tuning: { ...knobs, warmth: 0.1, humour: 0 }, voice })
+  check('send-off: sending the same villager off twice keeps the backup (it is never overwritten with the villager itself)', await readFile(join(joDir, 'persona.prev.json'), 'utf8') === beforeFail.persona && await readFile(personaFile, 'utf8') === blunt)
+  const history = await Promise.all((await readdir(join(joDir, 'persona-history')).catch((): string[] => [])).sort().map(async (f) => JSON.parse(await readFile(join(joDir, 'persona-history', f), 'utf8')).name + '/' + JSON.parse(await readFile(join(joDir, 'persona-history', f), 'utf8')).temperament))
+  check('send-off: every villager replaced is kept in persona-history/, so undo goes further back than one', history.length === 2 && history[0].startsWith('Pebble/') && history[1] === `Biscuit/${JSON.parse(beforeFail.persona).temperament}`, history)
+
+  // commitFiles' own rollback: the third rename fails (a locked file, macOS chflags), so the two already renamed are put back.
+  if (process.platform === 'darwin') {
+    const cdir = join(root, 'commit-check')
+    await mkdir(cdir)
+    const [a, c, b] = ['a.json', 'c.json', 'b.json'].map((f) => join(cdir, f))
+    await writeFile(a, 'old a')
+    await writeFile(b, 'old b')
+    await execFileP('chflags', ['uchg', b])
+    let threw = false
+    try {
+      await commitFiles([{ path: a, text: 'new a' }, { path: c, text: 'new c' }, { path: b, text: 'new b' }])
+    } catch {
+      threw = true
+    } finally {
+      await execFileP('chflags', ['nouchg', b])
+    }
+    const left = await readdir(cdir)
+    check('commitFiles: a rename failing after others succeeded puts back the old file, removes the new one, leaves no temporary file', threw && await readFile(a, 'utf8') === 'old a' && await readFile(b, 'utf8') === 'old b' && !left.includes('c.json') && left.every((f) => !f.endsWith('.tmp')), { threw, left })
+  }
+
+  // #47 review: remake does not overwrite a tuning saved while the model works; one remake only, checked under the lock.
+  let release: () => void = () => {}
+  let gatedCalls = 0, hold = true
+  const gated: VillagerMaker = async (ask) => {
+    gatedCalls++
+    if (ask.repair && hold) await new Promise<void>((r) => { release = r })
+    return stub(ask)
+  }
+  const g = await start(gated)
+  const gItem = (await (await g.api('/people/jo/villagers', { body: { description: 'a slow tortoise', accent: '#c8553d' } })).json() as { item: string }).item
+  const remaking = g.api(`/people/jo/villagers/${gItem}/remake`, { body: { reason: 'check: try again' } })
+  while (gatedCalls < 2) await new Promise((r) => setTimeout(r, 10))
+  const tunedMeanwhile = await g.api(`/people/jo/villagers/${gItem}/tuning`, { body: { ...knobs, humour: 0.5, size: 0.9 } })
+  release()
+  const remadeG = await remaking
+  const gRecord = JSON.parse(await readFile(join(joDir, 'villagers', `${gItem}.json`), 'utf8'))
+  check('remake: a tuning saved while the model works is kept (remake writes only its own fields)', tunedMeanwhile.status === 200 && remadeG.status === 200 && gRecord.tuning?.size === 0.9 && gRecord.repair?.reason === 'check: try again', { tune: tunedMeanwhile.status, remake: remadeG.status, tuning: gRecord.tuning })
+  // A second remake whose body arrives after the first has finished must still see it was re-made (409), and never call the model.
+  const gItem2 = (await (await g.api('/people/jo/villagers', { body: { description: 'another tortoise', accent: '#c8553d' } })).json() as { item: string }).item
+  // Its headers go now (the host starts on it); its body only after the first remake has finished.
+  const staleReq = request(`${g.base}/people/jo/villagers/${gItem2}/remake`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${g.token}` } })
+  const stale = new Promise<{ status: number }>((resolve, reject) => {
+    staleReq.on('response', (r) => (r.resume(), resolve({ status: r.statusCode ?? 0 })))
+    staleReq.on('error', reject)
+  })
+  staleReq.flushHeaders()
+  await new Promise((r) => setTimeout(r, 100))
+  const firstRemake = g.api(`/people/jo/villagers/${gItem2}/remake`, { body: { reason: 'check: first' } })
+  while (gatedCalls < 4) await new Promise((r) => setTimeout(r, 10))
+  hold = false
+  release()
+  const firstDone = await firstRemake
+  const callsAfterFirst = gatedCalls
+  staleReq.end(JSON.stringify({ reason: 'check: stale' }))
+  const staleDone = await stale
+  const gRecord2 = JSON.parse(await readFile(join(joDir, 'villagers', `${gItem2}.json`), 'utf8'))
+  check('remake: a second remake whose body came late is refused (409) and never reaches the model; the first repair stays', firstDone.status === 200 && staleDone.status === 409 && gatedCalls === callsAfterFirst && gRecord2.repair?.reason === 'check: first', { first: firstDone.status, stale: staleDone.status, calls: gatedCalls - callsAfterFirst, reason: gRecord2.repair?.reason })
+  // MAX_TEMPLATES: 60 saves at once leave at most 50.
+  const saves = await Promise.all(Array.from({ length: 60 }, (_, i) => g.api('/people/sam/persona-templates', { body: { name: `Many ${i}`, persona: STUB_PERSONA } })))
+  const samTemplates = (await readdir(join(root, 'people', 'sam', 'persona-templates'))).filter((f) => /^[a-f0-9]{12}\.json$/.test(f)).length
+  check('templates: saves at the same time never pass the limit of 50', samTemplates === 50 && saves.filter((r) => r.status === 409).length === 60 - (50 - 1), { stored: samTemplates, refused: saves.filter((r) => r.status === 409).length })
+  await g.fiber.dispose()
+
+  // #47 review: a remake keeps the pattern it was made with, even when the pattern is deleted or un-shared since.
+  calls = []
+  await rm(join(root, 'people', 'jo', 'persona-templates', `${plain.template.id}.json`))
+  const remadeSam = await api(`/people/sam/villagers/${samMade.item}/remake`, { body: { reason: 'check: again' } })
+  const remadeSamBody = await remadeSam.json() as { persona: { temperament: string } | null }
+  check('remake: a pattern deleted since is still applied from the record\'s snapshot (the manner never changes silently)', remadeSam.status === 200 && calls[0]?.pattern?.label === 'Plain helper' && remadeSamBody.persona?.temperament === plain.template.persona.temperament, { status: remadeSam.status, pattern: calls[0]?.pattern?.label, persona: remadeSamBody.persona })
+  // A record from before snapshots: its pattern gone, the remake is refused with the reason, and no model is asked.
+  const old = await (await api('/people/sam/villagers', { body: { description: 'an old owl', accent: '#c8553d', template: 'companion' } })).json() as { item: string }
+  const oldFile = join(root, 'people', 'sam', 'villagers', `${old.item}.json`)
+  const { pattern: _p, ...noSnapshot } = JSON.parse(await readFile(oldFile, 'utf8'))
+  await writeFile(oldFile, JSON.stringify({ ...noSnapshot, template: `jo:${plain.template.id}` }))
+  calls = []
+  const refusedRemake = await api(`/people/sam/villagers/${old.item}/remake`, { body: { reason: 'check: again' } })
+  check('remake: without a snapshot and with its pattern gone, the remake is refused with a plain reason, never run without the pattern', refusedRemake.status === 409 && /pattern/.test((await refusedRemake.json() as { error: string }).error) && calls.length === 0)
 
   // Storage: every write goes to a temporary file and is renamed over the record.
   const vdir = join(root, 'people', 'alex', 'villagers')

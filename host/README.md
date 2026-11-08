@@ -378,7 +378,8 @@ The villager generator (#47, `src/villager-make.ts`; home/README.md "Villager
 setup") writes this file: the model writes the persona in this shape, every
 persona it stores or serves passes `checkPersona`, the setup's dials map into
 `temperament`, `register`, `lengths` and `humour.lean`, and "Off you go" writes
-`persona.json` (keeping the old one as `persona.prev.json`) and `voice.json`. One
+`persona.json` (keeping the old one as `persona.prev.json` and in `persona-history/`)
+and `voice.json`, all or none. One
 villager per person for now.
 
 ### Profile: who the villager is talking to

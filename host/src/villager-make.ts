@@ -8,10 +8,11 @@
 //   GET  /people/:id/villagers/:item         -> {id, description, accent, role?, module, persona, personaRefused?, dials, tuning}
 //   POST /people/:id/villagers/:item/remake  {reason}  -> as the first POST, once per villager
 //   POST /people/:id/villagers/:item/tuning  {size, hue, pitch, pace, energy, warmth, playful, chatty, humour} each 0..1 -> {ok, persona}
-//   POST /people/:id/villagers/:item/send-off {tuning, voice} -> {ok, name}  writes people/<id>/persona.json (the old one kept as persona.prev.json) and voice.json
+//   POST /people/:id/villagers/:item/send-off {tuning, voice} -> {ok, name}  writes people/<id>/persona.json (the old one kept as persona.prev.json
+//                                             and in persona-history/), voice.json and the record's tuning together, or none of them (500 {error, stored: false})
 //   GET  /people/:id/villager                 -> {persona, voice}  the villager the person has now (persona.json, checked), and its babble voice
 //   GET  /people/:id/persona-templates        -> {builtin, templates, profile, humour}  the built-in patterns this person may pick, their own saved ones, their profile and the humour dial
-//   POST /people/:id/persona-templates        {name, persona, dials?, audience?, shared?} -> {template}
+//   POST /people/:id/persona-templates        {name, persona, dials?, item?, shared?} -> {template}  the host sets its audience (savedAudience); one sent is ignored
 //   GET  /family/persona-templates?for=<id>   -> {templates}  every listed person's shared ones
 //
 // One owner per rule (#42): host/src/persona.ts owns the persona's shape and its check
@@ -41,6 +42,13 @@
 // Stored under <root>/people/<id>/villagers/<item>.json, each write to a temporary file in the
 // same directory and then renamed over the record, so a crash never leaves half a record.
 // Model failures answer 422; storage failures answer 500.
+//
+// Every read-modify-write of a record (tuning, send-off, remake's write) runs under that record's lock, and
+// remake, which waits up to 240 s for the model, re-reads the record under the lock and sets only the fields it
+// owns, so a tuning saved meanwhile is kept. Remake's once-only check is made inside the person's making lock.
+// The send-off's files are written as one change (commitFiles): every temporary file first, then the renames,
+// persona.json last; a failed write or rename puts back what was renamed, so the person keeps their old villager
+// whole. A crash between two renames can still leave the backups and voice.json ahead of persona.json.
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -55,7 +63,7 @@ export type VillagerRole = (typeof ENUMS.role)[number]
 const isRole = (v: unknown): v is VillagerRole => typeof v === 'string' && (ENUMS.role as readonly string[]).includes(v)
 
 /** A pattern as the model and applyPattern see it: a whole persona's manner, under its card label. */
-export interface Pattern { label: string; persona: Omit<Persona, 'name' | 'template'>; builtin?: string }
+export interface Pattern { label: string; persona: Omit<Persona, 'name' | 'template'>; builtin?: string; audience?: 'any' | 'adult' | 'child' }
 export interface VillagerAsk { description: string; owner: string; accent: string; signal: AbortSignal; role?: VillagerRole; pattern?: Pattern; repair?: { module: string; persona?: string; reason: string } }
 /** `text` is the model's whole answer, read here for the persona block; a maker without one has no persona. */
 export type VillagerMaker = (ask: VillagerAsk) => Promise<{ module: string; text?: string } & Call>
@@ -67,6 +75,8 @@ type Audience = 'any' | 'adult' | 'child'
 
 interface Stored {
   id: string; description: string; accent: string; template?: string; role?: VillagerRole; module: string
+  /** The pattern as it was when the villager was made, so a remake keeps its manner if the pattern is later deleted or un-shared. */
+  pattern?: Pattern
   persona: Persona | null; personaRefused?: string; personaBlock?: string
   models: string[]; costUsd: number | null; outputTokens: number | null; ms: number; at: string
   tuning?: Record<string, number>
@@ -185,13 +195,53 @@ export function tunePersona(base: Persona, dials: Dials): Persona {
  * operator's profile setting ('admin') or by the person's own "keep it clean" ('asked').
  */
 export function humourDial(person: string, profile: Profile, prefs: Awaited<ReturnType<typeof readPreferences>>): { locked: Humour | null; by?: 'admin' | 'asked' } {
-  const at = (lean: 'clean' | 'cheeky') => humourCeiling(profile, prefs, { ...defaultPersona(person), humour: { style: 'plain', lean } })
+  const at = (lean: 'clean' | 'cheeky', p = prefs) => humourCeiling(profile, p, { ...defaultPersona(person), humour: { style: 'plain', lean } })
   const clean = at('clean'), cheeky = at('cheeky')
-  return clean === cheeky ? { locked: clean, by: profile.humour ? 'admin' : 'asked' } : { locked: null }
+  if (clean !== cheeky) return { locked: null }
+  // The person's own words are what binds when, without them, the level would be another: they lowered it.
+  const asked = at('clean', {}) !== clean || at('cheeky', {}) !== cheeky
+  return { locked: clean, by: profile.humour && !asked ? 'admin' : 'asked' }
 }
 
 /** May a person of this profile pick a pattern for this audience: adult ones for an adult, child ones for a child. */
 const offered = (audience: Audience, profile: Profile) => audience === 'any' || (audience === 'adult' ? profile.age === 'adult' : profile.age === 'child')
+
+/**
+ * Who may see a saved pattern: the most restrictive of its source pattern's audience, its humour lean and its maker's
+ * profile. A cheeky lean, an adults-only source or a maker whose operator setting is crude keeps it to the maker's age
+ * band (an unknown age counts as adult); a source for children keeps it to children. Adult and child together is
+ * adult: grown-up content never reaches a child. The page never says the audience.
+ */
+export function savedAudience(sources: Audience[], lean: 'clean' | 'cheeky', maker: Profile): Audience {
+  const band: Audience = maker.age === 'child' ? 'child' : 'adult'
+  const all = [...sources, lean === 'cheeky' ? band : 'any', maker.humour === 'crude' ? band : 'any']
+  return all.includes('adult') ? 'adult' : all.includes('child') ? 'child' : 'any'
+}
+
+/**
+ * Writes every file to a temporary name beside it, then renames them in order. A failed write or rename puts back
+ * the files already renamed (or removes them when they were new) and removes the temporary ones, then throws: all
+ * or nothing, short of a crash between two renames.
+ */
+export async function commitFiles(files: { path: string; text: string }[]) {
+  const before = await Promise.all(files.map((f) => readFile(f.path, 'utf8').catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  })))
+  const temps = files.map((f) => `${f.path}.${randomBytes(4).toString('hex')}.tmp`)
+  let renamed = 0
+  try {
+    for (const [i, f] of files.entries()) await writeFile(temps[i], f.text, { mode: 0o600 })
+    for (; renamed < files.length; renamed++) await rename(temps[renamed], files[renamed].path)
+  } catch (error) {
+    for (let i = renamed - 1; i >= 0; i--) {
+      const old = before[i]
+      await (old === null ? rm(files[i].path, { force: true }) : replaceFile(files[i].path, old)).catch(() => {})
+    }
+    await Promise.all(temps.slice(renamed).map((t) => rm(t, { force: true })))
+    throw error
+  }
+}
 
 /** Writes beside the target, then renames over it: a crash or a failed write leaves the old file whole. */
 async function replaceFile(path: string, text: string) {
@@ -276,6 +326,15 @@ interface Saved { id: string; name: string; persona: Persona; audience: Audience
 export function villagerRoutes(config: { root: string; people: Record<string, string>; profileOf: (id: string) => Profile; maker?: VillagerMaker; timeoutMs?: number }) {
   const { profileOf } = config
   const making = new Set<string>()
+  /** One chain per key: every read-modify-write of a record ("<id>/<item>") or of a person's saved patterns runs alone. */
+  const chains = new Map<string, Promise<unknown>>()
+  const locked = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const run = (chains.get(key) ?? Promise.resolve()).then(fn, fn)
+    const tail = run.catch(() => {})
+    chains.set(key, tail)
+    void tail.then(() => chains.get(key) === tail && chains.delete(key))
+    return run
+  }
   const personDir = (id: string) => join(config.root, 'people', id)
   const dir = (id: string) => join(personDir(id), 'villagers')
   const send = (res: ServerResponse, status: number, value: unknown) => {
@@ -352,13 +411,26 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     if (ref === undefined || ref === null || ref === '') return null
     if (typeof ref !== 'string') return 'refused'
     const profile = profileOf(id)
-    if (Object.hasOwn(TEMPLATE_CARDS, ref)) return offered(TEMPLATE_CARDS[ref].audience, profile) ? { label: TEMPLATE_CARDS[ref].label, persona: TEMPLATES[ref], builtin: ref } : 'refused'
+    if (Object.hasOwn(TEMPLATE_CARDS, ref)) return offered(TEMPLATE_CARDS[ref].audience, profile) ? { label: TEMPLATE_CARDS[ref].label, persona: TEMPLATES[ref], builtin: ref, audience: TEMPLATE_CARDS[ref].audience } : 'refused'
     const [maker, tid] = ref.split(':')
     if (!PERSON.test(maker ?? '') || !Object.hasOwn(config.people, maker) || !TEMPLATE.test(tid ?? '')) return 'refused'
     const t = (await listTemplates(maker)).find((x) => x.id === tid && (maker === id || x.shared) && offered(x.audience, profile))
     if (!t) return 'refused'
     const { name: _name, template: _template, ...manner } = t.persona
-    return { label: t.name, persona: manner }
+    return { label: t.name, persona: manner, audience: t.audience }
+  }
+  /** The audience of the pattern a persona came from: its built-in template, and the record's pattern when the page names the record. */
+  const sourceAudiences = async (id: string, persona: Persona, item: unknown): Promise<Audience[] | 'refused'> => {
+    const out: Audience[] = []
+    if (persona.template && Object.hasOwn(TEMPLATE_CARDS, persona.template)) out.push(TEMPLATE_CARDS[persona.template].audience)
+    if (item === undefined) return out
+    if (typeof item !== 'string' || !ITEM.test(item)) return 'refused'
+    const r = await read(id, item)
+    if (!r) return 'refused'
+    // A pattern snapshot without an audience (made before audiences were kept) counts as adult.
+    if (r.pattern) out.push(r.pattern.audience ?? 'adult')
+    else if (r.template) out.push('adult')
+    return out
   }
 
   /** One model call; answers 422 itself and returns null when the maker fails or writes no module. */
@@ -423,7 +495,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       try {
         b = await body(req)
       } catch {
-        return send(res, 400, { error: 'expected JSON {"name", "persona", "dials"?, "audience"?, "shared"?}' }), true
+        return send(res, 400, { error: 'expected JSON {"name", "persona", "dials"?, "item"?, "shared"?}' }), true
       }
       const name = capped(b.name, MAX_LABEL)
       if (!name) return send(res, 400, { error: `name is 1 to ${MAX_LABEL} characters` }), true
@@ -438,13 +510,17 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       } catch (error) {
         return send(res, 400, { error: reasonOf(error) }), true
       }
-      const audience = b.audience === undefined ? 'any' : b.audience
-      if (audience !== 'any' && audience !== 'adult' && audience !== 'child') return send(res, 400, { error: 'audience is any, adult or child' }), true
-      if ((await listTemplates(id)).length >= MAX_TEMPLATES) return send(res, 409, { error: `at most ${MAX_TEMPLATES} saved patterns` }), true
-      const template: Saved = { id: randomBytes(6).toString('hex'), name, persona, audience, shared: b.shared === true, maker: id, at: new Date().toISOString() }
-      await mkdir(templateDir(id), { recursive: true, mode: 0o700 })
-      await replaceFile(join(templateDir(id), `${template.id}.json`), JSON.stringify(template))
-      return send(res, 200, { template }), true
+      // The audience is the host's: from where the persona came, its lean and its maker, never from the body.
+      const sources = await sourceAudiences(id, persona, b.item)
+      if (sources === 'refused') return send(res, 400, { error: 'item is not a villager this person made' }), true
+      const audience = savedAudience(sources, persona.humour.lean === 'cheeky' ? 'cheeky' : 'clean', profile)
+      return await locked(`templates/${id}`, async () => {
+        if ((await listTemplates(id)).length >= MAX_TEMPLATES) return send(res, 409, { error: `at most ${MAX_TEMPLATES} saved patterns` }), true
+        const template: Saved = { id: randomBytes(6).toString('hex'), name, persona, audience, shared: b.shared === true, maker: id, at: new Date().toISOString() }
+        await mkdir(templateDir(id), { recursive: true, mode: 0o700 })
+        await replaceFile(join(templateDir(id), `${template.id}.json`), JSON.stringify(template))
+        return send(res, 200, { template }), true
+      })
     }
     const m = /^\/people\/([^/]+)\/villagers(?:\/([^/]+)(?:\/(tuning|remake|send-off))?)?$/.exec(path)
     if (!m) return false
@@ -473,7 +549,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
         const made = await makeOnce(res, { description, owner: config.people[id], accent: b.accent, ...(role ? { role } : {}), ...(pattern ? { pattern } : {}) })
         if (!made) return true
         // Stored and returned as text for the home's sandbox; never imported, evaluated or run here.
-        const record: Stored = { id: randomBytes(6).toString('hex'), description, accent: b.accent, ...(role ? { role } : {}), ...(pattern ? { template: b.template as string } : {}), module: made.module, persona: made.persona, ...(made.personaRefused ? { personaRefused: made.personaRefused } : {}), ...(made.personaBlock ? { personaBlock: made.personaBlock } : {}), models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, ms: made.ms, at: new Date().toISOString() }
+        const record: Stored = { id: randomBytes(6).toString('hex'), description, accent: b.accent, ...(role ? { role } : {}), ...(pattern ? { template: b.template as string, pattern } : {}), module: made.module, persona: made.persona, ...(made.personaRefused ? { personaRefused: made.personaRefused } : {}), ...(made.personaBlock ? { personaBlock: made.personaBlock } : {}), models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, ms: made.ms, at: new Date().toISOString() }
         // A storage failure throws past here to the host's 500, never the maker's 422.
         await write(id, record)
         return send(res, 200, answer(record, made)), true
@@ -483,9 +559,6 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     }
     if (item && action === 'remake' && req.method === 'POST') {
       if (!config.maker) return send(res, 503, { error: 'no villager maker' }), true
-      const found = await read(id, item)
-      if (!found) return send(res, 404, { error: 'no such villager' }), true
-      if (found.repair) return send(res, 409, { error: 'this villager was already re-made once' }), true
       let b: Record<string, unknown>
       try {
         b = await body(req)
@@ -495,17 +568,34 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       // The reason enters the model's prompt as data about the refusal: one capped line of plain text.
       const reason = capped(b.reason, MAX_REASON)
       if (!reason) return send(res, 400, { error: `reason is 1 to ${MAX_REASON} characters` }), true
-      const pattern = await patternFor(id, found.template)
       if (making.has(id)) return send(res, 409, { error: 'already making a villager' }), true
       making.add(id)
       try {
-        const made = await makeOnce(res, { description: found.description, owner: config.people[id], accent: found.accent, ...(isRole(found.role) ? { role: found.role } : {}), ...(pattern && pattern !== 'refused' ? { pattern } : {}), repair: { module: found.module, reason, ...(found.personaBlock ? { persona: found.personaBlock } : {}) } })
+        // Read and checked inside the making lock: two remakes cannot both see "not re-made yet".
+        const found = await read(id, item)
+        if (!found) return send(res, 404, { error: 'no such villager' }), true
+        if (found.repair) return send(res, 409, { error: 'this villager was already re-made once' }), true
+        // The pattern as it was at make time. A record from before snapshots were kept needs its pattern still there:
+        // without it the remake would change the manner, so it is refused with the reason.
+        let pattern: Pattern | null = found.pattern ?? null
+        if (!pattern && found.template) {
+          const now = await patternFor(id, found.template)
+          if (!now || now === 'refused') return send(res, 409, { error: 'the pattern this villager was made from is no longer there, so it cannot be re-made in its manner' }), true
+          pattern = now
+        }
+        const made = await makeOnce(res, { description: found.description, owner: config.people[id], accent: found.accent, ...(isRole(found.role) ? { role: found.role } : {}), ...(pattern ? { pattern } : {}), repair: { module: found.module, reason, ...(found.personaBlock ? { persona: found.personaBlock } : {}) } })
         if (!made) return true
-        // The repair's persona, else the first one if it was good; a refusal again is kept with its reason.
-        const persona = made.persona ?? stillGood(found.persona)
-        const record: Stored = { ...found, module: made.module, persona, personaRefused: persona ? undefined : made.personaRefused, personaBlock: made.personaBlock ?? found.personaBlock, repair: { reason, previous: found.module, ms: made.ms, models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, at: new Date().toISOString() } }
-        await write(id, record)
-        return send(res, 200, answer(record, made)), true
+        // Written under the record's lock from the record as it is now: only the fields remake owns change, so a
+        // tuning saved during the model call is kept.
+        return await locked(`${id}/${item}`, async () => {
+          const now = await read(id, item)
+          if (!now) return send(res, 404, { error: 'no such villager' }), true
+          // The repair's persona, else the first one if it was good; a refusal again is kept with its reason.
+          const persona = made.persona ?? stillGood(now.persona)
+          const record: Stored = { ...now, module: made.module, persona, personaRefused: persona ? undefined : made.personaRefused, personaBlock: made.personaBlock ?? now.personaBlock, repair: { reason, previous: now.module, ms: made.ms, models: made.models, costUsd: made.costUsd, outputTokens: made.outputTokens, at: new Date().toISOString() } }
+          await write(id, record)
+          return send(res, 200, answer(record, made)), true
+        })
       } finally {
         making.delete(id)
       }
@@ -517,8 +607,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       return send(res, 200, { id: found.id, description: found.description, accent: found.accent, ...(isRole(found.role) ? { role: found.role } : {}), module: found.module, persona, ...(found.personaRefused ? { personaRefused: found.personaRefused } : {}), dials: persona ? dialsOf(persona) : null, tuning: found.tuning ?? null, tuned: tunedOf(found) }), true
     }
     if (item && (action === 'tuning' || action === 'send-off') && req.method === 'POST') {
-      const found = await read(id, item)
-      if (!found) return send(res, 404, { error: 'no such villager' }), true
+      if (!(await read(id, item))) return send(res, 404, { error: 'no such villager' }), true
       let b: Record<string, unknown>
       try {
         b = await body(req)
@@ -527,30 +616,46 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
       }
       const values = knobs(action === 'tuning' ? b : b.tuning)
       if (typeof values === 'string') return send(res, 400, { error: values }), true
-      if (action === 'tuning') {
+      const voice = action === 'send-off' ? voiceOf(b.voice) : null
+      if (action === 'send-off' && !voice) return send(res, 400, { error: `voice is {${VOICE.join(', ')}}, finite numbers` }), true
+      return await locked(`${id}/${item}`, async () => {
+        const found = await read(id, item)
+        if (!found) return send(res, 404, { error: 'no such villager' }), true
         found.tuning = values
-        await write(id, found)
-        return send(res, 200, { ok: true, persona: tunedOf(found) }), true
-      }
-      // Send-off: the tuned persona becomes the person's villager (#42 reads persona.json on every turn).
-      const voice = voiceOf(b.voice)
-      if (!voice) return send(res, 400, { error: `voice is {${VOICE.join(', ')}}, finite numbers` }), true
-      found.tuning = values
-      let persona: Persona | null
-      try {
-        persona = tunedOf(found)
-      } catch (error) {
-        return send(res, 422, { error: reasonOf(error) }), true
-      }
-      if (!persona) return send(res, 409, { error: found.personaRefused ?? 'this villager has no persona' }), true
-      await write(id, found)
-      await mkdir(personDir(id), { recursive: true, mode: 0o700 })
-      const current = join(personDir(id), 'persona.json')
-      const previous = await readFile(current, 'utf8').catch(() => null)
-      if (previous !== null) await replaceFile(join(personDir(id), 'persona.prev.json'), previous)
-      await replaceFile(current, JSON.stringify(persona, null, 2))
-      await replaceFile(join(personDir(id), 'voice.json'), JSON.stringify({ ...voice, item: found.id }))
-      return send(res, 200, { ok: true, name: persona.name, persona }), true
+        if (action === 'tuning') {
+          await write(id, found)
+          return send(res, 200, { ok: true, persona: tunedOf(found) }), true
+        }
+        // Send-off: the tuned persona becomes the person's villager (#42 reads persona.json on every turn).
+        let persona: Persona | null
+        try {
+          persona = tunedOf(found)
+        } catch (error) {
+          return send(res, 422, { error: reasonOf(error) }), true
+        }
+        if (!persona) return send(res, 409, { error: found.personaRefused ?? 'this villager has no persona' }), true
+        const text = JSON.stringify(persona, null, 2)
+        const current = join(personDir(id), 'persona.json')
+        // The old villager is kept only when it is another one, so a retry of the same send-off never overwrites the
+        // backup with itself; each one kept also goes into persona-history/, where nothing is overwritten.
+        const previous = await readFile(current, 'utf8').catch(() => null)
+        const keep = previous !== null && previous !== text
+        const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
+        try {
+          await mkdir(join(personDir(id), 'persona-history'), { recursive: true, mode: 0o700 })
+          // persona.json last: it is what the next talk turn reads.
+          await commitFiles([
+            { path: join(dir(id), `${found.id}.json`), text: JSON.stringify(found) },
+            ...(keep ? [{ path: join(personDir(id), 'persona-history', `${stamp}.json`), text: previous }, { path: join(personDir(id), 'persona.prev.json'), text: previous }] : []),
+            { path: join(personDir(id), 'voice.json'), text: JSON.stringify({ ...voice, item: found.id }) },
+            { path: current, text },
+          ])
+        } catch (error) {
+          // Nothing changed. A JSON answer, so the page can tell "could not store it" from "the host is away".
+          return send(res, 500, { error: `could not store the send-off: ${reasonOf(error)}`, stored: false }), true
+        }
+        return send(res, 200, { ok: true, name: persona.name, persona }), true
+      })
     }
     return send(res, 405, { error: 'method not allowed' }), true
   }

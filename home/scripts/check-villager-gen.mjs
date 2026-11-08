@@ -305,6 +305,47 @@ ${tufts ? `  for (let k = 0; k < 5; k++) {
   check('a hostile persona is left out of the spec, with a fix, in under 50 ms', persona.ms < 50 && persona.hostile && persona.none, persona)
   check('arm-code.md\'s persona block example is in the persona.json shape', persona.example === 'Dumpling', persona)
   check('a crude lean, or the old dials shape, is never kept on the page', persona.crude === null && persona.oldShape === null, persona)
+  // #47 review: an eye with nothing in it is a failure, never a vacuous pass.
+  // A module cannot send an empty eye (assemble refuses a missing slot), so inspect() and faceViews() are called directly,
+  // with the same three the checks use (the dev server's optimised three/webgpu).
+  const emptyEye = await page.evaluate(async () => {
+    const url = performance.getEntriesByType('resource').map((e) => e.name).find((n) => /three_webgpu\.js/.test(n))
+    const THREE = await import(url)
+    const { inspect, faceViews } = await import('/src/villagers/gen/checks.ts')
+    const root = new THREE.Group()
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 10), new THREE.MeshBasicMaterial())
+    body.position.y = 0.3
+    const left = new THREE.Group(), right = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial())
+    left.position.set(-0.06, 0.4, 0.2)
+    right.position.set(0.06, 0.4, 0.2)
+    root.add(body, left, right)
+    root.updateMatrixWorld(true)
+    return { url: Boolean(url), inspect: inspect(root, [left, right], null, { species: false, mark: false }).failures, face: faceViews(root, [body, right], left, 0).failures }
+  })
+  check('an eye with nothing in it fails the face check (inspect and faceViews), never passes it', emptyEye.url && emptyEye.inspect.some((f) => /first eye has no shape/.test(f)) && emptyEye.face.some((f) => /first eye has no shape/.test(f)), emptyEye)
+  // #47 review: the voice registry keys on own properties and whole ids.
+  const voices = await page.evaluate(async () => {
+    const { registerVoice, unregisterVoice, voiceKey, VOICES } = await import('/src/voice/profiles.ts')
+    const p = { ...VOICES.dumpling }
+    const tom = registerVoice('Old Tom', { ...p, pitch: 150 })
+    const bess = registerVoice('Old Bess', { ...p, pitch: 300 })
+    const out = {
+      proto: [voiceKey('Constructor, the maker'), voiceKey('toString'), voiceKey('hasOwnProperty')],
+      tom: voiceKey('Old Tom'), bess: voiceKey('Old Bess'), distinct: tom !== bess && VOICES[voiceKey('Old Tom')].pitch === 150 && VOICES[voiceKey('Old Bess')].pitch === 300,
+      builtins: [voiceKey('Dumpling'), voiceKey('Dumpling, the cook'), voiceKey('villager-moss'), voiceKey('sam'), voiceKey('mia')],
+      setup: (() => { const k = registerVoice('setup-1', p); const r = voiceKey(k); unregisterVoice('setup-1'); return [k, r, voiceKey('setup-1')] })(),
+      builtinRefused: (() => { try { registerVoice('Dumpling', p); return false } catch { return true } })(),
+      protoRefused: (() => { try { registerVoice('__proto__', p); return false } catch { return Object.getPrototypeOf(VOICES) === Object.prototype } })(),
+    }
+    unregisterVoice('Old Tom')
+    unregisterVoice('Old Bess')
+    out.gone = [voiceKey('Old Tom'), voiceKey('Old Bess')]
+    return out
+  })
+  check('voices: a name that matches an Object.prototype key ("Constructor, the maker", toString) has no voice', voices.proto.every((k) => k === null), voices.proto)
+  check('voices: "Old Tom" and "Old Bess" get two voices, by their whole ids', voices.tom === 'old tom' && voices.bess === 'old bess' && voices.distinct, voices)
+  check('voices: the built-in three are still found by name, first word or person', JSON.stringify(voices.builtins) === JSON.stringify(['dumpling', 'dumpling', 'moss', 'tuft', 'moss']), voices.builtins)
+  check('voices: a setup voice registers and unregisters by its id; built-ins and __proto__ cannot be registered', JSON.stringify(voices.setup) === JSON.stringify(['setup-1', 'setup-1', null]) && voices.builtinRefused && voices.protoRefused && voices.gone.every((k) => k === null), voices)
   check('no page errors', errors.length === 0, errors)
 } finally {
   await browser.close()

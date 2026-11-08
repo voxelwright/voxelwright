@@ -38,31 +38,41 @@ const OWNERS: Record<string, string> = { alex: 'dumpling', sam: 'tuft', mia: 'mo
 
 const BUILT_IN = new Set(Object.keys(VOICES))
 
-/** The first word of a villager's name or id, lowercased and without "villager-": the key the registry uses. */
-export function keyWord(villager: string): string {
-  return villager.toLowerCase().replace(/^villager-/, '').split(/[,\s]/)[0]
-}
+/** A villager's name or id, trimmed, lowercased and without "villager-". */
+const normal = (villager: string) => villager.trim().toLowerCase().replace(/^villager-/, '')
 
-/** The voice key for a villager named by name ("Dumpling", "Dumpling, the cook"), entry or person id; null if unknown. */
-export function voiceKey(villager: string): string | null {
-  const word = keyWord(villager)
-  if (word in VOICES) return word
-  return OWNERS[word] ?? null
+/** The first word of a villager's name or id, lowercased and without "villager-": how a built-in villager is found by name. */
+export function keyWord(villager: string): string {
+  return normal(villager).split(/[,\s]/)[0]
 }
 
 /**
- * Gives a generated villager a voice. `villager` is any name or id that voiceKey() will later
- * be asked about ("villager-gen-3", "Shelly, the keeper"); returns the key it registered.
- * The three built-in voices cannot be replaced.
+ * The voice key for a villager: a registered id, whole ("setup-1", "gen:code-1"), else a built-in villager by the
+ * first word of its name ("Dumpling", "Dumpling, the cook") or its person's id; null if unknown. Own keys only, so
+ * "Constructor, the maker" is no one's.
+ */
+export function voiceKey(villager: string): string | null {
+  const id = normal(villager)
+  if (Object.hasOwn(VOICES, id)) return id
+  const word = keyWord(villager)
+  if (BUILT_IN.has(word)) return word
+  return Object.hasOwn(OWNERS, word) ? OWNERS[word] : null
+}
+
+/**
+ * Gives a generated villager a voice under its unique id, whole ("villager-gen-3", "setup-1"), so two villagers whose
+ * names share a first word ("Old Tom", "Old Bess") never share a voice; voiceKey() finds it by the same id. Returns
+ * the key it registered. The built-in voices and their people's ids cannot be replaced.
  */
 export function registerVoice(villager: string, profile: VoiceProfile): string {
-  const key = keyWord(villager)
-  if (BUILT_IN.has(key) || key in OWNERS) throw new Error(`"${key}" is a built-in voice`)
+  const key = normal(villager)
+  if (!key || key === '__proto__') throw new Error(`"${key}" is not a voice id`)
+  if (BUILT_IN.has(key) || Object.hasOwn(OWNERS, key)) throw new Error(`"${key}" is a built-in voice`)
   VOICES[key] = profile
   return key
 }
 
 export function unregisterVoice(villager: string): void {
-  const key = keyWord(villager)
+  const key = normal(villager)
   if (!BUILT_IN.has(key)) delete VOICES[key]
 }

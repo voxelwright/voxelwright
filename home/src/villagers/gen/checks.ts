@@ -68,6 +68,8 @@ const VIEWS = [
   { name: 'the dollhouse view (in front and above)', dir: new THREE.Vector3(0, -Math.sin(LIMITS.pitch), -Math.cos(LIMITS.pitch)), up: new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch)), fix: 'raise or tilt back any brim or hood so the eyes show from above' },
 ]
 
+const emptyEye = (i: number) => `the ${i === 0 ? 'first' : 'second'} eye has no shape in it; put a visible mesh in each eye group`
+
 /**
  * Whether eye `i` shows from the front and from the dollhouse camera: of 5 rays at its centre and round it, at least
  * 2 must reach it first from each. Returns the fewer of the two views and a failure per view it hides from.
@@ -76,7 +78,8 @@ export function faceViews(root: THREE.Object3D, meshes: THREE.Mesh[], eye: THREE
   const own = new Set<THREE.Object3D>()
   eye.traverse((o) => own.add(o))
   const box = new THREE.Box3().setFromObject(eye, true)
-  if (box.isEmpty()) return { least: 0, failures: [] }
+  // An eye with nothing in it cannot be seen: that is a failure, never a pass.
+  if (box.isEmpty()) return { least: 0, failures: [emptyEye(i)] }
   const c = box.getCenter(new THREE.Vector3())
   const r = box.getSize(new THREE.Vector3()).multiplyScalar(0.3)
   const ray = new THREE.Raycaster()
@@ -138,6 +141,7 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     eye.traverse((o) => own.add(o))
     const box = new THREE.Box3().setFromObject(eye, true)
     if (box.isEmpty()) {
+      failures.push(emptyEye(i))
       eyeRays.push(0)
       faceMargin.push(0)
       return

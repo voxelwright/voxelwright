@@ -839,8 +839,26 @@ try {
     await shot(page, '4b-saved')
     const pattern = JSON.parse(await readFile(join(root, 'people', 'alex', 'persona-templates', savedFiles[0]), 'utf8'))
     check('save: kept as a whole persona, the tuned warmth mapped in (blunt), cheeky at most, shared', /^blunt/.test(pattern.persona.temperament) && pattern.persona.humour.lean === 'cheeky' && pattern.shared === true && !('dials' in pattern.persona), pattern.persona)
+    // #47 review: the host sets the audience, never the page. A cheeky pattern is for adults only.
+    check('save: a cheeky saved pattern is kept for adults only, by the host', pattern.audience === 'adult', pattern.audience)
+    // A clean one too, shared, for Sam's pick below.
+    const clean = await page.evaluate(async (persona) => (await import('/src/villager.ts')).saveTemplate('alex', 'Calm Biscuit', persona, { warmth: 0.2, playful: 0.5, chatty: 0.5, humour: 0 }, true), (await st(page)).persona)
+    check('save: a clean pattern with no adults-only source is for anyone', clean.ok && clean.template.audience === 'any', clean)
+    // #47 review: the first villager's contact shadow is freed when the second one's set replaces it.
+    await page.evaluate(() => {
+      const setup = window.village.kernel.root.get('stage').scene.getObjectByName('villager setup')
+      const blobs = setup.children.filter((o) => / shadow$/.test(o.name))
+      window.shadowFreed = { blobs: blobs.length, geometry: 0, material: 0, map: 0 }
+      for (const b of blobs) {
+        b.geometry.addEventListener('dispose', () => window.shadowFreed.geometry++)
+        b.material.addEventListener('dispose', () => window.shadowFreed.material++)
+        b.material.map.addEventListener('dispose', () => window.shadowFreed.map++)
+      }
+    })
     await page.evaluate(() => window.villagerSetup.sendOff())
     await until(page, ['empty'])
+    const freed = await page.evaluate(() => window.shadowFreed)
+    check('send-off: the old contact shadows are disposed (material, shared geometry and texture), not only removed', freed.blobs === 1 && freed.material === 1 && freed.geometry === 1 && freed.map === 1, freed)
 
     await write(page, 'a [stub-fail] fox')
     await page.keyboard.press('Enter')
@@ -851,7 +869,7 @@ try {
     await context.close()
   }
   {
-    // It reloads for its maker, and is shared with Sam, a child, as cheeky in the host and the page.
+    // It reloads for its maker. Sam, a child, sees only the clean one Alex shared, never the cheeky one.
     const again = await open('')
     const mine = await again.page.evaluate(() => window.villagerSetup.patterns())
     check('save: after a reload the saved pattern is back on the rack', mine.cards.some((c) => c.source === 'mine' && c.humour === 'cheeky'), mine.cards)
@@ -861,7 +879,8 @@ try {
     const seen = await sam.page.evaluate(() => window.villagerSetup.patterns())
     check('profile: the page takes the person\'s profile from the host, whatever the URL says', JSON.stringify((await st(sam.page)).profile) === JSON.stringify({ age: 'child' }), (await st(sam.page)).profile)
     const shared = seen.cards.find((c) => c.source === 'family')
-    check('family: the shared pattern appears for another person, as saved', shared && shared.humour === 'cheeky', seen.cards)
+    check('family: the shared clean pattern appears for another person, as saved', shared && shared.name === 'Calm Biscuit' && shared.humour === 'clean', seen.cards)
+    check('family: Alex\'s cheeky shared pattern is not offered to Sam, a child', !seen.cards.some((c) => c.source === 'family' && c.humour === 'cheeky'), seen.cards)
     check('family: built-in templates for a child leave out the adults-only one', !seen.cards.some((c) => c.id === 'buddy') && seen.cards.some((c) => c.id === 'companion'), seen.cards.map((c) => c.id))
     await sam.page.click(`.vs-pattern[data-template="${shared.id}"]`)
     await sam.page.locator('.vs-slip .line').fill('a patient owl who helps with spelling')
@@ -869,7 +888,7 @@ try {
     await sam.page.keyboard.press('Enter')
     await until(sam.page, ['tuning', 'failed'])
     const s = await st(sam.page)
-    check('family: Sam\'s villager takes the shared pattern\'s manner (blunt), cheeky at most', /^blunt/.test(s.persona?.temperament ?? '') && s.persona.humour.lean === 'cheeky' && s.values.humour === 0.5, { persona: s.persona, values: s.values })
+    check('family: Sam\'s villager takes the shared pattern\'s manner (blunt, clean)', /^blunt/.test(s.persona?.temperament ?? '') && s.persona.humour.lean === 'clean' && s.values.humour === 0, { persona: s.persona, values: s.values })
     await sam.page.evaluate(() => window.villagerSetup.set('humour', 1))
     check('family: pushing the dial to crude for a child stays cheeky, with &profile=adult-optin in the URL', (await st(sam.page)).values.humour === 0.5)
     await sam.page.evaluate(() => window.villagerSetup.sendOff())
@@ -886,6 +905,70 @@ try {
     const k = await st(kit.page)
     check('profile: a person the host has no profile for is unknown, and the dial stops at cheeky', k.profile?.age === 'unknown' && k.values.humour === 0.5, { profile: k.profile, humour: k.values.humour })
     await kit.context.close()
+  }
+
+  // ── #47 review: a send-off the host could not store keeps the villager on the stool, ready to try again ──
+  {
+    const { context, page, errors } = await open('&person=jo')
+    const jo = join(root, 'people', 'jo')
+    const sendOffNow = async () => {
+      await page.evaluate(() => window.villagerSetup.sendOff())
+      await page.waitForFunction(() => !['leaving'].includes(window.villagerSetup.state().state) || window.villagerSetup.state().sentOff !== 'sending', null, { timeout: 10000 }).catch(() => {})
+      await page.waitForTimeout(600)
+    }
+    await page.locator('.vs-slip .line').fill('a calm pup who bakes bread')
+    await page.focus('.vs-slip .line')
+    await page.keyboard.press('Enter')
+    await until(page, ['tuning', 'failed'])
+    await page.evaluate(() => window.villagerSetup.set('warmth', 0.2))
+    const personaBefore = await readFile(join(jo, 'persona.json'), 'utf8').catch(() => null)
+    // voice.json as a directory: the host's last-but-one rename fails, so it writes nothing and answers 500 in JSON.
+    await mkdir(join(jo, 'voice.json'), { recursive: true })
+    await sendOffNow()
+    const f = await st(page)
+    const fp = await pg(page)
+    check('send-off failed (the host could not store it): the villager stays on the stool as tuned, and the person\'s persona is unchanged', f.state === 'tuning' && f.placed && f.walkers.length === 0 && f.kept.length === 0 && fp.done && f.values.warmth === 0.2 && /^failed: failed/.test(f.sentOff ?? '') && await readFile(join(jo, 'persona.json'), 'utf8').catch(() => null) === personaBefore, { state: f.state, placed: f.placed, walkers: f.walkers.length, kept: f.kept.length, done: fp.done, sentOff: f.sentOff })
+    check('send-off failed: the note says plainly and warmly it didn\'t go and can be tried again, not that the helper is away', /didn't go/.test(f.note ?? '') && /try again/.test(f.note ?? '') && !/isn't in/.test(f.note ?? '') && !/off to help/.test(f.status), { note: f.note, status: f.status })
+    // The host does not answer at all: the helper is away, and still nothing moves.
+    await page.route('**/villager/api/people/jo/villagers/*/send-off', (r) => r.abort())
+    await sendOffNow()
+    const a = await st(page)
+    check('send-off with the host away: it stays on the stool and the note says the helper isn\'t in', a.state === 'tuning' && a.walkers.length === 0 && /^failed: away/.test(a.sentOff ?? '') && /isn't in/.test(a.note ?? ''), { state: a.state, sentOff: a.sentOff, note: a.note })
+    await page.unroute('**/villager/api/people/jo/villagers/*/send-off')
+    await rm(join(jo, 'voice.json'), { recursive: true })
+    await page.evaluate(() => window.villagerSetup.sendOff())
+    await until(page, ['empty'])
+    await page.waitForFunction(() => window.villagerSetup.state().sentOff !== 'sending', null, { timeout: 10000 }).catch(() => {})
+    const s = await st(page)
+    const written = JSON.parse(await readFile(join(jo, 'persona.json'), 'utf8').catch(() => 'null'))
+    check('send-off tried again: the same tuned villager goes, and the host writes its persona', s.sentOff === 'Biscuit' && written?.name === 'Biscuit' && /^blunt/.test(written.temperament) && s.walkers.length === 1 && s.kept.length === 1 && /off to help/.test(s.status), { sentOff: s.sentOff, persona: written?.temperament, walkers: s.walkers.length })
+    check('send-off failure and retry: no page errors', errors.length === 0, errors)
+    await context.close()
+  }
+
+  // ── #47 review: unloading while the model works leaves nothing behind when the answer comes late ──
+  {
+    const { context, page, errors } = await open('')
+    const measure = () => page.evaluate(async () => {
+      const n = window.village.snapshot()
+      const { VOICES } = await import('/src/voice/profiles.ts')
+      return { objects: n.sceneObjects, hooks: n.frameHooks, dom: n.dom, iframes: document.querySelectorAll('iframe').length, setup: n.objects.filter((o) => /villager (setup|workshop)/.test(o)).length, voices: Object.keys(VOICES).filter((k) => k.startsWith('setup-')) }
+    })
+    await page.locator('.vs-slip .line').fill('a slow snail who keeps the time')
+    slow = true
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(1200)
+    const waiting = (await st(page)).state
+    await page.evaluate(() => window.village.kernel.unload('villagersetup'))
+    await page.waitForTimeout(300)
+    const m0 = await measure()
+    // Past the slow stub's 10 s: the host answers to a page that no longer has the workshop.
+    await page.waitForTimeout(11000)
+    slow = false
+    const m1 = await measure()
+    check('unloading during a make: the late answer starts no sandbox, registers no voice and adds nothing', waiting === 'waiting' && JSON.stringify(m1) === JSON.stringify(m0) && m1.voices.length === 0 && m1.setup === 0, { waiting, m0, m1 })
+    check('unloading during a make: no page errors', errors.length === 0, errors)
+    await context.close()
   }
 
   // ── Repair: the home's checks refuse the first module; one remake with the reason ──

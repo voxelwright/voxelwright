@@ -8,6 +8,7 @@
 //   villager.json       the Agent SDK session id to resume, and its running cost
 //   persona.json        who the villager is (#42), written by a villager generator; checked, never trusted as rules
 //   persona.prev.json   the persona before the last setup send-off (#47), kept to undo it
+//   persona-history/    every persona a send-off replaced (#47), never overwritten
 //   voice.json          the babble voice sent off with it (#47)
 //   villagers/<item>.json, persona-templates/<id>.json  setup's made villagers and saved patterns (villager-make.ts)
 //   preferences.json    what the person said they want (the humour dial), written by host code from their own words

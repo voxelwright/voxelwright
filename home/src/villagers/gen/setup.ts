@@ -20,7 +20,7 @@ import { Babbler } from '../../voice/engine'
 import { clampVoice, voiceFromDescription } from '../../voice/gen'
 import { registerVoice, unregisterVoice, VOICES, type VoiceProfile } from '../../voice/profiles'
 import { TYPE_RATE } from '../../voice/text'
-import { contactShadows, stepCrowd } from '../cast'
+import { contactShadows, disposeShadows, stepCrowd } from '../cast'
 import { Villager, type Figure } from '../rig'
 import { SPOTS } from '../world'
 import { assemble } from './assemble'
@@ -84,6 +84,12 @@ export default {
     const kept: Made[] = []
     const timings: Record<string, number> = {}
     let box: PropBox | null = null
+    /** Set when the scene is unloaded: a make, remake or send-off still in flight then does nothing more. */
+    let disposed = false
+    /** The waiting tag's seconds counter while a make is in flight. */
+    let clock = 0
+    /** Every voice this scene registered, so unloading takes them all back. */
+    const voiceKeys = new Set<string>()
     /** The host's profile of this person and its jokes dial (GET persona-templates). Until it answers, the dial is clean or cheeky. */
     let PROFILE: unknown = null
     let HUMOUR_DIAL: HumourDial = { locked: null }
@@ -560,9 +566,11 @@ export default {
         const { spec } = check(raw)
         return { fig: build(spec, phys, { accent }, seed), name: spec.name, role: spec.role as string, bark: spec.bark, voice: spec.voice as VoiceProfile | null, persona: field(raw, 'persona') }
       }
+      alive()
       box ??= new PropBox()
       const t0 = performance.now()
       const result = await box.run(text)
+      alive()
       timings.sandboxMs = performance.now() - t0
       if (!result.ok) throw new Error(`sandbox: ${result.reason}`)
       const checked = validate(result.data)
@@ -574,7 +582,12 @@ export default {
       return { fig: a.fig, name: a.about.name, role: a.about.role as string, bark: a.about.bark, voice: a.about.voice as VoiceProfile | null, persona: field(field(field(result.data, 'villager'), 'about'), 'persona') }
     }
 
+    /** Thrown after an await when the scene was unloaded meanwhile: the rest of a make is then a no-op. */
+    const alive = () => {
+      if (disposed) throw new Error('unloaded')
+    }
     const start = async (description: string) => {
+      if (disposed) return
       if (state === 'waiting' || state === 'stitching' || state === 'leaving') return
       description = description.trim().replace(/\s+/g, ' ')
       const template = patterns.picked?.template ?? null
@@ -600,7 +613,7 @@ export default {
       const t0 = performance.now()
       const elapsed = () => Math.round((performance.now() - t0) / 1000)
       let repairing = false
-      const clock = window.setInterval(() => setStatus(repairing ? `One piece didn't sit right, so it's being re-cut… ${elapsed()} s` : `Drafting the pattern from your words… ${elapsed()} s`, 'warm'), 1000)
+      clock = window.setInterval(() => setStatus(repairing ? `One piece didn't sit right, so it's being re-cut… ${elapsed()} s` : `Drafting the pattern from your words… ${elapsed()} s`, 'warm'), 1000)
       setStatus(FROM ? 'Unfolding a saved pattern…' : 'Drafting the pattern from your words… usually about a minute.', 'warm')
       let fail: string | null = null
       try {
@@ -609,12 +622,14 @@ export default {
         let role: string | undefined
         if (FROM) {
           const saved = await fetchSaved(FROM)
+          alive()
           arm = saved.meta.arm
           text = saved.text
           source = { from: FROM }
         } else {
           // The role the person's words (or the picked pattern) ask for; none, and the model's about() decides.
           const answer = await makeVillager(PERSON, description, ACCENT, template ? refOf(patterns.picked!, PERSON) : undefined, roleFor(description, template?.id))
+          alive()
           timings.modelMs = answer.ms
           if (!answer.ok) {
             fail = answer.why === 'away' ? 'away' : answer.why === 'busy' ? 'busy' : 'model'
@@ -634,7 +649,7 @@ export default {
         try {
           got = await figureFrom(arm, text, ACCENT, role)
         } catch (error) {
-          if (FROM || !source.item) throw error
+          if (disposed || FROM || !source.item) throw error
           moduleRefusal = String(error instanceof Error ? error.message : error)
         }
         if (!FROM && source.item && (!got || hostRefusal)) {
@@ -644,6 +659,7 @@ export default {
           repairing = true
           setStatus(`One piece didn't sit right, so it's being re-cut… ${elapsed()} s`, 'warm')
           const again = await remakeVillager(PERSON, source.item, reason)
+          alive()
           timings.remakeMs = again.ms
           if (!again.ok) {
             fail = again.why === 'away' ? 'away' : 'model'
@@ -660,6 +676,7 @@ export default {
         }
         if (!got) throw new Error(moduleRefusal)
         await patternsReady
+        alive()
         // The persona: the host's, checked by #42's checkPersona there (a live one always has it); a saved result's
         // own, else a plain one from the words. The dials are only where the sliders start.
         const persona = checked(hostPersona) ?? checked(got.persona) ?? fallbackPersona(description, got.role, got.name)
@@ -677,6 +694,8 @@ export default {
         await stitch(got.fig, made.name, got.bark, got.voice ?? voiceFromDescription(description))
       } catch (error) {
         clearInterval(clock)
+        // Unloaded meanwhile: nothing is left to tell, and nothing may be added to a scene that is gone.
+        if (disposed) return
         failed(fail ?? 'sewing', String(error instanceof Error ? error.message : error))
       }
     }
@@ -711,6 +730,7 @@ export default {
 
     // ── Stitching, part by part, with a needle pass for each ───────────────
     const stitch = async (made_: Figure, name: string, bark: string, rawVoice: VoiceProfile) => {
+      alive()
       state = 'stitching'
       fig = made_
       shop.activity('tidy')
@@ -753,9 +773,13 @@ export default {
       // Its voice: the model's, pulled into range; registered under a key that cannot collide.
       base = { voice: clampVoice(rawVoice), speed: fig.speed, bob: fig.bob }
       voiceKey = registerVoice(`setup-${kept.length + 1}`, { ...base.voice })
+      voiceKeys.add(voiceKey)
       setStatus(`Stitching ${name} together…`, 'warm')
       const t0 = performance.now()
-      for (const p of parts) await reveal(p, scales)
+      for (const p of parts) {
+        await reveal(p, scales)
+        alive()
+      }
       timings.stitchMs = performance.now() - t0
       // Up it hops, looks at you and says hello.
       state = 'tuning'
@@ -794,6 +818,7 @@ export default {
       if (S?.tuning) S.tuning()
       else if (slip.contains(document.activeElement) || document.activeElement === document.body) tools.focus('size')
       await wait(reducedMotion.matches ? 0 : 450)
+      if (disposed) return
       say(bark)
     }
 
@@ -856,36 +881,50 @@ export default {
       if (state !== 'tuning' || !fig || !puppet || !made) return
       state = 'leaving'
       tools.mode('off')
-      S?.leaving?.()
       done.classList.remove('shown')
       saveTag.classList.remove('shown')
+      const record: Made = { ...made, tuning: { ...made.tuning } }
+      // A live villager becomes the person's: the host writes its tuned persona (people/<id>/persona.json, the old one
+      // kept) and its voice, all or nothing. It only hops down once the host has it; until then it stays on the stool.
+      const voice = voiceKey ? VOICES[voiceKey] : null
+      if (record.source.item && voice) {
+        sentOff = 'sending'
+        const r = await sendOffVillager(PERSON, record.source.item, { ...record.tuning }, { ...voice }).catch(() => ({ ok: false as const, why: 'failed' as const }))
+        if (disposed) return
+        if (!r.ok) {
+          // Nothing changed on the host: the same tuned villager stays on the stool, ready to try again.
+          sentOff = `failed: ${r.why}`
+          state = 'tuning'
+          if (!S?.tuning) tools.mode('on')
+          done.classList.add('shown')
+          saveTag.classList.add('shown')
+          note(r.why === 'away'
+            ? `${record.name} didn't go: the workshop's helper isn't in just now. They're still here, just as you tuned them. Try "Off you go" again in a moment.`
+            : `${record.name} didn't go: their new home couldn't be saved this time. They're still here, just as you tuned them, so you can try again.`)
+          return
+        }
+        sentOff = r.name
+      }
+      kept.push(record)
+      S?.leaving?.()
       nametag.classList.remove('shown')
       card.classList.remove('shown')
       // A note belongs to the tuning it explained; the walk-off has the screen to itself.
       clearTimeout(noteTimer)
       noteEl.classList.remove('shown')
-      const record: Made = { ...made, tuning: { ...made.tuning } }
-      kept.push(record)
-      // A live villager becomes the person's: the host writes its tuned persona (people/<id>/persona.json, the old one kept) and its voice.
-      const voice = voiceKey ? VOICES[voiceKey] : null
-      if (record.source.item && voice) {
-        sentOff = 'sending'
-        void sendOffVillager(PERSON, record.source.item, { ...record.tuning }, { ...voice }).then((r) => {
-          sentOff = r.ok ? r.name : `failed: ${r.why}`
-          if (!r.ok) note(`${record.name} couldn't move in just now${r.why === 'away' ? ": the workshop's helper isn't in" : ''}. Nothing changed.`)
-        })
-      }
       const spot = SPOTS[LANDING]
       // Before it goes: square on to you, its face up, a wave goodbye.
       if (!reducedMotion.matches) {
         say('Bye for now!', true)
         await puppet.wave(1.4)
+        if (disposed || !puppet || !fig) return
         for (const t of sayTimers) clearTimeout(t)
         card.classList.remove('shown')
       }
       puppet.looking = false
       // Down it hops, growing from its bench size to its own as it goes.
       await puppet.leap(new THREE.Vector3(spot.at[0], 0, spot.at[1]), reducedMotion.matches ? 0.01 : 1.1, 0.35, SCALE * tune.size(record.tuning.size))
+      if (disposed || !fig) return
       bench = 1
       // The second routine's chores, counter first: that way leads across open floor, in view, not behind a chair.
       const tasks = [...ROUTINES[1].tasks]
@@ -894,7 +933,8 @@ export default {
       if (body) fig.root.userData.footprint = Math.max(body.max.x - body.min.x, body.max.z - body.min.z) * fig.root.scale.x * 1.15
       const walker = new Villager(fig, tasks, { start: LANDING, wait: 0.8 })
       walkers.push(walker)
-      for (const b of blobs) b.removeFromParent()
+      // The old shadows' material, geometry and texture are freed: contactShadows makes a new set each time.
+      disposeShadows(blobs)
       blobs = contactShadows(walkers)
       group.add(...blobs)
       // Watch it go: the camera follows it across the kitchen to its first chore, then comes back to the table.
@@ -929,6 +969,7 @@ export default {
     let shownCards: RackCard[] = []
     const loadPatterns = async () => {
       const [mine, family] = await Promise.all([personaTemplates(PERSON), familyTemplates(PERSON)])
+      if (disposed) return []
       PROFILE = mine.ok ? mine.profile : null
       HUMOUR_DIAL = mine.ok ? mine.humour : { locked: null }
       // A level the host locks (the admin's setting, or the person's own "keep it clean") pins the dial there.
@@ -982,7 +1023,9 @@ export default {
       const dials = { warmth: t.warmth, playful: t.playful, chatty: t.chatty, humour: Math.min(t.humour, 0.5) }
       const name = `Like ${made.name}`.slice(0, 40)
       saveButton.disabled = true
-      const saved = await saveTemplate(PERSON, name, made.persona, dials, share.checked)
+      // The villager it came from goes with it: the host reads its pattern there to decide who may see the saved one.
+      const saved = await saveTemplate(PERSON, name, made.persona, dials, share.checked, made.source.item)
+      if (disposed) return
       saveButton.disabled = false
       if (!saved.ok) return note(saved.why === 'away' ? "Couldn't keep the pattern: the workshop's helper isn't in just now." : "Couldn't keep the pattern this time.")
       lastSaved = saved.template.id
@@ -1087,6 +1130,8 @@ export default {
       patterns.enable('on')
       line.focus({ preventScroll: true })
       return () => {
+        disposed = true
+        clearInterval(clock)
         leaveTable()
         S?.dispose()
         delete document.documentElement.dataset.vsStrategy
@@ -1100,7 +1145,8 @@ export default {
         shop.dispose()
         box?.dispose()
         box = null
-        for (let i = 1; i <= kept.length + 1; i++) unregisterVoice(`setup-${i}`)
+        for (const key of voiceKeys) unregisterVoice(key)
+        voiceKeys.clear()
         babbler?.dispose()
         void audio?.close()
       }

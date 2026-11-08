@@ -24,6 +24,19 @@ export function contactShadows(villagers: Villager[]): THREE.Mesh[] {
   })
 }
 
+/** Takes contactShadows' blobs out of the scene and frees what they hold: each material, and the geometry and texture they share. */
+export function disposeShadows(blobs: THREE.Mesh[]) {
+  const shared = new Set<{ dispose(): void }>()
+  for (const b of blobs) {
+    b.removeFromParent()
+    const m = b.material as THREE.MeshBasicMaterial
+    if (m.map) shared.add(m.map)
+    shared.add(b.geometry)
+    m.dispose()
+  }
+  for (const d of shared) d.dispose()
+}
+
 /** One frame for a group: yielding, the rig, and the shadows following. */
 export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number, t: number, eye: THREE.Vector3, scale: number) {
   // Walkers wait for whoever is just ahead.
