@@ -8,17 +8,19 @@
 // public/audio/sfx/, with the synthesized sound as a stand-in until the file has loaded), and
 // `a` and `c` are two different synthesized characters. Round 2 (the owner's notes on round 1)
 // adds news d and e, hover d to f, farewell b to d, and a much softer b for turned and the pad;
-// turned and the pad's `a` were softened in place.
+// turned and the pad's `a` were softened in place. Round 3 (the owner found every news call
+// annoying and asked for something like a bubble pop) adds news f to i: small bubble pops, two
+// recorded, one synthesized and one hybrid, with `a` kept to compare.
 
 import type { CueName, Cue, Palette, Play, Kit } from '../contract'
-import { BODY, NOTE, crackle, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
+import { BODY, NOTE, crackle, curve, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
 import { SPRITES } from './sprites'
 
 /** The recorded sprites (public/audio/sfx/, made by scripts/make-sfx.mjs), by what they hold. */
 const S = {
   click: SPRITES['wood-clicks'], kalimba: SPRITES['kalimba-g5'], musicBox: SPRITES['music-box-g5'], tear: SPRITES.tears,
   swish: SPRITES['paper-swish'], slide: SPRITES['paper-slide'], cushion: SPRITES.cushion, page: SPRITES['page-turn'],
-  chair: SPRITES['chair-lift'], steps: SPRITES['sock-steps'],
+  chair: SPRITES['chair-lift'], steps: SPRITES['sock-steps'], bubble: SPRITES['bubble-pops'],
 }
 
 type Ctx = BaseAudioContext
@@ -646,6 +648,34 @@ function lift(a: Ctx, out: AudioNode, kit: Kit, t: number, p: Play, gain: number
   noise(a, out, kit, t + 0.06, { dur: 0.12, gain: gain * 0.25, random: p.random, freq: (u) => (480 + 120 * u) * p.rate, q: 8, env: swell(0.5, 1) })
 }
 
+/**
+ * A bubble's "bloop": one sine that sweeps up `sweep` octaves to `freq` (most of the way within
+ * about `rise` seconds, as a recorded pop does) and dies with time constant `tau`, struck over
+ * `attack` seconds so it has no click.
+ */
+function bloop(a: Ctx, out: AudioNode, t: number, o: { freq: number; gain: number; sweep?: number; rise?: number; tau?: number; attack?: number }) {
+  const at = snap(a, t)
+  const attack = o.attack ?? 0.003
+  const tau = o.tau ?? 0.014
+  const rise = (o.rise ?? 0.024) / 3
+  const sweep = o.sweep ?? 0.75
+  const dur = snap(a, attack + tau * 6.9)
+  const osc = new OscillatorNode(a, { frequency: o.freq * 2 ** -sweep })
+  osc.frequency.setValueCurveAtTime(curve(dur, (u) => o.freq * 2 ** (-sweep * Math.exp(-(u * dur) / rise))), at, dur)
+  const env = strike(dur, attack, tau)
+  const g = new GainNode(a, { gain: 0 })
+  g.gain.setValueCurveAtTime(curve(dur, (u) => o.gain * env(u), 4000), at, dur)
+  osc.connect(g).connect(out)
+  osc.start(at)
+  osc.stop(at + dur)
+}
+
+/**
+ * Each bubble-pop take's playback rate that brings its pitch to G5 (784 Hz). Measured from
+ * bubble-pops.ogg: the takes' energy-weighted peak frequencies are 821, 747, 1019 and 995 Hz.
+ */
+const POP_TO_G5 = [784 / 821, 784 / 747, 784 / 1019, 784 / 995]
+
 const news = {
   a: cue({
     bus: 'world', level: -18, gap: 0.6, length: 1.2, jitter: { cents: 2, db: 1 },
@@ -702,6 +732,43 @@ const news = {
       noise(a, out, kit, p.at, { dur: 0.04, gain: p.gain * 0.15, random: p.random, type: 'lowpass', freq: 500, q: 0.6, env: strike(0.04, 0.004, 0.01) })
       pluck(a, r, p.at, NOTE.G4 * p.rate, felt, { gain: p.gain * 0.5, attack: 0.009, dur: 0.55, ceiling: 1600 })
       pluck(a, r, p.at + 0.16, NOTE.C5 * p.rate, [{ ratio: 1, amp: 1, tau: 0.46 }, felt[1]], { gain: p.gain * 0.55, attack: 0.009, dur: 0.9, ceiling: 1600 })
+    },
+  }),
+  f: cue({
+    bus: 'world', level: -19, gap: 0.6, length: 0.25, jitter: { cents: 30, db: 1 },
+    samples: [S.bubble.file],
+    play(a, out, p, kit) {
+      // Recorded: one small bubble pop, four takes from four recordings in turn, top rolled off at 4 kHz.
+      if (sample(a, out, kit.sample(S.bubble.file), p.at, pick(p, S.bubble.takes), { gain: p.gain, rate: p.rate, top: 4000 })) return
+      bloop(a, out, p.at, { freq: 900 * p.rate, gain: p.gain })
+    },
+  }),
+  g: cue({
+    bus: 'world', level: -20.5, gap: 0.6, length: 0.25, jitter: { cents: 30, db: 1 },
+    samples: [S.bubble.file],
+    play(a, out, p, kit) {
+      // Recorded, bigger: the same four pops at 0.63 speed (eight semitones down, longer), top at 2.4 kHz.
+      if (sample(a, out, kit.sample(S.bubble.file), p.at, pick(p, S.bubble.takes), { gain: p.gain, rate: 0.63 * p.rate, top: 2400 })) return
+      bloop(a, out, p.at, { freq: 560 * p.rate, gain: p.gain, tau: 0.02 })
+    },
+  }),
+  h: cue({
+    bus: 'world', level: -21, gap: 0.6, length: 0.25, jitter: { cents: 25, db: 1 },
+    play(a, out, p) {
+      // Synthesized: a sine bloop rising to G5, and a faint smaller one landing on D6 just after it.
+      bloop(a, out, p.at, { freq: NOTE.G5 * p.rate, gain: p.gain })
+      bloop(a, out, p.at + 0.075, { freq: NOTE.D6 * p.rate, gain: p.gain * 0.23, sweep: 0.6, rise: 0.012, tau: 0.007 })
+    },
+  }),
+  i: cue({
+    bus: 'world', level: -17.5, gap: 0.6, length: 0.25, jitter: { cents: 25, db: 1 },
+    samples: [S.bubble.file],
+    play(a, out, p, kit) {
+      // Hybrid: a recorded pop retuned to G5 with a soft sine bloop on G5 under it, a touch longer.
+      const n = p.index % S.bubble.takes.length
+      bloop(a, out, p.at + 0.002, { freq: NOTE.G5 * p.rate, gain: p.gain * 0.12, sweep: 0.5, tau: 0.028, attack: 0.006 })
+      if (sample(a, out, kit.sample(S.bubble.file), p.at, S.bubble.takes[n], { gain: p.gain * 0.8, rate: POP_TO_G5[n] * p.rate, top: 3200 })) return
+      bloop(a, out, p.at, { freq: NOTE.G5 * p.rate, gain: p.gain * 0.73 })
     },
   }),
 }
@@ -823,6 +890,10 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
     c: 'Marimba E-E then A with a ghost shimmer.',
     d: 'A, rounder: the same kalimba G then high C with a slower strike, nothing above 2 kHz, less room, 2 dB quieter.',
     e: 'A, an octave lower with a felt mallet: G then C, warmer and rounder, less room, 2 dB quieter.',
+    f: 'Recorded: one small bubble pop, as recorded, a different one of four each time.',
+    g: 'Recorded, bigger: the same four bubble pops played slower, so they are deeper and rounder.',
+    h: 'Synthesized: a soft "bloop" that rises to G, with a faint smaller bubble just after it.',
+    i: 'Hybrid: a recorded bubble pop tuned to G with a soft synthesized bloop under it.',
   },
   walk: { a: 'Soft felt steps on the music\'s eighth notes: two to five leaving, two arriving.' },
   refused: { a: 'Two soft wooden knocks and a small latch rattle at the closed door.' },
@@ -840,4 +911,8 @@ export const SAMPLE_CREDITS: { title: string; author: string; source: string; li
   ['Page Turn', 'davidbain', 'https://freesound.org/s/136778/'],
   ['18-sentandose silla de madera.wav', 'Tomycatts', 'https://freesound.org/s/429327/'],
   ['01-32 Footsteps, Wood, Socks, Slow Pace.wav', 'SpliceSound', 'https://freesound.org/s/369837/'],
+  ['Bubble_4', 'BenParamoreAudio', 'https://freesound.org/s/868712/'],
+  ['Bubble_Pop', 'arttim', 'https://freesound.org/s/733264/'],
+  ['BubblePopping', 'Sess8it', 'https://freesound.org/s/762781/'],
+  ['pop out, bubble, soft bursting', 'chaferwitt', 'https://freesound.org/s/776443/'],
 ].map(([title, author, source]) => ({ title, author, source, licence: 'CC0 1.0', licenceUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' }))
