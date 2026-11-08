@@ -3,8 +3,9 @@
 // page's own AudioContext and the real mix (voice/buses.ts); "with music underneath" adds
 // the bed at its real level. Picks save to the dev server (POST /sound-lab/picks, see
 // vite.config.ts) and to localStorage `village.sfx.picks`, which the home's player reads.
-// Round 2 sits at the top with the cues the owner asked to change; round 1's cards stay below,
-// folded, with the current picks selected. .sound-lab/history.jsonl keeps every round's save.
+// Round 3 sits at the top with the one cue the owner asked to change again (news); round 2's and
+// round 1's cards stay below, folded, with the current picks selected. .sound-lab/history.jsonl
+// keeps every round's save.
 import type { CueName } from '../sound/contract'
 import { Player } from '../sound/player'
 import { DESCRIPTIONS, PALETTE, SAMPLE_CREDITS } from '../sound/palette'
@@ -66,6 +67,16 @@ const ROUND1_NOTES: Partial<Record<CueName, string>> = {
   farewell: 'This sounds like notification. No need for a kalimba there',
 }
 
+/** What the owner said in round 2 (November 8), as saved in .sound-lab/picks.json then. */
+const ROUND2_NOTES: Partial<Record<CueName, string>> = {
+  news: 'These all feel annoying. Maybe something a bubble pop would be better',
+}
+
+/** Round 3: the cue that changed again, the versions to compare (the current pick first), and what changed since. */
+const ROUND3: { cue: CueName; variants: string[]; before: string }[] = [
+  { cue: 'news', variants: ['a', 'f', 'g', 'h', 'i'], before: `Round 2: you picked A and said “${ROUND2_NOTES.news}”. A is unchanged, to compare; F to I are small, soft bubble pops, no tune.` },
+]
+
 /** Round 2: the cues that changed, the versions to compare (round 1's first), and what changed since. */
 const ROUND2: { cue: CueName; variants: string[]; before: string }[] = [
   { cue: 'news', variants: ['a', 'd', 'e'], before: 'Round 1: you picked A and said “Sounds a bit harsh still”. A is unchanged, to compare; D and E are softened.' },
@@ -91,6 +102,7 @@ const names = Object.keys(PALETTE) as CueName[]
 const variantsOf = (cue: CueName) => Object.keys(PALETTE[cue]).sort()
 const choosing = names.filter((c) => variantsOf(c).length > 1)
 const keeping = names.filter((c) => variantsOf(c).length === 1)
+const inRound3 = new Set(ROUND3.map((r) => r.cue))
 const inRound2 = new Set(ROUND2.map((r) => r.cue))
 /** What the server takes for a cue: a variant or 'none' when it has several, else keep or change. */
 const allowed = (cue: CueName) => (variantsOf(cue).length > 1 ? [...variantsOf(cue), 'none'] : ['keep', 'change'])
@@ -282,17 +294,23 @@ async function load() {
   for (const [cue, value] of Object.entries(state.picks)) if (!(cue in PALETTE) || !allowed(cue as CueName).includes(value)) delete state.picks[cue]
   // Round 1's notes are quoted on the round-2 cards; the boxes start empty for new notes.
   for (const { cue } of ROUND2) if (state.notes[cue] === ROUND1_NOTES[cue]) delete state.notes[cue]
+  // Round 2's notes are quoted on the round-3 card the same way.
+  for (const { cue } of ROUND3) if (state.notes[cue] === ROUND2_NOTES[cue]) delete state.notes[cue]
   manifest = found
   const cues = $('cues')
-  cues.append(el('p', { className: 'divider' }, 'Round 2'))
-  cues.append(el('p', { className: 'lede' }, 'The six sounds you asked to change. Each card says what you said last time; pick the version you like.'))
-  for (const { cue, variants, before } of ROUND2) cues.append(card(cue, variants, before))
+  cues.append(el('p', { className: 'divider' }, 'Round 3'))
+  cues.append(el('p', { className: 'lede' }, 'The news sound, again. The card says what you said last time; pick the version you like.'))
+  for (const { cue, variants, before } of ROUND3) cues.append(card(cue, variants, before))
   if (manifest) cues.append(el('p', { className: 'small' }, `The videos are the real home recorded headless; their sound is rendered offline over the same timeline (${manifest.audio}).`))
-  const round1 = el('details', { className: 'round1' }, el('summary', {}, `Round 1: the other ${names.length - ROUND2.length} sounds, with your picks`))
+  const round2 = el('details', { className: 'round round2' }, el('summary', {}, `Round 2: ${ROUND2.filter((r) => !inRound3.has(r.cue)).length} more sounds you changed, with your picks`))
+  for (const { cue, variants, before } of ROUND2) if (!inRound3.has(cue)) round2.append(card(cue, variants, before))
+  cues.append(round2)
+  const earlier = (cue: CueName) => inRound2.has(cue) || inRound3.has(cue)
+  const round1 = el('details', { className: 'round round1' }, el('summary', {}, `Round 1: the other ${names.filter((c) => !earlier(c)).length} sounds, with your picks`))
   round1.append(el('p', { className: 'divider' }, 'Pick one'))
-  for (const cue of choosing) if (!inRound2.has(cue)) round1.append(card(cue))
+  for (const cue of choosing) if (!earlier(cue)) round1.append(card(cue))
   round1.append(el('p', { className: 'divider' }, 'Keep or change'))
-  for (const cue of keeping) if (!inRound2.has(cue)) round1.append(card(cue))
+  for (const cue of keeping) if (!earlier(cue)) round1.append(card(cue))
   cues.append(round1)
   $('credits').append(credits())
   if (saved?.savedAt) say(`Last saved ${new Date(saved.savedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}`, true)

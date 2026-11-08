@@ -1,6 +1,6 @@
-// Headless proof of the listening room (#52): /sound-lab.html loads with no errors, round 2's
-// six cards come first and round 1's sit folded below, Start and a play button make sound at
-// the master (tapped with an AudioWorklet, as in check-sound.mjs), picks in both rounds
+// Headless proof of the listening room (#52): /sound-lab.html loads with no errors, round 3's
+// news card comes first and rounds 2 and 1 sit folded below, Start and a play button make sound at
+// the master (tapped with an AudioWorklet, as in check-sound.mjs), picks in every round
 // round-trip through POST and GET /sound-lab/picks into .sound-lab/picks.json, bad picks are
 // refused, and every manifest video exists.
 // Restores picks.json and history.jsonl as they were. Usage: node scripts/check-sound-lab.mjs [base-url]
@@ -30,14 +30,19 @@ try {
   await page.click('#start')
   await page.waitForSelector('#lab:not([hidden]) section.cue')
   const folded = await page.evaluate(() => ({
-    round2: [...document.querySelectorAll('#cues > section.cue')].map((s) => s.dataset.cue),
-    round1Open: document.querySelector('details.round1').open,
+    round3: [...document.querySelectorAll('#cues > section.cue')].map((s) => s.dataset.cue),
+    round2: [...document.querySelectorAll('details.round2 > section.cue')].map((s) => s.dataset.cue),
+    open: [...document.querySelectorAll('details.round')].map((d) => d.open),
     news: [...document.querySelectorAll('section[data-cue="news"] button.play')].map((b) => b.dataset.variant).join(''),
+    newsBefore: document.querySelector('section[data-cue="news"] .before')?.textContent ?? '',
+    newsPick: document.querySelector('section[data-cue="news"] .picks button[aria-pressed="true"]')?.dataset.value ?? null,
     hoverPicks: [...document.querySelectorAll('section[data-cue="hover"] .picks button')].map((b) => b.dataset.value).join(','),
     before: document.querySelector('section[data-cue="farewell"] .before')?.textContent ?? '',
   }))
-  check('Round 2 first: news, hover, farewell, turned, pad-up, pad-down, with their versions and what was said in round 1; round 1 folded below',
-    folded.round2.join() === 'news,hover,farewell,turned,pad-up,pad-down' && !folded.round1Open && folded.news === 'ade' && folded.hoverPicks === 'a,d,e,f,none' && folded.before.includes('kalimba'), JSON.stringify(folded))
+  check('Round 3 first: the news card with A and the bubble pops F to I, quoting round 2\'s note; rounds 2 and 1 folded below with their picks',
+    folded.round3.join() === 'news' && folded.round2.join() === 'hover,farewell,turned,pad-up,pad-down' && folded.open.join() === 'false,false' && folded.news === 'afghi' &&
+    folded.newsBefore.includes('bubble pop') && folded.hoverPicks === 'a,d,e,f,none' && folded.before.includes('kalimba'), JSON.stringify(folded))
+  await page.click('details.round2 > summary')
   await page.click('details.round1 > summary')
   const layout = await page.evaluate(() => ({
     cues: [...document.querySelectorAll('section.cue')].map((s) => s.dataset.cue),
@@ -58,15 +63,19 @@ try {
     tap.port.onmessage = (m) => (window.peak = Math.max(window.peak, m.data))
   })
   const quiet = await page.evaluate(() => new Promise((r) => setTimeout(() => r(window.peak), 300)))
-  await page.click('section[data-cue="news"] button.play[data-variant="d"]')
+  await page.click('section[data-cue="news"] button.play[data-variant="f"]')
   await page.waitForTimeout(700)
   const loud = await page.evaluate(() => window.peak)
-  check('Start, then Play D on round 2\'s news card sounds at the master', quiet < 1e-5 && loud > 1e-3, `before ${quiet}, after ${(20 * Math.log10(loud)).toFixed(1)} dBFS, context ${await page.evaluate(() => window.soundLab.audio.state)}`)
+  check('Start, then Play F (a recorded bubble pop) on round 3\'s news card sounds at the master', quiet < 1e-5 && loud > 1e-3, `before ${quiet}, after ${(20 * Math.log10(loud)).toFixed(1)} dBFS, context ${await page.evaluate(() => window.soundLab.audio.state)}`)
 
-  // Picks in both rounds and a note round-trip through the server.
-  await page.click('section[data-cue="farewell"] .picks button[data-value="c"]')
-  await page.click('section[data-cue="sent"] .picks button[data-value="c"]')
-  await page.click('section[data-cue="walk"] .picks button[data-value="change"]')
+  // Picks in every round and a note round-trip through the server. A pick button toggles, so each
+  // cue gets the first of its values that the owner's saved picks have not already pressed.
+  const choose = async (cue, values) => {
+    const v = await page.evaluate(([cue, values]) => values.find((v) => document.querySelector(`section[data-cue="${cue}"] .picks button[data-value="${v}"]`).getAttribute('aria-pressed') !== 'true'), [cue, values])
+    await page.click(`section[data-cue="${cue}"] .picks button[data-value="${v}"]`)
+    return v
+  }
+  const want = { news: await choose('news', ['h', 'g']), farewell: await choose('farewell', ['d', 'c']), sent: await choose('sent', ['c', 'a']), walk: await choose('walk', ['change', 'keep']) }
   await page.fill('section[data-cue="farewell"] textarea', 'the steps are lovely, a touch slower?')
   await page.click('#save')
   await page.waitForFunction(() => document.querySelector('#status').classList.contains('saved'), null, { timeout: 5000 })
@@ -74,16 +83,18 @@ try {
   const got = await page.evaluate(() => fetch('sound-lab/picks').then((r) => r.json()))
   const local = await page.evaluate(() => JSON.parse(localStorage.getItem('village.sfx.picks')))
   check('Picks round-trip: POST writes picks.json, GET returns it, localStorage holds variants only',
-    file.picks.farewell === 'c' && file.picks.sent === 'c' && file.picks.walk === 'change' && got.notes.farewell.startsWith('the steps') && file.savedAt && local.farewell === 'c' && local.sent === 'c' && !('walk' in local),
-    JSON.stringify({ file: file.picks, local }))
+    Object.entries(want).every(([cue, v]) => file.picks[cue] === v) && got.notes.farewell.startsWith('the steps') && file.savedAt && local.news === want.news && local.farewell === want.farewell && !('walk' in local),
+    JSON.stringify({ want, file: file.picks, local }))
   await page.reload()
   await page.click('#start')
   await page.waitForSelector('#lab:not([hidden]) section.cue')
-  const restored = await page.evaluate(() => {
+  await page.click('details.round2 > summary')
+  await page.click('details.round1 > summary')
+  const restored = await page.evaluate((want) => {
     const pressed = (cue, v) => document.querySelector(`section[data-cue="${cue}"] .picks button[data-value="${v}"]`).getAttribute('aria-pressed') === 'true'
-    return pressed('farewell', 'c') && pressed('sent', 'c') && pressed('walk', 'change') && document.querySelector('section[data-cue="farewell"] textarea').value.startsWith('the steps')
-  })
-  check('After a reload the page shows the saved picks (round 1 and 2) and note', restored)
+    return Object.entries(want).every(([cue, v]) => pressed(cue, v)) && document.querySelector('section[data-cue="farewell"] textarea').value.startsWith('the steps')
+  }, want)
+  check('After a reload the page shows the saved picks (rounds 1, 2 and 3) and note', restored)
 
   const post = (body, headers = { 'content-type': 'application/json' }) => page.evaluate(([body, headers]) => fetch('sound-lab/picks', { method: 'POST', headers, body }).then((r) => r.status), [body, headers])
   const refused = {
@@ -98,7 +109,7 @@ try {
     array: await post('[]'),
     notJsonType: await post(JSON.stringify({ picks: { chose: 'a' } }), { 'content-type': 'text/plain' }),
   }
-  check('Bad picks are refused (422, 400, or 415 for a non-JSON type) and leave picks.json alone', Object.entries(refused).every(([k, s]) => (k === 'notJsonType' ? s === 415 : s === 422 || s === 400)) && JSON.parse(readFileSync(join(lab, 'picks.json'), 'utf8')).picks.farewell === 'c', JSON.stringify(refused))
+  check('Bad picks are refused (422, 400, or 415 for a non-JSON type) and leave picks.json alone', Object.entries(refused).every(([k, s]) => (k === 'notJsonType' ? s === 415 : s === 422 || s === 400)) && JSON.parse(readFileSync(join(lab, 'picks.json'), 'utf8')).picks.farewell === want.farewell, JSON.stringify(refused))
 
   // The videos the page offers exist. They live in public/sound-lab/ (gitignored, made
   // locally), so a fresh worktree has no manifest: then the check is skipped, not failed. The
