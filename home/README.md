@@ -19,6 +19,7 @@ node scripts/check-navigation.mjs http://localhost:5181/ --build   # navigation 
 node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
+node scripts/check-physics.mjs        # physics (#74): ?physics=1, the pinball table, rules, talk-to-tune (stub host), villagers, step ms
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"

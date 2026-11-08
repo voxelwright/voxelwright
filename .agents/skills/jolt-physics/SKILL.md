@@ -5,9 +5,10 @@ description: Versions, verified recipes and limits for Jolt Physics in JavaScrip
 
 # Jolt Physics (JS/wasm)
 
-Adopted for the #74 bench (`home/bench/physics/jolt.ts`): `jolt-physics` 1.1.1
-(published October 23, 2026), the wasm build of Jolt by Jorrit Rouwe. Verified November 8, 2026 in
-Node 25.1 on an M1 Pro, single thread. Not yet run in the home's browser page.
+Adopted in #74: `jolt-physics` 1.1.1 (published October 23, 2026), the wasm build of Jolt
+by Jorrit Rouwe. The home's adapter is `home/src/engine/jolt.ts` (promoted from the bench,
+`home/bench/physics/jolt.ts`). Verified November 8, 2026 in Node 25.1 and in headless Chrome
+on an M1 Pro, single thread.
 
 Primary sources: the bindings' IDL and examples at
 <https://github.com/jrouwe/JoltPhysics.js> (`JoltJS.idl`, `Examples/`), the
@@ -21,9 +22,14 @@ names). Check the IDL before assuming a C++ method is exposed.
   `/wasm` loads `jolt-physics.wasm.wasm` (1.98 MB raw, 735 KB gzip). Use `/wasm`
   in the browser. Multithread builds need SharedArrayBuffer, so cross-origin
   isolation (COOP/COEP), which the home does not have.
-- Both need `'wasm-unsafe-eval'` in the page CSP; `home/vite.config.ts` has
-  `script-src 'self'` only. A CSP change needs the seven-lens review.
-- Cold load in Node: about 75 ms.
+- Both need `'wasm-unsafe-eval'` in the page CSP. `home/vite.config.ts` adds it only to
+  pages opened with `?physics` (one middleware owns the dev policy; `server.headers` is
+  applied at send time and would overwrite a middleware's choice). A CSP change needs the
+  seven-lens review (Sentinel).
+- Load the wasm in Vite with `initJolt({ locateFile: () => url })` and
+  `import url from 'jolt-physics/jolt-physics.wasm.wasm?url'`. The build emits the wasm
+  (2.0 MB, 761 KB gzip) and the glue as their own lazy chunk.
+- Cold load: about 75 ms in Node, 40 to 48 ms in the page (fetch and compile).
 
 ## Verified recipes (bench code is the reference)
 
@@ -78,9 +84,24 @@ names). Check the IDL before assuming a C++ method is exposed.
   queries); use the narrow-phase query for exact shapes.
 - Determinism: the same scene run twice in one build gave identical positions.
 
+- Small things: Jolt's defaults (`mSpeculativeContactDistance` and `mPenetrationSlop`,
+  0.02 m each) are for metre-sized bodies. With them a 27 mm ball passing 1.3 cm from a
+  wall's corner got a speculative contact and stopped dead. Set them through
+  `system.GetPhysicsSettings()` / `SetPhysicsSettings` (the home uses 0.004 and 0.001).
+  Measured: 40 shots, zero tunnelling, deepest penetration about 4 mm.
+- Kinematic bodies are not swept: a kinematic plunger moving 5 cm per step jumped through
+  the ball. A fast pusher is a dynamic body on a `SliderConstraint` (`mAutoDetectPoint`,
+  `mSliderAxis1/2`, `mNormalAxis1/2`, limits) driven by `SetMotorState(EMotorState_Velocity)`,
+  `SetTargetVelocity` and `GetMotorSettings().mMax/MinForceLimit`; dynamic bodies get LinearCast.
+- Kinematic bodies make no contacts with statics, so a walking capsule reports no floor
+  contact: footsteps come from the stride (`home/src/engine/world.ts`).
+- In the page: 50 bodies (the pinball table, the house's colliders and props, 3 villager
+  capsules) step in 0.2 ms median, 0.3 ms p95 per frame (performance.now resolution is
+  0.1 ms there), main thread.
+
 ## Not verified yet
 
-Browser load and step time, the multithread build, narrow-phase queries,
+The multithread build, narrow-phase queries,
 soft bodies, character controller, breakable constraints. Jolt has no built-in
 fracture; plan pre-fractured compounds swapped by the gadget layer.
 
