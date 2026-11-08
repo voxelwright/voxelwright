@@ -1,39 +1,83 @@
 // The page's side of the villager API (host/src/villager.ts), reached through
-// the dev server: /villager/launch gives the per-launch token and
-// /villager/api/* is forwarded to the host on 127.0.0.1.
+// the dev server, which forwards /villager/api/* to the host on 127.0.0.1.
+//
+// The token comes from the link the host prints (http://localhost:5181/#token=…).
+// A fragment never reaches a server; the page keeps the token for this tab in
+// sessionStorage and takes it out of the address bar.
 
-export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'route' }
+/**
+ * away: the host was not reached, so the line can be sent again. cut: the reply broke off or stalled after the host had the line.
+ * link: there is no token, or the host answered 401 (a link from an earlier launch): open the latest link; resending won't help.
+ * refused: the host answered 403, this tab's token is for someone other than the page's person (#40), so nothing was sent.
+ * other: the line was written under a different link than this tab holds now, so it was not sent (see `tag`).
+ * route: the reply named a route the host refused.
+ */
+export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' | 'route' | 'refused' | 'link' | 'other' }
+/** The page's own person: synthetic until family isolation is proven (AGENTS.md). Any other villager is a visit (#42). */
+export const ME = 'alex'
+/** Your own villager's path, or your visit to another person's villager, kept under you (#42). */
+const talkPath = (person: string) => (person === ME ? `/people/${ME}` : `/people/${ME}/visits/${person}`)
+/** A reply that sends nothing for this long is abandoned. */
+const IDLE_MS = 30_000
+const TOKEN_KEY = 'village.villager.token'
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
 let token: string | null = null
-
-/**
- * A request to the host, or null when the host is away. With `hostErrors`, a 5xx the host itself answered (JSON; the
- * dev server's proxy answers plain text when the host is down) is returned, so the caller can say it failed, not that
- * the host is away.
- */
-export async function authorized(path: string, init: RequestInit = {}, hostErrors = false): Promise<Response | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (!token) {
-      const launch = await fetch('/villager/launch', { cache: 'no-store' }).catch(() => null)
-      if (!launch?.ok) return null
-      token = (await launch.json()).token
-    }
-    const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
-    if (!res || (res.status >= 500 && !(hostErrors && res.headers.get('content-type')?.startsWith('application/json')))) return null
-    // The host restarted with a new token: fetch it once and try again.
-    if (res.status === 401) {
-      token = null
-      continue
-    }
-    return res
-  }
-  return null
+try {
+  token = sessionStorage.getItem(TOKEN_KEY)
+} catch {}
+/** Fired on window when a link installs a different token in this tab. */
+export const TOKEN_EVENT = 'village:token'
+/** Takes a token from the address bar's #token=…, keeps it for this tab and clears it from the bar. */
+function adoptLink() {
+  const linked = new URLSearchParams(location.hash.slice(1)).get('token')
+  if (!linked) return
+  const changed = linked !== token
+  token = linked
+  try {
+    sessionStorage.setItem(TOKEN_KEY, linked)
+  } catch {}
+  history.replaceState(history.state, '', location.pathname + location.search)
+  if (changed) dispatchEvent(new Event(TOKEN_EVENT))
 }
 
+/**
+ * A short fingerprint of a token (the first 12 hex digits of its SHA-256), so a kept line can say which link it was
+ * written under without storing the token. Null with no token. One promise per token, so callers resolve in order.
+ */
+let tagged: { token: string; tag: Promise<string> } | null = null
+async function fingerprint(t: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))
+  return [...digest.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+export function tokenTag(): Promise<string | null> {
+  const t = token
+  if (!t) return Promise.resolve(null)
+  if (tagged?.token !== t) tagged = { token: t, tag: fingerprint(t) }
+  return tagged.tag
+}
+adoptLink()
+// A new link opened in the same tab (after the host restarts) changes only the fragment.
+addEventListener('hashchange', adoptLink)
+
+/**
+ * Null when the host is unreachable. 'link' when there is no token or the host answered 401 (the token is from an
+ * earlier launch: open the new link). `as` sends that token instead of the tab's current one. With `hostErrors`, a 5xx
+ * the host itself answered (JSON; the dev server's proxy answers plain text when the host is down) is returned, so the
+ * caller can say it failed, not that the host is away (#47).
+ */
+export async function authorized(path: string, init: RequestInit = {}, as: string | null = token, hostErrors = false): Promise<Response | null | 'link'> {
+  if (!as) return 'link'
+  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${as}` } }).catch(() => null)
+  if (!res || (res.status >= 500 && !(hostErrors && res.headers.get('content-type')?.startsWith('application/json')))) return null
+  if (res.status === 401) return 'link'
+  return res
+}
+
+/** The conversation with `person`'s villager: your own, or your visit's. Null when it could not be read. */
 export async function conversation(person: string): Promise<Line[] | null> {
-  const res = await authorized(`/people/${person}/conversation`)
-  return res?.ok ? (await res.json()).lines : null
+  const res = await authorized(`${talkPath(person)}/conversation`)
+  return res && res !== 'link' && res.ok ? (await res.json()).lines : null
 }
 
 export interface Routing {
@@ -43,52 +87,81 @@ export interface Routing {
   onRoute(routed: Routed): void
 }
 
+export interface SayOptions {
+  /** Background the person did not say (the table's round so far): the villager hears it, the conversation never stores it. */
+  context?: string
+  /** With routing, one call either answers (text streams) or names a route (onRoute, no text). */
+  routing?: Routing
+  /** A drawing handed over (#42, sketch.ts), by reference: the drawer's id and the sketch's. */
+  sketch?: { from: string; id: string }
+  signal?: AbortSignal
+  /** The fingerprint (tokenTag) of the link the line was written under: sent only under that link, else why 'other'. */
+  tag?: string | null
+}
+
 /**
- * `context` is background the person did not say (the table's round so far): the villager hears it, the conversation never stores it.
- * With `routing`, one call either answers (text streams) or names a route (`onRoute`, no text).
+ * Send a line and stream the reply. Stops when signal aborts, or when the host
+ * sends nothing for IDLE_MS, so a hung host never leaves the page waiting.
  */
-export async function say(person: string, text: string, onText: (t: string) => void, context?: string, routing?: Routing, sketch?: { from: string; id: string }): Promise<Said> {
-  const res = await authorized(`/people/${person}/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    // A drawing handed over (#42, sketch.ts) goes by reference, the drawer's id and the sketch's.
-    body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
-  })
+export async function say(person: string, text: string, onText: (t: string) => void, { context, routing, sketch, signal, tag }: SayOptions = {}): Promise<Said> {
+  // The token is read once: the one checked against the line's tag is the one it is sent with.
+  const as = token
+  if (tag !== undefined && (as ? await fingerprint(as) : null) !== tag) return { ok: false, why: 'other' }
+  const stop = new AbortController()
+  const abort = () => stop.abort()
+  signal?.addEventListener('abort', abort)
+  let idle = setTimeout(abort, IDLE_MS)
   let routed: Routed | undefined
   const onRoute = (r: Routed) => {
     if (routed) return
     routed = r
     routing?.onRoute(r)
   }
-  if (!res) return { ok: false, why: 'away' }
-  if (res.status === 409) return { ok: false, why: 'busy' }
-  if (!res.ok || !res.body) return { ok: false, why: 'failed' }
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
-  let buffer = ''
   try {
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += value
-      let cut
-      while ((cut = buffer.indexOf('\n\n')) >= 0) {
-        const block = buffer.slice(0, cut)
-        buffer = buffer.slice(cut + 2)
-        const name = /^event: (.*)$/m.exec(block)?.[1]
-        const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
-        if (name === 'text') onText(data.t)
-        else if (name === 'route' && routing) onRoute(data.routed)
-        else if (name === 'done') {
-          if (data.routed && routing) onRoute(data.routed)
-          return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
-        } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
+    const res = await authorized(`${talkPath(person)}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
+      signal: stop.signal,
+    }, as)
+    // Stopped before an answer began: the host may already have the line.
+    if (!res) return { ok: false, why: stop.signal.aborted ? 'cut' : 'away' }
+    if (res === 'link') return { ok: false, why: 'link' }
+    if (res.status === 409) return { ok: false, why: 'busy' }
+    if (res.status === 403) return { ok: false, why: 'refused' }
+    if (!res.ok || !res.body) return { ok: false, why: 'failed' }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buffer = ''
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        clearTimeout(idle)
+        idle = setTimeout(abort, IDLE_MS)
+        buffer += value
+        let cut
+        while ((cut = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, cut)
+          buffer = buffer.slice(cut + 2)
+          const name = /^event: (.*)$/m.exec(block)?.[1]
+          const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? 'null')
+          if (name === 'text') onText(data.t)
+          else if (name === 'route' && routing) onRoute(data.routed)
+          else if (name === 'done') {
+            if (data.routed && routing) onRoute(data.routed)
+            return { ok: true, reply: data.reply, ...(routed ? { routed } : {}) }
+          } else if (name === 'failed') return { ok: false, why: data?.reason === 'route' ? 'route' : 'failed' }
+        }
       }
+    } catch {
+      return { ok: false, why: 'cut' }
     }
-  } catch {
-    return { ok: false, why: 'away' }
+    // The stream ended without an answer: the host went away mid-reply.
+    return { ok: false, why: 'cut' }
+  } finally {
+    clearTimeout(idle)
+    signal?.removeEventListener('abort', abort)
   }
-  // The stream ended without an answer: the host went away mid-reply.
-  return { ok: false, why: 'away' }
 }
 
 // ── The always-on input (#42 prototype) ─────────────────────────────────────
@@ -111,15 +184,16 @@ export interface Routed {
   library?: string
   section?: 'talk' | 'tasks'
 }
-export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy'; ms: number }
+export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused' | 'link'; ms: number }
 
-/** With `hostErrors`, a failure the host answered itself (a 5xx in JSON) is 'failed', not 'away' (see authorized). */
-export async function call<T>(path: string, body?: unknown, hostErrors = false): Promise<Outcome<T>> {
+export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
   const t0 = performance.now()
-  const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, hostErrors)
+  const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
+  if (res === 'link') return { ok: false, why: 'link', ms }
   if (res.status === 409) return { ok: false, why: 'busy', ms }
+  if (res.status === 403) return { ok: false, why: 'refused', ms }
   if (!res.ok) return { ok: false, why: 'failed', ms }
   try {
     return { ok: true, ms, ...((await res.json()) as T) }
@@ -157,20 +231,19 @@ export const makeVillager = (person: string, description: string, accent: string
 export const remakeVillager = (person: string, item: string, reason: string) =>
   call<MadeVillager>(`/people/${person}/villagers/${item}/remake`, { reason })
 /**
- * "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice. All or nothing
- * on the host: 'failed' when it could not store it (nothing changed), 'away' when the host did not answer.
+ * "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice, all or nothing
+ * on the host. Besides call()'s outcomes ('failed': nothing stored; 'away': no answer; 'refused': this tab's link is
+ * someone else's), 'persona' means the host refused the persona itself: retrying cannot help, so the page says so.
  */
-/**
- * Sends a tuned villager off to be the person's. Besides call()'s outcomes, 'refused' means the host refused its
- * persona itself: retrying cannot help, so the page says so instead of offering another try.
- */
-export async function sendOffVillager(person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>): Promise<Outcome<{ name: string; persona: unknown }> | { ok: false; why: 'refused'; reason: string; ms: number }> {
+export async function sendOffVillager(person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>): Promise<Outcome<{ name: string; persona: unknown }> | { ok: false; why: 'persona'; reason: string; ms: number }> {
   const t0 = performance.now()
-  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, true)
+  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, token, true)
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
+  if (res === 'link') return { ok: false, why: 'link', ms }
+  if (res.status === 403) return { ok: false, why: 'refused', ms }
   const body = (await res.json().catch(() => null)) as { refused?: unknown; error?: unknown; name?: unknown; persona?: unknown } | null
-  if (res.status === 422 && body?.refused === true) return { ok: false, why: 'refused', reason: typeof body.error === 'string' ? body.error.slice(0, 200) : '', ms }
+  if (res.status === 422 && body?.refused === true) return { ok: false, why: 'persona', reason: typeof body.error === 'string' ? body.error.slice(0, 200) : '', ms }
   if (res.status === 409) return { ok: false, why: 'busy', ms }
   if (!res.ok || !body || typeof body.name !== 'string') return { ok: false, why: 'failed', ms }
   return { ok: true, ms, name: body.name, persona: body.persona }
@@ -184,7 +257,7 @@ export interface PatternData { id: string; name: string; persona: Record<string,
 export interface HumourDial { locked: 'clean' | 'cheeky' | 'crude' | null; by?: 'admin' | 'asked' }
 export const personaTemplates = (person: string) =>
   call<{ builtin: PatternData[]; templates: PatternData[]; profile: unknown; humour: HumourDial }>(`/people/${person}/persona-templates`)
-export const familyTemplates = (person: string) => call<{ templates: PatternData[] }>(`/family/persona-templates?for=${person}`)
+export const familyTemplates = (person: string) => call<{ templates: PatternData[] }>(`/people/${person}/family-templates`)
 /**
  * Saved as a whole persona with the dials beside it; the host maps the dials in and checks it. `item` is the made
  * villager it came from: the host reads its pattern from there to decide who may see the saved one (the page never says).

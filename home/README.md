@@ -55,8 +55,9 @@ pointer paths, storage, reduced motion and a clean unload and reload.
 
 There is no menu bar. Meaningful objects are entries, registered through the
 `entries` plugin with a label, an object and an action. Pointer hover gives a
-soft warm glow and a handwritten label; click or tap chooses; Tab cycles the
-entries on screen from left to right and wraps, Enter chooses, Escape or a
+soft warm glow and a handwritten label; click or tap chooses; Tab moves through the
+entries on screen from left to right and, past either end, leaves the scene the
+browser's usual way (no keyboard trap), Enter chooses, Escape or a
 click elsewhere backs out. Touch skips hover. The nearest visible, depth-writing mesh under the pointer wins, so furniture blocks the entries behind it; light shafts, glows and hidden rooms do not. With `prefers-reduced-motion`
 glows, labels and camera moves are instant.
 
@@ -150,6 +151,10 @@ one 6 s run each; repeat runs of the same page vary by 1 to 3 ms:
 | living | `?q=low` | 3.2 / 4.5 |
 
 SSGI is not usable here; baked lighting is the next step for bounce light.
+
+`?webgl=1` runs three.js's WebGL2 backend even where WebGPU is available.
+WebGL2 has no GPU timer to calibrate with, so without `?q=` it settles on the
+low tier.
 
 Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
 medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
@@ -606,9 +611,14 @@ Model-written prop code runs in a sealed box, and only data comes back.
 
 - **Box.** `src/props/sandbox.ts` adds a hidden iframe with
   `sandbox="allow-scripts"` (no `allow-same-origin`, so its origin is opaque)
-  and a `srcdoc` whose first element is the CSP
-  `default-src 'none'; script-src 'nonce-<random>' blob:; worker-src blob:`.
-  Its one inline script, the relay, starts a classic Worker from a blob. The
+  that loads `/prop-box.html`, served by the dev-only `prop-box` plugin with
+  its own CSP header
+  `default-src 'none'; script-src 'nonce-<random>' blob:; worker-src blob:; frame-ancestors 'self'`
+  (the text and policy are in `src/props/relay.ts`). It is a document of its
+  own rather than `srcdoc` because a `srcdoc` frame inherits the home's CSP
+  (#40: `script-src 'self'`), which refuses the inline relay and the blob
+  worker; serving it this way keeps the home's CSP unchanged. Its one inline
+  script, the relay, starts a classic Worker from a blob. The
   worker is `src/props/box/worker.ts`, bundled into one script (three core
   r187 with `three/webgpu` aliased to `three`, the `paint.ts` painters on
   OffscreenCanvas, the spec presets, the serializer) by the dev-only
@@ -648,8 +658,9 @@ Model-written prop code runs in a sealed box, and only data comes back.
   onto a page canvas, as `paint.ts` makes them). Nothing is half-placed.
 
 The working combination, found by a probe in headless Chrome 158 (Playwright
-1.65): a **classic** blob Worker created from the sandboxed `srcdoc` frame
-inherits the frame's CSP. fetch, XHR, WebSocket, `importScripts`, outside
+1.65): a **classic** blob Worker created from the sandboxed frame inherits
+the frame's CSP (first probed with `srcdoc`; since the #40 merge the frame is
+`/prop-box.html`, and `check-prop-sandbox` passes 36 of 36 there). fetch, XHR, WebSocket, `importScripts`, outside
 `import()`, `eval` and `new Function` are all blocked, and `import()` of a blob
 still works. A control run with `connect-src` left open reached the outside
 server, so the CSP is what blocks it. A module worker from a blob failed to
@@ -708,8 +719,8 @@ matrix with shear has it baked into its own copy of the geometry).
 
 What the box relies on:
 
-- Chrome's sandboxed iframes: an opaque origin with `allow-scripts` alone, a
-  `<meta>` CSP in `srcdoc` enforced before the inline script, and blob
+- Chrome's sandboxed iframes: an opaque origin with `allow-scripts` alone, the
+  relay document's own CSP header enforced on its inline script, and blob
   workers inheriting their creator's CSP. Only Chrome 158 headless was
   tested; Safari and Firefox were not.
 - Chrome runs the sandboxed frame in another process: a frame main thread
@@ -1475,7 +1486,7 @@ and person scoping as the props endpoints; model failures answer 422:
   `POST .../send-off` `{tuning, voice}`, `GET /people/:id/villager`.
 - Every record, template, persona and voice file is written to a temporary file in the same
   directory and renamed over the old one; a failed write answers 500 and leaves the old file whole.
-- `GET` and `POST /people/:id/persona-templates`, `GET /family/persona-templates?for=<id>`:
+- `GET` and `POST /people/:id/persona-templates`, `GET /people/:id/family-templates`:
   the built-in patterns for the person's age band, their profile, the jokes dial, and saved
   patterns as data files under `people/<id>/persona-templates/`.
 
@@ -1567,20 +1578,35 @@ After a reload the last answer is already on the page. If the villager host is
 not running, the page says "Your villager is out for a moment" and the line is
 still kept in local storage.
 
-The dev server (`vite.config.ts`) hands same-origin pages the host's
-per-launch token at `/villager/launch`, read from
-`$VILLAGE_ROOT/villager/launch.json` (default `~/.village`), and forwards
-`/villager/api/*` to the host on `127.0.0.1:$VILLAGER_PORT` (default 5190).
-Start the host with `npm run villager` in `host/`.
+Start the host with `npm run villager` in `host/`. It prints one link per
+person, `alex: http://localhost:5181/#token=…`; open it. The token rides in the
+URL fragment, which the browser never sends to a server. The page keeps it in
+`sessionStorage` for that tab and removes it from the address bar with
+`history.replaceState`. After the host restarts, open its new link (in the same
+tab is fine); until then the page says the villager is out. The dev server
+(`vite.config.ts`) only forwards `/villager/api/*` to the host on
+`127.0.0.1:$VILLAGER_PORT` (default 5190). It hands out no token, and with
+`appType: 'mpa'` an unknown path such as `/villager/launch` is a 404.
+
+The dev server, and the live server that uses the same config, sends a Content
+Security Policy: `default-src`, `script-src` and `connect-src` are `'self'`
+(which covers Vite's HMR websocket), images may also be `data:` and `blob:`, and
+styles allow inline because Vite injects CSS as `<style>` tags in dev. A page
+script, a promoted plugin included, can reach the villager API for its tab's
+person but cannot `fetch`, beacon or load an image from another origin.
 
 `node scripts/check-villager.mjs [--shot=path]` starts its own stub host and
-dev server on a temporary root and proves, headless: the token is required
-and not handed to cross-site requests; Enter sends the line and the reply is
-written gradually onto the facing page; the proxy streams without buffering;
-the answer is back after a reload; after a host restart the page fetches the
-new token and the villager resumes the same session; with the host down the
-page says so and keeps the line; both processes stop. 13 of 13 passed
-(November 6, 2026). `--agent=claude` runs one real exchange instead.
+dev server on a temporary root and proves, headless: the token is required;
+`/villager/launch` is a 404 and returns no token; the link's token leaves the
+address bar and stays in the tab; the page is served with the policy, and a
+page script's `fetch`, `sendBeacon` and image to another loopback port are
+blocked (the receiving server saw 0 requests); Enter sends the line and the
+reply is written gradually onto the facing page; the proxy streams without
+buffering; the answer is back after a reload; after a host restart the new
+link opens the same villager, which resumes the session; with the host down
+the page says so and keeps the line; the home reports no other policy
+violations and the HMR socket connects; both processes stop. 17 of 17 passed
+(November 7, 2026). `--agent=claude` runs one real exchange instead.
 
 Real exchange, November 6, 2026, M1 Pro, `--agent=claude` (Sonnet), line "I
 keep forgetting to water the plants": one `write_note` call created
@@ -2035,8 +2061,8 @@ nothing placed, and your villager says so. The host stores and returns module
 text only; it never imports or runs it. The sandbox is dev only, so in a
 production build furnishing fails honestly.
 
-New host endpoints, all behind the per-launch token and under one listed
-person: `POST /people/:id/route` `{text, primary, villagers}`,
+New host endpoints, all behind the person's own token (#40) and under that
+person only: `POST /people/:id/route` `{text, primary, villagers}`,
 `POST /people/:id/props` `{what, size?, variant?}`, `GET /people/:id/library`,
 `GET /people/:id/library/:item`, `POST /people/:id/library/:item/keep`,
 `GET` and `POST /people/:id/projects`. Model failures answer 422, so the page
@@ -2279,6 +2305,9 @@ little message") with no route and nothing sent to Sam.
 
 ## Talk regroup: paper (#42, November 7, 2026)
 
+The paper climb below (November 8) changed the sending, the replies and the phone layout;
+where the two sections differ, the climb's is current.
+
 The talk look stalled at 5.8 to 7.0 over many rounds of tuning (one Opus scorer, no GPT).
 Following ui-craft's "Plateau: regroup", three looks were prototyped behind a flag,
 scored side by side against the current look by Opus and GPT-6.1 Sol, and the winner,
@@ -2340,8 +2369,8 @@ low tier, input in the world, conversation clarity, phone):
 | 6 | paper / current | 7.2 / 7.1 | not run |
 | 7 | paper as pushed / current | 7.3 / 6.4 | not run |
 
-Screenshots (scripted replies): `screenshots/talk/paper-*.jpg`, the same frames as the
-scorers saw (rest, writing, sent, talk, table, house, low tier, phone talk and table).
+Screenshots: `screenshots/talk/paper-*.jpg` now hold the paper climb's final frames (real
+replies, below).
 
 Paper won the round-1 categories that tuning had not moved: input in the world (9 and 9 to
 10) and motion (9 and 9), with material at 9. The current look won legibility and
@@ -2426,3 +2455,119 @@ started. Changed for the new behaviour: `check-talk-input` expects the resting p
 on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
 was 3), and checks that the camera waits for the sent note to land before turning to its
 reader; its Undo click reports why it missed instead of passing silently.
+
+## Paper climb (#42, November 8, 2026)
+
+Paper was polished toward 9 in every category with the same council (a fresh
+`claude -p --model opus` and GPT-6.1 Sol through T3, read only, rubric only, target hidden),
+with one regroup. What changed:
+
+- **The note lands and is read.** It flies at an even pace on screen (weighted by inverse
+  distance, its arc and size scaled with distance, so it is neither a speck nor gone by
+  0.8 s), casting a shadow. The reader's paws come up to catch it, it is held up in both
+  paws while the reader looks down at it, and the reply opens out of it (`src/talk/input.ts`,
+  the reader's pose in `src/villagers/rig.ts`). A fresh sheet shows on the pad as it tears;
+  the address comes back once the pad settles.
+- **Your line keeps one form**, the slip torn off your pad (ruled, your blue hand, "to
+  Dumpling" at its head): in a talk it is taped to the corner of the reply, and in a round
+  it lies on the table, flat and shadowed, wherever no face covers it
+  (`src/talk/paper.ts`, placement in `src/plugins/talk.ts`).
+- **The pad** has one address, top left, the same size at rest and while writing, and
+  writes in a firmer hand.
+- **The news marker** is a torn paper tag with tape in the villager's colour, not felt.
+- **Slips** keep clear of whole heads, ears included. Above a head they may lift higher
+  with a stretched tab, and a tab that would cross another slip stays short. A reply that
+  steps back shows its first words. The page before is kept, but no longer written as a
+  cut-off grey line over the next page.
+- **Phone:** a page is four lines; what was said stays on a smaller two-line slip near its
+  speaker; your line lies on the table's clear end; the journal is smaller, above the
+  sound buttons.
+- **Passers-by** are judged from the shot the camera is going to and go at once while it
+  moves, so a still frame never shows one glittering half-faded.
+- **Scene:** the fridge handle is brushed (roughness 0.55) and the window's painted garden
+  is toned below the bloom threshold.
+
+Shots: `node scripts/talk-shots.mjs <dir> --dev=5600` now also takes `landed` (just after
+the note arrives) and times the late frame by the page's clock. With `--real` it leaves the
+villager API to a host: start one with `VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia npm run
+villager -- --agent warm --model haiku --port 5612 --root <fresh dir>` in `host/`, and run
+the script with `VILLAGE_ROOT=<that dir> VILLAGER_PORT=5612`. The reference was captured
+from a `git archive` copy of c577195, since the dev server serves the working tree.
+
+Scores (means of ten categories; candidate / reference c577195 within each round):
+
+| Round | What was scored | Opus | GPT-6.1 Sol |
+| --- | --- | --- | --- |
+| 1 | the note lands in the paws and opens into the reply; your line on the table; one address | 7.5 / 6.9 | 8.3 / 8.1 |
+| 2 | the reader reads the note; even flight; the round stays on a phone | 7.5 / 7.1 | 8.6 / 8.3 |
+| 3 | your line in one form, taped or lying | 7.7 / 7.0 | not run |
+| regroup | current / sheet / tabs / from above (phone round) | 7.4 / 7.1 / 6.9 / 6.9 | 8.3 / 8.4 / 7.8 / 7.4 |
+| 4 (real replies) | after the regroup | 8.1 / 7.3 | 8.4 / 8.0 |
+| 5 (real replies, final) | phone pages and faces, no grey lead line, first words | 8.2 / 7.3 | 8.5 / 8.2 |
+
+Round 3 was the plateau trigger (Opus 7.5, 7.5, 7.7, and both models' top complaint the
+phone round's stack of slips), so one regroup of the two allowed was run on the phone
+round. Three prototypes behind a flag, scored with the current look: **sheet** (the round
+written on one sheet passed round), **tabs** (earlier turns fold to name tabs, your line on
+the table) and **from above** (too bold: the table straight down, every slip lying by its
+speaker). Cross-model means: current 7.85, sheet 7.75, tabs 7.35, from above 7.15. The
+current look was kept, with tabs' idea of your line lying on the table; the flag is gone.
+
+Final round, the code as pushed, real Haiku replies, per category (warmth, material,
+lighting, legibility, consistency, motion, low tier, input, conversation, phone): Opus 9, 8,
+8, 8, 8, 8, 7, 9, 9, 8 (mean 8.2); GPT-6.1 Sol 9, 9, 8, 8, 8, 9, 9, 9, 9, 7 (mean 8.5).
+
+Learning log:
+
+- **Moved it:** the sent line as one object that arrives and stays (motion: the reference
+  4 to 5, the candidate 8 to 9; conversation: 6 to 7 against 9 from both, rounds 4 and 5).
+- **Moved it:** your line in one form. As a header inside the reply, a slip on the table
+  and a card on the phone it was three forms (Opus, round 2); one taped slip lifted
+  consistency to 8.
+- **Hurt, then fixed:** the even screen pace kept the note near the camera, where a fixed
+  0.3 m arc carried it out of the top of the frame (round 2's late frame was empty).
+- **Regroup lost:** one sheet read as "a chat log in paper dress" (Opus phone 5); tabs
+  dropped what was said and read as still speaking; from above lost the faces and overflowed.
+- **Real replies showed what scripted ones hid:** a long reply on a phone came down over
+  the face, and a stepped-back slip showed its last page ("will still be there.").
+- **Scorers contradict across rounds:** keep the pad's address after sending (Opus, round 3)
+  and blank it as the note tears (Opus, round 4). It is blank as it tears and comes back once
+  the pad settles.
+
+Still under 9, and why:
+
+- **Phone (Opus 8, GPT 7):** at the table two slips still float over the scene, the
+  speaker's with a long tab down to it, and the pad is cut off at the corner. Both want the
+  villagers to carry the round. The regroup's three other compositions did worse; a closer
+  shot of the speaker on a phone is the untried one.
+- **Consistency (8, 8):** "to Dumpling" shows on the pad and on the note (GPT: only on the
+  note until a new line starts; Opus had asked for the opposite), and an action such as
+  "(nods at Alex)" sits in a speech slip (Opus: an animation with a small caption).
+- **Legibility (8, 8):** finished slips are small (15 to 16 px against 19), and the pencilled
+  "to" is faint.
+- **Motion (Opus 8):** at 0.7 s the note is small and crosses near Moss on its way.
+- **Low tier (Opus 7, GPT 9):** it is the high tier with less glow; Opus asks for a look of
+  its own (baked light, firmer paper outlines). Scene-wide, not this unit.
+- **Lighting and material (8; Opus material 8):** the warm haze, flat sound buttons and
+  procedural floor grain in close-ups belong to the scene and post stack. Only the window
+  card and the fridge handle were touched here.
+- **Close-up framing:** the two-shot can still frame Moss through an easel's legs (both, round
+  4). Its search (and the 31 ms it costs to open a talk) was not changed.
+
+Cost: per frame, the passer-by test projects through a probe camera set to the shot pose (a
+few matrix products per villager); placing your line tests up to eleven table spots. Opening
+a talk was not changed (the two-shot search is the same). `npm run perf-gate` on the final
+code, with 3 other headless Chromes running (GPU ms indicative): against main (cb1d565) PASS,
+`home` CPU p50 3.4 → 3.5 ms, draw calls 482 → 526 (the branch's, as before), every scene at 60
+fps (p99 16.8 ms, no long task), GPU p50/p95 at high 7.4/10.8 (`home`), 7.5/9.2
+(`villagers`), 8.5/12.4 ms (`talk`); against this branch's start (c577195) PASS, `home` CPU p50
+3.9 → 3.5 ms with 526 draw calls on both, `talk` 6.1 → 5.8 ms, `villagers` 7.6 → 7.7 ms.
+
+Checks on the final code (stub host, one at a time): `tsc --noEmit` in `home/` and `host/`,
+`check-kernel` 10/10, `check-entries` 33/33, `check-navigation` 18/18, `check-notebook`
+10/10, `check-talk-npc` 39/39, `check-talk-input` 64/64, `check-talk-notebook` 16/16,
+`check-sketch` 35/35, `check-babble` 28/28, `check-music` 30/30, `check-prop-sandbox` 35/35,
+host `check-villager` 225/225. Earlier in the climb `check-talk-notebook` failed once at 7 of
+8 distinct pages and `check-entries` once on the doorway glide, both under load and both
+passing alone. Changed for the new behaviour: `check-talk-npc` expects the page before kept
+and not shown; `check-talk-notebook` and `check-prop-sandbox` take `--dev`/`--host`.

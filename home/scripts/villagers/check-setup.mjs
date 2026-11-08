@@ -64,7 +64,9 @@ async function open(query, opts = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}`)
+  // #40: each page carries its own person's token in its link (the tab keeps it), never a shared one.
+  const person = /[&?]person=([a-z]+)/.exec(query)?.[1] ?? 'alex'
+  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}#token=${hostCtx.villager.tokens[person]}`)
   await page.waitForFunction(() => window.villagerSetup && window.village, null, { timeout: 60000 })
   await page.waitForTimeout(400)
   return { context, page, errors }
@@ -180,7 +182,8 @@ async function contrast(page) {
   return page.evaluate(async ([png, runs]) => {
     document.getElementById('contrast-probe')?.remove()
     for (const e of document.querySelectorAll('[data-contrast]')) delete e.dataset.contrast
-    const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob())
+    // Decoded here, not fetched: the page's CSP (connect-src 'self', #42) refuses a data: fetch.
+    const img = await createImageBitmap(new Blob([Uint8Array.from(atob(png), (ch) => ch.charCodeAt(0))], { type: 'image/png' }))
     const c = new OffscreenCanvas(img.width, img.height)
     const g = c.getContext('2d')
     g.drawImage(img, 0, 0)

@@ -32,10 +32,11 @@ async function start(villagerMaker?: VillagerMaker) {
   const base = `http://127.0.0.1:${launch.port}`
   const api = (path: string, opts: { body?: unknown; token?: string | null; method?: string } = {}) => fetch(`${base}${path}`, {
     method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
-    headers: { 'content-type': 'application/json', ...(opts.token === null ? {} : { authorization: `Bearer ${opts.token ?? launch.token}` }) },
+    // Each person has their own token (#40): by default the one for the person the path names.
+    headers: { 'content-type': 'application/json', ...(opts.token === null ? {} : { authorization: `Bearer ${opts.token ?? launch.tokens[/^\/people\/([^/]+)\//.exec(path)?.[1] ?? ''] ?? launch.tokens.alex}` }) },
     body: opts.body === undefined ? undefined : typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body),
   })
-  return { fiber, api, base, token: launch.token as string }
+  return { fiber, api, base, tokens: launch.tokens as Record<string, string> }
 }
 
 try {
@@ -96,8 +97,21 @@ try {
 
   check('no token is refused', (await api('/people/alex/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' }, token: null })).status === 401)
   check('a wrong token is refused', (await api('/people/alex/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' }, token: 'f'.repeat(64) })).status === 401)
-  check('an unlisted person is refused', (await api('/people/zed/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' } })).status === 404)
-  check('an odd person id is refused', (await api('/people/..%2Fetc/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' } })).status === 404)
+  check('an unlisted person is refused', (await api('/people/zed/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' } })).status === 403)
+  // #40: a token opens only its own person's villager routes, reads as well as writes.
+  const crossed = await Promise.all([
+    api('/people/jo/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' }, token: host.tokens.alex }),
+    api('/people/jo/villagers/aaaaaaaaaaaa/send-off', { body: { tuning: {}, voice: {} }, token: host.tokens.alex }),
+    api('/people/jo/villagers/aaaaaaaaaaaa/tuning', { body: {}, token: host.tokens.alex }),
+    api('/people/jo/villagers/aaaaaaaaaaaa/remake', { body: { reason: 'x' }, token: host.tokens.alex }),
+    api('/people/jo/villager', { token: host.tokens.alex }),
+    api('/people/jo/persona-templates', { token: host.tokens.alex }),
+    api('/people/jo/persona-templates', { body: { name: 'x', persona: {} }, token: host.tokens.alex }),
+    api('/people/jo/family-templates', { token: host.tokens.alex }),
+  ])
+  check("another person's token is refused on every villager route (403)", crossed.every((r) => r.status === 403), crossed.map((r) => r.status))
+  check('the family list is only under a person now', (await api('/family/persona-templates?for=alex')).status === 404)
+  check('an odd person id is refused', (await api('/people/..%2Fetc/villagers', { body: { description: 'a hedgehog', accent: '#c8553d' } })).status === 403)
   check('an empty description is refused', (await api('/people/alex/villagers', { body: { description: '   ', accent: '#c8553d' } })).status === 400)
   check('a description over 300 characters is refused', (await api('/people/alex/villagers', { body: { description: 'x'.repeat(301), accent: '#c8553d' } })).status === 400)
   check('an accent that is not #rrggbb is refused', (await api('/people/alex/villagers', { body: { description: 'a hedgehog', accent: 'red' } })).status === 400)
@@ -178,7 +192,7 @@ try {
 
   // Saved patterns: whole personas in the schema, through the same check, listed for the family.
   check('templates need the token', (await api('/people/alex/persona-templates', { token: null })).status === 401)
-  check('templates: an unlisted person is refused', (await api('/people/zed/persona-templates')).status === 404)
+  check('templates: an unlisted person is refused', (await api('/people/zed/persona-templates')).status === 403)
   check('templates: no name, or a persona that fails the check, is refused with the reason', (await tpl('alex', { name: '', persona: STUB_PERSONA })).status === 400 && (await (await tpl('alex', { name: 'x', persona: { ...STUB_PERSONA, humour: { style: 'x', lean: 'crude' } } })).json() as { error: string }).error.includes('humour.lean'))
   const mine = await (await tpl('alex', { name: 'Late-night buddy', persona: STUB_PERSONA, dials: { warmth: 0.9, playful: 0.9, chatty: 0.5, humour: 0.5 }, shared: true })).json() as { template: { id: string; persona: { temperament: string; humour: { lean: string } } } }
   check('templates: saved in the persona shape, tuned by its dials', /^warm, playful/.test(mine.template.persona.temperament) && mine.template.persona.humour.lean === 'cheeky', mine.template.persona)
@@ -186,7 +200,7 @@ try {
   check('templates: it reloads for its maker, unchanged', own.templates.length === 1 && own.templates[0].id === mine.template.id && own.templates[0].persona.temperament === mine.template.persona.temperament, own.templates)
   await tpl('alex', { name: 'Grown-ups only', persona: STUB_PERSONA, audience: 'adult', shared: true })
   await tpl('alex', { name: 'Private one', persona: STUB_PERSONA })
-  const fam = async (who?: string) => (await (await api(`/family/persona-templates${who ? `?for=${who}` : ''}`)).json() as { templates: { name: string; maker: string }[] }).templates
+  const fam = async (who: string) => (await (await api(`/people/${who}/family-templates`)).json() as { templates: { name: string; maker: string }[] }).templates
   // A clean one, from a villager made with no pattern (named by its item), by an adult without a crude setting: for anyone.
   const joPlain = await (await api('/people/jo/villagers', { body: { description: 'a plain hare', accent: '#c8553d' } })).json() as { item: string }
   const plain = await (await tpl('jo', { name: 'Plain helper', persona: STUB_PERSONA, dials: { warmth: 0.9, playful: 0.5, chatty: 0.5, humour: 0 }, item: joPlain.item, shared: true })).json() as { template: { id: string; audience: string; persona: { temperament: string } } }
@@ -323,7 +337,7 @@ try {
   // A second remake whose body arrives after the first has finished must still see it was re-made (409), and never call the model.
   const gItem2 = (await (await g.api('/people/jo/villagers', { body: { description: 'another tortoise', accent: '#c8553d' } })).json() as { item: string }).item
   // Its headers go now (the host starts on it); its body only after the first remake has finished.
-  const staleReq = request(`${g.base}/people/jo/villagers/${gItem2}/remake`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${g.token}` } })
+  const staleReq = request(`${g.base}/people/jo/villagers/${gItem2}/remake`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${g.tokens.jo}` } })
   const stale = new Promise<{ status: number }>((resolve, reject) => {
     staleReq.on('response', (r) => (r.resume(), resolve({ status: r.statusCode ?? 0 })))
     staleReq.on('error', reject)

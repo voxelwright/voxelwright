@@ -15,7 +15,7 @@ import { own } from '../../kernel'
 import { ROUTINES, SCALE } from '../../plugins/villagers'
 import { validate } from '../../props/rebuild'
 import { PropBox } from '../../props/sandbox'
-import { familyTemplates, makeVillager, personaTemplates, remakeVillager, saveTemplate, sendOffVillager, type HumourDial, type PatternData } from '../../villager'
+import { familyTemplates, makeVillager, ME, personaTemplates, remakeVillager, saveTemplate, sendOffVillager, type HumourDial, type PatternData } from '../../villager'
 import { Babbler } from '../../voice/engine'
 import { clampVoice, voiceFromDescription } from '../../voice/gen'
 import { registerVoice, unregisterVoice, VOICES, type VoiceProfile } from '../../voice/profiles'
@@ -44,7 +44,8 @@ const BOOK = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
 const params = new URLSearchParams(location.search)
 const FROM = params.get('from')
-const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : 'alex'
+/** The page's own person (villager.ts ME). The dev-only &person= picks another listed person; the host answers only if this tab's link is theirs (#40). */
+const PERSON = /^[a-z][a-z0-9-]{0,31}$/.test(params.get('person') ?? '') ? params.get('person')! : ME
 const ACCENT = /^#[0-9a-f]{6}$/i.test(params.get('accent') ?? '') ? params.get('accent')! : '#c8553d'
 const OWNER = PERSON.charAt(0).toUpperCase() + PERSON.slice(1)
 /** How a made villager is tuned: 1 (the default) the cheval mirror in the room; b and bench kept from the regroups (setup-strategy.ts). */
@@ -635,7 +636,7 @@ export default {
           alive()
           timings.modelMs = answer.ms
           if (!answer.ok) {
-            fail = answer.why === 'away' ? 'away' : answer.why === 'busy' ? 'busy' : 'model'
+            fail = answer.why === 'away' || answer.why === 'busy' || answer.why === 'link' || answer.why === 'refused' ? answer.why : 'model'
             throw new Error(answer.why)
           }
           text = answer.module
@@ -665,7 +666,7 @@ export default {
           alive()
           timings.remakeMs = again.ms
           if (!again.ok) {
-            fail = again.why === 'away' ? 'away' : 'model'
+            fail = again.why === 'away' || again.why === 'link' || again.why === 'refused' ? again.why : 'model'
             throw new Error(`remake: ${again.why} (first: ${reason})`)
           }
           text = again.module
@@ -717,6 +718,8 @@ export default {
       const words: Record<string, string> = {
         away: "The workshop's helper isn't in just now, so nothing was sewn. Your words are still here.",
         busy: "Another villager is still on the table. Let's finish that one first.",
+        link: 'This page needs your latest link from the host, so nothing was sewn. Open it and try again.',
+        refused: "This page was opened with someone else's link, so nothing was sewn.",
         model: "The pattern didn't come together this time, so nothing was sewn. Try again, or change a word or two.",
         sewing: "The pieces didn't fit together this time, so nothing was sewn. Try again, or change a word or two.",
       }
@@ -903,7 +906,11 @@ export default {
           saveTag.classList.add('shown')
           note(r.why === 'away'
             ? `${record.name} didn't go: the workshop's helper isn't in just now. They're still here, just as you tuned them. Try "Off you go" again in a moment.`
+            : r.why === 'link'
+              ? `${record.name} didn't go: this page needs your latest link from the host. They're still here, just as you tuned them.`
             : r.why === 'refused'
+              ? `${record.name} didn't go: this page was opened with someone else's link.`
+            : r.why === 'persona'
               // Another try would fail the same way: their character didn't pass the house's checks, so a new one is needed.
               ? `${record.name} can't move in as they are: their character didn't pass the house's checks. Describe them again to make a new one.`
               // On a partial save their new home may be half written; trying again rewrites all of it.

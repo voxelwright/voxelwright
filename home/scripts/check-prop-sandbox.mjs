@@ -1,11 +1,12 @@
 // Headless proof of the prop sandbox (#42): hostile prop modules are contained,
 // the home stays responsive and nothing hostile is placed or leaks an error.
-// Starts its own dev server on 5304 (Vite's API, with a request counter) on a
-// throwaway VILLAGE_ROOT holding a synthetic villager token, and an "outside"
-// server on a random port that must never be reached. Stops both at the end.
-// Usage: node scripts/check-prop-sandbox.mjs [--port=5304]
+// Starts its own dev server on 5304 by default (Vite's API, with a request counter), opens
+// the page with a synthetic villager token in its link (#40, the tab keeps it in
+// sessionStorage), and an "outside" server on a random port that must never be reached.
+// Stops both at the end.
+// Usage: node scripts/check-prop-sandbox.mjs [--dev=5304]
 // Exits non-zero when any check fails.
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -13,12 +14,9 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
-const port = Number(process.argv.find((a) => a.startsWith('--port='))?.slice(7) ?? 5304)
+const devPort = Number(process.argv.slice(2).find((a) => a.startsWith('--dev='))?.slice(6) ?? 5304)
 const root = await mkdtemp(join(tmpdir(), 'prop-sandbox-'))
-await mkdir(join(root, 'villager'))
-const token = `synthetic-${Math.random().toString(36).slice(2)}`
-await writeFile(join(root, 'villager', 'launch.json'), JSON.stringify({ port: 1, token }))
-process.env.VILLAGE_ROOT = root
+const token = `synthetic${Math.random().toString(36).slice(2)}`
 
 // The dev server, counting requests per path so a box request is visible even if the browser hides it.
 const served = []
@@ -27,11 +25,11 @@ const vite = await createServer({
   root: homeDir,
   configFile: join(homeDir, 'vite.config.ts'),
   logLevel: 'warn',
-  server: { port, strictPort: true },
+  server: { port: devPort, strictPort: true },
   plugins: [{ name: 'count', configureServer(s) { s.middlewares.use((req, _res, next) => { served.push(req.url); next() }) } }],
 })
 await vite.listen()
-const base = `http://localhost:${port}/`
+const base = `http://localhost:${devPort}/`
 
 const outside = []
 const outsideServer = http.createServer((req, res) => {
@@ -54,11 +52,13 @@ const pageErrors = []
 const mainConsoleErrors = []
 page.on('pageerror', (e) => pageErrors.push(String(e).slice(0, 300)))
 page.on('console', (m) => {
-  if (m.type() === 'error' && m.location().url.startsWith(base)) mainConsoleErrors.push(m.text().slice(0, 300))
+  // The box's own document (/prop-box.html) reports what its policy blocks; those are the box working, not the page.
+  if (m.type() === 'error' && m.location().url.startsWith(base) && !m.location().url.startsWith(`${base}prop-box.html`)) mainConsoleErrors.push(m.text().slice(0, 300))
 })
 
 try {
-  await page.goto(`${base}?cam=iso&q=low&props=none`)
+  await page.goto(`${base}?cam=iso&q=low&props=none#token=${token}`)
+  check('the page holds the synthetic token for its tab', (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === token)
   await page.waitForFunction(() => window.village && window.villageProps, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villageProps.loaded)
@@ -75,9 +75,9 @@ try {
     }, 10)
   })
   const errorsAtStart = { page: pageErrors.length, console: mainConsoleErrors.length }
-  // The page loads the villager token once at start; after this no request for it may come.
-  const launchHits = () => served.filter((u) => u.startsWith('/villager/launch')).length
-  const launchAtStart = launchHits()
+  // The box must never reach the villager API, with or without the tab's token.
+  const apiHits = () => served.filter((u) => u.startsWith('/villager/')).length
+  const apiAtStart = apiHits()
 
   const trial = async (code, opts = {}) => {
     await page.evaluate(() => { window.__gap = 0 })
@@ -110,8 +110,8 @@ try {
       importScripts: async () => importScripts('${OUT}/importScripts.js'),
       import: () => import('${OUT}/import.js'),
       eventsource: () => new Promise((res, rej) => { const e = new EventSource('${OUT}/sse'); e.onopen = res; e.onerror = () => rej(new Error('sse error')) }),
-      token: () => fetch('${base}villager/launch').then((r) => r.text()),
-      tokenRelative: () => fetch('/villager/launch').then((r) => r.text()),
+      token: () => fetch('${base}villager/api/people/alex/conversation').then((r) => r.text()),
+      tokenRelative: () => fetch('/villager/api/people/alex/conversation').then((r) => r.text()),
       beacon: async () => { if (!navigator.sendBeacon) throw new Error('no sendBeacon'); navigator.sendBeacon('${OUT}/beacon', 'x') },
     }
     for (const [name, f] of Object.entries(tries)) {
@@ -120,7 +120,7 @@ try {
     ${CUBE}`))
   await page.waitForTimeout(500)
   check('fetch, XHR, WebSocket, importScripts, import(), EventSource, sendBeacon to an outside URL are blocked', net.ok && outside.length === 0 && !net.notes.some((n) => n.includes('REACHED')), { outsideHits: outside.length, notes: net.notes })
-  check('the villager token cannot be fetched from the box', launchHits() === launchAtStart && !net.notes.some((n) => n.startsWith('token') && n.includes('REACHED')), { launchRequests: launchHits() - launchAtStart })
+  check('the villager API cannot be reached from the box', apiHits() === apiAtStart && !net.notes.some((n) => n.startsWith('token') && n.includes('REACHED')), { apiRequests: apiHits() - apiAtStart })
 
   // 2. The page, its storage and cookies from the worker.
   const reach = await trial(wrap(`
@@ -147,13 +147,13 @@ try {
     await t('cookie', () => document.cookie)
     await t('indexedDB', () => new Promise((res, rej) => { const q = indexedDB.open('x'); q.onsuccess = res; q.onerror = () => rej(q.error) }))
     await t('fetch outside', () => fetch(`${out}/frame`))
-    await t('fetch token', () => fetch(launch))
+    await t('fetch villager API', () => fetch(launch))
     await t('image outside', () => new Promise((res, rej) => { const i = new Image(); i.onload = res; i.onerror = rej; i.src = `${out}/img` }))
     await t('navigate top', async () => { top.location.href = `${out}/nav`; await new Promise((s) => setTimeout(s, 300)) })
     await t('open popup', () => { if (!open(`${out}/popup`)) throw new Error('blocked') })
     r.origin = self.origin
     return r
-  }, [OUT, `${base}villager/launch`])
+  }, [OUT, `${base}villager/api/people/alex/conversation`])
   await page.waitForTimeout(500)
   const frameLeaks = Object.entries(frameProbe).filter(([k, v]) => k !== 'origin' && v === 'REACHED').map(([k]) => k)
   check('the iframe cannot reach the page, storage, cookies, network, top navigation or popups', frameLeaks.length === 0 && frameProbe.origin === 'null' && outside.length === 0 && page.url().startsWith(base), { leaks: frameLeaks, outsideHits: outside.length, url: page.url() })

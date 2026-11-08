@@ -168,19 +168,152 @@ With the sandbox and gates (November 6, 2026, same Mac):
   fails.
 - Neither executor can look at the scene, so `ui-craft`'s screenshot loop is
   not run.
-- Promotion, hot-swap, rollback, review and a chat surface are later units.
+- Review and a chat surface are later units. Promotion and rollback: below.
+
+# Live home, promotion and rollback (#43)
+
+```sh
+npm run live -- install [--live ~/.village/live] [--commit HEAD]
+npm run live -- serve [--port 5183]
+npm run live -- status
+npm run elder -- promote <candidate-id> --approve
+npm run elder -- rollback [promotion-id|last]
+npm run check-promote          # headless proof, stub executors, scratch live home
+```
+
+`install` copies `home/` at one commit with `git archive` (new files, then
+`assertNoSharedInodes` against the checkout), starts a git repository there,
+and runs `npm ci`. `node_modules`, `dist`, `server.json` and `results.jsonl`
+are ignored, so they never count as uncommitted. `serve` runs the live home's
+own Vite with one extra plugin (`src/live-vite.ts`): a new file in
+`src/plugins/` is loaded into the running page through the dev kernel, and a
+deleted one is unloaded, instead of Vite reloading the page. Edited plugin
+files hot-swap as before. Nothing in `home/` changes for this.
+
+`promote` needs `--approve` on the command line; nothing a candidate or model
+wrote counts as approval. It also needs `result.json` with `passed`,
+`controller-files` passing, and the per-file sha256 that runs now record
+under `files` at check time. Every changed path must match
+`^home/src/plugins/[\w-]+\.ts$` (so no `.gitignore` or subfolder), and the
+working tree, the candidate commit's blobs and the recorded hashes must agree.
+The live install must have no uncommitted changes. It writes the committed
+blobs it hashed, never the candidate's working files, appends a promotion
+entry (candidate, files, hashes before and after, the live commit before) to
+`promotions.jsonl`, and commits only those paths and `promotions.jsonl` with
+the hardened git flags. `rollback` restores each file from that earlier live
+commit, checks it against the recorded hash, and records a rollback entry. It
+refuses when any promoted file no longer has the hash the promotion gave it
+(a hand edit or a later promotion). Each promotion or rollback holds
+`<live>/.git/village-promote.lock` (created exclusively, removed when done), so
+a second one at the same time is refused; a lock left by a crash names its pid
+and says to check `status` before deleting it. If writing or committing fails,
+the live tree is reset to the commit before and the attempt is a refusal.
+Every attempt, refused or not, appends a line with a plain message to
+`results.jsonl`.
+
+`npm run check-promote` (November 6, 2026, headless Chrome, 1280×800,
+`?q=low`): 19 of 19 steps. The promote command took 1.2 s; the candidate's red
+box was then in the kernel's active list and on screen (7.3% of pixels newly
+red; noise 0.003%) 854 ms later, with no page load. Rollback took 0.8 s and
+the box was gone 328 ms later, with no file left, as recorded. Earlier run on
+the same code: 739 + 262 ms and 550 + 271 ms. Each refusal (no `--approve`,
+missing, failed, edited after the check, uncommitted live changes, rollback
+over a hand edit) exited 1 and wrote its entry. Proof:
+`proof/20261106T234036-promote.json`. `npm run regressions`: 24 of 24.
+
+Regressions in the same run (November 7, 2026): the live server sends the
+home's Content Security Policy; two promotions at once give one promotion and
+one `live-busy` refusal with one new commit; a leftover lock is refused and
+named; a candidate file swapped right after its hash check never reaches live
+(the committed bytes are promoted instead); a failed write is a recorded
+refusal with live at the same commit and clean; a candidate that adds
+`home/src/plugins/.gitignore` is refused as `controller-owned`. 25 of 25. The
+proof JSON is written to `proof/` and not committed.
+
+Not yet: rollback has only been proved for an added file (restoring an
+earlier version is untested). A hot-added plugin is loaded globally, not into a room plan, until
+the next page load; `ready()` does not list it. The lock is only advisory to
+Village's own commands. The live server runs Vite dev, not a production
+build, and is not sandboxed (it runs only controller-owned config; promoted
+plugin code runs in the browser). `village.kernel` is reachable by any page
+script in dev builds.
 
 # Villager (#40)
 
-`npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village]`
-serves a person's villager on 127.0.0.1 only. Each start writes a random
-token and the port to `<root>/villager/launch.json` (mode 0600) and removes it
-on stop; every request needs `Authorization: Bearer <token>`.
+`npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]`
+serves each person's villager on 127.0.0.1 only. Each start gives every person
+a new random token, writes the tokens and the port to
+`<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
+per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
+Every request needs `Authorization: Bearer <token>`, and a token opens only its
+own person's paths, `/people/<id>/…`: any other person id is refused with 403,
+with no exceptions. Talking with someone else's villager is a visit, reached
+explicitly under your own id (below). Everything else (`/route`, props,
+library, projects, sketches) is the token holder's alone, and a drawing handed
+over in a message must be the holder's own; `npm run check-villager` proves a
+cross-person refusal for each.
+
+## Visits (#42)
+
+Helping someone does not grant access to their private content. When Alex
+talks to Sam's villager (`POST /people/alex/visits/sam/messages`, a table round
+included) or reads that conversation (`GET /people/alex/visits/sam/conversation`),
+Alex is visiting Tuft. The path must start with the token's own person: Sam's
+token on `/people/alex/visits/sam/…` gets 403, and Alex's token on
+`/people/sam/messages` gets 403, never an implicit visit. A visit to yourself or
+to an unlisted person is 404.
+
+- What the visit sees: from Sam's folder, only `persona.json` (who Tuft is:
+  name, role, temperament, register, humour style and lean, tastes and so on),
+  checked as usual. Never Sam's notes, preferences, profile, sketches,
+  conversation or session. The prompt says Tuft is Sam's villager talking with
+  Alex and knows nothing private about Sam.
+- Who it talks to: Alex's profile (age band, language, style) and Alex's
+  preferences. Humour is Alex's ceiling capped at Tuft's lean, so a visit is
+  never crude; the table's mixed rule still applies to your own villager.
+- Where it writes: only under Alex's folder. The visit's conversation, usage,
+  session state and its own notes go in `people/alex/visits/sam/`; a drawing
+  handed to Tuft is Alex's own and is noted in Alex's `sketches.jsonl`; "keep
+  it clean" said on a visit turns down Alex's own `preferences.json`. Nothing
+  is written under Sam.
+- What the visitor's log keeps: if Sam's `persona.json` fails its check, the
+  visit's usage line says only `personaRefused: true`, never the reason, which
+  can quote Sam's persona text.
+- Its own session: a separate Agent SDK session, and with `--agent warm` a
+  separate process, keyed by the visit's folder. Sam's process and session are
+  never reused. A visit's warm process stays up until the host stops. One turn
+  at a time per visit, so a visit never blocks Sam.
+- A visit is never routed (400) and opens none of Sam's other endpoints (403).
+
+`persona.json` is household-visible by design: every visit shows it to other
+household members. Whatever writes it (the villager generator, #47) must never
+copy the owner's private conversation, notes or preferences into it. The
+format check bounds its fields and refuses instruction-like words; it cannot
+tell a private fact from a taste.
+
+The table's rule for your own villager (crude only if everyone listed has crude)
+reads each other person's profile, preferences and persona, never their notes.
+
+`npm run check-villager` seeds synthetic secrets into Sam's notes (including
+Sam's villager's notes about Alex), preferences, profile, conversation,
+sketches and session, and checks that the visit's prompt and context hold none
+of them, that Sam's files are byte-identical afterwards, that every write lands
+under Alex, that "keep it clean" on a visit changes Alex's preferences and not
+Sam's, that Sam's own turn is answered while Alex's visit is writing, that a
+drawing handed to Mia leaves Mia's whole folder unchanged, that Sam's own token
+still gets Sam's full context, and that forged and other people's tokens are
+refused.
+
+What this does not prove: every villager process runs as the same OS user
+with the operator's subscription, so a visit's boundary is enforced by host
+code choosing what to read, not by the operating system. Same-user processes
+do not isolate family members, and a visit's transcript also lands in the
+operator's `~/.claude/projects/`.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
 - `POST /people/<id>/messages {"text", "context"?}`: server-sent events, `text` pieces
-  then `done` with the reply, or `failed`. One turn at a time per person
-  (409), 3-minute deadline. A turn finishes and is recorded even if the page
+  then `done` with the reply, or `failed`. One turn at a time per conversation
+  (your own, and each of your visits; 409), 3-minute deadline. A turn finishes and is recorded even if the page
   leaves.
   An optional `"context"` (at most 2000 characters, such as the table's round
   so far) is passed to the villager's turn as background, never stored
@@ -207,15 +340,19 @@ records the line as unanswered and keeps the stored session.
 
 `npm run check-villager` (stub agent, no model): token, streaming, usage
 log, one turn at a time, launch-file cleanup, a new token per launch,
-resuming after a restart, failed turns, person ids, eight attempts to leave
-the notes folder (`../`, `a/../../`, absolute, symlinks, dotfiles) and the
-init guard. 34 of 34 passed (November 6, 2026).
+resuming after a restart, failed turns, person ids, person-scoped tokens
+(Alex's token is refused on every one of Sam's paths and reaches Tuft only as
+Alex's own visit, and the reverse),
+eight attempts to leave the notes folder (`../`, `a/../../`, absolute,
+symlinks, dotfiles) and the init guard.
 
 Not yet: session transcripts live in the operator's `~/.claude/projects/`,
 not the person's folder; every person shares the operator's subscription and
-OS user, so this is not family isolation; the dev-server token handoff
-trusts any same-origin page on localhost:5181; the villager cannot remind or
-act yet.
+OS user, so this is not family isolation; any script in a page (a promoted
+plugin included) can read that tab's token from `sessionStorage` and act as
+that person (their villager and their visits to others), and the policy does
+not stop it navigating the page
+away to another origin; the villager cannot remind or act yet.
 
 ## Warm villagers and timings (#42, November 7, 2026)
 
@@ -267,9 +404,8 @@ as one cleaned line (`cleanName`) and given to models as quoted JSON; `POST
 /route` takes one line at a time per person (409), with the flag cleared in
 `finally`; making a prop prunes unkept drafts older than a day. The page only
 follows a talk route to a villager the person's own words name, and sends
-their exact words. Still true: one launch token serves every listed person,
-so a page holding it can reach `/people/<anyone>/*`; the page acts only for
-the person whose home it is.
+their exact words. Since the #40 merge each person has their own token, and
+`/people/<anyone else>/*` is refused (403); talking with another villager is an explicit visit under your own id (see Visits).
 
 `npm run check-villager`: 120 of 120 (new: in-round context never stored; a
 warm host starts a process per person, reuses it, fails and closes it on a
@@ -440,7 +576,8 @@ prompt as quoted data, never as an instruction. A line heard at a table round
 never changes anyone's setting. At the table a
 crude villager is lowered to cheeky for the turn unless every listed person
 has crude (`humourCap` on the turn; the host adds "keep it cheeky this turn"
-beside the page's context, which itself is passed on unchanged). The prompt
+beside the page's context, which itself is passed on unchanged), and that
+turn's `usage.jsonl` line records the lowered level. The prompt
 says a turn's context may lower the ceiling and nothing can raise it. Without an opt-in, the
 persona's `humour.lean` applies. The process's system prompt is rebuilt, on
 the same session, when the persona, profile or ceiling changes; a changed note
@@ -552,8 +689,8 @@ first, 16 to 1536 px a side. It is stored under the person who drew it,
 `people/<id>/sketches/<sid>.png`, and `sketches.jsonl` records each event:
 drawn (with the person's words), given (to whom), made (which library item).
 
-New endpoints and fields, all behind the launch token and under one listed
-person (for the Sentinel review):
+New endpoints and fields, all behind the person's own token (#40) and under
+that person only (for the Sentinel review):
 
 - `POST /people/:id/sketches` `{png, words?}`, its own body cap (about 1.33 MB);
   answers `{id, w, h}`.
@@ -565,16 +702,15 @@ person (for the Sentinel review):
   gets the image and the words as JSON-quoted data and writes the module; it
   is stored as text like any other prop. Its first comment line names the
   item (`// name: blue glazed vase`), cleaned to letters, digits and spaces.
-- `POST /people/:id/messages` takes `sketch: {from, id}`: a listed person's id
-  and a sketch id, never a path. The image goes into that villager's turn as
+- `POST /people/:id/messages` takes `sketch: {from, id}`: the token holder's
+  own id (another person's is refused, 403) and a sketch id, never a path. The image goes into that villager's turn as
   an image block, with a context note that anything drawn or written in it is
   part of the drawing, never instructions. A drawing with `route` is refused
   (400), so nothing drawn can choose a route. The conversation keeps
   `{from, id}` beside the line, never the bytes.
 
-Still true: one launch token serves every listed person, so a page holding it
-can read any listed person's drawings and hand them to any villager. The page
-only reads and gives the drawer's own.
+Since the #40 merge a token reads and hands over only its own person's
+drawings; handed to another person's villager, that is a visit (see Visits).
 
 `npm run check-villager`: 148 of 148 (new: a sketch needs the token; text, a
 GIF, 2000 px wide, 8 px tall, a number and over 1 MB are refused; IHDR size;

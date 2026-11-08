@@ -20,6 +20,9 @@ const video = opt('video')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-talk-'))
+// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
+const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
+const link = async (url) => `${url}#token=${await tokenNow()}`
 const hostPort = Number(opt('host') ?? 5296)
 const devPort = Number(opt('dev') ?? 5295)
 const base = `http://localhost:${devPort}/`
@@ -52,7 +55,9 @@ const stop = (child) => new Promise((resolve) => {
   child.once('exit', resolve)
   process.kill(-child.pid, 'SIGTERM')
 })
-const jsonl = (person, file) => readFile(join(root, 'people', person, file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
+// The page is Alex's (its link's token). Talking with another villager is Alex's visit (#42), kept under Alex.
+const folderOf = (person) => person === 'alex' ? join(root, 'people', 'alex') : join(root, 'people', 'alex', 'visits', person)
+const jsonl = (person, file) => readFile(join(folderOf(person), file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
 
 let host = await startHost()
 const dev = await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
@@ -71,7 +76,7 @@ async function until(page, test, ms = 20_000, every = 100) {
   return s
 }
 async function open(page, query) {
-  await page.goto(base + query)
+  await page.goto(await link(base + query))
   await page.evaluate(() => window.village.ready())
 }
 /** Hover a villager (it pauses), then click where it is now. */
@@ -253,8 +258,10 @@ try {
     // "go on" turns the page (the card is still gliding, so the click is dispatched rather than aimed).
     await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .more').click())
     await page.waitForTimeout(300)
-    const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).opacity, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
-    check('a long reply turns its page only when it would overflow, and keeps the first page as a dimmed line above', firstPage.cards.sam && shown1.more && shown1.lines <= 7 && shown1.lines >= 5 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && Number(shown2.before) < 0.9 && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
+    const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).display, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
+    // The page before is kept (for the journal and the checks) but no longer written on the slip: a cut-off grey
+    // line over the answer read as noise to both scorers (#42 paper climb, round 5).
+    check('a long reply turns its page only when it would overflow, and keeps the first page without writing it over the next', firstPage.cards.sam && shown1.more && shown1.lines <= 7 && shown1.lines >= 5 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && shown2.before === 'none' && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
 
     // Escape: back to chores and the room.
     await page.keyboard.press('Escape')
@@ -369,6 +376,9 @@ try {
     check('with the host down the villager says so in character', /out for a moment/.test(away.at(-1).cards.sam?.text ?? ''), away.at(-1).cards.sam)
     check('with the host down the line is kept, in storage and on the slip', kept.at(-1)?.text === 'Tuft, are you there?' && kept.at(-1)?.person === 'sam' && line === 'Tuft, are you there?', { kept: kept.at(-1), line })
     host = await startHost()
+    // The host's new link, opened in the same tab: only the fragment changes.
+    const fresh = await tokenNow()
+    await page.evaluate((t) => (location.hash = `token=${t}`), fresh)
 
     // A typed farewell: each says a short goodbye in turn, nothing is sent, and they go back to chores.
     await page.locator('.talk-slip .line').fill('')

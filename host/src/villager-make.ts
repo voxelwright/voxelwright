@@ -13,7 +13,7 @@
 //   GET  /people/:id/villager                 -> {persona, voice}  the villager the person has now (persona.json, checked), and its babble voice
 //   GET  /people/:id/persona-templates        -> {builtin, templates, profile, humour}  the built-in patterns this person may pick, their own saved ones, their profile and the humour dial
 //   POST /people/:id/persona-templates        {name, persona, dials?, item?, shared?} -> {template}  the host sets its audience (savedAudience); one sent is ignored
-//   GET  /family/persona-templates?for=<id>   -> {templates}  every listed person's shared ones
+//   GET  /people/:id/family-templates         -> {templates}  every listed person's shared ones this person may see
 //
 // One owner per rule (#42): host/src/persona.ts owns the persona's shape and its check
 // (checkPersona), the profile, and the humour rule (humourCeiling). Every persona this file
@@ -485,9 +485,12 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
   })
 
   return async (path: string, req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
-    if (path === '/family/persona-templates' && req.method === 'GET') {
-      const reader = new URL(req.url ?? '/', 'http://x').searchParams.get('for') ?? ''
-      const profile = PERSON.test(reader) && Object.hasOwn(config.people, reader) ? profileOf(reader) : { age: 'unknown' as const }
+    // The family's shared patterns as this person may see them: the reader is the token holder (#40), never a parameter.
+    const family = /^\/people\/([^/]+)\/family-templates$/.exec(path)
+    if (family && req.method === 'GET') {
+      const reader = family[1]
+      if (!PERSON.test(reader) || !Object.hasOwn(config.people, reader)) return send(res, 404, { error: 'no such person' }), true
+      const profile = profileOf(reader)
       const all = (await Promise.all(Object.keys(config.people).map(listTemplates))).flat().filter((t) => t.shared)
       return send(res, 200, { templates: forReader(all, profile) }), true
     }

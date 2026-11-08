@@ -4,6 +4,7 @@
 // The profile is authority data from the operator (and, later, onboarding): the
 // villager reads it and can never write it. The humour ceiling comes from the
 // profile and the person's own words, never from model output.
+import { randomUUID } from 'node:crypto'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readNote } from './notes.ts'
@@ -323,7 +324,8 @@ export async function readPreferences(personDir: string): Promise<Preferences> {
   }
 }
 export async function writePreferences(personDir: string, prefs: Preferences) {
-  const temp = `${preferencesFile(personDir)}.${process.pid}.tmp`
+  // A temp name per write, so two writes at once never rename each other's file away.
+  const temp = `${preferencesFile(personDir)}.${randomUUID()}.tmp`
   await writeFile(temp, JSON.stringify(prefs), { mode: 0o600 })
   await rename(temp, preferencesFile(personDir))
 }
@@ -361,36 +363,65 @@ export interface Character {
   aboutNote?: string
   styleNoteName: string
   aboutNoteName: string
+  /** On a visit (#42): the name of the person whose villager this is, when that is not the person talking. */
+  owner?: string
 }
 
-/** Loads a person's character. A persona.json that fails its check is not used: the default is, and the reason is returned. */
-export async function loadCharacter(person: string, personDir: string, profile: Profile = { age: 'unknown' }): Promise<{ character: Character; personaRefused?: string }> {
-  let persona = defaultPersona(person)
-  let personaRefused: string | undefined
+/** A person's villager persona from their persona.json. One that fails its check is not used: the default is, and the reason is returned. */
+export async function loadPersona(person: string, personDir: string): Promise<{ persona: Persona; personaRefused?: string }> {
   try {
-    persona = checkPersona(JSON.parse(await readFile(join(personDir, 'persona.json'), 'utf8')))
+    return { persona: checkPersona(JSON.parse(await readFile(join(personDir, 'persona.json'), 'utf8'))) }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') personaRefused = String((error as Error).message).slice(0, 200)
+    const personaRefused = (error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : String((error as Error).message).slice(0, 200)
+    return { persona: defaultPersona(person), ...(personaRefused ? { personaRefused } : {}) }
   }
-  const notesDir = join(personDir, 'notes')
+}
+
+const readNotes = async (notesDir: string, person: string) => {
   const note = (name: string) => readNote(notesDir, name).then((t) => t.slice(0, NOTE_CHARS), () => undefined)
+  return { styleNote: await note(styleNote(person)), aboutNote: await note(aboutNote(person)), styleNoteName: styleNote(person), aboutNoteName: aboutNote(person) }
+}
+
+/** The humour a person's own villager may use: profile, preferences and persona only (the table's rule reads this, never notes). */
+export async function humourOf(person: string, personDir: string, profile: Profile = { age: 'unknown' }): Promise<Humour> {
+  return humourCeiling(profile, await readPreferences(personDir), (await loadPersona(person, personDir)).persona)
+}
+
+/** Loads a person's character for their own villager. */
+export async function loadCharacter(person: string, personDir: string, profile: Profile = { age: 'unknown' }): Promise<{ character: Character; personaRefused?: string }> {
+  const { persona, personaRefused } = await loadPersona(person, personDir)
   const prefs = await readPreferences(personDir)
   return {
-    character: {
-      persona,
-      profile,
-      humour: humourCeiling(profile, prefs, persona),
-      styleNote: await note(styleNote(person)),
-      aboutNote: await note(aboutNote(person)),
-      styleNoteName: styleNote(person),
-      aboutNoteName: aboutNote(person),
-    },
+    character: { persona, profile, humour: humourCeiling(profile, prefs, persona), ...(await readNotes(join(personDir, 'notes'), person)) },
     ...(personaRefused ? { personaRefused } : {}),
   }
 }
 
+/**
+ * A visit (#42): `owner`'s villager talking with `visitor`. From the owner's folder only the checked
+ * persona.json is read (who the villager is, household-visible by design, so its writer must never copy
+ * private conversation or notes into it); never their notes,
+ * preferences, profile, sketches or sessions. The profile, preferences and notes are the visitor's own,
+ * the notes from the visit's folder, which the visitor owns. Humour is the visitor's ceiling, capped
+ * at the persona's lean, so a visit is never crude.
+ */
+export async function loadVisitCharacter(
+  visitor: { person: string; personDir: string; profile: Profile },
+  owner: { person: string; personDir: string; name: string },
+  visitDir: string,
+): Promise<{ character: Character; personaRefused?: true }> {
+  // The refusal's reason can quote the owner's persona text, so the visitor's log gets only that it was refused.
+  const { persona, personaRefused } = await loadPersona(owner.person, owner.personDir)
+  const ceiling = humourCeiling(visitor.profile, await readPreferences(visitor.personDir), persona)
+  const humour = HUMOUR_RANK[ceiling] > HUMOUR_RANK[persona.humour.lean] ? persona.humour.lean : ceiling
+  return {
+    character: { persona, profile: visitor.profile, humour, owner: owner.name, ...(await readNotes(join(visitDir, 'notes'), visitor.person)) },
+    ...(personaRefused ? { personaRefused: true as const } : {}),
+  }
+}
+
 /** What decides the process's system prompt; a change means a new process. The notes are left out: the villager wrote them in this session. */
-export const characterKey = (c: Character | undefined) => (c ? JSON.stringify([c.persona, c.profile, c.humour]) : '')
+export const characterKey = (c: Character | undefined) => (c ? JSON.stringify([c.persona, c.profile, c.humour, c.owner ?? null]) : '')
 
 /** The character for a caller that names none: the fallback persona, talking to an adult. */
 export function fallbackCharacter(person = 'someone'): Character {
