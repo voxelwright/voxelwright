@@ -164,13 +164,17 @@ export default {
     // The sun's shadow box covers the dollhouse kitchen (window.ts); a room built past it would be lit
     // as if nothing stood in the sun, so the box grows to hold every room, and goes back on unload.
     let sunWas: { left: number; right: number; top: number; bottom: number } | null = null
+    // Found once and kept while it stays in the scene, so the frame loop does not search the scene for it.
+    let sunLight: THREE.DirectionalLight | undefined
+    const theSun = () => (sunLight?.parent ? sunLight : (sunLight = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined))
+    const builtBeyondBase = (p: Plan) => p.rooms.some((r) => !BASE_ROOMS.has(r.id))
     const fitSun = (p: Plan) => {
-      const sun = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined
+      const sun = theSun()
       if (MODE === 'seat' || !sun?.isDirectionalLight || !sun.castShadow) return
       const cam = sun.shadow.camera
       sunWas ??= { left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom }
       const box = { ...sunWas }
-      if (p.rooms.some((r) => !BASE_ROOMS.has(r.id))) {
+      if (builtBeyondBase(p)) {
         sun.updateMatrixWorld()
         sun.target.updateMatrixWorld()
         cam.position.setFromMatrixPosition(sun.matrixWorld)
@@ -844,8 +848,9 @@ export default {
       }
       if (!roomGroup) return trySwap()
       if (plan !== builtPlan) rebuild(plan, false)
-      // The sun may come after the first rebuild on a page that opens with rooms already built.
-      if (!sunWas && builtPlan && builtPlan.rooms.length > 1) fitSun(builtPlan)
+      // The sun may come after the first rebuild on a page that opens with rooms already built: until it is
+      // found, look for it, but only when a room beyond the base house needs a bigger shadow box.
+      if (!sunWas && MODE !== 'seat' && !sunLight?.parent && builtPlan && builtBeyondBase(builtPlan)) fitSun(builtPlan)
       raise()
       settle()
       if (movein) {
