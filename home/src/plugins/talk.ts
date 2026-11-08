@@ -117,7 +117,8 @@ const TABLE_CENTRE = new THREE.Vector3(-0.25, TABLE_TOP, 0.15)
  * Where a note to the whole table can lie during the round, nearest the front first: the first with no face over
  * it in the table shot is used (#42 paper climb: a fixed spot put it over a chair back, floating).
  */
-const TABLE_SPOTS = [[-0.3, 0.44], [-0.75, 0.44], [0.2, 0.44], [-0.3, 0.12], [-0.8, 0.12], [0.25, 0.12], [-0.6, -0.15]]
+const TABLE_SPOTS = [[-0.3, 0.44], [-0.75, 0.44], [0.2, 0.44], [-0.3, 0.12], [-0.8, 0.12], [0.25, 0.12], [-0.6, -0.15],
+  [-0.95, 0.3], [-0.95, 0.0], [-0.9, -0.25], [-0.35, -0.25]]
   .map(([x, z]) => new THREE.Vector3(x, TABLE_TOP + 0.004, z))
 /** Your ink, the same blue-black as the pad's (input.ts). */
 const MY_INK = '#23395a'
@@ -1399,7 +1400,8 @@ export default {
         card.y += (spot.t + lead - card.y) * k
         card.placed = true
         el.style.translate = `${card.x}px ${card.y}px`
-        el.dataset.tail = crossed ? 'none' : spot.tail
+        // Crossed, it keeps a short tab toward its speaker instead of the stretched one.
+        el.dataset.tail = spot.tail
         el.style.setProperty('--reach', `${spot.tail === 'down' && !crossed ? Math.max(0, Math.round(head.y0 - 22 - (card.y + h))) : 0}px`)
         el.style.setProperty('--tail', spot.tail === 'down'
           ? `${THREE.MathUtils.clamp(head.cx - card.x, 22, w - 22)}px`
@@ -1460,12 +1462,14 @@ export default {
         delete myNote.dataset.tail
         const w = myNote.offsetWidth, h = myNote.offsetHeight
         const blocked = [...taken, ...faces.values()]
-        const clear = (o: Omit<Spot, 'tail'>) => inside(o) && !blocked.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t < o.t + o.h + 6)
+        // Clear of every slip with the tape on its top and of every whole head (face boxes leave out the top TAB).
+        const clear = (o: Omit<Spot, 'tail'>) => inside(o) && !blocked.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t - TAB < o.t + o.h + 6)
         // Lying on the table top: the spot it lay on last if it is still clear, else the first clear one from the front.
         let spot: Omit<Spot, 'tail'> | undefined
         for (const i of [pinned.at, ...TABLE_SPOTS.keys()]) {
           const a = toPx(edge.copy(TABLE_SPOTS[i]))
-          const o = { l: a.x - w / 2, t: a.y - h / 2, w, h }
+          // Kept inside the window's edge: on a phone the table's clear end is at the edge.
+          const o = { l: THREE.MathUtils.clamp(a.x - w / 2, EDGE, innerWidth - EDGE - w), t: a.y - h / 2, w, h }
           if (clear(o)) {
             spot = o
             pinned.at = i
@@ -2057,8 +2061,10 @@ function css() {
   .talk-slip .chip:hover, .talk-slip .chip:focus-visible { background: rgba(214, 186, 146, 0.6); translate: 0 -1px; outline: none; }
   .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; }
+    .talk-card.mine:not(.clipped) { max-width: 158px; padding: 10px 12px 8px; }
+    .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 2; }
     .talk-card.said .words { -webkit-line-clamp: 1; } .talk-card.said { max-width: calc(100vw - 48px); }
-    .talk-card.mine:not(.clipped) .words { -webkit-line-clamp: 1; } .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
+    .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
   @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }
   `
 }

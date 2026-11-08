@@ -292,8 +292,8 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.fillStyle = INK
     // Wrapped where the page wraps it, so the paper is as tall as its lines.
     let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', (words?.offsetWidth ?? w - 36) + 2)
-    // On a phone, one line in the round's stack, two clipped to a reply; three elsewhere.
-    const keep = innerWidth >= 600 ? 3 : el.classList.contains('clipped') ? 2 : 1
+    // Two lines on a phone, three elsewhere.
+    const keep = innerWidth >= 600 ? 3 : 2
     if (lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
     lines.forEach((l, i) => g.fillText(l, x0 + (words?.offsetLeft ?? 18), y0 + top + px - 1 + i * px * 1.3))
     // The round's sheet: each speaker's turn under yours, their name on tape in their colour, their words in ink.

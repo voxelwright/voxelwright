@@ -20,7 +20,8 @@ export default {
     // The garden: a painted backdrop far enough away to parallax against the frame.
     const garden = new THREE.Mesh(
       new THREE.PlaneGeometry(16, 8),
-      new THREE.MeshBasicMaterial({ map: paintGarden(3), fog: false }),
+      // Toned below the bloom threshold: at full strength the window bloomed hot in every shot (#42 paper climb).
+      new THREE.MeshBasicMaterial({ map: paintGarden(3), color: new THREE.Color(0.8, 0.8, 0.78), fog: false }),
     )
     garden.position.set(cx - 1.5, 1.6, WALL_Z - 6)
     garden.userData.seatOnly = true // a painted card: from above it shows over the wall (#42)
