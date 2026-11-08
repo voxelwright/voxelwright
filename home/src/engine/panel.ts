@@ -93,18 +93,22 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
   root.append(form, note)
 
   heading('Rules')
+  const rulesBox = document.createElement('div')
+  root.append(rulesBox)
   // Each slider sends the whole rules object with one field changed: still one atomic change.
-  for (const key of ruleKeys()) {
+  // A rule registered later (registerRule) gets its slider the next time the panel looks.
+  const addRule = (key: string) => {
     if (key === 'gravity') {
       for (const [i, axis] of ['x', 'y', 'z'].entries()) {
-        sliders.set(`gravity${i}`, slider(root, `gravity ${axis}`, FIELDS.gravity, world.rules.gravity[i], (v) => {
+        sliders.set(`gravity${i}`, slider(rulesBox, `gravity ${axis}`, FIELDS.gravity, world.rules.gravity[i], (v) => {
           const g = [...world.rules.gravity] as Rules['gravity']
           g[i] = v
           world.setRules({ gravity: g }, 'panel')
         }))
       }
-    } else sliders.set(key, slider(root, key, FIELDS[key], world.rules[key] as number, (v) => world.setRules({ [key]: v }, 'panel')))
+    } else sliders.set(key, slider(rulesBox, key, FIELDS[key], world.rules[key] as number, (v) => world.setRules({ [key]: v }, 'panel')))
   }
+  for (const key of ruleKeys()) addRule(key)
 
   heading('Gadgets')
   for (const g of world.knobs()) {
@@ -124,8 +128,16 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
   const show = () => {
     const r = world.rules
     for (const key of ruleKeys()) {
-      if (key === 'gravity') r.gravity.forEach((v, i) => { const s = sliders.get(`gravity${i}`)!; s.input.value = String(v); s.out.textContent = v.toFixed(2) })
-      else { const s = sliders.get(key)!; s.input.value = String(r[key]); s.out.textContent = (r[key] as number).toFixed(2) }
+      if (key === 'gravity') {
+        if (!sliders.has('gravity0')) addRule(key)
+        r.gravity.forEach((v, i) => { const s = sliders.get(`gravity${i}`)!; s.input.value = String(v); s.out.textContent = v.toFixed(2) })
+        continue
+      }
+      if (typeof r[key] !== 'number') continue
+      if (!sliders.has(key)) addRule(key)
+      const s = sliders.get(key)!
+      s.input.value = String(r[key])
+      s.out.textContent = (r[key] as number).toFixed(2)
     }
   }
   const tick = setInterval(() => {

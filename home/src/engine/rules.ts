@@ -60,6 +60,29 @@ export const presetRules = (name: string): Rules | undefined =>
 
 export const ruleKeys = () => Object.keys(FIELDS)
 
+// What the module held before anything was registered at runtime, so unloading can put it back.
+const BUILT_IN = { fields: structuredClone(FIELDS), normal: structuredClone(NORMAL), presets: { ...PRESETS } }
+/** Worlds hear of a rule added after they started, so their rules carry it too. */
+const listeners = new Set<(name: string, value: number) => void>()
+export function onRuleAdded(fn: (name: string, value: number) => void): () => void {
+  listeners.add(fn)
+  return () => void listeners.delete(fn)
+}
+
+/** Drops every rule and preset added at runtime and restores the built-ins (the plugin unloading). */
+export function resetRules() {
+  for (const key of Object.keys(FIELDS)) delete FIELDS[key]
+  for (const key of Object.keys(NORMAL)) delete NORMAL[key]
+  for (const key of Object.keys(PRESETS)) delete PRESETS[key]
+  Object.assign(FIELDS, structuredClone(BUILT_IN.fields))
+  Object.assign(NORMAL, structuredClone(BUILT_IN.normal))
+  Object.assign(PRESETS, BUILT_IN.presets)
+}
+
+/** Whether two rule sets say the same about every known rule. */
+export const sameRules = (a: Rules, b: Rules) =>
+  ruleKeys().every((k) => (k === 'gravity' ? (a.gravity as number[]).every((v, i) => v === b.gravity[i]) : a[k] === b[k]))
+
 const NAME = /^[a-z][a-zA-Z0-9]{0,31}$/
 /** Adds a numeric rule with its range and default. Returns null, or why it was refused. */
 export function registerRule(name: string, field: Field & { default: number }): string | null {
@@ -68,6 +91,7 @@ export function registerRule(name: string, field: Field & { default: number }): 
   if (![min, max, step, field.default].every(Number.isFinite) || min > max || step <= 0 || field.default < min || field.default > max) return 'a rule needs min <= default <= max and a positive step'
   FIELDS[name] = { min, max, step, about: String(about).slice(0, 120) }
   NORMAL[name] = field.default
+  for (const fn of listeners) fn(name, field.default)
   return null
 }
 

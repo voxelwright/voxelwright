@@ -3,7 +3,7 @@
 // (rules.ts checkRules), then applied all at once. A failed call or a refused answer leaves
 // the rules as they were.
 import { askRules, ME } from '../villager'
-import type { Rules } from '../engine/rules'
+import { checkRules, sameRules, type Rules } from '../engine/rules'
 import type { World } from '../engine/world'
 
 export type Asked =
@@ -21,7 +21,9 @@ export async function ask(world: World, text: string, person = ME): Promise<Aske
   let out: Asked
   if (!r.ok) out = { ok: false, why: r.why, ms: ms() }
   else {
-    const applied = world.setRules(r.rules, 'talk')
+    // An answer that changes nothing (every field invalid or unknown, or the same as now) is not a change.
+    const checked = checkRules(r.rules, world.rules)
+    const applied = 'reason' in checked ? { ok: false as const, reason: checked.reason } : sameRules(checked.rules, world.rules) ? { ok: false as const, reason: 'nothing valid to change' } : world.setRules(r.rules, 'talk')
     if (!applied.ok) out = { ok: false, why: 'refused', reason: applied.reason, ms: ms() }
     else out = {
       ok: true,

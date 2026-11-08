@@ -63,3 +63,43 @@ export interface ToySpec {
   /** The part people choose to play with it, if any. */
   handle?: string
 }
+
+/** Nothing lives farther than this from the origin (m); a thing that gets past it is put back. */
+export const WORLD_BOUND = 50
+/** Part sizes (half extents, radii) are between these (m). */
+const SIZE = [0.001, 20] as const
+const ID = /^[A-Za-z0-9_-]{1,48}$/
+
+const finite = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x))
+const inside = (v: number[]) => v.every((x) => Math.abs(x) <= WORLD_BOUND)
+
+/**
+ * Whether a toy's numbers can be built: ids that are plain, a finite frame and finite poses
+ * inside the world, sizes in range, no id used twice. Returns null, or why not. (The solver
+ * does not abort on NaN, zero or huge sizes; it carries on and poisons the whole world.)
+ */
+export function checkToy(toy: ToySpec): string | null {
+  if (!toy || typeof toy.id !== 'string' || !ID.test(toy.id)) return 'a toy id is letters, digits, dashes and underscores'
+  const f = toy.frame
+  if (!f || !finite(f.at, 3) || !inside(f.at) || !Number.isFinite(f.yaw) || !Number.isFinite(f.tilt)) return `${toy.id}: the frame is a finite point inside the world, a yaw and a tilt`
+  if (!Array.isArray(toy.parts) || !Array.isArray(toy.gadgets) || !Array.isArray(toy.wires)) return `${toy.id}: parts, gadgets and wires are lists`
+  const seen = new Set<string>()
+  for (const part of toy.parts) {
+    const name = `${toy.id}/${part?.id}`
+    if (typeof part?.id !== 'string' || !ID.test(part.id) || seen.has(part.id)) return `${name}: a part id is plain and used once`
+    seen.add(part.id)
+    if (!finite(part.at, 3) || !inside(part.at)) return `${name}: at is a finite point inside the world`
+    if (part.turn !== undefined && !finite(part.turn, 3)) return `${name}: turn is three finite angles`
+    if (part.motion !== undefined && !['static', 'dynamic', 'kinematic'].includes(part.motion)) return `${name}: motion is static, dynamic or kinematic`
+    const s = part.shape
+    const sizes = s?.kind === 'box' ? (finite(s.half, 3) ? s.half : null) : s?.kind === 'sphere' ? (finite([s.radius], 1) ? [s.radius] : null)
+      : s?.kind === 'capsule' || s?.kind === 'cylinder' ? (finite([s.halfHeight, s.radius], 2) ? [s.halfHeight, s.radius] : null) : null
+    if (!sizes || sizes.some((x) => x < SIZE[0] || x > SIZE[1])) return `${name}: a ${s?.kind ?? 'missing'} shape needs finite sizes from ${SIZE[0]} to ${SIZE[1]} m`
+  }
+  const gadgets = new Set<string>()
+  for (const g of toy.gadgets) {
+    if (typeof g?.id !== 'string' || !ID.test(g.id) || gadgets.has(g.id)) return `${toy.id}/${g?.id}: a gadget id is plain and used once`
+    gadgets.add(g.id)
+  }
+  return null
+}

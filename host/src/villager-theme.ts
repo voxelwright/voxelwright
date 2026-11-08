@@ -82,12 +82,15 @@ export function checkThemeReply(raw: string): { theme: Record<string, unknown>; 
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
-  let raw = ''
-  for await (const chunk of req) {
-    raw += chunk
-    if (raw.length > MAX_BODY) throw new Error('too large')
+  // Bytes, not characters: a chunk may end inside a multi-byte character, so decode once at the end.
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length
+    if (size > MAX_BODY) throw new Error('too large')
+    chunks.push(chunk)
   }
-  return JSON.parse(raw)
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
 const theming = new Set<string>()

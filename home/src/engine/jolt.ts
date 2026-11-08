@@ -48,7 +48,7 @@ export function createJolt(): PhysicsCore {
   const bodies: (InstanceType<J['Body']> | null)[] = []
   const sensors: boolean[] = []
   const byIndex = new Map<number, BodyId>()
-  const jointList: ({ kind: 'hinge'; c: InstanceType<J['HingeConstraint']> } | { kind: 'slider'; c: InstanceType<J['SliderConstraint']> })[] = []
+  const jointList: (({ kind: 'hinge'; c: InstanceType<J['HingeConstraint']> } | { kind: 'slider'; c: InstanceType<J['SliderConstraint']> }) | null)[] = []
   let fresh: Contact[] = []
   let combine: Combine = () => [0.5, 0.3]
   let optimized = false
@@ -66,7 +66,13 @@ export function createJolt(): PhysicsCore {
   const normalTo = (ax: Vec3): Vec3 => {
     const n: Vec3 = Math.abs(ax[1]) < 0.9 ? [-ax[2], 0, ax[0]] : [0, ax[2], -ax[1]]
     const len = Math.hypot(...n)
+    if (!(len > 1e-9)) throw new Error('a joint axis needs a direction')
     return [n[0] / len, n[1] / len, n[2] / len]
+  }
+  const joint = (id: number) => {
+    const j = jointList[id]
+    if (!j) throw new Error(`no joint ${id}`)
+    return j
   }
   const bid = (id: BodyId) => {
     const b = ids[id]
@@ -170,10 +176,11 @@ export function createJolt(): PhysicsCore {
       bodies[id] = null
     },
     addHinge(spec: HingeSpec) {
+      const normal = normalTo(spec.axis)
       const hs = new J.HingeConstraintSettings()
       hs.mPoint1 = hs.mPoint2 = setR(spec.anchor)
       hs.mHingeAxis1 = hs.mHingeAxis2 = setV(spec.axis)
-      hs.mNormalAxis1 = hs.mNormalAxis2 = setV(normalTo(spec.axis))
+      hs.mNormalAxis1 = hs.mNormalAxis2 = setV(normal)
       hs.mLimitsMin = spec.limits[0]
       hs.mLimitsMax = spec.limits[1]
       const c = J.castObject(hs.Create(jolt.sGetFixedToWorldBody(), body(spec.body)), J.HingeConstraint)
@@ -184,10 +191,11 @@ export function createJolt(): PhysicsCore {
       return jointList.length - 1
     },
     addSlider(spec: SliderSpec) {
+      const normal = normalTo(spec.axis)
       const ss = new J.SliderConstraintSettings()
       ss.mAutoDetectPoint = true
       ss.mSliderAxis1 = ss.mSliderAxis2 = setV(spec.axis)
-      ss.mNormalAxis1 = ss.mNormalAxis2 = setV(normalTo(spec.axis))
+      ss.mNormalAxis1 = ss.mNormalAxis2 = setV(normal)
       ss.mLimitsMin = spec.limits[0]
       ss.mLimitsMax = spec.limits[1]
       const c = J.castObject(ss.Create(jolt.sGetFixedToWorldBody(), body(spec.body)), J.SliderConstraint)
@@ -197,8 +205,16 @@ export function createJolt(): PhysicsCore {
       jointList.push({ kind: 'slider', c })
       return jointList.length - 1
     },
-    setMotor(joint, velocity, limit) {
-      const j = jointList[joint]
+    setLimits(id, limits) {
+      joint(id).c.SetLimits(limits[0], limits[1])
+      bi.ActivateBody(joint(id).c.GetBody2().GetID())
+    },
+    removeJoint(id) {
+      system.RemoveConstraint(joint(id).c)
+      jointList[id] = null
+    },
+    setMotor(id, velocity, limit) {
+      const j = joint(id)
       const ms = j.c.GetMotorSettings()
       if (j.kind === 'hinge') {
         ms.mMaxTorqueLimit = limit
@@ -211,8 +227,8 @@ export function createJolt(): PhysicsCore {
       }
       bi.ActivateBody(j.c.GetBody2().GetID())
     },
-    jointPosition(joint) {
-      const j = jointList[joint]
+    jointPosition(id) {
+      const j = joint(id)
       return j.kind === 'hinge' ? j.c.GetCurrentAngle() : j.c.GetCurrentPosition()
     },
     step(dt, substeps) {
@@ -265,6 +281,8 @@ export function createJolt(): PhysicsCore {
       return !bi.IsActive(bid(id))
     },
     dispose() {
+      // The three layer tables are JoltInterface's: measured on 1.1.1, destroying them after
+      // it corrupts the heap (a double free), so they are not freed here.
       J.destroy(jolt)
       for (const o of [listener, est, tmpV, tmpR, tmpQ]) J.destroy(o)
       ids.length = bodies.length = jointList.length = 0

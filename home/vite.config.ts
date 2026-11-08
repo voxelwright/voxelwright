@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { build, defineConfig, type Plugin } from 'vite'
+import { build, defineConfig, type Connect, type Plugin } from 'vite'
 import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
 
 // The villager host (host/src/villager.ts) listens on 127.0.0.1. The dev server
@@ -29,20 +29,19 @@ const csp = [
 // #74 physics: the solver is WebAssembly (Jolt), and compiling wasm needs 'wasm-unsafe-eval'
 // in script-src. It allows WebAssembly.compile/instantiate only, not eval() or new Function().
 // Only a page opened with ?physics gets it; every other page keeps the policy above. This
-// middleware is the one place the dev server sets the policy (server.headers would be applied
-// after it, at send time, and overwrite the choice).
+// middleware is the one place either server (dev and preview) sets the policy (server.headers
+// would be applied after it, at send time, and overwrite the choice).
 const physicsCsp = csp.map((d) => (d === "script-src 'self'" ? "script-src 'self' 'wasm-unsafe-eval'" : d)).join('; ')
 const homeCsp = csp.join('; ')
+const policy: Connect.NextHandleFunction = (req, res, next) => {
+  const url = new URL(req.url ?? '/', 'http://home')
+  res.setHeader('content-security-policy', url.searchParams.has('physics') ? physicsCsp : homeCsp)
+  next()
+}
 const physicsPolicy: Plugin = {
   name: 'physics-policy',
-  apply: 'serve',
-  configureServer(server) {
-    server.middlewares.use((req, res, next) => {
-      const url = new URL(req.url ?? '/', 'http://home')
-      res.setHeader('content-security-policy', url.searchParams.has('physics') ? physicsCsp : homeCsp)
-      next()
-    })
-  },
+  configureServer: (server) => void server.middlewares.use(policy),
+  configurePreviewServer: (server) => void server.middlewares.use(policy),
 }
 
 // #42 prop sandbox, dev only: `virtual:prop-box` is the sandbox worker bundled into one

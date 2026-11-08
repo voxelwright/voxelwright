@@ -72,6 +72,10 @@ export interface PhysicsCore {
   removeBody(id: BodyId): void
   addHinge(spec: HingeSpec): JointId
   addSlider(spec: SliderSpec): JointId
+  /** Moves a joint's travel limits (rad for a hinge, m for a slider). */
+  setLimits(joint: JointId, limits: [number, number]): void
+  /** Takes a joint out of the world (a toy that failed to build). */
+  removeJoint(joint: JointId): void
   /** Drive a joint's motor at a velocity (rad/s or m/s) with at most this torque (N·m) or force (N). */
   setMotor(joint: JointId, velocity: number, limit: number): void
   /** A hinge's angle (rad) or a slider's position (m). */

@@ -10,9 +10,9 @@ import { paintWood } from '../paint'
 import { PHYSICS_PANEL } from '../features'
 import { createJolt, loadJolt } from '../engine/jolt'
 import { World } from '../engine/world'
-import { PRESETS, registerPreset, registerRule, type Rules } from '../engine/rules'
-import { registerMaterial } from '../engine/materials'
-import { gadgetKinds, registerGadget } from '../engine/gadgets'
+import { PRESETS, registerPreset, registerRule, resetRules, type Rules } from '../engine/rules'
+import { registerMaterial, resetMaterials } from '../engine/materials'
+import { gadgetKinds, registerGadget, resetGadgets } from '../engine/gadgets'
 import { ask, askedSoFar } from './ask'
 import type { PhysicsEvent } from '../engine/events'
 import type { Vec3 } from '../engine/core'
@@ -38,6 +38,12 @@ export async function start(ctx: Context, gone: () => boolean) {
     ctx.emit('village/physics', e)
   }, (seed, light, dark, knots, planks) => paintWood({ seed, w: 256, h: 256, planks, light, dark, knots }))
   ctx.effect(() => () => world.dispose(), 'physics solver')
+  // The registries are module-level and outlive this plugin (reload, HMR): what was added at runtime goes with the world.
+  ctx.effect(() => () => {
+    resetRules()
+    resetMaterials()
+    resetGadgets()
+  }, 'physics registries')
   for (const toy of TOYS) world.addToy(toy)
   own(ctx, world.group)
 

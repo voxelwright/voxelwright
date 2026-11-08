@@ -17,6 +17,8 @@ export interface GadgetKind {
   outputs: string[]
   /** Once, when its toy is built. */
   setup?(g: Gadget, w: WorldApi): void
+  /** A knob changed value (tuned live, or restored): bring whatever was fixed from it at setup into line. */
+  knob?(g: Gadget, name: string, w: WorldApi): void
   /** Before each solver step of h simulated seconds. */
   step?(g: Gadget, w: WorldApi, h: number): void
   /** Its part touched something (after the step). */
@@ -71,11 +73,18 @@ registerGadget({
   knobs: { speed: knob(0, 60, 0.5, 25, 'rad/s'), torque: knob(0, 20, 0.1, 3, 'N·m'), swing: knob(0.1, 1.5, 0.01, 1, 'rad') },
   inputs: [], outputs: [],
   setup(g, w) {
-    g.state.joint = w.addHinge(g.part!, setting<Vec3>(g, 'anchor'), setting<Vec3>(g, 'axis'), [0, g.knobs.swing])
+    if (!g.part) throw new Error(`${g.id}: a hinge needs a part`)
+    g.state.joint = w.addHinge(g.part, setting<Vec3>(g, 'anchor'), setting<Vec3>(g, 'axis'), [0, g.knobs.swing])
   },
-  step(g, w) {
+  knob(g, name, w) {
+    if (name === 'swing') w.setLimits(g.state.joint, [0, g.knobs.swing])
+  },
+  step(g, w, h) {
     const k = g.knobs
-    w.setMotor(g.state.joint, (w.held(setting<string>(g, 'input')) ? 1 : -1) * k.speed * Math.min(2, w.rules.kick), k.torque * w.rules.kick)
+    const speed = k.speed * Math.min(2, w.rules.kick)
+    // Slows into the stop within one step, so the travel is the knob and not the knob plus an overshoot.
+    const aim = ((w.held(setting<string>(g, 'input')) ? k.swing : 0) - w.jointPosition(g.state.joint)) / h
+    w.setMotor(g.state.joint, Math.max(-speed, Math.min(speed, aim)), k.torque * w.rules.kick)
   },
 })
 
@@ -84,7 +93,8 @@ registerGadget({
   knobs: { strength: knob(0, 8, 0.05, 4.5, 'm/s'), travel: knob(0.01, 0.12, 0.005, 0.025, 'm'), charge: knob(0.1, 3, 0.05, 0.8, 's') },
   inputs: [], outputs: ['fired'],
   setup(g, w) {
-    g.state.joint = w.addSlider(g.part!, setting<Vec3>(g, 'axis'), [-0.12, 0.12])
+    if (!g.part) throw new Error(`${g.id}: a piston needs a part`)
+    g.state.joint = w.addSlider(g.part, setting<Vec3>(g, 'axis'), [-0.12, 0.12])
   },
   step(g, w) {
     const k = g.knobs, st = g.state
@@ -148,3 +158,10 @@ registerGadget({
     w.fire(g, 'changed', { value: g.state.value })
   },
 })
+
+const BUILT_IN = new Map(registry)
+/** Drops every kind added at runtime, and puts back any built-in one replaced (the plugin unloading). */
+export function resetGadgets() {
+  registry.clear()
+  for (const [name, k] of BUILT_IN) registry.set(name, k)
+}

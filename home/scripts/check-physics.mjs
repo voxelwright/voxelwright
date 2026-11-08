@@ -190,7 +190,7 @@ try {
     return { r, before, after: JSON.stringify(p.rules()), rulesEvents: p.events().filter((e) => e.kind === 'rules').length - n }
   }, text)
   if (agent === 'stub') {
-    for (const bad of ['[stub-rules-junk]', '[stub-rules-malformed]', '[stub-rules-fail]']) {
+    for (const bad of ['[stub-rules-junk]', '[stub-rules-malformed]', '[stub-rules-fail]', '[stub-rules-empty]']) {
       const t = await tune(`make it ${bad}`)
       check(`A ${bad.slice(12, -1)} talk answer leaves the rules unchanged`, !t.r.ok && t.before === t.after && t.rulesEvents === 0, t)
     }
@@ -247,6 +247,101 @@ try {
   check('Materials, rules and gadget kinds register at runtime through the API the built-ins use; a new kind runs in a new toy', typeof open_.refusedMaterial === 'string' && open_.okMaterial === null && open_.okRule === null && open_.okKind === null && open_.lifted > 0 && /no gadget kind teleporter/.test(open_.unknownKind ?? ''), open_)
   const dist = Math.hypot(...open_.before.ball.map((v, i) => v - open_.after.ball[i]))
   check('A snapshot restores the world after a wild experiment (things, rules, counters)', dist < 1e-4 && open_.before.rules === open_.after.rules && open_.before.score === open_.after.score, { dist, before: open_.before, after: open_.after })
+
+  // ── Failure paths: bad toys, a loop, the world bound, a bad snapshot, a flipper's travel ──
+  const bad = await page.evaluate(async () => {
+    const p = window.village.physics
+    const { engine } = p
+    const world = engine.world
+    const frame = { at: [40, 0, 0], yaw: 0, tilt: 0 }
+    const toy = (id, parts, gadgets = []) => ({ id, label: id, frame, inputs: {}, wires: [], parts, gadgets })
+    const ball = (extra = {}) => ({ id: 'ball', shape: { kind: 'sphere', radius: 0.03 }, material: 'steel', motion: 'dynamic', at: [0, 0.1, 0], ...extra })
+    const tryToy = (t) => { try { engine.addToy(t); return null } catch (e) { return String(e.message) } }
+    const left = () => { const q = p.thing('pinball/flipper-left').rotation; return q }
+    const angle = (a, b) => 2 * Math.acos(Math.min(1, Math.abs(a.reduce((s, v, i) => s + v * b[i], 0))))
+    const out = {}
+    const before = { keys: world.keys().length, bodies: p.stats().bodies }
+    // A hinge with no part: refused, nothing of the toy left, and its id can be used again.
+    out.noPart = tryToy(toy('oops', [ball()], [{ id: 'h', kind: 'hinge', anchor: [0, 0, 0], axis: [0, 1, 0] }]))
+    out.afterNoPart = { keys: world.keys().length, bodies: p.stats().bodies, meshes: world.keys().filter((k) => k.startsWith('oops/')).length }
+    out.reused = tryToy(toy('oops', [ball()]))
+    out.duplicate = tryToy(toy('oops', [ball()]))
+    // A kind whose setup adds a joint and then fails: the joint goes too, and the world still steps.
+    engine.registerGadget({ kind: 'flaky', about: 'test', knobs: {}, inputs: [], outputs: [], setup(g, w) { w.addSlider(g.part, [1, 0, 0], [-0.1, 0.1]); throw new Error('flaky setup') } })
+    out.flaky = tryToy(toy('flaky-toy', [ball()], [{ id: 'f', kind: 'flaky', part: 'ball' }]))
+    p.advance(0.3)
+    out.flakyLeft = world.keys().filter((k) => k.startsWith('flaky-toy/')).length
+    // Numbers that cannot be built.
+    out.nan = tryToy(toy('nan', [ball({ shape: { kind: 'sphere', radius: NaN } })]))
+    out.zero = tryToy(toy('zero', [ball({ shape: { kind: 'box', half: [0.1, 0, 0.1] } })]))
+    out.huge = tryToy(toy('huge', [ball({ at: [1e30, 0, 0] })]))
+    let axis = null
+    try { world.addHinge('oops/ball', [0, 0, 0], [0, 0, 0], [0, 1]) } catch (e) { axis = String(e.message) }
+    out.axis = axis
+    out.placeFar = world.place('oops/ball', [1e30, 0, 0])
+    out.after = { keys: world.keys().length, bodies: p.stats().bodies, before }
+    // Past the world bound a thing is put back and says so.
+    engine.addToy(toy('drift', [ball()]))
+    const n0 = p.events().length
+    p.setRules({ gravity: [30, 0, 0], maxSpeed: 40, drag: 0 })
+    p.advance(5)
+    const clamped = p.events().slice(-200).filter((e) => e.kind === 'clamped' && e.thing === 'drift/ball' && e.reset)
+    out.drift = { resets: clamped.length, position: p.thing('drift/ball').position }
+    p.preset('normal')
+    // A flipper's travel follows the swing slider (and the slider survives a snapshot).
+    p.reset()
+    p.preset('normal')
+    const travel = (swing) => {
+      p.setKnob('pinball/left-flipper', 'swing', swing)
+      p.input('left', false)
+      p.advance(0.6)
+      const rest = left()
+      p.input('left', true)
+      p.advance(0.8)
+      const up = left()
+      p.input('left', false)
+      p.advance(0.6)
+      return angle(rest, up)
+    }
+    out.swing = { wide: travel(1.2), narrow: travel(0.4) }
+    p.setKnob('pinball/left-flipper', 'swing', 1)
+    // A bad snapshot is checked like any other input.
+    p.reset()
+    const snap = JSON.parse(JSON.stringify(p.snapshot()))
+    snap.rules.gravity = [1e30, 'x', null]
+    snap.rules.kick = 1e9
+    snap.things['pinball/ball'].p = [1e30, 0, 0]
+    snap.gadgets['pinball/left-flipper'].knobs.torque = 1e9
+    snap.gadgets['pinball/left-flipper'].knobs.speed = 'fast'
+    const ev = p.events().filter((e) => e.kind === 'rules').length
+    const ballBefore = p.thing('pinball/ball').position
+    const r = p.restore(snap)
+    const lastRules = p.events().filter((e) => e.kind === 'rules').at(-1)
+    out.restore = { clamped: r.clamped, rules: p.rules(), event: lastRules.clamped, events: p.events().filter((e) => e.kind === 'rules').length - ev, ball: p.thing('pinball/ball').position, ballBefore, knobs: p.knobs().find((k) => k.id === 'pinball/left-flipper').knobs }
+    p.preset('normal')
+    return out
+  })
+  check('A toy that cannot be built is refused whole: no bodies, meshes or joints stay, its id can be built again, and a second toy with the same id is refused', /needs a part/.test(bad.noPart ?? '') && bad.afterNoPart.meshes === 0 && bad.reused === null && /already built/.test(bad.duplicate ?? '') && /flaky setup/.test(bad.flaky ?? '') && bad.flakyLeft === 0, bad)
+  check('NaN, zero and huge numbers in a toy, a hinge with no axis and a place far outside the world are refused', /finite sizes/.test(bad.nan ?? '') && /finite sizes/.test(bad.zero ?? '') && /inside the world/.test(bad.huge ?? '') && /direction/.test(bad.axis ?? '') && bad.placeFar === false, bad)
+  check('A thing that leaves the world bound is put back and a clamped reset event says so', bad.drift.resets > 0 && bad.drift.position.every((v) => Number.isFinite(v) && Math.abs(v) <= 50), bad.drift)
+  check('The swing slider changes the flipper\'s travel (about the knob in radians, both ways)', Math.abs(bad.swing.wide - 1.2) < 0.15 && Math.abs(bad.swing.narrow - 0.4) < 0.15, bad.swing)
+  check('Restoring a bad snapshot clamps its rules and knobs, skips a pose outside the world, lists them and emits the clamped rules once', bad.restore.rules.gravity[0] === 30 && bad.restore.rules.kick === 4 && bad.restore.event.length >= 3 && bad.restore.events === 1 && bad.restore.clamped.some((c) => c.startsWith('things.')) && bad.restore.knobs.torque === 20 && bad.restore.ball.every((v, i) => Math.abs(v - bad.restore.ballBefore[i]) < 1e-3), bad.restore)
+
+  // Added rules reach a world that already runs, and a reload (registries reset) starts from the built-ins.
+  const registries = await page.evaluate(async () => {
+    const p = window.village.physics
+    const { engine } = p
+    const rules = await import('/src/engine/rules.ts'), mats = await import('/src/engine/materials.ts'), kinds = await import('/src/engine/gadgets.ts')
+    const taken = engine.registerRule('lift', { min: 0, max: 20, step: 0.1, default: 0, about: 'again' })
+    const seeded = engine.registerRule('zest', { min: 0, max: 5, step: 0.1, default: 2, about: 'test' })
+    const zest = p.rules().zest
+    const set = p.setRules({ zest: 99 })
+    const kept = { zest: p.rules().zest, clamped: set.clamped }
+    rules.resetRules(); mats.resetMaterials(); kinds.resetGadgets()
+    const keys = rules.ruleKeys().length
+    return { taken, seeded, zest, kept, again: engine.registerRule('lift', { min: 0, max: 20, step: 0.1, default: 0, about: 'again' }), jelly: mats.material('jelly') ?? null, lifter: kinds.gadgetKind('lifter') ?? null, preset: Boolean(rules.PRESETS.moon), keys }
+  })
+  check('A rule registered into a running world reads as its default there; unloading drops runtime rules, materials and kinds so the next world starts from the built-ins', typeof registries.taken === 'string' && registries.seeded === null && registries.zest === 2 && registries.kept.zest === 5 && registries.again === null && registries.jelly === null && registries.lifter === null && registries.keys === 9 && registries.preset, registries)
 
   const kept = await page.evaluate(() => { const p = window.village.physics; p.preset('moon'); p.reset(); return p.rules().gravity[1] })
   check('Tuning survives a reset', kept === -1.62, kept)

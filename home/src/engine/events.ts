@@ -25,3 +25,5 @@ export type PhysicsEvent =
   | { kind: 'rules'; rules: Rules; by: 'preset' | 'panel' | 'talk' | 'code'; preset?: string; clamped: string[] }
   /** A thing went faster than the speed limit and was slowed to it, or fell out of the world and was put back. */
   | { kind: 'clamped'; thing: string; speed: number; at: At; reset: boolean }
+  /** Gadget signals were dropped: wires feeding themselves faster than they drain (the newest `signals` past the waiting limit). */
+  | { kind: 'dropped'; signals: number }

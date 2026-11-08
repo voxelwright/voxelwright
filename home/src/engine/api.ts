@@ -83,6 +83,8 @@ export interface WorldApi {
   // Joints, for gadget kinds (axes and anchors in the part's toy frame)
   addHinge(key: string, anchor: Vec3, axis: Vec3, limits: [number, number]): number
   addSlider(key: string, axis: Vec3, limits: [number, number]): number
+  /** Moves a joint's travel limits (radians for a hinge, metres for a slider). */
+  setLimits(joint: number, limits: [number, number]): void
   setMotor(joint: number, velocity: number, limit: number): void
   jointPosition(joint: number): number
 
@@ -96,5 +98,6 @@ export interface WorldApi {
 
   // Undo
   snapshot(): Snapshot
-  restore(s: Snapshot): void
+  /** Puts a snapshot back, checking it like any other input; `clamped` lists what had to be corrected or was skipped. */
+  restore(s: Snapshot): { clamped: string[] }
 }

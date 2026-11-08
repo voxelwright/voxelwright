@@ -62,3 +62,9 @@ const BUILT_IN: Record<string, Material> = {
   villager: { density: 600, friction: 0.7, restitution: 0.05, hardness: 0.05, look: { color: '#c97a5a', roughness: 0.95, metalness: 0 } },
 }
 for (const [name, m] of Object.entries(BUILT_IN)) registerMaterial(name, m)
+
+/** Drops every material added at runtime and restores the built-ins (the plugin unloading). */
+export function resetMaterials() {
+  registry.clear()
+  for (const [name, m] of Object.entries(BUILT_IN)) registerMaterial(name, m)
+}

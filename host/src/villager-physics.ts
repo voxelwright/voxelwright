@@ -18,7 +18,7 @@ export interface RulesAsk {
 export type Ruler = (ask: RulesAsk) => Promise<{ raw: string } & Call>
 
 const MAX_TEXT = 300
-const MAX_BODY = 8_000
+const MAX_BODY = 64_000
 const RULES = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine', 'rules.ts')
 
 let prompt: Promise<string> | undefined
@@ -63,12 +63,15 @@ export function checkRulesReply(raw: string): { rules: Record<string, unknown>; 
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
-  let raw = ''
-  for await (const chunk of req) {
-    raw += chunk
-    if (raw.length > MAX_BODY) throw new Error('too large')
+  // Bytes, not characters: a chunk may end inside a multi-byte character, so decode once at the end.
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length
+    if (size > MAX_BODY) throw new Error('too large')
+    chunks.push(chunk)
   }
-  return JSON.parse(raw)
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
 const tuning = new Set<string>()
@@ -116,6 +119,7 @@ export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: st
 /**
  * Keyword answers standing in for the model. "[stub-rules-fail]" throws, "[stub-rules-junk]"
  * answers prose, "[stub-rules-malformed]" answers JSON whose rules are a list,
+ * "[stub-rules-empty]" answers rules with nothing valid in them,
  * "[stub-rules-hostile]" answers rules full of hostile values, "moon" answers moon gravity,
  * anything else a bouncier world.
  */
@@ -127,6 +131,7 @@ export function stubRuler(delayMs = 40): Ruler {
     const call = { models: ['stub'], costUsd: 0, outputTokens: 0, apiMs: 0 }
     if (t.includes('[stub-rules-junk]')) return { raw: 'Sure! Everything is bouncier now.', ...call }
     if (t.includes('[stub-rules-malformed]')) return { raw: '{"note": "Lower gravity.", "rules": [0, -1.6, 0]}', ...call }
+    if (t.includes('[stub-rules-empty]')) return { raw: '{"note": "Nothing changes.", "rules": {"nope": 1, "bounce": "fast"}}', ...call }
     // Written as text so the __proto__ key arrives as an own property, the way a model's JSON would.
     if (t.includes('[stub-rules-hostile]')) return { raw: '{"note": "<img src=x onerror=alert(1)>", "rules": {"__proto__": {"polluted": true}, "gravity": [1e308, "down", null], "timeScale": -5, "bounce": "NaN", "kick": 1e9, "maxSpeed": 0, "substeps": 2.7, "constructor": {"prototype": {"x": 1}}, "eval": "alert(1)"}}', ...call }
     if (t.includes('moon')) return { raw: JSON.stringify({ note: 'Moon gravity: everything floats down slowly.', rules: { gravity: [0, -1.62, 0], drag: 0 } }), ...call }
