@@ -44,7 +44,8 @@ export default {
     const seam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.012, 0.01), new THREE.MeshStandardMaterial({ color: '#4a4a4a' }))
     seam.position.set(0, freezerTop, front + 0.001)
     group.add(seam)
-    const handleMat = new THREE.MeshStandardMaterial({ color: '#d8d6d0', metalness: 1, roughness: 0.25 })
+    // Brushed, not polished: a polished handle caught the window as a bloom streak (#42 paper climb).
+    const handleMat = new THREE.MeshStandardMaterial({ color: '#d8d6d0', metalness: 1, roughness: 0.55 })
     const door = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.6, 0.035, 3, 0.01), handleMat)
     door.position.set(W / 2 - 0.06, 1.25, front + 0.03)
     const drawer = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.03, 0.035, 3, 0.01), handleMat)

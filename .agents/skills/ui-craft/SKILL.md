@@ -116,6 +116,67 @@ Run at most about three regroups per prototype. If a regroup still can't reach 9
 report the ceiling plainly, with the strongest candidate and what it would take (an
 asset, a dependency, a decision). Don't pretend.
 
+## Lessons from the talk regroup (#42, November 7, 2026)
+
+Details and scores are in `home/README.md`, "Talk regroup".
+
+- **Take motion frames by the app's clock.** On a loaded machine a screenshot
+  "0.15 s after Enter" was taken 2 to 3 s late, so one look's sent note was never
+  on screen and its motion score (2 to 3) measured the capture, not the design.
+  Shoot at once, read the app's own time since the event, and retake if the frame
+  missed it (`home/scripts/talk-shots.mjs`).
+- **Keep words out of the post stack.** Paper "lit by the room" was bleached by
+  bloom under a lamp, and temporal anti-aliasing ghosted a transparent mesh whose
+  text changed every word. Words drawn on the page over the 3D view (a 2D canvas
+  shaped and shadowed like the object) were crisp; keep the 3D object for what is
+  not text.
+- **Depth of field and haze cost more than they give** on a busy room seen up
+  close: both models marked lighting down (4 to 6) and scored the low tier, which
+  had none, above the high one.
+- **A held object seen through a narrow lens looks flat.** At a 20 degree field of
+  view, tilt it 45 to 50 degrees and turn it so the convergence shows.
+- **A framing camera must test the whole frame, from the pose it will take.** A
+  line of sight to the subject missed door posts at the frame's edge, and the
+  dollhouse cutaway hid the very wall the new pose would show. Test rays across
+  the frame and predict what the cutaway will draw from there.
+- **Keep the current best in every round as a shuffled reference.** The unchanged
+  reference moved up to 0.7 between rounds, so compare within a round, not across.
+- **Read the split, not only the mean.** GPT-6.1 Sol rewarded legibility and
+  consistency; Opus rewarded the input and the words being things in the world. A
+  direction that wins the structural categories and loses on fixable rendering
+  faults is worth adopting; fix the faults before judging it again.
+
+## Lessons from the paper climb (#42, November 8, 2026)
+
+Details and scores are in `home/README.md`, "Paper climb".
+
+- **Make the thing that disappears persist as one object.** Both models' worst categories
+  (motion, conversation) moved 2 to 3 points once the sent line stayed one object: torn off,
+  flown, caught in the reader's paws, then taped to the reply or lying on the table. Showing it
+  in a different form in each place (a header in the reply, a slip, a card) cost consistency
+  until it was one form everywhere.
+- **Pace a flight by the screen, not the room.** An object leaving a camera half a metre
+  away covers most of the screen in its first moments. Weight its path by inverse distance,
+  and scale its arc and size with distance, or the "0.8 s" frame shows it already arrived or
+  off the top of the frame.
+- **Judge transitions from where the camera is going.** A passer-by faded from the
+  in-between camera started fading as the camera arrived, and the still frame caught a
+  glittering half-fade. Decide from the target pose, and finish instantly while the camera
+  moves.
+- **A shared container reads as a chat log, even in paper.** In the regroup a single
+  "sheet passed round" lost to separate slips beside each speaker ("a chat log in paper
+  dress"), and a top-down camera lost faces. Keep each line near the one who said it.
+- **Use real replies before the last round.** Scripted lines fit the layout. Real
+  replies run to several pages, and they showed a reply covering the face on a phone and a
+  stepped-back slip showing only its last fragment.
+- **Weigh a single remark against the votes.** One scorer asked to keep the pad's
+  address after sending, and later to blank it. Two rounds asked for a grey lead line to go.
+  Settle a contradiction by moment (blank as it tears, the address once it settles), and act
+  on what both models or several rounds repeat.
+- **Freeze the reference before you edit.** A dev server serves the working tree, so a
+  reference capture taken while you edit picks up the edits. Capture it from a
+  `git archive` copy.
+
 ## Do not
 
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.

@@ -2,13 +2,12 @@
 // A keypress anywhere starts writing; Enter sends the line on its way to whoever
 // it is addressed to (your own villager unless you have turned to someone else).
 //
-//   held    (the default) your own small notepad, held at the bottom of the view
-//           like a hand in a game: a real 3D object riding with the camera, lit by
-//           the room. At rest it is small and tucked at the bottom edge, showing
-//           only whom it is to; the first keypress or a click raises it to writing
-//           size, and it settles back after sending or Escape. Your words are
-//           written on it in your ink; Enter tears the note off and it flies to
-//           its recipient.
+//   held    (the default) your own small notepad, held low on the right in a knitted
+//           mitten and seen in perspective: a real 3D object riding with the camera.
+//           At rest it shows whom it is to; the first keypress or a click raises it
+//           to writing size, and it settles back after sending or Escape. Your words
+//           are written on it in your ink; Enter tears the note off, folds it in three
+//           and it flies to its recipient (the camera waits for it to land).
 //   speech  no box at all until you type: your words rise from the bottom centre
 //           as your own speech card, kin to the villagers' cards but clearly yours.
 //
@@ -43,8 +42,10 @@ export interface InputHooks {
   variant: Variant
   /** Who a line goes to now. */
   addressee(): Addressee
-  /** Where a sent line flies: the recipient's head, in world space. */
+  /** Where a sent line flies: the reader's paws, or the table, in world space. */
   target(): THREE.Vector3 | null
+  /** Whose paws the note lands in (it stays held there until it opens into the reply); none: it lies where it lands. */
+  holder?(): THREE.Object3D | null
   /** Enter, with the time it was pressed. */
   submit(text: string, t0: number): void
   /** Something else has the keyboard (the open journal): the input stays out of the way. */
@@ -143,7 +144,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const PW = 1024, PH = 600
   const [paperCanvas, paper] = canvas(PW, PH)
   const paperTex = toTexture(paperCanvas)
-  const paperMat = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.92, emissive: '#ffffff', emissiveMap: paperTex, emissiveIntensity: 0.32 })
+  // Unlit, held under the bloom threshold: a lamp near the camera never bleaches the words (#42 regroup).
+  const paperMat = new THREE.MeshBasicMaterial({ map: paperTex, color: new THREE.Color(0.8, 0.75, 0.65), fog: false })
   const board = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 })
   const PADW = 1.0, PADH = 0.6
   const back = new THREE.Mesh(new RoundedBoxGeometry(PADW + 0.04, PADH + 0.05, 0.02, 2, 0.012), board)
@@ -173,12 +175,43 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
 
   // The torn note on its way.
   // Its glow is warm paper, not white: a white glow bloomed into a slab in flight (ui-craft round 1), and none left it unlit.
-  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.DoubleSide, emissive: '#b8a888', emissiveIntensity: 0.3 })
-  const flyer = new THREE.Mesh(new THREE.PlaneGeometry(PADW, PADH * 0.62), flyMat)
+  const flyMat = new THREE.MeshStandardMaterial({ roughness: 0.92, transparent: true, side: THREE.FrontSide, emissive: '#b8a888', emissiveIntensity: 0.12 })
+  const NOTEH = PADH * 0.62
+  // The note folds its right third over as it lifts (#42 regroup); the back of the paper is blank.
+  const backMat = new THREE.MeshStandardMaterial({ color: '#efe3c8', roughness: 0.95, side: THREE.BackSide, transparent: true, emissive: '#8a7a5a', emissiveIntensity: 0.25 })
+  const part = (u0: number, u1: number) => {
+    const g = new THREE.PlaneGeometry(PADW * (u1 - u0), NOTEH)
+    const uv = g.attributes.uv
+    for (let k = 0; k < uv.count; k++) uv.setX(k, u0 + uv.getX(k) * (u1 - u0))
+    const face = new THREE.Mesh(g, flyMat)
+    face.add(new THREE.Mesh(g, backMat))
+    return face
+  }
+  const flyer = new THREE.Group()
+  const flat = part(0, 2 / 3), flap = part(2 / 3, 1)
+  flat.position.x = -PADW / 6
+  const hinge = new THREE.Group()
+  hinge.position.set(PADW / 6, 0, 0.002)
+  flap.position.x = PADW / 6
+  hinge.add(flap)
+  flyer.add(flat, hinge)
   flyer.name = 'talk note in flight'
   flyer.visible = false
   scene.add(mark(flyer))
-  let flight: { t: number; from: THREE.Matrix4; to: THREE.Vector3 } | null = null
+  // Its shadow crosses the floor under it, so the note is seen to be in the air.
+  flat.castShadow = flap.castShadow = true
+  let flight: { t: number; from: THREE.Matrix4; to: THREE.Vector3; holder: THREE.Object3D | null; local: THREE.Vector3; size: number } | null = null
+  /**
+   * Landed: held in the reader's paws (following them) or lying on the table, folded, until it opens
+   * (#42 paper climb: the note used to fade at the reader's head and the reply came from nowhere).
+   */
+  let held: { holder: THREE.Object3D | null; local: THREE.Vector3; t: number; opening: number; size: number } | null = null
+  /** Waiting for the note in flight to land (talk.ts holds the camera until then). */
+  let landings: (() => void)[] = []
+  const land = () => {
+    for (const done of landings) done()
+    landings = []
+  }
   /** Where the pad's paper is on screen, so the villagers' cards keep clear of it. */
   let padRect = { left: 0, top: 0, width: 0, height: 0 }
 
@@ -225,6 +258,9 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   let blink = 0
   /** Seconds since the last send, for the "sent" beat on the card. */
   let sent = 99
+  let everSent = false
+  /** The pad shows the fresh sheet under a note just torn off; repainted with the address after. */
+  let tornFresh = false
   const wrap = (g: CanvasRenderingContext2D, s: string, width: number) => {
     const out: string[] = []
     let line = ''
@@ -264,23 +300,30 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     g.moveTo(96, 0)
     g.lineTo(96, PH)
     g.stroke()
-    // To whom, in their colour, like the address on a note: large and on the left at rest, so it reads small; top right while writing.
+    // To whom, in their colour, like the address at the head of a note: one size and one place at rest and
+    // while writing (#42 paper climb: it moved and changed size between the two); the pad itself comes nearer.
     const to = hooks.addressee()
     const resting = !writing()
-    const name = to.label
-    const big = resting ? 96 : 58, small = resting ? 70 : 44
-    g.font = `700 ${big}px ${HAND}`
-    const nameW = g.measureText(name).width
-    g.font = `italic ${small}px ${HAND}`
-    const toW = g.measureText('to ').width
-    const x0 = resting ? 130 : PW - 60 - nameW - toW
-    const y0 = resting ? 128 : 92
     g.textAlign = 'left'
+    // Just torn: a fresh sheet for a moment, then the address is written on it again (#42 paper climb: the
+    // address showing faintly under the note as it tore off read as a copy).
+    if (flight && sent < 0.45) {
+      tornFresh = true
+      return
+    }
+    g.font = `italic 50px ${HAND}`
+    const toW = g.measureText('to ').width
     g.fillStyle = 'rgba(70, 50, 36, 0.7)'
-    g.fillText('to ', x0, y0)
-    g.font = `700 ${big}px ${HAND}`
+    g.fillText('to ', 120, 100)
+    g.font = `700 86px ${HAND}`
     g.fillStyle = to.colour
-    g.fillText(name, x0 + toW, y0)
+    g.fillText(to.label, 120 + toW, 100)
+    // The pencilled hint only until the first line is sent: after that it would read as a form's placeholder.
+    if (resting && !everSent) {
+      g.font = `italic 48px ${HAND}`
+      g.fillStyle = 'rgba(70, 50, 36, 0.8)'
+      g.fillText('just start typing…', 124, 184)
+    }
     if (resting) return
     g.textAlign = 'left'
     g.font = `56px ${HAND}`
@@ -298,6 +341,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       }
       return
     }
+    // A firm hand: lighter strokes were hard to read on the held pad before sending (#42 paper climb).
+    g.font = `700 56px ${HAND}`
     g.fillStyle = INK
     const lines = wrap(g, text, PW - 190).slice(-4)
     lines.forEach((l, i) => g.fillText(l, 120, 180 + i * 92))
@@ -387,9 +432,14 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   /** The note leaves: the pad tears it off and it flies to the recipient; the speech card rises toward them. */
   const send = () => {
     sent = 0
+    everSent = true
     const target = hooks.target()
     if (hooks.variant === 'held') {
+      // The note leaves without the caret.
+      const caret = caretOn
+      caretOn = false
       paintPad()
+      caretOn = caret
       flyMat.map?.dispose()
       const [c, g] = canvas(PW, Math.round(PH * 0.62))
       g.drawImage(paperCanvas, 0, 0, PW, PH * 0.62, 0, 0, PW, PH * 0.62)
@@ -398,7 +448,11 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       flyMat.needsUpdate = true
       sheet.updateWorldMatrix(true, false)
       flyer.matrixWorld.copy(sheet.matrixWorld)
-      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone() }
+      held = null
+      flyer.visible = false
+      const holder = hooks.holder?.() ?? null
+      // Held: about a postcard to a villager; on the table, a little larger, so it reads from the table shot.
+      if (target && !reducedMotion.matches) flight = { t: 0, from: sheet.matrixWorld.clone(), to: target.clone(), holder, local: holder ? holder.worldToLocal(target.clone()) : target.clone(), size: holder ? 0.28 : 0.3 }
     } else if (target && !reducedMotion.matches) {
       const p = target.clone().project(camera)
       const r = stage.renderer.domElement.getBoundingClientRect()
@@ -490,13 +544,23 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     // At rest about a third of its writing size, and mostly below the edge: only its top line, "to Dumpling", shows.
     // Drawing (#42): nearly facing you, as large as fits, lower middle of the view.
     const big = Math.min(1.75, (2 * aspect * 0.92) / 1.04, 1.25 / 0.65)
-    pad.scale.setScalar(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.42, 1, raise), big, draw))
-    pad.position.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.32, 0.05, raise), 0, draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-1.03, -0.93, raise) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
-    pad.rotation.set(THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.42, -0.62, raise) + lift * 0.12, -0.1, draw), 0.02 * (1 - draw), THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.05, 0.03, raise), 0, draw))
-    const jx = -aspect + 0.3
+    // Rest and writing poses: scale, x, y, tilt back, turn, roll. Held low on the right in perspective,
+    // as a hand would (#42 regroup: square to the view it read as a card on the screen). On a tall
+    // (phone) screen it sits bottom right at rest and centred while writing.
+    const narrow = aspect < 0.8
+    const [rest, up] = narrow
+      ? [[0.4, aspect - 0.2, -0.9, -0.8, -0.3, 0.1], [0.86, 0, -0.64, -0.74, -0.12, 0.04]]
+      : [[0.6, aspect - 0.6, -0.86, -0.82, -0.38, 0.14], [0.9, 0.42, -0.68, -0.74, -0.22, 0.07]]
+    const pose = (i: number) => THREE.MathUtils.lerp(rest[i], up[i], raise)
+    pad.scale.setScalar(THREE.MathUtils.lerp(pose(0), big, draw))
+    pad.position.set(THREE.MathUtils.lerp(pose(1), 0, draw), THREE.MathUtils.lerp(pose(2) + lift * 0.1, -0.98 + big * 0.36, draw) + breathe, 0)
+    pad.rotation.set(THREE.MathUtils.lerp(pose(3) + lift * 0.12, -0.1, draw), pose(4) * (1 - draw), THREE.MathUtils.lerp(pose(5), 0, draw))
+    // In the bottom left corner; on a phone smaller and tucked to the edge, above the sound buttons.
+    const jx = narrow ? -aspect + 0.15 : -aspect + 0.3
     hover += ((entries.hovered === hooks.journal ? 1 : 0) - hover) * (1 - Math.exp(-dt * 10))
-    journal.position.set(jx, -0.8 + hover * 0.06, 0.02)
-    journal.scale.setScalar(0.55 + hover * 0.04)
+    // On a phone it stands clear above the sound buttons in the corner (#42 paper climb: it sat on them).
+    journal.position.set(jx, (narrow ? -0.64 : -0.8) + hover * 0.06, 0.02)
+    journal.scale.setScalar((narrow ? 0.42 : 0.55) + hover * 0.04)
     // The real button sits over the felt journal on screen.
     journal.updateWorldMatrix(true, true)
     const box = new THREE.Box3().setFromObject(cover)
@@ -509,6 +573,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     journalButton.style.width = `${Math.max(24, x1 - x0)}px`
     journalButton.style.height = `${Math.max(24, Math.min(innerHeight, y1) - y0)}px`
     journalButton.hidden = away
+
     if (hooks.variant === 'held') {
       const p = screenBox(sheet)
       padRect = { left: p.x0, top: p.y0, width: p.x1 - p.x0, height: Math.max(0, p.y1 - p.y0) }
@@ -539,35 +604,89 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     }
     caret.classList.toggle('on', caretOn)
     sent += dt
+    if (tornFresh && sent >= 0.45) {
+      tornFresh = false
+      dirty = true
+    }
 
-    // The torn note: up off the pad, then a curve to the recipient, shrinking as it goes.
+    // The torn note: up off the pad, then a curve to the reader's paws (or down onto the table).
     if (flight) {
-      flight.t += dt / 1.25
+      flight.t += dt / 1.7
       // First the note lifts off the pad and turns to face its way, then it flies.
       const lifted = Math.min(1, flight.t / 0.28)
-      const k = Math.max(0, Math.min(1, (flight.t - 0.28) / 0.72))
+      const k = Math.max(0, Math.min(1, (flight.t - 0.34) / 0.66))
       flight.from.decompose(tmp, q, scl)
       const start = tmp.clone()
-      const end = flight.to
+      // Follows the reader if it moves while the note is on its way.
+      const end = flight.holder ? flight.holder.localToWorld(flight.to.copy(flight.local)) : flight.to
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q)
-      const e = 1 - (1 - k) ** 2
-      const pos = start.clone().addScaledVector(up, 0.05 * lifted).lerp(end, e).addScaledVector(up, Math.sin(k * Math.PI) * 0.25)
+      // Even across the screen, not across the room: moving evenly in the world, a note that starts half a metre
+      // from the camera covers most of the screen in its first moments and seems to have arrived by 0.8 s
+      // (#42 paper climb). Weighting by inverse distance makes its screen path even, so it is seen in the air.
+      camera.getWorldPosition(camAt)
+      const near = 1 / Math.max(0.2, start.distanceTo(camAt)), far = 1 / Math.max(0.2, end.distanceTo(camAt))
+      const s = THREE.MathUtils.smoothstep(k, 0, 1)
+      const e = (s * far) / ((1 - s) * near + s * far)
+      const pos = start.clone().addScaledVector(up, 0.05 * lifted).lerp(end, e)
+      // Its arc is the same height on screen all the way: in metres it grows with its distance from the camera
+      // (a fixed 0.3 m arc lifted it out of the top of the frame while it was still near).
+      pos.y += Math.sin(k * Math.PI) * 0.07 * pos.distanceTo(camAt)
       flyer.matrixAutoUpdate = true
       flyer.position.copy(pos)
-      flyer.quaternion.copy(q)
-      flyer.rotateZ(Math.sin(k * 9) * 0.18 * (1 - k))
-      flyer.rotateX(-0.5 * lifted - k * 0.6)
-      flyer.scale.copy(scl).multiplyScalar(1 - 0.85 * e)
-      flyMat.opacity = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25
+      // It arrives turned to be read: held up toward you, or flat on the table with its words your way.
+      const goal = landing(flight.holder, end)
+      // It flutters as paper does, rocking and tipping, and settles as it lands.
+      const sway = Math.sin(k * 11) * 0.22 * (1 - k)
+      flyer.quaternion.copy(q).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.5 * lifted + Math.sin(k * 7 + 1) * 0.25 * (1 - k), sway * 0.6, sway))).slerp(goal, THREE.MathUtils.smoothstep(k, 0.45, 1))
+      // Half its size by the time it has folded and lifted; then its size on screen eases to its size where it
+      // lands, so it is never a speck on the way (#42 paper climb: growing evenly in the world, it was).
+      const away = pos.distanceTo(camAt)
+      const ratio = THREE.MathUtils.lerp((scl.x * THREE.MathUtils.lerp(1, 0.7, lifted)) / Math.max(0.2, start.distanceTo(camAt)), flight.size / Math.max(0.2, end.distanceTo(camAt)), s)
+      flyer.scale.setScalar(ratio * away)
+      // Folded once while it lifts, the right third over, so the words still show on its way.
+      hinge.rotation.y = -Math.PI * 0.985 * THREE.MathUtils.smoothstep(flight.t, 0.04, 0.22)
+      flyMat.opacity = backMat.opacity = 1
       flyer.visible = true
       if (flight.t >= 1) {
+        held = { holder: flight.holder, local: flight.local.clone(), t: 0, opening: -1, size: flight.size }
         flight = null
-        flyer.visible = false
+        dirty = true
+        land()
+      }
+    } else if (held) {
+      // Held in the reader's paws (it follows them as they turn and hop), or lying on the table, until it opens.
+      held.t += dt
+      const at = held.holder ? held.holder.localToWorld(tmp.copy(held.local)) : tmp.copy(held.local)
+      flyer.position.copy(at).y += held.holder ? Math.sin(held.t * 2.2) * 0.004 : 0
+      flyer.quaternion.slerp(landing(held.holder, at), 1 - Math.exp(-dt * 6))
+      flyer.scale.setScalar(held.size)
+      // Nobody opened it (the reader is away): it opens by itself after a while.
+      if (held.opening < 0 && held.t > 8) held.opening = 0
+      if (held.opening >= 0) {
+        held.opening += dt
+        // It unfolds, then gives way to the slip it opens into.
+        hinge.rotation.y = -Math.PI * 0.985 * (1 - THREE.MathUtils.smoothstep(held.opening, 0, 0.22))
+        flyMat.opacity = backMat.opacity = 1 - THREE.MathUtils.smoothstep(held.opening, 0.12, 0.34)
+        if (held.opening > 0.34) {
+          held = null
+          flyer.visible = false
+        }
       }
     }
   }
+  const camAt = new THREE.Vector3()
+  const toCam = new THREE.Vector3()
+  /** How a landed note turns: held up toward you, leaning back a little; or flat on the table, its words toward you. */
+  const landing = (holder: THREE.Object3D | null, at: THREE.Vector3) => {
+    camera.getWorldPosition(camAt)
+    toCam.copy(camAt).sub(at)
+    const yaw = Math.atan2(toCam.x, toCam.z)
+    return new THREE.Quaternion().setFromEuler(holder ? new THREE.Euler(-0.25, yaw, 0, 'YXZ') : new THREE.Euler(-Math.PI / 2, yaw, 0, 'YXZ'))
+  }
 
   const dispose = () => {
+    land()
+    held = null
     vv?.removeEventListener('resize', placeField)
     vv?.removeEventListener('scroll', placeField)
     field.remove()
@@ -588,6 +707,29 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     dispose,
     focus: () => field.focus({ preventScroll: true }),
     key,
+    /** A sent note is on its way; `landed()` resolves when it arrives (at once when none is). */
+    get flying() {
+      return flight !== null
+    },
+    landed: () => (flight ? new Promise<void>((done) => landings.push(done)) : Promise.resolve()),
+    /** The landed note, held in the reader's paws or lying on the table, not yet opened. */
+    get holding() {
+      return held !== null && held.opening < 0
+    },
+    /** Whose paws the note in flight is going to (none: the table, or nothing in flight). */
+    flyingTo: () => flight?.holder ?? null,
+    /** Whose paws hold the landed note (none: it lies on the table). */
+    heldBy: () => held?.holder ?? null,
+    /** Where the landed note is on screen (its middle and width, CSS pixels), to open the slip from. */
+    heldAt: () => {
+      if (!held || !flyer.visible) return null
+      const p = screenBox(flat)
+      return { x: (p.x0 + p.x1) / 2, y: (p.y0 + p.y1) / 2, w: p.x1 - p.x0 }
+    },
+    /** The landed note opens: it unfolds and gives way to the slip it opens into. */
+    release: () => {
+      if (held && held.opening < 0) held.opening = 0
+    },
     /** Words are being written, so navigation keys are for the line, not the room. */
     get writing() {
       return writing()
@@ -614,7 +756,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       field.value = line
       onInput()
     },
-    state: () => ({ variant: hooks.variant, text, to: hooks.addressee().label, flying: Boolean(flight) || document.querySelector('.talk-mine.flying') !== null, speechShown: speech.classList.contains('shown'), padVisible: pad.visible && hud.visible, focused: document.activeElement === field, sentAgo: sent, raise, padScale: pad.scale.x }),
+    state: () => ({ variant: hooks.variant, text, to: hooks.addressee().label, flying: Boolean(flight) || document.querySelector('.talk-mine.flying') !== null, holding: held !== null && held.opening < 0, speechShown: speech.classList.contains('shown'), padVisible: pad.visible && hud.visible, focused: document.activeElement === field, sentAgo: sent, raise, padScale: pad.scale.x }),
     /** The journal button's place on screen, for the checks. */
     journalRect: () => journalButton.getBoundingClientRect().toJSON(),
   }

@@ -255,20 +255,44 @@ export default {
     // always-on input: a tapped letter writes, as before; held for HOLD_MS, a WASD or
     // QE letter moves the view instead, until it is let go. A second key during the
     // wait means someone is typing, so the first letter is written and typing goes on.
+    // When the main thread stalls, the timer fires before the queued keyup or next
+    // keydown runs, so a letter the timer called a hold is judged again by the events'
+    // own timeStamps (when the key really went down) and typed if it was a tap.
     let pending: { key: string; timer: ReturnType<typeof setTimeout> } | null = null
+    let turned: { key: string; down: number } | null = null // the letter the timer last turned into a hold
     let replaying = false
     navigation.claims = () => pending !== null || [...held.keys()].some((k) => k in LETTERS)
-    const write = () => {
-      if (!pending) return
-      const { key, timer } = pending
-      clearTimeout(timer)
-      pending = null
+    const type = (key: string) => {
       replaying = true
       try {
         dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
       } finally {
         replaying = false
       }
+    }
+    const write = () => {
+      if (!pending) return
+      const { key, timer } = pending
+      clearTimeout(timer)
+      pending = null
+      type(key)
+    }
+    /** The timer's hold was a tap if the event came within HOLD_MS of the keydown: stop moving and type it. */
+    const unhold = (at: number) => {
+      if (!turned) return false
+      const { key, down } = turned
+      turned = null
+      if (at - down >= HOLD_MS || !held.delete(key)) return false
+      type(key)
+      return true
+    }
+    /** Another key came while a letter was undecided or within HOLD_MS of its keydown: the letter was typed. */
+    const settles = (e: KeyboardEvent) => {
+      if (pending) {
+        write()
+        return true
+      }
+      return e.key.length === 1 && unhold(e.timeStamp)
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (replaying || MODE !== 'iso' || e.metaKey || e.ctrlKey || e.altKey) return
@@ -283,23 +307,22 @@ export default {
       }
       const letter = LETTERS[e.key]
       if (!letter || typing() || navigation.writing()) {
-        write()
+        settles(e)
         return
       }
       if (e.repeat || held.has(e.key)) {
         e.preventDefault()
         return
       }
-      if (pending) {
-        write()
-        return
-      }
+      if (settles(e)) return
       e.preventDefault()
       const key = e.key
+      const down = e.timeStamp
       pending = {
         key,
         timer: setTimeout(() => {
           pending = null
+          turned = { key, down }
           takeOver()
           held.set(key, letter)
         }, HOLD_MS),
@@ -307,11 +330,13 @@ export default {
     }
     const onKeyUp = (e: KeyboardEvent) => {
       if (pending?.key === e.key) write()
+      else if (turned?.key === e.key) unhold(e.timeStamp)
       held.delete(e.key)
     }
     const onBlur = () => {
       if (pending) clearTimeout(pending.timer)
       pending = null
+      turned = null
       held.clear()
     }
 
