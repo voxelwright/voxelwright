@@ -24,6 +24,19 @@ export function contactShadows(villagers: Villager[]): THREE.Mesh[] {
   })
 }
 
+/** Takes contactShadows' blobs out of the scene and frees what they hold: each material, and the geometry and texture they share. */
+export function disposeShadows(blobs: THREE.Mesh[]) {
+  const shared = new Set<{ dispose(): void }>()
+  for (const b of blobs) {
+    b.removeFromParent()
+    const m = b.material as THREE.MeshBasicMaterial
+    if (m.map) shared.add(m.map)
+    shared.add(b.geometry)
+    m.dispose()
+  }
+  for (const d of shared) d.dispose()
+}
+
 /** One frame for a group: yielding, the rig, and the shadows following. */
 export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number, t: number, eye: THREE.Vector3, scale: number) {
   // Walkers wait for whoever is just ahead.
@@ -64,7 +77,8 @@ export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number
     v.update(dt, t, eye)
     const blob = blobs[i]
     const sitting = v.seated > 0.5
-    const r = v.fig.side * 3.0 * scale + 0.12
+    // At least as wide as the body, when its maker measured it (root.userData.footprint, metres): a shell or a skirt hides a small one.
+    const r = Math.max(v.fig.side * 3.0 * scale + 0.12, (v.fig.root.userData.footprint as number | undefined) ?? 0)
     const lift = v.fig.floats ? 0.12 + v.fig.hip : 0
     const air = Math.max(0, v.pos.y - (sitting ? v.seatY : 0)) + lift
     blob.position.set(v.pos.x, (sitting ? v.seatY + 0.045 : 0) + 0.004, v.pos.z)

@@ -38,6 +38,16 @@ for (const name of ['Worker', 'SharedWorker']) delete (self as unknown as Record
 self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
   const { id, code } = event.data
   const notes: string[] = []
+  // #47: a villager module tags its parts with slots and gives its gait and about as plain data.
+  // Nothing here is trusted: the home checks every role against its closed list and clamps the data.
+  const roles = new Map<THREE.Object3D, string>()
+  const marks = new Set<THREE.Object3D>()
+  let villager: { gait?: unknown; about?: unknown } | null = null
+  const plain = (v: unknown) => {
+    const text = JSON.stringify(v ?? null)
+    if (text.length > 4000) throw new Error('villager data is longer than 4000 characters')
+    return JSON.parse(text) as unknown
+  }
   try {
     const root = new THREE.Group()
     const prop = {
@@ -45,11 +55,25 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
         if (!(object instanceof THREE.Object3D)) throw new Error('prop.add() takes a three.js object')
         root.add(object)
       },
+      tag: <T>(object: T, role: unknown): T => {
+        if (!(object instanceof THREE.Object3D)) throw new Error('villager.tag() takes a three.js object')
+        roles.set(object, String(role).slice(0, 40))
+        return object
+      },
+      /** #47 round 4: the role's mark (a hat, a plume, a flag); the home checks that it breaks the outline. */
+      mark: <T>(object: T): T => {
+        if (!(object instanceof THREE.Object3D)) throw new Error('villager.mark() takes a three.js object')
+        marks.add(object)
+        return object
+      },
+      gait: (g: unknown) => void ((villager ??= {}).gait = plain(g)),
+      about: (a: unknown) => void ((villager ??= {}).about = plain(a)),
       /** A preset from the spec arm: wood, fabric, painted, metal, ceramic, wallpaper. */
       material: (preset: Material['preset'], options: Omit<Material, 'preset'> = {}, seed = 1) => material({ ...options, preset }, seed),
       note: (text: unknown) => void (notes.length < 20 && notes.push(String(text).slice(0, 200))),
     }
-    const api = { THREE, RoundedBoxGeometry, paint, prop }
+    // RoundedBoxGeometry is also under THREE: models reach for THREE.RoundedBoxGeometry (9 of 25 repairs in #47 round 2).
+    const api = { THREE: { ...THREE, RoundedBoxGeometry }, RoundedBoxGeometry, paint, prop }
     const t0 = now()
     const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
     const mod = await import(/* @vite-ignore */ url)
@@ -61,8 +85,9 @@ self.onmessage = async (event: MessageEvent<{ id: number; code: string }>) => {
     else throw new Error('the module exports neither build(api) nor a default function')
     if (root.children.length === 0) throw new Error('the module added nothing (call prop.add or return an object from build)')
     const t1 = now()
-    const { data, transfer } = await serialize(root)
+    const { data, transfer } = await serialize(root, roles, marks)
     data.notes.push(...notes)
+    if (villager) data.villager = villager
     const t2 = now()
     post({ type: 'result', id, data, timing: { runMs: t1 - t0, serializeMs: t2 - t1, sentAt: performance.timeOrigin + now() } }, transfer)
   } catch (error) {

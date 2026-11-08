@@ -193,6 +193,13 @@ try {
   const clean = await page.evaluate(() => ({ obj: ({}).polluted, arr: [].polluted, keys: Object.getOwnPropertyNames(Object.prototype).length }))
   check('prototype-pollution keys in a forged result do not reach the page', !polluted.ok && clean.obj === undefined && clean.arr === undefined && clean.keys === before.protoKeys, { reason: polluted.reason, ...clean })
   check('a forged but valid result with __proto__ keys is rebuilt from fresh objects, page still clean', pollutedValid.ok && clean.obj === undefined, { ok: pollutedValid.ok, reason: pollutedValid.reason })
+  // #47 round 4: a mesh's role-mark flag is only ever true.
+  const badMark = await forge(() => {
+    const data = JSON.parse('{"meshes": [{"geometry": 0, "material": 0, "matrix": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1], "mark": "yes"}], "geometries": [{"normal": null, "uv": null, "index": null}], "materials": [{"preset": "standard", "color": [1,0.5,0.2], "emissive": [0,0,0], "emissiveIntensity": 1, "roughness": 0.5, "metalness": 0, "opacity": 1, "transparent": false, "depthWrite": true, "flatShading": false, "side": "front", "map": null}], "textures": [], "notes": [] }')
+    data.geometries[0].position = new Float32Array([0, 0, 0, 0.3, 0, 0, 0, 0.3, 0])
+    for (let id = 1; id < 400; id++) port.postMessage({ type: 'result', id, data, timing: {} })
+  })
+  check('a forged mesh with a role-mark flag other than true is rejected', !badMark.ok && /mesh 0 mark is not true/.test(badMark.reason), badMark.reason)
 
   // Prototype pollution inside the worker, then a normal prop.
   const workerPollution = await trial(wrap(`
@@ -286,6 +293,35 @@ try {
   check('nothing hostile was placed (only the last trial prop stands)', end.placed === before.placed, { before: before.placed, after: end.placed })
   check('no uncaught error or console error reached the page', pageErrors.length === errorsAtStart.page && mainConsoleErrors.length === errorsAtStart.console, { pageErrors: pageErrors.slice(errorsAtStart.page), console: mainConsoleErrors.slice(errorsAtStart.console) })
   check('the outside server was never reached', outside.length === 0, outside)
+
+  // 10. #47 villagers: the same box, roles from a closed list, every required slot, on a fresh page.
+  const vpage = await browser.newPage({ viewport: { width: 640, height: 400 } })
+  await vpage.goto(`${base}?plugins=renderer,camera&q=low&villager=gen&gen=none`)
+  await vpage.waitForFunction(() => window.villagerGen, null, { timeout: 30000 })
+  const vtrial = (code) => vpage.evaluate((c) => window.villagerGen.trial(c), code)
+  // A minimal villager with every slot; `swap` rewrites one tag to make the bad cases.
+  const villagerCode = (swap = (role) => role) => `export default function (villager, { THREE }) {
+    const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 })
+    const at = (geo, x, y, z, role, rough = 1) => { const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#c9a27a', roughness: rough })); m.position.set(x, y, z); villager.add(m); return role ? villager.tag(m, role) : m }
+    at(new THREE.SphereGeometry(0.17, 16, 10), 0, 0.17, 0)
+    ${['head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right'].map((r, i) => {
+      const role = swap(r)
+      const pos = { head: '0, 0.42, 0', 'eye-left': '-0.05, 0.44, 0.12', 'eye-right': '0.05, 0.44, 0.12', 'hand-left': '-0.17, 0.18, 0.02', 'hand-right': '0.17, 0.18, 0.02', 'foot-left': '-0.08, 0.03, 0.02', 'foot-right': '0.08, 0.03, 0.02' }[r]
+      return role === null ? '' : `at(new THREE.SphereGeometry(${r === 'head' ? 0.13 : 0.03}, 12, 8), ${pos}, ${JSON.stringify(role)}${r.startsWith('eye') ? ', 0.25' : ''})`
+    }).join('\n    ')}
+    villager.gait({ speed: 9, stride: 0.2, bob: 0.03, stepped: true, fidget: 0.2, __proto__: { polluted: 1 } })
+    villager.about({ name: 'Probe', role: 'carer', bark: 'Hello.', voice: { pitch: 9999 } })
+  }`
+  const vok = await vtrial(villagerCode())
+  check('a villager module with every slot assembles into a rig figure', vok.ok && vok.slots?.eyes === 2 && vok.slots?.hands === 2 && vok.slots?.feet === 2, vok)
+  const vunknown = await vtrial(villagerCode((r) => (r === 'hand-right' ? 'tail' : r)))
+  check('a villager part tagged with an unknown slot is rejected', !vunknown.ok && /role "tail" is not one of/.test(vunknown.reason), vunknown.reason)
+  const vmissing = await vtrial(villagerCode((r) => (r === 'foot-left' ? null : r)))
+  check('a villager missing a required slot is rejected', !vmissing.ok && /no "foot-left" part/.test(vmissing.reason), vmissing.reason)
+  const vproto = await vtrial(villagerCode((r) => (r === 'head' ? '__proto__' : r === 'eye-left' ? 'constructor' : r)))
+  const vclean = await vpage.evaluate(() => ({ obj: ({}).polluted, keys: Object.getOwnPropertyNames(Object.prototype).length }))
+  check('"__proto__" and "constructor" as slots are rejected and the page stays clean', !vproto.ok && /role "__proto__" is not one of/.test(vproto.reason) && vclean.obj === undefined && vclean.keys === before.protoKeys, { reason: vproto.reason, ...vclean })
+  await vpage.close()
 } finally {
   await browser.close()
   await vite.close()

@@ -505,7 +505,27 @@ they decide, how they sound and what they like, not only by their jobs:
 - anyone else → Hazel, a steady housemate.
 
 Templates (`TEMPLATES`): `buddy` (an irreverent couch buddy, cheeky lean; it
-only goes crude through the gate below) and `coach` (a calm coach, clean lean).
+only goes crude through the gate below) and `coach` (a calm coach, clean lean),
+and #47's setup patterns `organiser`, `grandparent`, `craftsperson` and
+`companion`. `TEMPLATE_CARDS` gives each its card label and who may pick it
+(`buddy` adults only, `companion` a child only).
+
+The villager generator (#47, `src/villager-make.ts`; home/README.md "Villager
+setup") writes this file: the model writes the persona in this shape, every
+persona it stores or serves passes `checkPersona`, the setup's dials map into
+`temperament`, `register`, `lengths` and `humour.lean`, and "Off you go" writes
+`persona.json` (keeping the old one as `persona.prev.json` and in `persona-history/`)
+and `voice.json`, all or none. One
+villager per person for now.
+
+`persona.json` is household-visible: a visit (#42) shows the visited villager's
+whole persona in that conversation. So the generator writes it only from what the
+creator types or picks while making the villager (the description, a pattern, the
+role, the dials) plus the owner's display name and accent. The owner's conversation,
+notes (`about-<id>.md`, `how-<id>-likes-to-talk.md`), preferences and profile style
+never reach the model's prompt, the stored record or `persona.json`. `node
+test/villager-make.ts` proves it with marker words seeded in each ("privacy"), and the
+setup's slip says "Everyone at home sees their personality."
 
 ### Profile: who the villager is talking to
 

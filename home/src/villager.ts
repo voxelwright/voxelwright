@@ -62,12 +62,14 @@ addEventListener('hashchange', adoptLink)
 
 /**
  * Null when the host is unreachable. 'link' when there is no token or the host answered 401 (the token is from an
- * earlier launch: open the new link). `as` sends that token instead of the tab's current one.
+ * earlier launch: open the new link). `as` sends that token instead of the tab's current one. With `hostErrors`, a 5xx
+ * the host itself answered (JSON; the dev server's proxy answers plain text when the host is down) is returned, so the
+ * caller can say it failed, not that the host is away (#47).
  */
-export async function authorized(path: string, init: RequestInit = {}, as: string | null = token): Promise<Response | null | 'link'> {
+export async function authorized(path: string, init: RequestInit = {}, as: string | null = token, hostErrors = false): Promise<Response | null | 'link'> {
   if (!as) return 'link'
   const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${as}` } }).catch(() => null)
-  if (!res || res.status >= 500) return null
+  if (!res || (res.status >= 500 && !(hostErrors && res.headers.get('content-type')?.startsWith('application/json')))) return null
   if (res.status === 401) return 'link'
   return res
 }
@@ -214,3 +216,51 @@ export const library = (person: string) => call<{ items: { id: string; name: str
 export const startProject = (person: string, what: string, where: string | undefined, text: string) =>
   call<{ project: { id: string; what: string; state: string } }>(`/people/${person}/projects`, { what, where, text })
 export const projects = (person: string) => call<{ projects: { id: string; what: string; where?: string; state: string }[] }>(`/people/${person}/projects`)
+
+// ── #47 villager setup (dev only) ───────────────────────────────────────────
+/**
+ * A villager written by the model from a description (and a pattern: a built-in id, or "<maker>:<id>"), as module
+ * text for the prop sandbox, its record id, and its persona checked by the host (#42's checkPersona) or the reason
+ * it was refused. `dials` are where the setup's sliders start. A `role` (one of the home's roles) decides the felt kit's
+ * mark; the host stores it and returns it on make, read and remake.
+ */
+export interface MadeVillager { item: string; module: string; role?: string; persona: unknown; personaRefused?: string; dials: Record<string, number> | null; models: string[]; costUsd: number | null; outputTokens: number | null }
+export const makeVillager = (person: string, description: string, accent: string, template?: string, role?: string) =>
+  call<MadeVillager>(`/people/${person}/villagers`, { description, accent, ...(template ? { template } : {}), ...(role ? { role } : {}) })
+/** A made villager whose module the home's checks, or whose persona the host's check, refused: made again once with the reason. */
+export const remakeVillager = (person: string, item: string, reason: string) =>
+  call<MadeVillager>(`/people/${person}/villagers/${item}/remake`, { reason })
+/**
+ * "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice, all or nothing
+ * on the host. Besides call()'s outcomes ('failed': nothing stored; 'away': no answer; 'refused': this tab's link is
+ * someone else's), 'persona' means the host refused the persona itself: retrying cannot help, so the page says so.
+ */
+export async function sendOffVillager(person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>): Promise<Outcome<{ name: string; persona: unknown }> | { ok: false; why: 'persona'; reason: string; ms: number }> {
+  const t0 = performance.now()
+  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, token, true)
+  const ms = performance.now() - t0
+  if (!res) return { ok: false, why: 'away', ms }
+  if (res === 'link') return { ok: false, why: 'link', ms }
+  if (res.status === 403) return { ok: false, why: 'refused', ms }
+  const body = (await res.json().catch(() => null)) as { refused?: unknown; error?: unknown; name?: unknown; persona?: unknown } | null
+  if (res.status === 422 && body?.refused === true) return { ok: false, why: 'persona', reason: typeof body.error === 'string' ? body.error.slice(0, 200) : '', ms }
+  if (res.status === 409) return { ok: false, why: 'busy', ms }
+  if (!res.ok || !body || typeof body.name !== 'string') return { ok: false, why: 'failed', ms }
+  return { ok: true, ms, name: body.name, persona: body.persona }
+}
+/** The person's villager now, and its babble voice, as the host keeps them. */
+export const currentVillager = (person: string) => call<{ persona: unknown; voice: Record<string, number> | null }>(`/people/${person}/villager`)
+
+/** Patterns (#47): the built-in ones this person may pick, their own saved ones, their profile and the jokes dial, all from the host. */
+export interface PatternData { id: string; name: string; persona: Record<string, unknown>; audience: 'any' | 'adult' | 'child'; shared?: boolean; maker?: string }
+/** The jokes dial as the host's humourCeiling decides it: locked at a level (by the admin's setting, or the person's own words) or free. */
+export interface HumourDial { locked: 'clean' | 'cheeky' | 'crude' | null; by?: 'admin' | 'asked' }
+export const personaTemplates = (person: string) =>
+  call<{ builtin: PatternData[]; templates: PatternData[]; profile: unknown; humour: HumourDial }>(`/people/${person}/persona-templates`)
+export const familyTemplates = (person: string) => call<{ templates: PatternData[] }>(`/people/${person}/family-templates`)
+/**
+ * Saved as a whole persona with the dials beside it; the host maps the dials in and checks it. `item` is the made
+ * villager it came from: the host reads its pattern from there to decide who may see the saved one (the page never says).
+ */
+export const saveTemplate = (person: string, name: string, persona: unknown, dials: Record<string, number> | undefined, shared: boolean, item?: string) =>
+  call<{ template: PatternData }>(`/people/${person}/persona-templates`, { name, persona, ...(dials ? { dials } : {}), shared, ...(item ? { item } : {}) })

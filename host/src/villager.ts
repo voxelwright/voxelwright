@@ -10,6 +10,10 @@
 //   notes/*.md          the villager's private notes (its only tools)
 //   villager.json       the Agent SDK session id to resume, and its running cost
 //   persona.json        who the villager is (#42), written by a villager generator; checked, never trusted as rules
+//   persona.prev.json   the persona before the last setup send-off (#47), kept to undo it
+//   persona-history/    every persona a send-off replaced (#47), never overwritten
+//   voice.json          the babble voice sent off with it (#47)
+//   villagers/<item>.json, persona-templates/<id>.json  setup's made villagers and saved patterns (villager-make.ts)
 //   preferences.json    what the person said they want (the humour dial), written by host code from their own words
 //   conversation.jsonl  what each side said (the person's own lines only, never context)
 //   usage.jsonl         one line per turn: model, tokens, cost, timings
@@ -26,6 +30,7 @@ import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
+import { villagerRoutes, type VillagerMaker } from './villager-make.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
 import { checkProfile, humourOf, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
@@ -43,6 +48,8 @@ export interface Config {
   /** The always-on input's router and prop maker (#42). Without them those endpoints answer 503. */
   router?: Router
   maker?: Maker
+  /** #47: writes a villager from a description (villager-make.ts). Without it that endpoint answers 503. */
+  villagerMaker?: VillagerMaker
   /** Sketching (#42, sketch.ts): a drawing to a prop module. Without it a sketch on /props answers 503. */
   sketchMaker?: SketchMaker
 }
@@ -387,6 +394,7 @@ export default {
       }
     }
 
+    const villagers = villagerRoutes({ root: config.root, people, maker: config.villagerMaker, profileOf })
     async function handle(req: IncomingMessage, res: ServerResponse) {
       const person = holder(req)
       if (!person) return send(res, 401, { error: 'token required' })
@@ -399,6 +407,8 @@ export default {
       const visitMatch = /^\/people\/[^/]+\/visits\/([^/]+)\/(conversation|messages)$/.exec(path)
       if (visitMatch && (visitMatch[1] === person || !PERSON.test(visitMatch[1]) || !Object.hasOwn(people, visitMatch[1]))) return send(res, 404, { error: 'no such villager' })
       const visitor = visitMatch ? person : undefined
+      // The villager generator's routes (#47) are all /people/<id>/…, so the check above covers them.
+      if (await villagers(path, req, res)) return
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {

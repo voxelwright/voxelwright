@@ -6,7 +6,7 @@
 // placed until the whole prop has been checked.
 import * as THREE from 'three/webgpu'
 import { MAX_RESULT_BYTES } from './sandbox'
-import type { PropData, Side, WireGeometry, WireMaterial, WireMesh, WireTexture, Wrap } from './wire'
+import { ROLES, type PropData, type Side, type WireGeometry, type WireMaterial, type WireMesh, type WireTexture, type Wrap } from './wire'
 
 export const LIMITS = {
   meshes: 300,
@@ -144,6 +144,10 @@ export function validate(input: unknown): { prop: PropData } | { reason: string 
         geometry: index(own(m, 'geometry'), geometries.length, `mesh ${i} geometry`),
         material: index(own(m, 'material'), materials.length, `mesh ${i} material`),
         matrix: numbers(own(m, 'matrix'), 16, `mesh ${i} matrix`, -Infinity, Infinity),
+        // #47: a villager slot, only from the closed list (so "__proto__" and friends are refused).
+        ...(own(m, 'role') === undefined ? {} : { role: oneOf(own(m, 'role'), ROLES, `mesh ${i} role`) }),
+        // #47 round 4: part of the villager's role mark; present only as true.
+        ...(own(m, 'mark') === undefined ? {} : { mark: own(m, 'mark') === true ? (true as const) : fail(`mesh ${i} mark is not true`) }),
       }
       const g = geometries[mesh.geometry]
       triangles += (g.index ? g.index.length : g.position.length / 3) / 3

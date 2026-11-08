@@ -61,6 +61,11 @@ if (only) for (const plan of Object.values(PLANS)) plan.plugins = plan.plugins.f
 for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
 // #42 experiment: ?props=<run-id> places generated props in the kitchen, in dev builds only.
 if (import.meta.env.DEV && params.has('props')) void import('./props/load').then((m) => load(m.default))
+// #47 experiment: ?villager=gen&gen=<run-id> places generated villagers in the kitchen, in dev builds only.
+if (import.meta.env.DEV && params.get('villager') === 'gen') void import('./villagers/gen/load').then((m) => load(m.default))
+// #47 setup: &setup=1 adds the felt workshop on the table, where a villager is made and tuned in a cheval mirror, in dev builds
+// only (b and bench are the regroups' kept ways to tune; d is 1).
+if (import.meta.env.DEV && params.get('villager') === 'gen' && /^(1|b|d|bench)$/.test(params.get('setup') ?? '')) void import('./villagers/gen/setup').then((m) => load(m.default))
 // When calibration steps the tier down, the renderer has already lowered the pixel
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.

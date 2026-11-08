@@ -112,6 +112,11 @@ rounds, or the same top complaint survived two rounds.
    score, what didn't, and why. Read it before every round. Copy lessons that
    generalise into this skill, so other threads benefit.
 
+Lesson (villager look, November 7): fixing a defect in place often only moves it. Trimming
+the scarf's tail and moving the owner colour to a chest badge both still read as a tongue or
+a bib. Merging two competing signals into one element (the role mark dyed in the owner's
+colour) removed the defect and raised contrast at once.
+
 Run at most about three regroups per prototype. If a regroup still can't reach 9,
 report the ceiling plainly, with the strongest candidate and what it would take (an
 asset, a dependency, a decision). Don't pretend.

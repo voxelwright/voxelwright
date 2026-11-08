@@ -14,6 +14,7 @@ import villager, { parsePeopleSpec } from './villager.ts'
 import { checkProfile, type Profile } from './persona.ts'
 import { claudeAgent, stubAgent, warmAgent } from './villager-agent.ts'
 import { claudeMaker, claudeRouter, stubMaker, stubRouter } from './villager-input.ts'
+import { claudeVillagerMaker, stubVillagerMaker } from './villager-make.ts'
 import { claudeSketchMaker, stubSketchMaker } from './sketch.ts'
 
 const { values } = parseArgs({
@@ -63,6 +64,7 @@ const fiber = root.plugin(villager, {
   agent: values.agent === 'stub' ? stubAgent() : (values.agent === 'warm' ? warmAgent : claudeAgent)({ model: values.model, thinking: values.thinking }),
   router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
+  villagerMaker: values.agent === 'stub' ? stubVillagerMaker() : claudeVillagerMaker(values['maker-model']),
   sketchMaker: values.agent === 'stub' ? stubSketchMaker(1500) : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
 })
 await fiber.await()

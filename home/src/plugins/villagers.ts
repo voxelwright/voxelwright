@@ -12,13 +12,13 @@ const flag = params.get('talk') === 'npc' ? null : params.get('villager')
 const shot = params.get('shot')
 
 /** Synthetic routines: the cook starts at the table, the tidier crosses the room, the gardener tends the window side. */
-const ROUTINES: { start: string; seated?: boolean; wait?: number; tasks: Task[] }[] = [
+export const ROUTINES: { start: string; seated?: boolean; wait?: number; tasks: Task[] }[] = [
   { start: 'seatMid', seated: true, tasks: [{ spot: 'seatMid', stay: 24 }, { spot: 'fridge', stay: 5 }, { spot: 'sink', stay: 6 }] },
   { start: 'sink', wait: 0.5, tasks: [{ spot: 'fridge', stay: 3 }, { spot: 'seatRight', stay: 12 }, { spot: 'sink', stay: 5 }, { spot: 'shelf', stay: 5 }, { spot: 'counter', stay: 3 }] },
   { start: 'window', wait: 6, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'fridge', stay: 4 }, { spot: 'counter', stay: 4 }, { spot: 'window', stay: 6 }] },
 ]
 /** Villagers are modelled at toy size and placed at about child height, so they read across the room. */
-const SCALE = 1.3
+export const SCALE = 1.3
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 const POSES: Record<string, { position: THREE.Vector3; look: THREE.Vector3 }> = {
   near: { position: new THREE.Vector3(1.95, 1.08, 1.8), look: new THREE.Vector3(0.75, 0.62, -0.45) },

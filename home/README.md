@@ -669,7 +669,7 @@ start in this frame. A `data:` worker also inherits the CSP; it is not used.
 `node scripts/check-prop-sandbox.mjs` starts its own dev server on 5304
 (through Vite's API, counting requests) on a temporary `VILLAGE_ROOT` with a
 synthetic villager token, plus an "outside" server on a random port. It
-proves, headless, 33 checks: a plain module builds; fetch, XHR, WebSocket,
+proves, headless, 33 checks (39 since #47, below): a plain module builds; fetch, XHR, WebSocket,
 `importScripts`, `import()`, EventSource and sendBeacon never reach the outside
 server; the villager token is never requested; the worker has no `document`,
 `window`, `parent`, `top`, storage, cookies, indexedDB or caches, and its origin
@@ -761,6 +761,770 @@ Not isolated, or unproven:
   with `'*'` (an opaque origin cannot be named). That message carries only
   the port and the public worker source, and anything coming back on the port
   is still checked.
+
+## Generated villagers (#47 experiment, November 6, 2026)
+
+**The pipeline today (code arm, the default).** The model writes one module in the prop sandbox: the species body
+from primitives, an eye disc on each side and one small anchor for the role's mark (`arm-code.md`). Everything after
+that is trusted code in `src/villagers/gen/`: `kit.ts` makes the button eyes, cheeks and the requested role's mark
+in the owner's felt; `assemble.ts` dyes the mark, nudges other felt off the owners' hues, runs the checks
+(`checks.ts`), then sews each rig slot's felt into one stitched surface (`skin.ts`) and seats the mark on it. A
+villager that fails a check gets one repair pass, with the check's sentence sent back to the model. Live making
+through the host, `run.mjs` and the setup scene all go through `assemble()`. `&kit=0` and `&skin=0` are for
+debugging only.
+
+Question: can a model make a felt-plush villager from one line of text that
+belongs next to Dumpling, Moss and Tuft? Two arms, same five synthetic
+descriptions, Sonnet, `scripts/villagers/style.md` (silhouette = role, colour
+= owner, prop = speciality; the owner's accent is an input, worn as the scarf
+and the outline):
+
+- **Spec**: JSON against `src/villagers/gen/spec.ts`. `gen/build.ts` clamps
+  every number to `RANGES`, replaces unknown enum values, checks `#rrggbb`
+  colours, keeps at most 3 accessories, and builds the Figure with the
+  `kinds.ts` felt kit (sheen, warm rim, owner outline, stitched textures,
+  button eyes). `gen/originals.ts` writes the hand-made three as specs; they
+  render almost identically (`screenshots/villager-gen/coverage.jpg`), after
+  adding one accessory, `leaf`, for Moss.
+- **Code**: a module `default(villager, api)` run in the prop sandbox.
+  `villager.tag(object, slot)` puts parts in the rig's slots, `villager.gait()`
+  and `villager.about()` return plain data. Wire meshes carry an optional
+  `role` from a closed list (`ROLES` in `wire.ts`, checked in `validate()`);
+  `gen/assemble.ts` refuses a missing slot, derives height, hip and side from
+  the geometry and replaces every material with the home's felt (or a glossy
+  bead when roughness is under 0.5).
+
+`?villager=gen&gen=<run-id>[,...]` places results from `generated/villagers/`
+walking the kitchen routines; `&lineup=1` stands them in a row, `&close=1`
+frames them. `hand:<key>` and `spec:<key>` (dumpling, tuft, moss) place a
+hand-made plush and its spec. Dev builds only; the loader lives in
+`src/villagers/gen/load.ts` because `main.ts` bundles every file in
+`plugins/`. Run, with the dev server on 5330:
+
+```sh
+node scripts/villagers/run.mjs <out>      # claude -p --model sonnet, 5 at a time, one repair pass; results.json, voices.json
+node scripts/villagers/capture.mjs <out>  # iso + close per result, rows, coverage, silhouette IoU, results.md
+```
+
+| # | Arm | Name | Latency s | API s | First try | Out tokens | Cost $ | Triangles | Draw calls | Max IoU |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 tortoise | spec | Brindle Sol | 34.9 | 5.2 | yes | 358 | 0.025 | 8180 | 57 | 0.76 |
+| 1 tortoise | code | Brindle | 84.3 | 49.6 | yes | 6110 | 0.068 | 9336 | 75 | 0.76 |
+| 2 mouse | spec | Pip Postmouse | 32.8 | 5.2 | yes | 355 | 0.025 | 7936 | 55 | 0.76 |
+| 2 mouse | code | Nib | 72.1 | 35.7 | yes | 4206 | 0.049 | 7700 | 73 | 0.77 |
+| 3 bear | spec | Honey Bun | 34.7 | 6.8 | yes | 584 | 0.027 | 8308 | 57 | 0.67 |
+| 3 bear | code | Biscuit | 85.7 | 39.9 | repaired | 5525 | 0.093 | 8932 | 53 | 0.77 |
+| 4 heron | spec | Heron Pell | 31.9 | 4.7 | yes | 349 | 0.037 | 7336 | 49 | 0.66 |
+| 4 heron | code | Professor Reed | 68.3 | 32.1 | yes | 3709 | 0.044 | 5996 | 57 | 0.57 |
+| 5 frog | spec | Puddle Pip | 32.1 | 6.0 | yes | 353 | 0.025 | 5888 | 39 | 0.78 |
+| 5 frog | code | Puddle | 64.0 | 26.7 | yes | 3133 | 0.038 | 7548 | 51 | 0.82 |
+
+Latency is wall clock with 5 `claude -p` calls at once; on this machine the
+CLI added about 27 s to every call (wall 32 s against 5 s of API time for the
+spec arm). Draw calls and triangles are the `?cam=iso&q=high` frame minus a
+frame without villagers (602 draw calls), shadow passes included. Max IoU is
+the closest silhouette among the ten and the hand-made three: each figure
+flat black on white from the dollhouse heading (fov 20), bottom- and
+centre-aligned, 128 px.
+
+Findings:
+
+- The spec arm is 7x faster in model time and half the cost (median 5.2 s API, about 350
+  tokens, $0.14 for five) and needed no clamping or repair. The code arm
+  takes 27 to 50 s API and 3,100 to 6,100 tokens ($0.29), and one of five
+  needed a repair (`RoundedBoxGeometry` used as `THREE.RoundedBoxGeometry`).
+- The code arm reads as more characterful: a real domed shell, a long heron
+  neck, wide frog lips. Its weak spots are model geometry the home cannot
+  fix, such as Biscuit's oversized scarf ring.
+- Silhouettes are not yet distinct enough. Round bodies dominate: 9 pairs
+  are above 0.75, Puddle (code) against Dumpling is 0.82, and the hand-made
+  Dumpling and Moss are 0.76 themselves. Only the herons (0.57 and 0.66)
+  and the spec bear (0.67) stand clearly apart.
+- Build time in the page is noisy (60 ms to 4.7 s with two pages loading at
+  once); the code arm includes a cold sandbox start of about 0.4 to 1.3 s.
+
+Look, scored blind from `screenshots/villager-gen/` (lineup, rows, close
+views) by Opus and GPT-6.1 Sol (via T3), 1 to 10, means over the five:
+
+| Arm | Scorer | Belongs | Matches description | Appeal | Row distinct |
+| --- | --- | --- | --- | --- | --- |
+| spec | Opus | 6.8 | 3.2 | 5.2 | 4 |
+| spec | Sol | 8.4 | 4.6 | 7.4 | 6 |
+| code | Opus | 7.0 | 7.2 | 6.4 | 8 |
+| code | Sol | 7.4 | 8.0 | 7.4 | 9 |
+
+Both say the spec arm is one round template, so the tortoise, mouse, heron and
+frog lose their species. The code arm gets species and props right in four of
+five; the bear (scarf across its face) pulls its means down. Sol rates the
+spec arm's finish higher.
+
+Voices, `node scripts/villagers/voices.mjs <voices.json> [base] --wav=<dir>`:
+every voice renders the same line offline with the real `Babbler`, once with
+the model's chosen voice and once with `voiceFromDescription()` in
+`src/voice/gen.ts` (a handmade trait mapping). Generated villagers' voices
+reach the engine through `registerVoice()` in `src/voice/profiles.ts`. Both arms
+pass the directional checks (mouse higher and quicker than tortoise and bear,
+bear darker than mouse, tortoise slowest). Median f0 / centroid, model voices:
+tortoise 106 to 111 Hz / 947 to 1,192 Hz, mouse 440 / 1,924 to 2,010, bear 117 to 127 / 881 to 892,
+heron 144 to 145 / 731 to 817, frog 157 to 333 / 539 to 932. The model crowds the low end
+(three of five under 150 Hz): spec tortoise and bear are 0.9 semitones and
+6% apart, code bear and heron 2.3 semitones and 8%. The mapping spreads
+wider but pins the mouse at the 480 Hz ceiling. check-babble still passes 27 of 27.
+
+### Round 2 (November 7, 2026): checks, role silhouettes, personas
+
+Code arm only (the look path); the spec arm still builds (one rerun job, `r2-spec-3`).
+
+- **Checks before showing** (`src/villagers/gen/checks.ts`, run by `assemble.ts`): rays from
+  in front and from the dollhouse pitch (33° above) must reach each eye first; every mesh must
+  touch another (bounding boxes within 0.02); the held prop's longest side is 1/3 to 1.1 of the
+  height; height 0.3 to 0.95, width at most 1.5 times the height. A failure is one sentence the
+  runner sends back as the repair request. `&checks=off` shows what was caught.
+  `node scripts/check-villager-gen.mjs [base]` (23 checks, dev server running): the hand-made
+  three and their specs pass, round 1's bear (scarf ring) and a level sun-hat brim are refused,
+  as are a lifted head, a tiny prop and a stretched body. The static box test passes round 1's
+  tortoise; what looked loose there were shell patches, which bounding boxes cannot see.
+- **Silhouette = role**: `scripts/villagers/style.md` gives each role one big mark (toque, tilted
+  sun hat, duster plume above the head, hip ledger, mortarboard, short-peak cap and mail bag,
+  goggles and tool belt, hood). The scarf is thicker and stays at the neck.
+- **Voices** start from `voiceFromDescription()`; the model adjusts with a `// voice:` reason.
+  `RANGES.voice.pitch` now tops out at 560 Hz; a 560 Hz voice tracks at 539 Hz (114 YIN frames).
+- **Personas**: round 2 used a provisional shape with its own templates and crude gate. Since
+  the merge of #42 (November 7) the persona is #42's `persona.json` schema, owned with its check,
+  the patterns and the humour rule by `host/src/persona.ts`; see "Personas on #42's schema" below.
+  `spec.ts` keeps a type-only mirror and `build.ts` `personaShape()` keeps one for display.
+
+```sh
+node scripts/villagers/run.mjs <out> [base] --set round1|readability --arms code --prefix r2-
+node scripts/villagers/capture.mjs <out> [base] --compare=generated/villagers/exp1
+node scripts/villagers/readability.mjs <out> [base]
+node scripts/villagers/voices.mjs <out>/voices.json [base] --wav=<dir> --checks=scripts/villagers/readability-voices.json
+```
+
+Round 1's five again (`screenshots/villager-gen/round2/rerun-lineup-sheet.jpg`, round 1 above
+round 2): all five usable, 3 first try, 2 repaired (`THREE.RoundedBoxGeometry`), median 107 s
+wall at 6 concurrent (persona text roughly doubled output tokens, 8,000 a villager), $0.60.
+Every role mark shows; the bear's face is clear; the closest silhouette pair among the five is
+0.74 (round 1: 0.82). Voices: 1 of 10 pairs too close (tortoise and bear, 2.3 st, 14%), all 7
+directional checks pass.
+
+Readability test, 20 synthetic villagers (all 8 roles, 2 or 3 each; 4 owners; fox, rabbit and
+hedgehog each in two roles; 7 made with a template), `round2/readability-*.jpg`:
+
+| Measure | Result |
+| --- | --- |
+| Usable | 20 of 20; 8 repaired (7 `THREE.RoundedBoxGeometry`, 1 duster longer than the villager) |
+| Role readability: nearest silhouette has the same role | 55% (chance 8%) |
+| Mean silhouette IoU within a role / between roles | 0.72 / 0.65 |
+| Visible accent at dollhouse distance (128 px for 1.4 m) | min 229 px (8.6% of the figure), median 391 px |
+| Voices too close (<3 st and <20% centroid) | 11 of 190 pairs (the mapping alone: 35) |
+| Voice directional checks | 9 of 9 |
+
+Hats read: cooks, gardeners, tutors and messengers find their own role. Goggles, tool belts,
+hoods and hip bags are mostly inside the round body outline, so makers and carers match other
+roles. Personas (`round2/personas-*.md`) are adult and specific; the crude template comes out
+cheeky for an adult who did not opt in and stays crude for one who did. Earlier passes, kept in
+`generated/villagers/exp2/*-a` and `*-b`: before the 33° rays, all three gardeners' sun-hat
+brims hid their faces from the dollhouse camera and passed the front-only check.
+
+Regression, seen by the lead in `round2/rerun-lineup-sheet.jpg` and `readability-colour.jpg`:
+the role cues read, but species anatomy collapsed into one round teddy body. The rerun tortoise
+has no shell, the mouse reads as a bear in a cap and the heron as a round body under a
+mortarboard; round 1's code arm had better species. Next: species-defining anatomy first, then
+the role cue on top, and a check that the body is not the default round template.
+
+After the round, `THREE.RoundedBoxGeometry` also resolves in the sandbox (the cause of 9 of 25
+repairs), the persona caps are 64 characters for role and 80 for speciality (40 cut mid-phrase), and
+repeated quirks are dropped. `node scripts/check-villager-gen.mjs` 23 of 23 (dev server on 5332),
+`node scripts/check-prop-sandbox.mjs --port=5336` 39 of 39.
+
+### Round 3 (November 7, 2026): species first, role on top
+
+Cause of the regression: round 2's prompt taught "Dumpling's body plus a role mark". Rule 1 made
+the role mark "the strongest thing in the outline", cut round 1's "unlike Dumpling, Moss and Tuft
+and unlike a plain bear" down to a parenthesis, and captioned the example "Dumpling, given its
+role's toque". The models copied the example: 24 of round 2's 25 modules open with Dumpling's body
+sphere (radius 0.17 to 0.21 at y 0.11 to 0.19; Dumpling's is 0.2 at 0.146), and 19 of 25 copy the
+scarf tails the example gained in round 2 (round 1: 1 of 5). The proportion check refused nothing
+in round 2 (every repair was `RoundedBoxGeometry`, a duster or a face).
+
+- **Prompt** (`scripts/villagers/style.md`, `arm-code.md`): rule 1 is now "species first", with a
+  12-row table of body plans and their 2 or 3 features (shelled, long-legged bird, rodent, rabbit,
+  bear, fox/cat/dog, amphibian, long-necked, big round, hoofed, spiny); the role is rule 2, one
+  cue on top. The style line no longer says "a big head on a soft body" or "never realistic
+  anatomy". The example's caption says its body is Dumpling's and not to start from it.
+- **Check** (`speciesFeatures()` in `src/villagers/gen/checks.ts`, run by `assemble.ts`): measured
+  from the geometry, without the held prop, the accent parts and the hat (head parts centred over
+  the head and above its middle): reach forward past the face (snout, beak, or the head ahead of the
+  body), the body off the floor (legs), a neck gap, paired parts above the head (ears, horns, eyes on
+  top), paired parts past the head's sides. With none at its threshold (`SPECIES`) the villager is
+  refused as the default round template, and the reason names each missing feature. It is
+  measured, not applied, on the hand-made three, which are that template. Thresholds come from
+  rounds 1 and 2 on disk: they refuse round 2's tortoise, mouse, bear and frog and pass round 1's
+  tortoise, mouse, heron and frog. Two margins are thin: round 1's frog clears `top` by 0.016, and
+  `forward` 0.3 sits between round 2's mouse (0.275) and a passing mouse (0.306). They do not catch round 2's heron (it has a beak, legs and a neck
+  that its scarf and chalkboard hide) or round 1's bear (its muzzle is short).
+- **Proportions**: height may be 1.0 (was 0.95) and width down to 0.25 of the height (was 0.35):
+  round 3's heron is 0.84 tall and 0.38 wide for its height, close to both old limits.
+- `trial(code, { accent, species })` runs the species check only when asked: the prop sandbox's
+  plumbing probe is a plain round figure. The setup scene's stub maker (`host/src/villager-make.ts`)
+  now adds a snout and tall ears to the example.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set round1|readability --arms code --prefix r3-
+node scripts/villagers/capture.mjs <out> http://localhost:5332/ --compare=generated/villagers/exp1,generated/villagers/exp2/rerun --labels="Round 1 code,Round 2 code,Round 3 code"
+node scripts/villagers/readability.mjs <out> [base] [--checks=off]   # --checks=off: re-measure an earlier round
+node scripts/villagers/voices.mjs <out>/voices.json [base] --wav=<dir> --checks=scripts/villagers/readability-voices.json --rename=rd-:r3-
+```
+
+Real Sonnet through `claude -p`, code arm. Round 1's five (`screenshots/villager-gen/round3/rerun-lineup-sheet.jpg`,
+rounds 1, 2 and 3 down): the tortoise has a domed shell with its head out in front, the mouse big
+round ears, whiskers and a pointed snout, the heron long legs, a long neck and a beak, the frog
+eyes on top; the toque, satchel, cap and mail bag, mortarboard and sun hat are all still there.
+The 20 (`round3/readability-*.jpg`): long rabbit ears, a fox's tail, ox horns, a giraffe's neck,
+hedgehog spines, a trunk, a snail's shell.
+
+| Measure | Round 1 | Round 2 | Round 3 |
+| --- | --- | --- | --- |
+| Five: usable, first try | 5, 4 | 5, 3 | 5, 5 |
+| Five: round template (today's check) | 1 (bear) | 4 (all but the heron) | 0 |
+| Five: closest silhouette pair | 0.82 | 0.74 | 0.73 |
+| Five: median latency, cost | 72 s, $0.29 | 107 s, $0.60 | 102 s, $0.58 |
+| 20: usable, repaired | | 20, 8 | 20, 2 (1 round template, a beaver; 1 duster too long) |
+| 20: role readability (nearest silhouette same role) | | 55% then; 40% re-measured today | 25% |
+| 20: mean IoU within / between roles | | 0.72 / 0.65 | 0.61 / 0.58 |
+| 20: mean pairwise IoU (species variety, lower is more varied) | | 0.65 | 0.59 |
+| 20: round template (today's check) | | 6 (badger, walrus, snail, beaver, sheep, panda) | 0 |
+| 20: visible accent, min / median | | 229 / 391 px | 53 / 275 px |
+| 20: median latency, cost | | 78 s, $2.37 | 86 s, $2.30 |
+| Voices too close: five / 20 | | 1 of 10 / 11 of 190 | 2 of 10 / 16 of 190 |
+| Voice directional checks | | 7 of 7, 9 of 9 | 7 of 7, 9 of 9 |
+
+Role readability by silhouette fell: the bodies now differ more than the hats, so a villager's
+nearest outline is often another role's similar animal. By eye the role cues still show in the
+colour tiles. Re-measuring round 2 today gave 40%, not 55%; the measure moves by about that much
+between captures. The visible accent is lower: the sheep carer's hood and shawl cover most of its
+scarf (53 px). Personas (`round3/personas-*.md`) stay adult and specific.
+`node scripts/check-villager-gen.mjs` 28 of 28, `node scripts/villagers/check-setup.mjs --port=5334`
+52 of 52 (also at `--viewport=390x844`), `npm run typecheck` passes.
+
+Silhouette role test (the TF2 test), round 3: Opus and GPT-6.1 Sol each saw only
+`round3/readability-silhouettes.jpg` (20 numbered flat-black figures at the dollhouse angle) and the
+legend of the eight role marks, and named a role for each. Each scored 11 of 20 (chance 2.5 of 20).
+
+| Role | Opus | Sol |
+| --- | --- | --- |
+| cook | 2 of 3 | 1 of 3 |
+| gardener | 2 of 3 | 1 of 3 |
+| tidier | 2 of 2 | 2 of 2 |
+| keeper | 2 of 2 | 2 of 2 |
+| tutor | 1 of 2 | 2 of 2 |
+| maker | 1 of 3 | 2 of 3 |
+| messenger | 0 of 2 | 0 of 2 |
+| carer | 1 of 3 | 1 of 3 |
+
+Both read both messengers as keepers: the mail bag and the ledger satchel are both a bag at the
+hip. Hats above the head (toque, mortarboard, duster plume) read; marks inside the body outline
+(goggles, tool belt, hood) do not, and a snail's shell reads as a carer's hood. Next: give every
+role a mark that breaks the outline above or beside the head, and no two roles the same kind of
+shape.
+
+### Round 4 (November 7, 2026): role marks that break the outline
+
+Each role has a new mark, chosen so that it breaks the outline above or beside the head and no
+two roles share a kind of shape (`scripts/villagers/style.md` rule 2, copied to
+`round4/role-legend.md`): cook toque (a tall puffed column), tutor mortarboard (a flat square
+plate), gardener sun hat (a wide round brim, the only brim), tidier duster (a round plume on a
+handle), messenger post flag (a pole on the back with a flag to one side), keeper pencil behind
+one ear (a single slanted bar), maker magnifying lens swung up beside the head (an open ring),
+carer stocking cap (a bent cone with a pom-pom). The messenger cap and mail bag, keeper satchel,
+maker goggles and tool belt, and carer hood are gone, and no role wears a bag.
+
+- **Tag**: `villager.mark(object)` in the prop sandbox marks a mesh or group in any slot. The wire
+  carries `mark: true` per mesh (`wire.ts`), `rebuild.ts` refuses any other value, and `assemble.ts`
+  copies it to the mesh.
+- **Check** (`markBreak()` in `gen/checks.ts`): the marked parts are projected on every vertex from in
+  front and 33° above (the eye check's view, yaw 0). They must rise at least `MARK` = 0.1 of the
+  height above the top of the largest head part, or reach that far past the sides of the largest head
+  and body parts. With no marked part, a mark that stays inside the outline, or the head or body
+  core itself marked, the villager is refused with a reason that names the role's mark (for example,
+  "the cook's toque stays inside the outline seen from in front and above: ..."). Marked parts no
+  longer count as species features, so a mark alone never passes the species check. The check runs
+  for live results and the setup scene; `trial()` runs it only when asked (`mark: true`), and the
+  hand-made three are not checked against it. Earlier rounds have no marks, so view or re-measure
+  them with `&checks=off`.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r4-
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=48   # round 3 numbered with 47
+node scripts/villagers/voices.mjs <out>/voices.json http://localhost:5332/ --wav=<dir> --checks=scripts/villagers/readability-voices.json --rename=rd-:r4-
+```
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, in `round4/readability-*.jpg`.
+The silhouette sheet is reshuffled and renumbered, and `round4/readability-key.md` is its key.
+
+| Measure | Round 3 | Round 4 |
+| --- | --- | --- |
+| Usable, repaired | 20, 2 | 20, 1 (r4-11: a floating mortarboard and a short prop, fixed in one pass) |
+| Round template (species check) | 0 | 0 |
+| Mean pairwise IoU (lower is more varied) | 0.59 | 0.55 |
+| Mean IoU within / between roles | 0.61 / 0.58 | 0.57 / 0.54 |
+| Nearest silhouette has the same role | 25% | 15% (chance 8%) |
+| Mark break, min above or past the side (`MARK` 0.1) | | every one at 0.12 or more; median above 0.23 |
+| Visible accent, min / median | 53 / 275 px | 89 / 204 px |
+| Median latency, cost | 86 s, $2.30 | 91 s, $2.15 |
+| Voices too close / directional checks | 16 of 190, 9 of 9 | 12 of 190, 9 of 9 |
+| Model declared the requested role | | 20 of 20 |
+
+All 20 marks are in place and visible on the sheets. The flag, pencil, lens ring and stocking cap
+are new shapes in the outline. The nearest-silhouette measure fell again because the bodies vary
+more than the marks: it compares whole outlines, so it is not the role test. The weak marks are the
+hedgehog maker's small lens among its spines, the hedgehog tidier's plume against its spines, and
+the sheep carer's cap merging into its wool. Personas (`round4/personas-readability.md`) stay adult,
+with no exclamation marks, "yay" or "hehe". The blind silhouette test with Opus and Sol is next.
+`node scripts/check-villager-gen.mjs` passes 33 of 33, `node scripts/check-prop-sandbox.mjs --port=5336`
+passes 40 of 40, and `npm run typecheck` passes.
+
+Silhouette role test, round 4 (same method as round 3, a new shuffle, the new legend): Opus 17 of
+20, GPT-6.1 Sol 17 of 20 (round 3: 11 and 11; chance 2.5). Both named every cook, tutor, tidier,
+keeper and messenger. Both missed the same three, each a mark lost against the species' own
+outline: the hedgehog maker's lens among its spines, the snail gardener's sun hat against its
+shell, and the sheep carer's stocking cap against its wool.
+
+### Look regroup and round 5 (November 7, 2026): the role mark is the owner's colour
+
+Round 4's scarf tail read as a tongue on all 8 reference villagers, and marks got lost on busy
+bodies. The regroup (`screenshots/villager-gen/LEARNING-look.md`) tried three ways to show the owner:
+a tidy band (A), a chest badge (B), and the role mark dyed in the owner's colour (C). Opus and GPT-6.1
+Sol both picked C in a blind test. C is now the only look. The A and B code is gone and stays in Git
+at c1a54c6.
+
+- **Prompt** (`style.md` rule 3, `arm-code.md`): there is no scarf, and the model never uses the accent.
+  It makes the mark in any colour and passes every part to `villager.mark()`. The host's live maker
+  (`host/src/villager-make.ts`) reads the same files, and the setup scene uses the same `assemble()`, so
+  both get C without a flag. The keeper's pencil is now fat (at least 0.08 H) with an eraser. The
+  maker's lens has a thick rim. Eye stalks stand in front of the sun hat's brim. `arm-code.md` gives a
+  one-piece bent-cone recipe for the carer's cap (cone vertices bent, no separate segments).
+- **Dye** (`gen/assemble.ts`): every marked part gets the owner's felt.
+- **Body felt** (`gen/checks.ts` `OWNER_CLASH`, the one threshold): a felt colour with OKLCh chroma of
+  at least 0.085 within 30° of the hue of any owner accent (`OWNER_ACCENTS`) or the villager's own
+  accent has its hue and chroma pulled towards oatmeal, with its lightness kept. Eyes and the held prop
+  are left alone, because a wooden spoon is chroma 0.10 in mustard's band. Each move is a fix line,
+  `felt: #from moved to #to`.
+- **Owner area** (`ownerArea`): the camera of `load.ts silhouettes()` drawn into a depth buffer on the
+  CPU. It is within 4% of the GPU render on the regroup's eight (the tortoise's pencil: 48 against 49 px).
+  A mark under `OWNER_PX` = 100 px is refused with a reason that names it and asks for a fatter one.
+  B's badges read at 100 to 121 px.
+- **Held prop**: it must come within 0.005 of a hand's own box (`LIMITS.grip`, triangle edges sampled in
+  the hand's axes). Before, it only had to come within 0.02 of any part's box. This refuses round 4's
+  owl (its book stands 2 cm off) and walrus. Round 3's heron passes; its slate sits 1.5 mm in front of
+  the mitten.
+- `run.mjs` reads the persona from the ```json block after the module with the host's `personaFrom`
+  (#42's `checkPersona`) and keeps `personaRefused`. `readability.mjs` adds the trusted owner area, the
+  moved felt, and a blind colour sheet in its own shuffle with `readability-colour-key.md`.
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
+`screenshots/villager-gen/round5/` (`repairs.md`, `personas-readability.md`).
+
+| Measure | Round 4 (scarf) | Regroup C (8) | Round 5 (20) |
+| --- | --- | --- | --- |
+| Usable, repaired | 20, 1 | 8, 0 | 20, 1 (r5-17 mouse: its own head part hid the eyes from above) |
+| Owner colour, min / median px | 89 / 204 (scarf) | 44 / 544 | 161 / 422 (trusted check; render 170 / 421) |
+| Refused for too little owner colour, or a prop not in hand | | | 0, 0 |
+| Felt moved off the owners' colours | | | 1 colour on 1 villager (a fox, a step past the gate) |
+| Nearest silhouette same role, mean IoU | 15%, 0.55 | | 25%, 0.553 |
+| Round template, declared role | 0, 20 of 20 | 0, 8 of 8 | 0, 20 of 20 |
+| Cost | $2.15 | $0.70 | $2.26 |
+
+The lowest marks are the two keepers' pencils, at 161 and 186 px; the regroup's thin pencil had 44.
+With the prompt asking for muted felt away from the owners' hues, Sonnet kept off them by itself: one
+colour was moved. The blind owner and role test on `readability-colour.jpg` is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r5- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=49 --close=r5-05,r5-18
+```
+
+Earlier rounds still load with `&checks=off`, but their marks are now dyed and their scarves moved
+towards oatmeal, so their old sheets will not render the same again.
+`node scripts/check-villager-gen.mjs` passes 41 of 41, `node scripts/check-prop-sandbox.mjs --port=5336`
+passes 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck`
+passes.
+
+#### Round 6: told apart by place, and sitting on the head
+
+In round 5's blind test, both models named every owner (20 of 20). Sol read 4 cooks as tidiers, because the
+toque's puff and the duster's plume were both a round puff above the head. Opus read the mortarboards as
+signboards held overhead, and the pom-poms floated off their caps. Round 6 makes the round marks differ in
+place as well as shape, and makes every mark sit on what holds it.
+
+- **Prompt** (`style.md` rule 2, `arm-code.md`): the toque is a tall, straight-sided pleated column centred on
+  the head. The duster is held out beside the head, never over it. The mortarboard lies on a shallow skullcap,
+  at most 0.05 H above the head. The stocking cap is a narrowing tube that ends blunt, with the pom-pom over that
+  end. The example Dumpling wears the new toque, so the host's stub and the setup scene get it too.
+- **Attachment** (`checks.ts markAttachment`, `surfaceContact`): every marked part must come within
+  `LIMITS.attach` = 0.005 of an unmarked part, or of a marked part that does, measured on the triangles (vertex to
+  triangle, edge crossings, one part inside another). The two parts must also meet across at least `LIMITS.joint` =
+  0.5 of the thinner part's thinnest side. The round-5 pom-poms touched their caps only at the cone's needle
+  point (0.20 to 0.22); every sound joint in round 5 measures 0.9 or more.
+- **Place** (`markPlace`): the toque's centre within `TOQUE.offset` = 15% of the head's width of the head's
+  centre, and its rise above the head at least `TOQUE.ratio` = 1 times its width. The plume's centre at least
+  `PLUME.offset` = 75% of the head's width out from the head's centre. The board's underside at most `BOARD.lift`
+  = 0.05 H above the head's top. These run only once the mark passes the round-5 checks, so a model gets one
+  mark problem at a time. Each reason names the mark.
+
+On round 5's 20, the new checks refuse 10: all 3 toques (rise 0.84 to 0.91 times their width), both boards
+(0.097 and 0.115 H up), all 3 pom-poms, the snail's sun hat (3 cm behind the head) and the ox's lens (1 cm off
+its arm). Both round-5 plumes already sat 1.1 and 1.5 head widths out, so the cook/tidier confusion came from the
+toque's round puff, not from the duster's place.
+
+The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
+`screenshots/villager-gen/round6/` (`repairs.md`, the colour sheet with its own key, the silhouette sheet with its key).
+
+| Measure | Round 5 | Round 6 |
+| --- | --- | --- |
+| Usable, repaired | 20, 1 | 20, 1 (r6-11 rabbit tutor: its skullcap held an eye's centre, so it was taken for the head) |
+| Owner colour, min / median px (trusted) | 161 / 422 | 145 / 384 |
+| Toque rise over width | 0.84 to 0.91 | 1.54 to 1.86 |
+| Board underside over the head | 0.097, 0.115 H | 0.013, 0.014 H |
+| Plume out from the head's centre | 1.11, 1.54 head widths | 1.08, 1.47 |
+| Loose marked parts | 5 villagers | 0 |
+| Nearest silhouette same role, mean IoU | 25%, 0.553 | 40%, 0.522 |
+| Felt moved off the owners' colours | 1 on 1 | 1 on 1 |
+| Cost | $2.26 | $2.08 |
+
+From above, the board on its skullcap still reads as a large flat plate. The blind owner and role test on the
+round-6 sheets is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r6- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=50 --close=r6-01,r6-07,r6-12,r6-18
+```
+
+`node scripts/check-villager-gen.mjs` passes 56 of 56, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck` passes.
+
+#### Round 7: appeal
+
+In round 6's blind test both models named every owner and role, but scored appeal 6 (Opus) and 8 (Sol):
+mortarboards and sun hats were flat slabs hiding the head, dusters looked like lollipops, and the toque's pleats
+did not show at dollhouse size. Round 7 resizes the marks and adds a short appeal paragraph to the prompt.
+
+- **Prompt** (`style.md`, `arm-code.md`): a soft-toy paragraph (a generous head, button eyes at or below the middle of
+  the face, joins that overlap by a third, every point a blunt felt cone, about 40 meshes at most). The board is 1.1
+  to 1.3 head widths on a skullcap above the eye line. The brim is 1.6 to 1.9 head widths, tilted back, and need no
+  longer be wider than the body. The duster is 5 to 7 feathers fanned from a felt knot. The toque is a band, a column
+  and a puff of 6 balls round a centre ball, 1.3 to 1.5 times the column's width, so its top is a cloud, not a top
+  hat's lid. Dumpling's example wears this toque, 9 marked parts.
+- **Checks** (`checks.ts markPlace`, `inspect`), measured in each part's own axes over the head core's width, each
+  reason naming the mark: board `BOARD.width` 1.0 to 1.4, brim `BRIM.width` 1.45 to 2.0, plume at least
+  `PLUME.tufts` = 4 marked parts. Face margin: the eyes must show past the mark (3 of 5 rays) from
+  `LIMITS.faceMargin` = 20 degrees steeper than the dollhouse view, swept in 5-degree steps; other parts never count
+  as blockers here. On round 6's 20 these refuse 5: all three brims (2.10 to 2.71 head widths), the elephant's board
+  (1.47) and both one-ball plumes. The hippo's hat also cleared the eyes only 15 degrees steeper.
+  `scripts/villagers/measure-marks.mjs <prefix>` prints these measures for a saved round.
+
+Real Sonnet through `claude -p`, code arm, concurrency 3, in `screenshots/villager-gen/round7/` (`repairs.md`, the
+colour sheet with its key, a fresh silhouette sheet with its key, seed 51, and closes of both tutors, a gardener,
+both tidiers and a cook).
+
+| Measure | Round 6 | Round 7 |
+| --- | --- | --- |
+| Usable, repaired | 20, 1 | 20, 3: r7-07 duster longer than the hedgehog was tall, r7-10 pencil-prop too short, r7-12 elephant's skullcap a whole sphere holding the eyes (taken for the head) |
+| Owner colour, min / median px (trusted) | 145 / 384 | 136 / 425 |
+| Board across, head widths | 1.47 (r6-12) | 1.27, 1.35 |
+| Brim across, head widths | 2.10 to 2.71 | 1.59 to 1.70 |
+| Face clear past the mark, degrees steeper than the camera | hippo 15, elephant 20 | 30 to 40 on the gardeners and tutors |
+| Plume parts | 1, 1 | 7, 8 |
+| Toque rise over width | 1.54 to 1.86 | 1.27 to 1.43 |
+| Nearest silhouette same role, mean IoU | 40%, 0.522 | 40%, 0.549 |
+| Cost | $2.08 | $2.29 |
+
+My eye on the sheets (not the council's): sun hats now frame the head, the toques read as chef's hats with a lumpy
+top, the dusters are feather fans, spines are blunt. Still weak: the elephant tutor's board is 1.35 times its head
+core but its ears make the head look narrower than the board, so from above it still reads as a slab. A check against
+the head's outline with its ears would catch it. The tassels are thick hanging capsules. The blind council on the
+round-7 sheets is next.
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r7- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=51 --close=r7-11,r7-12,r7-04,r7-07,r7-08,r7-01
+node scripts/villagers/measure-marks.mjs r7-
+```
+
+`node scripts/check-villager-gen.mjs` passes 66 of 66, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+40 of 40 (one earlier run 39 of 40, not reproduced in two reruns), host `node test/villager-make.ts` passes 81 of 81
+(stub maker). `npm run typecheck` fails only in `setup-d.ts` (`sizeAt` missing from `setup-b`), builder N's files.
+
+### The trusted felt kit (the default since the kit council)
+
+`gen/kit.ts` makes the face (button eyes with a highlight, set on the felt along the model's own eye line, and
+cheeks) and the role's mark (toque, mortarboard, sun hat, duster plume, post flag, pencil, lens, stocking cap)
+in the owner's felt, sized against the head. In a blind test both Opus and GPT-6.1 Sol preferred it to round 7 in
+all six close pairs, so it is on for runs, for live making through the host and for the setup scene (`assemble()`
+defaults `kit` to true). `&kit=0`, `readability.mjs --no-kit` and `measure-marks.mjs --no-kit` show the model's own
+eyes and mark, for debugging only.
+
+- **Prompt** (`style.md`, `arm-code.md`): the model no longer builds eyes or the mark. It tags a small dark disc for
+  each eye and passes one small felt anchor to `villager.mark()`: a button on the crown (cook, tutor, gardener,
+  carer), a button above one ear (keeper, maker), a patch on the back (messenger), or a knot on the top end of the
+  duster handle it holds (tidier). The role table, the bent-cap recipe and the mark checks are gone from the prompt;
+  Dumpling's example marks an anchor. The old prompt is kept as `scripts/villagers/fixtures/round7-arm-code.md` for
+  the checks on model-built marks.
+- **Role**: the requested role is trusted data. `run.mjs` writes it into `meta.json`, the host takes an optional
+  `role` on `POST /people/:id/villagers` (the home's `ENUMS.role`), puts it in the request, stores and returns it,
+  and `assemble(..., kit, requested)` uses it for the kit and the checks. When `about()` disagrees, the fix line reads
+  `role: the model declared "x"; the requested "y" is used`. The setup scene sends no role yet, so there the model's
+  `about()` decides.
+- **Hats**: the board is 0.95 of the head's width with its ears at the crown (1.04 to 1.18 head cores), 0.055 thick,
+  lying on the skullcap. The sun hat's brim is 1.6 head widths, sits on the head and tilts its front up (up to 0.5
+  rad) until the face clears; it slides back only after that. Ears, horns and eye stalks come up through stitched
+  felt holes (grommets) in the crown, the skullcap, the board, the brim or the stocking cap, and the toque narrows
+  between ears (to 0.22 of the head at least).
+- **Lens**: a thicker rim on a bigger ring, a longer arm from the temple with knobs at both ends, and a pale glass disc.
+- **Held props**: the prop moves (at most 0.08) so its handle runs through the middle of the holding mitten, and a felt
+  wrap in the mitten's colour closes round it; a prop with no handle is moved until the mitten overlaps its edge. A
+  duster handle that ends below the head is lengthened so the plume clears it. The prop's size check measures
+  against the villager without its mark (the kit's toque made Dumpling's spoon "too small").
+
+#### Round 8: the kit as the default
+
+Real Sonnet through `claude -p` (code arm, not mocked), concurrency 3, dev server 5332, the readability 20, with the
+new prompts. Sheets and closes in `screenshots/villager-gen/round8/`; `rabbit-hat-r7-04-body-kit-close.jpg` is round 7's long-eared rabbit under the final kit (round 8's rabbit gardener came out with short ears).
+
+| Measure | Round 7 | Round 8 |
+| --- | --- | --- |
+| Usable, repaired | 20, 3 | 20, 4: species (walrus), species plus the kit's pencil at 98 px (beaver; the pencil is thicker since), a sandbox error (sparrow), and the kit's plume too close to the hedgehog's head (a short handle is lengthened since). Repairs are from the run-time kit; owner colour and the sheets are from the final one |
+| Median first-call latency | 85 s | 65 s |
+| Median first-call output tokens | not recorded (round 6: 8,128) | 6,148 |
+| Cost | $2.29 | $1.79 |
+| Owner colour, min / median px (trusted) | 136 / 425 | 143 / 704 |
+| Model declared the requested role | 20 of 20 | 20 of 20 |
+
+```sh
+node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r8- --concurrency 3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=81 --close=r8-11,r8-12,r8-04,r8-07,r8-08,r8-01
+node scripts/villagers/measure-marks.mjs r8-
+```
+
+#### Round 9: the sewn skin as the default
+
+Both Opus and GPT-6.1 Sol preferred the sewn skin to round 8 in a blind close-pair test, so `assemble()` sews by
+default (`&skin=0`, `readability.mjs --no-skin`, `measure-marks.mjs --no-skin` and `skin-bench.mjs --no-skin` show
+the separate parts). Fixed from the council:
+
+- **Pale flecks** were triangles facing inwards: surface nets chose each quad's winding on the grid, and after the
+  vertices settled onto the field some faced in, were culled, and showed the board or the room through the felt
+  (6 to 49 per villager). Each triangle now faces the way the field's normals do. Three-felt triangles are cut too
+  (they left T-junction cracks, 282 open edges on the hedgehog), a felt patch under 9 vertices takes the felt
+  around it, and surface specks under 16 triangles are dropped before colouring.
+- **Ragged seams**: each seam vertex moves halfway to its neighbours' middle and back onto the surface, twice.
+- **Hats on the skin**: the whole mark moves along its seat by the difference between the skin and the parts it
+  replaced; the tutor's skullcap is fitted to the skin (rim sunk, never further out than it was built, so it passes
+  under an ear's root) and its top rises to the board, which now rests on it across 0.7 to 0.84 of its width instead
+  of one point (the elephant's board "floating").
+- **The panda's face**: its head kept its model position and size to the millimetre; the toque had slid 0.3 head
+  depths forward onto its brow. The toque now slides at most 0.1 forward.
+
+`skin-bench.mjs r8- --runs=3` (the round-8 20, fastest of 3, in the page): skin build median 38 ms, max 135 ms;
+assemble median 160 ms, max 641 ms (skin off: 101 / 625 ms, so the max is the rabbit's hat checks, not the skin);
+0 specks, 0 inward triangles, 0 mark parts loose on the skin. The attachment check on the skin costs 0.5 to 1.5 s,
+so only the scripts run it (`trial({ attach: true })`). Sheets in `screenshots/villager-gen/round9/`.
+
+```sh
+node scripts/villagers/skin-bench.mjs r8- --runs=3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=64 --close=r8-01,r8-04,r8-07,r8-08,r8-11,r8-12
+```
+
+## Villager setup: the felt workshop (#47, November 7, 2026)
+
+`?villager=gen&setup=1` (dev builds only; the production build contains none of it,
+checked by grepping `dist/`) turns the kitchen table into a felt workshop. This section describes the
+round-6 bench, now `&setup=bench`; the default tunes in a cheval mirror (below). The camera
+leans over the table; the notebook and its pencil step aside. You write who the villager
+is on a paper slip lying on the cutting mat, pick a personality pattern card from the
+rack behind the mat, or both; the picked card stands up out of the rack and its felt card,
+big, is clipped to the slip: your words say who they are, the pattern how they talk. While
+the model works, the tissue pattern sheet with your words lies on the mat and the pattern
+is made beside it: a piece is chalked on a felt sheet, cut out along the chalk and pinned in
+a row, one every 4.5 s, while the needle stitches a scrap; a small paper tag at the mat's
+front counts the seconds. The pieces are scenery, never a percentage. If the home's checks
+refuse a live module, the tag says one piece is being re-cut and the host is asked once for
+a repair with the refusal's reason; a second refusal is a failure. When the module arrives
+it runs in the prop sandbox, `gen/assemble.ts` makes the Figure, the slip lifts away and
+it is stitched together on the mat in order (body, head, ears, eyes, hands, feet,
+accessories, prop), a needle pass each, about 3.5 s. The other pattern cards lie down in
+the rack; the one it was made from stands at the rack's end, and its felt strip is on the
+name tag. It hops, looks at you and says its bark on a small paper note, inked word by word
+with its babble voice. A failure leaves the table tidy and says so on the slip.
+
+Layout follows the screen's shape. Wide (landscape, tablets included): the tools run
+along the near edge with their tags under them, quiet tags show on the empty table, and
+the save and send-off tags sit in the bottom corners. Narrow (a phone held upright): the
+villager stands at the back of the mat, then three ribbons, then two rows of three tools,
+each tag lying just under its own tool; the name tag heads the screen. Before there is a
+villager the tools stay off the table and the camera frames the rack, the mat and the slip.
+After the send-off only a small "Make another" tag shows until it is opened or the camera
+comes back. Labels
+use one paper tag style and two typefaces: handwriting for tags and the slip, the book
+face for speech, status lines and the slip's printed example.
+
+- `&from=<run-id>` stitches a saved result from `generated/villagers/<run-id>/` with no
+  model call (round-1 results skip assemble's later look checks; live results do not).
+- `&person=<id>` (default `ME` in `src/villager.ts`), `&accent=#rrggbb` (default `#c8553d`). Open the page
+  with that person's link from the host (`#token=…`, #40): another person's token answers 403.
+- The person's profile is #42's (`VILLAGER_PEOPLE=alex:Alex:adult` or a `VILLAGER_PROFILES`
+  file, see host/README.md), read with `GET persona-templates` together with the jokes dial as
+  the host's `humourCeiling` decides it. The page has no profile flag.
+
+The tools, all on the table, each with a paper tag that is a real `role="slider"` (Tab,
+arrows, Page keys, Home and End). A tag says what the tool is and what its two ends do,
+with a bead on a stitch for where it is now (the colour tag shows the rail's two end
+threads; the jokes tag inks the current step); each ribbon
+is labelled at both ends. Dragging changes the villager at once, and a short line is
+said on release. Nothing here calls a model.
+
+| Tool | Where | Changes |
+| --- | --- | --- |
+| tape measure | near edge, left | size, 0.8 to 1.25 times |
+| rail of thread spools | near edge | felt hue, 60 degrees either way; the owner's accent stays |
+| toy xylophone | near edge, middle | voice pitch, 7 semitones either way |
+| metronome | near edge, right | voice pace, 0.62 to 1.62 times |
+| wind-up key | near edge, far right | energy: gait speed, bob and idle sway |
+| three ribbons with a button | right of the mat | persona dials: blunt to warm, serious to playful, brief to chatty |
+| stitch dial | left, by the mug | jokes: clean or cheeky, the person's choice. Crude is never picked on the table: its mark has a padlock and its tag leaves the word out. When the household's admin set a level for the person (or they asked to keep it clean), the dial is pinned there with a short note, "set by the household's admin"; only an adult's admin setting shows crude |
+
+### Personas on #42's schema
+
+One owner per rule: `host/src/persona.ts` owns the persona (`Persona`, `checkPersona`), the
+patterns (`TEMPLATES`, offered by `TEMPLATE_CARDS`' audience for the person's age band) and the
+humour rule (`humourCeiling`). The page keeps no copy: `gen/spec.ts` has a type-only mirror,
+`build.ts` `personaShape()` keeps a persona of that shape for display, and the rack's patterns
+and the jokes dial come from `GET persona-templates`.
+
+Personas are household-visible (#42 visits show a visited villager's whole `persona.json`).
+The setup's slip says so ("Everyone at home sees their personality."), and the persona is
+made only from what the creator types or picks; the owner's conversation, notes, preferences
+and profile style never reach it (host test "privacy"; the boundary is in host/README.md).
+
+The model writes the persona as a ```json block after the module (`style.md`, `arm-code.md`),
+in #42's fields. Every persona, from the model, a pattern, a saved file or a request body, goes
+through `checkPersona` on the host before it is stored or served. One that fails is refused with
+the reason: the record keeps `persona: null` and `personaRefused`, and the page asks for its one
+repair with that reason (joined with the home's module reason when both fail). A persona refused
+again is a failure.
+
+| Ours (round 2) | #42 field |
+| --- | --- |
+| the `about()` name | `name` (`^[A-Z][A-Za-z' -]{0,23}$`) |
+| role, speciality | `role` (24), `speciality` (160) |
+| temperament, register enums | `temperament` (60), `register` (160), free words |
+| humour style enum | `humour.style` (160) |
+| jokes dial clean / cheeky / crude | `humour.lean`, clean or cheeky only |
+| quirks (3) | `quirks` (4 of 80) |
+| topics (5) | `cares` (6 of 80) |
+| (new) | `decides`, `tastes`, `frictions`, `mistakes`, asked for directly |
+| warmth, playful ribbons | words in `temperament` and a clause in `register` |
+| chatty ribbon | `lengths.card` (1 to 3), `lengths.long` scaled, `lengths.table` |
+
+The ribbons and the jokes dial stay tuning data (0 to 1) for the sliders' positions only.
+`tunePersona()` (villager-make.ts) maps them in from the model's own persona every time, so
+tuning never stacks: a ribbon at 0.3 or below or 0.7 or above adds its word ("blunt", "warm",
+"serious", "playful") to the temperament, dropping a contrary word, and a clause to the
+register; chatty sets `lengths.card` to 1 + round(2 × chatty); the jokes dial below 0.25 is
+clean, else cheeky. Its crude end is stored as cheeky. The sliders start in the middle for warmth
+and play, at the card length for chatty, and at the lean for jokes.
+
+Patterns: our six are #42's `TEMPLATES`. `buddy` and `coach` keep #42's ids and meaning, with
+our quirks merged in ("roasts the plan, then does it properly"; "asks what the person thinks
+before saying what it thinks"); `organiser`, `grandparent`, `craftsperson` and `companion` are
+new, in the schema. `buddy` is offered only for an adult profile and `companion` only for a
+child's. The words say who the villager is, the pattern how it talks: the model is given the
+pattern, then the host sets its temperament, register, humour, decides, mistakes and lengths
+over the model's (`applyPattern`); name, role, speciality, cares and frictions stay the model's;
+quirks are the model's first, four at most. A built-in pattern's id is kept as `template`.
+Saved and family-shared patterns are whole personas, tuned by their dials and checked by the same
+function; a stored file that fails the check is skipped. The host decides who may see a saved
+pattern and ignores any audience the page sends: the most restrictive of the pattern it came from
+(read from the made villager's record), its humour lean and its maker's profile. A cheeky lean,
+an adults-only source or a maker whose admin set crude keeps it to the maker's age band, so it
+never reaches a child from an adult. A remake keeps the pattern the villager was made with (a
+snapshot on its record), even if that pattern is deleted or un-shared since.
+
+"Off you go" for a villager made for person X writes `<root>/people/X/persona.json` (the tuned
+persona, checked), `voice.json` (its babble voice) and the record's tuning as one change: all of
+them or none. The old persona is kept as `persona.prev.json` and in `persona-history/` (never
+overwritten), and sending the same villager off again never overwrites the backup with itself.
+When the host cannot store it, it answers 500 in JSON and the villager stays on the stool, tuned,
+with a note that it didn't go and can be tried again; when the host is away, the note says so. #42 loads the persona on every turn and its `characterKey` changes,
+so the warm agent starts a new process and the next talk is the new villager (proved with the
+stub agent: its system prompt names the new villager). Today #42 has one villager per person,
+so a send-off replaces that person's villager. More than one would mean
+`people/X/villagers/<item>/persona.json` with a chosen current one, and the talk cast built
+from them; the kitchen's talk cast is still the hand-made three (`talk.ts`), so the new figure
+and its kept voice (served by `GET /people/X/villager`) are not yet seen in a talk.
+
+Live, real Sonnet through the host (November 7, a machine at load 200 and over): one make
+from the page (`check-setup.mjs --live`, the giraffe) passed first try in 140 s for $0.15,
+persona "Hollis" accepted by `checkPersona`. Two repairs of seeded real round-2 modules the home
+refuses (`fixtures/round2-*-noshell|teddy`), through `remake` with the real reasons: the mouse's
+repaired module and persona pass (66 s, $0.09); the tortoise's persona passes but its repaired
+module hides its eyes behind a head part (58 s, $0.11), so in the page that make would fail. The
+make timeout is 240 s (the first live make timed out at 150 s).
+
+Host (`host/src/villager-make.ts`, registered in `villager.ts` with one line), same token
+and person scoping as the props endpoints; model failures answer 422:
+
+- `POST /people/:id/villagers` `{description, accent, template?}`: Sonnet writes the code-arm
+  module and the persona block from `scripts/villagers/style.md` and `arm-code.md` (read, not
+  copied). `template` is a built-in id or `<maker>:<id>` of a pattern this person may see. The
+  host stores the module as text under `people/<id>/villagers/` and never imports or runs it.
+- `POST /people/:id/villagers/:item/remake` `{reason}`: once per villager, when the home's
+  checks refused its module or the host's check its persona. The model gets its previous
+  module, its previous persona block and the reason; the record keeps the new module, the reason
+  and the previous one.
+- `GET /people/:id/villagers/:item`, `POST .../tuning` (nine knobs; answers the tuned persona),
+  `POST .../send-off` `{tuning, voice}`, `GET /people/:id/villager`.
+- Every record, template, persona and voice file is written to a temporary file in the same
+  directory and renamed over the old one; a failed write answers 500 and leaves the old file whole.
+- `GET` and `POST /people/:id/persona-templates`, `GET /people/:id/family-templates`:
+  the built-in patterns for the person's age band, their profile, the jokes dial, and saved
+  patterns as data files under `people/<id>/persona-templates/`.
+
+```sh
+node test/villager-make.ts [--live]                 # in host/: 108 checks, stub maker; --live adds one Sonnet call
+node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
+node scripts/villagers/check-setup.mjs --strategy=1|b|bench [--shots=dir] [--viewports=1440x900,1024x768,390x844]
+```
+
+Tuning (November 7, after two regroups): `&setup=1` tunes the villager in a cheval mirror in the room
+(`gen/setup-d.ts`). The mirror and a felt fitting stool stand at the table's left end; the villager
+stands on the stool against painted silver glass. The tape measure is on the frame's left rail (its
+brass marker rides the head), the felt colour dots on the right, three dials on the stool's drawer,
+the manner ribbons across its legs and the jokes switch on its foot rail; each control has its two
+ends written beside it, shows how it moves on hover, focus and once as it comes out, and works by
+keyboard (Tab walks the nine values in order). Before there is a villager the pattern swatches hang
+in the glass; while the pattern is made the cutting happens on the stool's top. `&setup=b` (regroup
+1's mirror panel) and `&setup=bench` (the round-6 bench) are kept for the record; both mirrors share
+`gen/setup-controls.ts`. `--strategy=1` runs the default through the whole flow at each size with the
+layout gate, a face-spill check, a 14 px floor and the keyboard order; the other checks below drive the
+bench and prove the shared core. Captures and the learning log: `screenshots/villager-gen/setup/`
+(`d-round-2/` is the latest) and `LEARNING.md`.
+
+`check-setup.mjs` starts its own dev server (5334) and a host in-process with a stub
+maker, then proves headless: the workshop, the stitch order and pace, focus on the first
+tool, each tool changing scale, hue, pitch, rate and gait measurably by keyboard and by
+dragging, crude never picked and its note, the host's patterns alone and with words (the manner set by
+the host), the dial pinned at crude for an adult whose admin set it, save and reload, a shared
+pattern reaching a child, the send-off writing persona.json and the voice and its walk staying in view, reduced motion, failures leaving nothing
+placed, the stub host's waiting (a piece cut and pinned) and 422, the profile taken from
+the host whatever the URL says, one repair after a refused module and one after a refused persona, and three unload and
+reload cycles back to baseline. At every captured moment (`1-empty`, `1b-picked`,
+`2-waiting`, `3-tuning`, `4-pattern`, `4b-saved`, `5-walking`) a layout gate checks that
+every visible label is on screen and overlaps no other or the villager's projected
+bounds, and that no tool on the table lies under the slip; run it at `--viewport=390x844`
+and `1024x768` as well as the default. Captures: `screenshots/villager-gen/setup/round-N/`,
+scores and changes per round in its `NOTES.md`.
 
 ## Measured, kitchen scene (November 6, 2026)
 
