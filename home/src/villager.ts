@@ -160,8 +160,21 @@ export const remakeVillager = (person: string, item: string, reason: string) =>
  * "Off you go": the tuned villager becomes the person's (people/<id>/persona.json) with its babble voice. All or nothing
  * on the host: 'failed' when it could not store it (nothing changed), 'away' when the host did not answer.
  */
-export const sendOffVillager = (person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>) =>
-  call<{ ok: true; name: string; persona: unknown }>(`/people/${person}/villagers/${item}/send-off`, { tuning, voice }, true)
+/**
+ * Sends a tuned villager off to be the person's. Besides call()'s outcomes, 'refused' means the host refused its
+ * persona itself: retrying cannot help, so the page says so instead of offering another try.
+ */
+export async function sendOffVillager(person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>): Promise<Outcome<{ name: string; persona: unknown }> | { ok: false; why: 'refused'; reason: string; ms: number }> {
+  const t0 = performance.now()
+  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, true)
+  const ms = performance.now() - t0
+  if (!res) return { ok: false, why: 'away', ms }
+  const body = (await res.json().catch(() => null)) as { refused?: unknown; error?: unknown; name?: unknown; persona?: unknown } | null
+  if (res.status === 422 && body?.refused === true) return { ok: false, why: 'refused', reason: typeof body.error === 'string' ? body.error.slice(0, 200) : '', ms }
+  if (res.status === 409) return { ok: false, why: 'busy', ms }
+  if (!res.ok || !body || typeof body.name !== 'string') return { ok: false, why: 'failed', ms }
+  return { ok: true, ms, name: body.name, persona: body.persona }
+}
 /** The person's villager now, and its babble voice, as the host keeps them. */
 export const currentVillager = (person: string) => call<{ persona: unknown; voice: Record<string, number> | null }>(`/people/${person}/villager`)
 

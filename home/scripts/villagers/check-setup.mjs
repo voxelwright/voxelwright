@@ -841,8 +841,9 @@ try {
     check('save: kept as a whole persona, the tuned warmth mapped in (blunt), cheeky at most, shared', /^blunt/.test(pattern.persona.temperament) && pattern.persona.humour.lean === 'cheeky' && pattern.shared === true && !('dials' in pattern.persona), pattern.persona)
     // #47 review: the host sets the audience, never the page. A cheeky pattern is for adults only.
     check('save: a cheeky saved pattern is kept for adults only, by the host', pattern.audience === 'adult', pattern.audience)
-    // A clean one too, shared, for Sam's pick below.
-    const clean = await page.evaluate(async (persona) => (await import('/src/villager.ts')).saveTemplate('alex', 'Calm Biscuit', persona, { warmth: 0.2, playful: 0.5, chatty: 0.5, humour: 0 }, true), (await st(page)).persona)
+    // A clean one too, shared, for Sam's pick below. It names its villager's record, so the host can trace its source
+    // (review round 2: a save with no traceable source stays in the maker's own age band).
+    const clean = await page.evaluate(async ([persona, item]) => (await import('/src/villager.ts')).saveTemplate('alex', 'Calm Biscuit', persona, { warmth: 0.2, playful: 0.5, chatty: 0.5, humour: 0 }, true, item), [(await st(page)).persona, (await st(page)).item])
     check('save: a clean pattern with no adults-only source is for anyone', clean.ok && clean.template.audience === 'any', clean)
     // #47 review: the first villager's contact shadow is freed when the second one's set replaces it.
     await page.evaluate(() => {

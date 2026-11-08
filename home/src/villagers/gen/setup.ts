@@ -900,7 +900,10 @@ export default {
           saveTag.classList.add('shown')
           note(r.why === 'away'
             ? `${record.name} didn't go: the workshop's helper isn't in just now. They're still here, just as you tuned them. Try "Off you go" again in a moment.`
-            : `${record.name} didn't go: their new home couldn't be saved this time. They're still here, just as you tuned them, so you can try again.`)
+            : r.why === 'refused'
+              // Another try would fail the same way: their character didn't pass the house's checks, so a new one is needed.
+              ? `${record.name} can't move in as they are: their character didn't pass the house's checks. Describe them again to make a new one.`
+              : `${record.name} didn't go: their new home couldn't be saved this time. They're still here, just as you tuned them, so you can try again.`)
           return
         }
         sentOff = r.name
@@ -1256,6 +1259,8 @@ export default {
           state,
           name: made?.name ?? null,
           persona: made?.persona ?? null,
+          /** The host's record of a live-made villager, which saving a pattern names so the host can trace its source. */
+          item: (made?.source as { item?: string } | undefined)?.item ?? null,
           profile: PROFILE,
           humourDial: HUMOUR_DIAL,
           sentOff,

@@ -181,8 +181,11 @@ try {
   await tpl('alex', { name: 'Grown-ups only', persona: STUB_PERSONA, audience: 'adult', shared: true })
   await tpl('alex', { name: 'Private one', persona: STUB_PERSONA })
   const fam = async (who?: string) => (await (await api(`/family/persona-templates${who ? `?for=${who}` : ''}`)).json() as { templates: { name: string; maker: string }[] }).templates
-  // A clean one, from no pattern, made by an adult without a crude setting: for anyone.
-  const plain = await (await tpl('jo', { name: 'Plain helper', persona: STUB_PERSONA, dials: { warmth: 0.9, playful: 0.5, chatty: 0.5, humour: 0 }, shared: true })).json() as { template: { id: string; audience: string; persona: { temperament: string } } }
+  // A clean one, from a villager made with no pattern (named by its item), by an adult without a crude setting: for anyone.
+  const joPlain = await (await api('/people/jo/villagers', { body: { description: 'a plain hare', accent: '#c8553d' } })).json() as { item: string }
+  const plain = await (await tpl('jo', { name: 'Plain helper', persona: STUB_PERSONA, dials: { warmth: 0.9, playful: 0.5, chatty: 0.5, humour: 0 }, item: joPlain.item, shared: true })).json() as { template: { id: string; audience: string; persona: { temperament: string } } }
+  // Review round 2: with no item and no built-in template the source can't be traced, so it stays in the maker's age band.
+  check('audience: a clean pattern saved with no traceable source stays in the maker\'s age band (adult here)', (await (await tpl('jo', { name: 'Untraced', persona: STUB_PERSONA, dials: { warmth: 0.5, playful: 0.5, chatty: 0.5, humour: 0 }, shared: true })).json() as { template: { audience: string } }).template.audience === 'adult')
   const forSam = await fam('sam')
   check('family: a shared clean pattern appears for another person, a private one does not', plain.template.audience === 'any' && forSam.some((t) => t.name === 'Plain helper' && t.maker === 'jo') && !forSam.some((t) => t.name === 'Private one'), forSam.map((t) => t.name))
   check('family: an adults-only pattern is not offered to a child', !forSam.some((t) => t.name === 'Grown-ups only') && (await fam('jo')).some((t) => t.name === 'Grown-ups only'))
@@ -247,9 +250,10 @@ try {
   check('send-off: the next talk (stub agent) is the new villager: its system prompt names Biscuit, not Pebble', /Biscuit/.test(prompt) && !/Pebble/.test(prompt), prompt.slice(0, 200))
   const usage = (await readFile(join(root, 'people', 'jo', 'usage.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).at(-1)
   check('send-off: the turn records the new villager and no persona refusal', usage.villager === 'Biscuit' && !usage.personaRefused, usage)
-  check('send-off: a villager without a persona cannot be sent off (409)', await (async () => {
+  check('send-off: a villager without a persona cannot be sent off (422, refused: retrying cannot help, so not 409 "busy")', await (async () => {
     const r = await (await api('/people/sam/villagers', { body: { description: 'a [stub-bad-persona] vole', accent: '#c8553d' } })).json() as { item: string }
-    return (await sendOff('sam', r.item, { tuning: knobs, voice })).status === 409
+    const answer = await sendOff('sam', r.item, { tuning: knobs, voice })
+    return answer.status === 422 && ((await answer.json()) as { refused?: boolean }).refused === true
   })())
 
   // #47 review: a send-off is all or nothing. voice.json as a directory makes its rename fail after the others are written.

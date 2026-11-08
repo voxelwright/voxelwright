@@ -234,12 +234,24 @@ export async function commitFiles(files: { path: string; text: string }[]) {
     for (const [i, f] of files.entries()) await writeFile(temps[i], f.text, { mode: 0o600 })
     for (; renamed < files.length; renamed++) await rename(temps[renamed], files[renamed].path)
   } catch (error) {
+    // Put back what was already renamed. A restore that fails too is reported, never swallowed: the caller must not
+    // claim "nothing changed" when some files may be new (adversarial review, round 2).
+    let unrestored = 0
     for (let i = renamed - 1; i >= 0; i--) {
       const old = before[i]
-      await (old === null ? rm(files[i].path, { force: true }) : replaceFile(files[i].path, old)).catch(() => {})
+      await (old === null ? rm(files[i].path, { force: true }) : replaceFile(files[i].path, old)).catch(() => void unrestored++)
     }
     await Promise.all(temps.slice(renamed).map((t) => rm(t, { force: true })))
-    throw error
+    throw unrestored ? new PartialCommit(error, unrestored) : error
+  }
+}
+
+/** A commit that failed and could not be fully rolled back: some files may hold the new text. A retry rewrites them all. */
+export class PartialCommit extends Error {
+  readonly unrestored: number
+  constructor(cause: unknown, unrestored: number) {
+    super(`${unrestored} file(s) could not be restored after: ${reasonOf(cause)}`, { cause })
+    this.unrestored = unrestored
   }
 }
 
@@ -420,10 +432,12 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     return { label: t.name, persona: manner, audience: t.audience }
   }
   /** The audience of the pattern a persona came from: its built-in template, and the record's pattern when the page names the record. */
-  const sourceAudiences = async (id: string, persona: Persona, item: unknown): Promise<Audience[] | 'refused'> => {
+  const sourceAudiences = async (id: string, persona: Persona, item: unknown, maker: Profile): Promise<Audience[] | 'refused'> => {
     const out: Audience[] = []
     if (persona.template && Object.hasOwn(TEMPLATE_CARDS, persona.template)) out.push(TEMPLATE_CARDS[persona.template].audience)
-    if (item === undefined) return out
+    // No record named and no built-in template: the source cannot be traced (it may have been another person's adults-only
+    // pattern), so it stays within the maker's own age band; the page leaving `item` out never widens it (review, round 2).
+    if (item === undefined) return out.length ? out : [maker.age === 'child' ? 'child' : 'adult']
     if (typeof item !== 'string' || !ITEM.test(item)) return 'refused'
     const r = await read(id, item)
     if (!r) return 'refused'
@@ -511,7 +525,7 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
         return send(res, 400, { error: reasonOf(error) }), true
       }
       // The audience is the host's: from where the persona came, its lean and its maker, never from the body.
-      const sources = await sourceAudiences(id, persona, b.item)
+      const sources = await sourceAudiences(id, persona, b.item, profile)
       if (sources === 'refused') return send(res, 400, { error: 'item is not a villager this person made' }), true
       const audience = savedAudience(sources, persona.humour.lean === 'cheeky' ? 'cheeky' : 'clean', profile)
       return await locked(`templates/${id}`, async () => {
@@ -631,30 +645,39 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
         try {
           persona = tunedOf(found)
         } catch (error) {
-          return send(res, 422, { error: reasonOf(error) }), true
+          return send(res, 422, { error: reasonOf(error), refused: true }), true
         }
-        if (!persona) return send(res, 409, { error: found.personaRefused ?? 'this villager has no persona' }), true
-        const text = JSON.stringify(persona, null, 2)
-        const current = join(personDir(id), 'persona.json')
-        // The old villager is kept only when it is another one, so a retry of the same send-off never overwrites the
-        // backup with itself; each one kept also goes into persona-history/, where nothing is overwritten.
-        const previous = await readFile(current, 'utf8').catch(() => null)
-        const keep = previous !== null && previous !== text
-        const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
-        try {
-          await mkdir(join(personDir(id), 'persona-history'), { recursive: true, mode: 0o700 })
-          // persona.json last: it is what the next talk turn reads.
-          await commitFiles([
-            { path: join(dir(id), `${found.id}.json`), text: JSON.stringify(found) },
-            ...(keep ? [{ path: join(personDir(id), 'persona-history', `${stamp}.json`), text: previous }, { path: join(personDir(id), 'persona.prev.json'), text: previous }] : []),
-            { path: join(personDir(id), 'voice.json'), text: JSON.stringify({ ...voice, item: found.id }) },
-            { path: current, text },
-          ])
-        } catch (error) {
-          // Nothing changed. A JSON answer, so the page can tell "could not store it" from "the host is away".
-          return send(res, 500, { error: `could not store the send-off: ${reasonOf(error)}`, stored: false }), true
-        }
-        return send(res, 200, { ok: true, name: persona.name, persona }), true
+        // Not 409 ("busy, try again"): a retry would fail the same way, so the page is told the persona itself was refused.
+        if (!persona) return send(res, 422, { error: found.personaRefused ?? 'this villager has no persona', refused: true }), true
+        const sent = persona
+        // persona.json, persona.prev.json, voice.json and persona-history/ are the person's, not the record's: two
+        // send-offs of different villagers must not interleave their snapshots and rollbacks (adversarial review, round 2).
+        return await locked(`persona/${id}`, async () => {
+          const persona = sent
+          const text = JSON.stringify(persona, null, 2)
+          const current = join(personDir(id), 'persona.json')
+          // The old villager is kept only when it is another one, so a retry of the same send-off never overwrites the
+          // backup with itself; each one kept also goes into persona-history/, where nothing is overwritten.
+          const previous = await readFile(current, 'utf8').catch(() => null)
+          const keep = previous !== null && previous !== text
+          const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
+          try {
+            await mkdir(join(personDir(id), 'persona-history'), { recursive: true, mode: 0o700 })
+            // persona.json last: it is what the next talk turn reads.
+            await commitFiles([
+              { path: join(dir(id), `${found.id}.json`), text: JSON.stringify(found) },
+              ...(keep ? [{ path: join(personDir(id), 'persona-history', `${stamp}.json`), text: previous }, { path: join(personDir(id), 'persona.prev.json'), text: previous }] : []),
+              { path: join(personDir(id), 'voice.json'), text: JSON.stringify({ ...voice, item: found.id }) },
+              { path: current, text },
+            ])
+          } catch (error) {
+            // A JSON answer, so the page can tell "could not store it" from "the host is away". stored is false only when
+            // the rollback put everything back; when it could not, some files may be new and a retry rewrites them all.
+            if (error instanceof PartialCommit) console.error(`[villager-make] send-off for ${id}: ${error.message}`)
+            return send(res, 500, { error: `could not store the send-off: ${reasonOf(error)}`, stored: error instanceof PartialCommit ? 'partial' : false }), true
+          }
+          return send(res, 200, { ok: true, name: persona.name, persona }), true
+        })
       })
     }
     return send(res, 405, { error: 'method not allowed' }), true
