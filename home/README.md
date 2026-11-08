@@ -1929,3 +1929,9 @@ started. Changed for the new behaviour: `check-talk-input` expects the resting p
 on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
 was 3), and checks that the camera waits for the sent note to land before turning to its
 reader; its Undo click reports why it missed instead of passing silently.
+
+### Perf gate (#50, November 8)
+
+`npm run perf-gate` at `c7f6d5e`, 2 to 3 other headless Chromes on the machine:
+- **Against `feature/village-talk` (7f3bf15): every gate passes.** The themes add 15 draws (the swatch book) to home and villagers, and 9 to talk. CPU and heap match the base, because the theme plugin loads only on intent (the swatch book opening, a theme asked for), not with every page.
+- **Against `main` (cb1d565): one failure, home draw calls 541 against a limit of 530 (base 482).** 44 of the 59 come from #42's connected house, which is already on the talk branch (526), and 15 from the swatch book. GPU and frame gates pass.
