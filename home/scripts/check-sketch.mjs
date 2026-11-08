@@ -16,6 +16,9 @@ const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.l
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'village-sketch-'))
+// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
+const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
+const link = async (url) => `${url}#token=${await tokenNow()}`
 const hostPort = Number(opt('host') ?? 5503)
 const devPort = Number(opt('dev') ?? 5502)
 const shots = opt('shots')
@@ -50,7 +53,9 @@ const stop = (child) => new Promise((resolve) => {
   child.once('exit', resolve)
   process.kill(-child.pid, 'SIGTERM')
 })
-const jsonl = (person, file) => readFile(join(root, 'people', person, file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
+// The page is Alex's (its link's token). Talking with another villager is Alex's visit (#42), kept under Alex.
+const folderOf = (person) => person === 'alex' ? join(root, 'people', 'alex') : join(root, 'people', 'alex', 'visits', person)
+const jsonl = (person, file) => readFile(join(folderOf(person), file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
 
 await run('node', ['src/villager-cli.ts', '--agent', 'stub', '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
@@ -76,7 +81,7 @@ async function until(page, test, ms = 20_000, every = 50) {
   return s
 }
 async function open(page, query) {
-  await page.goto(base + query)
+  await page.goto(await link(base + query))
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
 }
@@ -235,7 +240,7 @@ try {
   s = await until(page, (x) => x.cards.mia?.finished && /lovely drawing/.test(x.cards.mia.text) && !x.pending, 15_000)
   await page.waitForTimeout(400)
   await shot(page, 'given')
-  const seen = JSON.parse(await readFile(join(root, 'people', 'mia', 'stub-last-image.json'), 'utf8').catch(() => '{}'))
+  const seen = JSON.parse(await readFile(join(folderOf('mia'), 'stub-last-image.json'), 'utf8').catch(() => '{}'))
   const miaLines = (await jsonl('mia', 'conversation.jsonl')).slice(miaBefore)
   check('Moss answers having seen the image, with no route on the line', /lovely drawing/.test(s.cards.mia?.text ?? '') && seen.bytes > 1000 && seen.routed === false && seen.note === true, { card: s.cards.mia?.text, seen })
   check("the drawing's words are your line to Moss, kept with a reference to the drawing", miaLines[0]?.text === INJECTION.words && miaLines[0].sketch?.from === 'alex' && /^[a-f0-9]{12}$/.test(miaLines[0].sketch.id), miaLines[0])
@@ -274,7 +279,8 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(600)
   const others = await readdir(join(root, 'people', 'sam')).catch(() => [])
-  check("the drawings are stored under Alex only", !others.includes('sketches') && !(await readdir(join(root, 'people', 'mia'))).includes('sketches'), others)
+  // A visit writes nothing under Mia, so her folder may not exist at all.
+  check("the drawings are stored under Alex only", !others.includes('sketches') && !(await readdir(join(root, 'people', 'mia')).catch(() => [])).includes('sketches'), others)
   check('no page errors', errors.length === 0, errors)
 
   // Clean unload, three times over.

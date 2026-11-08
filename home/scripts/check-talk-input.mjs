@@ -20,6 +20,9 @@ const agent = opt('agent') ?? 'stub'
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-input-'))
+// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
+const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
+const link = async (url) => `${url}#token=${await tokenNow()}`
 const hostPort = Number(opt('host') ?? 5298)
 const devPort = Number(opt('dev') ?? 5297)
 const base = `http://localhost:${devPort}/`
@@ -53,7 +56,9 @@ const stop = (child) => new Promise((resolve) => {
   child.once('exit', resolve)
   process.kill(-child.pid, 'SIGTERM')
 })
-const jsonl = (person, file) => readFile(join(root, 'people', person, file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
+// The page is Alex's (its link's token). Talking with another villager is Alex's visit (#42), kept under Alex.
+const folderOf = (person) => person === 'alex' ? join(root, 'people', 'alex') : join(root, 'people', 'alex', 'visits', person)
+const jsonl = (person, file) => readFile(join(folderOf(person), file), 'utf8').then((s) => s.trim().split('\n').map((l) => JSON.parse(l)), () => [])
 
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
@@ -71,7 +76,7 @@ async function until(page, test, ms = 20_000, every = 50) {
   return s
 }
 async function open(page, query) {
-  await page.goto(base + query)
+  await page.goto(await link(base + query))
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
 }

@@ -17,7 +17,8 @@ async function start() {
   const fiber = ctx.plugin(villager, { root, agent: stubAgent(0), port: 0, people: { alex: 'Alex', sam: 'Sam' } })
   await fiber.await()
   const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+  // Each person has their own token (#40); the house is shared, so either opens it.
+  return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens.alex as string, samToken: launch.tokens.sam as string }
 }
 
 // Synthetic plan: a 4 x 4 m square room.
@@ -176,6 +177,23 @@ try {
     check(`${what} is refused`, r.status === 400, r)
   }
   check('refused things store nothing', (await readdir(join(dir, 'events'))).length === itemsBefore)
+
+  // The house is the household's, but a person's library is their own (#40): another person's token reads and
+  // changes the house, keeps what others placed, and may not newly place someone else's library item.
+  check("another person's own token reads the shared house", (await api('/house/plans', undefined, host.samToken)).status === 200)
+  await library('alex', 'b1b2c3d4e5f6', true)
+  const asSam = async (path: string, body: unknown) => {
+    const res = await api(`/house/plans${path}`, body, host.samToken)
+    return { status: res.status, json: await res.json() }
+  }
+  const V8 = hex('8', 16)
+  const eventsBeforeSam = (await readdir(join(dir, 'events'))).length
+  const samPlacesAlex = await asSam('/versions', { version: { id: V8, parent: V7, plan: { ...base, furniture: [onTable, { ...lamp, id: 'f.other', item: { library: 'b1b2c3d4e5f6', person: 'alex' } }] } } })
+  check("placing someone else's library item is refused 403, and nothing is stored", samPlacesAlex.status === 403 && /alex's, not yours/.test(samPlacesAlex.json.error) && (await readdir(join(dir, 'events'))).length === eventsBeforeSam, samPlacesAlex)
+  const samKeeps = await asSam('/versions', { version: { id: V8, parent: V7, note: 'Sam added a picture', plan: { ...base, furniture: [onTable, picture] } } })
+  check("a version by another person keeps what was already placed, whoever's it is", samKeeps.status === 200 && samKeeps.json.version.plan.furniture[0].item.person === 'alex', samKeeps)
+  const back = await post('/head', { head: V7, expect: V8 })
+  check('and the head moves back for the checks below', back.status === 200, back)
 
   // Two hosts on one root racing one parent: the link() claim lets one in and refuses the other.
   const twin = await start()

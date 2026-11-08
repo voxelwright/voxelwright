@@ -232,19 +232,29 @@ export function planStore(root: string, kept: (person: string, item: string) => 
     res.end(JSON.stringify(value))
   }
 
-  /** Refuses 409 unless every library item the plan names is in that person's library and kept. */
-  async function checkKept(house: Obj) {
-    const refs = new Map<string, { library: string; person: string }>()
-    const add = (f: unknown) => {
-      const item = (f as Obj).item as Obj
-      if (typeof item.library === 'string') refs.set(`${item.person}/${item.library}`, item as { library: string; person: string })
+  /**
+   * Refuses 409 unless every library item the plan names is in that person's library and kept, and 403 when the
+   * plan newly names someone else's: a person's library is their own (#40), so a version may add only the caller's
+   * items. Items already in the parent version stay, whoever placed them.
+   */
+  async function checkKept(house: Obj, caller: string, parent: Obj | null) {
+    const refs = (p: Obj | null) => {
+      const out = new Map<string, { library: string; person: string }>()
+      for (const f of (p?.furniture as unknown[] | undefined) ?? []) {
+        const item = (f as Obj).item as Obj
+        if (typeof item.library === 'string') out.set(`${item.person}/${item.library}`, item as { library: string; person: string })
+      }
+      return out
     }
-    for (const f of house.furniture as unknown[]) add(f)
-    for (const { library, person } of refs.values()) if (!(await kept(person, library))) refuse(`library item ${library} is not one ${person} has kept`, 409)
+    const before = refs(parent)
+    for (const [key, { library, person }] of refs(house)) {
+      if (!before.has(key) && person !== caller) refuse(`library item ${library} is ${person}'s, not yours to place`, 403)
+      if (!(await kept(person, library))) refuse(`library item ${library} is not one ${person} has kept`, 409)
+    }
   }
 
-  /** /house/plans[/<what>]; the caller has checked the token. */
-  return async function plans(what: 'versions' | 'head' | 'names' | undefined, req: IncomingMessage, res: ServerResponse) {
+  /** /house/plans[/<what>]; the service has checked the token and passes whose it is. */
+  return async function plans(what: 'versions' | 'head' | 'names' | undefined, req: IncomingMessage, res: ServerResponse, caller: string) {
     try {
       if (what === undefined && req.method === 'GET') {
         const { versions, head, names } = await load()
@@ -270,7 +280,7 @@ export function planStore(root: string, kept: (person: string, item: string) => 
             refuse(`version ${v.id} exists`, 409)
           }
           if (v.parent !== state.head) throw new Stale('the house plan moved on')
-          await checkKept(house)
+          await checkKept(house, caller, (state.versions.find((k) => k.id === state.head)?.plan as Obj | undefined) ?? null)
           const version: Version = { ...sent, at }
           await append(state, { kind: 'version', version })
           return send(res, 200, { version })

@@ -1,10 +1,17 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
-import { conversation, say } from '../villager'
+import { conversation, ME, say, TOKEN_EVENT, tokenTag } from '../villager'
 import { inputVariant } from '../talk/input'
 
 const STORAGE_KEY = 'village.notebook.lines'
+/** Lines kept but not yet delivered to the villager, oldest first, each with who wrote it and under which link. */
+const OUTBOX_KEY = 'village.notebook.outbox'
+/** Lines that will never be sent: written under another link (or before lines were tagged). Kept, not delivered. */
+const HELD_KEY = 'village.notebook.held'
+/** A queued line: the page's person and the fingerprint of the link it was written under (never the token itself). */
+interface Queued { text: string; person: string; tag: string | null }
+const RETRY_S = 5 // seconds between attempts while the villager is away
 const HAND = 'italic 44px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
 // Matches paintPage in paint.ts: lines are 52px apart and the page's own note uses the first two.
 const lineY = (i: number) => 140 + 52 * (i + 1) - 10
@@ -15,22 +22,23 @@ const VILLAGER_HAND = 'italic 38px "Snell Roundhand", "Apple Chancery", "Segoe S
 const REPLY_FIRST = 4
 const REPLY_ROWS = 12
 const WRITE_RATE = 32 // characters a second, so chunky arrivals still read as writing
-// Synthetic person until family isolation is proven (AGENTS.md).
-const PERSON = 'alex'
 const AWAY = 'Your villager is out for a moment. Your line is kept here, and they will read it when they are back.'
+const LINK = 'This page needs your latest link from the host. Open it, and your villager will read your line then.'
+const REFUSED = 'This link belongs to someone else, so your line was not sent. It stays on your page.'
+const OTHER = 'A line written under another link stays on your page and was not sent with this one.'
 
-function readLines(): string[] {
+function readLines(key = STORAGE_KEY): string[] {
   try {
-    const lines = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    const lines = JSON.parse(localStorage.getItem(key) ?? '[]')
     return Array.isArray(lines) ? lines.filter((l) => typeof l === 'string') : []
   } catch {
     return []
   }
 }
 
-function saveLines(lines: string[]): boolean {
+function saveLines(lines: string[], key = STORAGE_KEY): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(lines))
+    localStorage.setItem(key, JSON.stringify(lines))
     return true
   } catch {
     return false
@@ -63,6 +71,8 @@ export default {
     input.type = 'text'
     input.maxLength = 48
     input.autocomplete = 'off'
+    // Focused only by choosing the notebook, so Tab never lands in an invisible field.
+    input.tabIndex = -1
     input.setAttribute('aria-label', 'A line for the notebook')
     input.className = 'village-offscreen'
     const style = document.createElement('style')
@@ -190,24 +200,110 @@ export default {
       paint()
     }
 
+    // Each kept line goes to an outbox in local storage first and leaves it once the
+    // villager has it. Lines typed while it answers wait their turn; while it is away
+    // they are tried again every RETRY_S seconds and on the next visit. A reply cut
+    // off mid-stream is not resent: the host already has that line.
+    // A line is sent only under the link it was written under (#42): the outbox outlives
+    // the tab's token, and another person's link opened in this browser must never send
+    // it as theirs. Lines that cannot be matched move to the held list, kept and unsent.
+    const isQueued = (q: unknown): q is Queued => !!q && typeof q === 'object' && typeof (q as Queued).text === 'string' && typeof (q as Queued).person === 'string' && ((q as Queued).tag === null || typeof (q as Queued).tag === 'string')
+    const readQueue = (key: string): unknown[] => {
+      try {
+        const list = JSON.parse(localStorage.getItem(key) ?? '[]')
+        return Array.isArray(list) ? list : []
+      } catch {
+        return []
+      }
+    }
+    const saveQueue = (key: string, list: Queued[]) => {
+      try {
+        localStorage.setItem(key, JSON.stringify(list))
+        return true
+      } catch {
+        return false
+      }
+    }
+    const outbox: Queued[] = []
+    const held = readQueue(HELD_KEY).filter(isQueued)
+    // Untagged lines from before tagging, or another person's, are held, never sent.
+    const stored = readQueue(OUTBOX_KEY)
+    for (const q of stored) {
+      if (isQueued(q) && q.person === ME) outbox.push(q)
+      else held.push(isQueued(q) ? q : { text: typeof q === 'string' ? q : '', person: '', tag: null })
+    }
+    if (outbox.length !== stored.length) {
+      saveQueue(HELD_KEY, held)
+      saveQueue(OUTBOX_KEY, outbox)
+    }
+    /** Moves every queued line not written under `tag` to the held list. */
+    const holdOthers = (tag: string | null) => {
+      const keep = outbox.filter((q) => q.person === ME && q.tag === tag)
+      if (keep.length === outbox.length) return false
+      held.push(...outbox.filter((q) => !keep.includes(q)))
+      outbox.splice(0, outbox.length, ...keep)
+      saveQueue(HELD_KEY, held)
+      saveQueue(OUTBOX_KEY, outbox)
+      return true
+    }
     let talking = false
-    const talk = async (text: string) => {
+    let retryIn = 0
+    let aborter: AbortController | null = null
+    const note = (text: string) => showReply(text, { note: true, instant: true })
+    const talk = async () => {
+      const line = outbox[0]
+      if (talking || line === undefined) return
       talking = true
+      aborter = new AbortController()
       voice.dataset.villager = 'writing'
       let heard = ''
       shown = 0
       showReply('')
-      const said = await say(PERSON, text, (t) => {
+      // The line goes only under the link it was written under; say() checks the tab's token against it.
+      const said = await say(ME, line.text, (t) => {
         heard += t
         showReply(heard)
-      })
+      }, { signal: aborter.signal, tag: line.tag })
+      aborter = null
       talking = false
+      if (disposed) return
       voice.dataset.villager = said.ok ? 'answered' : said.why
+      // Kept for another try: the host was away, or the link must be renewed first.
+      const retry = !said.ok && (said.why === 'away' || said.why === 'link')
+      if (!retry && outbox[0] === line) {
+        outbox.shift()
+        // Not sent and never sendable under this link: held, not lost.
+        if (!said.ok && (said.why === 'other' || said.why === 'refused')) {
+          held.push(line)
+          saveQueue(HELD_KEY, held)
+        }
+        saveQueue(OUTBOX_KEY, outbox)
+      }
       if (said.ok) showReply(said.reply)
       else if (said.why === 'busy') showHint('Your villager is still writing')
-      else if (said.why === 'away') showReply(AWAY, { note: true, instant: true })
-      else showReply('I could not quite answer that one. Your line is kept; try me again in a moment.', { note: true, instant: true })
+      else if (said.why === 'away') note(AWAY)
+      else if (said.why === 'link') note(LINK)
+      else if (said.why === 'refused') note(REFUSED)
+      else if (said.why === 'other') note(OTHER)
+      else if (said.why === 'cut') note('Your villager was interrupted partway through. Your line is kept; try me again in a moment.')
+      else note('I could not quite answer that one. Your line is kept; try me again in a moment.')
       voice.textContent = reply
+      if (!retry) void talk()
+      else if (said.why === 'away') retryIn = RETRY_S
+      // 'link': resending under the same token never helps; a new link (TOKEN_EVENT) tries again.
+    }
+    // A link opened in this tab installed a different token: lines written under another link are held, the rest go now.
+    const onToken = () => {
+      void tokenTag().then((tag) => {
+        if (disposed) return
+        if (holdOthers(tag) && !talking) {
+          note(OTHER)
+          voice.dataset.villager = 'other'
+          voice.textContent = reply
+        }
+        retryIn = 0
+        void talk()
+      })
     }
 
     const commit = () => {
@@ -216,9 +312,15 @@ export default {
       lines.push(text)
       draft = ''
       input.value = ''
-      showHint(saveLines(lines) ? 'Kept on the page' : 'Written, but this browser could not save it')
+      const pageSaved = saveLines(lines)
       paint()
-      if (!talking) void talk(text)
+      // Tagged with the link it was written under; one promise per token keeps lines in order.
+      void tokenTag().then((tag) => {
+        outbox.push({ text, person: ME, tag })
+        showHint(pageSaved && saveQueue(OUTBOX_KEY, outbox) ? 'Kept on the page' : 'Written, but this browser could not save it')
+        retryIn = 0
+        void talk()
+      })
     }
 
     const onInput = () => {
@@ -239,7 +341,11 @@ export default {
       document.body.append(input, voice)
       input.addEventListener('input', onInput)
       input.addEventListener('keydown', onKey)
+      addEventListener(TOKEN_EVENT, onToken)
       return () => {
+        removeEventListener(TOKEN_EVENT, onToken)
+        disposed = true
+        aborter?.abort()
         if (open) view.focus(null)
         restore()
         input.remove()
@@ -249,26 +355,49 @@ export default {
     }, 'notebook writing')
 
     // Register once the table has made the book.
+    // The table owns the book, so when the table reloads the entry follows the new one.
     let removeEntry: (() => void) | null = null
+    let registered: THREE.Object3D | null = null
+    let disposed = false
     ctx.effect(() => () => removeEntry?.(), 'notebook entry')
+    const inScene = (o: THREE.Object3D) => {
+      while (o.parent) o = o.parent
+      return o === scene
+    }
 
     // Show kept lines once the table's page exists, and blink the caret while writing.
     let painted = false
+    let asked = false
     let blink = 0
     ctx.on('village/frame', (dt) => {
+      if (registered && !inScene(registered)) {
+        if (open) leave()
+        removeEntry?.()
+        removeEntry = null
+        registered = null
+        painted = false
+      }
       if (!painted && page()) {
         painted = true
         paint()
-        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: book()!, select: enter, leave })
-        // The last answer is on the page when you come back, written already.
-        void conversation(PERSON).then((history) => {
-          const last = history?.filter((l) => l.from === 'villager' && l.text).pop()
-          if (!last?.text || talking || reply) return
-          showReply(last.text, { instant: true })
-          voice.dataset.villager = 'remembered'
-          voice.textContent = last.text
-        })
+        paintReply()
+        registered = book()!
+        removeEntry = entries.add({ id: 'notebook', label: 'Notebook', object: registered, select: enter, leave })
+        if (!asked) {
+          asked = true
+          // The last answer is on the page when you come back, written already.
+          void conversation(ME).then((history) => {
+            const last = history?.filter((l) => l.from === 'villager' && l.text).pop()
+            if (disposed || !last?.text || talking || reply) return
+            showReply(last.text, { instant: true })
+            voice.dataset.villager = 'remembered'
+            voice.textContent = last.text
+          })
+          // Lines kept while the villager was away go now.
+          void talk()
+        }
       }
+      if (retryIn > 0 && !talking && (retryIn -= dt) <= 0) void talk()
       if (shown < reply.length) {
         pen += WRITE_RATE * dt
         const step = Math.floor(pen)

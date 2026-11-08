@@ -2,7 +2,9 @@
 // talk, the table mid-round, the dollhouse, ?q=low, and a phone width. Replies are scripted
 // (Playwright answers the villager API), so every run gets the same words with the same timing;
 // no host runs. Headless only. `--query=` adds to the page's query (for a variant under test).
-// Usage: node scripts/talk-shots.mjs <out-dir> [--query=a=b] [--dev=5580] [--only=desktop|phone|low]
+// `--real` leaves the villager API to the dev server's host (start one with `npm run villager` and
+// pass its VILLAGE_ROOT and VILLAGER_PORT to this script), for the real model's words and timing.
+// Usage: node scripts/talk-shots.mjs <out-dir> [--query=a=b] [--dev=5600] [--only=desktop|phone|low] [--real]
 import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -12,10 +14,11 @@ import { chromium } from 'playwright'
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const out = args.find((a) => !a.startsWith('--'))
-if (!out) throw new Error('usage: talk-shots.mjs <out-dir> [--query=a=b] [--dev=5580]')
+if (!out) throw new Error('usage: talk-shots.mjs <out-dir> [--query=a=b] [--dev=5600] [--real]')
 const extra = opt('query')
 const only = opt('only')
-const devPort = Number(opt('dev') ?? 5580)
+const devPort = Number(opt('dev') ?? 5600)
+const real = args.includes('--real')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 await mkdir(out, { recursive: true })
 
@@ -93,7 +96,7 @@ const sent = []
 
 async function session(name, viewport, q, fn, extra = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, ...extra })
-  await scripted(context)
+  if (!real) await scripted(context)
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -107,7 +110,8 @@ async function session(name, viewport, q, fn, extra = {}) {
 }
 
 const state = (page) => page.evaluate(() => window.village.talk.state())
-async function until(page, test, ms = 30_000) {
+// A real model's reply can run to several pages, each turned after time to read it.
+async function until(page, test, ms = real ? 120_000 : 30_000) {
   const end = Date.now() + ms
   let s
   do {
@@ -117,6 +121,8 @@ async function until(page, test, ms = 30_000) {
   } while (Date.now() < end)
   throw new Error(`timed out: ${test}`)
 }
+/** A villager's reply is on its card in full: the scripted words, or any finished reply from a real model. */
+const replied = (s, id, words) => s.cards[id]?.finished && !s.pending && (real ? s.cards[id].text.length > 12 : words.test(s.cards[id].text))
 const choose = (page, id) => page.evaluate((id) => window.village.kernel.root.get('entries').choose(id), id)
 const glide = (page, frame) => page.evaluate((f) => window.village.kernel.root.get('view').glide(f, 0), frame)
 /** The kitchen, close enough to see who is who. */
@@ -138,7 +144,7 @@ async function tableRound(page, shot) {
   await page.keyboard.type('Shall we plant some herbs this weekend?', { delay: 25 })
   await page.keyboard.press('Enter')
   // Mid-round: one villager has spoken, the next is half-way through its words.
-  await until(page, (s) => s.round.length >= 2 && s.speaker === s.round[1].speaker && s.cards[s.speaker]?.as === 'speaking' && !s.cards[s.speaker].finished && s.cards[s.speaker].text.length > 20, 40_000)
+  await until(page, (s) => s.round.length >= 2 && s.speaker === s.round[1].speaker && s.cards[s.speaker]?.as === 'speaking' && !s.cards[s.speaker].finished && s.cards[s.speaker].text.length > 20, real ? 120_000 : 40_000)
   await page.waitForTimeout(700)
   await shot('table')
 }
@@ -169,10 +175,15 @@ try {
       await page.waitForTimeout(800)
       await page.keyboard.type("What's for dinner tonight?", { delay: 20 })
     }
-    await page.waitForTimeout(300)
+    // The late frame by the page's clock too: 0.7 s after Enter, or at once if the first frame took longer.
+    await until(page, (x) => x.input.sentAgo >= 0.7, 5000)
     await shot('sent-late')
     sent.push({ late: true, sentAgo: +(await state(page)).input.sentAgo.toFixed(2) })
-    await until(page, (s) => s.cards.alex?.finished && s.cards.alex.text.length > 40)
+    // Landed: the note has arrived (held, or opening into the reply).
+    const landed = await until(page, (x) => !x.input.flying, 10_000)
+    await shot('landed')
+    sent.push({ landed: true, sentAgo: +landed.input.sentAgo.toFixed(2) })
+    await until(page, (s) => replied(s, 'alex', /soup|bread/i))
     await page.waitForTimeout(800)
     await shot('reply')
     await page.keyboard.press('Escape')
@@ -182,7 +193,7 @@ try {
     await page.waitForTimeout(1200)
     await page.keyboard.type('How is the basil doing?', { delay: 30 })
     await page.keyboard.press('Enter')
-    await until(page, (s) => s.cards.mia?.finished && /basil|bushy/.test(s.cards.mia.text))
+    await until(page, (s) => replied(s, 'mia', /basil|bushy/))
     await page.waitForTimeout(1000)
     await shot('talk')
     await page.keyboard.press('Escape')
@@ -206,7 +217,7 @@ try {
     await page.waitForTimeout(1200)
     await page.keyboard.type('How is the basil doing?', { delay: 30 })
     await page.keyboard.press('Enter')
-    await until(page, (s) => s.cards.mia?.finished && /basil|bushy/.test(s.cards.mia.text))
+    await until(page, (s) => replied(s, 'mia', /basil|bushy/))
     await page.waitForTimeout(1000)
     await shot('talk')
     await page.keyboard.press('Escape')

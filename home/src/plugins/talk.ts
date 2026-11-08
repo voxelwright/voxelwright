@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { canvas, toTexture } from '../paint'
+import { canvas, rng, toTexture } from '../paint'
 import { KINDS } from '../villagers/kinds'
 import { Villager, type Task } from '../villagers/rig'
 import { contactShadows, stepCrowd } from '../villagers/cast'
 import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
+import { TABLE_TOP } from '../layout'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
@@ -105,6 +106,15 @@ const FAREWELL = /^\s*(?:(?:ok(?:ay)?|right|well)[\s,]+)?(?:thanks?(?: you)?(?: 
 /** Booster cushions on the chairs, so a seated villager clears the table top. */
 const BOOSTER = 0.12/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
 const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
+/**
+ * Where a note to the whole table can lie during the round, nearest the front first: the first with no face over
+ * it in the table shot is used (#42 paper climb: a fixed spot put it over a chair back, floating).
+ */
+const TABLE_SPOTS = [[-0.3, 0.44], [-0.75, 0.44], [0.2, 0.44], [-0.3, 0.12], [-0.8, 0.12], [0.25, 0.12], [-0.6, -0.15],
+  [-0.95, 0.3], [-0.95, 0.0], [-0.9, -0.25], [-0.35, -0.25]]
+  .map(([x, z]) => new THREE.Vector3(x, TABLE_TOP + 0.004, z))
+/** Your ink, the same blue-black as the pad's (input.ts). */
+const MY_INK = '#23395a'
 const KEPT = 'village.talk.kept'
 
 interface Speech {
@@ -167,7 +177,11 @@ ruler.className = 'talk-ruler'
 ruler.setAttribute('aria-hidden', 'true')
 const fits = (text: string) => {
   ruler.textContent = text
-  return ruler.offsetHeight <= PAGE_LINES * TEXT_PX * LEADING + 2
+  // On a phone a page is four lines at the slip's own width, so a long reply never comes down over the
+  // speaker's face (#42 paper climb: six lines and the page before reached Moss's eyes).
+  const narrow = innerWidth < 600
+  ruler.style.width = `${narrow ? Math.min(TEXT_WIDTH, innerWidth - 76) : TEXT_WIDTH}px`
+  return ruler.offsetHeight <= (narrow ? 4 : PAGE_LINES) * TEXT_PX * LEADING + 2
 }
 
 /** A speech card anchored to a villager: a stitched paper card wearing its name tag. */
@@ -224,6 +238,14 @@ class Card {
     this.more.hidden = true
     this.more.addEventListener('click', () => this.next())
     this.el.append(tab, page, this.more)
+  }
+
+  /**
+   * Stepped back after its turn: the reply from its start, so the slip's first lines are its first words
+   * (#42 paper climb: a long reply stepped back on its last page, a fragment like "will still be there.").
+   */
+  recall() {
+    if (this.finished) this.said.textContent = this.full.trim()
   }
 
   /** The words stop where they are: a reply cut short says so once. */
@@ -364,14 +386,14 @@ export default {
     group.name = 'talk'
 
     // ── The cast ──────────────────────────────────────────────────────────
-    const glyphMap = stitchedBang()
     const cast: Member[] = PEOPLE.map((p, i) => {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
       fig.root.scale.setScalar(SCALE)
       const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open', seatY: SEAT_Y + BOOSTER })
       const [name, role] = spec.name.split(', ')
-      const glyph = new THREE.Sprite(new THREE.SpriteMaterial({ map: glyphMap, transparent: true, depthWrite: false, opacity: 0 }))
+      // Kept under the bloom threshold, like the pad's paper, so the lamp never bleaches it.
+      const glyph = new THREE.Sprite(new THREE.SpriteMaterial({ map: paperBang(p.colour), color: new THREE.Color(0.86, 0.82, 0.74), transparent: true, depthWrite: false, opacity: 0 }))
       glyph.name = `${name} news glyph`
       glyph.scale.setScalar(0.15)
       glyph.visible = false
@@ -452,11 +474,27 @@ export default {
     voice.className = 'talk-voice'
     voice.setAttribute('role', 'status')
     voice.setAttribute('aria-live', 'polite')
+    // Your line at the table: the note lies open on the table for the round, so the replies have something to
+    // answer (#42 paper climb: your line vanished once sent). Laid out here, painted as paper by paper.ts.
+    const myNote = document.createElement('div')
+    myNote.className = 'talk-card mine'
+    myNote.dataset.talkCard = 'you'
+    myNote.setAttribute('aria-hidden', 'true')
+    const myTo = document.createElement('p')
+    myTo.className = 'to-line'
+    const myWords = document.createElement('p')
+    myWords.className = 'words'
+    const mySaid = document.createElement('span')
+    mySaid.className = 'said'
+    myWords.append(mySaid)
+    myNote.append(myTo, myWords)
+    /** Your line on screen: lying on the table (`card` null), or clipped to the reply it brought (#42 paper climb). */
+    const pinned: { on: boolean; card: Member | null; at: number; x: number; y: number; placed: boolean; lost: number } = { on: false, card: null, at: 0, x: 0, y: 0, placed: false, lost: 0 }
     const style = document.createElement('style')
     style.textContent = css() + paperCss()
     ctx.effect(() => {
       document.head.append(style)
-      document.body.append(slip, voice, ruler, ...cast.flatMap((m) => [m.card.el, m.tag]))
+      document.body.append(slip, voice, ruler, myNote, ...cast.flatMap((m) => [m.card.el, m.tag]))
       return () => {
         for (const m of cast) {
           m.card.el.remove()
@@ -465,6 +503,7 @@ export default {
         slip.remove()
         voice.remove()
         ruler.remove()
+        myNote.remove()
         document.body.classList.remove('talk-hovering')
         style.remove()
       }
@@ -486,11 +525,13 @@ export default {
     let released: Member | null = null
 
     const show = (m: Member, as: 'speaking' | 'said') => {
+      if (as === 'said') m.card.recall()
       showing.set(m, as)
       m.card.el.classList.add('shown')
       m.card.el.classList.toggle('said', as === 'said')
     }
     const hide = (m: Member) => {
+      if (pinned.card === m) unpin()
       m.card.stop()
       showing.delete(m)
       m.card.placed = false
@@ -498,6 +539,32 @@ export default {
     }
     const hideAll = () => {
       for (const m of cast) hide(m)
+      unpin()
+    }
+    /** Your line lies on the table, opened out of the note that landed there. */
+    /**
+     * Your line, as the slip torn off your pad, addressed at its head: one form wherever it is. At the table it
+     * lies on the table for the round; in a talk it is clipped to the corner of the reply it brought.
+     */
+    const pin = (text: string, to: Member | null = null) => {
+      myTo.textContent = `to ${to?.name ?? 'the table'}`
+      myNote.dataset.to = to?.name ?? 'the table'
+      myNote.style.setProperty('--c', to?.colour ?? '#8a6a48')
+      mySaid.textContent = text
+      pinned.on = true
+      pinned.card = to
+      myNote.classList.toggle('clipped', Boolean(to))
+      pinned.placed = false
+      if (input?.holding && input.heldBy() === null) {
+        const at = input.heldAt()
+        if (at) slips.from('you', at)
+        input.release()
+      }
+    }
+    const unpin = () => {
+      pinned.on = false
+      pinned.card = null
+      myNote.classList.remove('shown')
     }
     const speak = (m: Member, text: string, done = true) => {
       m.card.reset()
@@ -599,6 +666,8 @@ export default {
       return n.userData.cutaway ? !facing : facing
     }
     let subject: THREE.Object3D | null = null
+    /** The pose the camera was last sent to for a conversation. */
+    let shot: Pose | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
       // The held pad rides with the camera; it never blocks a shot. A cut-away wall blocks one only if it would stand in it.
@@ -730,11 +799,11 @@ export default {
       if (input?.flying) void input.landed().then(() => {
         if (partner !== m || mode !== 'talk') return
         m.v.beat()
-        view.focus(twoShot(m), 7)
+        view.focus(shot = twoShot(m), 7)
       })
       else {
         m.v.beat()
-        view.focus(twoShot(m), 7)
+        view.focus(shot = twoShot(m), 7)
       }
       const news = m.news
       if (news) clearNews(m)
@@ -773,7 +842,7 @@ export default {
 
     const toTable = () => {
       mode = 'table'
-      view.focus(tableShot(), 5)
+      view.focus(shot = tableShot(), 5)
       const names = seated.map((m) => m.name)
       openSlip(seated.length > 1 ? `Write to the table…` : `Write to ${names[0]}…`, tableChips(), seated.length > 1 ? 'table' : seated[0]!)
     }
@@ -869,6 +938,10 @@ export default {
     const inCharacter = (why: string) =>
       why === 'busy' ? "Hold on, I'm still thinking about the last thing."
         : why === 'failed' ? 'I lost my thread there. Could you say that again?'
+          // 403 (#40): the tab's token is someone else's, not this page's person's; nothing was sent.
+          : why === 'refused' ? "This page was opened with someone else's link, so that didn't reach me."
+          // 401 or no token: a link from an earlier launch. Resending won't help until the latest link is opened.
+          : why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again."
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
@@ -877,7 +950,7 @@ export default {
       void sayTo(m.person, text, (t) => {
         speech.first ??= performance.now()
         speech.text += t
-      }, context, routing, sketch).then((said) => {
+      }, { context, routing, sketch }).then((said) => {
         if (said.ok) speech.text = said.routed ? '' : said.reply
         else speech.away = said.why
         speech.done = true
@@ -930,14 +1003,34 @@ export default {
     const perform = async (m: Member, speech: Speech, said: string): Promise<boolean> => {
       replies++
       speaker = m
-      m.v.thinking = true
+      // With a note on its way it waits to read it before it thinks.
+      m.v.thinking = !input?.flying
       hide(m)
+      // Your note lands in the reader's paws first, and is read for a moment, before the answer opens out of it.
+      const reading = Boolean(input?.flying)
+      if (reading) {
+        // Its paws come up to catch the note as it comes near.
+        while (input!.flying && input!.state().sentAgo < 1.1) await frame()
+        if (input!.flying && input!.flyingTo() === m.v.fig.root) m.v.reading = true
+        await input!.landed()
+        m.v.reading = false
+        // It holds the note up in both paws and looks down at it, then thinks.
+        if (input!.heldBy() === m.v.fig.root) {
+          m.v.thinking = false
+          m.v.reading = true
+          const until = clock + 1.1
+          while (clock < until) await frame()
+          m.v.reading = false
+          m.v.thinking = true
+        }
+      }
       // Even a quick answer gets its beat: eyes up, a tap of the chin, then words (shorter when they are already in).
-      const beat = clock + (speech.text || speech.done ? 0.3 : 0.5)
+      const beat = clock + (speech.text || speech.done || reading ? 0.3 : 0.5)
       while ((!speech.text && !speech.done) || clock < beat) await frame()
       // A reply that opens with "(" may be a pass: wait for the whole of it before showing anything.
       while (!speech.done && /^\s*\([^)]*$/.test(speech.text)) await frame()
-      m.v.thinking = false
+      m.v.thinking = m.v.reading = false
+      openNote(m)
       if (speech.done && !speech.away && PASS.test(speech.text)) {
         m.v.nod()
         m.card.beat(speech.text.trim())
@@ -955,6 +1048,8 @@ export default {
       }
       m.v.speaking = true
       speak(m, speech.text, speech.done && !speech.away)
+      // In a talk your note comes back clipped to the reply: the note opened into it.
+      if (mode === 'talk') pin(said, m)
       timing?.set(m, performance.now())
       while (!speech.done || !m.card.finished) {
         // The host failing mid-reply cuts the words short where they are.
@@ -972,6 +1067,17 @@ export default {
       m.v.speaking = false
       voice.textContent = `${m.name}: ${speech.text}`
       return true
+    }
+
+    /** The note held in this villager's paws opens into its slip (the slip grows out of where the note is). */
+    const openNote = (m: Member) => {
+      if (!input?.holding || input.heldBy() !== m.v.fig.root) return
+      const at = input.heldAt()
+      if (at) {
+        slips.from(m.person, at)
+        slips.from('you', at)
+      }
+      input.release()
     }
 
     /** Seated villagers in the order a text names them. */
@@ -1020,6 +1126,12 @@ export default {
         return { m, speech, entry }
       }
       let current: ReturnType<typeof start> | null = start(queue.shift()!)
+      unpin()
+      // To the whole table: the note lands on the table and lies there, open, for the round.
+      if (seated.length > 1) {
+        if (input?.flying) await input.landed()
+        if (mode === 'table') pin(text)
+      }
       while (current) {
         const { m, speech, entry } = current
         // The next speaker is asked the moment this reply is complete.
@@ -1055,8 +1167,9 @@ export default {
         current = await upcoming
         if (current && mode === 'table') {
           await pause(0.45)
-          // A narrow screen has room for one line at the table: the next speaker's.
-          if (showing.get(m)) innerWidth < 600 ? hide(m) : show(m, 'said')
+          // What was said steps back; on a phone to a single line, so the round so far stays in view (#42
+          // paper climb: hiding it left one card with nothing it answered).
+          if (showing.get(m)) show(m, 'said')
         }
       }
       speaker = null
@@ -1185,6 +1298,8 @@ export default {
     const EDGE = 12
     /** How far a card's name tab sticks up above it. */
     const TAB = 22
+    /** How far your note overlaps the top of the reply it is taped to: just touching, the tape bridges them. */
+    const CLIP = 3
     const camUp = new THREE.Vector3()
     const camRight = new THREE.Vector3()
     const edge = new THREE.Vector3()
@@ -1214,6 +1329,7 @@ export default {
      * beside in a talk (the head fills the shot), above at the table. The
      * speaker is placed first; cards already said fit around it and the slip.
      */
+    const inside = (o: Omit<Spot, 'tail'>) => o.l >= EDGE && o.l + o.w <= innerWidth - EDGE && o.t >= EDGE + TAB && o.t + o.h <= innerHeight - EDGE
     const placeCards = (dt: number) => {
       const taken: Omit<Spot, 'tail'>[] = []
       if (slip.classList.contains('shown')) {
@@ -1232,42 +1348,112 @@ export default {
         if (o.fade < 0.5 || !o.v.fig.root.visible) continue
         const f = headBox(o)
         if (f.x1 < 0 || f.x0 > innerWidth || f.y1 < 0 || f.y0 > innerHeight) continue
-        faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
+        // The whole head, ears and all: slips used to be allowed over its top (#42 paper climb).
+        faces.set(o, { l: f.x0, t: f.y0, w: f.x1 - f.x0, h: f.y1 - f.y0 })
       }
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
       for (const m of order) {
         const { card } = m
         const el = card.el
-        const w = el.offsetWidth, h = el.offsetHeight
+        // Your note clipped above its top edge is placed with it, as one block.
+        const lead = pinned.on && pinned.card === m ? myNote.offsetHeight - CLIP : 0
+        const w = el.offsetWidth, ch = el.offsetHeight, h = ch + lead
         const head = headBox(m)
         const mouth = head.y0 + (head.y1 - head.y0) * 0.5
-        const right: Spot = { l: head.x1 + 24, t: mouth - 40, w, h, tail: 'left' }
-        const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40, w, h, tail: 'right' }
+        const right: Spot = { l: head.x1 + 24, t: mouth - 40 - lead, w, h, tail: 'left' }
+        const left: Spot = { l: head.x0 - 24 - w, t: mouth - 40 - lead, w, h, tail: 'right' }
         const above: Spot = { l: head.cx - w / 2, t: head.y0 - h - 22, w, h, tail: 'down' }
         // Beside the head in a talk on a wide screen; above it at the table and on a narrow screen, where beside cannot fit.
         const ways = mode === 'talk' && partner === m && innerWidth >= 600 ? [right, left, above] : [above, right, left]
         // A card may slide along its side as long as its tail still reaches the head.
-        const slides = (o: Spot) => [0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 })
-        const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + 16 && mouth < o.t + o.h - 16
-        const inside = (o: Spot) => o.l >= EDGE && o.l + o.w <= innerWidth - EDGE && o.t >= EDGE + TAB && o.t + o.h <= innerHeight - EDGE
+        // Above a head, also pushed back inside the window's edge: on a phone a slip is nearly as wide as the screen.
+        const slides = (o: Spot) => [...[0, -1, 1, -2, 2, -3, 3].map((k) => o.tail === 'down' ? { ...o, l: o.l + (k * w) / 5 } : { ...o, t: o.t + (k * h) / 5 }),
+          ...(o.tail === 'down' ? [{ ...o, l: THREE.MathUtils.clamp(o.l, EDGE, innerWidth - EDGE - w) }] : [])]
+        const reaches = (o: Spot) => o.tail === 'down' ? head.cx > o.l + 20 && head.cx < o.l + o.w - 20 : mouth > o.t + lead + 16 && mouth < o.t + o.h - 16
         const blocked = [...taken, ...[...faces].filter(([o]) => o !== m).map(([, f]) => f)]
-        let spot = ways.flatMap(slides).find((o) => inside(o) && reaches(o) && !blocked.some((t) => overlaps(o, t)))
+        // Higher above the head, its tail stretched down to it, before covering anyone's face (#42 paper
+        // climb: on a phone at the table the slip sat on a listener's head).
+        const lifted = [36, 72, 110, 150, 200].flatMap((d) => slides({ ...above, t: above.t - d }))
+        let spot = [...ways.flatMap(slides), ...lifted].find((o) => inside(o) && reaches(o) && !blocked.some((t) => overlaps(o, t)))
           ?? ways.flatMap(slides).find((o) => inside(o) && reaches(o) && !taken.some((t) => overlaps(o, t)))
         if (!spot) {
           const o = ways[0]
           spot = { ...o, l: THREE.MathUtils.clamp(o.l, EDGE, innerWidth - EDGE - w), t: THREE.MathUtils.clamp(o.t, EDGE + TAB, innerHeight - EDGE - h) }
         }
+        // A tail stretched down to a head below other slips would cross them: then the name tape alone says who.
+        const reach = spot.tail === 'down' ? Math.max(0, Math.round(head.y0 - 22 - (spot.t + h))) : 0
+        const tailX = THREE.MathUtils.clamp(head.cx, spot.l + 22, spot.l + w - 22)
+        const stem = { l: tailX - 10, t: spot.t + h + TAB, w: 20, h: reach }
+        const crossed = reach > 0 && taken.some((t) => stem.l < t.l + t.w && t.l < stem.l + stem.w && stem.t < t.t + t.h && t.t < stem.t + stem.h)
         taken.push(spot)
+        // A stretched tail keeps its own way clear: no later slip lies across it.
+        if (reach > 0 && !crossed) taken.push(stem)
         // Glide to the place rather than jump, except when the card first appears.
         const k = card.placed && !reducedMotion.matches ? 1 - Math.exp(-dt * 14) : 1
         card.x += (spot.l - card.x) * k
-        card.y += (spot.t - card.y) * k
+        card.y += (spot.t + lead - card.y) * k
         card.placed = true
         el.style.translate = `${card.x}px ${card.y}px`
+        // Crossed, it keeps a short tab toward its speaker instead of the stretched one.
         el.dataset.tail = spot.tail
+        el.style.setProperty('--reach', `${spot.tail === 'down' && !crossed ? Math.max(0, Math.round(head.y0 - 22 - (card.y + h))) : 0}px`)
         el.style.setProperty('--tail', spot.tail === 'down'
           ? `${THREE.MathUtils.clamp(head.cx - card.x, 22, w - 22)}px`
-          : `${THREE.MathUtils.clamp(mouth - card.y, 18, h - 18)}px`)
+          : `${THREE.MathUtils.clamp(mouth - card.y, 18, ch - 18)}px`)
+      }
+      // Your line, lying on the table near where the note landed, wherever it covers no face and no slip;
+      // where there is no such place (a phone), it stays out of the way.
+      // In a talk, your note sits on the reply's top right corner, taped to it.
+      if (pinned.on && pinned.card) {
+        const { card } = pinned.card
+        const shown = showing.has(pinned.card) && card.placed
+        myNote.classList.toggle('shown', shown)
+        if (shown) {
+          const w = myNote.offsetWidth
+          pinned.x = THREE.MathUtils.clamp(card.x + card.el.offsetWidth - w + 12, EDGE, innerWidth - EDGE - w)
+          pinned.y = card.y - myNote.offsetHeight + CLIP
+          pinned.placed = true
+          myNote.style.translate = `${pinned.x}px ${pinned.y}px`
+        }
+      } else if (pinned.on) {
+        const w = myNote.offsetWidth, h = myNote.offsetHeight
+        const blocked = [...taken, ...faces.values()]
+        // Clear of every slip with the tape on its top and of every face; lying on the table it may cross the tip
+        // of a head behind it (an antenna or an ear), never the face.
+        const slips = taken
+        const heads = [...faces.values()].map((f) => ({ ...f, t: f.t + 14, h: f.h - 14 }))
+        const clear = (o: Omit<Spot, 'tail'>) => inside(o)
+          && !slips.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t - TAB < o.t + o.h + 6)
+          && !heads.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t < o.t + o.h)
+        // Lying on the table top: the spot it lay on last if it is still clear, else the first clear one from the front.
+        let spot: Omit<Spot, 'tail'> | undefined
+        for (const i of [pinned.at, ...TABLE_SPOTS.keys()]) {
+          const a = toPx(edge.copy(TABLE_SPOTS[i]))
+          // Kept inside the window's edge: on a phone the table's clear end is at the edge.
+          const o = { l: THREE.MathUtils.clamp(a.x - w / 2, EDGE, innerWidth - EDGE - w), t: a.y - h / 2, w, h }
+          if (clear(o)) {
+            spot = o
+            pinned.at = i
+            break
+          }
+        }
+        // On a phone the table is full of heads: your line goes up on the wall, above the round.
+        for (let i = 0; !spot && innerWidth < 600 && i < 3; i++) {
+          const o = { l: (innerWidth - w) / 2, t: EDGE + i * (h + 12), w, h }
+          // Clear of the slips below it and of the name tape on top of each.
+          if (!blocked.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t - TAB - 6 < o.t + o.h)) spot = o
+        }
+        // Heads bob, so a place can come and go by a pixel: it keeps its last place for a moment before it gives way.
+        pinned.lost = spot ? 0 : pinned.lost + dt
+        if (!spot && pinned.placed && pinned.lost < 0.6) spot = { l: pinned.x, t: pinned.y, w, h }
+        myNote.classList.toggle('shown', Boolean(spot))
+        if (spot) {
+          const k = pinned.placed && !reducedMotion.matches ? 1 - Math.exp(-dt * 10) : 1
+          pinned.x += (spot.l - pinned.x) * k
+          pinned.y += (spot.t - pinned.y) * k
+          pinned.placed = true
+          myNote.style.translate = `${pinned.x}px ${pinned.y}px`
+        }
       }
     }
     const mid = new THREE.Vector3()
@@ -1276,16 +1462,27 @@ export default {
     const crowding = (m: Member) => {
       // Only once the camera is on the conversation: while it waits wide for a sent note, nobody is in its way.
       if (mode === 'room' || !view.focused || m === partner || m.seat) return false
+      // Judged from the shot the camera is going to, not where it is on the way (#42 paper climb: judged on the
+      // way, a passer-by began to fade as the camera arrived and glittered half-faded in the frame).
+      if (!shot) return false
       const subjects = mode === 'talk' && partner ? [partner] : seated
       if (!subjects.length) return false
+      probeCam.fov = stage.camera.fov
+      probeCam.aspect = stage.camera.aspect
+      probeCam.position.copy(shot.position)
+      probeCam.lookAt(shot.look)
+      probeCam.updateProjectionMatrix()
+      probeCam.updateMatrixWorld()
       mid.set(m.v.pos.x, m.v.fig.height * SCALE * 0.5, m.v.pos.z)
-      const d = mid.distanceTo(eye)
-      const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(eye)))
+      const d = mid.distanceTo(shot.position)
+      const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(shot!.position)))
       // Its middle or its head in the frame: close to the camera, a head can fill a corner while the body is below it.
-      m.v.fig.head.getWorldPosition(top).project(stage.camera)
-      mid.project(stage.camera)
-      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame.
-      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < 1.5 && Math.abs(p.y) < 1.25
+      m.v.fig.head.getWorldPosition(top).project(probeCam)
+      mid.project(probeCam)
+      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame. On a
+      // tall screen half a body's width is more than half the frame, so the margin grows with it (#42 paper climb).
+      const half = (m.v.fig.height * SCALE * 0.5) / (d * Math.tan(THREE.MathUtils.degToRad(probeCam.fov) / 2) * probeCam.aspect)
+      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < Math.max(1.5, 1 + half) && Math.abs(p.y) < 1.25
       const framed = inFrame(mid) || inFrame(top)
       // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
       const cut = Math.abs(mid.x) > 0.86 || mid.y < -0.8
@@ -1323,7 +1520,7 @@ export default {
           m.v.fig.root.localToWorld(at)
           // About the same size on screen from the room view as up close, floating just clear of the head.
           const size = THREE.MathUtils.clamp(eye.distanceTo(at) * 0.03, 0.13, 0.46)
-          m.glyph.scale.setScalar(size)
+          m.glyph.scale.set(size * 0.8, size, 1)
           m.glyph.position.copy(at).setY(at.y + size * 0.25 + Math.sin(t * 2.4) * 0.015)
           const mat = m.glyph.material
           if (entries.hovered === m.entry && m.news) m.looked += dt
@@ -1358,7 +1555,10 @@ export default {
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
         if (m.fade !== fadeGoal) {
-          m.fade = Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 7))
+          // Half-faded, the hashed alpha glitters: at once while the camera is still on its way (the move hides
+          // it), quickly once it is there (#42 paper climb).
+          const moving = shot !== null && eye.distanceTo(shot.position) > 0.4
+          m.fade = moving || Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 16))
           for (const { mat, base } of m.mats) mat.opacity = base * m.fade
           m.v.fig.root.visible = m.fade > 0.01
         }
@@ -1421,6 +1621,24 @@ export default {
       } else line.value = text
     }
     const headAt = new THREE.Vector3()
+    /** Who reads a line sent now: the villager it names, or the one talked to; none when it goes to the whole table. */
+    const reader = (): Member | null => {
+      const named = namedIn(input?.text ?? '')
+      if (named) return named
+      if (mode === 'table') return seated.length > 1 ? null : seated[0] ?? null
+      return mode === 'talk' && partner ? partner : primary()
+    }
+    /**
+     * Between a villager's paws, just in front of its tummy: the paws sit at its sides, so the tummy's
+     * front is about as far forward as they are apart (a point at a fixed depth was inside a round one).
+     */
+    const paws = (m: Member) => {
+      const { root, hands, height } = m.v.fig
+      const hand = hands[0]
+      if (!hand) return root.localToWorld(headAt.set(0, height * 0.42, 0.3))
+      root.worldToLocal(hand.getWorldPosition(headAt))
+      return root.localToWorld(headAt.set(0, headAt.y + 0.07, Math.abs(headAt.x) + 0.05))
+    }
     /** In the room, a line that names another villager is on its way to them, even before your villager has routed it. */
     const namedIn = (text: string) => mode === 'room' ? cast.find((m) => m !== primary() && new RegExp(`\\b${m.name}\\b`, 'i').test(text || (routing ? routingText : ''))) ?? null : null
     /** The line being routed: it keeps its addressee on the input until the route is back. */
@@ -1445,12 +1663,11 @@ export default {
         return { label: m.name, colour: m.colour }
       },
       target: () => {
-        const named = namedIn(input?.text ?? '')
-        if (named) return named.v.fig.head.getWorldPosition(headAt)
-        if (mode === 'table' && seated.length > 1) return headAt.set(-0.25, 1.0, 0.15)
-        const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
-        return m ? m.v.fig.head.getWorldPosition(headAt) : null
+        const m = reader()
+        // To the whole table it lands on the table; its slip then finds a clear place there.
+        return m ? paws(m) : headAt.copy(TABLE_SPOTS[0])
       },
+      holder: () => reader()?.v.fig.root ?? null,
       blocked: () => entries.active === 'notebook' || navigation.claims() || Boolean(hush?.pad),
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
@@ -1492,7 +1709,7 @@ export default {
       furnish?.dispose()
     }, 'talk always-on input')
     // ── The words as paper slips (#42 regroup, src/talk/paper.ts) ────────────
-    const slips = paperSlips((person) => cast.find((c) => c.person === person) ?? null)
+    const slips = paperSlips((person) => person === 'you' ? { name: 'you', colour: MY_INK } : cast.find((c) => c.person === person) ?? null)
     ctx.effect(() => () => slips.dispose(), 'talk paper slips')
     // Projects already being made stand where they will go, as wrapped parcels.
     if (INPUT) void listProjects(primary().person).then((r) => {
@@ -1560,7 +1777,7 @@ export default {
       furnish!.dismiss(guess)
       keep(me.person, text)
       restoreLine(text)
-      quip(me, why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+      quip(me, why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
     }
 
     /** What a route does in the room. The model's route is data: it never chooses who hears the person's words. */
@@ -1661,7 +1878,9 @@ export default {
         },
         /** Where a villager is on screen: its middle, or `up` of the way from its feet to the top of its head. */
         screen: (person: string, up = 0.5) => {
-          const m = cast.find((c) => c.person === person)!
+          // Your line on the table is a card too, with no villager under it.
+          const m = cast.find((c) => c.person === person)
+          if (!m) return null
           const box = new THREE.Box3().setFromObject(m.v.fig.root)
           const c = box.getCenter(new THREE.Vector3()).setY(THREE.MathUtils.lerp(box.min.y, box.max.y, up))
           c.project(stage.camera)
@@ -1676,40 +1895,46 @@ export default {
   },
 }
 
-/** A round felt patch with a stitched "!", painted in code. */
-function stitchedBang() {
-  const [c, g] = canvas(128, 128)
-  g.fillStyle = '#f2cf6b'
+/**
+ * The news marker: a little torn slip with an inked "!" under a strip of tape in the villager's colour, the
+ * same paper as the replies (#42 paper climb: a stitched felt patch was a second visual language).
+ */
+function paperBang(colour: string) {
+  const [c, g] = canvas(128, 160)
+  const r = rng([...colour].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 11) % 997)
+  const jag = () => (r() - 0.5) * 5
+  g.save()
+  g.translate(64, 84)
+  g.rotate(-0.06)
   g.beginPath()
-  g.arc(64, 64, 56, 0, Math.PI * 2)
+  g.moveTo(-40, -52)
+  for (let x = -40; x <= 40; x += 10) g.lineTo(x, -52 + jag())
+  for (let y = -52; y <= 56; y += 12) g.lineTo(40 + jag(), y)
+  for (let x = 40; x >= -40; x -= 10) g.lineTo(x, 56 + jag())
+  for (let y = 56; y >= -52; y -= 12) g.lineTo(-40 + jag(), y)
+  g.closePath()
+  g.shadowColor = 'rgba(60, 30, 10, 0.35)'
+  g.shadowBlur = 8
+  g.shadowOffsetY = 3
+  g.fillStyle = '#fbf3e1'
   g.fill()
-  for (let i = 0; i < 900; i++) {
-    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 54
-    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(120,70,20,0.12)'
-    g.fillRect(64 + Math.cos(a) * r, 64 + Math.sin(a) * r, 1.5, 1.5)
-  }
-  g.strokeStyle = 'rgba(110, 66, 30, 0.85)'
-  g.lineWidth = 3
-  g.setLineDash([7, 6])
-  g.beginPath()
-  g.arc(64, 64, 47, 0, Math.PI * 2)
+  g.shadowColor = 'transparent'
+  g.strokeStyle = 'rgba(120, 85, 50, 0.4)'
+  g.lineWidth = 1.5
   g.stroke()
-  g.setLineDash([])
-  g.fillStyle = '#5a3420'
-  g.beginPath()
-  g.roundRect(56, 26, 16, 50, 7)
-  g.fill()
-  g.beginPath()
-  g.arc(64, 92, 9, 0, Math.PI * 2)
-  g.fill()
-  g.strokeStyle = 'rgba(255, 236, 200, 0.55)'
-  g.lineWidth = 1.6
-  for (let y = 31; y < 72; y += 7) {
-    g.beginPath()
-    g.moveTo(60, y)
-    g.lineTo(68, y + 3)
-    g.stroke()
-  }
+  // Tape across the top in the villager's colour.
+  g.fillStyle = colour
+  g.globalAlpha = 0.9
+  g.fillRect(-28, -62, 56, 20)
+  g.fillStyle = 'rgba(30, 14, 4, 0.2)'
+  g.fillRect(-28, -62, 56, 20)
+  g.globalAlpha = 1
+  g.fillStyle = '#24170f'
+  g.font = `700 92px ${HAND}`
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillText('!', 2, 14)
+  g.restore()
   return toTexture(c)
 }
 
@@ -1733,6 +1958,14 @@ function css() {
   .talk-card .before { margin: 0 0 6px; padding-bottom: 5px; border-bottom: 1.5px dashed rgba(150, 100, 60, 0.28); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: italic 16px/1.35 ${BOOK}; color: #6b5340; opacity: 0.72; }
   .talk-card .before.open { white-space: pre-wrap; }
+  /* The page before is kept, not written over the next page: cut off in grey it read as noise (#42 paper climb). */
+  .talk-card .before { display: none; }
+  .talk-card.mine { max-width: min(240px, calc(100vw - 32px)); padding: 14px 18px 12px; }
+  .talk-card.mine, .talk-card.mine.shown { pointer-events: none; }
+  .talk-card.mine::after { display: none; }
+  .talk-card.mine .to-line { margin: 0 0 2px; font: italic 15px/1.2 ${HAND}; }
+  .talk-card.mine .words { font: 20px/1.3 ${HAND}; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .talk-card.mine:not(.clipped) .words { font-size: 23px; }
   .talk-card .before[hidden], .talk-card .more[hidden], .talk-card .cue[hidden] { display: none; }
   .talk-card .more { display: block; margin: 2px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
     font: italic 700 17px ${HAND}; color: color-mix(in oklab, var(--c) 80%, #2a1608); }
@@ -1799,7 +2032,12 @@ function css() {
   .talk-slip .chip.ideas { padding: 0 12px 6px; font: 700 18px/1 ${BOOK}; color: rgba(85, 58, 38, 0.7); background: rgba(214, 186, 146, 0.18); }
   .talk-slip .chip:hover, .talk-slip .chip:focus-visible { background: rgba(214, 186, 146, 0.6); translate: 0 -1px; outline: none; }
   .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; } }
+  @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; }
+    .talk-card.mine:not(.clipped) { max-width: 158px; padding: 10px 12px 8px; }
+    .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 3; }
+
+    .talk-card.said .words { -webkit-line-clamp: 2; font-size: 15px; } .talk-card.said { max-width: min(250px, 66vw); }
+    .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
   @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }
   `
 }
