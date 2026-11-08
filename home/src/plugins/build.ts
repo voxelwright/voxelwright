@@ -211,7 +211,9 @@ export default {
           old[i].geometry = m.geometry
           old[i].position.copy(m.position)
           old[i].rotation.copy(m.rotation)
+          // As built: shareWalls decides again which pieces are interior.
           old[i].userData.inward = m.userData.inward
+          old[i].userData.interior = m.userData.interior
         })
       } else {
         const before = built ? meshes(built) : null
@@ -239,28 +241,65 @@ export default {
      */
     const shareWalls = (p: Plan) => {
       if (!built) return
-      const shared = new Map<string, { x: number }>()
+      // Per shared wall: its x, and where its door's front edge is (z). From there back, the wall stands as the kitchen's
+      // own side does (the camera on the house's side keeps it): the door's frame, the wall over it and the stretch behind
+      // it to the back corner, so the doorway is a real opening and the back wall turns one corner, not two.
+      const shared = new Map<string, { x: number; front: number; z0: number; z1: number }>()
       for (const w of p.walls) {
         const rooms = roomsOf(p, w.id)
         if (rooms.length < 2 || rooms.every((r) => BASE_ROOMS.has(r.id))) continue
         const c = curveOf(p, w)
         if (Math.abs(c.dir[0]) > 0.2) continue
-        shared.set(w.id, { x: (c.a[0] + c.b[0]) / 2 })
+        const doors = w.openings.filter((o) => o.kind === 'door').map((o) => Math.max(pointAt(c, o.from)[1], pointAt(c, o.to)[1]))
+        shared.set(w.id, { x: (c.a[0] + c.b[0]) / 2, front: doors.length ? Math.max(...doors) : -Infinity, z0: Math.min(c.a[1], c.b[1]), z1: Math.max(c.a[1], c.b[1]) })
       }
-      // A short leftover of the same house wall beside the new room (under a metre) goes with it, or it stands alone as a pillar.
-      const xs = [...shared.values()].map((s) => s.x)
+      // A short leftover of the same house wall in front of the new room (under a metre) goes low with it, or it stands
+      // alone as a pillar; one behind it stands, joining the new room's back wall to the house's.
+      const lines = [...shared.values()]
       for (const w of p.walls) {
         const c = curveOf(p, w)
-        const x = (c.a[0] + c.b[0]) / 2
-        if (shared.has(w.id) || Math.abs(c.dir[0]) > 0.2 || c.length > 1 || !xs.some((s) => Math.abs(s - x) < 0.02)) continue
-        shared.set(w.id, { x })
+        const x = (c.a[0] + c.b[0]) / 2, z = (c.a[1] + c.b[1]) / 2
+        const line = lines.find((s) => Math.abs(s.x - x) < 0.02)
+        if (shared.has(w.id) || Math.abs(c.dir[0]) > 0.2 || c.length > 1 || !line || z < line.z0) continue
+        shared.set(w.id, { x, front: -Infinity, z0: Math.min(c.a[1], c.b[1]), z1: Math.max(c.a[1], c.b[1]) })
       }
+      const box = new THREE.Box3()
       for (const m of meshes(built)) {
         const at = shared.get(m.userData.wall)
         if (!at || !m.userData.inward) continue
+        box.setFromObject(m)
+        if (box.min.z < at.front - 1e-3) continue
         delete m.userData.inward
-        m.userData.interior = at
+        m.userData.interior = { x: at.x }
       }
+      hangLow([...shared.values()].filter((s) => s.z1 > s.front))
+    }
+    /**
+     * Things the house's plugins hung on a wall that is now cut low (furnish.ts's shelf and coat pegs on the kitchen's
+     * left wall) would float over the stub. They follow the wall: the low stretch's interior rule hides them with it and
+     * brings them back when it stands. What they were tagged with is put back when the wall changes again or on unload.
+     */
+    const hung = new Map<THREE.Object3D, THREE.Vector3>()
+    const hangLow = (low: Array<{ x: number; front: number; z0: number; z1: number }>) => {
+      for (const [o, inward] of hung) {
+        delete o.userData.interior
+        o.userData.inward = inward
+      }
+      hung.clear()
+      if (!low.length) return
+      const box = new THREE.Box3()
+      scene.traverse((o) => {
+        if (!o.userData.inward || o.userData.wall || hung.has(o) || o.parent === null) return
+        for (let q: THREE.Object3D | null = o; q; q = q.parent) if (q === group) return
+        box.setFromObject(o)
+        if (box.isEmpty() || box.min.y < 0.3) return
+        const cx = (box.min.x + box.max.x) / 2
+        const at = low.find((s) => Math.abs(cx - s.x) < 0.6 && box.max.z > Math.max(s.front, s.z0) && box.min.z < s.z1)
+        if (!at) return
+        hung.set(o, o.userData.inward as THREE.Vector3)
+        delete o.userData.inward
+        o.userData.interior = { x: at.x }
+      })
     }
     const inScene = (o: THREE.Object3D) => {
       for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === scene) return true
@@ -587,9 +626,9 @@ export default {
         @media (prefers-reduced-motion: reduce) { .build-note { transition: none; } }
         ${tagCss('.build-note', '.build-note-x', '.build-note-y', '.build-note-z')}
         ${tagCss('.build-back-card', '.build-back-x', '.build-back', '.build-back-z')}
-        .build-back { position: fixed; top: max(18px, env(safe-area-inset-top)); left: 50%; translate: -50% -8px; z-index: 20; rotate: -1.5deg;
+        .build-back { position: fixed; top: max(16px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); translate: 0 -8px; z-index: 20; rotate: -1.5deg;
           box-shadow: 0 6px 14px rgba(70, 40, 20, 0.18); opacity: 0; pointer-events: none; transition: opacity 260ms ease, translate 260ms ease; }
-        .build-back.shown { opacity: 1; translate: -50% 0; pointer-events: auto; }
+        .build-back.shown { opacity: 1; translate: 0 0; pointer-events: auto; }
         @media (prefers-reduced-motion: reduce) { .build-back { transition: none; } }
       `
       document.head.append(style)
@@ -793,6 +832,8 @@ export default {
       }
     }
 
+    let sun = 0
+    const DAYLIGHT = kit.daylight.color.clone(), SUN_POOL = new THREE.Color('#ffc46e')
     ctx.on('village/frame', (dt: number) => {
       if (MODE === 'iso' && built) frameHouse(dt)
       if (roomGroup && !inScene(roomGroup)) {
@@ -812,6 +853,13 @@ export default {
         if (m.room && m.phase !== 'idle' && !plan.rooms.some((r) => r.id === m.room)) movein.release()
         movein.frame()
       }
+      // While the reveal holds the view, from the moment the villager steps in, the new room is the lit subject: its
+      // window's patch of sun warms up, and cools back once the view lets go.
+      const m = movein?.state()
+      const lit = m && m.held && (m.phase === 'crossing' || m.phase === 'settled') ? 1 : 0
+      sun += (lit - sun) * (1 - Math.exp(-dt * 1.6))
+      kit.daylight.opacity = 0.55 + 0.4 * sun
+      kit.daylight.color.copy(DAYLIGHT).lerp(SUN_POOL, sun)
       lot.frame(dt)
       if (built?.shell) {
         const c = curveOf(plan, wallOf(plan, WALL))
@@ -909,6 +957,20 @@ export default {
           }
           return a
         },
+        /** Every generated wall piece as drawn now: its wall, timber (a door's frame) or plaster, its box, and whether it shows. */
+        walls: () => {
+          const box = new THREE.Box3()
+          const seen = (o: THREE.Object3D) => shown(o) && o.layers.isEnabled(0)
+          return (built ? meshes(built) : []).filter((m) => m.userData.wall).map((m) => {
+            box.setFromObject(m)
+            return { wall: m.userData.wall as string, timber: m.material === kit.timber, stub: Boolean(m.userData.cutaway), x: +((box.min.x + box.max.x) / 2).toFixed(3), z0: +box.min.z.toFixed(3), z1: +box.max.z.toFixed(3), y0: +box.min.y.toFixed(3), y1: +box.max.y.toFixed(3), shown: seen(m) }
+          })
+        },
+        /** The house's things hung on a wall now cut low, which go and come back with it: their box and whether they show. */
+        hung: () => [...hung.keys()].map((o) => {
+          const box = new THREE.Box3().setFromObject(o)
+          return { name: o.name || o.parent?.name || '', z0: +box.min.z.toFixed(3), z1: +box.max.z.toFixed(3), y0: +box.min.y.toFixed(3), shown: shown(o) && o.layers.isEnabled(0) }
+        }),
         wallX: () => {
           const m = built && meshes(built).find((o) => o.userData.wall === WALL && !o.userData.cutaway && o.material === kit.handleWall)
           return m?.position.x ?? null
@@ -925,6 +987,7 @@ export default {
         mark.geometry.dispose()
         ;(mark.material as THREE.Material).dispose()
         for (const m of glowOf.values()) m.dispose()
+        hangLow([])
         yard.restore()
         lot.dispose()
         const sun = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined

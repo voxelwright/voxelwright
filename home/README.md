@@ -1662,7 +1662,8 @@ plan and the view, or into one line your villager says:
 `src/build/outline.ts` stakes the draft out on the lawn at once; no walls are
 built. A flour line runs along both faces of the walls to be built (the far
 wall as an arc when it bends) and along the shared wall, broken where the door
-goes; the door's jambs and leaves are firm lines and its swing is dashed. An
+goes; the door's jambs are firm lines, and the doorway itself stands in the shared
+wall as a felt ghost (two posts and a lintel, the door's width and height). An
 orange string on corner stakes runs over the outer line. The room's first
 pieces stand inside as warm felt ghosts with a darker rim. The doorway to be is
 also taped out, in orange masking tape over a warm shade, on whichever face of
@@ -1682,9 +1683,10 @@ Enter or "Build it" commits one version ("Added the study"), and the real walls
 rise from the floor in 0.7 s (at once with reduced motion). The room arrives
 with a window in the middle of its far wall (an `addOpening` edit, 42% of the
 wall, 0.9 to 2.2 m; a curved window when the wall bends) and its first pieces
-(`src/build/firstroom.ts`), chosen by its name. A playroom gets a big braided
-rug with a little table and two stools on it, a toy chest under the window and
-a play tent in the far corner; a study a desk and chair under the window, a rug,
+(`src/build/firstroom.ts`), chosen by its name. A playroom gets a patchwork play
+rug with a little table and two stools on it, a toy chest under the window, a
+play tent in the far corner, and bunting, drawings, a book ledge and a growth
+chart on its back wall; a study a desk and chair under the window, a rug,
 and an armchair and floor lamp; a bedroom a bed with its head to the side wall,
 a side table and a rug; anything else a sofa against the far wall facing a low
 table on a big rug, an armchair and a floor lamp. Every room of 14 m² or more
@@ -1733,12 +1735,18 @@ built, the villager who asked walks from where they are through the new doorway 
 `setSpot` with the doorway's two faces as `through` points) and sits at the room's main
 piece: a stool at the play table, the sofa, the desk chair or the bed's edge, each cushioned
 to the villager's sitting height (0.635 m). They say one short line, and the view glides to
-a three-quarter view of the room, the shared wall cut to its stub, and follows them in. A
-drag, the wheel, a held WASD or arrow key ends the hold; the "Back to the house" tag at the
-top, or Escape, glides out to the whole house.
+a three-quarter view of the room and follows them in, the room about two thirds of the frame.
+The shared wall is cut to its stub in front of the door; from the door back it stands as the
+kitchen's own side does, so the doorway is a real opening (posts, trim, a lintel and the wall
+over it) and the house's wall joins the new room's back wall in one corner. What the kitchen
+hung on the low stretch (furnish.ts's shelf and coat pegs, one kit) goes with the wall and comes
+back when it stands. While the view is held the other villagers' "!" waits (talk.ts `hush`) and
+the new room's window throws a warmer patch of sun. A drag, the wheel, a held WASD or arrow key
+ends the hold; the "Back to the house" tag in the top left corner, or Escape, glides out to the
+whole house.
 
 ```sh
-node scripts/check-build-addroom.mjs                  # stub host and router, 67 checks (first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs                  # stub host and router, 71 checks (the doorway standing, the back junction closed, nothing hung floating, quiet "!" markers during the reward, first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
 node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg (outline, adjusted, close, reveal, built, door, phone), addroom.mp4
 node scripts/check-build-addroom.mjs --look --variant=<name>   # a look prototype (&look=<name>): addroom-{outline,reveal,built}-<name>.jpg
 node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate

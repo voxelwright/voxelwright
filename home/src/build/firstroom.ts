@@ -1,5 +1,5 @@
 // A new room's first pieces (#48), suited to its name: a playroom gets a play tent, a
-// little table and stools on a big rug and a toy chest under the window; a study a desk
+// little table and stools on a patchwork rug and a toy chest under the window; a study a desk
 // under the window and a reading chair; a bedroom a bed and a side table; anything else a
 // sofa facing a low table on a rug, an armchair and a floor lamp. Every room but the
 // smallest also gets a low bookcase and a plant on the side away from the door, and a
@@ -116,8 +116,8 @@ export function firstPieces(base: Plan, made: Plan, d: Draft, scene: THREE.Scene
   const label = d.label
 
   if (PLAY.test(label)) {
-    // A big rug in the middle to play on, a little table and stools on it, the toy chest under the window.
-    lay('big-rug', mid + away * 0.25, d.depth * 0.52, facing)
+    // A patchwork rug in the middle to play on, a little table and stools on it, the toy chest under the window.
+    lay('play-rug', mid + away * 0.25, d.depth * 0.52, facing)
     byFar('toy-chest', mid)
     lay('play-table', mid + away * 0.3, d.depth * 0.5, fromSide(away))
     // The tent in the far corner on the quiet side.

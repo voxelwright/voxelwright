@@ -437,7 +437,7 @@ try {
       const g = scene.getObjectByName('build outline ghosts')
       return { pieces: window.villageBuild.outline.pieces().map((f) => f.id), shown: g ? g.children.filter((c) => c.visible).map((c) => c.name) : [] }
     })
-    check('outline: the playroom\'s first pieces stand inside as ghosts (a big rug, the little table, the toy chest at least)', ['big-rug', 'play-table', 'toy-chest'].every((k) => ghosts.pieces.includes(`playroom.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
+    check('outline: the playroom\'s first pieces stand inside as ghosts (a play rug, the little table, the toy chest at least)', ['play-rug', 'play-table', 'toy-chest'].every((k) => ghosts.pieces.includes(`playroom.${k}`) && ghosts.shown.includes(`build outline ghost ${k}`)), ghosts)
     // The choice card stands clear of the staked-out room: no grip on screen falls inside it.
     const cardClear = await B(page, () => {
       const r = document.querySelector('.build-choice.shown').getBoundingClientRect()
@@ -511,6 +511,11 @@ try {
     // Enter builds it: one version, the room drawn.
     const gBefore = (await state(page)).geometries
     const ghostLayout = await B(page, () => window.villageBuild.outline.pieces())
+    // Another villager has news waiting, so the reward can be seen to quiet it.
+    await B(page, () => window.village.talk.notify('mia'))
+    await page.waitForTimeout(1500)
+    const glyph = () => B(page, () => window.village.talk.state().cast.mia?.glyph ?? 0)
+    const markerBefore = await glyph()
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 3)
     await frames(page, 6)
@@ -556,10 +561,43 @@ try {
     }, walk.w)
     check('move-in: the villager who asked (Alex\'s Dumpling) crosses the shared wall only through the new door\'s gap', walk.r.person === 'alex' && crossings.length >= 1 && crossings.every((c) => c.off < c.half - 0.1), { crossings, samples: walk.samples.length })
     check('move-in: they end seated on a stool at the play table, in the new room, and say one short line', walk.w?.seated && walk.w.spot === 'buildMovein' && inPlayroom && Math.abs(walk.w.y - 0.635) < 0.01 && /love it/.test((await state(page)).card ?? ''), { w: walk.w, seat: walk.r.seat })
+    // The settled frame, the shared wall as the reveal shows it: low in front of the door, standing from the door back.
+    await page.waitForTimeout(400)
+    const wallsNow = await B(page, () => ({ walls: window.villageBuild.walls(), hung: window.villageBuild.hung(), fixtures: window.villageBuild.fixtures('playroom.shared'), door: window.villageBuild.plan().walls.find((w) => w.id === 'playroom.shared')?.openings.find((o) => o.kind === 'door'), reveal: window.villageBuild.reveal() }))
+    {
+      const { walls, hung, fixtures, door, reveal } = wallsNow
+      const gap = reveal.door?.gap ?? [[0, 0], [0, 0]]
+      const front = Math.max(gap[0][1], gap[1][1]), back = Math.min(gap[0][1], gap[1][1])
+      const full = walls.filter((w) => !w.stub && !w.timber && w.y1 > 2.9 && Math.abs(w.x - reveal.door.mid[0]) < 0.1)
+      const frontLow = full.filter((w) => w.wall === 'playroom.shared' && w.z0 >= front - 1e-3).every((w) => !w.shown)
+      const timber = walls.filter((w) => w.wall === 'playroom.shared' && w.timber && w.shown)
+      const posts = timber.filter((w) => w.y0 < 0.02 && w.y1 > door.head - 0.05 && w.z1 - w.z0 < 0.2)
+      const lintel = timber.filter((w) => w.y0 > door.head - 0.2 && w.z0 <= back + 0.02 && w.z1 >= front - 0.02)
+      const above = full.filter((w) => w.wall === 'playroom.shared' && w.y0 > door.head - 0.01 && w.shown)
+      check('the doorway is a real opening while the wall in front of it is low: posts either side, a lintel and the wall over it standing', frontLow && posts.length >= 2 && lintel.length >= 1 && above.length >= 1, { frontLow, posts: posts.length, lintel: lintel.length, above: above.length })
+      // Behind the new room's back wall the house's own wall stands to the back corner: no gap where the two back walls meet.
+      const behind = full.filter((w) => w.shown && w.z1 <= back + 1e-3).sort((a, b) => a.z0 - b.z0)
+      let reach = -Infinity, from = behind[0]?.z0 ?? Infinity
+      for (const w of behind) if (reach === -Infinity || w.z0 <= reach + 0.01) reach = Math.max(reach, w.z1)
+      const cornerZ = await B(page, () => window.villageBuild.plan().corners.find((c) => c.id === 'kitchen.back-left').z)
+      const roomBack = await B(page, () => Math.min(...window.villageBuild.plan().corners.filter((c) => c.id.startsWith('playroom.')).map((c) => c.z)))
+      check('the back-wall junction is closed: the house\'s wall stands at full height from its back corner past the new room\'s back wall', from <= cornerZ + 0.1 && reach >= roomBack, { from, reach, cornerZ, roomBack })
+      // Nothing hung on the shared wall floats: each hung fixture is on a stretch that stands, or it is away with the wall.
+      const hungShown = hung.filter((h) => h.shown)
+      // The kitchen's face of the shared wall (side -1); stretches run from its front corner, z = the door's front edge + door.from - t.
+      const hangingOnLow = fixtures.filter((f) => f.y0 > 0.3 && !f.through && f.side === -1).map((f) => ({ name: f.name, z0: reveal.door.gap[0][1] + (door.from - f.to), z1: reveal.door.gap[0][1] + (door.from - f.from) }))
+        .filter((f) => !full.some((w) => w.shown && w.z0 <= f.z0 + 0.02 && w.z1 >= f.z1 - 0.02))
+      const covered = hangingOnLow.every((f) => hung.some((h) => !h.shown && h.z0 <= f.z0 + 0.05 && h.z1 >= f.z1 - 0.05))
+      check('no wall thing floats: what the kitchen hung on the shared wall goes while the wall is low', hung.length >= 1 && hungShown.length === 0 && covered, { hung, onLow: hangingOnLow })
+    }
+    const markerDuring = await glyph()
+    const hushed = await B(page, () => window.villageBuild.reveal().hushed)
     // The way back: the tag is offered while the view is held, and it glides out to the whole house.
     const tagShown = await B(page, () => window.villageBuild.backShown())
     await page.click('.build-back')
     await page.waitForTimeout(1600)
+    const markerAfter = await glyph()
+    check('during the reward the other villagers\' "!" is quiet, and it comes back after', markerBefore > 0.5 && hushed && markerDuring < 0.05 && markerAfter > 0.5, { markerBefore, hushed, markerDuring, markerAfter })
     const out = await B(page, () => ({ held: window.villageBuild.reveal().held, frame: window.village.kernel.root.get('view').frame, shown: window.villageBuild.backShown() }))
     check('"Back to the house" is offered while the reveal holds the view, and glides out to the whole house', tagShown && !out.held && !out.shown && out.frame.zoom < 0.02, out)
     const built = await B(page, () => {
@@ -608,7 +646,7 @@ try {
       return { ids, drawn: drawn.map((c) => c.userData.furniture), overlaps, outside }
     })
     const firstPieces = await pieces()
-    check('built: the playroom arrives with play things, a second grouping and a picture as plan furniture in the same version, all drawn (no sofa)', ['big-rug', 'play-table', 'toy-chest', 'play-tent', 'toy-shelf', 'potted-plant', 'play-wall'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && !firstPieces.ids.includes('playroom.sofa') && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
+    check('built: the playroom arrives with play things, a second grouping and a picture as plan furniture in the same version, all drawn (no sofa)', ['play-rug', 'play-table', 'toy-chest', 'play-tent', 'toy-shelf', 'potted-plant', 'play-wall'].every((k) => firstPieces.ids.includes(`playroom.${k}`)) && !firstPieces.ids.includes('playroom.sofa') && firstPieces.drawn.length === firstPieces.ids.length, firstPieces)
     check('built: the pieces do not overlap one another and stand inside the room', firstPieces.overlaps.length === 0 && firstPieces.outside.length === 0, firstPieces)
     const covered = await B(page, async () => {
       const P = await import('/src/build/plan.ts')
