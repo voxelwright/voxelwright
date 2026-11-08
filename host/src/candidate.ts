@@ -73,7 +73,15 @@ export async function manifest(repo: string): Promise<Manifest> {
   return result
 }
 
-function sha256(path: string): Promise<string> {
+/** Each path changed between two commits → sha256 of its content in the working tree, or null when deleted. */
+export async function changedFiles(repo: string, from: string, to: string): Promise<Record<string, string | null>> {
+  const paths = (await mustGit(['diff', '--name-only', '--no-renames', '-z', from, to], repo)).split('\0').filter(Boolean).sort()
+  const files: Record<string, string | null> = {}
+  for (const path of paths) files[path] = await sha256(join(repo, path)).catch(() => null)
+  return files
+}
+
+export function sha256(path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256')
     createReadStream(path).on('data', (chunk) => hash.update(chunk)).on('error', reject).on('end', () => resolve(hash.digest('hex')))

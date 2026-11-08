@@ -288,7 +288,7 @@ export default {
         try {
           // ask() answers { ok, note, label } or { ok: false, why }; it throws only on a fault.
           const r = await ask.call(themes, text) as { ok?: boolean; note?: string; label?: string; why?: string } | undefined
-          said = r?.ok ? r.note || `Now ${r.label ?? 'a new look'}.` : r?.why === 'superseded' ? 'Another look got there first.' : FAILED
+          said = r?.ok ? r.note || `Now ${r.label ?? 'a new look'}.` : r?.why === 'superseded' ? 'Another look got there first.' : r?.why === 'link' ? 'This page needs your latest link to write a look.' : FAILED
         } catch {
           said = FAILED
         }

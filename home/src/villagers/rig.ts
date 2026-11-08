@@ -48,6 +48,7 @@ const frac = (x: number) => x - Math.floor(x)
 
 const CHIN = new THREE.Vector3()
 const chin = new THREE.Vector3()
+const pawsAt = new THREE.Vector3()
 
 interface Foot { world: THREE.Vector3; from: THREE.Vector3; swing: boolean; settle: number }
 
@@ -72,6 +73,8 @@ export class Villager {
   readonly onPath = new THREE.Vector3()
   /** Waiting on its own words: looks up and taps its chin. */
   thinking = false
+  /** Holding a note it has just been given: both paws bring it up in front, and it looks down at it (#42). */
+  reading = false
   /** Saying something right now: leans in and nods. */
   speaking = false
   /** Someone else at the table is speaking: where they are, so it turns its head to listen (#42). */
@@ -87,6 +90,7 @@ export class Villager {
   working = 0
   talking = 0
   think = 0
+  read = 0
   speak = 0
   yawRate = 0
   t = 0
@@ -334,6 +338,7 @@ export class Villager {
     this.working += ((this.state === 'work' && !this.chosen && !this.idle ? 1 : 0) - this.working) * (1 - Math.exp(-dt * 4))
     this.talking += ((this.chosen ? 1 : 0) - this.talking) * (1 - Math.exp(-dt * 6))
     this.think += ((this.thinking ? 1 : 0) - this.think) * (1 - Math.exp(-dt * 7))
+    this.read += ((this.reading ? 1 : 0) - this.read) * (1 - Math.exp(-dt * 8))
     this.speak += ((this.speaking ? 1 : 0) - this.speak) * (1 - Math.exp(-dt * 6))
     this.beatU = Math.min(1, this.beatU + dt / 0.42)
     this.greetU = Math.min(1, this.greetU + dt / 1.8)
@@ -474,6 +479,11 @@ export class Villager {
       }
       // Speaking: the free hand opens out now and then.
       h.position.y += 0.035 * this.speak * (i ? 1 : 0) * Math.max(0, Math.sin(t * 2.3))
+      // Reading: both paws come in front, a little apart, holding up what it was given.
+      if (this.read > 0.001) {
+        pawsAt.set(rest.x * 0.42, rest.y + 0.05, Math.abs(rest.x) * 0.95)
+        h.position.lerp(pawsAt, this.read)
+      }
       // Thinking: the free hand comes up to the chin and taps.
       if (i === 1 && this.think > 0.001) {
         chin.copy(head.position).add(CHIN.set(0.03, -fig.height * 0.14, fig.height * 0.3))
@@ -492,7 +502,7 @@ export class Villager {
       : this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fps ? 12 : 5)))
     head.rotation.y = this.glance
-    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
+    head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.read * 0.24 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
     head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)
     // Blink every few seconds.
     this.blinkAt -= dt

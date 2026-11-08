@@ -1,4 +1,4 @@
-import { load, pluginStates, replace, root, unload } from './kernel'
+import { load, loadedNames, pluginStates, replace, root, unload } from './kernel'
 import renderer from './plugins/renderer'
 import room from './plugins/room'
 import windowView from './plugins/window'
@@ -71,7 +71,8 @@ if (import.meta.env.DEV && params.has('redecorate')) void import('./theme/redeco
 // When calibration steps the tier down, the renderer has already lowered the pixel
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
-root.on('village/tier', () => void replace(postfx))
+// A page that did not load postfx (?plugins=) keeps it out.
+root.on('village/tier', () => void (loadedNames().includes('postfx') && replace(postfx)))
 // A live theme change (src/theme setTheme): the theme plugin shifts the scene; postfx blends
 // its uniforms, or compiles the next chain ahead and swaps it in when the chain changes shape.
 root.on('village/theme', (previous, next) => {
@@ -109,6 +110,7 @@ function snapshot() {
     quality: stage?.quality,
     features: stage ? [...stage.features()] : [],
     tierReason: stage?.timing.tierReason,
+    tierSettled: stage?.timing.tierSettled ?? false,
     render: stage ? { drawCalls: stage.renderer.info.render.drawCalls, triangles: stage.renderer.info.render.triangles } : null,
   }
 }

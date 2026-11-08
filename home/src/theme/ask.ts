@@ -5,7 +5,7 @@
 import { checkTheme, chosen, prepare, PRESETS, setTheme, switching, theme } from './index'
 import { settled } from './switch'
 import type { Theme } from './tokens'
-import { askTheme } from '../villager'
+import { askTheme, ME } from '../villager'
 
 export type Asked =
   /** `settling`: the switch had not finished after 15 s (a hidden tab draws no frames), so it is reported as still settling. */
@@ -13,8 +13,9 @@ export type Asked =
   /**
    * `unbuilt`: the model's look passed check() but its post chain could not be built, so the look on screen stayed.
    * `superseded`: another look was chosen before this one settled, so this one is not on screen.
+   * `link`: no token, or one from an earlier launch (../villager.ts): open the latest link.
    */
-  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'unbuilt' | 'superseded'; reason?: string; ms: number }
+  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'unbuilt' | 'superseded'; reason?: string; ms: number }
 
 const asked: ({ text: string } & Asked)[] = []
 
@@ -41,7 +42,7 @@ function own(t: Theme): Theme {
 }
 
 /** Restyles the home from one sentence. `person` is whose host session is billed (the default household member). */
-export async function ask(text: string, person = 'alex'): Promise<Asked> {
+export async function ask(text: string, person = ME): Promise<Asked> {
   const t0 = performance.now()
   prepare()
   const r = await askTheme(person, text, theme())

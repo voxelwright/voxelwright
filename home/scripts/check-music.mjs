@@ -203,10 +203,8 @@ const URL_ALL = `${base}?talk=npc&plugins=babble,music`
 async function tap(p) {
   await p.evaluate(async () => {
     const { audio, bed } = window.village.music
-    const code = `registerProcessor('music-tap', class extends AudioWorkletProcessor {
-      process(inputs) { const ch = inputs[0][0]; let s = 0, p = 0; if (ch) for (let i = 0; i < ch.length; i++) { s += ch[i] * ch[i]; p = Math.max(p, Math.abs(ch[i])) }
-        this.port.postMessage([currentTime, s, p]); return true } })`
-    await audio.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
+    // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
+    await audio.audioWorklet.addModule('/scripts/music-tap.js')
     const node = new AudioWorkletNode(audio, 'music-tap')
     const sink = new GainNode(audio, { gain: 0 })
     bed.output.connect(node).connect(sink).connect(audio.destination)

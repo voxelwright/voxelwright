@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { assertNoSharedInodes, createCandidate, diffManifests, manifest, pruneCandidates } from './candidate.ts'
+import { assertNoSharedInodes, changedFiles, createCandidate, diffManifests, manifest, pruneCandidates } from './candidate.ts'
 import { EXPECTED_CHECKS, type Candidate, type CheckResult, type Elder, type ExecutorOutcome } from './elder.ts'
 import { checkTimeoutMs, mustGit } from './proc.ts'
 import { createSandbox } from './sandbox.ts'
@@ -144,6 +144,8 @@ export async function runOnce(elder: Elder, options: RunOptions) {
       await mustGit(['add', '-A'], candidate.repo)
       await mustGit(['commit', '--quiet', '--no-verify', '--allow-empty', '-m', `Elder candidate ${id}: ${result.status}\n\nRequest: ${options.request}\nExecutor: ${options.executor} (${outcome.model}), ${outcome.status}`], candidate.repo)
       result.commit = await mustGit(['rev-parse', 'HEAD'], candidate.repo)
+      // What was checked, by content: promotion refuses a candidate whose files no longer match.
+      result.files = await changedFiles(candidate.repo, candidate.baseCommit, result.commit as string)
     }
     result.stage = 'done'
   } catch (error) {

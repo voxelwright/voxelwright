@@ -45,6 +45,8 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - The owner works on this Mac while agents run. Never open visible browser
   windows or GUI apps: run Chrome/Playwright headless (WebGPU flags or a
   WebGL2 fallback), or use the Ally for anything that needs a display.
+- Read any script before running it. Never run leftover scripts from scratch
+  folders or other sessions; one opened a visible browser on the owner's screen.
 - Keep evidence short: the command, the result and the measurements that matter.
   Routine changes need no receipt archives.
 - Keep README commands current. Update the private handbook (`docs/`) at

@@ -15,13 +15,13 @@ import type { Context } from 'cordis'
 import { releaseGpu } from '../../kernel'
 import { chosen, presetId } from '../index'
 import type { Theme } from '../tokens'
-import { call, keepItem, library, libraryItem } from '../../villager'
+import { call, keepItem, library, libraryItem, ME } from '../../villager'
 import { ACCESSORIES, FELT, heads, PROPS, type Slot, type Target } from './targets'
 
 /** The looks this prototype redecorates; any other look keeps the originals (and costs no model call). */
 const REDECORATED = new Set(['neon-night', 'comic'])
 const params = new URLSearchParams(location.search)
-const PERSON = params.get('person') ?? 'alex'
+const PERSON = params.get('person') ?? ME
 const FADE_MS = 700
 const RESCAN = 20
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
