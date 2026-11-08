@@ -1371,7 +1371,8 @@ face for speech, status lines and the slip's printed example.
 
 - `&from=<run-id>` stitches a saved result from `generated/villagers/<run-id>/` with no
   model call (round-1 results skip assemble's later look checks; live results do not).
-- `&person=<id>` (default alex), `&accent=#rrggbb` (default `#c8553d`).
+- `&person=<id>` (default `ME` in `src/villager.ts`), `&accent=#rrggbb` (default `#c8553d`). Open the page
+  with that person's link from the host (`#token=…`, #40): another person's token answers 403.
 - The person's profile is #42's (`VILLAGER_PEOPLE=alex:Alex:adult` or a `VILLAGER_PROFILES`
   file, see host/README.md), read with `GET persona-templates` together with the jokes dial as
   the host's `humourCeiling` decides it. The page has no profile flag.
@@ -1491,7 +1492,7 @@ and person scoping as the props endpoints; model failures answer 422:
   patterns as data files under `people/<id>/persona-templates/`.
 
 ```sh
-node test/villager-make.ts [--live]                 # in host/: 81 checks, stub maker; --live adds one Sonnet call
+node test/villager-make.ts [--live]                 # in host/: 108 checks, stub maker; --live adds one Sonnet call
 node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
 node scripts/villagers/check-setup.mjs --strategy=1|b|bench [--shots=dir] [--viewports=1440x900,1024x768,390x844]
 ```
