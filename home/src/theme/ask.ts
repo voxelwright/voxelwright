@@ -8,9 +8,13 @@ import type { Theme } from './tokens'
 import { askTheme } from '../villager'
 
 export type Asked =
-  | { ok: true; note: string; id: string; label: string; clamped: string[]; hints: { props: string; costumes: string }; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
-  /** `unbuilt`: the model's look passed check() but its post chain could not be built, so the look on screen stayed. */
-  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'unbuilt'; reason?: string; ms: number }
+  /** `settling`: the switch had not finished after 15 s (a hidden tab draws no frames), so it is reported as still settling. */
+  | { ok: true; note: string; id: string; label: string; clamped: string[]; hints: { props: string; costumes: string }; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null; settling?: true }
+  /**
+   * `unbuilt`: the model's look passed check() but its post chain could not be built, so the look on screen stayed.
+   * `superseded`: another look was chosen before this one settled, so this one is not on screen.
+   */
+  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'unbuilt' | 'superseded'; reason?: string; ms: number }
 
 const asked: ({ text: string } & Asked)[] = []
 
@@ -48,12 +52,15 @@ export async function ask(text: string, person = 'alex'): Promise<Asked> {
     if ('reason' in checked) out = { ok: false, why: 'refused', reason: checked.reason, ms: Math.round(performance.now() - t0) }
     else {
       const look = own(checked.theme)
-      const was = chosen()
       setTheme(look)
-      // Wait for the switch to land: a rebuild can still fail and keep the look on screen.
-      // One a later switch took over (null) is not a failure of this look.
-      const landed = chosen() !== was ? await settled() : null
-      if (landed?.failed) out = { ok: false, why: 'unbuilt', reason: 'the look could not be built', ms: Math.round(performance.now() - t0) }
+      // Wait for this look's switch to land, whether setTheme just started it or it was already
+      // under way (the same look asked for twice): a rebuild can still fail and keep the old look.
+      // A hidden tab draws no frames, so the wait gives up after 15 s and reports the look as settling.
+      const pending = chosen() === look ? settled() : Promise.resolve(null)
+      const landed = await Promise.race([pending, new Promise<'slow'>((done) => setTimeout(() => done('slow'), 15000))])
+      const ms = () => Math.round(performance.now() - t0)
+      if (landed !== 'slow' && landed?.failed) out = { ok: false, why: 'unbuilt', reason: 'the look could not be built', ms: ms() }
+      else if (landed === null && chosen() !== look) out = { ok: false, why: 'superseded', reason: 'another look was chosen before this one settled', ms: ms() }
       else out = {
         ok: true,
         // Shown as text only, never as markup.
@@ -67,6 +74,7 @@ export async function ask(text: string, person = 'alex'): Promise<Asked> {
         models: r.models,
         costUsd: r.costUsd,
         outputTokens: r.outputTokens,
+        ...(landed === 'slow' ? { settling: true as const } : {}),
       }
     }
   }

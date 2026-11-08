@@ -1590,7 +1590,7 @@ export default {
           furnish!.dismiss(guess)
           if (routed.say) quip(me, routed.say)
           const r = await askTheme(text, me.person)
-          quip(me, r.ok ? r.note || `Now ${r.label}.` : "I couldn't change the look just now.")
+          quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : "I couldn't change the look just now.")
           return
         }
       }

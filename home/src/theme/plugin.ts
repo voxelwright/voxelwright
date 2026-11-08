@@ -154,8 +154,8 @@ export default {
       if (group) inside.light(group)
     }), 'theme preview')
     shade(ctx)
-    // For the checks: what the theme's worlds hold (window.village.theme.worlds()).
-    ctx.effect(() => {
+    // For the checks, dev builds only: what the theme's worlds hold (window.village.theme.worlds()).
+    if (import.meta.env.DEV) ctx.effect(() => {
       const api = (window as unknown as { village?: { theme?: Record<string, unknown> } }).village?.theme
       if (!api) return () => {}
       api.worlds = world.state
