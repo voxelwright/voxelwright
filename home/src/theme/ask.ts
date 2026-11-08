@@ -2,7 +2,7 @@
 // asks a model for theme JSON; the answer is data, checked here field by field before
 // setTheme. A failed call, a refused theme or a look whose post chain cannot be built
 // leaves the current theme on screen.
-import { checkTheme, chosen, prepare, PRESETS, setTheme, theme } from './index'
+import { checkTheme, chosen, prepare, PRESETS, setTheme, switching, theme } from './index'
 import { settled } from './switch'
 import type { Theme } from './tokens'
 import { askTheme } from '../villager'
@@ -52,15 +52,26 @@ export async function ask(text: string, person = 'alex'): Promise<Asked> {
     if ('reason' in checked) out = { ok: false, why: 'refused', reason: checked.reason, ms: Math.round(performance.now() - t0) }
     else {
       const look = own(checked.theme)
+      const before = settled()
       setTheme(look)
-      // Wait for this look's switch to land, whether setTheme just started it or it was already
-      // under way (the same look asked for twice): a rebuild can still fail and keep the old look.
-      // A hidden tab draws no frames, so the wait gives up after 15 s and reports the look as settling.
-      const pending = chosen() === look ? settled() : Promise.resolve(null)
-      const landed = await Promise.race([pending, new Promise<'slow'>((done) => setTimeout(() => done('slow'), 15000))])
+      // Wait for this look's switch: the one setTheme just started, or this look's own switch
+      // already under way (the same look asked for twice). A look already settled on screen needs
+      // no wait, and the latest report may then belong to an older switch, so it is not read.
+      // A rebuild can still fail and keep the old look. A hidden tab draws no frames, so the wait
+      // gives up after 15 s and reports the look as settling.
+      const started = settled() !== before
+      const pending = started || (chosen() === look && switching()) ? settled() : Promise.resolve(undefined)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const slow = new Promise<'slow'>((done) => { timer = setTimeout(() => done('slow'), 15000) })
+      let landed = await Promise.race([pending, slow])
+      // Taken over, then this look chosen again (A, B, A): follow the newer switch to this look.
+      while (landed === null && chosen() === look && switching()) landed = await Promise.race([settled(), slow])
+      clearTimeout(timer)
+      // A report speaks for this look only if its switch went to this look.
+      const mine = landed && landed !== 'slow' && landed.to === look.id ? landed : null
       const ms = () => Math.round(performance.now() - t0)
-      if (landed !== 'slow' && landed?.failed) out = { ok: false, why: 'unbuilt', reason: 'the look could not be built', ms: ms() }
-      else if (landed === null && chosen() !== look) out = { ok: false, why: 'superseded', reason: 'another look was chosen before this one settled', ms: ms() }
+      if (mine?.failed) out = { ok: false, why: 'unbuilt', reason: 'the look could not be built', ms: ms() }
+      else if (chosen() !== look) out = { ok: false, why: 'superseded', reason: 'another look was chosen before this one settled', ms: ms() }
       else out = {
         ok: true,
         // Shown as text only, never as markup.

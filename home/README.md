@@ -1935,3 +1935,10 @@ reader; its Undo click reports why it missed instead of passing silently.
 `npm run perf-gate` at `c7f6d5e`, 2 to 3 other headless Chromes on the machine:
 - **Against `feature/village-talk` (7f3bf15): every gate passes.** The themes add 15 draws (the swatch book) to home and villagers, and 9 to talk. CPU and heap match the base, because the theme plugin loads only on intent (the swatch book opening, a theme asked for), not with every page.
 - **Against `main` (cb1d565): one failure, home draw calls 541 against a limit of 530 (base 482).** 44 of the 59 come from #42's connected house, which is already on the talk branch (526), and 15 from the swatch book. GPU and frame gates pass.
+
+### Review (#50, November 8)
+
+`.agents/skills/adversarial-review`, Sonnet reviewer and GPT-6.1 Sol critic, four rounds; each round's kept flags were fixed in a new commit (`264a882`, `ad06eff`, `3f46793`, round 4) and reviewed fresh.
+- **Kept and fixed:** superseded and failed rebuilds (a failed prepare releases the hold, a failed rebuild resumes an interrupted blend, superseded switches publish nothing), written looks get their own id, contact blends, literal style text, the maker prompt's replacer, redecorate unloading, worlds built ahead per look and retired, and a run of `ask()` races: a hidden tab, a superseded look, the same look twice, a stale report from an older switch, and A then B then A.
+- **Dropped on evidence:** the 4 s world retire is long enough, since the compile holds the main thread. The critic also corrected one kept flag's cause (keys and bounds, not counts).
+- **Lead decisions:** the worlds check hook is dev-only; `ask()` reports a look as still settling after 15 s in a hidden tab instead of waiting.
