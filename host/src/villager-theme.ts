@@ -136,7 +136,8 @@ export async function themeRequest(themer: Themer | undefined, id: string, dir: 
 
 /**
  * Keyword answers standing in for the model. "[stub-theme-fail]" throws, "[stub-theme-junk]"
- * answers prose, "[stub-theme-hostile]" answers a theme full of hostile values, "normal"
+ * answers prose, "[stub-theme-hostile]" answers a theme full of hostile values,
+ * "[stub-theme-impostor]" answers a warm restyle that claims a built-in's id (neon-night), "normal"
  * answers the home preset, anything else a recognisable cool restyle.
  */
 export function stubThemer(delayMs = 60): Themer {
@@ -151,6 +152,7 @@ export function stubThemer(delayMs = 60): Themer {
       const palette = JSON.stringify(Array.from({ length: 10_000 }, (_, i) => `#${(i * 97 % 0xffffff).toString(16).padStart(6, '0')}`))
       return { raw: `{"note": "<img src=x onerror=alert(1)>", "theme": {"__proto__": {"polluted": true}, "id": "../../etc", "label": "<script>alert(1)</script>${'x'.repeat(500)}", "about": "fine\\u0000\\n<b>bold</b>", "light": {"key": {"color": "red", "gain": 1e9}, "fill": {}, "rim": {}, "practical": {}, "exposure": 1e308}, "surfaces": {"wall": {"paint": "javascript:alert(1)", "roughness": -5}, "floor": {}, "view": {}, "beam": {}, "glow": {}, "other": {"constructor": {"prototype": {"x": 1}}}}, "post": {"bloom": {"strength": "NaN", "radius": null, "threshold": -1}, "vignette": {}, "warm": [1, 1], "grain": 99, "grade": {"saturation": 1e9, "contrast": 0, "lift": [1, 1, 1]}, "veto": ["traa", "everything"], "stages": [{"kind": "eval", "code": "alert(1)"}, {"kind": "pixel", "height": 1e9, "dither": 0.1, "palette": ${palette}}]}, "motion": {"characterFps": 1e6}}}`, ...call }
     }
+    if (t.includes('[stub-theme-impostor]')) return { raw: JSON.stringify({ note: 'Neon, sort of.', theme: { id: 'neon-night', label: 'Neon night', about: 'Not really neon night.', light: { key: { color: '#ffb070', tint: 0.5 }, fill: {}, rim: {}, practical: {}, exposure: 1.1 }, surfaces: { wall: { color: '#806040', tint: 0.4 } }, post: { grain: 0.08 } } }), ...call }
     if (/\bnormal\b|\busual\b/.test(t)) return { raw: JSON.stringify({ note: 'Back to the golden hour home.', theme: { id: 'home', label: 'Golden hour', about: 'The usual warm kitchen.', light: { key: {}, fill: {}, rim: {}, practical: {}, exposure: 1.25 }, surfaces: { wall: {}, floor: {}, view: {}, beam: {}, glow: {}, other: {} }, fog: {}, post: { bloom: { strength: 0.42, radius: 0.55, threshold: 0.78 }, vignette: { amount: 0.4, inner: 0.38, outer: 0.95 }, warm: [1.03, 0.99, 0.93], grain: 0.14, grade: { saturation: 1, contrast: 1, lift: [0, 0, 0] }, veto: [], stages: [] } } }), ...call }
     return { raw: JSON.stringify({ note: 'Cooler light and deeper shadows.', theme: { id: 'stub-cool', label: 'Stub cool', about: 'A cool blue restyle from the stub.', light: { key: { color: '#6080ff', tint: 0.8 }, fill: {}, rim: {}, practical: {}, exposure: 1.0 }, surfaces: { wall: { color: '#304060', tint: 0.6 } }, post: { grain: 0.05 }, props: { hint: 'cool blue enamel' }, costumes: { hint: 'blue wool' } } }), ...call }
   }

@@ -67,7 +67,7 @@ function mixPost(a: Post, b: Post, k: number): Post {
   }
 }
 
-const ROLES: (keyof Surfaces)[] = ['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage']
+const ROLES: (keyof Surfaces)[] = ['wall', 'floor', 'view', 'beam', 'glow', 'other', 'trim', 'backdrop', 'foliage', 'contact']
 
 /** The theme `k` of the way from a to b (0 is a, 1 is b). Names, hints and stages are b's. */
 export function blend(a: Theme, b: Theme, k: number): Theme {
@@ -75,8 +75,9 @@ export function blend(a: Theme, b: Theme, k: number): Theme {
   for (const role of ROLES) {
     const sa = a.surfaces[role], sb = b.surfaces[role]
     if (!sa && !sb) continue
-    // An optional role a theme leaves out reads as its `other`, as the theme plugin does.
-    surfaces[role] = mixSurface(sa ?? a.surfaces.other, sb ?? b.surfaces.other, k)
+    // An optional role a theme leaves out reads as its `other`, as the theme plugin does; an unset contact shadow is left alone.
+    const unset = (t: Theme) => (role === 'contact' ? {} : t.surfaces.other)
+    surfaces[role] = mixSurface(sa ?? unset(a), sb ?? unset(b), k)
   }
   const ground = (t: Theme) => t.light.fill.ground ?? t.light.fill.color
   const ga = ground(a), gb = ground(b)

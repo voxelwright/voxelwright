@@ -14,6 +14,7 @@ import { oklabCpu, oklabLinear } from '../fx/pixel'
 import { follow, live, meanOf, type Twin } from '../shade/models'
 import type { MaterialClass } from '../shade/classify'
 import type { Theme } from '../tokens'
+import { presetId } from '../index'
 
 const ON = new URLSearchParams(location.search).get('repaint') === '1'
 
@@ -92,7 +93,8 @@ const nearest = (c: V3, p: NonNullable<typeof shared>): V3 => Fn(() => {
 
 /** A gouache twin of a plugin's material (null for glass, glowing things and the theme's own world: they keep their own). */
 export function gouache(o: THREE.MeshStandardMaterial, cls: MaterialClass, t: Theme, mesh: THREE.Object3D): Twin | null {
-  const spec = REPAINTS[t.id]
+  const id = presetId(t)
+  const spec = id && Object.hasOwn(REPAINTS, id) ? REPAINTS[id] : undefined
   const b = BRUSH[cls]
   if (!spec || !b) return null
   for (let p: THREE.Object3D | null = mesh; p; p = p.parent) if (p.userData.themeOwned) return null

@@ -289,11 +289,25 @@ export async function prepare(look: Theme): Promise<{ chain: Chain; take(): bool
   const at = live
   if (!at) return null
   const chain = build(at.stage, look)
-  await chain.compile()
-  // A draw can reach objects only once those before them are ready, so warm until none are new.
-  for (let i = 0; i < 40 && live === at && (await at.warm(chain)) > 0; i++);
+  try {
+    if (failNext) {
+      failNext = false
+      throw new Error('prepare failed on purpose (check hook)')
+    }
+    await chain.compile()
+    // A draw can reach objects only once those before them are ready, so warm until none are new.
+    for (let i = 0; i < 40 && live === at && (await at.warm(chain)) > 0; i++);
+  } catch (error) {
+    // A compile or warm draw that throws must not leave a half-built chain behind.
+    chain.dispose()
+    throw error
+  }
   return { chain, take: () => live === at && (at.take(chain), true) }
 }
+
+let failNext = false
+/** Dev checks only (scripts/check-themes.mjs): the next prepare() throws after building its chain. */
+export const failNextPrepare = () => void (failNext = true)
 
 /**
  * Bloom, a warm vignette and fine film grain, written as TSL nodes. The tier's
@@ -320,7 +334,14 @@ export default {
     ctx.effect(() => {
       live = self
       const remove = stage.addDrawPass(() => {
-        for (const w of warming.splice(0)) w.done(warm(stage.renderer, w.chain))
+        for (const w of warming.splice(0)) {
+          // A warm draw that throws rejects its prepare(), which disposes that chain; the live one still draws.
+          try {
+            w.done(warm(stage.renderer, w.chain))
+          } catch (error) {
+            w.done(Promise.reject(error))
+          }
+        }
         chain.render()
       })
       return () => {

@@ -7,7 +7,7 @@ import fridge from './plugins/fridge'
 import motes from './plugins/motes'
 import camera from './plugins/camera'
 import lamp from './plugins/lamp'
-import postfx from './plugins/postfx'
+import postfx, { failNextPrepare } from './plugins/postfx'
 import glass from './plugins/glass'
 import sunbeam from './plugins/sunbeam'
 import plant from './plugins/plant'
@@ -150,7 +150,7 @@ interface Readiness {
   problems: Record<string, { state: string; error?: string }>
 }
 // Dev builds also expose the kernel so scripts/check-kernel.mjs can load test plugins.
-if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload } })
+if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload, failNextPrepare } })
 Object.assign(window, { village })
 // The theme plugin joins when someone is about to change the look (src/theme prepare(): the
 // swatch book opening, a theme asked for), so its one-time rebuild lands before the switch and

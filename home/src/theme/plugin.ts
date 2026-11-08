@@ -275,6 +275,8 @@ export default {
       // While a switch is under way, stand up the world it is heading to ahead of its swap frame.
       const next = chosen()
       if (next !== t && next !== heading) world.ahead(next)
+      // A switch abandoned before it landed (the chosen look is the shown one again): drop what was built for it.
+      else if (next === t && heading !== null && heading !== t) world.abandon()
       heading = next
       const changed = t !== applied || costumes !== costumeVersion()
       if (!changed && ++frame % RESCAN) return

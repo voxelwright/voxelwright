@@ -13,7 +13,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { releaseGpu } from '../../kernel'
-import { chosen } from '../index'
+import { chosen, presetId } from '../index'
 import type { Theme } from '../tokens'
 import { call, keepItem, library, libraryItem } from '../../villager'
 import { ACCESSORIES, FELT, heads, PROPS, type Slot, type Target } from './targets'
@@ -106,6 +106,8 @@ export default {
     const hidden = new Map<THREE.Object3D, boolean>()
     let current = ''
     let switchedAt = 0
+    /** Set on unload: a piece still being made is never added after it. */
+    let cancelled = false
     let libraryList: Promise<{ id: string; name: string }[]> | null = null
 
     const fromModule = async (module: string) => {
@@ -222,8 +224,10 @@ export default {
     /** Stand a theme piece in every slot, fading in; the originals go when it is solid. */
     const standIn = (t: Theme, key: string, object: THREE.Group, slots: Slot[], surface?: boolean) => {
       const top = surface ? clearTop(object) : undefined
+      // Every slot is fitted before any is added, so a piece that cannot be fitted adds nothing.
+      const holders = slots.map((slot, i) => fit(i === 0 ? object : object.clone(true), slot.box, false, top))
       slots.forEach((slot, i) => {
-        const holder = fit(i === 0 ? object : object.clone(true), slot.box, false, top)
+        const holder = holders[i]
         holder.userData.themeOwned = true
         holder.name = `redecorate ${t.id} ${key}`
         holder.traverse((o) => {
@@ -237,7 +241,7 @@ export default {
 
     /** Accessories: one per felt villager's head, in turn. Kept costumes get none. */
     const dress = (t: Theme, pieces: (Built | null)[]) => {
-      if (!FELT) return
+      if (!FELT || cancelled) return
       heads(scene).forEach(({ root, head, skull }, i) => {
         const key = `${t.id} head ${String(root.userData.villagerId)}`
         let p = placed.find((x) => x.key === key)
@@ -260,7 +264,13 @@ export default {
           new THREE.Vector3(-s.x * 0.4, sb.max.y - s.y * 0.12, -s.z * 0.4),
           new THREE.Vector3(s.x * 0.4, sb.max.y + s.y * 0.3, s.z * 0.4),
         )
-        const holder = fit(made.object.clone(true), target, true)
+        let holder: THREE.Group
+        try {
+          holder = fit(made.object.clone(true), target, true)
+        } catch (error) {
+          console.warn(`redecorate: ${key} could not be fitted, the villager keeps its own look:`, error)
+          return
+        }
         holder.userData.themeOwned = true
         holder.name = key
         head.add(holder)
@@ -275,7 +285,8 @@ export default {
       restoreAll()
       current = t.id
       switchedAt = performance.now()
-      if (!REDECORATED.has(t.id)) return
+      // Only the real built-ins: a written or saved look may carry any id.
+      if (!REDECORATED.has(presetId(t) ?? '')) return
       // Pieces already standing for this look come back at once.
       for (const p of placed) if (p.theme === t.id) {
         p.holder.visible = true
@@ -286,7 +297,7 @@ export default {
       void (async () => {
         // Most visible first; each one stands as soon as it is ready.
         for (const target of PROPS) {
-          if (current !== t.id) return
+          if (cancelled || current !== t.id) return
           if (placed.some((p) => p.theme === t.id && p.key === target.key)) continue
           let slots = target.find(scene)
           for (let n = 0; !slots && n < 50 && current === t.id; n++) {
@@ -298,8 +309,15 @@ export default {
           const made = await piece(t, target, size, 'props')
           if (!made) continue
           if (made.status.readyMs === undefined) made.status.readyMs = Math.round(performance.now() - switchedAt)
+          if (cancelled) return
           if (current !== t.id || placed.some((p) => p.theme === t.id && p.key === target.key)) continue
-          standIn(t, target.key, made.object, slots, target.surface)
+          // One piece that cannot be placed leaves its original and skips only itself.
+          try {
+            standIn(t, target.key, made.object, slots, target.surface)
+          } catch (error) {
+            made.status.state = 'failed'
+            made.status.why = `placing: ${String((error as Error)?.message ?? error).slice(0, 160)}`
+          }
         }
         if (!FELT) return
         let acc = accessoriesFor.get(t.id)
@@ -309,6 +327,7 @@ export default {
           return out
         })()))
         const pieces = await acc
+        if (cancelled) return
         for (const p of pieces) if (p && p.status.readyMs === undefined) p.status.readyMs = Math.round(performance.now() - switchedAt)
         if (current === t.id) dress(t, pieces)
       })()
@@ -330,9 +349,9 @@ export default {
       const t = chosen()
       if (t.id !== current) redecorate(t)
       // New villagers, or one asked to keep its costume.
-      else if (FELT && REDECORATED.has(t.id)) {
+      else if (FELT && REDECORATED.has(presetId(t) ?? '')) {
         const acc = accessoriesFor.get(t.id)
-        if (acc) void acc.then((pieces) => current === t.id && dress(t, pieces))
+        if (acc) void acc.then((pieces) => !cancelled && current === t.id && dress(t, pieces))
       }
     })
 
@@ -353,6 +372,7 @@ export default {
     if (village) village.redecorate = { status }
 
     ctx.effect(() => () => {
+      cancelled = true
       restoreAll()
       for (const p of placed) p.holder.removeFromParent()
       for (const own of built.values()) for (const p of own.values()) void p.then((b) => b && releaseGpu(b.object))

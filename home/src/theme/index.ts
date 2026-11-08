@@ -46,6 +46,17 @@ const asked = new URLSearchParams(location.search).get('theme')
 const first = (asked !== null ? find(asked) : undefined) ?? find(readLast() ?? '') ?? HOME
 /** True when the page starts in a look other than the home's; without it the theme plugin is not loaded until a switch. */
 export const THEMED = first !== HOME
+/** Each blend frame's look and the look it heads to, for presetId. */
+const towards = new WeakMap<Theme, Theme>()
+/**
+ * The built-in `t` is, or is blending towards; undefined for any other look. Code tuned for one
+ * built-in (its light pools, its redecoration) asks this, never `t.id` alone: a written or
+ * saved look may carry any id.
+ */
+export function presetId(t: Theme): string | undefined {
+  const p = Object.hasOwn(PRESETS, t.id) ? PRESETS[t.id] : undefined
+  return p && (p === t || towards.get(t) === p) ? p.id : undefined
+}
 /** The look chosen: where a blend is heading. */
 let target: Theme = first
 /** The look on screen: the target, or a blend on its way there. */
@@ -81,12 +92,16 @@ export function setTheme(next: Theme) {
   if (!sameShape(previous, next)) {
     blending = null
     held = true
-  } else if (reducedMotion.matches) {
-    blending = null
-    shown = next
   } else {
-    blending = { from: previous, to: next, start: performance.now() }
-    requestAnimationFrame(run)
+    // A rebuild still compiling is abandoned (./switch.ts drops its chain): the chain on screen fits this look.
+    held = false
+    if (reducedMotion.matches) {
+      blending = null
+      shown = next
+    } else {
+      blending = { from: previous, to: next, start: performance.now() }
+      requestAnimationFrame(run)
+    }
   }
   root.emit('village/theme', previous, next)
 }
@@ -95,6 +110,17 @@ export function setTheme(next: Theme) {
 export function release() {
   held = false
   shown = target
+}
+
+/**
+ * ./switch.ts: the next look's chain could not be built. The look on screen stays, and is
+ * the chosen one again; the swatch book is told so its marks stay true.
+ */
+export function keepShown() {
+  held = false
+  target = shown
+  if (Object.hasOwn(PRESETS, shown.id) || mine.includes(shown)) writeLast(shown.id)
+  root.emit('village/theme-kept')
 }
 
 /** True while a blend or a held switch is under way. */
@@ -117,6 +143,7 @@ export function tick() {
   const k = t * t * (3 - 2 * t)
   shown = blend(b.from, b.to, k)
   origin.set(shown, origin.get(b.to) ?? 'home')
+  towards.set(shown, b.to)
 }
 function run() {
   tick()
@@ -162,6 +189,8 @@ export interface SwitchReport {
   compiledMs?: number
   /** Rebuild only: from the switch until the new chain had drawn a frame, ms. */
   firstFrameMs?: number
+  /** Rebuild only: why the next chain could not be built; the look on screen stayed. */
+  failed?: string
   frames: number
   done: boolean
 }

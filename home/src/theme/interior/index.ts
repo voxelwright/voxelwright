@@ -7,6 +7,7 @@
 // the theme plugin after every walk.
 import type { Context } from 'cordis'
 import type { Theme } from '../tokens'
+import { presetId } from '../index'
 import type { House } from '../world'
 import type * as THREE from 'three/webgpu'
 import { pools } from './pools'
@@ -29,7 +30,8 @@ export function interior(ctx: Context) {
     place(t: Theme, stood: { house: House; group: THREE.Group } | null) {
       sun.place(stood)
       yard(stood?.group ?? null)
-      lights?.place(t.id)
+      // Pools are tuned per built-in: a written or saved look never borrows them by its id.
+      lights?.place(presetId(t) ?? null)
       fit?.update(t, stood?.house ?? null)
     },
     /** A world stood ahead for a compile gets the light list it will have (./outdoors.ts). */

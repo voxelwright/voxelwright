@@ -403,9 +403,11 @@ export default {
       }
     }, 'swatch book cards')
     // Another way in (the API, a written request) changes the look: keep the marks true.
-    ctx.on('village/theme', () => {
+    const remark = () => {
       if (!fan.hidden) queueMicrotask(() => render(fan.contains(document.activeElement) ? `[data-look="${themes.current()}"]` : undefined))
-    })
+    }
+    ctx.on('village/theme', remark)
+    ctx.on('village/theme-kept', remark)
     ctx.effect(() => entries.add({
       id: 'swatch-book',
       label: 'Swatch book',

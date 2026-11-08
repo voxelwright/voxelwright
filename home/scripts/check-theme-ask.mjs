@@ -153,7 +153,7 @@ try {
     const cool = await ask(page, 'make it cyberpunk')
     const afterCool = await current(page)
     const snap = await page.evaluate(() => window.village.snapshot())
-    check('ask: applies a theme live', cool.ok && afterCool.id === 'stub-cool' && afterCool.light.exposure === 1 && afterCool.surfaces.wall.color === '#304060' && snap.plugins.active.includes('theme'), { cool, id: afterCool.id, active: snap.plugins.active })
+    check('ask: applies a theme live', cool.ok && /^written-stub-cool-[a-z0-9]+$/.test(afterCool.id) && cool.id === afterCool.id && afterCool.light.exposure === 1 && afterCool.surfaces.wall.color === '#304060' && snap.plugins.active.includes('theme'), { cool, id: afterCool.id, active: snap.plugins.active })
     check('ask: a partial theme is filled from the home', afterCool.post.bloom.strength === 0.42 && afterCool.surfaces.floor && typeof afterCool.fog === 'object', afterCool.post)
     check('ask: returns a note and the prop and costume hints', cool.note === 'Cooler light and deeper shadows.' && cool.hints.props === 'cool blue enamel' && cool.hints.costumes === 'blue wool', cool)
 
@@ -169,6 +169,14 @@ try {
     const failed = await ask(page, 'make it [stub-theme-fail]')
     const afterFail = await current(page)
     check('ask: a failed model call leaves the current theme', !failed.ok && failed.why === 'failed' && JSON.stringify(afterFail) === JSON.stringify(afterHostile), failed)
+
+    // A written look that claims a built-in's id gets its own: it does not become neon night.
+    const impostor = await ask(page, 'make it [stub-theme-impostor]')
+    const afterImpostor = await page.evaluate(async () => {
+      const { theme, PRESETS } = await import('/src/theme/index.ts')
+      return { id: theme().id, isNeon: theme() === PRESETS['neon-night'], current: window.village.theme.current(), marked: window.village.theme.list().filter((l) => l.current).map((l) => l.id), last: JSON.parse(localStorage.getItem('village.theme.last') ?? 'null') }
+    })
+    check('ask: a written look claiming id "neon-night" gets its own id and is not neon night', impostor.ok && impostor.id.startsWith('written-neon-night-') && afterImpostor.id === impostor.id && !afterImpostor.isNeon && afterImpostor.current === impostor.id && afterImpostor.marked.length === 0 && afterImpostor.last !== 'neon-night', { impostor, afterImpostor })
 
     const normal = await ask(page, 'go back to normal')
     const afterNormal = await current(page)
@@ -203,7 +211,7 @@ try {
         await page.waitForTimeout(100)
       }
       const t1 = await current(page)
-      check('input: "make it cozier" is routed to the theme and applied', s.routes.at(-1)?.route === 'theme' && s.asked.at(-1)?.ok && t0.id === 'home' && t1.id === 'stub-cool', s)
+      check('input: "make it cozier" is routed to the theme and applied', s.routes.at(-1)?.route === 'theme' && s.asked.at(-1)?.ok && t0.id === 'home' && t1.id.startsWith('written-stub-cool-'), s)
     }
 
     check('no page errors', errors.length === 0, errors)

@@ -72,12 +72,31 @@ export function worlds(scene: THREE.Scene) {
     retired.splice(retired.indexOf(entry), 1)
     entry.world.dispose()
   }
+  const retire = (world: World) => {
+    world.group.removeFromParent()
+    const entry = { world, timer: setTimeout(() => free(entry), RETIRE_MS) }
+    retired.push(entry)
+  }
   const unstand = () => {
     if (!stood) return
-    stood.world.group.removeFromParent()
-    const entry = { world: stood.world, timer: setTimeout(() => free(entry), RETIRE_MS) }
-    retired.push(entry)
+    retire(stood.world)
     stood = null
+  }
+  /**
+   * The chosen look came back to the one on screen: a world built ahead for the abandoned
+   * switch is not wanted. Retired rather than freed, since that switch's compile may still be
+   * running over it; one still stood for a compile (preview) is left to the next ahead() or drop().
+   */
+  const abandon = () => {
+    if (!next || next.world.group.parent) return
+    retire(next.world)
+    next = null
+  }
+  /** Is `o` still in the scene? A room that unloaded takes its exterior with it. */
+  const inScene = (o: THREE.Object3D) => {
+    let p: THREE.Object3D | null = o
+    while (p && p !== scene) p = p.parent
+    return p === scene
   }
   const clear = () => {
     unstand()
@@ -134,6 +153,8 @@ export function worlds(scene: THREE.Scene) {
       scene.add(world.group)
       stood = { key: want.key, world }
     }
+    // Forget the exteriors of rooms that unloaded, so the set holds only what is in the scene.
+    for (const o of hidden) if (!inScene(o)) hidden.delete(o)
     scene.traverse((o) => {
       if (o.userData.exterior && o.visible) {
         o.visible = false
@@ -169,5 +190,5 @@ export function worlds(scene: THREE.Scene) {
     scene.add(next.world.group)
     return next.world.group
   }
-  return { ahead, place, preview, drop }
+  return { ahead, abandon, place, preview, drop }
 }

@@ -126,7 +126,64 @@ const residue = (page) => page.evaluate(() => {
     const state = await page.evaluate(() => ({ current: window.village.theme.current(), shown: window.village.kernel.root.get('stage') && window.village.theme.switching(), hold: Boolean(document.querySelector('.village-theme-hold')) }))
     check('double switch: home to neon night to comic a frame later swaps in only comic, no neon frame, no leftover copy', swaps.length === 1 && swaps[0] === 'comic' && state.current === 'comic' && !state.hold, { swaps, state })
   }
+
+  // A switch back to a look the chain on screen fits, while a rebuild is still compiling:
+  // the rebuild is abandoned, never swapped in (review #50: the pixel stage stayed on the home's look).
+  for (const back of ['home', 'blue-hour']) {
+    await set(page, 'home')
+    await page.waitForFunction(() => !document.querySelector('.village-theme-hold'), null, { timeout: 5000 })
+    const t0 = await page.evaluate(() => {
+      window.village.theme.set('sixteen-bit')
+      return performance.now()
+    })
+    await page.evaluate((id) => new Promise((r) => requestAnimationFrame(() => r(window.village.theme.set(id)))), back)
+    await done(page)
+    // Long enough for the abandoned compile to have finished and, before the fix, swapped in.
+    await page.waitForTimeout(2500)
+    const swaps = await page.evaluate((t0) => window.village.theme.swaps().filter((s) => s.at >= t0).map((s) => s.look), t0)
+    const state = await page.evaluate(() => ({ current: window.village.theme.current(), switching: window.village.theme.switching(), hold: Boolean(document.querySelector('.village-theme-hold')), last: window.village.theme.lastSwitch() }))
+    check(`superseded rebuild: home to sixteen-bit, then ${back} a frame later, swaps in no chain and settles on ${back}`, swaps.length === 0 && state.current === back && !state.switching && !state.hold && state.last.to === back && state.last.done, { swaps, state })
+  }
+  {
+    const t0 = await page.evaluate(() => performance.now())
+    const r = await set(page, 'neon-night')
+    const swaps = await page.evaluate((t0) => window.village.theme.swaps().filter((s) => s.at >= t0).map((s) => s.look), t0)
+    check('superseded rebuild: the next rebuild after it swaps in its chain as usual', r.path === 'rebuild' && r.done && swaps.length === 1 && swaps[0] === 'neon-night', { r, swaps })
+  }
   check('no page errors while switching', errors.length === 0, errors)
+  await context.close()
+}
+
+// A rebuild whose chain cannot be built (a compile or warm draw throws) keeps the look on
+// screen: no frozen held frame, no half-built chain left behind, and the next switch works.
+{
+  const { context, page, errors } = await open('q=low')
+  await page.evaluate(() => localStorage.clear())
+  await page.waitForTimeout(500)
+  const before = await residue(page)
+  const t0 = await page.evaluate(() => {
+    window.village.kernel.failNextPrepare()
+    window.village.theme.set('neon-night')
+    return performance.now()
+  })
+  await done(page)
+  await page.waitForTimeout(800)
+  const state = await page.evaluate((t0) => ({
+    report: window.village.theme.lastSwitch(),
+    current: window.village.theme.current(),
+    marked: window.village.theme.list().filter((l) => l.current).map((l) => l.id),
+    switching: window.village.theme.switching(),
+    hold: Boolean(document.querySelector('.village-theme-hold')),
+    swaps: window.village.theme.swaps().filter((s) => s.at >= t0).length,
+    last: JSON.parse(localStorage.getItem('village.theme.last') ?? 'null'),
+  }), t0)
+  const after = await residue(page)
+  check('failed rebuild: the look on screen stays chosen, nothing held or swapped, the failure reported', state.report.failed && state.report.done && state.current === 'home' && state.marked.join() === 'home' && !state.switching && !state.hold && state.swaps === 0 && state.last === 'home', state)
+  check('failed rebuild: the half-built chain is freed (geometries and textures back where they were)', after.geometries <= before.geometries && after.textures <= before.textures && after.drawPasses === before.drawPasses, { before, after })
+  const r = await set(page, 'neon-night')
+  check('failed rebuild: the next switch works', r.path === 'rebuild' && r.done && !r.failed && (await page.evaluate(() => window.village.theme.current())) === 'neon-night', r)
+  check('failed rebuild: no page errors', errors.length === 0, errors)
+  await page.evaluate(() => localStorage.clear())
   await context.close()
 }
 

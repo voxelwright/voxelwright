@@ -47,6 +47,8 @@ declare module 'cordis' {
     'village/theme'(previous: unknown, next: unknown): void
     /** Someone is about to change the look (the swatch book opened, a theme was asked for): load the theme plugin now. */
     'village/theme-prepare'(): void
+    /** A switch failed and the look on screen stayed the chosen one (src/theme keepShown). */
+    'village/theme-kept'(): void
   }
 }
 

@@ -9,7 +9,7 @@
 import type { Stage } from '../kernel'
 import { root } from '../kernel'
 import { prepare } from '../plugins/postfx'
-import { noteSwap, noteSwitch, release, switching, type SwitchReport } from './index'
+import { keepShown, noteSwap, noteSwitch, release, switching, type SwitchReport } from './index'
 import { sameShape } from './blend'
 import type { Theme } from './tokens'
 
@@ -21,6 +21,7 @@ const SETTLED_FRAME_MS = 25
 let overlay: HTMLCanvasElement | null = null
 /** Raised by every hold, so a fade that a later hold took over leaves the overlay alone. */
 let holds = 0
+/** Raised by every switch, so a rebuild still compiling when another switch comes is never shown. */
 let generation = 0
 
 const nextFrame = () => new Promise<void>((done) => {
@@ -98,6 +99,7 @@ function watch(until: () => boolean, started: number) {
 export async function ease(stage: Stage | undefined, previous: Theme, next: Theme) {
   const started = performance.now()
   const base = { from: previous.id, to: next.id }
+  const mine = ++generation
   if (sameShape(previous, next)) {
     const path = reducedMotion.matches ? 'instant' : 'blend'
     noteSwitch({ ...base, path, worstMs: 0, settledMs: 0, frames: 0, done: false })
@@ -105,13 +107,25 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
     noteSwitch({ ...base, path, ...r, done: true })
     return
   }
-  const mine = ++generation
   let fading = true
   const report: SwitchReport = { ...base, path: 'rebuild', worstMs: 0, settledMs: 0, frames: 0, done: false }
   noteSwitch(report)
   const measured = watch(() => mine !== generation || !fading, started)
   // The current chain keeps drawing the room while the next one compiles.
-  const ready = await prepare(next)
+  let ready: Awaited<ReturnType<typeof prepare>>
+  try {
+    ready = await prepare(next)
+  } catch (error) {
+    // prepare() disposed the half-built chain. The current chain keeps drawing the look on
+    // screen, which becomes the chosen one again; nothing was held, so nothing freezes.
+    if (mine !== generation) return
+    const failed = String((error as Error)?.message ?? error).slice(0, 200)
+    console.warn(`theme switch to ${next.id} failed, keeping ${previous.id}:`, error)
+    keepShown()
+    fading = false
+    noteSwitch({ ...report, ...(await measured), failed, done: true })
+    return
+  }
   const compiledMs = +(performance.now() - started).toFixed(1)
   if (mine !== generation) {
     // A later switch took over: this chain is never shown.
@@ -126,10 +140,13 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
     return
   }
   const copy = await hold(stage, () => {
+    // A switch that came while this waited for the frame owns the screen now.
+    if (mine !== generation) return ready.chain.dispose()
     release()
     if (ready.take()) noteSwap(next.id)
     else ready.chain.dispose()
   })
+  if (mine !== generation) return fadeOut(copy)
   // The new chain draws from the next frame; wait until the GPU has finished that frame.
   await nextFrame()
   await nextFrame()
