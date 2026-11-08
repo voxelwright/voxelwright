@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { TABLE_TOP, WALL_Z } from '../layout'
@@ -293,11 +294,12 @@ export default {
     clock.position.set(1.25, 2.36, WALL_Z)
     // Its own meshes, not merged into the kit, so the whole clock leaves with the back wall when the dollhouse cuts it (#42).
     const rimMat = new THREE.MeshStandardMaterial({ color: '#8a5a3a', roughness: 0.45 })
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.018, 10, 40), rimMat)
-    rim.position.z = 0.03
-    const body = new THREE.Mesh(cyl(0.15, 0.15, 0.03, 32).rotateX(Math.PI / 2), rimMat)
-    body.position.z = 0.015
-    clock.add(rim, body)
+    // The rim and the case share a material, so they are one mesh.
+    const casing = new THREE.Mesh(mergeGeometries([
+      new THREE.TorusGeometry(0.15, 0.018, 10, 40).translate(0, 0, 0.03),
+      cyl(0.15, 0.15, 0.03, 32).rotateX(Math.PI / 2).translate(0, 0, 0.015),
+    ]), rimMat)
+    clock.add(casing)
     clock.userData.inward = new THREE.Vector3(0, 0, 1)
     const face = new THREE.Mesh(new THREE.CircleGeometry(0.142, 40), new THREE.MeshStandardMaterial({ map: paintClockFace(), roughness: 0.6 }))
     face.position.z = 0.032

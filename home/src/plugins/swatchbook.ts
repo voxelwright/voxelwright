@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
@@ -98,16 +99,22 @@ export default {
     const strips = paintStrips(builtIns)
     const paper = new THREE.MeshStandardMaterial({ map: strips, roughness: 0.85, side: THREE.DoubleSide })
     const sw = 0.05, sh = 0.2
+    // The strips share one paper, so their fanned poses are baked into one mesh: one draw and one shadow draw, not seven of each.
+    const leaves: THREE.BufferGeometry[] = []
     for (let i = 0; i < STRIPS; i++) {
       const geo = new THREE.PlaneGeometry(sw, sh).translate(0, sh / 2 - 0.012, 0)
       const uv = geo.attributes.uv as THREE.BufferAttribute
       for (let v = 0; v < uv.count; v++) uv.setX(v, (i + uv.getX(v)) / STRIPS)
-      const strip = new THREE.Mesh(geo, paper)
-      strip.rotation.z = THREE.MathUtils.degToRad(38 - (i * 76) / (STRIPS - 1))
-      strip.position.z = i * 0.0012
-      strip.castShadow = true
-      deck.add(strip)
+      leaves.push(geo.applyMatrix4(new THREE.Matrix4().compose(
+        new THREE.Vector3(0, 0, i * 0.0012),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, THREE.MathUtils.degToRad(38 - (i * 76) / (STRIPS - 1)))),
+        new THREE.Vector3(1, 1, 1),
+      )))
     }
+    const leafMesh = new THREE.Mesh(mergeGeometries(leaves), paper)
+    for (const g of leaves) g.dispose()
+    leafMesh.castShadow = true
+    deck.add(leafMesh)
     const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.012, 14).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#b08a4a', roughness: 0.35, metalness: 0.8 }))
     rivet.position.set(0, 0, 0.004)
     deck.add(rivet)
