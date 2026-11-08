@@ -44,8 +44,10 @@ let box: PropBox | null = null
 const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
 /** The trusted felt kit (./kit.ts) makes the face and the role's mark by default; `&kit=0` shows the model's own, for debugging only. */
 const kitOn = new URLSearchParams(location.search).get('kit') !== '0'
+/** Look regroup 3: `&skin=1` fuses each slot's felt parts into one sewn surface (./skin.ts), for comparing with round 8. */
+const skinOn = new URLSearchParams(location.search).get('skin') === '1'
 
-async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn, role?: string): Promise<Made> {
+async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn, role?: string, skin = skinOn): Promise<Made> {
   box ??= new PropBox()
   const t0 = performance.now()
   const result = await box.run(code)
@@ -53,8 +55,8 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit, role)
-  return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1 } }
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit, role, skin)
+  return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1, ...(a.skinMs === undefined ? {} : { skinMs: a.skinMs }) } }
 }
 
 function fromSpec(raw: unknown, phys: boolean, accent: string, seed: number): Made {
@@ -194,10 +196,10 @@ export default {
      * check-villager-gen.mjs. The species and role-mark checks are off unless asked for: the sandbox's
      * plumbing probe is a plain round figure on purpose, and the round 1 to 3 fixtures predate villager.mark().
      */
-    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string } = {}) => {
+    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string; skin?: boolean } = {}) => {
       try {
-        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role)
-        const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
+        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role, opts.skin ?? skinOn)
+        const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, timing: m.timing, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
         releaseGpu(m.fig.root)
         return r
       } catch (error) {

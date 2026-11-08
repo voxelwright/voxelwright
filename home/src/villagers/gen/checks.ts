@@ -61,6 +61,47 @@ function slotOf(o: THREE.Object3D, root: THREE.Object3D): string {
   return 'body'
 }
 
+const VIEWS = [
+  { name: 'the front', dir: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0), fix: 'keep everything at the neck, below the head' },
+  { name: 'the dollhouse view (in front and above)', dir: new THREE.Vector3(0, -Math.sin(LIMITS.pitch), -Math.cos(LIMITS.pitch)), up: new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch)), fix: 'raise or tilt back any brim or hood so the eyes show from above' },
+]
+
+/**
+ * Whether eye `i` shows from the front and from the dollhouse camera: of 5 rays at its centre and round it, at least
+ * 2 must reach it first from each. Returns the fewer of the two views and a failure per view it hides from.
+ */
+export function faceViews(root: THREE.Object3D, meshes: THREE.Mesh[], eye: THREE.Object3D, i: number): { least: number; failures: string[] } {
+  const own = new Set<THREE.Object3D>()
+  eye.traverse((o) => own.add(o))
+  const box = new THREE.Box3().setFromObject(eye, true)
+  if (box.isEmpty()) return { least: 0, failures: [] }
+  const c = box.getCenter(new THREE.Vector3())
+  const r = box.getSize(new THREE.Vector3()).multiplyScalar(0.3)
+  const ray = new THREE.Raycaster()
+  const failures: string[] = []
+  let least = 5
+  for (const { name, dir, up, fix } of VIEWS) {
+    let seen = 0
+    const blockers = new Map<string, number>()
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const at = c.clone().add(new THREE.Vector3(dx * r.x, 0, 0)).addScaledVector(up, dy * r.y)
+      ray.set(at.addScaledVector(dir, -2), dir)
+      const hit = ray.intersectObjects(meshes, false)[0]
+      if (hit && own.has(hit.object)) seen++
+      else if (hit) {
+        const what = `a ${hexOf(hit.object)} ${slotOf(hit.object, root)} part`
+        blockers.set(what, (blockers.get(what) ?? 0) + 1)
+      }
+    }
+    least = Math.min(least, seen)
+    if (seen < 2) {
+      const by = [...blockers.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+      failures.push(`the ${i === 0 ? 'first' : 'second'} eye is hidden from ${name}${by ? ` behind ${by}` : ''}; nothing may cover the face (${fix})`)
+    }
+  }
+  return { least, failures }
+}
+
 /**
  * Looks at a standing figure: the face visible from the front, no part floating free,
  * the held prop big enough to read, sane proportions, and (unless `species` is false) more than
@@ -86,14 +127,10 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
   if (aspect > LIMITS.aspect[1]) failures.push(`it is ${size.x.toFixed(2)} wide and only ${height.toFixed(2)} tall; keep the width under ${LIMITS.aspect[1]} times the height`)
 
   // Face: rays at each eye's centre and four points around it, from straight in front and from the
-  // dollhouse camera's pitch (in front and above); from both, the eye must be hit first.
+  // dollhouse camera's pitch (in front and above); from both, the eye must be hit first (./faceViews).
   const ray = new THREE.Raycaster()
   const eyeRays: number[] = []
   const faceMargin: number[] = []
-  const views = [
-    { name: 'the front', dir: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0), fix: 'keep everything at the neck, below the head' },
-    { name: 'the dollhouse view (in front and above)', dir: new THREE.Vector3(0, -Math.sin(LIMITS.pitch), -Math.cos(LIMITS.pitch)), up: new THREE.Vector3(0, Math.cos(LIMITS.pitch), -Math.sin(LIMITS.pitch)), fix: 'raise or tilt back any brim or hood so the eyes show from above' },
-  ]
   eyes.forEach((eye, i) => {
     const own = new Set<THREE.Object3D>()
     eye.traverse((o) => own.add(o))
@@ -105,26 +142,8 @@ export function inspect(root: THREE.Object3D, eyes: THREE.Object3D[], held: THRE
     }
     const c = box.getCenter(new THREE.Vector3())
     const r = box.getSize(new THREE.Vector3()).multiplyScalar(0.3)
-    let least = 5
-    for (const { name, dir, up, fix } of views) {
-      let seen = 0
-      const blockers = new Map<string, number>()
-      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const at = c.clone().add(new THREE.Vector3(dx * r.x, 0, 0)).addScaledVector(up, dy * r.y)
-        ray.set(at.addScaledVector(dir, -2), dir)
-        const hit = ray.intersectObjects(meshes, false)[0]
-        if (hit && own.has(hit.object)) seen++
-        else if (hit) {
-          const what = `a ${hexOf(hit.object)} ${slotOf(hit.object, root)} part`
-          blockers.set(what, (blockers.get(what) ?? 0) + 1)
-        }
-      }
-      least = Math.min(least, seen)
-      if (seen < 2) {
-        const by = [...blockers.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-        failures.push(`the ${i === 0 ? 'first' : 'second'} eye is hidden from ${name}${by ? ` behind ${by}` : ''}; nothing may cover the face (${fix})`)
-      }
-    }
+    const { least, failures: hidden } = faceViews(root, meshes, eye, i)
+    failures.push(...hidden)
     eyeRays.push(least)
     // The margin: the steepest view, from the dollhouse pitch up in 5-degree steps, at which at least 3 of 5 rays reach
     // the eye past every part of the mark. Only the mark counts as a blocker here (a snout or a tuft is the species' own business).

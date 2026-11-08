@@ -13,6 +13,7 @@
 //   (readability-colour-key.md), so its numbers say nothing about the silhouette sheet's.
 // Usage: node scripts/villagers/readability.mjs <out-dir> [base-url] [--checks=off] [--seed=47] [--close=<ids>]   (dev server running)
 // The trusted felt kit (gen/kit.ts) makes the face and the mark by default; --no-kit shows the model's own (&kit=0), to compare.
+// --skin (look regroup 3): the sewn skin and hats around the ears (&skin=1, gen/skin.ts), to compare with round 8.
 // --checks=off places villagers the checks would refuse, to measure an earlier round with today's checks.
 // --seed shuffles the blind sheet's numbering (47 gave round 3's order; round 4 used 48).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -24,6 +25,7 @@ const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://loc
 const checksOff = process.argv.includes('--checks=off')
 /** --no-kit: the model's own eyes and mark, not the trusted felt kit's (gen/kit.ts), for comparing with earlier rounds. */
 const noKit = process.argv.includes('--no-kit')
+const skin = process.argv.includes('--skin')
 const seedArg = Number(process.argv.find((a) => a.startsWith('--seed='))?.slice(7) ?? 47)
 const close = process.argv.find((a) => a.startsWith('--close='))?.slice(8).split(',').filter(Boolean) ?? []
 const results = JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'))
@@ -39,7 +41,7 @@ const TILE = 150
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 async function open(query) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}${noKit ? '&kit=0' : ''}`)
+  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}${noKit ? '&kit=0' : ''}${skin ? '&skin=1' : ''}`)
   await page.waitForFunction(() => window.village && window.villagerGen, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villagerGen.loaded)

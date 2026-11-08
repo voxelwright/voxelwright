@@ -175,15 +175,18 @@ function grommets(plane: THREE.Object3D, list: Crossing[], tube: number, mat: TH
   }
 }
 
+/** Where a part passes out through a dome: the point, in the shell's axes, and the ring a hole there would need. */
+interface DomeHit { at: THREE.Vector3; basis: THREE.Matrix4; ri: number; rj: number }
+
 /**
- * A stitched felt hole where each part comes up through a dome (a crown, a skullcap): the ellipsoid with radii `r` at
- * `shell`'s origin, in its own axes, above `minY`. The part's long axis is walked from end to end; where it passes
- * out through the dome a ring goes round it, shaped to the part's section and lying across its axis.
+ * Where each part comes up through a dome (a crown, a skullcap): the ellipsoid with radii `r` at `shell`'s origin, in
+ * its own axes, above `minY`. The part's long axis is walked from end to end; the first place it passes out through
+ * the dome is a hit, with the part's section there (grown by `tube`) lying across its axis.
  */
-function domeGrommets(shell: THREE.Object3D, r: THREE.Vector3, minY: number, parts: THREE.Mesh[], tube: number, mat: THREE.Material) {
+function domeCrossings(shell: THREE.Object3D, r: THREE.Vector3, minY: number, parts: THREE.Mesh[], tube: number): DomeHit[] {
   shell.updateMatrixWorld(true)
   const inv = shell.matrixWorld.clone().invert()
-  let n = 0
+  const out: DomeHit[] = []
   for (const m of parts) {
     m.geometry.computeBoundingBox()
     const bb = m.geometry.boundingBox!
@@ -210,14 +213,21 @@ function domeGrommets(shell: THREE.Object3D, r: THREE.Vector3, minY: number, par
     const along = hi.clone().sub(lo).normalize()
     const ax = axes[i].clone().addScaledVector(along, -axes[i].dot(along)).normalize()
     const ay = new THREE.Vector3().crossVectors(along, ax)
-    const ri = size[i] / 2 + tube * 0.4, rj = size[j] / 2 + tube * 0.4
-    const rr = (ri + rj) / 2
-    const g = at(shell, new THREE.TorusGeometry(rr, tube, 8, 28), mat, hit.x, hit.y, hit.z)
-    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(ax, ay, along))
-    g.scale.set(ri / rr, rj / rr, 1)
-    n++
+    out.push({ at: hit, basis: new THREE.Matrix4().makeBasis(ax, ay, along), ri: size[i] / 2 + tube * 0.4, rj: size[j] / 2 + tube * 0.4 })
   }
-  return n
+  return out
+}
+
+/** A stitched felt hole where each part comes up through a dome (./domeCrossings): a ring round it, shaped to its section. */
+function domeGrommets(shell: THREE.Object3D, r: THREE.Vector3, minY: number, parts: THREE.Mesh[], tube: number, mat: THREE.Material) {
+  const hits = domeCrossings(shell, r, minY, parts, tube)
+  for (const { at: p, basis, ri, rj } of hits) {
+    const rr = (ri + rj) / 2
+    const g = at(shell, new THREE.TorusGeometry(rr, tube, 8, 28), mat, p.x, p.y, p.z)
+    g.quaternion.setFromRotationMatrix(basis)
+    g.scale.set(ri / rr, rj / rr, 1)
+  }
+  return hits.length
 }
 
 export interface KitInput {
@@ -229,6 +239,11 @@ export interface KitInput {
   seed: number
   /** The blush, moved off the owners' hues by the caller. */
   blush: string
+  /**
+   * Look regroup 3 (with the sewn skin): hats sit between, in front of or behind the ears and are never cut by them,
+   * instead of round 8's stitched ear holes. Off: round 8's hats, unchanged.
+   */
+  around?: boolean
 }
 
 /**
@@ -329,6 +344,8 @@ export function feltKit(input: KitInput): KitResult {
     at(frame, new THREE.SphereGeometry(r * 0.24, 10, 8), shine, -sx * r * 0.32, r * 0.36, 0.3 * r)
     for (const m of flatten(frame)) {
       m.userData.colour = m.material === button ? '#1e1715' : '#fbf6ee'
+      // Set on the felt: the sewn skin (./skin.ts) moves it out with the surface it sits on.
+      m.userData.onFelt = true
       add.push({ mesh: m, slot: i === 0 ? 'eye-left' : 'eye-right' })
     }
     // A felt cheek below and outside the eye, flat on the face.
@@ -342,6 +359,7 @@ export function feltKit(input: KitInput): KitResult {
       at(c, new THREE.SphereGeometry(r * 1.25, 16, 10), blush, 0, 0, -0.05 * r).scale.set(1, 0.72, 0.2)
       for (const m of flatten(c)) {
         m.userData.colour = input.blush
+        m.userData.onFelt = true
         add.push({ mesh: m, slot: 'head' })
       }
     }
@@ -425,6 +443,103 @@ export function feltKit(input: KitInput): KitResult {
   let slot: Role = 'head'
   const H_ = H
 
+  /**
+   * Look regroup 3, the tutor around the ears: a skullcap reaching further down than round 8's (it shows under the
+   * board's front edge) and a board lying on it, turned together over the crown (back first, then forward), with the
+   * cap's reach and the board's width trimmed, until no ear passes through either and the face shows from 25 degrees
+   * steeper than the camera. Builds into `frame` and returns true, or returns false when nothing clears the ears.
+   */
+  function seatBoard(): boolean {
+    const wBand = widthBetween(head.c.y - 0.2 * head.r.y, top + 0.05 * head.r.y)
+    const bw0 = THREE.MathUtils.clamp(0.95 * wBand, 1.04 * cw, 1.18 * cw), t = 0.055 * cw
+    const R = head.r.clone().multiplyScalar(1.04)
+    const steepA = 0.58 + THREE.MathUtils.degToRad(25)
+    const up = new THREE.Vector3(0, Math.sin(steepA), Math.cos(steepA))
+    // The mark must rise a tenth of the height over the head as the dollhouse camera sees it (checks.ts markBreak):
+    // the highest point along the camera's up, board against head core.
+    const camUp = new THREE.Vector3(0, Math.cos(0.58), -Math.sin(0.58))
+    let coreTop = -Infinity
+    worldVertices(core!, (v) => { coreTop = Math.max(coreTop, v.dot(camUp)) })
+    const rises = (o: THREE.Object3D) => {
+      let hi = -Infinity
+      o.traverse((m) => { if ((m as THREE.Mesh).isMesh) worldVertices(m as THREE.Mesh, (v) => { hi = Math.max(hi, v.dot(camUp)) }) })
+      return hi - coreTop >= 0.11 * H
+    }
+    frame.position.copy(head.c)
+    /** The board's own frame for a cap turned by a: on the cap, turned less than it (a board tilted far reads as sliding off). */
+    const boardFrame = (a: number) => {
+      const b = 0.4 * a
+      const g = new THREE.Group()
+      g.position.copy(onEllipsoid({ c: new THREE.Vector3(), r: R }, new THREE.Vector3(0, Math.cos(b), Math.sin(b))))
+      g.rotation.x = b
+      return g
+    }
+    const proxy = new THREE.MeshBasicMaterial()
+    const trial = new THREE.Group()
+    frame.add(trial)
+    let pick: { a: number; theta: number; bw: number } | null = null
+    search: for (const a of [-0.3, -0.45, -0.15, -0.6, 0, -0.75, 0.15, -0.9, 0.3, -1.05, 0.45, -1.2]) {
+      for (const theta of [1.2, 1.0, 0.8, 0.6]) for (const bw of [bw0, Math.max(1.03 * cw, 0.9 * bw0)]) {
+        trial.clear()
+        const shell = new THREE.Group()
+        shell.rotation.x = a
+        trial.add(shell)
+        const cap = at(shell, new THREE.SphereGeometry(1, 16, 6, 0, Math.PI * 2, 0, theta), proxy)
+        cap.scale.copy(R)
+        const bf = boardFrame(a)
+        trial.add(bf)
+        at(bf, new THREE.BoxGeometry(bw, t, bw), proxy, 0, t * 0.2, 0)
+        const plane = new THREE.Group()
+        plane.position.y = t * 0.2
+        bf.add(plane)
+        frame.updateMatrixWorld(true)
+        const through = domeCrossings(shell, R, Math.cos(theta) * R.y, ears, 0).length > 0 ||
+          crossings(plane, ears).some((c) => Math.abs(c.x) - c.hx < bw / 2 + 0.03 * cw && Math.abs(c.z) - c.hz < bw / 2 + 0.03 * cw)
+        const hidden = !through && eyeAt.some((e) => {
+          ray.set(e.clone().addScaledVector(up, 0.002), up)
+          ray.far = 2
+          return ray.intersectObject(trial, true).length > 0
+        })
+        const ok = !through && !hidden && rises(trial)
+        trial.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
+        if (ok) { pick = { a, theta, bw }; break search }
+      }
+    }
+    trial.removeFromParent()
+    proxy.dispose()
+    if (!pick) {
+      notes.push('kit: hat: no place on the head clears the ears; stitched holes instead')
+      return false
+    }
+    const { a, theta, bw } = pick
+    const cap = at(frame, new THREE.SphereGeometry(1, 32, 12, 0, Math.PI * 2, 0, theta), felt(dark, seamTexture(dark, seed + 5, false)))
+    cap.userData.colour = dark
+    cap.scale.copy(R)
+    cap.rotation.x = a
+    const bf = boardFrame(a)
+    frame.add(bf)
+    at(bf, new RoundedBoxGeometry(bw, t, bw, 3, t * 0.4), felt(accent, borderTexture(accent, seed + 9)), 0, t * 0.2, 0)
+    const by = t * 0.7
+    at(bf, new THREE.CylinderGeometry(0.06 * cw, 0.06 * cw, 0.035 * cw, 16), felt(dark), 0, by + 0.005 * cw, 0).userData.colour = dark
+    const corner = new THREE.Vector3(side * bw * 0.46, by, bw * 0.46)
+    rod(bf, new THREE.Vector3(0, by + 0.012 * cw, 0), corner.clone().setY(by + 0.012 * cw), 0.02 * cw, felt(dark)).userData.colour = dark
+    at(bf, new THREE.SphereGeometry(0.045 * cw, 12, 10), felt(dark), corner.x, by - 0.01 * cw, corner.z).userData.colour = dark
+    // The tassel hangs straight down whatever the board's tilt.
+    const tassel = new THREE.Group()
+    tassel.position.set(corner.x, by - 0.01 * cw, corner.z)
+    tassel.rotation.x = -bf.rotation.x
+    bf.add(tassel)
+    const tcapY = -t - 0.02 * cw
+    at(tassel, new THREE.CylinderGeometry(0.04 * cw, 0.055 * cw, 0.1 * cw, 14), felt(dark), 0, tcapY, 0).userData.colour = dark
+    for (let k = 0; k < 7; k++) {
+      const ang = (k / 7) * Math.PI * 2
+      const sx = Math.cos(ang) * 0.03 * cw, sz = Math.sin(ang) * 0.03 * cw
+      rod(tassel, new THREE.Vector3(sx, tcapY - 0.02 * cw, sz), new THREE.Vector3(sx * 1.5, tcapY - 0.2 * cw, sz * 1.5), 0.016 * cw, felt(light)).userData.colour = light
+    }
+    notes.push(`kit: hat: board on a skullcap turned ${a.toFixed(2)} over the crown (reach ${theta.toFixed(1)}, ${(bw / cw).toFixed(2)} head widths), clear of the ears`)
+    return true
+  }
+
   if (role === 'cook') {
     // A pleated toque: a stitched band sunk in the crown, a column flaring a little, a cloud of balls on top.
     // Between the ears: the column narrows (down to 0.18 of the head) so ears that rise beside it stay out of its felt.
@@ -432,14 +547,32 @@ export function feltKit(input: KitInput): KitResult {
     const bandH = 0.16 * cw
     const y0 = top - 0.28 * head.r.y
     const probe = new THREE.Group()
-    probe.position.set(head.c.x, y0 + bandH, head.c.z - 0.05 * head.r.z)
-    const gap = Math.min(...crossings(probe, ears).map((c) => Math.hypot(c.x, c.z) - Math.max(c.hx, c.hz)), Infinity)
+    let tz = head.c.z - 0.05 * head.r.z
+    // The room the ears leave round the column's axis: at the band, and (around the ears) up the column too.
+    const room = (z: number) => {
+      let g = Infinity
+      for (const dy of input.around ? [bandH, bandH + 0.25 * cw, bandH + 0.5 * cw] : [bandH]) {
+        probe.position.set(head.c.x, y0 + dy, z)
+        g = Math.min(g, ...crossings(probe, ears).map((c) => Math.hypot(c.x, c.z) - Math.max(c.hx, c.hz)))
+      }
+      return g
+    }
+    let gap = room(tz)
+    if (input.around && gap < colR * 1.16 + 0.02 * cw) {
+      // Look regroup 3: slide the toque forward or back on the crown to where the ears leave it the most room.
+      for (const k of [0.1, -0.1, 0.2, -0.2, 0.3, -0.3]) {
+        const z = head.c.z + (k - 0.05) * head.r.z, g = room(z)
+        if (g > gap + 0.01 * cw) { gap = g; tz = z }
+      }
+      if (tz !== head.c.z - 0.05 * head.r.z) notes.push(`kit: hat: toque moved ${Math.abs((tz - head.c.z) / head.r.z + 0.05).toFixed(2)} head depths ${tz > head.c.z - 0.05 * head.r.z ? 'forward' : 'back'}, clear of the ears`)
+    }
     if (gap < colR * 1.16 + 0.02 * cw) {
-      colR = Math.max(0.22 * cw, (gap - 0.02 * cw) / 1.16)
+      // Round 8 narrowed the column to 0.22 of the head (a stovepipe between round ears); around the ears, to 0.24 at most.
+      colR = Math.max(input.around ? 0.24 * cw : 0.22 * cw, (gap - 0.02 * cw) / 1.16)
       notes.push(`kit: hat: toque narrowed to ${(colR / cw).toFixed(2)} of the head, between the ears`)
     }
     const colH = Math.max(0.62 * cw, 0.33 * H_ - (top - y0) - bandH - 0.24 * cw)
-    frame.position.set(head.c.x, y0, head.c.z - 0.05 * head.r.z)
+    frame.position.set(head.c.x, y0, tz)
     const band = at(frame, new THREE.CylinderGeometry(colR * 1.12, colR * 1.12, bandH, 32), felt(accent, seamTexture(dark, seed + 5)), 0, bandH / 2, 0)
     band.userData.colour = dark
     const col = new THREE.CylinderGeometry(colR * 1.14, colR, colH, 36, 6)
@@ -456,6 +589,8 @@ export function feltKit(input: KitInput): KitResult {
       at(frame, new THREE.SphereGeometry(0.15 * cw * ps, 18, 12), main, Math.cos(a) * 0.23 * cw * ps, puffY, Math.sin(a) * 0.23 * cw * ps)
     }
     at(frame, new THREE.SphereGeometry(0.2 * cw * ps, 20, 14), main, 0, puffY + 0.07 * cw * ps, 0)
+  } else if (role === 'tutor' && input.around && seatBoard()) {
+    // Look regroup 3: built where seatBoard() found room (below).
   } else if (role === 'tutor') {
     // A mortarboard worn as a cap: a skullcap hugging the crown, a thin stitched board lying on it about as wide as
     // the head with its ears where the board sits (council: a wider, thicker board was a slab hiding the head from
@@ -537,11 +672,51 @@ export function feltKit(input: KitInput): KitResult {
       if (tilt > -0.5) frame.rotation.x = tilt -= 0.05
       else frame.position.z -= 0.08 * head.r.z
     }
+    // Look regroup 3: no holes. Where an ear would pass through the crown or the brim, the hat moves forward or back on
+    // the head and tilts further back, the smallest move first, until no ear touches its felt and the face still shows;
+    // when no modest move clears them, round 8's stitched holes stay.
+    let holes0 = !input.around
+    if (input.around) {
+      const t0 = frame.rotation.x, z0 = frame.position.z
+      const pierced = () => {
+        frame.updateMatrixWorld(true)
+        if (domeCrossings(frame, new THREE.Vector3(cr, crownH, crz), 0.02 * cw, ears, 0).length) return true
+        return crossings(frame, ears).some((c) => Math.hypot(c.x / cr, c.z / crz) > 0.9 && Math.hypot(c.x, c.z) - Math.max(c.hx, c.hz) < Rb + 0.06 * cw)
+      }
+      const blocked = () => {
+        frame.updateMatrixWorld(true)
+        return eyeAt.some((e) => {
+          ray.set(e.clone().addScaledVector(upward, 0.002), upward)
+          ray.far = 2
+          return ray.intersectObjects(frame.children, false).length > 0
+        })
+      }
+      if (pierced()) {
+        const tries: { dz: number; tl: number }[] = []
+        // Within reason: tilted past 0.8 or slid back further, a sun hat reads as a halo behind the head (seen on the hippo).
+        for (const dz of [0, 0.1, -0.1, 0.2, -0.2, 0.3, -0.3, -0.45]) for (let tl = t0; tl >= -0.8; tl -= 0.1) tries.push({ dz, tl })
+        tries.sort((a, b) => Math.abs(a.dz) + 0.5 * Math.abs(a.tl - t0) - (Math.abs(b.dz) + 0.5 * Math.abs(b.tl - t0)))
+        const found = tries.find(({ dz, tl }) => {
+          frame.rotation.x = tl
+          frame.position.z = z0 + dz * head.r.z
+          return !pierced() && !blocked()
+        })
+        if (found) {
+          tilt = found.tl
+          notes.push(`kit: hat: sun hat ${found.dz ? `moved ${Math.abs(found.dz)} head depths ${found.dz > 0 ? 'forward' : 'back'}, ` : ''}tilted ${found.tl.toFixed(2)}, clear of the ears`)
+        } else {
+          frame.rotation.x = t0
+          frame.position.z = z0
+          holes0 = true
+          notes.push('kit: hat: no place on the head clears the ears; stitched holes instead')
+        }
+      }
+    }
     // Ears and stalks: a stitched hole where each comes out of the crown, or through the brim beyond it.
     frame.updateMatrixWorld(true)
     const before = frame.children.length
-    const holes = domeGrommets(frame, new THREE.Vector3(cr, crownH, crz), 0.02 * cw, ears, 0.03 * cw, felt(dark))
-    const through = crossings(frame, ears)
+    const holes = holes0 ? domeGrommets(frame, new THREE.Vector3(cr, crownH, crz), 0.02 * cw, ears, 0.03 * cw, felt(dark)) : 0
+    const through = holes0 ? crossings(frame, ears) : []
     grommets(frame, through, 0.035 * cw, felt(dark), (c) => Math.hypot(c.x / cr, c.z / crz) > 1 && Math.hypot(c.x, c.z) < Rb)
     for (const g of frame.children.slice(before)) g.userData.colour = dark
     notes.push(`kit: hat: sun hat tilted ${tilt.toFixed(2)}${frame.children.length > before ? `, ${frame.children.length - before} stitched hole(s) for ears (${holes} in the crown)` : ''}`)

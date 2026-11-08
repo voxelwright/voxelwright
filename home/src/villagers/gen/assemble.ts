@@ -11,7 +11,8 @@ import { feltKit, feltTexture } from '../kinds'
 import { BLUSH, feltKit as makeKit } from './kit'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
-import { awayFromOwners, inspect, OWNER_ACCENTS, type Measures } from './checks'
+import { awayFromOwners, faceViews, inspect, OWNER_ACCENTS, type Measures } from './checks'
+import { sewSkin } from './skin'
 import { ENUMS, type VillagerSpec } from './spec'
 
 /**
@@ -21,6 +22,8 @@ import { ENUMS, type VillagerSpec } from './spec'
  * The model never wears the accent itself.
  */
 const REQUIRED: Role[] = ['head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right']
+/** The sewn skin's grid: cells per head height for the head and for the other slots, the blend over the height, and the most triangles over the parts as built. */
+const SKIN = { head: 42, body: 32, blend: 0.03, budget: 1.5 }
 /** Model units: a villager stands 0.25 to 1.1 tall (Dumpling about 0.45, before the room's 1.3 scale). */
 const HEIGHT: [number, number] = [0.25, 1.1]
 
@@ -31,6 +34,8 @@ export interface Assembled {
   fixes: string[]
   /** What ./checks.ts measured; the figure is refused before this when a check fails. */
   measures: Measures
+  /** Look regroup 3: milliseconds the sewn skin took (./skin.ts), when it ran. */
+  skinMs?: number
 }
 
 /** Two #rrggbb colours within a few steps of 255 on every channel. */
@@ -48,7 +53,7 @@ const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).ge
  * `requested`: the role the runner or the host asked for. It is trusted data, so it decides the kit's mark and the
  * checks over the model's own `villager.about({ role })`, which only says what the model thought it was making.
  */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string, skin = false): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -98,7 +103,7 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
       const m = prop.materials[w.material], c = hex(m.color)
       return m.roughness >= 0.5 && m.metalness < 0.5 && w.role !== 'held' ? awayFromOwners(c, accents) : c
     }
-    const k = makeKit({ meshes: model.map(({ mesh, w }) => ({ mesh, slot: (w.role ?? 'body') as Role, mark: w.mark === true, colour: shownColour(w) })), role, accent, felt: (c, map) => felt(c, map ?? feltTexture(c, seed + 29, { band: false })), seed, blush: awayFromOwners(BLUSH, accents) })
+    const k = makeKit({ meshes: model.map(({ mesh, w }) => ({ mesh, slot: (w.role ?? 'body') as Role, mark: w.mark === true, colour: shownColour(w) })), role, accent, felt: (c, map) => felt(c, map ?? feltTexture(c, seed + 29, { band: false })), seed, blush: awayFromOwners(BLUSH, accents), around: skin })
     for (const m of k.remove) m.removeFromParent()
     model = model.filter(({ mesh }) => !k.remove.has(mesh))
     for (const part of k.add) group.add(part.mesh)
@@ -124,6 +129,8 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const made = new Map<string, THREE.Material>()
   const nudged = new Map<string, string>()
   const replaced = new Set<THREE.Material>()
+  /** Felt the skin may sew (matte, not marked, not the held prop or an eye), with its colour as shown. */
+  const sewable = new Map<THREE.Mesh, string>()
   model.forEach(({ mesh, w: wire }) => {
     const k = wire.material
     const old = mesh.material as THREE.MeshStandardMaterial
@@ -146,6 +153,7 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     if (marked || near(shown, accent)) mesh.userData.accent = true
     // The role mark (villager.mark()), for the check that it breaks the outline and carries enough colour.
     if (marked) mesh.userData.mark = true
+    if (matte && !marked && role !== 'held' && role !== 'eye-left' && role !== 'eye-right') sewable.set(mesh, shown)
   })
   for (const m of replaced) m.dispose()
   const marks = meshes.filter((m) => m.userData.mark).length
@@ -196,6 +204,90 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
   const { failures, measures } = inspect(root, eyes, held, { head, hands, species, mark, role })
   if (enforce && failures.length) throw new Error(`check: ${failures.join('; ')}`)
 
+  // Look regroup 3: the sewn skin. The checks above ran on the model's own parts (they measure its ears, head core
+  // and marks one by one); the skin then replaces each slot's felt with one surface, and the face, the pieces and the
+  // grip are checked again on what is shown.
+  let skinMs: number | undefined
+  if (skin) {
+    const t0 = performance.now()
+    root.updateMatrixWorld(true)
+    const H = Math.max(box('head').max.y, 1e-3)
+    const bySlot = new Map<THREE.Object3D, { mesh: THREE.Mesh; colour: string }[]>()
+    for (const [mesh, colour] of sewable) {
+      if (!mesh.parent) continue
+      if (!bySlot.has(mesh.parent)) bySlot.set(mesh.parent, [])
+      bySlot.get(mesh.parent)!.push({ mesh, colour })
+    }
+    const tris = (m: THREE.Mesh) => (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3
+    let before = 0
+    root.traverse((o) => { if ((o as THREE.Mesh).isMesh) before += tris(o as THREE.Mesh) })
+    // Sews every slot with cells `scale` times the base size; nothing is attached yet.
+    const sewAll = (scale: number) => {
+      let n = 0
+      return [...bySlot].map(([slot, parts]) => {
+        // The face is the head's: a finer grid there.
+        const cell = (scale * H) / (slot === head ? SKIN.head : SKIN.body)
+        return { slot, s: sewSkin(parts, { cell, blend: SKIN.blend * H, felt, seed: seed + 41 + n++ }) }
+      }).filter((x) => x.s !== null) as { slot: THREE.Object3D; s: NonNullable<ReturnType<typeof sewSkin>> }[]
+    }
+    const total = (list: ReturnType<typeof sewAll>) => before + list.reduce((t, { s }) => t + s.triangles - [...s.fused].reduce((u, m) => u + tris(m), 0), 0)
+    let sewnSlots = sewAll(1)
+    // At most SKIN.budget times the triangles of the parts as built: one retry on a coarser grid (a hedgehog's spines).
+    if (total(sewnSlots) > SKIN.budget * before) {
+      const over = total(sewnSlots) - SKIN.budget * before, skinTris = sewnSlots.reduce((t, { s }) => t + s.triangles, 0)
+      const scale = Math.sqrt(skinTris / Math.max(skinTris - over, skinTris * 0.25)) * 1.05
+      for (const { s } of sewnSlots) for (const m of s.meshes) { m.geometry.dispose(); (m.material as THREE.MeshStandardMaterial).map?.dispose(); (m.material as THREE.Material).dispose() }
+      sewnSlots = sewAll(scale)
+      fixes.push(`skin: over ${SKIN.budget} times the parts' triangles; sewn again on cells ${scale.toFixed(2)} times larger`)
+    }
+    const sewn: THREE.Mesh[] = []
+    const dropped: THREE.Mesh[] = []
+    let triangles = 0
+    for (const { slot, s } of sewnSlots) {
+      for (const m of s.fused) {
+        m.removeFromParent()
+        dropped.push(m)
+      }
+      for (const m of s.meshes) {
+        m.castShadow = m.receiveShadow = true
+        slot.attach(m)
+        sewn.push(m)
+      }
+      triangles += s.triangles
+      fixes.push(`skin: ${slot.name || 'body'}: ${s.notes.join('; ')}`)
+    }
+    // The kit's buttons and cheeks were set on the model's felt; the skin swells a little where parts join, so each is
+    // moved along its own facing by the difference between the two surfaces under it.
+    root.updateMatrixWorld(true)
+    const ray = new THREE.Raycaster()
+    const q = new THREE.Quaternion(), at = new THREE.Vector3(), n3 = new THREE.Vector3()
+    let reseated = 0
+    for (const { mesh } of added) {
+      if (!mesh.userData.onFelt) continue
+      mesh.getWorldPosition(at)
+      n3.set(0, 0, 1).applyQuaternion(mesh.getWorldQuaternion(q))
+      ray.set(at.clone().addScaledVector(n3, 0.05), n3.clone().negate())
+      ray.far = 0.1
+      const was = ray.intersectObjects(dropped, false)[0], now = ray.intersectObjects(sewn, false)[0]
+      if (!was || !now) continue
+      const lift = was.distance - now.distance
+      if (Math.abs(lift) < 1e-5 || Math.abs(lift) > 0.03) continue
+      mesh.position.addScaledVector(n3, lift)
+      mesh.updateMatrixWorld(true)
+      reseated++
+    }
+    for (const m of dropped) m.geometry.dispose()
+    // The face again, on the skin: a swelling where a snout joins must not cover a button.
+    const shown: THREE.Mesh[] = []
+    root.traverse((o) => { if ((o as THREE.Mesh).isMesh) shown.push(o as THREE.Mesh) })
+    const faces = eyes.map((e, i) => faceViews(root, shown, e, i))
+    const hidden = faces.flatMap((f) => f.failures)
+    if (enforce && hidden.length) throw new Error(`check (skin): ${hidden.join('; ')}`)
+    measures.eyeRays = faces.map((f) => f.least)
+    skinMs = performance.now() - t0
+    fixes.push(`skin: ${triangles} triangles in ${skinMs.toFixed(0)} ms with the face check; ${reseated} kit part(s) reseated on it`)
+  }
+
   const g = checked.spec.gait
   const touch = g.fidget > 0.02 ? (v: Villager) => {
     const t = g.stepped ? Math.floor(v.t * 12) / 12 : v.t
@@ -206,5 +298,5 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     stride: g.stride, speed: g.speed, bob: g.bob, stepped: g.stepped, outline, touch,
   }
   const { name, bark, voice } = checked.spec
-  return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures }
+  return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures, skinMs }
 }
