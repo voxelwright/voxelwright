@@ -166,6 +166,12 @@ in black until the sound starts, find the cover's end with ffmpeg
   dev middleware; `home/scripts/record-sound-lab.mjs` muxes offline renders onto headless
   videos (sync 0.8 to 30 ms).
 
+- What the owner chose over three listening rounds (Nov 7-8): recorded foley over synthesized
+  for wood and paper (chose, sent, page), softer and darker than our first levels for anything
+  that happens often (turning, notepad), no kalimba or notification-like tones for social
+  moments (farewell is chair and steps), and a short synthesized bubble "bloop" for the "!"
+  after every melodic two-note call felt annoying. Start new cues from that taste.
+
 ## Limits
 
 - Headless Chrome 158 starts an `AudioContext` running without a gesture (a flag
