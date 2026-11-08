@@ -399,6 +399,8 @@ export default {
       return m
     })
     const told = new Set<string>()
+    /** While set (build mode's move-in, #48), every "!" but this person's steps aside; the news itself waits. */
+    let hush: { except: string | null } | null = null
     const crowd = cast.map((m) => m.v)
     const blobs = contactShadows(crowd)
     group.add(...blobs)
@@ -1325,7 +1327,7 @@ export default {
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
           // It steps aside while you write or a note is on its way, so it never competes with whom the note is to.
-          const goal = m.news && !input?.writing && !input?.flying ? 1 : 0
+          const goal = m.news && !input?.writing && !input?.flying && (!hush || hush.except === m.person) ? 1 : 0
           mat.opacity += (goal - mat.opacity) * (1 - Math.exp(-dt * (goal ? 5 : 3)))
           if (!m.news && mat.opacity < 0.02) m.glyph.visible = false
         }
@@ -1637,6 +1639,8 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m) notify(m)
         },
+        /** Quiet every villager's "!" but `except`'s while `on` (build mode's move-in, #48); they come back after. */
+        hush: (on: boolean, except: string | null = null) => (hush = on ? { except } : null),
         /** Put words on a villager's card, as a greeting does; for the paging check. */
         say: (person: string, text: string) => {
           const m = cast.find((c) => c.person === person)
