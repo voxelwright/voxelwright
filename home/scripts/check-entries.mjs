@@ -3,12 +3,14 @@
 // glide the view through the house with no fade, and going back and forth adds
 // nothing (objects, plugins, frame hooks, geometries, textures, DOM, entries).
 // Runs in the dollhouse (?cam=iso), and walks the seated view through the doorway from its own signs.
-// Usage: node scripts/check-entries.mjs [base-url] [--shots=dir]   (dev server running)
+// Usage: node scripts/check-entries.mjs [base-url] [--shots=dir] [--build]   (dev server running)
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
 const base = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5181/'
 const shots = args.find((a) => a.startsWith('--shots='))?.slice(8)
+// --build runs it on the house build mode generates from the plan (#53).
+const extra = args.includes('--build') ? '&build=1' : ''
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })
@@ -27,7 +29,7 @@ async function open(query = '', reducedMotion = 'no-preference', { init, settle 
   const warnings = []
   page.on('console', (m) => m.type() === 'warning' && warnings.push(m.text()))
   if (init) await page.addInitScript(init)
-  await page.goto(`${base}?cam=iso&${query}`)
+  await page.goto(`${base}?cam=iso&${query}${extra}`)
   opened.push({ query, errors })
   if (!settle) return { context, page, errors, warnings }
   const ready = await page.evaluate(() => window.village.ready())
@@ -247,7 +249,7 @@ for (const room of ['kitchen', 'living']) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(base)
+  await page.goto(`${base}?${extra.slice(1)}`)
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
   const seen = await entries(page)

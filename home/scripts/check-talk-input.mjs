@@ -92,6 +92,11 @@ const back = async (page) => {
   await until(page, (s) => s.mode === 'room', 5000)
 }
 
+/** The house's placement (#56): the open session, the plan's furniture, and what is drawn. */
+const placing = (page) => page.evaluate(() => window.villagePlace.state())
+const furniture = (page) => page.evaluate(() => window.villagePlace.plan().furniture)
+const holders = (page) => page.evaluate(() => window.village.kernel.root.get('stage').scene.getObjectByName('placed things').children.length)
+const tagButtons = (page) => page.evaluate(() => [...document.querySelectorAll('.place-tag button')].filter((b) => !b.hidden).map((b) => b.textContent))
 try {
   if (agent === 'claude') {
     const variant = opt('variant') ?? 'held'
@@ -136,14 +141,14 @@ try {
       await page.waitForTimeout(1500)
       await page.keyboard.type('add a round oak table for four', { delay: 60 })
       await page.keyboard.press('Enter')
-      await until(page, (s) => s.input.furnish.job?.ghosts > 0, 15_000)
+      await until(page, (s) => s.input.furnish.job?.open, 15_000)
       await page.waitForTimeout(1200)
       await shot('ghost')
       const placed = await until(page, (s) => s.input.furnish.job?.state === 'placed' || (s.input.furnish.job === null && !s.input.routing && s.input.routes.length >= 2), 150_000, 200)
       await page.waitForTimeout(1200)
       await shot('final')
       await page.waitForTimeout(1500)
-      if (placed.input.furnish.job?.state === 'placed') await page.click('.furnish-choice [data-choice="keep"]')
+      if (placed.input.furnish.job?.state === 'placed') await page.click('.place-tag [data-place="confirm"]')
       await page.waitForTimeout(1500)
       await page.keyboard.type("let's add a playable pinball machine in the living room", { delay: 55 })
       await page.keyboard.press('Enter')
@@ -175,7 +180,7 @@ try {
 
     // The slip variant has none of the input.
     await open(page, '?talk=npc&input=slip&q=low')
-    const plain = await page.evaluate(() => ({ input: window.village.talk.state().input, dom: document.querySelectorAll('.talk-input-field, .talk-mine, .talk-journal, .talk-pad, .furnish-choice').length }))
+    const plain = await page.evaluate(() => ({ input: window.village.talk.state().input, dom: document.querySelectorAll('.talk-input-field, .talk-mine, .talk-journal, .talk-pad, .place-tag').length }))
     check('?input=slip has no always-on input', plain.input === null && plain.dom === 0, plain)
 
     // The held notepad is the default for ?talk=npc.
@@ -262,58 +267,109 @@ try {
     check("a model's talk route to a villager the line does not name is not followed", s.mode === 'talk' && s.partner === 'alex' && samAfter.length === 0 && alexAfter.filter((l) => l.from === 'person').every((l) => l.text === 'put my secret worry away [stub-route-redirect]') && !JSON.stringify(alexAfter).includes('paraphrase'), { mode: s.mode, partner: s.partner, samAfter, alexAfter })
     await back(page)
 
-    // furnish: ghost at once, then the final prop in its place, then undo.
+    // furnish (#56): the ghost is a placement at once, the prop is swapped into it, and Undo cancels it without a trace.
+    const furnitureBefore = (await furniture(page)).length
+    const holdersBefore = await holders(page)
     await page.keyboard.type('add a round oak table for four')
     const t0 = Date.now()
     await page.keyboard.press('Enter')
-    s = await until(page, (x) => x.input.furnish.job?.ghosts > 0, 3000, 10)
+    s = await until(page, (x) => x.input.furnish.job?.open, 3000, 10)
     const ghostSeen = Date.now() - t0
-    check('furnish: a ghost appears at once', s.input.furnish.job?.state === 'ghost' && s.input.furnish.placed === 0 && ghostSeen < 400, { ghostSeen, job: s.input.furnish.job })
+    let ps = await placing(page)
+    check('furnish: a ghost appears at once, as a placement of the house', s.input.furnish.job?.state === 'ghost' && ghostSeen < 400 && ps?.state === 'placing' && ps.mount === 'floor', { ghostSeen, job: s.input.furnish.job, ps })
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
     const t = s.input.furnish.timings.at(-1)
-    check('furnish: the prop comes back through the sandbox and replaces the ghost', s.input.furnish.placed === 1 && s.input.furnish.job.source === 'made' && s.input.furnish.choice && t.ok && t.ghostMs < t.finalMs, t)
-    await page.waitForTimeout(600)
-    s = await state(page)
-    check('the ghost is gone once the prop has settled', s.input.furnish.job?.ghosts === 0, s.input.furnish)
+    ps = await placing(page)
+    check('furnish: the prop comes back through the sandbox and is swapped into the same placement, named by its library item', s.input.furnish.job.source === 'made' && t.ok && t.ghostMs < t.finalMs && ps?.ref?.library === s.input.furnish.job.item && ps.ref.person === 'alex', { t, ps })
+    check('the tag over it offers Keep, Undo and Try another', JSON.stringify(await tagButtons(page)) === JSON.stringify(['Undo', 'Try another', 'Keep']), await tagButtons(page))
     check('your villager acknowledged it in the room', /let me see/i.test(s.cards.alex?.text ?? ''), s.cards.alex)
-    const undoMiss = await page.click('.furnish-choice [data-choice="undo"]', { timeout: 3000 }).then(() => null, (e) => String(e).split('\n').slice(0, 12).join(' | '))
+    // Try another: a new prop into the same placement, at the pose it has.
+    const poseBefore = ps.at
+    await page.click('.place-tag [data-place="more"]', { timeout: 3000 }).catch(() => {})
+    s = await until(page, (x) => x.input.furnish.job?.state === 'placed' && x.input.furnish.timings.length >= 2)
+    ps = await placing(page)
+    check('Try another swaps a new prop into the same placement', s.input.furnish.job.item && ps?.ref?.library === s.input.furnish.job.item && JSON.stringify(ps.at) === JSON.stringify(poseBefore) && s.input.furnish.timings.at(-1).text.includes('take 2'), { job: s.input.furnish.job, ps })
+    await page.click('.place-tag [data-place="cancel"]', { timeout: 3000 }).catch(() => {})
+    await page.waitForTimeout(200)
     s = await state(page)
-    if (undoMiss) console.error('Undo click:', undoMiss.slice(0, 900))
-    check('Undo takes it away again', s.input.furnish.placed === 0 && !s.input.furnish.choice && s.input.furnish.job === null, s.input.furnish)
+    check('Undo cancels the placement and leaves no trace', s.input.furnish.job === null && (await placing(page)) === null && (await furniture(page)).length === furnitureBefore && (await holders(page)) === holdersBefore && !(await page.$('.place-tag')), { job: s.input.furnish.job, furniture: (await furniture(page)).length })
 
-    // Replacing the table hides it, and undo brings it back.
+    // Replacing the table hides it while the new one is placed, and undo brings it back.
     await write(page, 'replace the table with a round oak one')
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
-    check('replace: the old table is hidden and the new one stands in its place', s.input.furnish.tableVisible === false && s.input.furnish.placed === 1, s.input.furnish)
+    check('replace: the old table is hidden and the new one is placed where it stood', s.input.furnish.tableVisible === false && (await placing(page))?.ok === true, { furnish: s.input.furnish, ps: await placing(page) })
     await page.evaluate(() => window.village.talk.undo())
+    await page.waitForTimeout(100)
     s = await state(page)
-    check('undo restores the table', s.input.furnish.tableVisible === true && s.input.furnish.placed === 0, s.input.furnish)
+    check('undo restores the table', s.input.furnish.tableVisible === true && s.input.furnish.job === null, s.input.furnish)
 
-    // A couple around the table, kept into the library; then placed again from it, and copied.
-    await write(page, 'add a couple of green armchairs around the table')
+    // A couple: one placement per piece, one after the other, each kept as plan furniture.
+    // (The stub router sizes a line by its first noun, so a line saying "the table" is table-sized: these name none.)
+    await write(page, 'add a couple of green chairs in the middle')
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
-    check('"a couple ... around the table" places two, facing the table', s.input.furnish.placed === 2 && s.input.furnish.job.places.length === 2, s.input.furnish.job)
-    await page.click('.furnish-choice [data-choice="keep"]', { timeout: 3000 }).catch(() => {})
-    await page.waitForTimeout(300)
+    check('"a couple of ... chairs": two first poses, the first piece placed first', s.input.furnish.job.places.length === 2 && s.input.furnish.job.piece === 0, s.input.furnish.job)
+    await page.click('.place-tag [data-place="confirm"]', { timeout: 3000 }).catch(() => {})
+    s = await until(page, (x) => x.input.furnish.job?.piece === 1 && x.input.furnish.job?.open)
+    ps = await placing(page)
+    const second = s.input.furnish.job?.places[1]
+    check('Keep on the first begins the second at its own first pose, with the same item', s.input.furnish.placed.length === 1 && ps?.ref?.library === s.input.furnish.job.item && second && Math.hypot(ps.at.x - second.x, ps.at.z - second.z) < 0.6, { ps, second, placed: s.input.furnish.placed })
+    await page.click('.place-tag [data-place="confirm"]', { timeout: 3000 }).catch(() => {})
+    s = await until(page, (x) => x.input.furnish.job === null && x.input.furnish.placed.length === 2)
+    const rows = await furniture(page)
+    check('both chairs are plan furniture, each naming the library item', s.input.furnish.placed.length === 2 && s.input.furnish.placed.every((id) => rows.some((f) => f.id === id && f.item.library && f.item.person === 'alex')), { placed: s.input.furnish.placed, rows })
     const items = await Promise.all((await readdir(join(root, 'people', 'alex', 'library'))).map(async (f) => JSON.parse(await readFile(join(root, 'people', 'alex', 'library', f), 'utf8'))))
-    check('Keep saves the prop to your library on the host, as module text', items.some((i) => i.kept && /armchairs/.test(i.name) && /export function build/.test(i.module)), items.map((i) => ({ name: i.name, kept: i.kept })))
-    await write(page, 'put the green armchairs by the window')
-    s = await until(page, (x) => x.input.furnish.job?.state === 'placed' || x.input.furnish.timings.length >= 4)
-    check('a saved piece is placed again from the library, not made anew', s.input.furnish.job?.source === 'library' && s.input.furnish.placed === 3, s.input.furnish.job)
+    check('Keep saves the prop to your library on the host, as module text, kept', items.some((i) => i.kept && /green chairs/.test(i.name) && /export function build/.test(i.module)), items.map((i) => ({ name: i.name, kept: i.kept })))
+    await write(page, 'put the green chairs by the window')
+    s = await until(page, (x) => x.input.furnish.job?.state === 'placed' || x.input.furnish.timings.length >= 5)
+    check('a saved piece is placed again from the library, not made anew', s.input.furnish.job?.source === 'library', s.input.furnish.job)
     await page.evaluate(() => window.village.talk.keep())
+    s = await until(page, (x) => x.input.furnish.job === null && x.input.furnish.placed.length === 3)
     const madeBefore = (await readdir(join(root, 'people', 'alex', 'library'))).length
     await write(page, 'another one like that')
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
-    check('"another one like that" copies without making anything', s.input.furnish.job?.source === 'copy' && s.input.furnish.placed === 4 && (await readdir(join(root, 'people', 'alex', 'library'))).length === madeBefore, s.input.furnish.job)
+    check('"another one like that" copies the last placed piece without making anything', s.input.furnish.job?.source === 'copy' && (await placing(page))?.ref?.library && (await readdir(join(root, 'people', 'alex', 'library'))).length === madeBefore, s.input.furnish.job)
     await page.evaluate(() => window.village.talk.undo())
+    await page.waitForTimeout(100)
+
+    // Nowhere fits: one short line, and nothing is placed until it is somewhere it fits.
+    {
+      const before = (await furniture(page)).length
+      await write(page, 'add a bookcase on the sill')
+      s = await until(page, (x) => x.input.furnish.job?.state === 'placed' && /won't fit/.test(x.cards.alex?.text ?? ''))
+      ps = await placing(page)
+      await page.evaluate(() => window.village.talk.keep())
+      await page.waitForTimeout(300)
+      check("where nothing fits, your villager says so once and Keep places nothing", ps?.ok === false && /won't fit/.test(s.cards.alex?.text ?? '') && (await furniture(page)).length === before && (await state(page)).input.furnish.job?.state === 'placed', { ps, card: s.cards.alex?.text })
+      await page.evaluate(() => window.village.talk.undo())
+      await page.waitForTimeout(100)
+    }
+    // A failed save after Keep says so, and nothing pretends to be kept.
+    {
+      const before = (await furniture(page)).length
+      await page.evaluate(() => window.village.talk.pickAt(1.1, 0, 1.3))
+      await write(page, 'add a lamp [stub-save] here')
+      s = await until(page, (x) => x.input.furnish.job?.state === 'placed')
+      await page.evaluate(() => {
+        const h = window.villagePlace.history()
+        window.__commit = h.commit
+        h.commit = () => Promise.reject(new Error('the host could not be reached'))
+      })
+      await page.evaluate(() => window.village.talk.keep())
+      s = await until(page, (x) => /isn't saved/.test(x.cards.alex?.text ?? ''), 20_000)
+      ps = await placing(page)
+      check('a failed save after Keep: your villager says it is not saved, it stays a ghost, the plan is unchanged', /isn't saved/.test(s.cards.alex?.text ?? '') && ps?.state === 'placing' && (await furniture(page)).length === before && s.input.furnish.job?.state === 'placed', { ps, card: s.cards.alex?.text })
+      await page.evaluate(() => (window.villagePlace.history().commit = window.__commit))
+      await page.evaluate(() => window.village.talk.undo())
+      await page.waitForTimeout(100)
+    }
 
     // A failed generation, and one the sandbox rejects, leave nothing.
     for (const [label, text] of [['fails', 'add a lamp [stub-make-fail] by the window'], ['is rejected by the sandbox checks', 'add a lamp [stub-make-bad] by the window']]) {
-      const placedBefore = (await state(page)).input.furnish.placed
+      const placedBefore = (await furniture(page)).length
       await write(page, text)
-      await until(page, (x) => x.input.furnish.job?.ghosts > 0, 3000, 10)
+      await until(page, (x) => x.input.furnish.job?.open, 3000, 10)
       s = await until(page, (x) => x.input.furnish.job === null && !x.input.routing && /nothing|didn't come out/i.test(x.cards.alex?.text ?? ''), 20_000)
-      check(`a generation that ${label} leaves no ghost and no prop, and says so`, s.input.furnish.placed === placedBefore && s.input.furnish.job === null && /nothing|didn't come out/i.test(s.cards.alex?.text ?? ''), { placed: s.input.furnish.placed, card: s.cards.alex?.text })
+      check(`a generation that ${label} leaves no ghost and no prop, and says so`, (await furniture(page)).length === placedBefore && (await placing(page)) === null && s.input.furnish.job === null && /nothing|didn't come out/i.test(s.cards.alex?.text ?? ''), { placed: s.input.furnish.placed, card: s.cards.alex?.text })
     }
 
     // project: a parcel where it will go, and a record on the host.
@@ -355,26 +411,35 @@ try {
       await write(page, text)
       s = await until(page, (x) => x.input.routes.at(-1)?.text === text && x.input.furnish.job?.state === 'placed', 20_000)
       check(`"${text}" goes to the router and is furnished`, s.input.routes.at(-1).path === 'router' && s.input.routes.at(-1).route === 'furnish' && (await routerCalls()) === calls0 + 1, s.input.routes.at(-1))
-      await page.click('.furnish-choice [data-choice="keep"]', { timeout: 3000 }).catch(() => {})
+      await page.click('.place-tag [data-place="confirm"]', { timeout: 3000 }).catch(() => {})
+      await until(page, (x) => x.input.furnish.job === null, 5000)
     }
-    // A guessed ghost the router turns into an answer fades out (never blinks), and the answer stays to be read.
-    await write(page, 'bring me some cheer')
-    s = await until(page, (x) => x.input.routes.at(-1)?.text === 'bring me some cheer' && x.input.furnish.job === null, 15_000, 10)
-    check('a guessed ghost the router answers instead fades away rather than blinking out', s.input.routes.at(-1).route === 'answer' && s.input.furnish.fading === 1, { route: s.input.routes.at(-1), fading: s.input.furnish.fading })
+    // A guessed ghost the router turns into an answer is cancelled with no trace, and the answer stays to be read.
+    {
+      const before = { rows: (await furniture(page)).length, holders: await holders(page) }
+      const begunBefore = (await state(page)).input.furnish.begun
+      await write(page, 'bring me some cheer')
+      s = await until(page, (x) => x.input.routes.at(-1)?.text === 'bring me some cheer' && x.input.furnish.job === null, 15_000, 10)
+      check('a guessed ghost the router answers instead is cancelled and leaves no trace', s.input.furnish.begun === begunBefore + 1 && s.input.routes.at(-1).route === 'answer' && (await placing(page)) === null && !(await page.$('.place-tag')) && (await furniture(page)).length === before.rows && (await holders(page)) === before.holders, { route: s.input.routes.at(-1), before })
+    }
     s = await until(page, (x) => x.cards.alex?.finished && /I hear you, Alex/.test(x.cards.alex.text) && !x.pending, 15_000)
     await page.waitForTimeout(2000)
     s = await state(page)
-    check('  ...and your villager answers in a talk that stays open', s.mode === 'talk' && s.partner === 'alex' && /I hear you, Alex/.test(s.cards.alex?.text ?? '') && s.input.furnish.fading === 0, { mode: s.mode, card: s.cards.alex?.text })
+    check('  ...and your villager answers in a talk that stays open', s.mode === 'talk' && s.partner === 'alex' && /I hear you, Alex/.test(s.cards.alex?.text ?? ''), { mode: s.mode, card: s.cards.alex?.text })
     await back(page)
     // Lines from your villager queue: the route's own line stays up before the living-room note replaces it.
+    const sentAt = await page.evaluate(() => performance.now())
     await write(page, 'add a picture above the sofa')
-    s = await until(page, (x) => x.input.quips.some((q) => /living room/.test(q.text)), 15_000)
+    s = await until(page, (x) => x.input.quips.some((q) => q.at > sentAt && /living room/.test(q.text)), 30_000)
     const [sayQ, noteQ] = s.input.quips.slice(-2)
     check("your villager's lines queue: each stays up 2.5 s or more before the next", /let me see/.test(sayQ.text) && /living room/.test(noteQ.text) && noteQ.at - sayQ.at >= 2500, s.input.quips.slice(-3))
     s = await until(page, (x) => x.input.furnish.job?.state === 'placed', 20_000)
     const picture = s.input.furnish.job.places[0]
+    ps = await placing(page)
     check('"a picture above the sofa" goes on a wall, upright, at picture height', picture.mount === 'wall' && picture.wall && picture.y > 1 && picture.y < 2, picture)
-    await page.click('.furnish-choice [data-choice="keep"]', { timeout: 3000 }).catch(() => {})
+    check('  ...and placement hangs it on the living room face of the shared wall', ps?.at?.mount === 'wall' && ps.at.roomId === 'living' && Math.abs(ps.pose.x - 3.58) < 0.12 && ps.ok, ps)
+    await page.click('.place-tag [data-place="confirm"]', { timeout: 3000 }).catch(() => {})
+    await until(page, (x) => x.input.furnish.job === null, 5000)
 
     // Placement (#42): distinct anchors give distinct poses, each on its mount.
     const poses = await page.evaluate(() => {
@@ -406,11 +471,21 @@ try {
     })
     check('a second piece on the same anchor slides clear of the first, and a TV never lands on the cow', Math.hypot(stacked.second.x - stacked.cow.x, stacked.second.z - stacked.cow.z) > 0.25 && stacked.tv.mount === 'wall' && Math.hypot(stacked.tv.x - stacked.cow.x, stacked.tv.z - stacked.cow.z) > 0.5, stacked)
 
-    // The parcel is there again after a reload: the project is read back from the host.
+    // The parcel is there again after a reload: the project is read back from the host. Kept pieces are plan furniture, drawn again.
+    const keptIds = (await state(page)).input.furnish.placed
     await open(page, '?talk=npc&input=held&q=low')
     await page.waitForTimeout(500)
     s = await state(page)
     check('after a reload the project parcel stands where it was', s.input.furnish.parcels.length === 1, s.input.furnish.parcels)
+    const end = Date.now() + 15_000
+    let drawnNow = []
+    while (Date.now() < end) {
+      drawnNow = await page.evaluate(() => (window.villagePlace.building() ? [] : window.villagePlace.drawn()))
+      if (keptIds.every((id) => drawnNow.some((d) => d.id === id))) break
+      await page.waitForTimeout(200)
+    }
+    const failures = await page.evaluate(() => window.villagePlace.failures())
+    check('after a reload every kept piece is plan furniture, rebuilt from the library through the sandbox', keptIds.length >= 4 && keptIds.every((id) => drawnNow.some((d) => d.id === id)) && !failures.length, { keptIds, drawn: drawnNow.map((d) => d.id), failures })
 
     // Clean unload, three times over: no input, furnishing or parcels left, the table visible.
     await write(page, 'replace the table with a round oak one')
@@ -421,14 +496,14 @@ try {
       await page.waitForTimeout(300)
       counts.push(await page.evaluate(() => {
         const snap = window.village.snapshot()
-        return { objects: snap.sceneObjects, geometries: snap.geometries, textures: snap.textures, hooks: snap.frameHooks, dom: snap.dom, talkObjects: snap.objects.filter((o) => /:talk (input|notepad|journal button|note in flight|furnishing|project)/.test(o)).length, inputDom: document.querySelectorAll('.talk-input-field, .talk-mine, .talk-journal, .talk-pad, .furnish-choice').length, table: window.village.kernel.root.get('stage').scene.getObjectByName('table').visible }
+        return { objects: snap.sceneObjects, geometries: snap.geometries, textures: snap.textures, hooks: snap.frameHooks, dom: snap.dom, talkObjects: snap.objects.filter((o) => /:talk (input|notepad|journal button|note in flight|furnishing|project)/.test(o)).length, inputDom: document.querySelectorAll('.talk-input-field, .talk-mine, .talk-journal, .talk-pad, .place-tag').length, placing: window.villagePlace.state(), table: window.village.kernel.root.get('stage').scene.getObjectByName('table').visible }
       }))
       if (i < 2) {
         await page.evaluate(() => window.village.load('talk'))
         await page.waitForTimeout(900)
       }
     }
-    check('unloading leaves no input, furnishing or parcel, and restores the table, every time', counts.every((c) => c.talkObjects === 0 && c.inputDom === 0 && c.table && c.objects === counts[0].objects && c.geometries === counts[0].geometries && c.textures === counts[0].textures && c.hooks === counts[0].hooks && c.dom === counts[0].dom), counts)
+    check('unloading leaves no input, furnishing or parcel, and restores the table, every time', counts.every((c) => c.talkObjects === 0 && c.inputDom === 0 && c.placing === null && c.table && c.objects === counts[0].objects && c.geometries === counts[0].geometries && c.textures === counts[0].textures && c.hooks === counts[0].hooks && c.dom === counts[0].dom), counts)
 
     // ?route=separate keeps the two-call path: the router first, then the answer; and the same redirect is refused there too.
     await open(page, '?talk=npc&route=separate&q=low')

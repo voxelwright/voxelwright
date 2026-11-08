@@ -12,6 +12,8 @@ const JOURNAL = /\b(journal|notebook|tasks|to-?do|conversations?|what (did|has) 
 const ANOTHER = /\b(another|one more|like that|like this|again)\b/
 /** Asking for the whole home's look (#50 themes): style, mood, season, "go back to normal". */
 const LOOK = /\b(theme|style|look of|mood|cozier|cosier|redecorate|go back to normal|back to (the )?normal)\b/
+/** Changes to the house itself (#48 build mode): a new room, or a door or wall opened into one. */
+const BUILD = /\b(add|open|build|make|knock|extend|put)\b[^.?!]{0,40}\b(room|study|bedroom|pantry|nursery|office|playroom|extension|door|doorway|wall)s?\b/
 
 export interface Line { text: string; /** Names of other villagers in the room. */ others: string[] }
 
@@ -19,7 +21,7 @@ export interface Line { text: string; /** Names of other villagers in the room. 
 export function mayRoute({ text, others }: Line): boolean {
   const t = text.toLowerCase()
   if (others.some((name) => new RegExp(`\\b${name.toLowerCase()}\\b`).test(t))) return true
-  if (JOURNAL.test(t) || ROOM_WORDS.test(t) || LOOK.test(t)) return true
+  if (JOURNAL.test(t) || ROOM_WORDS.test(t) || LOOK.test(t) || BUILD.test(t)) return true
   if (ROOM_VERBS.test(t) && (THINGS.test(t) || /\b(a|an|the|some|another|it|that|this|them)\b/.test(t))) return true
   if (WANTS.test(t) && THINGS.test(t)) return true
   return /\b(another one|one more|one like (that|this)|copy (it|that|this))\b/.test(t) || (ANOTHER.test(t) && THINGS.test(t))

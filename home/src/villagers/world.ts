@@ -44,6 +44,10 @@ export interface Spot {
   via: string
   /** A chair: hop from `at` onto this seat. */
   seat?: { x: number; z: number; yaw: number }
+  /** Floor points walked after `via`, before `at` (both faces of a doorway, say). */
+  through?: [number, number][]
+  /** The floor outline of the room the spot is in, when it is behind walls (build mode's new rooms): only a villager standing on it leaves through `through`. */
+  floor?: [number, number][]
 }
 
 const chairSeat = (x: number, z: number, yaw: number) => ({ x, z, yaw })
@@ -64,6 +68,11 @@ export const SPOTS: Record<string, Spot> = {
   // The living room's plant stand and grow shelves, reached through the doorway (open paths only).
   loungePlants: { at: [LIVING_X + 0.75, -1.3], face: Math.PI * 0.85, via: 'm2' },
 }
+/** Adds or replaces a spot (build mode's new rooms, #48); kept, since a villager may still be standing there. */
+export function setSpot(name: string, spot: Spot) {
+  SPOTS[name] = spot
+}
+
 /** Where the talk prototype puts its fourth chair, facing the table. */
 export const NEAR_CHAIR = { x: 0.2, z: 0.86, yaw: Math.PI }
 export const SEAT_Y = SEAT_TOP
@@ -96,24 +105,42 @@ function nodes(from: string, to: string, paths: Paths): string[] {
 
 /** A smooth floor path from one spot to another through the corridor. */
 export function route(from: string, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
-  return curve(SPOTS[from].at, via(from, paths), to, paths)
+  return curve(SPOTS[from].at, via(from, paths), to, paths, [...(SPOTS[from].through ?? [])].reverse())
 }
 
 /** A path from wherever a villager stands, through its nearest corridor node, to a spot. */
 export function routeFrom(x: number, z: number, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
-  const used = new Set((paths === 'open' ? OPEN_EDGES : EDGES).flat())
-  let near = via(to, paths), best = Infinity
-  for (const n of used) {
+  // Standing by a spot reached through a doorway, it leaves the way it came.
+  const inside = Object.values(SPOTS).find((s) => s.through && (s.floor ? onFloor(x, z, s.floor) : Math.hypot(s.at[0] - x, s.at[1] - z) < 1.5))
+  if (inside && SPOTS[to] !== inside) return curve([x, z], inside.via, to, paths, [...inside.through!].reverse())
+  return curve([x, z], nearestNode(x, z, paths) ?? via(to, paths), to, paths)
+}
+
+/** Whether a floor point lies inside a closed outline (even-odd crossings). */
+function onFloor(x: number, z: number, ring: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i], [xj, zj] = ring[j]
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside
+  }
+  return inside
+}
+
+/** The corridor node on these paths nearest a floor point (null when the paths have none). */
+export function nearestNode(x: number, z: number, paths: Paths = 'kitchen'): string | null {
+  let near: string | null = null, best = Infinity
+  for (const n of new Set((paths === 'open' ? OPEN_EDGES : EDGES).flat())) {
     const d = Math.hypot(NODES[n][0] - x, NODES[n][1] - z)
     if (d < best) [near, best] = [n, d]
   }
-  return curve([x, z], near, to, paths)
+  return near
 }
 
-function curve(start: [number, number], via0: string, to: string, paths: Paths): THREE.CatmullRomCurve3 {
+function curve(start: [number, number], via0: string, to: string, paths: Paths, leaving: [number, number][] = []): THREE.CatmullRomCurve3 {
   const b = SPOTS[to]
-  const points: [number, number][] = [start]
+  const points: [number, number][] = [start, ...leaving]
   for (const n of nodes(via0, via(to, paths), paths)) points.push(NODES[n])
+  if (b.through) points.push(...b.through)
   points.push(b.at)
   const clean = points.filter((p, i) => i === 0 || Math.hypot(p[0] - points[i - 1][0], p[1] - points[i - 1][1]) > 0.12)
   if (clean.length === 2) clean.splice(1, 0, [(clean[0][0] + clean[1][0]) / 2, (clean[0][1] + clean[1][1]) / 2])

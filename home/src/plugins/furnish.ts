@@ -30,6 +30,8 @@ export default {
     let k = kit
     const part: Kit['part'] = (...a) => k.part(...a)
     const dress: Kit['dress'] = (...a) => k.dress(...a)
+    /** Names what the next parts are, in every kit, so build mode can say "the dresser" (src/build/fixtures.ts). */
+    const label = (name: string | null) => { for (const x of [kit, leftWall, rightWall]) x.label = name }
     const flat = new THREE.Group()
     flat.name = 'furnish flat'
 
@@ -53,6 +55,7 @@ export default {
     runner.name = 'sink runner'
     flat.add(rug, runner)
 
+    label('stove')
     // The stove along the right wall, its oven door facing the room, a striped towel on the bar.
     {
       const z0 = -1.5, z1 = -0.88, x0 = RIGHT - 0.62, H = 0.9, cz = (z0 + z1) / 2
@@ -76,6 +79,7 @@ export default {
       dress(new THREE.PlaneGeometry(0.22, 0.32), towel, at(x0 - 0.052, 0.57, cz + 0.08, -Math.PI / 2))
       dress(new THREE.PlaneGeometry(0.22, 0.26), towel, at(x0 - 0.03, 0.6, cz + 0.08, -Math.PI / 2, 0, 0))
       dress(cyl(0.012, 0.012, 0.22, 10, ).rotateX(Math.PI / 2), towel, at(x0 - 0.041, 0.728, cz + 0.08))
+      label('cupboard')
       // A slim cupboard beside it with a utensil crock and a bread board.
       const c0 = z1 + 0.02, c1 = z1 + 0.5
       part(box(0.6, 0.88, c1 - c0), '#f1ece2', 'satin', at(RIGHT - 0.3, 0.44, (c0 + c1) / 2))
@@ -87,6 +91,7 @@ export default {
       dress(box(0.02, 0.36, 0.24), pine, at(RIGHT - 0.03, 1.09, c1 - 0.16, 0, 0, -0.12))
     }
 
+    label('pans')
     // Over the stove on the right wall: a brass rail with copper pans and utensils, and a framed print further along.
     k = rightWall
     {
@@ -100,6 +105,7 @@ export default {
         part(box(0.012, 0.16, 0.02), '#2b2420', 'satin', at(RIGHT - 0.05, y - 0.09, z))
       }
       for (let i = 0; i < 3; i++) part(box(0.01, 0.24, 0.035), i === 1 ? '#c9a46a' : '#3a302a', 'satin', at(RIGHT - 0.04, y - 0.12, z1 - 0.1 - i * 0.07))
+      label('print')
       // A framed botanical print further along the wall.
       part(box(0.03, 0.56, 0.44), '#8a5a3a', 'satin', at(RIGHT - 0.015, 1.72, 1.15))
       part(box(0.01, 0.48, 0.36), '#f3ead8', 'matte', at(RIGHT - 0.032, 1.72, 1.15))
@@ -108,6 +114,7 @@ export default {
     }
     k = kit
 
+    label('dresser')
     // Painted dresser on the left wall, an open shelf of jars and cookbooks above it.
     {
       const z0 = 0.2, z1 = 1.6, d = 0.44, H = 0.84, cz = (z0 + z1) / 2, x = LEFT + d / 2
@@ -125,6 +132,7 @@ export default {
       for (let i = 0; i < 4; i++) part(cyl(0.12, 0.1, 0.018, 24), '#f2ece0', 'gloss', at(x + 0.02, H + 0.01 + i * 0.019, z0 + 0.3))
       dress(box(0.3, 0.14, 0.4), pine, at(x + 0.02, H + 0.07, z1 - 0.32))
       for (let i = 0; i < 6; i++) part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1))
+      label('shelf')
       // Two shelves on iron brackets.
       k = leftWall
       for (const y of [1.42, 1.82]) {
@@ -160,6 +168,7 @@ export default {
       k = kit
     }
 
+    label('coat pegs')
     // Coat pegs by the doorway with a coat, a scarf and a tote; a bench with wellies under it.
     {
       const z0 = -1.95, z1 = -1.12, cz = (z0 + z1) / 2
@@ -178,6 +187,7 @@ export default {
       dress(box(0.08, 0.32, 0.28), throwRug, at(LEFT + 0.07, 1.36, pegs[3] - 0.05))
       part(new THREE.TorusGeometry(0.08, 0.008, 6, 14, Math.PI), '#8a6a4a', 'matte', at(LEFT + 0.07, 1.52, pegs[3] - 0.05, Math.PI / 2))
       k = kit
+      label('bench')
       // The bench.
       const bx = LEFT + 0.19
       dress(box(0.36, 0.04, z1 - z0 + 0.1), pine, at(bx, 0.44, cz))
@@ -190,6 +200,7 @@ export default {
       }
     }
 
+    label('toy box')
     // Toy box in the front-left corner, its lid ajar, blocks and a ball on the floor.
     {
       const x = -2.55, z = 3.2, ry = 0.15
@@ -212,6 +223,7 @@ export default {
       part(new THREE.TorusGeometry(0.09, 0.012, 6, 24).rotateX(Math.PI / 2), '#f2ece0', 'satin', at(-1.62, 0.09, 2.62, 0, 0.3))
     }
 
+    label('reading chair')
     // A reading chair on the open floor in front of the kitchen, turned to the table, with a throw, a side table and a lamp.
     {
       const x = 1.95, z = 2.0, ry = -2.3
@@ -248,9 +260,11 @@ export default {
       shade.name = 'reading lamp shade'
     }
 
+    label('plant')
     // A tall plant in a woven basket by the dresser.
     basketPlant(kit, wicker, LEFT + 0.32, 2.05, 1.15, 0)
 
+    label(null)
     // Fruit in a blue bowl and a jug of flowers on the table.
     {
       const bx = 0.36, bz = -0.06, y = TABLE_TOP
@@ -272,6 +286,7 @@ export default {
       }
     }
 
+    label('clock')
     // A wall clock between the lamp arm and the fridge, keeping the real time.
     const clock = new THREE.Group()
     clock.name = 'wall clock'
@@ -302,6 +317,7 @@ export default {
       hour.rotation.z = -(((now.getHours() % 12) + m / 60) / 12) * Math.PI * 2
     })
 
+    label(null)
     // Contact shadows: one soft decal per footprint, merged into one draw. They hold at
     // ?q=low too, where sun shadows are coarser.
     const prints: Array<[number, number, number, number, number]> = [

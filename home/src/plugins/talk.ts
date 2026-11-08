@@ -11,6 +11,7 @@ import { projects as listProjects, route, say as sayTo, type Routed, type Routin
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
+import type { PlacementService } from './place'
 import { mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
@@ -426,6 +427,8 @@ export default {
       return m
     })
     const told = new Set<string>()
+    /** While set (build mode's move-in, #48), every "!" but this person's steps aside; the news itself waits. */
+    let hush: { except: string | null; pad?: boolean } | null = null
     const crowd = cast.map((m) => m.v)
     const blobs = contactShadows(crowd)
     group.add(...blobs)
@@ -1265,6 +1268,8 @@ export default {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
+      // Writing while build mode's reward has put the pad away brings it back, and the key goes on the line (#48).
+      if (hush?.pad && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) hush = { except: hush.except }
       if (input?.key(e)) return
       if (e.key === 'Escape' && mode === 'table' && !entries.active) {
         e.preventDefault()
@@ -1540,7 +1545,7 @@ export default {
           if (entries.hovered === m.entry && m.news) m.looked += dt
           if (m.looked >= 1 && m.news) clearNews(m)
           // It steps aside while you write or a note is on its way, so it never competes with whom the note is to.
-          const goal = m.news && !input?.writing && !input?.flying ? 1 : 0
+          const goal = m.news && !input?.writing && !input?.flying && (!hush || hush.except === m.person) ? 1 : 0
           mat.opacity += (goal - mat.opacity) * (1 - Math.exp(-dt * (goal ? 5 : 3)))
           if (!m.news && mat.opacity < 0.02) m.glyph.visible = false
         }
@@ -1583,7 +1588,6 @@ export default {
       slips.frame(dt)
       input?.frame(dt, t)
       sketch?.frame(dt, t)
-      furnish?.frame(dt, t)
       for (const done of [...waiters]) {
         waiters.delete(done)
         done()
@@ -1660,7 +1664,13 @@ export default {
     let routingText = ''
     /** Whom you last talked with: J opens the journal at their pages. */
     let lastTalked: Member | null = null
-    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text), emit: ctx.emit.bind(ctx) }) : null
+    // Furnishing hands each piece to the house's placement (#56) while plugins/place.ts provides it.
+    let placement: PlacementService | null = null
+    if (INPUT) ctx.inject(['placement'], (inner) => {
+      placement = inner.placement
+      inner.effect(() => () => void (placement = null), 'talk placement')
+    })
+    const furnish = INPUT ? furnisher(stage, entries, { person: primary().person, maker: primary().name, say: (text) => quip(primary(), text), placement: () => placement, emit: ctx.emit.bind(ctx) }) : null
     const input = INPUT ? alwaysOn(stage, entries, {
       variant: INPUT,
       journal: 'notebook',
@@ -1677,7 +1687,7 @@ export default {
         return m ? paws(m) : headAt.copy(TABLE_SPOTS[0])
       },
       holder: () => reader()?.v.fig.root ?? null,
-      blocked: () => entries.active === 'notebook' || navigation.claims(),
+      blocked: () => entries.active === 'notebook' || navigation.claims() || Boolean(hush?.pad),
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
       emit: ctx.emit.bind(ctx),
@@ -1830,6 +1840,15 @@ export default {
           quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change the look just now.")
           return
         }
+        case 'build': {
+          // Build mode draws the room and speaks for your villager: the route's line, or one asking what was meant (#48).
+          furnish!.dismiss(guess)
+          if (mode === 'talk') endTalk()
+          const request = { intent: routed.intent, say: routed.say, person: me.person, reply: (line: string) => quip(me, line), handled: false }
+          ctx.emit('village/build-intent', request)
+          if (!request.handled) quip(me, "Let's do that in build mode. I can't move walls from here.")
+          return
+        }
       }
     }
 
@@ -1870,6 +1889,8 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m) notify(m)
         },
+        /** Quiet every villager's "!" but `except`'s while `on` (build mode's move-in, #48), and with `pad` put the held pad away; they come back after. */
+        hush: (on: boolean, except: string | null = null, pad = false) => (hush = on ? { except, pad } : null),
         /** Put words on a villager's card, as a greeting does; for the paging check. */
         say: (person: string, text: string) => {
           const m = cast.find((c) => c.person === person)
@@ -1880,6 +1901,11 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m && spot) m.v.sendTo(spot)
           else m?.v.release(0.2)
+        },
+        /** Where one villager stands and what it is doing, without building the whole state (build mode's move-in, #48). */
+        where: (person: string) => {
+          const m = cast.find((c) => c.person === person)
+          return m ? { x: m.v.pos.x, y: m.v.pos.y, z: m.v.pos.z, state: m.v.state, seated: m.v.seated > 0.5, spot: m.v.spot } : null
         },
         /** Where a villager is on screen: its middle, or `up` of the way from its feet to the top of its head. */
         screen: (person: string, up = 0.5) => {

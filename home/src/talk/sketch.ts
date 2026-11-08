@@ -7,7 +7,7 @@
 //   Make it   the drawing (a bounded PNG) and your words go to the host, where a
 //             vision model writes a prop module; it runs in the prop sandbox like
 //             any other, so only checked data reaches the home. While it is made,
-//             the page stands pinned beside the ghost.
+//             the page stands pinned beside the thing being placed.
 //   Give      the page is torn off and flies to whoever the pad is addressed to,
 //             who holds it up and answers in character. It is sent as an image with
 //             no route, so nothing drawn on it can steer where lines go.
@@ -467,7 +467,13 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   }
 
   // ── Make it: the drawing becomes the thing ───────────────────────────────
-  type Pin = { card: THREE.Group; mat: THREE.MeshStandardMaterial; state: 'flying' | 'pinned' | 'melting' | 'falling'; t: number; from: THREE.Matrix4; to: THREE.Vector3; into?: THREE.Vector3; held?: THREE.Object3D }
+  type Pin = {
+    card: THREE.Group; mat: THREE.MeshStandardMaterial; state: 'flying' | 'pinned' | 'melting' | 'falling'; t: number; from: THREE.Matrix4; to: THREE.Vector3; into?: THREE.Vector3; held?: THREE.Object3D
+    /** Stands beside whatever furnishing's open placement holds (the ghost, then the prop), following it while it is moved. */
+    beside?: boolean
+    /** What it stood beside last: its world box. */
+    box?: THREE.Box3
+  }
   const pins: Pin[] = []
   const world = new THREE.Group()
   world.name = 'talk sketches'
@@ -553,32 +559,23 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     const what = 'your drawing'
     const where = text
     const job = furnish.furnish({ route: 'furnish', what, where, size }, text || what, t0, null, (variant) => makeFromSketch(hooks.person, saved.id, text ? `${text}`.slice(0, 200) : 'the thing in my drawing', size, variant))
-    // Pin the page beside the ghost as soon as the ghost stands.
-    const placeNow = () => {
-      const s = furnish.state()
-      const p = s.job?.places[0]
-      if (!p) return false
-      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize()
-      pin.to.set(p.x, p.y, p.z).addScaledVector(right, size[0] / 2 + 0.62)
-      pin.to.y = p.y + Math.max(0.3, size[1] * 0.45)
-      return true
-    }
-    if (!placeNow()) pin.to.set(0, 0.6, 0.8)
+    // The page stands beside the placement's object from when it begins (each frame, so it follows a drag).
+    pin.to.set(0, 0.6, 0.8)
+    pin.beside = true
     hooks.emit('village/sent', { seconds: reducedMotion.matches ? 0 : 0.9, at: pin.to })
     await job
     making = false
     const s = furnish.state()
     const ok = s.job?.state === 'placed'
     results.push({ id: saved.id, ok, ms: performance.now() - t0, item: s.job?.item, ...(ok ? {} : { why: s.timings.at(-1)?.why ?? 'not placed' }) })
-    if (ok && s.job) {
-      const at = s.job.places[0]
-      pin.into = new THREE.Vector3(at.x, at.y + size[1] * 0.4, at.z)
-      pin.state = 'melting'
-      pin.t = 0
-    } else {
-      pin.state = 'falling'
-      pin.t = 0
-    }
+    // It stays while the person places the thing, and leaves when they keep it or let it go.
+    const placing = ok ? furnish.placing() : null
+    const kept = placing ? (await placing.placing.done).status === 'confirmed' : s.job?.state === 'kept'
+    pin.beside = false
+    if (!pins.includes(pin)) return
+    pin.state = kept && pin.box ? 'melting' : 'falling'
+    if (pin.state === 'melting') pin.into = pin.box!.getCenter(new THREE.Vector3())
+    pin.t = 0
   }
 
   // ── Give: the page flies to whoever the pad is addressed to ──────────────
@@ -622,6 +619,16 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   const q = new THREE.Quaternion()
   const scl = new THREE.Vector3()
   const camPos = new THREE.Vector3()
+  const right = new THREE.Vector3()
+  const besideOf = (p: Pin) => {
+    const now = furnish.placing()
+    if (!now) return
+    p.box = (p.box ?? new THREE.Box3()).setFromObject(now.object)
+    const c = p.box.getCenter(tmp)
+    const w = p.box.max.x - p.box.min.x, d = p.box.max.z - p.box.min.z, h = p.box.max.y - p.box.min.y
+    right.setFromMatrixColumn(camera.matrixWorld, 0).setY(0).normalize()
+    p.to.set(c.x, p.box.min.y + Math.max(0.3, h * 0.45), c.z).addScaledVector(right, Math.max(w, d) / 2 + 0.62)
+  }
   // At rest the pencil lies across the top of the pad, over the binding, where it shows even when the pad is tucked away.
   const rest = new THREE.Vector3(-PADW * 0.27, PADH / 2 + 0.06, 0.03)
   const tipAt = new THREE.Vector3().copy(rest)
@@ -707,6 +714,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
     camera.getWorldPosition(camPos)
     for (const p of [...pins]) {
       p.t += dt
+      if (p.beside) besideOf(p)
       if (p.state === 'flying') {
         const k = Math.min(1, p.t / (reducedMotion.matches ? 0.01 : 0.9))
         const e = 1 - (1 - k) ** 3
@@ -805,7 +813,12 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
       live: Boolean(live),
       making,
       giving,
-      pins: pins.map((p) => ({ state: p.state, held: Boolean(p.held) })),
+      pins: pins.map((p) => ({
+        state: p.state, held: Boolean(p.held), beside: Boolean(p.beside),
+        at: [p.card.position.x, p.card.position.y, p.card.position.z].map((v) => Math.round(v * 1000) / 1000),
+        /** The centre of what it stands beside, as last seen. */
+        by: p.box ? p.box.getCenter(new THREE.Vector3()).toArray().map((v) => Math.round(v * 1000) / 1000) : null,
+      })),
       results: results.slice(),
       surface: surface.hidden ? null : surface.getBoundingClientRect().toJSON(),
       pencil: pencilButton.hidden ? null : pencilButton.getBoundingClientRect().toJSON(),

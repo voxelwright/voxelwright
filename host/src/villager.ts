@@ -23,12 +23,17 @@
 //   visits/<owner>/     this person's talks with another person's villager (#42): its own conversation,
 //                       usage, session and notes. A visit reads only the owner's persona.json, and
 //                       writes the visitor's own preferences.json and sketches.jsonl as on any turn.
+//
+// The house is shared: <root>/house/plans/ holds its plan versions (plans.ts),
+// served at /house/plans to any person's own token. A version may newly place
+// only the caller's own kept library items (plans.ts checkKept).
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import type { Context } from 'cordis'
+import { planStore } from './plans.ts'
 import type { Agent } from './villager-agent.ts'
 import { villagerRoutes, type VillagerMaker } from './villager-make.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
@@ -153,6 +158,8 @@ export default {
     const busy = new Set<string>()
     const turns = new Set<Promise<unknown>>()
     const personDir = (id: string) => join(config.root, 'people', id)
+    // The library is this service's: a placed item must belong to a listed person and be kept (unparseable counts as not kept).
+    const plans = planStore(config.root, async (person, item) => Object.hasOwn(people, person) && (await readItem(person, item).catch(() => null))?.kept === true)
 
     /** The person whose token the request carries, or undefined. */
     const holder = (req: IncomingMessage) => {
@@ -406,6 +413,9 @@ export default {
       const person = holder(req)
       if (!person) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
+      const plansMatch = /^\/house\/plans(?:\/(versions|head|names))?$/.exec(path)
+      // The house is the household's: any person's own token opens it (#48); what a version may newly place is the caller's own.
+      if (plansMatch) return plans(plansMatch[1] as 'versions' | 'head' | 'names' | undefined, req, res, person)
       // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40).
       // A visit (#42) is explicit and under the visitor: /people/<me>/visits/<owner>/(conversation|messages).
       const first = /^\/people\/([^/]+)\//.exec(path)?.[1]

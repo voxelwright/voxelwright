@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { LIVING_X } from '../layout'
+import { LIVING_X, WORKSHOP_DOOR } from '../layout'
 import { closedDoor } from '../doorway'
 import { LOUNGE } from './lounge'
 
@@ -14,16 +14,16 @@ export default {
   inject: ['stage', 'view', 'entries'],
   apply(ctx: Context) {
     const { view, entries } = ctx
-    const workshop = closedDoor(0.82, 2.05)
+    const workshop = closedDoor(WORKSHOP_DOOR.w, WORKSHOP_DOOR.h)
     workshop.name = 'workshop door'
     workshop.rotation.y = -Math.PI / 2
-    workshop.position.set(LIVING_X + LOUNGE.right, 0, LOUNGE.back + 1.75)
+    workshop.position.set(LIVING_X + LOUNGE.right, 0, WORKSHOP_DOOR.z)
     workshop.userData.inward = new THREE.Vector3(-1, 0, 0) // leaves with its wall when a wider view cuts it away (#42)
     own(ctx, workshop)
 
     const atDoor = {
       position: new THREE.Vector3(LIVING_X - 0.3, 1.45, LOUNGE.back + 1.95),
-      look: new THREE.Vector3(LIVING_X + LOUNGE.right, 1.15, LOUNGE.back + 1.75),
+      look: new THREE.Vector3(LIVING_X + LOUNGE.right, 1.15, WORKSHOP_DOOR.z),
     }
     ctx.effect(() => entries.add({
       id: 'workshop',

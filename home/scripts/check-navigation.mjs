@@ -2,13 +2,15 @@
 // drag to turn, right-drag to pan, wheel to zoom, double-click to glide, clamping to the
 // house and yard, reduced motion, the always-on input still taking typed letters, and a
 // frame-to-frame flicker check on the doorway and window trim with the camera still.
-// Usage: node scripts/check-navigation.mjs [base-url] [--shots=dir]   (dev server running)
+// Usage: node scripts/check-navigation.mjs [base-url] [--shots=dir] [--build]   (dev server running)
 import { chromium } from 'playwright'
 import { writeFileSync } from 'node:fs'
 
 const args = process.argv.slice(2)
 const base = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5181/'
 const shots = args.find((a) => a.startsWith('--shots='))?.slice(8)
+// --build runs it on the house build mode generates from the plan (#53).
+const extra = args.includes('--build') ? '&build=1' : ''
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const checks = []
 const check = (name, pass, detail) => {
@@ -25,7 +27,7 @@ async function open(query, reducedMotion = 'no-preference', scale = 1) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`${base}?${query}`)
+  await page.goto(`${base}?${query}${extra}`)
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(1500)
   return { context, page, errors }
@@ -240,7 +242,7 @@ const onScreen = (page, x, z) => page.evaluate(async ([x, z]) => {
       const V = camera.position.constructor
       root.get('view').focus({ position: new V(...pose.p), look: new V(...pose.l) }, 60)
       scene.traverse((o) => { if (/villager|motes|talk|felt|babble/i.test(o.name) && o !== scene) o.visible = false })
-      for (const el of document.querySelectorAll('.talk-input-field, .talk-hud, .talk-mine')) el.style.visibility = 'hidden'
+      for (const el of document.querySelectorAll('.talk-input-field, .talk-hud, .talk-mine, .build-note')) el.style.visibility = 'hidden'
       await new Promise((r) => setTimeout(r, 2500))
       const THREE = await import(performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/deps/three_webgpu.js')))
       const box = new THREE.Box3().setFromObject(scene.getObjectByName(pose.object))

@@ -11,6 +11,11 @@ npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
+node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
+node scripts/check-navigation.mjs http://localhost:5181/ --build   # navigation and entries on the plan-built house (check-entries takes --build too)
+node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
+node scripts/check-place.mjs           # build mode: placing things
+node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"
@@ -2113,7 +2118,7 @@ JSON answer the host checks field by field (`checkRouted` in
 | --- | --- |
 | talk | that villager turns to you and the camera eases to it; any message for it is sent |
 | answer | your villager turns to you and answers through its own session |
-| furnish | a translucent ghost of the right size at once, then the made prop in its place, with Keep, Undo and Try another on a paper tag |
+| furnish | a ghost of the right size at once, placed through the house's placement (see "Placing items"), then the made prop swapped into it, with Keep, Undo and Try another on the placement's tag |
 | project | your villager says so in one line; a kraft-paper parcel with a stitched "being made" tag stands where it will go; the host records it in `projects.jsonl`, and parcels come back after a reload |
 | journal | the journal opens at that villager or section |
 | theme (#50) | your villager says one line, the whole home is restyled from the sentence, and it says what changed (see Themes) |
@@ -2123,17 +2128,30 @@ words (around the table, by the window, in the corner, on the counter, or
 "here", the last thing clicked, only when the person said here). Words naming
 the living room, the sofa, the plants or the sideboard pick its anchors: its
 back wall, the wall above the sofa, by the plants, its floor, the sideboard and
-its ceiling (`src/talk/place.ts`), and your villager says it is going next door. A line that starts like furnishing ("add", "put", "replace") shows the
-ghost before the route comes back; a different route dissolves it. The prop is
-made by `POST /people/:id/props` (Sonnet writing a plain-JS `build(api)`
-module), run in the prop sandbox, checked and rebuilt, then swapped in for the
-ghost. "Replace the table" hides the table and Undo shows it again. "Another
-one like that" clones what was pointed at or placed last, with no model call.
-Keep marks the module kept in the person's library
-(`people/<id>/library/<item>.json`, module text plus metadata), and the router
-is told the library's names, so "put the green armchair by the window" places
-a saved one again through the sandbox. A failed or rejected prop leaves
-nothing placed, and your villager says so. The host stores and returns module
+its ceiling (`src/talk/place.ts`), and your villager says it is going next door.
+That is only the first pose (#56): each piece is handed to the house's one
+placement (`placement.begin`), which owns everything after it: drag with snap
+and collision, red where it can't go, the turn ring, Q/E, Alt, touch. A line
+that starts like furnishing ("add", "put", "replace") begins the ghost's
+placement before the route comes back; a different route cancels it and
+leaves nothing. The prop is made by `POST /people/:id/props` (Sonnet writing a
+plain-JS `build(api)` module), run in the prop sandbox, checked and rebuilt,
+then swapped into the placement (`swap`) at the pose it has. Keep confirms the
+placement: the host marks the library item kept and the house plan gets a
+version with the piece as furniture `{library, person}`, so it is there after
+a reload and build mode can move it. Undo (or Escape) cancels it. Try another
+swaps a new prop into the same placement. Several pieces ("a couple of chairs")
+are placed one after another: Keep on one begins the next at its own first
+pose. "Replace the table" hides the table while the new one is placed and Undo
+shows it again (the old table comes back after a reload: it is not plan
+furniture). "Another one like that" copies the plan furniture pointed at or
+placed last, with no model call; something that is not plan furniture can't
+be copied, and your villager says so. The router is told the library's names,
+so "put the green armchair by the window" places a saved one again through the
+sandbox. A failed or rejected prop leaves nothing placed, and your villager
+says so. Where it doesn't fit, your villager says so once and Keep places
+nothing until it is somewhere it fits; a save that fails after Keep is said
+too, and the piece stays a ghost. The host stores and returns module
 text only; it never imports or runs it. The sandbox is dev only, so in a
 production build furnishing fails honestly.
 
@@ -2145,7 +2163,11 @@ person only: `POST /people/:id/route` `{text, primary, villagers}`,
 can tell them from the host being away.
 
 `node scripts/check-talk-input.mjs` (stub host: keyword router, box maker)
-proves, headless, 39 checks: no input without the flag; the pad rides with
+proves, headless, 70 checks (#56 rewrote the furnishing ones for placement:
+the ghost as a placement, the prop swapped in with its library item, Try
+another in the same placement, Undo and a dismissed guess leaving no trace,
+two pieces one after another, Keep surviving a reload, nowhere-fits and a
+failed save each said once). Earlier, 39 checks: no input without the flag; the pad rides with
 the camera; a keypress anywhere writes; your villager turns to you; Escape
 clears; `j` and the felt journal open the journal and the input steps aside;
 each route's effect in the room (talk with Moss, an answer from Dumpling, the
@@ -2157,7 +2179,8 @@ the parcel after a reload; three clean unloads with the table restored; the
 speech card, its live re-addressing and its flight. 39 of 39 passed (stub
 host, November 6, 2026). `--agent=claude --variant=held|speech
 [--shots=dir] [--video=file]` runs the real session, and `--agent=claude
---furnish` times five furnishing requests.
+--furnish` times five furnishing requests. 70 of 70 passed (stub host,
+November 7, 2026, `--dev=5353 --host=5354`).
 
 Routing, 15 written lines, `node test/route-bench.ts haiku sonnet` in `host/`
 (operator login, M1 Pro, one call at a time; wall time includes the CLI
@@ -2644,6 +2667,442 @@ through the sandbox, and handed to Moss three times it was described as a
 drawing ("a bold navy square ... the handwritten words at the top look like a
 little message") with no route and nothing sent to Sam.
 
+## Build mode (#48 experiment, November 6, 2026)
+
+`?build=1` builds the house's walls, floors and dollhouse shell from a floor
+plan instead of `room.ts`, `kitchendoor.ts`'s shared wall, `lounge.ts`'s walls
+and floor and `diorama.ts`'s shell (#53: both seated views are bit-identical to
+the house without the flag; the dollhouse differs in about 140 edge pixels where
+the plan lays one box per wall and the diorama one per side). With `?cam=iso` you
+can drag the house's right wall (the living room's, with the Workshop's door) to move it (snaps to 10 cm) or pull the glowing dot at its middle to
+bend it into a bay (snaps to 5 cm of bulge). The size and floor area show on a
+handwritten paper tag while you drag. Escape cancels a drag. Without the flag,
+`plugins/build.ts` does nothing.
+
+The plan (`src/build/plan.ts`, pure, no three.js) is a JSON document,
+`schema: 2`, with stable string ids. `HOUSE_PLAN` is the house: the kitchen and
+the living room sharing one wall (`kitchen.right`) with the doorway in it, the
+kitchen window, and the Workshop's door in the living room's right wall. Schema 1
+was the kitchen alone; `UPGRADES[1]` in `history.ts` moves its doorway onto the
+shared wall and builds the living room against it, and a saved kitchen whose
+right side no longer leaves room for it is listed but cannot be shown.
+
+- `corners` {id, x, z}: where wall centrelines meet. A position is stored only here.
+- `walls` {id, a, b, thickness, height, sagitta, openings}. `sagitta` is how
+  far the wall's middle bulges off the chord (0 means straight, and it is capped at
+  a half circle). Openings {id, kind door|window, from, to, sill, head, leaves?}
+  are measured in metres along the wall (arc length when curved).
+- `rooms` {id, label, loop}: a loop of corner ids. Walls are first-class, so
+  one wall can bound two rooms.
+- `furniture` {id, item, at}: placed things (see "Placing items").
+
+An edit is a small JSON object, applied by `apply(plan, edit)` and returning a
+new plan: `moveWall`, `bendWall`, `moveOpening`, `addRoom`, `placeItem`,
+`moveItem` and `removeItem`. `addRoom`
+attaches a rectangle along a straight wall. It splits that wall so the shared
+stretch is one wall in both loops, re-measures the openings on it, and can put a
+door (`leaves: 2` for double doors) on the shared wall. It refuses to split a
+curved wall. `validate(plan)` returns its reasons for rejecting a plan:
+dangling or duplicate ids, two walls on the same pair of corners, walls under
+0.5 m, bulges beyond a half circle, openings that don't fit or that overlap,
+doors off the floor and windows with leaves, rooms that name a corner twice,
+cross themselves, wind the wrong way, share floor with another room or share
+another room's name, a wall bounding more than two rooms, wall things off their
+wall, and a thing standing on a support that stands on it. Each committed drag is a plan version (see "Plan versions").
+
+`src/build/walls.ts` builds one box per wall piece along a world axis and bends
+it onto the arc only when the wall is curved. A straight wall therefore matches
+room.ts's geometry exactly. Its UVs and corner joinery copy room.ts's and
+diorama.ts's, wall by wall.
+The shell is a copy of `shell()` that handles arcs. A rebuild moves its new
+geometry into the meshes the camera already tracks and reuses one set of
+materials and textures. The plugin sets room.ts's and diorama.ts's meshes aside while it runs and
+puts them back when it unloads.
+
+```sh
+npx vite --port 5350 --strictPort &
+node scripts/check-build-plan.mjs http://localhost:5350/
+```
+
+Headless Chrome, WebGPU, 1440x900 at DPR 1, `q=low&fx=`, all 31 checks pass.
+Captures run with a fixed `Date`, a seeded `Math.random`, and frames stepped
+by the script with synthetic rAF and `performance.now()` time. Two runs
+without `?build=1` are then identical.
+
+| Capture | Noise floor (two runs without the flag) | Generated vs without the flag |
+| --- | --- | --- |
+| `?cam=iso` | 0.000 | 0.001 mean per channel; 3,762 px (0.29%) differ, the largest by 43 of 765 (R+G+B) |
+| seated | 0.000 | 0.000 (identical) |
+
+The iso residual is scattered single pixels on the dollhouse floor only. The
+generated floor is a triangulated polygon with UVs computed from world positions, so
+texel rounding moves slightly. Walls, shell and the seated view are
+bit-identical.
+
+Dragging the right wall 1 m out moves the plan corners and the wall by 1.00 m.
+The floor goes from 40.26 to 46.26 m². 1 m in gives 34.26 m². Back at the start
+after 100 moves, the geometry and texture counts are flat (329 and 78). Bending the wall
+out by 1 m adds 4.16 m² of floor, against a 4.21 m² circular segment on the
+centreline. A rebuild takes 1 ms median and 3 ms max. Unloading `build` gives a
+scene object list equal to a page without it (563 objects). There are no
+console errors; the 503 from `/villager/launch` is the same without the flag.
+
+In the model, adding a
+4 x 3 m pantry on the left wall with a double door validates. The shared wall
+is 4 m long, appears once and is in both loops, and the pantry measures
+12.00 m².
+
+Without the flag nothing changes. `check-kernel` passes 10/10. `check-entries`
+passes 25/27; its two failures (one extra geometry on the second room cycle)
+happen in the same way with `plugins/build.ts` removed.
+
+Still open or broken: the kitchen's built-in furniture doesn't follow a moved
+wall (the stove and the pans on the right wall stay put, and the villagers'
+corridors are unchanged). The garden plot, passage and lamp arm from `diorama.ts` don't
+follow the plan. Dragging works only in iso, because the seated room has never
+had a right wall, and the seated floor stays a fixed 9 m. The base stays a
+rectangle around a bay. Corners use room.ts's butt joints, not mitres. Screenshots are in `screenshots/build/`:
+`iso-` and `seat-` `baseline`, `generated` and `diff`, plus `drag-out`,
+`drag-in`, `bend-drag` and `bend` (jpg). The clip is `drag.mp4`.
+
+### Adding rooms
+
+Say it on the notepad in `?talk=npc&build=1`: "add a room to the left side,
+connected by double doors, 2/3 the size of the current room", or "add a 4 by
+3 metre study behind the living room". Or click a wall and say "open a door
+here into a new room". The router (`host/src/villager-input.ts`, route `build`)
+writes an intent as data, never geometry: `{op: 'addRoom', label, anchor: {room,
+side, wall}, size: {w, d} | {fraction}, connect: {kind, leaves, at}}`. The host
+keeps only known keys and plain values; `src/build/intent.ts` checks enums and
+ranges again. `src/build/resolve.ts` (pure) turns it into a draft against the
+plan and the view, or into one line your villager says:
+
+- Sides are relative to the camera: its view direction on the floor is
+  "behind", turned a quarter left or right is "left" or "right". When the
+  camera looks at a corner (two faces within 0.15 in cosine), it asks you to
+  click the wall.
+- `w` runs along the shared wall, `d` away from it. "2/3 the size" is 2/3 of
+  the anchor room's centreline floor area: `w` starts at the wall's length
+  times the square root of the fraction, and the 10 cm pair closest to the
+  target area wins (0.12% off for the kitchen). Everything snaps to 10 cm.
+- The room centres on the wall or the clicked point, then slides to the
+  nearest stretch with no window or door. It asks when the side curves, the
+  room would run into another room, no stretch fits, the room or side is
+  unclear, or the wall is too short.
+
+`src/build/outline.ts` stakes the draft out on the lawn at once; no walls are
+built. A flour line runs along both faces of the walls to be built (the far
+wall as an arc when it bends) and along the shared wall, broken where the door
+goes; the door's jambs are firm lines, and the doorway itself stands in the shared
+wall as a felt ghost (two posts and a lintel, the door's width and height).
+Stakes stand at the corners on the outer line, which is the one outline (no
+string over it). The room's first pieces stand inside as warm felt ghosts with a
+darker rim, the play rug as a flat amber patch. The doorway to be is
+also taped out, in orange masking tape over a warm shade, on whichever face of
+the shared wall the camera sees. The bubble gives the size in words ("a bit
+smaller than the kitchen") and stands beside the outline, never over it: left,
+right, above or below, clear of the size tags and of any villager's card, its
+tail pointing at the room. The width and depth sit on paper tags outside the
+outline's edges; click one to type a size. Wooden pegs stand on the walls they
+move, with arrows in flour.
+
+To adjust it, drag a peg or a wall, or click a size and type. The sage peg
+bends the far wall, and a dashed curve runs from that wall's ends through it.
+A refused drag flashes the walls chalk red. In iso the view eases to the room
+being drawn, then to the house.
+
+Enter or "Build it" commits one version ("Added the study"), and the real walls
+rise from the floor in 0.7 s (at once with reduced motion). The room arrives
+with a window in the middle of its far wall (an `addOpening` edit, 42% of the
+wall, 0.9 to 2.2 m; a curved window when the wall bends) and its first pieces
+(`src/build/firstroom.ts`), chosen by its name. A playroom gets a patchwork play
+rug (ochre, sage, terracotta and cream, stitched seams) with a little table and two stools on it, a toy chest by the quiet wall, a
+play tent in the far corner, and bunting, drawings, a book ledge and a growth
+chart on its back wall; a study a desk and chair under the window, a rug,
+and an armchair and floor lamp; a bedroom a bed with its head to the side wall,
+a side table and a rug; anything else a sofa against the far wall facing a low
+table on a big rug, an armchair and a floor lamp. Every room of 14 m² or more
+also gets a low bookcase and a potted plant on the side away from the door, by
+the shared wall, and a picture on that side wall. A strip 1.5 m into the room
+from the door is kept clear. They are `placeItem` edits in the room's own
+version, so one undo takes both away, and placing draws them from the plan, so
+they come back on reload. Each is checked by placing's fit rules
+(`src/build/mount.ts`) against the new house, what is already in the scene and
+the pieces laid before it; one that will not fit moves toward the shared wall
+and the middle 10 cm at a time, and is left out if it never fits. Rooms whose
+name says pantry, store, bathroom, laundry, utility, garage or hall get none.
+The pieces are kinds (`src/build/pieces.ts`), each on a soft contact shadow
+inside its own footprint: `sofa`, `armchair`, `low-table`, `floor-lamp`, `rug`,
+`big-rug`, `low-bookcase`, `toy-shelf`, `potted-plant`, `play-tent`,
+`play-table` (a craft table and two stools), `toy-chest`, `play-wall` (bunting,
+two drawings and a low ledge of picture books on a playroom's back wall), `desk`,
+`bed` and `side-table`. Free-standing pieces keep 0.3 m inside the outline and
+clear of its pegs, and the built pieces are laid against the same scan of the
+house as the ghosts, so they stand exactly where the ghosts stood. Escape or "Not now"
+leaves no trace (the view glides back to where it was). Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z step through versions. The
+plan history is `src/build/house.ts`: the host's store when the host is
+running. Without a host it is kept in memory, and a paper note at the top says
+once that nothing built will outlast the page.
+
+Every room renders with its floor and base, and a shared wall is drawn once. A
+door that a build edit opens gets a timber casing on both faces, lined reveals
+and a darker oak threshold strip, proud of both floors and wider than the wall. A window it opens gets a frame with glazing bars, a pane,
+a timber sill inside and a painted one outside, and a soft patch of daylight on
+the floor below it. The kitchen's own openings stay as room.ts draws them.
+The lot answers the plan (`src/build/lot.ts`): while any room or the staked-out
+room reaches past diorama.ts's lawn board, the lawn, its edge, its shadow and
+the picket fence are redrawn as one rectangle with rounded corners holding the
+old board and each room's walls plus 1 m, so no corner steps in, on a grass
+that tiles without seams; the fence follows it at the old board's inset and
+keeps its gate where the path still meets it. `src/build/yard.ts` hides the flowers,
+stones and shrubs inside a room, on the lawn round it, and along the stretch of
+old fence the lot grew past. All of it is runtime only and goes back when the
+rooms are undone or build mode unloads. The new room's base follows its walls
+round a bay, and the sun's shadow box grows to hold every room.
+
+The view answers the room (`src/build/frame.ts`, `src/build/movein.ts`; the dollhouse only).
+While the outline shows, the view glides to frame the outline, the shared wall and the
+door mark below the choice card, again after each change but never during a drag. Once
+built, the villager who asked walks from where they are through the new doorway (world.ts
+`setSpot` with the doorway's two faces as `through` points) and sits at the room's main
+piece: a stool at the play table, the sofa, the desk chair or the bed's edge, each cushioned
+to the villager's sitting height (0.635 m). They say one short line, and the view glides to
+a three-quarter view of the room and follows them in, the room about two thirds of the frame.
+The house wall a new room backs is cut into stretches (walls.ts `JAMB_WALL`, 0.55 m out from each
+door), each with its own cap. From the jamb wall in front of the door back it stands as the
+kitchen's own side does, so the doorway is cut into full wall (0.55 m of it in front, the wall
+over it, posts, trim and a lintel) and the house's wall joins the new room's back wall in one
+corner; in front of that it is a knee-high stretch with the front walls' cut top, meeting the new
+room's front wall at the corner. What the kitchen hung on the low stretch (furnish.ts's shelf and
+coat pegs, one kit) goes with the wall and comes back when it stands. While the view is held the
+other villagers' "!" waits and the held pad is put away (talk.ts `hush`; a typed letter brings the
+pad back and goes on the line), and the new room's window throws a warmer patch of sun. A drag, the wheel, a held WASD or arrow key
+ends the hold; the "Back to the house" tag in the top left corner, or Escape, glides out to the
+whole house.
+
+```sh
+node scripts/check-build-addroom.mjs                  # stub host and router, 75 checks (the doorway cut into full wall with no cap in mid-air, the threshold, the held pad away during the reward, the doorway standing, the back junction closed, nothing hung floating, quiet "!" markers during the reward, first pieces where the ghosts stood, the move-in through the door to a seat (play table, desk chair), the camera hold and the way back, card off the outline, door mark, window, one clean lawn round every room, yard put back on undo and unload)
+node scripts/check-build-addroom.mjs --look           # screenshots/build/addroom-*.jpg (outline, adjusted, close, reveal, built, door, phone), addroom.mp4
+node scripts/check-build-addroom.mjs --look --variant=<name>   # a look prototype (&look=<name>): addroom-{outline,reveal,built}-<name>.jpg
+node scripts/check-build-addroom.mjs --agent=claude   # real router (Sonnet), ?route=separate
+```
+
+Stub (November 7, 2026): 54 of 54, including the first pieces (in the room's
+version, all drawn, not overlapping, inside the room, back after a reload and
+gone with one undo) and the lawn holding every room. Enter to outline is 229 ms with the stub
+router on `?route=separate`; the outline is drawn in the same call that
+receives the route. On the default one-call path the stub villager streams its
+ROUTE reply six letters at a time, so it measures about 1.8 s there.
+
+Real router (Sonnet through the Agent SDK, 7 lines): 7 of 7 intents correct,
+including the two that should ask ("a study behind the kitchen" hits the window
+stretch; "add a room" has no side). Enter to route: median 17.5 s (10.3 to
+30.7 s). Enter to outline less the router call: 35 to 180 ms on four lines, 1.6 s
+on the first line of a fresh page. The router call, not the house, is the wait.
+
+| Line | Result |
+| --- | --- |
+| a room to the left, double doors, 2/3 the size | left wall, 4.9 x 5.8 m, double door |
+| a 4 by 3 m study behind the kitchen | asks: window or door on that wall |
+| a small pantry on the right, about 3 by 2 m | right wall, 3 x 2 m |
+| a bedroom in front of the kitchen, single door | front wall, 3.6 x 3 m |
+| a playroom to the right, half this room, open archway | right wall, 4.1 x 5.2 m, opening |
+| add a room | asks which side |
+| a 5 by 4 m office to the left, double doors | left wall, 5 x 4 m, double door |
+
+Look (November 7, screenshots only, ui-craft rubric plus "placing furniture and
+sketching a new room in a cozy dollhouse feels like a game, not a CAD tool").
+Scores out of 10: warmth, material, light, text, consistency, affordance,
+phone, game feel.
+
+| Scorer | Placing a thing | Sketching a room |
+| --- | --- | --- |
+| Opus | 8/7/7/8/8/8/7/7 | 6/6/6/7/6/7/6/6 |
+| GPT-6.1 Sol | 9/8/8/9/9/8/8/8 | 9/8/8/8/8/7/7/8 |
+
+This misses the 9/10 cross-model bar: Opus gives no 9. Both scorers name the
+built room as an empty shell off the lot (the yard does not follow the plan,
+#53), tape measures and m² that still read as drafting, and the kitchen's
+pendant wire across the window. `screenshots/build/look-before-after.jpg`
+pairs before and after for each placing and add-room shot, desktop and phone.
+
+Missing or approximate: the first pieces know four kinds of room by name
+(playroom, study, bedroom, and living room for anything else; pantries and the
+like get none). The villager's card is placed by `src/plugins/talk.ts` above
+the speaker's head and can still cover part of the kitchen. The ghosts are built the
+first time a room is staked out, which costs one slow frame. The size tags edit
+width and depth only, not the bend. On a phone the view centres on the new room
+but can't take in the whole house. Rooms are rectangles on straight walls only.
+
+### Plan versions
+
+`src/build/history.ts` (no three.js) keeps the house's plan as versions.
+`PlanHistory.open(store, HOUSE_PLAN)` saves the base as the root on first open.
+After that, the stored root wins. `commit(edits, note?)` applies the edits on top of the
+head, validates the result and saves it. `undo`, `redo`, `checkout` (branch from
+any version), `rename` and `refresh` cover the rest, and `diff(a, b)` lists added,
+removed and changed corners, walls, openings, rooms and furniture by id.
+
+- A version stores the plan it produced: `{id, parent, at, note?, plan}`. The
+  edits that made it are applied and checked on the page, then not kept; `note`
+  says in a few words what changed, and `diff` compares plans. Open reads each
+  stored plan, so a change to plan.ts (snapping, `MIN_ROOM_SIDE`) never changes
+  a saved house.
+- Migration hook: `UPGRADES[n]` in history.ts turns a schema-`n` plan into the
+  next schema, and `upgrade(plan)` runs the steps up to `PLAN_SCHEMA` (identity
+  at 1 today). `validate()` is a contract on stored plans: a change that refuses
+  a plan the previous rules accepted bumps `PLAN_SCHEMA` and adds a step. A
+  version this page cannot read (no step, saved by a newer home, or invalid) is
+  listed but cannot be shown or checked out. While the head is one, the house
+  shows its nearest readable ancestor and refuses commits until undo or
+  checkout moves the head.
+- Plans and versions the history hands out are deep-frozen.
+- A version exists only once the store has accepted it. A failed save throws
+  and leaves the head, the versions and the plan as they were. Resending the
+  same version (same id, parent and content) answers the stored one; another
+  version with a taken id is a 409 without a head.
+- Every head move is a compare-and-set. A commit names its parent, and undo, redo
+  and checkout name the head they expect. A page on a stale head gets `StaleHead`
+  and saves nothing, and nothing is merged; the history has already reloaded, so
+  trying again builds on the new head. Placing keeps the ghost and says the house
+  changed; an added room keeps its outline. Redo is per page. The head is shared,
+  so a reload keeps an undo.
+- `house()` (src/build/house.ts) opens the host's store when the host is running
+  and an in-memory one when it isn't; then `history.unsaved` is one line saying
+  nothing built will outlast the page. When the host is there but its plan can't be
+  opened, the house is read-only: `history.readOnly` is one warm line to show,
+  every change is refused with `ReadOnly` carrying that line, the wall handles are
+  not offered, and the error goes to the console. Build mode shows either line once on a paper note at the top; placing
+  shows the read-only line on its tag. A stored plan that is not a valid house
+  (`validate`) is unreadable like one from a newer page. After a host restart the
+  store fetches the new token once and retries.
+- Wall things move with walls: a wall move shifts a picture on a wall whose corner
+  `a` moved, as it does openings, and stops early rather than push one off its
+  wall; adding a room moves each picture to the split piece it is on. `validate`
+  refuses a wall thing off its wall.
+- A surface anchor names a placed support with `on`. Moving the support carries
+  what stands on it (the same shift and turn, at any depth), and it cannot be
+  removed while anything stands on it. Built-in tables and counters have no id,
+  so a thing on them keeps only its stored height.
+- On the host (`host/src/plans.ts`), the house is shared, so one store is
+  `<root>/house/plans/events/<seq>.json`: an append-only log of `version`, `head`
+  and `name` events. Directories are 0700 and files 0600. Each event is written whole to `tmp/` and then
+  hard-linked to its number, which fails if the number is taken. A cut-short
+  write leaves only a scratch file, and two writers can't take the same number.
+  A gap or an unreadable event makes reads fail rather than fold around it. The host sets
+  `at` from its clock and names no one: every page shares one token, so it cannot
+  yet know who is at the page. It checks every field and every plan's shape, at
+  most 256 KB per request, refuses 409 a version that places a library
+  item the person has not kept, and never runs a plan.
+- Endpoints, behind the per-launch token: `GET /house/plans` returns
+  `{versions, head, names}`. `POST /house/plans/versions {version}` answers 409
+  with `head` if the parent isn't the head. `POST /house/plans/head {head, expect}`
+  and `POST /house/plans/names {id, name}` cover the rest.
+
+```sh
+cd host && npm ci && npm run check-plans          # 62/62: token, create, append, retry, stale head, bad input, kept items, placed things, a failed write, two hosts racing, split multi-byte body, modes, restart, misnumbered event, gap in the log
+cd home && node scripts/check-plan-history.mjs    # memory store, stored plans and upgrades, stored plans held to the house's rules, frozen history, read-only house, wall things, supports, diff, then hostStore on a real host (stub agent)
+```
+
+The home check loads the TypeScript through Vite in-process, with no port and no browser.
+Its last part runs the real villager host with synthetic people. Two pages share one
+root, a stale page is refused and takes the new head, and a restarted host reopens
+to the same head, plans and names. `diff` reports the host wall that
+`addRoom` splits as changed, because it keeps its id, while the new pieces are added.
+
+### Placing items
+
+In every house since #56 (wall editing stays behind `?build=1`). `plugins/place.ts`
+provides the Cordis service `placement` (typed in `src/build/place.ts`) for build mode and
+#42's furnishing, and draws the furniture in the house plan. The placer itself (decals,
+styles, listeners) is made on the first `begin` or `move`, so an idle house only opens the
+plan and draws what it holds. `begin(item, pose?)` places a new thing and `move(furnitureId)` moves a placed
+one. Both return a `Placing`: `done` resolves `{status: 'confirmed', pose, furnitureId}` or
+`{status: 'cancelled'}`, `swap(object, size?, item?)` puts the made prop in place of the
+ghost and keeps the pose, and `cancel()` ends it from outside. `item` is
+`{library, person}` or `{kind}`. Confirming while the prop is still being made waits for
+`swap()` to name its library item (`swap(object, size, null)` forgets it while a new one
+is made). `PlaceItem.words` relabels the tag's buttons and adds one more action;
+`failed(why, line)` hears a refused confirm or a failed save; `Placing.confirm()`,
+`fits` and `note(text)` let a caller drive it. A pose with no `wallId` hangs on the
+nearest wall face it looks out of. The host then marks that item kept, so it is not
+pruned with unkept drafts after a day, and one version (`placeItem` or `moveItem`) is committed through
+`house()`, noted "Placed the …". If the commit fails, the ghost stays and says so.
+Undo and redo come from the versions.
+
+- Mounts (`src/build/mount.ts`). `floor` keeps clear of walls, other furniture and
+  0.6 m in front of doors. `surface` needs an upward face above 0.3 m under its middle
+  and four corners, level to 2.5 cm. Faces are found by casting rays at what the room
+  draws, so the table, counters and shelves need no tags. `wall` hangs flat on a wall the
+  camera sees whole, clear of doors, windows and what already hangs there. On a curved wall
+  it faces the normal and stands off the curve. `ceiling` hangs 0.75 m below the room's
+  ceiling on a cord with a rose. While it is placed, a see-through timber joist runs wall to
+  wall through the cord's top, with a pencil mark where the cord meets it.
+  Collisions use the world boxes of meshes, and 10 cm columns for merged meshes (furnish.ts
+  batches its things). Flat things such as rugs don't count. A wall thing counts built-ins up
+  to 0.6 m plus the wall's bulge off its face, so a bay bent out behind the shelf still has the
+  shelf in front. An opening is its hole plus the built-ins that dress it (frame, sill), so
+  nothing hangs over a sill's end.
+- Input: drag the thing (mouse, or one finger) and it snaps to 5 cm, then to the nearest
+  spot that fits within 30 cm. Where nothing fits, its rim and footprint turn chalk red, it
+  shows through what it is inside, what it bumps into gets a dashed chalk-red contour on its
+  top and a hatched patch where the two meet, the tag keeps clear of both, and it says why.
+  Q/E turn it 15°, Shift+Q/E 45° and Alt+Q/E 1°. The knob on the turn ring turns it in 15°
+  steps (Alt: no steps), and a tap on it turns it 15°. Two fingers twist it.
+- The look (`src/build/sketch.ts`, shared with adding rooms): the held thing is see-through
+  with a chalk rim, a faint silhouette where furniture hides it, a contact shadow and a turn
+  ring joined to its knob, with a dashed arc and arrowheads along the ring; a hung thing shows
+  a dotted thread down to a pool of its light, and its tag hangs beside it. On a phone the tag
+  docks at the bottom and the view eases sideways so the thing sits above it.
+  Alt while dragging means no grid and no pull. Enter or "Place it" confirms, and Escape or
+  "Not now" cancels. In iso the pointer is taken from the camera only on the thing or its
+  handle. While a placement is open, the canvas has `touch-action: none`.
+- Record (`plan.ts`): `Furniture {id, item, at}`. `at` is one anchor per mount: floor and
+  ceiling `{x, z, yaw}`, surface `{x, y, z, yaw}`, wall `{wallId, roomId, along, height, spin}`.
+  The surface height is stored because supports have no plan id. `roomId` is stored only
+  for walls, where it says which face. The other rooms follow from x and z. The
+  ops check dangling walls and rooms, an anchor off its wall, and a point outside every
+  room. `validate()` holds stored plans to the same rules: the walls and rooms an
+  anchor names, a wall thing on its wall and within its height, and an `on` that
+  names a support which does not stand on the thing. Turns are stored within one
+  full turn.
+- Dev: `window.villagePlace.begin('crate' | 'vase' | 'picture' | 'pendant')` places a
+  built-in thing, as do the first pieces' kinds (`sofa`, `armchair`, `low-table`,
+  `floor-lamp`, `rug`). `beginMaking(mount, label, size)` shows a box ghost for `swap()`.
+
+```sh
+cd home && node scripts/check-place.mjs           # 64/64: plan ops, each mount dragged, red and refused (a sill's end, a shelf in front of a bay), Q/E/Shift/Alt, handle, touch drag and twist, confirm, cancel, failed commit, another page first, swap while making, move, undo, reload
+cd home && node scripts/check-place.mjs --look    # also screenshots/build/place-*.jpg and place.mp4
+```
+
+Measured (M1, headless): `begin` takes 10 to 20 ms for floor, wall and ceiling, and about
+600 ms for surface (it scans the room's tops). 100 drag moves leave the geometry count flat.
+Missing: a thing whose wall shrinks is drawn at the wall's end. The kitchen's
+built-in furniture can't be moved: that needs a plan entry per named fixture and plugins
+that read their pose from it. A cut-away wall isn't offered for hanging.
+
+### Floor plan from an image (experiment)
+
+Synthetic plans only; images go only to Claude models. Run from `home/`:
+
+```sh
+node scripts/plan-import/render.mjs                  # the six synthetic plans to out/plans/<id>.png with <id>.truth.json beside them
+node scripts/plan-import/run.mjs <model> <tag> [ids] # each plan image to a Claude model through claude -p, one repair pass; out/runs/<tag>/
+node scripts/plan-import/score.mjs                   # every run against ground truth, contact sheets, out/results.md
+```
+
+November 6 run (claude-sonnet-5-5, claude-opus-5-5): every output was valid
+on the first try, so the repair pass never ran. Clean drawings (a, b, d, e, f)
+came back near exact, the curved bay and three-arc tower included. The rotated,
+keystoned hand sketch (c) had corners 0.11 to 0.14 m off and scale 1 to 3% off.
+Sonnet put one end of 3 windows 0.2 to 1.0 m off; Opus missed none. Untested:
+real scans, photos of paper, plans without dimensions. The two models ran
+concurrently, so latencies compare with each other but are not absolute.
+
+Per-plan tables are in `scripts/plan-import/out/results.md`. The
+experiment's output is not `plan.ts`'s `Plan`: openings sit in one list with a
+`wall` field, walls carry no height and openings no sill or head. Nothing
+converts it yet.
 ## Talk regroup: paper (#42, November 7, 2026)
 
 The paper climb below (November 8) changed the sending, the replies and the phone layout;

@@ -9,6 +9,7 @@
     "regressions": "node test/regressions.ts",
     "villager": "node src/villager-cli.ts",
     "check-villager": "node test/villager.ts",
+    "check-plans": "node test/plans.ts",
     "live": "node src/live.ts",
     "check-promote": "node test/promote.ts"
   },
