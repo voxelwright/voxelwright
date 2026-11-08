@@ -611,9 +611,14 @@ Model-written prop code runs in a sealed box, and only data comes back.
 
 - **Box.** `src/props/sandbox.ts` adds a hidden iframe with
   `sandbox="allow-scripts"` (no `allow-same-origin`, so its origin is opaque)
-  and a `srcdoc` whose first element is the CSP
-  `default-src 'none'; script-src 'nonce-<random>' blob:; worker-src blob:`.
-  Its one inline script, the relay, starts a classic Worker from a blob. The
+  that loads `/prop-box.html`, served by the dev-only `prop-box` plugin with
+  its own CSP header
+  `default-src 'none'; script-src 'nonce-<random>' blob:; worker-src blob:; frame-ancestors 'self'`
+  (the text and policy are in `src/props/relay.ts`). It is a document of its
+  own rather than `srcdoc` because a `srcdoc` frame inherits the home's CSP
+  (#40: `script-src 'self'`), which refuses the inline relay and the blob
+  worker; serving it this way keeps the home's CSP unchanged. Its one inline
+  script, the relay, starts a classic Worker from a blob. The
   worker is `src/props/box/worker.ts`, bundled into one script (three core
   r187 with `three/webgpu` aliased to `three`, the `paint.ts` painters on
   OffscreenCanvas, the spec presets, the serializer) by the dev-only
@@ -653,8 +658,9 @@ Model-written prop code runs in a sealed box, and only data comes back.
   onto a page canvas, as `paint.ts` makes them). Nothing is half-placed.
 
 The working combination, found by a probe in headless Chrome 158 (Playwright
-1.65): a **classic** blob Worker created from the sandboxed `srcdoc` frame
-inherits the frame's CSP. fetch, XHR, WebSocket, `importScripts`, outside
+1.65): a **classic** blob Worker created from the sandboxed frame inherits
+the frame's CSP (first probed with `srcdoc`; since the #40 merge the frame is
+`/prop-box.html`, and `check-prop-sandbox` passes 36 of 36 there). fetch, XHR, WebSocket, `importScripts`, outside
 `import()`, `eval` and `new Function` are all blocked, and `import()` of a blob
 still works. A control run with `connect-src` left open reached the outside
 server, so the CSP is what blocks it. A module worker from a blob failed to
@@ -713,8 +719,8 @@ matrix with shear has it baked into its own copy of the geometry).
 
 What the box relies on:
 
-- Chrome's sandboxed iframes: an opaque origin with `allow-scripts` alone, a
-  `<meta>` CSP in `srcdoc` enforced before the inline script, and blob
+- Chrome's sandboxed iframes: an opaque origin with `allow-scripts` alone, the
+  relay document's own CSP header enforced on its inline script, and blob
   workers inheriting their creator's CSP. Only Chrome 158 headless was
   tested; Safari and Firefox were not.
 - Chrome runs the sandboxed frame in another process: a frame main thread
