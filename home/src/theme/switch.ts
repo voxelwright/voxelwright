@@ -95,21 +95,31 @@ function watch(until: () => boolean, started: number) {
   })
 }
 
+/** The latest switch's outcome: its last report, or null if a later switch took over. */
+let latest: Promise<SwitchReport | null> = Promise.resolve(null)
+/** How the switch setTheme just started ends (./ask.ts waits on it). */
+export const settled = () => latest
+
 /** Ease the change from `previous` to `next` (both already chosen through setTheme). */
-export async function ease(stage: Stage | undefined, previous: Theme, next: Theme) {
+export function ease(stage: Stage | undefined, previous: Theme, next: Theme): Promise<SwitchReport | null> {
+  return (latest = run(stage, previous, next))
+}
+
+/** A report is published only while its switch is the latest, so an older one never replaces a newer one's. */
+async function run(stage: Stage | undefined, previous: Theme, next: Theme): Promise<SwitchReport | null> {
   const started = performance.now()
   const base = { from: previous.id, to: next.id }
   const mine = ++generation
+  const publish = (r: SwitchReport) => (mine === generation ? noteSwitch(r) : null)
   if (sameShape(previous, next)) {
     const path = reducedMotion.matches ? 'instant' : 'blend'
-    noteSwitch({ ...base, path, worstMs: 0, settledMs: 0, frames: 0, done: false })
-    const r = await watch(() => !switching(), started)
-    noteSwitch({ ...base, path, ...r, done: true })
-    return
+    publish({ ...base, path, worstMs: 0, settledMs: 0, frames: 0, done: false })
+    const r = await watch(() => mine !== generation || !switching(), started)
+    return publish({ ...base, path, ...r, done: true })
   }
   let fading = true
   const report: SwitchReport = { ...base, path: 'rebuild', worstMs: 0, settledMs: 0, frames: 0, done: false }
-  noteSwitch(report)
+  publish(report)
   const measured = watch(() => mine !== generation || !fading, started)
   // The current chain keeps drawing the room while the next one compiles.
   let ready: Awaited<ReturnType<typeof prepare>>
@@ -117,27 +127,26 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
     ready = await prepare(next)
   } catch (error) {
     // prepare() disposed the half-built chain. The current chain keeps drawing the look on
-    // screen, which becomes the chosen one again; nothing was held, so nothing freezes.
-    if (mine !== generation) return
+    // screen, which becomes the chosen one again (or resumes the blend this switch
+    // interrupted); nothing was held, so nothing freezes.
+    if (mine !== generation) return null
     const failed = String((error as Error)?.message ?? error).slice(0, 200)
     console.warn(`theme switch to ${next.id} failed, keeping ${previous.id}:`, error)
     keepShown()
     fading = false
-    noteSwitch({ ...report, ...(await measured), failed, done: true })
-    return
+    return publish({ ...report, ...(await measured), failed, done: true })
   }
   const compiledMs = +(performance.now() - started).toFixed(1)
   if (mine !== generation) {
     // A later switch took over: this chain is never shown.
     ready?.chain.dispose()
-    return
+    return null
   }
   if (!ready || !stage) {
     // No postfx to rebuild (?plugins= without it): the look changes on the next frame.
     release()
     fading = false
-    noteSwitch({ ...report, ...(await measured), compiledMs, done: true })
-    return
+    return publish({ ...report, ...(await measured), compiledMs, done: true })
   }
   const copy = await hold(stage, () => {
     // A switch that came while this waited for the frame owns the screen now.
@@ -146,7 +155,10 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
     if (ready.take()) noteSwap(next.id)
     else ready.chain.dispose()
   })
-  if (mine !== generation) return fadeOut(copy)
+  if (mine !== generation) {
+    fadeOut(copy)
+    return null
+  }
   // The new chain draws from the next frame; wait until the GPU has finished that frame.
   await nextFrame()
   await nextFrame()
@@ -155,5 +167,5 @@ export async function ease(stage: Stage | undefined, previous: Theme, next: Them
   const firstFrameMs = +(performance.now() - started).toFixed(1)
   fadeOut(copy)
   fading = false
-  noteSwitch({ ...report, ...(await measured), compiledMs, firstFrameMs, done: true })
+  return publish({ ...report, ...(await measured), compiledMs, firstFrameMs, done: true })
 }

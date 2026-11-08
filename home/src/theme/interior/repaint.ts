@@ -38,7 +38,8 @@ const REPAINTS: Record<string, Repaint> = {
 
 /** The shading model a theme's room takes under `&repaint=1`, for ../shade/apply.ts. */
 export function repaintModel(t: Theme): 'gouache' | null {
-  return ON && Object.hasOwn(REPAINTS, t.id) ? 'gouache' : null
+  const id = presetId(t)
+  return ON && id !== undefined && Object.hasOwn(REPAINTS, id) ? 'gouache' : null
 }
 
 /** How each class is painted: brush scale in metres along and across the stroke, its strength, and the finish. */

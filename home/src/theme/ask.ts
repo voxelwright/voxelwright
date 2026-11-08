@@ -1,13 +1,16 @@
 // A theme written from a sentence (#50): `village.theme.ask("make it cozier")`. The host
 // asks a model for theme JSON; the answer is data, checked here field by field before
-// setTheme. A failed call or a refused theme leaves the current theme on screen.
-import { checkTheme, prepare, PRESETS, setTheme, theme } from './index'
+// setTheme. A failed call, a refused theme or a look whose post chain cannot be built
+// leaves the current theme on screen.
+import { checkTheme, chosen, prepare, PRESETS, setTheme, theme } from './index'
+import { settled } from './switch'
 import type { Theme } from './tokens'
 import { askTheme } from '../villager'
 
 export type Asked =
   | { ok: true; note: string; id: string; label: string; clamped: string[]; hints: { props: string; costumes: string }; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
-  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused'; reason?: string; ms: number }
+  /** `unbuilt`: the model's look passed check() but its post chain could not be built, so the look on screen stayed. */
+  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'unbuilt'; reason?: string; ms: number }
 
 const asked: ({ text: string } & Asked)[] = []
 
@@ -45,8 +48,13 @@ export async function ask(text: string, person = 'alex'): Promise<Asked> {
     if ('reason' in checked) out = { ok: false, why: 'refused', reason: checked.reason, ms: Math.round(performance.now() - t0) }
     else {
       const look = own(checked.theme)
+      const was = chosen()
       setTheme(look)
-      out = {
+      // Wait for the switch to land: a rebuild can still fail and keep the look on screen.
+      // One a later switch took over (null) is not a failure of this look.
+      const landed = chosen() !== was ? await settled() : null
+      if (landed?.failed) out = { ok: false, why: 'unbuilt', reason: 'the look could not be built', ms: Math.round(performance.now() - t0) }
+      else out = {
         ok: true,
         // Shown as text only, never as markup.
         note: typeof r.note === 'string' ? r.note.slice(0, 160) : '',

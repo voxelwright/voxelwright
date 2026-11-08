@@ -267,7 +267,13 @@ function warm(renderer: THREE.WebGPURenderer, chain: Chain): Promise<number> {
     warmed.add(material)
   }
   try {
-    asNext(chain.look, () => chain.render())
+    asNext(chain.look, () => {
+      if (failNext === 'warm') {
+        failNext = null
+        throw new Error('warm draw failed on purpose (check hook)')
+      }
+      chain.render()
+    })
   } finally {
     delete (pipelines as Partial<Pipelines>).updateForRender
     delete (r as Partial<typeof r>)._renderObjectDirect
@@ -290,8 +296,8 @@ export async function prepare(look: Theme): Promise<{ chain: Chain; take(): bool
   if (!at) return null
   const chain = build(at.stage, look)
   try {
-    if (failNext) {
-      failNext = false
+    if (failNext === 'compile') {
+      failNext = null
       throw new Error('prepare failed on purpose (check hook)')
     }
     await chain.compile()
@@ -305,9 +311,13 @@ export async function prepare(look: Theme): Promise<{ chain: Chain; take(): bool
   return { chain, take: () => live === at && (at.take(chain), true) }
 }
 
-let failNext = false
-/** Dev checks only (scripts/check-themes.mjs): the next prepare() throws after building its chain. */
-export const failNextPrepare = () => void (failNext = true)
+let failNext: 'compile' | 'warm' | null = null
+/**
+ * Dev checks only (scripts/check-themes.mjs, check-theme-ask.mjs): the next prepare() throws,
+ * before its compile (`compile`) or inside its first warm draw, with the scene standing as
+ * the next look (`warm`).
+ */
+export const failNextPrepare = (at: 'compile' | 'warm' = 'compile') => void (failNext = at)
 
 /**
  * Bloom, a warm vignette and fine film grain, written as TSL nodes. The tier's

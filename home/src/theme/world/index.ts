@@ -5,6 +5,7 @@
 // worlds off, for comparisons.
 import * as THREE from 'three/webgpu'
 import type { Theme } from '../tokens'
+import { chosen } from '../index'
 import { neonCity } from './neon'
 import { comicPage } from './comic'
 import { twilightStreet } from './twilight'
@@ -61,10 +62,11 @@ function measure(scene: THREE.Scene): House | null {
  */
 const RETIRE_MS = 4000
 
-/** The theme plugin's hook: `ahead(t)` while a switch heads to `t`, `place(t)` on every walk, `drop()` on unload. */
+/** The theme plugin's hook: `ahead(t)` whenever the chosen look changes, `place(t)` on every walk, `drop()` on unload. */
 export function worlds(scene: THREE.Scene) {
   let stood: { key: string; world: World } | null = null
-  let next: { key: string; world: World } | null = null
+  /** Worlds built ahead for the chosen look, by key, not yet stood; only the chosen look's is ever kept. */
+  const built = new Map<string, World>()
   const hidden = new Set<THREE.Object3D>()
   const retired: Array<{ world: World; timer: ReturnType<typeof setTimeout> }> = []
   const free = (entry: { world: World; timer: ReturnType<typeof setTimeout> }) => {
@@ -72,6 +74,7 @@ export function worlds(scene: THREE.Scene) {
     retired.splice(retired.indexOf(entry), 1)
     entry.world.dispose()
   }
+  /** Out of the scene now, freed after RETIRE_MS: a compile may still be running over it. */
   const retire = (world: World) => {
     world.group.removeFromParent()
     const entry = { world, timer: setTimeout(() => free(entry), RETIRE_MS) }
@@ -81,16 +84,6 @@ export function worlds(scene: THREE.Scene) {
     if (!stood) return
     retire(stood.world)
     stood = null
-  }
-  /**
-   * The chosen look came back to the one on screen: a world built ahead for the abandoned
-   * switch is not wanted. Retired rather than freed, since that switch's compile may still be
-   * running over it; one still stood for a compile (preview) is left to the next ahead() or drop().
-   */
-  const abandon = () => {
-    if (!next || next.world.group.parent) return
-    retire(next.world)
-    next = null
   }
   /** Is `o` still in the scene? A room that unloaded takes its exterior with it. */
   const inScene = (o: THREE.Object3D) => {
@@ -106,8 +99,8 @@ export function worlds(scene: THREE.Scene) {
   /** On unload: put the yard back and free every world now. */
   const drop = () => {
     clear()
-    next?.world.dispose()
-    next = null
+    for (const world of built.values()) world.dispose()
+    built.clear()
     while (retired.length) free(retired[0])
   }
   /**
@@ -128,15 +121,17 @@ export function worlds(scene: THREE.Scene) {
     return world
   }
   /**
-   * Build the world a switch is heading to on a frame while the current look still draws,
-   * so the frame that swaps the look in does not build it too (30 to 40 ms for the neon city).
-   * It was never in the scene, so one no switch takes is freed at once.
+   * The chosen look is now `t`. Every world built ahead for another look is retired; the one
+   * `t` will stand is built now, on a frame while the current look still draws, so the frame
+   * that swaps the look in does not build it too (30 to 40 ms for the neon city).
    */
   const ahead = (t: Theme) => {
     const want = wanted(t)
-    if (want && (stood?.key === want.key || next?.key === want.key)) return
-    next?.world.dispose()
-    next = want && { key: want.key, world: build(want.name, want.house) }
+    for (const [key, world] of built) if (key !== want?.key) {
+      built.delete(key)
+      retire(world)
+    }
+    if (want && stood?.key !== want.key && !built.has(want.key)) built.set(want.key, build(want.name, want.house))
   }
   /** Stands the theme's world (or puts the yard back) and returns what stands, for ../interior/sun.ts. */
   const place = (t: Theme): { house: House; group: THREE.Group } | null => {
@@ -147,11 +142,15 @@ export function worlds(scene: THREE.Scene) {
     }
     if (stood?.key !== want.key) {
       unstand()
-      let world = next?.key === want.key ? next.world : null
-      if (world) next = null
-      else world = build(want.name, want.house)
+      const world = built.get(want.key) ?? build(want.name, want.house)
+      built.delete(want.key)
       scene.add(world.group)
       stood = { key: want.key, world }
+      // The chosen look stands: anything else built ahead (for walls measured before a room changed) is stale.
+      if (t === chosen()) {
+        for (const w of built.values()) retire(w)
+        built.clear()
+      }
     }
     // Forget the exteriors of rooms that unloaded, so the set holds only what is in the scene.
     for (const o of hidden) if (!inScene(o)) hidden.delete(o)
@@ -166,16 +165,21 @@ export function worlds(scene: THREE.Scene) {
   /**
    * For the next chain's compile (../ahead.ts): stand the world `t` will stand, ahead, in
    * place of the current one, with the yard shown or hidden as `t` will have it; `on` false
-   * puts it all back. Returns the group stood ahead, if any.
+   * puts it all back. Returns the group stood ahead, if any. A compile for a look no longer
+   * chosen (a later switch took over) gets nothing: its chain is never shown, and building
+   * or replacing worlds for it would throw away the chosen look's.
    */
   let shown: Array<[THREE.Object3D, boolean]> = []
+  let added: THREE.Group | null = null
   const preview = (t: Theme, on: boolean): THREE.Group | null => {
     if (!on) {
       for (const [o, v] of shown) o.visible = v
       shown = []
-      next?.world.group.removeFromParent()
+      added?.removeFromParent()
+      added = null
       return null
     }
+    if (t !== chosen()) return null
     ahead(t)
     const want = wanted(t)
     const same = want && stood?.key === want.key
@@ -186,9 +190,13 @@ export function worlds(scene: THREE.Scene) {
     if (stood && !same) show(stood.world.group, false)
     if (!want) for (const o of hidden) show(o, true)
     else if (!stood) scene.traverse((o) => { if (o.userData.exterior && o.visible) show(o, false) })
-    if (!next || same) return null
-    scene.add(next.world.group)
-    return next.world.group
+    const next = want && !same ? built.get(want.key) : undefined
+    if (!next) return null
+    scene.add(next.group)
+    added = next.group
+    return added
   }
-  return { ahead, abandon, place, preview, drop }
+  /** For the checks: the stood world's key, the keys built ahead, and how many wait to be freed. */
+  const state = () => ({ stood: stood?.key ?? null, ahead: [...built.keys()], retired: retired.length })
+  return { ahead, place, preview, drop, state }
 }

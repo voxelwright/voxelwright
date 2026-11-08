@@ -114,12 +114,22 @@ export function release() {
 
 /**
  * ./switch.ts: the next look's chain could not be built. The look on screen stays, and is
- * the chosen one again; the swatch book is told so its marks stay true.
+ * the chosen one again; the swatch book is told so its marks stay true. A blend the failed
+ * switch interrupted resumes towards its own target (the chain on screen fits it), so a
+ * mid-blend frame never settles as the look.
  */
 export function keepShown() {
   held = false
-  target = shown
-  if (Object.hasOwn(PRESETS, shown.id) || mine.includes(shown)) writeLast(shown.id)
+  const heading = towards.get(shown)
+  if (heading) {
+    target = heading
+    if (reducedMotion.matches) shown = heading
+    else {
+      blending = { from: shown, to: heading, start: performance.now() }
+      requestAnimationFrame(run)
+    }
+  } else target = shown
+  if (Object.hasOwn(PRESETS, target.id) || mine.includes(target)) writeLast(target.id)
   root.emit('village/theme-kept')
 }
 

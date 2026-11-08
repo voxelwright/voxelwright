@@ -154,6 +154,13 @@ export default {
       if (group) inside.light(group)
     }), 'theme preview')
     shade(ctx)
+    // For the checks: what the theme's worlds hold (window.village.theme.worlds()).
+    ctx.effect(() => {
+      const api = (window as unknown as { village?: { theme?: Record<string, unknown> } }).village?.theme
+      if (!api) return () => {}
+      api.worlds = world.state
+      return () => void delete api.worlds
+    }, 'theme worlds state')
 
     const light = (l: Lit, t: Theme, force: boolean) => {
       let base = lights.get(l)
@@ -272,11 +279,10 @@ export default {
     ctx.on('village/frame', () => {
       tick()
       const t = theme()
-      // While a switch is under way, stand up the world it is heading to ahead of its swap frame.
+      // Each time the chosen look changes, build its world ahead of its swap frame and retire
+      // any built for a look no longer chosen (a switch superseded or abandoned).
       const next = chosen()
-      if (next !== t && next !== heading) world.ahead(next)
-      // A switch abandoned before it landed (the chosen look is the shown one again): drop what was built for it.
-      else if (next === t && heading !== null && heading !== t) world.abandon()
+      if (next !== heading) world.ahead(next)
       heading = next
       const changed = t !== applied || costumes !== costumeVersion()
       if (!changed && ++frame % RESCAN) return

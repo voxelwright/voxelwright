@@ -182,6 +182,16 @@ try {
     const afterNormal = await current(page)
     check('ask: back to normal is the home again', normal.ok && afterNormal.id === 'home' && afterNormal.post.stages.length === 0 && afterNormal.light.exposure === before.light.exposure, normal)
 
+    // A checked look whose post chain cannot be built (the hostile answer's pixel stage, from
+    // the home: a rebuild): ask() waits for the switch and reports it, and the home stays.
+    await page.evaluate(() => window.village.kernel.failNextPrepare())
+    const unbuilt = await ask(page, 'make it [stub-theme-hostile]')
+    const afterUnbuilt = await page.evaluate(async () => {
+      const { theme } = await import('/src/theme/index.ts')
+      return { shown: theme().id, current: window.village.theme.current(), report: window.village.theme.lastSwitch(), last: window.village.theme.asked().at(-1) }
+    })
+    check('ask: a look whose chain cannot be built is reported as not built and leaves the home', !unbuilt.ok && unbuilt.why === 'unbuilt' && unbuilt.reason === 'the look could not be built' && afterUnbuilt.shown === 'home' && afterUnbuilt.current === 'home' && afterUnbuilt.report.failed && !afterUnbuilt.last.ok, { unbuilt, afterUnbuilt })
+
     // ── The host: token, person, shape ──
     const { port, token } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
     const post = (path, body, auth) => fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) }).then((r) => r.status)

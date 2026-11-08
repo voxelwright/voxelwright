@@ -150,6 +150,36 @@ const residue = (page) => page.evaluate(() => {
     const swaps = await page.evaluate((t0) => window.village.theme.swaps().filter((s) => s.at >= t0).map((s) => s.look), t0)
     check('superseded rebuild: the next rebuild after it swaps in its chain as usual', r.path === 'rebuild' && r.done && swaps.length === 1 && swaps[0] === 'neon-night', { r, swaps })
   }
+
+  // Three rebuilds a frame apart (A to B to C): only C's world stays, in the scene and in what
+  // was built ahead, and the others are freed once their retire timer (4 s) has run.
+  {
+    const worlds = () => page.evaluate(() => {
+      const names = []
+      window.village.kernel.root.get('stage').scene.traverse((o) => o.name.startsWith('theme world ') && names.push(o.name.slice(12)))
+      return { scene: names, ...window.village.theme.worlds() }
+    })
+    await set(page, 'sixteen-bit')
+    await page.waitForTimeout(4500)
+    const baseline = await residue(page)
+    await set(page, 'home')
+    await page.waitForTimeout(4500)
+    await page.evaluate(async () => {
+      const frame = () => new Promise((r) => requestAnimationFrame(r))
+      window.village.theme.set('neon-night')
+      await frame()
+      window.village.theme.set('comic')
+      await frame()
+      window.village.theme.set('sixteen-bit')
+    })
+    await done(page)
+    const soon = await worlds()
+    await page.waitForTimeout(4500)
+    const settled = await worlds()
+    const after = await residue(page)
+    check('A to B to C a frame apart: only C\'s world stands, nothing else is kept built ahead, and the rest are freed after the retire timer', settled.scene.join() === 'pixel-lot' && settled.ahead.length === 0 && settled.retired === 0 && soon.scene.join() === 'pixel-lot' && (await page.evaluate(() => window.village.theme.current())) === 'sixteen-bit', { soon, settled })
+    check('A to B to C a frame apart: geometries and textures settle where a single switch to C leaves them', after.geometries <= baseline.geometries && after.textures <= baseline.textures, { baseline, after })
+  }
   check('no page errors while switching', errors.length === 0, errors)
   await context.close()
 }
@@ -182,6 +212,59 @@ const residue = (page) => page.evaluate(() => {
   check('failed rebuild: the half-built chain is freed (geometries and textures back where they were)', after.geometries <= before.geometries && after.textures <= before.textures && after.drawPasses === before.drawPasses, { before, after })
   const r = await set(page, 'neon-night')
   check('failed rebuild: the next switch works', r.path === 'rebuild' && r.done && !r.failed && (await page.evaluate(() => window.village.theme.current())) === 'neon-night', r)
+
+  const look = () => page.evaluate(async () => {
+    const { theme, PRESETS } = await import('/src/theme/index.ts')
+    const names = []
+    window.village.kernel.root.get('stage').scene.traverse((o) => o.name.startsWith('theme world ') && names.push(o.name.slice(12)))
+    return {
+      report: window.village.theme.lastSwitch(),
+      current: window.village.theme.current(),
+      shownIsPreset: theme() === PRESETS[theme().id],
+      shown: theme().id,
+      exposure: theme().light.exposure,
+      marked: window.village.theme.list().filter((l) => l.current).map((l) => l.id),
+      switching: window.village.theme.switching(),
+      hold: Boolean(document.querySelector('.village-theme-hold')),
+      last: JSON.parse(localStorage.getItem('village.theme.last') ?? 'null'),
+      worlds: { scene: names, ...window.village.theme.worlds() },
+    }
+  })
+  // A rebuild that fails while it interrupts a blend (home to blue hour, then neon night
+  // mid-blend): the blend resumes to blue hour; no mid-blend frame settles as the look.
+  await set(page, 'home')
+  await page.evaluate(() => window.village.theme.set('blue-hour'))
+  await page.waitForTimeout(400)
+  await page.evaluate(() => {
+    window.village.kernel.failNextPrepare()
+    window.village.theme.set('neon-night')
+  })
+  await done(page)
+  await page.waitForTimeout(300)
+  const midBlend = await look()
+  check('failed rebuild during a blend: the interrupted blend finishes on blue hour, which is chosen, marked and last', midBlend.report.failed && midBlend.current === 'blue-hour' && midBlend.shown === 'blue-hour' && midBlend.shownIsPreset && Math.abs(midBlend.exposure - 1.18) < 1e-6 && midBlend.marked.join() === 'blue-hour' && midBlend.last === 'blue-hour' && !midBlend.switching && !midBlend.hold, midBlend)
+
+  // A warm draw that throws during a rebuild (the scene standing as the next look): the scene
+  // is put back, the look stays, the half-built chain and the world built ahead are freed.
+  await page.waitForTimeout(4500)
+  const beforeWarm = await residue(page)
+  await page.evaluate(() => {
+    window.village.kernel.failNextPrepare('warm')
+    window.village.theme.set('neon-night')
+  })
+  await done(page)
+  await page.waitForTimeout(4500)
+  const warmFail = await look()
+  const afterWarm = await residue(page)
+  const yard = await page.evaluate(() => {
+    let shown = 0
+    window.village.kernel.root.get('stage').scene.traverse((o) => o.userData.exterior && !o.userData.themeOwned && o.visible && shown++)
+    return shown
+  })
+  check('failed warm draw: the look on screen stays, its world alone stands, nothing kept ahead, the yard stays hidden', /warm draw/.test(warmFail.report.failed ?? '') && warmFail.current === 'blue-hour' && warmFail.shownIsPreset && !warmFail.hold && !warmFail.switching && warmFail.worlds.scene.join() === 'twilight-street' && warmFail.worlds.ahead.length === 0 && warmFail.worlds.retired === 0 && yard === 0, { warmFail, yard })
+  check('failed warm draw: the half-built chain and the world built ahead are freed', afterWarm.geometries <= beforeWarm.geometries && afterWarm.textures <= beforeWarm.textures && afterWarm.drawPasses === beforeWarm.drawPasses, { beforeWarm, afterWarm })
+  const again = await set(page, 'neon-night')
+  check('failed warm draw: the next switch works', again.path === 'rebuild' && again.done && !again.failed && (await page.evaluate(() => window.village.theme.current())) === 'neon-night', again)
   check('failed rebuild: no page errors', errors.length === 0, errors)
   await page.evaluate(() => localStorage.clear())
   await context.close()
