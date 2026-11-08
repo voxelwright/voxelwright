@@ -1,0 +1,61 @@
+export default function (villager, api) {
+  const { THREE } = api
+  const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 })
+  const bead = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.25 })
+  const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
+  const mauve = felt('#b3a0a8'), pink = felt('#d6b2b4'), wood = felt('#a8703a'), steel = felt('#9a9a92'), straw = felt('#d9c08a')
+  const dark = bead('#2a1f22')
+
+  // Body: a long barrel, longer than tall, on stubby legs
+  const body = add(villager, new THREE.SphereGeometry(0.2, 32, 20), mauve, 0, 0.23, -0.04)
+  body.scale.set(1, 0.85, 1.25)
+  add(villager, new THREE.SphereGeometry(0.1, 20, 12), pink, 0, 0.19, 0.12).scale.set(1, 0.8, 0.5)
+  add(villager, new THREE.SphereGeometry(0.04, 12, 10), mauve, 0, 0.27, -0.3)
+
+  // Head: low and forward of the body, with a wide boxy snout
+  const head = villager.tag(new THREE.Group(), 'head')
+  head.position.set(0, 0.33, 0.17)
+  villager.add(head)
+  add(head, new THREE.SphereGeometry(0.13, 28, 18), mauve, 0, 0, 0).scale.set(1.1, 0.95, 1)
+  add(head, new THREE.RoundedBoxGeometry(0.26, 0.11, 0.14, 4, 0.045), pink, 0, -0.035, 0.12)
+  for (const s of [-1, 1]) {
+    add(head, new THREE.SphereGeometry(0.014, 10, 8), dark, s * 0.05, 0.02, 0.185)
+    // eye bumps on top of the head
+    add(head, new THREE.SphereGeometry(0.04, 16, 12), mauve, s * 0.065, 0.075, 0.08)
+    // small ears
+    const ear = add(head, new THREE.SphereGeometry(0.035, 14, 10), mauve, s * 0.105, 0.095, -0.02)
+    ear.scale.set(1, 1, 0.6)
+    add(ear, new THREE.SphereGeometry(0.02, 10, 8), pink, 0, 0, 0.015).scale.set(1, 1, 0.5)
+    const eye = villager.tag(add(head, new THREE.SphereGeometry(0.022, 16, 12), dark, s * 0.065, 0.1, 0.105), s < 0 ? 'eye-left' : 'eye-right')
+    // stubby arms and feet
+    const hand = villager.tag(add(villager, new THREE.CapsuleGeometry(0.034, 0.05, 6, 10), mauve, s * 0.2, 0.24, 0.04), s < 0 ? 'hand-left' : 'hand-right')
+    hand.rotation.z = s * 0.4
+    villager.tag(add(villager, new THREE.SphereGeometry(0.055, 16, 12), mauve, s * 0.11, 0.055, 0.03), s < 0 ? 'foot-left' : 'foot-right').scale.set(1, 1.1, 1.2)
+  }
+  // stitched smile on the snout
+  const smile = add(head, new THREE.TorusGeometry(0.05, 0.006, 6, 18, Math.PI), dark, 0, -0.025, 0.187)
+  smile.rotation.z = Math.PI
+
+  // Gardener's mark: wide sun hat on the back of the head, tilted back so the face shows
+  const hat = new THREE.Group()
+  hat.position.set(0, 0.12, -0.06)
+  hat.rotation.x = -0.44
+  head.add(hat)
+  villager.mark(add(hat, new THREE.CylinderGeometry(0.3, 0.3, 0.016, 40), straw, 0, 0, 0))
+  villager.mark(add(hat, new THREE.CylinderGeometry(0.085, 0.1, 0.12, 24), straw, 0, 0, 0))
+
+  // Prop: a shovel for the vegetable patch, handle inside the mitten
+  const shovel = villager.tag(new THREE.Group(), 'held')
+  shovel.position.set(-0.2, 0.24, 0.04)
+  shovel.rotation.x = 0.1
+  villager.add(shovel)
+  add(shovel, new THREE.CylinderGeometry(0.012, 0.012, 0.3, 8), wood, 0, 0.03, 0)
+  add(shovel, new THREE.RoundedBoxGeometry(0.085, 0.1, 0.014, 3, 0.006), steel, 0, -0.16, 0)
+
+  villager.gait({ speed: 0.26, stride: 0.18, bob: 0.03, stepped: true, fidget: 0.2 })
+  // voice: lower and slower than the start for a big hippo, a little rounder and darker.
+  villager.about({
+    name: 'Mudge', role: 'gardener', bark: 'Beds are turned. Carrots go in on Saturday if the frost keeps off.',
+    voice: { pitch: 120, range: 2.6, formant: 0.76, rate: 8, breath: 0.12, wobble: 0.25, wobbleRate: 4.5, tilt: 2.4, gain: 0.95 },
+  })
+}

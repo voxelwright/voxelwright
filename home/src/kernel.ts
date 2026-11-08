@@ -15,10 +15,14 @@ export interface Stage {
   /** Rendering features on at the current tier (csm, gtao, traa, phys, ssgi), or exactly ?fx= when given. */
   features: () => Set<string>
   /**
-   * Per frame, in ms: gpu is submit-to-done on the WebGPU queue, passSum the summed
-   * timestamp-query pass durations (?gpu=1 only), cpu the JS frame (hooks and draw).
+   * Per frame, in ms: gpu is GPU busy time (the union of the frame's pass intervals from
+   * timestamp queries, src/gpu-time.js), passSum the summed pass durations (they overlap,
+   * so this overcounts), submitToDone the wait from the frame's last submit to
+   * onSubmittedWorkDone (includes main-thread delay), cpu the JS frame (hooks and draw).
+   * gpu and passSum are recorded while calibrating and under ?gpu=1, submitToDone under
+   * ?gpu=1. tracking is whether timestamp queries are available.
    */
-  timing: { gpu: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string; tierSettled: boolean }
+  timing: { gpu: number[]; submitToDone: number[]; passSum: number[]; cpu: number[]; tracking: boolean; tierReason: string; tierSettled: boolean }
   backend: 'WebGPU' | 'WebGL2'
   /** Draws one frame with the most recently added draw pass, or a plain render. */
   draw: () => void
@@ -44,6 +48,12 @@ declare module 'cordis' {
     'village/frame'(dt: number, elapsed: number): void
     'village/plugin-error'(name: string, error: unknown): void
     'village/tier'(quality: Quality): void
+    /** The theme changed (src/theme): previous and next, both checked Theme objects. */
+    'village/theme'(previous: unknown, next: unknown): void
+    /** Someone is about to change the look (the swatch book opened, a theme was asked for): load the theme plugin now. */
+    'village/theme-prepare'(): void
+    /** A switch failed and the look on screen stayed the chosen one (src/theme keepShown). */
+    'village/theme-kept'(): void
     /** An object own() just added; the rooms service hides it when its plugin's room is not the current one. */
     'village/owned'(object: THREE.Object3D, plugin: string): void
   }

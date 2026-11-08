@@ -1,7 +1,7 @@
 // Headless proof of talking to the villager through the notebook (#40).
 // Starts its own villager host with the stub agent (no model is called) and its
 // own dev server, both on a throwaway VILLAGE_ROOT, and stops them at the end.
-// Usage: node scripts/check-villager.mjs [--shot=path] [--agent=claude] [--line="..."]
+// Usage: node scripts/check-villager.mjs [--shot=path] [--agent=claude] [--line="..."] [--dev=5182] [--host=5191]
 //   --agent=claude runs one real exchange instead of the checks and prints its usage line.
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -19,8 +19,8 @@ const agent = opt('agent') ?? 'stub'
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-page-'))
-const hostPort = 5191
-const devPort = 5182
+const hostPort = Number(opt('host') ?? 5191)
+const devPort = Number(opt('dev') ?? 5182)
 const base = `http://localhost:${devPort}/`
 const checks = []
 const check = (name, pass, detail) => checks.push({ name, pass: Boolean(pass), detail })

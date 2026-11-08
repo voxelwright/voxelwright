@@ -1,0 +1,9 @@
+[
+ { "a": "r2-code-2", "b": "r2-code-1", "metric": "f0Hz", "why": "mouse above tortoise" },
+ { "a": "r2-code-2", "b": "r2-code-3", "metric": "f0Hz", "why": "mouse above bear" },
+ { "a": "r2-code-2", "b": "r2-code-1", "metric": "syllablesPerSec", "why": "mouse quicker than tortoise" },
+ { "a": "r2-code-2", "b": "r2-code-3", "metric": "centroidHz", "why": "mouse brighter than bear" },
+ { "a": "r2-code-3", "b": "r2-code-1", "metric": "syllablesPerSec", "why": "tortoise slower than bear" },
+ { "a": "r2-code-4", "b": "r2-code-1", "metric": "syllablesPerSec", "why": "tortoise slower than heron" },
+ { "a": "r2-code-5", "b": "r2-code-1", "metric": "syllablesPerSec", "why": "tortoise slower than frog" }
+]

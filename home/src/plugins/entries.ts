@@ -33,6 +33,8 @@ export interface Entries {
   readonly hovered: string | null
   /** Leave the active entry, as Escape does. */
   back(): void
+  /** Choose an entry by id, as a click on it would. False when there is no such entry. */
+  choose(id: string): boolean
   /** Show a short line of text at the bottom of the screen, or hide it with null. */
   say(text: string | null): void
   /** Put the keyboard order in screen order, left to right, then top to bottom. */
@@ -125,6 +127,7 @@ export default {
     const setHover = (next: Live | null) => {
       if (next === hovered) return
       hovered = next
+      if (next) ctx.emit('village/hover', { id: next.id, at: center(next) })
       if (next) label.textContent = next.label
       label.classList.toggle('shown', Boolean(next))
     }
@@ -155,12 +158,14 @@ export default {
       if (!was) return
       active = null
       say(null)
+      ctx.emit('village/backed', { id: was.id })
       was.leave?.()
     }
 
     const choose = (e: Live) => {
       if (active && active !== e) back()
       active = e
+      ctx.emit('village/chose', { id: e.id, at: center(e) })
       e.select()
     }
 
@@ -186,6 +191,7 @@ export default {
     const solid = (object: THREE.Object3D) => {
       if (!(object as THREE.Mesh).isMesh) return false
       for (let o: THREE.Object3D | null = object; o; o = o.parent) if (!o.visible) return false
+      if (object.userData.pick) return true // an unseen pick slab, such as a doorway's opening
       return ([] as THREE.Material[]).concat((object as THREE.Mesh).material).some((m) => m.visible && m.depthWrite)
     }
     let down: { x: number; y: number } | null = null
@@ -314,6 +320,11 @@ export default {
         return hovered?.id ?? null
       },
       back,
+      choose(id: string) {
+        const e = live.get(id)
+        if (e) choose(e)
+        return Boolean(e)
+      },
       say,
       sort,
       list: () => [...live.values()].map((e) => ({ id: e.id, label: e.label, ...toScreen(center(e)) })),

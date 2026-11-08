@@ -7,7 +7,7 @@ import fridge from './plugins/fridge'
 import motes from './plugins/motes'
 import camera from './plugins/camera'
 import lamp from './plugins/lamp'
-import postfx from './plugins/postfx'
+import postfx, { failNextPrepare } from './plugins/postfx'
 import glass from './plugins/glass'
 import sunbeam from './plugins/sunbeam'
 import plant from './plugins/plant'
@@ -25,14 +25,22 @@ import sideboard from './plugins/sideboard'
 import growshelves from './plugins/growshelves'
 import plantstand from './plugins/plantstand'
 import loungedoors from './plugins/loungedoors'
+import diorama from './plugins/diorama'
+import furnish from './plugins/furnish'
+import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
+import themePlugin from './theme/plugin'
+import { THEMED, themes } from './theme'
+import { attachAsk } from './theme/ask'
+import { ease } from './theme/switch'
+import type { Theme } from './theme/tokens'
 
 const params = new URLSearchParams(location.search)
 const listed = {
   renderer, camera, entries, postfx,
   room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
   toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
-  lounge, sideboard, growshelves, plantstand, loungedoors,
+  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, furnish, loungefurnish,
 }
 // Any other file in plugins/ joins the catalog under its declared name, so adding a plugin
 // never means editing this file. The Elder relies on that: candidates may change only plugins/.
@@ -43,25 +51,39 @@ const known = new Set<Loadable>(Object.values(listed))
 const extra = Object.fromEntries(
   Object.values(discovered).filter((p) => p && !known.has(p) && !(p.name in listed)).map((p) => [p.name, p]),
 )
-PLANS.kitchen.plugins.push(...Object.keys(extra))
+/** Loaded for the whole visit; the rooms service loads and unloads the rest. `sound` is here so mute and the cues outlive a room (#52). */
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx', 'sound', ...(THEMED ? ['theme'] : [])]
+PLANS.kitchen.plugins.push(...Object.keys(extra).filter((n) => !GLOBAL.includes(n)))
 const catalog: Record<string, Loadable> = { ...listed, ...extra }
-// ?room=living starts in another room.
+// ?room=living starts in (the seated view) or framed on (the dollhouse) another room.
 const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
-const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start) }
-/** Loaded for the whole visit; the rooms service loads and unloads the rest. */
-const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
+const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start), theme: themePlugin }
 // ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
 const only = params.get('plugins')?.split(',')
 // With rooms listed too, each room brings only its listed plugins, so the Elder's
 // lifecycle baseline (every active plugin but one) really leaves that one out.
 if (only) for (const plan of Object.values(PLANS)) plan.plugins = plan.plugins.filter((n) => only.includes(n))
 for (const [name, plugin] of Object.entries(plugins)) if (only ? only.includes(name) : GLOBAL.includes(name)) load(plugin)
-const keepRooms = params.get('rooms') !== 'unload'
+// #42 experiment: ?props=<run-id> places generated props in the kitchen, in dev builds only.
+if (import.meta.env.DEV && params.has('props')) void import('./props/load').then((m) => load(m.default))
+// #47 experiment: ?villager=gen&gen=<run-id> places generated villagers in the kitchen, in dev builds only.
+if (import.meta.env.DEV && params.get('villager') === 'gen') void import('./villagers/gen/load').then((m) => load(m.default))
+// #47 setup: &setup=1 adds the felt workshop on the table, where a villager is made and tuned in a cheval mirror, in dev builds
+// only (b and bench are the regroups' kept ways to tune; d is 1).
+if (import.meta.env.DEV && params.get('villager') === 'gen' && /^(1|b|d|bench)$/.test(params.get('setup') ?? '')) void import('./villagers/gen/setup').then((m) => load(m.default))
+// #50 regroup S3: ?redecorate=1 has the theme remake the kitchen's main props (dev builds only, like the sandbox).
+if (import.meta.env.DEV && params.has('redecorate')) void import('./theme/redecorate').then((m) => load(m.default))
 // When calibration steps the tier down, the renderer has already lowered the pixel
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
 // A page that did not load postfx (?plugins=) keeps it out.
 root.on('village/tier', () => void (loadedNames().includes('postfx') && replace(postfx)))
+// A live theme change (src/theme setTheme): the theme plugin shifts the scene; postfx blends
+// its uniforms, or compiles the next chain ahead and swaps it in when the chain changes shape.
+root.on('village/theme', (previous, next) => {
+  load(themePlugin)
+  void ease(root.get('stage'), previous as Theme, next as Theme)
+})
 
 /** What is registered right now: used by the unload proof and the perf run. */
 function snapshot() {
@@ -102,6 +124,8 @@ const village = {
   snapshot,
   /** GPU pass and CPU frame times recorded so far (see the renderer's timing notes). */
   timing: () => root.get('stage')?.timing,
+  /** Looks: list, current, set, save, rename, remove, keepCostume (src/theme). */
+  theme: themes,
   load: (name: string) => load(plugins[name]),
   unload,
   /**
@@ -110,8 +134,7 @@ const village = {
    * every requested plugin is active.
    */
   ready: (timeoutMs = 15000) => new Promise<Readiness>((resolve) => {
-    const current = root.get('rooms')?.current ?? start
-    const wanted = only ?? [...GLOBAL, ...(keepRooms ? Object.values(PLANS).flatMap((p) => p.plugins) : PLANS[current].plugins)]
+    const wanted = only ?? [...GLOBAL, ...Object.values(PLANS).flatMap((p) => p.plugins)]
     const deadline = performance.now() + timeoutMs
     const check = () => {
       const states = pluginStates()
@@ -134,5 +157,10 @@ interface Readiness {
   problems: Record<string, { state: string; error?: string }>
 }
 // Dev builds also expose the kernel so scripts/check-kernel.mjs can load test plugins.
-if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload } })
+if (import.meta.env.DEV) Object.assign(village, { kernel: { root, load, unload, failNextPrepare } })
 Object.assign(window, { village })
+// The theme plugin joins when someone is about to change the look (src/theme prepare(): the
+// swatch book opening, a theme asked for), so its one-time rebuild lands before the switch and
+// the home without a theme pays nothing for themes (#50 perf gate: CPU and heap on the talk branch).
+root.on('village/theme-prepare', () => void load(themePlugin))
+attachAsk()

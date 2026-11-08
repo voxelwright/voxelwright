@@ -2,15 +2,15 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { canvas, paintKidDrawing, paintPlaster, paintWood, rng, toTexture } from '../paint'
-import { LIVING_X } from '../layout'
+import { HOUSE_H, LIVING_X, WALL_T } from '../layout'
 
-/** Living room corner measurements, local to the room. */
-export const LOUNGE = { back: -2.2, right: 1.6, left: -3.2, height: 2.9, door: { x0: -2.36, x1: -1.64, top: 2.05 } }
+/** Living room measurements, local to the room (x from LIVING_X). Its left wall is the one it shares with the kitchen. */
+export const LOUNGE = { back: -2.2, right: 1.6, left: -3.2, height: HOUSE_H }
 
 /**
- * The living room shell: oak floor, two soft white walls meeting in the plant
- * corner, an evening table lamp's warmth and a quiet fill. Fog and background
- * stay with the kitchen's room plugin, so this one never touches them.
+ * The living room shell, next door to the kitchen: oak floor, the back and right
+ * walls meeting in the plant corner, and a lamp's warm glow. Fog, background, sun
+ * and fill are the house's, from the kitchen's plugins.
  */
 export default {
   name: 'lounge',
@@ -29,38 +29,40 @@ export default {
     floor.rotation.x = -Math.PI / 2
     floor.position.set((left + right) / 2, 0, back + 3)
     floor.receiveShadow = true
+    floor.name = 'lounge floor' // build mode (#53) stands its own in for the floor, walls and skirting
     room.add(floor)
 
+    // Thick plaster walls, as the kitchen's: the back wall runs from the shared wall's
+    // kitchen face to the outer corner, the right wall (with the Workshop's door) between it and the front.
     const wallMat = new THREE.MeshStandardMaterial({ map: paintPlaster(41, [240, 236, 229], 1536, 768, 0.3), roughness: 0.95 })
-    // The back wall is three panels around the kitchen doorway, sharing one unrepeated map.
-    const panel = (xa: number, xb: number, ya: number, yb: number) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(xb - xa, yb - ya), wallMat)
-      m.position.set((xa + xb) / 2, (ya + yb) / 2, back)
+    const T = WALL_T
+    const wall = (x0: number, x1: number, z0: number, z1: number, inward: THREE.Vector3) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, height, z1 - z0), wallMat)
+      m.position.set((x0 + x1) / 2, height / 2, (z0 + z1) / 2)
       const uv = m.geometry.attributes.uv as THREE.BufferAttribute
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * (xb - xa) + xa - left) / (right - left), (uv.getY(i) * (yb - ya) + ya) / height)
-      m.receiveShadow = true
+      const len = Math.max(x1 - x0, z1 - z0)
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 6, uv.getY(i))
+      m.castShadow = m.receiveShadow = true
+      m.userData.inward = inward // cut away when a camera stands behind it (#42)
+      m.name = 'lounge wall'
       room.add(m)
     }
-    const { door } = LOUNGE
-    panel(left, door.x0, 0, height)
-    panel(door.x0, door.x1, door.top, height)
-    panel(door.x1, right, 0, height)
-    const sideWall = new THREE.Mesh(new THREE.PlaneGeometry(6, height), wallMat)
-    sideWall.rotation.y = -Math.PI / 2
-    sideWall.position.set(right, height / 2, back + 3)
-    sideWall.receiveShadow = true
+    wall(left - T, right + T, back - T, back, new THREE.Vector3(0, 0, 1))
+    wall(right, right + T, back, back + 6, new THREE.Vector3(-1, 0, 0))
+    // The seated view looks up into the room: a ceiling it sees from below only.
     const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(right - left, 6), new THREE.MeshStandardMaterial({ color: '#efe9e0', roughness: 0.95 }))
     ceiling.rotation.x = Math.PI / 2
     ceiling.position.set((left + right) / 2, height, back + 3)
-    room.add(sideWall, ceiling)
+    ceiling.userData.seatOnly = true
+    room.add(ceiling)
     const trim = new THREE.MeshStandardMaterial({ color: '#f3efe8', roughness: 0.6 })
-    for (const [xa, xb] of [[left, door.x0], [door.x1, right]]) {
-      const skirt = new THREE.Mesh(new THREE.BoxGeometry(xb - xa, 0.09, 0.02), trim)
-      skirt.position.set((xa + xb) / 2, 0.045, back + 0.01)
-      room.add(skirt)
-    }
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(right - left, 0.09, 0.02), trim)
+    skirt.position.set((left + right) / 2, 0.045, back + 0.01)
+    skirt.name = 'lounge skirting'
+    room.add(skirt)
     const skirtSide = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 6), trim)
     skirtSide.position.set(right - 0.01, 0.045, back + 3)
+    skirtSide.name = 'lounge skirting'
     room.add(skirtSide)
 
     // A soft woven rug in front of the sideboard: terracotta and honey bands on cream wool.
@@ -120,19 +122,14 @@ export default {
     bench.position.set(0.3, 0, back + 0.22)
     room.add(bench)
 
-    // Evening light: a warm key from the lamp side, a soft fill, and a bounce.
-    const fill = new THREE.HemisphereLight('#fff4e6', '#9a8068', 1.15)
-    fill.name = 'lounge fill'
-    room.add(fill)
-    const key = new THREE.DirectionalLight('#ffd9a8', 1.15)
-    key.name = 'lounge key'
-    key.position.set(-2.5, 3.2, 2.5)
-    key.target.position.set(0.6, 0.8, -1.8)
-    key.castShadow = true
-    key.shadow.mapSize.set(1024, 1024)
-    key.shadow.bias = -0.0005
-    Object.assign(key.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: 0.5, far: 10 })
-    room.add(key, key.target)
+    // The house shares one sun and one fill (the kitchen's). The living room adds only a
+    // warm lamp-light that fades out before the kitchen, so its corner glows in the evening.
+    // One light for the room (the sideboard lamp and the grow strips are emissive): with the
+    // whole house drawn, every point light is paid for by every pixel.
+    const glow = new THREE.PointLight('#ffc98a', 2.6, 5.5, 1.2)
+    glow.name = 'lounge glow'
+    glow.position.set(-0.5, 1.9, back + 1.1)
+    room.add(glow)
     own(ctx, room)
   },
 }

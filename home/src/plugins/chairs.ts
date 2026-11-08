@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { paintWood } from '../paint'
@@ -8,7 +9,10 @@ import { paintWood } from '../paint'
 export function makeChair(pine: THREE.Material, cushion: THREE.Material) {
   const chair = new THREE.Group()
   const seatY = 0.45, w = 0.42, d = 0.42
-  const part = (geo: THREE.BufferGeometry, x: number, y: number, z: number, mat = pine) => {
+  // The pine parts share one material, so they are baked into one mesh: a draw and a shadow draw per chair, not twelve of each.
+  const pieces: THREE.BufferGeometry[] = []
+  const part = (geo: THREE.BufferGeometry, x: number, y: number, z: number, mat?: THREE.Material) => {
+    if (!mat) return void pieces.push(geo.translate(x, y, z))
     const m = new THREE.Mesh(geo, mat)
     m.position.set(x, y, z)
     m.castShadow = m.receiveShadow = true
@@ -23,8 +27,12 @@ export function makeChair(pine: THREE.Material, cushion: THREE.Material) {
   part(new THREE.BoxGeometry(w, 0.03, 0.02), 0, 0.58, -d / 2 + 0.02)
   for (let i = 0; i < 4; i++) part(new THREE.BoxGeometry(0.03, 0.29, 0.016), -0.12 + i * 0.08, 0.735, -d / 2 + 0.02)
   part(new THREE.BoxGeometry(w - 0.04, 0.03, 0.02), 0, 0.12, d / 2 - 0.02)
-  const pad = part(new RoundedBoxGeometry(w - 0.04, 0.05, d - 0.04, 3, 0.02), 0, seatY + 0.04, 0.01, cushion)
+  const pad = part(new RoundedBoxGeometry(w - 0.04, 0.05, d - 0.04, 3, 0.02), 0, seatY + 0.04, 0.01, cushion)!
   pad.castShadow = true
+  const frame = new THREE.Mesh(mergeGeometries(pieces), pine)
+  for (const g of pieces) g.dispose()
+  frame.castShadow = frame.receiveShadow = true
+  chair.add(frame)
   return chair
 }
 

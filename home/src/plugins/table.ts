@@ -29,7 +29,8 @@ export default {
     const top = TABLE_TOP
     const wood = new THREE.MeshStandardMaterial({
       map: paintWood({ seed: 7, planks: 4, light: [236, 198, 144], dark: [212, 170, 118], knots: 2 }),
-      roughness: 0.48,
+      // Oiled, not lacquered: the low sun and the pendant leave a glow on it, not a white hotspot (#42 room).
+      roughness: 0.74,
     })
     const slab = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.055, 1.0), wood)
     slab.position.y = top - 0.0275

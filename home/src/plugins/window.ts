@@ -1,9 +1,11 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
-import { WALL_Z, WINDOW } from '../layout'
+import { WALL_T, WALL_Z, WINDOW } from '../layout'
+import { casing, lining } from '../doorway'
 import { paintGarden } from '../paint'
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js'
+import { MODE, SHADOW_ONLY } from './camera'
 
 export default {
   name: 'window',
@@ -18,40 +20,49 @@ export default {
     // The garden: a painted backdrop far enough away to parallax against the frame.
     const garden = new THREE.Mesh(
       new THREE.PlaneGeometry(16, 8),
-      new THREE.MeshBasicMaterial({ map: paintGarden(3), fog: false }),
+      // Toned below the bloom threshold: at full strength the window bloomed hot in every shot (#42 paper climb).
+      new THREE.MeshBasicMaterial({ map: paintGarden(3), color: new THREE.Color(0.8, 0.8, 0.78), fog: false }),
     )
     garden.position.set(cx - 1.5, 1.6, WALL_Z - 6)
+    garden.material.userData.themeRole = 'view'
+    garden.userData.seatOnly = true // a painted card: from above it shows over the wall (#42)
+    garden.userData.exterior = true // a theme's world hides it and stands its own (src/theme/world)
     group.add(garden)
 
     const frameMat = new THREE.MeshStandardMaterial({
       color: '#efe4cf',
       roughness: 0.55,
     })
-    const bar = (bw: number, bh: number, x: number, y: number, d = 0.06) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, d), frameMat)
+    frameMat.userData.themeRole = 'trim'
+    // The sill runs through the wall's whole depth and the lining stands on it, so the
+    // wall's own reveal faces are buried in wood (they shared planes with the old frame
+    // bars, and TRAA's jitter made the tie flicker, #42). The casing is the trim on the room side.
+    const sillTop = y0 + 0.02
+    const sill = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.05, WALL_T - 0.002 + 0.2), frameMat)
+    sill.position.set(cx, sillTop - 0.025, WALL_Z + (0.2 - (WALL_T - 0.002)) / 2)
+    sill.castShadow = sill.receiveShadow = true
+    group.add(sill)
+    const opening = new THREE.Group()
+    opening.add(lining(w, y1 - sillTop, WALL_T, false, '#efe4cf'), casing(w, y1 - sillTop, '#efe4cf'))
+    opening.position.set(cx, sillTop, WALL_Z)
+    opening.traverse((o) => (o.castShadow = true))
+    group.add(opening)
+    // Glazing bars, their ends buried in the lining and the sill.
+    const bar = (bw: number, bh: number, x: number, y: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.06), frameMat)
       m.position.set(x, y, WALL_Z - 0.09)
       m.castShadow = true
       group.add(m)
     }
-    const f = 0.06
-    bar(w + f * 2, f, cx, y1 + f / 2, 0.2)
-    bar(w + f * 2, f, cx, y0 - f / 2, 0.2)
-    bar(f, h, x0 - f / 2, cy, 0.2)
-    bar(f, h, x1 + f / 2, cy, 0.2)
-    bar(0.035, h, cx, cy)
-    bar(w, 0.035, cx, cy + h * 0.12)
-
-    const sill = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.05, 0.3), frameMat)
-    sill.position.set(cx, y0 - 0.03, WALL_Z + 0.06)
-    sill.castShadow = sill.receiveShadow = true
-    group.add(sill)
+    bar(0.035, y1 - sillTop, cx, (sillTop + y1) / 2)
+    bar(w - 0.05, 0.035, cx, cy + h * 0.12)
 
     // A little terracotta pot with a leafy plant on the sill
     const pot = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.055, 0.12, 20),
       new THREE.MeshStandardMaterial({ color: '#c0643c', roughness: 0.85 }),
     )
-    pot.position.set(x0 + 0.25, y0 + 0.06, WALL_Z + 0.08)
+    pot.position.set(x0 + 0.25, sillTop + 0.06, WALL_Z + 0.08)
     pot.castShadow = true
     group.add(pot)
     const leafMat = new THREE.MeshStandardMaterial({ color: '#5f8a3a', roughness: 0.7, side: THREE.DoubleSide })
@@ -60,12 +71,13 @@ export default {
     for (let i = 0; i < 9; i++) {
       const leaf = new THREE.Mesh(leafGeo, leafMat)
       const a = (i / 9) * Math.PI * 2
-      leaf.position.set(pot.position.x + Math.cos(a) * 0.06, y0 + 0.15 + (i % 3) * 0.03, pot.position.z + Math.sin(a) * 0.05)
+      leaf.position.set(pot.position.x + Math.cos(a) * 0.06, sillTop + 0.15 + (i % 3) * 0.03, pot.position.z + Math.sin(a) * 0.05)
       leaf.rotation.set(0.4 * Math.sin(a), a, 0.6)
       leaf.castShadow = true
       group.add(leaf)
     }
 
+    group.userData.inward = new THREE.Vector3(0, 0, 1) // leaves with the back wall when the camera stands behind it
     own(ctx, group)
 
     // Low golden-hour sun pouring through the window onto the table.
@@ -85,6 +97,17 @@ export default {
     sun.shadow.bias = -0.0004
     sun.shadow.normalBias = 0.02
     sun.shadow.radius = 4
+    if (MODE !== 'seat') {
+      // The wider views see the whole floor, so the shadow box covers the whole room
+      // (outside it the sun lit the floor in hard wedges), and walls cut away from
+      // the camera still throw their shadows (#42).
+      // The box is centred on the house (same direction, moved along x), 18 m across.
+      sun.position.x += 2.4
+      sun.target.position.x += 2.4
+      Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, far: 24 })
+      sun.shadow.radius = 6
+      sun.shadow.camera.layers.enable(SHADOW_ONLY)
+    }
     if (ctx.stage.features().has('csm')) {
       // Three cascades over the room's depth only (the camera's far plane is 60 m;
       // the kitchen is about 6 m deep), soft-filtered, so near shadows get the texels.

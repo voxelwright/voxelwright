@@ -1,12 +1,13 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace, type Quality, type Stage } from '../kernel'
+import { gpuPassTimer, type GpuFrame } from '../gpu-time.js'
 
 const params = new URLSearchParams(location.search)
 const TIER_NAMES: Quality[] = ['high', 'medium', 'low']
 /** ?q= names a tier and skips calibration; without it the page starts high and measures. */
 const asked = TIER_NAMES.find((t) => t === params.get('q'))
-/** ?gpu=1 keeps GPU timestamps on for the whole visit, for scripts/measure.mjs. */
+/** ?gpu=1 keeps GPU timing on for the whole visit, for scripts/measure.mjs. */
 const gpuMode = params.get('gpu') === '1'
 /** ?fx=csm,gtao names exactly the features to run, overriding the tier's set, so each one's cost is measured alone. */
 const fxParam = params.get('fx')
@@ -15,7 +16,7 @@ const forceWebGL = params.get('webgl') === '1'
 
 /**
  * Each tier: device pixel ratio cap and the features it runs. maxGpuMs is the
- * median GPU time (submit to queue done) over the calibration frames above which
+ * median GPU busy time (src/gpu-time.js) over the calibration frames above which
  * the page steps down to the next tier. Numbers come from the README's tables.
  */
 export const TIERS: Record<Quality, { dpr: number; fx: string[]; maxGpuMs: number }> = {
@@ -41,11 +42,10 @@ export default {
     const renderer = new THREE.WebGPURenderer({
       antialias: quality !== 'low',
       powerPreference: 'high-performance',
-      trackTimestamp: gpuMode,
       forceWebGL,
     })
     await renderer.init()
-    const backendState = renderer.backend as unknown as { isWebGPUBackend?: boolean; trackTimestamp: boolean; device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }
+    const backendState = renderer.backend as unknown as { isWebGPUBackend?: boolean; device?: { queue: { onSubmittedWorkDone(): Promise<void> } } }
     const device = backendState.device
     // WebGL2 has no queue-done signal to time, and its frame interval is vsync, not
     // GPU cost. Without a measurement the page takes the light tier instead of guessing.
@@ -62,7 +62,8 @@ export default {
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)
     const backend = backendState.isWebGPUBackend ? 'WebGPU' : 'WebGL2'
-    const timing: Stage['timing'] = { gpu: [], passSum: [], cpu: [], tracking: backendState.trackTimestamp, tierReason: asked ? `?q=${asked}` : unmeasurable ? 'WebGL2: no GPU timer, so the light tier' : 'calibrating', tierSettled: !calibrating || unmeasurable }
+    const timer = device ? gpuPassTimer(device) : null
+    const timing: Stage['timing'] = { gpu: [], submitToDone: [], passSum: [], cpu: [], tracking: !!timer, tierReason: asked ? `?q=${asked}` : unmeasurable ? 'WebGL2: no GPU timer, so the light tier' : 'calibrating', tierSettled: !calibrating || unmeasurable }
 
     const passes: Array<() => void> = []
     // Calibration pauses while anything holds it, and drops a frame submitted before the last release.
@@ -110,13 +111,11 @@ export default {
     }
     addEventListener('resize', resize)
 
-    // GPU time per frame is the wait from the frame's last submit until the queue
-    // reports that work done. On the M1 Pro, three.js's summed timestamp-query pass
-    // durations overlapped (bloom mips of a few pixels each "took" 5 ms, 72 ms total
-    // at a steady 60 fps), so they are kept only as per-pass detail under ?gpu=1.
-    // The timestamp pool holds 256 queries, so it is resolved every frame while on.
+    // GPU ms per frame is the union of the frame's pass intervals from timestamp
+    // queries (src/gpu-time.js): it leaves out main-thread delay, which the older
+    // submit-to-done wait counted (a 12 ms CPU loop read as 39 ms of GPU). Without
+    // timestamp queries, calibration falls back to submit-to-done. ?gpu=1 records both.
     let frame = 0
-    let resolving = false
     let waiting = false
     let settled = !calibrating || unmeasurable
     let samples: number[] = []
@@ -137,8 +136,6 @@ export default {
       frame = 0
     }
     const timed = (ms: number, submitted: number) => {
-      timing.gpu.push(ms)
-      if (timing.gpu.length > 4000) timing.gpu.splice(0, 2000)
       if (settled || holds > 0 || submitted < releasedAt) return
       if (++frame <= WARMUP_FRAMES) return
       if (!samples.length) since = performance.now()
@@ -147,7 +144,18 @@ export default {
       if (!enough) return
       const sorted = [...samples].sort((a, b) => a - b)
       settleTier(sorted[Math.floor(sorted.length / 2)])
+      if (settled && !gpuMode) timer?.listeners.delete(onGpuFrame)
     }
+    const keep = (list: number[], ms: number) => {
+      list.push(ms)
+      if (list.length > 4000) list.splice(0, 2000)
+    }
+    const onGpuFrame = (f: GpuFrame) => {
+      keep(timing.gpu, f.busyMs)
+      keep(timing.passSum, f.sumMs)
+      timed(f.busyMs, f.endedAt ?? performance.now())
+    }
+    if (timer && (gpuMode || calibrating)) timer.listeners.add(onGpuFrame)
 
     const clock = new THREE.Timer()
     renderer.setAnimationLoop((time) => {
@@ -158,23 +166,20 @@ export default {
       const submitted = performance.now()
       timing.cpu.push(submitted - start)
       if (timing.cpu.length > 4000) timing.cpu.splice(0, 2000)
-      if (device && (gpuMode || !settled) && !waiting) {
+      timer?.endFrame()
+      if (device && (gpuMode || (!timer && !settled)) && !waiting) {
         waiting = true
         device.queue.onSubmittedWorkDone().then(() => {
           waiting = false
-          timed(performance.now() - submitted, submitted)
-        })
-      }
-      if (backendState.trackTimestamp && !resolving) {
-        resolving = true
-        renderer.resolveTimestampsAsync('render').then((ms) => {
-          resolving = false
-          if (typeof ms === 'number' && ms > 0) timing.passSum.push(ms)
+          const ms = performance.now() - submitted
+          keep(timing.submitToDone, ms)
+          if (!timer) timed(ms, submitted)
         })
       }
     })
 
     ctx.effect(() => () => {
+      timer?.listeners.delete(onGpuFrame)
       renderer.setAnimationLoop(null)
       removeEventListener('resize', resize)
       canvas.remove()

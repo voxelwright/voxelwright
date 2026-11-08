@@ -1,0 +1,79 @@
+export default function (villager, api) {
+  const { THREE } = api
+  const RoundedBoxGeometry = api.RoundedBoxGeometry
+  const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 })
+  const bead = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.3 })
+  const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
+  const ACCENT = '#c8553d'
+  const skin = felt('#b9b07f'), shellC = felt('#8a7a4e'), plateC = felt('#a39463'), cream = felt('#efe3c8')
+  const brown = felt('#7a5535'), teal = felt('#5f7f8a'), dark = felt('#4a3a2c')
+
+  // body and shell
+  add(villager, new THREE.SphereGeometry(0.19, 32, 20), skin, 0, 0.15, 0).scale.set(1, 0.7, 0.9)
+  add(villager, new THREE.SphereGeometry(0.2, 32, 20), shellC, 0, 0.2, -0.04).scale.set(1, 0.75, 1)
+  add(villager, new THREE.SphereGeometry(0.06, 16, 10), plateC, 0, 0.342, -0.04).scale.set(1.1, 0.4, 1.1)
+  for (const s of [-1, 1]) {
+    add(villager, new THREE.SphereGeometry(0.055, 16, 10), plateC, s * 0.125, 0.29, -0.05).scale.set(0.6, 0.6, 1)
+    add(villager, new THREE.SphereGeometry(0.05, 16, 10), plateC, s * 0.09, 0.22, -0.2).scale.set(1, 1, 0.5)
+  }
+  add(villager, new THREE.SphereGeometry(0.035, 12, 8), skin, 0, 0.1, -0.2).scale.set(1, 0.8, 1.2)
+  // neck
+  add(villager, new THREE.CylinderGeometry(0.075, 0.09, 0.08, 20), skin, 0, 0.26, 0.01)
+
+  // scarf in the owner's colour
+  const acc = felt(ACCENT)
+  const scarf = add(villager, new THREE.TorusGeometry(0.15, 0.03, 10, 28), acc, 0, 0.24, 0)
+  scarf.rotation.x = Math.PI / 2
+  for (const s of [-1, 1]) add(villager, new THREE.CapsuleGeometry(0.026, 0.07, 6, 10), acc, s * 0.045, 0.18, 0.165).rotation.z = s * 0.1
+
+  // keeper's mark: boxy ledger satchel at the hip, strap across the body
+  const strap = add(villager, new THREE.BoxGeometry(0.035, 0.36, 0.014), brown, 0, 0.17, 0.168)
+  strap.rotation.z = 0.9
+  add(villager, new RoundedBoxGeometry(0.11, 0.13, 0.15, 2, 0.008), brown, 0.24, 0.11, 0.01)
+  add(villager, new THREE.BoxGeometry(0.118, 0.04, 0.158), acc, 0.24, 0.165, 0.01)
+  add(villager, new THREE.SphereGeometry(0.014, 12, 8), bead('#d9b24c'), 0.24, 0.12, 0.09)
+  add(villager, new THREE.BoxGeometry(0.02, 0.05, 0.02), dark, 0.19, 0.17, 0.01)
+
+  // head
+  const head = villager.tag(new THREE.Group(), 'head')
+  head.position.set(0, 0.37, 0.01)
+  villager.add(head)
+  add(head, new THREE.SphereGeometry(0.15, 32, 20), skin, 0, 0, 0).scale.set(1.05, 0.9, 1)
+  add(head, new THREE.SphereGeometry(0.06, 20, 12), cream, 0, -0.045, 0.115).scale.set(1.3, 0.7, 0.8)
+  add(head, new THREE.SphereGeometry(0.014, 12, 8), bead('#3a2a20'), 0, -0.02, 0.17)
+  const smile = add(head, new THREE.TorusGeometry(0.035, 0.007, 8, 16, Math.PI), dark, 0, -0.06, 0.15)
+  smile.rotation.z = Math.PI
+  for (const s of [-1, 1]) {
+    const brow = add(head, new THREE.CapsuleGeometry(0.01, 0.04, 4, 8), shellC, s * 0.065, 0.065, 0.125)
+    brow.rotation.z = Math.PI / 2 + s * 0.2
+    const eye = villager.tag(add(head, new THREE.CylinderGeometry(0.02, 0.02, 0.012, 18), bead('#241a18'), s * 0.062, 0.025, 0.138), s < 0 ? 'eye-left' : 'eye-right')
+    eye.rotation.x = Math.PI / 2 - 0.15
+    const hand = villager.tag(add(villager, new THREE.CapsuleGeometry(0.034, 0.05, 6, 10), skin, s * 0.2, 0.15, 0.03), s < 0 ? 'hand-left' : 'hand-right')
+    hand.rotation.z = s * 0.5
+    villager.tag(add(villager, new THREE.SphereGeometry(0.05, 16, 10), skin, s * 0.1, 0.03, 0.04), s < 0 ? 'foot-left' : 'foot-right').scale.set(1, 0.65, 1.3)
+  }
+
+  // prop: the family calendar, a big ledger held at the left hand
+  const book = villager.tag(new THREE.Group(), 'held')
+  book.position.set(-0.2, 0.17, 0.075)
+  villager.add(book)
+  add(book, new RoundedBoxGeometry(0.17, 0.22, 0.03, 2, 0.006), teal, 0, 0, 0)
+  add(book, new THREE.BoxGeometry(0.145, 0.195, 0.012), cream, 0, 0, 0.012)
+  for (let i = 0; i < 3; i++) add(book, new THREE.BoxGeometry(0.11, 0.012, 0.004), brown, 0, 0.05 - i * 0.045, 0.02)
+
+  villager.gait({ speed: 0.22, stride: 0.16, bob: 0.02, stepped: true, fidget: 0.2 })
+  // voice: lower, slower and rounder than the start for an old, unhurried tortoise; a little more wobble for age.
+  villager.about({
+    name: 'Old Brindle', role: 'keeper',
+    bark: 'Thursday is double-booked: dentist and violin. One of them has to move, and I would not pick the dentist.',
+    voice: { pitch: 150, range: 2.8, formant: 0.95, rate: 4.5, breath: 0.25, wobble: 0.75, wobbleRate: 4.5, tilt: 2.0, gain: 0.9 },
+    persona: {
+      role: 'Keeps the family calendar and its deadlines',
+      speciality: 'Spotting clashes in the week before they happen',
+      temperament: 'calm', register: 'plain', humour: 'dry',
+      quirks: ['Taps out a swing rhythm while checking dates', 'Never double-books, and says so', 'Names each week after a jazz standard'],
+      topics: ["this week's clashes", 'birthdays and renewals', 'school and work schedules', 'jazz records', 'who needs a lift'],
+      dials: { warmth: 0.65, playful: 0.3, chatty: 0.4 },
+    },
+  })
+}

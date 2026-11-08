@@ -1,0 +1,516 @@
+// Page-free proof for plan versions (#48): src/build/history.ts with the memory
+// store, then with hostStore against a real villager host (stub agent, no model).
+// Usage: node scripts/check-plan-history.mjs   (needs host/node_modules: cd ../host && npm ci)
+// Vite loads the TypeScript in-process (no port, no browser). Synthetic data only.
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createServer } from 'vite'
+
+const vite = await createServer({ root: new URL('..', import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true } })
+const H = await vite.ssrLoadModule('/src/build/history.ts')
+const P = await vite.ssrLoadModule('/src/build/plan.ts')
+const { PlanHistory, memoryStore, hostStore, bearer, diff, canonical, upgrade, StaleHead, StoreError, HistoryError, ReadOnly } = H
+const { HOUSE_PLAN, PlanError } = P
+
+const checks = []
+const check = (name, pass, detail) => {
+  checks.push({ name, pass: Boolean(pass) })
+  console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${pass || detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`)
+}
+const same = (a, b) => canonical(a) === canonical(b)
+const refusal = async (fn) => {
+  try {
+    await fn()
+    return null
+  } catch (error) {
+    return error
+  }
+}
+const snapshot = (h) => canonical({ head: h.head, versions: h.versions(), plan: h.plan })
+
+const move = { op: 'moveWall', wallId: 'kitchen.right', by: 1 }
+const bend = { op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.5 }
+const hang = (id, wallId, along, roomId = 'kitchen') => ({ id, item: { kind: 'picture' }, at: { mount: 'wall', wallId, roomId, along, height: 1.5, spin: 0 } })
+const pantry = { op: 'addRoom', room: { id: 'pantry', label: 'Pantry' }, wallId: 'kitchen.left', from: 1, to: 5, depth: 3, door: { id: 'pantry.door', from: 2.25, to: 3.75, leaves: 2 } }
+
+try {
+  // ---- memory store: commit, undo, redo, branch, checkout, rename
+  const store = memoryStore()
+  const h = await PlanHistory.open(store, HOUSE_PLAN)
+  const root = h.head
+  check('first open saves the base as the root', h.versions().length === 1 && h.versions()[0].parent === null && same(h.plan, HOUSE_PLAN))
+  const heard = []
+  h.onChange((plan, head) => heard.push({ head, plan }))
+
+  const v1 = await h.commit([move], 'wider kitchen')
+  check('a commit moves the head and records the plan it made, its note and at, and no one by name', h.head === v1.id && v1.parent === root && v1.note === 'wider kitchen' && !('by' in v1) && !('edits' in v1) && same(v1.plan, h.plan) && !same(h.plan, HOUSE_PLAN))
+  check('onChange hears the new plan and head', heard.length === 1 && heard[0].head === v1.id && heard[0].plan === h.plan)
+
+  const before = snapshot(h)
+  const bad = await refusal(() => h.commit([{ op: 'moveOpening', openingId: 'kitchen.window', from: 6.5, to: 7.9 }]))
+  check('an invalid edit is refused with reasons and changes nothing', bad instanceof PlanError && bad.reasons.some((r) => /does not fit/.test(r)) && snapshot(h) === before, bad?.reasons)
+  const missing = await refusal(() => h.commit([{ op: 'moveWall', wallId: 'kitchen.nope', by: 1 }]))
+  check('an edit on a missing wall is refused with reasons', missing instanceof PlanError && /does not exist/.test(missing.reasons[0]) && snapshot(h) === before)
+  const noop = await refusal(() => h.commit([{ op: 'bendWall', wallId: 'kitchen.right', sagitta: 0 }]))
+  check('an edit that changes nothing is refused, not saved', noop instanceof PlanError && noop.reasons[0] === 'nothing changed' && snapshot(h) === before)
+
+  check('undo moves the head to the parent', (await h.undo()) && h.head === root && same(h.plan, HOUSE_PLAN))
+  check('undo at the root is false', !(await h.undo()) && h.head === root)
+  check('redo walks forward again', (await h.redo()) && h.head === v1.id)
+  check('redo with nothing to redo is false', !(await h.redo()))
+
+  await h.undo()
+  const v2 = await h.commit([bend], 'bay window')
+  check('a commit after undo branches from the head and clears redo', v2.parent === root && !(await h.redo()) && h.versions().length === 3)
+  await h.checkout(v1.id)
+  check('checkout moves to any version', h.head === v1.id && same(h.plan, h.planAt(v1.id)))
+  const v3 = await h.commit([pantry])
+  check('the next commit branches from the checked-out version', v3.parent === v1.id)
+  await h.rename(v2.id, '  Bay\nwindow  ')
+  check('rename stores a clean name', h.name(v2.id) === 'Bay window' && h.name(v1.id) === undefined)
+  check('a blank name is refused', (await refusal(() => h.rename(v1.id, '  '))) instanceof PlanError)
+  const queued = await Promise.all([h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }]), h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }])])
+  check('commits sent together are saved one after the other', queued[1].parent === queued[0].id && h.head === queued[1].id)
+
+  // ---- reopening reads the same plans and head
+  const again = await PlanHistory.open(store, HOUSE_PLAN)
+  check('reopening reads every version to the same plans and head', again.head === h.head && h.versions().every((v) => same(again.planAt(v.id), h.planAt(v.id))) && again.name(v2.id) === 'Bay window')
+
+  // ---- concurrent pages: compare-and-set, never merge
+  const other = await PlanHistory.open(store, HOUSE_PLAN)
+  await h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: -0.2 }])
+  const otherCount = other.versions().length
+  let otherHeard = null
+  other.onChange((plan, head) => (otherHeard = head))
+  const stale = await refusal(() => other.commit([bend]))
+  check('a page on a stale head is refused, saves nothing of its own, and has already taken the other head', stale instanceof StaleHead && stale.head === h.head && other.head === h.head && same(other.plan, h.plan) && other.versions().length === otherCount + 1 && otherHeard === h.head && other.versions().every((v) => h.versions().some((k) => k.id === v.id)))
+  const retried = await other.commit([bend])
+  check('after a StaleHead the next try builds on the new head without a reload', retried.parent === h.versions().at(-1).id)
+  await h.refresh()
+  check('refresh adopts the other page’s head', h.head === other.head && same(other.plan, h.plan))
+  await h.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: -0.2 }])
+  const staleUndo = await refusal(() => other.undo())
+  check('a stale undo is refused too, and the page takes the new head', staleUndo instanceof StaleHead && other.head === h.head)
+
+  // ---- a failed save is never a version
+  const flaky = memoryStore()
+  const failing = { ...flaky, commit: async () => { throw new StoreError(0, 'the host could not be reached: disk full') }, setHead: flaky.setHead, load: flaky.load, rename: flaky.rename }
+  const f = await PlanHistory.open(flaky, HOUSE_PLAN)
+  const fv = await f.commit([move])
+  const fStore = { ...failing }
+  const f2 = await PlanHistory.open({ ...fStore, setHead: async () => { throw new StoreError(500, 'write failed') } }, HOUSE_PLAN)
+  const fBefore = snapshot(f2)
+  let heardFail = 0
+  f2.onChange(() => heardFail++)
+  const err = await refusal(() => f2.commit([bend]))
+  check('a store that throws mid-commit: the error surfaces, no version, head unchanged', err instanceof StoreError && /disk full/.test(err.message) && snapshot(f2) === fBefore && f2.head === fv.id && heardFail === 0)
+  const errUndo = await refusal(() => f2.undo())
+  check('a failed undo leaves the head and redo path as they were', errUndo instanceof StoreError && snapshot(f2) === fBefore && !(await f2.redo().catch(() => false)))
+  check('after a failure the history still works', (await f.commit([bend])).parent === fv.id)
+
+  // The store accepts the version but the answer is lost: the page reports failure, then reconciles by reloading, never by resending.
+  const lossy = memoryStore()
+  const lost = { ...lossy, commit: async (v) => { await lossy.commit(v); throw new StoreError(0, 'the host could not be reached: connection reset') } }
+  const l = await PlanHistory.open(lost, HOUSE_PLAN)
+  check('a root saved with its answer lost is adopted on open', l.versions().length === 1)
+  const lBefore = snapshot(l)
+  const lostErr = await refusal(() => l.commit([move]))
+  const nextErr = await refusal(() => l.commit([bend]))
+  await l.refresh()
+  check('a lost answer: the commit fails, the next one is stale, refresh adopts the saved version once', lostErr instanceof StoreError && nextErr instanceof StaleHead && l.versions().length === 2 && snapshot(l) !== lBefore && same(l.versions()[1].plan, P.apply(HOUSE_PLAN, move)))
+
+  // ---- a version stores the plan it made; nothing is replayed
+  const clamp = memoryStore()
+  const ch = await PlanHistory.open(clamp, HOUSE_PLAN)
+  const clamped = await ch.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: -6 }])
+  const rightX = (plan) => plan.corners.find((c) => c.id === 'kitchen.back-right').x
+  const movedBy = rightX(clamped.plan) - rightX(HOUSE_PLAN)
+  const reread = await PlanHistory.open(clamp, HOUSE_PLAN)
+  check('moveWall by -6 stops at the room side, and the version stores the house it made', Math.abs(movedBy + 3.6) < 1e-6 && same(clamped.plan, ch.plan), movedBy)
+  check('reopening reads the stored plans and head', same(reread.plan, clamped.plan) && reread.head === clamped.id)
+  check('a stored version holds its plan and note only', !('hash' in clamped) && !('edits' in clamped) && !('base' in reread.versions()[0]) && same(reread.versions()[0].plan, HOUSE_PLAN))
+
+  // the upgrade hook, keyed on plan.schema (identity at the current schema; a fake 0 -> current step proves the path).
+  const v0 = ({ furniture, ...rest }) => ({ ...rest, schema: 0 })
+  const toV1 = { 0: (p) => ({ ...p, schema: P.PLAN_SCHEMA, furniture: [] }) }
+  check('upgrade is identity for a plan at the current schema', upgrade(HOUSE_PLAN) === HOUSE_PLAN)
+  check('upgrade runs the v0 step', same(upgrade(v0(HOUSE_PLAN), toV1), HOUSE_PLAN))
+  check('a plan from a newer home is refused with why', /newer home/.test((await refusal(async () => upgrade({ ...HOUSE_PLAN, schema: P.PLAN_SCHEMA + 1 })))?.message ?? ''))
+
+  // Schema 1 was the kitchen alone (its doorway in the back wall), as every store saved its root before the house plan (#53).
+  const KITCHEN_V1 = {"schema":1,"corners":[{"id":"kitchen.back-left","x":-3.4,"z":-2.29},{"id":"kitchen.back-right","x":3.4899999999999998,"z":-2.29},{"id":"kitchen.front-right","x":3.4899999999999998,"z":3.8899999999999997},{"id":"kitchen.front-left","x":-3.4,"z":3.8899999999999997}],"walls":[{"id":"kitchen.back","a":"kitchen.back-left","b":"kitchen.back-right","thickness":0.18,"height":3,"sagitta":0,"openings":[{"id":"kitchen.door-living","kind":"door","from":0.3999999999999999,"to":1.1,"sill":0,"head":2.08,"leaves":1},{"id":"kitchen.window","kind":"window","from":1.8499999999999999,"to":3.25,"sill":1,"head":2.15}]},{"id":"kitchen.right","a":"kitchen.back-right","b":"kitchen.front-right","thickness":0.18,"height":3,"sagitta":0,"openings":[]},{"id":"kitchen.front","a":"kitchen.front-right","b":"kitchen.front-left","thickness":0.18,"height":3,"sagitta":0,"openings":[]},{"id":"kitchen.left","a":"kitchen.front-left","b":"kitchen.back-left","thickness":0.18,"height":3,"sagitta":0,"openings":[]}],"rooms":[{"id":"kitchen","label":"Kitchen","loop":["kitchen.back-left","kitchen.back-right","kitchen.front-right","kitchen.front-left"]}],"furniture":[]}
+  const asV1 = (plan) => ({ ...structuredClone(plan), schema: 1 })
+  const v1Edit = (edit) => asV1(P.apply({ ...structuredClone(KITCHEN_V1), schema: P.PLAN_SCHEMA }, edit))
+  check('v1 upgrade: the saved kitchen becomes the house plan exactly', same(upgrade(KITCHEN_V1), HOUSE_PLAN), canonical(upgrade(KITCHEN_V1)))
+  const hungV1 = v1Edit({ op: 'placeItem', furniture: hang('f.v1', 'kitchen.right', 2, 'kitchen') })
+  const widerV1 = upgrade(v1Edit({ op: 'moveWall', wallId: 'kitchen.right', by: 1 }))
+  const bentV1 = upgrade(v1Edit({ op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.5 }))
+  const doorOn = (plan) => plan.walls.find((w) => w.openings.some((o) => o.id === 'kitchen.door-living'))?.id
+  check('v1 upgrade: a moved or bent right wall keeps its shape, carries the doorway, and the living room fills the rest',
+    P.validate(widerV1).length === 0 && P.validate(bentV1).length === 0 && doorOn(widerV1) === 'kitchen.right' && doorOn(bentV1) === 'kitchen.right' &&
+    Math.abs(P.roomArea(widerV1, 'living') - P.roomArea(HOUSE_PLAN, 'living') + 6.18) < 1e-6 && P.wallOf(bentV1, 'kitchen.right').sagitta === 0.5,
+    { wider: P.validate(widerV1), bent: P.validate(bentV1), area: P.roomArea(widerV1, 'living') })
+  check('v1 upgrade: a picture on the kitchen side of the right wall stays where it hung', same(upgrade(hungV1).furniture, hungV1.furniture))
+  const onRightV1 = v1Edit({ ...pantry, room: { id: 'nook', label: 'Nook' }, wallId: 'kitchen.right', door: undefined })
+  const refusedV1 = await refusal(async () => upgrade(onRightV1))
+  check('v1 upgrade: a room added on the right wall, where the living room stands, is refused with why', /living room now stands/.test(refusedV1?.message ?? ''), refusedV1?.message)
+  {
+    // Codd findings on the 1 -> 2 upgrade (#53).
+    const rightLength = (plan) => P.curveOf(plan, P.wallOf(plan, 'kitchen.right')).length
+    const door = (plan) => P.wallOf(plan, 'kitchen.right').openings.find((o) => o.id === 'kitchen.door-living')
+    // 1. The doorway stays at the house's doorway, shifted along to fit when the right wall got shorter.
+    for (const wallId of ['kitchen.front', 'kitchen.back']) {
+      const moved = v1Edit({ op: 'moveWall', wallId, by: -0.8 })
+      const got = await refusal(async () => upgrade(moved))
+      const up = got ? null : upgrade(moved)
+      check(`v1 upgrade: a kitchen with its ${wallId.slice(8)} wall moved in 0.8 m upgrades with the doorway on the shared wall`,
+        Math.abs(rightLength(moved) - 5.38) < 1e-6 && up && P.validate(up).length === 0 && door(up).from >= 0.3 - 1e-9 && door(up).to <= rightLength(up) - 0.3 + 1e-9 &&
+          (wallId === 'kitchen.back' ? Math.abs(door(up).from - 3.94) < 1e-6 : Math.abs(door(up).to - 5.08) < 1e-6),
+        got?.message ?? door(up))
+    }
+    // 1b. The living room stays a rectangle: its back and front walls follow the kitchen's moved back and front walls.
+    const straight = (plan, wallId) => { const w = P.wallOf(plan, wallId); const [a, b] = [w.a, w.b].map((id) => plan.corners.find((c) => c.id === id)); return Math.abs(a.z - b.z) < 1e-9 }
+    for (const [wallId, by, label] of [['kitchen.back', 1, 'back wall moved 1 m back'], ['kitchen.front', -1, 'front wall moved 1 m back']]) {
+      const moved = v1Edit({ op: 'moveWall', wallId, by })
+      const got = await refusal(async () => upgrade(moved))
+      const up = got ? null : upgrade(moved)
+      const zOf = (plan, id) => plan.corners.find((c) => c.id === id).z
+      const shifted = wallId === 'kitchen.back' ? zOf(moved, 'kitchen.back-right') - -2.29 : zOf(moved, 'kitchen.front-right') - 3.89
+      check(`v1 upgrade: a kitchen with its ${label} gives a rectangular living room`,
+        Math.abs(shifted + 1) < 1e-6 && up && P.validate(up).length === 0 && straight(up, 'living.back') && straight(up, 'living.front') && straight(up, 'kitchen.back') && straight(up, 'kitchen.front'),
+        got?.message ?? up?.corners)
+    }
+    // A right wall moved out leaves a narrower living room: honest, since the two rooms share that wall (checked above at 1 m).
+    // Moved so far the living room would be narrower than a room may be, it is refused with why.
+    const tooFar = await refusal(async () => upgrade(v1Edit({ op: 'moveWall', wallId: 'kitchen.right', by: 3.5 })))
+    check('v1 upgrade: a right wall moved out past the living room\'s minimum width is refused with why', /narrower than/.test(tooFar?.message ?? ''), tooFar?.message)
+    // 2. A room of the person's own that the living room would collide with keeps its shape and things under a fresh id and name.
+    const ownRoom = (id, label) => {
+      const added = P.apply({ ...structuredClone(KITCHEN_V1), schema: P.PLAN_SCHEMA }, { ...pantry, room: { id, label }, door: { id: `${id}.door`, from: 2.25, to: 3.75, leaves: 2 } })
+      const wall = added.walls.find((w) => w.id.startsWith(`${id}.`) && w.a !== 'kitchen.front-left' && w.b !== 'kitchen.back-left' && w.id !== `${id}.door`)
+      return asV1(P.apply(added, { op: 'placeItem', furniture: hang(`${id}.picture`, wall.id, 1, id) }))
+    }
+    for (const [id, label] of [['living-room', 'Living room'], ['living', 'Den']]) {
+      const before = ownRoom(id, label)
+      const got = await refusal(async () => upgrade(before))
+      const up = got ? null : upgrade(before)
+      const theirs = up?.rooms.find((r) => r.id !== 'kitchen' && r.id !== 'living')
+      const pic = up?.furniture.find((f) => f.at.mount === 'wall' && f.at.roomId === theirs?.id)
+      check(`v1 upgrade: a room of the person's own with id ${id} called ${label} upgrades beside the living room, kept under a fresh id and name`,
+        up && P.validate(up).length === 0 && up.rooms.find((r) => r.id === 'living')?.label === 'Living room' && theirs &&
+          (id === 'living' ? theirs.id === 'living-2' && theirs.label === 'Den' : theirs.id === 'living-room' && theirs.label === 'Living room 2') &&
+          Math.abs(P.roomArea(up, theirs.id) - P.roomArea({ ...before, schema: P.PLAN_SCHEMA }, id)) < 1e-6 && pic && P.validate(up).length === 0,
+        got?.message ?? theirs)
+    }
+    // 3. A right wall bowed deep into the kitchen still upgrades; rooms that really share floor are still refused.
+    for (const depth of [1.5, 2, 3]) {
+      const bowed = v1Edit({ op: 'bendWall', wallId: 'kitchen.right', sagitta: -depth })
+      const got = await refusal(async () => upgrade(bowed))
+      check(`v1 upgrade: the right wall bent ${depth} m into the kitchen upgrades`, P.wallOf(bowed, 'kitchen.right').sagitta === -depth && !got, got?.message ?? P.wallOf(bowed, 'kitchen.right').sagitta)
+    }
+    const den = structuredClone(HOUSE_PLAN)
+    const dc = [['den.a', -5, 0], ['den.b', -3.1, 0], ['den.c', -3.1, 2], ['den.d', -5, 2]]
+    den.corners.push(...dc.map(([id, x, z]) => ({ id, x, z })))
+    den.walls.push(...dc.map(([id], i) => ({ id: `${id}-wall`, a: id, b: dc[(i + 1) % 4][0], thickness: 0.18, height: 3, sagitta: 0, openings: [] })))
+    den.rooms.push({ id: 'den', label: 'Den', loop: dc.map(([id]) => id) })
+    check('a room reaching 0.3 m into the kitchen is still refused as an overlap', P.validate(den).some((r) => /room den overlaps room kitchen/.test(r)), P.validate(den))
+    // 4. Schema 2's living room and doorway are frozen in the upgrade: a page whose layout.ts moved the doorway and the living room still upgrades old kitchens to the same house.
+    const moved = await createServer({
+      root: new URL('..', import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true },
+      plugins: [{ name: 'moved-layout', transform: (code, id) => (id.endsWith('/src/layout.ts') ? code.replace('z0: 2.45, z1: 3.15', 'z0: 1.45, z1: 2.15').replace('WALL_T + 3.2', 'WALL_T + 4.2') : undefined) }],
+    })
+    try {
+      const PM = await moved.ssrLoadModule('/src/build/plan.ts')
+      const HM = await moved.ssrLoadModule('/src/build/history.ts')
+      check('v1 upgrade: a later change to layout.ts moves HOUSE_PLAN but not an upgraded old kitchen',
+        !same(PM.HOUSE_PLAN, HOUSE_PLAN) && same(HM.upgrade(KITCHEN_V1), upgrade(KITCHEN_V1)) && same(upgrade(KITCHEN_V1), HOUSE_PLAN), canonical(HM.upgrade(KITCHEN_V1)))
+    } finally {
+      await moved.close()
+    }
+    // 5. Things hung where the doorway is cut move to just beside it.
+    const over = upgrade(v1Edit({ op: 'placeItem', furniture: hang('f.over', 'kitchen.right', 5.1, 'kitchen') }))
+    const at = over.furniture.find((f) => f.id === 'f.over').at
+    check('v1 upgrade: a picture hung at 5.1 m on the right wall, where the doorway is cut, moves clear of it',
+      P.validate(over).length === 0 && at.wallId === 'kitchen.right' && (at.along <= door(over).from - 0.5 + 1e-9 || at.along >= door(over).to + 0.5 - 1e-9), at)
+  }
+  {
+    // A store saved by the kitchen-only page: its root and a moved wall read as the house; the room on the right is listed but unreadable.
+    const v1Store = memoryStore()
+    const seed = await PlanHistory.open(v1Store, HOUSE_PLAN)
+    await seed.commit([move])
+    await seed.commit([bend])
+    const st = await v1Store.load()
+    st.versions[0].plan = structuredClone(KITCHEN_V1)
+    st.versions[1].plan = v1Edit({ op: 'moveWall', wallId: 'kitchen.right', by: 1 })
+    st.versions[2].plan = onRightV1
+    const opened = await PlanHistory.open({ ...v1Store, load: async () => structuredClone(st) }, HOUSE_PLAN)
+    check('v1 store: the root and the moved wall open as the house; the room on the right is listed, unreadable, and the house shows its parent',
+      same(opened.planAt(st.versions[0].id), HOUSE_PLAN) && same(opened.plan, widerV1) && opened.versions().length === 3 &&
+      /living room now stands/.test((await refusal(async () => opened.planAt(st.versions[2].id)))?.message ?? ''))
+  }
+  const old = memoryStore()
+  const oh = await PlanHistory.open(old, HOUSE_PLAN)
+  const ov1 = await oh.commit([move])
+  await oh.commit([bend])
+  const withOld = (headAt) => ({ ...old, load: async () => { const st = await old.load(); st.versions[1].plan = v0(st.versions[1].plan); if (headAt) st.head = st.versions[1].id; return st } })
+  const noStep = await PlanHistory.open(withOld(false), HOUSE_PLAN)
+  const unreadable = await refusal(async () => noStep.planAt(ov1.id))
+  check('an old version with no upgrade step is listed but unreadable, and the house still opens', noStep.versions().length === 3 && unreadable instanceof HistoryError && /no upgrade from plan schema 0/.test(unreadable.message) && same(noStep.plan, oh.plan))
+  check('an unreadable version cannot be checked out', (await refusal(() => noStep.checkout(ov1.id))) instanceof HistoryError && noStep.head === oh.head)
+  const stepped = await PlanHistory.open(withOld(false), HOUSE_PLAN, { upgrades: toV1 })
+  check('with the v0 step the old version reads as v1', same(stepped.planAt(ov1.id), { ...oh.planAt(ov1.id), furniture: [] }))
+  // An unreadable head shows its nearest readable ancestor and refuses commits on top of it (undo or checkout moves it).
+  const headOld = await PlanHistory.open(withOld(true), HOUSE_PLAN)
+  const onBad = await refusal(() => headOld.commit([bend]))
+  check('an unreadable head opens on its nearest readable ancestor and refuses commits', headOld.head === ov1.id && same(headOld.plan, HOUSE_PLAN) && onBad instanceof HistoryError && onBad.versionId === ov1.id, onBad?.message)
+
+  // ---- what the history hands out is frozen
+  const tryWrite = (fn) => { try { fn(); return false } catch (error) { return error instanceof TypeError } }
+  const frozenBefore = snapshot(h)
+  check('plan, planAt and versions() cannot be changed through what they hand out',
+    tryWrite(() => { h.plan.corners[0].x = 99 }) && tryWrite(() => { h.planAt(root).walls[0].openings.push({}) }) &&
+    tryWrite(() => { h.versions()[1].plan.corners[0].x = 99 }) && tryWrite(() => { h.versions()[0].plan.rooms[0].label = 'x' }) && snapshot(h) === frozenBefore)
+
+  // ---- the store answers a retried version (same id, parent and content) with the stored one
+  const retryStore = memoryStore()
+  await PlanHistory.open(retryStore, HOUSE_PLAN)
+  const rs = await retryStore.load()
+  const sentAgain = { id: '1234567890abcdef', parent: rs.head, plan: P.apply(HOUSE_PLAN, move) }
+  const first = await retryStore.commit(sentAgain)
+  const again2 = await retryStore.commit(sentAgain)
+  const clash = await refusal(() => retryStore.commit({ ...sentAgain, note: 'other' }))
+  check('a retried version is answered with the stored one; a different one with its id is a 409, not stale', same(first, again2) && (await retryStore.load()).versions.length === 2 && clash instanceof StoreError && clash.status === 409 && !(clash instanceof StaleHead))
+
+  // ---- a host that is there but cannot be opened gives a read-only house that says why
+  const ro = PlanHistory.readOnly(HOUSE_PLAN, 'the saved house is away')
+  const roCommit = await refusal(() => ro.commit([move]))
+  check('a read-only house shows the plan and refuses every change with its reason', same(ro.plan, HOUSE_PLAN) && ro.readOnly === 'the saved house is away' && roCommit instanceof ReadOnly && roCommit.reasons[0] === 'the saved house is away' && (await refusal(() => ro.undo())) instanceof ReadOnly && ro.versions().length === 1)
+  // house() opens the store through villager.ts's `authorized` (the tab's own link, #42). Its page globals, stubbed:
+  // the token comes from the link fragment and stays in sessionStorage; a later link arrives on hashchange.
+  const realFetch = globalThis.fetch
+  const onHash = []
+  const page = { hash: '', pathname: '/', search: '' }
+  Object.assign(globalThis, {
+    location: page,
+    history: { state: null, replaceState() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    addEventListener: (type, fn) => type === 'hashchange' && onHash.push(fn),
+    dispatchEvent: () => true,
+  })
+  const linkTab = () => {
+    page.hash = '#token=' + 'a'.repeat(64)
+    onHash.forEach((fn) => fn())
+  }
+  // Each scenario loads its own house.ts (house() opens once per page); villager.ts and history.ts stay shared.
+  let scenario = 0
+  const freshHouse = () => vite.ssrLoadModule(`/src/build/house.ts?scenario=${++scenario}`)
+  const goodState = await (async () => {
+    const m = memoryStore()
+    await PlanHistory.open(m, HOUSE_PLAN)
+    return m.load()
+  })()
+  try {
+    let asked = 0
+    globalThis.fetch = async () => (asked++, new Response('{}', { status: 200 }))
+    const noLink = await freshHouse()
+    const nl = await noLink.house()
+    const nlCommit = await refusal(() => nl.commit([move]))
+    check('house() with no link opens in memory with the open-your-link line, asks the host nothing, and still builds', nl.unsaved === noLink.LINK_LINE && !nl.readOnly && asked === 0 && nlCommit === null && !/token/i.test(noLink.LINK_LINE), nlCommit?.message)
+    linkTab()
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'no' }), { status: 401 })
+    const refusedLink = await freshHouse()
+    const rl = await refusedLink.house()
+    check('house() with a link the host refuses (401) opens in memory with the open-your-link line', rl.unsaved === refusedLink.LINK_LINE && !rl.readOnly)
+
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+    const away = await freshHouse()
+    const aw = await away.house()
+    check('house() with a link and no host opens in memory with the keeper-away line', aw.unsaved === away.UNSAVED_LINE && !aw.readOnly)
+
+    const broken = { ...goodState, versions: [{ ...goodState.versions[0], plan: { ...goodState.versions[0].plan, walls: goodState.versions[0].plan.walls.map((w, i) => (i === 1 ? { ...w, b: 'kitchen.nowhere' } : w)) } }] }
+    let sent = null
+    globalThis.fetch = async (url, init) => ((sent = { url: String(url), auth: Boolean(init?.headers?.authorization) }), new Response(JSON.stringify(broken), { status: 200 }))
+    const damaged = await freshHouse()
+    const dh = await damaged.house()
+    check('house() whose saved house cannot be read is read-only, not a page-only copy', dh.readOnly === damaged.READ_ONLY_LINE && (await refusal(() => dh.commit([move]))) instanceof ReadOnly)
+    check("house() asks for /house/plans through the villager API with the tab's link", sent?.url === '/villager/api/house/plans' && sent.auth, sent)
+
+    // A running host whose stored house is damaged answers 500 to the tab's link and 401 to a request with no token.
+    globalThis.fetch = async (url, init) => (init?.headers?.authorization ? new Response(JSON.stringify({ error: 'internal error' }), { status: 500 }) : new Response(JSON.stringify({ error: 'token required' }), { status: 401 }))
+    const failing = await freshHouse()
+    const fh = await failing.house()
+    check('house() whose running host answers 500 is read-only, not a page-only copy', fh.readOnly === failing.READ_ONLY_LINE && (await refusal(() => fh.commit([move]))) instanceof ReadOnly)
+    // A stopped host behind the dev proxy: 502 to every request.
+    globalThis.fetch = async () => new Response('bad gateway', { status: 502 })
+    const proxied = await freshHouse()
+    const ph = await proxied.house()
+    check('house() whose host is stopped behind the dev proxy (502) opens in memory with the keeper-away line', ph.unsaved === proxied.UNSAVED_LINE && !ph.readOnly)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+
+  // ---- stored plans are held to the house's rules, and the history's shape is checked
+  {
+    const good = memoryStore()
+    await PlanHistory.open(good, HOUSE_PLAN)
+    const loaded = await good.load()
+    const broken = { ...loaded, versions: [{ ...loaded.versions[0], plan: { ...loaded.versions[0].plan, walls: loaded.versions[0].plan.walls.map((w, i) => (i === 1 ? { ...w, b: 'kitchen.nowhere' } : w)) } }] }
+    const invalid = await refusal(() => PlanHistory.open({ ...memoryStore(), load: async () => structuredClone(broken) }, HOUSE_PLAN))
+    check('a stored head that is not a valid house does not open as editable', invalid instanceof HistoryError && /not a valid house/.test(invalid.message), invalid?.message)
+    const twisted = memoryStore()
+    const tw = await PlanHistory.open({ ...twisted, commit: async (v) => { const st = await twisted.commit(v); return { ...st, plan: { ...st.plan, rooms: st.plan.rooms.map((r) => ({ ...r, label: r.label + '\uFFFD' })) } } } }, HOUSE_PLAN)
+    const twErr = await refusal(() => tw.commit([move]))
+    check('a store that returns a different plan is an error, not adopted', twErr instanceof StoreError && twErr.status === 500 && same(tw.plan, HOUSE_PLAN), twErr?.message)
+    const shaped = (edit) => refusal(() => PlanHistory.open({ ...memoryStore(), load: async () => edit(structuredClone(loaded)) }, HOUSE_PLAN))
+    const [twoRoots, childFirst, noHead] = await Promise.all([
+      shaped((st) => ({ ...st, versions: [...st.versions, { ...st.versions[0], id: 'f'.repeat(16) }] })),
+      shaped((st) => ({ ...st, versions: [{ ...st.versions[0], id: 'e'.repeat(16), parent: 'd'.repeat(16) }, ...st.versions] })),
+      shaped((st) => ({ ...st, head: 'e'.repeat(16) })),
+    ])
+    check('two roots, a child before its parent, or an unstored head does not open', twoRoots instanceof HistoryError && childFirst instanceof HistoryError && noHead instanceof HistoryError, [twoRoots, childFirst, noHead].map((e) => e?.message))
+    const turned = P.apply({ ...HOUSE_PLAN, furniture: [] }, { op: 'placeItem', furniture: { id: 'f.spin', item: { kind: 'box' }, at: { mount: 'floor', x: 0, z: 0.5, yaw: 17 * 2 * Math.PI + 0.25 } } })
+    check('a turn is stored within one full turn (the host bounds angles)', Math.abs(turned.furniture[0].at.yaw - 0.25) < 1e-6, turned.furniture[0].at)
+  }
+
+  // ---- things hung on walls move with them
+  const W = P.wallOf
+  const curve = (plan, id) => P.curveOf(plan, W(plan, id))
+  const at = (plan, f) => P.pointAt(curve(plan, f.at.wallId), f.at.along).map((v) => Math.round(v * 1e4) / 1e4)
+  const hung = { ...HOUSE_PLAN, furniture: [hang('f.front', 'kitchen.front', 1), hang('f.back', 'kitchen.back', 6.5)] }
+  const pic = (plan, id) => plan.furniture.find((f) => f.id === id)
+  const wider = P.apply(hung, { op: 'moveWall', wallId: 'kitchen.right', by: 1 })
+  check('moving a wall shifts a picture on a wall whose corner a moved, so it stays put in the room', Math.abs(pic(wider, 'f.front').at.along - 2) < 1e-6 && same(at(wider, pic(wider, 'f.front')), at(hung, pic(hung, 'f.front'))), pic(wider, 'f.front'))
+  const narrower = P.apply(hung, { op: 'moveWall', wallId: 'kitchen.right', by: -3 })
+  const backLen = curve(narrower, 'kitchen.back').length
+  check('a wall move that would push a picture off its wall stops early', pic(narrower, 'f.back').at.along <= backLen && Math.abs(rightX(narrower) - rightX(hung) + 0.3) < 1e-6, { backLen, x: rightX(narrower) - rightX(hung) })
+  check('validate refuses a picture off its wall', P.validate({ ...HOUSE_PLAN, furniture: [hang('f.off', 'kitchen.back', 99)] }).some((r) => /f\.off is 99\.00 m along/.test(r)))
+  const onLeft = { ...HOUSE_PLAN, furniture: [hang('f.a', 'kitchen.left', 0.5), hang('f.b', 'kitchen.left', 4.5), hang('f.c', 'kitchen.left', 5.5)] }
+  const split = P.apply(onLeft, pantry)
+  const homes = ['f.a', 'f.b', 'f.c'].map((id) => [pic(split, id).at.wallId, pic(split, id).at.along])
+  check('adding a room moves each picture to the piece it is on, measured from that piece', same(homes, [['kitchen.left', 0.5], ['pantry.shared', 3.5], ['pantry.rest', 0.5]]) && ['f.a', 'f.b', 'f.c'].every((id) => same(at(split, pic(split, id)), at(onLeft, pic(onLeft, id)))), homes)
+
+  // ---- a thing on a placed thing stands on it
+  const [cx, cz] = [0, (HOUSE_PLAN.corners[0].z + HOUSE_PLAN.corners[2].z) / 2]
+  const table = { id: 'f.table', item: { kind: 'table' }, at: { mount: 'floor', x: cx, z: cz, yaw: 0 } }
+  const vase = { id: 'f.vase', item: { kind: 'vase' }, at: { mount: 'surface', x: cx + 0.3, y: 0.76, z: cz, yaw: 0, on: 'f.table' } }
+  const cup = { id: 'f.cup', item: { kind: 'cup' }, at: { mount: 'surface', x: cx + 0.3, y: 0.9, z: cz, yaw: 0, on: 'f.vase' } }
+  let set = [table, vase, cup].reduce((plan, f) => P.apply(plan, { op: 'placeItem', furniture: f }), HOUSE_PLAN)
+  check('a surface anchor keeps `on` when placed on placed furniture', pic(set, 'f.vase').at.on === 'f.table' && pic(set, 'f.cup').at.on === 'f.vase')
+  const turned = P.apply(set, { op: 'moveItem', furnitureId: 'f.table', at: { mount: 'floor', x: cx + 1, z: cz, yaw: Math.PI / 2 } })
+  const r4 = (a) => [a.x, a.y, a.z, a.yaw].map((v) => Math.round(v * 1e4) / 1e4)
+  check('moving the table carries what stands on it (and on that), turned with it', same(r4(pic(turned, 'f.vase').at), r4({ x: cx + 1, y: 0.76, z: cz - 0.3, yaw: Math.PI / 2 })) && same(r4(pic(turned, 'f.cup').at), r4({ x: cx + 1, y: 0.9, z: cz - 0.3, yaw: Math.PI / 2 })), [pic(turned, 'f.vase').at, pic(turned, 'f.cup').at])
+  const lifted = P.apply(set, { op: 'moveItem', furnitureId: 'f.vase', at: { ...vase.at, y: 0.9, on: undefined } })
+  check('moving a surface support up carries what stands on it up too', Math.abs(pic(lifted, 'f.cup').at.y - 1.04) < 1e-6 && pic(lifted, 'f.vase').at.on === undefined, pic(lifted, 'f.cup').at)
+  const refusedRemove = await refusal(async () => P.apply(set, { op: 'removeItem', furnitureId: 'f.table' }))
+  check('removing a thing something stands on is refused', refusedRemove instanceof PlanError && /f\.vase standing on it/.test(refusedRemove.message))
+  const cycle = await refusal(async () => P.apply(set, { op: 'moveItem', furnitureId: 'f.vase', at: { ...vase.at, on: 'f.cup' } }))
+  check('standing on something that stands on you is refused', cycle instanceof PlanError && /stands on it/.test(cycle.message))
+  check('standing on a thing that is not in the house is refused', (await refusal(async () => P.apply(HOUSE_PLAN, { op: 'placeItem', furniture: vase }))) instanceof PlanError)
+
+  // ---- the rules a stored plan is held to
+  const twinWall = { ...HOUSE_PLAN, walls: [...HOUSE_PLAN.walls, { ...HOUSE_PLAN.walls[1], id: 'kitchen.right2', a: HOUSE_PLAN.walls[1].b, b: HOUSE_PLAN.walls[1].a }] }
+  check('validate refuses two walls on the same corners', P.validate(twinWall).includes('walls kitchen.right and kitchen.right2 join the same corners'), P.validate(twinWall))
+  const twice = { ...HOUSE_PLAN, rooms: [{ ...HOUSE_PLAN.rooms[0], loop: [...HOUSE_PLAN.rooms[0].loop, 'kitchen.back-right'] }] }
+  check('validate refuses a room naming a corner twice', P.validate(twice).includes('room kitchen names a corner twice'))
+  const looped = { ...HOUSE_PLAN, furniture: [{ ...vase, at: { ...vase.at, on: 'f.cup' } }, cup] }
+  check('validate refuses a stored plan whose things stand on each other', P.validate(looped).some((r) => /stands on it/.test(r)))
+  const trimmedRoom = P.apply(HOUSE_PLAN, { ...pantry, room: { id: 'pantry', label: ' Pantry ' } })
+  check("an added room's label is stored trimmed, as the host stores it", trimmedRoom.rooms.find((r) => r.id === 'pantry').label === 'Pantry')
+  const noted = await (await PlanHistory.open(memoryStore(), HOUSE_PLAN)).commit([move], ' Moved\nthe\u200bwall ')
+  check('a note is stored as plain text the host accepts', noted.note === 'Moved the wall', noted.note)
+  const halfTurned = await PlanHistory.open(memoryStore(), HOUSE_PLAN)
+  await halfTurned.commit([{ op: 'placeItem', furniture: { id: 'f.crate', item: { kind: 'crate' }, at: { mount: 'floor', x: 0, z: 1.5, yaw: Math.PI } } }])
+  const putBack = await refusal(() => halfTurned.commit([{ op: 'moveItem', furnitureId: 'f.crate', at: { ...halfTurned.plan.furniture[0].at } }]))
+  check('a half turn has one stored value: putting a half-turned thing back is not a version', putBack instanceof PlanError && putBack.reasons[0] === 'nothing changed' && halfTurned.versions().length === 2, putBack?.message)
+
+  // ---- diff
+  const K = HOUSE_PLAN
+  const moved = diff(K, h.planAt(v1.id))
+  check('diff: a moved wall is changed, with the walls it drags', moved.walls.changed.includes('kitchen.right') && moved.walls.changed.includes('kitchen.back') && moved.walls.changed.includes('living.back') && !moved.walls.changed.includes('kitchen.left') && !moved.walls.changed.includes('living.right') && !moved.walls.added.length && !moved.walls.removed.length, moved.walls)
+  check('diff: the moved corners and the room are changed', same(moved.corners.changed.sort(), ['kitchen.back-right', 'kitchen.front-right']) && same(moved.rooms.changed.sort(), ['kitchen', 'living']), moved)
+  check('diff: the doorway moves with its wall; openings on a wall whose far corner moved are unchanged', same(moved.openings.changed, ['kitchen.door-living']), moved.openings)
+  const added = diff(h.planAt(v1.id), h.planAt(v3.id))
+  check('diff: an added room adds the room, its walls, corners and door', same(added.rooms.added, ['pantry']) && ['pantry.w1', 'pantry.w2', 'pantry.w3', 'pantry.shared', 'pantry.rest'].every((id) => added.walls.added.includes(id)) && added.corners.added.length === 4 && same(added.openings.added, ['pantry.door']), added)
+  check('diff: the split host wall keeps its id and is changed, not removed', added.walls.changed.includes('kitchen.left') && !added.walls.removed.length && added.rooms.changed.includes('kitchen'), added.walls)
+  const openingMoved = diff(K, P.apply(K, { op: 'moveOpening', openingId: 'kitchen.window', from: 2.05, to: 3.45 }))
+  check('diff: a moved opening is changed and nothing else', same(openingMoved.openings.changed, ['kitchen.window']) && !openingMoved.walls.changed.length && !openingMoved.rooms.changed.length, openingMoved)
+  check('diff of a plan with itself is empty', Object.values(diff(K, K)).every((d) => !d.added.length && !d.removed.length && !d.changed.length))
+
+  // ---- hostStore against the real host (synthetic people, stub agent)
+  // The host's own cordis, so its plugin and this Context are the same copy.
+  const { Context } = await import('../../host/node_modules/cordis/lib/index.js')
+  const villager = (await import('../../host/src/villager.ts')).default
+  const { stubAgent } = await import('../../host/src/villager-agent.ts')
+  const dataRoot = await mkdtemp(join(tmpdir(), 'plan-history-'))
+  const startHost = async (port = 0) => {
+    const ctx = new Context()
+    const fiber = ctx.plugin(villager, { root: dataRoot, agent: stubAgent(0), port, people: { alex: 'Alex', sam: 'Sam' } })
+    await fiber.await()
+    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const base = `http://127.0.0.1:${launch.port}/`
+    return { fiber, port: launch.port, base, alex: bearer(base, launch.tokens.alex), sam: bearer(base, launch.tokens.sam) }
+  }
+  // A kept item in a person's library, as the host stores it (synthetic).
+  const libraryItem = async (person, item) => {
+    const dir = join(dataRoot, 'people', person, 'library')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, `${item}.json`), JSON.stringify({ id: item, name: 'Lamp', module: '', models: [], costUsd: null, ms: 0, at: new Date().toISOString(), kept: true }))
+  }
+  const lamp = (id, library, person, x) => ({ op: 'placeItem', furniture: { id, item: { library, person }, at: { mount: 'floor', x, z: 1.5, yaw: 0 } } })
+  try {
+    let host = await startHost()
+    // Two people, each with their own link, open the one shared house.
+    const alex = await PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN)
+    const sam = await PlanHistory.open(hostStore({ request: host.sam }), HOUSE_PLAN)
+    check("host: Alex's and Sam's own links open the same house, one root", alex.head === sam.head && alex.versions().length === 1 && sam.versions().length === 1)
+    const a1 = await alex.commit([move], 'wider')
+    await alex.commit([bend])
+    await alex.undo()
+    await alex.rename(a1.id, 'Wider kitchen')
+    const samStale = await refusal(() => sam.commit([pantry]))
+    check('host: a stale page is refused with the current head, and has taken it', samStale instanceof StaleHead && samStale.head === alex.head && sam.head === alex.head)
+    const s1 = await sam.commit([pantry])
+    check('host: the other person commits on the new head; no one is named', !('by' in s1) && s1.parent === a1.id && same(s1.plan, sam.plan))
+    await alex.refresh()
+    // A person's library is their own (#40): Alex places their own kept item; Sam may keep it but not newly place one of Alex's.
+    await libraryItem('alex', 'a1b2c3d4e5f6')
+    await libraryItem('alex', 'b1b2c3d4e5f6')
+    const placed = await refusal(() => alex.commit([lamp('f.lamp', 'a1b2c3d4e5f6', 'alex', 0.8)]))
+    check("host: Alex places a kept item from their own library", placed === null && alex.plan.furniture.some((f) => f.id === 'f.lamp'), placed?.message)
+    await sam.refresh()
+    const samHead = sam.head
+    const samPlaces = await refusal(() => sam.commit([lamp('f.other', 'b1b2c3d4e5f6', 'alex', 1.4)]))
+    check("host: Sam newly placing Alex's library item is a StoreError 403, and the house stays", samPlaces instanceof StoreError && samPlaces.status === 403 && sam.head === samHead && !sam.plan.furniture.some((f) => f.id === 'f.other'), samPlaces?.message)
+    const samKeeps = await refusal(() => sam.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.1 }]))
+    check("host: Sam's change that keeps Alex's lamp is saved", samKeeps === null && sam.plan.furniture.some((f) => f.id === 'f.lamp' && f.item.person === 'alex'), samKeeps?.message)
+    await alex.refresh()
+    const expected = { head: alex.head, plans: alex.versions().map((v) => [v.id, canonical(alex.planAt(v.id))]), name: alex.name(a1.id) }
+    await host.fiber.dispose()
+    // A restart mints new links: the old one is refused (no shared token to refresh), the new one reopens the same house.
+    const oldAlex = host.alex
+    host = await startHost(host.port)
+    const stale = await refusal(() => PlanHistory.open(hostStore({ request: oldAlex }), HOUSE_PLAN))
+    check("host: a link from an earlier launch is a StoreError 401", stale instanceof StoreError && stale.status === 401, stale?.message)
+    const reopened = await PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN)
+    check('host: a restarted host reopens to the same head, plans and names', reopened.head === expected.head && same(reopened.versions().map((v) => [v.id, canonical(reopened.planAt(v.id))]), expected.plans) && reopened.name(a1.id) === 'Wider kitchen')
+    const wrong = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, 'f'.repeat(64)) }), HOUSE_PLAN))
+    check('host: a refused token is a StoreError 401', wrong instanceof StoreError && wrong.status === 401)
+    const none = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, null) }), HOUSE_PLAN))
+    check('host: no token is a StoreError 401 and asks nothing', none instanceof StoreError && none.status === 401)
+    await host.fiber.dispose()
+    const gone = await refusal(() => PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN))
+    check('host: a host that is gone is a StoreError 0', gone instanceof StoreError && gone.status === 0, gone?.message)
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true })
+  }
+} finally {
+  await vite.close()
+}
+
+const failed = checks.filter((c) => !c.pass).length
+console.log(`${checks.length - failed}/${checks.length} checks pass`)
+process.exit(failed ? 1 : 0)

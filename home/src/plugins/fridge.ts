@@ -27,9 +27,12 @@ export default {
     const brushed = paintBrushed(9)
     // Physical tier: an enamel-like lacquer over the brushed steel, picking up the sun.
     const phys = ctx.stage.features().has('phys')
+    // Brushed steel (#42 room): the streaks drive the roughness too, and no clear coat,
+    // which made it read as grey plastic. A faint sheen across the grain stands in for
+    // the reflections a room without an environment map can't give it.
     const steel = new THREE.MeshPhysicalMaterial({
-      map: brushed, color: '#eef0f2', metalness: 0.3, roughness: 0.42,
-      clearcoat: phys ? 1 : 0.4, clearcoatRoughness: phys ? 0.12 : 0.3,
+      map: brushed, roughnessMap: brushed, color: '#e4e6e8', metalness: 0.55, roughness: 0.55,
+      sheen: phys ? 0.35 : 0, sheenColor: '#fff4e4', sheenRoughness: 0.35,
     })
     const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 4, 0.03), steel)
     body.position.y = H / 2 + 0.04
@@ -41,7 +44,8 @@ export default {
     const seam = new THREE.Mesh(new THREE.BoxGeometry(W * 0.98, 0.012, 0.01), new THREE.MeshStandardMaterial({ color: '#4a4a4a' }))
     seam.position.set(0, freezerTop, front + 0.001)
     group.add(seam)
-    const handleMat = new THREE.MeshStandardMaterial({ color: '#d8d6d0', metalness: 1, roughness: 0.25 })
+    // Brushed, not polished: a polished handle caught the window as a bloom streak (#42 paper climb).
+    const handleMat = new THREE.MeshStandardMaterial({ color: '#d8d6d0', metalness: 1, roughness: 0.55 })
     const door = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.6, 0.035, 3, 0.01), handleMat)
     door.position.set(W / 2 - 0.06, 1.25, front + 0.03)
     const drawer = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.03, 0.035, 3, 0.01), handleMat)

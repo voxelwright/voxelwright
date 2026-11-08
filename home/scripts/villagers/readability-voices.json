@@ -1,0 +1,11 @@
+[
+ { "a": "rd-14", "b": "rd-06", "metric": "f0Hz", "why": "little sparrow above big hippo" },
+ { "a": "rd-14", "b": "rd-16", "metric": "f0Hz", "why": "little sparrow above burly ox" },
+ { "a": "rd-17", "b": "rd-12", "metric": "f0Hz", "why": "tiny mouse above old elephant" },
+ { "a": "rd-17", "b": "rd-03", "metric": "f0Hz", "why": "tiny mouse above old walrus" },
+ { "a": "rd-14", "b": "rd-16", "metric": "centroidHz", "why": "sparrow brighter than ox" },
+ { "a": "rd-17", "b": "rd-06", "metric": "centroidHz", "why": "mouse brighter than hippo" },
+ { "a": "rd-02", "b": "rd-05", "metric": "syllablesPerSec", "why": "quick fox faster than slow snail" },
+ { "a": "rd-02", "b": "rd-03", "metric": "syllablesPerSec", "why": "quick fox faster than sleepy walrus" },
+ { "a": "rd-07", "b": "rd-12", "metric": "syllablesPerSec", "why": "busy hedgehog faster than wise old elephant" }
+]

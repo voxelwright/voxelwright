@@ -1,0 +1,61 @@
+export default function (villager, api) {
+  const { THREE } = api
+  const felt = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 })
+  const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
+  const green = felt('#8da655'), light = felt('#a9bd78'), cream = felt('#f3e6c8'), pink = felt('#e3a79a')
+  const mustard = felt('#d4a13c'), rust = felt('#b8643c')
+  const bead = new THREE.MeshStandardMaterial({ color: '#241a18', roughness: 0.25 })
+
+  // squat round body
+  add(villager, new THREE.SphereGeometry(0.2, 32, 20), green, 0, 0.15, 0).scale.set(1.1, 0.85, 0.95)
+  add(villager, new THREE.SphereGeometry(0.12, 24, 14), cream, 0, 0.13, 0.12).scale.set(1, 1, 0.45)
+  // spotty back patches
+  for (const s of [-1, 1]) add(villager, new THREE.SphereGeometry(0.03, 12, 8), light, s * 0.1, 0.24, -0.13).scale.set(1, 0.6, 0.6)
+
+  // scarf (accent only)
+  const sc = felt('#3d7cc8')
+  const scarf = add(villager, new THREE.TorusGeometry(0.17, 0.028, 10, 28), sc, 0, 0.25, 0)
+  scarf.rotation.x = Math.PI / 2
+  const tail = add(villager, new THREE.BoxGeometry(0.05, 0.1, 0.02), sc, 0.09, 0.19, 0.15)
+  tail.rotation.z = 0.2
+
+  // head: very wide, with bulging eyes on top
+  const head = villager.tag(new THREE.Group(), 'head')
+  head.position.set(0, 0.35, 0)
+  villager.add(head)
+  add(head, new THREE.SphereGeometry(0.16, 32, 20), green, 0, 0, 0).scale.set(1.3, 0.78, 1)
+  add(head, new THREE.SphereGeometry(0.1, 20, 12), light, 0, -0.04, 0.07).scale.set(1.4, 0.6, 0.8)
+  const smile = add(head, new THREE.TorusGeometry(0.075, 0.007, 6, 18, Math.PI), felt('#6b3b30'), 0, -0.005, 0.15)
+  smile.rotation.z = Math.PI
+  smile.scale.set(1.3, 1, 1)
+  for (const s of [-1, 1]) {
+    add(head, new THREE.SphereGeometry(0.058, 20, 12), green, s * 0.09, 0.1, 0.03)
+    const eye = villager.tag(add(head, new THREE.CylinderGeometry(0.025, 0.025, 0.012, 18), bead, s * 0.09, 0.11, 0.083), s < 0 ? 'eye-left' : 'eye-right')
+    eye.rotation.x = Math.PI / 2
+    add(head, new THREE.SphereGeometry(0.03, 12, 8), pink, s * 0.15, -0.03, 0.08).scale.set(1, 0.7, 0.4)
+    add(head, new THREE.SphereGeometry(0.008, 8, 6), felt('#5a7a3a'), s * 0.02, 0.04, 0.155)
+
+    const hand = villager.tag(add(villager, new THREE.CapsuleGeometry(0.032, 0.05, 6, 10), green, s * 0.22, 0.15, 0.03), s < 0 ? 'hand-left' : 'hand-right')
+    hand.rotation.z = s * 0.6
+    villager.tag(add(villager, new THREE.SphereGeometry(0.05, 16, 10), light, s * 0.12, 0.03, 0.04), s < 0 ? 'foot-left' : 'foot-right').scale.set(1.2, 0.6, 1.5)
+  }
+
+  // prop: little mustard watering can
+  const can = villager.tag(new THREE.Group(), 'held')
+  can.position.set(-0.25, 0.13, 0.07)
+  villager.add(can)
+  add(can, new THREE.CylinderGeometry(0.04, 0.045, 0.07, 16), mustard, 0, 0.03, 0)
+  const spout = add(can, new THREE.CylinderGeometry(0.008, 0.013, 0.08, 8), mustard, 0, 0.05, 0.065)
+  spout.rotation.x = 1.0
+  add(can, new THREE.CylinderGeometry(0.02, 0.014, 0.012, 12), rust, 0, 0.085, 0.1).rotation.x = 1.0
+  const handle = add(can, new THREE.TorusGeometry(0.03, 0.006, 6, 14, Math.PI), rust, 0, 0.04, -0.04)
+  handle.rotation.y = Math.PI / 2
+
+  villager.gait({ speed: 0.34, stride: 0.2, bob: 0.06, stepped: true, fidget: 0.5 })
+  villager.about({
+    name: 'Puddle',
+    role: 'gardener',
+    bark: "I watered the basil. Lettuce hope it grows!",
+    voice: { pitch: 150, range: 4, formant: 1.0, rate: 9, breath: 0.05, wobble: 0.6, wobbleRate: 7, tilt: 1.9, gain: 1 }
+  })
+}

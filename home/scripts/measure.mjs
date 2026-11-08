@@ -1,9 +1,10 @@
 // Scripted run in Google Chrome, headless by default so no window takes focus.
 // --headed shows the window; the README perf numbers were taken headed.
-// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--gpu] [--unload] [--headed]
-// --gpu adds ?gpu=1 and reports GPU time per frame (submit to queue done) and
-// the summed WebGPU timestamp-query pass durations. Chrome rounds timestamps to 100 us unless WebGPU developer features
-// are on, so --gpu launches with --enable-webgpu-developer-features.
+// Usage: node scripts/measure.mjs [url] [--shot=path] [--perf] [--gpu] [--unload] [--headed] [--place=crate]
+// --place=<kind> begins placing a built-in thing (?build=1) before measuring, so the ghost is in the frame.
+// --gpu adds ?gpu=1 and reports, per frame, GPU busy ms (the union of the frame's pass
+// intervals from timestamp queries, src/gpu-time.js), the summed pass durations (they
+// overlap, so they overcount) and submit-to-done ms (includes main-thread delay).
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -17,7 +18,6 @@ const browser = await chromium.launch({
   headless: !flag('headed'),
   args: [
     '--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist', '--window-position=0,0',
-    ...(args.includes('--gpu') ? ['--enable-webgpu-developer-features'] : []),
   ],
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
@@ -27,8 +27,28 @@ page.on('pageerror', (e) => errors.push(String(e)))
 await page.goto(url)
 const readiness = await page.evaluate(() => window.village.ready())
 await page.waitForTimeout(2000)
+// Settle (#50): with several headless Chromes starting at once, the GPU process can still be
+// compiling startup shaders after 2 s, and a whole 6 s window then ran at 0.3 to 2 fps although
+// each frame's GPU and CPU time were normal. Wait for 30 frames in a row under 50 ms (at most 20 s).
+const settleMs = await page.evaluate(() => new Promise((resolve) => {
+  const start = performance.now()
+  let last = start, run = 0
+  const step = (now) => {
+    run = now - last < 50 ? run + 1 : 0
+    last = now
+    if (run >= 30 || now - start > 20000) resolve(Math.round(now - start))
+    else requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}))
+const placing = args.find((a) => a.startsWith('--place='))?.slice(8)
+if (placing) {
+  await page.waitForFunction(() => window.villagePlace?.history(), null, { timeout: 20_000 })
+  await page.evaluate((k) => window.villagePlace.begin(k), placing)
+  await page.waitForTimeout(1000)
+}
 
-const result = { url, readiness }
+const result = { url, readiness, settleMs }
 result.loaded = await page.evaluate(() => {
   const { objects, ...rest } = window.village.snapshot()
   return rest
@@ -40,7 +60,7 @@ if (flag('perf')) {
       new Promise((resolve) => {
         const deltas = []
         const timing = window.village.timing()
-        const from = { gpu: timing?.gpu.length ?? 0, passSum: timing?.passSum.length ?? 0, cpu: timing?.cpu.length ?? 0 }
+        const from = { gpu: timing?.gpu.length ?? 0, passSum: timing?.passSum.length ?? 0, submitToDone: timing?.submitToDone?.length ?? 0, cpu: timing?.cpu.length ?? 0 }
         let last = performance.now()
         const end = last + 6000
         const step = (now) => {
@@ -61,8 +81,9 @@ if (flag('perf')) {
             resolve({
               gpu: stats(gpu),
               timestampPassSum: stats(passSum),
-              // Timestamps quantized to 100 us would all land on multiples of 0.1 ms.
-              timestampsQuantized: passSum.length ? passSum.every((ms) => Math.abs(ms * 10 - Math.round(ms * 10)) < 1e-6) : null,
+              submitToDone: stats(timing?.submitToDone?.slice(from.submitToDone) ?? []),
+              // Timestamps quantized to 100 us would put every busy time on a multiple of 0.1 ms.
+              timestampsQuantized: gpu.length ? gpu.every((ms) => Math.abs(ms * 10 - Math.round(ms * 10)) < 1e-6) : null,
               cpuFrame: stats(timing?.cpu.slice(from.cpu) ?? []),
               quality: s.quality,
               features: s.features,
