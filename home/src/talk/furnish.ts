@@ -39,6 +39,8 @@ interface Job {
   /** The piece being placed now. */
   index: number
   placing: Placing | null
+  /** What the open placement holds now: the ghost, then the made prop (or a later piece's copy). */
+  object: THREE.Object3D | null
   /** The box shown while the prop is made. */
   ghost: THREE.Mesh | null
   /** The made prop; later pieces are clones of it. */
@@ -155,6 +157,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       return fail(j, `placement ${String(error)}`.slice(0, 200), "I couldn't find a place for that one, so I've put nothing down.")
     }
     j.placing = placing
+    j.object = object
     begun++
     void placing.done.then((d) => {
       if (j.placing !== placing) return
@@ -230,7 +233,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const count = /\b(couple|two|pair)\b/.test(lower) ? 2 : /\bthree\b/.test(lower) ? 3 : 1
     const what = replacing ? 'table' : lower
     const { list, size, mount } = places(where, what, count, replacing)
-    const j: Job = { text, t0, routed: null, places: list, size, mount, index: 0, placing: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
+    const j: Job = { text, t0, routed: null, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
     void after(j, () => {
       // Routed before its ghost began: furnish() begins it at the routed place instead.
       if (j.state !== 'ghost' || j.routed) return
@@ -307,7 +310,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       j.placing = null
       p?.cancel()
       dropGhost(j)
-    } else j = { text, t0, routed, places: list, size, mount, index: 0, placing: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
+    } else j = { text, t0, routed, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false }
     const k = j
     k.routed = routed
     k.make = make
@@ -396,6 +399,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     // Placed before the swap repaints the tag, so it offers Try another.
     j.state = 'placed'
     j.placing.swap(made, undefined, ref)
+    j.object = made
     j.placing.note('')
     dropGhost(j)
     j.timing.ok = true
@@ -427,6 +431,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     j.timing = { text: `${j.text} (take ${j.variant + 1})`, ok: false, route: 'furnish' }
     j.ghost = boxGhost(j)
     j.placing.swap(j.ghost, j.size, null)
+    j.object = j.ghost
     j.made = null
     if (j.owned && old) releaseGpu(old)
     showMaking(j)
@@ -511,6 +516,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     undo,
     again,
     dispose,
+    /** The piece being placed now and what it holds, for sketching's pinned page. */
+    placing: () => (job?.placing && job.object ? { placing: job.placing, object: job.object } : null),
     /** For the checks and the timing runs. */
     state: () => ({
       job: job ? { state: job.state, open: Boolean(job.placing), piece: job.index, places: job.places, source: job.timing.source, item: job.item, kept: job.kept.slice() } : null,
