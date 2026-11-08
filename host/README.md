@@ -246,17 +246,22 @@ a new random token, writes the tokens and the port to
 `<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
 per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
 Every request needs `Authorization: Bearer <token>`, and a token opens only its
-own person: any other person id is refused with 403. The one exception is a
-visit, below. Everything else (`/route`, props, library, projects, sketches) is
-the token holder's alone, and a drawing handed over in a message must be the
-holder's own; `npm run check-villager` proves a cross-person refusal for each.
+own person's paths, `/people/<id>/…`: any other person id is refused with 403,
+with no exceptions. Talking with someone else's villager is a visit, reached
+explicitly under your own id (below). Everything else (`/route`, props,
+library, projects, sketches) is the token holder's alone, and a drawing handed
+over in a message must be the holder's own; `npm run check-villager` proves a
+cross-person refusal for each.
 
 ## Visits (#42)
 
-Helping someone does not grant access to their private content. When Alex's
-token talks to Sam's villager (`POST /people/sam/messages`, a table round
-included) or reads that conversation (`GET /people/sam/conversation`), Alex is
-visiting Tuft:
+Helping someone does not grant access to their private content. When Alex
+talks to Sam's villager (`POST /people/alex/visits/sam/messages`, a table round
+included) or reads that conversation (`GET /people/alex/visits/sam/conversation`),
+Alex is visiting Tuft. The path must start with the token's own person: Sam's
+token on `/people/alex/visits/sam/…` gets 403, and Alex's token on
+`/people/sam/messages` gets 403, never an implicit visit. A visit to yourself or
+to an unlisted person is 404.
 
 - What the visit sees: from Sam's folder, only `persona.json` (who Tuft is:
   name, role, temperament, register, humour style and lean, tastes and so on),
@@ -266,20 +271,38 @@ visiting Tuft:
 - Who it talks to: Alex's profile (age band, language, style) and Alex's
   preferences. Humour is Alex's ceiling capped at Tuft's lean, so a visit is
   never crude; the table's mixed rule still applies to your own villager.
-- Where it writes: only under `people/alex/visits/sam/` (conversation, usage,
-  session state, the visit's own notes). A drawing handed to Tuft is Alex's
-  own and is noted in Alex's `sketches.jsonl`. "Keep it clean" said on a visit
-  turns down Alex's own preferences.
+- Where it writes: only under Alex's folder. The visit's conversation, usage,
+  session state and its own notes go in `people/alex/visits/sam/`; a drawing
+  handed to Tuft is Alex's own and is noted in Alex's `sketches.jsonl`; "keep
+  it clean" said on a visit turns down Alex's own `preferences.json`. Nothing
+  is written under Sam.
+- What the visitor's log keeps: if Sam's `persona.json` fails its check, the
+  visit's usage line says only `personaRefused: true`, never the reason, which
+  can quote Sam's persona text.
 - Its own session: a separate Agent SDK session, and with `--agent warm` a
   separate process, keyed by the visit's folder. Sam's process and session are
-  never reused. One turn at a time per visit, so a visit never blocks Sam.
+  never reused. A visit's warm process stays up until the host stops. One turn
+  at a time per visit, so a visit never blocks Sam.
 - A visit is never routed (400) and opens none of Sam's other endpoints (403).
 
-`npm run check-villager` seeds synthetic secrets into Sam's notes, preferences,
-profile, conversation, sketches and session, and checks that the visit's
-prompt and context hold none of them, that Sam's files are byte-identical
-afterwards, that every write lands under Alex, that Sam's own token still gets
-Sam's full context, and that forged tokens are refused.
+`persona.json` is household-visible by design: every visit shows it to other
+household members. Whatever writes it (the villager generator, #47) must never
+copy the owner's private conversation, notes or preferences into it. The
+format check bounds its fields and refuses instruction-like words; it cannot
+tell a private fact from a taste.
+
+The table's rule for your own villager (crude only if everyone listed has crude)
+reads each other person's profile, preferences and persona, never their notes.
+
+`npm run check-villager` seeds synthetic secrets into Sam's notes (including
+Sam's villager's notes about Alex), preferences, profile, conversation,
+sketches and session, and checks that the visit's prompt and context hold none
+of them, that Sam's files are byte-identical afterwards, that every write lands
+under Alex, that "keep it clean" on a visit changes Alex's preferences and not
+Sam's, that Sam's own turn is answered while Alex's visit is writing, that a
+drawing handed to Mia leaves Mia's whole folder unchanged, that Sam's own token
+still gets Sam's full context, and that forged and other people's tokens are
+refused.
 
 What this does not prove: every villager process runs as the same OS user
 with the operator's subscription, so a visit's boundary is enforced by host
@@ -289,8 +312,8 @@ operator's `~/.claude/projects/`.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
 - `POST /people/<id>/messages {"text", "context"?}`: server-sent events, `text` pieces
-  then `done` with the reply, or `failed`. One turn at a time per person
-  (409), 3-minute deadline. A turn finishes and is recorded even if the page
+  then `done` with the reply, or `failed`. One turn at a time per conversation
+  (your own, and each of your visits; 409), 3-minute deadline. A turn finishes and is recorded even if the page
   leaves.
   An optional `"context"` (at most 2000 characters, such as the table's round
   so far) is passed to the villager's turn as background, never stored
@@ -318,15 +341,17 @@ records the line as unanswered and keeps the stored session.
 `npm run check-villager` (stub agent, no model): token, streaming, usage
 log, one turn at a time, launch-file cleanup, a new token per launch,
 resuming after a restart, failed turns, person ids, person-scoped tokens
-(Alex's token can neither read nor write Sam's villager, and the reverse),
+(Alex's token is refused on every one of Sam's paths and reaches Tuft only as
+Alex's own visit, and the reverse),
 eight attempts to leave the notes folder (`../`, `a/../../`, absolute,
-symlinks, dotfiles) and the init guard. 38 of 38 passed (November 7, 2026).
+symlinks, dotfiles) and the init guard.
 
 Not yet: session transcripts live in the operator's `~/.claude/projects/`,
 not the person's folder; every person shares the operator's subscription and
 OS user, so this is not family isolation; any script in a page (a promoted
-plugin included) can read that tab's token from `sessionStorage` and use that
-one person's villager, and the policy does not stop it navigating the page
+plugin included) can read that tab's token from `sessionStorage` and act as
+that person (their villager and their visits to others), and the policy does
+not stop it navigating the page
 away to another origin; the villager cannot remind or act yet.
 
 ## Warm villagers and timings (#42, November 7, 2026)
@@ -380,7 +405,7 @@ as one cleaned line (`cleanName`) and given to models as quoted JSON; `POST
 `finally`; making a prop prunes unkept drafts older than a day. The page only
 follows a talk route to a villager the person's own words name, and sends
 their exact words. Since the #40 merge each person has their own token, and
-`/people/<anyone else>/*` is refused (403), except a visit's conversation (see Visits).
+`/people/<anyone else>/*` is refused (403); talking with another villager is an explicit visit under your own id (see Visits).
 
 `npm run check-villager`: 120 of 120 (new: in-round context never stored; a
 warm host starts a process per person, reuses it, fails and closes it on a
@@ -531,7 +556,8 @@ prompt as quoted data, never as an instruction. A line heard at a table round
 never changes anyone's setting. At the table a
 crude villager is lowered to cheeky for the turn unless every listed person
 has crude (`humourCap` on the turn; the host adds "keep it cheeky this turn"
-beside the page's context, which itself is passed on unchanged). The prompt
+beside the page's context, which itself is passed on unchanged), and that
+turn's `usage.jsonl` line records the lowered level. The prompt
 says a turn's context may lower the ceiling and nothing can raise it. Without an opt-in, the
 persona's `humour.lean` applies. The process's system prompt is rebuilt, on
 the same session, when the persona, profile or ceiling changes; a changed note

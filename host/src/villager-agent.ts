@@ -260,8 +260,10 @@ interface Live {
 }
 
 /**
- * One Claude Code process per person, kept running between turns (#42): each
- * line is pushed into the process's streaming input, so a turn skips the
+ * One Claude Code process per conversation folder, kept running between turns
+ * (#42): a person's own, and each of their visits (a visit's process stays up
+ * until the host stops). Each line is pushed into the process's streaming
+ * input, so a turn skips the
  * process start, the init handshake and the resume read (first text p50 0.4 s
  * against 0.9 to 1.3 s per-turn). The stored session id stays the truth: a
  * process on any other session is closed and a new one resumes the stored id.
