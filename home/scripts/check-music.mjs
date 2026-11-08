@@ -203,7 +203,7 @@ const URL_ALL = `${base}?talk=npc&plugins=babble,music,sound`
 // A worklet on the music bus after its duck (voice/buses.ts) reports each 128-sample block's sum of squares with its audio time.
 async function tap(p) {
   await p.evaluate(async () => {
-    const { audio, mix } = window.village.music
+    const { audio, bed, mix } = window.village.music
     // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
     await audio.audioWorklet.addModule('/scripts/music-tap.js')
     const node = new AudioWorkletNode(audio, 'music-tap')
