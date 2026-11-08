@@ -26,3 +26,10 @@ export function mayRoute({ text, others }: Line): boolean {
   if (WANTS.test(t) && THINGS.test(t)) return true
   return /\b(another one|one more|one like (that|this)|copy (it|that|this))\b/.test(t) || (ANOTHER.test(t) && THINGS.test(t))
 }
+
+/**
+ * The page's own check of a router answer, as `nameIn` is for talk: a theme restyles the whole home with no
+ * confirmation and a build opens the house plan, so a line that says nothing of either is never acted on as one.
+ */
+export const asksTheme = (text: string) => LOOK.test(text.toLowerCase()) || /\bmake it\b/i.test(text)
+export const asksBuild = (text: string) => BUILD.test(text.toLowerCase()) || /\b(room|door|doorway|wall|opening|archway|extension)s?\b/i.test(text)

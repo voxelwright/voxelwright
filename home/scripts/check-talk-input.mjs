@@ -106,6 +106,19 @@ async function fixes() {
   page.on('pageerror', (e) => errors.push(String(e)))
   // Every maker request is counted; the next one can be held back, and any can be made to fail.
   const props = { calls: 0, hold: 0, fail: false }
+  // Writing a project down on the host can be held back too.
+  const projects = { hits: 0, hold: 0 }
+  await page.route('**/projects', async (r) => {
+    if (r.request().method() === 'POST') {
+      projects.hits++
+      if (projects.hold) {
+        const ms = projects.hold
+        projects.hold = 0
+        await new Promise((x) => setTimeout(x, ms))
+      }
+    }
+    return r.continue()
+  })
   await page.route('**/props', async (r) => {
     props.calls++
     if (props.fail) return r.fulfill({ status: 500, body: '{}' })
@@ -122,7 +135,7 @@ async function fixes() {
     await open(page, query)
   }
   const quipped = (re, ms = 10_000) => until(page, (x) => x.input.quips.some((q) => re.test(q.text)), ms)
-  let s
+  let s, ps
 
   // fix 5: a second furnishing line while the first is being made waits its turn; each piece gets its own Undo.
   await fresh()
@@ -144,6 +157,28 @@ async function fixes() {
   s = await state(page)
   check('#42 fix 5: a second furnishing line waits while the first is made, and Undo on each leaves nothing behind', callsWhileMaking === 1 && first === 'window' && second === 'table' && waited && s.input.furnish.placed.length === 0 && s.input.furnish.job === null, { callsWhileMaking, first, second, waited, placed: s.input.furnish.placed })
 
+  // R1 (batch 2): three lines queued behind a piece being made are each made in turn, and none is lost.
+  await fresh()
+  const queued = ['add a hatstand by the window', 'add a teapot by the window', 'add a kettle by the window', 'add a vase by the window']
+  const callsBefore = props.calls
+  props.hold = 3000
+  await write(page, queued[0])
+  await until(page, (x) => x.input.furnish.job?.open, 5000)
+  for (const line of queued.slice(1)) {
+    await page.waitForTimeout(700)
+    await write(page, line)
+  }
+  await page.waitForTimeout(700)
+  const turns = []
+  for (let i = 0; i < queued.length; i++) {
+    s = await until(page, (x) => x.input.furnish.timings.length === i + 1 && x.input.furnish.job?.state === 'placed', 10_000)
+    turns.push(s.input.furnish.timings.at(-1)?.text)
+    await page.evaluate(() => window.village.talk.undo())
+  }
+  await page.waitForTimeout(500)
+  s = await state(page)
+  check('batch 2 R1: three lines queued behind a piece being made are each made in turn, and none is lost', JSON.stringify(turns) === JSON.stringify(queued) && props.calls - callsBefore === 4 && s.input.furnish.job === null, { turns, calls: props.calls - callsBefore })
+
   // Fixes 7 and 13 (Keep waiting on the host, Keep during the settle-in) are now the house's placement: its own checks (check-place) cover a refused save and the settle-in.
 
   // fix 8: Try another keeps the piece until the new one is ready, and keeps it when the new one fails.
@@ -160,8 +195,7 @@ async function fixes() {
   check('#42 fix 8: a Try another that fails leaves the piece you had, and says so truthfully', afterRetry.input.furnish.job?.state === 'placed' && afterRetry.input.furnish.job.open && toldKept, { job: afterRetry.input.furnish.job, quips: afterRetry.input.quips })
   await page.evaluate(() => window.village.talk.undo())
 
-  // Fix 6 (no place left around the table: nothing is made, your villager says so) has no check here yet: under the house's placement a pair of chairs
-  // around the table does not fit, so no place ever fills. furnish.ts keeps the no-room path.
+  // Fix 6 (no place left around the table) is checked last in this group, once R3's stub fix let chairs fit around the table.
 
   // fix 9: many projects stand inside the room, in bounded slots, with a Tab entry for each one shown.
   await page.evaluate(async () => {
@@ -189,6 +223,32 @@ async function fixes() {
   await page.waitForTimeout(4500)
   const framesAfter = await page.evaluate(() => document.querySelectorAll('iframe').length)
   check('#42 fix 4: furnishing in flight when the room closes leaves no sandbox frame behind', framesAfter <= framesBefore, { framesBefore, framesAfter })
+
+  // R2 (batch 2): a line queued when the room closes makes no maker call and leaves no placement or tag.
+  await fresh()
+  props.hold = 3000
+  await write(page, 'add a hatstand by the window')
+  await until(page, (x) => x.input.furnish.job?.open, 5000)
+  await page.waitForTimeout(700)
+  await write(page, 'add a teapot by the window')
+  await quipped(/One at a time/)
+  const callsAtUnload = props.calls
+  await page.evaluate(() => window.village.unload('talk'))
+  await page.waitForTimeout(5000)
+  const left = await page.evaluate(() => ({ tags: document.querySelectorAll('.place-tag').length, placing: window.villagePlace.state() }))
+  check('batch 2 R2: a line queued at unload makes no maker call and leaves no placement or .place-tag', props.calls === callsAtUnload && left.tags === 0 && left.placing === null, { calls: props.calls, callsAtUnload, left })
+  // ...and a project the host was still writing down when the room closed puts no parcel entry into the closed room.
+  await fresh()
+  projects.hold = 2500
+  const hitsBefore = projects.hits
+  // (Not "in the living room": fix 9's seeded projects have filled that anchor, so no parcel would be made there to be found.)
+  await write(page, "let's add a playable pinball machine here")
+  const hitBy = Date.now() + 5000
+  while (projects.hits === hitsBefore && Date.now() < hitBy) await page.waitForTimeout(50)
+  await page.evaluate(() => window.village.unload('talk'))
+  await page.waitForTimeout(4000)
+  const entryIds = await page.evaluate(() => window.village.kernel.root.get('entries').list().map((e) => e.id).filter((id) => id.startsWith('project-')))
+  check('batch 2 R2: a project written down after the room closed leaves no parcel entry', projects.hits === hitsBefore + 1 && entryIds.length === 0, { hits: projects.hits - hitsBefore, entryIds })
 
   // fix 11: a click on another villager while your line is being routed does not move the reply.
   await fresh('?talk=npc&route=reply&q=low')
@@ -222,6 +282,30 @@ async function fixes() {
   const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('village.talk.kept') ?? '[]'))
   const said = (await jsonl('sam', 'conversation.jsonl')).slice(samLinesBefore).filter((l) => l.from === 'person')
   check('#42 fix 12: a reply cut short says so; the line is not put back or kept to resend, and the host has it once', /cut short/.test(s.cards.sam?.text ?? '') && s.input.text === '' && !kept.some((k) => k.text === 'Tell me about bread') && said.length === 1, { card: s.cards.sam?.text, text: s.input.text, kept, said })
+
+  // Fix 6 / R3 (batch 2): every place around the table taken, so the next line makes nothing and offers no Keep. (Last in this group: it leaves four stand-ins in the scene.)
+  await fresh()
+  // The kitchen's own chairs stand on the four places (place.ts AROUND_TABLE), so no piece of ours can be kept there. Four stand-ins, tagged as placed
+  // furniture, take them in the same way a kept piece would, which is all `taken()` looks at.
+  await page.evaluate(() => {
+    const scene = window.village.kernel.root.get('stage').scene
+    const Object3D = Object.getPrototypeOf(scene.constructor)
+    const things = scene.getObjectByName('placed things')
+    for (const [x, z] of [[-1.4, 0.2], [-0.75, 1.0], [0.85, 0.85], [-1.25, -0.55]]) {
+      const o = new Object3D()
+      o.position.set(x, 0, z)
+      o.userData.furniture = `stand-in-${x}`
+      things.add(o)
+    }
+  })
+  s = await state(page)
+  const standIns = await holders(page)
+  const callsFull = props.calls, begunFull = s.input.furnish.begun
+  await write(page, 'add a couple of yellow chairs around the table')
+  s = await quipped(/no room left around the table/)
+  await page.waitForTimeout(500)
+  s = await state(page)
+  check('fix 6: with every place around the table taken, nothing is made or placed, there is no Keep, and the person hears why', standIns >= 4 && /no room left around the table/.test(s.input.quips.at(-1)?.text ?? '') && props.calls === callsFull && s.input.furnish.begun === begunFull && s.input.furnish.job === null && (await tagButtons(page)).length === 0 && (await page.$('.place-tag')) === null, { standIns, calls: props.calls - callsFull, begun: s.input.furnish.begun - begunFull, quips: s.input.quips.slice(-2), buttons: await tagButtons(page) })
 
   check('#42 fixes: no page errors', errors.length === 0, errors)
   await context.close()

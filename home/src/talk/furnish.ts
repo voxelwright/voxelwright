@@ -159,6 +159,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const label = (j: Job) => (j.routed?.what ?? 'new piece').replace(/^(a|an|the|some) /i, '')
   /** Begin placing piece j.index with `object` at its first pose. */
   const begin = (j: Job, object: THREE.Object3D) => {
+    // The room was closed while this line waited: no session, no tag (#42).
+    if (disposed) return undefined
     const service = hooks.placement()
     if (!service) return fail(j, 'no placement', "I can't set anything down just now. Nothing's been moved.")
     const p = j.places[j.index]
@@ -240,26 +242,46 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     table.userData.replacedByTalk = true
     j.hidden.push(table)
   }
-  /** A piece still open from an earlier line is kept if it can be (as Keep would), else let go; then `next` begins. */
-  const after = (j: Job, next: () => void) => {
+  /**
+   * What a line must wait for before it may begin: a piece still open from an earlier line is kept if it can be
+   * (as Keep would), else let go. Null when nothing stands in the way.
+   */
+  const clearFor = (j: Job): Promise<unknown> | null => {
     const prev = job
-    if (prev && prev !== j && prev.placing && prev.state === 'ghost' && prev.routed && !disposed) {
+    if (!prev || prev === j || !prev.placing || disposed) return null
+    if (prev.state === 'ghost' && prev.routed) {
       // One piece at a time: a piece still being made is not cut short by the next line; this one starts once it is kept or undone.
       if (!toldWaiting.has(prev)) {
         toldWaiting.add(prev)
         hooks.say(`One at a time: I'll start on that once you've kept or undone the ${label(prev)}.`)
       }
-      queue = prev.settled
-    } else if (prev && prev !== j && prev.placing) {
-      prev.places = prev.places.slice(0, prev.index + 1)
-      const p = prev.placing
-      if (prev.state === 'placed' && p.fits) p.confirm()
-      else end(prev)
-      // A failed save leaves it open; the next line goes ahead (and its placement ends this one).
-      queue = Promise.race([p.done, new Promise<void>((r) => (prev.unstick = r))])
+      return prev.settled
     }
-    const run = queue.then(next)
-    queue = run
+    prev.places = prev.places.slice(0, prev.index + 1)
+    const p = prev.placing
+    if (prev.state === 'placed' && p.fits) p.confirm()
+    else end(prev)
+    // A failed save leaves it open; the next line goes ahead (and its placement ends this one), saying so.
+    const stuck = new Promise<void>((r) => {
+      const old = prev.unstick
+      prev.unstick = () => {
+        old?.()
+        r()
+      }
+    })
+    return Promise.race([p.done, stuck.then(() => hooks.say(`The ${label(prev)} wasn't saved, so I've let it go.`))])
+  }
+  /**
+   * `next` begins after every earlier line has had its turn. Each line chains behind the one before, and wakes to
+   * look again at what is open: lines queued behind one piece start one at a time, never together (#42).
+   */
+  const after = (j: Job, next: () => void) => {
+    let wait = clearFor(j)
+    const run = queue.then(async () => {
+      for (; wait && !disposed; wait = clearFor(j)) await wait
+      if (!disposed) next()
+    })
+    queue = run.catch(() => {})
     return run
   }
 
@@ -273,7 +295,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
     const replacing = /\breplace (?:the |our )?table\b/.test(lower)
     const where = /\b(around|by|near|in|on|at) (the )?[a-z ]+$/.exec(lower)?.[0] ?? (/\bhere\b/.test(lower) ? 'here' : '')
     const count = /\b(couple|two|pair)\b/.test(lower) ? 2 : /\bthree\b/.test(lower) ? 3 : 1
-    const what = replacing ? 'table' : lower
+    // The guess sizes the ghost by the thing, not by the place named after it ("chairs around the table" is not a table).
+    const what = replacing ? 'table' : where ? lower.replace(where, '') : lower
     const { list, size, mount } = places(where, what, count, replacing)
     if (!list.length) return null
     const j: Job = { text, t0, routed: null, places: list, size, mount, index: 0, placing: null, object: null, ghost: null, made: null, owned: false, ref: null, kept: [], hidden: [], variant: 0, state: 'ghost', timing: { text, ok: false }, told: false, ...settling() }
@@ -524,6 +547,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const PARCEL_H = 0.5 * 1.25, PARCEL_STEP = 0.82, PARCEL_CLEAR = 0.55
   /** A parcel where the project will go, or null when that anchor is full (the project is still on the host's list). */
   const parcel = (what: string, where: string | undefined) => {
+    if (disposed) return null
     const lower = (where ?? '').toLowerCase()
     const name = /living ?room|lounge/.test(lower) ? 'livingFloor' : /corner/.test(lower) ? 'corner' : /window/.test(lower) ? 'window' : 'floor'
     const at = ANCHORS[name]
@@ -557,6 +581,8 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const project = async (routed: Routed, text: string) => {
     const what = routed.what ?? 'something'
     const saved = await startProject(hooks.person, what, routed.where, text)
+    // The room closed while the host wrote it down: the project is on the list, and no parcel is put in a closed room.
+    if (disposed) return false
     if (!saved.ok) {
       hooks.say(saved.why === 'away' ? "I'm out for a moment, so I couldn't write that project down. Say it again soon?" : "I couldn't write that project down just now. Nothing's started.")
       return false

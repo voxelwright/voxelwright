@@ -12,7 +12,7 @@ import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
 import type { PlacementService } from './place'
-import { mayRoute } from '../talk/route-check'
+import { asksBuild, asksTheme, mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
@@ -1868,6 +1868,8 @@ export default {
         case 'theme': {
           // #50: the whole home's look, written from the person's own words; the note is shown as text.
           furnish!.dismiss(guess)
+          // The router's say-so is not enough to restyle the home: the person's own words must ask for a look.
+          if (!asksTheme(text)) return send(text, undefined, me)
           if (routed.say) quip(me, routed.say)
           const r = await askTheme(text, me.person)
           quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change the look just now.")
@@ -1876,6 +1878,7 @@ export default {
         case 'build': {
           // Build mode draws the room and speaks for your villager: the route's line, or one asking what was meant (#48).
           furnish!.dismiss(guess)
+          if (!asksBuild(text)) return send(text, undefined, me)
           if (mode === 'talk') endTalk()
           const request = { intent: routed.intent, say: routed.say, person: me.person, reply: (line: string) => quip(me, line), handled: false }
           ctx.emit('village/build-intent', request)

@@ -359,9 +359,11 @@ export function stubRoute(ask: Pick<RouteAsk, 'text' | 'primary' | 'villagers' |
   else if (/pinball|playable|machine/.test(t)) routed = { route: 'project', what: t.replace(/^.*?(a |an )/, '').slice(0, 60), where: /living room/.test(t) ? 'living room' : 'here', say: "That's a proper project. I'll start on it." }
   else if ((/^(add|open|build|make)\b/.test(t) && /\b(room|study|bedroom|pantry|nursery|office|playroom)\b/.test(t) && !/\b(table|chair|lamp|plant|rug)s?\b/.test(t)) || /door here/.test(t)) routed = { route: 'build', intent: stubIntent(t), say: 'Let me sketch it out.' }
   else if (/^(add|put|place|replace|another|wallpaper|hang)/.test(t) || /^(a|an|some) [a-z ]+ (on|by|near|in|above|from) the /.test(t)) {
-    const size = NOUNS.find(([re]) => re.test(t))?.[1]
+    const what = t.replace(/^(add|put|place|replace the \w+ with)\s+(a |an |another |the )?(couple of |two )?/, '').replace(/\s+(around|by|in|on|here).*$/, '') || 'thing'
+    // Sized by the thing, not by the place named after it ("chairs around the table" is not a table); a replaced table keeps the table's size.
+    const size = NOUNS.find(([re]) => re.test(/^replace the table/.test(t) ? 'table' : what))?.[1]
     const saved = ask.library.find((l) => t.includes(l.name.toLowerCase()))
-    routed = { route: 'furnish', what: t.replace(/^(add|put|place|replace the \w+ with)\s+(a |an |another |the )?(couple of |two )?/, '').replace(/\s+(around|by|in|on|here).*$/, '') || 'thing', where: /\b(?:around|by|near|in|on|at|above|from) (?:the |a )?[a-z' ]+$/.exec(t)?.[0] ?? 'here', count: /couple|two/.test(t) ? 2 : 1, size, replace: /^replace the table/.test(t) ? 'table' : undefined, mount: /\bwall\b|\b(tv|picture|painting|clock)\b/.test(t) ? 'wall' : /ceiling|lantern/.test(t) ? 'ceiling' : /\bon the (table|counter|sill)\b/.test(t) ? 'surface' : 'floor', copy: /like that|another one/.test(t) || undefined, library: saved?.id, say: 'Ooh, let me see.' }
+    routed = { route: 'furnish', what, where: /\b(?:around|by|near|in|on|at|above|from) (?:the |a )?[a-z' ]+$/.exec(t)?.[0] ?? 'here', count: /couple|two/.test(t) ? 2 : 1, size, replace: /^replace the table/.test(t) ? 'table' : undefined, mount: /\bwall\b|\b(tv|picture|painting|clock)\b/.test(t) ? 'wall' : /ceiling|lantern/.test(t) ? 'ceiling' : /\bon the (table|counter|sill)\b/.test(t) ? 'surface' : 'floor', copy: /like that|another one/.test(t) || undefined, library: saved?.id, say: 'Ooh, let me see.' }
   } else if (/^make it\b|change the style|go back to normal|\btheme\b/.test(t)) routed = { route: 'theme', say: 'Ooh, let me redecorate.' }
   else if (named && /chat|talk|ask|tell/.test(t)) routed = { route: 'talk', to: named.id }
   else routed = { route: 'answer' }
