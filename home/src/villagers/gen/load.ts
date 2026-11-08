@@ -44,10 +44,10 @@ let box: PropBox | null = null
 const enforce = new URLSearchParams(location.search).get('checks') !== 'off'
 /** The trusted felt kit (./kit.ts) makes the face and the role's mark by default; `&kit=0` shows the model's own, for debugging only. */
 const kitOn = new URLSearchParams(location.search).get('kit') !== '0'
-/** Look regroup 3: `&skin=1` fuses each slot's felt parts into one sewn surface (./skin.ts), for comparing with round 8. */
-const skinOn = new URLSearchParams(location.search).get('skin') === '1'
+/** The sewn skin (./skin.ts) fuses each slot's felt parts into one surface by default; `&skin=0` shows the separate parts, for debugging only. */
+const skinOn = new URLSearchParams(location.search).get('skin') !== '0'
 
-async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn, role?: string, skin = skinOn): Promise<Made> {
+async function fromCode(code: string, phys: boolean, accent: string, seed: number, species = true, mark = true, kit = kitOn, role?: string, skin = skinOn, attach = false): Promise<Made> {
   box ??= new PropBox()
   const t0 = performance.now()
   const result = await box.run(code)
@@ -55,7 +55,7 @@ async function fromCode(code: string, phys: boolean, accent: string, seed: numbe
   const t1 = performance.now()
   const checked = validate(result.data)
   if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
-  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit, role, skin)
+  const a = assemble(checked.prop, result.data, phys, accent, seed, enforce, species, mark, kit, role, skin, attach)
   return { fig: a.fig, name: a.about.name, role: a.about.role, bark: a.about.bark, voice: a.about.voice, persona: a.about.persona, fixes: a.fixes, measures: a.measures, timing: { sandboxMs: t1 - t0, runMs: result.timing.runMs, assembleMs: performance.now() - t1, ...(a.skinMs === undefined ? {} : { skinMs: a.skinMs }) } }
 }
 
@@ -195,10 +195,11 @@ export default {
      * Module text through the sandbox and the assembler, for scripts/check-prop-sandbox.mjs and
      * check-villager-gen.mjs. The species and role-mark checks are off unless asked for: the sandbox's
      * plumbing probe is a plain round figure on purpose, and the round 1 to 3 fixtures predate villager.mark().
+     * `attach` measures the mark's attachment again on the sewn skin (slow, scripts only).
      */
-    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string; skin?: boolean } = {}) => {
+    const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string; skin?: boolean; attach?: boolean } = {}) => {
       try {
-        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role, opts.skin ?? skinOn)
+        const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role, opts.skin ?? skinOn, opts.attach ?? false)
         const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, timing: m.timing, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
         releaseGpu(m.fig.root)
         return r

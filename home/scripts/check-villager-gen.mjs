@@ -27,6 +27,10 @@
 // get stitched holes in the board and the sun hat, the requested role wins over the model's about() with a fix line, a
 // marked head is refused with the anchor named, a spoon 6 cm off the mitten is moved into it and wrapped, and a duster
 // handle held up beside the head gets the kit's plume.
+// The sewn skin as the default (skin council): the spiny hedgehog sews with no specks and no inward triangle (an inward
+// triangle is culled and showed as a pale fleck), a ball that breaks the head's surface by a few millimetres leaves no
+// speck of its felt, a tutor's skullcap is fitted to the skin with the board resting on it across at least half its
+// width and every mark part held on the skin, the toque never slides onto the brow, and &skin=0 still builds the parts.
 // Usage: node scripts/check-villager-gen.mjs [base-url]   (dev server running; default http://localhost:5332/)
 // Exits non-zero when any check fails.
 import { readFileSync } from 'node:fs'
@@ -53,9 +57,10 @@ const check = (name, pass, detail) => {
 /**
  * A small plush cook, sound by default. Options break one thing each:
  * scarfY moves the scarf ring (0.43 is across the eyes), lift raises the head and eyes,
- * prop scales the held spoon, wide stretches the body sideways, off moves the spoon forward out of the hand.
+ * prop scales the held spoon, wide stretches the body sideways, off moves the spoon forward out of the hand,
+ * nub (the sewn skin) sets a brown ball in the back of the head that breaks the surface by a few millimetres: a fleck of felt.
  */
-const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1, off = 0 } = {}) => `export default function (villager, { THREE }) {
+const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1, off = 0, nub = 0 } = {}) => `export default function (villager, { THREE }) {
   const felt = (c, r = 1) => new THREE.MeshStandardMaterial({ color: c, roughness: r })
   const at = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m }
   at(villager, new THREE.SphereGeometry(0.17, 20, 12), felt('#c9a27a'), 0, 0.17, 0).scale.set(${wide}, 1, 1)
@@ -65,6 +70,7 @@ const plush = ({ scarfY = 0.27, lift = 0, prop = 1, wide = 1, off = 0 } = {}) =>
   head.position.set(0, ${0.42 + lift}, 0)
   villager.add(head)
   at(head, new THREE.SphereGeometry(0.13, 20, 12), felt('#c9a27a'), 0, 0, 0)
+  if (${nub}) at(head, new THREE.SphereGeometry(0.05, 16, 10), felt('#7a5a3a'), 0, 0.02, -${nub})
   for (const s of [-1, 1]) {
     villager.tag(at(villager, new THREE.SphereGeometry(0.025, 12, 8), felt('#241a18', 0.25), s * 0.05, ${0.44 + lift}, 0.12), s < 0 ? 'eye-left' : 'eye-right')
     villager.tag(at(villager, new THREE.SphereGeometry(0.035, 12, 8), felt('#c9a27a'), s * 0.17 * ${wide}, 0.18, 0.02), s < 0 ? 'hand-left' : 'hand-right')
@@ -251,6 +257,24 @@ ${tufts ? `  for (let k = 0; k < 5; k++) {
   villager.gait`)
   const dusted = await trial(kitDuster, { kit: true, mark: true, role: 'tidier', accent: '#e0b53a' })
   check('kit: a duster handle held up beside the head, its knot marked, gets the kit\'s plume out beside the head', dusted.ok && dusted.measures.place.plume.parts >= 6 && dusted.measures.place.plume.offset >= 0.75 && dusted.measures.loose.length === 0, dusted.ok ? dusted.measures.place : dusted.reason)
+
+  // The sewn skin, on by default since the skin council: sound surfaces, and the kit's mark seated on what is shown.
+  const spiny = await trial(fixture('round6-hedgehog-duster.code.txt'), { kit: true, mark: true, species: true, role: 'tidier', accent: '#e0b53a', attach: true })
+  check('skin: the spiny hedgehog sews with no specks, no triangle facing inwards, its spines as their own pieces, and its plume held', spiny.ok && spiny.measures.skin && spiny.measures.skin.specks === 0 && spiny.measures.skin.inward === 0 && spiny.measures.skin.pieces > spiny.measures.skin.meshes && spiny.measures.loose.length === 0, spiny.ok ? { skin: spiny.measures.skin, loose: spiny.measures.loose } : spiny.reason)
+  for (const [name, code] of [['the example', kitExample], ['the setup stub with tall ears', kitStub]]) {
+    const r = await trial(code, { kit: true, mark: true, role: 'tutor', accent: '#6a9a4a', attach: true })
+    check(`skin: ${name} as a tutor: the skullcap is fitted to the skin and the board rests on it across at least half its width, every mark part held`, r.ok && r.fixes.some((f) => /^skin: the mark seated on the skin, the skullcap fitted to it/.test(f)) && r.measures.place.board.rest >= 0.5 && r.measures.loose.length === 0 && r.measures.skin.inward === 0, r.ok ? { board: r.measures.place.board, loose: r.measures.loose, skin: r.measures.skin } : r.reason)
+  }
+  const fleck = await trial(plush({ nub: 0.08 }), { kit: true })
+  check('skin: a ball breaking the back of the head by a few millimetres leaves no speck of its felt (it takes the felt around it), and the surface faces out', fleck.ok && fleck.measures.skin.specks === 0 && fleck.measures.skin.inward === 0 && fleck.measures.skin.meshes >= 1, fleck.ok ? { skin: fleck.measures.skin, notes: fleck.fixes.filter((f) => f.startsWith('skin: head')) } : fleck.reason)
+  // Round ears set back on the crown, so the most room for the toque is forward (the panda's case).
+  const earsBack = kitExample.replace('\n  villager.add(head)\n', `\n  villager.add(head)
+  for (const s of [-1, 1]) add(head, new THREE.SphereGeometry(0.05, 14, 10), felt('#e2b98a'), s * 0.09, 0.13, -0.05)
+`)
+  const cooked = await trial(earsBack, { kit: true, mark: true, role: 'cook', accent: '#c8553d' })
+  check('skin: with round ears set back, the toque slides forward at most 0.1 head depths, not onto the brow', cooked.ok && cooked.fixes.some((f) => /toque moved 0\.10 head depths forward/.test(f)), cooked.ok ? cooked.fixes.filter((f) => f.startsWith('kit: hat')) : cooked.reason)
+  const bare = await trial(kitExample, { kit: true, mark: true, role: 'cook', skin: false })
+  check('skin: &skin=0 (debugging) still builds the separate parts, with no skin', bare.ok && !bare.fixes.some((f) => f.startsWith('skin:')) && bare.measures.skin === undefined, bare.ok ? bare.fixes.filter((f) => f.startsWith('skin')) : bare.reason)
 
   // Sentinel (round 2): a huge untrusted name is cut before any work on it, so it costs no more than a short one.
   const huge = await page.evaluate(async () => {

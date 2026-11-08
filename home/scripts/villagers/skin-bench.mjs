@@ -1,7 +1,9 @@
-// #47 look regroup 3 (sewn skin): build time, triangles and draw calls (meshes) per villager, with and without the
-// trusted skin (gen/skin.ts), on saved modules. No model calls. Every module goes through the sandbox and the
-// assembler in the page (villagerGen.trial), with the checks on (species and mark), the kit on and the requested role.
-// Usage: node scripts/villagers/skin-bench.mjs <prefix> [base-url] [--skin] [--runs=3]   (dev server running)
+// #47 sewn skin: build time, triangles and draw calls (meshes) per villager, with and without the trusted skin
+// (gen/skin.ts, the default; --no-skin for round 8's separate parts), on saved modules. No model calls. Every module
+// goes through the sandbox and the assembler in the page (villagerGen.trial), with the checks on (species and mark),
+// the kit on and the requested role. Timing is the fastest of --runs; one more run measures the skin's soundness
+// (pieces, specks, inward triangles) and the mark's attachment on the skin, which is too slow for live builds.
+// Usage: node scripts/villagers/skin-bench.mjs <prefix> [base-url] [--no-skin] [--runs=3]   (dev server running)
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,7 +12,7 @@ import { chromium } from 'playwright'
 const dir = resolve(dirname(fileURLToPath(import.meta.url)), '../../generated/villagers')
 const prefix = process.argv[2] ?? 'r8-'
 const base = process.argv[3]?.startsWith('http') ? process.argv[3] : 'http://localhost:5332/'
-const skin = process.argv.includes('--skin')
+const skin = !process.argv.includes('--no-skin')
 const runs = Number(process.argv.find((a) => a.startsWith('--runs='))?.slice(7) ?? 3)
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const rows = []
@@ -27,8 +29,9 @@ try {
       if (!r.ok) { best = r; break }
       if (!best || r.timing.assembleMs < best.timing.assembleMs) best = r
     }
+    const sound = best.ok && skin ? await page.evaluate(([c, o]) => window.villagerGen.trial(c, o), [code, { mark: true, species: true, accent: meta.accent, role: meta.role, skin, attach: true }]) : null
     const row = best.ok
-      ? { id, ok: true, triangles: best.triangles, meshes: best.meshes, assembleMs: +best.timing.assembleMs.toFixed(1), skinMs: best.timing.skinMs === undefined ? undefined : +best.timing.skinMs.toFixed(1), skin: best.fixes.filter((f) => f.startsWith('skin') || f.startsWith('kit: hat')) }
+      ? { id, ok: true, triangles: best.triangles, meshes: best.meshes, assembleMs: +best.timing.assembleMs.toFixed(1), skinMs: best.timing.skinMs === undefined ? undefined : +best.timing.skinMs.toFixed(1), soundness: sound?.measures?.skin, looseOnSkin: sound?.measures?.loose?.length, skin: best.fixes.filter((f) => f.startsWith('skin') || f.startsWith('kit: hat')) }
       : { id, ok: false, reason: best.reason.slice(0, 300) }
     rows.push(row)
     console.log(JSON.stringify(row))
@@ -38,4 +41,4 @@ try {
 }
 const ok = rows.filter((r) => r.ok)
 const med = (xs) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)]
-console.log(JSON.stringify({ skin, villagers: rows.length, ok: ok.length, medianTriangles: med(ok.map((r) => r.triangles)), maxTriangles: Math.max(...ok.map((r) => r.triangles)), medianMeshes: med(ok.map((r) => r.meshes)), medianAssembleMs: med(ok.map((r) => r.assembleMs)), maxAssembleMs: Math.max(...ok.map((r) => r.assembleMs)), medianSkinMs: skin ? med(ok.map((r) => r.skinMs ?? 0)) : undefined, maxSkinMs: skin ? Math.max(...ok.map((r) => r.skinMs ?? 0)) : undefined }))
+console.log(JSON.stringify({ skin, villagers: rows.length, ok: ok.length, medianTriangles: med(ok.map((r) => r.triangles)), maxTriangles: Math.max(...ok.map((r) => r.triangles)), medianMeshes: med(ok.map((r) => r.meshes)), medianAssembleMs: med(ok.map((r) => r.assembleMs)), maxAssembleMs: Math.max(...ok.map((r) => r.assembleMs)), medianSkinMs: skin ? med(ok.map((r) => r.skinMs ?? 0)) : undefined, maxSkinMs: skin ? Math.max(...ok.map((r) => r.skinMs ?? 0)) : undefined, specks: skin ? ok.reduce((t, r) => t + (r.soundness?.specks ?? 0), 0) : undefined, inward: skin ? ok.reduce((t, r) => t + (r.soundness?.inward ?? 0), 0) : undefined, looseOnSkin: skin ? ok.reduce((t, r) => t + (r.looseOnSkin ?? 0), 0) : undefined }))

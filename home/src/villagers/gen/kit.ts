@@ -73,6 +73,14 @@ function seamTexture(base: string, seed: number, stitches = true) {
 
 interface Ellipsoid { c: THREE.Vector3; r: THREE.Vector3 }
 
+/**
+ * A skullcap to fit on the sewn skin (assemble.ts): from the head's centre, each of its vertices goes just outside the
+ * skin, its rim just inside (so the edge never stands off), and near its pole up to the board's underside, so the board
+ * rests on a flat cap top rather than on one point of a dome. `reach` is the cap's polar angle; `half` and `t` are the
+ * board's half width and thickness.
+ */
+export interface Wrap { centre: THREE.Vector3; reach: number; board: THREE.Mesh; half: number; t: number }
+
 /** The point on an axis-aligned ellipsoid in a direction from its centre. */
 function onEllipsoid(e: Ellipsoid, dir: THREE.Vector3) {
   const d = dir.clone().normalize()
@@ -442,6 +450,13 @@ export function feltKit(input: KitInput): KitResult {
   const frame = new THREE.Group()
   let slot: Role = 'head'
   const H_ = H
+  /**
+   * Where the mark rests on the head's felt and which way is off it. The sewn skin (./skin.ts) swells a little where
+   * parts join and lies on chords between its vertices; assemble.ts moves the whole mark along `dir` by the difference
+   * between the two surfaces at `at`, so a hat sits on the skin shown and not on the parts it replaced.
+   */
+  let seat: { at: THREE.Vector3; dir: THREE.Vector3 } | null = null
+  const crown = () => ({ at: new THREE.Vector3(frame.position.x, top, frame.position.z), dir: new THREE.Vector3(0, 1, 0) })
 
   /**
    * Look regroup 3, the tutor around the ears: a skullcap reaching further down than round 8's (it shows under the
@@ -518,7 +533,8 @@ export function feltKit(input: KitInput): KitResult {
     cap.rotation.x = a
     const bf = boardFrame(a)
     frame.add(bf)
-    at(bf, new RoundedBoxGeometry(bw, t, bw, 3, t * 0.4), felt(accent, borderTexture(accent, seed + 9)), 0, t * 0.2, 0)
+    const board = at(bf, new RoundedBoxGeometry(bw, t, bw, 3, t * 0.4), felt(accent, borderTexture(accent, seed + 9)), 0, t * 0.2, 0)
+    cap.userData.wrap = { centre: head.c.clone(), reach: theta, board, half: bw / 2, t } satisfies Wrap
     const by = t * 0.7
     at(bf, new THREE.CylinderGeometry(0.06 * cw, 0.06 * cw, 0.035 * cw, 16), felt(dark), 0, by + 0.005 * cw, 0).userData.colour = dark
     const corner = new THREE.Vector3(side * bw * 0.46, by, bw * 0.46)
@@ -559,8 +575,9 @@ export function feltKit(input: KitInput): KitResult {
     }
     let gap = room(tz)
     if (input.around && gap < colR * 1.16 + 0.02 * cw) {
-      // Look regroup 3: slide the toque forward or back on the crown to where the ears leave it the most room.
-      for (const k of [0.1, -0.1, 0.2, -0.2, 0.3, -0.3]) {
+      // Look regroup 3: slide the toque forward or back on the crown to where the ears leave it the most room; forward
+      // at most 0.1 head depths (0.3 forward put the panda's band on its brow and squashed its face).
+      for (const k of [0.1, -0.1, -0.2, -0.3]) {
         const z = head.c.z + (k - 0.05) * head.r.z, g = room(z)
         if (g > gap + 0.01 * cw) { gap = g; tz = z }
       }
@@ -606,7 +623,7 @@ export function feltKit(input: KitInput): KitResult {
     const bw = THREE.MathUtils.clamp(0.95 * wBand, 1.04 * cw, 1.18 * cw), t = 0.055 * cw
     const bz = -0.12 * head.r.z
     const board = at(frame, new RoundedBoxGeometry(bw, t, bw, 3, t * 0.4), felt(accent, borderTexture(accent, seed + 9)), 0, capTop + t * 0.2, bz)
-    board.rotation.y = 0.0
+    cap.userData.wrap = { centre: head.c.clone(), reach: 1.0, board, half: bw / 2, t } satisfies Wrap
     const by = capTop + t * 0.7
     at(frame, new THREE.CylinderGeometry(0.06 * cw, 0.06 * cw, 0.035 * cw, 16), felt(dark), 0, by + 0.005 * cw, bz).userData.colour = dark
     const corner = new THREE.Vector3(side * bw * 0.46, by, bz + bw * 0.46)
@@ -761,6 +778,7 @@ export function feltKit(input: KitInput): KitResult {
     const a = THREE.MathUtils.degToRad(38)
     const dir = new THREE.Vector3(side * Math.sin(a), Math.cos(a), -0.22).normalize()
     const anchor = onEllipsoid(head, new THREE.Vector3(side * 0.85, 0.45, -0.3))
+    seat = { at: anchor.clone(), dir: anchor.clone().sub(head.c).normalize() }
     frame.position.copy(anchor).addScaledVector(dir, -0.16 * L)
     frame.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
     const eraser = at(frame, new THREE.CapsuleGeometry(rp * 0.95, 0.06 * L, 6, 16), felt(light), 0, 0.05 * L, 0)
@@ -774,6 +792,7 @@ export function feltKit(input: KitInput): KitResult {
     // knob, and an open ring with a thick rim (council: the thin lens and its short, hidden arm did not read).
     const tube = 0.036 * H_, R = 0.1 * H_
     const hinge = onEllipsoid(head, new THREE.Vector3(side, 0.3, 0.3))
+    seat = { at: hinge.clone(), dir: hinge.clone().sub(head.c).normalize() }
     const ring = new THREE.Vector3(head.c.x + side * (head.r.x + R + tube + 0.04 * H_), top + 0.17 * H_ - R - tube, head.c.z + 0.12 * head.r.z)
     const lens = at(frame, new THREE.TorusGeometry(R, tube, 16, 44), felt(accent, seamTexture(accent, seed + 21)), ring.x, ring.y, ring.z)
     lens.rotation.y = -side * 0.3
@@ -874,8 +893,10 @@ export function feltKit(input: KitInput): KitResult {
     return { add, remove, notes }
   }
   for (const { mesh } of marked) remove.add(mesh)
+  if (role === 'cook' || role === 'tutor' || role === 'gardener' || role === 'carer') seat = crown()
   const parts = flatten(frame)
   for (const m of parts) {
+    if (seat) m.userData.seat = seat
     m.userData.mark = true
     m.userData.accent = true
     m.userData.colour ??= accent
@@ -883,4 +904,55 @@ export function feltKit(input: KitInput): KitResult {
   }
   notes.push(`kit: ${role}'s mark, ${parts.length} parts in the owner's felt (the model's ${marked.length} dropped)`)
   return { add, remove, notes }
+}
+
+/**
+ * Fits a skullcap (its userData.wrap, ./Wrap) to the sewn skin under it, after sewing: each vertex is moved along
+ * its line from the head's centre to `lift` outside the skin, the rim's last fifth down to `sink` inside it, and
+ * vertices near the pole up to the board's underside where it is near. Returns how many vertices moved.
+ */
+export function wrapCap(cap: THREE.Mesh, reach: (o: THREE.Vector3, d: THREE.Vector3, far: number) => number | null, lift: number, sink: number): number {
+  const w = cap.userData.wrap as Wrap
+  cap.updateMatrixWorld(true)
+  w.board.updateMatrixWorld(true)
+  const geo = cap.geometry
+  const p = geo.attributes.position
+  const inv = cap.matrixWorld.clone().invert()
+  // The board's underside: a point on it and its normal, and the board's own axes for the footprint.
+  const bInv = w.board.matrixWorld.clone().invert()
+  const under = new THREE.Vector3(0, -w.t / 2, 0).applyMatrix4(w.board.matrixWorld)
+  const up = new THREE.Vector3(0, 1, 0).transformDirection(w.board.matrixWorld)
+  const v = new THREE.Vector3(), d = new THREE.Vector3(), q = new THREE.Vector3()
+  let moved = 0
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i)
+    // The unit sphere's y is the cosine of the vertex's angle from the cap's pole.
+    const rim = Math.acos(THREE.MathUtils.clamp(v.y, -1, 1)) / w.reach
+    v.applyMatrix4(cap.matrixWorld)
+    d.subVectors(v, w.centre)
+    const was = d.length()
+    if (was < 1e-6) continue
+    d.divideScalar(was)
+    // Where the line leaves the head through an ear or a horn the skin is far out; the cap goes no further out than it
+    // was built, so it passes under the ear's root instead of climbing it.
+    const found = reach(w.centre, d, was * 1.5)
+    if (found === null || found < was * 0.8) continue
+    const skin = Math.min(found, was)
+    let r = skin + THREE.MathUtils.lerp(lift, -sink, THREE.MathUtils.smoothstep(rim, 0.8, 1))
+    // Up to the board: where the line meets its underside inside the footprint, not far above the cap.
+    const k = d.dot(up)
+    if (k > 0.2 && rim < 0.9) {
+      const t = under.clone().sub(w.centre).dot(up) / k
+      q.copy(w.centre).addScaledVector(d, t).applyMatrix4(bInv)
+      if (t > r && t - r < 0.6 * skin && Math.abs(q.x) < w.half * 0.85 && Math.abs(q.z) < w.half * 0.85) r = THREE.MathUtils.lerp(r, t + w.t * 0.15, 1 - THREE.MathUtils.smoothstep(rim, 0.55, 0.9))
+    }
+    v.copy(w.centre).addScaledVector(d, r).applyMatrix4(inv)
+    p.setXYZ(i, v.x, v.y, v.z)
+    moved++
+  }
+  p.needsUpdate = true
+  geo.computeVertexNormals()
+  geo.computeBoundingBox()
+  geo.computeBoundingSphere()
+  return moved
 }

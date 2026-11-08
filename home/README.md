@@ -632,6 +632,15 @@ Not isolated, or unproven:
 
 ## Generated villagers (#47 experiment, November 6, 2026)
 
+**The pipeline today (code arm, the default).** The model writes one module in the prop sandbox: the species body
+from primitives, an eye disc on each side and one small anchor for the role's mark (`arm-code.md`). Everything after
+that is trusted code in `src/villagers/gen/`: `kit.ts` makes the button eyes, cheeks and the requested role's mark
+in the owner's felt; `assemble.ts` dyes the mark, nudges other felt off the owners' hues, runs the checks
+(`checks.ts`), then sews each rig slot's felt into one stitched surface (`skin.ts`) and seats the mark on it. A
+villager that fails a check gets one repair pass, with the check's sentence sent back to the model. Live making
+through the host, `run.mjs` and the setup scene all go through `assemble()`. `&kit=0` and `&skin=0` are for
+debugging only.
+
 Question: can a model make a felt-plush villager from one line of text that
 belongs next to Dumpling, Moss and Tuft? Two arms, same five synthetic
 descriptions, Sonnet, `scripts/villagers/style.md` (silhouette = role, colour
@@ -1164,6 +1173,35 @@ new prompts. Sheets and closes in `screenshots/villager-gen/round8/`; `rabbit-ha
 node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --arms code --prefix r8- --concurrency 3
 node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=81 --close=r8-11,r8-12,r8-04,r8-07,r8-08,r8-01
 node scripts/villagers/measure-marks.mjs r8-
+```
+
+#### Round 9: the sewn skin as the default
+
+Both Opus and GPT-6.1 Sol preferred the sewn skin to round 8 in a blind close-pair test, so `assemble()` sews by
+default (`&skin=0`, `readability.mjs --no-skin`, `measure-marks.mjs --no-skin` and `skin-bench.mjs --no-skin` show
+the separate parts). Fixed from the council:
+
+- **Pale flecks** were triangles facing inwards: surface nets chose each quad's winding on the grid, and after the
+  vertices settled onto the field some faced in, were culled, and showed the board or the room through the felt
+  (6 to 49 per villager). Each triangle now faces the way the field's normals do. Three-felt triangles are cut too
+  (they left T-junction cracks, 282 open edges on the hedgehog), a felt patch under 9 vertices takes the felt
+  around it, and surface specks under 16 triangles are dropped before colouring.
+- **Ragged seams**: each seam vertex moves halfway to its neighbours' middle and back onto the surface, twice.
+- **Hats on the skin**: the whole mark moves along its seat by the difference between the skin and the parts it
+  replaced; the tutor's skullcap is fitted to the skin (rim sunk, never further out than it was built, so it passes
+  under an ear's root) and its top rises to the board, which now rests on it across 0.7 to 0.84 of its width instead
+  of one point (the elephant's board "floating").
+- **The panda's face**: its head kept its model position and size to the millimetre; the toque had slid 0.3 head
+  depths forward onto its brow. The toque now slides at most 0.1 forward.
+
+`skin-bench.mjs r8- --runs=3` (the round-8 20, fastest of 3, in the page): skin build median 38 ms, max 135 ms;
+assemble median 160 ms, max 641 ms (skin off: 101 / 625 ms, so the max is the rabbit's hat checks, not the skin);
+0 specks, 0 inward triangles, 0 mark parts loose on the skin. The attachment check on the skin costs 0.5 to 1.5 s,
+so only the scripts run it (`trial({ attach: true })`). Sheets in `screenshots/villager-gen/round9/`.
+
+```sh
+node scripts/villagers/skin-bench.mjs r8- --runs=3
+node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=64 --close=r8-01,r8-04,r8-07,r8-08,r8-11,r8-12
 ```
 
 ## Villager setup: the felt workshop (#47, November 7, 2026)

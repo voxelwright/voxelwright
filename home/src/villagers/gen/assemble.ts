@@ -8,11 +8,11 @@ import * as THREE from 'three/webgpu'
 import { rebuild } from '../../props/rebuild'
 import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
-import { BLUSH, feltKit as makeKit } from './kit'
+import { BLUSH, feltKit as makeKit, wrapCap, type Wrap } from './kit'
 import type { Figure, Villager } from '../rig'
 import { check } from './build'
-import { awayFromOwners, faceViews, inspect, OWNER_ACCENTS, type Measures } from './checks'
-import { sewSkin } from './skin'
+import { awayFromOwners, faceViews, inspect, LIMITS, markAttachment, OWNER_ACCENTS, surfaceContact, type Measures } from './checks'
+import { sewSkin, type surfaceStats } from './skin'
 import { ENUMS, type VillagerSpec } from './spec'
 
 /**
@@ -22,8 +22,11 @@ import { ENUMS, type VillagerSpec } from './spec'
  * The model never wears the accent itself.
  */
 const REQUIRED: Role[] = ['head', 'eye-left', 'eye-right', 'hand-left', 'hand-right', 'foot-left', 'foot-right']
-/** The sewn skin's grid: cells per head height for the head and for the other slots, the blend over the height, and the most triangles over the parts as built. */
-const SKIN = { head: 42, body: 32, blend: 0.03, budget: 1.5 }
+/**
+ * The sewn skin's grid: cells per head height for the head and for the other slots, the blend over the height, the most
+ * triangles over the parts as built, and how far over the height a fitted skullcap stands off the skin and sinks its rim.
+ */
+const SKIN = { head: 42, body: 32, blend: 0.03, budget: 1.5, capLift: 0.006, capSink: 0.004 }
 /** Model units: a villager stands 0.25 to 1.1 tall (Dumpling about 0.45, before the room's 1.3 scale). */
 const HEIGHT: [number, number] = [0.25, 1.1]
 
@@ -52,8 +55,10 @@ const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).ge
  * `kit` (the default since the kit council): trusted code makes the face and the role's mark (./kit.ts).
  * `requested`: the role the runner or the host asked for. It is trusted data, so it decides the kit's mark and the
  * checks over the model's own `villager.about({ role })`, which only says what the model thought it was making.
+ * `skin` (the default since the skin council): each slot's felt is sewn into one surface (./skin.ts); false only to debug.
+ * `attachOnSkin`: measure the mark's attachment again on the skin (scripts only; see below).
  */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string, skin = false): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string, skin = true, attachOnSkin = false): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -276,6 +281,33 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
       mesh.updateMatrixWorld(true)
       reseated++
     }
+    // The kit's mark was set on the model's felt too: the whole mark moves along its seat's direction by the
+    // difference between the two surfaces at the seat (./kit.ts seat), so a hat sits on the skin shown.
+    const seats = new Map<{ at: THREE.Vector3; dir: THREE.Vector3 }, THREE.Mesh[]>()
+    for (const { mesh } of added) {
+      const s = mesh.userData.seat
+      if (!s) continue
+      if (!seats.has(s)) seats.set(s, [])
+      seats.get(s)!.push(mesh)
+    }
+    let seatedMarks = 0
+    for (const [{ at: a, dir }, parts] of seats) {
+      ray.set(a.clone().addScaledVector(dir, 0.05), dir.clone().negate())
+      ray.far = 0.1
+      const was = ray.intersectObjects(dropped, false)[0], now = ray.intersectObjects(sewn, false)[0]
+      if (!was || !now) continue
+      const lift = was.distance - now.distance
+      if (Math.abs(lift) < 1e-5 || Math.abs(lift) > 0.03) continue
+      for (const m of parts) {
+        m.position.addScaledVector(dir, lift)
+        m.updateMatrixWorld(true)
+      }
+      seatedMarks++
+    }
+    // A skullcap fits the skin under it, its rim sunk, its top up to the board (./kit.ts wrapCap).
+    const headSkin = sewnSlots.find(({ slot }) => slot === head)?.s
+    const wrapped = headSkin ? added.filter(({ mesh }) => mesh.userData.wrap).map(({ mesh }) => wrapCap(mesh, headSkin.reach, SKIN.capLift * H, SKIN.capSink * H)).filter((n) => n > 0).length : 0
+    if (seatedMarks || wrapped) fixes.push(`skin: the mark seated on the skin${wrapped ? ', the skullcap fitted to it' : ''}`)
     for (const m of dropped) m.geometry.dispose()
     // The face again, on the skin: a swelling where a snout joins must not cover a button.
     const shown: THREE.Mesh[] = []
@@ -284,6 +316,22 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     const hidden = faces.flatMap((f) => f.failures)
     if (enforce && hidden.length) throw new Error(`check (skin): ${hidden.join('; ')}`)
     measures.eyeRays = faces.map((f) => f.least)
+    // The mark on the skin: every part still sits on what holds it (the round-6 rule, on the surfaces shown). The
+    // kit and the skin are trusted code, so a miss here is ours, not the model's: it is measured and noted (the
+    // scripts hold it at zero), never sent back as a repair. Measured on the skin's triangles it costs 0.5 to 1.5 s,
+    // so only the scripts ask for it (`attachOnSkin`).
+    if (mark && attachOnSkin) {
+      measures.loose = markAttachment(shown, root)
+      for (const l of measures.loose) fixes.push(`skin: a ${l.colour} mark part near (${l.at.map((x) => x.toFixed(2)).join(', ')}) stands ${l.gap.toFixed(3)} clear of the skin`)
+      const cap = added.find(({ mesh }) => mesh.userData.wrap)?.mesh
+      if (cap && measures.place?.board) {
+        const { board, half } = cap.userData.wrap as Wrap
+        measures.place.board.rest = +(surfaceContact(board, cap, LIMITS.attach).width / (2 * half)).toFixed(3)
+      }
+    }
+    // The skin itself: no specks the grid caught alone, no triangle facing inwards (it shows as a hole).
+    const stats = sewn.filter((m) => m.name === 'skin').map((m) => m.userData.stats as ReturnType<typeof surfaceStats>)
+    measures.skin = { meshes: stats.length, pieces: stats.reduce((t, s) => t + s.pieces, 0), specks: stats.reduce((t, s) => t + s.specks, 0), inward: stats.reduce((t, s) => t + s.inward, 0) }
     skinMs = performance.now() - t0
     fixes.push(`skin: ${triangles} triangles in ${skinMs.toFixed(0)} ms with the face check; ${reseated} kit part(s) reseated on it`)
   }

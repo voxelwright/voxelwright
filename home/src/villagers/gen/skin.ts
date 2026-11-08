@@ -135,6 +135,41 @@ export function fitPart(mesh: THREE.Mesh): Shape | null {
   return { kind: best.kind, sdf, box: new THREE.Box3().setFromObject(mesh, true), thick: best.thick(s) }
 }
 
+/** A surface component with fewer triangles than this is a speck the grid caught, not felt (dropped before colouring). */
+const ISLAND = 16
+/** A felt patch of fewer vertices than this inside another felt is a fleck and takes the felt around it. */
+const FLECK = 9
+
+/** A triangle's face normal against the sum of its vertex normals: negative when it faces inwards. */
+function facing(p: ArrayLike<number>, n: ArrayLike<number>, a: number, b: number, c: number) {
+  const A = a * 3, B = b * 3, C = c * 3
+  const ux = p[B] - p[A], uy = p[B + 1] - p[A + 1], uz = p[B + 2] - p[A + 2], vx = p[C] - p[A], vy = p[C + 1] - p[A + 1], vz = p[C + 2] - p[A + 2]
+  return (uy * vz - uz * vy) * (n[A] + n[B] + n[C]) + (uz * vx - ux * vz) * (n[A + 1] + n[B + 1] + n[C + 1]) + (ux * vy - uy * vx) * (n[A + 2] + n[B + 2] + n[C + 2])
+}
+
+/**
+ * A sewn felt mesh's soundness, for the checks: its connected pieces, how many are specks (less area than `speck`), and
+ * the triangles facing inwards (each shows as a hole). Spines and ears in one felt are honest separate pieces; specks
+ * and inward triangles are not.
+ */
+export function surfaceStats(g: THREE.BufferGeometry, speck: number) {
+  const p = g.attributes.position.array, n = g.attributes.normal.array, idx = g.index!.array
+  const up = new Int32Array(p.length / 3).map((_, i) => i)
+  const find = (i: number): number => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i] } return i }
+  let inward = 0
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = find(idx[t]); up[find(idx[t + 1])] = a; up[find(idx[t + 2])] = a
+    if (facing(p, n, idx[t], idx[t + 1], idx[t + 2]) < 0) inward++
+  }
+  const area = new Map<number, number>()
+  for (let t = 0; t < idx.length; t += 3) {
+    const A = idx[t] * 3, B = idx[t + 1] * 3, C = idx[t + 2] * 3
+    const ux = p[B] - p[A], uy = p[B + 1] - p[A + 1], uz = p[B + 2] - p[A + 2], vx = p[C] - p[A], vy = p[C + 1] - p[A + 1], vz = p[C + 2] - p[A + 2]
+    area.set(find(idx[t]), (area.get(find(idx[t])) ?? 0) + 0.5 * len3(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx))
+  }
+  return { pieces: area.size, specks: [...area.values()].filter((a) => a < speck).length, inward }
+}
+
 /** Polynomial smooth minimum: a fillet of width k where two surfaces meet. */
 const smin = (a: number, b: number, k: number) => {
   const t = Math.max(k - Math.abs(a - b), 0) / k
@@ -169,6 +204,8 @@ export interface Skin {
   fused: Set<THREE.Mesh>
   notes: string[]
   triangles: number
+  /** Along a line from `o` (inside the skin) in unit direction `d`: how far to the skin, or null within `far`. */
+  reach: (o: THREE.Vector3, d: THREE.Vector3, far: number) => number | null
 }
 
 /**
@@ -236,6 +273,14 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
   const e = cell * 0.3
   /** Pull a point onto the field with one Newton step; its normal from the gradient there. */
   const settle = (x: number, y: number, z: number) => {
+    pos.push(0, 0, 0)
+    nrm.push(0, 0, 0)
+    const q = pos.length / 3 - 1
+    project(q, x, y, z)
+    return q
+  }
+  /** Vertex q to the point on the field nearest (x, y, z), with the field's normal there. */
+  const project = (q: number, x: number, y: number, z: number) => {
     let f = F(x, y, z)
     let gx = F(x + e, y, z) - F(x - e, y, z), gy = F(x, y + e, z) - F(x, y - e, z), gz = F(x, y, z + e) - F(x, y, z - e)
     const g2 = (gx * gx + gy * gy + gz * gz) / (4 * e * e)
@@ -247,10 +292,9 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
       f = F(x, y, z)
       gx = F(x + e, y, z) - f; gy = F(x, y + e, z) - f; gz = F(x, y, z + e) - f
     }
-    pos.push(x, y, z)
     const nl = len3(gx, gy, gz) || 1
-    nrm.push(gx / nl, gy / nl, gz / nl)
-    return pos.length / 3 - 1
+    pos[q * 3] = x; pos[q * 3 + 1] = y; pos[q * 3 + 2] = z
+    nrm[q * 3] = gx / nl; nrm[q * 3 + 1] = gy / nl; nrm[q * 3 + 2] = gz / nl
   }
   for (let kk = 0; kk < nz - 1; kk++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
     let mask = 0
@@ -291,6 +335,23 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
     if ((field[fid(i, j + 1, kk)] < 0) !== inside) quad(cellVert[cid(i - 1, j, kk - 1)], cellVert[cid(i, j, kk - 1)], cellVert[cid(i, j, kk)], cellVert[cid(i - 1, j, kk)], 1, inside)
     if ((field[fid(i, j, kk + 1)] < 0) !== inside) quad(cellVert[cid(i - 1, j - 1, kk)], cellVert[cid(i, j - 1, kk)], cellVert[cid(i, j, kk)], cellVert[cid(i - 1, j, kk)], 2, inside)
   }
+  // Islands: a speck of surface the grid caught on its own (a thin part's tip) is dropped before colouring, never a
+  // colour patch (that would leave a hole).
+  let islands = 0
+  {
+    const up = new Int32Array(pos.length / 3).map((_, i) => i)
+    const find = (i: number): number => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i] } return i }
+    for (let t = 0; t < tris.length; t += 3) { const a = find(tris[t]); up[find(tris[t + 1])] = a; up[find(tris[t + 2])] = a }
+    const count = new Map<number, number>()
+    for (let t = 0; t < tris.length; t += 3) count.set(find(tris[t]), (count.get(find(tris[t])) ?? 0) + 1)
+    if ([...count.values()].some((n) => n < ISLAND)) {
+      const kept: number[] = []
+      for (let t = 0; t < tris.length; t += 3) if (count.get(find(tris[t]))! >= ISLAND) kept.push(tris[t], tris[t + 1], tris[t + 2])
+      islands = [...count.values()].filter((n) => n < ISLAND).length
+      tris.length = kept.length
+      for (let i = 0; i < kept.length; i++) tris[i] = kept[i]
+    }
+  }
   if (!tris.length) return null
 
   // Felts: each vertex's distance to each felt, its label the nearest.
@@ -305,6 +366,33 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
   for (let q = 0; q < pos.length / 3; q++) {
     D(pos[q * 3], pos[q * 3 + 1], pos[q * 3 + 2], dist, q * nc)
     label.push(labelOf(q))
+  }
+  // A patch of one felt only a few vertices across, inside another (where two parts' surfaces nearly coincide), is a
+  // fleck, not a panel: it takes the felt around it.
+  if (nc > 1) {
+    const nv = label.length
+    const up = new Int32Array(nv).map((_, i) => i)
+    const find = (i: number): number => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i] } return i }
+    const nb: number[][] = Array.from({ length: nv }, () => [])
+    for (let t = 0; t < tris.length; t += 3) for (let m = 0; m < 3; m++) {
+      const a = tris[t + m], b = tris[t + (m + 1) % 3]
+      nb[a].push(b)
+      if (label[a] === label[b]) up[find(a)] = find(b)
+    }
+    const size = new Map<number, number>()
+    for (let q = 0; q < nv; q++) if (nb[q].length) size.set(find(q), (size.get(find(q)) ?? 0) + 1)
+    for (let q = 0; q < nv; q++) {
+      if (!nb[q].length || size.get(find(q))! >= FLECK) continue
+      const votes = new Map<number, number>()
+      for (const o of nb[q]) if (find(o) !== find(q)) votes.set(label[o], (votes.get(label[o]) ?? 0) + 1)
+      const best = [...votes].sort((a, b) => b[1] - a[1])[0]
+      if (best) label[q] = best[0]
+    }
+    // A relabelled vertex is now as near its new felt as its old one, so the seam cut sees it on the new side.
+    for (let q = 0; q < nv; q++) {
+      const own = dist[q * nc + label[q]]
+      for (let c = 0; c < nc; c++) if (c !== label[q] && dist[q * nc + c] < own) dist[q * nc + c] = own + 1e-6
+    }
   }
   // Cut each triangle that two felts share along the line where they are equally near; shared cut vertices per edge.
   const regions: number[][] = colours.map(() => [])
@@ -325,7 +413,17 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
     const ls = tri.map((q) => label[q])
     const distinct = [...new Set(ls)]
     if (distinct.length === 1) { regions[ls[0]].push(...tri); continue }
-    if (distinct.length === 3) { regions[ls[0]].push(...tri); continue }
+    if (distinct.length === 3) {
+      // Three felts meet: each edge is cut where its two felts are equally near (the same cut its neighbour makes, so
+      // no crack opens), and the three seams meet at the triangle's middle.
+      const c = [0, 1, 2].map((m) => cut(tri[m], tri[(m + 1) % 3], ls[m], ls[(m + 1) % 3]))
+      const g = settle((pos[tri[0] * 3] + pos[tri[1] * 3] + pos[tri[2] * 3]) / 3, (pos[tri[0] * 3 + 1] + pos[tri[1] * 3 + 1] + pos[tri[2] * 3 + 1]) / 3, (pos[tri[0] * 3 + 2] + pos[tri[1] * 3 + 2] + pos[tri[2] * 3 + 2]) / 3)
+      for (let m = 0; m < 3; m++) {
+        regions[ls[m]].push(tri[m], c[m], g, tri[m], g, c[(m + 2) % 3])
+        seams.push([c[m], g])
+      }
+      continue
+    }
     const [A, B] = distinct
     const side = (q: number) => dist[q * nc + A] - dist[q * nc + B] <= 0
     const polyA: number[] = [], polyB: number[] = [], seam: number[] = []
@@ -341,6 +439,25 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
     if (seam.length === 2) seams.push([seam[0], seam[1]])
   }
   dist = new Float32Array(0)
+  // The cut is straight inside each triangle, so on a coarse grid the seam zigzags (council: ragged edges). Each seam
+  // vertex with two seam neighbours moves halfway to their middle and back onto the surface, twice. Both felts share
+  // the vertex, so the seam stays closed.
+  const along = new Map<number, number[]>()
+  for (const [a, b] of seams) {
+    if (!along.has(a)) along.set(a, [])
+    if (!along.has(b)) along.set(b, [])
+    along.get(a)!.push(b)
+    along.get(b)!.push(a)
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const moved: [number, number, number, number][] = []
+    for (const [q, ns] of along) {
+      if (ns.length !== 2) continue
+      const [a, b] = ns
+      moved.push([q, (pos[q * 3] + (pos[a * 3] + pos[b * 3]) / 2) / 2, (pos[q * 3 + 1] + (pos[a * 3 + 1] + pos[b * 3 + 1]) / 2) / 2, (pos[q * 3 + 2] + (pos[a * 3 + 2] + pos[b * 3 + 2]) / 2) / 2])
+    }
+    for (const [q, x, y, z] of moved) project(q, x, y, z)
+  }
 
   // One mesh per felt, felt texture mapped triplanar in the figure's space.
   const meshes: THREE.Mesh[] = []
@@ -361,6 +478,9 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
       }
       index.push(r)
     }
+    // Every triangle faces the way the field's normals do. After the vertices settle onto the field, a quad's winding
+    // chosen on the grid can face inwards; culled, it showed as a pale fleck (the board or the room seen through it).
+    for (let t = 0; t < index.length; t += 3) if (facing(p, n, index[t], index[t + 1], index[t + 2]) < 0) [index[t + 1], index[t + 2]] = [index[t + 2], index[t + 1]]
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3))
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3))
@@ -374,6 +494,8 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
     mesh.name = 'skin'
     mesh.userData.colour = colours[c]
     mesh.userData.skin = true
+    // A piece of felt under three cells' area is a speck, not a panel or a spine (scripts read it through the checks).
+    mesh.userData.stats = surfaceStats(geo, 3 * cell * cell)
     meshes.push(mesh)
     triangles += index.length / 3
   })
@@ -414,6 +536,19 @@ export function sewSkin(parts: SkinPart[], o: SkinOptions): Skin | null {
     }
   }
   const kinds = shapes.reduce<Record<string, number>>((a, { shape }) => ({ ...a, [shape.kind]: (a[shape.kind] ?? 0) + 1 }), {})
-  const notes = [`${shapes.length} parts (${Object.entries(kinds).map(([kk, n]) => `${n} ${kk}`).join(', ')}) in ${colours.length} felt${colours.length > 1 ? 's' : ''}, ${seams.length} seam stitches, ${nx}x${ny}x${nz} grid${skipped.length ? `; kept apart: ${skipped.join(', ')}` : ''}`]
-  return { meshes, fused: new Set(shapes.map(({ part }) => part.mesh)), notes, triangles }
+  const notes = [`${shapes.length} parts (${Object.entries(kinds).map(([kk, n]) => `${n} ${kk}`).join(', ')}) in ${colours.length} felt${colours.length > 1 ? 's' : ''}, ${seams.length} seam stitches, ${nx}x${ny}x${nz} grid${islands ? `, ${islands} speck(s) dropped` : ''}${skipped.length ? `; kept apart: ${skipped.join(', ')}` : ''}`]
+  const reach = (o: THREE.Vector3, d: THREE.Vector3, far: number) => {
+    const at = (t: number) => F(o.x + d.x * t, o.y + d.y * t, o.z + d.z * t)
+    if (at(0) >= 0) return null
+    // March out in half cells to the first crossing, then halve the bracket.
+    let lo = 0, hi = 0
+    for (let t = cell / 2; ; t += cell / 2) {
+      if (t > far) return null
+      if (at(t) >= 0) { hi = t; break }
+      lo = t
+    }
+    for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; if (at(m) < 0) lo = m; else hi = m }
+    return (lo + hi) / 2
+  }
+  return { meshes, fused: new Set(shapes.map(({ part }) => part.mesh)), notes, triangles, reach }
 }

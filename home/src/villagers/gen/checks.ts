@@ -49,6 +49,8 @@ export interface Measures {
   loose: Loose[]
   /** Where the role's mark sits against the head (./markPlace); null without a mark or a head. */
   place: MarkPlace | null
+  /** The sewn skin (./skin.ts surfaceStats), when it ran: felt meshes, their pieces, specks among them, and triangles facing inwards. */
+  skin?: { meshes: number; pieces: number; specks: number; inward: number }
 }
 
 /** The colour the part was made in (assemble.ts keeps it; the felt material shades its own). */
@@ -453,8 +455,11 @@ export interface MarkPlace {
   toque?: { offset: number; ratio: number }
   /** The tidier's plume: centre off the head's centre in x over the head's width. */
   plume?: { offset: number; parts: number }
-  /** The tutor's board (its widest marked part): its underside over the head's top, over the villager's height. */
-  board?: { lift: number; width: number }
+  /**
+   * The tutor's board (its widest marked part): its underside over the head's top, over the villager's height. With the
+   * sewn skin and the scripts' attachment pass, `rest`: how wide the board meets its fitted skullcap, over the board's width.
+   */
+  board?: { lift: number; width: number; rest?: number }
   /** The gardener's brim (its widest marked part): across, in its own axes, over the head's width. */
   brim?: { width: number }
 }
