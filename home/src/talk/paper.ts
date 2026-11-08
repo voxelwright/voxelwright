@@ -156,7 +156,8 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     // The page before, if one has turned: one dimmed italic line over a pencilled rule (all of it once opened).
     const before = el.querySelector<HTMLElement>('.before')
     g.textBaseline = 'alphabetic'
-    if (before && !before.hidden && !said) {
+    // Not on a phone, where a page is short and the slip has to keep clear of the face below it.
+    if (before && !before.hidden && !said && innerWidth >= 600) {
       g.font = `italic 16px ${BOOK}`
       g.fillStyle = 'rgba(107, 83, 64, 0.75)'
       let kept = wrap(g, before.textContent ?? '', w - 44)
@@ -275,7 +276,7 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     // Wrapped where the page wraps it, so the paper is as tall as its lines.
     let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', (words?.offsetWidth ?? w - 36) + 2)
     // Two lines on a phone, three elsewhere.
-    const keep = innerWidth >= 600 ? 3 : 2
+    const keep = innerWidth >= 600 || !el.classList.contains('clipped') ? 3 : 2
     if (lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
     lines.forEach((l, i) => g.fillText(l, x0 + (words?.offsetLeft ?? 18), y0 + top + px - 1 + i * px * 1.3))
   }

@@ -256,6 +256,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   /** Seconds since the last send, for the "sent" beat on the card. */
   let sent = 99
   let everSent = false
+  /** The pad shows the fresh sheet under a note just torn off; repainted with the address after. */
+  let tornFresh = false
   const wrap = (g: CanvasRenderingContext2D, s: string, width: number) => {
     const out: string[] = []
     let line = ''
@@ -300,6 +302,12 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     const to = hooks.addressee()
     const resting = !writing()
     g.textAlign = 'left'
+    // Just torn: a fresh sheet for a moment, then the address is written on it again (#42 paper climb: the
+    // address showing faintly under the note as it tore off read as a copy).
+    if (flight && sent < 0.45) {
+      tornFresh = true
+      return
+    }
     g.font = `italic 50px ${HAND}`
     const toW = g.measureText('to ').width
     g.fillStyle = 'rgba(70, 50, 36, 0.7)'
@@ -587,6 +595,10 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     }
     caret.classList.toggle('on', caretOn)
     sent += dt
+    if (tornFresh && sent >= 0.45) {
+      tornFresh = false
+      dirty = true
+    }
 
     // The torn note: up off the pad, then a curve to the reader's paws (or down onto the table).
     if (flight) {
@@ -620,7 +632,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
       // Half its size by the time it has folded and lifted; then its size on screen eases to its size where it
       // lands, so it is never a speck on the way (#42 paper climb: growing evenly in the world, it was).
       const away = pos.distanceTo(camAt)
-      const ratio = THREE.MathUtils.lerp((scl.x * THREE.MathUtils.lerp(1, 0.55, lifted)) / Math.max(0.2, start.distanceTo(camAt)), flight.size / Math.max(0.2, end.distanceTo(camAt)), s)
+      const ratio = THREE.MathUtils.lerp((scl.x * THREE.MathUtils.lerp(1, 0.7, lifted)) / Math.max(0.2, start.distanceTo(camAt)), flight.size / Math.max(0.2, end.distanceTo(camAt)), s)
       flyer.scale.setScalar(ratio * away)
       // Folded once while it lifts, the right third over, so the words still show on its way.
       hinge.rotation.y = -Math.PI * 0.985 * THREE.MathUtils.smoothstep(flight.t, 0.04, 0.22)

@@ -176,7 +176,11 @@ ruler.className = 'talk-ruler'
 ruler.setAttribute('aria-hidden', 'true')
 const fits = (text: string) => {
   ruler.textContent = text
-  return ruler.offsetHeight <= PAGE_LINES * TEXT_PX * LEADING + 2
+  // On a phone a page is four lines at the slip's own width, so a long reply never comes down over the
+  // speaker's face (#42 paper climb: six lines and the page before reached Moss's eyes).
+  const narrow = innerWidth < 600
+  ruler.style.width = `${narrow ? Math.min(TEXT_WIDTH, innerWidth - 76) : TEXT_WIDTH}px`
+  return ruler.offsetHeight <= (narrow ? 4 : PAGE_LINES) * TEXT_PX * LEADING + 2
 }
 
 /** A speech card anchored to a villager: a stitched paper card wearing its name tag. */
@@ -650,6 +654,8 @@ export default {
       return n.userData.cutaway ? !facing : facing
     }
     let subject: THREE.Object3D | null = null
+    /** The pose the camera was last sent to for a conversation. */
+    let shot: Pose | null = null
     const solid = (o: THREE.Object3D) => {
       if (!(o as THREE.Mesh).isMesh) return false
       // The held pad rides with the camera; it never blocks a shot. A cut-away wall blocks one only if it would stand in it.
@@ -781,11 +787,11 @@ export default {
       if (input?.flying) void input.landed().then(() => {
         if (partner !== m || mode !== 'talk') return
         m.v.beat()
-        view.focus(twoShot(m), 7)
+        view.focus(shot = twoShot(m), 7)
       })
       else {
         m.v.beat()
-        view.focus(twoShot(m), 7)
+        view.focus(shot = twoShot(m), 7)
       }
       const news = m.news
       if (news) clearNews(m)
@@ -824,7 +830,7 @@ export default {
 
     const toTable = () => {
       mode = 'table'
-      view.focus(tableShot(), 5)
+      view.focus(shot = tableShot(), 5)
       const names = seated.map((m) => m.name)
       openSlip(seated.length > 1 ? `Write to the table…` : `Write to ${names[0]}…`, tableChips(), seated.length > 1 ? 'table' : seated[0]!)
     }
@@ -1324,7 +1330,8 @@ export default {
         if (o.fade < 0.5 || !o.v.fig.root.visible) continue
         const f = headBox(o)
         if (f.x1 < 0 || f.x0 > innerWidth || f.y1 < 0 || f.y0 > innerHeight) continue
-        faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
+        // The whole head, ears and all: slips used to be allowed over its top (#42 paper climb).
+        faces.set(o, { l: f.x0, t: f.y0, w: f.x1 - f.x0, h: f.y1 - f.y0 })
       }
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
       for (const m of order) {
@@ -1393,8 +1400,13 @@ export default {
       } else if (pinned.on) {
         const w = myNote.offsetWidth, h = myNote.offsetHeight
         const blocked = [...taken, ...faces.values()]
-        // Clear of every slip with the tape on its top and of every whole head (face boxes leave out the top TAB).
-        const clear = (o: Omit<Spot, 'tail'>) => inside(o) && !blocked.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t - TAB < o.t + o.h + 6)
+        // Clear of every slip with the tape on its top and of every face; lying on the table it may cross the tip
+        // of a head behind it (an antenna or an ear), never the face.
+        const slips = taken
+        const heads = [...faces.values()].map((f) => ({ ...f, t: f.t + 14, h: f.h - 14 }))
+        const clear = (o: Omit<Spot, 'tail'>) => inside(o)
+          && !slips.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t - TAB < o.t + o.h + 6)
+          && !heads.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t < o.t + o.h)
         // Lying on the table top: the spot it lay on last if it is still clear, else the first clear one from the front.
         let spot: Omit<Spot, 'tail'> | undefined
         for (const i of [pinned.at, ...TABLE_SPOTS.keys()]) {
@@ -1432,17 +1444,26 @@ export default {
     const crowding = (m: Member) => {
       // Only once the camera is on the conversation: while it waits wide for a sent note, nobody is in its way.
       if (mode === 'room' || !view.focused || m === partner || m.seat) return false
+      // Judged from the shot the camera is going to, not where it is on the way (#42 paper climb: judged on the
+      // way, a passer-by began to fade as the camera arrived and glittered half-faded in the frame).
+      if (!shot) return false
       const subjects = mode === 'talk' && partner ? [partner] : seated
       if (!subjects.length) return false
+      probeCam.fov = stage.camera.fov
+      probeCam.aspect = stage.camera.aspect
+      probeCam.position.copy(shot.position)
+      probeCam.lookAt(shot.look)
+      probeCam.updateProjectionMatrix()
+      probeCam.updateMatrixWorld()
       mid.set(m.v.pos.x, m.v.fig.height * SCALE * 0.5, m.v.pos.z)
-      const d = mid.distanceTo(eye)
-      const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(eye)))
+      const d = mid.distanceTo(shot.position)
+      const nearest = Math.min(...subjects.map((o) => o.v.pos.distanceTo(shot!.position)))
       // Its middle or its head in the frame: close to the camera, a head can fill a corner while the body is below it.
-      m.v.fig.head.getWorldPosition(top).project(stage.camera)
-      mid.project(stage.camera)
+      m.v.fig.head.getWorldPosition(top).project(probeCam)
+      mid.project(probeCam)
       // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame. On a
       // tall screen half a body's width is more than half the frame, so the margin grows with it (#42 paper climb).
-      const half = (m.v.fig.height * SCALE * 0.5) / (d * Math.tan(THREE.MathUtils.degToRad(stage.camera.fov) / 2) * stage.camera.aspect)
+      const half = (m.v.fig.height * SCALE * 0.5) / (d * Math.tan(THREE.MathUtils.degToRad(probeCam.fov) / 2) * probeCam.aspect)
       const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < Math.max(1.5, 1 + half) && Math.abs(p.y) < 1.25
       const framed = inFrame(mid) || inFrame(top)
       // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
@@ -1516,8 +1537,10 @@ export default {
         // A passer-by much nearer the camera than the conversation fades out instead of filling the frame.
         const fadeGoal = crowding(m) ? 0 : 1
         if (m.fade !== fadeGoal) {
-          // Quickly: half-faded, the hashed alpha reads as noise (#42 paper climb).
-          m.fade = Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 16))
+          // Half-faded, the hashed alpha glitters: at once while the camera is still on its way (the move hides
+          // it), quickly once it is there (#42 paper climb).
+          const moving = shot !== null && eye.distanceTo(shot.position) > 0.4
+          m.fade = moving || Math.abs(fadeGoal - m.fade) < 0.01 ? fadeGoal : m.fade + (fadeGoal - m.fade) * (1 - Math.exp(-dt * 16))
           for (const { mat, base } of m.mats) mat.opacity = base * m.fade
           m.v.fig.root.visible = m.fade > 0.01
         }
@@ -1970,7 +1993,8 @@ function css() {
   .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; }
     .talk-card.mine:not(.clipped) { max-width: 158px; padding: 10px 12px 8px; }
-    .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 2; }
+    .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 3; }
+    .talk-card .before { display: none; }
     .talk-card.said .words { -webkit-line-clamp: 2; font-size: 15px; } .talk-card.said { max-width: min(250px, 66vw); }
     .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
   @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }
