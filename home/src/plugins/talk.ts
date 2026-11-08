@@ -935,6 +935,8 @@ export default {
     const inCharacter = (why: string) =>
       why === 'busy' ? "Hold on, I'm still thinking about the last thing."
         : why === 'failed' ? 'I lost my thread there. Could you say that again?'
+          // 403 (#40): this page's link opens only its own person's villager; nothing was sent.
+          : why === 'refused' ? "I can only hear my own person from their page, so that didn't reach me."
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */

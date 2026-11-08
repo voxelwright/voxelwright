@@ -300,7 +300,7 @@ for (const room of ['kitchen', 'living']) {
   const t0 = Date.now()
   await page.evaluate(() => document.querySelector('[data-entry="to-living"]').focus())
   await page.keyboard.press('Enter')
-  await page.waitForFunction(() => !window.village.kernel.root.get('rooms').moving, null, { timeout: 30000, polling: 100 })
+  await page.waitForFunction(() => window.village.kernel.root.get('rooms').current === 'living' && !window.village.kernel.root.get('rooms').moving, null, { timeout: 30000, polling: 50 }).catch(() => {})
   const ms = Date.now() - t0
   const after = await page.evaluate(() => ({ room: window.village.kernel.root.get('rooms').current, lounge: window.village.snapshot().plugins.active.includes('lounge') }))
   check('a plugin waiting forever does not hold the glide (living room within 3 s)', ms < 3000 && after.room === 'living' && after.lounge, { ms, after })

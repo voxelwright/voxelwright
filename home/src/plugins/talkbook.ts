@@ -943,6 +943,8 @@ export default {
         reply.from = 'note'
         voice.dataset.talk = result.why
         if (result.why === 'failed') reply.text = 'No answer came that time. Your line is kept; try again in a moment.'
+        // 403 (#40): this page's link opens only its own person's villager. Not kept to resend: it would be refused again.
+        else if (result.why === 'refused') reply.text = `${who.name}'s villager answers only on ${who.name}'s own page. Nothing was sent.`
         else {
           reply.text = result.why === 'busy' ? `${who.name}'s villager is still writing another answer. Your line is kept here, not sent.` : AWAY
           mine.unsent = true
