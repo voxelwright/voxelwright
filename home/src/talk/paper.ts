@@ -258,10 +258,12 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     }
     g.font = `20px ${HAND}`
     g.fillStyle = INK
-    let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', w - 40)
-    const keep = innerWidth < 600 ? 1 : 3
+    // Wrapped where the page wraps it, so the paper is as tall as its lines.
+    let lines = wrap(g, el.querySelector('.said')?.textContent ?? '', (words?.offsetWidth ?? w - 36) + 2)
+    // On a phone, one line in the round's stack, two clipped to a reply; three elsewhere.
+    const keep = innerWidth >= 600 ? 3 : el.classList.contains('clipped') ? 2 : 1
     if (lines.length > keep) lines = [...lines.slice(0, keep - 1), lines[keep - 1].replace(/\s*\S*$/, '') + ' …']
-    lines.forEach((l, i) => g.fillText(l, x0 + 20, y0 + top + 19 + i * 26))
+    lines.forEach((l, i) => g.fillText(l, x0 + (words?.offsetLeft ?? 18), y0 + top + 19 + i * 26))
   }
 
   const frame = (dt: number) => {

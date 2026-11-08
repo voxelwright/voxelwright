@@ -1428,8 +1428,10 @@ export default {
       // Its middle or its head in the frame: close to the camera, a head can fill a corner while the body is below it.
       m.v.fig.head.getWorldPosition(top).project(stage.camera)
       mid.project(stage.camera)
-      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame.
-      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < 1.5 && Math.abs(p.y) < 1.25
+      // A round body shows well past its centre: a head just beyond the edge still puts a cheek in frame. On a
+      // tall screen half a body's width is more than half the frame, so the margin grows with it (#42 paper climb).
+      const half = (m.v.fig.height * SCALE * 0.5) / (d * Math.tan(THREE.MathUtils.degToRad(stage.camera.fov) / 2) * stage.camera.aspect)
+      const inFrame = (p: THREE.Vector3) => p.z < 1 && Math.abs(p.x) < Math.max(1.5, 1 + half) && Math.abs(p.y) < 1.25
       const framed = inFrame(mid) || inFrame(top)
       // Half out of the frame at its edge, it is only a cut-off shape: let it go too.
       const cut = Math.abs(mid.x) > 0.86 || mid.y < -0.8
@@ -1954,7 +1956,7 @@ function css() {
   .talk-voice { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; }
     .talk-card.said .words { -webkit-line-clamp: 1; } .talk-card.said { max-width: calc(100vw - 48px); }
-    .talk-card.mine .words { -webkit-line-clamp: 1; } }
+    .talk-card.mine:not(.clipped) .words { -webkit-line-clamp: 1; } .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
   @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }
   `
 }
