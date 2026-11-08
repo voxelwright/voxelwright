@@ -253,8 +253,10 @@ try {
     // "go on" turns the page (the card is still gliding, so the click is dispatched rather than aimed).
     await page.evaluate(() => document.querySelector('[data-talk-card="sam"] .more').click())
     await page.waitForTimeout(300)
-    const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).opacity, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
-    check('a long reply turns its page only when it would overflow, and keeps the first page as a dimmed line above', firstPage.cards.sam && shown1.more && shown1.lines <= 7 && shown1.lines >= 5 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && Number(shown2.before) < 0.9 && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
+    const shown2 = await page.evaluate(() => ({ kept: window.village.talk.state().cards.sam.kept, before: getComputedStyle(document.querySelector('[data-talk-card="sam"] .before')).display, words: document.querySelector('[data-talk-card="sam"] .words').textContent }))
+    // The page before is kept (for the journal and the checks) but no longer written on the slip: a cut-off grey
+    // line over the answer read as noise to both scorers (#42 paper climb, round 5).
+    check('a long reply turns its page only when it would overflow, and keeps the first page without writing it over the next', firstPage.cards.sam && shown1.more && shown1.lines <= 7 && shown1.lines >= 5 && /[.!?]$/.test(shown1.text) && long.startsWith(shown1.text) && shown2.kept === shown1.text && shown2.before === 'none' && shown2.words.trim().length > 0 && long.includes(shown2.words.trim()), { shown1, shown2 })
 
     // Escape: back to chores and the room.
     await page.keyboard.press('Escape')

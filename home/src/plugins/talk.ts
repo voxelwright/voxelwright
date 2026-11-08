@@ -1919,6 +1919,8 @@ function css() {
   .talk-card .before { margin: 0 0 6px; padding-bottom: 5px; border-bottom: 1.5px dashed rgba(150, 100, 60, 0.28); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: italic 16px/1.35 ${BOOK}; color: #6b5340; opacity: 0.72; }
   .talk-card .before.open { white-space: pre-wrap; }
+  /* The page before is kept, not written over the next page: cut off in grey it read as noise (#42 paper climb). */
+  .talk-card .before { display: none; }
   .talk-card.mine { max-width: min(240px, calc(100vw - 32px)); padding: 14px 18px 12px; }
   .talk-card.mine, .talk-card.mine.shown { pointer-events: none; }
   .talk-card.mine::after { display: none; }
@@ -1994,7 +1996,7 @@ function css() {
   @media (max-width: 600px) { .talk-slip { right: 16px; bottom: 16px; }
     .talk-card.mine:not(.clipped) { max-width: 158px; padding: 10px 12px 8px; }
     .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 3; }
-    .talk-card .before { display: none; }
+
     .talk-card.said .words { -webkit-line-clamp: 2; font-size: 15px; } .talk-card.said { max-width: min(250px, 66vw); }
     .talk-card.mine.clipped .words { -webkit-line-clamp: 2; } }
   @media (prefers-reduced-motion: reduce) { .talk-card, .talk-slip, .talk-tag { transition: none; } .talk-card .cue i { animation: none; opacity: 0.8; } }

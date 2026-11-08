@@ -30,7 +30,7 @@ const SCALE = 2
  * Each villager's card drawn as a slip of torn paper where the card is, a little crooked and
  * turned toward its speaker, with a paper tab toward them and the name on a strip of tape in
  * their colour. The card itself stays in the page, unseen under the slip: it lays the words out,
- * takes clicks ("go on", the page before) and is what screen readers and the checks read.
+ * takes clicks ("go on") and is what screen readers and the checks read.
  * Painted in a canvas on the page, over the room: as a mesh in the room, bloom bleached it under
  * the lamp and temporal anti-aliasing ghosted its words (the #42 regroup's rounds 1 and 2).
  */
@@ -153,25 +153,6 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
     g.textBaseline = 'middle'
     g.fillText(who.name, 13, th / 2 + 1)
     g.restore()
-    // The page before, if one has turned: one dimmed italic line over a pencilled rule (all of it once opened).
-    const before = el.querySelector<HTMLElement>('.before')
-    g.textBaseline = 'alphabetic'
-    // Not on a phone, where a page is short and the slip has to keep clear of the face below it.
-    if (before && !before.hidden && !said && innerWidth >= 600) {
-      g.font = `italic 16px ${BOOK}`
-      g.fillStyle = 'rgba(107, 83, 64, 0.75)'
-      let kept = wrap(g, before.textContent ?? '', w - 44)
-      if (!before.classList.contains('open') && kept.length > 1) kept = [kept[0].replace(/\s*\S*$/, '') + ' …']
-      kept.forEach((l, i) => g.fillText(l, x0 + 22, y0 + before.offsetTop + 16 + i * 21.6))
-      const ruleY = y0 + before.offsetTop + before.offsetHeight - 2
-      g.strokeStyle = 'rgba(150, 100, 60, 0.3)'
-      g.setLineDash([5, 4])
-      g.beginPath()
-      g.moveTo(x0 + 22, ruleY)
-      g.lineTo(x1 - 22, ruleY)
-      g.stroke()
-      g.setLineDash([])
-    }
     // The words, in ink, where the card has them.
     const words = el.querySelector('.said')?.textContent ?? ''
     const top = el.querySelector<HTMLElement>('.words')?.offsetTop ?? 22
@@ -298,9 +279,8 @@ export function paperSlips(speaker: (person: string) => Speaker | null) {
       const w = el.offsetWidth, h = el.offsetHeight
       const words = el.querySelector('.said')?.textContent ?? ''
       const cue = (el.querySelector('.cue') as HTMLElement | null)?.hidden
-      const before = el.querySelector<HTMLElement>('.before')
       const more = (el.querySelector('.more') as HTMLElement | null)?.hidden
-      const key = [w, h, words, cue, more, before?.hidden, before?.className, before?.textContent, el.dataset.to, el.className, el.dataset.tail, el.style.getPropertyValue('--tail'), el.style.getPropertyValue('--reach')].join('|')
+      const key = [w, h, words, cue, more, el.dataset.to, el.className, el.dataset.tail, el.style.getPropertyValue('--tail'), el.style.getPropertyValue('--reach')].join('|')
       if (key !== slip.key) {
         slip.key = key
         paint(slip, el, who, w, h)
