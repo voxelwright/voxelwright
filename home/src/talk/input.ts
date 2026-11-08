@@ -693,6 +693,8 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
     get holding() {
       return held !== null && held.opening < 0
     },
+    /** Whose paws the note in flight is going to (none: the table, or nothing in flight). */
+    flyingTo: () => flight?.holder ?? null,
     /** Whose paws hold the landed note (none: it lies on the table). */
     heldBy: () => held?.holder ?? null,
     /** Where the landed note is on screen (its middle and width, CSS pixels), to open the slip from. */

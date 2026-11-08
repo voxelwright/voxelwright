@@ -997,7 +997,11 @@ export default {
       // Your note lands in the reader's paws first, and is read for a moment, before the answer opens out of it.
       const reading = Boolean(input?.flying)
       if (reading) {
+        // Its paws come up to catch the note as it comes near.
+        while (input!.flying && input!.state().sentAgo < 1.1) await frame()
+        if (input!.flying && input!.flyingTo() === m.v.fig.root) m.v.reading = true
         await input!.landed()
+        m.v.reading = false
         // It holds the note up in both paws and looks down at it, then thinks.
         if (input!.heldBy() === m.v.fig.root) {
           m.v.thinking = false
