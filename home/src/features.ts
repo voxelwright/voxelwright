@@ -16,3 +16,9 @@ export const TALK = talk === null || talk === 'npc'
  * An explicit ?talk= (npc or notebook) keeps its old meaning, so build mode stays off there unless ?build=1.
  */
 export const BUILD = build === '1' || (build === null && talk === null)
+/**
+ * The physics world (#74): off unless ?physics is given, so the default page and the perf gate
+ * load no solver. ?physics=panel also shows the world-rules panel in dev builds.
+ */
+export const PHYSICS = query.has('physics')
+export const PHYSICS_PANEL = import.meta.env.DEV && query.get('physics') === 'panel'
