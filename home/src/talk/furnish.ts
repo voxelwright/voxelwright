@@ -545,6 +545,16 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
       fading: fading.length,
       tableVisible: stage.scene.getObjectByName('table')?.visible ?? null,
       placed: group.children.filter((o) => o.name.startsWith('talk furnishing ') && o.name !== 'talk furnishing ghost').length,
+      /** Ghosts standing in the room, fading ones included. */
+      ghostsInRoom: group.children.filter((o) => o.name === 'talk furnishing ghost').length,
+      /** Each placed piece's scale, to two places. */
+      scales: group.children.filter((o) => o.name.startsWith('talk furnishing ') && o.name !== 'talk furnishing ghost').map((o) => Math.round(o.scale.x * 100) / 100),
+      /** Each parcel's footprint in the room, and the Tab entries that stand for them. */
+      parcelBoxes: parcels.filter((p) => p.parent).map((p) => {
+        const b = new THREE.Box3().setFromObject(p)
+        return { x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z, y1: b.max.y }
+      }),
+      parcelEntries: entries.list().filter((e) => e.id.startsWith('project-')).length,
       picked: picked ? { x: picked.point.x, y: picked.point.y, z: picked.point.z, object: picked.object?.name ?? null } : null,
     }),
     pickAt: (x: number, y: number, z: number, name?: string) => {
