@@ -146,6 +146,37 @@ Details and scores are in `home/README.md`, "Talk regroup".
   direction that wins the structural categories and loses on fixable rendering
   faults is worth adopting; fix the faults before judging it again.
 
+## Lessons from the paper climb (#42, November 8, 2026)
+
+Details and scores are in `home/README.md`, "Paper climb".
+
+- **Make the thing that disappears persist as one object.** Both models' worst categories
+  (motion, conversation) moved 2 to 3 points once the sent line stayed one object: torn off,
+  flown, caught in the reader's paws, then taped to the reply or lying on the table. Showing it
+  in a different form in each place (a header in the reply, a slip, a card) cost consistency
+  until it was one form everywhere.
+- **Pace a flight by the screen, not the room.** An object leaving a camera half a metre
+  away covers most of the screen in its first moments. Weight its path by inverse distance,
+  and scale its arc and size with distance, or the "0.8 s" frame shows it already arrived or
+  off the top of the frame.
+- **Judge transitions from where the camera is going.** A passer-by faded from the
+  in-between camera started fading as the camera arrived, and the still frame caught a
+  glittering half-fade. Decide from the target pose, and finish instantly while the camera
+  moves.
+- **A shared container reads as a chat log, even in paper.** In the regroup a single
+  "sheet passed round" lost to separate slips beside each speaker ("a chat log in paper
+  dress"), and a top-down camera lost faces. Keep each line near the one who said it.
+- **Use real replies before the last round.** Scripted lines fit the layout. Real
+  replies run to several pages, and they showed a reply covering the face on a phone and a
+  stepped-back slip showing only its last fragment.
+- **Weigh a single remark against the votes.** One scorer asked to keep the pad's
+  address after sending, and later to blank it. Two rounds asked for a grey lead line to go.
+  Settle a contradiction by moment (blank as it tears, the address once it settles), and act
+  on what both models or several rounds repeat.
+- **Freeze the reference before you edit.** A dev server serves the working tree, so a
+  reference capture taken while you edit picks up the edits. Capture it from a
+  `git archive` copy.
+
 ## Do not
 
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.

@@ -1,7 +1,7 @@
 // Headless proof of the richer notebook behind ?talk=notebook (#42 prototype).
 // Starts its own villager host with the stub agent (no model is called) and its
 // own dev server, both on a throwaway VILLAGE_ROOT, and stops them at the end.
-// Usage: node scripts/check-talk-notebook.mjs [--shot=dir]
+// Usage: node scripts/check-talk-notebook.mjs [--shot=dir] [--dev=5184] [--host=5193]
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -15,8 +15,9 @@ const shot = args.find((a) => a.startsWith('--shot='))?.slice(7)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'talk-notebook-'))
-const hostPort = 5193
-const devPort = 5184
+const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+const hostPort = Number(opt('host') ?? 5193)
+const devPort = Number(opt('dev') ?? 5184)
 const base = `http://localhost:${devPort}/`
 const checks = []
 const check = (name, pass, detail) => {
