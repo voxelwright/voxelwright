@@ -14,7 +14,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 
 async function shoot(query, file) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&${query}`)
+  await page.goto(`${base}?talk=off&build=0&cam=iso&q=high&${query}`)
   await page.waitForFunction(() => window.village && window.villageProps, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   const report = await page.evaluate(() => window.villageProps.loaded)
@@ -45,7 +45,7 @@ await Promise.all([0, 1].map(async () => {
 
 // Floor: no generation, a parsed command places a copy of the existing chair.
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-await page.goto(`${base}?cam=iso&q=high&props=none`)
+await page.goto(`${base}?talk=off&build=0&cam=iso&q=high&props=none`)
 await page.waitForFunction(() => window.village && window.villageProps, null, { timeout: 30000 })
 await page.evaluate(() => window.village.ready())
 await page.waitForTimeout(1500)

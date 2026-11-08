@@ -41,7 +41,7 @@ const TILE = 150
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 async function open(query) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}${noKit ? '&kit=0' : ''}${skin ? '' : '&skin=0'}`)
+  await page.goto(`${base}?talk=off&build=0&cam=iso&q=high&villager=gen&${query}${checksOff ? '&checks=off' : ''}${noKit ? '&kit=0' : ''}${skin ? '' : '&skin=0'}`)
   await page.waitForFunction(() => window.village && window.villagerGen, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villagerGen.loaded)

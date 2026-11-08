@@ -66,7 +66,7 @@ async function open(query, opts = {}) {
   page.on('pageerror', (e) => errors.push(String(e)))
   // #40: each page carries its own person's token in its link (the tab keeps it), never a shared one.
   const person = /[&?]person=([a-z]+)/.exec(query)?.[1] ?? 'alex'
-  await page.goto(`${base}?q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}#token=${hostCtx.villager.tokens[person]}`)
+  await page.goto(`${base}?talk=off&build=0&q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}#token=${hostCtx.villager.tokens[person]}`)
   await page.waitForFunction(() => window.villagerSetup && window.village, null, { timeout: 60000 })
   await page.waitForTimeout(400)
   return { context, page, errors }

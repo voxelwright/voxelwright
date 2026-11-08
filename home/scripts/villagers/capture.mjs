@@ -21,7 +21,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true, args:
 
 async function open(query) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  await page.goto(`${base}?cam=iso&q=high&villager=gen&${query}`)
+  await page.goto(`${base}?talk=off&build=0&cam=iso&q=high&villager=gen&${query}`)
   await page.waitForFunction(() => window.village && window.villagerGen, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   const report = await page.evaluate(() => window.villagerGen.loaded)
