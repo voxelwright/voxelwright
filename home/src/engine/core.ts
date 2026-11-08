@@ -13,6 +13,8 @@ export type Shape =
   | { kind: 'capsule'; halfHeight: number; radius: number }
   /** Along local y. */
   | { kind: 'cylinder'; halfHeight: number; radius: number }
+  /** Boxes fixed together in the body's frame (a piece of furniture from its parts' boxes). Not for toys. */
+  | { kind: 'compound'; boxes: { half: Vec3; at: Vec3; rotation: Quat }[] }
 
 export type Motion = 'static' | 'dynamic' | 'kinematic'
 
@@ -24,6 +26,12 @@ export interface BodySpec {
   velocity?: Vec3
   /** kg/m³; only dynamic bodies use it. */
   density: number
+  /** kg, in place of density × volume (furniture is mostly air, so its box would weigh far too much). */
+  mass?: number
+  /** Never tips or spins: only moves (a walking person). */
+  upright?: boolean
+  /** Added asleep: it waits to be touched (or woken) before the solver moves it. */
+  asleep?: boolean
   friction: number
   restitution: number
   gravityFactor?: number
@@ -95,6 +103,12 @@ export interface PhysicsCore {
   moveKinematic(id: BodyId, position: Vec3, rotation: Quat, dt: number): void
   setLinearDamping(id: BodyId, damping: number): void
   setGravityFactor(id: BodyId, factor: number): void
+  /** A body that touches nothing (false) or collides again (true). */
+  setSolid(id: BodyId, solid: boolean): void
+  /** Moves a static body to a new pose (its owner moved it); nothing is woken. */
+  setPose(id: BodyId, position: Vec3, rotation: Quat): void
+  /** kg. */
+  mass(id: BodyId): number
   sleeping(id: BodyId): boolean
   dispose(): void
 }

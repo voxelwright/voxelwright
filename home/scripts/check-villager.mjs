@@ -133,11 +133,12 @@ try {
     check('the API refuses a request without the token', bare.status === 401, bare.status)
     const launch = await fetch(`${base}villager/launch`)
     check('launch-route-gone: the dev server hands out no token', launch.status === 404 && !(await launch.text()).includes(tokenOf(host)), launch.status)
-    check('the link leaves the address bar, and the tab keeps the token', page.url() === base && (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === tokenOf(host), page.url())
+    check('the link leaves the address bar, and the tab keeps the token', new URL(page.url()).origin + '/' === base && !page.url().includes('#') && (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === tokenOf(host), page.url())
 
-    // Content Security Policy: page scripts (promoted plugins included) reach only this origin.
+    // Content Security Policy: page scripts (promoted plugins included) reach only this origin. Scripts may compile
+    // WebAssembly (the physics solver, #74; ?physics=0 pages may not), and nothing else is added to script-src.
     const csp = (await fetch(base)).headers.get('content-security-policy') ?? ''
-    check('csp-header: the page is served with default-src and connect-src limited to self', /default-src 'self'/.test(csp) && /connect-src 'self'(;|$)/.test(csp) && /script-src 'self'(;|$)/.test(csp), csp)
+    check('csp-header: the page is served with default-src and connect-src limited to self', /default-src 'self'/.test(csp) && /connect-src 'self'(;|$)/.test(csp) && /script-src 'self'( 'wasm-unsafe-eval')?(;|$)/.test(csp), csp)
     let leaks = 0
     const sink = createServer((req, res) => (leaks++, res.end('ok')))
     await new Promise((r) => sink.listen(0, '127.0.0.1', r))

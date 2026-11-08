@@ -93,6 +93,7 @@ function offsetPath(path: P[], d: number): P[] {
 export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const group = new THREE.Group()
   group.name = 'build outline'
+  group.userData.body = false // a proposal drawn on the floor, not a thing (src/physics/home.ts)
 
   // The flour: one canvas on a plane laid on the lawn, moved and scaled to fit the room.
   const [sheetCanvas, g] = canvas(PX, PX)

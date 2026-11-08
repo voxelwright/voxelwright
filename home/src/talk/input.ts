@@ -95,6 +95,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   const hud = new THREE.Group()
   hud.name = 'talk input'
   hud.userData.hud = true
+  hud.userData.body = false // rides with the camera, not a thing in the room (src/physics/home.ts)
   scene.add(hud)
   const mark = (o: THREE.Object3D) => {
     o.traverse((n) => {
@@ -199,6 +200,7 @@ export function alwaysOn(stage: Stage, entries: Entries, hooks: InputHooks) {
   hinge.add(flap)
   flyer.add(flat, hinge)
   flyer.name = 'talk note in flight'
+  flyer.userData.body = false
   flyer.visible = false
   scene.add(mark(flyer))
   // Its shadow crosses the floor under it, so the note is seen to be in the air.

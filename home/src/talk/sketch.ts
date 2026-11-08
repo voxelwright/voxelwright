@@ -490,6 +490,7 @@ export function sketcher(stage: Stage, input: AlwaysOn, furnish: Furnisher, hook
   const pins: Pin[] = []
   const world = new THREE.Group()
   world.name = 'talk sketches'
+  world.userData.body = false // pinned paper, not a thing that is pushed (src/physics/home.ts)
   scene.add(world)
   let making = false
   const results: { id: string; ok: boolean; why?: string; ms: number; item?: string }[] = []

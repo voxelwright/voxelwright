@@ -102,6 +102,7 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   const ghosted = new WeakSet<Job>()
   const group = new THREE.Group()
   group.name = 'talk furnishing'
+  group.userData.body = false // ghosts and parcels on their way, not things yet (src/physics/home.ts)
   stage.scene.add(group)
   const ghostMat = new THREE.MeshStandardMaterial({ color: '#fff3dc', emissive: '#ffd9a6', emissiveIntensity: 0.35, roughness: 1, transparent: true, opacity: 0.4 })
   const timings: Timing[] = []

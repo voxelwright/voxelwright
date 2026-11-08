@@ -14,22 +14,24 @@ export function loadJolt(): Promise<void> {
   return (loading ??= initJolt({ locateFile: () => wasmUrl } as object).then((j) => void (J = j)))
 }
 
-const NON_MOVING = 0, MOVING = 1
+/** Statics; things that move; and things that touch nothing for now (a person sitting down). */
+const NON_MOVING = 0, MOVING = 1, GHOST = 2
 
 export function createJolt(): PhysicsCore {
   if (!J) throw new Error('loadJolt() first')
   const settings = new J.JoltSettings()
   settings.mMaxWorkerThreads = 0
-  const pairs = new J.ObjectLayerPairFilterTable(2)
+  const pairs = new J.ObjectLayerPairFilterTable(3)
   pairs.EnableCollision(NON_MOVING, MOVING)
   pairs.EnableCollision(MOVING, MOVING)
   const bpStatic = new J.BroadPhaseLayer(0), bpMoving = new J.BroadPhaseLayer(1)
-  const bpi = new J.BroadPhaseLayerInterfaceTable(2, 2)
+  const bpi = new J.BroadPhaseLayerInterfaceTable(3, 2)
   bpi.MapObjectToBroadPhaseLayer(NON_MOVING, bpStatic)
   bpi.MapObjectToBroadPhaseLayer(MOVING, bpMoving)
+  bpi.MapObjectToBroadPhaseLayer(GHOST, bpMoving)
   settings.mObjectLayerPairFilter = pairs
   settings.mBroadPhaseLayerInterface = bpi
-  settings.mObjectVsBroadPhaseLayerFilter = new J.ObjectVsBroadPhaseLayerFilterTable(bpi, 2, pairs, 2)
+  settings.mObjectVsBroadPhaseLayerFilter = new J.ObjectVsBroadPhaseLayerFilterTable(bpi, 2, pairs, 3)
   const jolt = new J.JoltInterface(settings)
   J.destroy(settings)
   J.destroy(bpStatic)
@@ -114,17 +116,41 @@ export function createJolt(): PhysicsCore {
   listener.OnContactRemoved = () => {}
   system.SetContactListener(listener)
 
+  /** Convex radius must not exceed the smallest half extent (thin walls, flippers). */
+  const boxShape = (half: Vec3) => {
+    const he = new J.Vec3(...half)
+    const shape = new J.BoxShape(he, Math.min(0.05, 0.5 * Math.min(...half)))
+    J.destroy(he)
+    return shape
+  }
+
   function makeShape(spec: BodySpec) {
     const s = spec.shape
     let shape
+    if (s.kind === 'compound') {
+      const settings = new J.StaticCompoundShapeSettings()
+      for (const b of s.boxes) {
+        const box = boxShape(b.half)
+        box.SetDensity(spec.density)
+        settings.AddShapeShape(setV(b.at), setQ(b.rotation), box, 0)
+      }
+      const result = settings.Create()
+      if (result.HasError()) {
+        const why = result.GetError().c_str()
+        J.destroy(settings)
+        throw new Error(`a compound shape could not be built: ${why}`)
+      }
+      shape = result.Get()
+      // The body takes its own reference below; the settings let go of theirs.
+      shape.AddRef()
+      J.destroy(settings)
+      return shape
+    }
     if (s.kind === 'sphere') shape = new J.SphereShape(s.radius)
-    else if (s.kind === 'box') {
-      const he = new J.Vec3(...s.half)
-      // Convex radius must not exceed the smallest half extent (thin walls, flippers).
-      shape = new J.BoxShape(he, Math.min(0.05, 0.5 * Math.min(...s.half)))
-      J.destroy(he)
-    } else if (s.kind === 'capsule') shape = new J.CapsuleShape(s.halfHeight, s.radius)
-    else shape = new J.CylinderShape(s.halfHeight, s.radius, Math.min(0.05, 0.5 * Math.min(s.halfHeight, s.radius)))
+    else if (s.kind === 'box') shape = boxShape(s.half)
+    else if (s.kind === 'capsule') shape = new J.CapsuleShape(s.halfHeight, s.radius)
+    // A small rounding: a large one curves the side's lower edge, and a person's body would press a ball into the floor.
+    else shape = new J.CylinderShape(s.halfHeight, s.radius, Math.min(0.01, 0.5 * Math.min(s.halfHeight, s.radius)))
     shape.SetDensity(spec.density)
     return shape
   }
@@ -147,6 +173,12 @@ export function createJolt(): PhysicsCore {
       const cs = new J.BodyCreationSettings(shape, p, q, motion, spec.motion === 'static' ? NON_MOVING : MOVING)
       J.destroy(p)
       J.destroy(q)
+      if (spec.shape.kind === 'compound') shape.Release()
+      if (spec.mass !== undefined && spec.motion === 'dynamic') {
+        cs.mOverrideMassProperties = J.EOverrideMassProperties_CalculateInertia
+        cs.mMassPropertiesOverride.mMass = spec.mass
+      }
+      if (spec.upright) cs.mAllowedDOFs = J.EAllowedDOFs_TranslationX | J.EAllowedDOFs_TranslationY | J.EAllowedDOFs_TranslationZ
       cs.mFriction = spec.friction
       cs.mRestitution = spec.restitution
       cs.mGravityFactor = spec.gravityFactor ?? 1
@@ -157,7 +189,7 @@ export function createJolt(): PhysicsCore {
       const body = bi.CreateBody(cs)
       J.destroy(cs)
       const b = body.GetID()
-      bi.AddBody(b, J.EActivation_Activate)
+      bi.AddBody(b, spec.asleep ? J.EActivation_DontActivate : J.EActivation_Activate)
       if (spec.velocity) bi.SetLinearVelocity(b, setV(spec.velocity))
       const id = ids.length
       ids.push(b)
@@ -276,6 +308,17 @@ export function createJolt(): PhysicsCore {
     },
     setGravityFactor(id, factor) {
       bi.SetGravityFactor(bid(id), factor)
+    },
+    setSolid(id, solid) {
+      bi.SetObjectLayer(bid(id), solid ? MOVING : GHOST)
+    },
+    setPose(id, p, rot) {
+      bi.SetPositionAndRotation(bid(id), setR(p), setQ(rot), J.EActivation_DontActivate)
+    },
+    mass(id) {
+      const mp = body(id).GetMotionProperties()
+      const inv = mp ? mp.GetInverseMass() : 0
+      return inv > 0 ? 1 / inv : Infinity
     },
     sleeping(id) {
       return !bi.IsActive(bid(id))

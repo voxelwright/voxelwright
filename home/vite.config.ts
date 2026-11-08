@@ -28,14 +28,15 @@ const csp = [
 
 // #74 physics: the solver is WebAssembly (Jolt), and compiling wasm needs 'wasm-unsafe-eval'
 // in script-src. It allows WebAssembly.compile/instantiate only, not eval() or new Function().
-// Only a page opened with ?physics gets it; every other page keeps the policy above. This
+// Physics is on by default (src/features.ts), so every page gets it except one opened with
+// ?physics=0, which keeps the policy above. This
 // middleware is the one place either server (dev and preview) sets the policy (server.headers
 // would be applied after it, at send time, and overwrite the choice).
 const physicsCsp = csp.map((d) => (d === "script-src 'self'" ? "script-src 'self' 'wasm-unsafe-eval'" : d)).join('; ')
 const homeCsp = csp.join('; ')
 const policy: Connect.NextHandleFunction = (req, res, next) => {
   const url = new URL(req.url ?? '/', 'http://home')
-  res.setHeader('content-security-policy', url.searchParams.has('physics') ? physicsCsp : homeCsp)
+  res.setHeader('content-security-policy', url.searchParams.get('physics') === '0' ? homeCsp : physicsCsp)
   next()
 }
 const physicsPolicy: Plugin = {

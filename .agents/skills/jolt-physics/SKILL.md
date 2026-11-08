@@ -22,8 +22,9 @@ names). Check the IDL before assuming a C++ method is exposed.
   `/wasm` loads `jolt-physics.wasm.wasm` (1.98 MB raw, 735 KB gzip). Use `/wasm`
   in the browser. Multithread builds need SharedArrayBuffer, so cross-origin
   isolation (COOP/COEP), which the home does not have.
-- Both need `'wasm-unsafe-eval'` in the page CSP. `home/vite.config.ts` adds it only to
-  pages opened with `?physics` (one middleware owns the dev policy; `server.headers` is
+- Both need `'wasm-unsafe-eval'` in the page CSP. `home/vite.config.ts` adds it to every
+  page but one opened with `?physics=0` (physics is on by default since November 8, 2026;
+  one middleware owns the dev policy; `server.headers` is
   applied at send time and would overwrite a middleware's choice). A CSP change needs the
   seven-lens review (Sentinel).
 - Load the wasm in Vite with `initJolt({ locateFile: () => url })` and
@@ -95,9 +96,21 @@ names). Check the IDL before assuming a C++ method is exposed.
   `SetTargetVelocity` and `GetMotorSettings().mMax/MinForceLimit`; dynamic bodies get LinearCast.
 - Kinematic bodies make no contacts with statics, so a walking capsule reports no floor
   contact: footsteps come from the stride (`home/src/engine/world.ts`).
-- In the page: 50 bodies (the pinball table, the house's colliders and props, 3 villager
-  capsules) step in 0.2 ms median, 0.3 ms p95 per frame (performance.now resolution is
-  0.1 ms there), main thread.
+- In the page: 70 to 74 bodies (31 home things as compounds of 1279 boxes, the pinball
+  table, light toys, 3 villagers) step in 0.2 to 0.3 ms median, 0.4 ms p95 per frame
+  (performance.now resolution is 0.1 ms there), main thread. Statics on the non-moving layer
+  need no merged shape at this size.
+- `StaticCompoundShapeSettings.AddShapeShape` + `Create().Get()` builds a compound (also for
+  dynamic bodies); keep a reference (`AddRef`) before destroying the settings, `Release` after
+  `BodyCreationSettings` took its own. Mass: `mOverrideMassProperties =
+  EOverrideMassProperties_CalculateInertia`, `mMassPropertiesOverride.mMass = kg` (verified).
+- An upright walker: `mAllowedDOFs` = translation X|Y|Z, gravity factor 0, velocity set each
+  step with the change capped at F/m·h (a finite push). `SetObjectLayer` to a third layer that
+  collides with nothing turns contacts off and on. A capsule's or a cylinder's large convex
+  radius rounds its lower edge and presses a small ball into the floor: use a cylinder with
+  convex radius at most 1 cm.
+- Kinematic bodies pass through statics (no kinematic-static contacts): a walker that must be
+  stopped by a wall is dynamic.
 
 ## Not verified yet
 

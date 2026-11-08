@@ -63,6 +63,7 @@ export default {
     shade.position.y = 0.22
     // Its light is the living room's one lamp-light (lounge.ts): every point light costs every pixel of the house.
     lamp.add(base, shade)
+    lamp.userData.body = { motion: 'dynamic', material: 'brass', mass: 1.8 } // a light thing on the sideboard (src/physics/home.ts)
     group.add(lamp)
     // Framed family photos leaning at the back, and a stack of cookbooks.
     const frame = (kind: 'beach' | 'mountains', seed: number, w: number, h: number, x: number, colour: string) => {
@@ -88,6 +89,7 @@ export default {
       stack.add(b)
     }
     stack.position.set(0.6, H + 0.02, 0.02)
+    stack.userData.body = { motion: 'dynamic', material: 'maple', mass: 1.2 } // (src/physics/home.ts)
     group.add(stack)
     own(ctx, group)
   },

@@ -18,6 +18,7 @@ export default {
   apply(ctx: Context) {
     const room = new THREE.Group()
     room.name = 'lounge'
+    room.userData.body = { material: 'plaster' } // walls and floor (src/physics/home.ts)
     room.position.x = LIVING_X
     const { back, right, left, height } = LOUNGE
 

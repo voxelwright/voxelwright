@@ -9,11 +9,11 @@ All textures are painted in code in `src/paint.ts`.
 ```sh
 npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
-# Talk, villagers, the iso view, babble, music and build mode are on by default (#72; src/features.ts).
-# Opt-outs: ?talk=off (quiet seated kitchen), ?build=0 (no build mode), ?cam=seat (seated view).
+# Talk, villagers, the iso view, babble, music, build mode and physics are on by default (#72, #74; src/features.ts).
+# Opt-outs: ?talk=off (quiet seated kitchen), ?build=0 (no build mode), ?physics=0 (no physics, no wasm), ?cam=seat (seated view).
 # ?talk=npc and ?build=1 still work. Scripts that need the old plain page add ?talk=off&build=0.
-# Physics (#74): ?physics=1 adds the engine and the pinball table (Shift or arrow keys flip, Space or the down arrow plunges);
-# ?physics=panel also opens the rules panel (dev builds only).
+# Physics (#74): every thing in the home is a body; the pinball table plays with Shift or arrow keys (flip) and Space or the
+# down arrow (plunge); "make gravity like the moon" on the notepad tunes it; ?physics=panel opens the rules panel (dev builds only).
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
@@ -21,7 +21,7 @@ node scripts/check-navigation.mjs http://localhost:5181/ --build   # navigation 
 node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
-node scripts/check-physics.mjs        # physics (#74): ?physics=1, the pinball table, rules, talk-to-tune (stub host), villagers, step ms
+node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, step ms
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"

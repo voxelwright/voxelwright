@@ -13,7 +13,8 @@ import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
 import type { PlacementService } from './place'
-import { asksBuild, asksTheme, mayRoute } from '../talk/route-check'
+import { asksBuild, asksPhysics, asksTheme, mayRoute } from '../talk/route-check'
+import type { PhysicsAsk } from './physics'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
@@ -1874,6 +1875,18 @@ export default {
           if (routed.say) quip(me, routed.say)
           const r = await askTheme(text, me.person)
           quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change the look just now.")
+          return
+        }
+        case 'physics': {
+          // #74: how things move, tuned from the person's own words by the physics world; its note is shown as text.
+          furnish!.dismiss(guess)
+          if (!asksPhysics(text)) return send(text, undefined, me)
+          if (routed.say) quip(me, routed.say)
+          const request: PhysicsAsk = { text, person: me.person }
+          ctx.emit('village/physics-ask', request)
+          // No answer (physics off or not started yet), a world that stopped while the model answered, or a thrown error all say the same.
+          const r = request.answer ? await request.answer.catch((error) => (console.error('Village physics ask failed:', error), null)) : null
+          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
           return
         }
         case 'build': {

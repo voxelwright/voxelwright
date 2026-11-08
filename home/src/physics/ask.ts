@@ -8,8 +8,8 @@ import type { World } from '../engine/world'
 
 export type Asked =
   | { ok: true; note: string; rules: Rules; clamped: string[]; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
-  /** `link`: no token, or one from an earlier launch: open the latest link. */
-  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link'; reason?: string; ms: number }
+  /** `link`: no token, or one from an earlier launch: open the latest link. `gone`: the world stopped (physics unloaded) while the model answered. */
+  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'gone'; reason?: string; ms: number }
 
 const asked: ({ text: string } & Asked)[] = []
 
@@ -20,6 +20,8 @@ export async function ask(world: World, text: string, person = ME): Promise<Aske
   const ms = () => Math.round(performance.now() - t0)
   let out: Asked
   if (!r.ok) out = { ok: false, why: r.why, ms: ms() }
+  // The model call takes up to a minute; the physics plugin may have unloaded and freed the world meanwhile.
+  else if (world.disposed) out = { ok: false, why: 'gone', ms: ms() }
   else {
     // An answer that changes nothing (every field invalid or unknown, or the same as now) is not a change.
     const checked = checkRules(r.rules, world.rules)

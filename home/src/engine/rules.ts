@@ -26,6 +26,8 @@ export interface Rules {
   maxSpeed: number
   /** Collision steps per frame. */
   substeps: number
+  /** The most force (N) a walking villager pushes with: what needs more holds it back. */
+  strength: number
   /** Rules registered at runtime (registerRule): numbers only. */
   [added: string]: number | Gravity
 }
@@ -42,15 +44,16 @@ export const FIELDS: Record<string, Field> = {
   impact: { min: 0, max: 3, step: 0.01, about: 'multiplies impact sound and dust' },
   maxSpeed: { min: 1, max: 40, step: 0.1, about: 'speed limit, m/s' },
   substeps: { min: 1, max: 4, step: 1, about: 'collision steps per frame' },
+  strength: { min: 0, max: 2000, step: 1, about: 'how hard a villager pushes, N' },
 }
 
-export const NORMAL: Rules = { gravity: [0, -9.81, 0], timeScale: 1, bounce: 1, friction: 1, drag: 0.05, kick: 1, impact: 1, maxSpeed: 12, substeps: 1 }
+export const NORMAL: Rules = { gravity: [0, -9.81, 0], timeScale: 1, bounce: 1, friction: 1, drag: 0.05, kick: 1, impact: 1, maxSpeed: 12, substeps: 1, strength: 120 }
 
 /** Each preset says only what differs from NORMAL. */
 export const PRESETS: Record<string, { label: string; rules: Partial<Rules> }> = {
   normal: { label: 'Normal', rules: {} },
   moon: { label: 'Moon', rules: { gravity: [0, -1.62, 0], drag: 0 } },
-  super: { label: 'Super powers', rules: { kick: 3, bounce: 1.25, impact: 2, maxSpeed: 25 } },
+  super: { label: 'Super powers', rules: { kick: 3, bounce: 1.25, impact: 2, maxSpeed: 25, strength: 900 } },
   slow: { label: 'Slow motion', rules: { timeScale: 0.3 } },
 }
 

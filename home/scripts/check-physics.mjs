@@ -1,9 +1,14 @@
-// Headless proof of the physics world (#74): the policy (only ?physics pages may compile wasm),
-// the pinball table fired many times by a scripted plunger with zero tunnelling and bumpers
-// that score through their wires, the keys, the moon preset changing the ball's measured
-// gravity, talk-to-tune refusals and clamps leaving or checking the rules, villagers pushing
-// a light thing, and the physics step time with the table and villagers live. Starts its own
-// villager host (stub ruler, no model) and dev server on a throwaway VILLAGE_ROOT.
+// Headless proof of the physics world (#74): on by default and off with ?physics=0 (and only
+// then may the page not compile wasm), every thing in the home a body with a material, the
+// home at rest staying at rest, a placed thing gaining a body and losing it on undo, the
+// pinball table fired many times by a scripted plunger with zero tunnelling and bumpers that
+// score through their wires, the keys, the moon preset changing the ball's measured gravity,
+// talk-to-tune refusals and clamps leaving or checking the rules, a notepad line routed to
+// physics, villagers pushing a light thing and held back by a heavy one, the walls' body
+// following a moved wall, undo putting the home's own moving things back, a wood grain that fails
+// to paint leaving the rest, a held walker let go when physics unloads, and the physics step
+// time with the home, the table and villagers live. Starts its own villager host (stub ruler
+// and router, no model) and dev server on a throwaway VILLAGE_ROOT.
 // Usage: node scripts/check-physics.mjs [--dev=5383] [--host=5387] [--shots=40] [--shots-dir=dir]
 //   --agent=claude: talk-to-tune asks a real model once ("make it feel like the moon").
 import { spawn } from 'node:child_process'
@@ -71,23 +76,46 @@ const BOUNDS = { min: [-0.26, 0, -0.52], max: [0.26, 0.052, 0.52] }
 const TOUCH = { min: BOUNDS.min.map((v) => v + R), max: BOUNDS.max.map((v) => v - R) }
 
 try {
-  // ── The policy: only a ?physics page may compile WebAssembly ──
+  // ── The policy: every page may compile WebAssembly but one opened with ?physics=0 ──
   const policy = async (q) => (await fetch(`${base}${q}`)).headers.get('content-security-policy') ?? ''
-  const plain = await policy(''), withPhysics = await policy('?physics=1')
-  check("Only a ?physics page gets 'wasm-unsafe-eval', and nothing else changes", !plain.includes('wasm') && withPhysics.includes("script-src 'self' 'wasm-unsafe-eval'") && withPhysics.replace(" 'wasm-unsafe-eval'", '') === plain, { plain, withPhysics })
+  const plain = await policy(''), off = await policy('?physics=0')
+  check("Every page gets 'wasm-unsafe-eval' but a ?physics=0 page, and nothing else changes", !off.includes('wasm') && plain.includes("script-src 'self' 'wasm-unsafe-eval'") && plain.replace(" 'wasm-unsafe-eval'", '') === off, { plain, off })
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
 
-  await open(page, '?talk=off&build=0&q=low')
+  await open(page, '?physics=0&talk=off&build=0&q=low')
   const quiet = await page.evaluate(() => ({ physics: Boolean(window.village.physics), wasm: performance.getEntriesByType('resource').some((r) => /jolt|\.wasm/.test(r.name)) }))
-  check('The default page loads no physics and no wasm', !quiet.physics && !quiet.wasm, quiet)
+  check('A ?physics=0 page loads no physics and no wasm', !quiet.physics && !quiet.wasm, quiet)
 
-  // ── The table, fired by a scripted plunger ──
-  await open(page, '?physics=1&talk=off&build=0&q=low')
+  // ── On by default: the table, fired by a scripted plunger ──
+  await open(page, '?talk=off&build=0&q=low')
   await physics(page)
+  check('Physics is on by default (no ?physics in the address)', await page.evaluate(() => Boolean(window.village.physics?.stats().bodies)), null)
   report.loadMs = await page.evaluate(() => window.village.physics.loadMs)
+  // ── The home at rest: woken whole (gravity changes wake every moving body), nothing moves or is put back ──
+  const rest = await page.evaluate(() => {
+    const p = window.village.physics
+    const keys = p.home.list().filter((t) => t.motion === 'dynamic').map((t) => t.key).concat(p.engine.world.keys().filter((k) => k.startsWith('house/') && p.thing(k).motion === 'dynamic'))
+    const before = Object.fromEntries(keys.map((k) => [k, p.thing(k).position]))
+    const n = p.events().length
+    p.setRules({ gravity: [0, -9.8, 0] })
+    p.setRules({ gravity: [0, -9.81, 0] })
+    p.advance(4)
+    const distance = (from) => Object.fromEntries(keys.map((k) => [k, +Math.hypot(...p.thing(k).position.map((x, i) => x - from[k][i])).toFixed(4)]))
+    const settled = distance(before)
+    // Woken a second time, what settled stays.
+    const after = Object.fromEntries(keys.map((k) => [k, p.thing(k).position]))
+    p.setRules({ gravity: [0, -9.8, 0] })
+    p.setRules({ gravity: [0, -9.81, 0] })
+    p.advance(4)
+    const again = distance(after)
+    const clamped = p.events().slice(n).filter((e) => e.kind === 'clamped').map((e) => e.thing)
+    return { keys: keys.length, home: p.home.list().filter((t) => t.motion === 'dynamic').map((t) => t.key), settled, again, clamped }
+  })
+  // Drawn things touch or overlap a little (a high chair's tray over the table): woken, they settle that much, once.
+  check('The home at rest stays at rest: woken whole, no moving thing settles more than 3 cm, none is put back, and woken again none moves over 2 mm', rest.home.length >= 2 && Object.values(rest.settled).every((d) => d < 0.03) && Object.values(rest.again).every((d) => d < 0.002) && !rest.clamped.length, rest)
   const shots = await page.evaluate(([SHOTS, BOUNDS]) => {
     const p = window.village.physics
     p.preset('normal')
@@ -199,6 +227,7 @@ try {
     check('A hostile talk answer is applied only as checked, clamped data, in one rules event', hostile.r.ok && hostile.rulesEvents === 1 && hr.gravity[0] === 30 && hr.timeScale === 0.1 && hr.kick === 4 && hr.maxSpeed === 1 && Number.isInteger(hr.substeps) && hostile.r.clamped.length >= 5 && !('eval' in hr), { clamped: hostile.r.clamped, rules: hr })
     const moonTalk = await tune('make it feel like the moon')
     check('"Make it feel like the moon" sets moon gravity and keeps the rest', moonTalk.r.ok && JSON.parse(moonTalk.after).gravity[1] === -1.62 && moonTalk.rulesEvents === 1, { note: moonTalk.r.note, after: moonTalk.after })
+    await page.evaluate(() => window.village.physics.preset('normal'))
   } else {
     const t = await tune('make it feel like the moon')
     report.realModel = t
@@ -349,20 +378,212 @@ try {
     const keys = rules.ruleKeys().length
     return { taken, seeded, zest, kept, again: engine.registerRule('lift', { min: 0, max: 20, step: 0.1, default: 0, about: 'again' }), jelly: mats.material('jelly') ?? null, lifter: kinds.gadgetKind('lifter') ?? null, preset: Boolean(rules.PRESETS.moon), keys }
   })
-  check('A rule registered into a running world reads as its default there; unloading drops runtime rules, materials and kinds so the next world starts from the built-ins', typeof registries.taken === 'string' && registries.seeded === null && registries.zest === 2 && registries.kept.zest === 5 && registries.again === null && registries.jelly === null && registries.lifter === null && registries.keys === 9 && registries.preset, registries)
+  check('A rule registered into a running world reads as its default there; unloading drops runtime rules, materials and kinds so the next world starts from the built-ins', typeof registries.taken === 'string' && registries.seeded === null && registries.zest === 2 && registries.kept.zest === 5 && registries.again === null && registries.jelly === null && registries.lifter === null && registries.keys === 10 && registries.preset, registries)
 
   const kept = await page.evaluate(() => { const p = window.village.physics; p.preset('moon'); p.reset(); return p.rules().gravity[1] })
   check('Tuning survives a reset', kept === -1.62, kept)
+
+  // Wood is painted one texture per task after starting: one that throws is logged, and the rest still paint.
+  const painter = await browser.newPage()
+  const painterErrors = []
+  painter.on('pageerror', (e) => painterErrors.push(String(e)))
+  await open(painter, '?talk=off&build=0&q=low')
+  const painted = await painter.evaluate(async () => {
+    const { oneByOne } = await import('/src/physics/start.ts')
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+    const ran = []
+    const paint = oneByOne(() => false)
+    paint(() => ran.push(1))
+    paint(() => { throw new Error('a grain that could not be painted') })
+    paint(() => ran.push(3))
+    await wait(50)
+    paint(() => ran.push(4))
+    await wait(50)
+    return ran
+  })
+  await painter.close()
+  check('A wood grain that throws while painting is logged and the others still paint, then and later', painted.join() === '1,3,4' && !painterErrors.length, { painted, errors: painterErrors.slice(0, 2) })
   await page.evaluate(() => window.village.physics.preset('normal'))
   check('No page errors on the physics page', !errors.length, errors.slice(0, 5))
 
-  // ── Villagers as bodies, and the step time with the table and villagers live ──
+  // ── The default page: every thing a body, villagers as bodies, placing, the notepad, and the step time ──
   const live = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const liveErrors = []
   live.on('pageerror', (e) => liveErrors.push(String(e)))
-  await open(live, '?physics=1&q=low')
+  await open(live, '?q=low')
   await physics(live)
   await live.waitForFunction(() => window.village.physics.stats().followers > 0, null, { timeout: 20_000 }).catch(() => {})
+  const home = await live.evaluate(() => {
+    const p = window.village.physics
+    p.home.scan()
+    const scene = window.village.kernel.root.get('stage').scene
+    let meshes = 0
+    const why = {}, without = [], notThings = new Set()
+    scene.traverse((m) => {
+      if (!m.isMesh) return
+      meshes++
+      const b = p.home.bodyOf(m)
+      const k = 'key' in b ? 'part of a thing' : b.none
+      why[k] = (why[k] ?? 0) + 1
+      if (k === 'no body') without.push(m.name || m.parent?.name || m.type)
+      if (k === 'not a thing') { let o = m; while (o.parent && o.userData.body !== false) o = o.parent; notThings.add(o.name) }
+    })
+    const list = p.home.list()
+    return {
+      meshes, why, without, notThings: [...notThings],
+      things: list.length, static: list.filter((t) => t.motion === 'static').length, dynamic: list.filter((t) => t.motion === 'dynamic').map((t) => t.key), boxes: list.reduce((n, t) => n + t.parts, 0),
+      noMaterial: list.filter((t) => !p.engine.world.material(t.material)).map((t) => t.key),
+      noBody: list.filter((t) => !p.thing(t.key)).map((t) => t.key),
+      materials: [...new Set(list.map((t) => t.material))],
+      stats: p.stats(), homeMs: p.homeMs, scan: p.home.stats().scanMs,
+    }
+  })
+  report.home = { meshes: home.meshes, why: home.why, things: home.things, static: home.static, dynamic: home.dynamic.length, boxes: home.boxes, bodies: home.stats.bodies, staticBodies: home.stats.static, dynamicBodies: home.stats.dynamic, firstReadMs: home.homeMs, scanMs: home.scan }
+  check('Every thing in the home is a body with a material: each mesh is part of one, or is a villager, a toy, scenery outside, see-through, or says it is not a thing', home.without.length === 0 && !home.noMaterial.length && !home.noBody.length && home.why['part of a thing'] > 300 && home.things > 25 && home.dynamic.length >= 2, home)
+
+  // A placed thing gains a body where the plan puts it, loses it on undo and gets it back on redo.
+  await live.waitForFunction(() => window.villagePlace?.history() && window.villagePlace.building() === 0, null, { timeout: 20_000 })
+  const placed = await live.evaluate(async () => {
+    const p = window.village.physics, vp = window.villagePlace
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+    const placing = vp.begin('crate')
+    await wait(300)
+    placing.confirm()
+    const d = await Promise.race([placing.done, wait(5000).then(() => ({ status: 'timeout' }))])
+    if (d.status !== 'confirmed') {
+      placing.cancel()
+      return { d }
+    }
+    await wait(50)
+    const body = () => p.home.list().find((t) => t.furniture === d.furnitureId) ?? null
+    const holder = window.village.kernel.root.get('stage').scene.getObjectByName('placed things').children.find((h) => h.userData.furniture === d.furnitureId)
+    const at = holder.getWorldPosition(holder.position.clone())
+    const first = body()
+    const where = first && p.thing(first.key).position
+    const h = vp.history()
+    await h.undo()
+    await wait(50)
+    const undone = body()
+    await h.redo()
+    await wait(50)
+    const redone = body()
+    return { d: d.status, first, where, holder: [at.x, at.y, at.z], undone, redone, redoneAt: redone && p.thing(redone.key).position }
+  })
+  check('A placed thing gains a static body where the plan puts it, loses it on undo and gets it back on redo', placed.d === 'confirmed' && placed.first?.motion === 'static' && Math.hypot(...placed.where.map((v, i) => v - placed.holder[i])) < 1e-3 && placed.undone === null && placed.redone?.key === placed.first.key && Math.hypot(...placed.redoneAt.map((v, i) => v - placed.holder[i])) < 1e-3, placed)
+
+  // A wall moved and undone: the walls' body follows within a frame or two of the build mode rebuilding them, not at the next
+  // periodic scan.
+  const walls = await live.evaluate(async () => {
+    const p = window.village.physics, h = window.villagePlace.history()
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+    const key = p.home.list().find((t) => t.name === 'build')?.key
+    if (!key) return { key: null }
+    const outline = () => p.thing(key)?.shape
+    const before = outline()
+    await h.commit([{ op: 'moveWall', wallId: 'living.right', by: 0.5 }])
+    await wait(200)
+    const moved = outline()
+    await h.undo()
+    await wait(200)
+    const undone = outline()
+    return { key, before, moved, undone }
+  })
+  const numbers = (o) => JSON.stringify(o ?? null).match(/-?[\d.]+(e-?\d+)?/g)?.map(Number) ?? []
+  const same = (a, b) => { const x = numbers(a), y = numbers(b); return x.length === y.length && x.every((v, i) => Math.abs(v - y[i]) < 1e-3) }
+  check('A wall moved and then undone: the walls\' body outline follows each within 200 ms', walls.key && !same(walls.moved, walls.before) && same(walls.undone, walls.before), walls)
+
+  // Undo of an experiment puts back the home's own moving things (a high chair, a lamp) too, not only toys.
+  const homeUndo = await live.evaluate(() => {
+    const p = window.village.physics
+    const keys = p.home.list().filter((t) => t.motion === 'dynamic').map((t) => t.key)
+    const at = () => Object.fromEntries(keys.map((k) => [k, p.thing(k).position]))
+    const far = (a, b) => Math.max(...keys.map((k) => Math.hypot(...a[k].map((v, i) => v - b[k][i]))))
+    const snap = p.snapshot()
+    const before = at()
+    p.setRules({ gravity: [9, -9.81, 0] })
+    p.advance(1)
+    const pushed = far(at(), before)
+    const r = p.restore(snap)
+    const restored = far(at(), before)
+    return { keys, saved: keys.filter((k) => k in snap.things), pushed: +pushed.toFixed(3), restored: +restored.toFixed(5), clamped: r.clamped }
+  })
+  check('A snapshot restores the home\'s moving things (bound bodies) after sideways gravity shoved them', homeUndo.keys.length >= 2 && homeUndo.saved.length === homeUndo.keys.length && homeUndo.pushed > 0.05 && homeUndo.restored < 1e-3 && !homeUndo.clamped.length, homeUndo)
+
+  // A villager walking into a heavy sofa is held back by it; walking into a felt ball pushes it along.
+  const trial = await live.evaluate(() => {
+    const p = window.village.physics
+    const scene = window.village.kernel.root.get('stage').scene
+    let fig = null
+    scene.traverse((o) => { if (!fig && typeof o.userData.villagerId === 'string') fig = o })
+    if (!fig) return { fig: false }
+    const walker = fig.clone(true)
+    walker.traverse((o) => { delete o.userData.villagerId; delete o.userData.held })
+    walker.userData.body = false
+    scene.add(walker)
+    // In the open in front of the house, on its own floor.
+    p.engine.addToy({ id: 'trial', label: 'Trial', frame: { at: [0, 0, 12], yaw: 0, tilt: 0 }, inputs: {}, wires: [], gadgets: [], parts: [
+      { id: 'floor', shape: { kind: 'box', half: [3, 0.1, 3] }, material: 'maple', at: [0, -0.1, 0], hidden: true },
+      { id: 'sofa', shape: { kind: 'box', half: [0.9, 0.4, 0.45] }, material: 'walnut', motion: 'dynamic', mass: 80, at: [0, 0.4, -1] },
+      { id: 'ball', shape: { kind: 'sphere', radius: 0.08 }, material: 'felt', motion: 'dynamic', at: [1.8, 0.08, -1] },
+    ] })
+    // Walkers of a set mass, whichever villager the scene lists first: its body's mass grows in step with its height.
+    const weigh = (s) => {
+      walker.scale.set(1, s, 1)
+      walker.updateMatrixWorld(true)
+      p.follow('trial/weigh', walker)
+      const m = p.thing('trial/weigh').mass
+      p.unfollow('trial/weigh')
+      return m
+    }
+    const [m1, m2] = [weigh(1), weigh(2)]
+    const walk = (x, thing, mass) => {
+      const key = `trial/walker-${thing}`
+      walker.scale.set(1, 1 + (mass - m1) / (m2 - m1), 1)
+      walker.position.set(x, 0, 12.3)
+      walker.updateMatrixWorld(true)
+      p.follow(key, walker)
+      p.advance(0.2)
+      const start = p.thing(`trial/${thing}`).position
+      let heldSteps = 0
+      const track = []
+      // At walking pace (0.8 m/s) towards -z for 3 s, stopping while held, as a villager's walk does (src/villagers/cast.ts).
+      for (let i = 0; i < 180; i++) {
+        if (p.held(key)) heldSteps++
+        else walker.position.z -= 0.8 / 60
+        walker.updateMatrixWorld(true)
+        p.advance(1 / 60)
+        if (i % 15 === 0) track.push([+walker.position.z.toFixed(2), +p.thing(key).position[2].toFixed(3), +p.thing(`trial/${thing}`).position[2].toFixed(3), p.held(key) ? 1 : 0])
+      }
+      const end = p.thing(`trial/${thing}`).position
+      const body = p.thing(key)
+      p.unfollow(key)
+      return { moved: +Math.hypot(...end.map((v, i) => v - start[i])).toFixed(3), endZ: +end[2].toFixed(3), heldSteps, track, bodyZ: +body.position[2].toFixed(3), radius: body.shape.radius, mass: +body.mass.toFixed(1), figureZ: +walker.position.z.toFixed(3) }
+    }
+    // A light and a heavy villager each walk into the sofa and into the ball (the heavy one gathers speed again more slowly after the bump).
+    const out = { rules: p.rules() }
+    for (const [who, mass] of [['light', 47], ['heavy', 57]]) {
+      p.place('trial/sofa', [0, 0.4, -1])
+      p.place('trial/ball', [1.8, 0.08, -1])
+      p.advance(0.2)
+      out[who] = { sofa: walk(0, 'sofa', mass), ball: walk(1.8, 'ball', mass) }
+    }
+    // The same walk with super strength (the `strength` rule, as "super powers" sets it) shoves the sofa.
+    p.place('trial/sofa', [0, 0.4, -1])
+    p.setRules({ strength: 900 })
+    out.strongSofa = walk(0, 'sofa', 57)
+    p.preset('normal')
+    walker.removeFromParent()
+    return out
+  })
+  report.villagerPush = trial
+  // The sofa's front face is 0.45 in front of its centre: the walker's body stays on that side of it.
+  const heldInFront = (sofa) => sofa.track.filter(([, , , held]) => held).every(([, body, at]) => body - sofa.radius > at + 0.45 - 0.03)
+  const pushes = (w, mass) => w && Math.abs(w.sofa.mass - mass) < 0.5 && Math.abs(w.ball.mass - mass) < 0.5 && w.sofa.moved < 0.1 && w.sofa.heldSteps > 30 && heldInFront(w.sofa) && w.ball.moved > 0.5 && w.ball.heldSteps === 0
+  for (const [who, mass] of [['light', 47], ['heavy', 57]]) {
+    check(`A ${mass} kg villager (\`strength\` 120 N) walking into an 80 kg sofa is held back (its body stays in front of it and the walker is told it is held, then squeezes past; the sofa moves under 10 cm in all) and pushes a felt ball along (over 0.5 m, never held)`, pushes(trial[who], mass), trial[who])
+  }
+  check('With strength 900 N the same walk shoves the sofa over 30 cm', trial.strongSofa?.moved > 0.3, trial.strongSofa)
+
   const pushed = await live.evaluate(async () => {
     const p = window.village.physics
     // A felt ball put where a villager stands is pushed out of the way by its body.
@@ -375,7 +596,33 @@ try {
     const end = p.thing('house/felt-ball').position
     return { villagers: p.stats().followers, moved: Math.hypot(end[0] - start[0], end[2] - start[2]), start, end }
   })
-  check('Villagers are kinematic bodies that push a light thing out of their way', pushed.villagers > 0 && pushed.moved > 0.05, pushed)
+  check('Villagers are bodies that push a light thing out of their way', pushed.villagers > 0 && pushed.moved > 0.05, pushed)
+
+  // ── The notepad: a line about how things move goes to the physics world (stub router and ruler) ──
+  {
+    const said = async (line) => {
+      const n = await live.evaluate(() => window.village.physics.asked().length)
+      await live.keyboard.press('Escape')
+      await live.keyboard.type(line, { delay: 0 })
+      await live.keyboard.press('Enter')
+      let s
+      // A real router and ruler take seconds each.
+      for (let i = 0; i < (agent === 'stub' ? 100 : 600); i++) {
+        s = await live.evaluate((n) => ({ routes: window.village.talk.state().input.routes, asked: window.village.physics.asked().slice(n), rules: window.village.physics.rules() }), n)
+        if (s.asked.length) break
+        await live.waitForTimeout(100)
+      }
+      return { route: s.routes.at(-1), asked: s.asked.at(-1), rules: s.rules }
+    }
+    const bouncy = await said('make everything bouncy')
+    const moon = await said('make gravity like the moon')
+    await live.evaluate(() => window.village.physics.preset('normal'))
+    if (agent === 'stub') check('Notepad: "make everything bouncy" and "make gravity like the moon" are routed to physics and change the rules (stub router and ruler)', bouncy.route?.route === 'physics' && bouncy.asked?.ok && bouncy.rules.bounce === 1.3 && moon.route?.route === 'physics' && moon.asked?.ok && moon.rules.gravity[1] === -1.62, { bouncy, moon })
+    else {
+      report.realNotepad = { bouncy, moon }
+      check('Notepad with a real router and ruler: "make everything bouncy" raises bounce and "make gravity like the moon" lowers gravity, both routed to physics', bouncy.route?.route === 'physics' && bouncy.asked?.ok && bouncy.rules.bounce > 1 && moon.route?.route === 'physics' && moon.asked?.ok && moon.rules.gravity[1] > -5, { bouncy, moon })
+    }
+  }
   const steps = await live.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 4000))
     const e = window.village.physics.events().filter((x) => x.kind === 'step')
@@ -399,13 +646,49 @@ try {
         await new Promise((r) => setTimeout(r, 250))
       }
     }
-    return { ...p.stats(), shots }
+    const villagerImpacts = p.events().filter((e) => e.kind === 'impact' && [e.a, e.b].some((k) => k.startsWith('villager/')) && [e.a, e.b].some((k) => k.startsWith('home/'))).length
+    return { ...p.stats(), shots, villagerImpacts }
   })
   report.stepMs = timing
-  check('Physics per frame stays small with the table and villagers live (frame median under 1 ms, p95 under 2 ms)', timing.frameMs.median < 1 && timing.frameMs.p95 < 2 && timing.followers > 0, timing)
+  check('Physics per frame stays small with the whole home, the table and villagers live (frame median under 1 ms, p95 under 2 ms)', timing.frameMs.median < 1 && timing.frameMs.p95 < 2 && timing.followers > 0 && timing.bodies > 50, timing)
+  check('Villagers going about their day do not keep knocking into the home (under 40 villager-furniture impacts in the last 500 events)', timing.villagerImpacts < 40, timing.villagerImpacts)
   check('No page errors with villagers and physics', !liveErrors.length, liveErrors.slice(0, 5))
+  // Physics unloaded while the model answers (a call takes up to a minute): the ask says the world is gone instead of throwing.
+  // Last, since it unloads physics; the shots below reload the page.
+  // A walker held back by the sofa as physics unloads walks on: nothing is left saying it is held.
+  const unloaded = await live.evaluate(async () => {
+    const p = window.village.physics
+    const scene = window.village.kernel.root.get('stage').scene
+    let fig = null
+    scene.traverse((o) => { if (!fig && typeof o.userData.villagerId === 'string') fig = o })
+    const walker = fig.clone(true)
+    walker.traverse((o) => { delete o.userData.villagerId; delete o.userData.held })
+    walker.userData.body = false
+    scene.add(walker)
+    p.preset('normal')
+    p.place('trial/sofa', [0, 0.4, -1])
+    walker.position.set(0, 0, 12.3)
+    walker.updateMatrixWorld(true)
+    p.follow('trial/walker-unload', walker)
+    p.advance(0.2)
+    for (let i = 0; i < 180 && !p.held('trial/walker-unload'); i++) {
+      walker.position.z -= 0.8 / 60
+      walker.updateMatrixWorld(true)
+      p.advance(1 / 60)
+    }
+    const heldBefore = walker.userData.held === true
+    const asking = p.ask('make gravity like the moon')
+    const unloaded = await window.village.kernel.unload('physics')
+    const r = await asking.then((r) => ({ ok: r.ok, why: r.why }), (e) => ({ threw: String(e) }))
+    const heldAfter = walker.userData.held ?? null
+    walker.removeFromParent()
+    return { unloaded, r, handle: Boolean(window.village.physics), heldBefore, heldAfter }
+  })
+  await live.waitForTimeout(200)
+  check('Physics unloaded during a talk-to-tune call: the ask ends as "gone", not a throw, and nothing errors on the page', unloaded.unloaded && unloaded.r.ok === false && unloaded.r.why === 'gone' && !unloaded.handle && !liveErrors.length, { ...unloaded, errors: liveErrors.slice(0, 3) })
+  check('Physics unloaded while a walker is held back: the walker is no longer marked held', unloaded.heldBefore && unloaded.heldAfter === null, { heldBefore: unloaded.heldBefore, heldAfter: unloaded.heldAfter })
   if (shotsDir) {
-    await live.goto(`${base}?physics=1&q=high&room=living#token=${tokens.alex}`)
+    await live.goto(`${base}?q=high&room=living#token=${tokens.alex}`)
     await live.evaluate(() => window.village.ready())
     await physics(live)
     await live.waitForTimeout(4000)

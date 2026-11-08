@@ -117,6 +117,7 @@ export function worlds(scene: THREE.Scene) {
   const build = (name: string, house: House) => {
     const world = WORLDS[name](house)
     world.group.name = `theme world ${name}`
+    world.group.userData.body = false // scenery round the house, not things in it (src/physics/home.ts)
     world.group.userData.themeOwned = true
     return world
   }

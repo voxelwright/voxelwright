@@ -27,6 +27,8 @@ declare module 'cordis' {
      * The listener sets `handled` when build mode took it.
      */
     'village/build-intent'(request: BuildRequest): void
+    /** The walls and floor were built again for this plan (the physics world reads them then, src/physics/start.ts). */
+    'village/built'(plan: Plan): void
   }
 }
 export interface BuildRequest { intent: unknown; say?: string; reply: (text: string) => void; handled?: boolean; /** Whose villager asked: they move into the room. */ person?: string }
@@ -92,6 +94,7 @@ export default {
     const kit = makeKit()
     const group = own(ctx, new THREE.Group())
     group.name = 'build'
+    group.userData.body = { material: 'plaster' } // the house's walls and floors (src/physics/home.ts)
     /** What is drawn: the history's head, or a drag's live preview on top of it. */
     let plan: Plan = HOUSE_PLAN
     let history: PlanHistory | null = null
@@ -236,6 +239,7 @@ export default {
       fitSun(next)
       highlight()
       rebuildMs.push(performance.now() - start)
+      ctx.emit('village/built', next)
     }
 
     /**
@@ -357,6 +361,7 @@ export default {
     )
     dot.rotation.x = -Math.PI / 2
     dot.name = 'build bend handle'
+    dot.userData.body = false // a handle, not a thing (src/physics/home.ts)
     dot.renderOrder = 2
     group.add(dot)
 
@@ -368,6 +373,7 @@ export default {
     tag.renderOrder = 3
     tag.visible = false
     tag.name = 'build size tag'
+    tag.userData.body = false // a label, not a thing (src/physics/home.ts)
     group.add(tag)
     let tagText = ''
     const paintTag = (p: Plan) => {
@@ -556,6 +562,7 @@ export default {
     mark.rotation.x = -Math.PI / 2
     mark.renderOrder = 3
     mark.name = 'build selected point'
+    mark.userData.body = false // a mark, not a thing (src/physics/home.ts)
     const selectWall = (next: typeof selected) => {
       selected = next
       if (next) {

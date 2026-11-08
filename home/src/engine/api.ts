@@ -19,6 +19,8 @@ export interface ThingInfo {
   velocity: Vec3
   /** The position in its toy's frame. */
   local: Vec3
+  /** kg; Infinity for a static thing. */
+  mass: number
 }
 
 /** A running gadget, as its kind sees it. `state` is the kind's own numbers, kept in snapshots. */

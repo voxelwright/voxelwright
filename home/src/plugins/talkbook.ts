@@ -347,6 +347,7 @@ export default {
 
     const book = new THREE.Group()
     book.name = 'talk notebook'
+    book.userData.body = false // the journal held up to the view, not a thing in the room (src/physics/home.ts)
     const coverW = W + 0.012, coverD = D + 0.02
     // Right half: cover board, page block, the right page.
     const coverR = boxWith(coverW, BOARD, coverD, [linenMat, linenMat, linenMat, linenMat, linenMat, linenMat])

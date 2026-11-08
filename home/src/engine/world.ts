@@ -1,11 +1,14 @@
 // The physics engine's world (#74), with no app imports. It builds toys (parts, gadgets,
 // wires) into solver bodies and three.js meshes, runs gadgets through their kinds' hooks
-// (gadgets.ts) and carries their signals along wires, moves followers (kinematic bodies that
-// track a scene object, such as a walking person), applies the world rules, guards against
-// explosions, and reports what happens as events. It implements the engine API (api.ts).
+// (gadgets.ts) and carries their signals along wires, binds bodies to scene objects drawn
+// elsewhere (the home's furniture: the object moved by its owner moves the body, a dynamic
+// body moves the object), drives followers (a walking person's body, pushing with finite
+// strength), applies the world rules, guards against explosions, and reports what happens as
+// events. It implements the engine API (api.ts).
 // Fixed 60 Hz steps of simulated time; gadget actions run after each solver step.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Gadget, Snapshot, ThingInfo, Touch, WorldApi } from './api'
 import type { BodyId, Contact, PhysicsCore, Quat, Shape, Vec3 } from './core'
 import type { At, PhysicsEvent } from './events'
@@ -21,6 +24,25 @@ const IMPACT_MIN = 0.003
 /** Below the floor by this much, a thing has fallen out of the world and is put back. */
 const LOST_Y = -1
 const STRIDE = 0.32
+/** A follower whose body is this far (m) from its figure jumped (a hop, a seat, a squeeze past): its body follows without touching anything. */
+const JUMP = 0.5
+/** A follower's body this far (m, across the floor) behind its figure is held back by something it cannot push. */
+const HELD_LAG = 0.08
+/** Behind and pushed back this long (s) is held: a bump that slows it for a moment is not. */
+const HELD_AFTER = 0.2
+/** Held this long (s), a follower stops saying so and walks on: its body catches up by a jump. */
+const HELD_MAX = 1.5
+/** A follower's body stands this far (m) off the floor: it pushes what stands on the floor, but never scrapes the floor itself. */
+const CLEAR = 0.03
+/** The fastest a follower's body chases its figure, m/s. */
+const CHASE = 4
+/** A figure standing still is drifted to at this rate (1/s), at most SETTLE_MAX m/s. */
+const SETTLE = 3
+const SETTLE_MAX = 0.5
+/** Contact taking back over this share of the most a step's chase may add to a follower's speed pushes it back. */
+const PUSHED_BACK = 0.5
+/** A bound object moved by its owner further than this (m, or radians) puts its body there. */
+const MOVED = 1e-4
 /** Gadget signals carried along wires per step; the rest wait for the next step. */
 const SIGNALS_PER_STEP = 200
 /** Signals waiting past this are dropped (a loop of wires feeding itself faster than it drains). */
@@ -38,9 +60,21 @@ interface Thing {
   wobble: number
 }
 
-interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; last: THREE.Vector3; walked: number; left: boolean }
+interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; mass: number; last: THREE.Vector3; walked: number; left: boolean; solid: boolean; heldFor: number; aim: THREE.Vector3; passing: boolean; sent: Vec3 }
 
-export interface Stats { stepMs: { median: number; p95: number; n: number }; frameMs: { median: number; p95: number; n: number }; bodies: number; followers: number }
+/** A body that stands for a scene object drawn by someone else (src/physics/home.ts binds the home's things). */
+interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat } }
+
+export interface BindSpec {
+  /** In the object's frame (its world position and turn), at world scale. */
+  shape: Shape
+  motion: 'static' | 'dynamic'
+  material: string
+  /** kg, dynamic only: in place of density × volume. */
+  mass?: number
+}
+
+export interface Stats { stepMs: { median: number; p95: number; n: number }; frameMs: { median: number; p95: number; n: number }; bodies: number; followers: number; static: number; dynamic: number }
 
 /** Paints a wood grain texture for a material's colour; the host app may supply one. */
 export type Grain = (seed: number, light: [number, number, number], dark: [number, number, number], knots: number, planks: number) => THREE.Texture
@@ -52,6 +86,16 @@ const at = (p: Vec3): At => ({ x: p[0], y: p[1], z: p[2] })
 const pointOk = (p: Vec3) => Array.isArray(p) && p.length === 3 && p.every((x) => Number.isFinite(x) && Math.abs(x) <= WORLD_BOUND)
 const dirOk = (d: Vec3) => Array.isArray(d) && d.length === 3 && d.every(Number.isFinite) && Math.hypot(...d) > 1e-9
 const limitsOk = (l: [number, number]) => Array.isArray(l) && l.length === 2 && l.every(Number.isFinite) && l[0] <= l[1]
+/** A compound as the one box round it (in its frame, ignoring its parts' turns): what an event says of its size. */
+const outline = (shape: Shape): Shape => {
+  if (shape.kind !== 'compound') return shape
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+  for (const b of shape.boxes) for (let i = 0; i < 3; i++) {
+    lo[i] = Math.min(lo[i], b.at[i] - b.half[i])
+    hi[i] = Math.max(hi[i], b.at[i] + b.half[i])
+  }
+  return { kind: 'box', half: [0, 1, 2].map((i) => +((hi[i] - lo[i]) / 2).toFixed(3)) as Vec3 }
+}
 const quantile = (xs: number[], q: number) => {
   if (!xs.length) return 0
   const s = [...xs].sort((a, b) => a - b)
@@ -61,7 +105,7 @@ const quantile = (xs: number[], q: number) => {
 export class World implements WorldApi {
   readonly group = new THREE.Group()
   private things = new Map<string, Thing>()
-  private byBody: (Thing | Follower | undefined)[] = []
+  private byBody: (Thing | Follower | Bound | undefined)[] = []
   private gadgets = new Map<string, Gadget>()
   private byPart = new Map<string, Gadget[]>()
   private wires = new Map<string, string[]>()
@@ -74,17 +118,22 @@ export class World implements WorldApi {
   private hops = 0
   private respawns = new Map<string, number>()
   private followers = new Map<string, Follower>()
+  private bound = new Map<string, Bound>()
   private pairs = new Map<string, readonly [number, number]>()
   private pairsVersion = -1
   private clampedAt = new Map<string, number>()
   private dust: { mesh: THREE.Mesh; life: number; v: THREE.Vector3 }[] = []
   private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }>()
   private looks = new Map<string, THREE.Material>()
+  /** Per toy, its scenery: the parts drawn together, one mesh per look (see build). */
+  private scenery = new Map<string, THREE.Mesh[]>()
   private tally = new Map<string, number>()
   private accumulator = 0
   private stepTimes: number[] = []
   private frameTimes: number[] = []
   clock = 0
+  /** Set by dispose(): the solver is freed, so nothing may touch it again. */
+  disposed = false
   rules: Rules = { ...NORMAL, gravity: [...NORMAL.gravity] }
   private unsubscribe: () => void
 
@@ -110,6 +159,7 @@ export class World implements WorldApi {
   // ── Rules ────────────────────────────────────────────────────────────────
 
   setRules(raw: unknown, by: Extract<PhysicsEvent, { kind: 'rules' }>['by'], preset?: string): { ok: true; rules: Rules; clamped: string[] } | { ok: false; reason: string } {
+    if (this.disposed) return { ok: false, reason: 'the world has stopped' }
     const checked = checkRules(raw, this.rules)
     if ('reason' in checked) return { ok: false, reason: checked.reason }
     this.applyRules(checked.rules)
@@ -128,6 +178,7 @@ export class World implements WorldApi {
     this.core.setGravity(this.rules.gravity)
     this.pairsVersion = -1
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, this.rules.drag)
+    for (const b of this.bound.values()) if (b.motion === 'dynamic') this.core.setLinearDamping(b.body, this.rules.drag)
   }
 
   /** Village's combine per pair: geometric friction, the livelier restitution, both scaled by the rules. Cached per material pair. */
@@ -180,6 +231,13 @@ export class World implements WorldApi {
     const frame = new THREE.Matrix4().compose(v3(toy.frame.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(toy.frame.tilt, toy.frame.yaw, 0, 'YXZ')), new THREE.Vector3(1, 1, 1))
     this.frames.set(toy.id, frame)
     const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3()
+    // Scenery: a part that never moves, that no gadget names and that is not the toy's handle is
+    // drawn merged with the toy's other scenery of its look, one mesh (and one draw per pass) per
+    // look instead of one per part. It has no mesh of its own: world.mesh() finds nothing for it
+    // and it does not wobble when hit.
+    const named = new Set(toy.gadgets.flatMap((g) => Object.values(g).filter((v): v is string => typeof v === 'string')))
+    if (toy.handle) named.add(toy.handle)
+    const merged = new Map<string, { look: THREE.Material; parts: THREE.BufferGeometry[] }>()
     for (const part of toy.parts) {
       m.compose(v3(part.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(part.turn ?? [0, 0, 0]))), new THREE.Vector3(1, 1, 1))
       m.premultiply(frame).decompose(p, q, s)
@@ -187,10 +245,15 @@ export class World implements WorldApi {
       const home = { p: arr(p), q: [q.x, q.y, q.z, q.w] as Quat }
       const body = this.core.addBody({
         shape: part.shape, motion: part.motion ?? 'static', position: home.p, rotation: home.q,
-        density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor,
+        density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor, ...(part.mass !== undefined ? { mass: part.mass } : {}),
       })
       const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
-      if (!part.hidden) {
+      if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id)) {
+        const look = this.look(part)
+        const key = `${part.material}:${part.paint ?? ''}`
+        const group = merged.get(key) ?? merged.set(key, { look, parts: [] }).get(key)!
+        group.parts.push(this.geometry(part.shape).applyMatrix4(m))
+      } else if (!part.hidden) {
         thing.mesh = new THREE.Mesh(this.geometry(part.shape), this.look(part))
         thing.mesh.name = thing.key
         thing.mesh.position.copy(p)
@@ -200,6 +263,18 @@ export class World implements WorldApi {
       }
       this.things.set(thing.key, thing)
       this.byBody[body] = thing
+    }
+    const scenery: THREE.Mesh[] = []
+    this.scenery.set(toy.id, scenery)
+    for (const [key, { look, parts }] of merged) {
+      const geometry = parts.length > 1 ? mergeGeometries(parts) : parts[0]
+      if (parts.length > 1) for (const g of parts) g.dispose()
+      if (!geometry) throw new Error(`${toy.id}: its ${key} parts could not be drawn together`)
+      const mesh = new THREE.Mesh(geometry, look)
+      mesh.name = `${toy.id} scenery ${key}`
+      mesh.castShadow = mesh.receiveShadow = true
+      this.group.add(mesh)
+      scenery.push(mesh)
     }
     for (const spec of toy.gadgets) {
       const kind = gadgetKind(spec.kind)!
@@ -252,10 +327,16 @@ export class World implements WorldApi {
       d.texture.dispose()
       this.displays.delete(key)
     }
+    for (const mesh of this.scenery.get(id) ?? []) {
+      this.group.remove(mesh)
+      mesh.geometry.dispose()
+    }
+    this.scenery.delete(id)
     this.frames.delete(id)
   }
 
   private geometry(shape: Shape): THREE.BufferGeometry {
+    if (shape.kind === 'compound') throw new Error('a compound shape is not drawn')
     if (shape.kind === 'sphere') return new THREE.SphereGeometry(shape.radius, 24, 16)
     if (shape.kind === 'cylinder') return new THREE.CylinderGeometry(shape.radius, shape.radius, shape.halfHeight * 2, 28)
     if (shape.kind === 'capsule') return new THREE.CapsuleGeometry(shape.radius, shape.halfHeight * 2, 6, 16)
@@ -311,20 +392,28 @@ export class World implements WorldApi {
   // ── Followers ────────────────────────────────────────────────────────────
 
   /**
-   * A kinematic capsule that follows a scene object (a walking person): it pushes what it walks
-   * into, and reports a footstep each stride. Sized from the object's bounds when it is added.
+   * A body for a scene object that walks (a person): an upright cylinder sized from the object's
+   * bounds, with the mass of its material, chasing the object each step with at most the
+   * `strength` rule's force while the object moves; standing, it stays where it is pushed to (a
+   * figure drawn pressed against the fridge does not lean on it). What it cannot push holds it
+   * back: while its body lags the object the object's `userData.held` is true (the walker's
+   * owner may wait), for at most HELD_MAX seconds. Off the floor (a hop, a seat) or after a jump
+   * it touches nothing and just follows.
+   * It reports a footstep each stride.
    */
   follow(key: string, object: THREE.Object3D, materialName = 'villager') {
     if (this.followers.has(key) || !material(materialName)) return false
     const box = new THREE.Box3().setFromObject(object)
     const size = box.getSize(new THREE.Vector3())
     if (!Number.isFinite(size.y) || size.y <= 0) return false
+    const tall = Math.max(0.05, size.y - CLEAR)
     const radius = Math.min(0.2, Math.max(0.08, 0.35 * Math.max(size.x, size.z)))
     const root = object.getWorldPosition(new THREE.Vector3())
-    const lift = box.min.y - root.y + size.y / 2
+    const lift = box.min.y - root.y + CLEAR + tall / 2
     const m = material(materialName)!
-    const body = this.core.addBody({ shape: { kind: 'capsule', halfHeight: Math.max(0.01, size.y / 2 - radius), radius }, motion: 'kinematic', position: [root.x, root.y + lift, root.z], density: m.density, friction: m.friction, restitution: m.restitution })
-    const f: Follower = { key, object, body, lift, radius, material: materialName, last: root.clone(), walked: 0, left: false }
+    // An upright cylinder, not a capsule: its flat sides push a ball along instead of pressing it into the floor.
+    const body = this.core.addBody({ shape: { kind: 'cylinder', halfHeight: tall / 2, radius }, motion: 'dynamic', upright: true, gravityFactor: 0, linearDamping: 0, position: [root.x, root.y + lift, root.z], density: m.density, friction: m.friction, restitution: m.restitution })
+    const f: Follower = { key, object, body, lift, radius, material: materialName, mass: this.core.mass(body), last: root.clone(), walked: 0, left: false, solid: true, heldFor: 0, aim: root.clone(), passing: false, sent: [0, 0, 0] }
     this.followers.set(key, f)
     this.byBody[body] = f
     return true
@@ -335,11 +424,118 @@ export class World implements WorldApi {
     if (!f) return
     this.core.removeBody(f.body)
     this.byBody[f.body] = undefined
+    delete f.object.userData.held
     this.followers.delete(key)
   }
 
   followerKeys() {
     return [...this.followers.keys()]
+  }
+
+  /** Whether a follower's body is held back by something it cannot push. */
+  heldBack(key: string) {
+    const f = this.followers.get(key)
+    return Boolean(f && f.heldFor > HELD_AFTER && f.heldFor < HELD_MAX)
+  }
+
+  private chase(f: Follower, at: THREE.Vector3, h: number) {
+    const target: Vec3 = [at.x, at.y + f.lift, at.z]
+    const p = this.core.position(f.body)
+    const gap = Math.hypot(target[0] - p[0], target[1] - p[1], target[2] - p[2])
+    const lag = Math.hypot(target[0] - p[0], target[2] - p[2])
+    const moving = at.distanceTo(f.aim) > 1e-4
+    // Off the floor, or jumped (a teleport, or squeezing past what held it too long): follow without
+    // touching. After a jump it touches things again once its figure stands still (at a spot, which is
+    // clear of furniture), so it never comes back to life inside the sofa it squeezed past.
+    if (gap > JUMP) f.passing = true
+    else if (!moving) f.passing = false
+    if (at.y > 0.05 || f.passing) {
+      if (f.solid) this.core.setSolid(f.body, (f.solid = false))
+      this.core.setState(f.body, target, [0, 0, 0])
+      f.sent = [0, 0, 0]
+      f.heldFor = 0
+    } else {
+      if (!f.solid) {
+        this.core.setState(f.body, target, [0, 0, 0])
+        this.core.setSolid(f.body, (f.solid = true))
+        f.sent = [0, 0, 0]
+      }
+      // Chase the figure with at most `strength` newtons: the velocity change per step is capped at F/m·h.
+      // A walking figure is tracked step for step; a figure standing still is drifted towards gently,
+      // so a body pushed out of a cupboard it is drawn against leans on it lightly instead of ramming it.
+      const v = this.core.velocity(f.body)
+      const want = target.map((x, i) => (x - p[i]) * (moving ? 1 / h : SETTLE))
+      const speed = Math.hypot(...want)
+      const top = moving ? CHASE : SETTLE_MAX
+      if (speed > top) for (let i = 0; i < 3; i++) want[i] *= top / speed
+      const dv = want.map((w, i) => w - v[i])
+      const most = (Number(this.rules.strength) / f.mass) * h
+      const n = Math.hypot(...dv)
+      const k = n > most ? most / n : 1
+      // Held: behind its figure and pushed back step after step, i.e. what it touches took back most of the speed the
+      // last step's chase sent it with. A light thing it bumps takes a little once; one it cannot push takes it all every
+      // step. Its own inertia never counts: a heavy walker gathering speed again after a bump is not held.
+      const pushedBack = lag > 1e-6 ? ((f.sent[0] - v[0]) * (target[0] - p[0]) + (f.sent[2] - v[2]) * (target[2] - p[2])) / lag : 0
+      f.heldFor = lag > HELD_LAG && pushedBack > PUSHED_BACK * most ? f.heldFor + h : 0
+      f.sent = [v[0] + dv[0] * k, v[1] + dv[1] * k, v[2] + dv[2] * k]
+      this.core.setVelocity(f.body, f.sent)
+    }
+    f.aim.copy(at)
+    const held = f.heldFor > HELD_AFTER && f.heldFor < HELD_MAX
+    if (held) f.object.userData.held = true
+    else delete f.object.userData.held
+  }
+
+  // ── Bound bodies ─────────────────────────────────────────────────────────
+
+  /**
+   * A body for a scene object drawn by someone else. When the object's owner moves it (a placed
+   * thing posed again, undo), its body goes there; a dynamic body moves the object in turn.
+   * Static ones never move by themselves. Added asleep: an object left resting slightly inside
+   * another waits to be touched. False for an unknown material or a key in use.
+   */
+  bind(key: string, object: THREE.Object3D, spec: BindSpec) {
+    const mat = material(spec.material)
+    if (this.bound.has(key) || this.things.has(key) || !mat) return false
+    object.updateWorldMatrix(true, false)
+    const p = new THREE.Vector3(), q = new THREE.Quaternion()
+    object.matrixWorld.decompose(p, q, new THREE.Vector3())
+    const body = this.core.addBody({
+      shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
+      density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
+    })
+    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: { p: arr(p), q: [q.x, q.y, q.z, q.w] } }
+    this.bound.set(key, b)
+    this.byBody[body] = b
+    return true
+  }
+
+  unbind(key: string) {
+    const b = this.bound.get(key)
+    if (!b) return
+    this.core.removeBody(b.body)
+    this.byBody[b.body] = undefined
+    this.bound.delete(key)
+  }
+
+  boundKeys() {
+    return [...this.bound.keys()]
+  }
+
+  /** Bound objects their owners moved since the last look: their bodies go there, at rest. */
+  private follows() {
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3()
+    for (const b of this.bound.values()) {
+      b.object.updateWorldMatrix(true, false)
+      b.object.matrixWorld.decompose(p, q, s)
+      if (p.distanceTo(b.p) <= MOVED && Math.abs(q.dot(b.q)) >= 1 - MOVED * MOVED) continue
+      b.p.copy(p)
+      b.q.copy(q)
+      const at = arr(p), turn: Quat = [q.x, q.y, q.z, q.w]
+      b.home = { p: at, q: turn }
+      if (b.motion === 'static') this.core.setPose(b.body, at, turn)
+      else this.core.setState(b.body, at, [0, 0, 0], turn)
+    }
   }
 
   // ── Running ──────────────────────────────────────────────────────────────
@@ -371,6 +567,7 @@ export class World implements WorldApi {
   /** One rendered frame: real seconds in, simulated time out by the rules' time scale. */
   frame(dt: number) {
     const t0 = performance.now()
+    this.follows()
     this.accumulator += Math.min(dt, 0.1) * this.rules.timeScale
     let steps = 0
     while (this.accumulator >= STEP && steps < MAX_STEPS) {
@@ -386,6 +583,7 @@ export class World implements WorldApi {
 
   /** Simulated seconds, stepped at once with no drawing in between (checks and tests). `each` sees every step. */
   advance(seconds: number, each?: () => void) {
+    this.follows()
     for (let i = 0; i < Math.round(seconds / STEP); i++) {
       this.step()
       each?.()
@@ -400,7 +598,7 @@ export class World implements WorldApi {
     const p = new THREE.Vector3()
     for (const f of this.followers.values()) {
       f.object.getWorldPosition(p)
-      this.core.moveKinematic(f.body, [p.x, p.y + f.lift, p.z], [0, 0, 0, 1], h)
+      this.chase(f, p, h)
       this.stride(f, p)
     }
     for (const g of this.gadgets.values()) gadgetKind(g.spec.kind)?.step?.(g, this, h)
@@ -473,8 +671,8 @@ export class World implements WorldApi {
     }
   }
 
-  private shapeOf(t: Thing | Follower): Shape {
-    return 'part' in t ? t.part.shape : { kind: 'capsule', halfHeight: 0, radius: t.radius }
+  private shapeOf(t: Thing | Follower | Bound): Shape {
+    return 'part' in t ? t.part.shape : 'outline' in t ? t.outline : { kind: 'cylinder', halfHeight: t.lift, radius: t.radius }
   }
 
   fire(gadget: Gadget, port: string, signal: Signal) {
@@ -499,6 +697,13 @@ export class World implements WorldApi {
   /** Too fast is slowed to the speed limit, lost (below the floor, past the world bound) or broken is put back home: never an explosion. */
   private guard() {
     const max = this.rules.maxSpeed
+    for (const b of this.bound.values()) {
+      if (b.motion !== 'dynamic') continue
+      const p = this.core.position(b.body)
+      if (p.every(Number.isFinite) && p[1] >= LOST_Y && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND) continue
+      this.core.setState(b.body, b.home.p, [0, 0, 0], b.home.q)
+      this.emit({ kind: 'clamped', thing: b.key, speed: -1, at: at(b.home.p), reset: true })
+    }
     for (const t of this.things.values()) {
       if (t.part.motion !== 'dynamic') continue
       const p = this.core.position(t.body)
@@ -533,6 +738,23 @@ export class World implements WorldApi {
 
   /** Meshes follow bodies; wobbles and dust ease out. */
   private sync(dt: number) {
+    const m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1)
+    for (const b of this.bound.values()) {
+      if (b.motion !== 'dynamic' || this.core.sleeping(b.body)) continue
+      const p = this.core.position(b.body), q = this.core.rotation(b.body)
+      b.p.set(p[0], p[1], p[2])
+      b.q.set(q[0], q[1], q[2], q[3])
+      // World pose to the object's own (its parent's frame), keeping its scale.
+      const o = b.object
+      m.compose(b.p, b.q, one)
+      if (o.parent) {
+        o.parent.updateWorldMatrix(true, false)
+        m.premultiply(new THREE.Matrix4().copy(o.parent.matrixWorld).invert())
+      }
+      const s = o.scale.clone()
+      m.decompose(o.position, o.quaternion, new THREE.Vector3())
+      o.scale.copy(s)
+    }
     for (const t of this.things.values()) {
       if (!t.mesh) continue
       if (t.part.motion && t.part.motion !== 'static') {
@@ -560,20 +782,22 @@ export class World implements WorldApi {
   // ── The API: reading and acting ─────────────────────────────────────────
 
   keys() {
-    return [...this.things.keys(), ...this.followers.keys()]
+    return [...this.things.keys(), ...this.followers.keys(), ...this.bound.keys()]
   }
 
   thing(key: string): ThingInfo | null {
     const t = this.things.get(key)
     const f = t ? undefined : this.followers.get(key)
-    if (!t && !f) return null
-    const body = (t ?? f)!.body
-    const p = this.core.position(body)
+    const b = t || f ? undefined : this.bound.get(key)
+    const any = t ?? f ?? b
+    if (!any) return null
+    const p = this.core.position(any.body)
     const frame = t && this.frames.get(t.toy)
     const local = frame ? arr(v3(p).applyMatrix4(frame.clone().invert())) : p
     return {
-      key, toy: t?.toy ?? 'followers', material: t?.part.material ?? f!.material, shape: t ? t.part.shape : this.shapeOf(f!),
-      motion: t?.part.motion ?? 'kinematic', position: p, rotation: this.core.rotation(body), velocity: this.core.velocity(body), local,
+      key, toy: t?.toy ?? (f ? 'followers' : 'bound'), material: t?.part.material ?? (f ?? b)!.material, shape: this.shapeOf(any),
+      motion: t?.part.motion ?? b?.motion ?? 'dynamic', position: p, rotation: this.core.rotation(any.body), velocity: this.core.velocity(any.body), local,
+      mass: this.core.mass(any.body),
     }
   }
 
@@ -588,6 +812,12 @@ export class World implements WorldApi {
   private dynamic(key: string) {
     const t = this.things.get(key)
     return t?.part.motion === 'dynamic' ? t : undefined
+  }
+
+  /** A moving body bound to a scene object drawn by someone else (a high chair, a lamp): snapshots keep and restore it too. */
+  private boundDynamic(key: string) {
+    const b = this.bound.get(key)
+    return b?.motion === 'dynamic' ? b : undefined
   }
 
   setVelocity(key: string, v: Vec3) {
@@ -685,14 +915,14 @@ export class World implements WorldApi {
 
   snapshot(): Snapshot {
     const things: Snapshot['things'] = {}
-    for (const t of this.things.values()) if (t.part.motion === 'dynamic') things[t.key] = { p: this.core.position(t.body), q: this.core.rotation(t.body), v: this.core.velocity(t.body) }
+    for (const t of [...this.things.values(), ...this.bound.values()]) if (('part' in t ? t.part.motion : t.motion) === 'dynamic') things[t.key] = { p: this.core.position(t.body), q: this.core.rotation(t.body), v: this.core.velocity(t.body) }
     const gadgets: Snapshot['gadgets'] = {}
     for (const g of this.gadgets.values()) gadgets[g.id] = { knobs: { ...g.knobs }, state: { ...g.state } }
     return { clock: this.clock, rules: { ...this.rules, gravity: [...this.rules.gravity] }, things, gadgets, respawns: [...this.respawns].map(([key, t]) => ({ key, t })) }
   }
 
   /**
-   * Puts moving things, gadget knobs and state, pending respawns and the rules back as a snapshot
+   * Puts moving things (toys' and bound ones), gadget knobs and state, pending respawns and the rules back as a snapshot
    * had them. A snapshot is data like any other: rules go through checkRules, poses must be
    * finite and inside the world, speeds are held to the speed limit, knobs to their ranges.
    * What could not be used is skipped and listed in `clamped`. Spin is not kept.
@@ -709,7 +939,7 @@ export class World implements WorldApi {
     }
     const num = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x))
     for (const [key, b] of Object.entries(s.things ?? {})) {
-      const t = this.dynamic(key)
+      const t = this.dynamic(key) ?? this.boundDynamic(key)
       if (!t || !b || !num(b.p, 3) || !pointOk(b.p as Vec3) || !num(b.v, 3) || !num(b.q, 4) || !(Math.hypot(...b.q) > 1e-6)) {
         clamped.push(`things.${key}`)
         continue
@@ -747,8 +977,10 @@ export class World implements WorldApi {
     return {
       stepMs: { median: quantile(this.stepTimes, 0.5), p95: quantile(this.stepTimes, 0.95), n: this.stepTimes.length },
       frameMs: { median: quantile(this.frameTimes, 0.5), p95: quantile(this.frameTimes, 0.95), n: this.frameTimes.length },
-      bodies: this.things.size + this.followers.size,
+      bodies: this.things.size + this.followers.size + this.bound.size,
       followers: this.followers.size,
+      static: [...this.things.values()].filter((t) => (t.part.motion ?? 'static') === 'static').length + [...this.bound.values()].filter((b) => b.motion === 'static').length,
+      dynamic: [...this.things.values()].filter((t) => t.part.motion === 'dynamic').length + [...this.bound.values()].filter((b) => b.motion === 'dynamic').length + this.followers.size,
     }
   }
 
@@ -757,7 +989,10 @@ export class World implements WorldApi {
   }
 
   dispose() {
+    this.disposed = true
     this.unsubscribe()
+    // A walker held back as the world goes would wait for a body that no longer exists (src/villagers/cast.ts).
+    for (const f of this.followers.values()) delete f.object.userData.held
     for (const d of this.displays.values()) d.texture.dispose()
     this.core.dispose()
   }

@@ -40,9 +40,9 @@ export function disposeShadows(blobs: THREE.Mesh[]) {
 
 /** One frame for a group: yielding, the rig, and the shadows following. */
 export function stepCrowd(villagers: Villager[], blobs: THREE.Mesh[], dt: number, t: number, eye: THREE.Vector3, scale: number) {
-  // Walkers wait for whoever is just ahead.
+  // Walkers wait for whoever is just ahead, and while their body is held back by something too heavy to push (the physics world sets `held`, src/engine/world.ts).
   villagers.forEach((v, i) => {
-    v.blocked = villagers.some((o, j) => {
+    v.blocked = v.fig.root.userData.held === true || villagers.some((o, j) => {
       // Someone busy at a chore is walked past (and may be clipped), not waited for.
       if (o === v || o.seated > 0.5 || o.state === 'work') return false
       const dx = o.pos.x - v.pos.x, dz = o.pos.z - v.pos.z

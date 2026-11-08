@@ -1,8 +1,8 @@
 /**
  * The one rule for which features a page has (#72). Talk, villagers, the dollhouse view, babble,
- * music and build mode are on by default. Opt-outs: ?talk=off returns the quiet seated kitchen
+ * music, build mode and physics are on by default. Opt-outs: ?talk=off returns the quiet seated kitchen
  * (no villagers, music or babble, and build mode only with ?build=1), ?build=0 turns
- * build mode off, ?cam=seat keeps the seated view. ?talk=npc and ?build=1 still work as before.
+ * build mode off, ?physics=0 turns the physics world off, ?cam=seat keeps the seated view. ?talk=npc and ?build=1 still work as before.
  * ?talk=notebook (or any other value) is the separate notebook prototype: talk is off for it.
  */
 const query = new URLSearchParams(location.search)
@@ -17,8 +17,9 @@ export const TALK = talk === null || talk === 'npc'
  */
 export const BUILD = build === '1' || (build === null && talk === null)
 /**
- * The physics world (#74): off unless ?physics is given, so the default page and the perf gate
- * load no solver. ?physics=panel also shows the world-rules panel in dev builds.
+ * The physics world (#74): on by default, every thing in the home a body (src/physics/home.ts).
+ * ?physics=0 turns it off: no solver, no wasm, and the page's policy keeps WebAssembly out
+ * (vite.config.ts). ?physics=panel also shows the world-rules panel in dev builds.
  */
-export const PHYSICS = query.has('physics')
+export const PHYSICS = query.get('physics') !== '0'
 export const PHYSICS_PANEL = import.meta.env.DEV && query.get('physics') === 'panel'

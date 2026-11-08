@@ -10,6 +10,8 @@ export default {
   apply(ctx: Context) {
     const group = new THREE.Group()
     group.name = 'highchair'
+    // Free-standing and no villager's seat: it moves when pushed, heavily (src/physics/home.ts).
+    group.userData.body = { motion: 'dynamic', material: 'maple', mass: 7 }
     group.position.set(-1.28, 0, 0.0)
     group.rotation.y = Math.PI / 2 - 0.2
     const pine = pineMaterial()

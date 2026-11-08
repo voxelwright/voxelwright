@@ -38,6 +38,7 @@ export default {
   apply(ctx: Context) {
     const ghosts = own(ctx, new THREE.Group())
     ghosts.name = 'placement'
+    ghosts.userData.body = false // ghosts, not things (src/physics/home.ts)
     const things = own(ctx, new THREE.Group())
     things.name = 'placed things'
     let plan: Plan = HOUSE_PLAN
@@ -83,6 +84,8 @@ export default {
     const show = (f: Furniture, d: Drawn) => {
       // Placing reads this to know which placed thing a top belongs to (a surface anchor's `on`).
       d.holder.userData.furniture = f.id
+      // A body of its own, static where the plan puts it: the plan is the record of where it stands (src/physics/home.ts).
+      d.holder.userData.body = { material: 'walnut' }
       withCord(d.holder, f.at.mount)
       things.add(d.holder)
       drawn.set(f.id, d)
@@ -167,6 +170,7 @@ export default {
         // Held (not posed from the plan) and unkeyed until the session ends; settleAdopted takes it from there.
         things.add(holder)
         holder.userData.furniture = id
+        holder.userData.body = { material: 'walnut' }
         drawn.set(id, { holder, size, label, key: '', held: true })
       },
       forget(id) {

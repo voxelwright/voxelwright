@@ -829,10 +829,14 @@ try {
     // The selection path: back from the study's move-in to the whole house, click a wall, then "open a door here into a new room".
     await B(page, () => window.villageBuild.back())
     await page.waitForTimeout(2600)
-    // #42's held writing pad is a button low on the right whose box can cover this wall, so click the point
-    // nearest 4 m along it, low on the wall, that the 3D view itself is under (the talk's paper canvas lets pointers through).
+    // #42's held writing pad is a button low on the right whose box can cover this wall, and the pinball table (#74, now on
+    // by default) stands against it from 2.7 to 3.8 m, so let pointers through the pad for this click and take the point
+    // nearest 4 m along the wall that no built-in stands in front of, low on the wall, with the 3D view under it.
     const pick = await B(page, () => {
+      for (const pad of document.querySelectorAll('.talk-pad')) pad.style.pointerEvents = 'none'
+      const taken = window.villageBuild.fixtures('living.right').filter((f) => f.y0 < 2.3)
       for (const t of [4.0, 3.75, 4.25, 3.5, 4.5, 3.25, 4.75, 3.0, 5.0]) {
+        if (taken.some((f) => t > f.from - 0.3 && t < f.to + 0.3)) continue
         const at = window.villageBuild.wallPoint('living.right', t, 0.43, 0)
         if (document.elementFromPoint(...at)?.tagName === 'CANVAS') return { t, at }
       }
@@ -840,6 +844,7 @@ try {
     })
     check('a point near 4 m along the living room\'s right wall is not covered by the page', pick, pick)
     if (pick) await page.mouse.click(...pick.at)
+    await B(page, () => { for (const pad of document.querySelectorAll('.talk-pad')) pad.style.pointerEvents = '' })
     await frames(page, 3)
     s = await state(page)
     check('clicking a wall selects it and remembers the point', s.selected?.wallId === 'living.right' && Math.abs(s.selected.t - pick?.t) < 0.15, { selected: s.selected, clicked: pick?.t })

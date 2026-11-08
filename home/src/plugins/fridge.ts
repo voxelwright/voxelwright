@@ -20,6 +20,7 @@ export default {
     const low = ctx.stage.quality === 'low'
     const group = new THREE.Group()
     group.name = 'fridge'
+    group.userData.body = { material: 'steel' } // (src/physics/home.ts)
     const W = 0.72, H = 1.78, D = 0.68
     group.position.set(1.5, 0, WALL_Z + D / 2 + 0.02)
     group.rotation.y = -0.12

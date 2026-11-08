@@ -11,6 +11,8 @@ export default {
   apply(ctx: Context) {
     const group = new THREE.Group()
     group.name = 'plant'
+    // A villager's workplace (villagers/world.ts SPOTS.plant): its pot stays put (src/physics/home.ts).
+    group.userData.body = { material: 'plaster' }
     group.position.set(0.78, 0, WALL_Z + 0.32)
     const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.3, 24, 4), new THREE.MeshStandardMaterial({ color: '#b98d58', roughness: 0.9 }))
     basket.position.y = 0.15

@@ -169,7 +169,7 @@ export async function say(person: string, text: string, onText: (t: string) => v
 // the page treats it as data. Prop modules only ever run in the prop sandbox.
 
 export interface Routed {
-  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme' | 'build'
+  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme' | 'build' | 'physics'
   to?: string
   say?: string
   message?: string

@@ -11,6 +11,7 @@ export default {
   apply(ctx: Context) {
     const room = new THREE.Group()
     room.name = 'room'
+    room.userData.body = { material: 'plaster' } // walls and floor (src/physics/home.ts)
 
     const floorTex = floorPlanks()
     floorTex.repeat.set(6.2, 4.9) // the dollhouse floor's board width and grain over the kitchen
