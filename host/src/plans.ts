@@ -1,13 +1,12 @@
 // The house's plan versions (#48). The house is shared by the family, so there is
-// one store, <root>/house/plans/, served at /house/plans behind the per-launch
-// token. Nobody is named on a version yet: the host does not know who is at the
-// page (every page shares one token), so it records no one rather than the wrong one.
+// one store, <root>/house/plans/, served at /house/plans behind a person's token.
+// Every event records `by`, the person whose token wrote it (#40).
 //
 // The store is an append-only event log, one file per event:
 //   events/<seq>.json   {seq, kind: 'version', version}  a version; the head moves to it
-//                       {seq, kind: 'head', head, at}     undo, redo or checkout
-//                       {seq, kind: 'name', id, name, at}
-// A version is {id, parent, at, note?, plan}: `plan` is the stored house, and `note`
+//                       {seq, kind: 'head', head, at, by}  undo, redo or checkout
+//                       {seq, kind: 'name', id, name, at, by}
+// A version is {id, parent, at, by, note?, plan}: `plan` is the stored house, and `note`
 // says in a few words what changed. An event is written whole to tmp/
 // and then hard-linked to its sequence number, which fails if that number exists. A
 // write cut short leaves only a file in tmp/, never an event; two writers can never
@@ -34,14 +33,16 @@ const MAX_ITEMS = 500
 const MAX_NOTE = 200
 const MAX_NAME = 60
 const MAX_LABEL = 40
+/** Events in the log: the whole log is read on every request, so it is bounded. */
+const MAX_EVENTS = 5000
 /** Metres; a house plan has no business beyond this. */
 const MAX_METRES = 1000
 
-export interface Version { id: string; parent: string | null; at: string; note?: string; plan: unknown }
+export interface Version { id: string; parent: string | null; at: string; by: string; note?: string; plan: unknown }
 type Event =
   | { seq: number; kind: 'version'; version: Version }
-  | { seq: number; kind: 'head'; head: string; at: string }
-  | { seq: number; kind: 'name'; id: string; name: string; at: string }
+  | { seq: number; kind: 'head'; head: string; at: string; by: string }
+  | { seq: number; kind: 'name'; id: string; name: string; at: string; by: string }
 interface State { versions: Version[]; head: string | null; names: Record<string, string>; seq: number }
 
 class Refused extends Error {
@@ -215,6 +216,7 @@ export function planStore(root: string, kept: (person: string, item: string) => 
     await mkdir(events, { recursive: true, mode: 0o700 })
     await mkdir(tmp, { recursive: true, mode: 0o700 })
     const seq = state.seq + 1
+    if (seq > MAX_EVENTS) refuse(`the house keeps at most ${MAX_EVENTS} changes`, 507)
     const scratch = join(tmp, `${seq}-${randomBytes(6).toString('hex')}.json`)
     await writeFile(scratch, JSON.stringify({ seq, ...event }), { mode: 0o600, flush: true })
     try {
@@ -275,13 +277,13 @@ export function planStore(root: string, kept: (person: string, item: string) => 
           const held = state.versions.find((k) => k.id === v.id)
           if (held) {
             // A retry of a version already saved (its answer was lost) gets the same answer; anything else with its id is refused.
-            const { at: _, ...rest } = held
+            const { at: _, by: __, ...rest } = held
             if (isDeepStrictEqual(rest, sent)) return send(res, 200, { version: held })
             refuse(`version ${v.id} exists`, 409)
           }
           if (v.parent !== state.head) throw new Stale('the house plan moved on')
           await checkKept(house, caller, (state.versions.find((k) => k.id === state.head)?.plan as Obj | undefined) ?? null)
-          const version: Version = { ...sent, at }
+          const version: Version = { ...sent, at, by: caller }
           await append(state, { kind: 'version', version })
           return send(res, 200, { version })
         }
@@ -289,13 +291,13 @@ export function planStore(root: string, kept: (person: string, item: string) => 
           const h = only(b, 'body', ['head', 'expect'])
           if (typeof h.head !== 'string' || !state.versions.some((k) => k.id === h.head)) refuse('head is a stored version', 404)
           if (h.expect !== state.head) throw new Stale('the house plan moved on')
-          await append(state, { kind: 'head', head: h.head, at })
+          await append(state, { kind: 'head', head: h.head, at, by: caller })
           return send(res, 200, { head: h.head })
         }
         const n = only(b, 'body', ['id', 'name'])
         if (typeof n.id !== 'string' || !state.versions.some((k) => k.id === n.id)) refuse('id is a stored version', 404)
         const name = text(n.name, 'name', MAX_NAME)
-        await append(state, { kind: 'name', id: n.id, name, at })
+        await append(state, { kind: 'name', id: n.id, name, at, by: caller })
         return send(res, 200, { id: n.id, name })
       })
     } catch (error) {

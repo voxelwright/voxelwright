@@ -64,7 +64,7 @@ try {
 
   // Create the root.
   const created = await post('/versions', { version: { id: ROOT, parent: null, plan: base } })
-  check('the root is created with at from the host and no one named', created.status === 200 && !('by' in created.json.version) && !Number.isNaN(Date.parse(created.json.version.at)) && JSON.stringify(created.json.version.plan) === JSON.stringify(base), created)
+  check('the root is created with at and by from the host', created.status === 200 && created.json.version.by === 'alex' && !Number.isNaN(Date.parse(created.json.version.at)) && JSON.stringify(created.json.version.plan) === JSON.stringify(base), created)
   const second = await post('/versions', { version: { id: hex('d', 16), parent: null, plan: base } })
   check('a second root is refused as stale, with the head', second.status === 409 && second.json.head === ROOT, second)
 
@@ -131,7 +131,7 @@ try {
   check('a write that fails before its link leaves no event', blocked.status === 500 && (await readdir(join(dir, 'events'))).length === before, blocked)
   // Another writer's event at the next number wins.
   const next = String(before + 1).padStart(8, '0')
-  await writeFile(join(dir, 'tmp', 'other.json'), JSON.stringify({ seq: before + 1, kind: 'name', id: V3, name: 'From another host', at: new Date().toISOString() }), { mode: 0o600 })
+  await writeFile(join(dir, 'tmp', 'other.json'), JSON.stringify({ seq: before + 1, kind: 'name', id: V3, name: 'From another host', at: new Date().toISOString(), by: 'alex' }), { mode: 0o600 })
   const head = (await (await api('/house/plans')).json()).head
   await link(join(dir, 'tmp', 'other.json'), join(dir, 'events', `${next}.json`))
   await rm(join(dir, 'tmp', 'other.json'))
@@ -195,6 +195,16 @@ try {
   const back = await post('/head', { head: V7, expect: V8 })
   check('and the head moves back for the checks below', back.status === 200, back)
 
+  // Every event records whose token wrote it (S1).
+  const samHead = await asSam('/head', { head: V8, expect: V7 })
+  const samName = await asSam('/names', { id: V8, name: 'Sam\'s picture' })
+  await post('/head', { head: V7, expect: V8 })
+  const authored = await Promise.all((await readdir(join(dir, 'events'))).sort().map(async (f) => JSON.parse(await readFile(join(dir, 'events', f), 'utf8'))))
+  const byOf = (e: { by?: string; version?: { by: string } }) => e.version?.by ?? e.by
+  const kindBy = (kind: string, by: string) => authored.some((e) => e.kind === kind && byOf(e) === by)
+  check('every plan event records its author: versions, head moves and names, by the token that wrote them', samHead.status === 200 && samName.status === 200 && samKeeps.json.version.by === 'sam' && authored.every((e) => typeof byOf(e) === 'string') && kindBy('version', 'alex') && kindBy('version', 'sam') && kindBy('head', 'alex') && kindBy('head', 'sam') && kindBy('name', 'alex') && kindBy('name', 'sam'), authored.map((e) => ({ seq: e.seq, kind: e.kind, by: byOf(e) })))
+  check('a retry of a stored version by someone else still answers with the stored one', (await asSam('/versions', { version: { id: V8, parent: V7, note: 'Sam added a picture', plan: { ...base, furniture: [onTable, picture] } } })).status === 200)
+
   // Two hosts on one root racing one parent: the link() claim lets one in and refuses the other.
   const twin = await start()
   const asTwin = (path: string, body: unknown) => fetch(`${twin.base}/house/plans${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${twin.token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }))
@@ -229,6 +239,19 @@ try {
   const files = (await readdir(join(dir, 'events'))).map((f) => join(dir, 'events', f))
   const modes = { house: await mode(join(root, 'house')), plans: await mode(dir), events: await mode(join(dir, 'events')), files: [...new Set(await Promise.all(files.map(mode)))] }
   check('dirs are 0700 and event files 0600', modes.house === 0o700 && modes.plans === 0o700 && modes.events === 0o700 && modes.files.length === 1 && modes.files[0] === 0o600, Object.fromEntries(Object.entries(modes).map(([k, v]) => [k, Array.isArray(v) ? v.map((m) => m.toString(8)) : v.toString(8)])))
+
+  // The log is bounded (S2): at the cap a change is refused 507 and nothing is written; reading still works.
+  {
+    const files = await readdir(join(dir, 'events'))
+    const headNow = (await (await api('/house/plans')).json()).head as string
+    // Fill the log to one short of the cap with head moves that change nothing (the head stays where it is).
+    await Promise.all(Array.from({ length: 4999 - files.length }, (_, i) => writeFile(join(dir, 'events', `${String(files.length + 1 + i).padStart(8, '0')}.json`), JSON.stringify({ seq: files.length + 1 + i, kind: 'head', head: headNow, at: new Date().toISOString(), by: 'alex' }), { mode: 0o600 })))
+    const last = await post('/head', { head: headNow, expect: headNow })
+    const over = await post('/head', { head: headNow, expect: headNow })
+    const overVersion = await post('/versions', { version: { id: '0123456789abcdef', parent: headNow, plan: base } })
+    check('the 5000th change is stored and the next is refused 507, with nothing written', last.status === 200 && over.status === 507 && /at most 5000 changes/.test(over.json.error) && overVersion.status === 507 && (await readdir(join(dir, 'events'))).length === 5000, { last: last.status, over, overVersion: overVersion.status })
+    check('a full log can still be read', (await api('/house/plans')).status === 200)
+  }
 
   // Reload: a new host process folds the same log to the same state.
   const snapshot = JSON.stringify(await (await api('/house/plans')).json())
