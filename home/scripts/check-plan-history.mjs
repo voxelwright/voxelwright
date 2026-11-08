@@ -2,7 +2,7 @@
 // store, then with hostStore against a real villager host (stub agent, no model).
 // Usage: node scripts/check-plan-history.mjs   (needs host/node_modules: cd ../host && npm ci)
 // Vite loads the TypeScript in-process (no port, no browser). Synthetic data only.
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'vite'
@@ -10,7 +10,7 @@ import { createServer } from 'vite'
 const vite = await createServer({ root: new URL('..', import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true } })
 const H = await vite.ssrLoadModule('/src/build/history.ts')
 const P = await vite.ssrLoadModule('/src/build/plan.ts')
-const { PlanHistory, memoryStore, hostStore, diff, canonical, upgrade, StaleHead, StoreError, HistoryError, ReadOnly } = H
+const { PlanHistory, memoryStore, hostStore, bearer, diff, canonical, upgrade, StaleHead, StoreError, HistoryError, ReadOnly } = H
 const { HOUSE_PLAN, PlanError } = P
 
 const checks = []
@@ -286,14 +286,65 @@ try {
   const ro = PlanHistory.readOnly(HOUSE_PLAN, 'the saved house is away')
   const roCommit = await refusal(() => ro.commit([move]))
   check('a read-only house shows the plan and refuses every change with its reason', same(ro.plan, HOUSE_PLAN) && ro.readOnly === 'the saved house is away' && roCommit instanceof ReadOnly && roCommit.reasons[0] === 'the saved house is away' && (await refusal(() => ro.undo())) instanceof ReadOnly && ro.versions().length === 1)
+  // house() opens the store through villager.ts's `authorized` (the tab's own link, #42). Its page globals, stubbed:
+  // the token comes from the link fragment and stays in sessionStorage; a later link arrives on hashchange.
   const realFetch = globalThis.fetch
+  const onHash = []
+  const page = { hash: '', pathname: '/', search: '' }
+  Object.assign(globalThis, {
+    location: page,
+    history: { state: null, replaceState() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    addEventListener: (type, fn) => type === 'hashchange' && onHash.push(fn),
+    dispatchEvent: () => true,
+  })
+  const linkTab = () => {
+    page.hash = '#token=' + 'a'.repeat(64)
+    onHash.forEach((fn) => fn())
+  }
+  // Each scenario loads its own house.ts (house() opens once per page); villager.ts and history.ts stay shared.
+  let scenario = 0
+  const freshHouse = () => vite.ssrLoadModule(`/src/build/house.ts?scenario=${++scenario}`)
+  const goodState = await (async () => {
+    const m = memoryStore()
+    await PlanHistory.open(m, HOUSE_PLAN)
+    return m.load()
+  })()
   try {
-    globalThis.fetch = async (url) => String(url) === '/villager/launch'
-      ? new Response(JSON.stringify({ token: 't' }), { status: 200 })
-      : new Response(JSON.stringify({ error: 'plan event 3 follows 1' }), { status: 500 })
-    const { house, READ_ONLY_LINE } = await vite.ssrLoadModule('/src/build/house.ts')
-    const hh = await house()
-    check('house() with a host token and a failing store is read-only, not a page-only copy', hh.readOnly === READ_ONLY_LINE && (await refusal(() => hh.commit([move]))) instanceof ReadOnly)
+    let asked = 0
+    globalThis.fetch = async () => (asked++, new Response('{}', { status: 200 }))
+    const noLink = await freshHouse()
+    const nl = await noLink.house()
+    const nlCommit = await refusal(() => nl.commit([move]))
+    check('house() with no link opens in memory with the open-your-link line, asks the host nothing, and still builds', nl.unsaved === noLink.LINK_LINE && !nl.readOnly && asked === 0 && nlCommit === null && !/token/i.test(noLink.LINK_LINE), nlCommit?.message)
+    linkTab()
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'no' }), { status: 401 })
+    const refusedLink = await freshHouse()
+    const rl = await refusedLink.house()
+    check('house() with a link the host refuses (401) opens in memory with the open-your-link line', rl.unsaved === refusedLink.LINK_LINE && !rl.readOnly)
+
+    globalThis.fetch = async () => {
+      throw new TypeError('fetch failed')
+    }
+    const away = await freshHouse()
+    const aw = await away.house()
+    check('house() with a link and no host opens in memory with the keeper-away line', aw.unsaved === away.UNSAVED_LINE && !aw.readOnly)
+
+    const broken = { ...goodState, versions: [{ ...goodState.versions[0], plan: { ...goodState.versions[0].plan, walls: goodState.versions[0].plan.walls.map((w, i) => (i === 1 ? { ...w, b: 'kitchen.nowhere' } : w)) } }] }
+    let sent = null
+    globalThis.fetch = async (url, init) => ((sent = { url: String(url), auth: Boolean(init?.headers?.authorization) }), new Response(JSON.stringify(broken), { status: 200 }))
+    const damaged = await freshHouse()
+    const dh = await damaged.house()
+    check('house() whose saved house cannot be read is read-only, not a page-only copy', dh.readOnly === damaged.READ_ONLY_LINE && (await refusal(() => dh.commit([move]))) instanceof ReadOnly)
+    check("house() asks for /house/plans through the villager API with the tab's link", sent?.url === '/villager/api/house/plans' && sent.auth, sent)
+
+    globalThis.fetch = async (url) => new Response(JSON.stringify({ error: 'internal error' }), { status: 500 })
+    const failing = await freshHouse()
+    const fh = await failing.house()
+    // A known gap, kept visible: authorized() reads any 5xx as "host unreachable" (the dev proxy answers 502/504 when
+    // the host is down), so a host whose stored house is damaged (500) opens a page-only house, not a read-only one.
+    check('known gap: house() whose host answers 500 opens in memory as if the keeper were away (authorized folds 5xx into unreachable)', fh.unsaved === failing.UNSAVED_LINE && !fh.readOnly)
   } finally {
     globalThis.fetch = realFetch
   }
@@ -396,13 +447,22 @@ try {
     const fiber = ctx.plugin(villager, { root: dataRoot, agent: stubAgent(0), port, people: { alex: 'Alex', sam: 'Sam' } })
     await fiber.await()
     const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
-    return { fiber, port: launch.port, base: `http://127.0.0.1:${launch.port}`, token: launch.token, launchFile: ctx.villager.launchFile }
+    const base = `http://127.0.0.1:${launch.port}/`
+    return { fiber, port: launch.port, base, alex: bearer(base, launch.tokens.alex), sam: bearer(base, launch.tokens.sam) }
   }
+  // A kept item in a person's library, as the host stores it (synthetic).
+  const libraryItem = async (person, item) => {
+    const dir = join(dataRoot, 'people', person, 'library')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, `${item}.json`), JSON.stringify({ id: item, name: 'Lamp', module: '', models: [], costUsd: null, ms: 0, at: new Date().toISOString(), kept: true }))
+  }
+  const lamp = (id, library, person, x) => ({ op: 'placeItem', furniture: { id, item: { library, person }, at: { mount: 'floor', x, z: 1.5, yaw: 0 } } })
   try {
     let host = await startHost()
-    const alex = await PlanHistory.open(hostStore({ base: host.base, token: host.token }), HOUSE_PLAN)
-    const sam = await PlanHistory.open(hostStore({ base: host.base, token: host.token }), HOUSE_PLAN)
-    check('host: two pages share one root', alex.head === sam.head && alex.versions().length === 1)
+    // Two people, each with their own link, open the one shared house.
+    const alex = await PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN)
+    const sam = await PlanHistory.open(hostStore({ request: host.sam }), HOUSE_PLAN)
+    check("host: Alex's and Sam's own links open the same house, one root", alex.head === sam.head && alex.versions().length === 1 && sam.versions().length === 1)
     const a1 = await alex.commit([move], 'wider')
     await alex.commit([bend])
     await alex.undo()
@@ -410,23 +470,36 @@ try {
     const samStale = await refusal(() => sam.commit([pantry]))
     check('host: a stale page is refused with the current head, and has taken it', samStale instanceof StaleHead && samStale.head === alex.head && sam.head === alex.head)
     const s1 = await sam.commit([pantry])
-    check('host: the other page commits on the new head; no one is named', !('by' in s1) && s1.parent === a1.id && same(s1.plan, sam.plan))
+    check('host: the other person commits on the new head; no one is named', !('by' in s1) && s1.parent === a1.id && same(s1.plan, sam.plan))
+    await alex.refresh()
+    // A person's library is their own (#40): Alex places their own kept item; Sam may keep it but not newly place one of Alex's.
+    await libraryItem('alex', 'a1b2c3d4e5f6')
+    await libraryItem('alex', 'b1b2c3d4e5f6')
+    const placed = await refusal(() => alex.commit([lamp('f.lamp', 'a1b2c3d4e5f6', 'alex', 0.8)]))
+    check("host: Alex places a kept item from their own library", placed === null && alex.plan.furniture.some((f) => f.id === 'f.lamp'), placed?.message)
+    await sam.refresh()
+    const samHead = sam.head
+    const samPlaces = await refusal(() => sam.commit([lamp('f.other', 'b1b2c3d4e5f6', 'alex', 1.4)]))
+    check("host: Sam newly placing Alex's library item is a StoreError 403, and the house stays", samPlaces instanceof StoreError && samPlaces.status === 403 && sam.head === samHead && !sam.plan.furniture.some((f) => f.id === 'f.other'), samPlaces?.message)
+    const samKeeps = await refusal(() => sam.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.1 }]))
+    check("host: Sam's change that keeps Alex's lamp is saved", samKeeps === null && sam.plan.furniture.some((f) => f.id === 'f.lamp' && f.item.person === 'alex'), samKeeps?.message)
     await alex.refresh()
     const expected = { head: alex.head, plans: alex.versions().map((v) => [v.id, canonical(alex.planAt(v.id))]), name: alex.name(a1.id) }
     await host.fiber.dispose()
-    host = await startHost()
-    const reopened = await PlanHistory.open(hostStore({ base: host.base, token: host.token }), HOUSE_PLAN)
-    check('host: a restarted host reopens to the same head, plans and names', reopened.head === expected.head && same(reopened.versions().map((v) => [v.id, canonical(reopened.planAt(v.id))]), expected.plans) && reopened.name(a1.id) === 'Wider kitchen')
-    // A host restart (same port, new token): the store fetches the new token once and saves.
-    let refreshes = 0
-    const kept = await PlanHistory.open(hostStore({ base: host.base, token: host.token, refresh: async () => (refreshes++, JSON.parse(await readFile(host.launchFile, 'utf8')).token) }), HOUSE_PLAN)
-    await host.fiber.dispose()
+    // A restart mints new links: the old one is refused (no shared token to refresh), the new one reopens the same house.
+    const oldAlex = host.alex
     host = await startHost(host.port)
-    const afterRestart = await refusal(() => kept.commit([{ op: 'moveWall', wallId: 'kitchen.right', by: 0.3 }]))
-    check('host: after a restart the store fetches the new token once and saves', afterRestart === null && refreshes === 1, afterRestart?.message)
-    const noToken = await refusal(() => PlanHistory.open(hostStore({ base: host.base, token: 'f'.repeat(64) }), HOUSE_PLAN))
-    check('host: a wrong token is a StoreError 401', noToken instanceof StoreError && noToken.status === 401)
+    const stale = await refusal(() => PlanHistory.open(hostStore({ request: oldAlex }), HOUSE_PLAN))
+    check("host: a link from an earlier launch is a StoreError 401", stale instanceof StoreError && stale.status === 401, stale?.message)
+    const reopened = await PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN)
+    check('host: a restarted host reopens to the same head, plans and names', reopened.head === expected.head && same(reopened.versions().map((v) => [v.id, canonical(reopened.planAt(v.id))]), expected.plans) && reopened.name(a1.id) === 'Wider kitchen')
+    const wrong = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, 'f'.repeat(64)) }), HOUSE_PLAN))
+    check('host: a refused token is a StoreError 401', wrong instanceof StoreError && wrong.status === 401)
+    const none = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, null) }), HOUSE_PLAN))
+    check('host: no token is a StoreError 401 and asks nothing', none instanceof StoreError && none.status === 401)
     await host.fiber.dispose()
+    const gone = await refusal(() => PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN))
+    check('host: a host that is gone is a StoreError 0', gone instanceof StoreError && gone.status === 0, gone?.message)
   } finally {
     await rm(dataRoot, { recursive: true, force: true })
   }

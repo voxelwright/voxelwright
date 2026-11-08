@@ -284,34 +284,33 @@ export function memoryStore(): PlanStore {
 }
 
 /**
- * The house's store on the host: `${base}/house/plans`, behind the per-launch
- * token. The host sets `at` to its clock. Nobody is named: the host does not yet
- * know who is at the page.
+ * How the store reaches the host: `path` under the villager API, sent with a person's token. A Response; null when
+ * the host is unreachable; 'link' when there is no token or the host answered 401. The page passes `authorized`
+ * from ../villager (the tab's current token); node and checks pass bearer().
  */
-export function hostStore(opts: { base: string; token: string; refresh?: () => Promise<string | null> }): PlanStore {
-  let token = opts.token
-  const root = `${opts.base.replace(/\/$/, '')}/house/plans`
-  const send = async (path: string, body?: unknown): Promise<Response> => {
-    try {
-      return await fetch(root + path, {
-        method: body === undefined ? 'GET' : 'POST',
-        headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-        body: JSON.stringify(body),
-      })
-    } catch (error) {
-      throw new StoreError(0, `the host could not be reached: ${(error as Error).message}`)
-    }
+export type HostRequest = (path: string, init?: RequestInit) => Promise<Response | null | 'link'>
+
+/** A HostRequest for node and checks: `${base}${path}` with `token` as the bearer. */
+export function bearer(base: string, token: string | null): HostRequest {
+  const root = base.replace(/\/$/, '')
+  return async (path, init = {}) => {
+    if (!token) return 'link'
+    const res = await fetch(root + path, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
+    if (!res || res.status >= 500) return null
+    if (res.status === 401) return 'link'
+    return res
   }
+}
+
+/**
+ * The house's store on the host: `/house/plans`, the one house every person shares, opened with the person's own
+ * token. The host sets `at` to its clock, and lets a version newly place only the caller's own library items.
+ */
+export function hostStore({ request }: { request: HostRequest }): PlanStore {
   async function call<T>(path: string, body?: unknown): Promise<T> {
-    let res = await send(path, body)
-    // The host restarted with a new token: fetch it once and try again.
-    if (res.status === 401 && opts.refresh) {
-      const fresh = await opts.refresh()
-      if (fresh) {
-        token = fresh
-        res = await send(path, body)
-      }
-    }
+    const res = await request(`/house/plans${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    if (res === null) throw new StoreError(0, 'the host could not be reached')
+    if (res === 'link') throw new StoreError(401, 'the host did not accept this link')
     const json = await res.json().catch(() => null)
     // Only a compare-and-set mismatch carries the head.
     if (res.status === 409 && json && 'head' in json) throw new StaleHead(json.head)
