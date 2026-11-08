@@ -20,6 +20,7 @@ export default {
     const T = WALL_T
     const x0 = KITCHEN.x0, x1 = LIVING_X + 1.6, z0 = WALL_Z, z1 = FRONT_Z, height = HOUSE_H
     const plaster = new THREE.MeshStandardMaterial({ map: paintPlaster(5, [244, 239, 230], 1536, 768, 0.45), roughness: 0.95 })
+    plaster.userData.themeRole = 'wall'
     group.add(shell({
       x0, x1, z0, z1, height, thickness: T,
       wall: plaster,
@@ -59,6 +60,7 @@ export default {
     pool.rotation.x = -Math.PI / 2
     pool.position.set(0.42, TABLE_TOP + 0.004, 0.35)
     pool.name = 'lamp pool'
+    pool.material.userData.themeRole = 'beam'
     group.add(pool)
 
     // A garden plot behind the house: the kitchen window looks down onto it, and from
@@ -69,11 +71,14 @@ export default {
     lawn.position.set((plot.x0 + plot.x1) / 2, 0, (plot.z0 + plot.z1) / 2)
     lawn.receiveShadow = true
     lawn.name = 'diorama garden'
+    lawn.userData.exterior = true // a theme's world hides it (src/theme/world)
+    lawn.material.userData.themeRole = 'backdrop'
     group.add(lawn)
     const cut = new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 })
     const plinth = new THREE.Mesh(new THREE.BoxGeometry(plot.x1 - plot.x0 + 0.08, 0.3, plot.z1 - plot.z0), cut)
     plinth.position.set(lawn.position.x, -0.152, lawn.position.z - 0.04)
     plinth.receiveShadow = true
+    plinth.userData.exterior = true
     group.add(plinth)
 
     // Small trees in the garden whose crowns show over the back wall, a younger one at

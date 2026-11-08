@@ -9,7 +9,7 @@ import { listNotes, readNote, writeNote } from '../src/notes.ts'
 import villager, { parsePeople, parsePeopleSpec } from '../src/villager.ts'
 import { initProblem, stubAgent, systemPrompt, villagerOptions, warmAgent, type Agent, type StartQuery } from '../src/villager-agent.ts'
 import { checkPersona, checkProfile, defaultPersona, fallbackCharacter, humourCeiling, humourWords, loadVisitCharacter, readPreferences, TEMPLATES, writePreferences, type Character } from '../src/persona.ts'
-import { checkRouted, cleanName, routeContext, routeInReply, stubMaker, stubRouter, type Maker, type Router } from '../src/villager-input.ts'
+import { checkRouted, cleanName, makerPrompt, routeContext, routeInReply, stubMaker, stubRouter, type Maker, type Router } from '../src/villager-input.ts'
 import { checkPng, MAX_SKETCHES, moduleName, stubSketchMaker } from '../src/sketch.ts'
 import { PNG } from 'pngjs'
 
@@ -856,6 +856,13 @@ try {
   check('nothing was written outside the notes folder', !existsSync(join(root, 'people', 'alex', 'escape.md')) && !existsSync(join(root, 'escape.md')) && (await readFile(outside, 'utf8')) === 'not for the villager')
   await writeNote(notes, 'plants.md', 'Water on Sundays.')
   check('a plain note round-trips', (await readNote(notes, 'plants.md')) === 'Water on Sundays.')
+
+  // A theme's style guide reaches the maker's prompt literally: `$&`, `$'` and `` $` `` are not replacement patterns.
+  {
+    const style = "brass $& rivets, $' and $` ticks, $$ signs"
+    const prompt = makerPrompt(style)
+    check('a theme style guide with $ patterns reaches the maker prompt literally', prompt.includes(JSON.stringify(style)) && !prompt.includes('\u0000'), prompt.slice(0, 400))
+  }
 
   // The init guard.
   const tools = ['mcp__notes__list_notes', 'mcp__notes__read_note', 'mcp__notes__write_note']

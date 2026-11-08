@@ -2116,6 +2116,7 @@ JSON answer the host checks field by field (`checkRouted` in
 | furnish | a translucent ghost of the right size at once, then the made prop in its place, with Keep, Undo and Try another on a paper tag |
 | project | your villager says so in one line; a kraft-paper parcel with a stitched "being made" tag stands where it will go; the host records it in `projects.jsonl`, and parcels come back after a reload |
 | journal | the journal opens at that villager or section |
+| theme (#50) | your villager says one line, the whole home is restyled from the sentence, and it says what changed (see Themes) |
 
 Furnishing (`src/talk/furnish.ts`): trusted code resolves the place from the
 words (around the table, by the window, in the corner, on the counter, or
@@ -2293,6 +2294,271 @@ text is slow; thinking still appears on some Haiku turns despite
 `thinking: disabled`; the phone layout (field of view, tap areas, card
 placement) is a later unit; the speech variant has no touch path.
 
+
+## Themes (#50 prototype)
+
+`?theme=<id>` restyles the whole home: `blue-hour` (dusk), `sixteen-bit` (16-bit pixel art),
+`neon-night` (a rain-soaked neon night), `comic` (comic-book halftone) or `pastoral` (hand-painted
+summer countryside). The swatch book on the window sill switches live, saves your own looks, and
+takes a written request ("make it cozier"), as does the always-on input. Final captures of every
+look: `screenshots/themes/final/`. Without `?theme=` nothing changes: the theme plugin isn't loaded
+and postfx reads the default theme, whose values are its old literals. A seeded, clock-fixed
+`?q=low` capture against the code before themes differs by a mean of 0.30 to 0.34 (seat) and
+0.30 (iso), against 0.17 to 1.68 between two runs of the old code.
+
+A theme is data (`src/theme/tokens.ts`), one file per preset in `src/theme/presets/`:
+
+- Lights by role: key (shadow-casting), fill (hemisphere), rim, practical (point and spot),
+  plus exposure. Each shifts the light's own colour towards a target, with a gain.
+- Surfaces by role: wall, floor, view (the painted window backdrop), beam (sunbeam, lamp
+  pool), glow (anything with a non-black emissive), trim, backdrop (the yard), other. A role
+  can set colour, roughness, metalness, emissive, or `paint` (a code painter that replaces
+  the map, in `src/theme/paint.ts`).
+- Fog colour, post-processing (bloom, vignette, warmth, grain, grade, the colour beyond the
+  room, reflections, vetoed features, extra stages such as `pixel`), animation timing,
+  costume rules and a prop style hint.
+
+`src/theme/plugin.ts` applies a theme to whatever the plugins made, by role, from each
+object's own values, and puts them back on unload. Plugins tag a role with
+`userData.themeRole` (one line each) or the role is inferred from the object's kind, so
+rooms, props and villagers from other threads are themed without changing them. A light's
+level is folded into its colour, because `window.ts` animates the sun's intensity every
+frame. `src/theme/fx/` holds post stages that can own the scene pass (resolution, filtering)
+and work in display space, after tone mapping, where palettes and dithering belong. Recipes
+are in `.agents/skills/tsl-stylised-post`.
+
+What a theme changes, by mechanism:
+
+| Mechanism | Speed | 16-bit | Neon night |
+| --- | --- | --- | --- |
+| Tokens | next frame | warm sun, cool fill, saturation 1.4, no grain, TRAA off | moonlight, violet fill, magenta lamp and rim, dark walls, glossy floor, violet fog and lift |
+| Post stage | one pipeline rebuild | 225 rows of integer art pixels, outlines, 37-colour OKLab palette, ordered dither | bloom 0.7, SSR at a third of the resolution on tiers with TRAA |
+| Local repaint (code painter) | milliseconds | none | the window shows a night city with lit towers and rain |
+| Model and prop sandbox (not built yet) | 10 to 15 s per prop | floor planks and small props redrawn at pixel scale | neon tube trim, a sign throwing light, a wet street outside |
+
+Costumes follow the same split: colours shift with the tokens today; new costumes would be
+made by the model.
+
+Frame cost, headless Chrome, 1440x900, M1 Pro, WebGPU, `npm run measure -- '<url>' --perf --gpu`,
+one 6 s run each, same session (neon seated is the second of two repeats after a stalled first run):
+
+| Page | Draw calls | GPU p50 / p95 ms |
+| --- | --- | --- |
+| `?q=high` | 526 | 11.0 / 11.9 |
+| `?q=high&theme=sixteen-bit` | 513 | 6.5 / 10.4 |
+| `?q=high&theme=neon-night` | 533 | 8.6 to 9.4 / 11.0 to 16.4 |
+| `?q=high&cam=iso` | 602 | 8.7 / 11.1 |
+| `?q=high&cam=iso&theme=sixteen-bit` | 589 | 7.9 / 11.3 |
+| `?q=high&cam=iso&theme=neon-night` | 609 | 11.3 / 16.4 |
+| `?q=low` | 457 | 5.5 / 9.1 |
+| `?q=low&theme=sixteen-bit` | 444 | 3.8 / 5.4 |
+| `?q=low&theme=neon-night` | 457 | 6.0 / 11.0 |
+
+16-bit is cheaper than the default because the scene renders at about 225 rows. SSR at half
+resolution cost 4 to 7 ms and once broke the 13 ms step-down; at a third it costs about 1 ms.
+
+Look (ui-craft, overall out of 10): 16-bit, a fresh Opus scorer 6 then 6.5 (two rounds),
+GPT-6.1 Sol 6; neon night, Opus category means 5.4, 5.7 and 5.9 (three rounds), GPT-6.1 Sol 6.
+Both reviewers asked for the same fixes. In 16-bit: dither only at transitions, not across flat
+walls; separate wood, paint and plaster by value; keep tiny objects legible at 225 rows. In neon
+night: much less cyan on the wall tops; a little warm fill so the household survives; the iso
+exterior and window still show a garden. Below the 9/10 bar; this round proves the mechanism.
+
+Polish round (November 7). 16-bit: a pixel snaps to its nearest palette colour and dithers only
+near the boundary between its two nearest colours (OKLab), narrowed where the light is flat, so
+walls and the fridge are flat and seams dither; `dither` is now that band's width (`check()`
+defaults it to 0.3). A flat `pixel-plaster` painter, two clean whites (38 colours), bloom back for
+the lamp, and creases need a depth bend too (the sunbeam's normals drew diagonal lines). Opus 6.5
+then 6. Neon night: trim glow 1.0 to 0.12 so the table leads, warm floor bounce in the fill,
+moonlight 0.03 (no floor glare), floor roughness 0.42, two signs in the city view. Opus 6.5 and
+6.5. Thin neon tubes need geometry or a glow-map path; tokens can't draw them.
+
+GPT-6.1 Sol on the final captures (`screenshots/themes/final/`, overall out of 10): blue hour 7,
+pastoral 7, 16-bit 6, neon night 6, comic 6. Its one best fix each: blue hour, a slate-blue
+exterior in iso; 16-bit, broad plank divisions on the iso floor; neon night, an urban silhouette
+instead of the yard in iso (consistency 4); comic, lighter inner ink on chair slats in iso;
+pastoral, contact shadows under chairs and cabinets. All below the 9/10 bar.
+
+`node scripts/theme-shots.mjs <dir> name=<url> ...` takes seeded, clock-fixed captures (a
+browser per shot), and `--diff a.png b.png` compares two. Screenshots: `screenshots/themes/`.
+
+Comic-book halftone (`?theme=comic`): three stages in `src/theme/fx/`. `chroma` shifts the red
+and blue plates by 0.05% of the screen height (3 taps, no pass). `halftone` adds the surface
+colour (`diffuseColor`) to the scene pass, so lit over surface colour is the light on each
+pixel: the light snaps to whole stops (flat shadow shapes) and round dots print only below the
+room's ambient light, so a dark fridge in the sun stays clean. `ink` draws lines from the
+inverse-depth Laplacian and from normal folds that also bend the depth (which keeps out
+additive glows). `motion.characterFps: 12` holds every villager's pose for a twelfth of a
+second (`villagers/rig.ts`); camera, roots and motes stay at frame rate. `?drop=chroma,ink`
+leaves stages out to measure them. Measured GPU p50 / p95: seated high 7.4 / 11.4 (baseline
+7.8 / 11.1 in the same session), iso high 6.5 / 8.1 (6.5 / 8.6), seated low 3.7 / 4.9
+(3.1 / 4.7). Look, three fresh Opus rounds, category means 5.1, 5.3 and 5.6: the scorers still
+want flatter texture (wood grain, rug), less specular, lighter ink on thin geometry in iso,
+and no dots behind the steam. The polish round flattened texture (an edge-preserving average of
+surface colour), wrote the colour and normal buffers from opaque surfaces only (no dots behind the
+steam) and lightened ink on thin strips: seated high 8.9 / 10.5, iso high 7.7 / 8.7, seated low
+4.4 / 6.1; Opus 5.5 then 6. The reported "halftone without ink runs under 1 fps" was not the theme:
+several headless Chromes starting at once were still compiling startup shaders when the measure
+window began, so a whole 6 s run sometimes held 0.3 to 2 fps with normal per-frame GPU and CPU time.
+`scripts/measure.mjs` now waits for 30 frames in a row under 50 ms (at most 20 s) and reports
+`settleMs`.
+
+Hand-painted pastoral (`?theme=pastoral`): gouache painters (`src/theme/paint.ts`) for the walls,
+the window view, the floorboards (`gouache-planks`), the yard, garden and worktable (`gouache-meadow`)
+and the leaves (`gouache-leaves`, a new `foliage` role), plus the `paper` stage. A painter paints once
+per theme. Each material wears its own clone with its own repeat, offset, rotation and wrap, so a floor
+tiled eight times and a table tiled once can share one painter. A theme's optional `sky` stands a
+painted backdrop card (an open cylinder seen from inside, unlit, not pickable) round the yard, so the
+dollhouse view has a sky. `light.key.soften` widens the sun's shadow blur. Clones, unused painters
+and the sky are released on a theme change and on unload. Three pastoral and home round trips return
+geometries to the no-theme count. Textures grew by 2 per trip, as with sixteen-bit, from the rebuild
+path. Measured GPU p50 / p95: seated high 9.7 / 12.1, iso high 8.4 / 8.8, seated low 3.4 / 4.9.
+Look, a fresh Opus scorer per round, overall 6, 6 and 6 (the same scorer put the earlier pastoral at
+about 4.5). Still asked for: the fridge's brushed steel and the chairs' gloss painted flat, contact
+shadows and a sun patch in iso, and the same yard through the window from both cameras.
+
+Not built yet: remaking props and costumes in the new style ("redecorated over time").
+
+### A theme written from a sentence
+
+`village.theme.ask("make it cozier")` (`src/theme/ask.ts`), or the same line typed into the
+always-on input, which routes it to a new `theme` route. The page sends the sentence and the
+current theme to `POST /people/:id/theme` (`host/src/villager-theme.ts`, behind the per-launch
+token, under one listed person, one at a time). One tool-less model call (Sonnet by default,
+`--theme-model haiku`) writes `{note, theme}`; its prompt is built from `tokens.ts`, the three
+presets and the painter names, so it never drifts from them. "Modify" is the same call with
+the current theme as data. The host checks the shape and answers 422 on model failure; the
+page checks every field with `check()` (`src/theme/check.ts`: own known keys only, numbers
+clamped, `#rrggbb` colours, stage kinds, painters and vetoes from fixed lists, palette at most
+64, short one-line strings, missing fields from the home) and only then calls `setTheme`. A
+failure or refusal leaves the current theme. The note is shown as text. The reply also
+carries `props.hint` and `costumes.hint`; nothing remakes props from them yet. The rule
+against naming films, studios or artists is in the prompt, not in `check()`.
+
+`node scripts/check-theme-ask.mjs` (stub themer and router) proves 22 checks: hostile
+`check()` inputs (`__proto__` keys, NaN, 1e308, unknown stages, a 10,000-colour palette,
+script-looking strings), presets passing unchanged, ask applying live, a hostile answer
+clamped, junk and a failed call leaving the theme, the token and person checks, and "make it
+cozier" from the input. `--agent=claude --theme-model=sonnet|haiku [--shots=dir]` runs five
+real sentences in sequence at `?q=high`, each modifying the last.
+
+Real calls, operator login, November 6, 2026, from `ask()` to two frames after `setTheme`.
+`check()` passed every answer first time with nothing clamped:
+
+| Sentence | Sonnet | Haiku |
+| --- | --- | --- |
+| make it cyberpunk | 12.8 s, 973 tok, $0.044 | 6.9 s, 1010 tok, $0.0024 |
+| make it cozier, more autumn | 8.1 s, 902 tok, $0.021 | 6.2 s, 914 tok, $0.0015 |
+| a hand-painted pastoral summer afternoon | 9.2 s, 979 tok, $0.022 | 17.1 s, 1961 tok, $0.0020 |
+| make it look like a comic book | 7.9 s, 1012 tok, $0.022 | 48.8 s, 1463 tok, $0.0016 |
+| go back to normal | 3.8 s, 412 tok, $0.017 | 21.7 s, 463 tok, $0.0011 |
+
+Sonnet's first call pays the prompt cache write. Haiku's last three took 17 to 49 s (nearly all
+of it in the host's model call); the cause was not investigated, and other agents were using the machine.
+One run each, so these are single samples. Halftone, ink, brush and paper are still
+pass-through stubs, so the comic and pastoral results show only their tokens. Screenshots
+(Sonnet): `screenshots/themes/ask-cyberpunk.jpg`, `ask-cozier-autumn.jpg`, `ask-comic.jpg`.
+
+### Switching live, saved looks and the swatch book
+
+The swatch book is a paint fan deck on the window sill (an entry: hover, click, or Tab and
+Enter). Its cards open out of the deck: the row stands on the sill line, centred on the deck as
+far as the screen allows, and each card grows out of the rivet in a gentle fan. Choosing a card
+switches the home live. Your own looks get "rename" and "tear out", the blank card saves the look
+on screen (a half-finished blend included) under a name, and the same name replaces it. Tearing
+out the look on screen switches to the look it was made from, so a card is always marked. The
+slip under the cards calls `village.theme.ask(text)`: while the model writes, the request stays
+on the slip with a turning paint pot and "Mixing the paint"; then it shows the note, or the line
+the villagers use when it fails ("I couldn't change the look just now."). Escape clears the slip,
+then closes the book.
+
+`setTheme()` picks one of two paths (`src/theme/switch.ts`):
+
+- Same post chain shape (the same stages with their settings, vetoes, and whether reflections
+  and a sky are in the chain; `shape()` in `src/theme/blend.ts`): the tokens blend over 1.5 s.
+  Postfx's numbers (bloom, vignette, warmth, grain, grade, sky colour, reflection strength) are
+  uniforms synced from `theme()` in its draw pass, so nothing is rebuilt. The grade is always in
+  the chain, written so its identity is exact. A value one look leaves unset (roughness, emissive,
+  a painted map) changes at the midpoint. Golden hour and Blue hour share a shape. The blend runs
+  on its own animation frames by the clock, so it finishes without the theme plugin.
+- Any other pair: postfx builds the next look's chain and compiles it while the current chain
+  keeps drawing the room live (`prepare()` in `src/plugins/postfx.ts`). Its scene passes compile
+  with `PassNode.compileAsync`; its quads (stages, bloom, render-to-texture nodes) compile through
+  warm draws that ask three for every missing pipeline asynchronously, so three skips those objects
+  until they are ready. A warm draw runs before the live chain's draw in the same frame, which
+  clears the canvas over it. When everything is ready, the last frame is copied to a canvas over
+  the scene, the new chain and the new look are swapped in under it in the same frame, and the
+  copy fades over 0.6 s. A second choice while a chain compiles drops that chain unseen.
+
+With `prefers-reduced-motion` a blend is instant and the copy is dropped without a fade.
+
+Looks you save live in `localStorage` (`village.themes`), the last chosen look in
+`village.theme.last` (`?theme=` wins over it) and costume choices in `village.theme.costumes`.
+Everything read back goes through `check()`; while that refuses everything, looks saved here come
+back through `revive()` in `src/theme/saved.ts`, which takes only colours and clamped numbers
+from storage and everything structural from the built-in the look was made from.
+
+Keep my costume: villager plugins tag each figure root with `tagVillager(root, id)`. A root with
+`userData.keepCostume` is skipped by the theme plugin with its whole subtree, and anything themed
+in it before is put back from the plugin's saved originals. `window.village.theme` exposes
+`list()`, `current()`, `get(id)`, `set(id)`, `save(name)`, `rename(id, name)`, `remove(id)`,
+`keepCostume(villagerId, on)`, `keepsCostume(id)`, `switching()` and `lastSwitch()`.
+
+`node scripts/check-themes.mjs [base-url] --before=<png>` proves both paths, the old chain
+drawing live until the swap, every rebuild frame under 100 ms at `?q=high`, a double switch that
+never swaps in the look before last, reduced motion, a blend with the theme plugin unloaded,
+deleting the look on screen, saved looks across reloads, keep my costume, the swatch book by
+keyboard and pointer, five theme and postfx cycles with no texture growth at either tier, and the
+no-op (the `--before` capture comes from `theme-shots.mjs` on the commit before; the swatch book
+is unloaded for the capture). Three clones the glass's transmission backdrop per render target
+and never frees it; postfx releases its scene pass's copy when a chain retires, which ended the
+one-texture-per-rebuild growth at the high tier.
+
+Switch timing, headless Chrome, 1440x900, `?q=high`, M1 Pro shared with three other builders,
+fresh browser per run (cold shader caches). Worst frame is the longest frame interval from the
+choice until the copy has faded:
+
+| Switch | Worst frame before | Worst frame now | Compiled ahead | Settled |
+| --- | --- | --- | --- | --- |
+| Golden hour to Blue hour (blend) | 16.8 to 33 ms | 16.8 ms | none rebuilt | 1.51 s |
+| Blue hour to Neon night | 117 to 733 ms | 40 ms | 0.71 s | 0.77 s |
+| Neon night to 16-bit | 83 to 567 ms | 23 ms | 0.86 s | 0.92 s |
+| 16-bit to Comic | (comic cold: 2.2 to 6 s) | 29 ms | 0.53 s | 0.59 s |
+| Comic to Golden hour | 183 ms | 28 ms | 0.25 s | 0.30 s |
+| Neon night to Pastoral | 1.4 to 13 s cold, 0.22 s warm | 1.04 s cold, 17 ms warm | 0.25 s | 1.37 s |
+
+What is left in Pastoral's cold switch is not the chain: its window painter (`pastoral-view` in
+`src/theme/paint.ts`) took 1.3 s of main-thread time on first use, at the swap frame. A faster
+painter is in progress in the pastoral unit; painting ahead needs a `prepaint` from the theme
+plugin's paint path.
+`node scripts/theme-strip.mjs <out.png> <from> <to> <ms> ...` draws a real frame strip of a
+switch in the page (Playwright screenshots take 0.1 to 8 s each, too slow for a 1.5 s switch).
+Screenshots: `screenshots/themes/swatch-book-*.jpg` and `switch-*-strip.jpg`.
+
+Look (ui-craft, a fresh Opus scorer per round, overall out of 10): 6, then 6 after a dusk window
+for Blue hour, one mark for the current card and larger notes. After compiling ahead, the fan from
+the sill and the mixing slip (one round, November 7): 6. Per category: warmth 7, materials 6,
+lighting 7, legibility 6, consistency 6, motion 5, the swatch book belongs 6, the room changing 6
+(the blend alone about 8, the rebuild about 4, judged on a strip whose one-second freeze is
+Pastoral's cold painter), the slip alive while waiting 4. Asked for next: a smaller fan nearer the
+sill that never covers the lamp; square matte chips; one arc for every card; the slip as a paper
+strip; a blank card that fills with colours while the look is written; a rebuild that starts
+changing the light at frame 0. Below the 9/10 bar.
+
+### Regroup S3: the theme redecorates (prototype, dev builds)
+
+`?theme=neon-night&redecorate=1` (or `comic`) has the theme remake the kitchen's dining table,
+chairs, fridge, pendant lamp and reading armchair, plus one headwear piece per felt villager
+(`?villager=b` or `?talk=npc`), in `src/theme/redecorate/`. Each piece is asked of the host's prop
+maker (`POST /people/:id/props` with `style`: the theme's label, about and `props.hint` or
+`costumes.hint`, replacing the house style paragraph of the maker prompt), run in the prop
+sandbox, checked, rebuilt and scaled into the original's box, so footprints, the table top and seat
+heights hold; the original is hidden under it. A table drops anything the model stood on its top.
+Pieces fade in one by one as they are ready; the home's look restores every original; a refused
+piece leaves its original. Made pieces are kept in the person's library as
+`<theme> redecoration, <key>: ...`, so a later visit loads them with no model call.
+`window.village.redecorate.status()` lists each piece with its source, host and sandbox ms and cost.
+Without `redecorate` nothing changes. Shots: `screenshots/themes/regroup1/s3-*.jpg`.
 
 ## Sketching on the notepad (#42 prototype, November 7, 2026)
 
@@ -2530,6 +2796,28 @@ started. Changed for the new behaviour: `check-talk-input` expects the resting p
 on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
 was 3), and checks that the camera waits for the sent note to land before turning to its
 reader; its Undo click reports why it missed instead of passing silently.
+
+### Perf gate (#50, November 8)
+
+`npm run perf-gate` at `c7f6d5e`, 2 to 3 other headless Chromes on the machine:
+- **Against `feature/village-talk` (7f3bf15): every gate passes.** The themes add 15 draws (the swatch book) to home and villagers, and 9 to talk. CPU and heap match the base, because the theme plugin loads only on intent (the swatch book opening, a theme asked for), not with every page.
+- **Against `main` (cb1d565): one failure, home draw calls 541 against a limit of 530 (base 482).** 44 of the 59 come from #42's connected house, which is already on the talk branch (526), and 15 from the swatch book. GPU and frame gates pass.
+
+After the merge with `feature/village` (09443a7), at `68821ca`:
+- **Against `feature/village` (09443a7): every gate passes.** Themes add 15 draws to home and villagers (the swatch book) and 4 to talk; CPU is within noise.
+- **Against `main` (faa1a0a): the same single failure, home draw calls 541 against 530.** 44 of the 59 extra draws are #42's connected house (526 on `feature/village`).
+- Both runs warned of 5 other headless Chromes on the GPU, so their GPU numbers are indicative only. The home's heap read 41 MB against 23 MB on `feature/village` (heap is not gated and moves with GC timing).
+
+### Paper talk look under every theme (#50, November 8)
+
+`talk-shots.mjs --only=desktop --query=theme=<id>` for all six looks: the slips, the reply and the round read in every look. Comic's toon shading drew the held pad's page dark navy; the shading model now leaves held objects (`userData.hud`) alone.
+
+### Review (#50, November 8)
+
+`.agents/skills/adversarial-review`, Sonnet reviewer and GPT-6.1 Sol critic, four rounds; each round's kept flags were fixed in a new commit (`264a882`, `ad06eff`, `3f46793`, round 4) and reviewed fresh.
+- **Kept and fixed:** superseded and failed rebuilds (a failed prepare releases the hold, a failed rebuild resumes an interrupted blend, superseded switches publish nothing), written looks get their own id, contact blends, literal style text, the maker prompt's replacer, redecorate unloading, worlds built ahead per look and retired, and a run of `ask()` races: a hidden tab, a superseded look, the same look twice, a stale report from an older switch, and A then B then A.
+- **Dropped on evidence:** the 4 s world retire is long enough, since the compile holds the main thread. The critic also corrected one kept flag's cause (keys and bounds, not counts).
+- **Lead decisions:** the worlds check hook is dev-only; `ask()` reports a look as still settling after 15 s in a hidden tab instead of waiting.
 
 ## Paper climb (#42, November 8, 2026)
 

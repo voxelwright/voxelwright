@@ -97,6 +97,7 @@ export function contactDecals(prints: Array<[number, number, number, number, num
   const quads = prints.flatMap(([x, z, w, d, yaw]) => [[w, d], [w * 0.78, d * 0.78]].map(([qw, qd]) =>
     new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).scale(qw, 1, qd).rotateY(yaw).translate(x, y, z)))
   const mesh = new THREE.Mesh(mergeGeometries(quads), new THREE.MeshBasicMaterial({ map: paintContact(), transparent: true, depthWrite: false }))
+  mesh.material.userData.themeRole = 'contact' // a theme tints and deepens it (src/theme/tokens.ts)
   for (const q of quads) q.dispose()
   mesh.renderOrder = -2
   mesh.name = 'contact shadows'

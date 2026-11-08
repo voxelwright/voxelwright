@@ -169,7 +169,7 @@ export async function say(person: string, text: string, onText: (t: string) => v
 // the page treats it as data. Prop modules only ever run in the prop sandbox.
 
 export interface Routed {
-  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal'
+  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme'
   to?: string
   say?: string
   message?: string
@@ -264,3 +264,6 @@ export const familyTemplates = (person: string) => call<{ templates: PatternData
  */
 export const saveTemplate = (person: string, name: string, persona: unknown, dials: Record<string, number> | undefined, shared: boolean, item?: string) =>
   call<{ template: PatternData }>(`/people/${person}/persona-templates`, { name, persona, ...(dials ? { dials } : {}), shared, ...(item ? { item } : {}) })
+/** A theme written from a sentence (#50): unchecked theme data, a one-line note, and the prop and costume hints. */
+export const askTheme = (person: string, text: string, current: unknown) =>
+  call<{ theme: unknown; note: string; hints: { props: unknown; costumes: unknown }; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/theme`, { text, current })

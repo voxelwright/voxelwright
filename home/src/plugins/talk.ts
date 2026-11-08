@@ -10,11 +10,13 @@ import { TABLE_TOP } from '../layout'
 import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
+import { ask as askTheme } from '../theme/ask'
 import { mayRoute } from '../talk/route-check'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
 import { makeChair, pineMaterial } from './chairs'
 import { navigation, type Pose } from './camera'
+import { tagVillager } from '../theme'
 import { paperCss, paperSlips } from '../talk/paper'
 
 // #42 prototype: talking to villagers like characters in a game, only with ?talk=npc.
@@ -391,6 +393,7 @@ export default {
       const spec = KINDS[KIND].specs[i]
       const fig = KINDS[KIND].build(i, phys, { accent: p.colour })
       fig.root.scale.setScalar(SCALE)
+      tagVillager(fig.root, `villager-${p.person}`)
       const v = new Villager(fig, p.tasks, { start: p.start, wait: p.wait, paths: 'open', seatY: SEAT_Y + BOOSTER })
       const [name, role] = spec.name.split(', ')
       // Kept under the bloom threshold, like the pad's paper, so the lamp never bleaches it.
@@ -1819,6 +1822,14 @@ export default {
           furnish!.dismiss(guess)
           ctx.emit('village/journal', { person: to?.person, section: routed.section })
           return
+        case 'theme': {
+          // #50: the whole home's look, written from the person's own words; the note is shown as text.
+          furnish!.dismiss(guess)
+          if (routed.say) quip(me, routed.say)
+          const r = await askTheme(text, me.person)
+          quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change the look just now.")
+          return
+        }
       }
     }
 

@@ -19,6 +19,7 @@ export default {
       new THREE.PlaneGeometry(KITCHEN.x1 - KITCHEN.x0, 7),
       new THREE.MeshStandardMaterial({ map: floorTex, roughness: FLOOR_ROUGHNESS }),
     )
+    floor.material.userData.themeRole = 'floor'
     floor.rotation.x = -Math.PI / 2
     floor.position.set((KITCHEN.x0 + KITCHEN.x1) / 2, 0, WALL_Z + 3.5)
     floor.receiveShadow = true
@@ -31,6 +32,7 @@ export default {
     const W0 = KITCHEN.x0 - WALL_T, W1 = KITCHEN.x1, H = HOUSE_H
     const plaster = paintPlaster(5, [244, 239, 230], 1536, 768, 0.45)
     const wallMat = new THREE.MeshStandardMaterial({ map: plaster, roughness: 0.95 })
+    wallMat.userData.themeRole = 'wall'
     const T = WALL_T
     const { x0, x1, y0, y1 } = WINDOW
     const block = (xa: number, xb: number, ya: number, yb: number) => {
@@ -55,6 +57,7 @@ export default {
 
     // Skirting board
     const trim = new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 })
+    trim.userData.themeRole = 'trim'
     const skirt = new THREE.Mesh(new THREE.BoxGeometry(KITCHEN.x1 - KITCHEN.x0, 0.1, 0.02), trim)
     skirt.position.set((KITCHEN.x0 + KITCHEN.x1) / 2, 0.06, WALL_Z + 0.015)
     room.add(skirt)

@@ -45,6 +45,7 @@ export function shell(spec: Shell): THREE.Group {
   const group = new THREE.Group()
   group.name = 'diorama shell'
   const cut = new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 })
+  cut.userData.themeRole = 'trim'
   // Outer extents: walls stand outside the inner faces, the base runs under them.
   const ox0 = x0 - T, ox1 = x1 + T, oz0 = z0 - T, oz1 = z1 + T
 
@@ -140,6 +141,7 @@ export function floor(x0: number, x1: number, z0: number, z1: number, map: THREE
   m.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2)
   m.receiveShadow = true
   m.name = 'diorama floor'
+  m.material.userData.themeRole = 'floor'
   return m
 }
 
@@ -167,6 +169,7 @@ export type TreeSpot = [number, number, number, number]
 export function trees(spots: TreeSpot[], y = 0): THREE.Group {
   const group = new THREE.Group()
   group.name = 'garden trees'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const bark: THREE.BufferGeometry[] = []
   const clumps: THREE.BufferGeometry[][] = [[], []]
   for (const [tx, tz, scale, turn] of spots) {
@@ -184,8 +187,8 @@ export function trees(spots: TreeSpot[], y = 0): THREE.Group {
     group.add(mesh)
   }
   merged(bark, new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 0.9 }))
-  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9 }))
-  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9 }))
+  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9, userData: { themeRole: 'foliage' } }))
+  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9, userData: { themeRole: 'foliage' } }))
   return group
 }
 
@@ -210,6 +213,7 @@ export function yard(spec: Yard): THREE.Group {
   const { x0, x1, z0, z1 } = spec
   const group = new THREE.Group()
   group.name = 'diorama yard'
+  group.userData.exterior = true // a theme's world hides it (src/theme/world)
   const r = rng(spec.seed)
   const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2
 
@@ -221,6 +225,7 @@ export function yard(spec: Yard): THREE.Group {
   // The low sun would lay the house's 8 m shadow across the lawn in hard wedges; the
   // foundation's soft contact shadow grounds it instead.
   lawn.name = 'yard lawn'
+  lawn.material.userData.themeRole = 'backdrop'
   group.add(lawn)
   const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, BOARD, d + 0.04), new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 }))
   edge.position.set(cx, YARD_TOP - BOARD / 2 - 0.002, cz)
@@ -231,6 +236,7 @@ export function yard(spec: Yard): THREE.Group {
   table.rotation.x = -Math.PI / 2
   table.position.set(cx, YARD_TOP - BOARD - 0.004, cz)
   table.name = 'worktable'
+  table.material.userData.themeRole = 'backdrop'
   group.add(table)
   group.add(contactShadow(w, d, cx, cz, YARD_TOP - BOARD + 0.001, 0.9))
 
@@ -317,7 +323,7 @@ export function yard(spec: Yard): THREE.Group {
     if (Math.hypot(along[0] - gate[0], along[1] - gate[1]) < 1) continue
     beds.push([along[0], along[1], 0.35 + r() * 0.25])
   }
-  const leaf = new THREE.MeshStandardMaterial({ color: '#5d7d33', roughness: 0.9 })
+  const leaf = new THREE.MeshStandardMaterial({ color: '#5d7d33', roughness: 0.9, userData: { themeRole: 'foliage' } })
   const mounds: THREE.BufferGeometry[] = []
   const blooms: Array<[THREE.Matrix4, THREE.Color]> = []
   const petals = ['#f4d36b', '#fff4dc', '#f29a7a', '#e7849c', '#c9a2e0']

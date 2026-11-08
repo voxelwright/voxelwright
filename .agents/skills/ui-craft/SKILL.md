@@ -121,6 +121,19 @@ Run at most about three regroups per prototype. If a regroup still can't reach 9
 report the ceiling plainly, with the strongest candidate and what it would take (an
 asset, a dependency, a decision). Don't pretend.
 
+## Lessons from regroups (themes #50, November 7, 2026)
+
+- Find which part owns the ceiling before tuning: fixing the exterior revealed the interior as
+  the next ceiling. Name it, then regroup on that part.
+- Partial restyling reads as stickers. Change the whole set in one language, or restyle each
+  object keeping its details (photos, magnets, books).
+- Look for a scale or parameter bug before blaming the style: a texture repeat made houses into
+  towers, metalness made an indoor floor read as asphalt, and a pixel size tuned for one camera
+  dissolved furniture in another.
+- A night or dusk scene needs one warm, motivated refuge light. It was the largest interior gain.
+- Score candidates in one capture session against references from the same session; one scorer
+  moves about one point between sessions.
+
 ## Lessons from the talk regroup (#42, November 7, 2026)
 
 Details and scores are in `home/README.md`, "Talk regroup".

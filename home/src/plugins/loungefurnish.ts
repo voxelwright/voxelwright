@@ -134,6 +134,8 @@ export default {
       [X - 0.55, 2.2, 1.0, 1.0, -2.3], // reading chair
       [L + 0.32, 2.18, 0.6, 0.6, 0], [X + 1.22, 3.42, 0.55, 0.55, 0], [L + 0.3, -0.45, 0.4, 0.4, 0], [X + 0.55, 2.8, 0.65, 0.65, 0], [X + 0.1, 3.35, 0.55, 0.42, 0.2],
       [X + 0.3, LOUNGE.back + 0.22, 0.95, 0.55, 0], // the lounge's bench
+      [L + 0.3, -0.45, 0.34, 0.34, 0], // floor lamp
+      [X - 0.78, LOUNGE.back + 0.245, 1.65, 0.62, 0], [X + 1.09, LOUNGE.back + 0.47, 0.72, 0.72, 0], // the sideboard and the plant stand (their own plugins)
     ]))
 
     const all = [kit.build('lounge furnish'), flat, shade]

@@ -1,4 +1,4 @@
-// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]
+// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--theme-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]
 // warm (the default, #42) keeps one Claude Code process per person between turns; claude starts one per turn.
 // VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the synthetic people; the default is alex:Alex.
 // Each entry may add an age band and a language (alex:Alex:adult:en). VILLAGER_PROFILES=<file.json> sets
@@ -15,6 +15,7 @@ import { checkProfile, type Profile } from './persona.ts'
 import { claudeAgent, stubAgent, warmAgent } from './villager-agent.ts'
 import { claudeMaker, claudeRouter, stubMaker, stubRouter } from './villager-input.ts'
 import { claudeVillagerMaker, stubVillagerMaker } from './villager-make.ts'
+import { claudeThemer, stubThemer } from './villager-theme.ts'
 import { claudeSketchMaker, stubSketchMaker } from './sketch.ts'
 
 const { values } = parseArgs({
@@ -24,6 +25,7 @@ const { values } = parseArgs({
     thinking: { type: 'boolean', default: false },
     'router-model': { type: 'string', default: 'sonnet' },
     'maker-model': { type: 'string', default: 'sonnet' },
+    'theme-model': { type: 'string', default: 'sonnet' },
     'sketch-model': { type: 'string', default: 'sonnet' },
     'sketch-effort': { type: 'string', default: 'low' },
     port: { type: 'string', default: '5190' },
@@ -65,6 +67,7 @@ const fiber = root.plugin(villager, {
   router: values.agent === 'stub' ? stubRouter() : claudeRouter(values['router-model']),
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
   villagerMaker: values.agent === 'stub' ? stubVillagerMaker() : claudeVillagerMaker(values['maker-model']),
+  themer: values.agent === 'stub' ? stubThemer() : claudeThemer(values['theme-model']),
   sketchMaker: values.agent === 'stub' ? stubSketchMaker(1500) : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
 })
 await fiber.await()

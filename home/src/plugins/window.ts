@@ -24,13 +24,16 @@ export default {
       new THREE.MeshBasicMaterial({ map: paintGarden(3), color: new THREE.Color(0.8, 0.8, 0.78), fog: false }),
     )
     garden.position.set(cx - 1.5, 1.6, WALL_Z - 6)
+    garden.material.userData.themeRole = 'view'
     garden.userData.seatOnly = true // a painted card: from above it shows over the wall (#42)
+    garden.userData.exterior = true // a theme's world hides it and stands its own (src/theme/world)
     group.add(garden)
 
     const frameMat = new THREE.MeshStandardMaterial({
       color: '#efe4cf',
       roughness: 0.55,
     })
+    frameMat.userData.themeRole = 'trim'
     // The sill runs through the wall's whole depth and the lining stands on it, so the
     // wall's own reveal faces are buried in wood (they shared planes with the old frame
     // bars, and TRAA's jitter made the tie flicker, #42). The casing is the trim on the room side.

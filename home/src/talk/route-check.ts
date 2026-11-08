@@ -10,6 +10,8 @@ const ROOM_WORDS = /\b(on|by|near|above|below|under|beside|next to|in|from|onto|
 const THINGS = /\b(furniture|decor|chair|table|sofa|couch|rug|lamp|lantern|plant|picture|painting|poster|shelf|tv|television|clock|mirror|cabinet|wallpaper|curtains?|vase|pinball|machine|cow|toy)s?\b/
 const JOURNAL = /\b(journal|notebook|tasks|to-?do|conversations?|what (did|has) \w+ (say|said|tell|told))\b/
 const ANOTHER = /\b(another|one more|like that|like this|again)\b/
+/** Asking for the whole home's look (#50 themes): style, mood, season, "go back to normal". */
+const LOOK = /\b(theme|style|look of|mood|cozier|cosier|redecorate|go back to normal|back to (the )?normal)\b/
 
 export interface Line { text: string; /** Names of other villagers in the room. */ others: string[] }
 
@@ -17,7 +19,7 @@ export interface Line { text: string; /** Names of other villagers in the room. 
 export function mayRoute({ text, others }: Line): boolean {
   const t = text.toLowerCase()
   if (others.some((name) => new RegExp(`\\b${name.toLowerCase()}\\b`).test(t))) return true
-  if (JOURNAL.test(t) || ROOM_WORDS.test(t)) return true
+  if (JOURNAL.test(t) || ROOM_WORDS.test(t) || LOOK.test(t)) return true
   if (ROOM_VERBS.test(t) && (THINGS.test(t) || /\b(a|an|the|some|another|it|that|this|them)\b/.test(t))) return true
   if (WANTS.test(t) && THINGS.test(t)) return true
   return /\b(another one|one more|one like (that|this)|copy (it|that|this))\b/.test(t) || (ANOTHER.test(t) && THINGS.test(t))

@@ -29,6 +29,7 @@ export default {
       side: THREE.DoubleSide,
       fog: false,
     })
+    material.userData.themeRole = 'beam'
     for (let s = 0; s < shells; s++) {
       const k = 1 - s * 0.035
       const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => new THREE.Vector3(cx + (x - cx) * k, cy + (y - cy) * k, WALL_Z - 0.05))

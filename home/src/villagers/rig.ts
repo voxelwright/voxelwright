@@ -4,6 +4,7 @@
 // over the standing foot and leans into speed and turns.
 import * as THREE from 'three/webgpu'
 import { route, routeFrom, SEAT_Y, SPOTS, type Paths } from './world'
+import { theme } from '../theme'
 
 /** What an art direction builds. Characters face +z; the rig moves `root`. */
 export interface Figure {
@@ -154,6 +155,8 @@ export class Villager {
     this.place()
   }
 
+  /** Poses per second when held (12 is on twos): the theme's, else 12 for directions drawn that way; 0 animates every frame. */
+  private get fps() { return theme().motion.characterFps ?? (this.fig.stepped ? 12 : 0) }
   private forward() { return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)) }
   private right() { return new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)) }
   /** Root scale: figures are modelled in their own units and placed larger or smaller. */
@@ -383,7 +386,7 @@ export class Villager {
             f.from.copy(f.world)
           }
           let u = (q - 0.5) / 0.5
-          if (fig.stepped) u = Math.floor(u * 4) / 4
+          if (this.fps) u = Math.floor(u * 4) / 4
           const target = this.restFoot(i).addScaledVector(fwd, 0.5 * stride * (1 - u) + 0.25 * stride)
           f.world.lerpVectors(f.from, target, smooth(u))
           f.world.y = Math.sin(u * Math.PI) * lift
@@ -419,17 +422,18 @@ export class Villager {
 
   private pose(dt: number, t: number, toCamera: number) {
     const fig = this.fig
-    // On twos: hold each pose for a twelfth of a second.
-    if (fig.stepped) {
-      const tick = Math.floor(t * 12)
+    // On twos: hold each pose for 1 / fps of a second.
+    const fps = this.fps
+    if (fps) {
+      const tick = Math.floor(t * fps)
       if (tick === this.tick) return
       this.tick = tick
-      t = tick / 12
-      dt = 1 / 12
+      t = tick / fps
+      dt = 1 / fps
     }
     const { pose, head, hands } = fig
     const w = this.walk
-    const p = fig.stepped ? Math.floor(this.phase * 8) / 8 : this.phase
+    const p = fps ? Math.floor(this.phase * 8) / 8 : this.phase
     const c = frac(2 * p)
     const pulse = c < 0.25 ? (1 - c / 0.25) ** 2 : 0
     const breathe = Math.sin(t * 2.1) * 0.012
@@ -499,7 +503,7 @@ export class Villager {
     const listening = this.listenTo && this.state === 'sit' && this.speak < 0.5 ? Math.atan2(this.listenTo.x - this.pos.x, this.listenTo.z - this.pos.z) : null
     const headGoal = listening !== null ? THREE.MathUtils.clamp(wrap(listening - this.yaw), -1.1, 1.1)
       : this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
-    this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fig.stepped ? 12 : 5)))
+    this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fps ? 12 : 5)))
     head.rotation.y = this.glance
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.read * 0.24 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
     head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)

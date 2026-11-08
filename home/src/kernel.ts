@@ -48,6 +48,12 @@ declare module 'cordis' {
     'village/frame'(dt: number, elapsed: number): void
     'village/plugin-error'(name: string, error: unknown): void
     'village/tier'(quality: Quality): void
+    /** The theme changed (src/theme): previous and next, both checked Theme objects. */
+    'village/theme'(previous: unknown, next: unknown): void
+    /** Someone is about to change the look (the swatch book opened, a theme was asked for): load the theme plugin now. */
+    'village/theme-prepare'(): void
+    /** A switch failed and the look on screen stayed the chosen one (src/theme keepShown). */
+    'village/theme-kept'(): void
     /** An object own() just added; the rooms service hides it when its plugin's room is not the current one. */
     'village/owned'(object: THREE.Object3D, plugin: string): void
   }
