@@ -10,10 +10,14 @@ import { paintWood } from '../paint'
 import { PHYSICS_PANEL } from '../features'
 import { createJolt, loadJolt } from '../engine/jolt'
 import { World } from '../engine/world'
-import { PRESETS, type Rules } from '../engine/rules'
+import { PRESETS, registerPreset, registerRule, type Rules } from '../engine/rules'
+import { registerMaterial } from '../engine/materials'
+import { gadgetKinds, registerGadget } from '../engine/gadgets'
 import { ask, askedSoFar } from './ask'
 import type { PhysicsEvent } from '../engine/events'
 import type { Vec3 } from '../engine/core'
+import type { WorldApi } from '../engine/api'
+import type { ToySpec } from '../engine/toy'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 
@@ -84,10 +88,20 @@ export async function start(ctx: Context, gone: () => boolean) {
   const handle = PINBALL.handle ? world.mesh(`${PINBALL.id}/${PINBALL.handle}`) : undefined
   if (handle) ctx.effect(() => ctx.entries.add({ id: PINBALL.id, label: PINBALL.label, object: handle, select: () => play(true), leave: () => play(false) }), 'pinball entry')
 
-  // Villagers join as bodies when they appear (talk places them after load), checked each second.
+  // Villagers join as followers when they appear (talk places them after load), checked each second.
+  const syncVillagers = () => {
+    const seen = new Set<string>()
+    ctx.stage.scene.traverse((o) => {
+      if (typeof o.userData.villagerId !== 'string') return
+      const key = `villager/${o.userData.villagerId}`
+      seen.add(key)
+      world.follow(key, o)
+    })
+    for (const key of world.followerKeys()) if (!seen.has(key)) world.unfollow(key)
+  }
   ctx.effect(() => {
-    world.syncVillagers(ctx.stage.scene)
-    const id = setInterval(() => world.syncVillagers(ctx.stage.scene), 1000)
+    syncVillagers()
+    const id = setInterval(syncVillagers, 1000)
     return () => clearInterval(id)
   }, 'physics villagers')
   ctx.on('village/frame', (dt) => world.frame(dt))
@@ -132,6 +146,13 @@ export async function start(ctx: Context, gone: () => boolean) {
     stats: () => world.stats(),
     clearStats: () => world.clearStats(),
     events: () => log.slice(),
+    snapshot: () => world.snapshot(),
+    restore: (s: Parameters<World['restore']>[0]) => world.restore(s),
+    /**
+     * The engine itself (src/engine/api.ts): the world as a WorldApi, the open registries, and
+     * addToy. Dev and checks for now; a later branch hands agents exactly this, sandboxed.
+     */
+    engine: { world: world as WorldApi, addToy: (toy: ToySpec) => world.addToy(toy), registerMaterial, registerGadget, registerRule, registerPreset, gadgetKinds },
   }
   ctx.effect(() => {
     const village = (window as unknown as { village?: Record<string, unknown> }).village

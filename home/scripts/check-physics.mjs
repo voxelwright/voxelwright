@@ -204,6 +204,50 @@ try {
     report.realModel = t
     check('A real model answer sets lower gravity', t.r.ok && JSON.parse(t.after).gravity[1] > -5, t)
   }
+  // ── Open registries, one API, undo ──
+  const open_ = await page.evaluate(() => {
+    const p = window.village.physics
+    const { engine } = p
+    const refusedMaterial = engine.registerMaterial('jelly', { density: -1, friction: 0.5, restitution: 0.5, hardness: 0.1, look: { color: '#ff00aa', roughness: 0.5, metalness: 0 } })
+    const okMaterial = engine.registerMaterial('jelly', { density: 900, friction: 0.6, restitution: 0.95, hardness: 0.05, look: { color: '#e88fb0', roughness: 0.4, metalness: 0 } })
+    const okRule = engine.registerRule('lift', { min: 0, max: 20, step: 0.1, default: 0, about: 'upward push on things the lifter touches, m/s' })
+    // A kind no one anticipated, registered through the same call the built-ins use: a lifter
+    // throws whatever touches its part upward by the `lift` rule times its knob.
+    const okKind = engine.registerGadget({
+      kind: 'lifter', about: 'test', knobs: { gain: { min: 0, max: 2, step: 0.1, default: 1, about: 'x lift' } }, inputs: [], outputs: ['lifted'],
+      touch(g, t, w) {
+        const o = w.thing(t.other)
+        if (t.sensor || o?.motion !== 'dynamic') return
+        w.setVelocity(t.other, [o.velocity[0], w.rules.lift * g.knobs.gain, o.velocity[2]])
+        w.fire(g, 'lifted', { value: 1, thing: t.other })
+      },
+    })
+    engine.addToy({ id: 'lab', label: 'Lab', frame: { at: [0, 0, 2.6], yaw: 0, tilt: 0 }, inputs: {}, wires: [], parts: [
+      { id: 'pad', shape: { kind: 'box', half: [0.2, 0.02, 0.2] }, material: 'jelly', at: [0, 0.02, 0] },
+      { id: 'bead', shape: { kind: 'sphere', radius: 0.03 }, material: 'jelly', motion: 'dynamic', at: [0, 0.3, 0] },
+    ], gadgets: [{ id: 'lift', kind: 'lifter', part: 'pad' }] })
+    p.preset('normal')
+    p.setRules({ lift: 3 })
+    p.advance(1)
+    const lifted = p.signals()['lab/lift.lifted'] ?? 0
+    let unknownKind = null
+    try { engine.addToy({ id: 'bad', label: 'Bad', frame: { at: [0, 0, 0], yaw: 0, tilt: 0 }, inputs: {}, wires: [], parts: [], gadgets: [{ id: 'x', kind: 'teleporter' }] }) } catch (e) { unknownKind = String(e.message) }
+    // Undo: snapshot, a wild experiment, restore.
+    p.preset('normal')
+    p.reset()
+    const snap = p.snapshot()
+    const before = { ball: p.thing('pinball/ball').position, rules: JSON.stringify(p.rules()), score: p.counters()['pinball/score'] }
+    p.setRules({ gravity: [9, 20, 0], kick: 4 })
+    p.place('pinball/ball', [0, 0.02, 0])
+    p.advance(1)
+    p.restore(snap)
+    const after = { ball: p.thing('pinball/ball').position, rules: JSON.stringify(p.rules()), score: p.counters()['pinball/score'] }
+    return { refusedMaterial, okMaterial, okRule, okKind, lifted, unknownKind, before, after }
+  })
+  check('Materials, rules and gadget kinds register at runtime through the API the built-ins use; a new kind runs in a new toy', typeof open_.refusedMaterial === 'string' && open_.okMaterial === null && open_.okRule === null && open_.okKind === null && open_.lifted > 0 && /no gadget kind teleporter/.test(open_.unknownKind ?? ''), open_)
+  const dist = Math.hypot(...open_.before.ball.map((v, i) => v - open_.after.ball[i]))
+  check('A snapshot restores the world after a wild experiment (things, rules, counters)', dist < 1e-4 && open_.before.rules === open_.after.rules && open_.before.score === open_.after.score, { dist, before: open_.before, after: open_.after })
+
   const kept = await page.evaluate(() => { const p = window.village.physics; p.preset('moon'); p.reset(); return p.rules().gravity[1] })
   check('Tuning survives a reset', kept === -1.62, kept)
   await page.evaluate(() => window.village.physics.preset('normal'))
@@ -215,18 +259,18 @@ try {
   live.on('pageerror', (e) => liveErrors.push(String(e)))
   await open(live, '?physics=1&q=low')
   await physics(live)
-  await live.waitForFunction(() => window.village.physics.stats().villagers > 0, null, { timeout: 20_000 }).catch(() => {})
+  await live.waitForFunction(() => window.village.physics.stats().followers > 0, null, { timeout: 20_000 }).catch(() => {})
   const pushed = await live.evaluate(async () => {
     const p = window.village.physics
     // A felt ball put where a villager stands is pushed out of the way by its body.
     let at = null
     window.village.kernel?.root.get('stage').scene.traverse((o) => { if (!at && typeof o.userData.villagerId === 'string') at = o.getWorldPosition(o.position.clone()) })
-    if (!at) return { villagers: p.stats().villagers, moved: 0 }
+    if (!at) return { villagers: p.stats().followers, moved: 0 }
     p.place('house/felt-ball', [at.x + 0.05, 0.3, at.z])
     const start = p.thing('house/felt-ball').position
     await new Promise((r) => setTimeout(r, 1500))
     const end = p.thing('house/felt-ball').position
-    return { villagers: p.stats().villagers, moved: Math.hypot(end[0] - start[0], end[2] - start[2]), start, end }
+    return { villagers: p.stats().followers, moved: Math.hypot(end[0] - start[0], end[2] - start[2]), start, end }
   })
   check('Villagers are kinematic bodies that push a light thing out of their way', pushed.villagers > 0 && pushed.moved > 0.05, pushed)
   const steps = await live.evaluate(async () => {
@@ -255,7 +299,7 @@ try {
     return { ...p.stats(), shots }
   })
   report.stepMs = timing
-  check('Physics per frame stays small with the table and villagers live (frame median under 1 ms, p95 under 2 ms)', timing.frameMs.median < 1 && timing.frameMs.p95 < 2 && timing.villagers > 0, timing)
+  check('Physics per frame stays small with the table and villagers live (frame median under 1 ms, p95 under 2 ms)', timing.frameMs.median < 1 && timing.frameMs.p95 < 2 && timing.followers > 0, timing)
   check('No page errors with villagers and physics', !liveErrors.length, liveErrors.slice(0, 5))
   if (shotsDir) {
     await live.goto(`${base}?physics=1&q=high&room=living#token=${tokens.alex}`)

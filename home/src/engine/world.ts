@@ -1,14 +1,18 @@
-// The physics engine's world (#74), with no app imports: builds toys (parts, gadgets, wires) into solver bodies and
-// three.js meshes, runs the gadget kit and the wires, keeps villagers as kinematic bodies,
-// applies the world rules, and reports what happens as `village/physics` events. Fixed
-// 60 Hz steps of simulated time; gadget actions are queued during a step and run after it.
+// The physics engine's world (#74), with no app imports. It builds toys (parts, gadgets,
+// wires) into solver bodies and three.js meshes, runs gadgets through their kinds' hooks
+// (gadgets.ts) and carries their signals along wires, moves followers (kinematic bodies that
+// track a scene object, such as a walking person), applies the world rules, guards against
+// explosions, and reports what happens as events. It implements the engine API (api.ts).
+// Fixed 60 Hz steps of simulated time; gadget actions run after each solver step.
 import * as THREE from 'three/webgpu'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
-import type { BodyId, Contact, JointId, PhysicsCore, Quat, Shape, Vec3 } from './core'
+import type { Gadget, Snapshot, ThingInfo, Touch, WorldApi } from './api'
+import type { BodyId, Contact, PhysicsCore, Quat, Shape, Vec3 } from './core'
 import type { At, PhysicsEvent } from './events'
-import { MATERIALS, MATERIAL_NAMES, type MaterialName } from './materials'
-import { checkRules, NORMAL, PRESETS, type Rules } from './rules'
-import { KNOBS, type GadgetSpec, type PartSpec, type Signal, type ToySpec } from './toy'
+import { gadgetKind } from './gadgets'
+import { material, materialNames, materialsVersion } from './materials'
+import { checkRules, NORMAL, presetRules, type Rules } from './rules'
+import type { PartSpec, Signal, ToySpec } from './toy'
 
 const STEP = 1 / 60
 const MAX_STEPS = 4
@@ -16,74 +20,64 @@ const MAX_STEPS = 4
 const IMPACT_MIN = 0.003
 /** Below the floor by this much, a thing has fallen out of the world and is put back. */
 const LOST_Y = -1
+const STRIDE = 0.32
 
 interface Thing {
   key: string
   toy: string
   part: PartSpec
   body: BodyId
-  material: number
   mesh?: THREE.Mesh
   home: { p: Vec3; q: Quat }
   wobble: number
 }
 
-interface Runtime {
-  spec: GadgetSpec
-  knobs: Record<string, number>
-  toy: string
-  thing?: Thing
-  joint?: JointId
-  /** piston: how far it was pulled (0..1) and its forward speed while firing. */
-  charge: number
-  firing: number
-  value: number
-}
+interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; last: THREE.Vector3; walked: number; left: boolean }
 
-export interface Stats { stepMs: { median: number; p95: number; n: number }; frameMs: { median: number; p95: number; n: number }; bodies: number; villagers: number }
+export interface Stats { stepMs: { median: number; p95: number; n: number }; frameMs: { median: number; p95: number; n: number }; bodies: number; followers: number }
+
+/** Paints a wood grain texture for a material's colour; the host app may supply one. */
+export type Grain = (seed: number, light: [number, number, number], dark: [number, number, number], knots: number, planks: number) => THREE.Texture
 
 const v3 = (a: Vec3) => new THREE.Vector3(a[0], a[1], a[2])
-const at = (p: Vec3 | THREE.Vector3): At => (Array.isArray(p) ? { x: p[0], y: p[1], z: p[2] } : { x: p.x, y: p.y, z: p.z })
+const arr = (p: THREE.Vector3): Vec3 => [p.x, p.y, p.z]
+const at = (p: Vec3): At => ({ x: p[0], y: p[1], z: p[2] })
 const quantile = (xs: number[], q: number) => {
   if (!xs.length) return 0
   const s = [...xs].sort((a, b) => a - b)
   return +s[Math.min(s.length - 1, Math.floor(s.length * q))].toFixed(3)
 }
 
-export class World {
+export class World implements WorldApi {
   readonly group = new THREE.Group()
-  private things: Thing[] = []
-  private byBody: (Thing | undefined)[] = []
-  private byKey = new Map<string, Thing>()
-  private gadgets = new Map<string, Runtime>()
+  private things = new Map<string, Thing>()
+  private byBody: (Thing | Follower | undefined)[] = []
+  private gadgets = new Map<string, Gadget>()
+  private byPart = new Map<string, Gadget[]>()
   private wires = new Map<string, string[]>()
   private frames = new Map<string, THREE.Matrix4>()
-  private held = new Set<string>()
+  private inputs = new Set<string>()
   private queue: { from: string; signal: Signal }[] = []
-  private respawns: { thing: Thing; t: number }[] = []
-  private villagers = new Map<THREE.Object3D, { body: BodyId; key: string; lift: number; radius: number; last: THREE.Vector3; walked: number; left: boolean }>()
-  private pairs: [number, number][] = []
+  private respawns = new Map<string, number>()
+  private followers = new Map<string, Follower>()
+  private pairs = new Map<string, readonly [number, number]>()
+  private pairsVersion = -1
   private clampedAt = new Map<string, number>()
   private dust: { mesh: THREE.Mesh; life: number; v: THREE.Vector3 }[] = []
   private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }>()
-  private wood = new Map<string, THREE.Texture>()
   private looks = new Map<string, THREE.Material>()
-  private accumulator = 0
   private tally = new Map<string, number>()
-  private clock = 0
+  private accumulator = 0
   private stepTimes: number[] = []
   private frameTimes: number[] = []
+  clock = 0
   rules: Rules = { ...NORMAL, gravity: [...NORMAL.gravity] }
 
-  /**
-   * `grain` paints a wood texture in a material's colour (the host app's painter); without it,
-   * wood is flat colour. Everything else here is the engine's own: no app imports.
-   */
-  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: (seed: number, light: [number, number, number], dark: [number, number, number], knots: number, planks: number) => THREE.Texture) {
+  /** `emit` receives every event; `grain`, when given, paints wood (else wood is flat colour). */
+  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: Grain) {
     this.group.name = 'physics'
-    core.setCombine((a, b) => this.pairs[(this.byBody[a]?.material ?? 0) * MATERIAL_NAMES.length + (this.byBody[b]?.material ?? 0)] ?? [0.5, 0.3])
+    core.setCombine((a, b) => this.combine(a, b))
     this.applyRules(this.rules)
-    // A small pool of felt dust for impacts.
     const dustMat = new THREE.MeshStandardMaterial({ color: '#e9dcc4', roughness: 1, transparent: true, opacity: 0.45, depthWrite: false })
     const dustGeo = new THREE.SphereGeometry(1, 8, 6)
     for (let i = 0; i < 24; i++) {
@@ -96,7 +90,6 @@ export class World {
 
   // ── Rules ────────────────────────────────────────────────────────────────
 
-  /** Checks raw rules over the current ones and applies them all at once; a refused change leaves the world as it was. */
   setRules(raw: unknown, by: Extract<PhysicsEvent, { kind: 'rules' }>['by'], preset?: string): { ok: true; rules: Rules; clamped: string[] } | { ok: false; reason: string } {
     const checked = checkRules(raw, this.rules)
     if ('reason' in checked) return { ok: false, reason: checked.reason }
@@ -106,41 +99,62 @@ export class World {
   }
 
   preset(name: string) {
-    const p = Object.hasOwn(PRESETS, name) ? PRESETS[name] : undefined
-    if (!p) return { ok: false as const, reason: `no preset ${name}` }
-    return this.setRules(p.rules, 'preset', name)
+    const rules = presetRules(name)
+    if (!rules) return { ok: false as const, reason: `no preset ${name}` }
+    return this.setRules(rules, 'preset', name)
   }
 
   private applyRules(next: Rules) {
     this.rules = { ...next, gravity: [...next.gravity] }
-    const r = this.rules
-    this.core.setGravity(r.gravity)
-    // The combine table: geometric friction, the livelier restitution, both scaled by the rules.
-    const n = MATERIAL_NAMES.length
-    this.pairs = new Array(n * n)
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-      const a = MATERIALS[MATERIAL_NAMES[i]], b = MATERIALS[MATERIAL_NAMES[j]]
-      this.pairs[i * n + j] = [Math.sqrt(a.friction * b.friction) * r.friction, Math.min(1.2, Math.max(a.restitution, b.restitution) * r.bounce)]
+    this.core.setGravity(this.rules.gravity)
+    this.pairsVersion = -1
+    for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, this.rules.drag)
+  }
+
+  /** Village's combine per pair: geometric friction, the livelier restitution, both scaled by the rules. Cached per material pair. */
+  private combine(a: BodyId, b: BodyId): readonly [number, number] {
+    if (this.pairsVersion !== materialsVersion()) {
+      this.pairs.clear()
+      this.pairsVersion = materialsVersion()
     }
-    for (const t of this.things) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, r.drag)
+    const ma = this.materialOf(a), mb = this.materialOf(b)
+    const key = ma < mb ? `${ma}|${mb}` : `${mb}|${ma}`
+    let pair = this.pairs.get(key)
+    if (!pair) {
+      const x = material(ma), y = material(mb)
+      pair = x && y ? [Math.sqrt(x.friction * y.friction) * this.rules.friction, Math.min(1.2, Math.max(x.restitution, y.restitution) * this.rules.bounce)] : [0.5, 0.3]
+      this.pairs.set(key, pair)
+    }
+    return pair
+  }
+
+  private materialOf(body: BodyId) {
+    const t = this.byBody[body]
+    return t ? ('part' in t ? t.part.material : t.material) : ''
   }
 
   // ── Building ─────────────────────────────────────────────────────────────
 
+  /** Builds a toy. Refuses (throws, building nothing) a part with an unknown material or a gadget with an unknown kind or part. */
   addToy(toy: ToySpec) {
+    for (const part of toy.parts) if (!material(part.material)) throw new Error(`${toy.id}/${part.id}: no material ${part.material}`)
+    for (const g of toy.gadgets) {
+      if (!gadgetKind(g.kind)) throw new Error(`${toy.id}/${g.id}: no gadget kind ${g.kind}`)
+      if (g.part !== undefined && !toy.parts.some((p) => p.id === g.part)) throw new Error(`${toy.id}/${g.id}: no part ${g.part}`)
+    }
     const frame = new THREE.Matrix4().compose(v3(toy.frame.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(toy.frame.tilt, toy.frame.yaw, 0, 'YXZ')), new THREE.Vector3(1, 1, 1))
     this.frames.set(toy.id, frame)
     const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3()
     for (const part of toy.parts) {
       m.compose(v3(part.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(part.turn ?? [0, 0, 0]))), new THREE.Vector3(1, 1, 1))
       m.premultiply(frame).decompose(p, q, s)
-      const mat = MATERIALS[part.material]
-      const home = { p: [p.x, p.y, p.z] as Vec3, q: [q.x, q.y, q.z, q.w] as Quat }
+      const mat = material(part.material)!
+      const home = { p: arr(p), q: [q.x, q.y, q.z, q.w] as Quat }
       const body = this.core.addBody({
         shape: part.shape, motion: part.motion ?? 'static', position: home.p, rotation: home.q,
         density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor,
       })
-      const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, material: MATERIAL_NAMES.indexOf(part.material), home, wobble: 0 }
+      const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
       if (!part.hidden) {
         thing.mesh = new THREE.Mesh(this.geometry(part.shape), this.look(part))
         thing.mesh.name = thing.key
@@ -149,33 +163,24 @@ export class World {
         thing.mesh.castShadow = thing.mesh.receiveShadow = true
         this.group.add(thing.mesh)
       }
-      this.things.push(thing)
+      this.things.set(thing.key, thing)
       this.byBody[body] = thing
-      this.byKey.set(thing.key, thing)
     }
-    for (const g of toy.gadgets) {
-      const rt: Runtime = { spec: g, knobs: { ...('knobs' in g ? g.knobs : {}) }, toy: toy.id, charge: 0, firing: 0, value: 0 }
-      if ('part' in g) {
-        rt.thing = this.byKey.get(`${toy.id}/${g.part}`)
-        if (!rt.thing) throw new Error(`${toy.id}: gadget ${g.id} names no part ${g.part}`)
+    for (const spec of toy.gadgets) {
+      const kind = gadgetKind(spec.kind)!
+      const knobs: Record<string, number> = {}
+      for (const [name, k] of Object.entries(kind.knobs)) {
+        const v = spec.knobs?.[name]
+        knobs[name] = typeof v === 'number' && Number.isFinite(v) ? Math.min(k.max, Math.max(k.min, v)) : k.default
       }
-      if (g.kind === 'hinge') {
-        const anchor = v3(g.anchor).applyMatrix4(frame)
-        const axis = v3(g.axis).transformDirection(frame)
-        rt.joint = this.core.addHinge({ body: rt.thing!.body, anchor: [anchor.x, anchor.y, anchor.z], axis: [axis.x, axis.y, axis.z], limits: [0, g.knobs.swing] })
-      }
-      if (g.kind === 'piston') {
-        const axis = v3(g.axis).transformDirection(frame)
-        rt.joint = this.core.addSlider({ body: rt.thing!.body, axis: [axis.x, axis.y, axis.z], limits: [-KNOBS.travel.max, KNOBS.travel.max] })
-      }
-      if (g.kind === 'counter' && g.display) this.display(`${toy.id}/${g.display}`, 0)
-      this.gadgets.set(`${toy.id}/${g.id}`, rt)
+      const g: Gadget = { id: `${toy.id}/${spec.id}`, toy: toy.id, spec, knobs, state: {}, ...(spec.part ? { part: `${toy.id}/${spec.part}` } : {}) }
+      this.gadgets.set(g.id, g)
+      if (g.part) this.byPart.set(g.part, [...(this.byPart.get(g.part) ?? []), g])
+      kind.setup?.(g, this)
     }
     for (const w of toy.wires) {
       const from = `${toy.id}/${w.from}`
-      const list = this.wires.get(from) ?? []
-      list.push(`${toy.id}/${w.to}`)
-      this.wires.set(from, list)
+      this.wires.set(from, [...(this.wires.get(from) ?? []), `${toy.id}/${w.to}`])
     }
   }
 
@@ -192,26 +197,20 @@ export class World {
     const key = `${part.material}:${part.paint ?? ''}`
     const known = this.looks.get(key)
     if (known) return known
-    const l = MATERIALS[part.material].look
+    const l = material(part.material)!.look
     const color = new THREE.Color(part.paint ?? l.color)
-    const wooden = part.material === 'maple' || part.material === 'walnut' || part.material === 'lacquer'
     let map: THREE.Texture | undefined
-    if (wooden && this.grain) {
-      map = this.wood.get(key)
-      if (!map) {
-        const rgb = (k: number) => [color.r, color.g, color.b].map((c) => Math.round(Math.min(255, c * 255 * k))) as [number, number, number]
-        map = this.grain(70 + this.wood.size, rgb(1.06), rgb(0.86), part.material === 'walnut' ? 2 : 0, part.material === 'lacquer' ? 1 : 2)
-        this.wood.set(key, map)
-      }
+    if (this.grain && (part.material === 'maple' || part.material === 'walnut' || part.material === 'lacquer')) {
+      const rgb = (k: number) => [color.r, color.g, color.b].map((c) => Math.round(Math.min(255, c * 255 * k))) as [number, number, number]
+      map = this.grain(70 + this.looks.size, rgb(1.06), rgb(0.86), part.material === 'walnut' ? 2 : 0, part.material === 'lacquer' ? 1 : 2)
     }
-    const material = new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, roughness: l.roughness, metalness: l.metalness, ...(map ? { map } : {}) })
-    this.looks.set(key, material)
-    return material
+    const look = new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, roughness: l.roughness, metalness: l.metalness, ...(map ? { map } : {}) })
+    this.looks.set(key, look)
+    return look
   }
 
-  /** A counter's value drawn on its display part, like a hand-lettered score card. */
-  private display(key: string, value: number) {
-    const thing = this.byKey.get(key)
+  show(key: string, text: string) {
+    const thing = this.things.get(key)
     if (!thing?.mesh) return
     let d = this.displays.get(key)
     if (!d) {
@@ -234,52 +233,60 @@ export class World {
     g.font = '600 104px "Iowan Old Style", Palatino, Georgia, serif'
     g.textAlign = 'center'
     g.textBaseline = 'middle'
-    g.fillText(String(value).padStart(5, '0'), 256, 96)
+    g.fillText(String(text).slice(0, 12), 256, 96)
     d.texture.needsUpdate = true
   }
 
-  // ── Villagers ────────────────────────────────────────────────────────────
+  // ── Followers ────────────────────────────────────────────────────────────
 
-  /** Villagers are kinematic capsules that follow their figures and push what they walk into. */
-  syncVillagers(scene: THREE.Object3D) {
-    const seen = new Set<THREE.Object3D>()
-    scene.traverse((o) => {
-      if (typeof o.userData.villagerId !== 'string') return
-      seen.add(o)
-      if (this.villagers.has(o)) return
-      const box = new THREE.Box3().setFromObject(o)
-      const size = box.getSize(new THREE.Vector3())
-      if (!Number.isFinite(size.y) || size.y <= 0) return
-      const radius = Math.min(0.2, Math.max(0.08, 0.35 * Math.max(size.x, size.z)))
-      const half = Math.max(0.01, size.y / 2 - radius)
-      const root = o.getWorldPosition(new THREE.Vector3())
-      const lift = box.min.y - root.y + size.y / 2
-      const mat = MATERIALS.villager
-      const body = this.core.addBody({ shape: { kind: 'capsule', halfHeight: half, radius }, motion: 'kinematic', position: [root.x, root.y + lift, root.z], density: mat.density, friction: mat.friction, restitution: mat.restitution })
-      const key = `villager/${o.userData.villagerId}`
-      const thing: Thing = { key, toy: 'villagers', part: { id: key, shape: { kind: 'capsule', halfHeight: half, radius }, material: 'villager', motion: 'kinematic', at: [0, 0, 0] }, body, material: MATERIAL_NAMES.indexOf('villager'), home: { p: [root.x, root.y + lift, root.z], q: [0, 0, 0, 1] }, wobble: 0 }
-      this.byBody[body] = thing
-      this.villagers.set(o, { body, key, lift, radius, last: root.clone(), walked: 0, left: false })
-    })
-    for (const [o, v] of this.villagers) if (!seen.has(o)) {
-      this.core.removeBody(v.body)
-      this.byBody[v.body] = undefined
-      this.villagers.delete(o)
-    }
+  /**
+   * A kinematic capsule that follows a scene object (a walking person): it pushes what it walks
+   * into, and reports a footstep each stride. Sized from the object's bounds when it is added.
+   */
+  follow(key: string, object: THREE.Object3D, materialName = 'villager') {
+    if (this.followers.has(key) || !material(materialName)) return false
+    const box = new THREE.Box3().setFromObject(object)
+    const size = box.getSize(new THREE.Vector3())
+    if (!Number.isFinite(size.y) || size.y <= 0) return false
+    const radius = Math.min(0.2, Math.max(0.08, 0.35 * Math.max(size.x, size.z)))
+    const root = object.getWorldPosition(new THREE.Vector3())
+    const lift = box.min.y - root.y + size.y / 2
+    const m = material(materialName)!
+    const body = this.core.addBody({ shape: { kind: 'capsule', halfHeight: Math.max(0.01, size.y / 2 - radius), radius }, motion: 'kinematic', position: [root.x, root.y + lift, root.z], density: m.density, friction: m.friction, restitution: m.restitution })
+    const f: Follower = { key, object, body, lift, radius, material: materialName, last: root.clone(), walked: 0, left: false }
+    this.followers.set(key, f)
+    this.byBody[body] = f
+    return true
+  }
+
+  unfollow(key: string) {
+    const f = this.followers.get(key)
+    if (!f) return
+    this.core.removeBody(f.body)
+    this.byBody[f.body] = undefined
+    this.followers.delete(key)
+  }
+
+  followerKeys() {
+    return [...this.followers.keys()]
   }
 
   // ── Running ──────────────────────────────────────────────────────────────
 
   input(name: string, down: boolean) {
-    if (down) this.held.add(name)
-    else this.held.delete(name)
+    if (down) this.inputs.add(name)
+    else this.inputs.delete(name)
+  }
+
+  held(input: string) {
+    return this.inputs.has(input)
   }
 
   setKnob(gadget: string, knob: string, value: number) {
-    const rt = this.gadgets.get(gadget)
-    const range = KNOBS[knob]
-    if (!rt || !range || !Object.hasOwn(rt.knobs, knob) || !Number.isFinite(value)) return false
-    rt.knobs[knob] = Math.min(range.max, Math.max(range.min, value))
+    const g = this.gadgets.get(gadget)
+    const range = g && gadgetKind(g.spec.kind)?.knobs[knob]
+    if (!g || !range || !Number.isFinite(value)) return false
+    g.knobs[knob] = Math.min(range.max, Math.max(range.min, value))
     return true
   }
 
@@ -310,158 +317,93 @@ export class World {
 
   private step() {
     const h = STEP
-    const r = this.rules
     const t0 = performance.now()
     this.clock += h
-    // Villagers: their figures lead, their bodies follow.
     const p = new THREE.Vector3()
-    for (const [o, v] of this.villagers) {
-      o.getWorldPosition(p)
-      this.core.moveKinematic(v.body, [p.x, p.y + v.lift, p.z], [0, 0, 0, 1], h)
-      this.stride(v, p)
+    for (const f of this.followers.values()) {
+      f.object.getWorldPosition(p)
+      this.core.moveKinematic(f.body, [p.x, p.y + f.lift, p.z], [0, 0, 0, 1], h)
+      this.stride(f, p)
     }
-    for (const rt of this.gadgets.values()) {
-      const g = rt.spec
-      if (g.kind === 'hinge') {
-        const k = rt.knobs
-        this.core.setMotor(rt.joint!, (this.held.has(g.input) ? 1 : -1) * k.speed * Math.min(2, r.kick), k.torque * r.kick)
-      } else if (g.kind === 'piston') this.piston(rt, g)
-    }
-    this.core.step(h, r.substeps)
+    for (const g of this.gadgets.values()) gadgetKind(g.spec.kind)?.step?.(g, this, h)
+    this.core.step(h, this.rules.substeps)
     for (const c of this.core.contacts()) this.contact(c)
     for (let n = 0; this.queue.length && n < 200; n++) {
       const { from, signal } = this.queue.shift()!
-      this.deliver(from, signal)
+      for (const to of this.wires.get(from) ?? []) {
+        const dot = to.lastIndexOf('.')
+        const g = this.gadgets.get(to.slice(0, dot))
+        if (g) gadgetKind(g.spec.kind)?.receive?.(g, to.slice(dot + 1), signal, this)
+      }
     }
+    // A loop of wires stops here rather than running forever.
     this.queue.length = 0
-    for (let i = this.respawns.length - 1; i >= 0; i--) {
-      const s = this.respawns[i]
-      if (s.t > this.clock) continue
-      this.respawns.splice(i, 1)
-      this.core.setState(s.thing.body, s.thing.home.p, [0, 0, 0], s.thing.home.q)
+    for (const [key, t] of this.respawns) {
+      if (t > this.clock) continue
+      this.respawns.delete(key)
+      const thing = this.things.get(key)
+      if (thing) this.core.setState(thing.body, thing.home.p, [0, 0, 0], thing.home.q)
     }
     this.guard()
     this.stepTimes.push(performance.now() - t0)
     if (this.stepTimes.length > 1200) this.stepTimes.splice(0, 600)
   }
 
-  /**
-   * A part on a slider: pulled back along -axis while held (fully after `charge` s, to `travel`
-   * m), driven forward on release at a speed set by how far it was pulled, through its rest point
-   * by up to `travel` so a shot leaves at that speed, then eased back to rest. A dynamic body, so
-   * the solver sweeps it into what it hits.
-   */
-  private piston(rt: Runtime, g: Extract<GadgetSpec, { kind: 'piston' }>) {
-    const k = rt.knobs
-    const pos = this.core.jointPosition(rt.joint!)
-    const held = this.held.has(g.input)
-    let velocity: number, limit: number
-    if (rt.firing) {
-      if (pos >= k.travel * 0.9) rt.firing = 0
-      velocity = rt.firing
-      limit = 400
-    } else if (held && pos <= 0.002) {
-      rt.charge = Math.min(1, Math.max(rt.charge, -pos / k.travel))
-      velocity = pos > -k.travel ? -k.travel / k.charge : 0
-      limit = 30
-    } else if (rt.charge > 0.02) {
-      rt.firing = Math.max(0.05, k.strength * rt.charge * this.rules.kick)
-      rt.charge = 0
-      velocity = rt.firing
-      limit = 400
-    } else {
-      // At rest, held there gently so whatever leans on it does not push it back.
-      rt.charge = 0
-      velocity = -pos * 12
-      limit = 30
+  /** A step each stride along the floor, alternating feet either side of the walking line. */
+  private stride(f: Follower, p: THREE.Vector3) {
+    const dx = p.x - f.last.x, dz = p.z - f.last.z
+    const d = Math.hypot(dx, dz)
+    // A jump (a seat hop, a teleport) is not walking; nor is standing on a chair.
+    if (d > 0.5 || p.y > 0.05) {
+      f.last.copy(p)
+      f.walked = 0
+      return
     }
-    this.core.setMotor(rt.joint!, velocity, limit)
+    f.walked += d
+    f.last.copy(p)
+    if (f.walked < STRIDE || d < 1e-5) return
+    f.walked -= STRIDE
+    f.left = !f.left
+    const hx = dx / d, hz = dz / d
+    const side = (f.left ? 1 : -1) * f.radius * 0.45
+    this.emit({ kind: 'step', thing: f.key, material: f.material, at: { x: p.x - hz * side, y: 0, z: p.z + hx * side }, heading: { x: hx, y: 0, z: hz }, side: f.left ? 'left' : 'right', foot: { length: f.radius * 0.9, width: f.radius * 0.45 } })
   }
 
   private contact(c: Contact) {
     const ta = this.byBody[c.a], tb = this.byBody[c.b]
     if (!ta || !tb) return
-    if (c.sensor) {
-      for (const [zone, other] of [[ta, tb], [tb, ta]] as const) {
-        if (!zone.part.sensor || other.part.motion !== 'dynamic') continue
-        for (const [id, rt] of this.gadgets) if (rt.spec.kind === 'zone' && rt.thing === zone) this.fire(id, 'enter', { value: 1, body: other.body, at: c.point })
+    if (!c.sensor) {
+      const impulse = c.impulse * this.rules.impact
+      if (impulse >= IMPACT_MIN) {
+        const ma = material(this.materialOf(c.a)), mb = material(this.materialOf(c.b))
+        this.emit({ kind: 'impact', a: ta.key, b: tb.key, materials: [this.materialOf(c.a), this.materialOf(c.b)], shapes: [this.shapeOf(ta), this.shapeOf(tb)], at: at(c.point), normal: at(c.normal), impulse: c.impulse, hardness: Math.max(ma?.hardness ?? 0, mb?.hardness ?? 0), impact: this.rules.impact })
+        this.puff(c.point, impulse)
+        for (const t of [ta, tb]) if ('part' in t && t.part.motion !== 'dynamic' && t.mesh) t.wobble = Math.min(1, t.wobble + impulse * 4)
       }
-      return
     }
-    const impulse = c.impulse * this.rules.impact
-    if (impulse >= IMPACT_MIN) {
-      const ma = MATERIALS[ta.part.material], mb = MATERIALS[tb.part.material]
-      this.emit({ kind: 'impact', a: ta.key, b: tb.key, materials: [ta.part.material, tb.part.material], shapes: [ta.part.shape, tb.part.shape], at: at(c.point), normal: at(c.normal), impulse: c.impulse, hardness: Math.max(ma.hardness, mb.hardness), impact: this.rules.impact })
-      this.puff(c.point, impulse)
-      for (const t of [ta, tb]) if (t.part.motion !== 'dynamic' && t.mesh) t.wobble = Math.min(1, t.wobble + impulse * 4)
-    }
-    for (const [part, other, sign] of [[ta, tb, 1], [tb, ta, -1]] as const) {
-      for (const [id, rt] of this.gadgets) {
-        if (rt.spec.kind !== 'sensor' || rt.thing !== part || c.impulse < rt.knobs.threshold) continue
-        this.fire(id, 'hit', { value: c.impulse, body: other.body, dir: [c.normal[0] * sign, c.normal[1] * sign, c.normal[2] * sign], at: c.point })
-      }
+    for (const [self, other, sign] of [[ta, tb, 1], [tb, ta, -1]] as const) {
+      const touched = this.byPart.get(self.key)
+      if (!touched) continue
+      const t: Touch = { other: other.key, impulse: c.impulse, dir: [c.normal[0] * sign, c.normal[1] * sign, c.normal[2] * sign], point: c.point, sensor: c.sensor }
+      for (const g of touched) gadgetKind(g.spec.kind)?.touch?.(g, t, this)
     }
   }
 
-  /** A step each stride along the floor, alternating feet either side of the walking line. */
-  private stride(v: { key: string; radius: number; last: THREE.Vector3; walked: number; left: boolean }, p: THREE.Vector3) {
-    const dx = p.x - v.last.x, dz = p.z - v.last.z
-    const d = Math.hypot(dx, dz)
-    // A jump (a seat hop, a teleport) is not walking; nor is standing on a chair.
-    if (d > 0.5 || p.y > 0.05) {
-      v.last.copy(p)
-      v.walked = 0
-      return
-    }
-    v.walked += d
-    v.last.copy(p)
-    const STRIDE = 0.32
-    if (v.walked < STRIDE || d < 1e-5) return
-    v.walked -= STRIDE
-    v.left = !v.left
-    const hx = dx / d, hz = dz / d
-    const side = (v.left ? 1 : -1) * v.radius * 0.45
-    this.emit({ kind: 'step', thing: v.key, material: 'villager', at: { x: p.x - hz * side, y: 0, z: p.z + hx * side }, heading: { x: hx, y: 0, z: hz }, side: v.left ? 'left' : 'right', foot: { length: v.radius * 0.9, width: v.radius * 0.45 } })
+  private shapeOf(t: Thing | Follower): Shape {
+    return 'part' in t ? t.part.shape : { kind: 'capsule', halfHeight: 0, radius: t.radius }
   }
 
-  /** A gadget output: reported, then carried along its wires. */
-  private fire(gadget: string, port: string, signal: Signal) {
-    const thing = signal.body !== undefined ? this.byBody[signal.body]?.key : undefined
-    this.emit({ kind: 'signal', gadget, port, value: signal.value, ...(thing ? { thing } : {}), ...(signal.at ? { at: at(signal.at) } : {}) })
-    const from = `${gadget}.${port}`
+  fire(gadget: Gadget, port: string, signal: Signal) {
+    const from = `${gadget.id}.${port}`
     this.tally.set(from, (this.tally.get(from) ?? 0) + 1)
+    this.emit({ kind: 'signal', gadget: gadget.id, port, value: signal.value, ...(signal.thing ? { thing: signal.thing } : {}), ...(signal.at ? { at: at(signal.at) } : {}) })
     this.queue.push({ from, signal })
-  }
-
-  private deliver(from: string, signal: Signal) {
-    for (const to of this.wires.get(from) ?? []) {
-      const dot = to.lastIndexOf('.')
-      const rt = this.gadgets.get(to.slice(0, dot))
-      const port = to.slice(dot + 1)
-      if (!rt) continue
-      const g = rt.spec
-      if (g.kind === 'kick' && port === 'fire' && signal.body !== undefined && signal.dir) {
-        const other = this.byBody[signal.body]
-        if (other?.part.motion !== 'dynamic') continue
-        const v = this.core.velocity(signal.body)
-        const s = rt.knobs.strength * this.rules.kick
-        this.core.setVelocity(signal.body, [v[0] + signal.dir[0] * s, v[1] + signal.dir[1] * s, v[2] + signal.dir[2] * s])
-        this.fire(to.slice(0, dot), 'kicked', { value: s, body: signal.body })
-      } else if (g.kind === 'emitter' && port === 'spawn' && rt.thing && (signal.body === undefined || signal.body === rt.thing.body)) {
-        if (!this.respawns.some((r) => r.thing === rt.thing)) this.respawns.push({ thing: rt.thing, t: this.clock + rt.knobs.delay })
-        this.fire(to.slice(0, dot), 'spawned', { value: 1 })
-      } else if (g.kind === 'counter' && (port === 'add' || port === 'reset')) {
-        rt.value = port === 'add' ? rt.value + rt.knobs.step : 0
-        if (g.display) this.display(`${rt.toy}/${g.display}`, rt.value)
-        this.fire(to.slice(0, dot), 'changed', { value: rt.value })
-      }
-    }
   }
 
   /** Too fast is slowed to the speed limit, lost or broken is put back home: never an explosion. */
   private guard() {
     const max = this.rules.maxSpeed
-    for (const t of this.things) {
+    for (const t of this.things.values()) {
       if (t.part.motion !== 'dynamic') continue
       const p = this.core.position(t.body)
       const v = this.core.velocity(t.body)
@@ -495,7 +437,7 @@ export class World {
 
   /** Meshes follow bodies; wobbles and dust ease out. */
   private sync(dt: number) {
-    for (const t of this.things) {
+    for (const t of this.things.values()) {
       if (!t.mesh) continue
       if (t.part.motion && t.part.motion !== 'static') {
         const p = this.core.position(t.body), q = this.core.rotation(t.body)
@@ -519,64 +461,160 @@ export class World {
     }
   }
 
-  // ── Reading and resetting ───────────────────────────────────────────────
+  // ── The API: reading and acting ─────────────────────────────────────────
 
-  /** A thing's position in the world and in its toy's own frame, and its velocity. */
-  thing(key: string) {
-    const t = this.byKey.get(key)
-    if (!t) return null
-    const p = this.core.position(t.body)
-    const frame = this.frames.get(t.toy)
-    const local = frame ? v3(p).applyMatrix4(frame.clone().invert()) : v3(p)
-    return { position: p, local: [local.x, local.y, local.z] as Vec3, velocity: this.core.velocity(t.body), body: t.body }
+  keys() {
+    return [...this.things.keys(), ...this.followers.keys()]
   }
 
-  /** Puts a moving thing at a point in its toy's frame, at rest (tests now; picking things up later). */
-  place(key: string, local: Vec3) {
-    const t = this.byKey.get(key)
-    const frame = this.frames.get(t?.toy ?? '')
-    if (!t || !frame || t.part.motion !== 'dynamic' || !local.every(Number.isFinite)) return false
-    const p = v3(local).applyMatrix4(frame)
-    this.core.setState(t.body, [p.x, p.y, p.z], [0, 0, 0], t.home.q)
+  thing(key: string): ThingInfo | null {
+    const t = this.things.get(key)
+    const f = t ? undefined : this.followers.get(key)
+    if (!t && !f) return null
+    const body = (t ?? f)!.body
+    const p = this.core.position(body)
+    const frame = t && this.frames.get(t.toy)
+    const local = frame ? arr(v3(p).applyMatrix4(frame.clone().invert())) : p
+    return {
+      key, toy: t?.toy ?? 'followers', material: t?.part.material ?? f!.material, shape: t ? t.part.shape : this.shapeOf(f!),
+      motion: t?.part.motion ?? 'kinematic', position: p, rotation: this.core.rotation(body), velocity: this.core.velocity(body), local,
+    }
+  }
+
+  material(name: string) {
+    return material(name)
+  }
+
+  materials() {
+    return materialNames()
+  }
+
+  private dynamic(key: string) {
+    const t = this.things.get(key)
+    return t?.part.motion === 'dynamic' ? t : undefined
+  }
+
+  setVelocity(key: string, v: Vec3) {
+    const t = this.dynamic(key)
+    if (!t || !v.every(Number.isFinite)) return false
+    this.core.setVelocity(t.body, v)
     return true
   }
 
-  mesh(key: string) {
-    return this.byKey.get(key)?.mesh
+  applyImpulse(key: string, impulse: Vec3) {
+    const t = this.dynamic(key)
+    if (!t || !impulse.every(Number.isFinite)) return false
+    this.core.applyImpulse(t.body, impulse)
+    return true
   }
 
-  /** How many times each gadget output has fired since the world started. */
+  place(key: string, local: Vec3) {
+    const t = this.dynamic(key)
+    const frame = t && this.frames.get(t.toy)
+    if (!t || !frame || !local.every(Number.isFinite)) return false
+    this.core.setState(t.body, arr(v3(local).applyMatrix4(frame)), [0, 0, 0], t.home.q)
+    return true
+  }
+
+  respawn(key: string, delay: number) {
+    if (!this.dynamic(key) || this.respawns.has(key)) return false
+    this.respawns.set(key, this.clock + Math.max(0, delay))
+    return true
+  }
+
+  private bodyOf(key: string) {
+    const t = this.things.get(key)
+    if (!t) throw new Error(`no thing ${key}`)
+    return t
+  }
+
+  addHinge(key: string, anchor: Vec3, axis: Vec3, limits: [number, number]) {
+    const t = this.bodyOf(key)
+    const frame = this.frames.get(t.toy)!
+    return this.core.addHinge({ body: t.body, anchor: arr(v3(anchor).applyMatrix4(frame)), axis: arr(v3(axis).transformDirection(frame)), limits })
+  }
+
+  addSlider(key: string, axis: Vec3, limits: [number, number]) {
+    const t = this.bodyOf(key)
+    return this.core.addSlider({ body: t.body, axis: arr(v3(axis).transformDirection(this.frames.get(t.toy)!)), limits })
+  }
+
+  setMotor(joint: number, velocity: number, limit: number) {
+    this.core.setMotor(joint, velocity, limit)
+  }
+
+  jointPosition(joint: number) {
+    return this.core.jointPosition(joint)
+  }
+
+  toWorldDir(toy: string, dir: Vec3): Vec3 {
+    const frame = this.frames.get(toy)
+    return frame ? arr(v3(dir).transformDirection(frame)) : dir
+  }
+
   signals() {
     return Object.fromEntries(this.tally)
   }
 
+  mesh(key: string) {
+    return this.things.get(key)?.mesh
+  }
+
+  /** Each counter-like gadget's `value` state. */
   counters() {
     const out: Record<string, number> = {}
-    for (const [id, rt] of this.gadgets) if (rt.spec.kind === 'counter') out[id] = rt.value
+    for (const [id, g] of this.gadgets) if ('value' in g.state) out[id] = g.state.value
     return out
   }
 
   knobs() {
-    return [...this.gadgets].filter(([, rt]) => Object.keys(rt.knobs).length).map(([id, rt]) => ({ id, kind: rt.spec.kind, knobs: { ...rt.knobs } }))
+    return [...this.gadgets.values()].filter((g) => Object.keys(g.knobs).length).map((g) => ({ id: g.id, kind: g.spec.kind, knobs: { ...g.knobs }, ranges: gadgetKind(g.spec.kind)!.knobs }))
+  }
+
+  // ── Undo ─────────────────────────────────────────────────────────────────
+
+  snapshot(): Snapshot {
+    const things: Snapshot['things'] = {}
+    for (const t of this.things.values()) if (t.part.motion === 'dynamic') things[t.key] = { p: this.core.position(t.body), q: this.core.rotation(t.body), v: this.core.velocity(t.body) }
+    const gadgets: Snapshot['gadgets'] = {}
+    for (const g of this.gadgets.values()) gadgets[g.id] = { knobs: { ...g.knobs }, state: { ...g.state } }
+    return { clock: this.clock, rules: { ...this.rules, gravity: [...this.rules.gravity] }, things, gadgets, respawns: [...this.respawns].map(([key, t]) => ({ key, t })) }
+  }
+
+  /** Puts moving things, gadget knobs and state, pending respawns and the rules back as a snapshot had them. Spin is not kept: things restart without it. */
+  restore(s: Snapshot) {
+    this.applyRules(s.rules)
+    this.emit({ kind: 'rules', rules: this.rules, by: 'code', clamped: [] })
+    for (const [key, b] of Object.entries(s.things)) {
+      const t = this.things.get(key)
+      if (t) this.core.setState(t.body, b.p, b.v, b.q)
+    }
+    for (const [id, saved] of Object.entries(s.gadgets)) {
+      const g = this.gadgets.get(id)
+      if (!g) continue
+      Object.assign(g.knobs, saved.knobs)
+      // Joint handles are the world's, not the experiment's: keep them.
+      g.state = { ...saved.state, ...('joint' in g.state ? { joint: g.state.joint } : {}) }
+      const display = g.spec.display
+      if (typeof display === 'string' && 'value' in g.state) this.show(`${g.toy}/${display}`, String(g.state.value).padStart(5, '0'))
+    }
+    this.respawns = new Map(s.respawns.map((r) => [r.key, r.t]))
+    this.clock = s.clock
   }
 
   /** Every moving thing home and every counter to zero. The rules and knobs stay as tuned. */
   reset() {
-    for (const t of this.things) if (t.part.motion === 'dynamic') this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
-    this.respawns.length = 0
-    for (const [id, rt] of this.gadgets) if (rt.spec.kind === 'counter') {
-      rt.value = 0
-      if (rt.spec.display) this.display(`${rt.toy}/${rt.spec.display}`, 0)
-      this.fire(id, 'changed', { value: 0 })
-    }
+    for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
+    this.respawns.clear()
+    for (const g of this.gadgets.values()) if ('value' in g.state) gadgetKind(g.spec.kind)?.receive?.(g, 'reset', { value: 0 }, this)
   }
 
   stats(): Stats {
     return {
       stepMs: { median: quantile(this.stepTimes, 0.5), p95: quantile(this.stepTimes, 0.95), n: this.stepTimes.length },
       frameMs: { median: quantile(this.frameTimes, 0.5), p95: quantile(this.frameTimes, 0.95), n: this.frameTimes.length },
-      bodies: this.things.length + this.villagers.size,
-      villagers: this.villagers.size,
+      bodies: this.things.size + this.followers.size,
+      followers: this.followers.size,
     }
   }
 

@@ -2,8 +2,7 @@
 // shows it in dev builds with ?physics=panel only). Every rule's slider comes from rules.ts FIELDS, presets apply
 // all at once, a line of text asks for rules in words (the host app supplies `ask`), and each gadget's knobs tune
 // live. Returns its removal.
-import { FIELDS, PRESETS, RULE_KEYS, type Rules } from './rules'
-import { KNOBS } from './toy'
+import { FIELDS, PRESETS, ruleKeys, type Rules } from './rules'
 import type { Stats, World } from './world'
 
 const CSS = `
@@ -95,7 +94,7 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
 
   heading('Rules')
   // Each slider sends the whole rules object with one field changed: still one atomic change.
-  for (const key of RULE_KEYS) {
+  for (const key of ruleKeys()) {
     if (key === 'gravity') {
       for (const [i, axis] of ['x', 'y', 'z'].entries()) {
         sliders.set(`gravity${i}`, slider(root, `gravity ${axis}`, FIELDS.gravity, world.rules.gravity[i], (v) => {
@@ -104,7 +103,7 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
           world.setRules({ gravity: g }, 'panel')
         }))
       }
-    } else sliders.set(key, slider(root, key, FIELDS[key], world.rules[key], (v) => world.setRules({ [key]: v }, 'panel')))
+    } else sliders.set(key, slider(root, key, FIELDS[key], world.rules[key] as number, (v) => world.setRules({ [key]: v }, 'panel')))
   }
 
   heading('Gadgets')
@@ -114,7 +113,7 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
     name.textContent = `${g.id.split('/').pop()} (${g.kind})`
     name.style.color = '#cdbb9e'
     box.append(name)
-    for (const [knob, value] of Object.entries(g.knobs)) slider(box, knob, KNOBS[knob], value, (v) => world.setKnob(g.id, knob, v))
+    for (const [knob, value] of Object.entries(g.knobs)) slider(box, knob, g.ranges[knob], value, (v) => world.setKnob(g.id, knob, v))
     root.append(box)
   }
 
@@ -124,14 +123,14 @@ export function panel(world: World, ask: (text: string) => Promise<Answer>, stat
 
   const show = () => {
     const r = world.rules
-    for (const key of RULE_KEYS) {
+    for (const key of ruleKeys()) {
       if (key === 'gravity') r.gravity.forEach((v, i) => { const s = sliders.get(`gravity${i}`)!; s.input.value = String(v); s.out.textContent = v.toFixed(2) })
-      else { const s = sliders.get(key)!; s.input.value = String(r[key]); s.out.textContent = r[key].toFixed(2) }
+      else { const s = sliders.get(key)!; s.input.value = String(r[key]); s.out.textContent = (r[key] as number).toFixed(2) }
     }
   }
   const tick = setInterval(() => {
     const s = stats()
-    meter.textContent = `step ${s.stepMs.median} ms (p95 ${s.stepMs.p95}), ${s.bodies} bodies, ${s.villagers} villagers`
+    meter.textContent = `step ${s.stepMs.median} ms (p95 ${s.stepMs.p95}), ${s.bodies} bodies, ${s.followers} followers`
     show()
   }, 500)
   document.head.append(style)

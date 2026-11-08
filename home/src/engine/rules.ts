@@ -1,12 +1,15 @@
 // World rules (#74): one object that says how the whole world behaves, tuned live from the
 // panel, by presets (one per game mode) or by talking. FIELDS is the one owner of each
-// rule's range: the checker clamps to it, the panel draws its sliders from it, and the host
-// quotes this file to the model. A change is checked whole and applied all at once
-// (world.ts setRules), never half-applied; tuning is kept for the visit and survives a reset.
+// rule's range and default: the checker clamps to it, the panel draws its sliders from it,
+// and the host quotes this file to the model. Open at runtime: registerRule adds a rule (a
+// gadget kind reads it from world.rules), registerPreset a game mode. A change is checked
+// whole and applied all at once (World.setRules), never half-applied.
+
+export type Gravity = [number, number, number]
 
 export interface Rules {
   /** m/s², world space; [0, -9.81, 0] is the Earth. */
-  gravity: [number, number, number]
+  gravity: Gravity
   /** Simulated seconds per real second. */
   timeScale: number
   /** Multiplies every pair's combined restitution (bounciness). */
@@ -23,11 +26,13 @@ export interface Rules {
   maxSpeed: number
   /** Collision steps per frame. */
   substeps: number
+  /** Rules registered at runtime (registerRule): numbers only. */
+  [added: string]: number | Gravity
 }
 
-interface Field { min: number; max: number; step: number; about: string }
+export interface Field { min: number; max: number; step: number; about: string }
 
-export const FIELDS: Record<Exclude<keyof Rules, 'gravity'>, Field> & { gravity: Field } = {
+export const FIELDS: Record<string, Field> = {
   gravity: { min: -30, max: 30, step: 0.01, about: 'gravity per axis, m/s²' },
   timeScale: { min: 0.1, max: 2, step: 0.01, about: 'simulated seconds per real second' },
   bounce: { min: 0, max: 1.6, step: 0.01, about: 'multiplies bounciness' },
@@ -41,14 +46,37 @@ export const FIELDS: Record<Exclude<keyof Rules, 'gravity'>, Field> & { gravity:
 
 export const NORMAL: Rules = { gravity: [0, -9.81, 0], timeScale: 1, bounce: 1, friction: 1, drag: 0.05, kick: 1, impact: 1, maxSpeed: 12, substeps: 1 }
 
-export const PRESETS: Record<string, { label: string; rules: Rules }> = {
-  normal: { label: 'Normal', rules: NORMAL },
-  moon: { label: 'Moon', rules: { ...NORMAL, gravity: [0, -1.62, 0], drag: 0 } },
-  super: { label: 'Super powers', rules: { ...NORMAL, kick: 3, bounce: 1.25, impact: 2, maxSpeed: 25 } },
-  slow: { label: 'Slow motion', rules: { ...NORMAL, timeScale: 0.3 } },
+/** Each preset says only what differs from NORMAL. */
+export const PRESETS: Record<string, { label: string; rules: Partial<Rules> }> = {
+  normal: { label: 'Normal', rules: {} },
+  moon: { label: 'Moon', rules: { gravity: [0, -1.62, 0], drag: 0 } },
+  super: { label: 'Super powers', rules: { kick: 3, bounce: 1.25, impact: 2, maxSpeed: 25 } },
+  slow: { label: 'Slow motion', rules: { timeScale: 0.3 } },
 }
 
-export const RULE_KEYS = Object.keys(FIELDS) as (keyof Rules)[]
+/** A preset's whole rules: NORMAL with its changes. */
+export const presetRules = (name: string): Rules | undefined =>
+  Object.hasOwn(PRESETS, name) ? { ...NORMAL, gravity: [...NORMAL.gravity], ...PRESETS[name].rules } as Rules : undefined
+
+export const ruleKeys = () => Object.keys(FIELDS)
+
+const NAME = /^[a-z][a-zA-Z0-9]{0,31}$/
+/** Adds a numeric rule with its range and default. Returns null, or why it was refused. */
+export function registerRule(name: string, field: Field & { default: number }): string | null {
+  if (!NAME.test(name) || Object.hasOwn(FIELDS, name)) return `${name} is taken or not a rule name`
+  const { min, max, step, about } = field
+  if (![min, max, step, field.default].every(Number.isFinite) || min > max || step <= 0 || field.default < min || field.default > max) return 'a rule needs min <= default <= max and a positive step'
+  FIELDS[name] = { min, max, step, about: String(about).slice(0, 120) }
+  NORMAL[name] = field.default
+  return null
+}
+
+/** Adds or replaces a preset: a label and the rules it changes (checked when applied). */
+export function registerPreset(name: string, label: string, rules: Partial<Rules>): string | null {
+  if (!NAME.test(name)) return 'a preset name is letters and digits'
+  PRESETS[name] = { label: String(label).slice(0, 40), rules }
+  return null
+}
 
 const clampTo = (f: Field, v: number) => {
   const c = Math.min(f.max, Math.max(f.min, v))
@@ -57,16 +85,16 @@ const clampTo = (f: Field, v: number) => {
 
 /**
  * Rules from untrusted data (a model's answer, a stored tuning), field by field over
- * `current`: own keys only, a missing field keeps its current value, a non-number or
- * non-finite one keeps it too and is listed, an out-of-range one is clamped and listed.
+ * `current`: own keys of FIELDS only, a missing field keeps its current value, a non-number
+ * or non-finite one keeps it too and is listed, an out-of-range one is clamped and listed.
  * Anything that is not a plain object is refused.
  */
 export function checkRules(raw: unknown, current: Rules): { rules: Rules; clamped: string[] } | { reason: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { reason: 'rules are not an object' }
   const r = raw as Record<string, unknown>
-  const next: Rules = { ...current, gravity: [...current.gravity] }
+  const next: Rules = { ...NORMAL, ...current, gravity: [...current.gravity] }
   const clamped: string[] = []
-  for (const key of RULE_KEYS) {
+  for (const key of ruleKeys()) {
     if (!Object.hasOwn(r, key)) continue
     const v = r[key]
     if (key === 'gravity') {
@@ -93,5 +121,3 @@ export function checkRules(raw: unknown, current: Rules): { rules: Rules; clampe
   }
   return { rules: next, clamped }
 }
-
-export const sameRules = (a: Rules, b: Rules) => RULE_KEYS.every((k) => (k === 'gravity' ? a.gravity.every((x, i) => x === b.gravity[i]) : a[k] === b[k]))
