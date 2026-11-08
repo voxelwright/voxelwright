@@ -1,7 +1,7 @@
 // A theme written from a sentence (#50): `village.theme.ask("make it cozier")`. The host
 // asks a model for theme JSON; the answer is data, checked here field by field before
 // setTheme. A failed call or a refused theme leaves the current theme on screen.
-import { checkTheme, setTheme, theme } from './index'
+import { checkTheme, prepare, setTheme, theme } from './index'
 import { askTheme } from '../villager'
 
 export type Asked =
@@ -13,6 +13,7 @@ const asked: ({ text: string } & Asked)[] = []
 /** Restyles the home from one sentence. `person` is whose host session is billed (the default household member). */
 export async function ask(text: string, person = 'alex'): Promise<Asked> {
   const t0 = performance.now()
+  prepare()
   const r = await askTheme(person, text, theme())
   let out: Asked
   if (!r.ok) out = { ok: false, why: r.why, ms: Math.round(performance.now() - t0) }

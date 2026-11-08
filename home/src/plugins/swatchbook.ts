@@ -3,7 +3,7 @@ import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
 import { WALL_Z, WINDOW } from '../layout'
 import { canvas, toTexture } from '../paint'
-import { themes, type LookInfo } from '../theme'
+import { prepare, themes, type LookInfo } from '../theme'
 import type { Shift, Theme } from '../theme/tokens'
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -371,6 +371,7 @@ export default {
 
     let closing = 0
     const open = () => {
+      prepare()
       clearTimeout(closing)
       editing = null
       note = ''

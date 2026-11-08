@@ -45,6 +45,8 @@ declare module 'cordis' {
     'village/tier'(quality: Quality): void
     /** The theme changed (src/theme): previous and next, both checked Theme objects. */
     'village/theme'(previous: unknown, next: unknown): void
+    /** Someone is about to change the look (the swatch book opened, a theme was asked for): load the theme plugin now. */
+    'village/theme-prepare'(): void
   }
 }
 

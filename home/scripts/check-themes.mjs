@@ -31,6 +31,11 @@ async function open(query = '', { reducedMotion = 'no-preference', context = nul
   await page.goto(`${base}?${query}`)
   const ready = await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
+  // A person opens the swatch book or asks for a look before a switch, and that loads the theme
+  // plugin (src/theme prepare()); the home without a theme never loads it.
+  await page.evaluate(() => window.village.theme.prepare())
+  await page.waitForFunction(() => window.village.snapshot().plugins.active.includes('theme'), null, { timeout: 15000 })
+  await page.waitForTimeout(600)
   return { context: ctx, page, ready, errors }
 }
 const done = (page) => page.waitForFunction(() => window.village.theme.lastSwitch()?.done && !window.village.theme.switching(), null, { timeout: 20000 })
@@ -383,7 +388,7 @@ const residue = (page) => page.evaluate(() => {
 for (const q of ['q=low', 'q=high']) {
   const { context, page } = await open(q)
   await page.waitForTimeout(1500)
-  // The theme plugin loads on idle after the page settles (src/main.ts); the cycles end with it unloaded.
+  // The theme plugin loaded when the page prepared for a switch (src/theme prepare()); the cycles end with it unloaded.
   await page.evaluate(() => window.village.unload('theme'))
   await page.waitForTimeout(300)
   const fresh = await residue(page)

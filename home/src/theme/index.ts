@@ -183,6 +183,8 @@ export const themes = {
   })),
   current: () => target.id,
   get: (id: string) => find(id),
+  /** Load the theme plugin ahead of a switch, as opening the swatch book does. */
+  prepare: () => prepare(),
   set(id: string): boolean {
     const t = find(id)
     if (t) setTheme(t)
@@ -243,3 +245,13 @@ export const themes = {
 }
 
 export { HOME }
+
+/**
+ * Someone is about to change the look: the swatch book opened, or a theme was asked for.
+ * The theme plugin loads now, so its one-time room rebuild (its fixture lights join every lit
+ * shader, about 190 ms) lands while the book opens or the model writes, not in the switch.
+ * The home without a theme never loads it, so it pays nothing for themes.
+ */
+export function prepare() {
+  root.emit('village/theme-prepare')
+}
