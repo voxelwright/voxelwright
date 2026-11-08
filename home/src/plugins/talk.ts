@@ -239,6 +239,14 @@ class Card {
     this.el.append(tab, page, this.more)
   }
 
+  /**
+   * Stepped back after its turn: the reply from its start, so the slip's first lines are its first words
+   * (#42 paper climb: a long reply stepped back on its last page, a fragment like "will still be there.").
+   */
+  recall() {
+    if (this.finished) this.said.textContent = this.full.trim()
+  }
+
   /** The words stop where they are: a reply cut short says so once. */
   stop() {
     if (this.count && !this.finished && !this.muted) this.onStop()
@@ -514,6 +522,7 @@ export default {
     let released: Member | null = null
 
     const show = (m: Member, as: 'speaking' | 'said') => {
+      if (as === 'said') m.card.recall()
       showing.set(m, as)
       m.card.el.classList.add('shown')
       m.card.el.classList.toggle('said', as === 'said')
