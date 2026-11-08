@@ -74,7 +74,7 @@ const ROUND2_NOTES: Partial<Record<CueName, string>> = {
 
 /** Round 3: the cue that changed again, the versions to compare (the current pick first), and what changed since. */
 const ROUND3: { cue: CueName; variants: string[]; before: string }[] = [
-  { cue: 'news', variants: ['a', 'f', 'g', 'h', 'i'], before: `Round 2: you picked A and said “${ROUND2_NOTES.news}”. A is unchanged, to compare; F to I are small, soft bubble pops, no tune.` },
+  { cue: 'news', variants: ['a', 'f', 'g', 'h', 'i'], before: `Round 2: you picked A and said “${ROUND2_NOTES.news}”. A is unchanged, to compare; F to I are small, soft bubble pops, no little melody.` },
 ]
 
 /** Round 2: the cues that changed, the versions to compare (round 1's first), and what changed since. */

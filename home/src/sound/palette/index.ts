@@ -890,7 +890,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
     c: 'Marimba E-E then A with a ghost shimmer.',
     d: 'A, rounder: the same kalimba G then high C with a slower strike, nothing above 2 kHz, less room, 2 dB quieter.',
     e: 'A, an octave lower with a felt mallet: G then C, warmer and rounder, less room, 2 dB quieter.',
-    f: 'Recorded: one small bubble pop, as recorded, a different one of four each time.',
+    f: 'Recorded: one small bubble pop, a different one of four each time, its top rolled off.',
     g: 'Recorded, bigger: the same four bubble pops played slower, so they are deeper and rounder.',
     h: 'Synthesized: a soft "bloop" that rises to G, with a faint smaller bubble just after it.',
     i: 'Hybrid: a recorded bubble pop tuned to G with a soft synthesized bloop under it.',
