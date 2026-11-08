@@ -1,6 +1,8 @@
 // The villager service: a loopback-only HTTP API through which a person talks
 // to their villager. Each launch gives every person their own token, which
-// opens that person's villager and no other. The tokens are written with mode
+// opens only that person's paths, /people/<id>/…; any other person's answer 403.
+// Talking with someone else's villager is a visit, at /people/<id>/visits/<owner>/,
+// kept under the visitor and shown only the owner's persona. The tokens are written with mode
 // 0600 to <root>/villager/launch.json, and the CLI prints each person's link
 // (the token rides in the URL fragment). Replies stream as server-sent events.
 //
@@ -15,7 +17,8 @@
 //   library/<item>.json props made for them: module text (never run here) and metadata
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
 //   visits/<owner>/     this person's talks with another person's villager (#42): its own conversation,
-//                       usage, session and notes. A visit reads only the owner's persona.json.
+//                       usage, session and notes. A visit reads only the owner's persona.json, and
+//                       writes the visitor's own preferences.json and sketches.jsonl as on any turn.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -24,7 +27,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
-import { checkProfile, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
+import { checkProfile, humourOf, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
 
 export interface Config {
@@ -176,9 +179,10 @@ export default {
       if (asked === 'clean') await writePreferences(personDir(talker), { humour: 'clean', at: new Date().toISOString() })
       const { character, personaRefused } = visitor ? await visitCharacterOf(visitor, id) : await characterOf(id)
       // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
+      // Each other person's level comes from their profile, preferences and persona only, never their notes.
       let humourCap: Humour | undefined
       if (context !== undefined && character.humour === 'crude') {
-        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map(async (p) => (await characterOf(p)).character.humour))
+        const others = await Promise.all(Object.keys(people).filter((p) => p !== id).map((p) => humourOf(p, personDir(p), profileOf(p))))
         if (others.some((h) => h !== 'crude')) humourCap = 'cheeky'
       }
       const at = new Date().toISOString()
@@ -233,7 +237,7 @@ export default {
         // A routed line is stored with the route's spoken line, never the JSON; a refused route is not acted on.
         const said = r && 'routed' in r ? r.routed.say ?? `(${r.routed.route})` : r ? '' : result.reply
         await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', ...(r && 'reason' in r ? { unanswered: true } : { text: said }), ...(r && 'routed' in r ? { route: r.routed.route } : {}) })
-        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: character.humour, ...(visitor ? { visiting: id } : {}), ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
+        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: humourCap ?? character.humour, ...(visitor ? { visiting: id } : {}), ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
         if (r && 'reason' in r) event('failed', { reason: 'route' })
         else event('done', { reply: said, ttftMs: result.ttftMs, totalMs, ...(r ? { routed: r.routed } : {}) })
       } catch (error) {
@@ -387,14 +391,14 @@ export default {
       const person = holder(req)
       if (!person) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
-      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40),
-      // except a visit (#42): talking with another listed person's villager, kept under the visitor.
-      const owner = /^\/people\/([^/]+)\//.exec(path)?.[1]
-      if (owner === undefined) return send(res, 404, { error: 'not found' })
-      const visiting = owner !== person && /^\/people\/[^/]+\/(conversation|messages)$/.test(path)
-      if (visiting && (!PERSON.test(owner) || !Object.hasOwn(people, owner))) return send(res, 404, { error: 'no such villager' })
-      if (owner !== person && !visiting) return send(res, 403, { error: 'this token is for another person' })
-      const visitor = visiting ? person : undefined
+      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40).
+      // A visit (#42) is explicit and under the visitor: /people/<me>/visits/<owner>/(conversation|messages).
+      const first = /^\/people\/([^/]+)\//.exec(path)?.[1]
+      if (first === undefined) return send(res, 404, { error: 'not found' })
+      if (first !== person) return send(res, 403, { error: 'this token is for another person' })
+      const visitMatch = /^\/people\/[^/]+\/visits\/([^/]+)\/(conversation|messages)$/.exec(path)
+      if (visitMatch && (visitMatch[1] === person || !PERSON.test(visitMatch[1]) || !Object.hasOwn(people, visitMatch[1]))) return send(res, 404, { error: 'no such villager' })
+      const visitor = visitMatch ? person : undefined
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {
@@ -408,9 +412,10 @@ export default {
         if (item !== undefined && !ITEM.test(item)) return send(res, 404, { error: 'no such item' })
         return input(id, plain ?? (keep ? 'keep' : 'library'), item, req, res)
       }
-      const match = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(path)
-      if (!match) return send(res, 404, { error: 'not found' })
-      const [, id, what] = match
+      const own = /^\/people\/([^/]+)\/(conversation|messages)$/.exec(path)
+      if (!own && !visitMatch) return send(res, 404, { error: 'not found' })
+      // On a visit, `id` is the visited villager's person; everything is read and written under `visitor`.
+      const [id, what] = visitMatch ? [visitMatch[1], visitMatch[2]] : [own![1], own![2]]
       if (what === 'conversation' && req.method === 'GET') {
         const lines = await readJsonl(join(visitor ? visitDir(visitor, id) : personDir(id), 'conversation.jsonl'))
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
