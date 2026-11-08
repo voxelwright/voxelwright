@@ -10,7 +10,7 @@
 //     printing each routed intent, whether it matched, and Enter to outline (or to the question).
 import { spawn, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -63,6 +63,8 @@ const stop = (child) => new Promise((resolve) => {
 
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
+// #40: the page takes its person's token from the link the host prints (#token=…). This page is Alex's.
+const link = async (url) => `${url}#token=${JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex}`
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist'] })
 
 async function open(query, context) {
@@ -72,7 +74,7 @@ async function open(query, context) {
   page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push(m.text()))
   // The moment Enter goes down, before any of the page's own handlers.
   await page.addInitScript(() => addEventListener('keydown', (e) => e.key === 'Enter' && (window.__enterAt = performance.now()), true))
-  await page.goto(base + query)
+  await page.goto(await link(base + query))
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villageBuild.history())
   await page.waitForTimeout(1500)
@@ -205,7 +207,6 @@ try {
       await page.waitForTimeout(400)
     }
     // The routed intents themselves, from the host's route log.
-    const { readFile } = await import('node:fs/promises')
     const log = (await readFile(join(root, 'people', 'alex', 'routes.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
     lines.forEach(([text, right], i) => {
       const entry = log.find((l) => l.text === text)
@@ -859,9 +860,8 @@ try {
     const denDraft = s.draft
     if (denDraft) {
       await B(page, async (d) => {
-        const H = await import('/src/build/history.ts'), P = await import('/src/build/plan.ts')
-        const { token } = await (await fetch('/villager/launch')).json()
-        const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), P.HOUSE_PLAN)
+        const H = await import('/src/build/history.ts'), P = await import('/src/build/plan.ts'), V = await import('/src/villager.ts')
+        const other = await H.PlanHistory.open(H.hostStore({ request: V.authorized }), P.HOUSE_PLAN)
         await other.commit([{ op: 'addRoom', room: { id: 'nook', label: 'Nook' }, wallId: d.wallId, from: d.from, to: d.to, depth: 2 }], 'Added the nook')
       }, denDraft)
       await B(page, () => window.villageBuild.outline.confirm())

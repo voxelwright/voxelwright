@@ -103,6 +103,9 @@ const stop = (child) => new Promise((resolve) => {
 
 await run('node', ['src/villager-cli.ts', '--agent', 'stub', '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
+// #40: the page takes its person's token from the link the host prints (#token=…). This page is Alex's.
+const tokens = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens
+const link = async (url) => `${url}#token=${(await tokens()).alex}`
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist'] })
 const QUERY = '?build=1&cam=iso&q=high'
 
@@ -114,7 +117,7 @@ const snap = (page) => page.evaluate(() => {
   return { objects: s.objects.join('\n'), dom: s.dom, geometries: s.geometries }
 })
 async function open(page) {
-  await page.goto(base + QUERY)
+  await page.goto(await link(base + QUERY))
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villageBuild.history())
   await page.waitForFunction(() => window.villagePlace?.history() && window.villagePlace.building() === 0, null, { timeout: 20_000 })
@@ -337,18 +340,17 @@ try {
   await page.evaluate(() => {
     window.villagePlace.history().commit = window.__commit
   })
-  // another page changes the house first (a real second history on the same host store): StaleHead, then the history has the new head.
-  const otherHead = await page.evaluate(async () => {
+  // Sam changes the house first, from Sam's own link (a real second history on the same shared host store): StaleHead, then the history has the new head.
+  const otherHead = await page.evaluate(async (sam) => {
     const H = await import('/src/build/history.ts')
-    const { token } = await (await fetch('/villager/launch')).json()
-    const other = await H.PlanHistory.open(H.hostStore({ base: '/villager/api', token }), window.villagePlace.plan())
+    const other = await H.PlanHistory.open(H.hostStore({ request: H.bearer('/villager/api', sam) }), window.villagePlace.plan())
     return (await other.commit([{ op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.2 }], 'Bent the wall')).id
-  })
+  }, (await tokens()).sam)
   await page.keyboard.press('Enter')
   await page.waitForTimeout(600)
   s = await S(page)
   const headNow = await page.evaluate(() => window.villagePlace.history().head)
-  check('when another page moved the house, the ghost stays, says so, and the page already has the new head', s.state === 'placing' && /house changed/.test(s.hint) && headNow === otherHead && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore, { s, headNow, otherHead })
+  check('when Sam moved the house from another page, the ghost stays, says so, and the page already has the new head', s.state === 'placing' && /house changed/.test(s.hint) && headNow === otherHead && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore, { s, headNow, otherHead })
   await page.keyboard.press('Enter')
   d = await done(page)
   check('after the failures, confirming again places it once, on the other page’s version', (await page.evaluate(() => window.villagePlace.history().versions().at(-1).parent)) === otherHead && d.status === 'confirmed' && (await page.evaluate(() => window.villagePlace.drawn())).length === drawnBefore + 1)

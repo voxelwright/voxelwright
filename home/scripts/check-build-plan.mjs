@@ -359,9 +359,12 @@ if (!args.includes('--skip-drag')) {
 if (!args.includes('--skip-drag')) {
   const ro = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   const rp = await ro.newPage()
-  await rp.route('**/villager/launch', (r) => r.fulfill({ json: { token: 't' } }))
-  await rp.route('**/villager/api/house/plans', (r) => r.fulfill({ status: 500, json: { error: 'plan event 3 follows 1' } }))
-  await rp.goto(`${base}?cam=iso&q=low&fx=&build=1`)
+  // The tab has a link (#40) and the host answers, but the saved house is not one this page can read. (A host that
+  // answers 5xx reads as away, like a stopped host behind the dev proxy, and opens in memory: check-plan-history.)
+  const root = '0123456789abcdef'
+  const unreadable = { versions: [{ id: root, parent: null, at: '2026-11-07T00:00:00.000Z', plan: { schema: 2, corners: [], walls: [], rooms: [{ id: 'r', label: 'R', loop: ['x', 'y', 'z'] }], furniture: [] } }], head: root, names: {} }
+  await rp.route('**/villager/api/house/plans', (r) => r.fulfill({ status: 200, json: unreadable }))
+  await rp.goto(`${base}?cam=iso&q=low&fx=&build=1#token=${'a'.repeat(64)}`)
   await rp.evaluate(() => window.village.ready())
   await rp.evaluate(() => window.villageBuild.history())
   await rp.waitForTimeout(1500)
