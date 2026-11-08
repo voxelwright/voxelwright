@@ -382,6 +382,15 @@ persona it stores or serves passes `checkPersona`, the setup's dials map into
 and `voice.json`, all or none. One
 villager per person for now.
 
+`persona.json` is household-visible: a visit (#42) shows the visited villager's
+whole persona in that conversation. So the generator writes it only from what the
+creator types or picks while making the villager (the description, a pattern, the
+role, the dials) plus the owner's display name and accent. The owner's conversation,
+notes (`about-<id>.md`, `how-<id>-likes-to-talk.md`), preferences and profile style
+never reach the model's prompt, the stored record or `persona.json`. `node
+test/villager-make.ts` proves it with marker words seeded in each ("privacy"), and the
+setup's slip says "Everyone at home sees their personality."
+
 ### Profile: who the villager is talking to
 
 Trusted authority data written by the operator now and by onboarding later.

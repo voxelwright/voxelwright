@@ -19,7 +19,9 @@ const live = process.argv.includes('--live')
 const root = await mkdtemp(join(tmpdir(), 'villager-make-check-'))
 const checks: { name: string; pass: boolean; detail?: unknown }[] = []
 const check = (name: string, pass: unknown, detail?: unknown) => checks.push({ name, pass: Boolean(pass), detail })
-const PROFILES: Record<string, Profile> = { alex: { age: 'adult', humour: 'crude' }, sam: { age: 'child' }, jo: { age: 'adult' } }
+// Jo's profile style is private: it must never reach a generated persona (persona.json is household-visible, #42 visits).
+const PRIVATE_STYLE = 'likes quillmarrow answers'
+const PROFILES: Record<string, Profile> = { alex: { age: 'adult', humour: 'crude' }, sam: { age: 'child' }, jo: { age: 'adult', style: PRIVATE_STYLE } }
 const block = (p: unknown) => '```js\nexport default function () {}\n```\n```json\n' + JSON.stringify(p) + '\n```'
 
 async function start(villagerMaker?: VillagerMaker) {
@@ -354,6 +356,27 @@ try {
   calls = []
   const refusedRemake = await api(`/people/sam/villagers/${old.item}/remake`, { body: { reason: 'check: again' } })
   check('remake: without a snapshot and with its pattern gone, the remake is refused with a plain reason, never run without the pattern', refusedRemake.status === 409 && /pattern/.test((await refusedRemake.json() as { error: string }).error) && calls.length === 0)
+
+  // #42 visits show a villager's whole persona.json to the household, so the persona writer must never copy the owner's
+  // private things into it: their conversation, their notes about them, their preferences or their profile's style.
+  // Seed each with a marker word, make, repair and send off a villager, and look for the markers everywhere it went.
+  {
+    const MARKERS = ['bramblewick', 'thistlevane', 'copperfen', 'quillmarrow']
+    const jo = join(root, 'people', 'jo')
+    await mkdir(join(jo, 'notes'), { recursive: true })
+    await writeFile(join(jo, 'conversation.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), from: 'person', text: 'my bramblewick secret, please keep it between us' })}\n`)
+    await writeFile(join(jo, 'notes', 'about-jo.md'), 'Jo works nights at the thistlevane depot.\n')
+    await writeFile(join(jo, 'notes', 'how-jo-likes-to-talk.md'), 'Short answers; never mention copperfen.\n')
+    await writeFile(join(jo, 'preferences.json'), JSON.stringify({ humour: 'clean' }))
+    const before = calls.length
+    const made = await (await api('/people/jo/villagers', { body: { description: 'a [stub-mark-head] tidy badger', accent: '#6a9a4a' } })).json() as { item: string; persona: unknown }
+    await api(`/people/jo/villagers/${made.item}/remake`, { body: { reason: 'the head itself is tagged as the mark' } })
+    const sent = await sendOff('jo', made.item, { tuning: { ...knobs, warmth: 0.9, chatty: 0.9 }, voice })
+    const prompts = JSON.stringify(calls.slice(before)) + calls.slice(before).map((c) => villagerAsk(c.description, c.owner, c.accent, c.pattern as never, c.role as never)).join('\n')
+    const stored = [await readFile(personaFile, 'utf8'), await readFile(join(jo, 'villagers', `${made.item}.json`), 'utf8'), JSON.stringify(await (await api(`/people/jo/villagers/${made.item}`)).json()), JSON.stringify(await (await api('/people/jo/villager')).json())].join('\n')
+    const leaks = MARKERS.filter((m) => prompts.includes(m) || stored.includes(m))
+    check('privacy: the owner\'s conversation, notes, preferences and profile style reach neither the model\'s prompt nor the stored villager or persona.json', sent.status === 200 && calls.length - before === 2 && leaks.length === 0, { leaks, sent: sent.status, calls: calls.length - before })
+  }
 
   // Storage: every write goes to a temporary file and is renamed over the record.
   const vdir = join(root, 'people', 'alex', 'villagers')

@@ -508,7 +508,10 @@ export default {
       status.textContent = text
       status.dataset.tone = tone
     }
-    const READY = 'Describe them, or pick a pattern card. You tune them once they are sewn.'
+    // persona.json is household-visible (#42 visits): what the creator types becomes a personality everyone at home sees,
+    // so the slip says so plainly. Nothing private (conversations, notes, profile) is ever put into it (host test 'privacy').
+    const SHARED = 'Everyone at home sees their personality.'
+    const READY = `Describe them or pick a pattern. ${SHARED}`
     setStatus(READY)
 
     // ── Saying things: a paper card over the villager, and its babble ──────
@@ -1017,7 +1020,7 @@ export default {
       // How the two combine: the words say who they are, the pattern how they talk.
       line.placeholder = card ? 'Who are they? e.g. a hedgehog who bakes bread' : 'e.g. a sleepy hedgehog who bakes bread before dawn'
       // The words say who they are (the line's example says so); the pattern, how they talk.
-      if (state === 'empty' || state === 'failed') setStatus(card ? `${card.template.name} sets how they talk.` : READY)
+      if (state === 'empty' || state === 'failed') setStatus(card ? `${card.template.name} sets how they talk. ${SHARED}` : READY)
       chip.setAttribute('aria-label', card ? `Pattern ${card.template.name}. Click to put it back.` : '')
     }
     const saveAsPattern = async () => {

@@ -272,6 +272,8 @@ async function regroup(s) {
     await page.waitForTimeout(2200)
     await settle(page)
     await shot(page, '1-empty')
+    // persona.json is household-visible (#42 visits): the slip says so before anything is typed.
+    check('privacy: the slip says plainly that everyone at home will see the personality', /Everyone at home sees their personality/.test((await st(page)).status ?? ''), (await st(page)).status)
     if (cheval) {
       await contrastAt(page, tag, '1-empty')
       check(`${tag}: before there is a villager the controls are put away: nothing to tab to`, await page.evaluate(() => [...document.querySelectorAll('.vs-fit [tabindex="0"]')].every((e) => getComputedStyle(e).visibility === 'hidden')))

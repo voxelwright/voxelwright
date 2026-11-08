@@ -1390,6 +1390,11 @@ humour rule (`humourCeiling`). The page keeps no copy: `gen/spec.ts` has a type-
 `build.ts` `personaShape()` keeps a persona of that shape for display, and the rack's patterns
 and the jokes dial come from `GET persona-templates`.
 
+Personas are household-visible (#42 visits show a visited villager's whole `persona.json`).
+The setup's slip says so ("Everyone at home sees their personality."), and the persona is
+made only from what the creator types or picks; the owner's conversation, notes, preferences
+and profile style never reach it (host test "privacy"; the boundary is in host/README.md).
+
 The model writes the persona as a ```json block after the module (`style.md`, `arm-code.md`),
 in #42's fields. Every persona, from the model, a pattern, a saved file or a request body, goes
 through `checkPersona` on the host before it is stored or served. One that fails is refused with
