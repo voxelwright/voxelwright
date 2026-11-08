@@ -146,6 +146,28 @@ Details and scores are in `home/README.md`, "Talk regroup".
   direction that wins the structural categories and loses on fixable rendering
   faults is worth adopting; fix the faults before judging it again.
 
+## Lessons from the build-mode regroups (#48, November 7, 2026)
+
+Details and scores are in `home/screenshots/build/look-log.md`.
+
+- **When a complaint repeats, look for the missing system.** Three rounds of
+  restyling a room sketch moved the score less than 0.3; the complaint was that
+  the yard didn't follow the floor plan. Making the ground answer the plan moved
+  it 2 to 3 in one round.
+- **A person in the scene beats a better camera.** For "the new room is the
+  reward", a villager walking in and sitting down scored 9 on that category from
+  both models; no framing change came close.
+- **Keep the distance the art was made for.** An eye-level view of a dollhouse
+  exposed low-poly props and blank windows and lost 3 to 4 points of cohesion.
+- **The payoff shot moves faster than the tool shot.** Furnishing the built
+  result lifted payoff at once; the proposal stayed capped by legibility (what
+  covers what, one visual language), which is layout work, not more drawing.
+- **One comparative sheet is steadier than separate calls.** Put the current best
+  and every candidate on one image with one rubric, and ask for a ranking first.
+- **Geometry fixes need scene assertions.** Cutting a wall low but not its top cap
+  left a beam floating over the reward. Pixels didn't catch it; a check that no
+  cap stands without wall below would have.
+
 ## Do not
 
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.
