@@ -18,7 +18,7 @@
 // new head. A version exists only once the store has accepted it; until then
 // head, versions and plan stay as they were. Plans and versions handed out are
 // frozen: they are history, not scratch space.
-import { apply, curveOf, PLAN_SCHEMA, PlanError, pointAt, round, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
+import { apply, curveOf, MIN_ROOM_SIDE, PLAN_SCHEMA, PlanError, pointAt, round, validate, type Edit, type Id, type Opening, type Plan, type Room, type Wall } from './plan'
 
 export interface Version {
   id: string
@@ -122,10 +122,8 @@ export type Upgrade = (plan: unknown) => unknown
 const DOOR_LIVING: Opening = { id: 'kitchen.door-living', kind: 'door', from: 4.74, to: 5.44, sill: 0, head: 2.08, leaves: 1 }
 /** The doorway's world z where it starts on the shared wall, which runs back (corner a) to front. */
 const DOOR_LIVING_Z = 2.45
-const LIVING_CORNERS = [
-  { id: 'living.back-right', x: 8.47, z: -2.29 },
-  { id: 'living.front-right', x: 8.47, z: 3.89 },
-]
+/** The living room's outer wall stands at this x; its back and front walls run straight out from the kitchen's shared corners to it. */
+const LIVING_RIGHT_X = 8.47
 const livingWall = (id: Id, a: Id, b: Id, openings: Opening[] = []): Wall => ({ id, a, b, thickness: 0.18, height: 3, sagitta: 0, openings })
 const LIVING_WALLS: Wall[] = [
   livingWall('living.back', 'kitchen.back-right', 'living.back-right'),
@@ -189,6 +187,17 @@ function houseFromKitchen(stored: unknown): unknown {
   }
   const corners = plan.corners.map((c) => ({ ...c, x: round(c.x), z: round(c.z) }))
   const A = corners.find((c) => c.id === shared.a)!
+  const B = corners.find((c) => c.id === shared.b)!
+  // The living room stays a rectangle: its outer corners take the z of the kitchen's shared
+  // corners, so a moved back or front wall moves the living room's with it. A right wall
+  // moved out leaves a narrower living room; that is honest, since the two rooms share it.
+  if (Math.min(LIVING_RIGHT_X - A.x, LIVING_RIGHT_X - B.x) < MIN_ROOM_SIDE) {
+    throw new Error(`the kitchen's right wall was moved out so far that the living room would be narrower than ${MIN_ROOM_SIDE} m`)
+  }
+  const livingCorners = [
+    { id: 'living.back-right', x: LIVING_RIGHT_X, z: A.z },
+    { id: 'living.front-right', x: LIVING_RIGHT_X, z: B.z },
+  ]
   const length = curveOf({ ...plan, corners }, shared).length
   const width = round(DOOR_LIVING.to - DOOR_LIVING.from)
   const from = round(Math.min(Math.max(DOOR_LIVING_Z - A.z, 0.3), length - 0.3 - width))
@@ -205,7 +214,7 @@ function houseFromKitchen(stored: unknown): unknown {
   const next: Plan = {
     ...plan,
     schema: PLAN_SCHEMA,
-    corners: [...corners, ...LIVING_CORNERS],
+    corners: [...corners, ...livingCorners],
     walls: [
       ...plan.walls.map((w) => {
         const openings = w.openings.filter((o) => o.id !== door.id).map((o) => ({ ...o, from: round(o.from), to: round(o.to) }))

@@ -169,6 +169,22 @@ try {
           (wallId === 'kitchen.back' ? Math.abs(door(up).from - 3.94) < 1e-6 : Math.abs(door(up).to - 5.08) < 1e-6),
         got?.message ?? door(up))
     }
+    // 1b. The living room stays a rectangle: its back and front walls follow the kitchen's moved back and front walls.
+    const straight = (plan, wallId) => { const w = P.wallOf(plan, wallId); const [a, b] = [w.a, w.b].map((id) => plan.corners.find((c) => c.id === id)); return Math.abs(a.z - b.z) < 1e-9 }
+    for (const [wallId, by, label] of [['kitchen.back', 1, 'back wall moved 1 m back'], ['kitchen.front', -1, 'front wall moved 1 m back']]) {
+      const moved = v1Edit({ op: 'moveWall', wallId, by })
+      const got = await refusal(async () => upgrade(moved))
+      const up = got ? null : upgrade(moved)
+      const zOf = (plan, id) => plan.corners.find((c) => c.id === id).z
+      const shifted = wallId === 'kitchen.back' ? zOf(moved, 'kitchen.back-right') - -2.29 : zOf(moved, 'kitchen.front-right') - 3.89
+      check(`v1 upgrade: a kitchen with its ${label} gives a rectangular living room`,
+        Math.abs(shifted + 1) < 1e-6 && up && P.validate(up).length === 0 && straight(up, 'living.back') && straight(up, 'living.front') && straight(up, 'kitchen.back') && straight(up, 'kitchen.front'),
+        got?.message ?? up?.corners)
+    }
+    // A right wall moved out leaves a narrower living room: honest, since the two rooms share that wall (checked above at 1 m).
+    // Moved so far the living room would be narrower than a room may be, it is refused with why.
+    const tooFar = await refusal(async () => upgrade(v1Edit({ op: 'moveWall', wallId: 'kitchen.right', by: 3.5 })))
+    check('v1 upgrade: a right wall moved out past the living room\'s minimum width is refused with why', /narrower than/.test(tooFar?.message ?? ''), tooFar?.message)
     // 2. A room of the person's own that the living room would collide with keeps its shape and things under a fresh id and name.
     const ownRoom = (id, label) => {
       const added = P.apply({ ...structuredClone(KITCHEN_V1), schema: P.PLAN_SCHEMA }, { ...pantry, room: { id, label }, door: { id: `${id}.door`, from: 2.25, to: 3.75, leaves: 2 } })
