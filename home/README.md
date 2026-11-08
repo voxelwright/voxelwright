@@ -12,6 +12,8 @@ npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the
 # Talk, villagers, the iso view, babble, music and build mode are on by default (#72; src/features.ts).
 # Opt-outs: ?talk=off (quiet seated kitchen), ?build=0 (no build mode), ?cam=seat (seated view).
 # ?talk=npc and ?build=1 still work. Scripts that need the old plain page add ?talk=off&build=0.
+# Physics (#74): ?physics=1 adds the engine and the pinball table (Shift or arrow keys flip, Space or the down arrow plunges);
+# ?physics=panel also opens the rules panel (dev builds only).
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
