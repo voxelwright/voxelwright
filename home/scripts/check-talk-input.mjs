@@ -184,10 +184,10 @@ try {
     await page.waitForTimeout(600)
     let s = await state(page)
     check('held is the default: the notepad is in view, addressed to your own villager', s.input.variant === 'held' && s.input.padVisible && s.input.to === 'Dumpling' && s.mode === 'room', s.input)
-    // At rest: small and tucked at the bottom edge, showing whom it is to.
+    // At rest: held low on the right in perspective, showing whom it is to (#42 regroup: it was a strip at the bottom edge).
     const area = (r) => r.width * r.height
     const rest = s.input.padRect
-    check('at rest the pad is small and tucked at the bottom edge', s.input.raise < 0.05 && area(rest) < 0.04 * 1280 * 800 && rest.top > 800 * 0.86 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
+    check('at rest the pad is held low on the right, under 9% of the screen, reaching the bottom edge', s.input.raise < 0.05 && area(rest) < 0.09 * 1280 * 800 && rest.left > 1280 * 0.55 && rest.top > 800 * 0.6 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
     check('held: the pad and journal ride with the camera as scene objects', baseline.objects.some((o) => o.endsWith(':talk input')) && baseline.objects.some((o) => o.endsWith(':talk notepad')) && baseline.objects.some((o) => o.endsWith(':talk journal button')))
 
     // A keypress anywhere starts writing, and the pad rises to writing size.
@@ -198,7 +198,7 @@ try {
     const attending = (await state(page)).cast.alex.attending
     check('your villager turns to you while you write', attending, attending)
     const risen = await until(page, (x) => x.input.raise > 0.97, 2000, 30)
-    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 3 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
+    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 1.5 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
     await page.keyboard.press('Escape')
     s = await state(page)
     const settled = await until(page, (x) => x.input.raise < 0.03, 2000, 30)
@@ -230,7 +230,10 @@ try {
 
     // talk: that villager turns and the camera eases to them.
     await write(page, 'I want to chat with Moss')
-    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia')
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia', 20_000, 10)
+    // The camera turns to Moss only once the note has landed, so the note is seen on its way (#42 regroup).
+    check('the camera waits for the sent note to land before turning to its reader', !s.input.flying || !s.focused, { flying: s.input.flying, focused: s.focused })
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia' && x.focused && !x.input.flying)
     check('talk route: "I want to chat with Moss" opens a talk with Moss', s.mode === 'talk' && s.partner === 'mia' && s.cards.mia && s.focused, { mode: s.mode, partner: s.partner, routes: s.input.routes })
     check('the input re-addresses to Moss', s.input.to === 'Moss', s.input.to)
     const before = (await jsonl('mia', 'conversation.jsonl')).length
