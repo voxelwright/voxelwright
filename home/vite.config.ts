@@ -168,6 +168,8 @@ const soundLab: Plugin = {
 
 export default defineConfig({
   plugins: [propBox, soundLab],
+  // No SPA fallback: an unknown path is a 404, not the page.
+  appType: 'mpa',
   server: {
     headers: { 'content-security-policy': csp },
     proxy: {
