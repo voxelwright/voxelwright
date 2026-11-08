@@ -77,7 +77,11 @@ try {
 
   let calls: { description: string; owner: string; accent: string; role?: string; pattern?: { label: string }; repair?: { module: string; persona?: string; reason: string } }[] = []
   const stub = stubVillagerMaker(60)
+  // Every ask the maker gets, whole (minus its abort signal): the privacy check reads all of it, not chosen fields.
+  const asks: string[] = []
   const counting: VillagerMaker = async (ask) => {
+    const { signal: _signal, ...rest } = ask
+    asks.push(JSON.stringify(rest))
     calls.push({ description: ask.description, owner: ask.owner, accent: ask.accent, ...(ask.role ? { role: ask.role } : {}), ...(ask.pattern ? { pattern: ask.pattern } : {}), ...(ask.repair ? { repair: ask.repair } : {}) })
     return stub(ask)
   }
@@ -372,10 +376,17 @@ try {
     const made = await (await api('/people/jo/villagers', { body: { description: 'a [stub-mark-head] tidy badger', accent: '#6a9a4a' } })).json() as { item: string; persona: unknown }
     await api(`/people/jo/villagers/${made.item}/remake`, { body: { reason: 'the head itself is tagged as the mark' } })
     const sent = await sendOff('jo', made.item, { tuning: { ...knobs, warmth: 0.9, chatty: 0.9 }, voice })
-    const prompts = JSON.stringify(calls.slice(before)) + calls.slice(before).map((c) => villagerAsk(c.description, c.owner, c.accent, c.pattern as never, c.role as never)).join('\n')
+    // The whole asks, and the prompts the real maker would build from them (system prompt, ask, repair ask).
+    const prompts = asks.slice(before).join('\n') + villagerPrompt() + calls.slice(before).map((c) => {
+      const ask = villagerAsk(c.description, c.owner, c.accent, c.pattern as never, c.role as never)
+      return c.repair ? repairAsk(ask, c.repair.module, c.repair.reason, c.repair.persona) : ask
+    }).join('\n')
     const stored = [await readFile(personaFile, 'utf8'), await readFile(join(jo, 'villagers', `${made.item}.json`), 'utf8'), JSON.stringify(await (await api(`/people/jo/villagers/${made.item}`)).json()), JSON.stringify(await (await api('/people/jo/villager')).json())].join('\n')
-    const leaks = MARKERS.filter((m) => prompts.includes(m) || stored.includes(m))
-    check('privacy: the owner\'s conversation, notes, preferences and profile style reach neither the model\'s prompt nor the stored villager or persona.json', sent.status === 200 && calls.length - before === 2 && leaks.length === 0, { leaks, sent: sent.status, calls: calls.length - before })
+    // Saving and sharing the villager's persona as a pattern, and the family's list, carry none of it either.
+    const savedPattern = await (await tpl('jo', { name: 'Like Badger', persona: (await (await api(`/people/jo/villagers/${made.item}`)).json() as { persona: unknown }).persona, item: made.item, shared: true })).json()
+    const shared = JSON.stringify(savedPattern) + JSON.stringify(await fam('jo')) + JSON.stringify(await fam('sam'))
+    const leaks = MARKERS.filter((m) => prompts.includes(m) || stored.includes(m) || shared.includes(m))
+    check('privacy: the owner\'s conversation, notes, preferences and profile style reach neither the model\'s whole ask and prompts nor the stored villager, persona.json or a saved and shared pattern', sent.status === 200 && calls.length - before === 2 && leaks.length === 0, { leaks, sent: sent.status, calls: calls.length - before })
   }
 
   // Storage: every write goes to a temporary file and is renamed over the record.
