@@ -51,10 +51,14 @@ export class PropBox {
     const channel = new MessageChannel()
     this.frame = frame
     this.port = channel.port1
-    this.started = new Promise<number>((resolve, reject) => {
+    const started = new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('the prop sandbox did not start')), 10000)
       channel.port1.onmessage = (event) => {
         const m = event.data as { type?: unknown; id?: unknown }
-        if (m?.type === 'ready') return resolve(performance.now() - t0)
+        if (m?.type === 'ready') {
+          clearTimeout(timer)
+          return resolve(performance.now() - t0)
+        }
         if (typeof m?.id !== 'number') return
         const settle = this.pending.get(m.id)
         if (settle) settle(this.read(m))
@@ -63,16 +67,25 @@ export class PropBox {
         // The frame's origin is opaque, so there is no origin to name; the message carries only the port and the public worker source.
         frame.contentWindow!.postMessage({ type: 'init', source: workerSource }, '*', [channel.port2])
       }, { once: true })
-      setTimeout(() => reject(new Error('the prop sandbox did not start')), 10000)
     })
+    // A start that failed is not kept: the dead frame goes, and the next run starts afresh.
+    started.catch(() => {
+      if (this.started === started) this.dispose()
+    })
+    this.started = started
     document.body.append(frame)
-    return this.started
+    return started
   }
 
   /** Runs one module in a fresh worker. The page's own limit is the box's plus 3 s; past it the box is torn down. */
   async run(code: string, timeoutMs = 5000): Promise<BoxResult> {
     const cold = !this.started
-    const startMs = await this.start()
+    let startMs: number
+    try {
+      startMs = await this.start()
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
     const id = this.next++
     return new Promise<BoxResult>((resolve) => {
       const timer = setTimeout(() => {
