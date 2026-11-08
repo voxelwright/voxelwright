@@ -117,7 +117,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
       }
     }
     const face = seat ? seat.yaw : Math.atan2(centre[0] - spot[0], centre[1] - spot[1])
-    setSpot(SPOT, { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, ...(seat ? { seat: { x: seat.x, z: seat.z, yaw: seat.yaw } } : {}) })
+    setSpot(SPOT, { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, floor: ring, ...(seat ? { seat: { x: seat.x, z: seat.z, yaw: seat.yaw } } : {}) })
     room = d.roomId
     label = d.label
     person = who

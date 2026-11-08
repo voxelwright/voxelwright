@@ -46,6 +46,8 @@ export interface Spot {
   seat?: { x: number; z: number; yaw: number }
   /** Floor points walked after `via`, before `at` (both faces of a doorway, say). */
   through?: [number, number][]
+  /** The floor outline of the room the spot is in, when it is behind walls (build mode's new rooms): only a villager standing on it leaves through `through`. */
+  floor?: [number, number][]
 }
 
 const chairSeat = (x: number, z: number, yaw: number) => ({ x, z, yaw })
@@ -109,9 +111,19 @@ export function route(from: string, to: string, paths: Paths = 'kitchen'): THREE
 /** A path from wherever a villager stands, through its nearest corridor node, to a spot. */
 export function routeFrom(x: number, z: number, to: string, paths: Paths = 'kitchen'): THREE.CatmullRomCurve3 {
   // Standing by a spot reached through a doorway, it leaves the way it came.
-  const inside = Object.values(SPOTS).find((s) => s.through && Math.hypot(s.at[0] - x, s.at[1] - z) < 1.5)
+  const inside = Object.values(SPOTS).find((s) => s.through && (s.floor ? onFloor(x, z, s.floor) : Math.hypot(s.at[0] - x, s.at[1] - z) < 1.5))
   if (inside && SPOTS[to] !== inside) return curve([x, z], inside.via, to, paths, [...inside.through!].reverse())
   return curve([x, z], nearestNode(x, z, paths) ?? via(to, paths), to, paths)
+}
+
+/** Whether a floor point lies inside a closed outline (even-odd crossings). */
+function onFloor(x: number, z: number, ring: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i], [xj, zj] = ring[j]
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside
+  }
+  return inside
 }
 
 /** The corridor node on these paths nearest a floor point (null when the paths have none). */
