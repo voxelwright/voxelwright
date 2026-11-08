@@ -73,8 +73,10 @@ const residue = (page) => page.evaluate(() => {
   check('blend: takes about 1.5 s with no rebuild stall (worst frame under 100 ms)', blend.settledMs > 1300 && blend.settledMs < 2500 && blend.worstMs < 100, blend)
   measures.blend = blend
 
-  // A blend reaches the target's numbers exactly.
-  const tokens = await page.evaluate(() => {
+  // A blend reaches the target's numbers exactly. The blend can finish on its own animation frame,
+  // before the theme plugin's frame applies the target, so read two frames later.
+  const tokens = await page.evaluate(async () => {
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
     const stage = window.village.kernel.root.get('stage')
     return { exposure: stage.renderer.toneMappingExposure }
   })
