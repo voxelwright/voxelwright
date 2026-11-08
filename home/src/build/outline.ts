@@ -1,7 +1,7 @@
 // The outline of a room being added (#48): the room staked out on the lawn, the way
 // one is marked out on grass. A flour line runs round the walls to be built (the far
 // wall as an arc when it bends) and along the shared wall, broken where the door goes,
-// with the door's leaves and their dashed swing; a taut string on stakes runs over the
+// with the doorway standing in the shared wall as a felt ghost; a taut string on stakes runs over the
 // flour; the room's first pieces stand inside as soft felt ghosts; wooden pegs sit on
 // the walls they move, and handwritten tags give the sizes and the choice. Trusted code
 // draws it from a draft (resolve.ts); the person adjusts it directly: drag a peg or a
@@ -235,6 +235,18 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
   const ghostFelt = new THREE.MeshStandardMaterial({ color: '#d99a62', emissive: '#7a4220', emissiveIntensity: 0.18, roughness: 1, transparent: true, opacity: 0.62 })
   const ghostRug = new THREE.MeshStandardMaterial({ color: '#f0c79a', roughness: 1, transparent: true, opacity: 0.7, depthWrite: false })
   const ghostRim = new THREE.MeshBasicMaterial({ color: '#5c3a22', side: THREE.BackSide, transparent: true, opacity: 0.6, fog: false })
+  /** The doorway to be, as a felt ghost standing in the shared wall: two posts and a lintel (placed by layout below). */
+  const DOOR_POST = 0.1
+  const doorBox = new THREE.BoxGeometry(1, 1, 1)
+  const doorGhost = new THREE.Group()
+  doorGhost.name = 'build outline door ghost'
+  for (let i = 0; i < 3; i++) {
+    const m = new THREE.Mesh(doorBox, ghostFelt)
+    m.renderOrder = 3
+    m.raycast = () => {}
+    doorGhost.add(m)
+  }
+  ghosts.add(doorGhost)
   /** One ghost per kind, built on first need and kept while the outline lives. */
   const ghostOf = new Map<string, THREE.Group>()
   const ghost = (kind: string) => {
@@ -519,22 +531,27 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     if (d.door.from - d.from > T / 2 + 0.05) flour([face(d.from + T / 2), face(d.door.from)], 0.045, 0.9)
     if (d.to - d.door.to > T / 2 + 0.05) flour([face(d.door.to), face(d.to - T / 2)], 0.045, 0.9)
 
-    // The door: jambs across the shared wall, each leaf as a firm line and its swing dashed into the new room.
+    // The door: jambs across the shared wall in flour, and the doorway itself standing in the wall as a felt ghost
+    // like the pieces' (two posts and a lintel, the door's width and height), so footprint, door and pieces read as one proposal.
     for (const t of [d.door.from, d.door.to]) flour([geo.at(t, -T / 2 - 0.06), geo.at(t, T / 2 + 0.1)], 0.045, 1)
     const dw = d.door.to - d.door.from
-    const hinges: Array<{ at: number; dir: 1 | -1; r: number }> = d.door.leaves === 2
-      ? [{ at: d.door.from, dir: 1, r: dw / 2 }, { at: d.door.to, dir: -1, r: dw / 2 }]
-      : d.door.leaves === 1 ? [{ at: d.door.from, dir: 1, r: dw }] : []
-    for (const h of hinges) {
-      const hinge = geo.at(h.at, T / 2)
-      flour([hinge, add(hinge, geo.out, h.r)], 0.04, 1)
-      const arcPts: P[] = Array.from({ length: 17 }, (_, i) => {
-        const a = (i / 16) * Math.PI / 2
-        return add(add(hinge, geo.dir, h.dir * h.r * Math.cos(a)), geo.out, h.r * Math.sin(a))
+    {
+      const head = made.walls.flatMap((w) => w.openings).find((o) => o.id === `${d.roomId}.door`)?.head ?? 2.05
+      const yaw = Math.atan2(geo.dir[0], geo.dir[1]) - Math.PI / 2
+      const parts: Array<[number, number, number, number]> = [
+        // [middle along the wall, width along it, bottom, top]
+        [d.door.from + DOOR_POST / 2, DOOR_POST, 0, head],
+        [d.door.to - DOOR_POST / 2, DOOR_POST, 0, head],
+        [(d.door.from + d.door.to) / 2, dw, head - DOOR_POST, head],
+      ]
+      parts.forEach(([t, w, y0, y1], i) => {
+        const m = doorGhost.children[i] as THREE.Mesh
+        const [x, z] = geo.at(t, 0)
+        m.position.set(x, (y0 + y1) / 2, z)
+        m.scale.set(w, y1 - y0, T + 0.08)
+        m.rotation.set(0, yaw, 0)
       })
-      flour(arcPts, 0.032, 0.9, FLOUR, [0.07, 0.08])
     }
-    if (!d.door.leaves) flour([geo.at(d.door.from, T / 2), geo.at(d.door.to, T / 2)], 0.032, 0.9, FLOUR, [0.07, 0.08])
     {
       // The same doorway taped out on the shared wall, on whichever face the camera sees.
       const head = made.walls.flatMap((w) => w.openings).find((o) => o.id === `${d.roomId}.door`)?.head ?? 2.05
@@ -924,6 +941,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
     for (const h of ghostOf.values()) releaseGpu(h)
     ghostRug.map?.dispose()
     for (const m of [ghostFelt, ghostRug, ghostRim]) m.dispose()
+    doorBox.dispose()
   }
 
   /** Screen points (CSS px) of each grip, for the checks. */

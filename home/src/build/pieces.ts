@@ -165,6 +165,49 @@ const bigRug: Build = () => {
   return g
 }
 
+/**
+ * A playroom's rug, 2.6 × 1.9 m with rounded corners: a soft wool patchwork of sage, sky, mustard and clay squares
+ * inside a cream band and a sage rim, so it never reads as the kitchen's braided oval. Flat, as the other rugs.
+ */
+const playRug: Build = () => {
+  const W = 2.6, D = 1.9, R = 0.22
+  const [c, g] = canvas(520, 380)
+  const px = 200 // pixels per metre
+  g.fillStyle = '#8fa88a'
+  g.beginPath(); g.roundRect(0, 0, 520, 380, R * px); g.fill()
+  g.fillStyle = '#efe4cf'
+  g.beginPath(); g.roundRect(14, 14, 492, 352, R * px - 14); g.fill()
+  // The patchwork: muted squares with a little gap of cream between, the colours stepping like a quilt.
+  const tones = ['#a9bfa2', '#a8c0cf', '#e2c27a', '#d7a184', '#c9b8d4', '#e8d6b0']
+  const cols = 7, rows = 5, x0 = 46, y0 = 46, cw = (520 - x0 * 2) / cols, ch = (380 - y0 * 2) / rows
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    g.fillStyle = tones[(i * 2 + j * 3) % tones.length]
+    g.beginPath(); g.roundRect(x0 + i * cw + 3, y0 + j * ch + 3, cw - 6, ch - 6, 8); g.fill()
+  }
+  // Running stitches round the field.
+  g.strokeStyle = 'rgba(120, 96, 70, 0.45)'
+  g.setLineDash([9, 7])
+  g.lineWidth = 3
+  g.beginPath(); g.roundRect(32, 32, 456, 316, R * px - 30); g.stroke()
+  const shape = new THREE.Shape()
+  const [hw, hd] = [W / 2, D / 2]
+  shape.moveTo(-hw + R, -hd)
+  shape.lineTo(hw - R, -hd); shape.quadraticCurveTo(hw, -hd, hw, -hd + R)
+  shape.lineTo(hw, hd - R); shape.quadraticCurveTo(hw, hd, hw - R, hd)
+  shape.lineTo(-hw + R, hd); shape.quadraticCurveTo(-hw, hd, -hw, hd - R)
+  shape.lineTo(-hw, -hd + R); shape.quadraticCurveTo(-hw, -hd, -hw + R, -hd)
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.008, bevelEnabled: false, curveSegments: 6 })
+  geo.rotateX(-Math.PI / 2)
+  // Map the painted rug over the top by position, so the texture sits square on the shape.
+  const pos = geo.attributes.position as THREE.BufferAttribute, uv = geo.attributes.uv as THREE.BufferAttribute
+  for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / W + 0.5, 0.5 - pos.getZ(i) / D)
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 1 }))
+  m.receiveShadow = true
+  const grp = new THREE.Group()
+  grp.add(m)
+  return grp
+}
+
 /** A low pine bookcase, two shelves of books, and on top a jar (or, in a playroom, a teddy, blocks and picture books). */
 const shelf = (toys: boolean): Build => () => {
   const g = new THREE.Group()
@@ -225,7 +268,8 @@ const toyShelf = shelf(true)
 
 /**
  * A playroom's wall at child height: felt bunting along a cord, two crayon drawings taped up under
- * it, and a low ledge of picture books turned face out. Hung with its middle at about 1.1 m.
+ * it, a low ledge of picture books turned face out, and a growth chart up the wall beside them.
+ * Hung with its middle at about 1.1 m.
  */
 const playWall: Build = () => {
   const g = new THREE.Group()
@@ -284,6 +328,43 @@ const playWall: Build = () => {
     d.position.set(x, y, 0.01)
     d.rotation.z = r
     g.add(d)
+  }
+  // A growth chart beside them, reaching up the wall: a birch board with a tick every 10 cm, a number every
+  // half metre and two children's marks pencilled in, a little sun at its top.
+  {
+    const [c, x] = canvas(64, 576)
+    x.fillStyle = '#ead8b4'
+    x.fillRect(0, 0, 64, 576)
+    for (let i = 0; i < 576; i += 6) {
+      x.fillStyle = `rgba(160, 120, 70, ${0.05 + ((i * 7) % 11) / 160})`
+      x.fillRect(0, i, 64, 3)
+    }
+    x.fillStyle = '#7a5a3a'
+    // The board runs from 0.42 m to 1.72 m off the floor: 443 px per metre.
+    const yOf = (cm: number) => 576 - (cm / 100 - 0.42) * 443
+    for (let cm = 50; cm <= 170; cm += 10) {
+      const y = yOf(cm)
+      const half = cm % 50 === 0
+      x.fillRect(0, y - 1, half ? 26 : 14, 3)
+      if (half) {
+        x.font = '600 15px Georgia, serif'
+        x.fillText(String(cm), 30, y + 5)
+      }
+    }
+    for (const [cm, col] of [[96, '#c2412f'], [118, '#5a8fb0']] as const) {
+      const y = yOf(cm)
+      x.fillStyle = col
+      x.fillRect(4, y - 2, 56, 4)
+      x.beginPath(); x.arc(52, y - 9, 5, 0, Math.PI * 2); x.fill()
+    }
+    x.fillStyle = '#e3b54a'
+    x.beginPath(); x.arc(32, 18, 11, 0, Math.PI * 2); x.fill()
+    // Beside the ledge's end, under the cord's pin, keeping inside the grouping's height.
+    const chart = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 1.3), new THREE.MeshStandardMaterial({ map: toTexture(c), roughness: 0.85 }))
+    chart.position.set(-W / 2 - 0.1, 1.07, 0.012)
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.17, 1.32, 0.016), wood('#b98a58'))
+    back.position.set(-W / 2 - 0.1, 1.07, 0.003)
+    g.add(back, chart)
   }
   // The ledge: a pine lip at child height with picture books standing face out.
   const pine = wood('#c4935e')
@@ -482,6 +563,7 @@ export const LIVING: Record<string, { mount: Mount; label: string; build: Build 
   'floor-lamp': { mount: 'floor', label: 'floor lamp', build: floorLamp },
   rug: { mount: 'floor', label: 'braided rug', build: rug },
   'big-rug': { mount: 'floor', label: 'big braided rug', build: bigRug },
+  'play-rug': { mount: 'floor', label: 'patchwork play rug', build: playRug },
   'low-bookcase': { mount: 'floor', label: 'low bookcase', build: lowBookcase },
   'toy-shelf': { mount: 'floor', label: 'toy shelf', build: toyShelf },
   'play-wall': { mount: 'wall', label: 'bunting and drawings', build: playWall },
