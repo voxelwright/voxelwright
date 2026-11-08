@@ -60,7 +60,8 @@ export function shade(ctx: Context) {
       if ((o as THREE.DirectionalLight).isDirectionalLight && (o as THREE.DirectionalLight).castShadow) key = o as THREE.DirectionalLight
       const mats = (o as THREE.Mesh).material
       if (!mats || !(o as THREE.Mesh).isMesh) return
-      if (o.userData.themeOwned) return
+      // The theme's own world, and what the viewer holds (the talk pad, src/talk/input.ts: its page is unlit by design).
+      if (o.userData.themeOwned || o.userData.hud) return
       for (const m of ([] as THREE.Material[]).concat(mats)) {
         seen.add(m)
         if (!classes.has(m)) {

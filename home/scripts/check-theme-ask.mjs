@@ -55,10 +55,12 @@ const stop = (child) => new Promise((resolve) => {
 const model = opt('theme-model') ?? 'sonnet'
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--theme-model', model, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
+// #40: each person has their own token; the page takes Alex's from the link the host prints (#token=…).
+const { tokens } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 
 async function open(page, query) {
-  await page.goto(base + query)
+  await page.goto(`${base}${query}#token=${tokens.alex}`)
   await page.evaluate(() => window.village.ready())
   await page.waitForFunction(() => typeof window.village?.theme?.ask === 'function')
   await page.waitForTimeout(500)
@@ -193,18 +195,20 @@ try {
     check('ask: a look whose chain cannot be built is reported as not built and leaves the home', !unbuilt.ok && unbuilt.why === 'unbuilt' && unbuilt.reason === 'the look could not be built' && afterUnbuilt.shown === 'home' && afterUnbuilt.current === 'home' && afterUnbuilt.report.failed && !afterUnbuilt.last.ok, { unbuilt, afterUnbuilt })
 
     // ── The host: token, person, shape ──
-    const { port, token } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
+    const { port } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
+    const token = tokens.alex
     const post = (path, body, auth) => fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) }).then((r) => r.status)
     const statuses = {
       none: await post('/people/alex/theme', { text: 'make it cozier' }),
       wrong: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${'0'.repeat(64)}`),
       right: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${token}`),
       stranger: await post('/people/zed/theme', { text: 'make it cozier' }, `Bearer ${token}`),
+      otherPerson: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${tokens.sam}`),
       empty: await post('/people/alex/theme', { text: '' }, `Bearer ${token}`),
       badCurrent: await post('/people/alex/theme', { text: 'cozier', current: [1] }, `Bearer ${token}`),
     }
     check('host: the token is required', statuses.none === 401 && statuses.wrong === 401 && statuses.right === 200, statuses)
-    check('host: only listed people, and a checked request shape', statuses.stranger === 404 && statuses.empty === 400 && statuses.badCurrent === 400, statuses)
+    check('host: a token opens only its own person (#40), and a checked request shape', statuses.stranger === 403 && statuses.otherPerson === 403 && statuses.empty === 400 && statuses.badCurrent === 400, statuses)
     const log = (await readFile(join(root, 'people', 'alex', 'themes.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     check('host: each call is logged with its outcome', log.some((l) => l.refused) && log.some((l) => l.failed) && log.filter((l) => l.id).length >= 3, log.map((l) => l.id ?? l.refused ?? l.failed))
 

@@ -6,7 +6,7 @@
 // pass its VILLAGE_ROOT and VILLAGER_PORT to this script), for the real model's words and timing.
 // Usage: node scripts/talk-shots.mjs <out-dir> [--query=a=b] [--dev=5600] [--only=desktop|phone|low] [--real]
 import { spawn } from 'node:child_process'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -66,14 +66,14 @@ function run(cmd, argv, cwd, ready) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function scripted(context) {
-  await context.route('**/villager/launch', (r) => r.fulfill({ json: { token: 'shots' } }))
   await context.route('**/villager/api/**', async (r) => {
     const url = new URL(r.request().url())
     const path = url.pathname.replace('/villager/api', '')
-    const m = /^\/people\/([a-z]+)\/messages$/.exec(path)
+    // Another person's villager is a visit (#42): /people/<me>/visits/<owner>/messages.
+    const m = /^\/people\/([a-z]+)\/(?:visits\/([a-z]+)\/)?messages$/.exec(path)
     if (m && r.request().method() === 'POST') {
       const body = JSON.parse(r.request().postData() ?? '{}')
-      const reply = replyFor(m[1], body.text ?? '', body.context)
+      const reply = replyFor(m[2] ?? m[1], body.text ?? '', body.context)
       await sleep(900)
       const sse = [...reply.match(/.{1,12}/g).map((t) => `event: text\ndata: ${JSON.stringify({ t })}\n\n`), `event: done\ndata: ${JSON.stringify({ reply })}\n\n`].join('')
       return r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: sse })
@@ -100,7 +100,9 @@ async function session(name, viewport, q, fn, extra = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`${base}?talk=npc&q=${q}${suffix}`)
+  // #40: the page takes its person's token from the link (#token=…): Alex's from the host's launch file, or any for the scripted API.
+  const token = real ? JSON.parse(await readFile(join(process.env.VILLAGE_ROOT, 'villager', 'launch.json'), 'utf8')).tokens.alex : 'shots'
+  await page.goto(`${base}?talk=npc&q=${q}${suffix}#token=${token}`)
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(2500)
   const t0 = Date.now()
