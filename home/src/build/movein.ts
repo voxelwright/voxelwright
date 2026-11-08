@@ -34,7 +34,7 @@ type Talk = {
   walk(person: string, spot: string | null): void
   say(person: string, text: string): void
   where(person: string): { x: number; y: number; z: number; state: string; seated: boolean; spot: string } | null
-  hush?(on: boolean, except?: string | null): void
+  hush?(on: boolean, except?: string | null, pad?: boolean): void
 }
 const talk = () => (window as unknown as { village?: { talk?: Talk } }).village?.talk
 
@@ -131,14 +131,14 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     subject.copy(look)
   }
 
-  /** While the reveal holds the view the kitchen is quiet: the other villagers' "!" wait (talk.ts hush). */
+  /** While the reveal holds the view the kitchen is quiet: the other villagers' "!" wait and the held pad is put away (talk.ts hush). */
   let hushed = false
   /** Called each frame: walks, follows, and settles. */
   const step = () => {
     const quiet = held && phase !== 'idle'
     if (quiet !== hushed) {
       hushed = quiet
-      talk()?.hush?.(quiet, person)
+      talk()?.hush?.(quiet, person, true)
     }
     if (phase === 'idle' || !door) return
     const t = talk()

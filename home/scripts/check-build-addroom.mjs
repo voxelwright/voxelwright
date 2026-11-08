@@ -266,18 +266,31 @@ try {
     }
     await page.waitForTimeout(1200)
     await page.keyboard.press('Enter')
-    // The move-in: the doorway step as the in-between shot, then its settled frame.
+    // The move-in: the doorway step as the in-between shot (the villager between the door's posts), then its settled frame.
     const reveal = () => B(page, () => window.villageBuild.reveal?.().phase ?? null)
     if ((await reveal()) !== null) {
-      const end = Date.now() + 25_000
-      let crossed = false
-      for (let p; (p = await reveal()) !== 'settled' && Date.now() < end;) {
-        if (p === 'crossing' && !crossed) {
-          crossed = true
-          await page.screenshot({ path: shot('reveal'), quality: 88, type: 'jpeg' })
+      // Caught on the way in, 0.22 m short of the wall's middle line: the screenshot's own delay carries them into the gap.
+      const inDoor = await B(page, () => new Promise((done) => {
+        const t0 = performance.now()
+        let last = Infinity
+        const tick = () => {
+          const r = window.villageBuild.reveal()
+          const w = r.person && window.village.talk.where(r.person)
+          if (r.door && w) {
+            const [a, b] = r.door.gap, L = Math.hypot(b[0] - a[0], b[1] - a[1])
+            const side = Math.abs((w.x - r.door.mid[0]) * -(b[1] - a[1]) / L + (w.z - r.door.mid[1]) * (b[0] - a[0]) / L)
+            if (side < 0.22 && side < last) return done({ side: +side.toFixed(3), phase: r.phase })
+            last = side
+          }
+          if (r.phase === 'settled' || performance.now() - t0 > 25_000) return done(null)
+          requestAnimationFrame(tick)
         }
-        await page.waitForTimeout(40)
-      }
+        tick()
+      }))
+      if (inDoor) await page.screenshot({ path: shot('reveal'), quality: 88, type: 'jpeg' })
+      const crossed = Boolean(inDoor)
+      const end = Date.now() + 25_000
+      while ((await reveal()) !== 'settled' && Date.now() < end) await page.waitForTimeout(40)
       const r = await B(page, () => window.villageBuild.reveal())
       console.log(`reveal ${JSON.stringify(r)} crossed=${crossed}`)
       await page.waitForTimeout(1600)
@@ -516,6 +529,7 @@ try {
     await page.waitForTimeout(1500)
     const glyph = () => B(page, () => window.village.talk.state().cast.mia?.glyph ?? 0)
     const markerBefore = await glyph()
+    const padBefore = await B(page, () => window.village.talk.state().input?.padVisible)
     await page.keyboard.press('Enter')
     s = await until(page, (x) => !x.draft && x.rooms.length === 3)
     await frames(page, 6)
@@ -569,7 +583,8 @@ try {
       const gap = reveal.door?.gap ?? [[0, 0], [0, 0]]
       const front = Math.max(gap[0][1], gap[1][1]), back = Math.min(gap[0][1], gap[1][1])
       const full = walls.filter((w) => !w.stub && !w.timber && w.y1 > 2.9 && Math.abs(w.x - reveal.door.mid[0]) < 0.1)
-      const frontLow = full.filter((w) => w.wall === 'playroom.shared' && w.z0 >= front - 1e-3).every((w) => !w.shown)
+      // In front of the door's jamb wall (0.55 m, walls.ts JAMB_WALL) the shared wall is low.
+      const frontLow = full.filter((w) => w.wall === 'playroom.shared' && w.z0 >= front + 0.5).every((w) => !w.shown)
       const timber = walls.filter((w) => w.wall === 'playroom.shared' && w.timber && w.shown)
       const posts = timber.filter((w) => w.y0 < 0.02 && w.y1 > door.head - 0.05 && w.z1 - w.z0 < 0.2)
       const lintel = timber.filter((w) => w.y0 > door.head - 0.2 && w.z0 <= back + 0.02 && w.z1 >= front - 0.02)
@@ -585,11 +600,34 @@ try {
       // Nothing hung on the shared wall floats: each hung fixture is on a stretch that stands, or it is away with the wall.
       const hungShown = hung.filter((h) => h.shown)
       // The kitchen's face of the shared wall (side -1); stretches run from its front corner, z = the door's front edge + door.from - t.
-      const hangingOnLow = fixtures.filter((f) => f.y0 > 0.3 && !f.through && f.side === -1).map((f) => ({ name: f.name, z0: reveal.door.gap[0][1] + (door.from - f.to), z1: reveal.door.gap[0][1] + (door.from - f.from) }))
-        .filter((f) => !full.some((w) => w.shown && w.z0 <= f.z0 + 0.02 && w.z1 >= f.z1 - 0.02))
+      // Only what hangs: a built-in that stands on the floor (the dresser) does not float over a low wall. And only a standing
+      // wall holds a thing up, not a cap (at be0092e a cap over the low stretch made every hung thing look held).
+      const onFloor = new Set(fixtures.filter((f) => f.y0 < 0.05).map((f) => f.name))
+      const hangingOnLow = fixtures.filter((f) => f.y0 > 0.3 && !f.through && f.side === -1 && !onFloor.has(f.name)).map((f) => ({ name: f.name, z0: reveal.door.gap[0][1] + (door.from - f.to), z1: reveal.door.gap[0][1] + (door.from - f.from) }))
+        .filter((f) => !full.some((w) => w.shown && w.y0 < 0.01 && w.z0 <= f.z0 + 0.02 && w.z1 >= f.z1 - 0.02))
       const covered = hangingOnLow.every((f) => hung.some((h) => !h.shown && h.z0 <= f.z0 + 0.05 && h.z1 >= f.z1 - 0.05))
       check('no wall thing floats: what the kitchen hung on the shared wall goes while the wall is low', hung.length >= 1 && hungShown.length === 0 && covered, { hung, onLow: hangingOnLow })
+      // Every cap shown on the shared wall's line has its own wall standing under it, end to end: no top in mid-air.
+      const standing = full.filter((w) => w.shown && w.y0 < 0.01)
+      const caps = full.filter((w) => w.shown && w.y0 > 2.9 && w.y1 - w.y0 < 0.05)
+      const overDoor = full.filter((w) => w.shown && w.y0 > door.head - 0.01 && w.y1 - w.y0 > 0.5 && w.z0 <= back + 0.01 && w.z1 >= front - 0.01)
+      const bare = caps.filter((c) => ![...standing, ...overDoor].some((w) => w.z0 <= c.z0 + 0.01 && w.z1 >= c.z1 - 0.01))
+      check('the full-height shared wall\'s top ends where its wall ends: no cap without wall below', caps.length >= 2 && bare.length === 0, { caps: caps.map((c) => [c.z0, c.z1]), bare: bare.map((c) => [c.z0, c.z1]) })
+      // Full wall either side of the door, at least 0.45 m of it, standing from the floor to the top.
+      const fullTo = (from, dir) => {
+        let at = from
+        for (let moved = true; moved;) {
+          moved = false
+          for (const w of standing) if (w.y1 > 2.9 && (dir > 0 ? w.z0 <= at + 0.01 && w.z1 > at + 1e-3 : w.z1 >= at - 0.01 && w.z0 < at - 1e-3)) { at = dir > 0 ? w.z1 : w.z0; moved = true }
+        }
+        return +Math.abs(at - from).toFixed(3)
+      }
+      const sides = { front: fullTo(front, 1), back: fullTo(back, -1) }
+      check('the door is cut into the full-height wall: at least 0.45 m of full wall on each side of it', sides.front >= 0.45 && sides.back >= 0.45, sides)
+      const sill = walls.filter((w) => w.threshold && w.wall === 'playroom.shared' && w.shown && w.z0 <= back + 0.01 && w.z1 >= front - 0.01 && w.y1 >= 0.02)
+      check('a wooden threshold strip lies across the floor under the new door', sill.length === 1, sill)
     }
+    const padDuring = await B(page, () => window.village.talk.state().input?.padVisible)
     const markerDuring = await glyph()
     const hushed = await B(page, () => window.villageBuild.reveal().hushed)
     // The way back: the tag is offered while the view is held, and it glides out to the whole house.
@@ -598,6 +636,8 @@ try {
     await page.waitForTimeout(1600)
     const markerAfter = await glyph()
     check('during the reward the other villagers\' "!" is quiet, and it comes back after', markerBefore > 0.5 && hushed && markerDuring < 0.05 && markerAfter > 0.5, { markerBefore, hushed, markerDuring, markerAfter })
+    const padAfter = await B(page, () => window.village.talk.state().input?.padVisible)
+    check('during the reward the held pad ("to Dumpling") is put away, and it is back after', padBefore === true && padDuring === false && padAfter === true, { padBefore, padDuring, padAfter })
     const out = await B(page, () => ({ held: window.villageBuild.reveal().held, frame: window.village.kernel.root.get('view').frame, shown: window.villageBuild.backShown() }))
     check('"Back to the house" is offered while the reveal holds the view, and glides out to the whole house', tagShown && !out.held && !out.shown && out.frame.zoom < 0.02, out)
     const built = await B(page, () => {

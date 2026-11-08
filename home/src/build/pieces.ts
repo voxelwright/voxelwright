@@ -177,18 +177,24 @@ const playRug: Build = () => {
   g.beginPath(); g.roundRect(0, 0, 520, 380, R * px); g.fill()
   g.fillStyle = '#efe4cf'
   g.beginPath(); g.roundRect(14, 14, 492, 352, R * px - 14); g.fill()
-  // The patchwork: muted squares with a little gap of cream between, the colours stepping like a quilt.
-  const tones = ['#a9bfa2', '#a8c0cf', '#e2c27a', '#d7a184', '#c9b8d4', '#e8d6b0']
-  const cols = 7, rows = 5, x0 = 46, y0 = 46, cw = (520 - x0 * 2) / cols, ch = (380 - y0 * 2) / rows
+  // The patchwork in the house's palette (ochre, sage, terracotta, cream), the patches sewn edge to edge like a quilt.
+  const tones = ['#d6a64e', '#a3b38c', '#c97a52', '#efe2c4', '#e2c07c', '#8fa47e', '#d99b78', '#f3e8d0']
+  const cols = 7, rows = 5, x0 = 40, y0 = 40, cw = (520 - x0 * 2) / cols, ch = (380 - y0 * 2) / rows
   for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-    g.fillStyle = tones[(i * 2 + j * 3) % tones.length]
-    g.beginPath(); g.roundRect(x0 + i * cw + 3, y0 + j * ch + 3, cw - 6, ch - 6, 8); g.fill()
+    g.fillStyle = tones[(i * 3 + j * 5) % tones.length]
+    g.fillRect(x0 + i * cw, y0 + j * ch, cw, ch)
   }
-  // Running stitches round the field.
-  g.strokeStyle = 'rgba(120, 96, 70, 0.45)'
-  g.setLineDash([9, 7])
+  // Stitched seams: a running stitch along every seam and round the field, in a darker thread.
+  g.strokeStyle = 'rgba(96, 70, 48, 0.55)'
+  g.lineWidth = 2.5
+  g.setLineDash([7, 6])
+  g.beginPath()
+  for (let i = 1; i < cols; i++) { g.moveTo(x0 + i * cw, y0 + 4); g.lineTo(x0 + i * cw, 380 - y0 - 4) }
+  for (let j = 1; j < rows; j++) { g.moveTo(x0 + 4, y0 + j * ch); g.lineTo(520 - x0 - 4, y0 + j * ch) }
+  g.stroke()
   g.lineWidth = 3
-  g.beginPath(); g.roundRect(32, 32, 456, 316, R * px - 30); g.stroke()
+  g.beginPath(); g.roundRect(x0 - 10, y0 - 10, 520 - (x0 - 10) * 2, 380 - (y0 - 10) * 2, 10); g.stroke()
+  g.setLineDash([])
   const shape = new THREE.Shape()
   const [hw, hd] = [W / 2, D / 2]
   shape.moveTo(-hw + R, -hd)

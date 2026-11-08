@@ -400,7 +400,7 @@ export default {
     })
     const told = new Set<string>()
     /** While set (build mode's move-in, #48), every "!" but this person's steps aside; the news itself waits. */
-    let hush: { except: string | null } | null = null
+    let hush: { except: string | null; pad?: boolean } | null = null
     const crowd = cast.map((m) => m.v)
     const blobs = contactShadows(crowd)
     group.add(...blobs)
@@ -1137,6 +1137,8 @@ export default {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
+      // Writing while build mode's reward has put the pad away brings it back, and the key goes on the line (#48).
+      if (hush?.pad && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) hush = { except: hush.except }
       if (input?.key(e)) return
       if (e.key === 'Escape' && mode === 'table' && !entries.active) {
         e.preventDefault()
@@ -1449,7 +1451,7 @@ export default {
         const m = mode === 'talk' && partner ? partner : mode === 'table' ? seated[0] : primary()
         return m ? m.v.fig.head.getWorldPosition(headAt) : null
       },
-      blocked: () => entries.active === 'notebook' || navigation.claims(),
+      blocked: () => entries.active === 'notebook' || navigation.claims() || Boolean(hush?.pad),
       openJournal: () => ctx.emit('village/journal', { person: (partner ?? lastTalked)?.person, section: 'talk' }),
       submit: (text, t0) => void submitLine(text, t0),
       enter: (): boolean => sketch?.enter() ?? false,
@@ -1639,8 +1641,8 @@ export default {
           const m = cast.find((c) => c.person === person)
           if (m) notify(m)
         },
-        /** Quiet every villager's "!" but `except`'s while `on` (build mode's move-in, #48); they come back after. */
-        hush: (on: boolean, except: string | null = null) => (hush = on ? { except } : null),
+        /** Quiet every villager's "!" but `except`'s while `on` (build mode's move-in, #48), and with `pad` put the held pad away; they come back after. */
+        hush: (on: boolean, except: string | null = null, pad = false) => (hush = on ? { except, pad } : null),
         /** Put words on a villager's card, as a greeting does; for the paging check. */
         say: (person: string, text: string) => {
           const m = cast.find((c) => c.person === person)
