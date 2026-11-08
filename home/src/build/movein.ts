@@ -22,7 +22,7 @@ const MAIN = ['play-table', 'sofa', 'desk', 'bed']
 /** The settled frame fills this screen box (NDC), clear of the notepad at the bottom. */
 const BOX = { x: [-1.02, 0.9] as [number, number], y: [-0.66, 1.08] as [number, number] }
 /** No closer than this: the overhead distance the art was made for, a little higher than the prototype's 0.36. */
-const MOST = 0.3
+const MOST = 0.34
 /** One short line on sitting down, by room. */
 const LINES: Array<[RegExp, string]> = [
   [/play|toy|kid|nursery|child/i, 'Oh, I love it in here!'],
@@ -34,6 +34,7 @@ type Talk = {
   walk(person: string, spot: string | null): void
   say(person: string, text: string): void
   where(person: string): { x: number; y: number; z: number; state: string; seated: boolean; spot: string } | null
+  hush?(on: boolean, except?: string | null): void
 }
 const talk = () => (window as unknown as { village?: { talk?: Talk } }).village?.talk
 
@@ -78,7 +79,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
 
     // The settled view: a three-quarter view from the house's front, turned off the host wall so the far wall
     // (the curved one, when it bends) is seen at an angle, not edge-on.
-    const toward = new THREE.Vector2(-into[0] * 0.55, 0.8 - into[1] * 0.55).normalize()
+    const toward = new THREE.Vector2(-into[0] * 0.66, 0.78 - into[1] * 0.66).normalize()
     const yaw = Math.atan2(toward.x, toward.y)
     // The floor and the walls' tops fill the frame, the room pinned to the side away from the house so the lawn
     // and lot edge beyond it stay out of the picture and the house shows beside it.
@@ -130,8 +131,15 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     subject.copy(look)
   }
 
+  /** While the reveal holds the view the kitchen is quiet: the other villagers' "!" wait (talk.ts hush). */
+  let hushed = false
   /** Called each frame: walks, follows, and settles. */
   const step = () => {
+    const quiet = held && phase !== 'idle'
+    if (quiet !== hushed) {
+      hushed = quiet
+      talk()?.hush?.(quiet, person)
+    }
     if (phase === 'idle' || !door) return
     const t = talk()
     if (phase === 'rising') {
@@ -154,7 +162,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     const me = t?.where(person)
     if (!me) return
     const past = (me.x - door.mid[0]) * door.into[0] + (me.z - door.mid[1]) * door.into[1]
-    if (phase === 'walking' && past > 0.3) phase = 'crossing'
+    if (phase === 'walking' && past > 0.45) phase = 'crossing'
     if (phase === 'crossing' && me.spot === SPOT && (seat ? me.state === 'sit' : me.state === 'work')) {
       phase = 'settled'
       t!.say(person, LINES.find(([re]) => re.test(label))?.[1] ?? 'Oh, this is nice.')
@@ -185,6 +193,8 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     if (person && phase !== 'rising') talk()?.walk(person, null)
     phase = 'idle'
     held = false
+    if (hushed) talk()?.hush?.(false)
+    hushed = false
   }
 
   return {
@@ -196,7 +206,7 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     letGo: () => (held = false),
     /** Whether the reveal is still holding the view. */
     holding: () => held,
-    state: () => ({ phase, room, person, spot, seat, door: door && { mid: door.mid, gap: door.gap }, path, frame, held }),
+    state: () => ({ phase, room, person, spot, seat, door: door && { mid: door.mid, gap: door.gap }, path, frame, held, hushed }),
   }
 }
 
