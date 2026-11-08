@@ -7,9 +7,16 @@
 
 /**
  * away: the host was not reached, so the line can be sent again. cut: the reply broke off or stalled after the host had the line.
- * refused: the host answered 403, this tab's token is for another person (#40). route: the reply named a route the host refused.
+ * link: there is no token, or the host answered 401 (a link from an earlier launch): open the latest link; resending won't help.
+ * refused: the host answered 403, this tab's token is for someone other than the page's person (#40), so nothing was sent.
+ * other: the line was written under a different link than this tab holds now, so it was not sent (see `tag`).
+ * route: the reply named a route the host refused.
  */
-export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' | 'route' | 'refused' }
+export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' | 'route' | 'refused' | 'link' | 'other' }
+/** The page's own person: synthetic until family isolation is proven (AGENTS.md). Any other villager is a visit (#42). */
+export const ME = 'alex'
+/** Your own villager's path, or your visit to another person's villager, kept under you (#42). */
+const talkPath = (person: string) => (person === ME ? `/people/${ME}` : `/people/${ME}/visits/${person}`)
 /** A reply that sends nothing for this long is abandoned. */
 const IDLE_MS = 30_000
 const TOKEN_KEY = 'village.villager.token'
@@ -19,31 +26,56 @@ let token: string | null = null
 try {
   token = sessionStorage.getItem(TOKEN_KEY)
 } catch {}
+/** Fired on window when a link installs a different token in this tab. */
+export const TOKEN_EVENT = 'village:token'
 /** Takes a token from the address bar's #token=…, keeps it for this tab and clears it from the bar. */
 function adoptLink() {
   const linked = new URLSearchParams(location.hash.slice(1)).get('token')
   if (!linked) return
+  const changed = linked !== token
   token = linked
   try {
     sessionStorage.setItem(TOKEN_KEY, linked)
   } catch {}
   history.replaceState(history.state, '', location.pathname + location.search)
+  if (changed) dispatchEvent(new Event(TOKEN_EVENT))
+}
+
+/**
+ * A short fingerprint of a token (the first 12 hex digits of its SHA-256), so a kept line can say which link it was
+ * written under without storing the token. Null with no token. One promise per token, so callers resolve in order.
+ */
+let tagged: { token: string; tag: Promise<string> } | null = null
+async function fingerprint(t: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))
+  return [...digest.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+export function tokenTag(): Promise<string | null> {
+  const t = token
+  if (!t) return Promise.resolve(null)
+  if (tagged?.token !== t) tagged = { token: t, tag: fingerprint(t) }
+  return tagged.tag
 }
 adoptLink()
 // A new link opened in the same tab (after the host restarts) changes only the fragment.
 addEventListener('hashchange', adoptLink)
 
-/** Null when there is no token, the host is unreachable, or the token is from an earlier launch (open the new link). */
-export async function authorized(path: string, init: RequestInit = {}): Promise<Response | null> {
-  if (!token) return null
-  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
-  if (!res || res.status >= 500 || res.status === 401) return null
+/**
+ * Null when the host is unreachable. 'link' when there is no token or the host answered 401 (the token is from an
+ * earlier launch: open the new link). `as` sends that token instead of the tab's current one.
+ */
+export async function authorized(path: string, init: RequestInit = {}, as: string | null = token): Promise<Response | null | 'link'> {
+  if (!as) return 'link'
+  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${as}` } }).catch(() => null)
+  if (!res || res.status >= 500) return null
+  if (res.status === 401) return 'link'
   return res
 }
 
+/** The conversation with `person`'s villager: your own, or your visit's. Null when it could not be read. */
 export async function conversation(person: string): Promise<Line[] | null> {
-  const res = await authorized(`/people/${person}/conversation`)
-  return res?.ok ? (await res.json()).lines : null
+  const res = await authorized(`${talkPath(person)}/conversation`)
+  return res && res !== 'link' && res.ok ? (await res.json()).lines : null
 }
 
 export interface Routing {
@@ -61,13 +93,18 @@ export interface SayOptions {
   /** A drawing handed over (#42, sketch.ts), by reference: the drawer's id and the sketch's. */
   sketch?: { from: string; id: string }
   signal?: AbortSignal
+  /** The fingerprint (tokenTag) of the link the line was written under: sent only under that link, else why 'other'. */
+  tag?: string | null
 }
 
 /**
  * Send a line and stream the reply. Stops when signal aborts, or when the host
  * sends nothing for IDLE_MS, so a hung host never leaves the page waiting.
  */
-export async function say(person: string, text: string, onText: (t: string) => void, { context, routing, sketch, signal }: SayOptions = {}): Promise<Said> {
+export async function say(person: string, text: string, onText: (t: string) => void, { context, routing, sketch, signal, tag }: SayOptions = {}): Promise<Said> {
+  // The token is read once: the one checked against the line's tag is the one it is sent with.
+  const as = token
+  if (tag !== undefined && (as ? await fingerprint(as) : null) !== tag) return { ok: false, why: 'other' }
   const stop = new AbortController()
   const abort = () => stop.abort()
   signal?.addEventListener('abort', abort)
@@ -79,14 +116,15 @@ export async function say(person: string, text: string, onText: (t: string) => v
     routing?.onRoute(r)
   }
   try {
-    const res = await authorized(`/people/${person}/messages`, {
+    const res = await authorized(`${talkPath(person)}/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
       signal: stop.signal,
-    })
+    }, as)
     // Stopped before an answer began: the host may already have the line.
     if (!res) return { ok: false, why: stop.signal.aborted ? 'cut' : 'away' }
+    if (res === 'link') return { ok: false, why: 'link' }
     if (res.status === 409) return { ok: false, why: 'busy' }
     if (res.status === 403) return { ok: false, why: 'refused' }
     if (!res.ok || !res.body) return { ok: false, why: 'failed' }
@@ -144,13 +182,14 @@ export interface Routed {
   library?: string
   section?: 'talk' | 'tasks'
 }
-export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused'; ms: number }
+export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused' | 'link'; ms: number }
 
 export async function call<T>(path: string, body?: unknown): Promise<Outcome<T>> {
   const t0 = performance.now()
   const res = await authorized(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
+  if (res === 'link') return { ok: false, why: 'link', ms }
   if (res.status === 409) return { ok: false, why: 'busy', ms }
   if (res.status === 403) return { ok: false, why: 'refused', ms }
   if (!res.ok) return { ok: false, why: 'failed', ms }

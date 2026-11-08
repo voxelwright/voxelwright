@@ -8,8 +8,9 @@ import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
 // page gets its person's token from the link the host prints, never from here.
 const port = Number(process.env.VILLAGER_PORT ?? 5190)
 
-// Page scripts, promoted plugins included, may talk only to this origin: the
-// API and Vite's HMR websocket ('self' covers ws: on the same host and port).
+// Page scripts, promoted plugins included, may fetch and open sockets only to this
+// origin: the API and Vite's HMR websocket ('self' covers ws: on the same host and
+// port). The policy does not stop a script navigating the page to another origin.
 // Styles stay inline-capable because Vite injects CSS as <style> tags in dev.
 const csp = [
   "default-src 'self'",

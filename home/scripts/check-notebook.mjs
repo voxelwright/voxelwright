@@ -1,5 +1,6 @@
 // Headless proof of the notebook interaction (#36).
 // Usage: node scripts/check-notebook.mjs [base-url] [--shot=path]   (dev server running)
+import { createHash } from 'node:crypto'
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -124,32 +125,95 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 }
 
 // The villager is away: a kept line waits in the outbox and is sent once the host
-// answers again; a line typed while it answers waits its turn.
-{
-  const { context, page } = await open('reduce')
-  await page.evaluate(() => localStorage.removeItem('village.notebook.outbox'))
+// answers again; a line typed while it answers waits its turn. Each queued line
+// carries the person and a fingerprint of the link it was written under, never the token.
+const ALEX = 'a'.repeat(64)
+const SAM = 'b'.repeat(64)
+const fp = (t) => createHash('sha256').update(t).digest('hex').slice(0, 12)
+const queues = (page) => page.evaluate(() => ({
+  outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'),
+  held: JSON.parse(localStorage.getItem('village.notebook.held') ?? '[]'),
+  state: document.querySelector('[data-villager]').dataset.villager,
+  text: document.querySelector('[data-villager]').textContent,
+  stored: JSON.stringify({ ...localStorage }),
+}))
+const writeLine = async (page, text) => {
   await page.focus('[data-entry="notebook"]')
   await page.keyboard.press('Enter')
-  await page.keyboard.type('Buy milk')
+  await page.keyboard.type(text)
   await page.keyboard.press('Enter')
+}
+{
+  const { context, page } = await open('reduce')
+  await page.evaluate(() => ['village.notebook.outbox', 'village.notebook.held'].forEach((k) => localStorage.removeItem(k)))
+  await page.evaluate((t) => (location.hash = `token=${t}`), ALEX)
+  await writeLine(page, 'Buy milk')
   await page.waitForTimeout(800)
-  const waiting = await page.evaluate(() => ({ outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'), state: document.querySelector('[data-villager]').dataset.villager }))
-  check('with the host away the line waits in the outbox', waiting.outbox.join() === 'Buy milk' && waiting.state === 'away', waiting)
-  // The host comes back (a stand-in on the page's routes) and its link is opened in
-  // the same tab, which changes only the fragment; the first reply is slow.
+  const waiting = await queues(page)
+  check('with the host away the line waits in the outbox, tagged with its person and link fingerprint, never the token', waiting.outbox.length === 1 && waiting.outbox[0].text === 'Buy milk' && waiting.outbox[0].person === 'alex' && waiting.outbox[0].tag === fp(ALEX) && !waiting.stored.includes(ALEX) && waiting.state === 'away', waiting)
+  // The host comes back (a stand-in on the page's routes); the first reply is slow.
   const sent = []
-  await page.evaluate(() => (location.hash = 'token=t'))
   await page.route('**/villager/api/people/alex/messages', async (r) => {
-    sent.push(JSON.parse(r.request().postData()).text)
+    sent.push({ text: JSON.parse(r.request().postData()).text, auth: r.request().headers().authorization })
     if (sent.length === 1) await new Promise((x) => setTimeout(x, 1500))
-    await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: `heard ${sent.at(-1)}` })}\n\n` })
+    await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: `heard ${sent.at(-1).text}` })}\n\n` })
   })
   await page.waitForTimeout(6000)
   await page.keyboard.type('And eggs')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(3000)
-  const done = await page.evaluate(() => ({ outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'), text: document.querySelector('[data-villager]').textContent }))
-  check('when the host is back the outbox is sent in order and emptied', sent.join() === 'Buy milk,And eggs' && done.outbox.length === 0 && done.text === 'heard And eggs', { sent, done })
+  const done = await queues(page)
+  check('when the host is back the outbox is sent in order, under the link it was written under, and emptied', sent.map((x) => x.text).join() === 'Buy milk,And eggs' && sent.every((x) => x.auth === `Bearer ${ALEX}`) && done.outbox.length === 0 && done.text === 'heard And eggs', { sent: sent.map((x) => x.text), done })
+  await context.close()
+}
+
+// A tagged line is never sent under another token (#42): Alex queues a line while the host is away, then
+// Sam's link is opened in the same tab. Every request the page makes is recorded.
+{
+  const { context, page } = await open('reduce')
+  await page.evaluate(() => ['village.notebook.outbox', 'village.notebook.held'].forEach((k) => localStorage.removeItem(k)))
+  const requests = []
+  let mode = 'away'
+  await page.route('**/villager/api/**', async (r) => {
+    const body = r.request().postData()
+    requests.push({ path: new URL(r.request().url()).pathname, auth: r.request().headers().authorization, text: body ? JSON.parse(body).text : undefined })
+    if (mode === 'away') return r.fulfill({ status: 502, body: 'away' })
+    if (mode === 'unauth') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"token required"}' })
+    if (mode === 'forbidden') return r.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"this token is for another person"}' })
+    if (!body) return r.fulfill({ status: 200, contentType: 'application/json', body: '{"lines":[]}' })
+    await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: 'heard' })}\n\n` })
+  })
+  await page.evaluate((t) => (location.hash = `token=${t}`), ALEX)
+  await writeLine(page, 'For Alex only')
+  await page.waitForTimeout(800)
+  const queued = await queues(page)
+  mode = 'ok'
+  await page.evaluate((t) => (location.hash = `token=${t}`), SAM)
+  await page.waitForTimeout(7000)
+  const underSam = requests.filter((x) => x.auth === `Bearer ${SAM}` && x.text === 'For Alex only')
+  const after = await queues(page)
+  check("a line queued under Alex's link is never sent with Sam's token", queued.outbox[0]?.tag === fp(ALEX) && underSam.length === 0 && after.outbox.length === 0 && after.held.some((q) => q.text === 'For Alex only' && q.tag === fp(ALEX)), { underSam, after: { outbox: after.outbox, held: after.held } })
+  check('the page says the line was held, not sent', after.state === 'other' && /another link/.test(after.text), { state: after.state, text: after.text })
+  // Reloaded with Sam's token in the tab: still held, still unsent. An untagged line from before tagging is held too.
+  await page.evaluate(() => localStorage.setItem('village.notebook.outbox', JSON.stringify(['an old untagged line'])))
+  await page.reload()
+  await page.evaluate(() => window.village.ready())
+  await page.waitForTimeout(7000)
+  const reloaded = await queues(page)
+  check('after a reload under Sam\'s link, held and untagged lines are still never sent', requests.filter((x) => x.text === 'For Alex only').every((x) => x.auth === `Bearer ${ALEX}`) && !requests.some((x) => x.text === 'an old untagged line') && reloaded.outbox.length === 0 && reloaded.held.some((q) => q.text === 'an old untagged line'), { requests: requests.filter((x) => x.text), reloaded: { outbox: reloaded.outbox, held: reloaded.held } })
+  // 401: a link from an earlier launch has its own state and is not retried under the same token.
+  mode = 'unauth'
+  await writeLine(page, 'stale link line')
+  await page.waitForTimeout(7000)
+  const stale = await queues(page)
+  const staleTries = requests.filter((x) => x.text === 'stale link line').length
+  check('401 is its own state ("open your latest link"), not away, and the line is kept without retrying', stale.state === 'link' && /latest link/.test(stale.text) && stale.outbox.some((q) => q.text === 'stale link line') && staleTries === 1, { state: stale.state, text: stale.text, staleTries })
+  // 403: the token is someone else's. Said plainly, never "your line is kept; try me again".
+  mode = 'forbidden'
+  await writeLine(page, 'refused line')
+  await page.waitForTimeout(1500)
+  const refused = await queues(page)
+  check('403 is the refused state and never promises a retry', refused.state === 'refused' && /someone else/.test(refused.text) && !/try me again/.test(refused.text) && refused.outbox.length === 0 && refused.held.some((q) => q.text === 'refused line'), { state: refused.state, text: refused.text })
   await context.close()
 }
 
