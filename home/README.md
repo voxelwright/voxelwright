@@ -1283,7 +1283,7 @@ never acts: loudest cue -14.9 dBFS, a scripted minute of use (about 120 plays) -
 -13.3 dBFS peak (ui -40.9, world -35.9 LUFS; the voices are about -29 LUFS short-term); closest
 consecutive takes differ by -53 dBFS; offline render 40 ms per audio second (fastest of three);
 0.3 ms median and 1 ms slowest-event median of main thread per sound (plain-array curves; a
-`Float32Array` curve cost about 200 ns per point in Chrome); `public/audio/sfx` 137 KB of a 400 KB
+`Float32Array` curve cost about 200 ns per point in Chrome); `public/audio/sfx` 145 KB (with round 3's bubble pops) of a 400 KB
 budget. The shared context is now made on every page load (Chrome's silent sink): 0.4 to 0.8 ms
 in its constructor. `npm run perf-gate -- --base origin/feature/village-talk`: every scene holds
 60 fps; CPU p50 in the talk scene +0.3 and -0.2 ms in two reruns (one run at load 155 read +0.6).
