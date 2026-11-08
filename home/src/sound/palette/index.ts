@@ -750,7 +750,8 @@ export const PALETTE: Palette = {
  * The owner's picks from the listening room, the default for every visit. The player falls back
  * to 'a' for a cue not named here; the page's stored picks and `?sfx=` still win over these.
  */
-export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c', sent: 'b', placed: 'a', page: 'b', news: 'a' }
+// Round 1 (Nov 7) and round 2 (Nov 8) picks. pad-up keeps its softened 'a'.
+export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c', sent: 'b', placed: 'a', page: 'b', news: 'a', hover: 'e', farewell: 'c', turned: 'b', 'pad-down': 'b' }
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
