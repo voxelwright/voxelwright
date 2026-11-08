@@ -809,11 +809,26 @@ const refused = {
   }),
 }
 
+const knock = {
+  a: cue({
+    bus: 'world', level: -12, gap: 0.035, length: 0.3, jitter: { cents: 60, db: 1.5 },
+    play(a, out, p, kit) {
+      // Physics impacts (#74): louder with the impulse, brighter with the harder material.
+      const e = p.event as { impulse?: number; impact?: number; hardness?: number }
+      const force = Math.min(1, Math.max(0.04, ((e.impulse ?? 0.1) * (e.impact ?? 1)) / 0.25))
+      const hard = Math.min(1, Math.max(0, e.hardness ?? 0.5))
+      const gain = p.gain * Math.sqrt(force)
+      if (hard < 0.3) thump(a, out, kit, p.at, { from: 170 * p.rate, to: 90, dur: 0.08, gain: gain * 0.7, random: p.random, puff: 0.8, cut: 600 + 900 * hard })
+      else tock(a, out, kit, p.at, { freq: (180 + 520 * hard) * p.rate, gain, random: p.random, click: 0.3 + 0.5 * hard, band: 900 + 3200 * hard })
+    },
+  }),
+}
+
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock,
 }
 
 /**
@@ -825,6 +840,7 @@ export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c',
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
+  knock: { a: 'A physics impact: a felt thump for soft materials, a wooden or steel tock for hard ones, louder with the impulse.' },
   hover: {
     a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',
     d: 'A felt-wrapped wooden tap: a real wooden click (six takes), cut to 60 ms with its top rolled off, so it is a soft "tok".',

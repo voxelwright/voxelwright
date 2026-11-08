@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "cordis": "4.0.0-rc.12",
+    "jolt-physics": "1.1.1",
     "three": "0.187.0"
   },
   "devDependencies": {

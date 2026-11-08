@@ -1,0 +1,12 @@
+{
+  "name": "village-physics-bench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node run.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "jolt-physics": "1.1.1"
+  }
+}

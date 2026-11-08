@@ -236,6 +236,7 @@ const emit = (p, name, e) =>
   }, [name, e])
 
 const SAMPLE = {
+  'village/physics': { kind: 'impact', a: 'pinball/ball', b: 'pinball/bumper-a', materials: ['steel', 'rubber'], shapes: [{ kind: 'sphere', radius: 0.0135 }, { kind: 'cylinder', halfHeight: 0.02, radius: 0.03 }], at: { x: 0, y: 1, z: 0 }, normal: { x: 0, y: 0, z: 1 }, impulse: 0.1, hardness: 0.6, impact: 1 },
   'village/hover': { id: 'notebook' }, 'village/chose': { id: 'notebook' }, 'village/backed': { id: 'notebook' },
   'village/glide': { seconds: 1 }, 'village/turned': { villager: 'mia' }, 'village/greeted': { villager: 'sam' },
   'village/card': { villager: 'mia', page: 0 }, 'village/pad': { up: true }, 'village/wrote': { added: 1 }, 'village/sketched': { tool: 'pen' },

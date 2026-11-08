@@ -31,6 +31,8 @@ const lines = {
   // One sound for the walk, as the camera heads for the door; the arrival is part of it.
   'village/walk': (e) => (e.phase === 'leave' ? 'walk' : null),
   'village/refused': () => 'refused',
+  // Physics (#74): only impacts are heard, and only ones hard enough to notice.
+  'village/physics': (e) => (e.kind === 'impact' && e.impulse * e.impact >= 0.01 ? 'knock' : null),
 } satisfies { [K in keyof Events]?: Line<K> }
 
 export type SoundEvent = keyof typeof lines
