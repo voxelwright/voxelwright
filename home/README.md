@@ -61,26 +61,29 @@ click elsewhere backs out. Touch skips hover. The nearest visible, depth-writing
 glows, labels and camera moves are instant.
 
 Entries today: the notebook, the fridge (frames its door; family moments and
-what's coming up will live there), the kitchen doorway ("Living room"), and in
-the living room the plant shelves ("Idea garden", a placeholder for Plant a
-Seed), the doorway back ("Kitchen") and the closed "Workshop" door.
+what's coming up will live there), the doorway between the rooms (its kitchen
+face is "Living room", its living-room face "Kitchen"), the plant shelves
+("Idea garden", a placeholder for Plant a Seed) and the closed "Workshop" door.
 
-Rooms are groups of plugins (`PLANS` in `src/plugins/rooms.ts`). Choosing a
-doorway eases the camera towards it, fades through warm dark, swaps rooms and
-eases in. `?room=living` starts in the living room. By default the
-neighbouring room stays loaded but hidden, because loading on entry stalled
-one frame for 0.5 to 2.2 s behind the fade; `?rooms=unload` loads on entry and
-unloads on leaving. `node scripts/check-entries.mjs` proves keyboard and
-pointer reach for every entry, the walks, reduced motion, and that leaving a
-room under `?rooms=unload` leaves no objects, plugins, frame hooks, geometries
-or DOM behind; `--keep` runs the walks with the default.
+Rooms are groups of plugins (`PLANS` in `src/plugins/rooms.ts`), all loaded
+for the whole visit and all drawn: since #42 the kitchen and the living room are
+one house (see "One house" below). Choosing a doorway glides the view through
+the house to the other room, with no fade and no swap. `?room=living` starts
+framed on (dollhouse) or seated in the living room. `node scripts/check-entries.mjs`
+proves keyboard and pointer reach for every entry in both rooms, that the
+doorway's glides are smooth and fade-free in both directions, that a round
+trip adds no objects, plugins, frame hooks, DOM, entries, geometries or
+textures, the seated view's walk through the doorway, and reduced motion.
 
-Walk measurements, headless Chrome, 1440×900, DPR 1, four walks each:
+The seated view faces each room's back wall and the doorway is beside you, off
+screen, so a small painted sign on each back wall ("Living room →" right of the
+kitchen clock, "← Kitchen" over the living room's bookcase) is the doorway's
+entry there. Pointing at it labels it, Tab reaches it, and choosing it walks you
+through the real doorway. `check-entries` walks from the default seat by pointer
+and back by keyboard.
 
-| Policy | Swap behind the fade | Worst frame during a walk |
-| --- | --- | --- |
-| unload on leaving | 0.63 to 1.11 s | 0.52 to 2.2 s |
-| keep neighbour loaded (default) | 0.09 s | 33 to 50 ms |
+Per room at rest, before the rooms became one house (November 6), headless
+Chrome, 1440×900, WebGPU, holding 60 fps (the headless cap) in every mode:
 
 Per room at rest, headless Chrome, 1440×900, WebGPU, holding 60 fps (the
 headless cap) in every mode:
@@ -244,26 +247,25 @@ replies or table rounds), page load time (reported in the JSON, not gated) and a
 
 ## Camera variants (#42 probe)
 
-`?cam=iso` looks down on the room like a dollhouse: a 20° perspective camera
-16 m away (the stage camera stays perspective, so postfx and entries keep
-working). Drag or Q/E orbit within about -30° to +80°, the wheel zooms from the
-whole room to the table. `?cam=third` stands 2.4 m behind and 2.2 m above a
+`?cam=iso` looks down on the house like a dollhouse: a 20° perspective camera
+(the stage camera stays perspective, so postfx and entries keep working). Its
+navigation is described in "One house" below. `?cam=third` stands 2.4 m behind and 2.2 m above a
 point on the floor; clicking the floor walks there, clicking an object walks to
 a step in front of it (and chooses it, if it is an entry). Without `?cam=`
 nothing changes. Both rigs hang off the resting pose that `travel()` moves, so
 room walks work, and focus poses blend the field of view back to 40°. Q/E are
 ignored while typing, so the notebook still takes the letter q.
 
-Iso is a dollhouse cutaway. Only the iso plan loads `diorama` (kitchen) and
-`loungediorama` (living room); `src/diorama.ts` builds the shell: a base with
+Iso is a dollhouse cutaway. Only the iso plan loads `diorama` (the whole house
+since #42); `src/diorama.ts` builds the shell: a base with
 a soft contact shadow, a floor clipped to the walls, thick walls with painted
 caps, and low cut stubs that take a wall's place when the camera stands
 outside it. Walls tagged `userData.inward` that face away move to a
 shadow-only layer (`SHADOW_ONLY`), so they keep casting; in both wider views the
 sun's shadow box covers the whole room, which removed the hard sun wedges.
-Behind the kitchen sits a garden plot with a tree, which the window looks down
-on, and the doorway passage has an outside. The pendant hangs from a braced
-wall arm, and a soft pool on the table shows it is on. The kitchen's 9 m floor
+Behind the house sits a garden plot with trees, which the kitchen window looks down
+on. The pendant hangs from a braced
+wall arm, and a soft pool on the table shows it is on. The seated view's kitchen floor, the living room's ceiling
 and the painted garden card are `userData.seatOnly`. `?cam=third` keeps the old
 fixes: walls cut away, fog slid back and a warm backdrop.
 
@@ -307,6 +309,125 @@ Dollhouse shell, same setup, one 6 s run each:
 | `?cam=iso&q=high&room=living`, after | 193 | 41,272 | 9.2 / 11.5 |
 
 Screenshots: `screenshots/talk/iso-*.jpg`, since replaced by the furnished room below (`room-home-before.jpg` is this shell).
+
+## One house (#42, November 7, 2026)
+
+Merged onto the talk branch the same day. The held-key rule below now reads the
+input's own writing state (`navigation.writing`, set by `talk.ts` from
+`input.writing`), so words on the pad or a sketch keep the keys too. The red
+sheet by the door was the talk notebook's cloth spine, a half-cylinder of 1 m
+radius drawn while the book is closed; it now wraps the page block, and
+`check-talk-notebook` bounds the closed book.
+
+The kitchen and the living room are one building on the yard (`src/layout.ts`):
+kitchen | living room | room for the Workshop, side by side along one back wall,
+each 6 m deep and 3 m tall, sharing 18 cm walls. The doorway between them is in
+the shared wall (z 2.45 to 3.15), not the kitchen's back wall: with the living
+room behind the kitchen its plant wall would have stood behind the kitchen's
+back wall, hidden from every front view. The Workshop's closed door in the
+living room's right wall leads to where that room will go. Both rooms load at
+the start and stay drawn; there is no fade, veil or swap. The house shares one
+sun (its shadow box now centred on the house, 18 m across), one fill and one
+fog; the living room adds one warm point light, because every point light costs
+every pixel once the whole house is drawn (the sideboard lamp and the grow
+strips are emissive now).
+
+**Flicker.** The flicker on door and window frames was z-fighting. The old
+doorway's passage planes lay on the wall's reveal faces, and the window's frame
+bars were buried in the wall with their inner faces on the reveal planes (plus
+a 1 cm sunlit sliver of the frame's top face under a soft shadow edge). TRAA's
+sub-pixel jitter re-decides the depth tie every frame, which turns a static
+pattern into shimmer. Measured with the camera held still on a focus pose, 8
+frames: the doorway's reveal had 5.6% of its pixels changing by more than 20
+levels; moving the passage planes 4 cm cleared it (0.01%), turning TRAA off
+cleared it (static pattern left), and shadow bias changes did nothing (6.8%).
+Openings now have a lining (jambs and head, `lining()` in `src/doorway.ts`)
+that reaches 2 mm into the wall so the reveal faces are buried in solid wood,
+a casing proud of the wall, and no exposed face narrower than about 3 cm.
+Crops: the window's top trim went from a dashed shimmering line to 0.27%, and
+`check-navigation` gates both trims under 0.5%.
+
+**Moving around (dollhouse).** The view rests on a floor point with a turn and
+a zoom from the whole house (36 m away) to one corner (5.6 m):
+
+| Input | Does |
+| --- | --- |
+| Left drag | turn (and tilt a little) |
+| Right drag, shift drag, two fingers | pan |
+| Wheel, trackpad pinch, two-finger spread | zoom |
+| Double-click the floor | glide there, at least half-way in |
+| Arrow keys | pan, while nothing is being written |
+| Hold W A S D | pan |
+| Hold Q E | turn |
+| Doorway entry (click, or Tab and Enter) | glide through the house to that room |
+
+The view stays over the house and its yard (1 m past the walls, 1.5 m front and
+back). Under `prefers-reduced-motion` every move lands at once.
+
+**Keys and the always-on input.** Letters belong to the input: a tapped letter
+writes, as before, even W, A, S, D, Q or E. Held for 170 ms, one of those six
+moves the view until it is let go. A second key during the wait means someone is
+typing, so the first letter is written and typing carries on, in order. Once a
+line has text (or any text field has focus), arrows and letters edit the line
+and the view stays still. The camera claims keys in a window capture listener
+registered before the input's, and the input asks `navigation.claims()` (one
+line in `talk.ts`'s `blocked` hook) before turning a key into writing.
+
+**Cutaway.** Outer walls keep the old rule (the wall the camera stands behind
+leaves the view, keeps its shadow, and a stub takes its place). The shared wall
+has two insides, so it stands at full height only when you are close in (zoom
+over 0.5 or a focus pose) and it is behind what you look at; otherwise it is a
+stub and the next room shows over it. Its doorway trim goes with it. Every
+cut-away wall and stub is compiled once at load, which removed a 450 ms stall
+on the first glide into a room.
+
+**Villagers.** The open paths in `src/villagers/world.ts` run along the
+kitchen's right wall, through the doorway and round the living room's furniture
+to its plant corner. Mia (Moss, the gardener) tends the living room's plants as
+her third chore.
+
+**Cost.** Both rooms are always drawn now. Headless Chrome, 1440x900, DPR 2,
+WebGPU, `?talk=npc&input=held`, whole-house view after (the kitchen view before),
+`npm run measure -- <url> --perf --gpu`, two 6 s runs after:
+
+| | Draw calls | Triangles | GPU p50 / p95 ms | Frame p50 / p95 ms, pacing unlocked |
+| --- | --- | --- | --- | --- |
+| `q=high`, before | 907 | 187,658 | 11.2 / 17.7 | 7.4 / 8.9 |
+| `q=high`, after | 1,082 | 251,392 | 16.6 / 19.1 and 16.7 / 18.3 | 8.5 / 9.8 |
+| `q=low`, before | 838 | 184,428 | 4.9 / 6.6 | 5.7 / 6.4 |
+| `q=low`, after | 1,004 | 242,978 | 5.3 / 6.8 and 5.3 / 15.8 | 6.3 / 7.7 |
+
+The GPU column (submit to queue done) is bimodal on the M1 Pro: the same page
+reads about 8.7 or about 16.5 ms from run to run, with nothing changed in between,
+so it looks quantized by vsync. Hiding parts of the scene moved it between the two
+modes rather than by their cost. With frame pacing unlocked (`--disable-gpu-vsync
+--disable-frame-rate-limit`), a high-tier frame takes 8.5 ms at p50, 1.1 ms more
+than before. That is enough to move the GPU column across a vsync step: without
+`?q=`, calibration measured 15.0 ms and stepped down to medium in one of two
+runs, where the base commit measured 10.8 ms and stayed high in three.
+
+Re-measured after the merge onto the talk branch with GPU ms from timestamp
+queries (`src/gpu-time.js`, the pass-interval union, not submit-to-done), same
+setup, `?talk=npc&input=held&q=high`, whole-house view, three 6 s runs: 1,098
+draw calls, 250,010 triangles, GPU p50 9.4, 8.1 and 8.0 ms, p95 13.2, 10.4 and
+10.9 ms (submit-to-done read 17.1 to 17.3 ms in the same runs). That is inside
+the high tier's 13 ms step-down and 16 ms p95, so nothing was trimmed. The 16.6 ms
+above was the old measure.
+
+The seated view (the perf gate's `home` scene) drew 566 calls after the merge, 84 over
+main and past the gate's limit: the other room's merged furniture has bounds that
+reach the view and the sun's shadow box. Seated, meshes wholly past the shared
+wall's centre now hide until you walk (`rooms.ts`), the signs are one mesh each and
+the doorway casts no shadow there: 526 calls, as on the talk branch before the
+merge. CPU p50 against main measured +0.3 to +0.6 ms over four gate runs with 4 to 6
+other headless Chromes running (the limit is +0.5); the talk branch before the merge
+measured +0.2 in the same runs. Open: confirm on a quiet machine, and if it holds,
+trim about 0.2 ms of seated CPU.
+
+Checks: `node scripts/check-entries.mjs` (rewritten for glides) and
+`node scripts/check-navigation.mjs` (keys, the input rule, drag, pan, zoom,
+double-click, clamping, reduced motion, flicker). Demo:
+`node scripts/demo-house.mjs out.mp4 <base-url>` records a 30 s clip.
 
 ## The room as a home screen (#42, November 6, 2026)
 
@@ -1845,6 +1966,9 @@ after `setSinkId('')` was verified for state and a running clock, not by ear on 
 
 ## Always-on input (#42 prototype)
 
+The pad's look and the reply cards below were replaced by paper (see "Talk regroup: paper"):
+the pad is now held low on the right in perspective, and replies are torn paper slips.
+
 `?talk=npc` now has the held notepad by default (`?input=speech` for the
 speech card, `?input=slip` for the old slip): an input that is always there. A keypress anywhere starts writing (a lowercase
 `j` with nothing written opens the journal instead; a capital J still starts a
@@ -1880,9 +2004,11 @@ JSON answer the host checks field by field (`checkRouted` in
 | journal | the journal opens at that villager or section |
 
 Furnishing (`src/talk/furnish.ts`): trusted code resolves the place from the
-words (around the table, by the window, in the corner, on the counter, the
-living room's door, or "here", the last thing clicked, only when the person said
-here). A line that starts like furnishing ("add", "put", "replace") shows the
+words (around the table, by the window, in the corner, on the counter, or
+"here", the last thing clicked, only when the person said here). Words naming
+the living room, the sofa, the plants or the sideboard pick its anchors: its
+back wall, the wall above the sofa, by the plants, its floor, the sideboard and
+its ceiling (`src/talk/place.ts`), and your villager says it is going next door. A line that starts like furnishing ("add", "put", "replace") shows the
 ghost before the route comes back; a different route dissolves it. The prop is
 made by `POST /people/:id/props` (Sonnet writing a plain-JS `build(api)`
 module), run in the prop sandbox, checked and rebuilt, then swapped in for the
@@ -1963,13 +2089,13 @@ scene before this branch). Claude only; no GPT reviewer this slice.
 
 Stubbed or missing: "messages from the school" has no data source (the
 villager says it cannot see any); projects are a record and a parcel, nobody
-builds them yet, and there is no static stand-in; the living room is not
-furnished from the kitchen (a request for it lands in the kitchen and the
-villager says so); placed props are not kept across a reload (the library is);
+builds them yet, and there is no static stand-in; placed props are not kept across a reload (the library is);
 no voice toggle and no context from where you are. Screenshots:
 `screenshots/talk/input-*.jpg` (real models).
 
 ## Table rounds, faster replies and the compact notepad (#42, November 7, 2026)
+
+The compact notepad below was replaced the same day by the held pad of "Talk regroup: paper".
 
 Table rounds (`table()` in `src/plugins/talk.ts`): a line to the table starts
 a round. The villager it names first speaks first; otherwise the opener
@@ -2016,8 +2142,10 @@ it inside the tap, so the phone keyboard comes up.
 Keys: `talk.ts` has the one keyboard listener (`onKey`). In order: the
 input's `key()` (any key while a line has the keyboard; `j` opens the
 journal; a printable key starts a line; Escape clears a restored line);
-then the slot for room navigation, for arrows and WASD only while nothing is
-being written (`input.writing`); then Escape at the table leaves it.
+room navigation runs before it, in camera.ts's window capture listener (arrows,
+and WASD or QE held 170 ms, only while nothing is being written:
+`navigation.writing`), and prevents what it takes; then Escape at the table
+leaves it.
 
 Checks, stub host: `check-talk-npc` 39 of 39 (new: named first speaks first,
 a pass is a nod with no voice, the second speaker hears your line and the
@@ -2135,3 +2263,153 @@ lines to sam" written on the page) was made into "chunky wooden cube"
 through the sandbox, and handed to Moss three times it was described as a
 drawing ("a bold navy square ... the handwritten words at the top look like a
 little message") with no route and nothing sent to Sam.
+
+## Talk regroup: paper (#42, November 7, 2026)
+
+The talk look stalled at 5.8 to 7.0 over many rounds of tuning (one Opus scorer, no GPT).
+Following ui-craft's "Plateau: regroup", three looks were prototyped behind a flag,
+scored side by side against the current look by Opus and GPT-6.1 Sol, and the winner,
+paper, replaced the old look. The flag and the two losing looks are gone.
+
+What the talk looks like now (`?talk=npc`):
+
+- **The pad** is held low on the right in a knitted mitten, in perspective, its paper unlit
+  so a lamp never bleaches it (`src/talk/input.ts`). At rest it reads "to Dumpling" in the
+  addressee's colour, with "just start typing…" pencilled under it until the first line is
+  sent. On a phone it sits bottom right, clear of the journal.
+- **Sending:** the note tears off, folds its right third over (its words still show), halves
+  in size as it lifts and flies to the addressee. The camera waits for it to land before it
+  turns to the reader, who hops as it arrives; before, the camera swung away at once and
+  the note was never on screen. The "!" news marker steps aside while you write or a note
+  is in flight.
+- **Replies** are slips of torn paper with the speaker's name on a strip of tape in their
+  colour and a paper tab toward them (`src/talk/paper.ts`). Each is a 2D canvas on the page
+  over the 3D view, drawn where the card is; the card stays in the page unseen, laying out
+  the words, taking clicks ("go on", the page before) and serving screen readers and the
+  checks. Finished slips at the table step back: lighter ink, a little smaller, lower and
+  paler, still opaque. Cards keep off every face in view, not only the conversation's.
+- **Camera:** the talk two-shot fits a tall screen (the villager centred, further back, its
+  slip above) and tests the whole frame from the pose it will take: rays to 8 points across
+  the frame at the villager's depth, with walls the dollhouse cutaway would put back counted
+  as solid (a door post the cutaway had hidden filled a third of one shot). It takes the first
+  clear pose with nothing in front, or the least cluttered of the first six. A villager whose
+  head is in the shot fades as a passer-by, once the camera is on the conversation. The table shot pulls back on a tall screen, and a
+  phone shows one line at the table, the speaker's.
+
+The three strategies, each a change of approach (the `?look=` prototypes, removed):
+
+| Look | Idea |
+| --- | --- |
+| a, paper | the pad held in perspective, the note folds and flies, replies as paper slips in the room |
+| b, cinematic | an eye-level close-up with shallow depth of field, the table cutting to whoever speaks, inked comic balloons of one width, a dusk surround |
+| c, no interface (too bold) | no cards, tags or buttons; one felt caption strip in the speaker's colour; the pad only while writing, and a pad object on the table |
+
+Shots: `node scripts/talk-shots.mjs <dir> [--query=…] [--dev=5586]` takes the same frames
+every time, headless (the kitchen at rest, writing, just after Enter and a moment later,
+Dumpling's reply, a talk with Moss, the table mid-round, the house, `?q=low`, and a phone at
+390 px). Replies are scripted by Playwright in place of the host, written like the real
+ones, so every look got the same words with the same timing; no model replies were used.
+The "sent" frame is checked against the page's clock and retaken if it missed the flight.
+
+Scores. Each round, a fresh Opus (`claude -p --model opus`, read only) and GPT-6.1 Sol
+(through T3, medium effort, read only) saw only the rubric and the screenshots under
+shuffled letters, with the current look as a reference; neither was told a target. Means
+over ten categories (warmth, material, lighting and depth, legibility, consistency, motion,
+low tier, input in the world, conversation clarity, phone):
+
+| Round | What was scored | Opus | GPT-6.1 Sol |
+| --- | --- | --- | --- |
+| 1 | paper / cinematic / no interface / current | 7.5 / 5.5 / 6.7 / 7.0 | 7.5 / 6.8 / 7.9 / 8.1 |
+| 2 | paper after round 1 / current | 7.0 / 7.0 | 7.9 / 7.9 |
+| 3 | paper adopted / current | 7.2 / 7.1 | 8.4 / 7.6 |
+| 4 | paper / current | 7.6 / 7.1 | not run |
+| 5 | paper / current | 7.6 / 6.9 | 8.4 / 7.7 |
+| 6 | paper / current | 7.2 / 7.1 | not run |
+| 7 | paper as pushed / current | 7.3 / 6.4 | not run |
+
+Screenshots (scripted replies): `screenshots/talk/paper-*.jpg`, the same frames as the
+scorers saw (rest, writing, sent, talk, table, house, low tier, phone talk and table).
+
+Paper won the round-1 categories that tuning had not moved: input in the world (9 and 9 to
+10) and motion (9 and 9), with material at 9. The current look won legibility and
+consistency (8 to 9). Opus chose paper in every round. GPT-6.1 Sol chose the current look
+in rounds 1 and 2, both times naming washed-out reply text as paper's fault; once rounds 2
+and 3 fixed that, it chose paper (8.4 against 7.6 and 7.7). The unchanged reference moved by up
+to 0.7 between rounds, so compare within a
+round. GPT-6.1 Sol's last round (5): warmth 9, material 9, lighting 8, legibility 8,
+consistency 9, motion 8, low tier 9, input 9, conversation 8, phone 7. Opus's last round
+(7, the code as pushed): warmth 8, material 8, lighting 7, legibility 7, consistency 8,
+motion 7, low tier 7, input 8, conversation 7, phone 6.
+
+Learning log:
+
+- **Moved it:** holding the pad in perspective (input in the world 6 → 8 to 10); letting the
+  sent note be seen, by holding the camera until it lands (motion 2 to 4 → 6 to 9); one
+  material for everything written (material 7 → 8 to 9).
+- **Hurt, then fixed:** slips lit by the room were bleached by bloom under the pendant (GPT
+  legibility 4); as transparent meshes, temporal anti-aliasing ghosted their changing words
+  (Opus round 2). Drawn on the page they were crisp. Rendering them in a second pass after
+  post-processing broke the frame (the canvas target did not keep the first pass).
+- **Cinematic lost:** depth of field and haze on a busy room smeared the table (lighting 4
+  and 6), the low tier without them scored higher, and cutting at once to the close-up hid
+  the sent line (motion 2 and 3).
+- **No interface split the models:** one caption strip read cleanly (GPT 7.9) but lost who
+  speaks to whom and the turn before (conversation 5 from both).
+- **Capture timing confounded round 1:** on this loaded machine the "0.15 s" frame of the
+  current look was taken 2 to 3 s late, after its note had landed; its motion score (2 and
+  3) measured the capture. Frames are now checked by the page's clock.
+- **Each fix can trade one complaint for another:** finished slips made see-through let the
+  lamp show through them (round 5); made opaque and alike, the round's order could not be
+  read (round 6). They now step back by size, place and ink instead.
+- **Camera shots:** posts and passers-by at the frame's edge came from testing only the line
+  to the subject, from the cutaway hiding walls the new pose would show, and from judging
+  a passer-by by its middle while its head was in frame.
+
+**The ceiling.** Neither model reached 9 in every category. Opus's means for paper went
+7.6, 7.6, 7.2 over rounds 4 to 6, the plateau trigger; one regroup of the three allowed was
+run, and polishing stopped there on time. A second regroup would target what tuning has not
+moved: your own line pinned on the table during a round, the note landing in the addressee's
+paws and opening into the reply, one address label in one place, and the felt "!" marker.
+
+Still under 9, and why:
+
+- Conversation clarity at the table (6 to 7): your own line vanishes during a round; Opus
+  asked for it pinned on the table as a slip. Not built.
+- Motion (6 to 9): the note flies to the addressee's head and fades; Opus asked for it to
+  land in their paws and open into the reply.
+- Consistency (6 to 8): "to Dumpling" changes size and place between rest and writing; the
+  felt "!" news marker is a second visual language.
+- Lighting (7 to 8): the fridge handle's bloom streak and the warm haze are the scene's
+  materials and post stack, outside this unit.
+- Phone (6 to 7): at the table a slip above the speaker can cover a listener's head, and the
+  bottom corners hold the journal, the sound buttons and the pad together.
+
+Cost: the talk two-shot now casts up to about 70 rays against the meshes within 3.5 m of the
+villager when a talk opens. Measured around the whole talk-open call in headless Chrome,
+18 opens: p50 9.5 ms before, 31 ms after at load 66 and 84 ms at load 160 (max 150 and 409
+ms), paid once per talk, not per frame. Slips cost a 2D canvas repaint when their words
+change. `npm run perf-gate` against main (cb1d565), three runs with 6 to 7 other headless
+Chromes running (so GPU ms is indicative): every scene holds 60 fps (no frame over 20 ms, p99
+16.8 ms); GPU p50 / p95 at high 5.8 to 7.3 / 7.0 to 11.1 ms in `home`, `villagers` and `talk`;
+`home` CPU p50 +0.3, +0.1 and +0.7 ms against the +0.5 limit, so two passes and one fail on
+that rule. The `home` scene does not load the talk (`talk.ts` returns without `?talk=npc`),
+and against this branch's start (40faf49), two runs, `home` CPU p50 was +0.3 and -0.1 ms with
+draw calls identical (526): the margin against main is the branch's, not this unit's, and
+needs a quiet-machine run before main.
+
+Checks (stub host, one at a time, load average 45 to 250): `check-kernel` 10/10,
+`check-entries` 33/33, `check-navigation` 18/18, `check-notebook` 10/10 (9/10 once in the
+suite: the reduced-motion return landed 0.13 m off; 10/10 alone), `check-babble` 28/28,
+`check-music` 30/30, `check-talk-npc` 39/39, `check-talk-input` 64/64, `check-talk-notebook`
+16/16, `check-sketch` 35/35, `check-prop-sandbox` 35/35, host `check-villager` 225/225, and
+`tsc --noEmit` in `home/` and `host/`. Earlier `check-talk-input` runs failed on load timing:
+furnishing lines that start with "a" lost their first letter to the camera's held-key pan
+(the key stayed down past 170 ms on the loaded machine, so the line went to chat; on a
+stalled machine any first W, A, S, D, Q or E can be lost this way), and a ghost came at
+546 ms against the 400 ms limit. One failure was real and is fixed: a quip queued behind
+earlier lines ("Ooh, let me see.") could come due after the villager had begun answering a
+newer line and replace the answer on its card; a quip is now dropped once a newer reply has
+started. Changed for the new behaviour: `check-talk-input` expects the resting pad held low
+on the right under 9% of the screen (it was a strip under 4%), raised by over 1.5 times (it
+was 3), and checks that the camera waits for the sent note to land before turning to its
+reader; its Undo click reports why it missed instead of passing silently.

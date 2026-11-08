@@ -26,7 +26,6 @@ import growshelves from './plugins/growshelves'
 import plantstand from './plugins/plantstand'
 import loungedoors from './plugins/loungedoors'
 import diorama from './plugins/diorama'
-import loungediorama from './plugins/loungediorama'
 import furnish from './plugins/furnish'
 import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
@@ -36,7 +35,7 @@ const listed = {
   renderer, camera, entries, postfx,
   room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
   toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
-  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, loungediorama, furnish, loungefurnish,
+  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, furnish, loungefurnish,
 }
 // Any other file in plugins/ joins the catalog under its declared name, so adding a plugin
 // never means editing this file. The Elder relies on that: candidates may change only plugins/.
@@ -49,10 +48,10 @@ const extra = Object.fromEntries(
 )
 PLANS.kitchen.plugins.push(...Object.keys(extra))
 const catalog: Record<string, Loadable> = { ...listed, ...extra }
-// ?room=living starts in another room.
+// ?room=living starts in (the seated view) or framed on (the dollhouse) another room.
 const start = PLANS[params.get('room') ?? ''] ? params.get('room')! : 'kitchen'
 const plugins: Record<string, Loadable> = { ...catalog, rooms: rooms(catalog, start) }
-/** Loaded for the whole visit; the rooms service loads and unloads the rest. */
+/** Loaded for the whole visit; the rooms service loads the rooms, which stay too. */
 const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx']
 // ?plugins=renderer,room loads exactly the named plugins and no rooms, used to measure baselines.
 const only = params.get('plugins')?.split(',')
@@ -67,7 +66,6 @@ if (import.meta.env.DEV && params.get('villager') === 'gen') void import('./vill
 // #47 setup: &setup=1 adds the felt workshop on the table, where a villager is made and tuned in a cheval mirror, in dev builds
 // only (b and bench are the regroups' kept ways to tune; d is 1).
 if (import.meta.env.DEV && params.get('villager') === 'gen' && /^(1|b|d|bench)$/.test(params.get('setup') ?? '')) void import('./villagers/gen/setup').then((m) => load(m.default))
-const keepRooms = params.get('rooms') !== 'unload'
 // When calibration steps the tier down, the renderer has already lowered the pixel
 // ratio; post-processing is rebuilt with the new tier's features. Scene content keeps
 // its load-time detail, so ?q=low remains the way to get the light scene everywhere.
@@ -119,8 +117,7 @@ const village = {
    * every requested plugin is active.
    */
   ready: (timeoutMs = 15000) => new Promise<Readiness>((resolve) => {
-    const current = root.get('rooms')?.current ?? start
-    const wanted = only ?? [...GLOBAL, ...(keepRooms ? Object.values(PLANS).flatMap((p) => p.plugins) : PLANS[current].plugins)]
+    const wanted = only ?? [...GLOBAL, ...Object.values(PLANS).flatMap((p) => p.plugins)]
     const deadline = performance.now() + timeoutMs
     const check = () => {
       const states = pluginStates()

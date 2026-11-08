@@ -179,10 +179,10 @@ try {
     await page.waitForTimeout(600)
     let s = await state(page)
     check('held is the default: the notepad is in view, addressed to your own villager', s.input.variant === 'held' && s.input.padVisible && s.input.to === 'Dumpling' && s.mode === 'room', s.input)
-    // At rest: small and tucked at the bottom edge, showing whom it is to.
+    // At rest: held low on the right in perspective, showing whom it is to (#42 regroup: it was a strip at the bottom edge).
     const area = (r) => r.width * r.height
     const rest = s.input.padRect
-    check('at rest the pad is small and tucked at the bottom edge', s.input.raise < 0.05 && area(rest) < 0.04 * 1280 * 800 && rest.top > 800 * 0.86 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
+    check('at rest the pad is held low on the right, under 9% of the screen, reaching the bottom edge', s.input.raise < 0.05 && area(rest) < 0.09 * 1280 * 800 && rest.left > 1280 * 0.55 && rest.top > 800 * 0.6 && rest.top + rest.height >= 799, { raise: s.input.raise, rest, share: area(rest) / (1280 * 800) })
     check('held: the pad and journal ride with the camera as scene objects', baseline.objects.some((o) => o.endsWith(':talk input')) && baseline.objects.some((o) => o.endsWith(':talk notepad')) && baseline.objects.some((o) => o.endsWith(':talk journal button')))
 
     // A keypress anywhere starts writing, and the pad rises to writing size.
@@ -193,7 +193,7 @@ try {
     const attending = (await state(page)).cast.alex.attending
     check('your villager turns to you while you write', attending, attending)
     const risen = await until(page, (x) => x.input.raise > 0.97, 2000, 30)
-    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 3 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
+    check('the first keypress raises the pad smoothly to writing size', risen.input.raise > 0.97 && area(risen.input.padRect) > 1.5 * area(rest) && risen.input.padRect.top < rest.top - 60, { rest, risen: risen.input.padRect })
     await page.keyboard.press('Escape')
     s = await state(page)
     const settled = await until(page, (x) => x.input.raise < 0.03, 2000, 30)
@@ -225,7 +225,10 @@ try {
 
     // talk: that villager turns and the camera eases to them.
     await write(page, 'I want to chat with Moss')
-    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia')
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia', 20_000, 10)
+    // The camera turns to Moss only once the note has landed, so the note is seen on its way (#42 regroup).
+    check('the camera waits for the sent note to land before turning to its reader', !s.input.flying || !s.focused, { flying: s.input.flying, focused: s.focused })
+    s = await until(page, (x) => x.mode === 'talk' && x.partner === 'mia' && x.focused && !x.input.flying)
     check('talk route: "I want to chat with Moss" opens a talk with Moss', s.mode === 'talk' && s.partner === 'mia' && s.cards.mia && s.focused, { mode: s.mode, partner: s.partner, routes: s.input.routes })
     check('the input re-addresses to Moss', s.input.to === 'Moss', s.input.to)
     const before = (await jsonl('mia', 'conversation.jsonl')).length
@@ -268,8 +271,9 @@ try {
     s = await state(page)
     check('the ghost is gone once the prop has settled', s.input.furnish.job?.ghosts === 0, s.input.furnish)
     check('your villager acknowledged it in the room', /let me see/i.test(s.cards.alex?.text ?? ''), s.cards.alex)
-    await page.click('.furnish-choice [data-choice="undo"]', { timeout: 3000 }).catch(() => {})
+    const undoMiss = await page.click('.furnish-choice [data-choice="undo"]', { timeout: 3000 }).then(() => null, (e) => String(e).split('\n').slice(0, 12).join(' | '))
     s = await state(page)
+    if (undoMiss) console.error('Undo click:', undoMiss.slice(0, 900))
     check('Undo takes it away again', s.input.furnish.placed === 0 && !s.input.furnish.choice && s.input.furnish.job === null, s.input.furnish)
 
     // Replacing the table hides it, and undo brings it back.
@@ -381,10 +385,13 @@ try {
         ['add a table to the interior with a cow', p('wooden table with black and white cow-spot print', 'the interior | add a table to the interior with a cow', 'floor')],
       ].map(([text, r]) => ({ text, mount: r.mount, anchor: r.poses[0].anchor, x: +r.poses[0].x.toFixed(2), y: +r.poses[0].y.toFixed(2), z: +r.poses[0].z.toFixed(2), size: r.size }))
     })
-    const want = [['wall', 'wall'], ['wall', 'wall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
+    const want = [['wall', 'livingWall'], ['wall', 'sofaWall'], ['ceiling', 'ceiling'], ['surface', 'table'], ['floor', 'window'], ['floor', 'corner'], ['surface', 'counter'], ['floor', 'floor']]
     check('each line gets its expected mount and anchor (a TV the model put on the floor goes on the wall)', poses.every((p, i) => p.mount === want[i][0] && p.anchor === want[i][1]), poses)
-    const distinct = new Set(poses.filter((p) => p.anchor !== 'wall').map((p) => `${p.x},${p.y},${p.z}`))
-    check('distinct anchors give distinct poses', distinct.size === poses.filter((p) => p.anchor !== 'wall').length, poses)
+    const distinct = new Set(poses.map((p) => `${p.x},${p.y},${p.z}`))
+    check('distinct anchors give distinct poses', distinct.size === poses.length, poses)
+    // The living room (x 3.58 to 8.38 since #42's one house): the TV on its back wall, the picture on the wall behind the sofa.
+    check('the living room is furnishable: "a TV on the living room wall" lands on its back wall, "a picture above the sofa" on the wall behind the sofa',
+      poses[0].x > 3.7 && poses[0].x < 8.3 && Math.abs(poses[0].z + 2.2) < 0.05 && Math.abs(poses[1].x - 3.58) < 0.05 && poses[1].z > -0.1 && poses[1].z < 1.95, poses.slice(0, 2))
     const [tv, pic, lantern, cow, plant] = poses
     check('heights by mount: TV and picture up the wall, the lantern hanging, the cow on the table top, the plant on the floor', tv.y > 0.6 && tv.size[2] < tv.size[1] && pic.y > 1 && lantern.y > 1.5 && Math.abs(cow.y - 0.76) < 0.01 && plant.y === 0, poses)
     const stacked = await page.evaluate(() => {
