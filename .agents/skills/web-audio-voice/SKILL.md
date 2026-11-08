@@ -129,10 +129,12 @@ and measure in Node: YIN pitch (take the shortest lag within 0.06 of the best
 normalized difference, or a formant on the second harmonic reads an octave
 up), Hann-windowed FFT spectral centroid, BS.1770 integrated loudness (K
 weighting, 400 ms blocks, -70 and -10 LU gates), sample peak. For the live
-context, tap the output with an `AudioWorkletNode` from a Blob URL that posts
-each 128-frame block's peak with `currentTime`, so latency is measured on the
-audio clock (about 2.7 ms resolution), not with rAF. See
-`home/scripts/check-babble.mjs`.
+context, tap the output with an `AudioWorkletNode` that posts each 128-frame
+block's peak with `currentTime`, so latency is measured on the audio clock (about
+2.7 ms resolution), not with rAF. Load the worklet from a same-origin file
+(`home/scripts/sound-tap.js`, `babble-tap.js`, `music-tap.js`, served by Vite):
+the home's CSP is `script-src 'self'` with no `blob:` (#40), so a Blob URL worklet
+fails to load. See `home/scripts/check-sound.mjs`.
 
 **Recording sound with video.** Playwright video has no audio. Cover the page
 in black until the sound starts, find the cover's end with ffmpeg
