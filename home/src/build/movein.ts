@@ -10,7 +10,7 @@
 // through both faces of the new doorway, and talk.ts's `walk` sends them; `where` reads them.
 import * as THREE from 'three/webgpu'
 import type { View, Frame } from '../plugins/camera'
-import { nearestNode, setSpot } from '../villagers/world'
+import { nearestNode, setSpot, type Spot } from '../villagers/world'
 import { curveOf, outline as ringOf, pointAt, wallOf, type Furniture, type P, type Plan } from './plan'
 import { draftGeometry, type Draft } from './resolve'
 import { SEATS } from './pieces'
@@ -45,6 +45,8 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
   let room = ''
   let label = ''
   let person: string | null = null
+  /** The spot as last registered, so its floor can follow the room (or be dropped with it). */
+  let spotDef: Spot | null = null
   let door: { mid: P; into: P; gap: [P, P] } | null = null
   let seat: { x: number; z: number; yaw: number; from: -1 | 1 } | null = null
   let spot: P = [0, 0]
@@ -117,7 +119,8 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
       }
     }
     const face = seat ? seat.yaw : Math.atan2(centre[0] - spot[0], centre[1] - spot[1])
-    setSpot(SPOT, { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, floor: ring, ...(seat ? { seat: { x: seat.x, z: seat.z, yaw: seat.yaw } } : {}) })
+    spotDef = { at: spot, face, via: nearestNode(outside[0], outside[1], 'open') ?? 'f0', through: path, floor: ring, ...(seat ? { seat: { x: seat.x, z: seat.z, yaw: seat.yaw } } : {}) }
+    setSpot(SPOT, spotDef)
     room = d.roomId
     label = d.label
     person = who
@@ -197,8 +200,32 @@ export function makeMoveIn(view: View, camera: THREE.PerspectiveCamera) {
     hushed = false
   }
 
+  /**
+   * The plan changed: the spot's floor follows the room it was made for. If the room is gone (undone), the
+   * villager goes back to their chores and the spot forgets the room's floor and doorway path, so nobody standing
+   * where it was is led out through a door that no longer exists.
+   */
+  let synced: Plan | null = null
+  const sync = (plan: Plan) => {
+    if (!room || !spotDef || plan === synced) return
+    synced = plan
+    const r = plan.rooms.find((x) => x.id === room)
+    if (!r) {
+      release()
+      spotDef = { ...spotDef, through: undefined, floor: undefined }
+      setSpot(SPOT, spotDef)
+      room = ''
+      return
+    }
+    const ring = ringOf(plan, r)
+    if (JSON.stringify(ring) === JSON.stringify(spotDef.floor)) return
+    spotDef = { ...spotDef, floor: ring }
+    setSpot(SPOT, spotDef)
+  }
+
   return {
     start,
+    sync,
     frame: step,
     framing,
     release,

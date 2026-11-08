@@ -855,8 +855,8 @@ export default {
       settle()
       if (movein) {
         const m = movein.state()
-        // The room was undone under the reveal: the villager goes back to their chores.
-        if (m.room && m.phase !== 'idle' && !plan.rooms.some((r) => r.id === m.room)) movein.release()
+        // The room was undone or reshaped: the villager goes back to their chores if it is gone, and the spot's floor follows it.
+        if (m.room) movein.sync(plan)
         movein.frame()
       }
       // While the reveal holds the view, from the moment the villager steps in, the new room is the lit subject: its

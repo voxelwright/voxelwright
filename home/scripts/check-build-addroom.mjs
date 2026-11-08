@@ -760,6 +760,13 @@ try {
         check('undo: with the room gone, the yard is exactly as diorama.ts drew it', Object.keys(yard0).every((k) => back[k] === yard0[k]), Object.keys(yard0).filter((k) => back[k] !== yard0[k]))
         const gone = await pieces()
         check('one undo takes the room and its first pieces away together', gone.ids.length === 0 && gone.drawn.length === 0, gone)
+        // The move-in spot forgets the undone room: nobody standing where it was is led out through its old door.
+        const spotAfter = await B(page, async () => {
+          const W = await import('/src/villagers/world.ts')
+          const sp = W.SPOTS.buildMovein
+          return sp ? { floor: Boolean(sp.floor), through: Boolean(sp.through) } : null
+        })
+        check('undo: the move-in spot drops the undone room\'s floor and doorway path', spotAfter && !spotAfter.floor && !spotAfter.through, spotAfter)
       }
       await page.keyboard.press('Control+Shift+z')
       s = await until(page, (x) => x.rooms.length === 3)
