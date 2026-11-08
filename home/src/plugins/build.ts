@@ -632,8 +632,10 @@ export default {
         ${tagCss('.build-note', '.build-note-x', '.build-note-y', '.build-note-z')}
         ${tagCss('.build-back-card', '.build-back-x', '.build-back', '.build-back-z')}
         .build-back { position: fixed; top: max(16px, env(safe-area-inset-top)); left: max(16px, env(safe-area-inset-left)); translate: 0 -8px; z-index: 20; rotate: -1.5deg;
-          box-shadow: 0 6px 14px rgba(70, 40, 20, 0.18); opacity: 0; pointer-events: none; transition: opacity 260ms ease, translate 260ms ease; }
-        .build-back.shown { opacity: 1; translate: 0 0; pointer-events: auto; }
+          box-shadow: 0 6px 14px rgba(70, 40, 20, 0.18); opacity: 0; pointer-events: none;
+          visibility: hidden; transition: opacity 260ms ease, translate 260ms ease, visibility 0s 260ms; }
+        /* Hidden, it is out of the Tab order too (visibility), and it still fades. */
+        .build-back.shown { opacity: 1; translate: 0 0; pointer-events: auto; visibility: visible; transition-delay: 0s; }
         @media (prefers-reduced-motion: reduce) { .build-back { transition: none; } }
       `
       document.head.append(style)

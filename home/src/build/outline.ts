@@ -980,7 +980,7 @@ export function makeOutline(stage: Stage, hooks: OutlineHooks) {
 
 function css() {
   return `
-  .build-dim, .build-choice, .build-dim-field { position: fixed; z-index: 6; left: 0; top: 0; opacity: 0; pointer-events: none; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1); scale: 0.9; }
+  .build-dim, .build-choice, .build-dim-field { position: fixed; z-index: 6; left: 0; top: 0; opacity: 0; pointer-events: none; visibility: hidden; transition: opacity 160ms ease, scale 200ms cubic-bezier(.2, 1.4, .4, 1), visibility 0s 160ms; scale: 0.9; }
   .build-dim { min-height: 36px; min-width: 44px; padding: 3px 12px 5px; border: 0; border-radius: 9px; cursor: text; rotate: -3deg; color: #4a3428; font: 700 18px ${HAND};
     background: linear-gradient(170deg, #fffaf0, #f6e8cf); box-shadow: 0 5px 12px rgba(70, 40, 20, 0.24), 0 1px 0 rgba(255, 255, 255, 0.7) inset; }
   .build-dim[data-dim='d'] { rotate: 4deg; }
@@ -991,7 +991,8 @@ function css() {
   .build-dim::after { content: ''; position: absolute; inset: 3px; border: 1.2px dashed rgba(150, 110, 80, 0.4); border-radius: 7px; pointer-events: none; }
   .build-dim:hover::after, .build-dim:focus-visible::after { border-color: rgba(150, 100, 60, 0.85); }
   .build-dim:focus-visible { outline: 3px solid #e7a35c; outline-offset: 2px; border-radius: 8px; }
-  .build-dim.shown, .build-choice.shown, .build-dim-field.shown { opacity: 1; scale: 1; pointer-events: auto; }
+  /* Hidden, they are out of the Tab order too (visibility), and they still fade. */
+  .build-dim.shown, .build-choice.shown, .build-dim-field.shown { opacity: 1; scale: 1; pointer-events: auto; visibility: visible; transition-delay: 0s; }
   .build-dim.shown:hover, .build-dim.shown:focus-visible { opacity: 1; }
   .build-dim.editing { opacity: 0; pointer-events: none; }
   .build-dim-field { width: 92px; padding: 3px 10px 5px; border: 1.5px dashed rgba(150, 100, 60, 0.5); border-radius: 9px; text-align: center;

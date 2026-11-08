@@ -339,12 +339,16 @@ try {
     check('house() whose saved house cannot be read is read-only, not a page-only copy', dh.readOnly === damaged.READ_ONLY_LINE && (await refusal(() => dh.commit([move]))) instanceof ReadOnly)
     check("house() asks for /house/plans through the villager API with the tab's link", sent?.url === '/villager/api/house/plans' && sent.auth, sent)
 
-    globalThis.fetch = async (url) => new Response(JSON.stringify({ error: 'internal error' }), { status: 500 })
+    // A running host whose stored house is damaged answers 500 to the tab's link and 401 to a request with no token.
+    globalThis.fetch = async (url, init) => (init?.headers?.authorization ? new Response(JSON.stringify({ error: 'internal error' }), { status: 500 }) : new Response(JSON.stringify({ error: 'token required' }), { status: 401 }))
     const failing = await freshHouse()
     const fh = await failing.house()
-    // A known gap, kept visible: authorized() reads any 5xx as "host unreachable" (the dev proxy answers 502/504 when
-    // the host is down), so a host whose stored house is damaged (500) opens a page-only house, not a read-only one.
-    check('known gap: house() whose host answers 500 opens in memory as if the keeper were away (authorized folds 5xx into unreachable)', fh.unsaved === failing.UNSAVED_LINE && !fh.readOnly)
+    check('house() whose running host answers 500 is read-only, not a page-only copy', fh.readOnly === failing.READ_ONLY_LINE && (await refusal(() => fh.commit([move]))) instanceof ReadOnly)
+    // A stopped host behind the dev proxy: 502 to every request.
+    globalThis.fetch = async () => new Response('bad gateway', { status: 502 })
+    const proxied = await freshHouse()
+    const ph = await proxied.house()
+    check('house() whose host is stopped behind the dev proxy (502) opens in memory with the keeper-away line', ph.unsaved === proxied.UNSAVED_LINE && !ph.readOnly)
   } finally {
     globalThis.fetch = realFetch
   }
