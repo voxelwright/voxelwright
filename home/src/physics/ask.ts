@@ -3,8 +3,8 @@
 // (rules.ts checkRules), then applied all at once. A failed call or a refused answer leaves
 // the rules as they were.
 import { askRules, ME } from '../villager'
-import type { Rules } from './rules'
-import type { World } from './world'
+import type { Rules } from '../engine/rules'
+import type { World } from '../engine/world'
 
 export type Asked =
   | { ok: true; note: string; rules: Rules; clamped: string[]; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }

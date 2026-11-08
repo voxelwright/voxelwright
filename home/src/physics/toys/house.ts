@@ -2,7 +2,7 @@
 // heavy furniture already stand (drawn by their own plugins), and a few light things on the
 // floor along the villagers' walks for them to nudge, plus one heavy crate.
 import { FRONT_Z, KITCHEN, LIVING_X, TABLE_TOP, WALL_T, WALL_Z, DOORWAY, HOUSE_H } from '../../layout'
-import type { PartSpec, ToySpec } from '../toy'
+import type { PartSpec, ToySpec } from '../../engine/toy'
 
 const block = (id: string, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): PartSpec =>
   ({ id, shape: { kind: 'box', half: [(x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2] }, material: 'plaster', at: [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], hidden: true })

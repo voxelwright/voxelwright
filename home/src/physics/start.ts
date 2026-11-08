@@ -1,17 +1,19 @@
-// Starts the physics world for the `physics` plugin (#74), loaded on demand: the solver, the
+// Village's adapter over the physics engine (src/engine, #74), for the `physics` plugin and
+// loaded on demand: the solver, the
 // house's colliders and light things, the pinball table, villagers as bodies, keys while a
 // toy is being played, the rules (kept for the visit in this browser), and the
 // `village.physics` handle the checks and the panel use.
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own } from '../kernel'
+import { paintWood } from '../paint'
 import { PHYSICS_PANEL } from '../features'
-import { createJolt, loadJolt } from './jolt'
-import { World } from './world'
-import { PRESETS, type Rules } from './rules'
+import { createJolt, loadJolt } from '../engine/jolt'
+import { World } from '../engine/world'
+import { PRESETS, type Rules } from '../engine/rules'
 import { ask, askedSoFar } from './ask'
-import type { PhysicsEvent } from './events'
-import type { Vec3 } from './core'
+import type { PhysicsEvent } from '../engine/events'
+import type { Vec3 } from '../engine/core'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 
@@ -30,7 +32,7 @@ export async function start(ctx: Context, gone: () => boolean) {
     log.push(e)
     if (log.length > 500) log.splice(0, 250)
     ctx.emit('village/physics', e)
-  })
+  }, (seed, light, dark, knots, planks) => paintWood({ seed, w: 256, h: 256, planks, light, dark, knots }))
   ctx.effect(() => () => world.dispose(), 'physics solver')
   for (const toy of TOYS) world.addToy(toy)
   own(ctx, world.group)
@@ -140,7 +142,7 @@ export async function start(ctx: Context, gone: () => boolean) {
   }, 'physics handle')
 
   if (PHYSICS_PANEL) {
-    const { panel } = await import('./panel')
+    const { panel } = await import('../engine/panel')
     if (!gone()) ctx.effect(() => panel(world, api.ask, () => api.stats()), 'physics panel')
   }
 }

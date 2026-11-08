@@ -3,7 +3,7 @@
 // sensors are wired to kicks and to a score counter, two maple flippers on motor hinges,
 // a plunger piston, and a drain zone wired to an emitter that puts the ball back.
 import { LIVING_X } from '../../layout'
-import type { PartSpec, ToySpec } from '../toy'
+import type { PartSpec, ToySpec } from '../../engine/toy'
 
 const AT: [number, number, number] = [LIVING_X + 0.9, 0.92, 1.0]
 const TILT = 0.113 // 6.5 degrees, a real table's lean

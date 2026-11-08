@@ -1,4 +1,4 @@
-// The physics world (#74): builds toys (parts, gadgets, wires) into solver bodies and
+// The physics engine's world (#74), with no app imports: builds toys (parts, gadgets, wires) into solver bodies and
 // three.js meshes, runs the gadget kit and the wires, keeps villagers as kinematic bodies,
 // applies the world rules, and reports what happens as `village/physics` events. Fixed
 // 60 Hz steps of simulated time; gadget actions are queued during a step and run after it.
@@ -9,7 +9,6 @@ import type { At, PhysicsEvent } from './events'
 import { MATERIALS, MATERIAL_NAMES, type MaterialName } from './materials'
 import { checkRules, NORMAL, PRESETS, type Rules } from './rules'
 import { KNOBS, type GadgetSpec, type PartSpec, type Signal, type ToySpec } from './toy'
-import { paintWood } from '../paint'
 
 const STEP = 1 / 60
 const MAX_STEPS = 4
@@ -76,7 +75,11 @@ export class World {
   private frameTimes: number[] = []
   rules: Rules = { ...NORMAL, gravity: [...NORMAL.gravity] }
 
-  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void) {
+  /**
+   * `grain` paints a wood texture in a material's colour (the host app's painter); without it,
+   * wood is flat colour. Everything else here is the engine's own: no app imports.
+   */
+  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: (seed: number, light: [number, number, number], dark: [number, number, number], knots: number, planks: number) => THREE.Texture) {
     this.group.name = 'physics'
     core.setCombine((a, b) => this.pairs[(this.byBody[a]?.material ?? 0) * MATERIAL_NAMES.length + (this.byBody[b]?.material ?? 0)] ?? [0.5, 0.3])
     this.applyRules(this.rules)
@@ -193,15 +196,15 @@ export class World {
     const color = new THREE.Color(part.paint ?? l.color)
     const wooden = part.material === 'maple' || part.material === 'walnut' || part.material === 'lacquer'
     let map: THREE.Texture | undefined
-    if (wooden) {
+    if (wooden && this.grain) {
       map = this.wood.get(key)
       if (!map) {
         const rgb = (k: number) => [color.r, color.g, color.b].map((c) => Math.round(Math.min(255, c * 255 * k))) as [number, number, number]
-        map = paintWood({ seed: 70 + this.wood.size, w: 256, h: 256, planks: part.material === 'lacquer' ? 1 : 2, light: rgb(1.06), dark: rgb(0.86), knots: part.material === 'walnut' ? 2 : 0 })
+        map = this.grain(70 + this.wood.size, rgb(1.06), rgb(0.86), part.material === 'walnut' ? 2 : 0, part.material === 'lacquer' ? 1 : 2)
         this.wood.set(key, map)
       }
     }
-    const material = new THREE.MeshStandardMaterial({ color: wooden ? '#ffffff' : color, roughness: l.roughness, metalness: l.metalness, ...(map ? { map } : {}) })
+    const material = new THREE.MeshStandardMaterial({ color: map ? '#ffffff' : color, roughness: l.roughness, metalness: l.metalness, ...(map ? { map } : {}) })
     this.looks.set(key, material)
     return material
   }

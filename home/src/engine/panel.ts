@@ -1,10 +1,9 @@
-// The world-rules panel (#74), a Workshop tool: dev builds with ?physics=panel only, never
-// on the warm product surface. Every rule's slider comes from rules.ts FIELDS, presets apply
-// all at once, a line of text asks the host for rules (ask.ts), and each gadget's knobs tune
+// The world-rules panel (#74), a workshop tool kept off any warm product surface (the home
+// shows it in dev builds with ?physics=panel only). Every rule's slider comes from rules.ts FIELDS, presets apply
+// all at once, a line of text asks for rules in words (the host app supplies `ask`), and each gadget's knobs tune
 // live. Returns its removal.
 import { FIELDS, PRESETS, RULE_KEYS, type Rules } from './rules'
 import { KNOBS } from './toy'
-import type { Asked } from './ask'
 import type { Stats, World } from './world'
 
 const CSS = `
@@ -20,7 +19,10 @@ const CSS = `
 .physics-panel .note { color: #cdbb9e; min-height: 1.3em; }
 `
 
-export function panel(world: World, ask: (text: string) => Promise<Asked>, stats: () => Stats): () => void {
+/** What asking for rules in words came to: the new rules' note, or why they stayed as they were. */
+export type Answer = { ok: true; note: string; clamped: string[] } | { ok: false; why: string; reason?: string }
+
+export function panel(world: World, ask: (text: string) => Promise<Answer>, stats: () => Stats): () => void {
   const root = document.createElement('aside')
   root.className = 'physics-panel'
   root.setAttribute('aria-label', 'World rules')

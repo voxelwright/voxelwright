@@ -1,7 +1,7 @@
 // World rules written from a sentence (#74): POST /people/:id/physics {text, current}. The
 // villager-theme.ts pattern: one tool-less model call writes the rules as JSON; the host
 // checks only its shape and answers 422 when the model fails; the page checks every field
-// again and clamps it (home/src/physics/rules.ts checkRules) before applying the rules all at
+// again and clamps it (home/src/engine/rules.ts checkRules) before applying the rules all at
 // once. The answer is data: it can change how the world moves and nothing else.
 // `stubRuler` stands in for the model in checks.
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
@@ -19,7 +19,7 @@ export type Ruler = (ask: RulesAsk) => Promise<{ raw: string } & Call>
 
 const MAX_TEXT = 300
 const MAX_BODY = 8_000
-const RULES = join(import.meta.dirname, '..', '..', 'home', 'src', 'physics', 'rules.ts')
+const RULES = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine', 'rules.ts')
 
 let prompt: Promise<string> | undefined
 /** The system prompt, built once from the home's own rules file (type, ranges, presets), so it never drifts from it. */

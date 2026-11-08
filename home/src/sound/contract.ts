@@ -7,7 +7,7 @@
 // for stereo pan, so a plugin passes what it has (a head, a prop, a door) and nothing
 // about the screen.
 
-import type { PhysicsEvent } from '../physics/events'
+import type { PhysicsEvent } from '../engine/events'
 
 /** A world position: a THREE.Vector3 or anything with x, y, z. */
 export interface Where { x: number; y: number; z: number }
@@ -60,7 +60,7 @@ declare module 'cordis' {
     'village/walk'(e: Timed & { phase: 'leave' | 'arrive'; from: string; to: string; at?: Where }): void
     /** Something can't be used yet (the closed Workshop door). */
     'village/refused'(e: { id: string; at?: Where }): void
-    /** The physics world (#74): impacts, gadget signals, rule changes and clamps, as data (physics/events.ts). */
+    /** The physics world (#74): impacts, gadget signals, rule changes and clamps, as data (engine/events.ts). */
     'village/physics'(e: PhysicsEvent): void
   }
 }

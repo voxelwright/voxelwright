@@ -171,7 +171,7 @@ try {
 
   // ── Rules: checked, clamped, atomic ──
   const unit = await page.evaluate(async () => {
-    const { checkRules, NORMAL } = await import('/src/physics/rules.ts')
+    const { checkRules, NORMAL } = await import('/src/engine/rules.ts')
     const hostile = checkRules(JSON.parse('{"__proto__": {"polluted": true}, "gravity": [1e308, "x", null], "timeScale": -1, "bounce": "NaN", "kick": 1e9, "substeps": 2.6, "eval": "alert(1)"}'), NORMAL)
     return {
       refused: [checkRules(null, NORMAL), checkRules([1, 2], NORMAL), checkRules('moon', NORMAL)].every((r) => 'reason' in r),
