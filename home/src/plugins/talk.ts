@@ -26,6 +26,12 @@ const ON = params.get('talk') === 'npc'
 /** ?slip=always keeps your paper slip on screen with no talk open, addressed to your own villager. */
 const SLIP_ALWAYS = params.get('slip') === 'always'
 /**
+ * The paper climb's first regroup (#42): three ways to show a round at the table on a phone, behind ?round=
+ * until one wins. tabs: earlier speakers fold to name tabs and your note lies on the table; sheet: the round is
+ * one sheet passed round; above: the table from straight above, every slip lying in front of its speaker.
+ */
+const ROUND = (['tabs', 'sheet', 'above'] as const).find((r) => params.get('round') === r) ?? null
+/**
  * The always-on input (#42): the held notepad by default, ?input=speech for the speech card,
  * ?input=slip for the paper slip that shows only during a talk. Lines to your own villager are routed by it.
  */
@@ -105,6 +111,8 @@ const FAREWELL = /^\s*(?:(?:ok(?:ay)?|right|well)[\s,]+)?(?:thanks?(?: you)?(?: 
 /** Booster cushions on the chairs, so a seated villager clears the table top. */
 const BOOSTER = 0.12/** The table from above and to the right, close enough for faces, wide enough to see who else is about. */
 const TABLE_SHOT: Pose = { position: new THREE.Vector3(1.75, 2.35, 2.6), look: new THREE.Vector3(0.0, 0.45, -0.25) }
+/** The middle of the table top. */
+const TABLE_CENTRE = new THREE.Vector3(-0.25, TABLE_TOP, 0.15)
 /**
  * Where a note to the whole table can lie during the round, nearest the front first: the first with no face over
  * it in the table shot is used (#42 paper climb: a fixed spot put it over a chair back, floating).
@@ -817,6 +825,8 @@ export default {
 
     /** The table shot, pulled back on a tall screen so everyone at the table stays in frame. */
     const tableShot = (): Pose => {
+      // ?round=above on a phone: straight down onto the table, its length along the screen.
+      if (ROUND === 'above' && innerWidth < 600) return { position: TABLE_CENTRE.clone().add(new THREE.Vector3(0.75, 5.6, 0.05)), look: TABLE_CENTRE.clone() }
       const back = THREE.MathUtils.clamp(0.8 / stage.camera.aspect, 1, 1.7)
       return { position: TABLE_SHOT.look.clone().lerp(TABLE_SHOT.position, back), look: TABLE_SHOT.look }
     }
@@ -1321,10 +1331,35 @@ export default {
         if (f.x1 < 0 || f.x0 > innerWidth || f.y1 < 0 || f.y0 > innerHeight) continue
         faces.set(o, { l: f.x0, t: f.y0 + TAB, w: f.x1 - f.x0, h: f.y1 - f.y0 - TAB })
       }
+      // The regroup's phone round prototypes (?round=), only at the table on a phone.
+      const phoneRound = ROUND !== null && mode === 'table' && innerWidth < 600 ? ROUND : null
+      for (const r of ['tabs', 'sheet', 'above'] as const) document.body.classList.toggle(`round-${r}`, phoneRound === r)
       const order = [...showing.keys()].sort((a, b) => Number(showing.get(a) === 'said') - Number(showing.get(b) === 'said'))
       for (const m of order) {
         const { card } = m
         const el = card.el
+        // tabs: what was said folds to its speaker's name over its head.
+        el.classList.toggle('folded', phoneRound === 'tabs' && showing.get(m) === 'said')
+        // above: each slip lies on the table in front of its speaker, seen from straight above.
+        if (phoneRound === 'above') {
+          const w = el.offsetWidth, h = el.offsetHeight
+          const at = toPx(edge.copy(m.v.pos).lerp(TABLE_CENTRE, 0.3).setY(TABLE_TOP))
+          let spot = { l: THREE.MathUtils.clamp(at.x - w / 2, EDGE, innerWidth - EDGE - w), t: THREE.MathUtils.clamp(at.y - h / 2, EDGE + TAB, innerHeight - EDGE - h), w, h }
+          // Slips already lying there push this one out toward its speaker's side of the table.
+          const c = toPx(edge.copy(TABLE_CENTRE))
+          const dx = Math.sign(at.x - c.x) || 1, dy = Math.sign(at.y - c.y) || 1
+          for (let i = 0; i < 8 && taken.some((t) => spot.l < t.l + t.w && t.l < spot.l + spot.w && spot.t - TAB < t.t + t.h && t.t < spot.t + spot.h); i++)
+            spot = { ...spot, l: THREE.MathUtils.clamp(spot.l + dx * 18, EDGE, innerWidth - EDGE - w), t: THREE.MathUtils.clamp(spot.t + dy * 22, EDGE + TAB, innerHeight - EDGE - h) }
+          taken.push(spot)
+          const k = card.placed && !reducedMotion.matches ? 1 - Math.exp(-dt * 14) : 1
+          card.x += (spot.l - card.x) * k
+          card.y += (spot.t - card.y) * k
+          card.placed = true
+          el.style.translate = `${card.x}px ${card.y}px`
+          el.dataset.tail = 'none'
+          el.style.setProperty('--reach', '0px')
+          continue
+        }
         // Your note clipped above its top edge is placed with it, as one block.
         const lead = pinned.on && pinned.card === m ? myNote.offsetHeight - CLIP : 0
         const w = el.offsetWidth, ch = el.offsetHeight, h = ch + lead
@@ -1384,7 +1419,45 @@ export default {
           pinned.placed = true
           myNote.style.translate = `${pinned.x}px ${pinned.y}px`
         }
+      } else if (pinned.on && phoneRound === 'sheet') {
+        // sheet: your note is the round's one sheet, at the top, written on by each speaker in turn and
+        // reaching down to whoever is writing now.
+        const rows = [...new Set(roundLog.map((r) => r.speaker))].map((p) => cast.find((c) => c.person === p)!).filter((m) => showing.has(m))
+        const sig = rows.map((m) => `${m.person}:${showing.get(m)}:${m.card.el.querySelector('.said')?.textContent}:${m.card.talking}`).join('|')
+        if (sig !== myNote.dataset.rows) {
+          myNote.dataset.rows = sig
+          for (const r of myNote.querySelectorAll('.row')) r.remove()
+          for (const m of rows) {
+            const row = document.createElement('div')
+            row.className = `row${showing.get(m) === 'speaking' ? ' now' : ''}${m.card.talking ? ' talking' : ''}`
+            row.style.setProperty('--c', m.colour)
+            const name = document.createElement('div')
+            name.className = 'who'
+            name.textContent = m.name
+            const words = document.createElement('div')
+            words.className = 'text'
+            words.textContent = m.card.el.querySelector('.said')?.textContent ?? ''
+            row.append(name, words)
+            myNote.append(row)
+          }
+        }
+        myNote.classList.add('sheet', 'shown')
+        const w = myNote.offsetWidth, h = myNote.offsetHeight
+        pinned.x = EDGE
+        pinned.y = EDGE + 4
+        pinned.placed = true
+        myNote.style.translate = `${pinned.x}px ${pinned.y}px`
+        const now = speaker && showing.has(speaker) ? headBox(speaker) : null
+        myNote.dataset.tail = now ? 'down' : 'none'
+        if (now) {
+          myNote.style.setProperty('--tail', `${THREE.MathUtils.clamp(now.cx - pinned.x, 30, w - 30)}px`)
+          myNote.style.setProperty('--reach', `${Math.max(0, Math.round(now.y0 - 22 - (pinned.y + h)))}px`)
+        }
       } else if (pinned.on) {
+        myNote.classList.remove('sheet')
+        for (const r of myNote.querySelectorAll('.row')) r.remove()
+        delete myNote.dataset.rows
+        delete myNote.dataset.tail
         const w = myNote.offsetWidth, h = myNote.offsetHeight
         const blocked = [...taken, ...faces.values()]
         const clear = (o: Omit<Spot, 'tail'>) => inside(o) && !blocked.some((t) => o.l < t.l + t.w + 6 && t.l < o.l + o.w + 6 && o.t < t.t + t.h + 6 && t.t < o.t + o.h + 6)
@@ -1400,7 +1473,14 @@ export default {
           }
         }
         // On a phone the table is full of heads: your line goes up on the wall, above the round.
-        for (let i = 0; !spot && innerWidth < 600 && i < 3; i++) {
+        // above: in the middle of the table.
+        if (phoneRound === 'above') {
+          const a = toPx(edge.copy(TABLE_CENTRE))
+          let o = { l: THREE.MathUtils.clamp(a.x - w / 2, EDGE, innerWidth - EDGE - w), t: a.y - h / 2, w, h }
+          for (let i = 0; i < 10 && taken.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t - TAB < o.t + o.h); i++) o = { ...o, t: o.t - 20 }
+          spot = o
+        }
+        for (let i = 0; !spot && innerWidth < 600 && phoneRound !== 'tabs' && i < 3; i++) {
           const o = { l: (innerWidth - w) / 2, t: EDGE + i * (h + 12), w, h }
           // Clear of the slips below it and of the name tape on top of each.
           if (!blocked.some((t) => o.l < t.l + t.w && t.l < o.l + o.w && o.t < t.t + t.h && t.t - TAB - 6 < o.t + o.h)) spot = o
@@ -1894,6 +1974,22 @@ function css() {
   .talk-card.mine .to-line { margin: 0 0 2px; font: italic 15px/1.2 ${HAND}; }
   .talk-card.mine .words { font: 20px/1.3 ${HAND}; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .talk-card.mine:not(.clipped) .words { font-size: 23px; }
+  /* The regroup's phone round prototypes (?round=). */
+  .talk-card.folded { width: 108px; min-width: 108px; max-width: 108px; height: 34px; padding: 0; }
+  .talk-card.folded .page, .talk-card.folded .more { display: none; }
+  body.round-tabs .talk-card.mine:not(.clipped) { max-width: 158px; padding: 10px 12px 8px; }
+  body.round-tabs .talk-card.mine:not(.clipped) .words { font-size: 16px; -webkit-line-clamp: 2; }
+  body.round-sheet .talk-paper:not(.you) { display: none; }
+  .talk-card.mine.sheet { max-width: none; width: calc(100vw - 24px); padding: 12px 18px 12px; }
+  .talk-card.mine.sheet .words { font-size: 19px; -webkit-line-clamp: 2; }
+  .talk-card.mine.sheet .row { margin: 10px 0 0; padding-top: 6px; }
+  .talk-card.mine.sheet .row .who { height: 20px; font: 700 15px/20px ${HAND}; }
+  .talk-card.mine.sheet .row .text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 4px; font: 16px/1.35 ${BOOK}; white-space: normal; }
+  .talk-card.mine.sheet .row.now .text { -webkit-line-clamp: 4; font-size: 18px; }
+  body.round-above .talk-card { max-width: 210px; padding: 18px 16px 10px; }
+  body.round-above .talk-card .words { font-size: 15px; }
+  body.round-above .talk-card.mine { max-width: 180px; }
+  body.round-above .talk-card.mine .words { font-size: 17px; -webkit-line-clamp: 2; }
   .talk-card .before[hidden], .talk-card .more[hidden], .talk-card .cue[hidden] { display: none; }
   .talk-card .more { display: block; margin: 2px 0 0 auto; padding: 2px 4px; border: 0; background: none; cursor: pointer;
     font: italic 700 17px ${HAND}; color: color-mix(in oklab, var(--c) 80%, #2a1608); }
