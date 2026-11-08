@@ -14,6 +14,8 @@
 //   routes.jsonl        the separate router (#42, ?route=separate): each line routed, the checked route, timings
 //   library/<item>.json props made for them: module text (never run here) and metadata
 //   projects.jsonl      things too big for the fast path, recorded as "being made"
+//   visits/<owner>/     this person's talks with another person's villager (#42): its own conversation,
+//                       usage, session and notes. A visit reads only the owner's persona.json.
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -22,7 +24,7 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from './villager-agent.ts'
 import { checkRouted, cleanName, ROUTE_PREFIX, routeInReply, type Maker, type Router, type RouteAsk, type Routed } from './villager-input.ts'
-import { checkProfile, humourWords, loadCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
+import { checkProfile, humourWords, loadCharacter, loadVisitCharacter, writePreferences, type AgeBand, type Humour, type Profile } from './persona.ts'
 import { loadSketch, noteSketch, SKETCH, sketchRoute, type SketchImage, type SketchMaker } from './sketch.ts'
 
 export interface Config {
@@ -155,9 +157,15 @@ export default {
     const profileOf = (id: string): Profile => config.profiles?.[id] ?? { age: 'unknown' }
     /** Who the villager is and who it is talking to, from trusted files and config; the humour ceiling never comes from a reply. */
     const characterOf = (id: string) => loadCharacter(id, personDir(id), profileOf(id))
+    /** A visit (#42): `visitor` talking with `owner`'s villager. Everything it writes is the visitor's, under their folder. */
+    const visitDir = (visitor: string, owner: string) => join(personDir(visitor), 'visits', owner)
+    const visitCharacterOf = (visitor: string, owner: string) =>
+      loadVisitCharacter({ person: visitor, personDir: personDir(visitor), profile: profileOf(visitor) }, { person: owner, personDir: personDir(owner), name: people[owner] }, visitDir(visitor, owner))
 
-    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse, sketch?: { from: string; id: string; image: SketchImage }) {
-      const dir = personDir(id)
+    /** A turn with `id`'s villager. With `visitor`, it is their visit: the turn reads and writes only under the visitor. */
+    async function converse(id: string, text: string, context: string | undefined, route: Omit<RouteAsk, 'text' | 'signal'> | undefined, res: ServerResponse, sketch?: { from: string; id: string; image: SketchImage }, visitor?: string) {
+      const talker = visitor ?? id
+      const dir = visitor ? visitDir(visitor, id) : personDir(id)
       const notesDir = join(dir, 'notes')
       await mkdir(notesDir, { recursive: true, mode: 0o700 })
       const stateFile = join(dir, 'villager.json')
@@ -165,8 +173,8 @@ export default {
       // The humour dial (#42): words in a direct talk can only turn it down. The host cannot tell who is
       // typing at a shared screen, so crude comes only from the operator's profile (Sentinel, #42).
       const asked = context === undefined ? humourWords(text) : null
-      if (asked === 'clean') await writePreferences(dir, { humour: 'clean', at: new Date().toISOString() })
-      const { character, personaRefused } = await characterOf(id)
+      if (asked === 'clean') await writePreferences(personDir(talker), { humour: 'clean', at: new Date().toISOString() })
+      const { character, personaRefused } = visitor ? await visitCharacterOf(visitor, id) : await characterOf(id)
       // At the table, crude only if everyone listed has crude on their own; otherwise cheeky for that turn.
       let humourCap: Humour | undefined
       if (context !== undefined && character.humour === 'crude') {
@@ -211,7 +219,7 @@ export default {
         }
       }
       try {
-        const result = await config.agent({ name: people[id], text, context, route, character, humourCap, ...(sketch ? { image: sketch.image } : {}), sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
+        const result = await config.agent({ name: people[talker], text, context, route, character, humourCap, ...(sketch ? { image: sketch.image } : {}), sessionId: state.sessionId, notesDir, personDir: dir, signal: deadline, onText })
         const totalMs = Date.now() - started
         if (held !== null && !routed) {
           routed = routeInReply(held, ids, items)
@@ -225,7 +233,7 @@ export default {
         // A routed line is stored with the route's spoken line, never the JSON; a refused route is not acted on.
         const said = r && 'routed' in r ? r.routed.say ?? `(${r.routed.route})` : r ? '' : result.reply
         await appendJsonl(join(dir, 'conversation.jsonl'), { at: new Date().toISOString(), from: 'villager', ...(r && 'reason' in r ? { unanswered: true } : { text: said }), ...(r && 'routed' in r ? { route: r.routed.route } : {}) })
-        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: character.humour, ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
+        await appendJsonl(join(dir, 'usage.jsonl'), { at, models: result.models, usage: result.usage, costUsd, sessionCostUsd: result.sessionCostUsd, ttftMs: result.ttftMs, totalMs, sessionId: result.sessionId, resumed: Boolean(state.sessionId), villager: character.persona.name, age: character.profile.age, humour: character.humour, ...(visitor ? { visiting: id } : {}), ...(personaRefused ? { personaRefused } : {}), ...(route ? { route: r ? ('routed' in r ? r.routed.route : `refused: ${r.reason}`) : 'answer' } : {}) })
         if (r && 'reason' in r) event('failed', { reason: 'route' })
         else event('done', { reply: said, ttftMs: result.ttftMs, totalMs, ...(r ? { routed: r.routed } : {}) })
       } catch (error) {
@@ -379,10 +387,14 @@ export default {
       const person = holder(req)
       if (!person) return send(res, 401, { error: 'token required' })
       const path = new URL(req.url ?? '/', 'http://x').pathname
-      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40).
+      // Every route below is /people/<id>/…, and a token opens its own person's and no other (#40),
+      // except a visit (#42): talking with another listed person's villager, kept under the visitor.
       const owner = /^\/people\/([^/]+)\//.exec(path)?.[1]
       if (owner === undefined) return send(res, 404, { error: 'not found' })
-      if (owner !== person) return send(res, 403, { error: 'this token is for another person' })
+      const visiting = owner !== person && /^\/people\/[^/]+\/(conversation|messages)$/.test(path)
+      if (visiting && (!PERSON.test(owner) || !Object.hasOwn(people, owner))) return send(res, 404, { error: 'no such villager' })
+      if (owner !== person && !visiting) return send(res, 403, { error: 'this token is for another person' })
+      const visitor = visiting ? person : undefined
       // Sketching (#42, sketch.ts): a person's own drawings.
       const sketchMatch = /^\/people\/([^/]+)\/sketches(?:\/([^/]+))?$/.exec(path)
       if (sketchMatch) {
@@ -400,7 +412,7 @@ export default {
       if (!match) return send(res, 404, { error: 'not found' })
       const [, id, what] = match
       if (what === 'conversation' && req.method === 'GET') {
-        const lines = await readJsonl(join(personDir(id), 'conversation.jsonl'))
+        const lines = await readJsonl(join(visitor ? visitDir(visitor, id) : personDir(id), 'conversation.jsonl'))
         return send(res, 200, { name: people[id], lines: lines.slice(-40) })
       }
       if (what === 'messages' && req.method === 'POST') {
@@ -416,6 +428,8 @@ export default {
         // The always-on input (#42): the line may be routed in the villager's own reply.
         let ask: Omit<RouteAsk, 'text' | 'signal'> | undefined
         if (route !== undefined) {
+          // Only your own villager routes your line; a visit is a conversation and nothing more.
+          if (visitor) return send(res, 400, { error: 'a visit is never routed' })
           const { primary, villagers } = (route ?? {}) as { primary?: unknown; villagers?: unknown }
           const known = castOf(villagers, people)
           if (typeof primary !== 'string' || !VILLAGER_NAME.test(primary) || !known) return send(res, 400, { error: 'route is {"primary": a villager name, "villagers": [{id, name, role}] of listed people}' })
@@ -434,14 +448,16 @@ export default {
           if (!image) return send(res, 404, { error: 'no such sketch' })
           sketch = { from, id: sid, image: { ...image, by: people[from] } }
         }
-        if (busy.has(id)) return send(res, 409, { error: 'the villager is still writing' })
-        busy.add(id)
+        // One turn at a time per conversation: your own, or each of your visits (so a visit never blocks the owner).
+        const conversationKey = visitor ? `${visitor}>${id}` : id
+        if (busy.has(conversationKey)) return send(res, 409, { error: 'the villager is still writing' })
+        busy.add(conversationKey)
         const turn = (async () => {
           if (ask) ask.library = (await listLibrary(id)).map((l) => ({ id: l.id, name: cleanName(l.name) }))
           if (sketch) await noteSketch(personDir(sketch.from), { id: sketch.id, given: id })
-          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res, sketch)
+          return converse(id, (text as string).trim(), (context as string | undefined)?.trim() || undefined, ask, res, sketch, visitor)
         })().finally(() => {
-          busy.delete(id)
+          busy.delete(conversationKey)
           turns.delete(turn)
         })
         turns.add(turn)

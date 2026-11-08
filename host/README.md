@@ -246,10 +246,46 @@ a new random token, writes the tokens and the port to
 `<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
 per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
 Every request needs `Authorization: Bearer <token>`, and a token opens only its
-own person: any other person id is refused with 403. That holds on every
-endpoint below, #42's included (talk, table rounds, `/route`, props, library,
-projects, sketches, and a drawing handed over in a message, which must be the
-token holder's own); `npm run check-villager` proves a cross-person refusal for each.
+own person: any other person id is refused with 403. The one exception is a
+visit, below. Everything else (`/route`, props, library, projects, sketches) is
+the token holder's alone, and a drawing handed over in a message must be the
+holder's own; `npm run check-villager` proves a cross-person refusal for each.
+
+## Visits (#42)
+
+Helping someone does not grant access to their private content. When Alex's
+token talks to Sam's villager (`POST /people/sam/messages`, a table round
+included) or reads that conversation (`GET /people/sam/conversation`), Alex is
+visiting Tuft:
+
+- What the visit sees: from Sam's folder, only `persona.json` (who Tuft is:
+  name, role, temperament, register, humour style and lean, tastes and so on),
+  checked as usual. Never Sam's notes, preferences, profile, sketches,
+  conversation or session. The prompt says Tuft is Sam's villager talking with
+  Alex and knows nothing private about Sam.
+- Who it talks to: Alex's profile (age band, language, style) and Alex's
+  preferences. Humour is Alex's ceiling capped at Tuft's lean, so a visit is
+  never crude; the table's mixed rule still applies to your own villager.
+- Where it writes: only under `people/alex/visits/sam/` (conversation, usage,
+  session state, the visit's own notes). A drawing handed to Tuft is Alex's
+  own and is noted in Alex's `sketches.jsonl`. "Keep it clean" said on a visit
+  turns down Alex's own preferences.
+- Its own session: a separate Agent SDK session, and with `--agent warm` a
+  separate process, keyed by the visit's folder. Sam's process and session are
+  never reused. One turn at a time per visit, so a visit never blocks Sam.
+- A visit is never routed (400) and opens none of Sam's other endpoints (403).
+
+`npm run check-villager` seeds synthetic secrets into Sam's notes, preferences,
+profile, conversation, sketches and session, and checks that the visit's
+prompt and context hold none of them, that Sam's files are byte-identical
+afterwards, that every write lands under Alex, that Sam's own token still gets
+Sam's full context, and that forged tokens are refused.
+
+What this does not prove: every villager process runs as the same OS user
+with the operator's subscription, so a visit's boundary is enforced by host
+code choosing what to read, not by the operating system. Same-user processes
+do not isolate family members, and a visit's transcript also lands in the
+operator's `~/.claude/projects/`.
 
 - `GET /people/<id>/conversation`: the last 40 lines on both sides.
 - `POST /people/<id>/messages {"text", "context"?}`: server-sent events, `text` pieces
@@ -344,7 +380,7 @@ as one cleaned line (`cleanName`) and given to models as quoted JSON; `POST
 `finally`; making a prop prunes unkept drafts older than a day. The page only
 follows a talk route to a villager the person's own words name, and sends
 their exact words. Since the #40 merge each person has their own token, and
-`/people/<anyone else>/*` is refused (403).
+`/people/<anyone else>/*` is refused (403), except a visit's conversation (see Visits).
 
 `npm run check-villager`: 120 of 120 (new: in-round context never stored; a
 warm host starts a process per person, reuses it, fails and closes it on a
@@ -628,7 +664,7 @@ that person only (for the Sentinel review):
   `{from, id}` beside the line, never the bytes.
 
 Since the #40 merge a token reads and hands over only its own person's
-drawings, and only to that person's villager.
+drawings; handed to another person's villager, that is a visit (see Visits).
 
 `npm run check-villager`: 148 of 148 (new: a sketch needs the token; text, a
 GIF, 2000 px wide, 8 px tall, a number and over 1 MB are refused; IHDR size;

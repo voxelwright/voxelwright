@@ -8,7 +8,7 @@ import { Context } from 'cordis'
 import { listNotes, readNote, writeNote } from '../src/notes.ts'
 import villager, { parsePeople, parsePeopleSpec } from '../src/villager.ts'
 import { initProblem, stubAgent, systemPrompt, villagerOptions, warmAgent, type Agent, type StartQuery } from '../src/villager-agent.ts'
-import { checkPersona, checkProfile, defaultPersona, fallbackCharacter, humourCeiling, humourWords, TEMPLATES, type Character } from '../src/persona.ts'
+import { checkPersona, checkProfile, defaultPersona, fallbackCharacter, humourCeiling, humourWords, loadVisitCharacter, TEMPLATES, type Character } from '../src/persona.ts'
 import { checkRouted, cleanName, routeContext, routeInReply, stubMaker, stubRouter, type Maker, type Router } from '../src/villager-input.ts'
 import { checkPng, MAX_SKETCHES, moduleName, stubSketchMaker } from '../src/sketch.ts'
 import { PNG } from 'pngjs'
@@ -102,12 +102,13 @@ try {
   const after = await say(host.base, host.token, 'still there?')
   check('the next turn resumes the same session', /4 lines/.test(after.events.find((e) => e.name === 'done')?.data.reply ?? ''))
 
-  // Person ids: a token opens one person's villager and no other.
-  for (const id of ['..%2Falex', 'Alex', 'nobody']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 403)
+  // Person ids: a token opens one person's villager; another listed person's villager is only ever a visit (#42).
+  for (const id of ['..%2Falex', 'Alex', 'nobody']) check(`person "${id}" is refused`, (await say(host.base, host.token, 'hi', id)).status === 404)
   const crossRead = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })
-  check("person-scoped token: Alex's token cannot read Sam's conversation", crossRead.status === 403, crossRead.status)
-  check("person-scoped token: Alex's token cannot write to Sam's villager", (await say(host.base, host.token, 'hi', 'sam')).status === 403)
-  check("person-scoped token: Sam's token cannot read Alex's conversation", (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).status === 403)
+  check("person-scoped token: Alex's token never reads Sam's conversation (it gets Alex's own visit, empty)", crossRead.status === 200 && (await crossRead.json()).lines.length === 0)
+  check("person-scoped token: Alex's line to Sam's villager is a visit, written under Alex", (await say(host.base, host.token, 'hi', 'sam')).status === 200 && existsSync(join(root, 'people', 'alex', 'visits', 'sam', 'conversation.jsonl')) && !existsSync(join(root, 'people', 'sam', 'conversation.jsonl')))
+  const alexSeen = await (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).json()
+  check("person-scoped token: Sam's token never reads Alex's conversation", alexSeen.lines.length === 0, alexSeen.lines.length)
   const samOwn = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })
   check("person-scoped token: Sam's token reads Sam's conversation", samOwn.status === 200 && (await samOwn.json()).name === 'Sam')
   await host.fiber.dispose()
@@ -133,7 +134,7 @@ try {
   check('the conversation read back has no context in it', !JSON.stringify(readBack).includes("Dumpling said"), readBack.lines.length)
   for (const bad of [42, 'x'.repeat(2001)]) check(`context ${typeof bad === 'number' ? 'that is not a string' : 'over 2000 characters'} is refused`, (await say(host.base, host.tokens, 'hi', 'sam', bad)).status === 400)
   check("a listed person's villager does not see another's lines", existsSync(join(root, 'people', 'sam', 'conversation.jsonl')) && !samReply.includes('water the plants'))
-  check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 403)
+  check('an unlisted person is still refused', (await say(host.base, host.token, 'hi', 'zoe')).status === 404)
   await host.fiber.dispose()
 
   // The always-on input (#42): route, props, library and projects.
@@ -240,11 +241,9 @@ try {
     check('launch.json holds one token per person and no shared one', Object.keys(launch.tokens).sort().join() === 'alex,sam' && launch.tokens.alex !== launch.tokens.sam && !('token' in launch))
     const cast = [{ id: 'alex', name: 'Dumpling', role: 'cook' }, { id: 'sam', name: 'Tuft', role: 'tidier' }]
     const png = (() => { const p = new PNG({ width: 64, height: 32 }); p.data.fill(240); return PNG.sync.write(p).toString('base64') })()
+    // Talk, table rounds and the journal's conversation are visits (below); everything else is Sam's alone.
+    check("a visit is never routed: Alex's line to Sam's villager with a route is refused", (await as('alex', '/people/sam/messages', { text: 'hi', route: { primary: 'Tuft', villagers: cast } })).status === 400)
     const endpoints: [string, string, unknown?][] = [
-      ['conversation read (journal)', '/people/sam/conversation'],
-      ['talk (SSE)', '/people/sam/messages', { text: 'hi' }],
-      ['table round (context)', '/people/sam/messages', { text: 'hi', context: 'at the kitchen table, Dumpling said "Soup."' }],
-      ['talk with a route', '/people/sam/messages', { text: 'hi', route: { primary: 'Tuft', villagers: cast } }],
       ['route', '/people/sam/route', { text: 'hi', primary: 'Tuft', villagers: cast }],
       ['props (furnishing)', '/people/sam/props', { what: 'a chair' }],
       ['library list', '/people/sam/library'],
@@ -260,7 +259,14 @@ try {
     }
     check("cross-person: nothing was written under Sam, preferences included", !existsSync(join(xroot, 'people', 'sam')))
     // Sam's own token is served on the same endpoints, which also gives Sam an item and a drawing to aim at.
-    for (const [name, path, body] of endpoints) {
+    const ownOnly: [string, string, unknown?][] = [
+      ['conversation read (journal)', '/people/sam/conversation'],
+      ['talk (SSE)', '/people/sam/messages', { text: 'hi' }],
+      ['table round (context)', '/people/sam/messages', { text: 'hi', context: 'at the kitchen table, Dumpling said "Soup."' }],
+      ['talk with a route', '/people/sam/messages', { text: 'hi', route: { primary: 'Tuft', villagers: cast } }],
+      ...endpoints,
+    ]
+    for (const [name, path, body] of ownOnly) {
       const res = await as('sam', path, body)
       await res.text()
       check(`own person: Sam's token is served on Sam's ${name}`, res.status === 200, res.status)
@@ -274,6 +280,87 @@ try {
     const samConversation = await readFile(join(xroot, 'people', 'sam', 'conversation.jsonl'), 'utf8')
     check("cross-person: Alex's token cannot hand Sam's drawing to Alex's villager", (await as('alex', '/people/alex/messages', { text: 'look', sketch: { from: 'sam', id: sketch } })).status === 403 && !existsSync(join(xroot, 'people', 'alex', 'stub-last-image.json')))
     check("cross-person: Sam's folder is unchanged by Alex's attempts", (await readFile(join(xroot, 'people', 'sam', 'conversation.jsonl'), 'utf8')) === samConversation)
+    await fiber.dispose()
+  }
+
+  // Visits (#42 on #40): Alex talks with Sam's villager. The visit sees only Tuft's persona, never Sam's private
+  // context (notes, preferences, profile, sketches, journal, session), runs in its own session under Alex, and
+  // writes nothing under Sam. Synthetic secrets are seeded into each of Sam's private places.
+  {
+    const vroot = join(root, 'visit')
+    const samDir = join(vroot, 'people', 'sam')
+    const SECRETS = ['Zanzibar', 'Quillfeather', 'Marmalade', 'Okonkwo', 'Pelican', 'samsession']
+    await mkdir(join(samDir, 'notes'), { recursive: true })
+    await mkdir(join(samDir, 'sketches'), { recursive: true })
+    await writeFile(join(samDir, 'notes', 'about-sam.md'), 'Sam is saving for Zanzibar and told nobody.')
+    await writeFile(join(samDir, 'notes', 'how-sam-likes-to-talk.md'), 'Call me Quillfeather.')
+    await writeFile(join(samDir, 'preferences.json'), JSON.stringify({ humour: 'cheeky', at: '2026-11-07T00:00:00Z', marmalade: 'Marmalade' }))
+    await writeFile(join(samDir, 'conversation.jsonl'), JSON.stringify({ at: '2026-11-07T00:00:00Z', from: 'person', text: 'my doctor is Dr Okonkwo' }) + '\n')
+    await writeFile(join(samDir, 'sketches.jsonl'), JSON.stringify({ id: 'abcdefabcdef', at: '2026-11-07T00:00:00Z', drawn: true, words: 'a Pelican for my secret project' }) + '\n')
+    await writeFile(join(samDir, 'villager.json'), JSON.stringify({ sessionId: 'samsession-1', sessionCostUsd: 0 }))
+    await mkdir(join(samDir, 'stub-sessions'), { recursive: true })
+    await writeFile(join(samDir, 'stub-sessions', 'samsession-1.json'), JSON.stringify(['my doctor is Dr Okonkwo']))
+    const tuft = { ...defaultPersona('sam'), name: 'Tuft' }
+    await writeFile(join(samDir, 'persona.json'), JSON.stringify(tuft))
+    const snapshot = async (dir: string) => {
+      const out: Record<string, string> = {}
+      const walk = async (d: string) => {
+        for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+          const f = join(d, e.name)
+          if (e.isDirectory()) await walk(f)
+          else out[f.slice(vroot.length)] = (await readFile(f)).toString('base64')
+        }
+      }
+      await walk(dir)
+      return out
+    }
+    const ctx = new Context()
+    const fiber = ctx.plugin(villager, {
+      root: vroot, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam', mia: 'Mia' },
+      profiles: { alex: { age: 'adult', humour: 'crude', style: 'plain and quick' }, sam: { age: 'adult', style: 'like Pelican the sailor' }, mia: { age: 'adult' } },
+      router: stubRouter(5), maker: stubMaker(5), sketchMaker: stubSketchMaker(5),
+    })
+    await fiber.await()
+    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const base = `http://127.0.0.1:${launch.port}`
+    const samBefore = await snapshot(samDir)
+    const allBefore = await snapshot(vroot)
+
+    const visit = await say(base, launch.tokens.alex, 'what would you cut from my week?', 'sam')
+    const visitDir = join(vroot, 'people', 'alex', 'visits', 'sam')
+    const prompt = await readFile(join(visitDir, 'stub-last-prompt.txt'), 'utf8')
+    check('a visit is answered by the visited villager', visit.status === 200 && visit.events.at(-1)?.name === 'done', visit.events.at(-1))
+    check("the visit prompt carries Tuft's persona fields and says it is Sam's villager talking with Alex", prompt.startsWith("You are Tuft, Sam's villager") && prompt.includes('Alex') && [tuft.register, tuft.temperament, tuft.decides!, tuft.humour.style].every((f) => prompt.includes(JSON.stringify(f).slice(1, -1)) || prompt.includes(f)), prompt.slice(0, 300))
+    check("the visit prompt holds none of Sam's notes, preferences, profile, journal, sketches or session", !SECRETS.some((x) => prompt.includes(x)), SECRETS.filter((x) => prompt.includes(x)))
+    const built = await loadVisitCharacter({ person: 'alex', personDir: join(vroot, 'people', 'alex'), profile: { age: 'adult', humour: 'crude' } }, { person: 'sam', personDir: samDir, name: 'Sam' }, visitDir)
+    check("the visit's context builder holds none of Sam's private context, and the visitor's profile", !SECRETS.some((x) => JSON.stringify(built).includes(x)) && built.character.profile.humour === 'crude' && built.character.owner === 'Sam' && built.character.persona.name === 'Tuft', built.character)
+    const usage = JSON.parse((await readFile(join(visitDir, 'usage.jsonl'), 'utf8')).trim().split('\n').at(-1)!)
+    check("a visit's humour is the visitor's ceiling capped at the persona's lean (Alex crude, Tuft cheeky)", usage.humour === 'cheeky' && usage.visiting === 'sam' && usage.villager === 'Tuft', usage)
+    await say(base, launch.tokens.alex, 'and the garden?', 'mia', 'at the kitchen table with Alex, Tuft and Moss. Round so far: Alex said "and the garden?". It is your turn, Moss.')
+    const miaUsage = JSON.parse((await readFile(join(vroot, 'people', 'alex', 'visits', 'mia', 'usage.jsonl'), 'utf8')).trim().split('\n').at(-1)!)
+    check('a table round is a visit to each seated villager (Moss leans clean, so clean)', miaUsage.humour === 'clean' && miaUsage.visiting === 'mia', miaUsage)
+    const visitBack = await (await fetch(`${base}/people/sam/conversation`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).json()
+    check("Alex's journal read of Tuft is Alex's own visit, never Sam's lines", visitBack.name === 'Sam' && visitBack.lines.length === 2 && !JSON.stringify(visitBack).includes('Okonkwo'), visitBack.lines.length)
+
+    const samAfter = await snapshot(samDir)
+    check("Sam's files are byte-identical after the visits", JSON.stringify(samAfter) === JSON.stringify(samBefore), Object.keys(samAfter).filter((k) => samAfter[k] !== samBefore[k] || !(k in samBefore)))
+    const allAfter = await snapshot(vroot)
+    const written = Object.keys(allAfter).filter((k) => allAfter[k] !== allBefore[k])
+    check('every write of a visit is under Alex (visits/sam, visits/mia)', written.length > 0 && written.every((k) => k.startsWith('/people/alex/visits/sam/') || k.startsWith('/people/alex/visits/mia/')), written)
+    check("a visit keeps its own session, not Sam's", JSON.parse(await readFile(join(visitDir, 'villager.json'), 'utf8')).sessionId !== 'samsession-1')
+
+    // Sam's own token reaches Sam's own villager with full context.
+    const own = await say(base, launch.tokens.sam, 'hello', 'sam')
+    const ownPrompt = await readFile(join(samDir, 'stub-last-prompt.txt'), 'utf8')
+    check("Sam's own token reaches Sam's villager with Sam's notes and profile", own.events.at(-1)?.name === 'done' && ownPrompt.startsWith("You are Tuft, Sam's villager") && ownPrompt.includes('Quillfeather') && ownPrompt.includes('Zanzibar') && ownPrompt.includes('Pelican the sailor'), ownPrompt.slice(0, 200))
+    const ownLines = await (await fetch(`${base}/people/sam/conversation`, { headers: { authorization: `Bearer ${launch.tokens.sam}` } })).json()
+    check("Sam's conversation holds none of Alex's visit", !JSON.stringify(ownLines).includes('cut from my week'))
+
+    // Forged and other tokens.
+    check('a forged token is refused on a visit', (await say(base, 'f'.repeat(64), 'hi', 'sam')).status === 401 && (await say(base, null, 'hi', 'sam')).status === 401)
+    check("a visit never opens the owner's other endpoints", (await fetch(`${base}/people/sam/sketches`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).status === 403 && (await fetch(`${base}/people/sam/library`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).status === 403)
+    check("Sam's token cannot read Alex's visit to Tuft", !JSON.stringify(await (await fetch(`${base}/people/alex/conversation`, { headers: { authorization: `Bearer ${launch.tokens.sam}` } })).json()).includes('cut from my week'))
+    check('a visit to an unlisted person is refused', (await say(base, launch.tokens.alex, 'hi', 'zoe')).status === 404)
     await fiber.dispose()
   }
 
@@ -355,6 +442,11 @@ try {
     w = await warmStart(agent)
     check('after a host restart the warm process resumes the stored session', starts.length === before + 3 && starts.slice(before).some((x) => x.resume === stored), starts.slice(before).map((x) => x.resume))
     check('and answers on it', (await say(w.base, w.token, 'back again')).events.at(-1)?.name === 'done')
+    // A visit (#42) never reuses the owner's warm process or session: Alex's visit to Tuft starts its own.
+    const beforeVisit = starts.length
+    const live = agent.live!()
+    const v = await say(w.base, w.token.alex, 'a visiting line', 'sam')
+    check("a warm visit runs in a process of its own, never the owner's", v.events.at(-1)?.name === 'done' && starts.length === beforeVisit + 1 && agent.live!() === live + 1 && !starts.at(-1)!.resume && starts.at(-1)!.lines.some((l) => l.includes('a visiting line')) && !starts.slice(0, beforeVisit).some((x) => x.lines.some((l) => l.includes('a visiting line'))), { starts: starts.length - beforeVisit, live: agent.live!() })
     await w.fiber.dispose()
   }
 
@@ -654,13 +746,15 @@ try {
     check('words on a sketch only describe the prop: the maker answers with a module', injectedMade.status === 200 && 'module' in (await injectedMade.json()))
     const samLines = async () => (await readFile(join(root, 'people', 'sam', 'conversation.jsonl'), 'utf8').catch(() => '')).trim().split('\n').length
     const samBefore = await samLines()
-    const giveRes = await fetch(`${host.base}/people/alex/messages`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'For you', sketch: { from: 'alex', id: injected.id } }) })
+    const giveRes = await fetch(`${host.base}/people/mia/messages`, { method: 'POST', headers: auth, body: JSON.stringify({ text: 'For you', sketch: { from: 'alex', id: injected.id } }) })
     const giveText = await giveRes.text()
-    const seen = JSON.parse(await readFile(join(root, 'people', 'alex', 'stub-last-image.json'), 'utf8'))
+    // Handed to Mia's villager on Alex's visit: the turn ran in Alex's visit folder, nothing under Mia.
+    const seen = JSON.parse(await readFile(join(root, 'people', 'alex', 'visits', 'mia', 'stub-last-image.json'), 'utf8'))
     check("a drawing reaches the villager's turn as an image, with no route", giveRes.status === 200 && /lovely drawing/.test(giveText) && !giveText.includes('event: route') && seen.bytes === bytes.length && seen.routed === false && seen.note === true, seen)
-    const alexLines = (await readFile(join(root, 'people', 'alex', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
-    const handed = alexLines.find((l) => l.sketch)
-    check('the conversation keeps a reference to the drawing, not its bytes', handed?.text === 'For you' && handed.sketch.from === 'alex' && handed.sketch.id === injected.id && !JSON.stringify(alexLines).includes(good.slice(0, 40)))
+    const visitLines = (await readFile(join(root, 'people', 'alex', 'visits', 'mia', 'conversation.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    const handed = visitLines.find((l) => l.sketch)
+    check('the visit keeps a reference to the drawing, not its bytes', handed?.text === 'For you' && handed.sketch.from === 'alex' && handed.sketch.id === injected.id && !JSON.stringify(visitLines).includes(good.slice(0, 40)))
+    check("nothing of the drawing reached Mia's folder", !existsSync(join(root, 'people', 'mia', 'conversation.jsonl')) && !existsSync(join(root, 'people', 'mia', 'stub-last-image.json')))
     check('nothing reached sam', (await samLines()) === samBefore)
     check('a drawing with a route is refused', (await post('/people/alex/messages', { text: 'x', sketch: { from: 'alex', id: injected.id }, route: { primary: 'Dumpling', villagers: [{ id: 'alex', name: 'Dumpling', role: 'cook' }] } })).status === 400)
     for (const [name, sketch] of [['with a path for an id', { from: 'alex', id: '../../villager/launch' }], ['as a string', injected.id]] as const)
@@ -668,11 +762,10 @@ try {
     // A token hands over only its own person's drawings, and only to its own villager (#40).
     for (const [name, sketch] of [['from an unlisted person', { from: 'zoe', id: injected.id }], ["from another person", { from: 'sam', id: injected.id }]] as const)
       check(`a drawing ${name} is refused`, (await post('/people/alex/messages', { text: 'x', sketch })).status === 403)
-    check("a drawing handed to another person's villager is refused", (await post('/people/mia/messages', { text: 'x', sketch: { from: 'alex', id: injected.id } })).status === 403)
     check('a drawing that does not exist is refused', (await post('/people/alex/messages', { text: 'x', sketch: { from: 'alex', id: 'abcdefabcdef' } })).status === 404)
     const list = await (await fetch(`${host.base}/people/alex/sketches`, { headers: auth })).json()
     const first = list.sketches.find((x: { id: string }) => x.id === saved.id), second = list.sketches.find((x: { id: string }) => x.id === injected.id)
-    check('the journal list folds each drawing with what became of it', list.sketches[0].id === injected.id && first?.words === 'blue glaze, about 30 cm' && first.made.length === 1 && second?.given[0] === 'alex', list.sketches)
+    check('the journal list folds each drawing with what became of it', list.sketches[0].id === injected.id && first?.words === 'blue glaze, about 30 cm' && first.made.length === 1 && second?.given[0] === 'mia', list.sketches)
     check("sam's list is empty", (await (await fetch(`${host.base}/people/sam/sketches`, { headers: samAuth })).json()).sketches.length === 0)
     // Sentinel (#42): drawings per person are capped.
     const kept = join(root, 'people', 'sam', 'sketches')
