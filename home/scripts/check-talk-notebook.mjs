@@ -15,6 +15,9 @@ const shot = args.find((a) => a.startsWith('--shot='))?.slice(7)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'talk-notebook-'))
+// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
+const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
+const link = async (url) => `${url}#token=${await tokenNow()}`
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const hostPort = Number(opt('host') ?? 5193)
 const devPort = Number(opt('dev') ?? 5184)
@@ -87,7 +90,7 @@ try {
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const page = await context.newPage()
-    await page.goto(`${base}?q=low`)
+    await page.goto(await link(`${base}?q=low`))
     const ready = await page.evaluate(() => window.village.ready())
     await settle(page)
     const s = await page.evaluate(() => {
@@ -113,7 +116,7 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(flagged)
+  await page.goto(await link(flagged))
   await page.evaluate(() => localStorage.clear())
   await page.reload()
   const ready = await page.evaluate(() => window.village.ready())

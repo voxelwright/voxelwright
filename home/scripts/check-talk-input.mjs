@@ -20,6 +20,9 @@ const agent = opt('agent') ?? 'stub'
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-input-'))
+// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
+const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
+const link = async (url) => `${url}#token=${await tokenNow()}`
 const hostPort = Number(opt('host') ?? 5298)
 const devPort = Number(opt('dev') ?? 5297)
 const base = `http://localhost:${devPort}/`
@@ -71,7 +74,7 @@ async function until(page, test, ms = 20_000, every = 50) {
   return s
 }
 async function open(page, query) {
-  await page.goto(base + query)
+  await page.goto(await link(base + query))
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(800)
 }
