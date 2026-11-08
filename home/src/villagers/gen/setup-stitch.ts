@@ -172,10 +172,14 @@ export class Puppet {
       const fly = smooth(Math.max(0, (j.u - 0.15) / 0.85))
       this.at.lerpVectors(j.from, j.to, fly)
       lift = Math.sin(fly * Math.PI) * j.height
-      fig.root.scale.setScalar(j.scale0 + (j.scale1 - j.scale0) * fly)
+      // It grows to its own size only on the way down, once it is past the stool: shown smaller there (a phone's bench
+      // size), growing at the start of the flight would swell it out of the mirror over the rails' controls.
+      fig.root.scale.setScalar(j.scale0 + (j.scale1 - j.scale0) * smooth(Math.max(0, (fly - 0.6) / 0.4)))
       squash = j.u < 0.15 ? Math.sin((j.u / 0.15) * Math.PI) * 0.14 : 0
+      // It turns toward where it lands once it is in the air past the stool, not while still in front of the mirror
+      // (side on, a long villager would reach past the glass).
       const heading = Math.atan2(j.to.x - j.from.x, j.to.z - j.from.z)
-      this.yaw += wrap(heading - this.yaw) * (1 - Math.exp(-dt * 8))
+      if (fly > 0.4) this.yaw += wrap(heading - this.yaw) * (1 - Math.exp(-dt * 10))
       if (j.u >= 1) {
         this.jump = null
         j.done()

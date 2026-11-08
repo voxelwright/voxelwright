@@ -101,7 +101,7 @@ const layout = (page) => page.evaluate((selectors) => {
   const outside = boxes.filter(({ r }) => r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight).map((b) => b.what)
   // The villager on the table is boxes too, one per part (a held prop or a role mark reaching out is its own box, so the
   // gap between it and the body is free): no label may lie over any of them.
-  if (window.villagerSetup.bounds() && window.villagerSetup.state().state === 'tuning') for (const r of window.villagerSetup.parts()) boxes.push({ what: 'villager', r })
+  if (window.villagerSetup.bounds() && ['tuning', 'leaving'].includes(window.villagerSetup.state().state)) for (const r of window.villagerSetup.parts()) boxes.push({ what: 'villager', r })
   const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1
   const overlaps = []
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) if (!(boxes[i].what === 'villager' && boxes[j].what === 'villager') && hit(boxes[i].r, boxes[j].r)) overlaps.push(`${boxes[i].what} × ${boxes[j].what}`)
@@ -224,6 +224,35 @@ const write = async (page, text) => {
   await page.locator('.vs-slip .line').fill(text)
 }
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+/** The names of every pattern the host offers this person: built-in, their own saved ones (one per name), the family's shared ones. */
+const hostPatterns = (page, person) => page.evaluate(async (person) => {
+  const v = await import('/src/villager.ts')
+  const [mine, family] = await Promise.all([v.personaTemplates(person), v.familyTemplates(person)])
+  const own = [...new Set(mine.templates.map((t) => t.name.trim()))]
+  const shared = [...new Set(family.templates.filter((t) => t.maker !== person).map((t) => `${t.maker}|${t.name.trim()}`))].map((k) => k.split('|')[1])
+  return { builtin: mine.builtin.map((t) => t.name), names: [...mine.builtin.map((t) => t.name), ...own, ...shared] }
+}, person)
+/** Every swatch wholly inside the glass with the list at its top: none behind the fold. */
+const allInGlass = async (page, tag, name, count) => {
+  const r = await page.evaluate(() => {
+    const hang = document.querySelector('.vs-fit .hang')
+    hang.scrollTop = 0
+    const h = hang.getBoundingClientRect()
+    const hidden = [...hang.querySelectorAll('.vs-swatch')].filter((b) => {
+      const r = b.getBoundingClientRect()
+      return r.top < h.top - 1 || r.bottom > h.bottom + 1 || r.left < h.left - 1 || r.right > h.right + 1
+    }).map((b) => b.textContent)
+    return { hidden, faded: hang.classList.contains('more'), tab: document.querySelector('.vs-fit .glass').classList.contains('more'), short: hang.scrollHeight - hang.clientHeight, hang: Math.round(h.height) }
+  })
+  check(`${tag}: at ${name} all ${count} patterns show in the glass at once, none behind the fold or faded, no "more" tab`, r.hidden.length === 0 && !r.faded && !r.tab, r)
+}
+/** What each control shows: the ribbons' buttons, the dials' turns, the chosen colour and jokes. */
+const controlsShown = (page) => page.evaluate(() => ({
+  ribbons: [...document.querySelectorAll('.vs-fit .ribbon')].map((e) => `${e.dataset.key} ${e.getAttribute('aria-valuenow')} ${e.querySelector('.button').style.left}`),
+  dials: [...document.querySelectorAll('.vs-fit .knob')].map((e) => `${e.dataset.key} ${e.getAttribute('aria-valuenow')} ${e.style.getPropertyValue('--turn')}`),
+  colour: [...document.querySelectorAll('.vs-fit .dot')].findIndex((e) => e.classList.contains('at')),
+  jokes: [...document.querySelectorAll('.vs-fit .step')].findIndex((e) => e.classList.contains('at')),
+}))
 
 /**
  * #47 regroup: one strategy's whole flow at one size. Describe or pick a pattern, wait, stitch, tune all nine values
@@ -249,10 +278,8 @@ async function regroup(s) {
       check(`${tag}: no word on the swatches or the slip is under 14 px`, (await small(page, '.vs-fit, .vs-slip')).length === 0, await small(page, '.vs-fit, .vs-slip'))
       // Every pattern has one swatch, the built-in ones first, no two alike, and each can be brought into view and picked.
       const sw = await page.evaluate(async () => {
-        const cards = window.villagerSetup.state().rack.cards
         const swatches = [...document.querySelectorAll('.vs-fit .vs-swatch')]
         const names = swatches.map((b) => b.textContent)
-        const sources = swatches.map((b) => cards.find((c) => c.id === b.dataset.template)?.source)
         const hang = document.querySelector('.vs-fit .hang')
         const unreachable = []
         for (const b of swatches) {
@@ -263,16 +290,30 @@ async function regroup(s) {
           if (r.top < h.top - 1 || r.bottom > h.bottom + 1 || hit !== b) unreachable.push(b.dataset.template)
         }
         hang.scrollTop = 0
-        return { count: swatches.length, cards: cards.length, names, sources, unreachable, scrolls: hang.scrollHeight > hang.clientHeight + 1 }
+        return { count: swatches.length, names, unreachable, scrolls: hang.scrollHeight > hang.clientHeight + 1 }
       })
-      const builtInFirst = sw.sources.slice(Math.max(0, sw.sources.findIndex((x) => x !== 'built-in'))).every((x) => x !== 'built-in') || sw.sources.every((x) => x === 'built-in')
-      check(`${tag}: each pattern has one swatch (${sw.count}), the built-in ones first, none alike, every one reachable`, sw.count === sw.cards && new Set(sw.names).size === sw.names.length && builtInFirst && sw.unreachable.length === 0, sw)
+      // Every pattern the host offers this person (built-in, their own saved ones by name, the family's shared ones) has
+      // one swatch, the built-in ones first; and up to eight show in the glass at once, none behind the fold.
+      const offered = await hostPatterns(page, 'jo')
+      const builtInFirst = offered.builtin.every((n, i) => sw.names[i]?.startsWith(n))
+      check(`${tag}: each pattern has one swatch (${sw.count}), the built-in ones first, none alike, every one reachable`, new Set(sw.names).size === sw.names.length && builtInFirst && sw.unreachable.length === 0, sw)
+      check(`${tag}: every built-in, saved and shared pattern the host offers has a swatch (${offered.names.length}: ${offered.names.filter((n) => /^Like/.test(n)).join(', ')})`, offered.names.length === sw.count && offered.names.every((n) => sw.names.some((x) => x.startsWith(n))), { offered: offered.names, names: sw.names })
+      await allInGlass(page, tag, '1-empty', offered.names.length)
     }
     // The mirrors hang the patterns as swatches in the glass; the bench stands them on the rack.
     const glass = s === 'b' || cheval
     await page.click(glass ? '.vs-swatch[data-template=coach]' : '.vs-pattern[data-template=coach]')
     await page.waitForTimeout(700)
-    if (cheval) await contrastAt(page, tag, '1b-picked')
+    if (cheval) {
+      await contrastAt(page, tag, '1b-picked')
+      await allInGlass(page, tag, '1b-picked', (await page.$$('.vs-fit .vs-swatch')).length)
+      // The pattern's manner on the slip's chip is read whole: wrapped, never cut off with an ellipsis.
+      const about = await page.evaluate(() => {
+        const e = document.querySelector('.vs-slip .chip span'), cs = getComputedStyle(e)
+        return { text: e.textContent, cut: e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1, ellipsis: cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap' }
+      })
+      check(`${tag}: the picked pattern's manner on the slip is shown whole ("${about.text}")`, !about.cut && !about.ellipsis, about)
+    }
     check(`${tag}: picking a pattern shows it on the slip`, (await st(page)).rack.picked === 'coach' && (await page.textContent('.vs-slip .chip')).includes('Calm coach'))
     await shot(page, '1b-picked')
     await page.focus('.vs-slip:not(.vs-say) .line')
@@ -299,12 +340,18 @@ async function regroup(s) {
         await page.mouse.move(k.x + dx, k.y, { steps: 5 })
         await page.mouse.up()
       }
+      // The ribbons, a fifth of the way along (before the capture, so it shows the values the send-off keeps).
+      for (const key of ['warmth', 'playful', 'chatty']) {
+        const r = await page.evaluate((key) => window.villagerSetup.control(key), key)
+        await page.mouse.click(r.x - r.w / 2 + r.w * 0.2, r.y)
+      }
       await page.waitForTimeout(900)
       await shot(page, '3-tuning')
       if (cheval) await contrastAt(page, tag, '3-tuning')
-      for (const key of ['warmth', 'playful', 'chatty']) {
-        const r = await page.evaluate((key) => window.villagerSetup.control(key), key)
-        await page.mouse.click(r.x - r.w / 2 + 2, r.y)
+      if (cheval && vw >= vh && vw < 1300) {
+        // A tablet: the tuning words are 16 px or more and the ribbons' buttons a fingertip across (26 px or more).
+        const handles = await page.evaluate(() => [...document.querySelectorAll('.vs-fit .ribbon .button')].map((b) => Math.round(b.getBoundingClientRect().width)))
+        check(`${tag}: on a tablet no tuning word is under 16 px and the ribbons' buttons are 26 px or more (${handles.join(', ')})`, (await small(page, '.vs-fit', 15.95)).length === 0 && handles.every((w) => w >= 26), { small: await small(page, '.vs-fit', 15.95), handles })
       }
       if (cheval) {
         // Jo has no admin setting: the switch is clean and cheeky, with no crude and no padlock; the arrows stop at cheeky.
@@ -383,14 +430,40 @@ async function regroup(s) {
       await page.waitForFunction(() => /Kept as a pattern/.test(window.villagerSetup.state().note ?? ''), null, { timeout: 8000 }).catch(() => {})
       check(`${tag}: "Save as a pattern" keeps it on the host`, /Kept as a pattern/.test((await st(page)).note ?? ''), (await st(page)).note)
     }
+    const tunedBefore = (await st(page)).values
+    const shown0 = cheval ? await controlsShown(page) : null
+    // Every frame from the send-off until it is off the stool: the villager's parts and the glass on the page.
+    if (cheval) await page.evaluate(() => {
+      const samples = (window.farewell = [])
+      const t0 = performance.now()
+      const tick = () => {
+        const b = window.villagerSetup.bounds()
+        if (!b || performance.now() - t0 > 4000) return
+        const g = window.villagerSetup.glass(), parts = window.villagerSetup.parts()
+        const box = parts.reduce((a, r) => ({ left: Math.min(a.left, r.left), right: Math.max(a.right, r.right), top: Math.min(a.top, r.top), bottom: Math.max(a.bottom, r.bottom) }), { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity })
+        samples.push({ ms: Math.round(performance.now() - t0), state: window.villagerSetup.state().state, box, g })
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
     await page.click('.vs-done')
     if (cheval) {
       // It turns to you and waves goodbye (1.4 s) before the hop down (1.1 s).
       await page.waitForTimeout(800)
       await shot(page, '4-waving')
+      const shown1 = await controlsShown(page)
+      check(`${tag}: while it waves goodbye every control still shows the tuned values (ribbons, dials, colour, jokes)`, JSON.stringify(shown0) === JSON.stringify(shown1), { before: shown0, waving: shown1 })
       await page.waitForTimeout(3200)
+      // Waving and setting off, while it is still on the stool (its middle within 8 px of where it stood), it stays inside
+      // the glass's sides and top: it neither outgrows the mirror nor covers the rails' controls.
+      const farewell = await page.evaluate(() => window.farewell)
+      const mid = (f) => (f.box.left + f.box.right) / 2
+      const up = farewell.filter((f) => farewell.length && Math.abs(mid(f) - mid(farewell[0])) <= 8)
+      const out = up.filter((f) => f.box.left < f.g.left - 2 || f.box.right > f.g.right + 2 || f.box.top < f.g.top - 2)
+      check(`${tag}: waving goodbye and hopping off, the villager stays inside the glass until it hops down (${up.length} frames on the stool, ${out.length} outside)`, up.length > 20 && out.length === 0, { first: out[0], frames: farewell.length })
     } else await page.waitForTimeout(4000)
     const s3 = await st(page)
+    if (cheval) check(`${tag}: the send-off keeps all nine tuned values as they were set`, JSON.stringify(s3.kept[0]?.tuning) === JSON.stringify(Object.fromEntries(Object.keys(s3.kept[0]?.tuning ?? {}).map((k) => [k, tunedBefore[k]]))) && ['warmth', 'playful', 'chatty'].every((k) => Math.abs(s3.kept[0].tuning[k] - tunedBefore[k]) < 1e-9 && tunedBefore[k] > 0.05), { kept: s3.kept[0]?.tuning, before: tunedBefore })
     const w0 = s3.walkers[0]
     await page.waitForTimeout(2500)
     const w1 = (await st(page)).walkers[0]
@@ -463,6 +536,17 @@ async function regroup(s) {
       await page.waitForTimeout(600)
       await page.click('.vs-save button')
       await page.waitForFunction(() => /Kept as a pattern/.test(window.villagerSetup.state().note ?? ''), null, { timeout: 8000 }).catch(() => {})
+      // Tuned, then sent off: the host keeps the tuning beside the module and writes the persona with the manner mapped in.
+      const want = { warmth: 0.2, playful: 0.3, chatty: 0.25 }
+      for (const [k, v] of Object.entries(want)) await page.evaluate(([k, v]) => window.villagerSetup.set(k, v), [k, v])
+      await page.evaluate(() => window.villagerSetup.sendOff())
+      await until(page, ['empty'])
+      await page.waitForFunction(() => window.villagerSetup.state().sentOff !== 'sending', null, { timeout: 10000 }).catch(() => {})
+      const dir = join(root, 'people', 'jo', 'villagers')
+      const records = await Promise.all((await readdir(dir)).map(async (f) => JSON.parse(await readFile(join(dir, f), 'utf8'))))
+      const stored = records.filter((r) => r.description === typed).find((r) => r.tuning && Object.entries(want).every(([k, v]) => r.tuning[k] === v))
+      const persona = JSON.parse(await readFile(join(root, 'people', 'jo', 'persona.json'), 'utf8').catch(() => 'null'))
+      check(`${tag}: sent off, the host keeps the tuned manner beside the module and in the person's persona (blunt)`, Boolean(stored) && (await st(page)).sentOff === persona?.name && /^blunt/.test(persona?.temperament ?? ''), { tuning: records.map((r) => r.tuning), sentOff: (await st(page)).sentOff, temperament: persona?.temperament })
     }
     check(`${tag} (waiting): no page errors`, errors.length === 0, errors)
     await context.close()
@@ -471,6 +555,17 @@ async function regroup(s) {
 
 try {
   if (strategy) {
+    // Alex shares a pattern with the family first, so Jo's mirror shows a shared one beside Jo's own saved ones.
+    {
+      const { context, page } = await open('&person=alex')
+      const ok = await page.evaluate(async () => {
+        const v = await import('/src/villager.ts')
+        const mine = await v.personaTemplates('alex')
+        return (await v.saveTemplate('alex', 'Like Pip', { name: 'Pip', ...mine.builtin.find((t) => t.id === 'grandparent').persona }, undefined, true)).ok
+      })
+      check(`[${strategy}] Alex shares a pattern with the family (synthetic)`, ok)
+      await context.close()
+    }
     const sizes = arg('viewports', '1440x900,1024x768,390x844').split(',')
     for (const size of sizes) {
       ;[vw, vh] = size.split('x').map(Number)

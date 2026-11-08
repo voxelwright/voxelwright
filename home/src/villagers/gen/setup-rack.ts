@@ -131,6 +131,8 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
   // text (something stands in front of the rack), so the names are painted on the cards instead.
   let mode: 'on' | 'quiet' | 'off' = 'off'
   let picked: RackCard | null = null
+  /** Every card set, the rack's and those past its end (the mirror shows them all). */
+  let all: RackCard[] = []
   const corner = new THREE.Vector3()
 
   const clear = () => {
@@ -150,6 +152,7 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
     group,
     set(list: RackCard[]) {
       clear()
+      all = list
       const shown = list.slice(0, MAX)
       shown.forEach((card, i) => {
         const felt = feltFor(i)
@@ -215,7 +218,7 @@ export function rack(stage: Stage, onPick: (card: RackCard | null) => void) {
     },
     /** The picked card's felt colour, for the slip's big card. */
     feltOf(card: RackCard) {
-      return cards.find((c) => c.card.template.id === card.template.id)?.felt ?? FELTS[0]
+      return cards.find((c) => c.card.template.id === card.template.id)?.felt ?? feltFor(Math.max(0, all.findIndex((c) => c.template.id === card.template.id)))
     },
     /** How wide the row of cards is, in metres. */
     width() {

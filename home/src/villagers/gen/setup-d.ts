@@ -204,6 +204,13 @@ export function fitting(scene: Scene): Strategy {
   const steps = kit.jokes(jokes)
   const hang = el('div', 'hang', glassFace)
   const drawSwatches = kit.swatches(hang)
+  // More patterns than the glass holds even sewn snug: a tab at the glass's foot says so, and scrolls on a click.
+  const moreCue = el('span', 'more-cue', glassFace)
+  moreCue.setAttribute('aria-hidden', 'true')
+  moreCue.textContent = 'more patterns ↓'
+  moreCue.addEventListener('click', () => hang.scrollBy({ top: hang.clientHeight * 0.8, behavior: 'smooth' }))
+  /** How many swatches the snug fit was decided for. */
+  let snugFor = -1
   const parts = { marker, tape, dots, knobs, ribbons, steps }
 
   // ── Projection: the furniture's faces on the page ──
@@ -384,7 +391,8 @@ export function fitting(scene: Scene): Strategy {
     standAt: () => AT.clone().add(new THREE.Vector3(0, dimsNow().S.top + 0.007, dimsNow().S.z)),
     turn: () => 0.06,
     // The mirror is furniture, not resized to the villager. A villager is shown at the size that, at its biggest and
-    // seen through the camera that will frame it, stands inside the glass clear of both rails, with a band above its head
+    // seen through the camera that will frame it, stands inside the glass clear of both rails (with room for a hop's
+    // squash, 7% wider, as it hops on and off), with a band above its head
     // for what it says. Measured on the page, so a villager standing nearer the camera than the glass is allowed for.
     fit(body) {
       const pose = at()
@@ -404,7 +412,7 @@ export function fitting(scene: Scene): Strategy {
           const q = toPage(v.copy(p).applyMatrix4(m), fit)
           left = Math.min(left, q.x); right = Math.max(right, q.x); top = Math.min(top, q.y)
         }
-        return left >= glass.left + gw * 0.015 && right <= glass.right - gw * 0.015 && top >= glass.top + gh * 0.12
+        return left >= glass.left + gw * 0.045 && right <= glass.right - gw * 0.045 && top >= glass.top + gh * 0.12
       }
       let lo = 0.2, hi = 1.8
       for (let i = 0; i < 24; i++) {
@@ -518,7 +526,16 @@ export function fitting(scene: Scene): Strategy {
       if (!tuningNow()) {
         const slipTop = scene.slip.getBoundingClientRect().top
         const g = glassFace.getBoundingClientRect()
-        hang.style.maxHeight = `${Math.max(60, Math.round(Math.min(g.bottom - 10, slipTop - 14) - g.top - 10))}px`
+        // Still more than the glass holds, sewn snug: the hang stops short of the glass's foot, where the "more" tab hangs.
+        const cue = glassFace.classList.contains('more') ? 30 : 0
+        hang.style.maxHeight = `${Math.max(60, Math.round(Math.min(g.bottom - 4, slipTop - 14) - hang.getBoundingClientRect().top - cue))}px`
+        // Too many to show at their ease: sewn snug (tighter felt, smaller gaps) so all of them show without scrolling.
+        if (hang.children.length !== snugFor) {
+          snugFor = hang.children.length
+          hang.classList.remove('snug')
+        } else if (!hang.classList.contains('snug') && hang.scrollHeight > hang.clientHeight + 2) hang.classList.add('snug')
+        // The tab only when they would not fit even without the room kept for it (else it would hold itself open).
+        glassFace.classList.toggle('more', hang.classList.contains('snug') && hang.scrollHeight > hang.clientHeight + cue + 2)
         hang.classList.toggle('more', hang.scrollTop + hang.clientHeight < hang.scrollHeight - 2)
       }
       // The tags' threads: from each tag's eyelet up to where it is tied.
@@ -673,11 +690,21 @@ function css() {
   @keyframes vs-fit-pop { 50% { scale: 1.25; } }
   /* The swatches tucked into the glass: felt samples with pinked edges. */
   .vs-fit .glass { padding: 12px; }
-  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden auto; width: 100%; box-sizing: border-box; padding: 8px 4px 10px;
+  .vs-fit .hang { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 12px 10px; overflow: hidden auto; width: 100%; box-sizing: border-box; padding: 12px 8px 8px;
     overscroll-behavior: contain; scrollbar-width: none; }
   .vs-fit .hang::-webkit-scrollbar { display: none; }
   /* More patterns than the glass holds: the last row fades out, so it reads as more below. */
   .vs-fit .hang.more { mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); }
+  /* Many patterns: sewn snug, so they all show at once. */
+  .vs-fit .hang.snug { gap: 6px 8px; padding-top: 10px; padding-bottom: 4px; }
+  .vs-fit .hang.snug .vs-swatch .felt { min-height: 0; padding: 9px 4px 12px; }
+  .vs-fit .hang.snug .vs-swatch b { font-size: 16px; line-height: 1.05; }
+  .vs-fit .hang.snug .vs-swatch small { font-size: 14px; line-height: 1.1; margin-top: 1px; }
+  .vs-fit .hang.snug .vs-swatch .felt::after { inset: 3px 3px 10px; }
+  /* Still more than the glass holds: a paper tab at its foot. */
+  .vs-fit .more-cue { display: none; position: absolute; left: 50%; bottom: 6px; translate: -50% 0; padding: 3px 10px 4px; border-radius: 3px; cursor: pointer; pointer-events: auto;
+    font: italic 14px/1 ${BOOK}; color: #2e1f12; background: #f1e4c8; box-shadow: 0 2px 5px rgba(20, 10, 4, 0.35); }
+  .vs-fit:not(.tuning) .glass.more .more-cue { display: block; }
   /* The card itself lifts, tilts and glows; its felt (pinked by a clip) is a layer inside it, so the glow isn't clipped. */
   .vs-fit .vs-swatch { position: relative; width: calc(50% - 6px); max-width: 150px; padding: 0; border: 0; cursor: pointer; background: none; color: var(--ink, #fffaf0);
     transform-origin: 50% 0; transition: rotate 200ms ease, translate 200ms ease, scale 200ms ease, transform 220ms ease, filter 220ms ease;
@@ -700,7 +727,7 @@ function css() {
   .vs-fit .vs-swatch:nth-child(odd) { rotate: -1.5deg; } .vs-fit .vs-swatch:nth-child(even) { rotate: 1.2deg; }
   .vs-fit .vs-swatch:hover { translate: 0 2px; }
   /* The chosen one is lifted off the glass on its pin: it tips its foot toward you, glows warm and is stitched round. */
-  .vs-fit .vs-swatch[aria-pressed=true] { z-index: 1; translate: 0 -2px; rotate: 0deg; scale: 1.08; transform: perspective(360px) rotateX(18deg);
+  .vs-fit .vs-swatch[aria-pressed=true] { z-index: 1; translate: 0 -2px; rotate: 0deg; scale: 1.05; transform: perspective(360px) rotateX(18deg);
     filter: drop-shadow(0 0 4px #fff6df) drop-shadow(0 0 14px rgba(255, 222, 150, 0.95)) drop-shadow(0 10px 8px rgba(40, 25, 10, 0.4)); }
   /* The others settle back against the glass. */
   .vs-fit .hang:has([aria-pressed=true]) .vs-swatch:not([aria-pressed=true]) { scale: 0.95; }
@@ -728,6 +755,19 @@ function css() {
   .vs-fit.waiting .face, .vs-fit.waiting .dim { display: none; }
   /* Waving goodbye: the controls rest, untouchable. */
   .vs-fit.leaving .face > * { pointer-events: none; opacity: 0.6; transition: opacity 300ms ease; }
+  /* A tablet: the tuning words and the ribbons' buttons a size up, for a finger at arm's length. */
+  @media (min-aspect-ratio: 9/10) and (max-width: 1299px) {
+    .vs-fit .tag, .vs-fit .dial-name, .vs-fit .jokes-name, .vs-fit .step { font-size: 17px; }
+    .vs-fit .dial-ends span, .vs-fit .tape .end { font-size: 16px; line-height: 16px; }
+    .vs-fit .tape .end { padding: 3px 2px; }
+    .vs-fit .tape { width: min(28px, 82%); }
+    .vs-fit .ribbon-row { grid-template-columns: 64px 1fr 64px; font-size: 16px; }
+    .vs-fit .ribbon { height: 15px; --b: 26px; }
+    .vs-fit .ribbon .button { width: 26px; height: 26px; margin: -13px 0 0 -13px; }
+    .vs-fit .ribbon .button::after { line-height: 26px; }
+    .vs-fit .marker { height: 24px; margin-top: -12px; }
+    .vs-fit .marker::after { line-height: 24px; }
+  }
   /* A phone: the stool is a dressing table, so the controls have room to be finger-sized and the words bigger. */
   @media (max-aspect-ratio: 9/10) {
     .vs-fit .ribbon-row { grid-template-columns: 64px 1fr 64px; gap: 6px; font-size: 16px; }
@@ -750,7 +790,7 @@ function css() {
     .vs-fit .dot::after { inset: -8px -12px; }
     .vs-fit .marker { height: 26px; margin-top: -13px; width: 50px; }
     .vs-fit .marker::after { line-height: 26px; }
-    .vs-fit .glass { padding: 8px; }
+    .vs-fit .glass { padding: 6px 4px; }
     .vs-fit .right { padding: 2px 0; }
     .vs-fit .colours { justify-content: space-between; }
     .vs-fit .hang { gap: 12px 10px; }

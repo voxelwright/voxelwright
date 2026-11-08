@@ -936,15 +936,16 @@ export default {
       const list: RackCard[] = mine.ok ? mine.builtin.map((template) => ({ template, source: 'built-in' as const })) : []
       if (mine.ok) list.push(...mine.templates.map((template) => ({ template, source: 'mine' as const })))
       if (family.ok) list.push(...family.templates.filter((t) => t.maker !== PERSON).map((template) => ({ template, source: 'family' as const, maker: (template.maker ?? '').charAt(0).toUpperCase() + (template.maker ?? '').slice(1) })))
-      // The built-in patterns first, then the two newest saved ones (a fresh save is on the rack). One card per name and
-      // maker: saving "Like Brindle" twice keeps the newer one, not two cards that look the same.
+      // The built-in patterns first, then every saved and shared one, newest first (a fresh save is first among them). One
+      // card per name and maker: saving "Like Brindle" twice keeps the newer one, not two cards that look the same. The
+      // bench's rack stands as many as it holds (setup-rack.ts MAX); the mirror's glass shows them all.
       const builtIn = list.filter((c) => c.source === 'built-in')
       const seen = new Set<string>()
       const saved = list.filter((c) => c.source !== 'built-in').reverse().filter((c) => {
         const key = `${c.source}|${c.maker ?? ''}|${c.template.name.trim().toLowerCase()}`
         return !seen.has(key) && Boolean(seen.add(key))
       })
-      shownCards = [...builtIn, ...saved.slice(0, 2)]
+      shownCards = [...builtIn, ...saved]
       patterns.set(shownCards)
       return list
     }
@@ -958,7 +959,8 @@ export default {
         const name = document.createElement('b')
         name.textContent = card.template.name
         const about = document.createElement('span')
-        about.textContent = [p.temperament, p.humour?.style ?? null, footFor(card) || null].filter(Boolean).join(' · ')
+        // One short line, read whole: the manner and who it is for or from (the humour shows on the jokes switch).
+        about.textContent = [p.temperament, footFor(card) || null].filter(Boolean).join(' · ')
         const back = document.createElement('i')
         back.textContent = '✕'
         back.setAttribute('aria-hidden', 'true')
@@ -1338,7 +1340,7 @@ function css() {
     background: var(--felt, #55724a); color: var(--ink, #fffaf0); box-shadow: 0 5px 12px rgba(60, 30, 10, 0.25); }
   .vs-slip .chip::before { content: ''; position: absolute; inset: 4px; border: 1.6px dashed color-mix(in srgb, currentColor 65%, transparent); border-radius: 4px; pointer-events: none; }
   .vs-slip .chip b { font: 700 19px/1.15 ${HAND}; white-space: nowrap; }
-  .vs-slip .chip span { font: italic 14px/1.3 ${BOOK}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .vs-slip .chip span { font: italic 14px/1.3 ${BOOK}; min-width: 0; overflow-wrap: anywhere; }
   .vs-slip .chip i { align-self: center; font: 700 15px/1 ${HAND}; font-style: normal; opacity: 0.9; }
   .vs-slip .chip[hidden] { display: none; }
   .vs-slip .chip:hover i, .vs-slip .chip:focus-visible i { opacity: 1; text-decoration: underline; }
