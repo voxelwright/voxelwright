@@ -903,7 +903,8 @@ export default {
             : r.why === 'refused'
               // Another try would fail the same way: their character didn't pass the house's checks, so a new one is needed.
               ? `${record.name} can't move in as they are: their character didn't pass the house's checks. Describe them again to make a new one.`
-              : `${record.name} didn't go: their new home couldn't be saved this time. They're still here, just as you tuned them, so you can try again.`)
+              // On a partial save their new home may be half written; trying again rewrites all of it.
+              : `${record.name} didn't go: their new home couldn't be saved this time. They're still here, just as you tuned them: try again and it will finish.`)
           return
         }
         sentOff = r.name

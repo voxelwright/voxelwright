@@ -241,7 +241,9 @@ export async function commitFiles(files: { path: string; text: string }[]) {
       const old = before[i]
       await (old === null ? rm(files[i].path, { force: true }) : replaceFile(files[i].path, old)).catch(() => void unrestored++)
     }
-    await Promise.all(temps.slice(renamed).map((t) => rm(t, { force: true })))
+    // Cleanup never hides the outcome: a failed removal of a temporary file must not turn a partial commit into "nothing
+    // changed" (review, round 3), so it is settled, not awaited as a whole.
+    await Promise.allSettled(temps.slice(renamed).map((t) => rm(t, { force: true })))
     throw unrestored ? new PartialCommit(error, unrestored) : error
   }
 }
@@ -437,7 +439,8 @@ export function villagerRoutes(config: { root: string; people: Record<string, st
     if (persona.template && Object.hasOwn(TEMPLATE_CARDS, persona.template)) out.push(TEMPLATE_CARDS[persona.template].audience)
     // No record named and no built-in template: the source cannot be traced (it may have been another person's adults-only
     // pattern), so it stays within the maker's own age band; the page leaving `item` out never widens it (review, round 2).
-    if (item === undefined) return out.length ? out : [maker.age === 'child' ? 'child' : 'adult']
+    // A built-in template named in the body narrows it further but never replaces the band (review, round 3).
+    if (item === undefined) return [...out, maker.age === 'child' ? 'child' : 'adult']
     if (typeof item !== 'string' || !ITEM.test(item)) return 'refused'
     const r = await read(id, item)
     if (!r) return 'refused'
