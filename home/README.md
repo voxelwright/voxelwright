@@ -1965,6 +1965,15 @@ reader; its Undo click reports why it missed instead of passing silently.
 - **Against `feature/village-talk` (7f3bf15): every gate passes.** The themes add 15 draws (the swatch book) to home and villagers, and 9 to talk. CPU and heap match the base, because the theme plugin loads only on intent (the swatch book opening, a theme asked for), not with every page.
 - **Against `main` (cb1d565): one failure, home draw calls 541 against a limit of 530 (base 482).** 44 of the 59 come from #42's connected house, which is already on the talk branch (526), and 15 from the swatch book. GPU and frame gates pass.
 
+After the merge with `feature/village` (09443a7), at `68821ca`:
+- **Against `feature/village` (09443a7): every gate passes.** Themes add 15 draws to home and villagers (the swatch book) and 4 to talk; CPU is within noise.
+- **Against `main` (faa1a0a): the same single failure, home draw calls 541 against 530.** 44 of the 59 extra draws are #42's connected house (526 on `feature/village`).
+- Both runs warned of 5 other headless Chromes on the GPU, so their GPU numbers are indicative only. The home's heap read 41 MB against 23 MB on `feature/village` (heap is not gated and moves with GC timing).
+
+### Paper talk look under every theme (#50, November 8)
+
+`talk-shots.mjs --only=desktop --query=theme=<id>` for all six looks: the slips, the reply and the round read in every look. Comic's toon shading drew the held pad's page dark navy; the shading model now leaves held objects (`userData.hud`) alone.
+
 ### Review (#50, November 8)
 
 `.agents/skills/adversarial-review`, Sonnet reviewer and GPT-6.1 Sol critic, four rounds; each round's kept flags were fixed in a new commit (`264a882`, `ad06eff`, `3f46793`, round 4) and reviewed fresh.
