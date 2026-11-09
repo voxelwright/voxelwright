@@ -22,6 +22,7 @@ node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, step ms
+node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"

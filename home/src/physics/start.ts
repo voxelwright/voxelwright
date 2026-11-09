@@ -20,6 +20,7 @@ import type { PhysicsEvent } from '../engine/events'
 import type { Vec3 } from '../engine/core'
 import type { WorldApi } from '../engine/api'
 import type { ToySpec } from '../engine/toy'
+import { touch } from './touch'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 
@@ -163,7 +164,10 @@ export async function start(ctx: Context, gone: () => boolean) {
     playing = on ? PINBALL : null
     ctx.view.focus(on ? PLAY_POSE : null)
     if (!on) for (const name of Object.keys(PINBALL.inputs)) world.input(name, false)
+    hands.table(on)
   }
+  // Fingers and the mouse: the same inputs as the keys while the table is chosen, and pokes and flings otherwise.
+  const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
   ctx.effect(() => {
     addEventListener('keydown', onKey, true)
     addEventListener('keyup', onKey, true)
@@ -173,7 +177,10 @@ export async function start(ctx: Context, gone: () => boolean) {
     }
   }, 'physics keys')
   const handle = PINBALL.handle ? world.mesh(`${PINBALL.id}/${PINBALL.handle}`) : undefined
-  if (handle) ctx.effect(() => ctx.entries.add({ id: PINBALL.id, label: PINBALL.label, object: handle, select: () => play(true), leave: () => play(false) }), 'pinball entry')
+  if (handle) ctx.effect(() => ctx.entries.add({ id: PINBALL.id, label: PINBALL.label, object: handle, select: () => {
+    play(true)
+    ctx.entries.say('Tap left or right to flip')
+  }, leave: () => play(false) }), 'pinball entry')
 
   // Villagers join as followers when they appear (talk places them after load), checked each second.
   const syncVillagers = () => {

@@ -35,6 +35,11 @@ export interface Entries {
   back(): void
   /** Choose an entry by id, as a click on it would. False when there is no such entry. */
   choose(id: string): boolean
+  /**
+   * What the eye meets at a screen point: the nearest solid hit, and the entry it belongs to
+   * (null when it is no entry's). A gesture that is not an entry's asks first, so it never takes a tap meant for one.
+   */
+  probe(clientX: number, clientY: number): { entry: string | null; hit: THREE.Intersection | null }
   /** Show a short line of text at the bottom of the screen, or hide it with null. */
   say(text: string | null): void
   /** Put the keyboard order in screen order, left to right, then top to bottom. */
@@ -172,21 +177,22 @@ export default {
     // Pointer: hover on mouse and pen, tap or click to choose; touch skips hover.
     const raycaster = new THREE.Raycaster()
     const ndc = new THREE.Vector2()
-    const pick = (event: PointerEvent): Live | null => {
+    const probe = (clientX: number, clientY: number): { entry: Live | null; hit: THREE.Intersection | null } => {
       const rect = renderer.domElement.getBoundingClientRect()
-      ndc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
+      ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
       raycaster.setFromCamera(ndc, camera)
       // The nearest solid thing wins, so furniture blocks the entries behind it.
-      for (const { object } of raycaster.intersectObject(scene, true)) {
-        if (!solid(object)) continue
-        for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+      for (const hit of raycaster.intersectObject(scene, true)) {
+        if (!solid(hit.object)) continue
+        for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
           const e = owners.get(o)
-          if (e) return e
+          if (e) return { entry: e, hit }
         }
-        return null
+        return { entry: null, hit }
       }
-      return null
+      return { entry: null, hit: null }
     }
+    const pick = (event: PointerEvent) => probe(event.clientX, event.clientY).entry
     /** Seen and opaque to the eye: hidden rooms, light shafts, glows and motes don't block. */
     const solid = (object: THREE.Object3D) => {
       if (!(object as THREE.Mesh).isMesh) return false
@@ -324,6 +330,10 @@ export default {
         const e = live.get(id)
         if (e) choose(e)
         return Boolean(e)
+      },
+      probe(clientX: number, clientY: number) {
+        const { entry, hit } = probe(clientX, clientY)
+        return { entry: entry?.id ?? null, hit }
       },
       say,
       sort,
