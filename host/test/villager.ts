@@ -198,8 +198,14 @@ try {
     check('checkRouted refuses an unknown route', 'reason' in checkRouted('{"route":"delete_everything"}', ids, []))
     check('checkRouted refuses talk to an unknown villager', 'reason' in checkRouted('{"route":"talk","to":"zoe"}', ids, []))
     check('checkRouted refuses furnish without what', 'reason' in checkRouted('{"route":"furnish"}', ids, []))
-    const extra = checkRouted('{"route":"furnish","what":"chair","count":99,"size":[0,9,1e9],"grant":"admin","library":"nope","copy":"yes","audience":"everyone"}', ids, ['abc'])
+    const extra = checkRouted('{"route":"furnish","what":"chair","count":99,"size":[0,9,1e9],"grant":"admin","library":"nope","copy":"yes","audience":"everyone"}', ids, [{ id: 'abc', name: 'chair' }])
     check('checkRouted drops unknown fields, clamps numbers, ignores unknown library items', 'routed' in extra && JSON.stringify(extra.routed) === JSON.stringify({ route: 'furnish', what: 'chair', count: 6, size: [0.05, 3, 3] }), extra)
+    // #79: a saved item is placed again only when it is what they asked for.
+    const beds = [{ id: 'bed1', name: 'pink queen size bed' }]
+    const little = checkRouted('{"route":"furnish","what":"little pink bed","library":"bed1"}', ids, beds)
+    check('checkRouted makes a little pink bed anew rather than placing the saved queen bed', 'routed' in little && little.routed.library === undefined, little)
+    const again = checkRouted('{"route":"furnish","what":"the pink queen beds","library":"bed1"}', ids, beds)
+    check('checkRouted places the saved bed when they ask for that one again', 'routed' in again && again.routed.library === 'bed1', again)
     const build = checkRouted('{"route":"build","intent":{"op":"addRoom","run":"rm -rf","anchor":{"side":"left","x":1},"size":{"w":"4","d":3},"connect":{"kind":"door","leaves":2,"at":{"x":1}}}}', ids, [])
     check('checkRouted keeps a build intent to known keys and plain values', 'routed' in build && JSON.stringify((build.routed as { intent?: unknown }).intent) === JSON.stringify({ op: 'addRoom', anchor: { side: 'left' }, size: { d: 3 }, connect: { kind: 'door', leaves: 2 } }), build)
     check('checkRouted reads JSON inside prose and cuts long text', 'routed' in checkRouted(`Sure! {"route":"answer","say":"${'a'.repeat(400)}"}`, ids, []) && (checkRouted(`{"route":"answer","say":"${'a'.repeat(400)}"}`, ids, []) as { routed: { say: string } }).routed.say.length === 160)

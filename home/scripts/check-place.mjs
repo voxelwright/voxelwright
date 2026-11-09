@@ -408,6 +408,139 @@ try {
   await page.evaluate(async () => (await window.villageBuild.history()).redo())
   await page.waitForTimeout(200)
 
+  // ---- editing a placed thing (#79): click it, then Move or Remove; Delete; a drag still orbits
+  const crateHit = async () => {
+    const at = (await page.evaluate(() => window.villagePlace.drawn())).find((x) => x.id === crateId).at
+    return screenOf(page, at[0], at[1] + 0.12, at[2])
+  }
+  const selectedId = () => page.evaluate(() => window.villagePlace.selected())
+  const editTag = () => page.evaluate(() => {
+    const t = document.querySelector('.edit-tag')
+    return t && { name: t.querySelector('strong')?.textContent, buttons: [...t.querySelectorAll('button')].map((b) => b.textContent) }
+  })
+  const drawnIds = () => page.evaluate(() => window.villagePlace.drawn().map((x) => x.id))
+  await page.mouse.click(720, 880) // nothing there
+  check('edit: nothing selected to begin with', (await selectedId()) === null && !(await editTag()))
+  const [ex, ey] = await crateHit()
+  await page.mouse.click(ex, ey)
+  await page.waitForTimeout(150)
+  check('edit: a click on a placed crate selects it and shows its tag with Move and Remove', (await selectedId()) === crateId && (await editTag())?.buttons.join() === 'Remove,Move', { sel: await selectedId(), tag: await editTag() })
+  await shot(page, 'edit')
+  await page.keyboard.press('Escape')
+  check('edit: Escape lets go', (await selectedId()) === null && !(await editTag()))
+  await page.mouse.click(ex, ey)
+  await page.mouse.click(720, 880)
+  check('edit: a click on empty space lets go', (await selectedId()) === null)
+  // A drag that starts on the thing orbits the camera and selects nothing.
+  const p0 = await crateHit()
+  await page.mouse.move(ex, ey)
+  await page.mouse.down()
+  for (let i = 1; i <= 10; i++) await page.mouse.move(ex + i * 14, cy)
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+  const p1 = await crateHit()
+  check('edit: a drag that starts on a placed thing still orbits the camera and selects nothing', Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 10 && (await selectedId()) === null, { p0, p1 })
+  // Remove: one version, the thing is gone; undo brings it back; redo removes it again.
+  const [rx, ry] = await crateHit()
+  await page.mouse.click(rx, ry)
+  await page.waitForTimeout(150)
+  check('edit: selected again after the drag', (await selectedId()) === crateId)
+  const vRemove = await versions(page)
+  await page.click('.edit-tag button[data-edit=remove]')
+  await page.waitForTimeout(400)
+  const lastRemoved = await page.evaluate(async () => (await window.villageBuild.history()).versions().at(-1).note)
+  check('edit: Remove is one version, "Removed the apple crate"; the plan and the scene lose it', (await versions(page)) === vRemove + 1 && lastRemoved === 'Removed the apple crate' && !(await furniture(page)).some((f) => f.id === crateId) && !(await drawnIds()).includes(crateId) && (await selectedId()) === null && !(await editTag()), { lastRemoved, drawn: await drawnIds() })
+  await page.keyboard.press('Control+KeyZ')
+  await page.waitForTimeout(400)
+  check('edit: undo brings the crate back, in the plan and in the scene', (await furniture(page)).some((f) => f.id === crateId) && (await drawnIds()).includes(crateId))
+  await page.keyboard.press('Control+Shift+KeyZ')
+  await page.waitForTimeout(400)
+  check('edit: redo removes it again', !(await furniture(page)).some((f) => f.id === crateId) && !(await drawnIds()).includes(crateId))
+  await page.keyboard.press('Control+KeyZ')
+  await page.waitForTimeout(400)
+  // Delete removes the selected thing; typing in the notepad does not.
+  const [dx, dy] = await crateHit()
+  await page.mouse.click(dx, dy)
+  await page.waitForTimeout(150)
+  const input = await page.$('input, textarea')
+  if (input) {
+    await input.focus()
+    await page.keyboard.press('Backspace')
+    check('edit: Backspace while typing in an input removes nothing', (await furniture(page)).some((f) => f.id === crateId))
+    await input.evaluate((e) => e.blur())
+  }
+  await page.keyboard.press('Delete')
+  await page.waitForTimeout(400)
+  check('edit: Delete removes the selected thing', !(await furniture(page)).some((f) => f.id === crateId))
+  await page.keyboard.press('Control+KeyZ')
+  await page.waitForTimeout(400)
+  // A failed commit leaves the thing standing and says why (the house moves on under the tag).
+  const [fx, fy] = await crateHit()
+  await page.mouse.click(fx, fy)
+  await page.waitForTimeout(150)
+  await page.evaluate(async () => {
+    const h = await window.villageBuild.history()
+    window.__commit = h.commit
+    h.commit = async () => { throw new Error('boom') }
+  })
+  await page.click('.edit-tag button[data-edit=remove]')
+  await page.waitForTimeout(300)
+  const hintText = await page.evaluate(() => document.querySelector('.edit-tag .hint')?.textContent)
+  check('edit: a failed remove leaves the thing and shows one line why', (await furniture(page)).some((f) => f.id === crateId) && Boolean(hintText) && (await selectedId()) === crateId, { hintText })
+  await page.evaluate(async () => { (await window.villageBuild.history()).commit = window.__commit })
+  // Move: a session starts on the same thing; confirming moves it.
+  await page.click('.edit-tag button[data-edit=move]')
+  await page.waitForTimeout(200)
+  s = await S(page)
+  check('edit: Move starts a move session of that thing and the tag steps aside', s?.moving === crateId && (await selectedId()) === null && !(await editTag()), s)
+  const vEdMove = await versions(page)
+  s = await dragTo(page, await screenOf(page, -1.0, 0, 1.9))
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => !window.villagePlace.active(), null, { timeout: 10_000 })
+  check('edit: confirming the move moves it as one version', (await versions(page)) === vEdMove + 1 && (await furniture(page)).find((f) => f.id === crateId).at.x > -1.3 && s.ok, (await furniture(page)).find((f) => f.id === crateId))
+  // Nothing selects while a placement is open.
+  await begin(page, 'vase')
+  const [ox2, oy2] = await crateHit()
+  await page.mouse.click(ox2, oy2)
+  check('edit: a click does not select while a thing is being placed', (await selectedId()) === null)
+  await page.evaluate(() => window.__placing.cancel())
+  // #79 review: a picture on a wall is the picture's to select, not a grip on the wall behind it.
+  await begin(page, 'picture')
+  await dragTo(page, await page.evaluate(() => window.villageBuild.wallPoint('kitchen.back', 3.9, 1.5, 0.1)))
+  await page.keyboard.press('Enter')
+  const pic = await done(page)
+  const picAt = (await page.evaluate(() => window.villagePlace.drawn())).find((x) => x.id === pic.furnitureId)?.at
+  const vPic = await versions(page)
+  const [px, py] = await screenOf(page, picAt[0], picAt[1] + 0.2, picAt[2])
+  await page.mouse.click(px, py)
+  await page.waitForTimeout(200)
+  check('edit: a click on a picture hung on a wall selects the picture, not the wall, and moves nothing', pic.status === 'confirmed' && (await selectedId()) === pic.furnitureId && (await page.evaluate(() => window.villageBuild.selected())) === null && (await versions(page)) === vPic, { pic, sel: await selectedId(), wall: await page.evaluate(() => window.villageBuild.selected()) })
+  await page.keyboard.press('Escape')
+  // #79 review: a wall moved in stops before it leaves a placed thing outside every room.
+  const stays = await page.evaluate(async () => {
+    const P = await import('/src/build/plan.ts')
+    const plan = P.apply(window.villagePlace.plan(), { op: 'placeItem', furniture: { id: 'probe-crate', item: { kind: 'crate' }, at: { mount: 'floor', x: -2.5, z: 0.5, yaw: 0 } } })
+    const moved = [-2, 2].map((by) => P.apply(plan, { op: 'moveWall', wallId: 'kitchen.left', by }))
+    return { inside: moved.every((m) => Boolean(P.roomAt(m, -2.5, 0.5))), changed: moved.some((m) => m !== plan) }
+  })
+  check('plan: moving a wall in stops before a placed thing would stand outside the room', stays.inside && stays.changed, stays)
+
+  // With the talk pad on (the default page), the click still reaches the thing (#70).
+  {
+    const talkPage = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
+    await talkPage.goto(await link(base + '?build=1&cam=iso&q=high'))
+    await talkPage.evaluate(() => window.village.ready())
+    await talkPage.waitForFunction(() => window.villagePlace?.history() && window.villagePlace.building() === 0, null, { timeout: 20_000 })
+    await talkPage.waitForTimeout(1500)
+    const at = (await talkPage.evaluate(() => window.villagePlace.drawn())).find((x) => x.id === crateId)?.at
+    const [tx, ty] = await screenOf(talkPage, at[0], at[1] + 0.12, at[2])
+    const top = await talkPage.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [tx, ty])
+    await talkPage.mouse.click(tx, ty)
+    await talkPage.waitForTimeout(200)
+    check('edit: with the talk pad and physics on, a click on a placed thing still selects it', (await talkPage.evaluate(() => window.villagePlace.selected())) === crateId, { top })
+    await talkPage.close()
+  }
+
   // ---- reload: everything placed is back at its pose (host store)
   const placed = (await furniture(page)).map((f) => f.id).sort()
   const drawnBeforeReload = Object.fromEntries((await page.evaluate(() => window.villagePlace.drawn())).map((x) => [x.id, x]))
@@ -467,6 +600,20 @@ try {
     await begin(tp, 'picture')
     await tp.waitForTimeout(300)
     await tp.screenshot({ path: join(OUT, 'place-phone-wall.jpg'), quality: 86 })
+  }
+  // A one-finger tap on a placed thing selects it (the plan's crate, loaded from the host).
+  await tp.evaluate(() => window.__placing.cancel())
+  await begin(tp, 'crate')
+  await tp.keyboard.press('Enter')
+  const placedHere = await done(tp)
+  await tp.waitForTimeout(1200)
+  const tapAt = (await tp.evaluate(() => window.villagePlace.drawn())).find((x) => x.id === placedHere.furnitureId)?.at
+  if (tapAt) {
+    const [tx, ty] = await screenOf(tp, tapAt[0], tapAt[1] + 0.12, tapAt[2])
+    await tp.touchscreen.tap(tx, ty)
+    await tp.waitForTimeout(200)
+    const tagBox = await tp.evaluate(() => document.querySelector('.edit-tag')?.getBoundingClientRect().toJSON())
+    check('phone: a one-finger tap on a placed thing selects it and the tag docks at the bottom', (await tp.evaluate(() => window.villagePlace.selected())) === placedHere.furnitureId && tagBox && tagBox.bottom > 700, { tagBox, tapAt, at: [tx, ty] })
   }
   await phone.close()
   if (look) {

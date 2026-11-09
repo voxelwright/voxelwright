@@ -21,7 +21,7 @@ node scripts/check-navigation.mjs http://localhost:5181/ --build   # navigation 
 node scripts/check-build-addroom.mjs   # build mode: adding rooms (stub host and router)
 node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
-node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, step ms
+node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, a walk round a placed bed (#79), step ms
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 npm run typecheck

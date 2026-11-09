@@ -220,7 +220,7 @@ export default {
       // A line that may be routed (#42): the first words decide. A reply starting with ROUTE is
       // held back and read as a route, never shown as words; anything else streams as usual.
       const ids = route?.villagers.map((v) => v.id) ?? []
-      const items = route?.library.map((l) => l.id) ?? []
+      const items = route?.library ?? []
       let held = route ? '' : null
       let routed: { routed: Routed } | { reason: string } | null = null
       const onText = (t: string) => {
@@ -305,7 +305,7 @@ export default {
           library = await listLibrary(id)
           const call = await config.router({ name: people[id], primary, text: text.trim(), villagers: known, library: library.map((l) => ({ id: l.id, name: l.name })), signal: AbortSignal.timeout(30_000) })
           const ms = Date.now() - started
-          const checked = checkRouted(call.raw, known.map((v) => v.id), library.map((l) => l.id))
+          const checked = checkRouted(call.raw, known.map((v) => v.id), library)
           await appendJsonl(join(dir, 'routes.jsonl'), { at, text: text.trim(), ...('routed' in checked ? { routed: checked.routed } : { refused: checked.reason }), ms, models: call.models, costUsd: call.costUsd, outputTokens: call.outputTokens })
           if ('reason' in checked) return send(res, 422, { error: checked.reason, ms })
           return send(res, 200, { routed: checked.routed, ms, models: call.models, costUsd: call.costUsd })

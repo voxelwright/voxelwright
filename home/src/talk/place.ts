@@ -93,6 +93,36 @@ export interface PlaceOptions {
   taken?: { x: number; y: number; z: number }[]
   /** Towards the camera, for things set down on the floor. */
   face?: (x: number, z: number) => number
+  /** Things placed in the house, oldest first, so "on the bed" can name one: its label, the middle of its top, its turn and half its footprint. */
+  things?: Thing[]
+}
+
+export interface Thing { label: string; top: { x: number; y: number; z: number }; ry: number; half: number }
+
+const singular = (w: string) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w)
+/** Surfaces the house names itself ("on the table" is the kitchen table): a placed thing takes them only by a fuller name ("on the side table"). */
+const BUILT_IN_SURFACE = /^(table|counter|worktop|sill|windowsill|shelf)$/
+/**
+ * The placed thing the words set something on ("on the bed", "on top of the pink bed"), newest
+ * first: its label ends in the phrase's noun ("table lamp" is a lamp, not a table) and has the
+ * phrase's other words. A wall, floor or ceiling is never a thing.
+ */
+export function thingNamed(where: string, things: Thing[] = []): Thing | null {
+  const phrases = where.toLowerCase().matchAll(/\bon (?:top of )?(?:the |a |an |my |our |that |this )?([a-z' ]+?)(?=\s*(?:\||$|[,.!?]|\b(?:in|by|near|next|please|for|and)\b))/g)
+  for (const [, phrase] of phrases) {
+    const words = phrase.trim().split(/\s+/).map(singular)
+    const noun = words.at(-1) ?? ''
+    if (!noun || /^(wall|ceiling|floor)$/.test(noun) || (words.length === 1 && BUILT_IN_SURFACE.test(noun))) continue
+    const found = [...things].reverse().find((t) => {
+      const label = t.label.toLowerCase().split(/[^a-z]+/).filter(Boolean).map(singular)
+      // The thing's own noun is the last word before "with", "of" or "and" ("sofa with cushions" is a sofa, "table lamp" a lamp).
+      const cut = label.findIndex((w) => w === 'with' || w === 'of' || w === 'and')
+      const head = (cut > 0 ? label.slice(0, cut) : label).at(-1)
+      return head === noun && words.every((w) => label.includes(w))
+    })
+    if (found) return found
+  }
+  return null
 }
 
 /** The anchor a line's words name for a mount, and a note when it went to the other room. */
@@ -117,7 +147,9 @@ function anchorFor(mount: Mount, w: string): { name: string; note?: string } {
  */
 export function placeFor(what: string, where: string, proposed?: unknown, opts: PlaceOptions = {}): { poses: Pose[]; mount: Mount; size: [number, number, number]; note?: string } {
   const w = where.toLowerCase(), kind = what.toLowerCase()
-  const mount = mountFor(what, where, proposed)
+  // "On the bed": a placed thing's top is the surface, whatever the model proposed (#79).
+  const on = thingNamed(where, opts.things)
+  const mount = on && !/\b(ceiling|hang\w* from|wall|above)\b/.test(w) && !WALL_KIND.test(kind) && !CEILING_KIND.test(kind) ? 'surface' : mountFor(what, where, proposed)
   const raw = sizeOf(what, opts.size)
   const size = mount === 'wall' ? wallSize(raw) : raw
   const [sw, sh] = size
@@ -131,6 +163,11 @@ export function placeFor(what: string, where: string, proposed?: unknown, opts: 
   }
   let { name, note } = anchorFor(mount, w)
   let a: Anchor = ANCHORS[name]
+  if (on && mount === 'surface') {
+    a = { mount, x: on.top.x, y: on.top.y, z: on.top.z, ry: on.ry, span: Math.max(0, on.half - 0.1) }
+    name = `on ${on.label}`
+    note = undefined
+  }
   // "Here": the surface pointed at. A floor or top takes it as it is; a wall takes wall pieces, and stands others in front.
   const here = /\b(here|there|that spot)\b/.test(w) ? opts.here : null
   if (here) {

@@ -712,6 +712,43 @@ try {
     })
     check('a second piece on the same anchor slides clear of the first, and a TV never lands on the cow', Math.hypot(stacked.second.x - stacked.cow.x, stacked.second.z - stacked.cow.z) > 0.25 && stacked.tv.mount === 'wall' && Math.hypot(stacked.tv.x - stacked.cow.x, stacked.tv.z - stacked.cow.z) > 0.5, stacked)
 
+    // #79: "on the bed" sets things on a placed thing's top, not on the table.
+    const onThing = await page.evaluate(() => {
+      const p = window.village.talk.placeFor
+      const bed = { label: 'pink queen size bed', top: { x: 1.1, y: 0.55, z: 1.4 }, ry: 0, half: 0.8 }
+      const things = [{ label: 'apple crate', top: { x: -1, y: 0.4, z: 1 }, ry: 0, half: 0.2 }, bed]
+      const r = (what, where, mount, opts) => { const o = p(what, where, mount, opts); return { mount: o.mount, anchor: o.poses[0].anchor, x: o.poses[0].x, y: o.poses[0].y, z: o.poses[0].z } }
+      return {
+        toys: r('stuffed toys', 'on the bed | put stuffed toys on the bed', 'floor', { things }),
+        top: r('teddy bear', 'on top of the pink bed', 'surface', { things }),
+        noBed: r('stuffed toys', 'on the bed | put stuffed toys on the bed', 'surface', { things: things.slice(0, 1) }),
+        picture: r('picture', 'above the bed | a picture above the bed', 'wall', { things }),
+        table: r('toy cow', 'on the table', 'surface', { things }),
+        // #79 review: a label that only contains the word, or another table, does not take the house's own surfaces.
+        lamp: r('book', 'on the table', 'surface', { things: [{ label: 'Table lamp', top: { x: 2, y: 1.5, z: 1 }, ry: 0, half: 0.2 }] }),
+        sideTable: r('vase', 'on the table', 'surface', { things: [{ label: 'Oak side table', top: { x: 2, y: 0.5, z: 1 }, ry: 0, half: 0.3 }] }),
+        sideTableNamed: r('vase', 'on the side table', 'surface', { things: [{ label: 'Oak side table', top: { x: 2, y: 0.5, z: 1 }, ry: 0, half: 0.3 }] }),
+        stool: r('mug', 'on the counter', 'surface', { things: [{ label: 'counter stool', top: { x: 2, y: 0.7, z: 1 }, ry: 0, half: 0.2 }] }),
+        sofa: r('teddy', 'on the sofa', 'surface', { things: [{ label: 'Sofa with cushions', top: { x: 2, y: 0.8, z: 1 }, ry: 0, half: 0.4 }] }),
+      }
+    })
+    check('"stuffed toys on the bed" sit on the placed bed\'s top, even when the model said floor', onThing.toys.mount === 'surface' && onThing.toys.anchor === 'on pink queen size bed' && Math.abs(onThing.toys.y - 0.55) < 1e-6 && Math.abs(onThing.toys.x - 1.1) < 0.9, onThing)
+    check('  ...and "on top of the pink bed" finds it too', onThing.top.anchor === 'on pink queen size bed', onThing.top)
+    check('  ..."on the table" stays the kitchen table beside a table lamp or a side table, "on the side table" finds the side table, and "on the counter" is not a counter stool', onThing.lamp.anchor === 'table' && onThing.sideTable.anchor === 'table' && onThing.sideTableNamed.anchor === 'on Oak side table' && onThing.stool.anchor === 'counter' && onThing.sofa.anchor === 'on Sofa with cushions', onThing)
+    check('  ...with no bed placed it falls back as before, a picture above the bed still hangs on a wall, and the table is still the table', onThing.noBed.anchor === 'table' && onThing.picture.mount === 'wall' && onThing.table.anchor === 'table', onThing)
+    await page.evaluate(() => {
+      window.__crate = window.villagePlace.begin('crate', { x: 1.0, y: 0, z: 1.6, yaw: 0 })
+    })
+    await page.waitForTimeout(200)
+    await page.evaluate(() => window.__crate.confirm())
+    await page.waitForFunction(() => window.villagePlace.plan().furniture.some((f) => f.item.kind === 'crate') && !window.villagePlace.active(), null, { timeout: 10_000 })
+    await write(page, 'put a toy cow on the crate')
+    s = await until(page, (x) => x.input.furnish.job?.state === 'placed', 20_000)
+    const onCrate = { job: s.input.furnish.job, placing: await placing(page) }
+    check('end to end: "put a toy cow on the crate" begins on the placed crate as a surface thing', onCrate.job?.places?.[0]?.anchor === 'on apple crate' && onCrate.placing?.mount === 'surface' && onCrate.placing?.at?.y > 0.2, onCrate)
+    await page.click('.place-tag [data-place="cancel"]', { timeout: 3000 }).catch(() => {})
+    await until(page, (x) => x.input.furnish.job === null, 5000)
+
     // The parcel is there again after a reload: the project is read back from the host. Kept pieces are plan furniture, drawn again.
     const keptIds = (await state(page)).input.furnish.placed
     await open(page, '?talk=npc&input=held&q=low')

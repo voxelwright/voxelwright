@@ -311,6 +311,43 @@ if (!args.includes('--skip-drag')) {
   const ms = await page.evaluate(() => window.villageBuild.rebuildMs().slice(1).sort((a, b) => a - b))
   check('rebuild time per change (ms, median / max)', true, [ms[Math.floor(ms.length / 2)], ms[ms.length - 1]].map((v) => +v.toFixed(2)))
 
+
+  // Any wall of any room drags: the kitchen's left and back walls, a pantry added off the left wall, and the wall the kitchen and living room share.
+  const wallPlan = (id, by) => page.evaluate(async ([id, by]) => {
+    const P = await import('/src/build/plan.ts')
+    const p = window.villageBuild.plan()
+    const w = P.wallOf(p, id), c = P.curveOf(p, w)
+    // A spot along the wall clear of its openings (a press over one is the opening's).
+    let t = c.length * 0.5
+    for (const f of [0.5, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9]) if (!w.openings.some((o) => f * c.length > o.from - 0.4 && f * c.length < o.to + 0.4)) { t = f * c.length; break }
+    // Off the bend handle's middle stretch, so the press moves the wall.
+    if (Math.abs(t - c.length / 2) < 0.7) t = c.length * 0.2
+    const [x, z] = P.pointAt(c, t)
+    const pr = (px, pz) => window.villageBuild.project(px, 0.42, pz)
+    return { at: pr(x, z), to: pr(x + c.normal[0] * by, z + c.normal[1] * by), areas: Object.fromEntries(p.rooms.map((r) => [r.id, +P.roomArea(p, r.id).toFixed(3)])), versions: (await window.villageBuild.history()).versions().length }
+  }, [id, by])
+  const dragWall = async (id, by) => {
+    const a = await wallPlan(id, by)
+    await page.mouse.move(...a.at)
+    await frames()
+    const cursorOn = await page.evaluate(() => document.querySelector('canvas').style.cursor)
+    await page.mouse.down()
+    await page.mouse.move(...a.to, { steps: 25 })
+    await frames()
+    const tagShown = await page.evaluate(() => window.village.kernel.root.get('stage').scene.getObjectByName('build size tag')?.visible)
+    await page.mouse.up()
+    await frames(30)
+    const b = await wallPlan(id, by)
+    return { before: a, after: b, cursorOn, tagShown }
+  }
+  const sameVersion = (d) => d.after.versions === d.before.versions + 1
+  const dShared = await dragWall('kitchen.right', 0.5)
+  check('drag any wall: the wall the kitchen shares with the living room moves both rooms, one version', dShared.after.areas.living !== dShared.before.areas.living && dShared.after.areas.kitchen !== dShared.before.areas.kitchen && sameVersion(dShared), { living: [dShared.before.areas.living, dShared.after.areas.living], kitchen: [dShared.before.areas.kitchen, dShared.after.areas.kitchen], versions: [dShared.before.versions, dShared.after.versions] })
+  for (const [id, room, by] of [['kitchen.left', 'kitchen', 1], ['kitchen.back', 'kitchen', 1]]) {
+    const d = await dragWall(id, by)
+    check(`drag any wall: ${id} out ${by} m grows ${room}, one version, grab cursor and size tag on`, d.after.areas[room] > d.before.areas[room] + 1 && sameVersion(d) && d.cursorOn === 'grab' && d.tagShown, { grab: d.cursorOn, tag: d.tagShown, [room]: [d.before.areas[room], d.after.areas[room]], versions: [d.before.versions, d.after.versions] })
+  }
+
   // More than one room: a pantry on the left wall is drawn with its own floor, and the shared wall once.
   await page.evaluate(() => {
     window.villageBuild.intent({ op: 'addRoom', label: 'pantry', anchor: { side: 'left' }, size: { w: 4, d: 3 }, connect: { kind: 'door', leaves: 2 } })
@@ -332,6 +369,19 @@ if (!args.includes('--skip-drag')) {
   })
   check('three rooms: each has its floor, and the shared walls are drawn once, by the house', multi.rooms.length === 3 && multi.floors === 3 && multi.shared.length === 2 && Object.keys(multi.drawn).length === 1, multi)
   await jpg(page, 'two-rooms.jpg')
+
+  // The new room's far wall resizes it; the wall it shares with the kitchen moves both rooms.
+  const far = await page.evaluate(async () => {
+    const P = await import('/src/build/plan.ts')
+    const p = window.villageBuild.plan()
+    const pantry = p.rooms.find((r) => r.id === 'pantry')
+    const walls = P.roomWalls(p, pantry).map(({ wall }) => wall).filter((w) => w.id !== 'pantry.shared' && P.roomsOf(p, w.id).length === 1)
+    return walls.map((w) => ({ id: w.id, x: P.pointAt(P.curveOf(p, w), P.curveOf(p, w).length / 2)[0] })).sort((a, b) => a.x - b.x)[0].id
+  })
+  await page.waitForTimeout(3500)
+  await frames()
+  const dFar = await dragWall(far, 1)
+  check(`drag any wall: the pantry's far wall (${far}) out 1 m grows the pantry, one version`, dFar.after.areas.pantry > dFar.before.areas.pantry + 1 && sameVersion(dFar) && dFar.after.areas.kitchen === dFar.before.areas.kitchen, { pantry: [dFar.before.areas.pantry, dFar.after.areas.pantry], versions: [dFar.before.versions, dFar.after.versions] })
 
   await page.evaluate(() => window.village.unload('build'))
   await frames()

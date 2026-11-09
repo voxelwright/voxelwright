@@ -29,7 +29,7 @@ for (const model of process.argv.slice(2)) {
     try {
       const call = await router({ name: 'Alex', primary: 'Dumpling', text, villagers, library, signal: AbortSignal.timeout(60_000) })
       const ms = Math.round(performance.now() - t0)
-      const checked = checkRouted(call.raw, villagers.map((v) => v.id), library.map((l) => l.id))
+      const checked = checkRouted(call.raw, villagers.map((v) => v.id), library)
       const got = 'routed' in checked ? checked.routed : null
       const ok = got?.route === expected && (!to || got.to === to)
       out.push({ model, text, expected, to, got, ok, ms, apiMs: call.apiMs, outputTokens: call.outputTokens, costUsd: call.costUsd })

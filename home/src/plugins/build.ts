@@ -3,12 +3,13 @@ import type { Context } from 'cordis'
 import { BUILD } from '../features'
 import { own, releaseGpu, replace } from '../kernel'
 import { canvas, paintGlow, toTexture } from '../paint'
-import { HOUSE_PLAN, apply, curveOf, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
+import { HOUSE_PLAN, apply, curveOf, type Curve, floorOf, roomAt, roomsOf, runsForward, normalAt, outline as ringOf, pointAt, polygonArea, roomWalls, wallOf, type Edit, type P, type Plan } from '../build/plan'
 import { BASE_ROOMS, JAMB_WALL, build, makeKit, type Built } from '../build/walls'
 import { ReadOnly, StaleHead, type PlanHistory } from '../build/history'
 import { HAND, tagCss } from '../build/sketch'
 import { alongOf } from '../build/mount'
 import { house } from '../build/house'
+import { busy, claims } from '../build/edit'
 import { checkIntent } from '../build/intent'
 import { OPENING_HEAD, draftEdits, draftGeometry, fit, freshId, freshLabel, resolve, type Draft } from '../build/resolve'
 import { makeOutline } from '../build/outline'
@@ -46,8 +47,8 @@ export interface BuildRequest { intent: unknown; say?: string; reply: (text: str
  * With ?build=0 (or ?talk=off) this plugin does nothing.
  */
 const ENABLED = BUILD
-/** The wall that drags and bends: the house's right wall, where the Workshop will go. */
-const WALL = 'living.right'
+/** How near (m) the pointer must be to a wall's centreline to take hold of it. */
+const REACH = 0.32
 /** Screen boxes (NDC) the proposal fills: the top is left for its card, the bottom for the notepad. */
 const PROPOSAL_BOX: Box = { x: [-0.84, 0.84], y: [-0.7, 0.46] }
 /** What lounge.ts builds that the plan's walls and floor stand in for. */
@@ -210,7 +211,7 @@ export default {
     }
     const rebuild = (next: Plan, final: boolean) => {
       const start = performance.now()
-      const fresh = build(next, kit, { iso: MODE === 'iso', handle: WALL, final })
+      const fresh = build(next, kit, { iso: MODE === 'iso', final })
       if (built && meshes(built).length === meshes(fresh).length) {
         // Same pieces: move the new geometry into the meshes the camera already tracks, so cutaway state holds.
         const old = meshes(built)
@@ -352,9 +353,7 @@ export default {
       void renderer.compileAsync(group, camera, scene).catch(() => {})
     }
 
-    // Handles: the right wall glows on hover; a glowing dot at its middle bends it.
-    kit.handleWall.emissive.set('#ffb15e')
-    kit.handleWall.emissiveIntensity = 0
+    // Handles: the wall under the pointer glows on hover; a glowing dot at its middle bends it.
     const dot = new THREE.Mesh(
       new THREE.CircleGeometry(0.34, 40),
       new THREE.MeshBasicMaterial({ map: paintGlow(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
@@ -376,11 +375,11 @@ export default {
     tag.userData.body = false // a label, not a thing (src/physics/home.ts)
     group.add(tag)
     let tagText = ''
-    const paintTag = (p: Plan) => {
-      const ring = floorOf(p, roomsOf(p, WALL)[0] ?? p.rooms[0])
+    const paintTag = (p: Plan, wallId: string) => {
+      const ring = floorOf(p, roomsOf(p, wallId)[0] ?? p.rooms[0])
       const xs = ring.map((q) => q[0]), zs = ring.map((q) => q[1])
       const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...zs) - Math.min(...zs)
-      const bent = Math.abs(wallOf(p, WALL).sagitta) > 0
+      const bent = Math.abs(wallOf(p, wallId).sagitta) > 0
       const text = `${w.toFixed(1)} × ${d.toFixed(1)} m|${polygonArea(ring).toFixed(1)} m²${bent ? ', with a bay' : ''}`
       if (text === tagText) return
       tagText = text
@@ -417,40 +416,67 @@ export default {
     const raycaster = new THREE.Raycaster()
     const ndc = new THREE.Vector2()
     const hitPoint = new THREE.Vector3()
-    const cut = () => meshes(built!).some((m) => m.userData.wall === WALL && m.userData.cutaway && m.visible)
+    const cut = (id: string) => meshes(built!).some((m) => m.userData.wall === id && m.userData.cutaway && m.visible)
     const onPlane = (e: PointerEvent, y: number) => {
       const rect = renderer.domElement.getBoundingClientRect()
       ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
       raycaster.setFromCamera(ndc, camera)
       return raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), hitPoint) ? hitPoint.clone() : null
     }
-    type Hit = { kind: 'move' | 'bend'; y: number; at: THREE.Vector3 }
-    /** The right wall drags only while it is still the kitchen's own whole side. */
-    const rightFree = () => {
-      const w = plan.walls.find((k) => k.id === WALL)
-      return Boolean(w && w.a === 'living.back-right' && w.b === 'living.front-right' && roomsOf(plan, WALL).length === 1)
+    type Hit = { wall: string; kind: 'move' | 'bend'; y: number; at: THREE.Vector3 }
+    // Every wall's centreline for the plan on screen, made once per plan so a hover costs no curve work.
+    let curvesOf: { plan: Plan; list: Array<{ id: string; c: Curve }> } | null = null
+    const curves = () => {
+      if (curvesOf?.plan !== plan) curvesOf = { plan, list: plan.walls.map((w) => ({ id: w.id, c: curveOf(plan, w) })) }
+      return curvesOf.list
     }
+    /** The wall of a room nearest the pointer's point on a level plane, within reach, and where along it. */
     const pick = (e: PointerEvent): Hit | null => {
-      if (!built?.shell || outline.draft() || !rightFree() || history?.readOnly) return null
-      const c = curveOf(plan, wallOf(plan, WALL))
-      for (const y of cut() ? [STUB] : [STUB, 1.2, 2.0, 2.8]) {
+      // While a thing is being placed or moved the press is the placement's: its ghost may stand by any wall now (#79).
+      if (!built?.shell || outline.draft() || history?.readOnly || ctx.get('placement')?.active) return null
+      const walls = curves()
+      // A wall cut down to its stub can be taken only at the stub's height.
+      const low = new Set<string>()
+      for (const m of meshes(built)) if (m.userData.cutaway && m.visible) low.add(m.userData.wall)
+      for (const y of [STUB, 1.2, 2.0, 2.8]) {
         const p = onPlane(e, y)
         if (!p) continue
-        const t = alongOf(plan, wallOf(plan, WALL), p.x, p.z)
-        const [x, z] = pointAt(c, t)
-        if (Math.hypot(p.x - x, p.z - z) > 0.32) continue
+        let near: { id: string; c: Curve; t: number } | null = null, best = REACH
+        for (const w of walls) {
+          const c = w.c
+          // Cheap reject: the chord's distance, less the bulge a bend can add, before the exact curve.
+          const ux = p.x - c.a[0], uz = p.z - c.a[1]
+          const s = Math.min(c.chord, Math.max(0, ux * c.dir[0] + uz * c.dir[1]))
+          if (Math.hypot(ux - c.dir[0] * s, uz - c.dir[1] * s) > best + Math.abs(c.sagitta)) continue
+          if (y !== STUB && low.has(w.id)) continue
+          const t = alongOf(plan, wallOf(plan, w.id), p.x, p.z)
+          const [x, z] = pointAt(c, t)
+          const d = Math.hypot(p.x - x, p.z - z)
+          if (d < best) [best, near] = [d, { ...w, t }]
+        }
+        if (!near) continue
+        const wall = wallOf(plan, near.id), t = near.t
+        if (!roomsOf(plan, wall.id).length) continue
         // A door in the wall stays the door's to point at (the Workshop's is an entry), so the handle keeps clear of it.
-        if (wallOf(plan, WALL).openings.some((o) => y < o.head && t > o.from - 0.1 && t < o.to + 0.1)) return null
-        return { kind: Math.abs(t - c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
+        if (wall.openings.some((o) => y < o.head && t > o.from - 0.1 && t < o.to + 0.1)) return null
+        return { wall: wall.id, kind: Math.abs(t - near.c.length / 2) < 0.6 ? 'bend' : 'move', y, at: p }
       }
       return null
     }
 
-    let hover: Hit['kind'] | null = null
+    let hover: { wall: string; kind: Hit['kind'] } | null = null
+    /** The wall that glows: the one being dragged, else the one under the pointer. */
+    let glowing: string | null = null
     let drag: (Hit & { from: Plan; edit: Edit | null }) | null = null
     const show = () => {
-      const kind = drag?.kind ?? hover
-      kit.handleWall.emissiveIntensity = drag?.kind === 'move' ? 0.3 : kind === 'move' ? 0.16 : kind ? 0.06 : 0
+      const kind = drag?.kind ?? hover?.kind
+      const wall = drag?.wall ?? hover?.wall ?? null
+      const level = drag?.kind === 'move' ? 0.3 : kind === 'move' ? 0.16 : kind ? 0.06 : 0
+      for (const m of handleOf.values()) m.emissiveIntensity = level
+      if (wall !== glowing) {
+        glowing = wall
+        highlight()
+      }
       ;(dot.material as THREE.MeshBasicMaterial).opacity = drag?.kind === 'bend' ? 1 : kind === 'bend' ? 0.85 : kind ? 0.45 : 0
       renderer.domElement.style.cursor = drag ? 'grabbing' : kind ? 'grab' : ''
       tag.visible = Boolean(drag)
@@ -459,20 +485,35 @@ export default {
       e.stopImmediatePropagation()
       e.preventDefault()
     }
+    /** Whether the pointer is over a placed thing the editor would select (build/edit.ts). */
+    const onThing = (e: PointerEvent) => {
+      let near = Infinity
+      for (const c of claims) near = Math.min(near, c(e.clientX, e.clientY))
+      if (near === Infinity) return false
+      // Only a thing in front of the wall (a picture on it), not one behind it in the next room, takes the press.
+      const w = wallAt(e)
+      return !w || near < camera.position.distanceTo(w.point) + 0.02
+    }
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || e.target !== renderer.domElement) return
+      // A thing on the wall (a picture) is the thing's to select, not a grip on the wall (#79 review).
+      if (onThing(e)) return
       const hit = pick(e)
       if (!hit) return
+      // A finger has no hover to show the grip, so on touch a wall drags only once it is chosen (tapped); a swipe near one orbits.
+      if (e.pointerType === 'touch' && selected?.wallId !== hit.wall) return
       stop(e)
       drag = { ...hit, from: plan, edit: null }
-      paintTag(plan)
+      paintTag(plan, hit.wall)
       show()
     }
     const onMove = (e: PointerEvent) => {
       if (!drag) {
         const was = hover
-        hover = e.target === renderer.domElement ? pick(e)?.kind ?? null : null
-        if (hover !== was) show()
+        // Hover only with no button down: an orbit drag needs no grip, and skips the raycasts.
+        const hit = e.buttons === 0 && e.target === renderer.domElement && !onThing(e) ? pick(e) : null
+        hover = hit && { wall: hit.wall, kind: hit.kind }
+        if (hover?.wall !== was?.wall || hover?.kind !== was?.kind) show()
         // Over a handle the wall owns the pointer, so nothing behind it lights up; an orbit drag passes through.
         if (hover && e.buttons === 0) e.stopImmediatePropagation()
         return
@@ -480,13 +521,13 @@ export default {
       stop(e)
       const p = onPlane(e, drag.y)
       if (!p) return
-      const { normal } = curveOf(drag.from, wallOf(drag.from, WALL))
+      const { normal } = curveOf(drag.from, wallOf(drag.from, drag.wall))
       const along = (p.x - drag.at.x) * normal[0] + (p.z - drag.at.z) * normal[1]
       drag.edit = drag.kind === 'move'
-        ? { op: 'moveWall', wallId: WALL, by: along }
-        : { op: 'bendWall', wallId: WALL, sagitta: wallOf(drag.from, WALL).sagitta + along }
+        ? { op: 'moveWall', wallId: drag.wall, by: along }
+        : { op: 'bendWall', wallId: drag.wall, sagitta: wallOf(drag.from, drag.wall).sagitta + along }
       plan = apply(drag.from, drag.edit)
-      paintTag(plan)
+      paintTag(plan, drag.wall)
     }
     /** A drag ends as one committed version; a cancelled or failed one leaves the head as it was. */
     const end = (cancel: boolean) => {
@@ -496,7 +537,7 @@ export default {
       const h = history
       if (cancel || !d.edit || plan === d.from || !h) plan = h?.plan ?? d.from
       else {
-        const edit = { ...d.edit, ...(d.edit.op === 'moveWall' ? { by: moveAmount(d.from, plan) } : { sagitta: wallOf(plan, WALL).sagitta }) } as Edit
+        const edit = { ...d.edit, ...(d.edit.op === 'moveWall' ? { by: moveAmount(d.from, plan, d.wall) } : { sagitta: wallOf(plan, d.wall).sagitta }) } as Edit
         void h.commit([edit], d.kind === 'move' ? 'Moved the wall' : 'Bent the wall').catch((e) => {
           plan = h.plan
           rebuild(plan, true)
@@ -536,6 +577,18 @@ export default {
     // ── Selecting a wall: a click on it remembers the wall and the point ──────
     let selected: { wallId: string; t: number; point: THREE.Vector3 } | null = null
     const glowOf = new Map<THREE.Material, THREE.MeshStandardMaterial>()
+    // The hover glow of a wall under the pointer: its own material, warmed, at the level show() sets.
+    const handleOf = new Map<THREE.Material, THREE.MeshStandardMaterial>()
+    const handleGlow = (m: THREE.Material) => {
+      let h = handleOf.get(m)
+      if (!h) {
+        h = (m as THREE.MeshStandardMaterial).clone()
+        h.emissive.set('#ffb15e')
+        h.emissiveIntensity = 0
+        handleOf.set(m, h)
+      }
+      return h
+    }
     const glow = (m: THREE.Material) => {
       let lit = glowOf.get(m)
       if (!lit) {
@@ -550,7 +603,7 @@ export default {
       if (!built) return
       for (const m of meshes(built)) {
         const base = (m.userData.material as THREE.Material | undefined) ?? m.material as THREE.Material
-        const want = selected && m.userData.wall === selected.wallId ? glow(base) : base
+        const want = selected && m.userData.wall === selected.wallId ? glow(base) : glowing && m.userData.wall === glowing ? handleGlow(base) : base
         if (want !== base) m.userData.material = base
         if (m.material !== want) m.material = want
       }
@@ -603,7 +656,8 @@ export default {
       const p = pressed
       pressed = null
       if (!p || drag || outline.draft() || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 6) return
-      const w = wallAt(e)
+      // A click on a placed thing is the thing's (build/edit.ts), not the wall's behind it.
+      const w = onThing(e) ? null : wallAt(e)
       if (w || selected) selectWall(w)
     }
 
@@ -742,7 +796,11 @@ export default {
         addEventListener('keydown', onKey, opts)
         addEventListener('pointerdown', onPress, opts)
         addEventListener('pointerup', onRelease, opts)
+        // A click on a placed thing selects it, but not under a wall drag or an open outline (build/edit.ts).
+        const wallBusy = () => Boolean(drag) || Boolean(outline.draft())
+        busy.add(wallBusy)
         return () => {
+          busy.delete(wallBusy)
           listening.abort()
           renderer.domElement.style.cursor = ''
         }
@@ -879,13 +937,19 @@ export default {
       kit.daylight.color.copy(DAYLIGHT).lerp(SUN_POOL, sun)
       lot.frame(dt)
       if (built?.shell) {
-        const c = curveOf(plan, wallOf(plan, WALL))
-        const [x, z] = pointAt(c, c.length / 2)
-        const [nx, nz] = normalAt(c, c.length / 2)
-        if (cut()) dot.position.set(x, STUB + 0.025, z)
-        else dot.position.set(x - nx * 0.45, 0.02, z - nz * 0.45)
-        tag.position.set(x - nx * 1.6, 1.5, z - nz * 1.6)
-        dot.visible = rightFree() && !outline.draft() && !history?.readOnly
+        dot.visible = Boolean(glowing) && !outline.draft() && !history?.readOnly
+        if (glowing) {
+          const wall = wallOf(plan, glowing)
+          const c = curveOf(plan, wall)
+          const [x, z] = pointAt(c, c.length / 2)
+          const [nx, nz] = normalAt(c, c.length / 2)
+          // Inside the room: the side its floor lies on.
+          const owner = roomsOf(plan, glowing)[0]
+          const k = owner && !runsForward(plan, owner, glowing) ? 1 : -1
+          if (cut(glowing)) dot.position.set(x, STUB + 0.025, z)
+          else dot.position.set(x + nx * k * 0.45, 0.02, z + nz * k * 0.45)
+          tag.position.set(x + nx * k * 1.6, 1.5, z + nz * k * 1.6)
+        }
       }
       outline.frame()
     })
@@ -939,10 +1003,10 @@ export default {
         /** Floors drawn, one per room. */
         floors: () => (built ? meshes(built).filter((m) => m.name === 'build floor' || m.name === 'build room floor').length : 0),
         rebuildMs: () => rebuildMs,
-        /** Screen points (CSS px) of the right wall's move and bend handles. */
-        handles: () => {
-          const c = curveOf(plan, wallOf(plan, WALL))
-          const y = cut() ? STUB : 1.2
+        /** Screen points (CSS px) of a wall's move and bend handles (the house's right wall unless named). */
+        handles: (wallId = 'living.right') => {
+          const c = curveOf(plan, wallOf(plan, wallId))
+          const y = cut(wallId) ? STUB : 1.2
           const at = (t: number) => {
             const [x, z] = pointAt(c, t)
             const v = new THREE.Vector3(x, y, z).project(camera)
@@ -989,7 +1053,7 @@ export default {
           return { name: o.name || o.parent?.name || '', z0: +box.min.z.toFixed(3), z1: +box.max.z.toFixed(3), y0: +box.min.y.toFixed(3), shown: shown(o) && o.layers.isEnabled(0) }
         }),
         wallX: () => {
-          const m = built && meshes(built).find((o) => o.userData.wall === WALL && !o.userData.cutaway && o.material === kit.handleWall)
+          const m = built && meshes(built).find((o) => o.userData.wall === 'living.right' && !o.userData.cutaway && o.material !== kit.timber && o.material !== kit.trim)
           return m?.position.x ?? null
         },
       }
@@ -1003,7 +1067,7 @@ export default {
         mark.removeFromParent()
         mark.geometry.dispose()
         ;(mark.material as THREE.Material).dispose()
-        for (const m of glowOf.values()) m.dispose()
+        for (const m of [...glowOf.values(), ...handleOf.values()]) m.dispose()
         hangLow([])
         yard.restore()
         lot.dispose()
@@ -1013,7 +1077,7 @@ export default {
           sun.shadow.camera.updateProjectionMatrix()
         }
         restore()
-        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.handleWall, kit.trim, kit.loungeTrim, kit.timber, kit.threshold, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow, kit.glass, kit.daylight]) {
+        for (const m of [kit.seatWall, kit.shellWall, kit.loungeWall, kit.trim, kit.loungeTrim, kit.timber, kit.threshold, kit.cut, kit.seatFloor, kit.isoFloor, kit.loungeFloor, kit.shadow, kit.glass, kit.daylight]) {
           m.map?.dispose()
           m.dispose()
         }
@@ -1023,8 +1087,8 @@ export default {
 }
 
 /** How far a wall moved between two plans, along its normal. */
-function moveAmount(from: Plan, to: Plan): number {
-  const a = curveOf(from, wallOf(from, WALL)), b = curveOf(to, wallOf(to, WALL))
+function moveAmount(from: Plan, to: Plan, wallId: string): number {
+  const a = curveOf(from, wallOf(from, wallId)), b = curveOf(to, wallOf(to, wallId))
   return Math.round(((b.a[0] - a.a[0]) * a.normal[0] + (b.a[1] - a.a[1]) * a.normal[1]) * 1e6) / 1e6
 }
 

@@ -30,7 +30,7 @@ export const SURFACE_MIN = 0.3
 /** How far below the ceiling a hung thing's top is. */
 export const CORD = 0.75
 /** Clear floor in front of a door. */
-const DOOR_CLEAR = 0.6
+export const DOOR_CLEAR = 0.6
 const LEVEL = 0.025
 /** How close a built-in comes to an opening (or to what already dresses it) to count as dressing it: a frame, a sill. */
 const DRESS = 0.06

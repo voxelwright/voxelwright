@@ -537,6 +537,8 @@ function moveWall(plan: Plan, wallId: Id, by: number): Plan {
       return shift === undefined || f.at.mount !== 'wall' ? f : { ...f, at: { ...f.at, along: round(f.at.along + shift) } }
     })
     if (touching.some((w) => curveOf(next, w).chord < MIN_ROOM_SIDE - 1e-9)) return null
+    // A wall stops before it leaves a placed thing standing outside every room (#79): placing and moving refuse that too.
+    if (plan.furniture.some((f) => f.at.mount !== 'wall' && roomAt(plan, f.at.x, f.at.z) && !roomAt(next, f.at.x, f.at.z))) return null
     return validate(next).length ? null : next
   }
   for (let d = snap(by, MOVE_SNAP); Math.abs(d) > 1e-9; d = round(d - Math.sign(d) * MOVE_SNAP)) {

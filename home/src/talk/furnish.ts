@@ -19,7 +19,7 @@ import type { PlacementService } from '../plugins/place'
 import type { Placing } from '../build/place'
 import type { ItemRef } from '../build/plan'
 import { canvas, toTexture } from '../paint'
-import { ANCHORS, placeFor, sizeOf, TABLE, type Mount, type Pose } from './place'
+import { ANCHORS, placeFor, sizeOf, TABLE, type Mount, type Pose, type Thing } from './place'
 import { libraryItem, makeProp, startProject, type Routed } from '../villager'
 
 const HAND = '"Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
@@ -133,10 +133,17 @@ export function furnisher(stage: Stage, entries: Entries, hooks: FurnishHooks) {
   /** Base points of what already stands, so a new piece's first pose keeps clear of them. */
   const taken = () => holders().map((o) => ({ x: o.position.x, y: o.position.y, z: o.position.z }))
   /** Trusted first poses from the words the person used (place.ts), with "here" the last surface pointed at. */
+  /** What stands in the house now, for "on the bed": each placed thing's top and footprint. */
+  const things = (): Thing[] => (hooks.placement()?.things() ?? []).map(({ label, object }) => {
+    object.updateMatrixWorld(true)
+    const b = new THREE.Box3().setFromObject(object)
+    const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3())
+    return { label, top: { x: c.x, y: b.max.y, z: c.z }, ry: object.rotation.y, half: Math.min(s.x, s.z) / 2 }
+  })
   const places = (where: string, what: string, count: number, replacing: boolean, mount?: unknown, size?: number[]) => {
     if (replacing) return { list: [{ x: TABLE.x, y: 0, z: TABLE.z, ry: 0, mount: 'floor', anchor: 'table' } as Pose], size: sizeOf(what, size), mount: 'floor' as Mount }
     const here = picked && performance.now() - picked.at < 5 * 60_000 ? picked : null
-    const placedNow = placeFor(what, where, mount, { count, size, here, taken: taken(), face: facing })
+    const placedNow = placeFor(what, where, mount, { count, size, here, taken: taken(), face: facing, things: things() })
     return { list: placedNow.poses, size: placedNow.size, mount: placedNow.mount, note: placedNow.note }
   }
 

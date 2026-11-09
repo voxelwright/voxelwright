@@ -1,8 +1,11 @@
 // Where villagers can stand in the house and how they get between places.
 // Hand-placed against the furniture in layout.ts, cabinets, chairs, table and fridge,
 // and, past the doorway, the living room's sofa, coffee table and reading chair.
+// A walk whose hand-placed curve comes too close to something placed since (a bed on the
+// floor, #79) is planned instead on the floor grid (./floor.ts), which plugins/place.ts keeps.
 import * as THREE from 'three/webgpu'
 import { DOORWAY, KITCHEN, LIVING_X, WALL_T } from '../layout'
+import type { Floor } from './floor'
 
 const DOOR_Z = (DOORWAY.z0 + DOORWAY.z1) / 2
 
@@ -136,13 +139,40 @@ export function nearestNode(x: number, z: number, paths: Paths = 'kitchen'): str
   return near
 }
 
+let floor: Floor | null = null
+/** The floor grid walks are planned on when their curve is in the way of something (null: hand-placed curves only). */
+export function setFloor(f: Floor | null) {
+  floor = f
+}
+/** Walks planned on the floor grid, for the checks: how many, and the last one's time. */
+export const planned = { walks: 0, lastMs: 0, maxMs: 0, fellBack: 0 }
+
 function curve(start: [number, number], via0: string, to: string, paths: Paths, leaving: [number, number][] = []): THREE.CatmullRomCurve3 {
   const b = SPOTS[to]
   const points: [number, number][] = [start, ...leaving]
   for (const n of nodes(via0, via(to, paths), paths)) points.push(NODES[n])
   if (b.through) points.push(...b.through)
   points.push(b.at)
+  const hand = smooth(points)
+  if (!floor) return hand
+  const t0 = performance.now()
+  const along = hand.getSpacedPoints(Math.max(2, Math.ceil(hand.getLength() / 0.05))).map((p) => [p.x, p.z] as [number, number])
+  if (floor.clear(along, start, b.at)) return hand
+  // In the way of something placed: round it on the floor grid, or, with no way round, the hand-placed curve
+  // (the walker's body is held back and then passes, engine/world.ts), so nobody stands frozen.
+  const path = floor.path(start, b.at)
+  const ms = performance.now() - t0
+  planned.walks++
+  planned.lastMs = ms
+  planned.maxMs = Math.max(planned.maxMs, ms)
+  if (!path) planned.fellBack++
+  return path ? smooth(path) : hand
+}
+
+/** A smooth floor curve through points, dropping any closer than 12 cm to the one before. */
+function smooth(points: [number, number][]): THREE.CatmullRomCurve3 {
   const clean = points.filter((p, i) => i === 0 || Math.hypot(p[0] - points[i - 1][0], p[1] - points[i - 1][1]) > 0.12)
+  if (clean.length === 1) clean.push([clean[0][0] + 0.01, clean[0][1]])
   if (clean.length === 2) clean.splice(1, 0, [(clean[0][0] + clean[1][0]) / 2, (clean[0][1] + clean[1][1]) / 2])
   return new THREE.CatmullRomCurve3(clean.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'centripetal')
 }

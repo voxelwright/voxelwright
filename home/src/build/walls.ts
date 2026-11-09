@@ -26,7 +26,6 @@ export interface Kit {
   /** lounge.ts's plaster. */
   loungeWall: THREE.MeshStandardMaterial
   /** The draggable wall's own copy of its plaster (the living room's right wall), so it can glow on hover. */
-  handleWall: THREE.MeshStandardMaterial
   trim: THREE.MeshStandardMaterial
   loungeTrim: THREE.MeshStandardMaterial
   /** Timber casing round the doors build edits open. */
@@ -62,7 +61,6 @@ export function makeKit(): Kit {
   oak.rotation = Math.PI / 2
   return {
     seatWall, shellWall, loungeWall,
-    handleWall: loungeWall.clone(),
     trim: new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6 }),
     loungeTrim: new THREE.MeshStandardMaterial({ color: '#f3efe8', roughness: 0.6 }),
     timber: new THREE.MeshStandardMaterial({ color: '#c8956a', roughness: 0.62 }),
@@ -336,10 +334,10 @@ export interface Built {
 type Style = 'kitchen-back' | 'kitchen-side' | 'shared' | 'living-back' | 'living-side' | 'front'
 
 /**
- * Build the house. `handle` gives that wall the hover material. `final` repaints the
+ * Build the house. `final` repaints the
  * contact shadow when the footprint changed; while dragging the old one stretches.
  */
-export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: string; final?: boolean }): Built {
+export function build(plan: Plan, kit: Kit, options: { iso: boolean; final?: boolean }): Built {
   const seat = new THREE.Group()
   seat.name = 'build seat'
   const shell = new THREE.Group()
@@ -398,13 +396,12 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
     const T = f.wall.thickness, H = f.wall.height
     const [t0, t1] = extent(f, room, style)
     const openings = f.wall.openings.filter((o) => !CLOSED.has(o.id))
-    const handle = options.handle === f.wall.id
     // A house wall a new room backs is cut into stretches a door's jamb wall away from each door (build.ts stands
     // the stretch round the door and keeps the rest low); any other wall is one stretch between its openings.
     const cuts = style !== 'shared' && style !== 'front' && roomsOf(plan, f.wall.id).length === 2 && !isBase(f.wall) ? jambCuts(openings, t0, t1) : []
     if (style === 'front') {
       // diorama.ts's shell: full walls round the openings, a cap on full walls and lintels, a low stub for the cutaway.
-      const wallMat = handle ? kit.handleWall : kit.shellWall
+      const wallMat = kit.shellWall
       for (const [a, b, y0, y1] of around(openings, t0, t1, H)) {
         const m = piece(f, a, b, y0, y1, T, 0, wallMat, world8(H))
         m.castShadow = m.receiveShadow = true
@@ -421,7 +418,7 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
         for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * len + uMin - face) / 6, (uv.getY(i) * (y1 - y0) + y0) / H)
       }
       for (const [a, b, y0, y1] of around(openings, t0, t1, H)) {
-        const m = shadowed(piece(f, a, b, y0, y1, T, 0, handle ? kit.handleWall : kit.seatWall, fromFace))
+        const m = shadowed(piece(f, a, b, y0, y1, T, 0, kit.seatWall, fromFace))
         delete m.userData.inward
         m.userData.interior = interior
         seat.add(m)
@@ -452,7 +449,7 @@ export function build(plan: Plan, kit: Kit, options: { iso: boolean; handle?: st
     } else {
       // room.ts and lounge.ts: full-height walls in both views; the shell adds their caps.
       const lounge = style === 'living-back' || style === 'living-side'
-      const wallMat = handle ? kit.handleWall : lounge ? kit.loungeWall : kit.seatWall
+      const wallMat = lounge ? kit.loungeWall : kit.seatWall
       let uvMap: UvMap | undefined
       if (style === 'kitchen-back') {
         // One plaster map stretched over the whole wall, never repeated.

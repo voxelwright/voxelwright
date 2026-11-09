@@ -509,6 +509,69 @@ try {
   })
   check('A snapshot restores the home\'s moving things (bound bodies) after sideways gravity shoved them', homeUndo.keys.length >= 2 && homeUndo.saved.length === homeUndo.keys.length && homeUndo.pushed > 0.05 && homeUndo.restored < 1e-3 && !homeUndo.clamped.length, homeUndo)
 
+  // A bed placed across a villager's corridor (#79): the walk goes round it on the floor grid and arrives.
+  const round = await live.evaluate(async () => {
+    const vp = window.villagePlace, talk = window.village.talk
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+    const frame = () => new Promise((r) => requestAnimationFrame(r))
+    const scene = window.village.kernel.root.get('stage').scene
+    // Across the open corridor in front of the table (world.ts f0 to f1), where the hand-placed walk from the shelf to the near
+    // chair runs. Put in the plan as the placeItem a confirmed placing commits: placing it by hand there slides it against the
+    // front wall, off the corridor.
+    const pose = { x: -0.76, z: 2.1, yaw: 0 }
+    await vp.history().commit([{ op: 'placeItem', furniture: { id: 'f.bed79', item: { kind: 'bed' }, at: { mount: 'floor', ...pose } } }])
+    const d = { furnitureId: 'f.bed79' }
+    await wait(300)
+    const holder = scene.getObjectByName('placed things').children.find((h) => h.userData.furniture === d.furnitureId)
+    if (!holder) return { drawn: false }
+    holder.updateMatrixWorld(true)
+    // The bed's footprint, world-aligned (yaw 0): its meshes' box corners.
+    const V = holder.position.constructor
+    const xs = [], zs = []
+    holder.traverse((o) => {
+      if (!o.isMesh) return
+      o.geometry.computeBoundingBox()
+      const g = o.geometry.boundingBox
+      for (const x of [g.min.x, g.max.x]) for (const z of [g.min.z, g.max.z]) {
+        const c = new V(x, 0, z).applyMatrix4(o.matrixWorld)
+        xs.push(c.x)
+        zs.push(c.z)
+      }
+    })
+    const b = { min: { x: Math.min(...xs), z: Math.min(...zs) }, max: { x: Math.max(...xs), z: Math.max(...zs) } }
+    const gap = (x, z) => Math.hypot(Math.max(b.min.x - x, 0, x - b.max.x), Math.max(b.min.z - z, 0, z - b.max.z))
+    const person = 'sam'
+    const arrive = async (spot, s) => {
+      talk.walk(person, spot)
+      const path = []
+      for (let t = performance.now(); performance.now() - t < s * 1000;) {
+        await frame()
+        const w = talk.where(person)
+        if (!w) return { path, arrived: false }
+        if (w.state === 'walk') path.push([w.x, w.z])
+        if (w.spot === spot && (w.state === 'work' || w.state === 'sit')) return { path, arrived: true, state: w.state, at: [w.x, w.z] }
+      }
+      return { path, arrived: false, where: talk.where(person) }
+    }
+    const toShelf = await arrive('shelf', 30)
+    const before = { ...vp.walks() }
+    const across = await arrive('seatNear', 30)
+    const after = vp.walks()
+    talk.walk(person, null)
+    const closest = Math.min(...across.path.map(([x, z]) => gap(x, z)))
+    // The hand-placed corridor it lies across: world.ts's nodes f0 and f1.
+    const crossed = Array.from({ length: 21 }, (_, i) => [-1.75 + 1.45 * i / 20, 1.3 + 0.15 * i / 20]).some(([x, z]) => gap(x, z) === 0)
+    // Undo the bed, so the rest of the page is as it was.
+    await vp.history().undo()
+    return {
+      crossed, footprint: [b.min.x, b.min.z, b.max.x, b.max.z].map((v) => +v.toFixed(3)), toShelf: toShelf.arrived,
+      arrived: across.arrived, state: across.state, steps: across.path.length, closest: +closest.toFixed(3),
+      planned: after.walks - before.walks, fellBack: after.fellBack - before.fellBack, planMs: +after.maxMs.toFixed(2), buildMs: after.buildMs.map((v) => +v.toFixed(1)),
+    }
+  })
+  report.walkRound = round
+  check('A bed placed across a villager\'s corridor: the walk is planned round it on the floor grid (no fallback), keeps at least 0.2 m from its footprint all the way, and arrives at the near chair', round.crossed && round.toShelf && round.arrived && round.planned >= 1 && round.fellBack === 0 && round.steps > 30 && round.closest >= 0.2, round)
+
   // A villager walking into a heavy sofa is held back by it; walking into a felt ball pushes it along.
   const trial = await live.evaluate(() => {
     const p = window.village.physics

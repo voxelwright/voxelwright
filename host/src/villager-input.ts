@@ -101,12 +101,24 @@ export type Maker = (ask: MakeAsk) => Promise<{ module: string; name: string } &
 
 const short = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, max) : undefined)
 
+/** Words that do not tell one thing from another: "a pink bed" and "the pink bed" are the same thing. */
+const FILLER = new Set(['a', 'an', 'the', 'some', 'one', 'another', 'again', 'same', 'my', 'our', 'your', 'that', 'this', 'of', 'with', 'and', 'in', 'on', 'for', 'like', 'just', 'saved', 'it'])
+const wordsOf = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w)).map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w))
+/**
+ * Whether placing saved item `name` gives the person `what` they asked for: every word of
+ * `what` is in the name. "little pink bed" is not "pink queen size bed", so that is made anew.
+ */
+export const sameThing = (what: string, name: string) => {
+  const have = new Set(wordsOf(name))
+  return wordsOf(what).every((w) => have.has(w))
+}
+
 /**
  * The router's answer as plain checked data, or a reason. Unknown routes,
  * villagers and library items are refused; text is cut short; numbers are
  * clamped. Nothing the model wrote can add a field or a permission.
  */
-export function checkRouted(raw: string, villagers: string[], library: string[]): { routed: Routed } | { reason: string } {
+export function checkRouted(raw: string, villagers: string[], library: { id: string; name: string }[]): { routed: Routed } | { reason: string } {
   const json = /\{[\s\S]*\}/.exec(raw)?.[0]
   let v: Record<string, unknown>
   try {
@@ -140,8 +152,10 @@ export function checkRouted(raw: string, villagers: string[], library: string[])
     const replace = short(v.replace, 40)
     if (replace) out.replace = replace
     if (v.copy === true) out.copy = true
+    // A saved item only when it is what they asked for: the model's choice is not proof (a new size or colour is a new thing).
     const item = short(v.library, 64)
-    if (item && library.includes(item)) out.library = item
+    const saved = item ? library.find((l) => l.id === item) : undefined
+    if (saved && sameThing(out.what!, saved.name)) out.library = saved.id
   }
   if (route === 'journal' && (v.section === 'talk' || v.section === 'tasks')) out.section = v.section
   if (route === 'build') {
@@ -156,7 +170,7 @@ export function checkRouted(raw: string, villagers: string[], library: string[])
 function routeRules(ask: Omit<RouteAsk, 'text' | 'signal'>): string[] {
   return [
     '- "talk": they want to talk with another villager. Give "to" (an id below) and, if the line carries something to pass on, "message".',
-    '- "furnish": a quick change to the room: add, place, replace or copy furniture or decor that can be made at once as a simple static object. Give "what" (a few words: kind, material, colour), "where" as they said it (or "here"), "mount": "floor" (stands on the floor), "surface" (sits on a table, counter or sill), "wall" (pictures, shelves, a TV, a clock) or "ceiling" (lanterns, mobiles, pendant lamps), "count", "size" [width, height, depth] in metres, "replace" if it replaces something in the room (e.g. "table"), "copy": true for "another one like that", "library" if it names a saved item below.',
+    '- "furnish": a quick change to the room: add, place, replace or copy furniture or decor that can be made at once as a simple static object. Give "what" (a few words: kind, material, colour), "where" as they said it (or "here"), "mount": "floor" (stands on the floor), "surface" (sits on a table, counter or sill), "wall" (pictures, shelves, a TV, a clock) or "ceiling" (lanterns, mobiles, pendant lamps), "count", "size" [width, height, depth] in metres, "replace" if it replaces something in the room (e.g. "table"), "copy": true for "another one like that", "library" (an id below) only when they ask for that saved thing again as it is; a different size, colour, material or kind is a new thing, so leave "library" out.',
     '- "project": something too big, interactive or working to make at once (a playable machine, a whole room makeover, anything that moves or does something). Give "what" and "where".',
     '- "journal": they want to see conversations or tasks. Give "to" if they name a villager and "section": "talk" or "tasks".',
     '- "theme": they want the look of the whole home changed: its style, mood, season or colours ("make it cozier", "change the style to neon", "go back to normal"). No other fields; the theme is written separately.',
@@ -202,7 +216,7 @@ export const ROUTE_PREFIX = 'ROUTE'
  * counts; the JSON on its first line goes through checkRouted. `answer` is not
  * a route here (an answer is the reply itself), so it is refused.
  */
-export function routeInReply(reply: string, villagers: string[], library: string[]): { routed: Routed } | { reason: string } | null {
+export function routeInReply(reply: string, villagers: string[], library: { id: string; name: string }[]): { routed: Routed } | { reason: string } | null {
   const text = reply.trimStart()
   if (!text.startsWith(ROUTE_PREFIX)) return null
   const first = text.slice(ROUTE_PREFIX.length).split('\n')[0]
