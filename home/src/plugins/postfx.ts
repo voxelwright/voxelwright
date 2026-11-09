@@ -17,6 +17,7 @@ import { chosen, theme } from '../theme'
 import type { Post, Theme } from '../theme/tokens'
 import { makeFx, type FxContext } from '../theme/fx'
 import { asNext } from '../theme/ahead'
+import { fieldLook } from '../engine/heat'
 
 // Each material's shader is built in one task. Inside compileAsync, three r187 builds a
 // material in stages and yields to the next frame between them (NodeBuilder.buildAsync).
@@ -124,6 +125,8 @@ function build(stage: Stage, built: Theme): Chain {
     color = resolved
   }
 
+  // Fire's light, char and wetness from the heat field (#74), before bloom so what glows blooms. Reads nothing while the field is idle.
+  color = fieldLook(color, depth.x, stage.camera)
   for (const s of stages) if (s.hdr) color = s.hdr(color, fxContext)
 
   // The low tier keeps its softer bloom (0.25 where the home's is 0.42) in every theme.

@@ -25,5 +25,15 @@ export type PhysicsEvent =
   | { kind: 'rules'; rules: Rules; by: 'preset' | 'panel' | 'talk' | 'code'; preset?: string; clamped: string[] }
   /** A thing went faster than the speed limit and was slowed to it, or fell out of the world and was put back. */
   | { kind: 'clamped'; thing: string; speed: number; at: At; reset: boolean }
+  /**
+   * Fire (fire.ts). A part of a thing caught (`thing` its key, `part` its name in the thing, '' for the
+   * whole of it), from the heat around it, or set alight by an ask, a gadget or code; `temperature` is
+   * the heat it read, °C.
+   */
+  | { kind: 'ignite'; thing: string; part: string; material: string; at: At; by: 'heat' | 'ask' | 'gadget' | 'code'; temperature: number }
+  /** It stopped burning before its fuel ran out: water put it out, or an ask, a gadget or code did. `fuel` is what is left, 0 to 1. */
+  | { kind: 'extinguish'; thing: string; part: string; material: string; at: At; by: 'water' | 'ask' | 'gadget' | 'code'; fuel: number }
+  /** It burnt out: nothing left to burn, charred. */
+  | { kind: 'burnt'; thing: string; part: string; material: string; at: At }
   /** Gadget signals were dropped since the last such event: past the waiting limit, or more than 64 wires from a physical cause (a loop of wires feeding itself). */
   | { kind: 'dropped'; signals: number }

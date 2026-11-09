@@ -28,7 +28,7 @@ export class Kit {
   private buckets = new Map<THREE.Material, THREE.BufferGeometry[]>()
   /** What the parts added from now on are ("dresser"), so a merged kit can still say what stands where. */
   label: string | null = null
-  private regions: Array<{ name: string | null; box: THREE.Box3 }> = []
+  private regions: Array<{ name: string | null; box: THREE.Box3; metal: boolean }> = []
   readonly finishes: Record<Finish, THREE.Material>
   constructor(phys: boolean) {
     const tint = (roughness: number, metalness = 0) => new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness })
@@ -54,7 +54,8 @@ export class Kit {
   }
   private push(material: THREE.Material, g: THREE.BufferGeometry) {
     g.computeBoundingBox()
-    this.regions.push({ name: this.label, box: g.boundingBox!.clone() })
+    // Metal (the stove, pans) is told apart for heat: it warms but never burns (src/physics/home.ts).
+    this.regions.push({ name: this.label, box: g.boundingBox!.clone(), metal: ((material as THREE.MeshStandardMaterial).metalness ?? 0) >= 0.5 })
     const list = this.buckets.get(material) ?? []
     list.push(g)
     this.buckets.set(material, list)

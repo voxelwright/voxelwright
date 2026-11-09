@@ -63,7 +63,7 @@ interface Thing {
 interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; mass: number; last: THREE.Vector3; walked: number; left: boolean; solid: boolean; heldFor: number; aim: THREE.Vector3; passing: boolean; sent: Vec3 }
 
 /** A body that stands for a scene object drawn by someone else (src/physics/home.ts binds the home's things). */
-interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat } }
+interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat }; parts?: BindSpec['parts'] }
 
 export interface BindSpec {
   /** In the object's frame (its world position and turn), at world scale. */
@@ -72,6 +72,37 @@ export interface BindSpec {
   material: string
   /** kg, dynamic only: in place of density × volume. */
   mass?: number
+  /**
+   * Named parts of a compound, each its own material for heat and fire (a merged kit's sofa is felt,
+   * its stove steel): indices into shape.boxes. Boxes no part names burn as the thing's material.
+   */
+  parts?: { name: string; material: string; boxes: number[] }[]
+}
+
+/** A part that can take heat, in world space: what fire.ts keeps a temperature, fuel and wetness for. */
+export interface Burnable {
+  /** `thing` or `thing:part`. */
+  id: string
+  thing: string
+  /** Its name in the thing, '' for the whole thing. */
+  part: string
+  material: string
+  /** The box round it, world space (axis-aligned). */
+  center: Vec3
+  half: Vec3
+  /** It moves (a dynamic body): its box is read again as it goes. */
+  moving: boolean
+}
+
+/** What World needs of fire.ts (kept apart so the world runs without fire). */
+export interface Burner {
+  ignite(thing: string, part: string | undefined, by: 'ask' | 'gadget' | 'code'): string | null
+  douse(thing: string, part: string | undefined, by: 'ask' | 'gadget' | 'code'): string | null
+  burning(thing: string): boolean
+  rain(seconds: number): string | null
+  strike(thing: string, part: string | undefined): string | null
+  snapshot(): unknown
+  restore(s: unknown): string[]
 }
 
 export interface Stats { stepMs: { median: number; p95: number; n: number }; frameMs: { median: number; p95: number; n: number }; bodies: number; followers: number; static: number; dynamic: number }
@@ -96,6 +127,14 @@ const outline = (shape: Shape): Shape => {
   }
   return { kind: 'box', half: [0, 1, 2].map((i) => +((hi[i] - lo[i]) / 2).toFixed(3)) as Vec3 }
 }
+const corner = new THREE.Vector3(), box3 = new THREE.Box3(), boxPose = new THREE.Matrix4(), partPose = new THREE.Matrix4()
+/** Grows `into` by a box (half extents, at, turn in a frame) carried by `pose` (that frame to the world). */
+function growBy(into: THREE.Box3, pose: THREE.Matrix4, half: Vec3, at: Vec3, rotation: Quat) {
+  partPose.compose(v3(at), new THREE.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]), new THREE.Vector3(1, 1, 1)).premultiply(pose)
+  for (let i = 0; i < 8; i++) into.expandByPoint(corner.set(i & 1 ? half[0] : -half[0], i & 2 ? half[1] : -half[1], i & 4 ? half[2] : -half[2]).applyMatrix4(partPose))
+}
+const halfOf = (shape: Shape): Vec3 => shape.kind === 'box' ? shape.half : shape.kind === 'sphere' ? [shape.radius, shape.radius, shape.radius]
+  : shape.kind === 'compound' ? (outline(shape) as { half: Vec3 }).half : [shape.radius, shape.halfHeight + (shape.kind === 'capsule' ? shape.radius : 0), shape.radius]
 const quantile = (xs: number[], q: number) => {
   if (!xs.length) return 0
   const s = [...xs].sort((a, b) => a - b)
@@ -129,6 +168,10 @@ export class World implements WorldApi {
   private scenery = new Map<string, THREE.Mesh[]>()
   private tally = new Map<string, number>()
   private accumulator = 0
+  /** Bumped whenever a thing is added or taken away: fire.ts reads burnables() again. */
+  version = 0
+  /** Fire and heat (fire.ts), when the host runs them: ignite, douse and snapshots go through it. */
+  burner?: Burner
   private stepTimes: number[] = []
   private frameTimes: number[] = []
   clock = 0
@@ -292,10 +335,12 @@ export class World implements WorldApi {
       const from = `${toy.id}/${w.from}`
       this.wires.set(from, [...(this.wires.get(from) ?? []), `${toy.id}/${w.to}`])
     }
+    this.version++
   }
 
   /** Everything of a toy out of the world again: joints, bodies, meshes, gadgets, wires, displays. */
   private removeToy(id: string) {
+    this.version++
     for (const joint of this.joints.get(id) ?? []) this.core.removeJoint(joint)
     this.joints.delete(id)
     for (const [key, t] of this.things) {
@@ -504,9 +549,10 @@ export class World implements WorldApi {
       shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
       density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
     })
-    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: { p: arr(p), q: [q.x, q.y, q.z, q.w] } }
+    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts }
     this.bound.set(key, b)
     this.byBody[body] = b
+    this.version++
     return true
   }
 
@@ -516,6 +562,7 @@ export class World implements WorldApi {
     this.core.removeBody(b.body)
     this.byBody[b.body] = undefined
     this.bound.delete(key)
+    this.version++
   }
 
   boundKeys() {
@@ -911,6 +958,86 @@ export class World implements WorldApi {
     return [...this.gadgets.values()].filter((g) => gadgetKind(g.spec.kind) && Object.keys(g.knobs).length).map((g) => ({ id: g.id, kind: g.spec.kind, knobs: { ...g.knobs }, ranges: gadgetKind(g.spec.kind)!.knobs }))
   }
 
+  // ── Heat and fire ────────────────────────────────────────────────────────
+
+  /**
+   * Every part that takes heat, with its box in the world now: each toy part, and each bound
+   * thing's named parts plus the rest of it. Followers (villagers) are not burnables.
+   */
+  burnables(movingOnly = false): Burnable[] {
+    const out: Burnable[] = []
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), c = new THREE.Vector3(), h = new THREE.Vector3()
+    const push = (id: string, thing: string, part: string, mat: string, moving: boolean) => {
+      if (box3.isEmpty()) return
+      box3.getCenter(c)
+      box3.getSize(h).multiplyScalar(0.5)
+      out.push({ id, thing, part, material: mat, center: arr(c), half: arr(h), moving })
+    }
+    for (const t of this.things.values()) {
+      if (t.part.sensor || t.part.hidden || (movingOnly && t.part.motion !== 'dynamic')) continue
+      const pos = this.core.position(t.body), rot = this.core.rotation(t.body)
+      boxPose.compose(v3(pos), q.set(rot[0], rot[1], rot[2], rot[3]), one)
+      box3.makeEmpty()
+      if (t.part.shape.kind === 'compound') for (const b of t.part.shape.boxes) growBy(box3, boxPose, b.half, b.at, b.rotation)
+      else growBy(box3, boxPose, halfOf(t.part.shape), [0, 0, 0], [0, 0, 0, 1])
+      push(t.key, t.key, '', t.part.material, t.part.motion === 'dynamic')
+    }
+    for (const b of this.bound.values()) {
+      if (movingOnly && b.motion !== 'dynamic') continue
+      if (b.motion === 'dynamic') {
+        const pos = this.core.position(b.body), rot = this.core.rotation(b.body)
+        p.set(pos[0], pos[1], pos[2])
+        q.set(rot[0], rot[1], rot[2], rot[3])
+      } else {
+        b.object.updateWorldMatrix(true, false)
+        b.object.matrixWorld.decompose(p, q, h)
+      }
+      boxPose.compose(p, q, one)
+      const boxes = b.shape.kind === 'compound' ? b.shape.boxes : [{ half: halfOf(b.shape), at: [0, 0, 0] as Vec3, rotation: [0, 0, 0, 1] as Quat }]
+      const named = new Set<number>()
+      for (const part of b.parts ?? []) {
+        box3.makeEmpty()
+        for (const i of part.boxes) {
+          const x = boxes[i]
+          if (!x) continue
+          named.add(i)
+          growBy(box3, boxPose, x.half, x.at, x.rotation)
+        }
+        push(`${b.key}:${part.name}`, b.key, part.name, material(part.material) ? part.material : b.material, b.motion === 'dynamic')
+      }
+      if (named.size === boxes.length) continue
+      box3.makeEmpty()
+      boxes.forEach((x, i) => named.has(i) || growBy(box3, boxPose, x.half, x.at, x.rotation))
+      push(b.key, b.key, '', b.material, b.motion === 'dynamic')
+    }
+    return out
+  }
+
+  /** Sets a thing (or one named part of it) alight. Null, or why not. */
+  ignite(key: string, part?: string, by: 'ask' | 'gadget' | 'code' = 'code') {
+    return this.burner ? this.burner.ignite(key, part, by) : 'fire is not running'
+  }
+
+  /** Puts water on a thing (or one named part): it puts out what burns and wets the rest. Null, or why not. */
+  douse(key: string, part?: string, by: 'ask' | 'gadget' | 'code' = 'code') {
+    return this.burner ? this.burner.douse(key, part, by) : 'fire is not running'
+  }
+
+  /** Rain over the whole home for some seconds. Null, or why not. */
+  rain(seconds: number) {
+    return this.burner ? this.burner.rain(seconds) : 'fire is not running'
+  }
+
+  /** Lightning: a burst of great heat at a thing (or part). What burns there catches; metal only gets hot. Null, or why not. */
+  strike(key: string, part?: string) {
+    return this.burner ? this.burner.strike(key, part) : 'fire is not running'
+  }
+
+  /** Whether any part of a thing is burning. */
+  burning(key: string) {
+    return this.burner?.burning(key) ?? false
+  }
+
   // ── Undo ─────────────────────────────────────────────────────────────────
 
   snapshot(): Snapshot {
@@ -918,7 +1045,7 @@ export class World implements WorldApi {
     for (const t of [...this.things.values(), ...this.bound.values()]) if (('part' in t ? t.part.motion : t.motion) === 'dynamic') things[t.key] = { p: this.core.position(t.body), q: this.core.rotation(t.body), v: this.core.velocity(t.body) }
     const gadgets: Snapshot['gadgets'] = {}
     for (const g of this.gadgets.values()) gadgets[g.id] = { knobs: { ...g.knobs }, state: { ...g.state } }
-    return { clock: this.clock, rules: { ...this.rules, gravity: [...this.rules.gravity] }, things, gadgets, respawns: [...this.respawns].map(([key, t]) => ({ key, t })) }
+    return { clock: this.clock, rules: { ...this.rules, gravity: [...this.rules.gravity] }, things, gadgets, respawns: [...this.respawns].map(([key, t]) => ({ key, t })), ...(this.burner ? { fire: this.burner.snapshot() } : {}) }
   }
 
   /**
@@ -962,6 +1089,8 @@ export class World implements WorldApi {
     this.respawns = new Map((Array.isArray(s.respawns) ? s.respawns : []).filter((r) => r && this.dynamic(r.key) && typeof r.t === 'number' && Number.isFinite(r.t)).map((r) => [r.key, r.t]))
     if (typeof s.clock === 'number' && Number.isFinite(s.clock)) this.clock = s.clock
     this.queue.length = 0
+    // Fire is put back as the snapshot had it, or out everywhere when it had none; the heat field starts cold either way.
+    if (this.burner) clamped.push(...this.burner.restore(s.fire))
     return { clamped }
   }
 

@@ -165,3 +165,42 @@ export function resetGadgets() {
   registry.clear()
   for (const [name, k] of BUILT_IN) registry.set(name, k)
 }
+
+registerGadget({
+  kind: 'flame', about: 'Keeps its part alight while `lit` is 1 (it lights it as soon as fire runs); `light` lights it, `out` puts it out with water. Fires `caught` when it lights.',
+  knobs: { lit: knob(0, 1, 1, 0, 'on or off') }, inputs: ['light', 'out'], outputs: ['caught'],
+  setup(g) {
+    g.state.wanted = g.knobs.lit
+  },
+  knob(g, name, w) {
+    // Only a change of `lit` re-arms it: a snapshot putting back the same value keeps the latch it saved.
+    if (name !== 'lit' || g.knobs.lit === g.state.wanted) return
+    g.state.wanted = g.knobs.lit
+    g.state.lit = 0
+    if (!g.knobs.lit && g.part && w.burning(g.part)) w.douse(g.part, undefined, 'gadget')
+  },
+  step(g, w) {
+    // Lit once per time `lit` is set: lighting waits for fire to run, and a doused candle stays out until lit again.
+    if (!g.knobs.lit || g.state.lit || !g.part) return
+    if (w.burning(g.part)) {
+      g.state.lit = 1
+      return
+    }
+    const why = w.ignite(g.part, undefined, 'gadget')
+    if (why === 'fire is not running') return
+    // Lit, or it cannot be (burnt out, too wet): either way it stops trying until lit again.
+    g.state.lit = 1
+    if (why === null) w.fire(g, 'caught', { value: 1, thing: g.part })
+  },
+  receive(g, port, _s, w) {
+    if (!g.part) return
+    if (port === 'light') {
+      g.knobs.lit = g.state.wanted = 1
+      g.state.lit = 0
+    } else if (port === 'out') {
+      g.knobs.lit = g.state.wanted = 0
+      w.douse(g.part, undefined, 'gadget')
+    }
+  },
+})
+

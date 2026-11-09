@@ -1886,7 +1886,9 @@ export default {
           ctx.emit('village/physics-ask', request)
           // No answer (physics off or not started yet), a world that stopped while the model answered, or a thrown error all say the same.
           const r = request.answer ? await request.answer.catch((error) => (console.error('Village physics ask failed:', error), null)) : null
-          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
+          // An act the world refused says why ("the fridge: steel does not burn"), as text.
+          const refusedAct = r && !r.ok && r.why === 'refused' && r.acts?.find((a) => a.refused)
+          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : refusedAct ? `${refusedAct.target ?? 'That'}: ${refusedAct.refused}.` : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
           return
         }
         case 'build': {

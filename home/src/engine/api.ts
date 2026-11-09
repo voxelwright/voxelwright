@@ -55,6 +55,8 @@ export interface Snapshot {
   things: Record<string, { p: Vec3; q: Quat; v: Vec3 }>
   gadgets: Record<string, { knobs: Record<string, number>; state: Record<string, number> }>
   respawns: { key: string; t: number }[]
+  /** Fire and wetness per part (fire.ts's own snapshot), when fire runs. Restoring without it puts every fire out. */
+  fire?: unknown
 }
 
 export interface WorldApi {
@@ -97,6 +99,17 @@ export interface WorldApi {
   show(key: string, text: string): void
   /** A direction in a toy's frame, in world space. */
   toWorldDir(toy: string, dir: Vec3): Vec3
+
+  // Heat and fire (null, or why not)
+  /** Sets a thing, or one named part of it ('sofa' in a merged kit), alight. */
+  ignite(key: string, part?: string, by?: 'ask' | 'gadget' | 'code'): string | null
+  /** Water on a thing or a part: puts out what burns there and wets it. */
+  douse(key: string, part?: string, by?: 'ask' | 'gadget' | 'code'): string | null
+  burning(key: string): boolean
+  /** Rain over the home for some seconds (at most 60). */
+  rain(seconds: number): string | null
+  /** Lightning at a thing: great heat for a moment; it catches if it burns. */
+  strike(key: string, part?: string): string | null
 
   // Undo
   snapshot(): Snapshot

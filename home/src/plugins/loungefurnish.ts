@@ -38,6 +38,7 @@ export default {
     rug.name = 'lounge rug'
     flat.add(rug)
 
+    kit.label = 'sofa'
     // The sofa, facing into the room.
     {
       const z0 = -0.1, z1 = 1.95, cz = (z0 + z1) / 2, len = z1 - z0, sx = L + 0.43
@@ -53,23 +54,29 @@ export default {
       dress(box(0.02, 0.32, 0.32), throwCloth, at(sx + 0.3, 0.53, z1 - 0.12))
     }
 
+    kit.label = 'coffee table'
     // Coffee table on the rug with books, a candle and a bowl of clementines.
     {
       const cx = X - 1.55, cz = 0.95
       dress(cyl(0.46, 0.46, 0.04, 32).scale(1, 1, 0.75), pine, at(cx, 0.42, cz))
       for (const [dx, dz] of [[-0.3, -0.2], [0.3, -0.2], [-0.3, 0.2], [0.3, 0.2]]) dress(cyl(0.022, 0.016, 0.4, 8), pine, at(cx + dx, 0.2, cz + dz))
       dress(cyl(0.4, 0.4, 0.02, 28).scale(1, 1, 0.72), pine, at(cx, 0.12, cz))
+      kit.label = 'books'
       const books: Array<[number, string]> = [[0.04, '#2f5446'], [0.035, '#c9a24a'], [0.03, '#7a3b2e']]
       let y = 0.44
       books.forEach(([h, c], i) => {
         part(box(0.28 - i * 0.03, h, 0.2 - i * 0.02), c, 'satin', at(cx - 0.18, y + h / 2, cz + 0.05, 0.15 * i - 0.1))
         y += h
       })
+      kit.label = 'candle'
       part(cyl(0.035, 0.035, 0.09, 14), '#f4ecd8', 'satin', at(cx - 0.18, y + 0.045, cz + 0.05))
+      kit.label = 'bowl'
       part(cyl(0.11, 0.07, 0.06, 20), '#4f7896', 'gloss', at(cx + 0.18, 0.47, cz - 0.04))
+      kit.label = 'clementines'
       for (let i = 0; i < 4; i++) part(ball(0.035, 12, 8), '#e8892c', 'satin', at(cx + 0.15 + (i % 2) * 0.06, 0.51 + (i > 1 ? 0.03 : 0), cz - 0.07 + Math.floor(i / 2) * 0.06))
     }
 
+    kit.label = 'bookcase'
     // A tall bookcase on the left wall near the door.
     {
       const z0 = -1.75, z1 = -0.85, cz = (z0 + z1) / 2, d = 0.32, H = 1.8, bx = L + d / 2
@@ -95,6 +102,7 @@ export default {
       })
     }
 
+    kit.label = 'floor lamp'
     // Floor lamp at the sofa's end, its shade glowing.
     part(cyl(0.012, 0.012, 1.45, 8), '#2b2420', 'satin', at(L + 0.3, 0.73, -0.45))
     part(cyl(0.14, 0.15, 0.02, 20), '#2b2420', 'satin', at(L + 0.3, 0.01, -0.45))
@@ -106,6 +114,7 @@ export default {
     shade.castShadow = true
     shade.name = 'lounge lamp shade'
 
+    kit.label = 'reading chair'
     // A reading chair turned to the coffee table, beside where the seated view stands.
     {
       const base = new THREE.Matrix4().compose(new THREE.Vector3(X - 0.55, 0, 2.2), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -2.3), new THREE.Vector3(1, 1, 1))
@@ -117,16 +126,21 @@ export default {
       for (const [lx, lz] of [[-0.33, -0.31], [0.33, -0.31], [-0.33, 0.31], [0.33, 0.31]]) dress(cyl(0.022, 0.016, 0.14, 8), pine, local(lx, 0.07, lz))
     }
 
+    kit.label = 'blanket basket'
     // A basket of blankets beside the sofa (the doorway to the kitchen is just past it), and a plant in the front corner.
     dress(cyl(0.24, 0.2, 0.4, 24), wicker, at(L + 0.32, 0.2, 2.18))
     part(ball(0.2, 14, 8).scale(1, 0.45, 1), '#c2714f', 'matte', at(L + 0.32, 0.4, 2.15))
     part(ball(0.18, 14, 8).scale(1, 0.4, 1), '#efe4cc', 'matte', at(L + 0.36, 0.46, 2.23))
+    kit.label = 'plant'
     basketPlant(kit, wicker, X + 1.22, 3.42, 1.1, 2.1)
+    kit.label = 'pouf'
     // A knitted pouf and a stack of board games behind the seated view, so the front of the room is not bare.
     part(cyl(0.26, 0.26, 0.3, 24), '#d8a85a', 'matte', at(X + 0.55, 0.15, 2.8))
     part(new THREE.TorusGeometry(0.24, 0.04, 8, 24).rotateX(Math.PI / 2), '#c8984a', 'matte', at(X + 0.55, 0.3, 2.8))
+    kit.label = 'board games'
     for (const [i, c] of ['#4b5d7a', '#c2463a', '#e8dcc2'].entries()) part(box(0.4 - i * 0.04, 0.06, 0.28), c, 'satin', at(X + 0.1, 0.03 + i * 0.06, 3.35, 0.2 * i))
 
+    kit.label = null
     flat.add(contactDecals([
       [L + 0.43, 0.92, 1.05, 2.25, 0], // sofa
       [X - 1.55, 0.95, 1.1, 0.85, 0], // coffee table

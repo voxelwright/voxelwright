@@ -269,6 +269,6 @@ export const saveTemplate = (person: string, name: string, persona: unknown, dia
 /** A theme written from a sentence (#50): unchecked theme data, a one-line note, and the prop and costume hints. */
 export const askTheme = (person: string, text: string, current: unknown) =>
   call<{ theme: unknown; note: string; hints: { props: unknown; costumes: unknown }; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/theme`, { text, current })
-/** World rules written from a sentence (#74): unchecked rules data and a one-line note; physics/ask.ts checks every field. */
-export const askRules = (person: string, text: string, current: unknown) =>
-  call<{ rules: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current })
+/** World rules and acts written from a sentence (#74): unchecked rules and acts and a one-line note; physics/ask.ts checks every field and act. `things` names what acts may target. */
+export const askRules = (person: string, text: string, current: unknown, things: string[] = []) =>
+  call<{ rules?: unknown; acts?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things })

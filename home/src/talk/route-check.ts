@@ -13,7 +13,7 @@ const ANOTHER = /\b(another|one more|like that|like this|again)\b/
 /** Asking for the whole home's look (#50 themes): style, mood, season, "go back to normal". */
 const LOOK = /\b(theme|style|look of|mood|cozier|cosier|redecorate|go back to normal|back to (the )?normal)\b/
 /** How things move (#74 physics): gravity, bounce, friction, time, strength. */
-const PHYSICS = /\b(gravity|gravitational|bouncy|bouncier|bounce|bouncing|slippery|friction|slow[- ]?mo(tion)?|moon|weightless|zero[- ]?g|floaty|physics|super ?powers?|stronger|strength)\b/
+const PHYSICS = /\b(gravity|gravitational|bouncy|bouncier|bounce|bouncing|slippery|friction|slow[- ]?mo(tion)?|moon|weightless|zero[- ]?g|floaty|physics|super ?powers?|stronger|strength|fire|fires|burn|burning|alight|ablaze|flames?|candles?|matches|ignite|douse|extinguish|put (it|the fire|them) out|bucket|water|soak|wet|rain|raining|lightning|thunder)\b/
 /** Changes to the house itself (#48 build mode): a new room, or a door or wall opened into one. */
 const BUILD = /\b(add|open|build|make|knock|extend|put)\b[^.?!]{0,40}\b(room|study|bedroom|pantry|nursery|office|playroom|extension|door|doorway|wall)s?\b/
 

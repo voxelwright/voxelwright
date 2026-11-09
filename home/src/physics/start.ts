@@ -10,6 +10,9 @@ import { canvas, paintWood, toTexture } from '../paint'
 import { PHYSICS_PANEL } from '../features'
 import { createJolt, loadJolt } from '../engine/jolt'
 import { World, type Grain } from '../engine/world'
+import { Fire } from '../engine/fire'
+import { GpuHeatField } from '../engine/heat'
+import { Flames } from '../engine/flames'
 import { PRESETS, registerPreset, registerRule, resetRules, type Rules } from '../engine/rules'
 import { registerMaterial, resetMaterials } from '../engine/materials'
 import { gadgetKinds, registerGadget, resetGadgets } from '../engine/gadgets'
@@ -23,9 +26,10 @@ import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
+import { CANDLE } from './toys/candle'
 
 const STORED = 'village.physics.rules'
-const TOYS = [HOUSE, PINBALL, PINBALL_STAND]
+const TOYS = [HOUSE, PINBALL, PINBALL_STAND, CANDLE]
 /** Where the view stands to play the table: at its low end, looking down the playfield. */
 /** A turn of the event loop: the page draws and takes input between the steps of starting. */
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -198,7 +202,36 @@ export async function start(ctx: Context, gone: () => boolean) {
     const id = setInterval(syncVillagers, 1000)
     return () => clearInterval(id)
   }, 'physics villagers')
-  ctx.on('village/frame', (dt) => world.frame(dt))
+
+  // Heat and fire (#74): the field on the GPU over the home as it stands now (its things' boxes, a
+  // little past them), each part's fire state here, and the flames drawn over what burns.
+  const span = world.burnables().filter((b) => !b.thing.startsWith('house/'))
+  const lo: Vec3 = [Infinity, 0, Infinity], hi: Vec3 = [-Infinity, 2.6, -Infinity]
+  for (const b of span) for (const i of [0, 2] as const) {
+    lo[i] = Math.min(lo[i], b.center[i] - b.half[i])
+    hi[i] = Math.max(hi[i], b.center[i] + b.half[i])
+  }
+  for (const i of [0, 2] as const) if (!Number.isFinite(lo[i]) || hi[i] - lo[i] > 40) [lo[i], hi[i]] = [-8, 8]
+  const field = new GpuHeatField(ctx.stage.renderer, { min: [lo[0] - 0.3, -0.05, lo[2] - 0.3], max: [hi[0] + 0.3, Math.max(hi[1], 3), hi[2] + 0.3] })
+  const fire = new Fire(world, field, (e) => {
+    log.push(e)
+    ctx.emit('village/physics', e)
+  })
+  ctx.effect(() => () => fire.dispose(), 'fire')
+  const flames = new Flames()
+  own(ctx, flames.group)
+  ctx.effect(() => () => flames.dispose(), 'flames')
+  let flamesAt = -1
+  ctx.on('village/frame', (dt) => {
+    world.frame(dt)
+    fire.frame(dt)
+    // Flames follow the fire state a few times a second; their motion is their shaders'.
+    const now = performance.now()
+    if (now - flamesAt > 120 && (fire.lit || flames.group.visible)) {
+      flamesAt = now
+      flames.update(fire.flames())
+    }
+  })
 
   // A notepad line about how things move (src/plugins/talk.ts routes it): asked here, said back there.
   ctx.on('village/physics-ask', (request) => {
@@ -253,6 +286,20 @@ export async function start(ctx: Context, gone: () => boolean) {
     stats: () => world.stats(),
     clearStats: () => world.clearStats(),
     events: () => log.slice(),
+    /** Fire and heat: each part's state, what burns, and acts (the checks, the notepad, agents). */
+    fire: {
+      list: () => fire.list(),
+      stats: () => fire.stats(),
+      clearStats: () => fire.clearStats(),
+      ignite: (key: string, part?: string) => world.ignite(key, part, 'code'),
+      douse: (key: string, part?: string) => world.douse(key, part, 'code'),
+      rain: (seconds: number) => fire.rain(seconds),
+      burning: (key: string) => world.burning(key),
+      /** Steps fire and heat this many simulated seconds at once, reading the field back as it goes. */
+      run: (seconds: number) => fire.run(seconds),
+      bounds: field.bounds,
+      backend: (ctx.stage.renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'WebGPU' : 'WebGL2',
+    },
     snapshot: () => world.snapshot(),
     restore: (s: Parameters<World['restore']>[0]) => world.restore(s),
     /**

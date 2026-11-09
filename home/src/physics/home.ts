@@ -39,8 +39,26 @@ const MAX_INSTANCES = 256
 const SAME = 0.02
 
 type Box = { half: Vec3; at: Vec3; rotation: Quat }
+/** What a box of a merged kit is, for heat: its label ('sofa') and whether it is drawn as metal. */
+type Label = { name: string | null; metal: boolean }
+
+/**
+ * What a part of the home is made of, for heat and fire, from what it is called: the first rule
+ * whose words match its label (or, for the rest of a thing, the thing's name). Data: a new piece of
+ * furniture burns right by adding its words here. Metal-finished parts are steel whatever their name.
+ */
+export const MATTER: [RegExp, string][] = [
+  [/shade/, 'paper'],
+  [/shared wall|doorway$/, 'plaster'],
+  [/sofa|reading chair|armchair|cushion|pouf|blanket|throw|curtain|rug|furnish flat|coat/, 'felt'],
+  [/\bbooks?\b|games|print|paper|card|swatch/, 'paper'],
+  [/candle/, 'wax'],
+  [/bowl|vase|mug|plate|plant|clementine/, 'ceramic'],
+  [/stove|pans|fridge|lamp/, 'steel'],
+]
+const matterOf = (name: string | null | undefined) => (name ? MATTER.find(([words]) => words.test(name.toLowerCase()))?.[1] : undefined)
 interface Found { object: THREE.Object3D; data: BodyData; meshes: THREE.Mesh[]; kits: Set<THREE.Object3D> }
-interface Held { key: string; data: string; boxes: Box[]; motion: 'static' | 'dynamic'; material: string }
+interface Held { key: string; data: string; boxes: Box[]; motion: 'static' | 'dynamic'; material: string; parts: number }
 
 /** Why a mesh has no body of its own thing, or null when it is part of one. */
 export function notAThing(mesh: THREE.Object3D): string | null {
@@ -119,8 +137,8 @@ function behind(g: THREE.BufferGeometry): THREE.Box3 {
   return box
 }
 
-/** A thing's boxes in its own frame: its world position and turn, at world scale. */
-function boxesOf(f: Found): Box[] {
+/** A thing's boxes in its own frame: its world position and turn, at world scale; and what each kit box is (null for a mesh's). */
+function boxesOf(f: Found, labels: (Label | null)[] = []): Box[] {
   f.object.updateWorldMatrix(true, false)
   f.object.matrixWorld.decompose(p, q, s)
   const toThing = new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1)).invert()
@@ -137,15 +155,21 @@ function boxesOf(f: Found): Box[] {
     for (let i = 0; i < (many ? Math.min(many.count, MAX_INSTANCES) : 1); i++) {
       if (many) many.getMatrixAt(i, each)
       const b = boxIn(many ? each.premultiply(m) : m, local)
-      if (b) out.push(b)
+      if (b) {
+        out.push(b)
+        labels.push(null)
+      }
     }
   }
   for (const kit of f.kits) {
     kit.updateWorldMatrix(true, false)
     m.multiplyMatrices(toThing, kit.matrixWorld)
-    for (const r of kit.userData.regions as Array<{ box: THREE.Box3 }>) {
+    for (const r of kit.userData.regions as Array<{ box: THREE.Box3; name?: string | null; metal?: boolean }>) {
       const b = boxIn(m, r.box)
-      if (b) out.push(b)
+      if (b) {
+        out.push(b)
+        labels.push({ name: r.name ?? null, metal: Boolean(r.metal) })
+      }
     }
   }
   return out
@@ -161,6 +185,35 @@ const sameBoxes = (a: Box[], b: Box[]) => {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (!near(a[i].half, b[i].half) || !near(a[i].at, b[i].at) || !near(a[i].rotation, b[i].rotation)) return false
   return true
+}
+
+/**
+ * A thing's named parts for heat: kit boxes grouped by label, each made of what its words say (or
+ * steel if drawn as metal, or the thing's own material); unlabelled metal boxes together as
+ * 'metal'; and the rest of the thing as one part named after the thing when its name says it is
+ * made of something else (a rug drawn on its own).
+ */
+function partsOf(labels: (Label | null)[], thing: string, material: string) {
+  const groups = new Map<string, { name: string; material: string; boxes: number[] }>()
+  const rest: number[] = []
+  const used = new Set<string>()
+  labels.forEach((l, i) => {
+    const name = l?.name ?? (l?.metal ? 'metal' : null)
+    if (!name) return void rest.push(i)
+    const made = l?.metal ? 'steel' : matterOf(name) ?? material
+    const key = `${name}|${made}`
+    let g = groups.get(key)
+    if (!g) {
+      // The same label in two materials (a lamp's steel stem and paper shade) is two parts.
+      const unique = used.has(name) ? `${name} ${made}` : name
+      used.add(unique)
+      groups.set(key, (g = { name: unique, material: made, boxes: [] }))
+    }
+    g.boxes.push(i)
+  })
+  const own = matterOf(thing)
+  if (own && own !== material && rest.length) groups.set(thing, { name: thing.replace(/[^\w .-]+/g, '-').slice(0, 40), material: own, boxes: rest })
+  return [...groups.values()]
 }
 
 /** Total box volume, m³, for a dynamic thing that names no mass. */
@@ -192,7 +245,8 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
     const seen = new Set<THREE.Object3D>()
     for (const f of found) {
       seen.add(f.object)
-      const boxes = boxesOf(f)
+      const labels: (Label | null)[] = []
+      const boxes = boxesOf(f, labels)
       const before = held.get(f.object)
       if (before && before.data === dataKey(f.data) && sameBoxes(before.boxes, boxes)) continue
       const key = before?.key ?? keyFor(f.object)
@@ -204,13 +258,14 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
       const motion = f.data.motion === 'dynamic' ? 'dynamic' : 'static'
       const density = world.material(material)!.density
       const mass = motion === 'dynamic' ? (typeof f.data.mass === 'number' && f.data.mass > 0 && f.data.mass < 5000 ? f.data.mass : Math.min(500, Math.max(0.05, density * volume(boxes) * 0.2))) : undefined
-      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}) })) {
+      const parts = partsOf(labels, f.object.name || String(f.object.userData.furniture ?? ''), material)
+      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}) })) {
         if (!before) used.delete(key)
         held.delete(f.object)
         refused.push(key)
         continue
       }
-      held.set(f.object, { key, data: dataKey(f.data), boxes, motion, material })
+      held.set(f.object, { key, data: dataKey(f.data), boxes, motion, material, parts: parts.length })
     }
     for (const [object, h] of held) {
       if (seen.has(object)) continue
@@ -240,7 +295,7 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
       return thing ? { key: held.get(thing)!.key } : { none: 'no body' }
     },
     /** Every thing with a body: its key, name, motion, material and how many boxes it is made of. */
-    list: () => [...held].map(([o, h]) => ({ key: h.key, name: o.name, furniture: o.userData.furniture as string | undefined, motion: h.motion, material: h.material, parts: h.boxes.length })),
+    list: () => [...held].map(([o, h]) => ({ key: h.key, name: o.name, furniture: o.userData.furniture as string | undefined, motion: h.motion, material: h.material, parts: h.boxes.length, named: h.parts })),
     stats: () => {
       const sorted = [...scanMs].sort((a, b) => a - b)
       return { scans, refused: refused.slice(-10), rebuilt: Object.fromEntries(rebuilt), scanMs: { median: +(sorted[Math.floor(sorted.length / 2)] ?? 0).toFixed(2), max: +(sorted.at(-1) ?? 0).toFixed(2) } }
