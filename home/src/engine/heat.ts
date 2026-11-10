@@ -265,12 +265,17 @@ export function fieldLook(color: THREE.Node<'vec4'>, depthTexture: THREE.Texture
   const depth = depthTexture.x
   return Fn(() => {
     const out = vec4(color).toVar()
-    If(look.active.greaterThan(0.5).or(fireAt(0).w.greaterThan(0)).and(depth.lessThan(0.99999)), () => {
+    If(look.active.greaterThan(0.5).or(fireAt(0).w.add(fireAt(1).w).add(fireAt(2).w).add(fireAt(3).w).greaterThan(0)).and(depth.lessThan(0.99999)), () => {
       const view = getViewPosition(uv(), depth, projectionInverse)
       const p = world.mul(vec4(view, 1)).xyz
       const toEye = world.mul(vec4(0, 0, 0, 1)).xyz.sub(p).normalize()
-      const color = out.rgb.toVar()
-      const T = float(0).toVar(), char = float(0).toVar(), edge = float(0).toVar()
+      // Each is given its value here, at the top: a variable first met inside a branch would belong to that branch.
+      const color = vec3(0).toVar(), lit = vec3(0).toVar(), T = float(0).toVar(), char = float(0).toVar(), edge = float(0).toVar()
+      color.assign(out.rgb)
+      T.assign(0)
+      char.assign(0)
+      edge.assign(0)
+      const glare = fireAt(0).w.add(fireAt(1).w).add(fireAt(2).w).add(fireAt(3).w).toVar()
       // Only inside the field's box: past it, a read would be the edge cell's, metres away.
       const g = p.sub(look.origin).div(look.cell)
       If(look.active.greaterThan(0.5).and(min(g.x, min(g.y, g.z)).greaterThanEqual(0)).and(g.x.lessThanEqual(NX)).and(g.y.lessThanEqual(NY)).and(g.z.lessThanEqual(NZ)), () => {
@@ -288,18 +293,17 @@ export function fieldLook(color: THREE.Node<'vec4'>, depthTexture: THREE.Texture
         // Char eats into a surface raggedly: scorched patches first, then charcoal all over (the grain still shows a little).
         const tooth = mx_noise_float(p.mul(11)).mul(0.6).add(mx_noise_float(p.mul(37)).mul(0.4)).mul(0.5).add(0.5)
         const black = smoothstep(tooth.mul(0.55), tooth.mul(0.55).add(0.22), char)
-        color.assign(mix(color, color.mul(vec3(0.13, 0.1, 0.085)).add(vec3(0.004, 0.003, 0.003)), black.mul(0.96)).mul(float(1).sub(wet.mul(0.18))))
+        color.assign(mix(color, color.mul(vec3(0.06, 0.047, 0.04)).add(vec3(0.004, 0.003, 0.003)), black.mul(0.96)).mul(float(1).sub(wet.mul(0.18))))
         // Where the char is still eating forward and the air is hot, its edge glows like burning paper.
         edge.assign(black.mul(float(1).sub(black)).mul(4).mul(smoothstep(150, 450, T)))
       })
-      const lit = color.toVar()
-      If(fireAt(0).w.greaterThan(0), () => {
+      lit.assign(color)
+      If(glare.greaterThan(0), () => {
         // The surface's facing, from the depth alone (no normal target to read): flat per face, which suits a felt-and-paper home.
         const facing = cross(dFdx(view), dFdy(view)).normalize().toVar()
         facing.assign(facing.mul(dot(facing, view).greaterThan(0).select(-1, 1)))
         const grain = interleavedGradientNoise(screenCoordinate.xy)
         // The eye settles on the fire: the rest of the room sinks a little, so the firelight reads in daylight too.
-        const glare = fireAt(0).w.add(fireAt(1).w).add(fireAt(2).w).add(fireAt(3).w)
         lit.mulAssign(float(1).sub(smoothstep(0, 2.5, glare).mul(0.38)))
         for (let i = 0; i < firelight.array.length; i++) {
           const fire = fireAt(i)
@@ -336,13 +340,13 @@ export function fieldLook(color: THREE.Node<'vec4'>, depthTexture: THREE.Texture
         }
       })
       lit.addAssign(vec3(1.0, 0.32, 0.04).mul(edge.mul(1.3)))
-      // Embers: on deeply charred surfaces that are still hot, a network of glowing cracks between charcoal plates.
-      If(char.greaterThan(0.45).and(T.greaterThan(450)), () => {
+      // Embers: deep char that is still very hot glows through a few soft cracks.
+      If(char.greaterThan(0.6).and(T.greaterThan(500)), () => {
         const t = look.time
-        const cells = mx_worley_noise_vec2(p.mul(14).add(vec3(0, t.mul(0.05), 0)))
-        const crack = smoothstep(0.05, 0.0, cells.y.sub(cells.x))
-        const pulse = mx_noise_float(p.mul(4).add(vec3(t.mul(0.5)))).mul(0.35).add(0.75)
-        lit.addAssign(glowOf(T).mul(smoothstep(0.5, 0.95, char)).mul(smoothstep(450, 650, T)).mul(crack).mul(pulse).mul(1.6))
+        const cells = mx_worley_noise_vec2(p.mul(9).add(vec3(0, t.mul(0.04), 0)))
+        const crack = smoothstep(0.12, 0.0, cells.y.sub(cells.x))
+        const patch = smoothstep(0.1, 0.6, mx_noise_float(p.mul(2.3).add(vec3(t.mul(0.3)))))
+        lit.addAssign(glowOf(T).mul(smoothstep(0.6, 0.95, char)).mul(smoothstep(500, 800, T)).mul(crack).mul(patch).mul(0.9))
       })
       out.assign(vec4(lit, out.a))
     })

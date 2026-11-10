@@ -285,7 +285,7 @@ export class Fire implements Burner {
     return this.fieldTime - this.lastHot < LINGER || this.fieldTime < this.rainUntil || this.pours.length > 0 || this.damp
   }
 
-  /** The field's sources now: burning parts heat round them, charred ones keep their char, pours and candles. */
+  /** The field's sources now: burning parts heat round them, charred ones keep their char where their fire reached, pours and candles. */
   private sources(): Source[] {
     const out: Source[] = []
     for (const p of this.order) {
@@ -297,7 +297,7 @@ export class Fire implements Burner {
       }
     }
     for (const x of this.pours) out.push(x.source)
-    for (const p of this.order) if (p.state !== 'burning' && p.inside && p.char > 0.02 && out.length < MAX_SOURCES) out.push({ center: p.b.center, half: p.b.half, heat: 0, rate: 0, water: 0, char: p.char })
+    for (const p of this.order) if (p.state !== 'burning' && p.inside && p.char > 0.02 && out.length < MAX_SOURCES) out.push({ ...(p.state === 'burnt' ? p.b : this.extent(p)), heat: 0, rate: 0, water: 0, char: p.char })
     return out.slice(0, MAX_SOURCES)
   }
 

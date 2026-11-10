@@ -95,7 +95,7 @@ try {
       await page.waitForTimeout(90)
       await page.screenshot({ path: join(out, `${name}-strip-${i}.png`) })
     }
-    console.log(JSON.stringify(await page.evaluate(() => ({ fire: window.village.physics.fire.stats(), gpu: window.village.stage?.timing?.gpu?.slice(-60) }))))
+    console.log(JSON.stringify(await page.evaluate(() => ({ parts: window.village.physics.fire.list().filter((p) => p.state !== 'cold' || p.wet > 0.05 || p.char > 0.05).map((p) => `${p.id} ${p.state} fuel ${p.fuel} wet ${p.wet} char ${p.char} ${p.temp}°`), fire: window.village.physics.fire.stats(), gpu: window.village.stage?.timing?.gpu?.slice(-60) }))))
   }
 } finally {
   await browser.close()
