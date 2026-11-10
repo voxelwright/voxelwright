@@ -107,7 +107,7 @@ try {
   await h.world(() => window.village.physics.hand.tidy())
   await h.wait(1500)
   const again = await h.drawn()
-  check('Tidying after that puts every thing back, merged again: the same draw calls as before', again.out === 0 && Object.keys(await h.world(() => window.village.physics.hand.astray())).length === 0 && Math.abs(again.drawCalls - rest.drawCalls) <= 6, { rest, again, astray: await h.world(() => window.village.physics.hand.astray()) })
+  check('Tidying after that puts every thing back, drawn merged again', again.out === 0 && again.meshes === 0 && Object.keys(await h.world(() => window.village.physics.hand.astray())).length === 0, { rest, again, astray: await h.world(() => window.village.physics.hand.astray()) })
 
   // The mouse lifts the top plate off the dresser, carries it to the kitchen table and sets it down.
   const plate = `${T}plate#4`
@@ -123,7 +123,7 @@ try {
   check('Over a loose thing the mouse shows a hand; a press takes the plate and lifts it off the pile', cursor === 'grab' && holding === plate && lifted.position[1] - from.position[1] > 0.03, { cursor, holding, lift: lifted.position[1] - from.position[1] })
   const during = await h.drawn()
   check('The moving plate is drawn by its own mesh, the rest still merged', during.out >= 1 && during.out <= 4, during)
-  const table = await h.screen([0.1, 0.75, 0.45])
+  const table = await h.screen([-0.45, 0.75, -0.18])
   for (let i = 1; i <= 24; i++) {
     await page.mouse.move(at.x + ((table.x - at.x) * i) / 24, at.y + ((table.y - at.y) * i) / 24)
     await h.wait(25)
@@ -134,7 +134,7 @@ try {
   await page.mouse.up()
   await h.wait(1500)
   const down = await h.thing(plate)
-  check('Dragged to the table it follows the pointer over it, and let go it rests on the table top', far([carried.position[0], carried.position[2]], [0.1, 0.45]) < 0.25 && carried.position[1] > 0.78 && far([down.position[0], down.position[2]], [0.1, 0.45]) < 0.35 && Math.abs(down.position[1] - 0.76) < 0.04, { carried: carried.position, down: down.position })
+  check('Dragged to the table it follows the pointer over it, and let go it rests on the table top', far([carried.position[0], carried.position[2]], [-0.45, -0.18]) < 0.25 && carried.position[1] > 0.78 && far([down.position[0], down.position[2]], [-0.45, -0.18]) < 0.35 && Math.abs(down.position[1] - 0.76) < 0.04, { carried: carried.position, down: down.position })
   const held = (await h.events('held')).filter((e) => e.thing === plate)
   check('Taking and letting go are told as events', held.length === 2 && held[0].held && !held[1].held && held[0].material === 'ceramic', held.map((e) => e.held))
 

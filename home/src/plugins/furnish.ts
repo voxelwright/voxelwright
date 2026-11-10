@@ -266,7 +266,8 @@ export default {
       dress(cyl(0.025, 0.03, 0.54, 10), pine, st(0, 0.27, 0))
       dress(cyl(0.14, 0.16, 0.02, 20), pine, st(0, 0.01, 0))
       thing('book', { material: 'paper', mass: 0.45 }, () => part(box(0.16, 0.035, 0.22), '#2f5446', 'satin', st(0.04, 0.5825, 0.02)))
-      thing('cup', { material: 'ceramic', mass: 0.25, round: 'can' }, () => part(cyl(0.035, 0.03, 0.07, 14), '#e8dcc6', 'gloss', st(-0.1, 0.6, -0.06)))
+      // Clear of the throw that hangs over the chair's arm: under it the cup could not be lifted.
+      thing('cup', { material: 'ceramic', mass: 0.25, round: 'can' }, () => part(cyl(0.035, 0.03, 0.07, 14), '#e8dcc6', 'gloss', st(0.0, 0.6, -0.15)))
       // Floor lamp behind the chair, its linen shade lit from inside.
       const lamp = (lx: number, ly: number, lz: number) => base.clone().multiply(at(lx, ly, lz))
       part(cyl(0.012, 0.012, 1.4, 8), '#2b2420', 'satin', lamp(-0.58, 0.7, 0.1))

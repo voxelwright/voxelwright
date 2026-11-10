@@ -28,6 +28,7 @@ node scripts/check-physics.mjs        # physics (#74): on by default, every thin
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
 node scripts/check-physics-toys.mjs   # toys from a sentence (#88): three asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
+node scripts/check-tactile.mjs        # a house you can feel (#107): the kitchen's loose things are bodies drawn merged at rest, a mouse and a finger lift, carry, throw and nudge them, tidying puts them back, impacts sound by material
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"
