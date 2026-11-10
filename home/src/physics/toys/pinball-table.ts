@@ -2,6 +2,10 @@
 // it is made of: a steel ball on a slick lacquered playfield, rubber posts whose impact
 // sensors are wired to kicks and to a score counter, two maple flippers on motor hinges,
 // a plunger piston, and a drain zone wired to an emitter that puts the ball back.
+// It is a game because of what is wired to what (#108), again with no pinball code: pulling the
+// plunger starts a round, each ball put back counts one off three, the last one loses the round,
+// and the next pull starts another. Three lamps on the backbox are the balls left, a red one is
+// the end, and each bumper's own lamp flashes when it is hit.
 import { LIVING_X } from '../../layout'
 import type { PartSpec, ToySpec } from '../../engine/toy'
 
@@ -13,6 +17,9 @@ const BALL = 0.0135
 
 const wall = (id: string, x: number, z: number, hx: number, hz: number, yaw = 0, material: PartSpec['material'] = 'walnut'): PartSpec =>
   ({ id, shape: { kind: 'box', half: [hx, WALL_H, hz] }, material, at: [x, WALL_H, z], turn: [0, yaw, 0] })
+/** A lamp's lens on the backbox, facing the player. */
+const lens = (id: string, x: number, paint: string): PartSpec =>
+  ({ id, shape: { kind: 'cylinder', halfHeight: 0.005, radius: 0.017 }, material: 'glass', paint, at: [x, 0.085, -L - 0.037], turn: [Math.PI / 2, 0, 0] })
 const post = (id: string, x: number, z: number, r: number, paint: string): PartSpec =>
   ({ id, shape: { kind: 'cylinder', halfHeight: 0.02, radius: r }, material: 'rubber', paint, at: [x, 0.02, z] })
 
@@ -31,6 +38,10 @@ export const PINBALL: ToySpec = {
     { id: 'cabinet', shape: { kind: 'box', half: [W + 0.03, 0.06, L + 0.04] }, material: 'walnut', at: [0, -0.08, 0] },
     { id: 'backbox', shape: { kind: 'box', half: [W + 0.03, 0.17, 0.03] }, material: 'walnut', at: [0, 0.17, -L - 0.07] },
     { id: 'scoreboard', shape: { kind: 'box', half: [0.2, 0.07, 0.004] }, material: 'maple', paint: '#f6ead2', at: [0, 0.2, -L - 0.036] },
+    lens('life-1', -0.15, '#f2b34a'),
+    lens('life-2', -0.09, '#f2b34a'),
+    lens('life-3', -0.03, '#f2b34a'),
+    lens('over', 0.15, '#d9573f'),
     // A glass lid: the ball stays on the table whatever the rules do to it.
     { id: 'lid', shape: { kind: 'box', half: [W + 0.02, 0.004, L + 0.02] }, material: 'glass', at: [0, 2 * WALL_H + 0.006, 0], hidden: true },
     wall('rail-left', -W - 0.006, 0, 0.006, L),
@@ -69,13 +80,35 @@ export const PINBALL: ToySpec = {
     { id: 'drain-zone', kind: 'zone', part: 'drain' },
     { id: 'ball-return', kind: 'emitter', part: 'ball', knobs: { delay: 0.6 } },
     { id: 'score', kind: 'counter', display: 'scoreboard', knobs: { step: 10 } },
+    // The game: three balls a round, counted down as each is put back.
+    { id: 'game', kind: 'game' },
+    { id: 'balls', kind: 'counter', knobs: { step: -1, start: 3, target: 0 } },
+    { id: 'life-1-lamp', kind: 'lamp', part: 'life-1', knobs: { level: 1, lit: 1 } },
+    { id: 'life-2-lamp', kind: 'lamp', part: 'life-2', knobs: { level: 2, lit: 1 } },
+    { id: 'life-3-lamp', kind: 'lamp', part: 'life-3', knobs: { level: 3, lit: 1 } },
+    { id: 'over-lamp', kind: 'lamp', part: 'over' },
+    { id: 'bumper-a-lamp', kind: 'lamp', part: 'bumper-a', knobs: { seconds: 0.18 } },
+    { id: 'bumper-b-lamp', kind: 'lamp', part: 'bumper-b', knobs: { seconds: 0.18 } },
+    { id: 'bumper-c-lamp', kind: 'lamp', part: 'bumper-c', knobs: { seconds: 0.18 } },
   ],
   wires: [
     ...['a', 'b', 'c'].flatMap((k) => [
       { from: `bumper-${k}-sensor.hit`, to: `bumper-${k}-kick.fire` },
       { from: `bumper-${k}-sensor.hit`, to: 'score.add' },
+      { from: `bumper-${k}-sensor.hit`, to: `bumper-${k}-lamp.flash` },
     ]),
     { from: 'drain-zone.enter', to: 'ball-return.spawn' },
+    // A round starts with a pull of the plunger (it does nothing while one runs) and clears the board.
+    { from: 'plunger-spring.fired', to: 'game.start' },
+    { from: 'game.started', to: 'score.reset' },
+    { from: 'game.started', to: 'balls.reset' },
+    { from: 'game.started', to: 'over-lamp.off' },
+    { from: 'score.changed', to: 'game.score' },
+    // A ball put back is a ball used: `spawned` fires once a drain, however the ball bounces in it.
+    { from: 'ball-return.spawned', to: 'balls.add' },
+    ...[1, 2, 3].map((n) => ({ from: 'balls.changed', to: `life-${n}-lamp.set` })),
+    { from: 'balls.reached', to: 'game.lose' },
+    { from: 'game.lost', to: 'over-lamp.on' },
   ],
 }
 

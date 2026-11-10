@@ -12,7 +12,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Gadget, Snapshot, ThingInfo, Touch, WorldApi } from './api'
 import type { BodyId, Contact, PhysicsCore, Quat, Shape, Vec3 } from './core'
 import type { At, PhysicsEvent } from './events'
-import { gadgetKind } from './gadgets'
+import { digits, gadgetKind } from './gadgets'
 import { material, materialNames, materialsVersion } from './materials'
 import { checkRules, NORMAL, onRuleAdded, presetRules, type Rules } from './rules'
 import { checkToy, WORLD_BOUND, type PartSpec, type Signal, type ToySpec } from './toy'
@@ -49,6 +49,8 @@ const SIGNALS_PER_STEP = 200
 const SIGNALS_WAITING = 1000
 /** A signal more than this many wires away from a physical cause is dropped: a loop of wires feeding itself ends here however slowly it fills the queue. */
 const SIGNAL_HOPS = 64
+/** A lit lamp's emissive strength (glow level 1). */
+const GLOW = 1.4
 
 interface Thing {
   key: string
@@ -165,6 +167,8 @@ export class World implements WorldApi {
   /** A part's face drawn as a card (a score): its canvas, texture and material, and the text it should show next frame when changed. */
   private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshStandardMaterial; text: string; drawn: string | null }>()
   private looks = new Map<string, THREE.Material>()
+  /** A part that glows (a lamp) is drawn with a material of its own: the looks are shared by every part of a material and paint. */
+  private glows = new Map<string, THREE.MeshStandardMaterial>()
   /** Per toy, its scenery: the parts drawn together, one mesh per look (see build). */
   private scenery = new Map<string, THREE.Mesh[]>()
   private tally = new Map<string, number>()
@@ -343,7 +347,7 @@ export class World implements WorldApi {
   census() {
     let joints = 0
     for (const list of this.joints.values()) joints += list.length
-    return { things: this.things.size, gadgets: this.gadgets.size, joints, wires: this.wires.size, looks: this.looks.size, displays: this.displays.size, draws: this.draws, toys: this.frames.size }
+    return { things: this.things.size, gadgets: this.gadgets.size, joints, wires: this.wires.size, looks: this.looks.size, displays: this.displays.size, glows: this.glows.size, draws: this.draws, toys: this.frames.size }
   }
 
   /** Whether a toy with this id is built. */
@@ -387,6 +391,11 @@ export class World implements WorldApi {
       d.texture.dispose()
       d.material.dispose()
       this.displays.delete(key)
+    }
+    for (const [key, glow] of this.glows) {
+      if (!mine(key)) continue
+      glow.dispose()
+      this.glows.delete(key)
     }
     for (const mesh of this.scenery.get(id) ?? []) {
       this.group.remove(mesh)
@@ -448,6 +457,23 @@ export class World implements WorldApi {
       thing.mesh.material = material
     }
     d.text = String(text).slice(0, 12)
+  }
+
+  /**
+   * A part glowing in its own colour. Its material is made the first time (a lamp asks at setup, so
+   * nothing compiles in the middle of play); after that only its brightness changes.
+   */
+  glow(key: string, level: number) {
+    const thing = this.things.get(key)
+    if (!thing?.mesh || this.displays.has(key) || !Number.isFinite(level)) return
+    let glow = this.glows.get(key)
+    if (!glow) {
+      glow = (this.look(thing.part) as THREE.MeshStandardMaterial).clone()
+      glow.emissive.set(thing.part.paint ?? material(thing.part.material)!.look.color)
+      this.glows.set(key, glow)
+      thing.mesh.material = glow
+    }
+    glow.emissiveIntensity = GLOW * Math.min(4, Math.max(0, level))
   }
 
   /** Draws the cards whose text changed since they were last drawn. */
@@ -1126,7 +1152,7 @@ export class World implements WorldApi {
       g.state = { ...state, ...('joint' in g.state ? { joint: g.state.joint } : {}) }
       for (const [name, v] of Object.entries(saved.knobs ?? {})) if (!this.applyKnob(g, name, v)) clamped.push(`${id}.${name}`)
       const display = g.spec.display
-      if (typeof display === 'string' && 'value' in g.state) this.show(`${g.toy}/${display}`, String(g.state.value).padStart(5, '0'))
+      if (typeof display === 'string' && 'value' in g.state) this.show(`${g.toy}/${display}`, digits(g.state.value))
     }
     this.respawns = new Map((Array.isArray(s.respawns) ? s.respawns : []).filter((r) => r && this.dynamic(r.key) && typeof r.t === 'number' && Number.isFinite(r.t)).map((r) => [r.key, r.t]))
     if (typeof s.clock === 'number' && Number.isFinite(s.clock)) this.clock = s.clock
@@ -1136,12 +1162,15 @@ export class World implements WorldApi {
     return { clamped }
   }
 
-  /** Every moving thing home and every counter to zero. The rules and knobs stay as tuned. */
+  /** Every moving thing home and every gadget that takes a `reset` back as it started (a counter, a game, a lamp). The rules and knobs stay as tuned. */
   reset() {
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
     this.respawns.clear()
     this.queue.length = 0
-    for (const g of this.gadgets.values()) if ('value' in g.state) gadgetKind(g.spec.kind)?.receive?.(g, 'reset', { value: 0 }, this)
+    for (const g of this.gadgets.values()) {
+      const kind = gadgetKind(g.spec.kind)
+      if (kind?.inputs.includes('reset')) kind.receive?.(g, 'reset', { value: 0 }, this)
+    }
   }
 
   stats(): Stats {
@@ -1165,6 +1194,7 @@ export class World implements WorldApi {
     // A walker held back as the world goes would wait for a body that no longer exists (src/villagers/cast.ts).
     for (const f of this.followers.values()) delete f.object.userData.held
     for (const d of this.displays.values()) d.texture.dispose()
+    for (const glow of this.glows.values()) glow.dispose()
     this.core.dispose()
   }
 }

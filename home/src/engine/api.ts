@@ -97,6 +97,8 @@ export interface WorldApi {
   fire(gadget: Gadget, port: string, signal: Signal): void
   /** Draws a short text on a part's face (a score card). */
   show(key: string, text: string): void
+  /** How brightly a part glows in its own colour: 0 not at all, 1 lit, up to 4. A part with a card (show) does not glow. */
+  glow(key: string, level: number): void
   /** A direction in a toy's frame, in world space. */
   toWorldDir(toy: string, dir: Vec3): Vec3
 

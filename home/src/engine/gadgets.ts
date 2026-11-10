@@ -54,6 +54,8 @@ export const gadgetKinds = () => [...registry.values()]
 
 const knob = (min: number, max: number, step: number, def: number, about: string): Knob => ({ min, max, step, default: def, about })
 const setting = <T>(g: Gadget, name: string) => g.spec[name] as T
+/** A counter's total as a card shows it. */
+export const digits = (value: number) => String(value).padStart(5, '0')
 
 // ── The built-in kit ──────────────────────────────────────────────────────
 
@@ -153,19 +155,22 @@ registerGadget({
 })
 
 registerGadget({
-  kind: 'counter', about: 'Adds `step` on `add`, zero on `reset`; `changed` carries the total. Shown on the part named by its `display` setting.',
-  knobs: { step: knob(-100, 1000, 1, 1, 'per add') }, inputs: ['add', 'reset'], outputs: ['changed'], settings: { display: 'part' },
+  kind: 'counter', about: 'A number, `start` at first. `add` adds `step` (a negative step counts down); `reset` puts it back to `start`. Every change fires `changed` with the total. An `add` then fires one of two, never both: `reached` when the total is now `target`, else `counting`. Shown on the part named by its `display` setting.',
+  knobs: { step: knob(-100, 1000, 1, 1, 'per add'), start: knob(-1000, 100000, 1, 0, 'at first and on reset'), target: knob(-1000, 1000000, 1, 0, 'fires reached') },
+  inputs: ['add', 'reset'], outputs: ['changed', 'reached', 'counting'], settings: { display: 'part' },
   setup(g, w) {
-    g.state.value = 0
+    g.state.value = g.knobs.start
     const display = setting<string | undefined>(g, 'display')
-    if (display) w.show(`${g.toy}/${display}`, '00000')
+    if (display) w.show(`${g.toy}/${display}`, digits(g.state.value))
   },
   receive(g, port, _s, w) {
     if (port !== 'add' && port !== 'reset') return
-    g.state.value = port === 'add' ? g.state.value + g.knobs.step : 0
+    g.state.value = port === 'add' ? g.state.value + g.knobs.step : g.knobs.start
     const display = setting<string | undefined>(g, 'display')
-    if (display) w.show(`${g.toy}/${display}`, String(g.state.value).padStart(5, '0'))
+    if (display) w.show(`${g.toy}/${display}`, digits(g.state.value))
     w.fire(g, 'changed', { value: g.state.value })
+    // A reset decides nothing: only an add says whether the target was reached.
+    if (port === 'add') w.fire(g, g.state.value === g.knobs.target ? 'reached' : 'counting', { value: g.state.value })
   },
 })
 
@@ -184,13 +189,6 @@ registerGadget({
     if (name === 'friction') w.setMotor(g.state.joint, 0, g.knobs.friction)
   },
 })
-
-const BUILT_IN = new Map(registry)
-/** Drops every kind added at runtime, and puts back any built-in one replaced (the plugin unloading). */
-export function resetGadgets() {
-  registry.clear()
-  for (const [name, k] of BUILT_IN) registry.set(name, k)
-}
 
 registerGadget({
   kind: 'flame', about: 'Keeps its part alight while `lit` is 1 (it lights it as soon as fire runs); `light` lights it, `out` puts it out with water. Fires `caught` when it lights.',
@@ -230,3 +228,68 @@ registerGadget({
   },
 })
 
+// ── Logic parts (#108): what turns a contraption into a game ────────────────
+
+registerGadget({
+  kind: 'game', about: 'A round of play. `start` begins one unless one is running, and fires `started`. While it runs, `win` ends it with `won` and `lose` ends it with `lost`; `reset` ends it and says nothing. `score` remembers the signal\'s value (wire a counter\'s `changed` to it), and `won` and `lost` carry it.',
+  knobs: {}, inputs: ['start', 'win', 'lose', 'score', 'reset'], outputs: ['started', 'won', 'lost'],
+  setup(g) {
+    g.state.playing = 0
+    g.state.score = 0
+  },
+  receive(g, port, s, w) {
+    const st = g.state
+    if (port === 'score') st.score = Number.isFinite(s.value) ? s.value : st.score
+    else if (port === 'reset') st.playing = 0
+    else if (port === 'start' && !st.playing) {
+      st.playing = 1
+      w.fire(g, 'started', { value: 1 })
+    } else if ((port === 'win' || port === 'lose') && st.playing) {
+      st.playing = 0
+      w.fire(g, port === 'win' ? 'won' : 'lost', { value: st.score })
+    }
+  },
+})
+
+/** How bright a lamp's part is: lit, and brighter for the moment of a flash. */
+const LIT = 1, FLASH = 2
+const shine = (g: Gadget, w: WorldApi) => {
+  if (g.part) w.glow(g.part, g.state.until ? FLASH : g.state.on ? LIT : 0)
+}
+registerGadget({
+  kind: 'lamp', about: 'Makes its part glow. `on` and `off` switch it. `set` lights it when the signal\'s value is at least `level` and puts it out otherwise (three lamps at levels 1, 2 and 3 on a counter show three lives). `flash` makes it bright for `seconds`, then as it was. Lit at first, and again on `reset`, when `lit` is 1.',
+  knobs: { level: knob(-1000, 1000000, 1, 1, 'lit from this value'), seconds: knob(0.05, 10, 0.05, 0.2, 's a flash lasts'), lit: knob(0, 1, 1, 0, 'lit at first') },
+  inputs: ['on', 'off', 'set', 'flash', 'reset'], outputs: [], needs: { part: 'any' },
+  setup(g, w) {
+    if (!g.part) throw new Error(`${g.id}: a lamp needs a part`)
+    g.state.on = g.knobs.lit
+    g.state.until = 0
+    shine(g, w)
+  },
+  // A snapshot put back sets the knobs last: the part then shows the state that came with them.
+  knob(g, _name, w) {
+    shine(g, w)
+  },
+  step(g, w) {
+    if (!g.state.until || w.clock < g.state.until) return
+    g.state.until = 0
+    shine(g, w)
+  },
+  receive(g, port, s, w) {
+    const st = g.state
+    if (port === 'on') st.on = 1
+    else if (port === 'off') st.on = 0
+    else if (port === 'set') st.on = s.value >= g.knobs.level ? 1 : 0
+    else if (port === 'reset') [st.on, st.until] = [g.knobs.lit, 0]
+    else if (port === 'flash') st.until = w.clock + g.knobs.seconds
+    else return
+    shine(g, w)
+  },
+})
+
+const BUILT_IN = new Map(registry)
+/** Drops every kind added at runtime, and puts back any built-in one replaced (the plugin unloading). */
+export function resetGadgets() {
+  registry.clear()
+  for (const [name, k] of BUILT_IN) registry.set(name, k)
+}
