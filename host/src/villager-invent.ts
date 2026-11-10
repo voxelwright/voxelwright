@@ -156,6 +156,8 @@ const HOSTILE: Record<string, string> = {
   '[stub-invent-fling]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; if (g.state.n > 8) return; for (const t of w.things) w.push(t.key, [0.2 * t.mass, 1.5 * t.mass, 0]) }',
   // Writes on its part every step, as real answers like to.
   '[stub-invent-show]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; g.show("n " + g.state.n) }',
+  // Native built-ins never ask the interrupt handler: each call runs for seconds under the budget, and only the page's watchdog ends it.
+  '[stub-invent-native]': 'var big = Array.from({ length: 60000 }, () => ({ a: [1, 2, 3] }))\nfunction step(g, w) { for (let i = 0; i < 1e6; i++) JSON.stringify(big) }',
   // Fails every other step: never three in a row, so it keeps running.
   '[stub-invent-flaky]': 'function step(g, w) { if (Math.round(w.clock * 60) % 2) throw new Error("odd step") }',
   // Reads the time each call stands for: never zero or less, whatever the clock did.

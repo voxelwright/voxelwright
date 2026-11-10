@@ -217,6 +217,30 @@ try {
       const undone = await undo()
       check('a sandbox that stops answering is closed, said on its tag, and undone', r.ok && /stopped answering/.test(m?.stopped ?? '') && /It stopped/.test(said ?? '') && undone && same(await world(), baseline), { stopped: m?.stopped, said })
     }
+    // A call stuck in a native built-in: no interrupt ever comes, so the watchdog and the frame's removal must end the worker itself.
+    {
+      await page.evaluate(() => (window.longest = 0))
+      const closed = new Promise((resolve) => page.once('worker', (w) => w.once('close', () => resolve(true))))
+      const r = await ask('[stub-invent-native] a magnet')
+      await page.waitForFunction(() => window.village.physics.mechanics().at(-1)?.stopped, null, { timeout: 10_000 }).catch(() => {})
+      const m = await mech()
+      const ended = await Promise.race([closed, page.waitForTimeout(4000).then(() => false)])
+      const longest = await page.evaluate(() => window.longest)
+      const undone = await undo()
+      check('a call stuck in a native built-in is closed by the watchdog, its worker ends, and Undo works', r.ok && /stopped answering/.test(m?.stopped ?? '') && ended && longest < 200 && undone && same(await world(), baseline), { stopped: m?.stopped, ended, longest })
+    }
+    // The relay's own rule: a message nobody asked for ends the sandbox (the code in the interpreter cannot send one; a broken worker could).
+    {
+      const r = await ask('make a magnet')
+      await page.waitForTimeout(300)
+      await page.frames().find((f) => f.url().includes('mechanic-box')).evaluate(() => { owed = 0; answer({ type: 'tock', out: '{"commands":[],"states":{}}', asks: 0, ms: 0 }) })
+        // The page removes the frame as soon as it hears: the call may not get to return.
+        .catch(() => {})
+      await page.waitForFunction(() => window.village.physics.mechanics().at(-1)?.stopped, null, { timeout: 5000 }).catch(() => {})
+      const m = await mech()
+      const undone = await undo()
+      check('an answer nobody asked for closes the sandbox, and Undo still works', r.ok && /without being asked/.test(m?.stopped ?? '') && undone && same(await world(), baseline), { stopped: m?.stopped })
+    }
     // The frame's own policy, asked from inside the frame (the code in the interpreter cannot ask at all).
     {
       await ask('make a magnet')
@@ -336,6 +360,21 @@ try {
     }
   } else {
     // ── A real model writes real mechanics ──────────────────────────────────
+    // The real router first: a line typed on the notepad must come out as a mechanic, built by the real model.
+    {
+      await page.keyboard.press('Escape')
+      await page.keyboard.type('make a magnet', { delay: 20 })
+      await page.keyboard.press('Enter')
+      let s
+      for (let i = 0; i < 900; i++) {
+        s = await page.evaluate(() => ({ route: window.village.talk.state().input.routes.at(-1), asked: window.village.physics.asked().at(-1) }))
+        if (s.asked) break
+        await page.waitForTimeout(100)
+      }
+      report.notepad = { route: s.route, as: s.asked?.as, ok: s.asked?.ok, reason: s.asked?.reason, ms: s.asked?.ms, toy: s.asked?.toy && { label: s.asked.toy.label, mechanic: s.asked.toy.mechanic } }
+      check('"make a magnet" typed on the notepad goes through the real router to a built mechanic', s.route?.route === 'physics' && s.asked?.as?.make === 'mechanic' && s.asked?.ok && s.asked?.toy?.mechanic, report.notepad)
+      await undo()
+    }
     const asks = (opt('asks') ?? 'make a magnet|a fan that blows things across the table|gravity that points at the candle|a pad that flings whatever lands on it').split('|')
     for (const text of asks) for (let i = 0; i < trials; i++) {
       await page.evaluate(() => { window.village.physics.reset(); window.longest = 0 })

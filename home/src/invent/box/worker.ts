@@ -5,8 +5,10 @@
 // into it at all. Each call hands it one JSON text and takes one JSON text back.
 //
 // Limits, all enforced here, outside the code they limit: memory (the interpreter refuses to
-// grow past MEMORY), stack depth, work per call (the interpreter asks its interrupt handler
-// every so often; past `budget` asks the call is stopped), and the size of an answer.
+// grow past MEMORY), stack depth, work per call in bytecode (the interpreter asks its interrupt
+// handler every so often; past `budget` asks the call is stopped), and the size of an answer.
+// Native built-ins (JSON.stringify, fill) never ask: the page's watchdog (LIMITS.late) is what
+// ends such a call, by removing the frame.
 // A call that fails inside the interpreter (an exception, a limit) answers with the reason and
 // the interpreter lives on. Anything that fails outside it (a trap in the WebAssembly, the
 // worker's own stack) is not survivable: the worker says `broken` and takes no more calls.
