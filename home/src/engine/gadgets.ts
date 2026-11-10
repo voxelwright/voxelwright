@@ -54,8 +54,8 @@ export const gadgetKinds = () => [...registry.values()]
 
 const knob = (min: number, max: number, step: number, def: number, about: string): Knob => ({ min, max, step, default: def, about })
 const setting = <T>(g: Gadget, name: string) => g.spec[name] as T
-/** A counter's total as a card shows it. */
-export const digits = (value: number) => String(value).padStart(5, '0')
+/** A counter's total as a card shows it: five places, the first a minus sign below zero. */
+export const digits = (value: number) => (value < 0 ? `-${String(-value).padStart(4, '0')}` : String(value).padStart(5, '0'))
 
 // ── The built-in kit ──────────────────────────────────────────────────────
 
@@ -231,8 +231,8 @@ registerGadget({
 // ── Logic parts (#108): what turns a contraption into a game ────────────────
 
 registerGadget({
-  kind: 'game', about: 'A round of play. `start` begins one unless one is running, and fires `started`. While it runs, `win` ends it with `won` and `lose` ends it with `lost`; `reset` ends it and says nothing. `score` remembers the signal\'s value (wire a counter\'s `changed` to it), and `won` and `lost` carry it.',
-  knobs: {}, inputs: ['start', 'win', 'lose', 'score', 'reset'], outputs: ['started', 'won', 'lost'],
+  kind: 'game', about: 'A round of play. `start` begins one unless one is running, and fires `started`. While it runs, `win` ends it with `won` and `lose` ends it with `lost`; `reset` ends it and says nothing. `score` remembers the signal\'s value (wire a counter\'s `changed` to it), and `won` and `lost` carry it. A signal into `during` comes out of `during` only while a round runs (what counts only in play: a ball lost, a point scored).',
+  knobs: {}, inputs: ['start', 'win', 'lose', 'score', 'during', 'reset'], outputs: ['started', 'won', 'lost', 'during'],
   setup(g) {
     g.state.playing = 0
     g.state.score = 0
@@ -241,7 +241,9 @@ registerGadget({
     const st = g.state
     if (port === 'score') st.score = Number.isFinite(s.value) ? s.value : st.score
     else if (port === 'reset') st.playing = 0
-    else if (port === 'start' && !st.playing) {
+    else if (port === 'during') {
+      if (st.playing) w.fire(g, 'during', s)
+    } else if (port === 'start' && !st.playing) {
       st.playing = 1
       w.fire(g, 'started', { value: 1 })
     } else if ((port === 'win' || port === 'lose') && st.playing) {

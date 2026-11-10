@@ -26,12 +26,26 @@ const check = (name, pass, detail) => {
 }
 
 const server = spawn('npx', ['vite', '--port', String(devPort), '--strictPort'], { cwd: homeDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-await new Promise((resolve, reject) => {
+/** Stops vite and everything it started; nothing to do when it has gone already. */
+const stopServer = () => new Promise((resolve) => {
+  if (server.exitCode !== null || server.signalCode !== null) return resolve()
+  server.once('exit', resolve)
+  try {
+    process.kill(-server.pid, 'SIGTERM')
+  } catch {
+    resolve()
+  }
+})
+const up = new Promise((resolve, reject) => {
   let out = ''
   const timer = setTimeout(() => reject(new Error(`vite did not start: ${out.slice(-400)}`)), 30_000)
   server.stdout.on('data', (d) => (/Local:/.test((out += d)) ? (clearTimeout(timer), resolve()) : undefined))
   server.stderr.on('data', (d) => (out += d))
   server.on('exit', (code) => reject(new Error(`vite exited ${code}: ${out.slice(-400)}`)))
+})
+await up.catch(async (error) => {
+  await stopServer()
+  throw error
 })
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 if (shotsDir) await mkdir(shotsDir, { recursive: true })
@@ -73,8 +87,15 @@ try {
   const game = (fn, arg) => page.evaluate(fn, arg)
 
   // ── A round, from the first pull to the last ball ──
-  const fresh = await game(() => { window.village.physics.reset(); return window.game.state() })
-  check('Before a round: three balls, three lamps lit, the end lamp dark, nothing started', fresh.balls === 3 && fresh.lamps.every(Boolean) && !fresh.over && fresh.fired.started === 0, fresh)
+  const fresh = await game(() => {
+    const p = window.village.physics
+    p.reset()
+    // A ball in the drain before any round costs nothing.
+    window.game.drain()
+    p.advance(0.5)
+    return window.game.state()
+  })
+  check('Before a round: three balls, three lamps lit, the end lamp dark, nothing started, and a ball drained then costs none', fresh.balls === 3 && fresh.lamps.every(Boolean) && !fresh.over && fresh.fired.started === 0, fresh)
 
   const round = await game(() => {
     const p = window.village.physics, g = window.game
@@ -100,7 +121,7 @@ try {
     g.drain()
     out.three = g.state()
     out.lost = p.events().slice(n0).filter((e) => e.kind === 'signal' && e.gadget === 'pinball/game' && e.port === 'lost')
-    // After the end: another drain ends nothing again.
+    // After the end: another drain ends nothing again, and costs no ball (none is in play).
     g.drain()
     out.afterEnd = g.state()
     return out
@@ -110,7 +131,7 @@ try {
   check('A ball bouncing in the drain (three entries before it is put back) costs one ball, not three', round.two.balls === 1 && round.two.lamps.join() === 'true,false,false', round.two)
   check('The third ball ends the round: lost fires once, every lamp is out and the end lamp is lit', round.three.balls === 0 && round.three.fired.lost === 1 && !round.three.lamps.some(Boolean) && round.three.over, round.three)
   check('The end is an event anyone can read: a signal from pinball/game, port lost, carrying the score', round.lost.length === 1 && round.scored > 0 && round.lost[0].value === round.scoreBeforeLast && round.three.score === round.scoreBeforeLast, { lost: round.lost, scored: round.scored, score: round.scoreBeforeLast })
-  check('After the end nothing ends again', round.afterEnd.fired.lost === 1 && round.afterEnd.fired.started === 1, round.afterEnd)
+  check('After the end a drain ends nothing again and counts no ball', round.afterEnd.fired.lost === 1 && round.afterEnd.fired.started === 1 && round.afterEnd.balls === 0, round.afterEnd)
   if (shotsDir) {
     await page.evaluate(() => window.village.physics.play(true))
     await page.waitForTimeout(1800)
@@ -128,9 +149,14 @@ try {
   // ── Reset, and a snapshot put back ──
   const undo = await game(() => {
     const p = window.village.physics, g = window.game
+    // Some score first, so a snapshot that lost it would show.
+    p.place('pinball/ball', [-0.2, 0.0136, -0.36])
+    p.advance(1.5)
     g.drain()
     const snap = p.snapshot()
     const before = g.state()
+    p.place('pinball/ball', [-0.2, 0.0136, -0.36])
+    p.advance(1.5)
     g.drain()
     g.drain()
     const ended = g.state()
@@ -145,7 +171,7 @@ try {
     return { before, ended, restored, carriedOn, reset, startedAfterReset: g.state().fired.started - reset.fired.started }
   })
   const same = (a, b) => a.balls === b.balls && a.score === b.score && a.lamps.join() === b.lamps.join() && a.over === b.over
-  check('A snapshot puts the game back: balls, score and every lamp as they were, and the round carries on', undo.ended.over && same(undo.before, undo.restored) && undo.carriedOn.balls === undo.before.balls - 1 && !undo.carriedOn.over, undo)
+  check('A snapshot puts the game back: balls, a score above zero and every lamp as they were, and the round carries on', undo.ended.over && undo.before.score > 0 && undo.ended.score > undo.before.score && same(undo.before, undo.restored) && undo.carriedOn.balls === undo.before.balls - 1 && !undo.carriedOn.over, undo)
   check('Reset puts the game back to before a round (three balls, lamps lit, end lamp dark), and a pull then starts one', undo.reset.balls === 3 && undo.reset.lamps.every(Boolean) && !undo.reset.over && undo.startedAfterReset === 1, undo)
 
   // ── Loops of wires, with the logic parts in them ──
@@ -220,7 +246,7 @@ try {
   check('the check ran to the end', false, String(error?.stack ?? error))
 } finally {
   await browser.close().catch(() => {})
-  await new Promise((resolve) => { server.once('exit', resolve); process.kill(-server.pid, 'SIGTERM') })
+  await stopServer()
 }
 const failed = checks.filter((c) => !c.pass)
 console.log(JSON.stringify({ ok: !failed.length, passed: checks.length - failed.length, failed: failed.map((c) => c.name) }, null, 1))

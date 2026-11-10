@@ -104,8 +104,9 @@ export const PINBALL: ToySpec = {
     { from: 'game.started', to: 'balls.reset' },
     { from: 'game.started', to: 'over-lamp.off' },
     { from: 'score.changed', to: 'game.score' },
-    // A ball put back is a ball used: `spawned` fires once a drain, however the ball bounces in it.
-    { from: 'ball-return.spawned', to: 'balls.add' },
+    // A ball put back is a ball used, while a round runs: `spawned` fires once a drain, however the ball bounces in it.
+    { from: 'ball-return.spawned', to: 'game.during' },
+    { from: 'game.during', to: 'balls.add' },
     ...[1, 2, 3].map((n) => ({ from: 'balls.changed', to: `life-${n}-lamp.set` })),
     { from: 'balls.reached', to: 'game.lose' },
     { from: 'game.lost', to: 'over-lamp.on' },

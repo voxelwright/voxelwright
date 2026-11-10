@@ -25,12 +25,26 @@ const base = `http://localhost:${devPort}/`
 const size = { width: 390, height: 844 }
 
 const server = spawn('npx', ['vite', '--port', String(devPort), '--strictPort'], { cwd: homeDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-await new Promise((resolve, reject) => {
+/** Stops vite and everything it started; nothing to do when it has gone already. */
+const stopServer = () => new Promise((resolve) => {
+  if (server.exitCode !== null || server.signalCode !== null) return resolve()
+  server.once('exit', resolve)
+  try {
+    process.kill(-server.pid, 'SIGTERM')
+  } catch {
+    resolve()
+  }
+})
+const up = new Promise((resolve, reject) => {
   let log = ''
   const timer = setTimeout(() => reject(new Error(`vite did not start: ${log.slice(-400)}`)), 30_000)
   server.stdout.on('data', (d) => (/Local:/.test((log += d)) ? (clearTimeout(timer), resolve()) : undefined))
   server.stderr.on('data', (d) => (log += d))
   server.on('exit', (code) => reject(new Error(`vite exited ${code}: ${log.slice(-400)}`)))
+})
+await up.catch(async (error) => {
+  await stopServer()
+  throw error
 })
 const dir = mkdtempSync(join(tmpdir(), 'pinball-video-'))
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
@@ -111,7 +125,7 @@ try {
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(start), '-i', join(dir, webm), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '24', '-movflags', '+faststart', out])
 } finally {
   await browser.close().catch(() => {})
-  await new Promise((resolve) => { server.once('exit', resolve); process.kill(-server.pid, 'SIGTERM') })
+  await stopServer()
   rmSync(dir, { recursive: true, force: true })
 }
 console.log(JSON.stringify(stats, null, 1))
