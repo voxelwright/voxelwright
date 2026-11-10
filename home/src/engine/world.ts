@@ -933,6 +933,16 @@ export class World implements WorldApi {
     return true
   }
 
+  moveTo(key: string, position: Vec3, velocity: Vec3, rotation?: Quat) {
+    const t = this.dynamic(key)
+    if (!t || !position.every(Number.isFinite) || !pointOk(position) || position[1] < 0 || !velocity.every(Number.isFinite)) return false
+    const n = rotation ? Math.hypot(...rotation) : 1
+    if (!(n > 1e-6)) return false
+    const speed = Math.hypot(...velocity), k = speed > this.rules.maxSpeed ? this.rules.maxSpeed / speed : 1
+    this.core.setState(t.body, position, [velocity[0] * k, velocity[1] * k, velocity[2] * k], rotation ? [rotation[0] / n, rotation[1] / n, rotation[2] / n, rotation[3] / n] : this.core.rotation(t.body))
+    return true
+  }
+
   respawn(key: string, delay: number) {
     if (!this.dynamic(key) || this.respawns.has(key)) return false
     this.respawns.set(key, this.clock + Math.max(0, delay))

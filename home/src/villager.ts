@@ -260,6 +260,8 @@ export interface Routed {
   intent?: unknown
   /** physics: the line asks to build a toy (#88). Picks the host's prompt and model only; every toy is checked here. */
   toy?: boolean
+  /** physics: the line asks for a mechanic the kit does not have (#106). */
+  invent?: boolean
 }
 export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused' | 'link'; ms: number }
 
@@ -348,8 +350,8 @@ export const askTheme = (person: string, text: string, current: unknown) =>
  * World rules, acts and a toy written from a sentence (#74, #88): unchecked rules, acts and toy and a one-line note;
  * physics/ask.ts checks every field, act and part. `things` names what acts may target, `surfaces` where a toy may stand.
  */
-export const askRules = (person: string, text: string, current: unknown, things: string[] = [], surfaces: unknown[] = [], toy = false) =>
-  call<{ rules?: unknown; acts?: unknown; toy?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things, surfaces, ...(toy ? { toy } : {}) })
+export const askRules = (person: string, text: string, current: unknown, things: string[] = [], surfaces: unknown[] = [], toy = false, invent = false) =>
+  call<{ rules?: unknown; acts?: unknown; toy?: unknown; mechanic?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things, surfaces, ...(toy ? { toy } : {}), ...(invent ? { invent } : {}) })
 
 // ── Reminders (#86) ─────────────────────────────────────────────────────────
 /** A reminder as the host gives it to the page: `when` is in words, in the zone the page sent. States are host/src/reminders.ts's. */

@@ -8,6 +8,8 @@
 // A toy (#88): the answer may also carry a new toy as parts, gadgets and wires on one of the
 // surfaces the page offered; the host checks its shape, the page checks every field
 // (src/engine/made.ts) and builds it all at once or not at all. Nothing in it runs.
+// A mechanic (#106): with `invent`, the answer is a toy with one new kind of gadget and that
+// kind's code (villager-invent.ts). The host passes the code on as text and never runs it.
 // `stubRuler` stands in for the model in checks.
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -15,6 +17,7 @@ import { join } from 'node:path'
 import { oneShot, type Call } from './villager-input.ts'
 import { EXAMPLE_SURFACE, marbleRun, pins, seesaw, type OfferedSurface } from './toy-examples.ts'
 import { MADE_KINDS } from '../../home/src/engine/made-kinds.ts'
+import { checkInventReply, inventPrompt, stubMechanic } from './villager-invent.ts'
 
 export interface RulesAsk {
   text: string
@@ -26,6 +29,8 @@ export interface RulesAsk {
   surfaces: OfferedSurface[]
   /** The router said the line asks to build a toy: the kit prompt on the toy model. Only quality rides on it; the page checks everything. */
   toy: boolean
+  /** The router said the line asks for a mechanic the kit does not have (#106): the invention prompt, and code in the answer. */
+  invent: boolean
   signal: AbortSignal
 }
 
@@ -128,12 +133,14 @@ async function toyRules() {
   ]
 }
 
-/** Rules and acts on `model` with the short prompt; a toy (the router said so) on `toyModel` with the kit prompt. */
-export function claudeRuler(model = 'haiku', toyModel = 'sonnet'): Ruler {
+/** Rules and acts on `model` with the short prompt; a toy (the router said so) on `toyModel` with the kit prompt; a mechanic on `inventModel` with the invention prompt. */
+export function claudeRuler(model = 'haiku', toyModel = 'sonnet', inventModel = 'sonnet'): Ruler {
   return async (ask) => {
     const current = ask.current === undefined ? 'none (the normal preset)' : JSON.stringify(ask.current)
     const asked = `Sentence (data): ${JSON.stringify(ask.text)}\nCurrent rules (data): ${current}\nThings (data): ${JSON.stringify(ask.things)}`
-    const { text, ...call } = ask.toy
+    const { text, ...call } = ask.invent
+      ? await oneShot(inventModel, await inventPrompt(), `Sentence (data): ${JSON.stringify(ask.text)}\nThings (data): ${JSON.stringify(ask.things)}\nSurfaces (data): ${JSON.stringify(ask.surfaces)}`, ask.signal)
+      : ask.toy
       ? await oneShot(toyModel, await toyPrompt(), `${asked}\nSurfaces (data): ${JSON.stringify(ask.surfaces)}`, ask.signal)
       : await oneShot(model, await rulesPrompt(), asked, ask.signal)
     return { raw: text, ...call }
@@ -141,7 +148,7 @@ export function claudeRuler(model = 'haiku', toyModel = 'sonnet'): Ruler {
 }
 
 /** A toy shaped as the page expects, or why not. Shape only: the page checks every field. */
-function toyShape(t: unknown): ToyReply | string {
+export function toyShape(t: unknown): ToyReply | string {
   if (!t || typeof t !== 'object' || Array.isArray(t)) return 'the toy is not an object'
   const v = t as Record<string, unknown>
   const list = (x: unknown, max: number) => (x === undefined ? [] : Array.isArray(x) && x.length <= max ? x : null)
@@ -208,14 +215,16 @@ const tuning = new Set<string>()
  */
 export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: string, req: IncomingMessage, res: ServerResponse, send: (res: ServerResponse, status: number, value: unknown) => void) {
   if (!ruler) return send(res, 503, { error: 'no ruler' })
-  let b: { text?: unknown; current?: unknown; things?: unknown; surfaces?: unknown; toy?: unknown }
+  let b: { text?: unknown; current?: unknown; things?: unknown; surfaces?: unknown; toy?: unknown; invent?: unknown }
   try {
     b = ((await readBody(req)) ?? {}) as typeof b
   } catch {
     return send(res, 400, { error: 'expected JSON {"text", "current"?, "things"?, "surfaces"?, "toy"?}' })
   }
   if (b.toy !== undefined && typeof b.toy !== 'boolean') return send(res, 400, { error: 'toy is true or false' })
-  const toy = b.toy === true
+  if (b.invent !== undefined && typeof b.invent !== 'boolean') return send(res, 400, { error: 'invent is true or false' })
+  const invent = b.invent === true
+  const toy = b.toy === true && !invent
   const { text, current } = b
   const things = b.things === undefined ? [] : b.things
   const surfaces = b.surfaces === undefined ? [] : b.surfaces
@@ -232,10 +241,17 @@ export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: st
   const log = (entry: Record<string, unknown>) => mkdir(dir, { recursive: true, mode: 0o700 })
     .then(() => appendFile(join(dir, 'physics.jsonl'), JSON.stringify({ at, text: text.trim(), ...entry }) + '\n', { mode: 0o600 }))
   try {
-    const call = await ruler({ text: text.trim(), current, things: things as string[], surfaces: (surfaces as OfferedSurface[]).map((s) => ({ id: s.id, label: s.label, half: s.half, height: s.height })), toy, signal: AbortSignal.timeout(toy ? 90_000 : 60_000) })
+    const call = await ruler({ text: text.trim(), current, things: things as string[], surfaces: (surfaces as OfferedSurface[]).map((s) => ({ id: s.id, label: s.label, half: s.half, height: s.height })), toy, invent, signal: AbortSignal.timeout(toy || invent ? 90_000 : 60_000) })
     const ms = Date.now() - started
-    const checked = checkRulesReply(call.raw)
     const usage = { ms, models: call.models, costUsd: call.costUsd, outputTokens: call.outputTokens, apiMs: call.apiMs }
+    if (invent) {
+      // A mechanic answer is a mechanic or nothing: rules and acts are not read from it.
+      const made = checkInventReply(call.raw)
+      await log({ ...('reason' in made ? { refused: made.reason } : { mechanic: { label: made.mechanic.toy.label, on: made.mechanic.toy.on, parts: made.mechanic.toy.parts.length, code: made.mechanic.code.length }, note: made.note }), ...usage })
+      if ('reason' in made) return send(res, 422, { error: made.reason, ms })
+      return send(res, 200, { mechanic: made.mechanic, note: made.note, ...usage })
+    }
+    const checked = checkRulesReply(call.raw)
     await log({ ...('reason' in checked ? { refused: checked.reason } : { rules: checked.rules, acts: checked.acts, ...(checked.toy ? { toy: { label: checked.toy.label, on: checked.toy.on, parts: checked.toy.parts.length } } : {}), note: checked.note }), ...usage })
     if ('reason' in checked) return send(res, 422, { error: checked.reason, ms })
     return send(res, 200, { rules: checked.rules, acts: checked.acts, toy: checked.toy, note: checked.note, ...usage })
@@ -263,6 +279,7 @@ export function stubRuler(delayMs = 40): Ruler {
     const t = ask.text.toLowerCase()
     if (t.includes('[stub-rules-fail]')) throw new Error('stub ruler failure requested')
     const call = { models: ['stub'], costUsd: 0, outputTokens: 0, apiMs: 0 }
+    if (ask.invent) return { raw: stubMechanic(ask.text, ask.surfaces), ...call }
     if (t.includes('[stub-rules-junk]')) return { raw: 'Sure! Everything is bouncier now.', ...call }
     if (t.includes('[stub-rules-malformed]')) return { raw: '{"note": "Lower gravity.", "rules": [0, -1.6, 0]}', ...call }
     if (t.includes('[stub-rules-empty]')) return { raw: '{"note": "Nothing changes.", "rules": {"nope": 1, "bounce": "fast"}}', ...call }

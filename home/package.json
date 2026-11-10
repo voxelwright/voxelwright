@@ -12,8 +12,10 @@
     "perf-gate": "node scripts/perf-gate.mjs"
   },
   "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "cordis": "4.0.0-rc.12",
     "jolt-physics": "1.1.1",
+    "quickjs-emscripten-core": "0.32.0",
     "three": "0.187.0"
   },
   "devDependencies": {

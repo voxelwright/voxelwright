@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { build, defineConfig, type Connect, type Plugin } from 'vite'
 import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
+import * as mechanic from './src/invent/relay.ts'
 
 // The villager host (host/src/villager.ts) listens on 127.0.0.1. The dev server
 // forwards /villager/api/* to it, so the page and the API share an origin. The
@@ -72,6 +73,39 @@ const propBox: Plugin = {
       logLevel: 'warn',
       resolve: { alias: [{ find: /^three\/webgpu$/, replacement: 'three' }] },
       build: { write: false, minify: true, lib: { entry, formats: ['iife'], name: 'propBox' } },
+    })
+    const chunk = (Array.isArray(out) ? out[0] : out as { output: { type: string; code?: string; moduleIds?: string[] }[] }).output[0]
+    for (const file of chunk.moduleIds ?? []) if (!file.startsWith('\0') && !file.includes('node_modules')) this.addWatchFile(file)
+    return `export default ${JSON.stringify(chunk.code)}`
+  },
+}
+
+// #106 mechanic sandbox, on every server and in the build (an invented mechanic is part of the
+// home, not a dev tool): `virtual:mechanic-box` is its worker bundled into one self-contained
+// script (the QuickJS glue and the prelude) and exported as a string, because the sealed frame
+// has no network and starts its worker from a blob. mechanic.BOX_PATH is that frame's relay
+// document, served with its own policy in place of the home's (src/invent/relay.ts).
+const serveMechanicBox: Connect.NextHandleFunction = (_req, res) => {
+  const nonce = randomBytes(16).toString('hex')
+  res.setHeader('content-security-policy', mechanic.boxPolicy(nonce))
+  res.setHeader('content-type', 'text/html; charset=utf-8')
+  res.setHeader('cache-control', 'no-store')
+  res.end(mechanic.boxDocument(nonce))
+}
+const mechanicBox: Plugin = {
+  name: 'mechanic-box',
+  configureServer: (server) => void server.middlewares.use(mechanic.BOX_PATH, serveMechanicBox),
+  configurePreviewServer: (server) => void server.middlewares.use(mechanic.BOX_PATH, serveMechanicBox),
+  resolveId: (id) => (id === 'virtual:mechanic-box' ? '\0virtual:mechanic-box' : undefined),
+  async load(id) {
+    if (id !== '\0virtual:mechanic-box') return
+    const entry = join(import.meta.dirname, 'src/invent/box/worker.ts')
+    const out = await build({
+      configFile: false,
+      logLevel: 'error',
+      // The QuickJS glue resolves its .wasm against import.meta.url, which an iife has none of; the bytes are handed in instead (wasmBinary).
+      define: { 'import.meta.url': JSON.stringify('http://mechanic-box.invalid/') },
+      build: { write: false, minify: true, lib: { entry, formats: ['iife'], name: 'mechanicBox' } },
     })
     const chunk = (Array.isArray(out) ? out[0] : out as { output: { type: string; code?: string; moduleIds?: string[] }[] }).output[0]
     for (const file of chunk.moduleIds ?? []) if (!file.startsWith('\0') && !file.includes('node_modules')) this.addWatchFile(file)
@@ -186,7 +220,7 @@ const soundLab: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [physicsPolicy, propBox, soundLab],
+  plugins: [physicsPolicy, propBox, mechanicBox, soundLab],
   // No SPA fallback: an unknown path is a 404, not the page.
   appType: 'mpa',
   server: {

@@ -48,9 +48,10 @@ export type Checked = { toy: ToySpec; clamped: string[] } | { reason: string }
 
 /**
  * A toy from untrusted data, to stand on `surface` with id `id`, or the reason it cannot be made.
- * Parts are in the surface's frame: x across, z along, y up from its top.
+ * Parts are in the surface's frame: x across, z along, y up from its top. `also` names registered
+ * kinds allowed besides the made kit (#106: the kind a mechanic's own code runs).
  */
-export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checked {
+export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: readonly string[] = []): Checked {
   if (!obj(raw)) return { reason: 'there was no toy in the answer' }
   const clamped: string[] = []
   const lists = ['parts', 'gadgets', 'wires'].map((k) => (raw[k] === undefined && k !== 'parts' ? [] : raw[k]))
@@ -79,7 +80,7 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checke
     const kind = typeof g.kind === 'string' ? gadgetKind(g.kind) : undefined
     if (!kind) return { reason: `there is no gadget called ${plain(g.kind, 32) || 'that'}` }
     // Only the made kit: fire comes from asking for it, and keys are not handed to made toys.
-    if (!(MADE_KINDS as readonly string[]).includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
+    if (!(MADE_KINDS as readonly string[]).includes(kind.kind) && !also.includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
     const spec: GadgetSpec = { id: g.id, kind: kind.kind }
     if (g.part !== undefined) {
       if (typeof g.part !== 'string' || !ids.has(g.part)) return { reason: `the ${g.id} gadget names a part that is not there` }
