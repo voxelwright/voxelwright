@@ -6,8 +6,9 @@
 //
 // Undo does not ask the sandbox for anything. The toy comes out of the world, the frame is
 // removed (which ends the worker whatever it is doing), the kind leaves the registry, and the
-// things the mechanic moved go back where they were when it arrived. A mechanic that stops by
+// things the mechanic moved itself go back where they were when it arrived (not what those knocked into). A mechanic that stops by
 // itself (it kept failing, or its sandbox died) says so on its tag and stays as inert parts.
+import type { Snapshot } from '../engine/api'
 import type { Vec3 } from '../engine/core'
 import { registerGadget, unregisterGadget } from '../engine/gadgets'
 import { checkKind, Mechanic } from '../engine/invent'
@@ -58,13 +59,18 @@ export async function prepare(world: World, raw: unknown, places: () => Record<s
   const mechanic = new Mechanic(kind, decl, opened.hooks, places, opened.box)
   opened.box.onTock = (reply) => mechanic.tock(reply)
   opened.box.onDead = (reason) => mechanic.stop(`its sandbox closed (${reason})`)
-  const refused = registerGadget(mechanic.gadgetKind())
+  // The world as the mechanic finds it, taken at its first step: by then a toy it replaced is out and what that one moved is back.
+  let before: Snapshot | null = null
+  const own = mechanic.gadgetKind()
+  const refused = registerGadget({ ...own, step: (g, w, h) => {
+    before ??= world.snapshot()
+    own.step?.(g, w, h)
+  } })
   if (refused) {
     opened.box.dispose()
     return refused
   }
   running.set(kind, mechanic)
-  const before = world.snapshot()
   const moved = new Set<string>()
   mechanic.onMoved = (key) => moved.add(key)
   let ended = false
@@ -77,8 +83,9 @@ export async function prepare(world: World, raw: unknown, places: () => Record<s
     mechanic.stop('it was taken away')
     unregisterGadget(kind)
     running.delete(kind)
-    if (!undone || world.disposed) return
-    // What it moved goes back where it was when the mechanic arrived (things since removed are skipped).
+    if (!undone || world.disposed || !before) return
+    // What it moved itself goes back where it was when the mechanic arrived (things since removed are skipped). What those knocked into stays.
+
     for (const key of moved) {
       const was = before.things[key]
       if (was) world.moveTo(key, was.p, was.v, was.q)

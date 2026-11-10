@@ -1,6 +1,7 @@
 // A toy made from a sentence (#88), on trial until the person decides, as furnishing does it:
 // Keep, Undo or Try another, on a paper tag over the toy. It is built all at once. Undo takes
-// that toy out and nothing else: rules, fire, other toys and what it pushed stay as they are. A
+// that toy out and nothing else: rules, fire, other toys and what it pushed stay as they are (a
+// toy that carries a mechanic, #106, also puts back the things its code moved: see Spirit). A
 // new toy (another ask, or Try another) is built before the one on trial is taken out, so when it
 // cannot be built the world is exactly as it was. Kept toys stay for this visit only (a reload
 // clears them), at most MAX_KEPT, one to a surface. The tag follows the toy only while shown.
@@ -14,7 +15,7 @@ export type Built = { ok: true; id: string } | { ok: false; reason: string }
 /**
  * What a toy carries besides its parts (#106: an invented mechanic's sandbox). `end` is called once,
  * after the toy is out of the world or as the page unloads: `undone` when the toy was taken back
- * (Undo, or another replaced it), so whatever it did to the world is put back too.
+ * (Undo, or another replaced it), so the things it moved itself go back too.
  */
 export interface Spirit { end(undone: boolean): void }
 /** `on` is the surface's label: one toy to a surface. */

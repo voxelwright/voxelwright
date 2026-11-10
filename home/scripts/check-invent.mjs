@@ -110,7 +110,10 @@ try {
   if (agent === 'stub') {
     // ── The magnet, end to end ───────────────────────────────────────────────
     const stepBefore = await page.evaluate(async () => { const p = window.village.physics; p.clearStats(); await new Promise((r) => setTimeout(r, 2000)); return p.stats().stepMs })
+    await page.evaluate(() => (window.longest = 0))
     const r = await ask('make a magnet')
+    // The first invention fetches the sandbox chunk and the interpreter: its longest page task is reported, not judged (it varies with load).
+    report.firstLongestTaskMs = await page.evaluate(() => window.longest)
     const built = await world()
     check('"make a magnet" builds a toy with a new kind of gadget, on trial with a tag', r.ok && r.toy?.mechanic && built.trial && (await tag()) !== null, { ok: r.ok, toy: r.toy, reason: r.reason })
     check('its kind is in the gadget registry and its code is in one sealed frame', built.kinds.includes(r.toy?.mechanic?.kind) && built.frames === baseline.frames + 1 && (await page.evaluate(() => { const f = document.querySelector('iframe[src="/mechanic-box.html"]'); return f?.getAttribute('sandbox') === 'allow-scripts' })), { kinds: built.kinds, frames: built.frames })
@@ -122,7 +125,8 @@ try {
     const pulled = await parts()
     const near = (set, id) => dist(set[id], set.magnet)
     const marbles = ['marble-1', 'marble-2', 'marble-3']
-    check('the steel marbles are pulled to the magnet and the felt ball is left alone', marbles.every((m) => near(pulled, m) < near(start, m) * 0.6) && near(pulled, 'felt-ball') > near(start, 'felt-ball') * 0.9, { start: [...marbles, 'felt-ball'].map((m) => +near(start, m).toFixed(3)), pulled: [...marbles, 'felt-ball'].map((m) => +near(pulled, m).toFixed(3)) })
+    // Laid at 0.17 to 0.23 m; the first reading already comes after some pull, so the test is where they end up.
+    check('the steel marbles are pulled to the magnet and the felt ball is left alone', marbles.every((m) => near(pulled, m) < 0.08) && near(pulled, 'felt-ball') > 0.15, { start: [...marbles, 'felt-ball'].map((m) => +near(start, m).toFixed(3)), pulled: [...marbles, 'felt-ball'].map((m) => +near(pulled, m).toFixed(3)) })
     const gid = `${built.trial}/pull`
     const caught = () => page.evaluate((gid) => ({ state: window.village.physics.snapshot().gadgets[gid]?.state, fired: window.village.physics.signals()[`${gid}.caught`] ?? 0 }), gid)
     await page.waitForFunction((gid) => (window.village.physics.snapshot().gadgets[gid]?.state.caught ?? 0) >= 1, gid, { timeout: 10_000 }).catch(() => {})
@@ -195,6 +199,47 @@ try {
       const after = await world()
       check(`stopped with no long task over 200 ms, said on its tag, and undone (${marker})`, r.ok && m?.stopped && /It stopped/.test(said ?? '') && !/[<>]/.test(said ?? '') && longest < 200 && ball && undone && same(after, baseline), { ok: r.ok, reason: r.reason, stopped: m?.stopped, said, longest, lastError: m?.stats.lastError, after: same(after, baseline) ? 'baseline' : after })
     }
+    {
+      const r = await ask('[stub-invent-flaky] a magnet')
+      await page.waitForTimeout(2000)
+      const m = await mech()
+      await undo()
+      check('a mechanic that fails now and then, never three times in a row, keeps running', r.ok && !m?.stopped && m?.stats.errors > 10, { stopped: m?.stopped, errors: m?.stats.errors })
+    }
+    // The page's own watchdog: the worker's answers are dropped in the relay, so nothing in the sandbox reports a thing.
+    {
+      const r = await ask('make a magnet')
+      await page.waitForTimeout(300)
+      await page.frames().find((f) => f.url().includes('mechanic-box')).evaluate(() => { worker.onmessage = null })
+      await page.waitForFunction(() => window.village.physics.mechanics().at(-1)?.stopped, null, { timeout: 8000 }).catch(() => {})
+      const m = await mech()
+      const said = await tag()
+      const undone = await undo()
+      check('a sandbox that stops answering is closed, said on its tag, and undone', r.ok && /stopped answering/.test(m?.stopped ?? '') && /It stopped/.test(said ?? '') && undone && same(await world(), baseline), { stopped: m?.stopped, said })
+    }
+    // The frame's own policy, asked from inside the frame (the code in the interpreter cannot ask at all).
+    {
+      await ask('make a magnet')
+      const frame = page.frames().find((f) => f.url().includes('mechanic-box'))
+      const inside = await frame.evaluate(() => Promise.all([fetch('/', { mode: 'no-cors' }).then(() => 'fetched', () => 'refused'), new Promise((r) => { try { const q = indexedDB.open('probe'); q.onsuccess = () => r('opened'); q.onerror = () => r('denied') } catch { r('denied') } })]).then(([net, store]) => ({ net, store, origin: self.origin })))
+      await undo()
+      check("the sandbox frame's own policy refuses the network and storage, and its origin is opaque", inside.net === 'refused' && inside.store === 'denied' && inside.origin === 'null', inside)
+    }
+    // A snapshot from an earlier clock: the code is never told a call stands for no time or less.
+    {
+      const r = await ask('[stub-invent-h] a magnet')
+      const gid = `${(await world()).trial}/pull`
+      const minh = await page.evaluate(async (gid) => {
+        const p = window.village.physics
+        const snap = p.snapshot()
+        await new Promise((r) => setTimeout(r, 1200))
+        p.restore(snap)
+        await new Promise((r) => setTimeout(r, 400))
+        return p.snapshot().gadgets[gid]?.state.minh
+      }, gid)
+      await undo()
+      check('after a snapshot from an earlier clock is restored, a call still stands for a positive time', r.ok && minh > 0.01, { minh })
+    }
     // Undo while the code is looping, before anything has noticed.
     {
       const r = await ask('[stub-invent-loop] a magnet')
@@ -231,6 +276,28 @@ try {
       await page.evaluate(() => window.village.physics.reset())
       check('and Undo leaves the baseline', same(await world(), baseline), await world())
     }
+    {
+      const r = await ask('[stub-invent-wild-once] a magnet')
+      await page.waitForTimeout(1000)
+      const m = await mech()
+      await undo()
+      await page.evaluate(() => window.village.physics.reset())
+      check('each forged command is checked on its own: 2 of 17 applied, 15 refused', r.ok && m.stats.commands === 2 && m.stats.refused === 15, { commands: m.stats.commands, refused: m.stats.refused })
+    }
+    // Try another, then Undo: the home's things are where they were before the first mechanic, not where it threw them.
+    {
+      const at = (undo) => page.evaluate((undo) => { const p = window.village.physics; if (undo) p.made.undo(); return Object.fromEntries(p.engine.world.keys().filter((k) => !k.startsWith('made-')).map((k) => [k, p.thing(k)]).filter(([, t]) => t.motion === 'dynamic' && t.toy !== 'bound' && t.toy !== 'followers' && (undo || Math.hypot(...t.velocity) < 0.005)).map(([k, t]) => [k, t.position])) }, undo)
+      await page.waitForTimeout(1500)
+      const before = await at(false)
+      await ask('[stub-invent-fling] a magnet')
+      await page.waitForTimeout(350)
+      await page.evaluate(() => window.village.physics.made.another())
+      await page.waitForTimeout(350)
+      const after = await at(true)
+      const astray = Object.keys(before).filter((k) => Math.hypot(...before[k].map((v, i) => v - after[k][i])) > 0.03)
+      check('Try another and then Undo puts back what both mechanics threw', Object.keys(before).length >= 5 && astray.length === 0 && same(await world(), baseline), { things: Object.keys(before).length, astray })
+      await page.evaluate(() => window.village.physics.reset())
+    }
 
     // ── Keep and Try another ────────────────────────────────────────────────
     {
@@ -238,10 +305,11 @@ try {
       const again = await page.evaluate(() => window.village.physics.made.another())
       const second = await world()
       check('Try another replaces a mechanic with a new one: one frame, one new kind, the old gone', first.ok && again?.ok && second.frames === baseline.frames + 1 && second.mechanics === 1 && second.trial !== first.toy.id && !second.kinds.includes(first.toy.mechanic.kind), { again, frames: second.frames, mechanics: second.mechanics, kinds: second.kinds })
+      const views = (await mech()).stats.views
       const kept = await page.evaluate(() => window.village.physics.made.keep())
       await page.waitForTimeout(600)
       const m = await mech()
-      check('Keep leaves it running with no tag', kept && (await tag()) === null && !m.stopped && m.stats.views > 0, { kept, stopped: m.stopped })
+      check('Keep leaves it running with no tag', kept && (await tag()) === null && !m.stopped && m.stats.views > views + 10 && (await world()).census.toys === baseline.census.toys + 1, { kept, stopped: m.stopped, views: [views, m.stats.views] })
     }
     // From the notepad: the router's flag reaches the invent ask.
     {
@@ -259,6 +327,13 @@ try {
       await undo()
     }
     check('the sandbox frames asked the network for their own document and nothing else', boxRequests.length > 0 && boxRequests.every((u) => u === `${base}mechanic-box.html`), [...new Set(boxRequests)])
+    // Last: the kept mechanic is still running, and unloading physics must close its sandbox.
+    {
+      const open = await page.evaluate(() => document.querySelectorAll('iframe').length)
+      await page.evaluate(() => window.village.kernel.unload('physics'))
+      const left = await page.evaluate(() => document.querySelectorAll('iframe').length)
+      check('unloading physics closes every mechanic sandbox', open === baseline.frames + 1 && left === baseline.frames, { open, left })
+    }
   } else {
     // ── A real model writes real mechanics ──────────────────────────────────
     const asks = (opt('asks') ?? 'make a magnet|a fan that blows things across the table|gravity that points at the candle|a pad that flings whatever lands on it').split('|')
@@ -295,5 +370,5 @@ try {
 const out = opt('out')
 if (out) await writeFile(out, JSON.stringify({ checks, report }, null, 2))
 const failed = checks.filter((c) => !c.pass)
-console.log(JSON.stringify({ agent, model: report.model, passed: checks.length - failed.length, failed: failed.map((f) => f.name), spend: report.spend, summary: report.summary }, null, 2))
+console.log(JSON.stringify({ agent, model: report.model, passed: checks.length - failed.length, failed: failed.map((f) => f.name), spend: report.spend, firstLongestTaskMs: report.firstLongestTaskMs, summary: report.summary }, null, 2))
 process.exit(failed.length ? 1 : 0)

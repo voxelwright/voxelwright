@@ -156,6 +156,24 @@ const HOSTILE: Record<string, string> = {
   '[stub-invent-fling]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; if (g.state.n > 8) return; for (const t of w.things) w.push(t.key, [0.2 * t.mass, 1.5 * t.mass, 0]) }',
   // Writes on its part every step, as real answers like to.
   '[stub-invent-show]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; g.show("n " + g.state.n) }',
+  // Fails every other step: never three in a row, so it keeps running.
+  '[stub-invent-flaky]': 'function step(g, w) { if (Math.round(w.clock * 60) % 2) throw new Error("odd step") }',
+  // Reads the time each call stands for: never zero or less, whatever the clock did.
+  '[stub-invent-h]': 'function step(g, w) { g.state.minh = Math.min(g.state.minh === undefined ? 1 : g.state.minh, w.h) }',
+  // The forged commands once, alone, then nothing: each one is counted.
+  '[stub-invent-wild-once]': `function step(g, w) {}
+let calls = 0
+globalThis.__tick = (json) => {
+  const v = JSON.parse(json)
+  if (calls++) return JSON.stringify({ commands: [], states: {} })
+  const key = v.things.length ? v.things[0].key : 'nothing'
+  const id = v.gadgets[0].id
+  return JSON.stringify({ commands: [
+    ['push', key, [1e308, 1e308, 1e308]], ['push', 'house/floor', [0, 5, 0]], ['push', 'villager/alex', [0, 5, 0]], ['push', key, [NaN, 0, 0]], ['push', key, 'up'],
+    ['velocity', key, [9999, 0, 0]], ['move', key, [0, -40, 0]], ['move', key, [1e9, 1, 0]], ['move', 'kitchen/fridge', [0, 1, 0]],
+    ['fire', id, 'nope', 1], ['fire', 'pinball/score', 'changed', 99999], ['show', id, '<img src=x onerror=alert(1)>'], ['ignite', key], ['setRules', { gravity: [0, 30, 0] }], 'junk', null, 7,
+  ], states: {} })
+}`,
   // Reaches for everything a page script could: none of it exists inside the interpreter.
   '[stub-invent-reach]': 'function step(g, w) { g.state.reached = [typeof window, typeof document, typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof localStorage, typeof postMessage, typeof importScripts, typeof setTimeout, typeof navigator, typeof self, typeof require, typeof process].filter((t) => t !== "undefined").length }',
   // Replaces the prelude's function and answers with commands and states no check should let through.

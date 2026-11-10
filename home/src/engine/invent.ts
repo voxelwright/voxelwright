@@ -206,9 +206,10 @@ export class Mechanic {
       }
     })
     this.events.clear()
-    const view = { h: round(Math.min(INVENT.h, this.sentClock < 0 ? 1 / 60 : w.clock - this.sentClock)), clock: round(w.clock), gravity: w.rules.gravity, things: [...things.values()], gadgets }
+    const view = { h: round(this.sentClock < 0 || w.clock <= this.sentClock ? 1 / 60 : Math.min(INVENT.h, w.clock - this.sentClock)), clock: round(w.clock), gravity: w.rules.gravity, things: [...things.values()], gadgets }
     let json = ''
-    if (w.clock - this.placesAt >= INVENT.places) {
+    // (The clock goes back when a snapshot is restored.)
+    if (w.clock - this.placesAt >= INVENT.places || w.clock < this.placesAt) {
       this.placesAt = w.clock
       const places = JSON.stringify(this.places())
       if (places !== this.placesSent) {
