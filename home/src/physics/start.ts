@@ -83,13 +83,15 @@ export async function start(ctx: Context, gone: () => boolean) {
     return texture
   }
   const tell = (e: PhysicsEvent) => {
+    modes?.saw(e)
     log.push(e)
     if (log.length > 500) log.splice(0, 250)
     ctx.emit('village/physics', e)
   }
+  // Game modes (#108): a game's own rules and toys, on loan while it is played. They hear every event, to know a rule someone changed.
+  let modes: Modes | undefined
   const world = new World(createJolt(), tell, grain)
-  // Game modes (#108): a game's own rules and toys, on loan while it is played.
-  const modes = new Modes(world, tell)
+  modes = new Modes(world, tell)
   ctx.effect(() => () => world.dispose(), 'physics solver')
   // The registries are module-level and outlive this plugin (reload, HMR): what was added at runtime goes with the world.
   ctx.effect(() => () => {

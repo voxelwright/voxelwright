@@ -30,10 +30,13 @@ export function bestScores(ctx: Context, world: World) {
   }
   give()
   ctx.on('village/physics', (e) => {
-    // A snapshot put back (it says so with a rules event) carries the knobs of its moment: a record beaten since stays beaten.
-    if (e.kind === 'rules' && e.by === 'code') return give()
+    // A snapshot put back (it says so with a rules event, before its knobs are in) carries the knobs of its moment: once
+    // it is all back, a record beaten since is given its best again.
+    if (e.kind === 'rules' && e.by === 'code') return queueMicrotask(give)
     if (e.kind !== 'signal' || e.port !== 'beaten' || !kept(e.gadget) || !Number.isFinite(e.value)) return
     if (!Object.hasOwn(best, e.gadget) && Object.keys(best).length >= MAX) return
+    // Only ever upward: a record that lost its best some other way does not take the kept one down with it.
+    if (best[e.gadget] >= e.value) return
     best[e.gadget] = e.value
     try {
       localStorage.setItem(STORED, JSON.stringify(best))

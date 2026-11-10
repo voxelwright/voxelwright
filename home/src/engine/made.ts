@@ -147,13 +147,20 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checke
   // No signal may come back round to where it started in one chain: that loop feeds itself every step. Followed port by
   // port (#108): a wire into an input goes on only through the outputs that input can fire at once (the kind's `causes`),
   // so a game's own rings are fine (a round resets its score, whose change the round only remembers; a timer's `done`
-  // restarts the toy that started the timer) and a counter wired back into its own `add` is still refused.
+  // restarts the toy that started the timer) and a counter wired back into its own `add`, a bell into its own `ring`, or
+  // a counter's change into the restart that resets it, is still refused.
   const next = new Map<string, string[]>()
   for (const w of wires) {
     const dot = w.to.lastIndexOf('.')
     const to = w.to.slice(0, dot), kind = gadgetKind(gadgets.find((g) => g.id === to)!.kind)!
-    const fired = Object.hasOwn(kind.causes ?? {}, w.to.slice(dot + 1)) ? kind.causes![w.to.slice(dot + 1)] : kind.outputs
-    next.set(w.from, [...(next.get(w.from) ?? []), ...fired.map((port) => `${to}.${port}`)])
+    const port = w.to.slice(dot + 1)
+    const fired = (Object.hasOwn(kind.causes ?? {}, port) ? kind.causes![port] : kind.outputs).map((out) => `${to}.${out}`)
+    // An input that restarts the toy resets every gadget in it: whatever each fires on a reset follows in the same chain.
+    if (kind.resetsToy?.includes(port)) for (const g of gadgets) {
+      const k = gadgetKind(g.kind)!
+      if (k.inputs.includes('reset')) fired.push(...(Object.hasOwn(k.causes ?? {}, 'reset') ? k.causes!.reset : k.outputs).map((out) => `${g.id}.${out}`))
+    }
+    next.set(w.from, [...(next.get(w.from) ?? []), ...fired])
   }
   const state = new Map<string, 1 | 2>()
   const loops = (out: string): boolean => {

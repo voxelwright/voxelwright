@@ -1,7 +1,7 @@
 // A game mode (#108): a preset that bundles the rules a game is played under and the toys it
 // brings, started and ended as one. Starting changes those rules and builds those toys, all or
 // nothing; ending takes its toys out and puts back each rule it changed, unless someone changed
-// that rule again meanwhile (their change stays). One mode runs at a time. Both ends are said as
+// that rule meanwhile (it is theirs from then on, whatever they set it to: `saw` hears of it). One mode runs at a time. Both ends are said as
 // events, so whoever keeps the rules (the page's storage) or watches the home knows a mode's
 // rules are on loan.
 import type { PhysicsEvent } from './events'
@@ -26,13 +26,29 @@ const same = (a: Value | undefined, b: Value | undefined) => (Array.isArray(a) &
 const copy = (v: Value): Value => (Array.isArray(v) ? [...v] : v)
 
 export class Modes {
-  private running: { mode: GameMode; before: Record<string, Value>; set: Record<string, Value> } | null = null
+  /** `set`: the rules still on loan and what they were set to; `seen`: their values as last said, to tell a change from a repeat. */
+  private running: { mode: GameMode; before: Record<string, Value>; set: Record<string, Value>; seen: Record<string, Value> } | null = null
 
   constructor(private world: World, private emit: (e: PhysicsEvent) => void) {}
 
   /** The running mode's id, or null. */
   get active() {
     return this.running?.mode.id ?? null
+  }
+
+  /**
+   * Every event the world says goes past here (the host passes them on). A rules change that is not a
+   * mode's own, moving a rule the running mode set, makes that rule the person's: it is not put back.
+   */
+  saw(e: PhysicsEvent) {
+    const r = this.running
+    if (!r || e.kind !== 'rules' || e.by === 'mode') return
+    for (const key of Object.keys(r.set)) {
+      if (same(e.rules[key], r.seen[key])) continue
+      delete r.set[key]
+      delete r.seen[key]
+    }
+    for (const key of Object.keys(r.seen)) r.seen[key] = copy(e.rules[key])
   }
 
   /** Starts a mode: its toys built and its rules in force, or nothing changed and the reason. */
@@ -68,7 +84,7 @@ export class Modes {
       // As the checker left them (clamped to their ranges): what the end compares against.
       for (const key of Object.keys(wanted)) set[key] = copy(applied.rules[key])
     }
-    this.running = { mode, before, set }
+    this.running = { mode, before, set, seen: { ...set } }
     this.emit({ kind: 'mode', mode: mode.id, label: mode.label, state: 'started' })
     return { ok: true }
   }
@@ -81,6 +97,7 @@ export class Modes {
     if (this.world.disposed) return true
     for (const toy of r.mode.toys ?? []) this.world.removeToy(toy.id)
     const back: Record<string, Value> = {}
+    // What is still on loan (`saw` took out what someone changed), and still as the mode set it.
     for (const [key, v] of Object.entries(r.set)) if (same(this.world.rules[key], v)) back[key] = r.before[key]
     if (Object.keys(back).length) this.world.setRules(back, 'mode')
     this.emit({ kind: 'mode', mode: r.mode.id, label: r.mode.label, state: 'ended' })

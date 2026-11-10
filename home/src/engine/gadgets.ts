@@ -28,6 +28,8 @@ export interface GadgetKind {
    * checks a toy for loops (made.ts) lets it be.
    */
   causes?: Record<string, string[]>
+  /** Its inputs named here reset every gadget of its toy that takes a `reset` (the restart kind): what those fire on a reset is in the same chain. */
+  resetsToy?: string[]
   /** The spec settings it reads besides `part` and `knobs`. */
   settings?: Record<string, Setting>
   /** What its spec must give, so a toy written as data is refused before it is built: a part (`moving`: a dynamic one) and settings by name. */
@@ -406,7 +408,7 @@ registerGadget({
 
 registerGadget({
   kind: 'restart', about: 'On `go`, puts its whole toy back as it was made and fires `done`: every moving part where it started and at rest, every counter, game, lamp, timer and the like reset. The pins stood up again for the next round.',
-  knobs: {}, inputs: ['go'], outputs: ['done'],
+  knobs: {}, inputs: ['go'], outputs: ['done'], resetsToy: ['go'],
   receive(g, port, _s, w) {
     if (port === 'go' && w.restartToy(g.toy)) w.fire(g, 'done', { value: 1 })
   },
@@ -431,12 +433,13 @@ registerGadget({
 
 // ── Feedback (#108): what makes a hit land. Each only says what happened; sound and the view listen. ──
 
-/** Seconds between two notes of one bell: a run is heard as notes, and a bell wired to ring itself cannot flood. */
+/** Seconds between two notes of one bell: a run is heard as notes, and a bell rung every step still says at most eleven a second. */
 const RING_GAP = 0.09
 registerGadget({
   kind: 'bell', about: 'Rings. On `ring` it fires `rang` with `note` as the value (semitones above middle C; whoever makes the home\'s sounds plays it), `rings` times in a row, each `step` semitones from the last: one note for a hit, a run up for a prize, a run down for a loss. Heard from where its part is, when it has one.',
   knobs: { note: knob(-12, 36, 1, 12, 'semitones above middle C'), rings: knob(1, 6, 1, 1, 'notes in a row'), step: knob(-12, 12, 1, 7, 'semitones between them') },
-  inputs: ['ring'], outputs: ['rang'], causes: { ring: [] },
+  // `rang` comes later, from `step`, but it is still what a `ring` leads to: named so, a bell wired to ring itself is seen as the loop it is.
+  inputs: ['ring'], outputs: ['rang'],
   setup(g) {
     Object.assign(g.state, { left: 0, n: 0, next: 0 })
   },

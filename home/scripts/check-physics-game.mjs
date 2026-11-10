@@ -174,7 +174,7 @@ try {
   check('The next pull starts a new round: score zero, three balls, lamps lit, the end lamp dark', again.fired.started === 2 && again.score === 0 && again.balls === 3 && again.lamps.every(Boolean) && !again.over, again)
 
   // ── Reset, and a snapshot put back ──
-  const undo = await game(() => {
+  const undo = await game(async () => {
     const p = window.village.physics, g = window.game
     // Some score first, so a snapshot that lost it would show.
     g.bump()
@@ -188,17 +188,20 @@ try {
     const bestAfter = g.best()
     p.restore(snap)
     const restored = g.state()
+    // The snapshot is older than the best score: once it is all back, the record is given its best again.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const bestRestored = g.best()
     // The restored round carries on: one more drain is the second ball, not a new game.
     g.drain()
     const carriedOn = g.state()
     p.reset()
     const reset = g.state()
     g.pull()
-    return { before, ended, bestAfter, restored, carriedOn, reset, startedAfterReset: g.state().fired.started - reset.fired.started }
+    return { before, ended, bestAfter, bestRestored, restored, carriedOn, reset, startedAfterReset: g.state().fired.started - reset.fired.started }
   })
   const same = (a, b) => a.balls === b.balls && a.score === b.score && a.lamps.join() === b.lamps.join() && a.over === b.over
   check('A snapshot puts the game back: balls, a score above zero and every lamp as they were, and the round carries on', undo.ended.over && undo.before.score > 0 && undo.ended.score > undo.before.score && same(undo.before, undo.restored) && undo.carriedOn.balls === undo.before.balls - 1 && !undo.carriedOn.over, undo)
-  check('A later round only changes the best when it beats it', undo.bestAfter.best === Math.max(round.best.best, undo.ended.score) && undo.bestAfter.kept === undo.bestAfter.best, { first: round.best, later: undo.ended.score, best: undo.bestAfter })
+  check('A later round only changes the best when it beats it, and a snapshot from before it put back does not take it away', undo.bestAfter.best === Math.max(round.best.best, undo.ended.score) && undo.bestAfter.kept === undo.bestAfter.best && undo.bestRestored.best === undo.bestAfter.best && undo.bestRestored.kept === undo.bestAfter.best, { first: round.best, later: undo.ended.score, best: undo.bestAfter, restored: undo.bestRestored })
   check('Reset puts the game back to before a round (three balls, lamps lit, end lamp dark), and a pull then starts one', undo.reset.balls === 3 && undo.reset.lamps.every(Boolean) && !undo.reset.over && undo.startedAfterReset === 1, undo)
 
   // ── The missions: three lanes for a multiball, four targets for another ball (a round is running) ──
@@ -271,6 +274,13 @@ try {
     p.play(false)
     out.left = { substeps: p.rules().substeps, gravity: p.rules().gravity[1], bounce: p.rules().bounce, active: p.modes.active(), stored: JSON.parse(stored() ?? 'null') }
     out.events = p.events().slice(n0).filter((e) => e.kind === 'mode').map((e) => `${e.mode} ${e.state}`)
+    // A rule the mode set, changed by someone and then set back to the same value, is theirs: it is not put back.
+    p.preset('normal')
+    p.play(true)
+    p.setRules({ substeps: 3 })
+    p.setRules({ substeps: 2 })
+    p.play(false)
+    out.theirs = p.rules().substeps
     // A mode that brings a toy and plays under a preset.
     p.preset('normal')
     const rules0 = JSON.stringify(p.rules()), census0 = census()
@@ -289,7 +299,7 @@ try {
     return out
   })
   check('Choosing the table starts its mode (two collision steps a frame) and leaving it puts that rule back; both are said as events', modes.before.substeps === 1 && modes.playing.substeps === 2 && modes.playing.active === 'pinball' && modes.left.substeps === 1 && modes.left.active === null && modes.events.join() === 'pinball started,pinball ended', { before: modes.before, playing: modes.playing, left: modes.left, events: modes.events })
-  check('A mode\'s rules are on loan: nothing is kept in the browser while it runs; what someone tuned meanwhile stays and is kept when it ends, without the mode\'s own rule', modes.playing.storedSame && modes.tuned.storedSame && modes.left.gravity === -1.62 && modes.left.bounce === 1.1 && modes.left.stored?.gravity?.[1] === -1.62 && modes.left.stored?.substeps === 1, { playing: modes.playing, tuned: modes.tuned, left: modes.left })
+  check('A mode\'s rules are on loan: nothing is kept in the browser while it runs; what someone tuned meanwhile stays and is kept when it ends, without the mode\'s own rule; a rule of the mode\'s that someone changed is theirs even set back to the same value', modes.playing.storedSame && modes.tuned.storedSame && modes.left.gravity === -1.62 && modes.left.bounce === 1.1 && modes.left.stored?.gravity?.[1] === -1.62 && modes.left.stored?.substeps === 1 && modes.theirs === 2, { playing: modes.playing, tuned: modes.tuned, left: modes.left, theirs: modes.theirs })
   check('A mode that brings a toy and a preset: both in force while it runs, a second mode is refused, and ending it leaves the rules and the census as they were', modes.started.ok && modes.mid.has && modes.mid.gravity === -1.62 && modes.mid.bounce === 1.3 && modes.second.ok === false && modes.ended && modes.end.rules && modes.end.census && !modes.end.has && modes.end.active === null && modes.end.endedAgain === false, { started: modes.started, mid: modes.mid, second: modes.second, end: modes.end })
   check('A mode whose toy cannot be built starts nothing: rules and census as they were', modes.bad.ok === false && /teleporter/.test(modes.bad.reason) && modes.afterBad.rules && modes.afterBad.census && modes.afterBad.active === null, { bad: modes.bad, afterBad: modes.afterBad })
 
@@ -336,6 +346,35 @@ try {
   check('A game wired to start itself the moment it ends is cut 64 wires from each physical cause (a bounce of the ball) and says so; the world still steps', loops.spin.first > 0 && loops.spin.first <= 64 * loops.spin.hits && loops.spin.later === loops.spin.first && loops.spin.dropped > 0 && loops.spin.ballY > 0, loops.spin)
   check('A ring of spawner, points and a set that feeds itself is cut the same way, having counted sevens; the world still steps', loops.churn.first > 0 && loops.churn.first % 7 === 0 && loops.churn.dropped > 0 && loops.churn.ballY > -1, loops.churn)
   check('A loop through a part that waits (an emitter asked to spawn by its own spawn) runs once per wait, never a flood', loops.wait.spawns >= 1 && loops.wait.spawns <= 11 && loops.wait.dropped === 0, loops.wait)
+
+  // ── The made-toy checker, by port: what a game needs passes, what feeds itself in one go does not ──
+  const made = await game(async () => {
+    const { checkMadeToy } = await import('/src/engine/made.ts')
+    const surface = { id: 'table', label: 'the table', at: [40, 0, 0], yaw: 0, half: [0.4, 0.22], height: 0.45 }
+    const parts = [
+      { id: 'floor', shape: { kind: 'box', half: [0.3, 0.01, 0.2] }, material: 'maple', at: [0, 0.01, 0] },
+      { id: 'pin', shape: { kind: 'cylinder', halfHeight: 0.04, radius: 0.014 }, material: 'plaster', motion: 'dynamic', at: [0, 0.06, 0] },
+      { id: 'line', shape: { kind: 'box', half: [0.01, 0.03, 0.1] }, material: 'glass', at: [0.2, 0.05, 0], sensor: true, hidden: true },
+      { id: 'wall', shape: { kind: 'box', half: [0.01, 0.03, 0.1] }, material: 'glass', at: [-0.2, 0.05, 0], hidden: true },
+    ]
+    const gadgets = [{ id: 'z', kind: 'zone', part: 'line' }, { id: 't', kind: 'tilt', part: 'pin' }, { id: 'c', kind: 'counter' }, { id: 'g', kind: 'game' }, { id: 'again', kind: 'timer' }, { id: 'r', kind: 'restart' }, { id: 'b', kind: 'bell' }, { id: 'best', kind: 'record' }]
+    const why = (wires, more = []) => { const r = checkMadeToy({ label: 'x', parts, gadgets: [...gadgets, ...more], wires }, surface, 'made-x'); return 'reason' in r ? r.reason : null }
+    const round = [{ from: 'z.enter', to: 'g.start' }, { from: 't.fell', to: 'c.add' }, { from: 'c.changed', to: 'g.score' }, { from: 'c.reached', to: 'g.win' }, { from: 'g.started', to: 'c.reset' }, { from: 'g.won', to: 'again.start' }, { from: 'g.won', to: 'best.in' }, { from: 'again.done', to: 'r.go' }, { from: 'c.changed', to: 'b.ring' }]
+    const ok = checkMadeToy({ label: 'x', parts, gadgets, wires: round }, surface, 'made-x')
+    return {
+      round: why(round),
+      hidden: 'toy' in ok ? Object.fromEntries(ok.toy.parts.map((x) => [x.id, Boolean(x.hidden)])) : null,
+      counterIntoItself: why([{ from: 'c.changed', to: 'c.add' }]),
+      bellIntoItself: why([{ from: 'b.rang', to: 'b.ring' }]),
+      changeIntoRestart: why([{ from: 'c.changed', to: 'r.go' }]),
+      throughTwo: why([{ from: 'c.reached', to: 'g.win' }, { from: 'g.won', to: 'c.add' }]),
+      spawner: why([], [{ id: 's', kind: 'spawner', part: 'pin' }]),
+      freeze: why([], [{ id: 'f', kind: 'freeze' }]),
+    }
+  })
+  check('A made game\'s own rings pass the checker (a round resets the score it remembers; a timer\'s end restarts the toy), and only a trigger volume may be hidden', made.round === null && made.hidden?.line === true && made.hidden?.wall === false, made)
+  check('The checker still refuses what feeds itself in one go: a counter into its own add, a bell into its own ring, a counter\'s change into the restart that resets it, a win that adds to the counter that decided it', [made.counterIntoItself, made.bellIntoItself, made.changeIntoRestart, made.throughTwo].every((r) => /loop/.test(r ?? '')), made)
+  check('A made toy may not have a spawner or a freeze: they reach past the toy', /can't have a spawner/.test(made.spawner ?? '') && /can't have a freeze/.test(made.freeze ?? ''), { spawner: made.spawner, freeze: made.freeze })
 
   // ── A toy with lamps leaves nothing behind, and a lamp needs a part ──
   const tidy = await game(() => {
