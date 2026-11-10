@@ -15,6 +15,8 @@
 import type { CueName, Cue, Palette, Play, Kit } from '../contract'
 import { BODY, NOTE, crackle, curve, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
 import { SPRITES } from './sprites'
+import { playImpact, type Struck } from './impact'
+import type { Shape } from '../../engine/core'
 
 /** The recorded sprites (public/audio/sfx/, made by scripts/make-sfx.mjs), by what they hold. */
 const S = {
@@ -809,26 +811,22 @@ const refused = {
   }),
 }
 
-const knock = {
-  a: cue({
-    bus: 'world', level: -12, gap: 0.035, length: 0.3, jitter: { cents: 60, db: 1.5 },
-    play(a, out, p, kit) {
-      // Physics impacts (#74): louder with the impulse, brighter with the harder material.
-      const e = p.event as { impulse?: number; impact?: number; hardness?: number }
-      const force = Math.min(1, Math.max(0.04, ((e.impulse ?? 0.1) * (e.impact ?? 1)) / 0.25))
-      const hard = Math.min(1, Math.max(0, e.hardness ?? 0.5))
-      const gain = p.gain * Math.sqrt(force)
-      if (hard < 0.3) thump(a, out, kit, p.at, { from: 170 * p.rate, to: 90, dur: 0.08, gain: gain * 0.7, random: p.random, puff: 0.8, cut: 600 + 900 * hard })
-      else tock(a, out, kit, p.at, { freq: (180 + 520 * hard) * p.rate, gain, random: p.random, click: 0.3 + 0.5 * hard, band: 900 + 3200 * hard })
-    },
-  }),
-}
+// Physics impacts (#74, #107): what the two things are made of, how big they are and how hard they met make the
+// sound (./impact.ts). Four cues so each kind keeps its own gap; played alone, each is a typical pair of its kind.
+const struck = (bus: Cue['bus'], gap: number, length: number, alone: Struck) => ({
+  a: cue({ bus, level: -12, gap, length, jitter: { cents: 45, db: 1.5 }, play: (a, out, p, kit) => playImpact(a, out, p, kit, alone) }),
+})
+const SMALL: Shape = { kind: 'box', half: [0.05, 0.05, 0.05] }, TABLE: Shape = { kind: 'box', half: [0.9, 0.03, 0.5] }
+const knock = struck('world', 0.03, 0.4, { materials: ['maple', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
+const clack = struck('world', 0.03, 0.9, { materials: ['ceramic', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
+const ring = struck('world', 0.04, 1.6, { materials: ['steel', 'walnut'], shapes: [{ kind: 'cylinder', halfHeight: 0.065, radius: 0.1 }, TABLE], impulse: 0.4 })
+const thud = struck('world', 0.06, 0.4, { materials: ['felt', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
 
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, clack, ring, thud,
 }
 
 /**
@@ -840,7 +838,10 @@ export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c',
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
-  knock: { a: 'A physics impact: a felt thump for soft materials, a wooden or steel tock for hard ones, louder with the impulse.' },
+  knock: { a: 'Wood or plaster struck: a short knock, lower for a bigger thing, louder and brighter with the blow. Made from the two materials\' facts.' },
+  clack: { a: 'Glazed pottery struck: a bright clack that rings a moment, with the table\'s low knock under it.' },
+  ring: { a: 'Metal or glass struck: it rings on, a pot low and long, a jar high and clear; a soft thing striking it only makes it hum.' },
+  thud: { a: 'Something soft landing (felt, fruit, rubber, a person): a low thud with no ring.' },
   hover: {
     a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',
     d: 'A felt-wrapped wooden tap: a real wooden click (six takes), cut to 60 ms with its top rolled off, so it is a soft "tok".',
