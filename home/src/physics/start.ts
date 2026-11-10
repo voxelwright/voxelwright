@@ -27,6 +27,7 @@ import type { WorldApi } from '../engine/api'
 import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
 import { hand } from './hand'
+import { impacts } from './impacts'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -177,6 +178,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
   // The house's own things, by hand (#107): pick up, carry, stack and throw.
   const grip = hand(ctx, world, () => playing?.id ?? null)
+  // What a hit looks like: splinters, chips, sparks and dust by material.
+  const bits = impacts(ctx)
   ctx.effect(() => {
     addEventListener('keydown', onKey, true)
     addEventListener('keyup', onKey, true)
@@ -292,6 +295,8 @@ export async function start(ctx: Context, gone: () => boolean) {
     home: { list: home.list, bodyOf: home.bodyOf, scan: home.scan, stats: home.stats },
     /** The hand (#107): what it holds, what a press at a screen point would take, and putting every loose thing back where it was made. */
     hand: { holding: grip.holding, pick: grip.pick, tidy: (keys?: string[]) => world.tidy(keys), astray: () => world.astray() },
+    /** Bits in the air from hits (splinters, chips, sparks, dust). */
+    flying: bits.flying,
     /** A follower for any scene object (checks walk one into things); `held` says it is held back. */
     follow: (key: string, object: THREE.Object3D) => world.follow(key, object),
     unfollow: (key: string) => world.unfollow(key),

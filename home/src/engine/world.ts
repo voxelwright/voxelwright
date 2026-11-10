@@ -65,10 +65,10 @@ interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: nu
 /** A body that stands for a scene object drawn by someone else (src/physics/home.ts binds the home's things). */
 interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat }; parts?: BindSpec['parts']; woke?: () => void; slept?: (home: boolean) => void }
 /** A thing held by a hand (hold): where it is drawn to, and the most force that draws it. */
-interface Hold { to: Vec3; strength: number }
+interface Hold { to: Vec3; strength: number; arc: number }
 /** How fast (1/s) a held thing closes on where it is held to, its top speed (m/s), and how fast it is turned upright (1/s). */
 const HOLD_RATE = 14
-const HOLD_SPEED = 9
+const HOLD_SPEED = 5
 const HOLD_UPRIGHT = 9
 /** A moving bound thing that comes to rest within this (m) of where it was made is set there exactly. */
 const NEARLY_HOME = 0.012
@@ -657,7 +657,10 @@ export class World implements WorldApi {
   private pull(b: Bound, hold: Hold, h: number) {
     const p = this.core.position(b.body), v = this.core.velocity(b.body)
     const mass = this.core.mass(b.body)
-    const want = hold.to.map((x, i) => (x - p[i]) * HOLD_RATE)
+    // Carried a long way it rides higher, over what stands between, and comes down as it nears.
+    const far = Math.hypot(hold.to[0] - p[0], hold.to[2] - p[2])
+    const to: Vec3 = [hold.to[0], hold.to[1] + Math.min(hold.arc, far * 0.8), hold.to[2]]
+    const want = to.map((x, i) => (x - p[i]) * HOLD_RATE)
     const speed = Math.hypot(...want)
     if (speed > HOLD_SPEED) for (let i = 0; i < 3; i++) want[i] *= HOLD_SPEED / speed
     // Gravity is carried by the hand first; what is left of its strength moves the thing.
@@ -680,21 +683,28 @@ export class World implements WorldApi {
    * A hand takes hold of a moving bound thing (a mug, a chair) and draws it towards `to` (world
    * space) with at most `strength` newtons, step after step, until hold(key, null) lets it go
    * with the speed it has. A thing too heavy for the hand drags and tips instead of rising.
+   * `arc` (m) is how much higher than `to` it may ride while it still has far to go.
    */
-  hold(key: string, to: Vec3 | null, strength = 60) {
+  hold(key: string, to: Vec3 | null, strength = 60, arc = 0) {
     const b = this.boundDynamic(key)
     if (!b) return false
-    if (!to) return this.holds.delete(b)
+    if (!to) {
+      if (!this.holds.delete(b)) return false
+      this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: false })
+      return true
+    }
     if (!pointOk(to) || !(strength > 0)) return false
     const held = this.holds.get(b)
     if (held) {
       held.to = [...to]
       held.strength = strength
+      held.arc = arc
     } else {
-      this.holds.set(b, { to: [...to], strength })
+      this.holds.set(b, { to: [...to], strength, arc })
       // Woken with the speed it has (none): the first step draws it.
       this.core.setVelocity(b.body, this.core.velocity(b.body))
       this.core.applyImpulse(b.body, [0, 1e-6, 0])
+      this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: true })
     }
     return true
   }
@@ -993,7 +1003,9 @@ export class World implements WorldApi {
   private pose(b: Bound) {
     const p = this.core.position(b.body), q = this.core.rotation(b.body)
     b.p.set(p[0], p[1], p[2])
-    b.q.set(q[0], q[1], q[2], q[3])
+    // The solver's turn is a float's width off unit length; left so, the object's own (unit) turn would read as its
+    // owner having moved it (follows), and the thing's home would follow it wherever it was thrown.
+    b.q.set(q[0], q[1], q[2], q[3]).normalize()
     // World pose to the object's own (its parent's frame), keeping its scale.
     const o = b.object
     const m = poseM.compose(b.p, b.q, ONE)

@@ -8,14 +8,15 @@
 //
 // It takes the house's own things (bodies bound to scene objects, src/physics/home.ts); toys'
 // parts are poked by src/physics/touch.ts, which leaves bound things alone, so one press is
-// never both. Order of claims as there: build mode's wall handles first (earlier on the
-// window), an entry under the point is never ours, nor a press while an entry is chosen or a
-// table is played. What is ours is swallowed, so the view does not turn with the drag. A
+// never both. Order of claims: build mode's wall grip (earlier on the window) yields to a
+// loose thing in front of the wall, through its own `claims` (src/build/edit.ts); an entry
+// under the point is never ours, nor a press while an entry is chosen or a table is played. What is ours is swallowed, so the view does not turn with the drag. A
 // second finger lets go (two fingers are the view's), as does a press the page loses.
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import type { Vec3 } from '../engine/core'
 import type { World } from '../engine/world'
+import { claims } from '../build/edit'
 
 /** N the hand draws a thing with: it lifts about 12 kg, and drags what is heavier. */
 const GRIP = 120
@@ -23,17 +24,19 @@ const GRIP = 120
 const NEAR = { mouse: 14, touch: 30 }
 /** m a held thing rides above what is under it. */
 const LIFT = 0.07
+/** m higher a held thing may ride while it has far to go: over the chair backs between the dresser and the table. */
+const ARC = 0.45
 /** px above the finger a held thing is shown on a touch screen, so the finger does not cover it. */
 const ABOVE_FINGER = 44
 /** px a press may drift, and ms it may last, and still be a tap. */
 const TAP = 10
-const TAP_MS = 260
+const TAP_MS = 350
 /** m/s a tap adds, away from the viewer, and the hop on top of it. */
 const POKE = 1.2
 const HOP = 0.5
 /** A throw faster than this (m/s) rises a little, as a thrown thing does: this share of its speed, upward. */
 const THROW = 1.2
-const ARC = 0.28
+const RISE = 0.28
 /** How far (m) a ray looks. */
 const FAR = 200
 
@@ -129,6 +132,16 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     return best
   }
 
+  // Build mode asks before it grips a wall (and on every hover move): the answer for one point is kept for the frame.
+  let asked: { x: number; y: number; distance: number } | null = null
+  const claim = (x: number, y: number) => {
+    if (played() || ctx.entries.active) return Infinity
+    if (asked?.x === x && asked.y === y) return asked.distance
+    const t = pick(x, y, NEAR.mouse)
+    asked = { x, y, distance: t ? v.set(...t.at).distanceTo(camera.position) - Math.hypot(...t.half) : Infinity }
+    return asked.distance
+  }
+
   interface Held { key: string; pointer: number; touch: boolean; half: Vec3; x: number; y: number; t: number; moved: boolean; /** px from the pointer to where the thing is shown. */ dx: number; dy: number; height: number }
   let held: Held | null = null
 
@@ -149,7 +162,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
       if (!(k > 0 && k < 1)) return
       to = [origin[0] + direction[0] * k, h.height, origin[2] + direction[2] * k]
     }
-    world.hold(h.key, to, GRIP)
+    world.hold(h.key, to, GRIP, ARC)
   }
 
   const letGo = () => {
@@ -205,7 +218,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     // A throw: it keeps its speed, and a fast one rises a little.
     const [vx, vy, vz] = thing.velocity
     const speed = Math.hypot(vx, vz)
-    if (speed > THROW) world.setVelocity(h.key, [vx, Math.max(vy, speed * ARC), vz])
+    if (speed > THROW) world.setVelocity(h.key, [vx, Math.max(vy, speed * RISE), vz])
   }
 
   // Over a loose thing the mouse shows an open hand: once a frame at most, and only while it moves.
@@ -216,6 +229,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     if (!hover && canvas.style.cursor === 'grab') canvas.style.cursor = ''
   }
   const off = ctx.on('village/frame', () => {
+    asked = null
     if (!hover || held) return
     const { x, y } = hover
     hover = null
@@ -235,6 +249,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
   }
   const opts = { capture: true }
   ctx.effect(() => {
+    claims.add(claim)
     addEventListener('pointerdown', down, opts)
     addEventListener('pointermove', onMove, opts)
     addEventListener('pointermove', onHover)
@@ -244,6 +259,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     addEventListener('blur', letGo)
     document.addEventListener('visibilitychange', letGo)
     return () => {
+      claims.delete(claim)
       removeEventListener('pointerdown', down, opts)
       removeEventListener('pointermove', onMove, opts)
       removeEventListener('pointermove', onHover)

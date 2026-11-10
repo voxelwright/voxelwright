@@ -43,6 +43,14 @@ export const reach = (s: Shape | undefined): number =>
 /** An impact as the sound needs it; an event's fields, each optional so a cue can be played alone. */
 export interface Struck { materials?: [string, string]; shapes?: [Shape, Shape]; impulse?: number; impact?: number }
 
+/** The hand that takes a thing, for the sound: soft, and bigger than what it takes, so the thing's own voice leads. */
+const HAND: Shape = { kind: 'sphere', radius: 0.6 }
+/** An event as an impact: an impact itself, or a hand taking hold of a thing (a fingertip's soft touch on it). */
+export function struckOf(e: Record<string, unknown>): Struck {
+  if (e.kind !== 'held') return e as Struck
+  return { materials: [e.material as string, 'villager'], shapes: [e.shape as Shape, HAND], impulse: 0.07, impact: 1 }
+}
+
 /** 0 to 1 from an impulse in N·s: a set-down mug is about 0.2, a thrown kettle 0.9. */
 export const loudness = (impulse: number) => Math.min(1, 1.05 * (impulse / (impulse + 0.5)) ** 0.7)
 
@@ -76,7 +84,7 @@ function mode(a: BaseAudioContext, out: AudioNode, t: number, freq: number, gain
 }
 
 export function playImpact(a: BaseAudioContext, out: AudioNode, p: Play, kit: Kit, fallback: Struck) {
-  const e: Struck = { ...fallback, ...(p.event as Struck) }
+  const e: Struck = { ...fallback, ...struckOf(p.event) }
   const t = snap(a, p.at)
   const loud = loudness(Math.max(0, (e.impulse ?? 0.15) * (e.impact ?? 1)))
   const [small, big] = sides(e)

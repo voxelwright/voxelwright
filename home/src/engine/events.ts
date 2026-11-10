@@ -35,5 +35,7 @@ export type PhysicsEvent =
   | { kind: 'extinguish'; thing: string; part: string; material: string; at: At; by: 'water' | 'ask' | 'gadget' | 'code'; fuel: number }
   /** It burnt out: nothing left to burn, charred. */
   | { kind: 'burnt'; thing: string; part: string; material: string; at: At }
+  /** A hand took hold of a moving thing of the house (`held` true: a mug lifted off the table), or let it go with the speed it had. */
+  | { kind: 'held'; thing: string; material: string; shape: Shape; at: At; held: boolean }
   /** Gadget signals were dropped since the last such event: past the waiting limit, or more than 64 wires from a physical cause (a loop of wires feeding itself). */
   | { kind: 'dropped'; signals: number }
