@@ -8,9 +8,10 @@
 // room's firelight (heat.ts lights and shadows the picture from them). Nothing is drawn, and
 // the layer is not rendered, while nothing burns.
 import * as THREE from 'three/webgpu'
-import { abs, cameraFar, cameraNear, cameraPosition, cross, float, If, Fn, fract, instancedBufferAttribute, max, mix, mx_noise_float, normalize, pass, perspectiveDepthToViewZ, positionGeometry, positionView, screenUV, sin, smoothstep, texture, time, uniform, uv, vec3, vec4 } from 'three/tsl'
+import { abs, cameraFar, cameraNear, cameraPosition, cross, float, If, Fn, fract, instancedBufferAttribute, max, mix, normalize, pass, perspectiveDepthToViewZ, positionGeometry, positionView, screenUV, sin, smoothstep, texture, time, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
 import type { Vec3 } from './core'
 import { firelight } from './heat'
+import { drift } from './noise'
 
 export interface Burning {
   id: string; center: Vec3; half: Vec3; strength: number; fierce: number
@@ -62,7 +63,7 @@ const upright = (base: THREE.Node<'vec3'>, width: THREE.Node<'float'>, height: T
 
 /** 0 behind the home's surfaces, rising to 1 over `soft` metres in front of them. */
 const inFront = (soft: number) => {
-  const behind = perspectiveDepthToViewZ(layer.depth.sample(screenUV).x, cameraNear, cameraFar)
+  const behind = perspectiveDepthToViewZ(layer.depth.sample(screenUV).level(float(0)).x, cameraNear, cameraFar)
   return smoothstep(0, soft, positionView.z.sub(behind))
 }
 
@@ -116,17 +117,16 @@ export class Flames {
       // One quad is a sheet of fire, not one tongue: across it, in tenths of a metre, so licks are the same size on a candle and a sofa.
       const across = x.mul(a.w).mul(5)
       // The sheet leans and whips, more toward its top.
-      const sway = mx_noise_float(vec3(across.mul(0.5).add(seed.mul(9)), p.y.mul(1.4).sub(t.mul(0.8)), t.mul(0.22))).mul(0.55).mul(p.y)
+      const sway = drift(across.mul(0.06).add(seed.mul(0.37)), p.y.mul(0.17).sub(t.mul(0.1))).x.mul(0.55).mul(p.y)
       const xs = across.add(sway)
       // A candle's flame is one calm teardrop; a sofa's is torn into tongues by its own draught.
       const wild = mix(float(0.1), float(1), smoothstep(0.3, 0.9, fierce))
       // How high the fire stands along the sheet: tongues that rise, wander and fall.
-      const swell = mx_noise_float(vec3(xs.mul(0.7).add(seed.mul(13)), t.mul(0.4), seed.mul(5)))
-      const ridge = float(1).sub(abs(mx_noise_float(vec3(xs.mul(1.5).add(seed.mul(3)), t.mul(0.55), seed.mul(11).add(p.y.mul(0.6)))))).pow(3)
-      const crest = swell.mul(0.16).add(ridge.mul(0.42)).mul(wild).add(mix(float(0.62), float(0.3), wild))
-      // Two octaves scrolling up: the big licks and the small ones. They bite harder the higher they go, so licks tear off and rise.
-      const big = mx_noise_float(vec3(xs.mul(1.1).add(seed.mul(7)), p.y.mul(2.6).sub(t.mul(1.9)), t.mul(0.4)))
-      const small = mx_noise_float(vec3(xs.mul(2.7), p.y.mul(5.5).sub(t.mul(3.4)), t.mul(0.7).add(seed)))
+      const stand = drift(xs.mul(0.14).add(seed.mul(0.61)), t.mul(0.06).add(seed.mul(3)).add(p.y.mul(0.05)))
+      const crest = stand.x.mul(0.16).add(float(1).sub(abs(stand.y)).pow(3).mul(0.42)).mul(wild).add(mix(float(0.62), float(0.3), wild))
+      // Two sizes of lick scrolling up. They bite harder the higher they go, so licks tear off and rise.
+      const big = drift(xs.mul(0.13).add(seed.mul(0.83)), p.y.mul(0.3).sub(t.mul(0.22))).x
+      const small = drift(xs.mul(0.33).add(seed.mul(0.29)), p.y.mul(0.66).sub(t.mul(0.4))).y
       const lick = big.mul(0.62).add(small.mul(0.38)).mul(mix(float(0.1), float(0.6), wild)).mul(p.y.mul(1.1).add(0.15))
       // Rounded off at the sheet's sides, narrowing upward, and clear of the quad's top edge.
       const v = crest.sub(p.y).sub(x.mul(x).mul(p.y.mul(0.9).add(0.55))).add(lick).sub(smoothstep(0.85, 1, p.y).mul(0.6)).toVar()
@@ -176,7 +176,7 @@ export class Flames {
     const grow = life.mul(2.4).add(0.6)
     const m = glowing(Fn(() => {
       const p = uv()
-      const n = mx_noise_float(vec3(p.mul(2.4).add(seed.mul(9)), time.mul(0.3).add(seed.mul(5))))
+      const n = drift(p.x.mul(0.3).add(seed.mul(0.9)), p.y.mul(0.3).add(time.mul(0.04)).add(seed.mul(0.5))).x
       const d = p.sub(0.5).length().mul(2).add(n.mul(0.4))
       const alpha = smoothstep(1, 0.15, d).mul(smoothstep(0, 0.15, life)).mul(smoothstep(1, 0.35, life)).mul(0.38).mul(b.z).mul(inFront(0.25))
       // Lit from below by its fire while young, grey once it has risen.
@@ -252,7 +252,7 @@ export class Flames {
       const width = (small ? Math.max(bx, bz) * 3.2 : Math.min(0.62, Math.max(0.2, 2.6 * Math.sqrt(hx * hz)))) * grown
       const height = (small ? width * 2.1 : Math.min(0.95, width * 1.6)) * (0.6 + 0.4 * fire.fierce)
       // One sheet to about every half-width of burning surface.
-      const want = Math.max(1, Math.min(10, Math.round((4 * hx * hz) / (width * width * 0.3))))
+      const want = Math.max(1, Math.min(7, Math.round((4 * hx * hz) / (width * width * 0.35))))
       const every = Math.max(1, Math.floor(lit.length / want))
       let top = -Infinity
       for (const [i, at] of lit.entries()) {
@@ -379,7 +379,7 @@ export function flameLayer(color: THREE.Node<'vec4'>, depth: THREE.Texture, rend
   const out = Fn(() => {
     const c = vec4(color).toVar()
     If(layer.on.greaterThan(0.5), () => {
-      const fire = drawn.sample(uv())
+      const fire = drawn.sample(uv()).level(float(0))
       c.assign(vec4(c.rgb.mul(float(1).sub(fire.a)).add(max(fire.rgb, 0)), c.a))
     })
     return c

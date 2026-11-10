@@ -152,7 +152,9 @@ function build(stage: Stage, built: Theme): Chain {
   }
 
   // Fire's light, char and wetness from the heat field (#74), before bloom so what glows blooms. Reads nothing while the field is idle.
-  color = fieldLook(color, depth, stage.camera, !low)
+  const field = fieldLook(color, depth, stage.camera, !low)
+  disposables.push(field)
+  color = field.color
   // Flames, embers and smoke are their own layer over that (#105): after the focus, so they stay crisp; before bloom, so they glow.
   const fire = flameLayer(color, scenePass.getTexture('depth'), stage.renderer, stage.camera)
   disposables.push(fire)
