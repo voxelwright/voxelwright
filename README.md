@@ -34,9 +34,32 @@ cd host && npm install && npm run villager
 cd host && npm run elder -- "put a small radio on the windowsill"
 ```
 
-Checks: `npm run typecheck`, `npm run build` and the `scripts/check-*.mjs`
-files in `home/`; `npm run regressions`, `npm run check-villager` and
-`npm run check-promote` in `host/`.
+## Checks
+
+Before a merge, and after every rebase, run one command from the repo root:
+
+```sh
+npm install                      # once; also npm install in home/ and host/
+npm run check                    # both typechecks, the home build, the host's stub tests, every home check
+npm run check -- --list          # what it runs, and why anything is skipped
+npm run check -- --only kernel notebook   # just these
+```
+
+It prints one line per check (pass, fail or skip with the reason, seconds), shows the last lines of
+each failure and exits non-zero if any failed. Full logs are in `.check/`. Checks use stub agents
+and make no model calls; the `--agent=claude` runs stay by hand. It picks free ports for every
+check and starts one dev server for the page checks, so it does not touch ports 5181 or 5190 and
+can run beside a play server. A full run takes under 20 minutes on the dev Mac (serial: about 31). `--only` also runs a check the manifest skips, such as `host-regressions`. The runner and
+`scripts/checks.mjs` (the manifest: which checks may run together, which are local-only, which are
+skipped and why) are the one place to look. Perf gates (`npm run perf-gate` in `home/`) stay by hand.
+Checks rewrite some tracked screenshots under `home/screenshots/`; `git checkout home/screenshots`
+before you commit.
+
+GitHub Actions (`.github/workflows/check.yml`) runs `npm run check -- --ci --webgl` on pull
+requests to `main` and pushes to `main`, on `ubuntu-latest`: both typechecks, the home build, the host's
+villager and plan tests, the route check and the one page check (babble) that passes reliably in software WebGL2. It does not
+run the other page checks (too slow or past their time bounds without a GPU), the host regressions
+(macOS sandbox), the perf gates or anything with a model. Those run on your Mac.
 
 ## Handbook
 

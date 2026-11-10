@@ -5,3 +5,4 @@ node_modules/
 *.sock
 .village/
 host/proof/*.json
+.check/
