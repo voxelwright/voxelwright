@@ -44,6 +44,10 @@ export function createJolt(): PhysicsCore {
   const ps = system.GetPhysicsSettings()
   ps.mSpeculativeContactDistance = 0.004
   ps.mPenetrationSlop = 0.001
+  // The same for coming to rest (#108): a body under 3 cm/s for half a second is put to sleep, and a
+  // ball starting to roll down a wooden guide is slower than that, so it stopped there for good (9 of
+  // 30 balls on the pinball table, none with this). Things at rest in the home still sleep.
+  ps.mPointVelocitySleepThreshold = 0.004
   system.SetPhysicsSettings(ps)
 
   const ids: (InstanceType<J['BodyID']> | null)[] = []
