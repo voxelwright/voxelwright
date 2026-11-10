@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { TALK } from '../features'
 import { replace } from '../kernel'
-import { paintBackdrop } from '../paint'
+import { focusOn } from '../lens'
 import { HOUSE } from '../layout'
 
 /** Where the camera stands and what it looks at. */
@@ -123,8 +123,8 @@ export default {
     const walk = { at: new THREE.Vector3(), goal: new THREE.Vector3() } // third: offset from the rest pose's standing point
     const forward = new THREE.Vector3()
     const ground = new THREE.Vector3()
-    // Iso sits the diorama on a painted warm card; third person looks out into a warm haze.
-    const backdrop = MODE === 'iso' ? paintBackdrop(7) : new THREE.Color('#c99d74')
+    // Behind a theme's world, where the home's own sky (atmosphere.ts) has stepped back: a warm haze.
+    const backdrop = new THREE.Color('#c99d74')
     let roomBackground: THREE.Scene['background'] = null
     const fogs = new Map<THREE.Fog, [number, number]>()
     const cutaway = new Set<THREE.Object3D>()
@@ -391,7 +391,6 @@ export default {
           o.traverse((n) => n.layers.set(0))
           o.visible = !o.userData.cutaway
         }
-        if (backdrop instanceof THREE.Texture) backdrop.dispose()
         camera.position.copy(saved.position)
         camera.quaternion.copy(saved.quaternion)
         camera.fov = saved.fov
@@ -456,6 +455,8 @@ export default {
 
     const pitchOf = (zoom: number, tilt: number) => THREE.MathUtils.lerp(ISO.pitchFar, ISO.pitchNear, zoom) + tilt
     camera.fov = MODE === 'iso' ? ISO.fov : MODE === 'third' ? THIRD.fov : SEAT_FOV
+    // Outside the seated rooms the view reaches the sea of cloud under the island (atmosphere.ts).
+    if (MODE !== 'seat') camera.far = 260
     camera.updateProjectionMatrix()
     const rigPosition = new THREE.Vector3()
     const toCamera = new THREE.Vector3()
@@ -547,7 +548,11 @@ export default {
       if (MODE !== 'seat') camera.position.y += Math.sin(Math.PI * k) * Math.min(1.2, 0.3 * from.position.distanceTo(to.position))
       const looked = from.look.lerp(to.look, k)
       camera.lookAt(looked)
-      if (MODE === 'seat') return
+      if (MODE === 'seat') {
+        // Seated, the whole room is sharp; leaning in to the notebook or the fridge, the room behind it softens.
+        focusOn(camera.position.distanceTo(looked), k, k)
+        return
+      }
       // Focus poses were framed at the seat's field of view, so every rig blends back to it.
       const fov = THREE.MathUtils.lerp(rigFov, SEAT_FOV, k)
       if (camera.fov !== fov) {
@@ -555,11 +560,13 @@ export default {
         camera.updateProjectionMatrix()
       }
       atmosphere(rigPosition.distanceTo(rigLook) * calm + 3.6 * k, looked, MODE === 'iso' ? Math.max(rig.zoom, k) : 1)
+      // Walking in third person nothing blurs, as on the seat: the lens opens only on a focus pose.
+      focusOn(camera.position.distanceTo(looked), MODE === 'iso' ? Math.max(rig.zoom, k) : k, MODE === 'iso' ? 1 : k)
     })
 
     /**
      * The rooms' fog was tuned for a viewer 3.6 m from what they look at, so it
-     * slides back with the rig. Iso sits on a warm backdrop instead of the dark beyond the house.
+     * slides back with the rig. Off the seat the view stands under the sky (atmosphere.ts), with a warm haze behind a theme's world.
      *
      * Cutaway. Outer walls (`userData.inward`) the camera stands behind leave the view
      * but keep casting shadows, and a cut stub (`userData.cutaway`) takes their place.

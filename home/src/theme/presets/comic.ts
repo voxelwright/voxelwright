@@ -84,7 +84,9 @@ export const COMIC: Theme = {
     warm: [1.02, 1.0, 0.96],
     grain: 0,
     grade: { saturation: 1.22, contrast: 1.08, lift: [0, 0, 0.008] },
-    veto: [],
+    // The halftone reads tone from the scene pass itself, past the occlusion, and after the lens's blur the
+    // colour plates fall back to that pass too: one plate would be blurred and the others sharp.
+    veto: ['gtao', 'dof'],
     stages: (variant?.stages ?? STAGES).filter((s) => !drop.has(s.kind)),
   },
   ...(variant?.shade ? { shade: variant.shade } : {}),

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { own, replace } from '../kernel'
+import { MODE } from './camera'
 import { HOUSE_H, KITCHEN, WALL_T, WALL_Z, WINDOW } from '../layout'
 import { floorPlanks, paintPlaster } from '../paint'
 import { FLOOR_ROUGHNESS } from '../diorama'
@@ -66,7 +67,8 @@ export default {
     own(ctx, room)
 
     // Soft bounce light from the warm room. The fire's own light lives in the hearth plugin.
-    const hemi = own(ctx, new THREE.HemisphereLight('#fff0dc', '#a07a58', 1.6))
+    // Under the open sky of the dollhouse the environment (atmosphere.ts) is the fill, and this only lifts the shade a little, cool from above and warm off the floor.
+    const hemi = own(ctx, MODE === 'seat' ? new THREE.HemisphereLight('#fff0dc', '#a07a58', 1.6) : new THREE.HemisphereLight('#dfe9ff', '#ffc890', 0.5))
     hemi.name = 'room fill'
   },
 }

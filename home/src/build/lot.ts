@@ -1,4 +1,4 @@
-// The lot answers the plan (#48): the lawn board, its painted edge, its soft shadow and the
+// The lot answers the plan (#48): the lawn board, its painted edge, the island under it and the
 // picket fence grow to hold every room and the room being staked out, a margin of lawn
 // round each, and go back exactly as diorama.ts drew them when nothing reaches past the
 // old board. The grown lawn is one rectangle with rounded corners holding the old board and
@@ -8,6 +8,8 @@
 import * as THREE from 'three/webgpu'
 import { YARD_TOP } from '../diorama'
 import { canvas, makeNoise, rng, toTexture } from '../paint'
+import { islandBody, islandMaterial } from '../island'
+import { setLawn } from '../ground'
 import type { P } from './plan'
 
 /** Lawn beyond a room's outermost wall, before its fence. */
@@ -87,7 +89,7 @@ function paintTiledGrass(seed: number) {
 
 export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   let found: {
-    lawn: THREE.Mesh; edge: THREE.Mesh | null; shadow: THREE.Mesh | null; fence: THREE.InstancedMesh; rail: THREE.Mesh | null
+    lawn: THREE.Mesh; edge: THREE.Mesh | null; island: THREE.Mesh | null; fence: THREE.InstancedMesh; rail: THREE.Mesh | null
     rect: Rect; board: number; gate: P | null
   } | null = null
 
@@ -98,7 +100,7 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     if (!lawn?.parent || !fence?.isInstancedMesh) return null
     const kids = lawn.parent.children
     const edge = (kids[kids.indexOf(lawn) + 1] as THREE.Mesh | undefined) ?? null
-    const shadow = (kids.find((c) => c.name === 'diorama contact shadow') as THREE.Mesh | undefined) ?? null
+    const island = (kids.find((c) => c.name === 'island') as THREE.Mesh | undefined) ?? null
     const rail = (fence.parent?.children.find((c) => (c as THREE.Mesh).isMesh && c !== fence && (c as THREE.Mesh).material === fence.material) as THREE.Mesh | undefined) ?? null
     const { width: w, height: d } = (lawn.geometry as THREE.PlaneGeometry).parameters
     const rect = { x0: lawn.position.x - w / 2, x1: lawn.position.x + w / 2, z0: lawn.position.z - d / 2, z1: lawn.position.z + d / 2 }
@@ -124,7 +126,7 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
         gate = s[0] === 'x' ? [f[s], mid] : [mid, f[s]]
       }
     }
-    found = { lawn, edge, shadow, fence, rail, rect, board, gate }
+    found = { lawn, edge, island, fence, rail, rect, board, gate }
     return found
   }
 
@@ -139,12 +141,11 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
   const edge = new THREE.Mesh(new THREE.BufferGeometry())
   edge.name = 'lot lawn'
   edge.rotation.x = -Math.PI / 2
-  const [shadowCanvas, sg] = canvas(256, 256)
-  const shadowMap = toTexture(shadowCanvas)
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shadowMap, transparent: true, depthWrite: false, fog: false }))
-  shadow.name = 'lot shadow'
-  shadow.rotation.x = -Math.PI / 2
-  grown.add(edge, shadow)
+  // The island under the grown lawn (src/island.ts), recut whenever the outline moves.
+  const body = new THREE.Mesh(new THREE.BufferGeometry(), islandMaterial())
+  body.name = 'lot island'
+  body.castShadow = body.receiveShadow = true
+  grown.add(edge, body)
   let pickets: THREE.InstancedMesh | null = null
   const railBox = new THREE.BoxGeometry(1, 0.035, 0.02)
   const rails: THREE.Mesh[] = []
@@ -232,23 +233,10 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     edge.geometry = new THREE.ExtrudeGeometry(shape, { depth: f.board, bevelEnabled: false })
     edge.material = [lawnMat, (f.edge?.material as THREE.Material | undefined) ?? lawnMat]
     edge.position.y = YARD_TOP - f.board
-    // The board's soft shadow on the table, painted from the same rectangles.
-    const xs = outline.map((p) => p[0]), zs = outline.map((p) => p[1])
-    const pad = 0.9
-    const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, z0 = Math.min(...zs) - pad, z1 = Math.max(...zs) + pad
-    const sx = 256 / (x1 - x0), sz = 256 / (z1 - z0)
-    sg.clearRect(0, 0, 256, 256)
-    sg.filter = 'blur(18px)'
-    sg.fillStyle = 'rgba(70, 38, 20, 0.8)'
-    sg.beginPath()
-    outline.forEach(([x, z], i) => (i ? sg.lineTo((x - x0) * sx, (z - z0) * sz) : sg.moveTo((x - x0) * sx, (z - z0) * sz)))
-    sg.closePath()
-    sg.fill()
-    sg.filter = 'none'
-    shadowMap.needsUpdate = true
-    shadow.scale.set(x1 - x0, z1 - z0, 1)
-    shadow.position.set((x0 + x1) / 2, YARD_TOP - f.board + 0.001, (z0 + z1) / 2)
-    for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = false
+    body.geometry.dispose()
+    body.geometry = islandBody(outline, YARD_TOP - f.board + 0.02)
+    setLawn(outline)
+    for (const o of [f.lawn, f.edge, f.island, f.fence, f.rail]) if (o) o.visible = false
     grown.visible = true
     runFence(roundedRect({ x0: box.x0 + INSET, x1: box.x1 - INSET, z0: box.z0 + INSET, z1: box.z1 - INSET }, ROUND - INSET))
   }
@@ -266,7 +254,8 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     }
     for (const m of rails.splice(0)) m.removeFromParent()
     if (!f) return
-    for (const o of [f.lawn, f.edge, f.shadow, f.fence, f.rail]) if (o) o.visible = true
+    setLawn([[f.rect.x0, f.rect.z0], [f.rect.x1, f.rect.z0], [f.rect.x1, f.rect.z1], [f.rect.x0, f.rect.z1]])
+    for (const o of [f.lawn, f.edge, f.island, f.fence, f.rail]) if (o) o.visible = true
   }
 
   const rectOf = (poly: P[], m = MARGIN): Rect => {
@@ -336,9 +325,8 @@ export function makeLot(scene: THREE.Scene, parent: THREE.Object3D) {
     grown.removeFromParent()
     railBox.dispose()
     edge.geometry.dispose()
-    shadow.geometry.dispose()
-    ;(shadow.material as THREE.Material).dispose()
-    shadowMap.dispose()
+    body.geometry.dispose()
+    ;(body.material as THREE.Material).dispose()
     lawnMat.dispose()
     grass.dispose()
   }

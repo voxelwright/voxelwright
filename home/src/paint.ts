@@ -643,19 +643,6 @@ export function paintLawn(seed: number) {
   return toTexture(c)
 }
 
-/** The warm card behind the iso diorama (#42): a soft pool of light on warm paper, darker toward the corners. */
-export function paintBackdrop(seed: number) {
-  const w = 512, h = 320
-  const n = makeNoise(seed, 64)
-  const [c] = pixels(w, h, (x, y) => {
-    const dx = (x / w - 0.5) * 1.3, dy = y / h - 0.42
-    const d = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 1.5)
-    const fibre = (n(x / 9, y / 9, 3) - 0.5) * 7
-    return mixRGB([236, 208, 172], [186, 138, 102], d * d).map((v) => v + fibre) as RGB
-  })
-  return toTexture(c)
-}
-
 /** A warm round glow, bright in the middle and gone at the rim, for light pools seen from above (#42). */
 export function paintGlow() {
   const [c, g] = canvas(128, 128)
@@ -843,19 +830,3 @@ export function floorPlanks() {
   return t
 }
 
-/**
- * The worktable under the dollhouse (#42 room): one soft painted oak top, long faint
- * grain and a warm pool of lamplight in the middle that dims toward the edges, so the
- * far table melts into the fog instead of reading as a giant floor.
- */
-export function paintWorktable(seed: number) {
-  const size = 1024
-  const n = makeNoise(seed, 128)
-  return toTexture(pixels(size, size, (x, y) => {
-    const u = x / size - 0.5, v = y / size - 0.5
-    const d = Math.min(1, Math.sqrt(u * u + v * v) * 2.1)
-    const grain = n(x / 300, y / 16, 3)
-    const t = (0.94 + (grain - 0.5) * 0.06) * (1 - d * d * 0.3)
-    return mixRGB([170, 124, 86], [196, 150, 106], 1 - d).map((c) => c * t) as RGB
-  })[0])
-}

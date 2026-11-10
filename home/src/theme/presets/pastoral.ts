@@ -45,7 +45,9 @@ export const PASTORAL: Theme = {
     warm: [1.0, 1.0, 0.99],
     grain: 0,
     grade: { saturation: 1.15, contrast: 1.06, lift: [0.008, 0.008, 0.01] },
-    veto: [],
+    // The paper stage pools pigment along edges it finds in the scene pass itself (fx/paper.ts), which the
+    // occlusion and the lens's blur never reach: soft colour under hard pooled edges.
+    veto: ['gtao', 'dof'],
     // Paper alone: the brush stage (Kuwahara) smeared the painted textures and photos into blocks.
     stages: [{ kind: 'paper', grain: 0.7, edges: 0.9, tint: '#fdf7ea', shadow: '#9a8ccc' }],
   },

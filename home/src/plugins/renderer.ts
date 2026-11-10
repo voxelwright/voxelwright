@@ -20,13 +20,13 @@ const forceWebGL = params.get('webgl') === '1'
  * the page steps down to the next tier. Numbers come from the README's tables.
  */
 export const TIERS: Record<Quality, { dpr: number; fx: string[]; maxGpuMs: number }> = {
-  // M1 Pro kitchen, 2880x1800: 7 to 8 ms bare, 9 to 11.5 ms with phys and traa; runs
-  // vary by 2 to 3 ms. 13 ms leaves about 3.7 ms of a 60 Hz frame. csm (+2 ms, +286
-  // draws) showed no visible change from this camera; gtao (+5 to 9 ms) and ssgi
-  // (+286 ms) cost too much. Those three stay opt-in through ?fx=.
-  high: { dpr: 2, fx: ['phys', 'traa'], maxGpuMs: 13 },
-  medium: { dpr: 1.5, fx: ['phys', 'traa'], maxGpuMs: 12 },
-  low: { dpr: 1, fx: [], maxGpuMs: Infinity },
+  // M1 Pro, the dollhouse at 2880x1800 (November 9): 6.8 ms with phys and traa, +0.5 ms for
+  // the lens's shallow focus (dof), +3.2 ms for ambient occlusion at half resolution with 8
+  // samples (gtao), 11.9 ms with both. csm (+2 ms, +286 draws) showed no visible change and
+  // ssgi (+286 ms) costs too much; those two stay opt-in through ?fx=.
+  high: { dpr: 2, fx: ['phys', 'traa', 'gtao', 'dof'], maxGpuMs: 13 },
+  medium: { dpr: 1.5, fx: ['phys', 'traa', 'gtao', 'dof'], maxGpuMs: 12 },
+  low: { dpr: 1, fx: ['dof'], maxGpuMs: Infinity },
 }
 // Calibration skips shader-compile frames, then takes the median of 45 frames, or of
 // whatever arrived in 2 s (at least 8), so a very slow GPU steps down quickly.
@@ -54,10 +54,11 @@ export default {
     const dpr = () => Math.min(devicePixelRatio, TIERS[quality].dpr)
     renderer.setPixelRatio(dpr())
     renderer.setSize(innerWidth, innerHeight)
-    renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 1.25
+    // Neutral keeps a painted colour's hue and saturation up to the highlights, where the filmic curves washed them towards grey.
+    renderer.toneMapping = THREE.NeutralToneMapping
+    renderer.toneMappingExposure = 1.1
     renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.shadowMap.type = params.get('sh') === 'pcf' ? THREE.PCFShadowMap : THREE.VSMShadowMap
 
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 60)

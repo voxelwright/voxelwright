@@ -16,6 +16,7 @@ import { makeOutline } from '../build/outline'
 import { makeFixtures } from '../build/fixtures'
 import { makeYard } from '../build/yard'
 import { makeLot } from '../build/lot'
+import { setBare } from '../ground'
 import { makeMoveIn } from '../build/movein'
 import { fitFrame, lift, type Box } from '../build/frame'
 import { MODE, OVERVIEW, type Frame } from './camera'
@@ -144,6 +145,8 @@ export default {
       const areas = p ? p.rooms.filter((r) => !BASE_ROOMS.has(r.id)).map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.08)) : []
       const all = paper ? [...areas, paper] : areas
       lot.grow(all)
+      // Grass keeps off every room's floor and walls, and off the paper a room is being drawn on.
+      setBare('rooms', [...(p ? p.rooms.map((r) => ringOf(p, r, -Math.max(...roomWalls(p, r).map(({ wall }) => wall.thickness)) / 2 - 0.04)) : []), ...(paper ? [paper] : [])].map((ring) => ({ ring })))
       yard.hide([...all, ...lot.clearings(all)])
     }
     /** A room just built rises from the paper: its new walls grow up from the floor (instant with reduced motion). */
@@ -1071,6 +1074,7 @@ export default {
         hangLow([])
         yard.restore()
         lot.dispose()
+        setBare('rooms', [])
         const sun = scene.getObjectByName('sun') as THREE.DirectionalLight | undefined
         if (sunWas && sun?.isDirectionalLight) {
           Object.assign(sun.shadow.camera, sunWas)

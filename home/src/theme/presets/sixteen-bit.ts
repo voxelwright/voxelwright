@@ -39,7 +39,8 @@ export const SIXTEEN_BIT: Theme = {
     warm: [1.01, 0.99, 0.96],
     grain: 0,
     grade: { saturation: 1.15, contrast: 1.1, lift: [0, 0, 0] },
-    veto: ['traa'],
+    // Art pixels snap to one palette colour each: nothing soft (occlusion, the lens's blur) under them.
+    veto: ['traa', 'gtao', 'dof'],
     stages: [{
       kind: 'pixel',
       height: 225,

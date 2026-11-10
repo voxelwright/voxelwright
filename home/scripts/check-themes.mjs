@@ -338,7 +338,7 @@ const residue = (page) => page.evaluate(() => {
   await page.reload()
   await page.evaluate(() => window.village.ready())
   const modified = await page.evaluate((id) => ({ exposure: window.village.theme.get(id)?.light.exposure, count: window.village.theme.list().filter((l) => l.mine).length }), id)
-  check('modify: saving a half-blended look under the same name replaces it (exposure between 1.18 and 1.25), and survives a reload', midId === id && modified.count === 1 && mid > 1.18 && mid < 1.25 && Math.abs(modified.exposure - mid) < 1e-9, { midId, mid, modified })
+  check('modify: saving a half-blended look under the same name replaces it (exposure between 1.1 and 1.18), and survives a reload', midId === id && modified.count === 1 && mid > 1.1 && mid < 1.18 && Math.abs(modified.exposure - mid) < 1e-9, { midId, mid, modified })
 
   await page.evaluate((id) => window.village.theme.rename(id, 'Evening tea'), id)
   await page.reload()

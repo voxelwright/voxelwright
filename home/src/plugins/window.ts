@@ -6,6 +6,7 @@ import { casing, lining } from '../doorway'
 import { paintGarden } from '../paint'
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js'
 import { MODE, SHADOW_ONLY } from './camera'
+import { SUN_DIRECTION } from '../sky'
 
 export default {
   name: 'window',
@@ -102,10 +103,16 @@ export default {
       // (outside it the sun lit the floor in hard wedges), and walls cut away from
       // the camera still throw their shadows (#42).
       // The box is centred on the house (same direction, moved along x), 18 m across.
-      sun.position.x += 2.4
-      sun.target.position.x += 2.4
-      Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, far: 24 })
-      sun.shadow.radius = 6
+      // Seen from above the sun stands high over the back-left corner (atmosphere.ts SUN_DIRECTION),
+      // so the floor is sunlit past the back wall's short shadow and every piece of furniture
+      // throws a soft one towards the viewer.
+      sun.color.set('#fff3e0')
+      sun.target.position.set(2.5, 0, -1)
+      sun.position.copy(sun.target.position).addScaledVector(SUN_DIRECTION, 16)
+      Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 34 })
+      sun.shadow.mapSize.set(size, size)
+      sun.shadow.radius = 3
+      sun.shadow.blurSamples = 8
       sun.shadow.camera.layers.enable(SHADOW_ONLY)
     }
     if (ctx.stage.features().has('csm')) {
@@ -118,10 +125,11 @@ export default {
     own(ctx, sun)
     own(ctx, sun.target)
 
+    const level = MODE === 'seat' ? 5.2 : 3.7
     // Wind in the garden: the backdrop sways a touch, light breathes with passing leaves.
     ctx.on('village/frame', (_dt, t) => {
       garden.position.x = cx - 1.5 + Math.sin(t * 0.3) * 0.02
-      sun.intensity = 5.2 + Math.sin(t * 0.7) * 0.15 + Math.sin(t * 1.9) * 0.08
+      sun.intensity = level + Math.sin(t * 0.7) * 0.15 + Math.sin(t * 1.9) * 0.08
     })
   },
 }

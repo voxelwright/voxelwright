@@ -4,6 +4,8 @@ import { own, replace } from '../kernel'
 import { FRONT_Z, HOUSE, HOUSE_H, KITCHEN, LIVING_X, TABLE_TOP, WALL_T, WALL_Z } from '../layout'
 import { floorPlanks, paintGlow, paintLawn, paintPlaster } from '../paint'
 import { CUT, YARD_TOP, floor, shell, trees, yard } from '../diorama'
+import { BUILD } from '../features'
+import { setBare } from '../ground'
 
 /**
  * The house as a dollhouse for ?cam=iso (#42): one base under both rooms, the
@@ -95,6 +97,13 @@ export default {
       path: [[-3.9, -3.7], [-4.35, -1.2], [-4.4, 2.4], [-3.7, 4.9], [-2.8, 6.38]],
     }))
 
+    // Without build mode nothing else says where the house stands; with it, the plan does (plugins/build.ts).
+    // The same 4 cm clear of the walls as the plan leaves, so the lawn is the same either way.
+    const clear = 0.04
+    if (!BUILD) setBare('rooms', [{ ring: [[HOUSE.x0 - clear, HOUSE.z0 - clear], [HOUSE.x1 + clear, HOUSE.z0 - clear], [HOUSE.x1 + clear, HOUSE.z1 + clear], [HOUSE.x0 - clear, HOUSE.z1 + clear]] }])
+    // The garden plot behind the house is a raised bed of its own.
+    setBare('plot', [{ ring: [[plot.x0, plot.z0], [plot.x1, plot.z0], [plot.x1, plot.z1], [plot.x0, plot.z1]] }])
+    ctx.effect(() => () => { setBare('plot', []); setBare('yard', []); if (!BUILD) setBare('rooms', []) }, 'ground cover')
     own(ctx, group)
   },
 }

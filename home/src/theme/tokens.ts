@@ -26,7 +26,7 @@ export interface Lighting {
   rim: Shift
   /** Point and spot lights: lamps, the glow in the sideboard, grow lights. */
   practical: Shift
-  /** Tone-mapping exposure (today 1.25). */
+  /** Tone-mapping exposure (the home: 1.1). */
   exposure: number
 }
 

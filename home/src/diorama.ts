@@ -3,7 +3,10 @@
 // camera stands behind. Built only in iso, so the seated view never sees it.
 import * as THREE from 'three/webgpu'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { canvas, paintGrass, paintWorktable, rng, toTexture } from './paint'
+import { canvas, paintGrass, rng, toTexture } from './paint'
+import { islandBody, islandMaterial } from './island'
+import { setBare, setLawn, type Bare } from './ground'
+import { foliage } from './foliage'
 
 export type Side = 'back' | 'front' | 'left' | 'right'
 
@@ -187,8 +190,8 @@ export function trees(spots: TreeSpot[], y = 0): THREE.Group {
     group.add(mesh)
   }
   merged(bark, new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 0.9 }))
-  merged(clumps[0], new THREE.MeshStandardMaterial({ color: '#6c8c3c', roughness: 0.9, userData: { themeRole: 'foliage' } }))
-  merged(clumps[1], new THREE.MeshStandardMaterial({ color: '#86a347', roughness: 0.9, userData: { themeRole: 'foliage' } }))
+  merged(clumps[0], foliage('#5f9a3a', { foot: y + 1.6 }))
+  merged(clumps[1], foliage('#84b545', { foot: y + 1.6 }))
   return group
 }
 
@@ -225,20 +228,19 @@ export function yard(spec: Yard): THREE.Group {
   // The low sun would lay the house's 8 m shadow across the lawn in hard wedges; the
   // foundation's soft contact shadow grounds it instead.
   lawn.name = 'yard lawn'
+  lawn.receiveShadow = true
+  setLawn([[x0, z0], [x1, z0], [x1, z1], [x0, z1]])
   lawn.material.userData.themeRole = 'backdrop'
   group.add(lawn)
   const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, BOARD, d + 0.04), new THREE.MeshStandardMaterial({ color: CUT, roughness: 0.8 }))
   edge.position.set(cx, YARD_TOP - BOARD / 2 - 0.002, cz)
   group.add(edge)
 
-  // The worktable it all stands on, painted unlit so it reads the same in every room, its edges lost in the fog.
-  const table = new THREE.Mesh(new THREE.PlaneGeometry(48, 48), new THREE.MeshBasicMaterial({ map: paintWorktable(spec.seed) }))
-  table.rotation.x = -Math.PI / 2
-  table.position.set(cx, YARD_TOP - BOARD - 0.004, cz)
-  table.name = 'worktable'
-  table.material.userData.themeRole = 'backdrop'
-  group.add(table)
-  group.add(contactShadow(w, d, cx, cz, YARD_TOP - BOARD + 0.001, 0.9))
+  // The lot is an island in the sky (src/plugins/atmosphere.ts): under the board, earth and rock.
+  const body = new THREE.Mesh(islandBody([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], YARD_TOP - BOARD + 0.02), islandMaterial())
+  body.name = 'island'
+  body.castShadow = body.receiveShadow = true
+  group.add(body)
 
   // Picket fence just inside the board's edge, with a gap where the path meets it.
   const inset = 0.22
@@ -305,6 +307,7 @@ export function yard(spec: Yard): THREE.Group {
       ))
     }
   }
+  const bare: Bare[] = stones.map((m) => ({ at: [m.elements[12], m.elements[14]], radius: 0.3 }))
   const stone = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.17, 0.18, 0.03, 9), new THREE.MeshStandardMaterial({ color: '#cfc0a6', roughness: 0.92 }), stones.length)
   stones.forEach((m, i) => stone.setMatrixAt(i, m))
   stone.receiveShadow = true
@@ -323,7 +326,7 @@ export function yard(spec: Yard): THREE.Group {
     if (Math.hypot(along[0] - gate[0], along[1] - gate[1]) < 1) continue
     beds.push([along[0], along[1], 0.35 + r() * 0.25])
   }
-  const leaf = new THREE.MeshStandardMaterial({ color: '#5d7d33', roughness: 0.9, userData: { themeRole: 'foliage' } })
+  const leaf = foliage('#5a8f38', { foot: YARD_TOP, reach: 0.05 })
   const mounds: THREE.BufferGeometry[] = []
   const blooms: Array<[THREE.Matrix4, THREE.Color]> = []
   const petals = ['#f4d36b', '#fff4dc', '#f29a7a', '#e7849c', '#c9a2e0']
@@ -341,6 +344,8 @@ export function yard(spec: Yard): THREE.Group {
   for (const [sx, sz] of [[fx0 + 0.5, fz1 - 0.5], [fx1 - 0.5, fz1 - 0.5], [fx1 - 0.6, fz0 + 0.6]]) {
     mounds.push(lumpy(0.42, sx * 3 + sz, [14, 10]).translate(sx, YARD_TOP + 0.3, sz))
   }
+  for (const [bx, bz, br] of beds) bare.push({ at: [bx, bz], radius: br * 0.9 })
+  setBare('yard', bare)
   if (mounds.length) {
     const bush = new THREE.Mesh(mergeGeometries(mounds), leaf)
     for (const g of mounds) g.dispose()

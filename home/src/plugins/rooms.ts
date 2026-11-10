@@ -45,7 +45,7 @@ export const PLANS: Record<string, RoomPlan> = {
   kitchen: {
     plugins: ['room', 'window', 'glass', 'sunbeam', 'cabinets', 'table', 'chairs', 'highchair', 'fridge',
       'toyshelf', 'botanical', 'plant', 'motes', 'lamp', 'rimlight', 'notebook', 'kitchendoor', 'furnish',
-      ...(MODE === 'iso' ? ['diorama'] : [])],
+      ...(MODE === 'iso' ? ['diorama', 'grass'] : [])],
     home: pose([0.1, 1.45, 2.7], [0.12, 1.05, -0.9]),
     frame: { x: 0.25, z: 0.8, zoom: 0.42, yaw: 0.42 },
   },
@@ -84,7 +84,8 @@ export function rooms(catalog: Record<string, Plugin & { name: string }>, start:
       ctx.effect(() => {
         const atmosphere = { fog: scene.fog, background: scene.background }
         scene.background = new THREE.Color('#2a1d16')
-        scene.fog = new THREE.Fog('#e8c49a', 6, 22)
+        // The seated rooms stand in a warm haze; the dollhouse stands in open air, where only the far sky hazes.
+        scene.fog = MODE === 'seat' ? new THREE.Fog('#e8c49a', 6, 22) : new THREE.Fog('#bfe3fb', 30, 150)
         return () => {
           // Pending loads and moves stop here, so none resumes after disposal.
           disposed = true

@@ -190,8 +190,8 @@ SSGI is not usable here; baked lighting is the next step for bounce light.
 WebGL2 has no GPU timer to calibrate with, so without `?q=` it settles on the
 low tier.
 
-Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys and traa,
-medium DPR 1.5 with phys and traa, low DPR 1 with none. Without `?q=`, the page
+Tiers (`TIERS` in `src/plugins/renderer.ts`): high is DPR 2 with phys, traa,
+gtao and dof, medium DPR 1.5 with the same four, low DPR 1 with dof alone. Without `?q=`, the page
 skips 15 frames, takes the median GPU ms of 45 frames (or of 2 s, at least 8),
 and steps down when high exceeds 13 ms or medium exceeds 12 ms (GPU busy ms since
 #42; without timestamp queries it falls back to submit-to-done). With a 12 ms CPU
@@ -208,6 +208,51 @@ shadow change. GPT was not available. Screenshots: `screenshots/engine-before.pn
 
 Ally (Linux, AMD Phoenix1): no Chromium, Chrome or Node installed, so nothing
 was measured there.
+
+## The look (#94, November 9, 2026)
+
+The dollhouse view stands in daylight on an island in the sky. Each part is one file:
+
+- `src/plugins/atmosphere.ts`: the sky. A small HDR sky is the scene's environment, so
+  every surface takes sky light and glossy ones reflect it. The background is a gradient
+  by view direction, and a plane 9 m under the lawn carries a drifting sea of cloud. A
+  theme's `fog` token pulls the sky's colours towards its own air and dims the sky light,
+  so a night theme has a night sky. A theme that brings its own world hides the sky.
+- The sun (`window.ts`) stands high over the back-left corner outside the seated view,
+  with soft variance shadows (`VSMShadowMap`, 2048, 8 blur samples) over the whole lot.
+  The warm hemisphere fill dropped from 1.6 to 0.5 there, so shadows read.
+- `src/island.ts`: turf, soil and rock under any lawn outline, in flat facets. The lot's
+  island is recut when build mode grows the lawn.
+- `src/ground.ts`: the cover map, a 512 px canvas of where grass grows. `setLawn(outline)`
+  and `setBare(name, patches)` draw on it; it repaints only on a real change.
+- `src/plugins/grass.ts`: one instanced draw of tufts and one of daisies, a tuft per
+  10.5 cm cell (17 cm on the low tier), placed by the cell alone so grass stays put when
+  the lot grows. The vertex shader scales each tuft by the cover map.
+- `src/wind.ts`: one gust field, read by the grass, the trees (`src/foliage.ts`) and
+  the clouds.
+- `src/lens.ts`: shallow focus. The camera calls `focusOn(distance, closeness)`; postfx
+  blurs by depth with 12 taps, skipping pixels in focus. Things nearer than 3 m (the held
+  notepad and journal) never blur. Seated, it blurs only while leaning in to an entry.
+- `postfx.ts`: ambient occlusion with normals taken from depth (a light shaft has no
+  depth, and stamped its rectangle into a normal target), tinted warm violet. Tone
+  mapping is Neutral, which keeps saturation into the highlights; exposure is 1.1.
+
+Measured in headless Chrome on the M1 Pro, the dollhouse at 2880x1800, `?gpu=1`, GPU
+busy ms at p50, one run each (runs vary by 1 to 2 ms):
+
+| Tier | Before #94 | After |
+| --- | --- | --- |
+| high | 6.6 | 11.3 to 12.6 |
+| medium | not measured | 8.1 |
+| low | not measured | 4.5 |
+
+Per feature at high: shallow focus +0.5 ms, occlusion +3.2 ms, grass +0.7 ms. CPU per
+frame was 10.6 to 10.8 ms with and without the grass in this run; the perf gate, on a
+production build, measures 0.5 to 1.8 ms more than main.
+
+Found on the way and not fixed here: on main, a theme's world does not stand on the
+default page (`window.village.theme.worlds()` reports nothing stood with build mode on),
+and `?theme=pastoral` logs "Maximum call stack size exceeded".
 
 ## Performance gate (#42, November 6, 2026)
 
@@ -478,11 +523,10 @@ a clock are on its table and wall); compare `room-seat-before.jpg` and
 
 - Ground (`yard()` in `src/diorama.ts`, both dioramas): a lawn board a little
   below the house floor, a picket fence with a gate, stepping stones, flower
-  clumps, shrubs and an orchard row, on an unlit painted worktable that fades
-  into the fog. Fence posts, stones and blooms are instanced; all trees in a
-  yard are merged into three meshes. The lawn takes no sun shadow (the low sun
-  laid the house's 8 m shadow across it in wedges); a soft decal grounds the
-  foundation. In iso the sun's shadow box is ±8 m.
+  clumps, shrubs and an orchard row. Fence posts, stones and blooms are
+  instanced; all trees in a yard are merged into three meshes. The board is
+  the top of an island in the sky, the lawn is grown grass and takes the sun's
+  shadows (see "The look").
 - Kitchen (`furnish`, all camera modes): braided rug under the table, runner by
   the sink, a stove on the right wall with a towel on the oven bar and a kettle,
   a pan rail, a framed print, a painted dresser with an open shelf of jars and

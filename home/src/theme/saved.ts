@@ -61,7 +61,8 @@ export function revive(record: Saved, base: Theme): Theme | null {
   const data = record.theme as Theme
   if (!data || typeof data !== 'object' || !data.light || !data.surfaces || !data.post || !data.fog) return null
   try {
-    if (shape(data) !== shape(base)) return null
+    // Vetoes come from the built-in (below), so a look saved before its built-in vetoed a new feature still comes back.
+    if (shape({ ...data, post: { ...data.post, veto: base.post.veto } }) !== shape(base)) return null
   } catch {
     return null
   }

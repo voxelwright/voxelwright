@@ -228,7 +228,8 @@ const onScreen = (page, x, z) => page.evaluate(async ([x, z]) => {
 
 // ── Flicker: the camera still on the doorway and on the window, moving things hidden ──
 {
-  const { context, page } = await open('talk=npc&input=held&q=high', 'no-preference', 2)
+  // wind=0 stills the grass, the trees and the clouds (src/wind.ts): they move on their own too.
+  const { context, page } = await open('talk=npc&input=held&q=high&wind=0', 'no-preference', 2)
   const poses = {
     doorway: { p: [1.2, 2.0, 4.6], l: [3.45, 1.1, 2.8], object: 'kitchen doorway' },
     window: { p: [0.6, 2.6, 1.2], l: [-0.85, 1.6, -2.2], object: 'window' },

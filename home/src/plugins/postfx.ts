@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import {
   color as color3, diffuseColor, float, length, luminance, metalness, mix, mrt, normalView, output, packNormalToRGB, pass, pow,
   renderOutput, roughness, sample, select, smoothstep, step, uniform, unpackRGBToNormal, uv, vec2, vec3, vec4, velocity,
-  viewportOpaqueMipTexture,
+  convertToTexture, viewportOpaqueMipTexture,
 } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { film } from 'three/addons/tsl/display/FilmNode.js'
@@ -18,6 +18,7 @@ import type { Post, Theme } from '../theme/tokens'
 import { makeFx, type FxContext } from '../theme/fx'
 import { asNext } from '../theme/ahead'
 import { fieldLook } from '../engine/heat'
+import { lens, shallowFocus } from '../lens'
 
 // Each material's shader is built in one task. Inside compileAsync, three r187 builds a
 // material in stages and yields to the next frame between them (NodeBuilder.buildAsync).
@@ -57,11 +58,11 @@ function build(stage: Stage, built: Theme): Chain {
   // without MSAA; the low tier keeps its single colour target and goes without.
   const reflect = temporal && look.reflect ? look.reflect : null
   const scenePass = pass(stage.scene, stage.camera, temporal ? { samples: 0 } : {})
-  if (gtao || temporal) {
+  if (temporal || gi || reflect) {
     scenePass.setMRT(mrt({
       output,
       ...(gi ? { diffuseColor } : {}),
-      ...(gtao || gi || reflect ? { normal: packNormalToRGB(normalView) } : {}),
+      ...(gi || reflect ? { normal: packNormalToRGB(normalView) } : {}),
       ...(temporal ? { velocity } : {}),
       ...(reflect ? { metalrough: vec2(metalness, roughness) } : {}),
     }))
@@ -76,7 +77,7 @@ function build(stage: Stage, built: Theme): Chain {
   const fxContext: FxContext = { stage, scenePass, depth }
   for (const s of stages) s.scene?.(fxContext)
   const quiet = (key: 'bloom' | 'grain' | 'vignette' | 'fxaa') => stages.some((s) => s.quiet?.[key])
-  const normalTexture = gtao || gi || reflect ? scenePass.getTextureNode('normal') : null
+  const normalTexture = gi || reflect ? scenePass.getTextureNode('normal') : null
   const normal = normalTexture && sample((at) => unpackRGBToNormal(normalTexture.sample(at)))
 
   // Every number below is a uniform, synced from theme() before each frame, so a theme
@@ -92,12 +93,26 @@ function build(stage: Stage, built: Theme): Chain {
     disposables.push(giPass)
     const diffuse = scenePass.getTextureNode('diffuseColor')
     color = vec4(scenePass.getTextureNode().rgb.mul(giPass.a).add(diffuse.rgb.mul(giPass.rgb)), 1)
-  } else if (gtao && normal) {
-    const aoPass = ao(depth, normal, stage.camera)
-    aoPass.resolutionScale = 0.5
+  } else if (gtao) {
+    // Normals come from the depth buffer: a light shaft or a glow (transparent, no depth) would stamp its own
+    // into a normal target and leave its rectangle in the occlusion. It also spares the target.
+    const aoPass = ao(depth, null as unknown as THREE.Node, stage.camera)
+    aoPass.resolutionScale = 0.4
+    // Wide and soft, to seat furniture on the floor and deepen corners; its reach follows the view (src/lens.ts).
+    aoPass.radius = lens.occlusion as typeof aoPass.radius
+    aoPass.thickness.value = 1.2
+    aoPass.distanceExponent.value = 1.4
+    aoPass.samples.value = 8
+    // With TRAA after it the noise turns each frame and the history averages it away.
+    aoPass.useTemporalFiltering = temporal
     disposables.push(aoPass)
-    // Soften the occlusion so creases darken without dirtying the painted textures.
-    color = scenePass.getTextureNode().mul(mix(float(1), aoPass.getTextureNode().r, 0.75))
+    // Occlusion falls towards a deep warm violet, not black, so creases stay colourful and the painted textures stay clean.
+    const occluded = float(1).sub(aoPass.getTextureNode().r).mul(0.9)
+    // Rendered to a texture here and released with the chain: left to TRAA, the texture it makes for a
+    // computed input was never freed (two GPU textures a rebuild).
+    const shaded = convertToTexture(vec4(scenePass.getTextureNode().rgb.mul(mix(vec3(1), vec3(0.36, 0.3, 0.46), occluded)), 1))
+    disposables.push(shaded as unknown as { dispose(): void })
+    color = shaded as unknown as THREE.Node<'vec4'>
   }
   if (reflect && normal) {
     const mirror = ssr(scenePass.getTextureNode(), depth, normal, {
@@ -123,6 +138,16 @@ function build(stage: Stage, built: Theme): Chain {
     const resolved = traa(color, depth, scenePass.getTextureNode('velocity'), stage.camera)
     disposables.push(resolved)
     color = resolved
+  }
+  // The lens's shallow focus (src/lens.ts), on the resolved frame so its taps read a steady image.
+  if (fx.has('dof')) {
+    let frame: THREE.Node = color
+    if (temporal) frame = (color as unknown as { getTextureNode(): THREE.TextureNode }).getTextureNode()
+    else if (!(color as THREE.Node & { isTextureNode?: boolean }).isTextureNode) {
+      frame = convertToTexture(color)
+      disposables.push(frame as unknown as { dispose(): void })
+    }
+    color = shallowFocus(frame as THREE.TextureNode, depth as THREE.TextureNode, stage.camera)
   }
 
   // Fire's light, char and wetness from the heat field (#74), before bloom so what glows blooms. Reads nothing while the field is idle.

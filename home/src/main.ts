@@ -26,6 +26,8 @@ import growshelves from './plugins/growshelves'
 import plantstand from './plugins/plantstand'
 import loungedoors from './plugins/loungedoors'
 import diorama from './plugins/diorama'
+import atmosphere from './plugins/atmosphere'
+import grass from './plugins/grass'
 import furnish from './plugins/furnish'
 import loungefurnish from './plugins/loungefurnish'
 import { PLANS, rooms } from './plugins/rooms'
@@ -38,10 +40,10 @@ import type { Theme } from './theme/tokens'
 
 const params = new URLSearchParams(location.search)
 const listed = {
-  renderer, camera, entries, postfx,
+  renderer, camera, entries, postfx, atmosphere,
   room, window: windowView, glass, sunbeam, cabinets, table, chairs, highchair, fridge,
   toyshelf, botanical, plant, motes, lamp, rimlight, notebook, kitchendoor,
-  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, furnish, loungefurnish,
+  lounge, sideboard, growshelves, plantstand, loungedoors, diorama, grass, furnish, loungefurnish,
 }
 // Any other file in plugins/ joins the catalog under its declared name, so adding a plugin
 // never means editing this file. The Elder relies on that: candidates may change only plugins/.
@@ -53,7 +55,7 @@ const extra = Object.fromEntries(
   Object.values(discovered).filter((p) => p && !known.has(p) && !(p.name in listed)).map((p) => [p.name, p]),
 )
 /** Loaded for the whole visit; the rooms service loads and unloads the rest. `sound` is here so mute and the cues outlive a room (#52). */
-const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx', 'sound', ...(THEMED ? ['theme'] : [])]
+const GLOBAL = ['renderer', 'camera', 'entries', 'rooms', 'postfx', 'sound', 'atmosphere', ...(THEMED ? ['theme'] : [])]
 PLANS.kitchen.plugins.push(...Object.keys(extra).filter((n) => !GLOBAL.includes(n)))
 const catalog: Record<string, Loadable> = { ...listed, ...extra }
 // ?room=living starts in (the seated view) or framed on (the dollhouse) another room.

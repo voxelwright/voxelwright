@@ -11,7 +11,7 @@ import { WORLDS } from './world'
 type Obj = Record<string, unknown>
 
 /** Features a theme may turn off (renderer.ts tiers plus the opt-in ?fx= ones). Vetoing only removes work. */
-const VETOES = ['phys', 'traa', 'csm', 'gtao', 'ssgi']
+const VETOES = ['phys', 'traa', 'csm', 'gtao', 'ssgi', 'dof']
 const SHADES = ['toon', 'wet'] as const
 const MAX_PALETTE = 64
 const MAX_STAGES = 6

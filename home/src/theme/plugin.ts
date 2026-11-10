@@ -130,7 +130,8 @@ export default {
       sky = null
     }
     const placeSky = (t: Theme) => {
-      const painter = t.sky?.paint
+      // Under the home's open sky (plugins/atmosphere.ts) a painted card would stand in mid-air: the sky takes the theme's air instead.
+      const painter = scene.getObjectByName('cloud sea')?.visible ? undefined : t.sky?.paint
       if (sky?.painter === painter) return
       dropSky()
       if (!painter || !Object.hasOwn(PAINTERS, painter)) return
