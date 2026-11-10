@@ -947,10 +947,10 @@ export default {
         reply.from = 'note'
         voice.dataset.talk = result.why
         if (result.why === 'failed') reply.text = 'No answer came that time. Your line is kept; try again in a moment.'
-        // 403 (#40): the tab's token is someone else's, not this page's person's. Not kept to resend: it would be refused again.
+        // 403 (#40): this device is paired to someone else, not this page's person. Not kept to resend: it would be refused again.
         else if (result.why === 'refused') reply.text = 'This notebook was opened with someone else\'s link. Nothing was sent.'
-        // 401 or no token: a link from an earlier launch. Not kept to resend: only the latest link will work.
-        else if (result.why === 'link') reply.text = 'This notebook needs your latest link from the host. Nothing was sent; open it and write again.'
+        // 401: this device is not paired. Not kept to resend: only pairing will help.
+        else if (result.why === 'link') reply.text = "This device isn't linked to Village yet. Nothing was sent; open your link, then write again."
         // Cut short (as notebook.ts): the host already has the line, so it is not kept to send twice. History has the rest.
         else if (result.why === 'cut') {
           stale = true

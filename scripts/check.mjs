@@ -130,8 +130,18 @@ if (toRun.some((c) => c.needs === 'devServer')) {
 
 async function runOne(c) {
   const scratch = mkdtempSync(join(tmpdir(), `check-${c.name}-`))
-  const ports = { dev: await freePort(), host: await freePort(), away: await freePort() }
-  const argv = c.run.map((a) => a.replace('{dev}', ports.dev).replace('{host}', ports.host).replace('{base}', base ?? '').replace('{scratch}', scratch))
+  // Any {name} but {base} and {scratch} is a free port: the same port for the same name within one check.
+  const ports = { away: await freePort() }
+  const fill = async (a) => {
+    let out = a.replace('{base}', base ?? '').replace('{scratch}', scratch)
+    for (const [, name] of out.matchAll(/\{(\w+)\}/g)) {
+      ports[name] ??= await freePort()
+      out = out.replaceAll(`{${name}}`, String(ports[name]))
+    }
+    return out
+  }
+  const argv = []
+  for (const a of c.run) argv.push(await fill(a))
   const t0 = Date.now()
   // VILLAGER_PORT: a port with no host behind it. A check that starts its own stub host sets its own; one that does not would otherwise reach 5190.
   const p = start(argv, join(root, c.cwd), { VILLAGE_SCRATCH: scratch, VILLAGER_PORT: String(ports.away) })

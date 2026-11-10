@@ -7,13 +7,14 @@ import { Villager, type Task } from '../villagers/rig'
 import { contactShadows, stepCrowd } from '../villagers/cast'
 import { NEAR_CHAIR, SEAT_Y, SPOTS } from '../villagers/world'
 import { TABLE_TOP } from '../layout'
-import { projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
+import { ME, projects as listProjects, route, say as sayTo, type Routed, type Routing } from '../villager'
 import { TALK } from '../features'
 import { alwaysOn, inputVariant, type Variant } from '../talk/input'
 import { furnisher } from '../talk/furnish'
 import { ask as askTheme } from '../theme/ask'
 import type { PlacementService } from './place'
-import { asksBuild, asksPhysics, asksTheme, mayRoute } from '../talk/route-check'
+import { asksBuild, asksElder, asksPhysics, asksTheme, mayRoute } from '../talk/route-check'
+import { elderCard } from '../talk/elder'
 import type { PhysicsAsk } from './physics'
 import { placeFor } from '../talk/place'
 import { sketcher, type Sketcher, type SketchRef } from '../talk/sketch'
@@ -90,6 +91,8 @@ const PEOPLE: Person[] = [
   { person: 'mia', owner: 'Mia', colour: '#7a5aa8', start: 'plantSide', wait: 3, tasks: [{ spot: 'plant', stay: 6 }, { spot: 'plantSide', stay: 5 }, { spot: 'loungePlants', stay: 6 }],
     hello: 'Hello! Mind the watering can.', chips: ['How are the plants?', 'How was your day?'], bye: 'Bye! The basil is waiting for me.' },
 ]
+/** A person's colour: their villager's ink on paper (#86 reminders sign in it). */
+export const inkOf = (person: string) => PEOPLE.find((p) => p.person === person)?.colour ?? '#8a6a48'
 /** The synthetic "something for you" a villager carries after a chore. */
 const NEWS: Record<string, string> = { mia: 'The basil by the window has a new leaf. I thought you would like to know.' }
 /** Seats in the order they fill: the far side first, so faces turn to you. */
@@ -639,7 +642,8 @@ export default {
       if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => line.focus({ preventScroll: true }), 30)
     }
     /** Your own villager: the one a line goes to when nobody else is being talked to. */
-    const primary = () => cast[0]
+    /** Your own villager: the one of the person this device is paired as (villager.ts ME). */
+    const primary = () => cast.find((m) => m.person === ME) ?? cast[0]
     const closeSlip = () => {
       mine.classList.remove('shown')
       line.blur()
@@ -959,10 +963,10 @@ export default {
     const inCharacter = (why: string) =>
       why === 'busy' ? "Hold on, I'm still thinking about the last thing."
         : why === 'failed' ? 'I lost my thread there. Could you say that again?'
-          // 403 (#40): the tab's token is someone else's, not this page's person's; nothing was sent.
+          // 403 (#40): this device is paired to someone else, not this page's person; nothing was sent.
           : why === 'refused' ? "This page was opened with someone else's link, so that didn't reach me."
-          // 401 or no token: a link from an earlier launch. Resending won't help until the latest link is opened.
-          : why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again."
+          // 401: this device is not paired. Resending won't help until a pairing link is opened.
+          : why === 'link' ? "I can't hear you until this device is paired. Open your pairing link and say it again."
           : "Sorry, I'm out for a moment. I've kept what you said."
 
     /** Ask one villager and stream its words into a speech record. */
@@ -1757,10 +1761,13 @@ export default {
       blocked: () => entries.active === 'notebook',
       emit: ctx.emit.bind(ctx),
     }) : null
+    // #87: the Elder's card, by the notepad; only an elder route asks it for a run.
+    const elder = INPUT ? elderCard() : null
     ctx.effect(() => () => {
       sketch?.dispose()
       input?.dispose()
       furnish?.dispose()
+      elder?.dispose()
     }, 'talk always-on input')
     // ── The words as paper slips (#42 regroup, src/talk/paper.ts) ────────────
     const slips = paperSlips((person) => person === 'you' ? { name: 'you', colour: MY_INK } : cast.find((c) => c.person === person) ?? null)
@@ -1834,7 +1841,7 @@ export default {
       if (why === 'cut') return quip(me, CUT_SHORT)
       keep(me.person, text)
       restoreLine(text)
-      quip(me, why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
+      quip(me, why === 'link' ? "I can't hear you until this device is paired. Open your pairing link and say it again." : why === 'away' ? "Sorry, I'm out for a moment. I've kept what you wrote." : why === 'busy' ? "Hold on, I'm still sorting the last one. I've kept what you wrote." : "I didn't quite follow that one. Could you say it another way?")
     }
 
     /** What a route does in the room. The model's route is data: it never chooses who hears the person's words. */
@@ -1874,7 +1881,7 @@ export default {
           if (!asksTheme(text)) return send(text, undefined, me)
           if (routed.say) quip(me, routed.say)
           const r = await askTheme(text, me.person)
-          quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change the look just now.")
+          quip(me, r.ok ? r.note || `Now ${r.label}.` : r.why === 'superseded' ? 'Another look got there first.' : r.why === 'link' ? "I can't hear you until this device is paired. Open your pairing link and say it again." : "I couldn't change the look just now.")
           return
         }
         case 'physics': {
@@ -1889,7 +1896,16 @@ export default {
           const r = request.answer ? await request.answer.catch((error) => (console.error('Village physics ask failed:', error), null)) : null
           // An act the world refused says why ("the fridge: steel does not burn"), as text.
           const refusedAct = r && !r.ok && r.why === 'refused' && r.acts?.find((a) => a.refused)
-          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : r.toy ? `I couldn't build that: ${r.reason}. Nothing's changed.` : refusedAct ? `${refusedAct.target ?? 'That'}: ${refusedAct.refused}.` : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
+          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : r.toy ? `I couldn't build that: ${r.reason}. Nothing's changed.` : refusedAct ? `${refusedAct.target ?? 'That'}: ${refusedAct.refused}.` : r.why === 'link' ? "I can't hear you until this device is paired. Open your pairing link and say it again." : "I couldn't change how things move just now.")
+          return
+        }
+        case 'elder': {
+          // #87: the person's own words must name the Elder and ask for a change. The route starts a run at most: keeping
+          // it happens only on the host's approval page (host/src/approval.ts). The router's line is not used (it may claim more).
+          furnish!.dismiss(guess)
+          if (!elder || !asksElder(text)) return send(text, undefined, me)
+          if (mode === 'talk') endTalk()
+          quip(me, await elder.ask(text))
           return
         }
         case 'build': {
@@ -1926,6 +1942,7 @@ export default {
           focused: view.focused,
           input: input ? { ...input.state(), routing, routes: routes.slice(), quips: quipLog.slice(), furnish: furnish!.state(), journalRect: input.journalRect(), padRect: input.padRect() } : null,
           sketch: sketch?.state() ?? null,
+          elder: elder?.state() ?? null,
           round: roundLog.map((r) => ({ ...r })),
         }),
         /** For the checks: what "here" and "that" point at, as a click on the room would set it. */

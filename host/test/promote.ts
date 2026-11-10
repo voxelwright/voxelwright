@@ -162,7 +162,9 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   let loads = 0
   page.on('load', () => (loads++, serverLog.push(`[proof] page load ${loads}\n`)))
-  await page.goto(`http://127.0.0.1:${port}/?q=low`)
+  // The quiet seated kitchen (#72 made walking villagers and the iso view the default): a still frame, so the pixel
+  // gate measures the promoted box and not villagers moving, and the box is as large as it was when this check was written.
+  await page.goto(`http://127.0.0.1:${port}/?q=low&talk=off`)
   const ready = await page.evaluate(() => (window as unknown as { village: { ready: (ms: number) => Promise<{ ok: boolean }> } }).village.ready(30_000))
   check('live page ready', ready.ok)
   const csp = (await fetch(`http://127.0.0.1:${port}/`)).headers.get('content-security-policy') ?? ''
@@ -229,9 +231,15 @@ try {
   const head = () => mustGit(['rev-parse', 'HEAD'], live)
   const clean = async () => (await mustGit(['status', '--porcelain'], live)) === ''
   const settle = (p: Promise<{ result: string; reason?: string }>) => p.then((o) => o.reason ?? o.result, (e) => `threw: ${e}`)
-  const promoteGood = () => promote({ candidate: good.id as string, approve: true, candidatesRoot, live })
   await mustGit(['rm', '--quiet', '--', PLUGIN], live)
   await mustGit([...ELDER_IDENTITY, 'commit', '--quiet', '-m', 'Remove promobox by hand'], live)
+  // promotions.jsonl says what is in the home: removed by hand, the candidate's promotion is still open, so it is not promoted twice.
+  const twice = await settle(promote({ candidate: good.id as string, approve: true, candidatesRoot, live }))
+  check('promote-already-promoted: a candidate whose promotion is still open is refused', twice === 'already-promoted', { twice })
+  // The rest uses a fresh candidate of the same plugin.
+  const fresh = await candidate('stub-promobox')
+  check('a fresh passing candidate', fresh.status === 'passed', { id: fresh.id })
+  const promoteGood = () => promote({ candidate: fresh.id as string, approve: true, candidatesRoot, live })
 
   // Two promotions at once: one goes in, the other is refused, and history has one commit.
   let h0 = await head()
@@ -244,16 +252,18 @@ try {
   check('promote-stale-lock-refused: a lock left behind is refused and named', stale === 'live-busy' && (await lastResult()).message.includes('village-promote.lock'), { stale })
   await rm(join(live, '.git', 'village-promote.lock'))
 
+  const freshFile = join(fresh.repo as string, PLUGIN)
+  const freshOriginal = await readFile(freshFile)
   // The candidate file is swapped right after its hash is checked: only the committed bytes may reach live.
   const swappedText = 'export default { name: "swapped", apply() { fetch("https://example.invalid") } }\n'
   const realStream = fs.createReadStream
   let swapped = false
   fs.createReadStream = ((path: fs.PathLike, ...rest: unknown[]) => {
     const stream = (realStream as (...a: unknown[]) => fs.ReadStream)(path, ...rest)
-    if (!swapped && String(path) === candidateFile)
+    if (!swapped && String(path) === freshFile)
       stream.once('end', () => {
         swapped = true
-        fs.writeFileSync(candidateFile, swappedText)
+        fs.writeFileSync(freshFile, swappedText)
       })
     return stream
   }) as typeof fs.createReadStream
@@ -267,10 +277,10 @@ try {
   const recordedSwap = (await readFile(join(live, 'results.jsonl'), 'utf8')).split('\n').length > results0
   check(
     'promote-swap-after-check: a file swapped after its check never reaches live; live gets the committed bytes or stays unchanged, and the attempt is recorded',
-    swapped && !swapOutcome.startsWith('threw') && recordedSwap && (await clean()) && liveText !== swappedText && (swapOutcome === 'promoted' ? (await sha256(join(live, PLUGIN))) === (good.files as Record<string, string>)[PLUGIN] : (await head()) === h0),
+    swapped && !swapOutcome.startsWith('threw') && recordedSwap && (await clean()) && liveText !== swappedText && (swapOutcome === 'promoted' ? (await sha256(join(live, PLUGIN))) === (fresh.files as Record<string, string>)[PLUGIN] : (await head()) === h0),
     { swapped, swapOutcome, recordedSwap },
   )
-  await writeFile(candidateFile, original)
+  await writeFile(freshFile, freshOriginal)
   if (swapOutcome === 'promoted') await settle(rollback({ target: 'last', live }))
 
   // Writing into live fails partway: refused, recorded, live unchanged.

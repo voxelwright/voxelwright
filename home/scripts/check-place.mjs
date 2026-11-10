@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { pairLink, pairSecret, sessionCookie } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -103,9 +104,8 @@ const stop = (child) => new Promise((resolve) => {
 
 await run('node', ['src/villager-cli.ts', '--agent', 'stub', '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
-// #40: the page takes its person's token from the link the host prints (#token=…). This page is Alex's.
-const tokens = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens
-const link = async (url) => `${url}#token=${(await tokens()).alex}`
+// #85: the page pairs through a one-time link (#pair=…). This page is Alex's.
+const link = (url) => pairLink(url, root)
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist'] })
 const QUERY = '?talk=off&build=1&cam=iso&q=high'
 
@@ -341,11 +341,21 @@ try {
     window.villagePlace.history().commit = window.__commit
   })
   // Sam changes the house first, from Sam's own link (a real second history on the same shared host store): StaleHead, then the history has the new head.
-  const otherHead = await page.evaluate(async (sam) => {
+  // Sam's requests go from node with Sam's paired session: a page script cannot set a cookie header (#85).
+  const samSecret = await pairSecret(base, root, 'sam')
+  await page.exposeFunction('__asSam', async (path, method, body) => {
+    const r = await fetch(`${base}villager/api${path}`, { method, headers: { 'content-type': 'application/json', ...sessionCookie(samSecret, base) }, body: body ?? undefined })
+    return { status: r.status, text: await r.text() }
+  })
+  const otherHead = await page.evaluate(async () => {
     const H = await import('/src/build/history.ts')
-    const other = await H.PlanHistory.open(H.hostStore({ request: H.bearer('/villager/api', sam) }), window.villagePlace.plan())
+    const request = async (path, init = {}) => {
+      const r = await window.__asSam(path, init.method ?? 'GET', init.body ?? null)
+      return r.status === 401 ? 'link' : new Response(r.text, { status: r.status, headers: { 'content-type': 'application/json' } })
+    }
+    const other = await H.PlanHistory.open(H.hostStore({ request }), window.villagePlace.plan())
     return (await other.commit([{ op: 'bendWall', wallId: 'kitchen.right', sagitta: 0.2 }], 'Bent the wall')).id
-  }, (await tokens()).sam)
+  })
   await page.keyboard.press('Enter')
   await page.waitForTimeout(600)
   s = await S(page)

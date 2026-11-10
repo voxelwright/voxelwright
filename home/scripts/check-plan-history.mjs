@@ -10,7 +10,7 @@ import { createServer } from 'vite'
 const vite = await createServer({ root: new URL('..', import.meta.url).pathname, server: { middlewareMode: true, hmr: false, ws: false }, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true } })
 const H = await vite.ssrLoadModule('/src/build/history.ts')
 const P = await vite.ssrLoadModule('/src/build/plan.ts')
-const { PlanHistory, memoryStore, hostStore, bearer, diff, canonical, upgrade, StaleHead, StoreError, HistoryError, ReadOnly } = H
+const { PlanHistory, memoryStore, hostStore, withSession, diff, canonical, upgrade, StaleHead, StoreError, HistoryError, ReadOnly } = H
 const { HOUSE_PLAN, PlanError } = P
 
 const checks = []
@@ -286,22 +286,20 @@ try {
   const ro = PlanHistory.readOnly(HOUSE_PLAN, 'the saved house is away')
   const roCommit = await refusal(() => ro.commit([move]))
   check('a read-only house shows the plan and refuses every change with its reason', same(ro.plan, HOUSE_PLAN) && ro.readOnly === 'the saved house is away' && roCommit instanceof ReadOnly && roCommit.reasons[0] === 'the saved house is away' && (await refusal(() => ro.undo())) instanceof ReadOnly && ro.versions().length === 1)
-  // house() opens the store through villager.ts's `authorized` (the tab's own link, #42). Its page globals, stubbed:
-  // the token comes from the link fragment and stays in sessionStorage; a later link arrives on hashchange.
+  // house() opens the store through villager.ts's `authorized` (this device's pairing, #42, #85). Its page globals,
+  // stubbed: the session is an HttpOnly cookie the page never sees, so whether it is paired is the host's answer.
   const realFetch = globalThis.fetch
   const onHash = []
+  let remembered = null
   const page = { hash: '', pathname: '/', search: '' }
   Object.assign(globalThis, {
     location: page,
     history: { state: null, replaceState() {} },
-    sessionStorage: { getItem: () => null, setItem() {} },
+    // The pairing this page last saw confirmed (public: person and tag); null until a scenario says it was paired.
+    localStorage: { getItem: (k) => (k === 'village.villager.paired' ? remembered : null), setItem() {}, removeItem() {} },
     addEventListener: (type, fn) => type === 'hashchange' && onHash.push(fn),
     dispatchEvent: () => true,
   })
-  const linkTab = () => {
-    page.hash = '#token=' + 'a'.repeat(64)
-    onHash.forEach((fn) => fn())
-  }
   // Each scenario loads its own house.ts (house() opens once per page); villager.ts and history.ts stay shared.
   let scenario = 0
   const freshHouse = () => vite.ssrLoadModule(`/src/build/house.ts?scenario=${++scenario}`)
@@ -311,18 +309,15 @@ try {
     return m.load()
   })()
   try {
-    let asked = 0
-    globalThis.fetch = async () => (asked++, new Response('{}', { status: 200 }))
-    const noLink = await freshHouse()
-    const nl = await noLink.house()
-    const nlCommit = await refusal(() => nl.commit([move]))
-    check('house() with no link opens in memory with the open-your-link line, asks the host nothing, and still builds', nl.unsaved === noLink.LINK_LINE && !nl.readOnly && asked === 0 && nlCommit === null && !/token/i.test(noLink.LINK_LINE), nlCommit?.message)
-    linkTab()
-
-    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'no' }), { status: 401 })
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'no' }), { status: 401, headers: { 'content-type': 'application/json' } })
     const refusedLink = await freshHouse()
     const rl = await refusedLink.house()
-    check('house() with a link the host refuses (401) opens in memory with the open-your-link line', rl.unsaved === refusedLink.LINK_LINE && !rl.readOnly)
+    const rlCommit = await refusal(() => rl.commit([move]))
+    check('house() on a device never paired opens in memory with the open-your-link line, and still builds', rl.unsaved === refusedLink.LINK_LINE && !rl.readOnly && rlCommit === null && !/token/i.test(refusedLink.LINK_LINE), rlCommit?.message)
+    remembered = JSON.stringify({ person: 'alex', tag: 'a1'.repeat(8) })
+    const revoked = await freshHouse()
+    const rv = await revoked.house()
+    check('house() on a device whose pairing the host no longer knows (401) opens in memory with the open-your-link line', rv.unsaved === revoked.LINK_LINE && !rv.readOnly)
 
     globalThis.fetch = async () => {
       throw new TypeError('fetch failed')
@@ -333,14 +328,14 @@ try {
 
     const broken = { ...goodState, versions: [{ ...goodState.versions[0], plan: { ...goodState.versions[0].plan, walls: goodState.versions[0].plan.walls.map((w, i) => (i === 1 ? { ...w, b: 'kitchen.nowhere' } : w)) } }] }
     let sent = null
-    globalThis.fetch = async (url, init) => ((sent = { url: String(url), auth: Boolean(init?.headers?.authorization) }), new Response(JSON.stringify(broken), { status: 200 }))
+    globalThis.fetch = async (url, init) => ((sent = { url: String(url), auth: (init?.credentials ?? 'same-origin') === 'same-origin' }), new Response(JSON.stringify(broken), { status: 200 }))
     const damaged = await freshHouse()
     const dh = await damaged.house()
     check('house() whose saved house cannot be read is read-only, not a page-only copy', dh.readOnly === damaged.READ_ONLY_LINE && (await refusal(() => dh.commit([move]))) instanceof ReadOnly)
-    check("house() asks for /house/plans through the villager API with the tab's link", sent?.url === '/villager/api/house/plans' && sent.auth, sent)
+    check("house() asks for /house/plans through the villager API with this device's cookie", sent?.url === '/villager/api/house/plans' && sent.auth, sent)
 
-    // A running host whose stored house is damaged answers 500 to the tab's link and 401 to a request with no token.
-    globalThis.fetch = async (url, init) => (init?.headers?.authorization ? new Response(JSON.stringify({ error: 'internal error' }), { status: 500 }) : new Response(JSON.stringify({ error: 'token required' }), { status: 401 }))
+    // A running host whose stored house is damaged answers 500 to the paired device and 401 to a request without the cookie.
+    globalThis.fetch = async (url, init) => (init?.credentials !== 'omit' ? new Response(JSON.stringify({ error: 'internal error' }), { status: 500 }) : new Response(JSON.stringify({ error: 'this device is not paired' }), { status: 401 }))
     const failing = await freshHouse()
     const fh = await failing.house()
     check('house() whose running host answers 500 is read-only, not a page-only copy', fh.readOnly === failing.READ_ONLY_LINE && (await refusal(() => fh.commit([move]))) instanceof ReadOnly)
@@ -445,14 +440,15 @@ try {
   const { Context } = await import('../../host/node_modules/cordis/lib/index.js')
   const villager = (await import('../../host/src/villager.ts')).default
   const { stubAgent } = await import('../../host/src/villager-agent.ts')
+  const { pairedLaunch } = await import('../../host/test/paired.ts')
   const dataRoot = await mkdtemp(join(tmpdir(), 'plan-history-'))
   const startHost = async (port = 0) => {
     const ctx = new Context()
     const fiber = ctx.plugin(villager, { root: dataRoot, agent: stubAgent(0), port, people: { alex: 'Alex', sam: 'Sam' } })
     await fiber.await()
-    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const launch = await pairedLaunch(ctx.villager, ['alex', 'sam'])
     const base = `http://127.0.0.1:${launch.port}/`
-    return { fiber, port: launch.port, base, alex: bearer(base, launch.tokens.alex), sam: bearer(base, launch.tokens.sam) }
+    return { fiber, port: launch.port, base, alex: withSession(base, launch.tokens.alex), sam: withSession(base, launch.tokens.sam) }
   }
   // A kept item in a person's library, as the host stores it (synthetic).
   const libraryItem = async (person, item) => {
@@ -474,7 +470,8 @@ try {
     const samStale = await refusal(() => sam.commit([pantry]))
     check('host: a stale page is refused with the current head, and has taken it', samStale instanceof StaleHead && samStale.head === alex.head && sam.head === alex.head)
     const s1 = await sam.commit([pantry])
-    check('host: the other person commits on the new head; no one is named', !('by' in s1) && s1.parent === a1.id && same(s1.plan, sam.plan))
+    // Since 1cc3a8a each person has their own session, so the host records who wrote a version (#40, plans.ts).
+    check("host: the other person commits on the new head, and the version names them", s1.by === 'sam' && s1.parent === a1.id && same(s1.plan, sam.plan), { by: s1.by, parent: s1.parent, a1: a1.id })
     await alex.refresh()
     // A person's library is their own (#40): Alex places their own kept item; Sam may keep it but not newly place one of Alex's.
     await libraryItem('alex', 'a1b2c3d4e5f6')
@@ -490,17 +487,17 @@ try {
     await alex.refresh()
     const expected = { head: alex.head, plans: alex.versions().map((v) => [v.id, canonical(alex.planAt(v.id))]), name: alex.name(a1.id) }
     await host.fiber.dispose()
-    // A restart mints new links: the old one is refused (no shared token to refresh), the new one reopens the same house.
+    // A restart keeps pairings (#85): the device paired before it reopens the same house.
     const oldAlex = host.alex
     host = await startHost(host.port)
-    const stale = await refusal(() => PlanHistory.open(hostStore({ request: oldAlex }), HOUSE_PLAN))
-    check("host: a link from an earlier launch is a StoreError 401", stale instanceof StoreError && stale.status === 401, stale?.message)
+    const kept = await PlanHistory.open(hostStore({ request: oldAlex }), HOUSE_PLAN)
+    check('host: a device paired before a restart still opens the house', kept.head === expected.head)
     const reopened = await PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN)
     check('host: a restarted host reopens to the same head, plans and names', reopened.head === expected.head && same(reopened.versions().map((v) => [v.id, canonical(reopened.planAt(v.id))]), expected.plans) && reopened.name(a1.id) === 'Wider kitchen')
-    const wrong = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, 'f'.repeat(64)) }), HOUSE_PLAN))
-    check('host: a refused token is a StoreError 401', wrong instanceof StoreError && wrong.status === 401)
-    const none = await refusal(() => PlanHistory.open(hostStore({ request: bearer(host.base, null) }), HOUSE_PLAN))
-    check('host: no token is a StoreError 401 and asks nothing', none instanceof StoreError && none.status === 401)
+    const wrong = await refusal(() => PlanHistory.open(hostStore({ request: withSession(host.base, 'f'.repeat(64)) }), HOUSE_PLAN))
+    check('host: an unknown session is a StoreError 401', wrong instanceof StoreError && wrong.status === 401)
+    const none = await refusal(() => PlanHistory.open(hostStore({ request: withSession(host.base, null) }), HOUSE_PLAN))
+    check('host: no session is a StoreError 401 and asks nothing', none instanceof StoreError && none.status === 401)
     await host.fiber.dispose()
     const gone = await refusal(() => PlanHistory.open(hostStore({ request: host.alex }), HOUSE_PLAN))
     check('host: a host that is gone is a StoreError 0', gone instanceof StoreError && gone.status === 0, gone?.message)

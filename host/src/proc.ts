@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 
 export interface ProcResult {
@@ -104,6 +104,37 @@ export function exec(cmd: string, args: string[], options: ProcOptions): Promise
   })
 }
 
+/**
+ * This process as an owner: `<pid>@<start in ms>`. A pid alone is not an identity: after a reboot it may belong to
+ * another process, or to a new host.
+ */
+export const processTag = () => `${process.pid}@${Math.round(performance.timeOrigin)}`
+
+/**
+ * Whether the owner a tag names is running: that pid, started then (within 2 s). A tag without `@` reads as gone.
+ * `ps` is asked in the C locale, since it prints the start time in the user's language otherwise. A start time that
+ * still cannot be read counts as running: a live owner is never taken for a dead one.
+ */
+export function tagRunning(tag: string): boolean {
+  const [pid, start] = tag.split('@').map(Number)
+  if (!Number.isInteger(pid) || !Number.isFinite(start)) return false
+  if (pid === process.pid) return start === Math.round(performance.timeOrigin)
+  if (!isRunning(pid)) return false
+  const started = Date.parse(spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).stdout.trim())
+  return !Number.isFinite(started) || Math.abs(started - start) <= 2000
+}
+
+/** Whether a process is running: signal 0 only checks. EPERM means it exists and is someone else's. */
+export function isRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 export function killGroup(pid: number | undefined, name: NodeJS.Signals): void {
   if (!pid) return
   try {
@@ -139,6 +170,6 @@ export function git(args: string[], cwd: string): Promise<ProcResult> {
 /** Run git, require success, and return its trimmed stdout. */
 export async function mustGit(args: string[], cwd: string): Promise<string> {
   const result = await git(args, cwd)
-  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed (${result.code}${result.spawnError ? `, ${result.spawnError}` : ''}): ${result.stderr.trim()}`)
+  if (result.code !== 0) throw new Error(`git ${args.join(' ')} failed (${result.timedOut ? 'timed out' : result.code}${result.spawnError ? `, ${result.spawnError}` : ''}): ${result.stderr.trim()}`)
   return result.stdout.trim()
 }

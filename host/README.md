@@ -238,18 +238,246 @@ build, and is not sandboxed (it runs only controller-owned config; promoted
 plugin code runs in the browser). `village.kernel` is reachable by any page
 script in dev builds.
 
+# Village, kept on (#85)
+
+```sh
+npm run village [-- --root ~/.village --live <root>/live --port 5183 --agent warm|claude|stub --url <base>]
+                [--approval-port <port + 1>] [--approval-url https://<this mac>.<tailnet>.ts.net:8443/]
+                [--operators alex] [--elder-executor claude-code] [--elder-per-hour 6]
+npm run village -- link <person> [--add] [--url https://<this mac>.<tailnet>.ts.net/]
+npm run village -- unlink <person>     # every device and unused link of that person stops working
+npm run village -- status
+npm run village -- service install|uninstall|status|plist [--label dev.village.home]
+npm run check-village          # end to end, stub agent, scratch root, port 5317
+npm run check-daily-home       # the daily home end to end: Elder, approval page, reminders; stub models; ports 5320-5321
+npm run check-daily-home -- --real   # the same flow with the real villager, router and Elder (operator's login)
+npm run check-approval         # every refusal of the approval rule and the approval server; no browser
+```
+
+The daily home has the villagers, reminders and the Elder in it. The Elder
+copies from this checkout and promotes into the same live copy `village`
+serves, so a kept change appears in the open home page without a reload.
+Operators default to the first listed person.
+
+`start` (the default) installs the live home from this checkout's commit if
+`<live>` is missing (built in `<live>.installing` and moved in only when
+complete), starts the villagers on a loopback port of their own, and serves the
+live home's Vite on `127.0.0.1:<port>`, which forwards `/villager/api/*` to
+them: one origin. It prints, per person, how many devices are paired; a person
+with none gets a pairing link only when the output is a terminal, otherwise the
+`link` command to run, so no code reaches a log. Vite accepts the `--url` host
+names, for `tailscale serve`.
+
+Pairing (`src/pairing.ts`): `link` mints a one-time code (valid a day) and
+prints `…/#pair=<code>`. The page takes it out of the address bar and posts it
+to `/villager/api/pair`, which answers with the session in a cookie:
+`HttpOnly; SameSite=Strict; Path=/villager/api; Max-Age` 400 days, and `Secure`
+when the page's Origin is https. Page scripts never see it; the page keeps the
+session's public tag to tag queued lines, and the host refuses a request whose
+`X-Village-Session` tag is another session's (412). `<root>/villager/pairing.json`
+(0600, `{ version: 1, people }`; any other shape is refused, not read as empty)
+holds only SHA-256 hashes of codes and sessions, compared in constant time. A
+session ends 400 days after pairing, in its cookie and at rest, and expired ones
+are pruned. Changes take a lock file that names its owner (only a lock older
+than 10 s is taken over, and only the owner removes it) and replace the file
+atomically; a running host rereads it when it changes. `link` without `--add` ends every earlier
+session and code of that person; `--add` pairs one more device. Every API request must be same-origin:
+`Sec-Fetch-Site` other than `same-origin` gets 403 (cookies ignore ports, so a
+page on another localhost port is same-site and SameSite alone would let it
+in); without that header, an `Origin` for another host is refused.
+
+A session belongs to the home it was paired on. `/pair` stores the request's
+`Host` with it (never `X-Forwarded-Host`), and only that Host opens it: cookies
+ignore ports, so the browser sends a home's cookie to every localhost port, and
+without this a dev server proxying to a villager on the same root could act as
+the operator. Vite's proxy keeps the browser's Host (no `changeOrigin`;
+`check-village` fails if that changes). Each home's cookie is named
+`village_<hash of its host>`, so two homes on one machine keep their own. The
+approval page opens the session of the home with the same host name. A session
+paired before this change stores no host and has to be paired again.
+
+`service install` writes `~/Library/LaunchAgents/<label>.plist` and bootstraps
+it in `gui/<uid>`. The job runs `start` with every option `service install` was
+given (paths resolved; `--add` and `--label` are the service command's own), so
+`--operators` and the Elder's limits survive launchd. The plist has RunAtLoad,
+KeepAlive, ThrottleInterval 10, ProcessType Interactive, this terminal's PATH
+and HOME, VILLAGER_PEOPLE and VILLAGER_PROFILES if set, and a log in
+`<root>/logs/village.log`. `service plist` prints it without writing or loading
+it. Without `ProcessType Interactive`, launchd throttled the job's I/O and the
+first install's `git add` timed out. `uninstall` boots it out, waits until
+launchd has let go and removes the file.
+
+Load (November 9, 2026, M1 Pro, headless Chrome, loopback, default page, fresh
+browser context, 4 runs): the Vite dev server that `village` serves drew its
+first frame at 5.1 to 5.8 s (158 to 172 requests; the slowest was the first
+start, with Vite's dependency cache cleared), and a production build under
+`vite preview` at 5.0 to 5.2 s (4 requests). The first frame waits for the
+scene's own start-up, not for modules. Dev is served: promotions and rollbacks
+reach an open page without a reload only through the dev kernel. Not measured
+over tailscale to a phone, where 160 requests may cost more.
+
+## The approval page and its origin
+
+Keep, Undo and Not this for an Elder change happen only on the approval page
+(`approval/`, served by `src/approval-server.ts`), never in the home: the live
+home runs promoted plugins, model-written code a person kept earlier, and one
+of them could otherwise approve the next. The villagers serve it themselves on
+`127.0.0.1:<port + 1>` (5184 by default; `npm run villager` takes a free port
+and prints it, or `--approval-port`), which
+is its own origin. It is static HTML, script and style from this repo, with
+`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
+connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+`X-Frame-Options: DENY` and `Cross-Origin-Opener-Policy: same-origin`.
+
+On the Mac, the Elder's card opens `http://localhost:5184/#run=<id>` in a new
+tab. The page reads only the run id from its address, shows the person's
+words, the before and after pictures and each gate, and enables Keep it / Not
+this (or Undo) 0.8 s after it is visible and focused, again after each return
+to it, and only for real presses. The device's session cookie reaches it
+because cookies ignore ports; its API sits under the cookie's
+`/villager/api` path. `src/approval.ts` accepts an act only when it arrived at
+the approval server, with `Sec-Fetch-Site: same-origin` and an `Origin` that
+is an approval origin, as JSON, from an operator's session, naming a passed
+run (or the promotion its Keep made). The same request from the live home's
+origin is refused with or without the cookie, and so is any request through
+the home's own API. `promote()` then refuses a candidate changed since its
+check.
+
+From a phone behind `tailscale serve`, the home is served on 443; the approval
+page needs a second served port. The owner adds it (this repo does not change
+`tailscale serve`):
+
+```sh
+tailscale serve --bg --https=8443 http://127.0.0.1:5184
+npm run village -- --url https://<this mac>.<tailnet>.ts.net/ --approval-url https://<this mac>.<tailnet>.ts.net:8443/
+```
+
+The card picks the approval address whose host name is the page's, so a phone
+paired on the tailnet name opens the tailnet's approval page and its cookie
+goes with it. `service install` keeps both options.
+
+# The Elder from inside the home (#87)
+
+```sh
+npm run villager -- --operators alex [--candidates DIR] [--live DIR] [--approval-port PORT] [--elder-executor claude-code] [--elder-timeout-ms 360000] [--elder-per-hour 6]
+npm run check-elder-home      # stub executors and router, scratch live home, headless Chrome; ports 5350-5353
+npm run check-elder-home -- --real --shots DIR   # one real claude-code run through the page
+```
+
+A notepad line that names the Elder and asks for a change ("Elder, put a small
+brass bell on the table") is the `elder` route. The dividing rule is the
+Elder's name: the same words without it stay `furnish` (a static object placed
+at once) or `project`. The page acts on the route only when the person's own
+words name the Elder and ask for a change (`asksElder`), and sends their words,
+not the router's. With the real router (Sonnet, `ROUTE_BENCH_ONLY=elder node
+test/route-bench.ts sonnet`) six of six lines routed as expected, including
+"put a small brass bell on the table" as furnish and "what does the Elder
+actually do?" as answer.
+
+The villager host runs the Elder (`src/elder-home.ts`), under the person's own
+path, so a visit never reaches it:
+
+- `GET /people/<id>/elder`: whether they may ask, the hourly allowance, their latest run.
+- `POST /people/<id>/elder/runs {"text"}`: starts a run. Operators only
+  (`--operators`, default the first listed person); anyone else gets a plain
+  refusal and no run. One run at a time for the host (409), and at most
+  `--elder-per-hour` runs in a rolling hour (429). The timeout is the Elder's.
+- `GET /people/<id>/elder/runs/<run>`: its stages as they go (copy, install,
+  the picture before, the write, each gate, the in-page hint), then passed or
+  failed with the reason in plain words, time and cost. The page polls it once
+  a second while a run is going.
+- `GET …/runs/<run>/before|after`: the base and candidate screenshots, only to
+  the person who asked. The run also records where they differ, so the card
+  shows that spot in both.
+- `POST …/runs/<run>/keep {"candidate"}`, `…/undo {"promotion"}`,
+  `…/decline {}`: Keep, Undo and Not this, accepted only from the approval
+  page (above). The card's "Look and decide" and "Undo" open that page; the
+  card then polls the run every 2 s for up to 15 minutes, and once when the
+  home is shown again, until the decision arrives.
+
+A stop (SIGTERM, `launchctl` restarting the service) waits for a Keep, Undo or
+Not this being answered, and answers new ones 503 ("The house is stopping").
+After a crash (kill -9, power loss) the next start finds the promote lock of a
+process that is gone, puts the live copy back to its last commit, removes the
+lock and records `recovered` in `runs.jsonl`; a lock whose process is still
+running is left alone. `npm run check-stop` stops and kills a real host
+mid-Keep.
+
+`<root>/elder/runs.jsonl` is the host's record: asked, finished, interrupted,
+kept, undone, declined, refused. A run asked but never finished when the host
+starts again is recorded as interrupted, shown as cut off, never passed, never
+kept and never run again. The hourly cap reads the record, so a restart does
+not reset it.
+
+Approval has one owner, `src/approval.ts` (see "The approval page and its
+origin" above). Keep names the run the page showed, for a run this host
+recorded as passed and not kept, declined or undone; Undo names the promotion
+that Keep made. Only then does the host call `promote()` with `approve: true`
+(or `rollback()`), which keeps all of its own refusals; the approval page
+shows their words ("changed since they were checked"). The route, the
+villager's reply, the candidate's files, its `result.json` and the executor's
+output can start a run at most. The CLI's `--approve` is unchanged.
+
+`npm run check-elder-home` (November 9, 2026, M1 Pro, stub executor and
+router, real gates; other sessions' checks were running on the same machine):
+32 of 32 steps. The happy path through the page: Enter to card 1.3 s; the
+run passed in 57.5 s (copy 3.8 s, install 2.5 s, picture before 17.1 s, write
+0 s, controller-files 2.2 s, build 5.6 s, screenshot 8.2 s, lifecycle
+16.5 s, wall time between stage events); Keep by Tab and Enter 0.46 s, Undo
+0.27 s, the live copy gaining and losing `stubbell.ts`. The same run under
+heavy load from other sessions took 243 s. Refusals, each as expected: a
+non-operator asking (403, no run) or keeping, a visit path (404), another
+person's token (403), a second ask while one runs (409), Keep while running,
+Keep without browser headers, cross-site, from another origin, not JSON, or
+naming another candidate, the router's `approve`/`keep` fields (dropped), a
+candidate edited after its check (promote's reason shown on the card), a
+candidate whose plugin, a file beside it and its executor report all claim
+approval (passed, not kept), a failed build gate (reason and the TS error on
+the card), a run killed with SIGKILL mid-write (interrupted after restart,
+Keep refused, not run again), and the hourly cap (429). The card does not
+poll when no run is going.
+
+One real run through the page (`--real`, claude-code with
+claude-sonnet-5-5, stub router; the machine was busy): "put a small brass bell
+on the table" passed in 233.5 s for $0.10 (copy 16.5 s, install 10.6 s,
+picture before 41.3 s, write 22.6 s, controller-files 13.7 s, build 18.8 s,
+screenshot 47.6 s, lifecycle 61.5 s). It added only
+`home/src/plugins/bell.ts`; Keep took 0.55 s and Undo 0.28 s.
+
+Not yet:
+
+- A promoted plugin can still act as the paired person everywhere else in the
+  home's API (see Villager), including asking the Elder for a run; it cannot
+  keep, undo or turn one down.
+- With `npm run villager` the card's page is the development home and Keep
+  changes the live home (`npm run live -- serve`), so the change does not appear
+  in the room where it was asked; the card says so. `npm run village` serves the
+  live home itself, where it does appear.
+- A kept plugin can flood this browser's cookies for the home's host name (evicting the session cookie, or pushing
+  the Cookie header past Node's 16 KiB limit), so the home and the approval page stop answering in that browser;
+  Undo from the terminal (`npm run elder -- rollback`) still works.
+- A refusal at the approval server is recorded in `runs.jsonl`, one line per
+  try. The home cannot send one: it does not route Keep, Undo or Not this.
+- One run at a time and the hourly cap are per host and its root; two hosts on
+  one root would each allow a run. A run another host is making stays
+  "running" in this host's view until this host restarts.
+- A run is not cancelled when the host stops; the process exits and the next
+  start records it as interrupted. Its candidate folder stays.
+- The router's `say` for an elder route is not shown (it could claim the change
+  is done); the villager says the page's own line.
+
 # Villager (#40)
 
 `npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]`
-serves each person's villager on 127.0.0.1 only. Each start gives every person
-a new random token, writes the tokens and the port to
-`<root>/villager/launch.json` (mode 0600, removed on stop), and prints one link
-per person, `alex: http://localhost:5181/#token=…` (`--home` sets the base).
-Every request needs `Authorization: Bearer <token>`, and a token opens only its
+serves each person's villager on 127.0.0.1 only, behind the home's dev server
+(`npm run village` above is the daily way). It writes the port to
+`<root>/villager/launch.json` (mode 0600, no secrets, removed on stop). A
+device is paired to one person (#85, `src/pairing.ts`): every request needs
+that device's session cookie, and a session opens only its
 own person's paths, `/people/<id>/…`: any other person id is refused with 403,
 with no exceptions. Talking with someone else's villager is a visit, reached
 explicitly under your own id (below). Everything else (`/route`, props,
-library, projects, sketches) is the token holder's alone, and a drawing handed
+library, projects, sketches) is the paired person's alone, and a drawing handed
 over in a message must be the holder's own; `npm run check-villager` proves a
 cross-person refusal for each.
 
@@ -258,8 +486,8 @@ cross-person refusal for each.
 Helping someone does not grant access to their private content. When Alex
 talks to Sam's villager (`POST /people/alex/visits/sam/messages`, a table round
 included) or reads that conversation (`GET /people/alex/visits/sam/conversation`),
-Alex is visiting Tuft. The path must start with the token's own person: Sam's
-token on `/people/alex/visits/sam/…` gets 403, and Alex's token on
+Alex is visiting Tuft. The path must start with the session's own person: Sam's
+session on `/people/alex/visits/sam/…` gets 403, and Alex's session on
 `/people/sam/messages` gets 403, never an implicit visit. A visit to yourself or
 to an unlisted person is 404.
 
@@ -338,9 +566,10 @@ id to resume and its running cost), `conversation.jsonl` and `usage.jsonl`
 (models, tokens, cost of the turn, first-text and total time). A failed turn
 records the line as unanswered and keeps the stored session.
 
-`npm run check-villager` (stub agent, no model): token, streaming, usage
-log, one turn at a time, launch-file cleanup, a new token per launch,
-resuming after a restart, failed turns, person ids, person-scoped tokens
+`npm run check-villager` (stub agent, no model): pairing (cookie attributes,
+one-time codes, expiry, hashes only at rest, re-linking revokes, the session
+tag, same-origin only), streaming, usage log, one turn at a time, launch-file
+cleanup, a paired session that survives a restart, resuming after a restart, failed turns, person ids, person-scoped tokens
 (Alex's token is refused on every one of Sam's paths and reaches Tuft only as
 Alex's own visit, and the reverse),
 eight attempts to leave the notes folder (`../`, `a/../../`, absolute,
@@ -349,10 +578,56 @@ symlinks, dotfiles) and the init guard.
 Not yet: session transcripts live in the operator's `~/.claude/projects/`,
 not the person's folder; every person shares the operator's subscription and
 OS user, so this is not family isolation; any script in a page (a promoted
-plugin included) can read that tab's token from `sessionStorage` and act as
-that person (their villager and their visits to others), and the policy does
-not stop it navigating the page
-away to another origin; the villager cannot remind or act yet.
+plugin included) cannot read the session cookie but can still act as the
+page's paired person while it runs (their villager and their visits to
+others), and the policy does not stop it navigating the page
+away to another origin; apart from reminders (below), the villager cannot act yet.
+
+## Reminders (#86, November 9, 2026)
+
+`npm run check-reminders` (stub agent, controlled clock, no model): 66 checks.
+
+A person's own villager has three more tools, `set_reminder` (`at` as local
+`YYYY-MM-DDTHH:MM`, or `in_minutes`), `list_reminders` and `cancel_reminder`,
+from an in-process `reminders` server (`src/reminders.ts`). A visit never has
+them; its prompt says reminders are kept only between a person and their own
+villager. The page sends its time zone with every line and poll. Only a line
+sets the person's zone (in memory); a poll or an ack from any device is
+answered in its own zone without storing it. Each turn's context gets "Now it is Monday 9 November 2026, 14:00 in Europe/Kyiv.", and the
+tool's result says the time it understood in words, which the villager says
+back. Refused in plain words: the past, more than a year ahead, a date that
+does not exist, a time the clocks skip (an overlap takes the first and says
+so). Repeating reminders are not supported; the prompt has the villager say so.
+Words a model says after a reminder tool are kept (notes still seal the reply).
+
+Stored in `<root>/people/<id>/reminders.json` (0600, temp file and rename, one
+write at a time per file, at most 50 open, 160 characters each, done and
+cancelled ones kept 14 days). States, with `transition()` the one owner of
+changes: `pending`, `put off` (waiting), `due` (its time came; the page has not
+shown it yet), `shown` (the page acknowledged it; it stays on the fridge),
+`done`, `cancelled`. `late` is a separate fact: a reminder whose time came
+while nobody was asking, or that stayed unshown for 5 minutes, is due and late,
+and the fridge marks it missed. Time is settled only when the page polls or a
+tool runs. A file that cannot be read fails every call instead of reading as
+empty; a failed write is a tool error the villager must say, or a 500 to the page.
+
+- `GET /people/<id>/reminders?zone=`: settles, then open ones and today's done ones, with `when` in words and `today`.
+- `POST /people/<id>/reminders/<rid> {"action": "shown" | "done" | "later", "until"?: "hour" | "morning", "zone"?}`:
+  tomorrow morning is 9:00 the next local day. 409 when the state does not allow it, 404 for no such reminder.
+
+Measured with the real model (warm Haiku, operator login, through the host, no browser, November 9, 2026):
+
+| Line | First text | Total | Tools |
+| --- | --- | --- | --- |
+| remind me to call the dentist tomorrow at nine | 1.99 s | 2.24 s | set_reminder |
+| remind me in 20 minutes to take the bread out | 1.27 s | 1.48 s | set_reminder |
+| what's coming up? | 1.15 s | 1.43 s | list_reminders |
+| cancel the dentist one | 1.21 s | 1.40 s | cancel_reminder |
+| remind me every morning to take my vitamins | 1.13 s | 1.58 s | none (said it cannot repeat) |
+
+Every tool call came before the first words, so each reminder turn pays one
+extra model round trip. Not yet: notifications while the home is closed, and
+repeating reminders.
 
 ## Warm villagers and timings (#42, November 7, 2026)
 

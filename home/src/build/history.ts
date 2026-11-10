@@ -284,18 +284,18 @@ export function memoryStore(): PlanStore {
 }
 
 /**
- * How the store reaches the host: `path` under the villager API, sent with a person's token. A Response; null when
- * the host is unreachable; 'link' when there is no token or the host answered 401. The page passes `authorized`
- * from ../villager (the tab's current token); node and checks pass bearer().
+ * How the store reaches the host: `path` under the villager API, sent with a paired session. A Response; null when
+ * the host is unreachable; 'link' when there is no session or the host answered 401. The page passes `authorized`
+ * from ../villager (this device's cookie); node and checks pass withSession().
  */
 export type HostRequest = (path: string, init?: RequestInit) => Promise<Response | null | 'link'>
 
-/** A HostRequest for node and checks: `${base}${path}` with `token` as the bearer. */
-export function bearer(base: string, token: string | null): HostRequest {
+/** A HostRequest for node and checks: `${base}${path}` with `secret` as the session cookie (#85). */
+export function withSession(base: string, secret: string | null): HostRequest {
   const root = base.replace(/\/$/, '')
   return async (path, init = {}) => {
-    if (!token) return 'link'
-    const res = await fetch(root + path, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } }).catch(() => null)
+    if (!secret) return 'link'
+    const res = await fetch(root + path, { ...init, headers: { ...init.headers, cookie: `village_session=${secret}` } }).catch(() => null)
     if (!res || res.status >= 500) return null
     if (res.status === 401) return 'link'
     return res
@@ -304,7 +304,7 @@ export function bearer(base: string, token: string | null): HostRequest {
 
 /**
  * The house's store on the host: `/house/plans`, the one house every person shares, opened with the person's own
- * token. The host sets `at` to its clock, and lets a version newly place only the caller's own library items.
+ * session. The host sets `at` to its clock, and lets a version newly place only the caller's own library items.
  */
 export function hostStore({ request }: { request: HostRequest }): PlanStore {
   async function call<T>(path: string, body?: unknown): Promise<T> {

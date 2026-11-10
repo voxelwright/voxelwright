@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -56,12 +57,11 @@ function run(cmd, argv, cwd, env, ready) {
 
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
-const { tokens } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 if (shotsDir) await mkdir(shotsDir, { recursive: true })
 
 async function open(page, query) {
-  await page.goto(`${base}${query}#token=${tokens.alex}`)
+  await page.goto(await pairLink(`${base}${query}`, root))
   await page.evaluate(() => window.village.ready())
   await page.waitForFunction(() => window.village?.physics?.fire, null, { timeout: 30_000 })
 }

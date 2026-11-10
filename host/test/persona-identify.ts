@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { Context } from 'cordis'
+import { pairedLaunch } from './paired.ts'
 
 const { values } = parseArgs({ options: {
   model: { type: 'string', default: 'haiku' },
@@ -50,7 +51,7 @@ const NAMES = /\b(Dumpling|Tuft|Moss|Alex|Sam|Mia)\b/g
 const strip = (s: string) => s.replace(NAMES, (n) => (['Alex', 'Sam', 'Mia'].includes(n) ? '[person]' : '[housemate]'))
 
 async function say(base: string, token: string, person: string, text: string) {
-  const res = await fetch(`${base}/people/${person}/messages`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text }) })
+  const res = await fetch(`${base}/people/${person}/messages`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${token}` }, body: JSON.stringify({ text }) })
   const raw = await res.text()
   const done = raw.split('\n\n').filter(Boolean).map((b) => ({ name: /^event: (.*)$/m.exec(b)?.[1], data: JSON.parse(/^data: (.*)$/m.exec(b)?.[1] ?? 'null') })).find((e) => e.name === 'done')
   return done ? (done.data.reply as string) : ''
@@ -64,13 +65,13 @@ async function collect() {
   const agent = warmAgent({ model: values.model, thinking: false })
   const fiber = ctx.plugin(villager, { root, agent, port: Number(values.port), people: Object.fromEntries(CAST.map(([id, n]) => [id, n])), profiles: Object.fromEntries(CAST.map(([id]) => [id, { age: 'adult' }])) })
   await fiber.await()
-  const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+  const launch = await pairedLaunch(ctx.villager, CAST.map(([id]) => id))
   await new Promise((r) => setTimeout(r, 5000))
   const base = `http://127.0.0.1:${launch.port}`
   const replies: any[] = []
   try {
     for (const [i, line] of LINES.entries()) {
-      const got = await Promise.all(CAST.map(async ([id, person, name]) => ({ line: i, text: line, person, villager: name, reply: await say(base, launch.token, id, line) })))
+      const got = await Promise.all(CAST.map(async ([id, person, name]) => ({ line: i, text: line, person, villager: name, reply: await say(base, launch.tokens[id], id, line) })))
       for (const r of got) console.error(`${i} ${r.villager}: ${r.reply}`)
       replies.push(...got)
     }

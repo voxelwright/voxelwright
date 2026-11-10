@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
 import { replace } from '../kernel'
-import { conversation, ME, say, TOKEN_EVENT, tokenTag } from '../villager'
+import { conversation, ME, PAIRED_EVENT, say, sessionTag } from '../villager'
 import { inputVariant } from '../talk/input'
 
 const STORAGE_KEY = 'village.notebook.lines'
@@ -9,7 +9,7 @@ const STORAGE_KEY = 'village.notebook.lines'
 const OUTBOX_KEY = 'village.notebook.outbox'
 /** Lines that will never be sent: written under another link (or before lines were tagged). Kept, not delivered. */
 const HELD_KEY = 'village.notebook.held'
-/** A queued line: the page's person and the fingerprint of the link it was written under (never the token itself). */
+/** A queued line: the page's person and the public tag of the pairing it was written under (never the session itself). */
 interface Queued { text: string; person: string; tag: string | null }
 const RETRY_S = 5 // seconds between attempts while the villager is away
 const HAND = 'italic 44px "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive'
@@ -23,9 +23,9 @@ const REPLY_FIRST = 4
 const REPLY_ROWS = 12
 const WRITE_RATE = 32 // characters a second, so chunky arrivals still read as writing
 const AWAY = 'Your villager is out for a moment. Your line is kept here, and they will read it when they are back.'
-const LINK = 'This page needs your latest link from the host. Open it, and your villager will read your line then.'
-const REFUSED = 'This link belongs to someone else, so your line was not sent. It stays on your page.'
-const OTHER = 'A line written under another link stays on your page and was not sent with this one.'
+const LINK = "This device isn't linked to Village yet. Open your link, then write again."
+const REFUSED = 'This device belongs to someone else, so nothing was sent. Your words are still on the page.'
+const OTHER = 'A line written under another pairing stays on your page and was not sent with this one.'
 
 function readLines(key = STORAGE_KEY): string[] {
   try {
@@ -204,8 +204,8 @@ export default {
     // villager has it. Lines typed while it answers wait their turn; while it is away
     // they are tried again every RETRY_S seconds and on the next visit. A reply cut
     // off mid-stream is not resent: the host already has that line.
-    // A line is sent only under the link it was written under (#42): the outbox outlives
-    // the tab's token, and another person's link opened in this browser must never send
+    // A line is sent only under the pairing it was written under (#42, #85): the outbox outlives
+    // the pairing, and another person's link opened in this browser must never send
     // it as theirs. Lines that cannot be matched move to the held list, kept and unsent.
     const isQueued = (q: unknown): q is Queued => !!q && typeof q === 'object' && typeof (q as Queued).text === 'string' && typeof (q as Queued).person === 'string' && ((q as Queued).tag === null || typeof (q as Queued).tag === 'string')
     const readQueue = (key: string): unknown[] => {
@@ -232,6 +232,13 @@ export default {
       if (isQueued(q) && q.person === ME) outbox.push(q)
       else held.push(isQueued(q) ? q : { text: typeof q === 'string' ? q : '', person: '', tag: null })
     }
+    // Lines held just now, here or just before the page loaded again as whoever the device is now paired as: say so below.
+    const HELD_NOTE = 'village.notebook.heldNote'
+    let heldOnLoad = stored.some((q) => isQueued(q) && q.person !== ME)
+    try {
+      heldOnLoad ||= sessionStorage.getItem(HELD_NOTE) === '1'
+      sessionStorage.removeItem(HELD_NOTE)
+    } catch {}
     if (outbox.length !== stored.length) {
       saveQueue(HELD_KEY, held)
       saveQueue(OUTBOX_KEY, outbox)
@@ -244,6 +251,10 @@ export default {
       outbox.splice(0, outbox.length, ...keep)
       saveQueue(HELD_KEY, held)
       saveQueue(OUTBOX_KEY, outbox)
+      // The page may load again as the new person (villager.ts becomes): the note is said after that too.
+      try {
+        sessionStorage.setItem(HELD_NOTE, '1')
+      } catch {}
       return true
     }
     let talking = false
@@ -259,7 +270,7 @@ export default {
       let heard = ''
       shown = 0
       showReply('')
-      // The line goes only under the link it was written under; say() checks the tab's token against it.
+      // The line goes only under the pairing it was written under; say() and the host check the session against it.
       const said = await say(ME, line.text, (t) => {
         heard += t
         showReply(heard)
@@ -290,11 +301,11 @@ export default {
       voice.textContent = reply
       if (!retry) void talk()
       else if (said.why === 'away') retryIn = RETRY_S
-      // 'link': resending under the same token never helps; a new link (TOKEN_EVENT) tries again.
+      // 'link': resending unpaired never helps; a new link (PAIRED_EVENT) tries again.
     }
-    // A link opened in this tab installed a different token: lines written under another link are held, the rest go now.
+    // This device was paired anew: lines written under another pairing are held, the rest go now.
     const onToken = () => {
-      void tokenTag().then((tag) => {
+      void sessionTag().then((tag) => {
         if (disposed) return
         if (holdOthers(tag) && !talking) {
           note(OTHER)
@@ -305,6 +316,11 @@ export default {
         void talk()
       })
     }
+    if (heldOnLoad) {
+      note(OTHER)
+      voice.dataset.villager = 'other'
+      voice.textContent = reply
+    }
 
     const commit = () => {
       const text = draft.trim()
@@ -314,8 +330,8 @@ export default {
       input.value = ''
       const pageSaved = saveLines(lines)
       paint()
-      // Tagged with the link it was written under; one promise per token keeps lines in order.
-      void tokenTag().then((tag) => {
+      // Tagged with the pairing it was written under; one promise keeps lines in order.
+      void sessionTag().then((tag) => {
         outbox.push({ text, person: ME, tag })
         showHint(pageSaved && saveQueue(OUTBOX_KEY, outbox) ? 'Kept on the page' : 'Written, but this browser could not save it')
         retryIn = 0
@@ -341,9 +357,9 @@ export default {
       document.body.append(input, voice)
       input.addEventListener('input', onInput)
       input.addEventListener('keydown', onKey)
-      addEventListener(TOKEN_EVENT, onToken)
+      addEventListener(PAIRED_EVENT, onToken)
       return () => {
-        removeEventListener(TOKEN_EVENT, onToken)
+        removeEventListener(PAIRED_EVENT, onToken)
         disposed = true
         aborter?.abort()
         if (open) view.focus(null)

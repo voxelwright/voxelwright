@@ -21,7 +21,16 @@ export interface RunOptions {
   timeoutMs: number
   /** Passed candidates kept besides failed ones. */
   keep?: number
+  /** The candidate's id, from candidateId(); a new one when left out. */
+  id?: string
+  /** Told each stage as it starts, and each check as it finishes. For showing progress only: it never changes the run. */
+  onStage?: (event: StageEvent) => void
 }
+
+export type StageEvent = { stage: string } | { stage: 'check'; check: string; pass: boolean; ran: boolean }
+
+/** A run's id: time first, so ids sort by time, then a random part that keeps two runs in the same second apart. */
+export const candidateId = (executor: string) => `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}-${randomBytes(3).toString('hex')}-${executor}`
 
 export function instructions(request: string, repo: string): string {
   const uiCraft = existsSync(join(repo, '.agents/skills/ui-craft/SKILL.md'))
@@ -47,8 +56,13 @@ ${uiCraft}- Keep it small, visible from the default camera, and in keeping with 
 type Status = 'passed' | 'failed'
 
 export async function runOnce(elder: Elder, options: RunOptions) {
-  // The random part keeps two runs in the same second apart; ids still sort by time.
-  const id = `${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '')}-${randomBytes(3).toString('hex')}-${options.executor}`
+  const id = options.id ?? candidateId(options.executor)
+  if (!/^[\w.-]+$/.test(id)) throw new Error(`Not a candidate id: ${id}`)
+  const tell = (event: StageEvent) => {
+    try {
+      options.onStage?.(event)
+    } catch {}
+  }
   const started = performance.now()
   const root = resolve(options.candidatesRoot)
   const runDir = join(root, id)
@@ -63,6 +77,10 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     request: options.request,
     executor: options.executor,
   }
+  const stage = (name: string) => {
+    result.stage = name
+    tell({ stage: name })
+  }
   const checks: Record<string, CheckResult> = {}
   const durations: Record<string, unknown> = {}
   let candidate: Candidate | undefined
@@ -75,12 +93,12 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     const missing = EXPECTED_CHECKS.filter((name) => !elder.checks.has(name))
     if (missing.length) throw new Error(`Expected checks are not registered: ${missing.join(', ')}`)
 
-    result.stage = 'copy'
+    stage('copy')
     candidate = await createCandidate(options.source, root, id)
     Object.assign(result, { baseCommit: candidate.baseCommit, branch: candidate.branch, repo: candidate.repo })
 
     // Install from the base commit's lockfile before the executor exists, under srt with only the npm registry reachable.
-    result.stage = 'install'
+    stage('install')
     const sandbox = await createSandbox({ repo: candidate.repo, network: 'npm' })
     const install = await sandbox
       .run('npm', ['ci', '--ignore-scripts', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: join(candidate.repo, 'home'), timeoutMs: 300_000, logFile: join(runDir, 'install.log') })
@@ -88,16 +106,16 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     durations.installMs = install.durationMs
     if (install.code !== 0) throw new Error(`npm ci failed in the candidate (${install.spawnError ?? `exit ${install.code}`}); see install.log`)
 
-    result.stage = 'inodes'
+    stage('inodes')
     result.inodeCheck = await assertNoSharedInodes(options.source, candidate.repo)
 
-    result.stage = 'prepare'
+    stage('prepare')
     for (const name of EXPECTED_CHECKS) await elder.checks.get(name)!.prepare?.(candidate)
 
     // The commit below runs git on the candidate; it must not read a .git the executor rewrote.
     const gitBefore = await manifest(join(candidate.repo, '.git'))
 
-    result.stage = 'executor'
+    stage('executor')
     outcome = await executor.run({
       dir: candidate.repo,
       prompt: instructions(options.request, candidate.repo),
@@ -107,7 +125,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     Object.assign(result, { model: outcome.model, executorOutcome: outcome })
     durations.executorMs = outcome.durationMs
 
-    result.stage = 'checks'
+    stage('checks')
     let blocked: string | undefined = outcome.status === 'completed' ? undefined : `executor ${outcome.status}`
     for (const name of EXPECTED_CHECKS) {
       const check = elder.checks.get(name)!
@@ -123,6 +141,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
         checked = { pass: false, detail: String(error) }
       }
       checks[name] = { ...checked, evidence: check.evidence, durationMs: Math.round(performance.now() - t) }
+      tell({ stage: 'check', check: name, pass: checked.pass, ran: true })
       // Later checks run candidate code or trust files an earlier gate vouches for.
       if (!checked.pass && !check.evidence) blocked = `${name} failed`
     }
@@ -133,7 +152,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
     const passed = outcome.status === 'completed' && gates.every((name) => checks[name]?.pass === true)
     result.status = passed ? 'passed' : 'failed'
 
-    result.stage = 'commit'
+    stage('commit')
     const gitChanges = diffManifests(gitBefore, await manifest(join(candidate.repo, '.git')))
     const gitTouched = [...gitChanges.added, ...gitChanges.modified, ...gitChanges.deleted]
     if (gitTouched.length) {
@@ -147,7 +166,7 @@ export async function runOnce(elder: Elder, options: RunOptions) {
       // What was checked, by content: promotion refuses a candidate whose files no longer match.
       result.files = await changedFiles(candidate.repo, candidate.baseCommit, result.commit as string)
     }
-    result.stage = 'done'
+    stage('done')
   } catch (error) {
     result.status = 'failed'
     result.error = error instanceof Error ? error.message : String(error)

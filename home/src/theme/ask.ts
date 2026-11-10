@@ -13,7 +13,7 @@ export type Asked =
   /**
    * `unbuilt`: the model's look passed check() but its post chain could not be built, so the look on screen stayed.
    * `superseded`: another look was chosen before this one settled, so this one is not on screen.
-   * `link`: no token, or one from an earlier launch (../villager.ts): open the latest link.
+   * `link`: this device is not paired (../villager.ts): open a pairing link.
    */
   | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'unbuilt' | 'superseded'; reason?: string; ms: number }
 

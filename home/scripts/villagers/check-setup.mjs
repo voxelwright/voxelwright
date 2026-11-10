@@ -27,7 +27,7 @@ let [vw, vh] = arg('viewport', '1440x900').split('x').map(Number)
 const strategy = arg('strategy', null)
 const root = await mkdtemp(join(tmpdir(), 'villager-setup-'))
 
-// The host, in this process: the real routes and token, a stub villager maker that takes 3 s.
+// The host, in this process: the real routes and pairing, a stub villager maker that takes 3 s.
 // Profiles are #42's and live on the host only (the page has no profile flag): Alex and Jo are adults with
 // no humour setting (the dial is clean or cheeky), Lee an adult whose admin set crude, Sam a child, and Kit
 // has no profile (unknown).
@@ -64,9 +64,9 @@ async function open(query, opts = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  // #40: each page carries its own person's token in its link (the tab keeps it), never a shared one.
+  // #85: each page pairs as its own person through a one-time link, never a shared one.
   const person = /[&?]person=([a-z]+)/.exec(query)?.[1] ?? 'alex'
-  await page.goto(`${base}?talk=off&build=0&q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}#token=${hostCtx.villager.tokens[person]}`)
+  await page.goto(`${base}?talk=off&build=0&q=low&villager=gen&setup=${opts.setup ?? 'bench'}${query}#pair=${await hostCtx.villager.pairing.mint(person, { keep: true })}`)
   await page.waitForFunction(() => window.villagerSetup && window.village, null, { timeout: 60000 })
   await page.waitForTimeout(400)
   return { context, page, errors }

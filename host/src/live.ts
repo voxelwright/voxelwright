@@ -7,7 +7,7 @@
 //   npm run live -- serve [--live DIR] [--port 5183]
 //   npm run live -- status [--live DIR]
 import { existsSync, realpathSync, rmSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -20,11 +20,14 @@ export const DEFAULT_LIVE = join(homedir(), '.village', 'live')
 /** Commits in the live repository carry this identity; global git config is never read. */
 export const ELDER_IDENTITY = ['-c', 'user.name=Village Elder', '-c', 'user.email=elder@village.invalid']
 /** Kept out of git, so they never count as uncommitted changes. */
-const IGNORED = ['home/node_modules/', 'home/dist/', 'results.jsonl', 'server.json']
+export const IGNORED = ['home/node_modules/', 'home/dist/', 'results.jsonl', 'server.json']
 
 export async function install(live: string, source: string, rev = 'HEAD') {
-  const target = resolve(live)
-  if (existsSync(target)) throw new Error(`There is already a live installation at ${target}. Remove it first to reinstall.`)
+  const final = resolve(live)
+  if (existsSync(final)) throw new Error(`There is already a live installation at ${final}. Remove it first to reinstall.`)
+  // Built beside its place and moved in only when complete (#85): an interrupted install never counts as installed.
+  const target = `${final}.installing`
+  await rm(target, { recursive: true, force: true })
   const top = await mustGit(['rev-parse', '--show-toplevel'], source)
   const commit = await mustGit(['rev-parse', '--verify', `${rev}^{commit}`], top)
   await mkdir(target, { recursive: true })
@@ -42,6 +45,9 @@ export async function install(live: string, source: string, rev = 'HEAD') {
   await writeFile(join(target, 'install.json'), JSON.stringify({ sourceCommit: commit, installedAt: new Date().toISOString() }, null, 2) + '\n')
   await writeFile(join(target, 'promotions.jsonl'), '')
   await mustGit(['init', '--quiet', '-b', 'live'], target)
+  // No background gc or maintenance in the live repo: it would write in .git while the install is checked.
+  await mustGit(['config', 'gc.auto', '0'], target)
+  await mustGit(['config', 'maintenance.auto', 'false'], target)
   await mustGit(['add', '-A'], target)
   await mustGit([...ELDER_IDENTITY, 'commit', '--quiet', '--no-verify', '-m', `Install home at ${commit}`], target)
   const npm = await exec('npm', ['ci', '--ignore-scripts', '--prefer-offline', '--no-audit', '--no-fund', '--cache', join(homedir(), '.village', 'npm-cache')], {
@@ -53,7 +59,8 @@ export async function install(live: string, source: string, rev = 'HEAD') {
   await rm(join(target, 'home', 'node_modules.install.log'), { force: true })
   if (npm.code !== 0) throw new Error(`npm ci failed in the live install: ${npm.stderr.slice(-2000)}`)
   const inodes = await assertNoSharedInodes(top, target)
-  return { live: target, sourceCommit: commit, inodes, installMs: npm.durationMs }
+  await rename(target, final)
+  return { live: final, sourceCommit: commit, inodes, installMs: npm.durationMs }
 }
 
 export async function status(live: string) {
@@ -80,8 +87,11 @@ export async function status(live: string) {
   }
 }
 
-/** Runs the live home's own Vite (its config, its node_modules) with the live-reload plugin added. */
-export async function serve(live: string, port: number) {
+/**
+ * Starts the live home's own Vite (its config, its node_modules) with the live-reload plugin added, on 127.0.0.1.
+ * `allowedHosts` lets a proxy in front of it (tailscale serve, #85) use its own host name.
+ */
+export async function startLive(live: string, port: number, { allowedHosts = [] as string[] } = {}) {
   // Vite reports watched files by real path (/var is /private/var on macOS).
   const home = join(realpathSync(resolve(live)), 'home')
   const vitePath = createRequire(join(home, 'package.json')).resolve('vite')
@@ -91,19 +101,31 @@ export async function serve(live: string, port: number) {
     root: home,
     configFile: join(home, 'vite.config.ts'),
     plugins: [liveReload(join(home, 'src', 'plugins'))],
-    server: { host: '127.0.0.1', port, strictPort: true },
+    server: { host: '127.0.0.1', port, strictPort: true, ...(allowedHosts.length ? { allowedHosts } : {}) },
     clearScreen: false,
   })
   await server.listen()
   const url = `http://127.0.0.1:${port}/`
   const info = join(resolve(live), 'server.json')
   await writeFile(info, JSON.stringify({ pid: process.pid, port, url, startedAt: new Date().toISOString() }) + '\n')
-  // Vite exits the process on SIGTERM itself, so the record is removed on exit.
+  // Vite's own SIGTERM handler exits the process (npm run live -- serve); npm run village stops it itself. The record goes on exit either way.
   process.on('exit', () => rmSync(info, { force: true }))
+  return {
+    url,
+    close: async () => {
+      await server.close()
+      rmSync(info, { force: true })
+    },
+  }
+}
+
+/** `npm run live -- serve`: the live home alone, until a signal. */
+export async function serve(live: string, port: number) {
+  const server = await startLive(live, port)
   const stop = () => void server.close().finally(() => process.exit(0))
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
-  console.log(JSON.stringify({ serving: url, live: resolve(live) }))
+  console.log(JSON.stringify({ serving: server.url, live: resolve(live) }))
 }
 
 if (import.meta.main) {

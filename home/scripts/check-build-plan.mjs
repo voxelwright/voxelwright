@@ -411,12 +411,14 @@ if (!args.includes('--skip-drag')) {
 if (!args.includes('--skip-drag')) {
   const ro = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   const rp = await ro.newPage()
-  // The tab has a link (#40) and the host answers, but the saved house is not one this page can read. (A host that
+  // The host answers (routed here) for a paired tab, but the saved house is not one this page can read. (A host that
   // answers 5xx reads as away, like a stopped host behind the dev proxy, and opens in memory: check-plan-history.)
   const root = '0123456789abcdef'
   const unreadable = { versions: [{ id: root, parent: null, at: '2026-11-07T00:00:00.000Z', plan: { schema: 2, corners: [], walls: [], rooms: [{ id: 'r', label: 'R', loop: ['x', 'y', 'z'] }], furniture: [] } }], head: root, names: {} }
   await rp.route('**/villager/api/house/plans', (r) => r.fulfill({ status: 200, json: unreadable }))
-  await rp.goto(`${base}?cam=iso&q=low&fx=&talk=off&build=1#token=${'a'.repeat(64)}`)
+  // Paired before (#85): the page remembers its pairing's public tag, so it asks the host.
+  await rp.addInitScript(() => localStorage.setItem('village.villager.paired', JSON.stringify({ person: 'alex', tag: 'a1'.repeat(8) })))
+  await rp.goto(`${base}?cam=iso&q=low&fx=&talk=off&build=1`)
   await rp.evaluate(() => window.village.ready())
   await rp.evaluate(() => window.villageBuild.history())
   await rp.waitForTimeout(1500)

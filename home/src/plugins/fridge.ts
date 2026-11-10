@@ -112,8 +112,8 @@ export default {
     }
     own(ctx, group)
 
-    // An entry: choosing the fridge frames its door. Family moments and what's
-    // coming up will live here; for now it says so gently.
+    // An entry: choosing the fridge frames its door, and with reminders (#86) shows the
+    // today note and the notes on the door beside it. Without them it says so gently.
     const { view, entries } = ctx
     const facing = new THREE.Vector3(Math.sin(group.rotation.y), 0, Math.cos(group.rotation.y))
     const centre = group.position.clone().setY(1.12)
@@ -124,9 +124,14 @@ export default {
       object: group,
       select() {
         view.focus(pose)
-        entries.say("Family moments and what's coming up will gather here soon")
+        const board = ctx.get('reminders')
+        if (board) board.open()
+        else entries.say("Family moments and what's coming up will gather here soon")
       },
-      leave: () => view.focus(null),
+      leave() {
+        view.focus(null)
+        ctx.get('reminders')?.close()
+      },
     }), 'fridge entry')
   },
 }

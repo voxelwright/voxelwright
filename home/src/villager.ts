@@ -1,76 +1,149 @@
-// The page's side of the villager API (host/src/villager.ts), reached through
-// the dev server, which forwards /villager/api/* to the host on 127.0.0.1.
+// The page's side of the villager API (host/src/villager.ts), reached on the
+// page's own origin at /villager/api/*.
 //
-// The token comes from the link the host prints (http://localhost:5181/#token=…).
-// A fragment never reaches a server; the page keeps the token for this tab in
-// sessionStorage and takes it out of the address bar.
+// Pairing (#85): the host prints a one-time link (…/#pair=<code>). A fragment never
+// reaches a server; the page takes it out of the address bar and history, and trades
+// it once at POST /pair for a session the host keeps in an HttpOnly cookie. No script
+// on the page, promoted plugins included, can read that cookie; the page only knows
+// the session's public tag, which it keeps (with the person) to tag queued lines.
 
 /**
  * away: the host was not reached, so the line can be sent again. cut: the reply broke off or stalled after the host had the line.
- * link: there is no token, or the host answered 401 (a link from an earlier launch): open the latest link; resending won't help.
- * refused: the host answered 403, this tab's token is for someone other than the page's person (#40), so nothing was sent.
- * other: the line was written under a different link than this tab holds now, so it was not sent (see `tag`).
+ * link: this device is not paired, or the host answered 401 (its pairing was replaced): open a new link; resending won't help.
+ * refused: the host answered 403, this device is paired to someone other than the page's person (#40), so nothing was sent.
+ * other: the line was written under a different pairing than this device has now, so it was not sent (see `tag`).
  * route: the reply named a route the host refused.
  */
 export type Said = { ok: true; reply: string; routed?: Routed } | { ok: false; why: 'away' | 'busy' | 'failed' | 'cut' | 'route' | 'refused' | 'link' | 'other' }
 /** The page's own person: synthetic until family isolation is proven (AGENTS.md). Any other villager is a visit (#42). */
-export const ME = 'alex'
 /** Your own villager's path, or your visit to another person's villager, kept under you (#42). */
 const talkPath = (person: string) => (person === ME ? `/people/${ME}` : `/people/${ME}/visits/${person}`)
 /** A reply that sends nothing for this long is abandoned. */
 const IDLE_MS = 30_000
-const TOKEN_KEY = 'village.villager.token'
+/** The last pairing the host confirmed: { person, tag }. Public, never the session itself. */
+const PAIRED_KEY = 'village.villager.paired'
+/** The person's time zone, sent with every line and reminder call (#86): the villager reads "tomorrow at nine" in it. */
+export const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 export interface Line { from: 'person' | 'villager'; text?: string; unanswered?: boolean }
 
-let token: string | null = null
-try {
-  token = sessionStorage.getItem(TOKEN_KEY)
-} catch {}
-/** Fired on window when a link installs a different token in this tab. */
-export const TOKEN_EVENT = 'village:token'
-/** Takes a token from the address bar's #token=…, keeps it for this tab and clears it from the bar. */
-function adoptLink() {
-  const linked = new URLSearchParams(location.hash.slice(1)).get('token')
-  if (!linked) return
-  const changed = linked !== token
-  token = linked
+/** This device's pairing: the person and the session's public tag. */
+export interface Paired { person: string; tag: string }
+/** Fired on window when this device is paired anew (a link was opened). */
+export const PAIRED_EVENT = 'village:paired'
+
+const remembered = (): Paired | null => {
   try {
-    sessionStorage.setItem(TOKEN_KEY, linked)
+    const p = JSON.parse(localStorage.getItem(PAIRED_KEY) ?? 'null')
+    return p && typeof p.person === 'string' && typeof p.tag === 'string' ? { person: p.person, tag: p.tag } : null
+  } catch {
+    return null
+  }
+}
+/**
+ * The page's person: whoever this device is paired as (A4), from the last pairing the host confirmed, then from the
+ * host itself. A live binding: importers always read the current value. Alex until the device is paired.
+ */
+export let ME = remembered()?.person ?? 'alex'
+/** The host named this device's person. Another person than the page started as: load the page again as them, so every plugin that read ME at load reads it anew. */
+function becomes(person: string) {
+  if (person === ME) return
+  ME = person
+  location.reload()
+}
+const remember = (p: Paired | null) => {
+  try {
+    if (p) localStorage.setItem(PAIRED_KEY, JSON.stringify(p))
+    else localStorage.removeItem(PAIRED_KEY)
   } catch {}
-  history.replaceState(history.state, '', location.pathname + location.search)
-  if (changed) dispatchEvent(new Event(TOKEN_EVENT))
+}
+
+/** What the host says about this device. Null: not paired. When the host is away, the last pairing it confirmed. */
+async function askSession(): Promise<Paired | null> {
+  const res = await fetch('/villager/api/session').catch(() => null)
+  if (res?.status === 401) {
+    remember(null)
+    return null
+  }
+  if (!res || !res.ok || !res.headers.get('content-type')?.startsWith('application/json')) return remembered()
+  const { person, tag } = await res.json()
+  const p = { person, tag }
+  remember(p)
+  becomes(person)
+  return p
 }
 
 /**
- * A short fingerprint of a token (the first 12 hex digits of its SHA-256), so a kept line can say which link it was
- * written under without storing the token. Null with no token. One promise per token, so callers resolve in order.
+ * Trades a link's one-time code for this device's session. True when paired; false when the host refused the code
+ * (used, old or unknown); null when the host was not reached. Until it settles, sessionTag() waits for it.
  */
-let tagged: { token: string; tag: Promise<string> } | null = null
-async function fingerprint(t: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))
-  return [...digest.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join('')
+export async function pairWith(code: string): Promise<boolean | null> {
+  const trade = (async (): Promise<{ ok: boolean | null; p: Paired | null }> => {
+    const res = await fetch('/villager/api/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) }).catch(() => null)
+    if (!res || res.status >= 500) return { ok: null, p: null }
+    if (!res.ok) return { ok: false, p: null }
+    const { person, tag } = await res.json()
+    remember({ person, tag })
+    return { ok: true, p: { person, tag } }
+  })()
+  pairing = trade.then(({ p }) => p ?? askSession())
+  const { ok, p } = await trade
+  if (ok) dispatchEvent(new Event(PAIRED_EVENT))
+  if (p) becomes(p.person)
+  return ok
 }
-export function tokenTag(): Promise<string | null> {
-  const t = token
-  if (!t) return Promise.resolve(null)
-  if (tagged?.token !== t) tagged = { token: t, tag: fingerprint(t) }
-  return tagged.tag
+
+/** The code in a pairing link (…#pair=<code>), or null. */
+export const codeIn = (text: string) => /[#&]pair=([0-9a-f]{64})\b/.exec(text)?.[1] ?? null
+
+let pairing: Promise<Paired | null> = Promise.resolve(remembered())
+/** Takes a pairing code from the address bar, out of the bar and history first, and pairs this device. */
+function adoptLink() {
+  const code = codeIn(location.hash)
+  if (!code) return
+  history.replaceState(history.state, '', location.pathname + location.search)
+  void pairWith(code)
 }
-adoptLink()
-// A new link opened in the same tab (after the host restarts) changes only the fragment.
+/** An installed home-screen app: iOS may copy the browser's cookies into it, but not its storage, so it asks. */
+export const installed = () => typeof matchMedia === 'function' && (matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true)
+// A page with no remembered pairing asks the host nothing until it is paired (#40): no request, no 401 in its console.
+if (codeIn(location.hash)) adoptLink()
+else if (remembered() || installed()) pairing = askSession()
+// A new link opened in the same tab changes only the fragment.
 addEventListener('hashchange', adoptLink)
 
+/** This device's pairing, as last known: null when not paired. */
+export const paired = (): Promise<Paired | null> => pairing
+
 /**
- * Null when the host is unreachable. 'link' when there is no token or the host answered 401 (the token is from an
- * earlier launch: open the new link). `as` sends that token instead of the tab's current one. With `hostErrors`, a 5xx
- * the host itself answered (JSON; the dev server's proxy answers plain text when the host is down) is returned, so the
- * caller can say it failed, not that the host is away (#47).
+ * The public tag of this device's session, so a kept line can say which pairing it was written under. Null when not
+ * paired. One promise for all callers, so they resolve in order.
  */
-export async function authorized(path: string, init: RequestInit = {}, as: string | null = token, hostErrors = false): Promise<Response | null | 'link'> {
-  if (!as) return 'link'
-  const res = await fetch(`/villager/api${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${as}` } }).catch(() => null)
+export function sessionTag(): Promise<string | null> {
+  return pairing.then((p) => p?.tag ?? null)
+}
+
+/**
+ * Null when the host is unreachable. 'link' when this device is not paired (401). With `tag`, the host serves the
+ * request only under that session (else 412). With `hostErrors`, a 5xx the host itself answered (JSON; the dev
+ * server's proxy answers plain text when the host is down) is returned, so the caller can say it failed, not that the
+ * host is away (#47).
+ */
+export async function authorized(path: string, init: RequestInit = {}, hostErrors = false, tag?: string | null): Promise<Response | null | 'link'> {
+  if (!(await pairing)) {
+    // Not paired, as far as this page knows. Another tab may have paired this browser since: then it remembered it.
+    if (!remembered()) return 'link'
+    pairing = askSession()
+    if (!(await pairing)) return 'link'
+  }
+  const headers = new Headers(init.headers)
+  if (tag) headers.set('x-village-session', tag)
+  const res = await fetch(`/villager/api${path}`, { ...init, headers }).catch(() => null)
   if (!res || (res.status >= 500 && !(hostErrors && res.headers.get('content-type')?.startsWith('application/json')))) return null
-  if (res.status === 401) return 'link'
+  if (res.status === 401) {
+    remember(null)
+    pairing = Promise.resolve(null)
+    return 'link'
+  }
   return res
 }
 
@@ -95,7 +168,7 @@ export interface SayOptions {
   /** A drawing handed over (#42, sketch.ts), by reference: the drawer's id and the sketch's. */
   sketch?: { from: string; id: string }
   signal?: AbortSignal
-  /** The fingerprint (tokenTag) of the link the line was written under: sent only under that link, else why 'other'. */
+  /** The session tag (sessionTag) the line was written under: sent only under that session, else why 'other'. */
   tag?: string | null
 }
 
@@ -104,9 +177,8 @@ export interface SayOptions {
  * sends nothing for IDLE_MS, so a hung host never leaves the page waiting.
  */
 export async function say(person: string, text: string, onText: (t: string) => void, { context, routing, sketch, signal, tag }: SayOptions = {}): Promise<Said> {
-  // The token is read once: the one checked against the line's tag is the one it is sent with.
-  const as = token
-  if (tag !== undefined && (as ? await fingerprint(as) : null) !== tag) return { ok: false, why: 'other' }
+  // A line written under a pairing goes only under that pairing: checked here, and by the host (412) when it is sent.
+  if (tag !== undefined && (await sessionTag()) !== tag) return { ok: false, why: 'other' }
   const stop = new AbortController()
   const abort = () => stop.abort()
   signal?.addEventListener('abort', abort)
@@ -121,13 +193,14 @@ export async function say(person: string, text: string, onText: (t: string) => v
     const res = await authorized(`${talkPath(person)}/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
+      body: JSON.stringify({ text, zone: ZONE, ...(context ? { context } : {}), ...(routing ? { route: routing.route } : {}), ...(sketch ? { sketch } : {}) }),
       signal: stop.signal,
-    }, as)
+    }, false, tag)
     // Stopped before an answer began: the host may already have the line.
     if (!res) return { ok: false, why: stop.signal.aborted ? 'cut' : 'away' }
     if (res === 'link') return { ok: false, why: 'link' }
     if (res.status === 409) return { ok: false, why: 'busy' }
+    if (res.status === 412) return { ok: false, why: 'other' }
     if (res.status === 403) return { ok: false, why: 'refused' }
     if (!res.ok || !res.body) return { ok: false, why: 'failed' }
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -169,7 +242,7 @@ export async function say(person: string, text: string, onText: (t: string) => v
 // the page treats it as data. Prop modules only ever run in the prop sandbox.
 
 export interface Routed {
-  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme' | 'build' | 'physics'
+  route: 'talk' | 'answer' | 'furnish' | 'project' | 'journal' | 'theme' | 'build' | 'physics' | 'elder'
   to?: string
   say?: string
   message?: string
@@ -241,7 +314,7 @@ export const remakeVillager = (person: string, item: string, reason: string) =>
  */
 export async function sendOffVillager(person: string, item: string, tuning: Record<string, number>, voice: Record<string, number>): Promise<Outcome<{ name: string; persona: unknown }> | { ok: false; why: 'persona'; reason: string; ms: number }> {
   const t0 = performance.now()
-  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, token, true)
+  const res = await authorized(`/people/${person}/villagers/${item}/send-off`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tuning, voice }) }, true)
   const ms = performance.now() - t0
   if (!res) return { ok: false, why: 'away', ms }
   if (res === 'link') return { ok: false, why: 'link', ms }
@@ -277,3 +350,87 @@ export const askTheme = (person: string, text: string, current: unknown) =>
  */
 export const askRules = (person: string, text: string, current: unknown, things: string[] = [], surfaces: unknown[] = [], toy = false) =>
   call<{ rules?: unknown; acts?: unknown; toy?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things, surfaces, ...(toy ? { toy } : {}) })
+
+// ── Reminders (#86) ─────────────────────────────────────────────────────────
+/** A reminder as the host gives it to the page: `when` is in words, in the zone the page sent. States are host/src/reminders.ts's. */
+export interface ReminderView {
+  id: string
+  what: string
+  at: string
+  state: 'pending' | 'put off' | 'due' | 'shown' | 'done'
+  /** It arrived after its time, while the home was closed or the host down. */
+  late?: true
+  when: string
+  today: boolean
+}
+/** Your own reminders, settled by the host: due ones (late when they arrived while the home was closed) are on their way to the fridge. */
+export const reminders = () => call<{ villager: string; zone: string; reminders: ReminderView[] }>(`/people/${ME}/reminders?zone=${encodeURIComponent(ZONE)}`)
+/** Tell the host the page showed it, it was ticked off, or put off (an hour, or tomorrow morning). */
+export const actOnReminder = (id: string, action: 'shown' | 'done' | 'later', until?: 'hour' | 'morning') =>
+  call<{ reminder: { state: string; when: string } }>(`/people/${ME}/reminders/${id}`, { action, ...(until ? { until } : {}), zone: ZONE })
+
+// ── #87 the Elder from inside the home ──────────────────────────────────────
+// The host (host/src/elder-home.ts) runs the Elder and keeps the record. The page only shows what the host says; it
+// never keeps, undoes or turns a change down (host/src/approval.ts says why).
+
+/** A stage of an Elder run; `label` is the host's words for it (host/src/elder-home.ts STAGES). */
+export type ElderStage = { name: string; label?: string; state: 'waiting' | 'now' | 'pass' | 'fail' | 'warn' | 'skipped'; ms?: number }
+export interface ElderRun {
+  id: string
+  request: string
+  status: 'running' | 'passed' | 'failed' | 'interrupted' | 'kept' | 'undone' | 'declined'
+  stages: ElderStage[]
+  reason?: string
+  detail?: string
+  warning?: string
+  totalMs?: number
+  costUsd?: number | null
+  pictures?: boolean
+  promotion?: string
+  said?: string
+  liveUrl?: string | null
+  /** This page is the live home, so a kept change appears in it. */
+  here?: boolean
+}
+/** What the host answered: the run, or a refusal in plain words (not an operator, busy, the hourly cap, Keep refused). */
+export type ElderAnswer =
+  | { ok: true; run: ElderRun | null; operator?: boolean; busy?: boolean; left?: number; approval?: string[] }
+  | { ok: false; why: 'away' | 'link' | 'refused' | 'failed'; refused?: string; message?: string; run?: ElderRun }
+
+async function elderCall(path: string, body?: unknown): Promise<ElderAnswer> {
+  const res = await authorized(`/people/${ME}/elder${path}`, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, true)
+  if (!res) return { ok: false, why: 'away' }
+  if (res === 'link') return { ok: false, why: 'link' }
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if (!data) return { ok: false, why: 'failed' }
+  if (!res.ok) return { ok: false, why: typeof data.refused === 'string' ? 'refused' : 'failed', refused: data.refused as string | undefined, message: typeof data.message === 'string' ? data.message : undefined, run: data.run as ElderRun | undefined }
+  return { ok: true, run: (data.run as ElderRun | null) ?? null, operator: data.operator as boolean | undefined, busy: data.busy as boolean | undefined, left: data.left as number | undefined, approval: Array.isArray(data.approval) ? data.approval.filter((u): u is string => typeof u === 'string') : undefined }
+}
+
+/** Whether this person may ask the Elder, and their latest run. */
+export const elderState = () => elderCall('')
+/** Ask the Elder for a change, in the person's own words. Starts a run at most. */
+export const askElder = (text: string) => elderCall('/runs', { text })
+export const elderRun = (id: string) => elderCall(`/runs/${encodeURIComponent(id)}`)
+/**
+ * The approval page for a run: the host's address for it whose host name is this page's (localhost, 127.0.0.1 or the
+ * tailnet name, so the device's pairing cookie goes with it), else the first. Null when the host named none.
+ */
+export function approvalLink(urls: string[] | undefined, id: string): string | null {
+  const list = (urls ?? []).flatMap((u) => {
+    try {
+      const url = new URL(u)
+      return url.protocol === 'http:' || url.protocol === 'https:' ? [url] : []
+    } catch {
+      return []
+    }
+  })
+  const url = list.find((u) => u.hostname === location.hostname) ?? list[0]
+  return url ? `${url.origin}/#run=${encodeURIComponent(id)}` : null
+}
+/** The home without (before) or with (after) the change, as an object URL; the caller revokes it. */
+export async function elderPicture(id: string, which: 'before' | 'after'): Promise<string | null> {
+  const res = await authorized(`/people/${ME}/elder/runs/${encodeURIComponent(id)}/${which}`)
+  if (!res || res === 'link' || !res.ok || res.headers.get('content-type') !== 'image/png') return null
+  return URL.createObjectURL(await res.blob())
+}

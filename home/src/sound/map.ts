@@ -31,6 +31,8 @@ const lines = {
   // One sound for the walk, as the camera heads for the door; the arrival is part of it.
   'village/walk': (e) => (e.phase === 'leave' ? 'walk' : null),
   'village/refused': () => 'refused',
+  // A reminder on the fridge is news: the owner's soft bloop. Ticking it off is a small reward; putting it off is quiet.
+  'village/reminder': (e) => (e.state === 'done' ? 'kept' : e.state === 'later' ? null : 'news'),
   // Physics (#74): only impacts are heard, and only ones hard enough to notice.
   'village/physics': (e) => (e.kind === 'impact' && e.impulse * e.impact >= 0.01 ? 'knock' : null),
 } satisfies { [K in keyof Events]?: Line<K> }

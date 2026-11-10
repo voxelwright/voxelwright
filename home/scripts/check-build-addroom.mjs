@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -63,8 +64,8 @@ const stop = (child) => new Promise((resolve) => {
 
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
-// #40: the page takes its person's token from the link the host prints (#token=…). This page is Alex's.
-const link = async (url) => `${url}#token=${JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex}`
+// #85: the page pairs through a one-time link (#pair=…). This page is Alex's.
+const link = (url) => pairLink(url, root)
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--ignore-gpu-blocklist'] })
 
 async function open(query, context) {

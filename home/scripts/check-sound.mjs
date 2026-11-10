@@ -244,6 +244,8 @@ const SAMPLE = {
   'village/book': { open: true, seconds: 0.7 }, 'village/page': { leaves: 1, dir: 1, seconds: 0.42 }, 'village/sat': { villager: 'mia', seconds: 0.7 },
   'village/farewell': { villagers: ['mia'] }, 'village/news': { villager: 'mia' }, 'village/walk': { phase: 'leave', from: 'kitchen', to: 'living', seconds: 0.95 },
   'village/refused': { id: 'workshop' },
+  // #86: a ticked-off reminder (an arrival is the news cue, which its gap would drop right after village/news here).
+  'village/reminder': { state: 'done' },
 }
 {
   const live = await open('talk=npc&plugins=babble,music,sound')

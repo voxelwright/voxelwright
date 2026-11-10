@@ -58,6 +58,8 @@ declare module 'cordis' {
     'village/news'(e: { villager: string; at?: Where }): void
     /** A room walk: `leave` as the camera heads for the door, `arrive` as the new room eases in. */
     'village/walk'(e: Timed & { phase: 'leave' | 'arrive'; from: string; to: string; at?: Where }): void
+    /** A reminder (#86): one arrived on the fridge (on time, or missed while the home was closed), was ticked off, or put off. */
+    'village/reminder'(e: { state: 'arrived' | 'missed' | 'done' | 'later'; at?: Where }): void
     /** Something can't be used yet (the closed Workshop door). */
     'village/refused'(e: { id: string; at?: Where }): void
     /** The physics world (#74): impacts, gadget signals, rule changes and clamps, as data (engine/events.ts). */

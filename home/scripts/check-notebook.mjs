@@ -1,6 +1,5 @@
 // Headless proof of the notebook interaction (#36).
 // Usage: node scripts/check-notebook.mjs [base-url] [--shot=path]   (dev server running)
-import { createHash } from 'node:crypto'
 import { chromium } from 'playwright'
 
 const args = process.argv.slice(2)
@@ -126,16 +125,15 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 // The villager is away: a kept line waits in the outbox and is sent once the host
 // answers again; a line typed while it answers waits its turn. Each queued line
-// carries the person and a fingerprint of the link it was written under, never the token.
-const ALEX = 'a'.repeat(64)
-const SAM = 'b'.repeat(64)
-const fp = (t) => createHash('sha256').update(t).digest('hex').slice(0, 12)
+// carries the person and the public tag of the pairing it was written under (#85),
+// never the session, which is an HttpOnly cookie the page cannot read.
+const ALEX = 'a1'.repeat(8)
+const SAM = 'b2'.repeat(8)
 const queues = (page) => page.evaluate(() => ({
   outbox: JSON.parse(localStorage.getItem('village.notebook.outbox') ?? '[]'),
   held: JSON.parse(localStorage.getItem('village.notebook.held') ?? '[]'),
   state: document.querySelector('[data-villager]').dataset.villager,
   text: document.querySelector('[data-villager]').textContent,
-  stored: JSON.stringify({ ...localStorage }),
 }))
 const writeLine = async (page, text) => {
   await page.focus('[data-entry="notebook"]')
@@ -143,18 +141,27 @@ const writeLine = async (page, text) => {
   await page.keyboard.type(text)
   await page.keyboard.press('Enter')
 }
+/** This browser was paired as `person` before (the host confirmed it then); the page reloads knowing that. */
+const pairedBefore = async (page, person, tag) => {
+  await page.evaluate((p) => {
+    ['village.notebook.outbox', 'village.notebook.held'].forEach((k) => localStorage.removeItem(k))
+    localStorage.setItem('village.villager.paired', JSON.stringify(p))
+  }, { person, tag })
+  await page.reload()
+  await page.evaluate(() => window.village.ready())
+  await page.waitForTimeout(800)
+}
 {
   const { context, page } = await open('reduce')
-  await page.evaluate(() => ['village.notebook.outbox', 'village.notebook.held'].forEach((k) => localStorage.removeItem(k)))
-  await page.evaluate((t) => (location.hash = `token=${t}`), ALEX)
+  await pairedBefore(page, 'alex', ALEX)
   await writeLine(page, 'Buy milk')
   await page.waitForTimeout(800)
   const waiting = await queues(page)
-  check('with the host away the line waits in the outbox, tagged with its person and link fingerprint, never the token', waiting.outbox.length === 1 && waiting.outbox[0].text === 'Buy milk' && waiting.outbox[0].person === 'alex' && waiting.outbox[0].tag === fp(ALEX) && !waiting.stored.includes(ALEX) && waiting.state === 'away', waiting)
+  check('with the host away the line waits in the outbox, tagged with its person and pairing tag', waiting.outbox.length === 1 && waiting.outbox[0].text === 'Buy milk' && waiting.outbox[0].person === 'alex' && waiting.outbox[0].tag === ALEX && waiting.state === 'away', waiting)
   // The host comes back (a stand-in on the page's routes); the first reply is slow.
   const sent = []
   await page.route('**/villager/api/people/alex/messages', async (r) => {
-    sent.push({ text: JSON.parse(r.request().postData()).text, auth: r.request().headers().authorization })
+    sent.push({ text: JSON.parse(r.request().postData()).text, session: r.request().headers()['x-village-session'] })
     if (sent.length === 1) await new Promise((x) => setTimeout(x, 1500))
     await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: `heard ${sent.at(-1).text}` })}\n\n` })
   })
@@ -163,53 +170,63 @@ const writeLine = async (page, text) => {
   await page.keyboard.press('Enter')
   await page.waitForTimeout(3000)
   const done = await queues(page)
-  check('when the host is back the outbox is sent in order, under the link it was written under, and emptied', sent.map((x) => x.text).join() === 'Buy milk,And eggs' && sent.every((x) => x.auth === `Bearer ${ALEX}`) && done.outbox.length === 0 && done.text === 'heard And eggs', { sent: sent.map((x) => x.text), done })
+  check('when the host is back the outbox is sent in order, under the pairing it was written under, and emptied', sent.map((x) => x.text).join() === 'Buy milk,And eggs' && sent.every((x) => x.session === ALEX) && done.outbox.length === 0 && done.text === 'heard And eggs', { sent, done })
   await context.close()
 }
 
-// A tagged line is never sent under another token (#42): Alex queues a line while the host is away, then
+// A tagged line is never sent under another pairing (#42, #85): Alex queues a line while the host is away, then
 // Sam's link is opened in the same tab. Every request the page makes is recorded.
 {
   const { context, page } = await open('reduce')
-  await page.evaluate(() => ['village.notebook.outbox', 'village.notebook.held'].forEach((k) => localStorage.removeItem(k)))
   const requests = []
   let mode = 'away'
+  let who = { person: 'alex', tag: ALEX }
   await page.route('**/villager/api/**', async (r) => {
     const body = r.request().postData()
-    requests.push({ path: new URL(r.request().url()).pathname, auth: r.request().headers().authorization, text: body ? JSON.parse(body).text : undefined })
+    const path = new URL(r.request().url()).pathname
+    requests.push({ path, session: r.request().headers()['x-village-session'], text: body ? JSON.parse(body).text : undefined })
     if (mode === 'away') return r.fulfill({ status: 502, body: 'away' })
-    if (mode === 'unauth') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"token required"}' })
-    if (mode === 'forbidden') return r.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"this token is for another person"}' })
+    if (mode === 'unauth') return r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"this device is not paired"}' })
+    if (path.endsWith('/pair')) {
+      who = { person: 'sam', tag: SAM }
+      return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'set-cookie': `village_session=${'c'.repeat(64)}; Path=/villager/api; HttpOnly; SameSite=Strict` }, body: JSON.stringify(who) })
+    }
+    if (path.endsWith('/session')) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(who) })
+    if (mode === 'forbidden') return r.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"this device is paired to another person"}' })
     if (!body) return r.fulfill({ status: 200, contentType: 'application/json', body: '{"lines":[]}' })
     await r.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: done\ndata: ${JSON.stringify({ reply: 'heard' })}\n\n` })
   })
-  await page.evaluate((t) => (location.hash = `token=${t}`), ALEX)
+  await pairedBefore(page, 'alex', ALEX)
   await writeLine(page, 'For Alex only')
   await page.waitForTimeout(800)
   const queued = await queues(page)
   mode = 'ok'
-  await page.evaluate((t) => (location.hash = `token=${t}`), SAM)
+  await page.evaluate((code) => (location.hash = `pair=${code}`), 'd'.repeat(64))
   await page.waitForTimeout(7000)
-  const underSam = requests.filter((x) => x.auth === `Bearer ${SAM}` && x.text === 'For Alex only')
+  const underSam = requests.filter((x) => x.text === 'For Alex only' && x.session !== ALEX)
   const after = await queues(page)
-  check("a line queued under Alex's link is never sent with Sam's token", queued.outbox[0]?.tag === fp(ALEX) && underSam.length === 0 && after.outbox.length === 0 && after.held.some((q) => q.text === 'For Alex only' && q.tag === fp(ALEX)), { underSam, after: { outbox: after.outbox, held: after.held } })
-  check('the page says the line was held, not sent', after.state === 'other' && /another link/.test(after.text), { state: after.state, text: after.text })
-  // Reloaded with Sam's token in the tab: still held, still unsent. An untagged line from before tagging is held too.
+  const url = page.url()
+  check("a line queued under Alex's pairing is never sent once the device is paired as Sam", queued.outbox[0]?.tag === ALEX && underSam.length === 0 && after.outbox.length === 0 && after.held.some((q) => q.text === 'For Alex only' && q.tag === ALEX) && !url.includes('pair='), { underSam, url, after: { outbox: after.outbox, held: after.held } })
+  check('the page says the line was held, not sent', after.state === 'other' && /another pairing/.test(after.text), { state: after.state, text: after.text })
+  // Reloaded, paired as Sam: still held, still unsent. An untagged line from before tagging is held too.
   await page.evaluate(() => localStorage.setItem('village.notebook.outbox', JSON.stringify(['an old untagged line'])))
   await page.reload()
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(7000)
   const reloaded = await queues(page)
-  check('after a reload under Sam\'s link, held and untagged lines are still never sent', requests.filter((x) => x.text === 'For Alex only').every((x) => x.auth === `Bearer ${ALEX}`) && !requests.some((x) => x.text === 'an old untagged line') && reloaded.outbox.length === 0 && reloaded.held.some((q) => q.text === 'an old untagged line'), { requests: requests.filter((x) => x.text), reloaded: { outbox: reloaded.outbox, held: reloaded.held } })
-  // 401: a link from an earlier launch has its own state and is not retried under the same token.
+  check("after a reload paired as Sam, held and untagged lines are still never sent", requests.filter((x) => x.text === 'For Alex only').every((x) => x.session === ALEX) && !requests.some((x) => x.text === 'an old untagged line') && reloaded.outbox.length === 0 && reloaded.held.some((q) => q.text === 'an old untagged line'), { requests: requests.filter((x) => x.text), reloaded: { outbox: reloaded.outbox, held: reloaded.held } })
+  // 401: this device's pairing ended (a new link for this person, elsewhere). Its own state, not retried.
   mode = 'unauth'
   await writeLine(page, 'stale link line')
   await page.waitForTimeout(7000)
   const stale = await queues(page)
   const staleTries = requests.filter((x) => x.text === 'stale link line').length
-  check('401 is its own state ("open your latest link"), not away, and the line is kept without retrying', stale.state === 'link' && /latest link/.test(stale.text) && stale.outbox.some((q) => q.text === 'stale link line') && staleTries === 1, { state: stale.state, text: stale.text, staleTries })
-  // 403: the token is someone else's. Said plainly, never "your line is kept; try me again".
+  check('401 is its own state ("open your pairing link"), not away, and the line is kept without retrying', stale.state === 'link' && /Open your link/.test(stale.text) && stale.outbox.some((q) => q.text === 'stale link line') && staleTries === 1, { state: stale.state, text: stale.text, staleTries })
+  // 403: paired to someone else. Said plainly, never "your line is kept; try me again".
+  // Paired again by a new link, and the host (mocked here) refuses this device's lines with 403.
   mode = 'forbidden'
+  await page.evaluate((code) => (location.hash = `pair=${code}`), 'e'.repeat(64))
+  await page.waitForTimeout(500)
   await writeLine(page, 'refused line')
   await page.waitForTimeout(1500)
   const refused = await queues(page)

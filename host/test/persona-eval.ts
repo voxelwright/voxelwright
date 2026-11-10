@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { Context } from 'cordis'
+import { pairedLaunch } from './paired.ts'
 
 const { values } = parseArgs({ options: {
   model: { type: 'string', default: 'haiku' },
@@ -67,7 +68,7 @@ const select = values.only ? new Set(values.only.split(',')) : null
 const out: any = { model: values.model, hostDir, started: new Date().toISOString(), turns: [] as any[], scenarios: [] as any[] }
 
 async function say(base: string, token: string, person: string, text: string, context?: string) {
-  const res = await fetch(`${base}/people/${person}/messages`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, context }) })
+  const res = await fetch(`${base}/people/${person}/messages`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${token}` }, body: JSON.stringify({ text, context }) })
   const raw = await res.text()
   const events = raw.split('\n\n').filter(Boolean).map((b) => ({ name: /^event: (.*)$/m.exec(b)?.[1], data: JSON.parse(/^data: (.*)$/m.exec(b)?.[1] ?? 'null') }))
   const done = events.find((e) => e.name === 'done')
@@ -89,10 +90,10 @@ for (const s of SCENARIOS) {
     const agent = warmAgent({ model: values.model, thinking: false })
     const fiber = ctx.plugin(villager, { root, agent, port: Number(values.port), people, profiles })
     await fiber.await()
-    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const launch = await pairedLaunch(ctx.villager, ['alex', 'sam', 'mia'])
     // The warm processes start at launch; a real host is up long before the first line.
     await new Promise((r) => setTimeout(r, 5000))
-    return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.token as string }
+    return { fiber, base: `http://127.0.0.1:${launch.port}`, tokens: launch.tokens }
   }
   let host = await start()
   const who = s.people.find((p) => p.id === s.who)!
@@ -106,7 +107,7 @@ for (const s of SCENARIOS) {
       history.push({ from: 'note', text: '(the host restarted and the conversation started a fresh session; only the notes carried over)' })
       continue
     }
-    const r = await say(host.base, host.token, s.who, step.say, step.context)
+    const r = await say(host.base, host.tokens[s.who], s.who, step.say, step.context)
     const turn = { scenario: s.id, topic: s.topic, index: index++, person: who.name, band: who.band, villager: who.villager, judge: s.judge ?? 'adult', tag: step.tag, text: step.say, context: step.context, history: [...history], ...r }
     out.turns.push(turn)
     history.push({ from: who.name, text: step.say }, { from: who.villager, text: r.reply })
@@ -117,7 +118,7 @@ for (const s of SCENARIOS) {
     const moss = out.turns.at(-1).reply
     for (const [id, me, prev] of [['sam', 'Tuft', [['Alex', JOKE], ['Moss', moss]]], ['alex', 'Dumpling', null]] as const) {
       const round: [string, string][] = prev ? prev.map((x) => [...x] as [string, string]) : [['Alex', JOKE], ['Moss', moss], ['Tuft', out.turns.at(-1).reply]]
-      const r = await say(host.base, host.token, id, JOKE, table(me, round))
+      const r = await say(host.base, host.tokens[id], id, JOKE, table(me, round))
       out.turns.push({ scenario: s.id, topic: s.topic, index: index++, person: 'Alex', band: 'adult', villager: me, judge: 'adult', tag: `table:${id}`, text: JOKE, context: table(me, round), history: round.slice(1).map(([n, t]) => ({ from: n, text: t })), ...r })
       console.error(`s7 ${me}: ${r.reply}`)
     }

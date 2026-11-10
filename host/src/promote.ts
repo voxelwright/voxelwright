@@ -8,11 +8,12 @@
 // candidate, its result.json or model output is read as approval.
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, link, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { CANDIDATE_OWNED, sha256 } from './candidate.ts'
 import { ELDER_IDENTITY } from './live.ts'
-import { git, mustGit } from './proc.ts'
+import { git, mustGit, processTag, tagRunning } from './proc.ts'
+import { withFileLock } from './file-lock.ts'
 
 type Hash = string | null
 
@@ -72,13 +73,19 @@ async function attempt(live: string, action: string, work: () => Promise<Outcome
   let locked = false
   try {
     if (existsSync(join(live, '.git'))) {
+      // The lock and its owner are made in one step (a file with the owner in it, linked to the lock's name), so the
+      // lock never exists empty and start-up recovery never takes a live owner's lock for a dead one's.
+      const made = `${lock}.${randomBytes(6).toString('hex')}`
       try {
-        await writeFile(lock, String(process.pid), { flag: 'wx' })
+        await writeFile(made, processTag(), { flag: 'wx' })
+        await link(made, lock)
         locked = true
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
         const holder = (await readFile(lock, 'utf8').catch(() => '')).trim()
         refuse('live-busy', `Another promotion or rollback is changing the home right now (process ${holder || 'unknown'}). Try again when it's done. If no such process is running, it stopped partway: check the home with "npm run live -- status", then delete ${lock}.`, { lock, holder })
+      } finally {
+        await rm(made, { force: true })
       }
     }
     return await record(live, action, await work())
@@ -96,6 +103,31 @@ async function attempt(live: string, action: string, work: () => Promise<Outcome
  * commits it with the entry. If anything fails, puts the live tree back at head
  * and refuses, so live is either fully changed and recorded or unchanged.
  */
+/**
+ * On start: a promote lock whose owner is gone (power loss, kill -9) would make every Keep and Undo answer live-busy
+ * forever. When its owner is no longer running, put the live copy back to its last commit (a promotion or rollback cut
+ * off before its commit never happened; one cut off after it is already recorded), remove git's own lock if that
+ * process left one, and remove the lock. Null when there is nothing to recover or the owner is still running.
+ */
+export function recoverDeadLock(live: string): Promise<{ holder: string; discarded: string[] } | null> {
+  const lock = join(resolve(live), '.git', 'village-promote.lock')
+  // Nothing to recover, and nothing made: taking the recovery lock would create <live>/.git where no live home is installed.
+  if (!existsSync(lock)) return Promise.resolve(null)
+  // One recovery at a time, so two hosts starting on one root do not reset the copy under each other.
+  return withFileLock(join(resolve(live), '.git', 'village-recover'), async () => {
+    if (!existsSync(lock)) return null
+    const holder = (await readFile(lock, 'utf8').catch(() => '')).trim()
+    // An empty lock is never a dead owner's: the lock is written with its owner in one step (attempt).
+    if (!holder || tagRunning(holder)) return null
+    await rm(join(resolve(live), '.git', 'index.lock'), { force: true })
+    const discarded = (await mustGit(['status', '--porcelain'], live)).split('\n').filter(Boolean).map((l) => l.slice(3))
+    await mustGit(['reset', '--hard', '--quiet', 'HEAD'], live)
+    await mustGit(['clean', '-fdq'], live)
+    await rm(lock, { force: true })
+    return { holder, discarded }
+  })
+}
+
 async function applyToLive(live: string, head: string, contents: Record<string, string | null>, expected: Record<string, Hash>, entry: PromotionEntry | RollbackEntry, subject: string): Promise<string> {
   try {
     for (const [path, text] of Object.entries(contents)) {
@@ -124,6 +156,24 @@ async function requireCleanLive(live: string) {
 
 async function readEntries(live: string): Promise<(PromotionEntry | RollbackEntry)[]> {
   return (await readFile(join(live, 'promotions.jsonl'), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line))
+}
+
+/**
+ * Which candidates are in the live home, from <live>/promotions.jsonl, the one record of it: `open` maps a candidate to
+ * its promotion that has not been rolled back, `last` to its latest promotion (open or not). Empty without a live home.
+ */
+export async function livePromotions(live: string): Promise<{ open: Map<string, string>; last: Map<string, string> }> {
+  const open = new Map<string, string>()
+  const last = new Map<string, string>()
+  if (!existsSync(join(live, 'promotions.jsonl'))) return { open, last }
+  const entries = await readEntries(live)
+  const undone = new Set(entries.filter((e): e is RollbackEntry => e.type === 'rollback').map((e) => e.promotion))
+  for (const e of entries) {
+    if (e.type !== 'promotion') continue
+    last.set(e.candidate, e.id)
+    if (!undone.has(e.id)) open.set(e.candidate, e.id)
+  }
+  return { open, last }
 }
 
 async function commitEntry(live: string, entry: PromotionEntry | RollbackEntry, subject: string): Promise<string> {
@@ -205,6 +255,9 @@ export function promote(options: PromoteOptions): Promise<Outcome> {
     if (mismatched.length)
       refuse('changed-since-check', `${id}'s files have changed since they were checked (${[...new Set(mismatched)].join(', ')}). I'll only put in exactly what passed, so please run the request again.`, { candidate: id, paths: [...new Set(mismatched)] })
 
+    // Already in: a second promotion would record before == after, and its rollback would leave the first one live.
+    const already = (await livePromotions(live)).open.get(id)
+    if (already) refuse('already-promoted', `${id} is already in the home (${already}). Roll that back first if you want to put it in again.`, { candidate: id, promotion: already })
     await requireCleanLive(live)
     const liveBefore = await mustGit(['rev-parse', 'HEAD'], live)
     const changes: PromotionEntry['files'] = {}

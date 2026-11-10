@@ -8,7 +8,12 @@
 // timeout fails the case instead of hanging the script. The script exits 1
 // when any case does not get its result, and then keeps the candidates for
 // inspection; otherwise it removes them.
-import { existsSync } from 'node:fs'
+//
+// It runs in a temp folder of its own (TMPDIR set for a child of itself), so its
+// sweep of leftover elder-* entries can only remove what this run made, never
+// another process's scratch.
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
@@ -22,6 +27,16 @@ import claudeCode from '../src/plugins/claude-code.ts'
 import homeChecks, { browserLauncher } from '../src/plugins/home-checks.ts'
 import { runOnce } from '../src/run.ts'
 import { createSandbox } from '../src/sandbox.ts'
+
+// Re-run in a private temp folder: every elder-* entry below tmpdir() is then this run's own.
+if (!process.env.VILLAGE_REGRESSIONS_TMP) {
+  // A short name: the sandbox's socket lives a few folders below, and macOS caps a socket path at 104 bytes.
+  const own = mkdtempSync(join(tmpdir(), 'vr-'))
+  const child = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, TMPDIR: own, VILLAGE_REGRESSIONS_TMP: own } })
+  // A failed run keeps its candidates for inspection (they are inside `own` unless --candidates says otherwise).
+  if (child.status === 0) rmSync(own, { recursive: true, force: true })
+  process.exit(child.status ?? 1)
+}
 
 const { values } = parseArgs({
   options: {
@@ -536,7 +551,7 @@ async function runCase(c: Case): Promise<{ verdict: string | true; runDir?: stri
   }
 }
 
-/** Entries in the user temp directory named elder-*, so each case can remove what it left. */
+/** Entries in this run's own temp folder named elder-*, so each case can remove what it left. */
 const tmpEntries = async () => new Set((await readdir(tmpdir())).filter((n) => n.startsWith('elder-')).map((n) => join(tmpdir(), n)))
 
 let controlRepo: string | undefined

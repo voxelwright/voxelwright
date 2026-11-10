@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink, pairSecret, sessionCookie } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -46,10 +47,8 @@ function run(cmd, argv, cwd, env, ready) {
     child.on('exit', (code) => reject(new Error(`${cmd} exited ${code}: ${out.slice(-400)}`)))
   })
 }
-// The host prints each person's link; the token is in its fragment.
-const startHost = () => run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root, '--home', base], hostDir, {}, /alex: \S+#token=[0-9a-f]{64}\n/)
-const linkOf = (child) => /alex: (\S+#token=[0-9a-f]{64})/.exec(child.out)[1]
-const tokenOf = (child) => /#token=([0-9a-f]{64})/.exec(linkOf(child))[1]
+// Pairing (#85): the check mints a one-time link as `npm run village -- link` does; the page trades it for a cookie.
+const startHost = () => run('node', ['src/villager-cli.ts', '--agent', agent, '--port', String(hostPort), '--root', root, '--home', base], hostDir, {}, /alex: .*\n/)
 const stop = (child) => new Promise((resolve) => {
   if (!children.has(child)) return resolve()
   child.once('exit', resolve)
@@ -115,7 +114,8 @@ try {
   const page = await context.newPage()
   const consoleLines = []
   page.on('console', (m) => consoleLines.push(m.text()))
-  await openNotebook(page, linkOf(host))
+  const firstLink = await pairLink(base, root)
+  await openNotebook(page, firstLink)
 
   if (agent === 'claude') {
     const line = opt('line') ?? 'I keep forgetting to water the plants'
@@ -128,12 +128,19 @@ try {
     for (const name of await readdir(notesDir)) notes[name] = await readFile(join(notesDir, name), 'utf8')
     console.log(JSON.stringify({ page: result, usage, notes, conversation: await conversationFile() }, null, 2))
   } else {
-    // Token and proxy: the API needs the token, and the dev server does not buffer the stream.
+    // Pairing and proxy (#85): the API needs a paired session, and the dev server does not buffer the stream.
     const bare = await fetch(`${base}villager/api/people/alex/conversation`)
-    check('the API refuses a request without the token', bare.status === 401, bare.status)
+    check('the API refuses a request without a paired session', bare.status === 401, bare.status)
+    check('the host prints no pairing link when its output is not a terminal', !/#pair=/.test(host.out) && /alex: not paired yet/.test(host.out), host.out.split('\n').filter((l) => l.startsWith('alex')))
     const launch = await fetch(`${base}villager/launch`)
-    check('launch-route-gone: the dev server hands out no token', launch.status === 404 && !(await launch.text()).includes(tokenOf(host)), launch.status)
-    check('the link leaves the address bar, and the tab keeps the token', new URL(page.url()).origin + '/' === base && !page.url().includes('#') && (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === tokenOf(host), page.url())
+    check('launch-route-gone: the dev server hands out nothing', launch.status === 404, launch.status)
+    const cookies = await context.cookies(`${base}villager/api/`)
+    const session = cookies.find((c) => c.name.startsWith('village_'))
+    const pageSees = await page.evaluate(() => ({ cookie: document.cookie, stored: JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }), history: history.length, url: location.href }))
+    check('pair-cookie: the link leaves the address bar, and the session is an HttpOnly, SameSite=Strict cookie on the API path', new URL(page.url()).origin + '/' === base && !page.url().includes('#') && session?.httpOnly === true && session?.sameSite === 'Strict' && session?.path === '/villager/api', { url: page.url(), session: session && { httpOnly: session.httpOnly, sameSite: session.sameSite, path: session.path, secure: session.secure } })
+    check('pair-unreadable: page scripts cannot read the session or the code', !pageSees.cookie.includes('village_session') && !pageSees.stored.includes(session?.value ?? 'none') && !pageSees.stored.includes(firstLink.split('#pair=')[1]) && !pageSees.url.includes('pair='), { cookie: pageSees.cookie })
+    const reused = await fetch(`${base}villager/api/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: firstLink.split('#pair=')[1] }) })
+    check('pair-once: the opened link cannot be used again', reused.status === 401, reused.status)
 
     // Content Security Policy: page scripts (promoted plugins included) reach only this origin. Scripts may compile
     // WebAssembly (the physics solver, #74; ?physics=0 pages may not), and nothing else is added to script-src.
@@ -163,8 +170,8 @@ try {
     if (shot) await page.screenshot({ path: shot })
 
     // The proxy streams: pieces arrive spread out, before the end.
-    const token = tokenOf(host)
-    const res = await fetch(`${base}villager/api/people/alex/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ text: 'through the proxy' }) })
+    const secret = await pairSecret(base, root)
+    const res = await fetch(`${base}villager/api/people/alex/messages`, { method: 'POST', headers: { ...sessionCookie(secret, base), 'content-type': 'application/json' }, body: JSON.stringify({ text: 'through the proxy' }) })
     const arrivals = []
     for await (const chunk of res.body) arrivals.push(Date.now())
     check('the dev server forwards the stream without buffering it', arrivals.length >= 5 && arrivals.at(-1) - arrivals[0] >= 200, { chunks: arrivals.length, spreadMs: arrivals.at(-1) - arrivals[0] })
@@ -177,12 +184,13 @@ try {
     check('after a reload the last answer is on the page', back.state === 'remembered' && back.text === (await conversationFile()).at(-1).text, back)
     check('the reloaded page draws a reply, not the bare page', (await leftPage(page)) !== '' && back.text.length > 0)
 
-    // Host restart: a new token, the same conversation, once the new link is opened.
+    // Host restart (#85): no new link. The paired page reloads and its villager resumes.
     await stop(host)
     host = await startHost()
-    await openNotebook(page, linkOf(host))
+    check('after a restart the paired person needs no new link', /alex: 1 paired device|alex: \d+ paired devices/.test(host.out), host.out.split('\n').filter((l) => l.startsWith('alex')))
+    await openNotebook(page, `${base}?talk=off&build=0`)
     const resumed = await write(page, 'did you remember?')
-    check('after a host restart the new link opens the same villager, which resumes', resumed.voice.state === 'answered' && /3 lines/.test(resumed.voice.text) && resumed.voice.text.includes('water the plants'), resumed.voice)
+    check('pair-survives-restart: after a host restart the same device, with no new link, reaches the same villager, which resumes', resumed.voice.state === 'answered' && /3 lines/.test(resumed.voice.text) && resumed.voice.text.includes('water the plants'), resumed.voice)
 
     // Host down: the page says so warmly and keeps the line.
     await stop(host)

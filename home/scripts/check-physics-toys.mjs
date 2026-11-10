@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -153,13 +154,12 @@ async function works(page, kind) {
 try {
   await run('node', ['src/villager-cli.ts', '--agent', agent, '--rules-model', rulesModel, '--toy-model', model, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
   await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
-  const { tokens } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
   const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
   if (shotsDir) await mkdir(shotsDir, { recursive: true })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)))
-  await page.goto(`${base}#token=${tokens.alex}`)
+  await page.goto(await pairLink(base, root))
   await page.evaluate(() => window.village.ready())
   await page.waitForFunction(() => window.village?.physics?.made, null, { timeout: 30_000 })
   const surfaces = await page.evaluate(() => window.village.physics.made.surfaces())
@@ -432,19 +432,19 @@ try {
       ['a wooden chair by the window', 'furnish'], ['a seesaw', 'physics'], ['build a marble run on the table', 'physics'],
       ['set up ten pins and a ball', 'physics'], ['make a seesaw', 'physics'], ['put a wooden toy box in the corner', 'furnish'],
     ]
-    const routed = await page.evaluate(async ([lines, token]) => {
+    const routed = await page.evaluate(async ([lines]) => {
       const { mayRoute, asksPhysics } = await import('/src/talk/route-check.ts')
       const cast = Object.entries(window.village.talk.state().cast)
       const me = window.village.talk.state().cast.alex.name
       const villagers = cast.map(([id, c]) => ({ id, name: c.name, role: 'Helper' }))
       const out = []
       for (const [text] of lines) {
-        const res = await fetch('/villager/api/people/alex/route', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text, primary: me, villagers }) })
+        const res = await fetch('/villager/api/people/alex/route', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, primary: me, villagers }) })
         const body = await res.json().catch(() => ({}))
         out.push({ text, mayRoute: mayRoute({ text, others: [] }), asksPhysics: asksPhysics(text), route: body.routed?.route ?? `error ${res.status} ${body.error ?? ''}` })
       }
       return out
-    }, [lines, tokens.alex])
+    }, [lines])
     const right = routed.filter((r, i) => r.route === lines[i][1] && r.mayRoute && (lines[i][1] !== 'physics' || r.asksPhysics))
     report.router = routed
     check(`the real router sends toy lines to physics and furniture to furnish (${right.length} of ${lines.length})`, right.length === lines.length, routed)

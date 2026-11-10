@@ -1,6 +1,7 @@
 // Headless checks of the villager API with the stub agent: no model is called.
 // npm run check-villager
 import { existsSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,16 +13,20 @@ import { checkPersona, checkProfile, defaultPersona, fallbackCharacter, humourCe
 import { checkRouted, cleanName, makerPrompt, routeContext, routeInReply, stubMaker, stubRouter, type Maker, type Router } from '../src/villager-input.ts'
 import { checkPng, MAX_SKETCHES, moduleName, stubSketchMaker } from '../src/sketch.ts'
 import { PNG } from 'pngjs'
+import { pairDevice as pairDevicePlain, pairedLaunch, secretOf } from './paired.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'villager-check-'))
 const checks: { name: string; pass: boolean; detail?: unknown }[] = []
 const check = (name: string, pass: unknown, detail?: unknown) => checks.push({ name, pass: Boolean(pass), detail })
 
-async function start(people?: Record<string, string>, maker?: Maker, agent: Agent = stubAgent(30), extra: { turnTimeoutMs?: number; router?: Router } = {}) {
+const launchOf = (ctx: Context) => pairedLaunch(ctx.villager, ['alex', 'sam', 'mia', 'kim', 'leo'])
+const pairDevice = (ctx: Context, base: string, person: string) => pairDevicePlain(ctx.villager.pairing, base, person)
+
+async function start(people?: Record<string, string>, maker?: Maker, agent: Agent = stubAgent(30), extra: { turnTimeoutMs?: number; router?: Router; port?: number } = {}) {
   const ctx = new Context()
-  const fiber = ctx.plugin(villager, { root, agent, port: 0, people: people ?? { alex: 'Alex', sam: 'Sam' }, router: extra.router ?? stubRouter(5), maker: maker ?? stubMaker(5), sketchMaker: stubSketchMaker(5), turnTimeoutMs: extra.turnTimeoutMs })
+  const fiber = ctx.plugin(villager, { root, agent, port: extra.port ?? 0, people: people ?? { alex: 'Alex', sam: 'Sam' }, router: extra.router ?? stubRouter(5), maker: maker ?? stubMaker(5), sketchMaker: stubSketchMaker(5), turnTimeoutMs: extra.turnTimeoutMs })
   await fiber.await()
-  const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+  const launch = await launchOf(ctx)
   return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens.alex as string, samToken: launch.tokens.sam as string, tokens: launch.tokens as Record<string, string> }
 }
 
@@ -48,7 +53,7 @@ async function say(base: string, given: string | Record<string, string> | null, 
   const token = given && typeof given === 'object' ? given[visitor ?? person] : given
   const res = await fetch(`${base}/people/${visitor ? `${visitor}/visits/${person}` : person}/messages`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(token ? { cookie: `village_session=${token}` } : {}) },
     body: JSON.stringify({ text, context, route }),
   })
   const events: Streamed['events'] = []
@@ -99,17 +104,166 @@ try {
   await slow
   check('one turn at a time per person', clash.status === 409, clash.status)
 
-  // Persistence across a host restart: new token, same session.
+  // Persistence across a host restart (#85): the paired device keeps its session, and the conversation resumes.
   const oldToken = host.token
+  const oldPort = Number(new URL(host.base).port)
   await host.fiber.dispose()
   check('the launch file is removed when the host stops', !existsSync(join(root, 'villager', 'launch.json')))
-  host = await start()
-  check('a new launch has a new token', host.token !== oldToken && (await say(host.base, oldToken, 'hi')).status === 401)
+  // The same port, as the home's is: a session belongs to the host it was paired on.
+  host = await start(undefined, undefined, undefined, { port: oldPort })
+  check('pair-survives-restart: a device paired before the restart is still served', (await fetch(`${host.base}/people/alex/conversation`, { headers: { cookie: `village_session=${oldToken}` } })).status === 200)
   const third = await say(host.base, host.token, 'did you remember?')
   const reply = third.events.find((e) => e.name === 'done')?.data.reply ?? ''
   check('the conversation resumes after a host restart', /3 lines/.test(reply) && reply.includes('water the plants'), reply)
-  const history = await (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.token}` } })).json()
+  const history = await (await fetch(`${host.base}/people/alex/conversation`, { headers: { cookie: `village_session=${host.token}` } })).json()
   check('the page can read back both sides', history.lines.length === 6 && history.lines.at(-1).from === 'villager', history.lines.length)
+
+  // Pairing (#85): a one-time code becomes a session cookie; the store keeps hashes only; links revoke; only the home's own origin may ask.
+  {
+    const ctx = host.fiber.ctx
+    const pairWith = (code: unknown, headers: Record<string, string> = {}) => fetch(`${host.base}/pair`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ code }) })
+    const read = (secret: string | null, headers: Record<string, string> = {}) => fetch(`${host.base}/people/alex/conversation`, { headers: { ...(secret ? { cookie: `village_session=${secret}` } : {}), ...headers } })
+    const code = await ctx.villager.pairing.mint('alex', { keep: true })
+    const paired = await pairWith(code, { origin: host.base })
+    const cookie = paired.headers.get('set-cookie') ?? ''
+    const secret = secretOf(paired)
+    const body = await paired.json()
+    check('pair: a code gives an HttpOnly, SameSite=Strict cookie scoped to the API, not Secure over http', paired.status === 200 && /HttpOnly/.test(cookie) && /SameSite=Strict/.test(cookie) && /Path=\/villager\/api/.test(cookie) && /Max-Age=\d+/.test(cookie) && !/Secure/.test(cookie) && body.person === 'alex' && /^[0-9a-f]{16}$/.test(body.tag) && !JSON.stringify(body).includes(secret!), { status: paired.status, body })
+    check('pair: the answer body never carries the secret, and the session reads', (await read(secret)).status === 200)
+    check('pair: a code works once', (await pairWith(code)).status === 401)
+    check('pair: a wrong or malformed code is refused', (await pairWith('0'.repeat(64))).status === 401 && (await pairWith('../../x')).status === 401 && (await pairWith(42)).status === 401)
+    const secure = await pairWith(await ctx.villager.pairing.mint('alex', { keep: true }), { origin: 'https://village.example.ts.net', 'sec-fetch-site': 'same-origin' })
+    check('pair: behind https (Origin https) the cookie is Secure', secure.status === 200 && /; Secure/.test(secure.headers.get('set-cookie') ?? ''))
+    const session = await (await fetch(`${host.base}/session`, { headers: { cookie: `village_session=${secret}` } })).json()
+    check('session: names the person and the public tag only', session.person === 'alex' && session.tag === body.tag && Object.keys(session).sort().join() === 'name,person,tag')
+    const store = await readFile(ctx.villager.pairing.file, 'utf8')
+    check('at rest: pairing.json holds no code or session secret, only hashes', !store.includes(code) && !store.includes(secret!) && !store.includes(oldToken) && store.includes(body.tag))
+    const mode = (await import('node:fs')).statSync(ctx.villager.pairing.file).mode & 0o777
+    check('at rest: pairing.json is 0600', mode === 0o600, mode.toString(8))
+    // Session tag: a line written under one session is never sent under another.
+    check('tag: the expected session tag is served, another is refused (412)', (await read(secret, { 'x-village-session': body.tag })).status === 200 && (await read(secret, { 'x-village-session': 'ffffffffffffffff' })).status === 412)
+    // Origin: cookies ignore ports, so a page on another localhost port is same-site; only same-origin is served.
+    check('origin: Sec-Fetch-Site same-origin is served', (await read(secret, { 'sec-fetch-site': 'same-origin' })).status === 200)
+    for (const site of ['cross-site', 'same-site', 'none']) check(`origin: Sec-Fetch-Site ${site} is refused (403)`, (await read(secret, { 'sec-fetch-site': site })).status === 403)
+    const forged = await fetch(`${host.base}/people/alex/messages`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${secret}`, 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' }, body: JSON.stringify({ text: 'cross-site line' }) })
+    const linesAfter = (await (await read(secret)).json()).lines
+    check('origin: a cross-site POST is refused (403) and writes nothing', forged.status === 403 && !linesAfter.some((l: { text: string }) => l.text === 'cross-site line'))
+    const otherPort = await fetch(`${host.base}/people/alex/messages`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${secret}`, host: '127.0.0.1:5320', origin: 'http://127.0.0.1:5399' }, body: JSON.stringify({ text: 'other port line' }) })
+    check('origin: without Sec-Fetch-Site, an Origin for another host or port is refused (403)', otherPort.status === 403)
+    check('origin: a cross-site pairing attempt is refused (403)', (await pairWith(await ctx.villager.pairing.mint('alex', { keep: true }), { 'sec-fetch-site': 'cross-site' })).status === 403)
+    // Re-linking revokes: a new link without --keep ends every earlier session and code of that person, and no one else's.
+    const pending = await ctx.villager.pairing.mint('alex', { keep: true })
+    const relink = await ctx.villager.pairing.mint('alex')
+    check('relink: the old sessions are refused (401)', (await read(secret)).status === 401 && (await read(oldToken)).status === 401 && (await read(host.token)).status === 401)
+    check('relink: an earlier unused code is refused', (await pairWith(pending)).status === 401)
+    check("relink: another person's session is untouched", (await fetch(`${host.base}/people/sam/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })).status === 200)
+    const fresh = secretOf(await pairWith(relink))
+    check('relink: the new link pairs', fresh !== null && (await read(fresh)).status === 200)
+    check("other person: Sam's session on Alex's conversation is refused (403)", (await fetch(`${host.base}/people/alex/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })).status === 403)
+    // Expiry: a code past its time is refused.
+    const late = await ctx.villager.pairing.mint('sam', { keep: true })
+    const state = JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8'))
+    for (const c of state.people.sam.pending) c.expires = Date.now() - 1
+    await writeFile(ctx.villager.pairing.file, JSON.stringify(state))
+    check('expiry: an old code is refused', (await pairWith(late)).status === 401)
+    // A revoked person: every session ends.
+    await ctx.villager.pairing.revoke('sam')
+    check('revoke: the person\'s sessions are refused (401)', (await fetch(`${host.base}/people/sam/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })).status === 401)
+    // A session belongs to the home (Host) it was paired on (A2). Cookies ignore ports, so another home on this
+    // machine (a dev server proxying here) gets this cookie too; its Host differs, and the session must not open.
+    const viaHost = (host_: string, path: string, init: { method?: string; cookie?: string; body?: string; base?: string } = {}) =>
+      new Promise<{ status: number; setCookie: string }>((resolve, reject) => {
+        const { port } = new URL(init.base ?? host.base)
+        const r = httpRequest({ host: '127.0.0.1', port, path, method: init.method ?? 'GET', headers: { host: host_, 'content-type': 'application/json', ...(init.cookie ? { cookie: init.cookie } : {}) } }, (res) => {
+          res.resume()
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, setCookie: String(res.headers['set-cookie'] ?? '') }))
+        })
+        r.on('error', reject)
+        r.end(init.body)
+      })
+    const pairAt = async (host_: string) => (await viaHost(host_, '/pair', { method: 'POST', body: JSON.stringify({ code: await ctx.villager.pairing.mint('alex', { keep: true }) }) })).setCookie.split(';')[0]
+    const homeA = await pairAt('localhost:5183')
+    const homeB = await pairAt('localhost:5181')
+    check('host-bound: each home names its own cookie', /^village_[0-9a-f]{12}=[0-9a-f]{64}$/.test(homeA) && homeA.split('=')[0] !== homeB.split('=')[0], [homeA.split('=')[0], homeB.split('=')[0]])
+    check("host-bound: a session paired on one port is refused through another port's proxy (401)", (await viaHost('localhost:5181', '/people/alex/conversation', { cookie: homeA })).status === 401 && (await viaHost('localhost:5190', '/session', { cookie: homeA })).status === 401)
+    const decoys = Array.from({ length: 9 }, (_, i) => `village_decoy${i}=${String(i).repeat(64)}`).join('; ')
+    check('nine decoy session cookies set by a page before the real one do not lock the person out', (await viaHost('localhost:5183', '/session', { cookie: `${decoys}; ${homeA}` })).status === 200)
+    check('host-bound: two homes paired in one cookie jar both keep working', (await viaHost('localhost:5183', '/session', { cookie: `${homeB}; ${homeA}` })).status === 200 && (await viaHost('localhost:5181', '/session', { cookie: `${homeA}; ${homeB}` })).status === 200)
+    const stored = JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8'))
+    check('host-bound: a session stored without a host opens nothing', await (async () => {
+      const legacy = (await viaHost('localhost:5183', '/pair', { method: 'POST', body: JSON.stringify({ code: await ctx.villager.pairing.mint('alex', { keep: true }) }) })).setCookie.split(';')[0]
+      const now = JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8'))
+      const people = now.people ?? now
+      for (const s of people.alex.sessions) if (s.host === 'localhost:5183') delete s.host
+      await writeFile(ctx.villager.pairing.file, JSON.stringify(now))
+      const refused = (await viaHost('localhost:5183', '/session', { cookie: legacy })).status === 401
+      await writeFile(ctx.villager.pairing.file, JSON.stringify(stored))
+      return refused
+    })())
+    // Two homes on one root (B2): a dev home's device does not count as paired on the live home, and a new link for the
+    // live home leaves the dev home's devices paired.
+    const pairs = ctx.villager.pairing
+    const devSession = (await pairs.pair(await pairs.mint('mia', { keep: true }), 'localhost:5181'))!
+    const liveHosts = ['localhost:5183', '127.0.0.1:5183']
+    check("status counts only sessions that open this home", (await pairs.status(liveHosts)).mia?.sessions === 0 && (await pairs.status(['localhost:5181'])).mia?.sessions === 1)
+    await pairs.mint('mia', { hosts: liveHosts })
+    check("a new link for one home leaves another home's devices paired", (await pairs.session(devSession.secret, 'localhost:5181'))?.person === 'mia')
+    await pairs.mint('mia', { hosts: ['localhost:5181'] })
+    check("and a new link for that home ends them", (await pairs.session(devSession.secret, 'localhost:5181')) === undefined)
+    // The file has a version and a shape (B3): anything else is refused plainly, never read as empty.
+    const good = await readFile(ctx.villager.pairing.file, 'utf8')
+    check('at rest: pairing.json is { version: 1, people }', ((f) => f.version === 1 && typeof f.people.alex === 'object')(JSON.parse(good)))
+    await writeFile(ctx.villager.pairing.file, JSON.stringify(JSON.parse(good).people))
+    check('a pairing file of another shape is refused with a plain error', await ctx.villager.pairing.status().then(() => false, (e: Error) => /not a version 1 pairing file/.test(e.message)))
+    await writeFile(ctx.villager.pairing.file, JSON.stringify({ ...JSON.parse(good), version: 2 }))
+    check('a pairing file of a newer version is refused, even with valid people', await ctx.villager.pairing.status().then(() => false, (e: Error) => /not a version 1 pairing file/.test(e.message)))
+    await writeFile(ctx.villager.pairing.file, good)
+    // /pair binds the session to the request's own Host, never a forwarded one.
+    const forwarded = await new Promise<string>(async (resolve, reject) => {
+      const code = await ctx.villager.pairing.mint('alex', { keep: true })
+      const { port } = new URL(host.base)
+      const r = httpRequest({ host: '127.0.0.1', port, path: '/pair', method: 'POST', headers: { host: 'localhost:5183', 'x-forwarded-host': 'evil.example', 'content-type': 'application/json' } }, (res) => (res.resume(), resolve(String(res.headers['set-cookie'] ?? '').split(';')[0])))
+      r.on('error', reject)
+      r.end(JSON.stringify({ code }))
+    })
+    const boundTo = JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8')).people.alex.sessions.at(-1).host
+    check("/pair with an X-Forwarded-Host binds the session to the request's Host", forwarded.startsWith('village_') && boundTo === 'localhost:5183', boundTo)
+    // The lock excludes (B4): a fresh lock held by someone else is waited for, never taken; a stale one is taken over.
+    const lockFile = `${ctx.villager.pairing.file}.lock`
+    await writeFile(lockFile, 'someone-else')
+    let minted = false
+    const waiting = ctx.villager.pairing.mint('mia', { keep: true }).then(() => (minted = true))
+    await new Promise((r) => setTimeout(r, 600))
+    check("a fresh lock held by another writer is waited for, not taken over or removed", !minted && (await readFile(lockFile, 'utf8')) === 'someone-else')
+    await rm(lockFile)
+    await waiting
+    check('the change goes through once that lock is released, and its own lock is gone after', minted && !existsSync(lockFile))
+    await writeFile(lockFile, 'crashed')
+    const old = new Date(Date.now() - 60_000)
+    await (await import('node:fs/promises')).utimes(lockFile, old, old)
+    const took = Date.now()
+    await ctx.villager.pairing.mint('mia', { keep: true })
+    check("a lock older than the stale limit (a crashed writer's) is taken over", Date.now() - took < 2000 && !existsSync(lockFile))
+    // Sessions end (B7): one paired longer ago than the session lifetime opens nothing and is pruned at the next change.
+    const aged = await pairDevice(ctx, host.base, 'alex')
+    const withAged = JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8'))
+    const agedEntry = withAged.people.alex.sessions.at(-1)
+    agedEntry.pairedAt = new Date(Date.now() - 401 * 86_400_000).toISOString()
+    await writeFile(ctx.villager.pairing.file, JSON.stringify(withAged))
+    check('a session older than its lifetime is refused (401)', (await read(aged)).status === 401)
+    await ctx.villager.pairing.mint('mia', { keep: true })
+    check('and is pruned from the file at the next change', !JSON.parse(await readFile(ctx.villager.pairing.file, 'utf8')).people.alex.sessions.some((x: { tag: string }) => x.tag === agedEntry.tag))
+    // A person no longer listed: their session opens nothing (401), even though it is in the store.
+    const ghost = await pairDevice(ctx, host.base, 'sam')
+    const restarted = await start({ alex: 'Alex' })
+    // The same Host the session was paired on, sent to a host that no longer lists Sam.
+    const ghostHost = new URL(host.base).host
+    check('a session of someone no longer listed is refused (401), while a listed one on the same host opens', (await viaHost(ghostHost, '/session', { base: restarted.base, cookie: `village_session=${ghost}` })).status === 401 && (await viaHost(ghostHost, '/session', { base: restarted.base, cookie: `village_session=${fresh}` })).status === 200)
+    await restarted.fiber.dispose()
+    host.token = fresh!
+    host.samToken = (await pairDevice(ctx, host.base, 'sam'))!
+    host.tokens = { alex: host.token, sam: host.samToken }
+  }
 
   // A failed turn is not silently a reply, and does not move the session.
   const state = await readFile(join(dir, 'villager.json'), 'utf8')
@@ -122,16 +276,16 @@ try {
   // Person ids: a token opens only its own person's paths (#40). Another listed person's villager is reached only
   // by an explicit visit under the token's own person (#42), never implicitly through /people/<other>/.
   for (const id of ['..%2Falex', 'Alex', 'nobody']) check(`person "${id}" is refused`, [403, 404].includes((await say(host.base, host.token, 'hi', id)).status))
-  const crossRead = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.token}` } })
+  const crossRead = await fetch(`${host.base}/people/sam/conversation`, { headers: { cookie: `village_session=${host.token}` } })
   check("person-scoped token: Alex's token on Sam's conversation is refused (403), no implicit visit", crossRead.status === 403)
   check("person-scoped token: Alex's token on /people/sam/messages is refused (403) and writes nothing", (await say(host.base, host.token, 'hi', 'sam')).status === 403 && !existsSync(join(root, 'people', 'alex', 'visits')) && !existsSync(join(root, 'people', 'sam', 'conversation.jsonl')))
   const explicitVisit = await say(host.base, host.token, 'hi', 'sam', undefined, undefined, 'alex')
   check("Alex's token on /people/alex/visits/sam/messages is a visit (200), written under Alex", explicitVisit.status === 200 && explicitVisit.events.at(-1)?.name === 'done' && existsSync(join(root, 'people', 'alex', 'visits', 'sam', 'conversation.jsonl')) && !existsSync(join(root, 'people', 'sam', 'conversation.jsonl')))
   check("Sam's token on /people/alex/visits/sam/messages is refused (403)", (await say(host.base, host.samToken, 'hi', 'sam', undefined, undefined, 'alex')).status === 403)
-  check("Sam's token on /people/alex/visits/sam/conversation is refused (403)", (await fetch(`${host.base}/people/alex/visits/sam/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).status === 403)
+  check("Sam's token on /people/alex/visits/sam/conversation is refused (403)", (await fetch(`${host.base}/people/alex/visits/sam/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })).status === 403)
   check('a visit to yourself is not a visit (404)', (await say(host.base, host.token, 'hi', 'alex', undefined, undefined, 'alex')).status === 404)
-  check("Sam's token on /people/alex/conversation is refused (403)", (await fetch(`${host.base}/people/alex/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })).status === 403)
-  const samOwn = await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.samToken}` } })
+  check("Sam's token on /people/alex/conversation is refused (403)", (await fetch(`${host.base}/people/alex/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })).status === 403)
+  const samOwn = await fetch(`${host.base}/people/sam/conversation`, { headers: { cookie: `village_session=${host.samToken}` } })
   check("person-scoped token: Sam's token reads Sam's conversation", samOwn.status === 200 && (await samOwn.json()).name === 'Sam')
   await host.fiber.dispose()
 
@@ -152,7 +306,7 @@ try {
   const heard = await readFile(join(root, 'people', 'sam', 'stub-last-context.txt'), 'utf8').catch(() => '')
   check('context reaches the villager turn', said.events.at(-1)?.name === 'done' && heard.includes('Dumpling said "Soup."'), heard)
   check("context is never stored as the person's line", personLines.at(-1) === 'what shall we cook?' && !samLines.some((l) => /Dumpling said|Context/.test(l.text ?? '')), personLines)
-  const readBack = await (await fetch(`${host.base}/people/sam/conversation`, { headers: { authorization: `Bearer ${host.tokens.sam}` } })).json()
+  const readBack = await (await fetch(`${host.base}/people/sam/conversation`, { headers: { cookie: `village_session=${host.tokens.sam}` } })).json()
   check('the conversation read back has no context in it', !JSON.stringify(readBack).includes("Dumpling said"), readBack.lines.length)
   for (const bad of [42, 'x'.repeat(2001)]) check(`context ${typeof bad === 'number' ? 'that is not a string' : 'over 2000 characters'} is refused`, (await say(host.base, host.tokens, 'hi', 'sam', bad)).status === 400)
   check("a listed person's villager does not see another's lines", existsSync(join(root, 'people', 'sam', 'conversation.jsonl')) && !samReply.includes('water the plants'))
@@ -168,7 +322,7 @@ try {
     host = await start(listed, async (ask) => (ask.what.includes('tattle') ? { module: tattletale, name: ask.what, models: ['stub'], costUsd: 0, outputTokens: 0, apiMs: 0 } : real(ask)))
     const api = (path: string, init: { method?: string; body?: unknown; token?: string | null } = {}) => fetch(`${host.base}${path}`, {
       method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
-      headers: { 'content-type': 'application/json', ...(init.token === null ? {} : { authorization: `Bearer ${init.token ?? host.token}` }) },
+      headers: { 'content-type': 'application/json', ...(init.token === null ? {} : { cookie: `village_session=${init.token ?? host.token}` }) },
       body: init.body === undefined ? undefined : typeof init.body === 'string' ? init.body : JSON.stringify(init.body),
     })
     const cast = [{ id: 'alex', name: 'Dumpling', role: 'cook' }, { id: 'sam', name: 'Tuft', role: 'tidier' }, { id: 'mia', name: 'Moss', role: 'gardener' }]
@@ -261,14 +415,15 @@ try {
     const ctx = new Context()
     const fiber = ctx.plugin(villager, { root: xroot, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam' }, router: stubRouter(5), maker: stubMaker(5), sketchMaker: stubSketchMaker(5) })
     await fiber.await()
-    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const launch = await launchOf(ctx)
     const base = `http://127.0.0.1:${launch.port}`
     const as = (person: string, path: string, body?: unknown) => fetch(`${base}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${launch.tokens[person]}` },
+      headers: { 'content-type': 'application/json', cookie: `village_session=${launch.tokens[person]}` },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    check('launch.json holds one token per person and no shared one', Object.keys(launch.tokens).sort().join() === 'alex,sam' && launch.tokens.alex !== launch.tokens.sam && !('token' in launch))
+    const launchText = await readFile(ctx.villager.launchFile, 'utf8')
+    check('one session per person and no shared one; launch.json holds no secret', Object.keys(launch.tokens).sort().join() === 'alex,sam' && launch.tokens.alex !== launch.tokens.sam && !Object.values(launch.tokens).some((t) => launchText.includes(t)) && Object.keys(JSON.parse(launchText)).sort().join() === 'pid,port')
     const cast = [{ id: 'alex', name: 'Dumpling', role: 'cook' }, { id: 'sam', name: 'Tuft', role: 'tidier' }]
     const png = (() => { const p = new PNG({ width: 64, height: 32 }); p.data.fill(240); return PNG.sync.write(p).toString('base64') })()
     // Talk, table rounds and the journal's conversation are visits (below); everything else is Sam's alone.
@@ -343,7 +498,7 @@ try {
       router: stubRouter(5), maker: stubMaker(5), sketchMaker: stubSketchMaker(5),
     })
     await fiber.await()
-    const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+    const launch = await launchOf(ctx)
     const base = `http://127.0.0.1:${launch.port}`
     const samBefore = await snapshot(samDir)
     const allBefore = await snapshot(vroot)
@@ -361,7 +516,7 @@ try {
     await say(base, launch.tokens.alex, 'and the garden?', 'mia', 'at the kitchen table with Alex, Tuft and Moss. Round so far: Alex said "and the garden?". It is your turn, Moss.', undefined, 'alex')
     const miaUsage = JSON.parse((await readFile(join(vroot, 'people', 'alex', 'visits', 'mia', 'usage.jsonl'), 'utf8')).trim().split('\n').at(-1)!)
     check('a table round is a visit to each seated villager (Moss leans clean, so clean)', miaUsage.humour === 'clean' && miaUsage.visiting === 'mia', miaUsage)
-    const visitBack = await (await fetch(`${base}/people/alex/visits/sam/conversation`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).json()
+    const visitBack = await (await fetch(`${base}/people/alex/visits/sam/conversation`, { headers: { cookie: `village_session=${launch.tokens.alex}` } })).json()
     check("Alex's journal read of Tuft is Alex's own visit, never Sam's lines", visitBack.name === 'Sam' && visitBack.lines.length === 2 && !JSON.stringify(visitBack).includes('Okonkwo'), visitBack.lines.length)
 
     const samAfter = await snapshot(samDir)
@@ -375,13 +530,13 @@ try {
     const own = await say(base, launch.tokens.sam, 'hello', 'sam')
     const ownPrompt = await readFile(join(samDir, 'stub-last-prompt.txt'), 'utf8')
     check("Sam's own token reaches Sam's villager with Sam's notes and profile", own.events.at(-1)?.name === 'done' && ownPrompt.startsWith("You are Tuft, Sam's villager") && ownPrompt.includes('Quillfeather') && ownPrompt.includes('Zanzibar') && ownPrompt.includes('Pelican the sailor'), ownPrompt.slice(0, 200))
-    const ownLines = await (await fetch(`${base}/people/sam/conversation`, { headers: { authorization: `Bearer ${launch.tokens.sam}` } })).json()
+    const ownLines = await (await fetch(`${base}/people/sam/conversation`, { headers: { cookie: `village_session=${launch.tokens.sam}` } })).json()
     check("Sam's conversation holds none of Alex's visit", !JSON.stringify(ownLines).includes('cut from my week'))
 
     // Forged and other tokens.
     check('a forged token is refused on a visit', (await say(base, 'f'.repeat(64), 'hi', 'sam', undefined, undefined, 'alex')).status === 401 && (await say(base, null, 'hi', 'sam', undefined, undefined, 'alex')).status === 401)
-    check("a visit never opens the owner's other endpoints", (await fetch(`${base}/people/sam/sketches`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).status === 403 && (await fetch(`${base}/people/sam/library`, { headers: { authorization: `Bearer ${launch.tokens.alex}` } })).status === 403)
-    check("Sam's token cannot read Alex's visit to Tuft (403)", (await fetch(`${base}/people/alex/visits/sam/conversation`, { headers: { authorization: `Bearer ${launch.tokens.sam}` } })).status === 403 && (await fetch(`${base}/people/alex/conversation`, { headers: { authorization: `Bearer ${launch.tokens.sam}` } })).status === 403)
+    check("a visit never opens the owner's other endpoints", (await fetch(`${base}/people/sam/sketches`, { headers: { cookie: `village_session=${launch.tokens.alex}` } })).status === 403 && (await fetch(`${base}/people/sam/library`, { headers: { cookie: `village_session=${launch.tokens.alex}` } })).status === 403)
+    check("Sam's token cannot read Alex's visit to Tuft (403)", (await fetch(`${base}/people/alex/visits/sam/conversation`, { headers: { cookie: `village_session=${launch.tokens.sam}` } })).status === 403 && (await fetch(`${base}/people/alex/conversation`, { headers: { cookie: `village_session=${launch.tokens.sam}` } })).status === 403)
     check('a visit to an unlisted person is refused', (await say(base, launch.tokens.alex, 'hi', 'zoe', undefined, undefined, 'alex')).status === 404)
 
     // "Keep it clean" said on a visit turns down the visitor's own preferences, never the owner's.
@@ -396,7 +551,7 @@ try {
       const slowCtx = new Context()
       const slowFiber = slowCtx.plugin(villager, { root: vroot, agent: stubAgent(60), port: 0, people: { alex: 'Alex', sam: 'Sam', mia: 'Mia' } })
       await slowFiber.await()
-      const slowLaunch = JSON.parse(await readFile(slowCtx.villager.launchFile, 'utf8'))
+      const slowLaunch = await launchOf(slowCtx)
       const slowBase = `http://127.0.0.1:${slowLaunch.port}`
       const visiting = say(slowBase, slowLaunch.tokens.alex, 'a long visiting question', 'sam', undefined, undefined, 'alex')
       await new Promise((r) => setTimeout(r, 50))
@@ -470,7 +625,7 @@ try {
       const ctx = new Context()
       const fiber = ctx.plugin(villager, { root: warmRoot, agent, port: 0, people: listed, turnTimeoutMs })
       await fiber.await()
-      const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+      const launch = await launchOf(ctx)
       return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens as Record<string, string> }
     }
     let agent = warmAgent({ model: 'fake' }, fake)
@@ -536,10 +691,10 @@ try {
     // The separate router: one call at a time per person.
     await host.fiber.dispose()
     host = await start(listed, undefined, stubAgent(30), { router: stubRouter(150) })
-    const call = () => fetch(`${host.base}/people/alex/route`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${host.token}` }, body: JSON.stringify({ text: 'hi', primary: 'Dumpling', villagers: cast }) }).then((r) => r.status)
+    const call = () => fetch(`${host.base}/people/alex/route`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${host.token}` }, body: JSON.stringify({ text: 'hi', primary: 'Dumpling', villagers: cast }) }).then((r) => r.status)
     const statuses = await Promise.all([call(), call(), call()])
     check('the separate router refuses a second line while one is in flight', statuses.filter((x) => x === 200).length === 1 && statuses.filter((x) => x === 409).length === 2, statuses)
-    check('a failed route frees the person for the next', (await fetch(`${host.base}/people/alex/route`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${host.token}` }, body: JSON.stringify({ text: 'x [stub-route-fail]', primary: 'Dumpling', villagers: cast }) })).status === 422 && (await call()) === 200)
+    check('a failed route frees the person for the next', (await fetch(`${host.base}/people/alex/route`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${host.token}` }, body: JSON.stringify({ text: 'x [stub-route-fail]', primary: 'Dumpling', villagers: cast }) })).status === 422 && (await call()) === 200)
     await host.fiber.dispose()
   }
 
@@ -650,7 +805,7 @@ try {
       const ctx = new Context()
       const fiber = ctx.plugin(villager, { root: proot, agent: stubAgent(1), port: 0, people: { alex: 'Alex', leo: 'Leo', kim: 'Kim', mia: 'Mia', sam: 'Sam' }, profiles: { alex: { age: 'adult', humour: 'crude' }, leo: { age: 'child' }, mia: { age: 'adult' }, sam: { age: 'adult', humour: 'crude' } } })
       await fiber.await()
-      const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+      const launch = await launchOf(ctx)
       return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens as Record<string, string> }
     }
     const prompt = (id: string) => readFile(join(proot, 'people', id, 'stub-last-prompt.txt'), 'utf8')
@@ -780,8 +935,8 @@ try {
   // Sketches (#42, sketch.ts): checked PNGs under the drawer only; made into props or handed over as images, never routed.
   {
     const host = await start({ alex: 'Alex', sam: 'Sam', mia: 'Mia' })
-    const auth = { 'content-type': 'application/json', authorization: `Bearer ${host.token}` }
-    const samAuth = { 'content-type': 'application/json', authorization: `Bearer ${host.tokens.sam}` }
+    const auth = { 'content-type': 'application/json', cookie: `village_session=${host.token}` }
+    const samAuth = { 'content-type': 'application/json', cookie: `village_session=${host.tokens.sam}` }
     const post = (path: string, value: unknown, headers = auth) => fetch(`${host.base}${path}`, { method: 'POST', headers, body: JSON.stringify(value) })
     const pngOf = (w: number, h: number) => {
       const png = new PNG({ width: w, height: h })

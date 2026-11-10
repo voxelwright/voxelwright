@@ -21,13 +21,22 @@ You need a recent Node (measured on 25.1), Google Chrome and a signed-in
 Claude Code.
 
 ```sh
-# The home, at http://localhost:5181: the iso dollhouse with walking villagers, talk, music and
-# build mode, all on by default. ?talk=off is the quiet seated kitchen, ?build=0 turns build mode
-# off, ?cam=seat keeps the seated view.
-cd home && npm install && npm run dev
+# Village for daily use: the live home with the villagers, reminders and the Elder, http://localhost:5183/.
+# The first start installs the live home (~/.village/live) from this checkout's commit.
+# VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the people (the home's cast is these three, so list all of
+# them, or the notepad cannot route); --agent stub runs without a model.
+cd host && npm install && npm run village
+npm run village -- link alex          # a one-time pairing link; a paired device stays paired across restarts
+npm run village -- link alex --add    # pair one more device without unpairing the others
+npm run village -- service install    # launchd keeps Village running; `service uninstall` removes it
+# Notepad: "Elder, put a small brass bell on the table" asks the Elder (operators only). Keep or Undo it
+# on the approval page its card opens, http://localhost:5184/ (its own origin; see host/README.md).
 
-# The villager: prints one link per person, such as http://localhost:5181/#token=...
-# Open that link, not the plain address. --agent stub runs without a model.
+# Development: the home's dev server at http://localhost:5181 (the iso dollhouse with walking
+# villagers, talk, music and build mode; ?talk=off is the quiet seated kitchen, ?build=0 turns build
+# mode off, ?cam=seat keeps the seated view) and the villagers behind it on 5190. In a terminal, the
+# villager prints a pairing link for each person not yet paired.
+cd home && npm install && npm run dev
 cd host && npm install && npm run villager
 
 # The Elder: writes a candidate under ~/.village/candidates/

@@ -1,8 +1,8 @@
 // Headless proof of the prop sandbox (#42): hostile prop modules are contained,
 // the home stays responsive and nothing hostile is placed or leaks an error.
 // Starts its own dev server on 5304 by default (Vite's API, with a request counter), opens
-// the page with a synthetic villager token in its link (#40, the tab keeps it in
-// sessionStorage), and an "outside" server on a random port that must never be reached.
+// the page as a paired device (#85: a synthetic session in an HttpOnly cookie on the API
+// path), and an "outside" server on a random port that must never be reached.
 // Stops both at the end.
 // Usage: node scripts/check-prop-sandbox.mjs [--dev=5304]
 // Exits non-zero when any check fails.
@@ -16,7 +16,7 @@ import { chromium } from 'playwright'
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const devPort = Number(process.argv.slice(2).find((a) => a.startsWith('--dev='))?.slice(6) ?? 5304)
 const root = await mkdtemp(join(tmpdir(), 'prop-sandbox-'))
-const token = `synthetic${Math.random().toString(36).slice(2)}`
+const token = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 // The dev server, counting requests per path so a box request is visible even if the browser hides it.
 const served = []
@@ -57,8 +57,9 @@ page.on('console', (m) => {
 })
 
 try {
-  await page.goto(`${base}?cam=iso&q=low&props=none&talk=off&build=0#token=${token}`)
-  check('the page holds the synthetic token for its tab', (await page.evaluate(() => sessionStorage.getItem('village.villager.token'))) === token)
+  await page.context().addCookies([{ name: 'village_session', value: token, url: `${base}villager/api/`, httpOnly: true, sameSite: 'Strict' }])
+  await page.goto(`${base}?cam=iso&q=low&props=none&talk=off&build=0`)
+  check('the page is paired with a synthetic session its scripts cannot read', (await page.context().cookies(`${base}villager/api/`)).some((c) => c.value === token) && !(await page.evaluate(() => document.cookie)).includes(token))
   await page.waitForFunction(() => window.village && window.villageProps, null, { timeout: 30000 })
   await page.evaluate(() => window.village.ready())
   await page.evaluate(() => window.villageProps.loaded)

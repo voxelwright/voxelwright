@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink, pairSecret, sessionCookie } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -55,12 +56,11 @@ const stop = (child) => new Promise((resolve) => {
 const model = opt('theme-model') ?? 'sonnet'
 await run('node', ['src/villager-cli.ts', '--agent', agent, '--theme-model', model, '--port', String(hostPort), '--root', root], hostDir, { VILLAGER_PEOPLE: 'alex:Alex,sam:Sam,mia:Mia' }, /listening on/)
 await run('npx', ['vite', '--port', String(devPort), '--strictPort'], homeDir, { VILLAGE_ROOT: root, VILLAGER_PORT: String(hostPort) }, /Local:/)
-// #40: each person has their own token; the page takes Alex's from the link the host prints (#token=…).
-const { tokens } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
+// #85: each page pairs as Alex through a one-time link (#pair=…).
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 
 async function open(page, query) {
-  await page.goto(`${base}${query}${/talk=/.test(query) ? '' : (query ? '&' : '?') + 'talk=off&build=0'}#token=${tokens.alex}`)
+  await page.goto(await pairLink(`${base}${query}${/talk=/.test(query) ? '' : (query ? '&' : '?') + 'talk=off&build=0'}`, root))
   await page.evaluate(() => window.village.ready())
   await page.waitForFunction(() => typeof window.village?.theme?.ask === 'function')
   await page.waitForTimeout(500)
@@ -196,19 +196,20 @@ try {
 
     // ── The host: token, person, shape ──
     const { port } = JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8'))
-    const token = tokens.alex
-    const post = (path, body, auth) => fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) }).then((r) => r.status)
+    const token = await pairSecret(base, root)
+    const samToken = await pairSecret(base, root, 'sam')
+    const post = (path, body, auth) => fetch(`${base}villager/api${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? sessionCookie(auth, base) : {}) }, body: JSON.stringify(body) }).then((r) => r.status)
     const statuses = {
       none: await post('/people/alex/theme', { text: 'make it cozier' }),
-      wrong: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${'0'.repeat(64)}`),
-      right: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${token}`),
-      stranger: await post('/people/zed/theme', { text: 'make it cozier' }, `Bearer ${token}`),
-      otherPerson: await post('/people/alex/theme', { text: 'make it cozier' }, `Bearer ${tokens.sam}`),
-      empty: await post('/people/alex/theme', { text: '' }, `Bearer ${token}`),
-      badCurrent: await post('/people/alex/theme', { text: 'cozier', current: [1] }, `Bearer ${token}`),
+      wrong: await post('/people/alex/theme', { text: 'make it cozier' }, '0'.repeat(64)),
+      right: await post('/people/alex/theme', { text: 'make it cozier' }, token),
+      stranger: await post('/people/zed/theme', { text: 'make it cozier' }, token),
+      otherPerson: await post('/people/alex/theme', { text: 'make it cozier' }, samToken),
+      empty: await post('/people/alex/theme', { text: '' }, token),
+      badCurrent: await post('/people/alex/theme', { text: 'cozier', current: [1] }, token),
     }
-    check('host: the token is required', statuses.none === 401 && statuses.wrong === 401 && statuses.right === 200, statuses)
-    check('host: a token opens only its own person (#40), and a checked request shape', statuses.stranger === 403 && statuses.otherPerson === 403 && statuses.empty === 400 && statuses.badCurrent === 400, statuses)
+    check('host: a paired session is required', statuses.none === 401 && statuses.wrong === 401 && statuses.right === 200, statuses)
+    check('host: a session opens only its own person (#40), and a checked request shape', statuses.stranger === 403 && statuses.otherPerson === 403 && statuses.empty === 400 && statuses.badCurrent === 400, statuses)
     const log = (await readFile(join(root, 'people', 'alex', 'themes.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     check('host: each call is logged with its outcome', log.some((l) => l.refused) && log.some((l) => l.failed) && log.filter((l) => l.id).length >= 3, log.map((l) => l.id ?? l.refused ?? l.failed))
 

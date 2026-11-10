@@ -32,6 +32,7 @@ import { PLANS, rooms } from './plugins/rooms'
 import themePlugin from './theme/plugin'
 import { THEMED, themes } from './theme'
 import { attachAsk } from './theme/ask'
+import { offerPairing } from './pair'
 import { ease } from './theme/switch'
 import type { Theme } from './theme/tokens'
 
@@ -164,3 +165,5 @@ Object.assign(window, { village })
 // the home without a theme pays nothing for themes (#50 perf gate: CPU and heap on the talk branch).
 root.on('village/theme-prepare', () => void load(themePlugin))
 attachAsk()
+// On a home-screen install that is not paired yet, ask for the pairing link (#85).
+void offerPairing()

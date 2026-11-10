@@ -44,6 +44,23 @@ separates registered, active and failed plugins. Post-processing adds a draw
 pass with `stage.addDrawPass()`; passes are removed by identity, so plugins can
 unload in any order.
 
+## Reminders on the fridge (#86)
+
+```sh
+node scripts/check-reminders.mjs [--dev=5331] [--host=5330] [--shots=dir]   # stub host and dev server of its own
+```
+
+`src/plugins/reminders.ts` asks the host every 30 s and when the page becomes
+visible. A due reminder (marked missed when it arrived late) is pinned to the fridge door as a paper note
+in the villager's hand with a magnet in the owner's colour, a slip comes up
+beside the fridge with the `news` cue (`village/reminder`), and the page then
+acknowledges it; a lost ack means it arrives again, deduped by id. Tick it off
+or put it off an hour or until tomorrow morning; a failed save says so and
+stays unticked. Choosing the fridge (or Tab to the note and Enter) shows the
+today note, from the host with no model call, beside the notes. The plugin
+has no frame hook at rest: one while a slip follows the fridge, one while a
+note is pinned. Reduced motion drops both movements.
+
 ## Plugins
 
 `renderer` provides the `stage` service: renderer, scene, camera, quality and
@@ -686,10 +703,10 @@ start in this frame. A `data:` worker also inherits the CSP; it is not used.
 
 `node scripts/check-prop-sandbox.mjs` starts its own dev server on 5304
 (through Vite's API, counting requests) on a temporary `VILLAGE_ROOT` with a
-synthetic villager token, plus an "outside" server on a random port. It
+synthetic paired session (an HttpOnly cookie, #85), plus an "outside" server on a random port. It
 proves, headless, 33 checks (39 since #47, below): a plain module builds; fetch, XHR, WebSocket,
 `importScripts`, `import()`, EventSource and sendBeacon never reach the outside
-server; the villager token is never requested; the worker has no `document`,
+server; the villager API is never requested; the worker has no `document`,
 `window`, `parent`, `top`, storage, cookies, indexedDB or caches, and its origin
 is `null`; the iframe itself (probed with Playwright as if the relay were
 compromised) cannot reach the page, storage, cookies, network, top navigation
@@ -1390,7 +1407,7 @@ face for speech, status lines and the slip's printed example.
 - `&from=<run-id>` stitches a saved result from `generated/villagers/<run-id>/` with no
   model call (round-1 results skip assemble's later look checks; live results do not).
 - `&person=<id>` (default `ME` in `src/villager.ts`), `&accent=#rrggbb` (default `#c8553d`). Open the page
-  with that person's link from the host (`#token=…`, #40): another person's token answers 403.
+  paired as that person (a `link <person>` link, #85): another person's session answers 403.
 - The person's profile is #42's (`VILLAGER_PEOPLE=alex:Alex:adult` or a `VILLAGER_PROFILES`
   file, see host/README.md), read with `GET persona-templates` together with the jokes dial as
   the host's `humourCeiling` decides it. The page has no profile flag.
@@ -1597,15 +1614,20 @@ After a reload the last answer is already on the page. If the villager host is
 not running, the page says "Your villager is out for a moment" and the line is
 still kept in local storage.
 
-Start the host with `npm run villager` in `host/`. It prints one link per
-person, `alex: http://localhost:5181/#token=…`; open it. The token rides in the
-URL fragment, which the browser never sends to a server. The page keeps it in
-`sessionStorage` for that tab and removes it from the address bar with
-`history.replaceState`. After the host restarts, open its new link (in the same
-tab is fine); until then the page says the villager is out. The dev server
-(`vite.config.ts`) only forwards `/villager/api/*` to the host on
-`127.0.0.1:$VILLAGER_PORT` (default 5190). It hands out no token, and with
-`appType: 'mpa'` an unknown path such as `/villager/launch` is a 404.
+Start the host with `npm run villager` in `host/`. In a terminal it prints a
+pairing link for each person with no paired device,
+`alex: http://localhost:5181/#pair=…`; open it once (#85). The code rides in
+the URL fragment, which the browser never sends to a server; the page removes
+it from the address bar with `history.replaceState` and trades it at
+`POST /villager/api/pair` for a session the host sets as an HttpOnly,
+SameSite=Strict cookie on `/villager/api`. Page scripts never see the session;
+the page keeps only its public tag. A paired device stays paired when the host
+restarts. `npm run village -- link <person>` makes a new link (and unpairs that
+person's other devices unless `--add`). A page that was never paired asks the
+host nothing. The dev server (`vite.config.ts`) only forwards
+`/villager/api/*` to the host on `127.0.0.1:$VILLAGER_PORT` (default 5190). It
+hands out nothing, and with `appType: 'mpa'` an unknown path such as
+`/villager/launch` is a 404.
 
 The dev server, and the live server that uses the same config, sends a Content
 Security Policy: `default-src`, `script-src` and `connect-src` are `'self'`
@@ -1615,14 +1637,15 @@ script, a promoted plugin included, can reach the villager API for its tab's
 person but cannot `fetch`, beacon or load an image from another origin.
 
 `node scripts/check-villager.mjs [--shot=path]` starts its own stub host and
-dev server on a temporary root and proves, headless: the token is required;
-`/villager/launch` is a 404 and returns no token; the link's token leaves the
-address bar and stays in the tab; the page is served with the policy, and a
+dev server on a temporary root and proves, headless: a paired session is
+required; the host prints no link when its output is not a terminal;
+`/villager/launch` is a 404; the link leaves the address bar and the session is
+an HttpOnly cookie no page script can read; an opened link cannot pair again; the page is served with the policy, and a
 page script's `fetch`, `sendBeacon` and image to another loopback port are
 blocked (the receiving server saw 0 requests); Enter sends the line and the
 reply is written gradually onto the facing page; the proxy streams without
-buffering; the answer is back after a reload; after a host restart the new
-link opens the same villager, which resumes the session; with the host down
+buffering; the answer is back after a reload; after a host restart the same
+device, with no new link, reaches the same villager, which resumes the session; with the host down
 the page says so and keeps the line; the home reports no other policy
 violations and the HMR socket connects; both processes stop. 17 of 17 passed
 (November 7, 2026). `--agent=claude` runs one real exchange instead.

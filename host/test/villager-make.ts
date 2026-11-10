@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { Context } from 'cordis'
 import villager from '../src/villager.ts'
+import { pairedLaunch } from './paired.ts'
 import { stubAgent } from '../src/villager-agent.ts'
 import { checkPersona, defaultPersona, TEMPLATES, type Profile } from '../src/persona.ts'
 import { applyPattern, claudeVillagerMaker, commitFiles, dialsOf, humourDial, personaFrom, repairAsk, STUB_PERSONA, stubVillagerMaker, tunePersona, villagerAsk, villagerPrompt, type VillagerMaker } from '../src/villager-make.ts'
@@ -28,12 +29,12 @@ async function start(villagerMaker?: VillagerMaker) {
   const ctx = new Context()
   const fiber = ctx.plugin(villager, { root, agent: stubAgent(5), port: 0, people: { alex: 'Alex', sam: 'Sam', jo: 'Jo' }, villagerMaker, profiles: PROFILES })
   await fiber.await()
-  const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+  const launch = await pairedLaunch(ctx.villager, ['alex', 'sam', 'jo'])
   const base = `http://127.0.0.1:${launch.port}`
   const api = (path: string, opts: { body?: unknown; token?: string | null; method?: string } = {}) => fetch(`${base}${path}`, {
     method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
     // Each person has their own token (#40): by default the one for the person the path names.
-    headers: { 'content-type': 'application/json', ...(opts.token === null ? {} : { authorization: `Bearer ${opts.token ?? launch.tokens[/^\/people\/([^/]+)\//.exec(path)?.[1] ?? ''] ?? launch.tokens.alex}` }) },
+    headers: { 'content-type': 'application/json', ...(opts.token === null ? {} : { cookie: `village_session=${opts.token ?? launch.tokens[/^\/people\/([^/]+)\//.exec(path)?.[1] ?? ''] ?? launch.tokens.alex}` }) },
     body: opts.body === undefined ? undefined : typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body),
   })
   return { fiber, api, base, tokens: launch.tokens as Record<string, string> }
@@ -337,7 +338,7 @@ try {
   // A second remake whose body arrives after the first has finished must still see it was re-made (409), and never call the model.
   const gItem2 = (await (await g.api('/people/jo/villagers', { body: { description: 'another tortoise', accent: '#c8553d' } })).json() as { item: string }).item
   // Its headers go now (the host starts on it); its body only after the first remake has finished.
-  const staleReq = request(`${g.base}/people/jo/villagers/${gItem2}/remake`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${g.tokens.jo}` } })
+  const staleReq = request(`${g.base}/people/jo/villagers/${gItem2}/remake`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${g.tokens.jo}` } })
   const stale = new Promise<{ status: number }>((resolve, reject) => {
     staleReq.on('response', (r) => (r.resume(), resolve({ status: r.statusCode ?? 0 })))
     staleReq.on('error', reject)

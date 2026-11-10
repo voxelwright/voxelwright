@@ -7,7 +7,7 @@ import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
 
 // The villager host (host/src/villager.ts) listens on 127.0.0.1. The dev server
 // forwards /villager/api/* to it, so the page and the API share an origin. The
-// page gets its person's token from the link the host prints, never from here.
+// device is paired from a link the host prints (#85), never from here.
 const port = Number(process.env.VILLAGER_PORT ?? 5190)
 
 // Page scripts, promoted plugins included, may fetch and open sockets only to this

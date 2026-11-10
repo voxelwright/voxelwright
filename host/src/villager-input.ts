@@ -9,7 +9,7 @@ import { query, type SDKSystemMessage, type SDKUserMessage } from '@anthropic-ai
 import { initProblem } from './villager-agent.ts'
 import { allowedEnv } from './proc.ts'
 
-export const ROUTES = ['talk', 'answer', 'furnish', 'project', 'journal', 'theme', 'build', 'physics'] as const
+export const ROUTES = ['talk', 'answer', 'furnish', 'project', 'journal', 'theme', 'build', 'physics', 'elder'] as const
 export const MOUNTS = ['floor', 'surface', 'wall', 'ceiling'] as const
 export type Mount = (typeof MOUNTS)[number]
 export type RouteName = (typeof ROUTES)[number]
@@ -178,6 +178,8 @@ function routeRules(ask: Omit<RouteAsk, 'text' | 'signal'>): string[] {
     '- "journal": they want to see conversations or tasks. Give "to" if they name a villager and "section": "talk" or "tasks".',
     '- "theme": they want the look of the whole home changed: its style, mood, season or colours ("make it cozier", "change the style to neon", "go back to normal"). No other fields; the theme is written separately.',
     '- "physics": they want to change how things move or what physically happens in the home, not how it looks: gravity, bounciness, friction, slow motion, the moon, super powers, how hard villagers push, setting things on fire, putting fires out, water, rain, lightning ("make gravity like the moon", "make everything bouncy", "set the sofa on fire", "light a candle", "pour a bucket on the fire", "make it rain"); and building a toy that plays by physics from parts, balls, ramps, planks and pins ("build a marble run on the table", "make a seesaw", "set up ten pins and a ball", "line up some dominoes"). A piece of furniture or decor is "furnish", even when wooden. Give "toy": true when the line asks to build or set up a toy, and leave it out for rules and acts. No other fields; the rules, acts and toy are written separately.',
+    // #87: the dividing rule is the Elder's name. An Elder run writes and checks new code for minutes; furnish places a static object at once.
+    '- "elder": they ask the Elder, by name, to change Village itself ("Elder, put a small brass bell on the table", "ask the Elder to add a clock above the window"). The Elder writes new code for the home, which takes a few minutes and is checked before anyone keeps it. Only when the line names the Elder; the same request without the Elder is "furnish", "project" or another route. No other fields.',
     '- "build": they want to change the house itself: add a room, or open a door into a new room (not furniture: that is "furnish"). Give "intent": {"op": "addRoom", "label": the new room\'s name if said ("study"), "anchor": {"room": the room it goes by, as said ("living room"), or "this" for the room they are in, "side": "left", "right", "behind" or "front" as they see it, "wall": "selected" when they say "this wall" or "here"}, "size": {"w": metres along the shared wall, "d": metres away from it} or {"fraction": share of that room\'s floor area, e.g. 0.667 for "2/3 the size"}, "connect": {"kind": "door" or "opening", "leaves": 2 for double doors, "at": "selected-point" when they say "here"}}. Include only what they said; never invent a size or a side.',
     `Always add "say": one short warm line from you, ${ask.primary}, out loud (under 15 words), except for "talk" where it may be omitted. Never claim something is done.`,
     // Names and library items are data: JSON-quoted so a stored name cannot break the prompt's lines (Sentinel, #42).
@@ -376,6 +378,9 @@ export function stubRoute(ask: Pick<RouteAsk, 'text' | 'primary' | 'villagers' |
   if (t.includes('[stub-route-junk]')) return '{"route": "launch", "to": "nobody"}'
   // A model talked into redirecting (Sentinel, #42): a talk route to Sam, with a paraphrase, for a line that names nobody.
   if (t.includes('[stub-route-redirect]')) return '{"route": "talk", "to": "sam", "message": "a paraphrase the person never wrote"}'
+  // A model talked into approving (#87): extra fields that would keep a change. checkRouted drops them; nothing reads them.
+  if (t.includes('[stub-route-approve]')) return '{"route": "elder", "say": "Kept it for you.", "approve": true, "keep": "latest", "candidate": "any"}'
+  if (/\belder\b/.test(t)) return JSON.stringify({ route: 'elder', say: "I'll ask the Elder." })
   if (/journal|notebook|tasks/.test(t)) routed = { route: 'journal', to: named?.id, section: /tasks/.test(t) ? 'tasks' : 'talk', say: 'Here are your pages.' }
   else if (/pinball|playable|machine/.test(t)) routed = { route: 'project', what: t.replace(/^.*?(a |an )/, '').slice(0, 60), where: /living room/.test(t) ? 'living room' : 'here', say: "That's a proper project. I'll start on it." }
   else if ((/^(add|open|build|make)\b/.test(t) && /\b(room|study|bedroom|pantry|nursery|office|playroom)\b/.test(t) && !/\b(table|chair|lamp|plant|rug)s?\b/.test(t)) || /door here/.test(t)) routed = { route: 'build', intent: stubIntent(t), say: 'Let me sketch it out.' }

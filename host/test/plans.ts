@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from 'cordis'
 import villager from '../src/villager.ts'
+import { pairedLaunch } from './paired.ts'
 import { stubAgent } from '../src/villager-agent.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'plans-check-'))
@@ -16,7 +17,7 @@ async function start() {
   const ctx = new Context()
   const fiber = ctx.plugin(villager, { root, agent: stubAgent(0), port: 0, people: { alex: 'Alex', sam: 'Sam' } })
   await fiber.await()
-  const launch = JSON.parse(await readFile(ctx.villager.launchFile, 'utf8'))
+  const launch = await pairedLaunch(ctx.villager, ['alex', 'sam'])
   // Each person has their own token (#40); the house is shared, so either opens it.
   return { fiber, base: `http://127.0.0.1:${launch.port}`, token: launch.tokens.alex as string, samToken: launch.tokens.sam as string }
 }
@@ -42,7 +43,7 @@ try {
   const api = (path: string, body?: unknown, token: string | null = host.token, raw?: string) =>
     fetch(`${host.base}${path}`, {
       method: body === undefined && raw === undefined ? 'GET' : 'POST',
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: { 'content-type': 'application/json', ...(token ? { cookie: `village_session=${token}` } : {}) },
       body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
     })
   const post = async (path: string, body: unknown) => {
@@ -207,7 +208,7 @@ try {
 
   // Two hosts on one root racing one parent: the link() claim lets one in and refuses the other.
   const twin = await start()
-  const asTwin = (path: string, body: unknown) => fetch(`${twin.base}/house/plans${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${twin.token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }))
+  const asTwin = (path: string, body: unknown) => fetch(`${twin.base}/house/plans${path}`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: `village_session=${twin.token}` }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }))
   const headNow = (await (await api('/house/plans')).json()).head
   const [ra, rb] = await Promise.all([
     post('/versions', { version: { id: hex('1', 16), parent: headNow, plan: base } }),
@@ -224,7 +225,7 @@ try {
   const cut = bytes.indexOf(Buffer.from('ü')) + 1
   const split = await new Promise<{ status: number; body: string }>((done, fail) => {
     const url = new URL(`${host.base}/house/plans/versions`)
-    const req = request({ hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': bytes.length, authorization: `Bearer ${host.token}` } }, (res) => {
+    const req = request({ hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': bytes.length, cookie: `village_session=${host.token}` } }, (res) => {
       let body = ''
       res.setEncoding('utf8').on('data', (c) => (body += c)).on('end', () => done({ status: res.statusCode ?? 0, body }))
     })

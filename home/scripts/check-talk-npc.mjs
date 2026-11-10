@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -20,9 +21,8 @@ const video = opt('video')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'villager-talk-'))
-// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
-const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
-const link = async (url) => `${url}#token=${await tokenNow()}`
+// #85: the page pairs through a one-time link (#pair=…), minted as `npm run village -- link` does, never from the dev server.
+const link = (url) => pairLink(url, root)
 const hostPort = Number(opt('host') ?? 5296)
 const devPort = Number(opt('dev') ?? 5295)
 const base = `http://localhost:${devPort}/`
@@ -376,9 +376,7 @@ try {
     check('with the host down the villager says so in character', /out for a moment/.test(away.at(-1).cards.sam?.text ?? ''), away.at(-1).cards.sam)
     check('with the host down the line is kept, in storage and on the slip', kept.at(-1)?.text === 'Tuft, are you there?' && kept.at(-1)?.person === 'sam' && line === 'Tuft, are you there?', { kept: kept.at(-1), line })
     host = await startHost()
-    // The host's new link, opened in the same tab: only the fragment changes.
-    const fresh = await tokenNow()
-    await page.evaluate((t) => (location.hash = `token=${t}`), fresh)
+    // The restarted host keeps this device's pairing (#85): no new link.
 
     // A typed farewell: each says a short goodbye in turn, nothing is sent, and they go back to chores.
     await page.locator('.talk-slip .line').fill('')

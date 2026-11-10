@@ -17,12 +17,17 @@ const PHYSICS = /\b(gravity|gravitational|bouncy|bouncier|bounce|bouncing|slippe
 /** Changes to the house itself (#48 build mode): a new room, or a door or wall opened into one. */
 const BUILD = /\b(add|open|build|make|knock|extend|put)\b[^.?!]{0,40}\b(room|study|bedroom|pantry|nursery|office|playroom|extension|door|doorway|wall)s?\b/
 
+/** Asking the Elder by name for a change to Village itself (#87): the route's dividing rule. */
+const ELDER = /\belder\b/
+const CHANGE = /\b(add|put|place|make|build|hang|paint|change|give|turn|move|remove|replace|install|fix|create|bring|set|let|could|can|would|please)\b/
+
 export interface Line { text: string; /** Names of other villagers in the room. */ others: string[] }
 
 /** True when the line may change the room, talk to another villager or open the journal. */
 export function mayRoute({ text, others }: Line): boolean {
   const t = text.toLowerCase()
   if (others.some((name) => new RegExp(`\\b${name.toLowerCase()}\\b`).test(t))) return true
+  if (ELDER.test(t)) return true
   if (JOURNAL.test(t) || ROOM_WORDS.test(t) || LOOK.test(t) || BUILD.test(t) || PHYSICS.test(t)) return true
   if (ROOM_VERBS.test(t) && (THINGS.test(t) || /\b(a|an|the|some|another|it|that|this|them)\b/.test(t))) return true
   if (WANTS.test(t) && THINGS.test(t)) return true
@@ -38,3 +43,5 @@ export const asksTheme = (text: string) => LOOK.test(text.toLowerCase()) || /\bm
 /** The page's own check of a physics route: the person's words must be about how things move. */
 export const asksPhysics = (text: string) => PHYSICS.test(text.toLowerCase())
 export const asksBuild = (text: string) => BUILD.test(text.toLowerCase()) || /\b(room|door|doorway|wall|opening|archway|extension)s?\b/i.test(text)
+/** The page's own check of an elder route: the person's words name the Elder and ask for a change, not about it. */
+export const asksElder = (text: string) => ELDER.test(text.toLowerCase()) && CHANGE.test(text.toLowerCase())

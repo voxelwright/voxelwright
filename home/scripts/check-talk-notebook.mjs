@@ -9,15 +9,15 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const shot = args.find((a) => a.startsWith('--shot='))?.slice(7)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'talk-notebook-'))
-// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
-const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
-const link = async (url) => `${url}#token=${await tokenNow()}`
+// #85: the page pairs through a one-time link (#pair=…), minted as `npm run village -- link` does, never from the dev server.
+const link = (url) => pairLink(url, root)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const hostPort = Number(opt('host') ?? 5193)
 const devPort = Number(opt('dev') ?? 5184)
@@ -116,9 +116,10 @@ try {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(await link(flagged))
+  // A clean page first, then paired: the page remembers its pairing (public tag) in local storage (#85).
+  await page.goto(flagged)
   await page.evaluate(() => localStorage.clear())
-  await page.reload()
+  await page.goto(await link(flagged))
   const ready = await page.evaluate(() => window.village.ready())
   await settle(page, 1200)
   const scene0 = await page.evaluate(() => {

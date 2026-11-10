@@ -22,7 +22,7 @@ export interface MadeDone { id: string; label: string; on: string; parts: number
 
 export type Asked =
   | { ok: true; note: string; rules: Rules; clamped: string[]; acts: Done[]; toy?: MadeDone; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
-  /** `link`: no token, or one from an earlier launch: open the latest link. `gone`: the world stopped (physics unloaded) while the model answered. */
+  /** `link`: this device is not paired: open a pairing link. `gone`: the world stopped (physics unloaded) while the model answered. */
   | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'gone'; reason?: string; acts?: Done[]; /** The answer's toy was refused: `reason` says why, in plain words. */ toy?: true; ms: number }
 
 const asked: ({ text: string; as: AskAs } & Asked)[] = []

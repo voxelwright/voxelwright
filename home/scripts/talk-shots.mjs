@@ -10,6 +10,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -100,9 +101,9 @@ async function session(name, viewport, q, fn, extra = {}) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  // #40: the page takes its person's token from the link (#token=…): Alex's from the host's launch file, or any for the scripted API.
-  const token = real ? JSON.parse(await readFile(join(process.env.VILLAGE_ROOT, 'villager', 'launch.json'), 'utf8')).tokens.alex : 'shots'
-  await page.goto(`${base}?talk=npc&q=${q}${suffix}#token=${token}`)
+  // #85: with a real host the page pairs as Alex through a one-time link minted in VILLAGE_ROOT; the scripted API needs none.
+  const url = `${base}?talk=npc&q=${q}${suffix}`
+  await page.goto(real ? await pairLink(url, process.env.VILLAGE_ROOT) : url)
   await page.evaluate(() => window.village.ready())
   await page.waitForTimeout(2500)
   const t0 = Date.now()

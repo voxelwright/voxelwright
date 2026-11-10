@@ -5,14 +5,22 @@
   "type": "module",
   "scripts": {
     "elder": "node src/cli.ts",
+    "village": "node src/village.ts",
     "typecheck": "tsc --noEmit",
     "regressions": "node test/regressions.ts",
     "villager": "node src/villager-cli.ts",
     "check-villager": "node test/villager.ts",
+    "check-reminders": "node test/reminders.ts",
     "check-plans": "node test/plans.ts",
     "live": "node src/live.ts",
     "check-promote": "node test/promote.ts",
-    "check-physics-prompt": "node test/physics-prompt.ts"
+    "check-physics-prompt": "node test/physics-prompt.ts",
+    "check-village": "node test/village.ts",
+    "check-elder-home": "node test/elder-home.ts",
+    "check-daily-home": "node test/daily-home.ts",
+    "check-approval": "node test/approval.ts",
+    "check-file-lock": "node test/file-lock.ts",
+    "check-stop": "node test/stop.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.319",

@@ -10,15 +10,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { DOODLE, INJECTION, SKETCHES, dense, drawWithMouse, onPage } from './sketches.mjs'
+import { pairLink } from './pairing.mjs'
 
 const args = process.argv.slice(2)
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(tmpdir(), 'village-sketch-'))
-// #40: the page takes its person's token from the link the host prints (#token=…), never from the dev server.
-const tokenNow = async () => JSON.parse(await readFile(join(root, 'villager', 'launch.json'), 'utf8')).tokens.alex
-const link = async (url) => `${url}#token=${await tokenNow()}`
+// #85: the page pairs through a one-time link (#pair=…), minted as `npm run village -- link` does, never from the dev server.
+const link = (url) => pairLink(url, root)
 const hostPort = Number(opt('host') ?? 5503)
 const devPort = Number(opt('dev') ?? 5502)
 const shots = opt('shots')

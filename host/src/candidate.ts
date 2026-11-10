@@ -45,8 +45,13 @@ async function fileInodes(dir: string): Promise<Set<string>> {
   const found = new Set<string>()
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue
-    const s = await lstat(join(entry.parentPath, entry.name))
-    found.add(`${s.dev}:${s.ino}`)
+    // git's own temp files (a background repack, another process's git) can vanish between the listing and here;
+    // a file that is gone links to nothing.
+    const s = await lstat(join(entry.parentPath, entry.name)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (s) found.add(`${s.dev}:${s.ino}`)
   }
   return found
 }
