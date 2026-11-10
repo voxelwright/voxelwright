@@ -129,6 +129,8 @@ export function createJolt(): PhysicsCore {
 
   // Ray casts: one ray, settings, collector and set of filters, reused.
   const ray = new J.RRayCast(), raySettings = new J.RayCastSettings(), rayHit = new J.CastRayClosestHitCollisionCollector()
+  // A ray that starts inside a shape leaves it without a hit: a caller steps on from a hit to look past it.
+  raySettings.mTreatConvexAsSolid = false
   const anyBroad = new J.BroadPhaseLayerFilter(), anyLayer = new J.ObjectLayerFilter(), anyShape = new J.ShapeFilter(), notThese = new J.IgnoreMultipleBodiesFilter()
 
   /** Convex radius must not exceed the smallest half extent (thin walls, flippers). */

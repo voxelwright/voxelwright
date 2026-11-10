@@ -26,6 +26,7 @@ import type { Vec3 } from '../engine/core'
 import type { WorldApi } from '../engine/api'
 import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
+import { hand } from './hand'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -174,6 +175,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   }
   // Fingers and the mouse: the same inputs as the keys while the table is chosen, and pokes and flings otherwise.
   const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
+  // The house's own things, by hand (#107): pick up, carry, stack and throw.
+  const grip = hand(ctx, world, () => playing?.id ?? null)
   ctx.effect(() => {
     addEventListener('keydown', onKey, true)
     addEventListener('keyup', onKey, true)
@@ -287,6 +290,8 @@ export async function start(ctx: Context, gone: () => boolean) {
     thing: (key: string) => world.thing(key),
     /** The home's things with bodies, the thing a mesh belongs to (or why none), and scan stats. */
     home: { list: home.list, bodyOf: home.bodyOf, scan: home.scan, stats: home.stats },
+    /** The hand (#107): what it holds, what a press at a screen point would take, and putting every loose thing back where it was made. */
+    hand: { holding: grip.holding, pick: grip.pick, tidy: (keys?: string[]) => world.tidy(keys), astray: () => world.astray() },
     /** A follower for any scene object (checks walk one into things); `held` says it is held back. */
     follow: (key: string, object: THREE.Object3D) => world.follow(key, object),
     unfollow: (key: string) => world.unfollow(key),

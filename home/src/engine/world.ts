@@ -699,6 +699,18 @@ export class World implements WorldApi {
     return true
   }
 
+  /** The moving bound things a hand may take: each one's key, where it is (world space) and the half sizes of the box round it. */
+  movables(): { key: string; at: Vec3; half: Vec3 }[] {
+    const out: { key: string; at: Vec3; half: Vec3 }[] = []
+    for (const b of this.bound.values()) if (b.motion === 'dynamic') out.push({ key: b.key, at: [b.p.x, b.p.y, b.p.z], half: halfOf(b.outline) })
+    return out
+  }
+
+  /** The scene object a bound thing's body stands for. */
+  boundObject(key: string) {
+    return this.bound.get(key)?.object
+  }
+
   /** Every held thing's key. */
   holding() {
     return [...this.holds.keys()].map((b) => b.key)
