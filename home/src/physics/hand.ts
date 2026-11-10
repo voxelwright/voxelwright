@@ -134,8 +134,10 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
 
   // Build mode asks before it grips a wall (and on every hover move): the answer for one point is kept for the frame.
   let asked: { x: number; y: number; distance: number } | null = null
+  /** Not the hand's moment: a table is played, an entry is chosen, or a thing is being placed (its drag is the placing's). */
+  const away = () => Boolean(played() || ctx.entries.active || ctx.get('placement')?.active)
   const claim = (x: number, y: number) => {
-    if (played() || ctx.entries.active) return Infinity
+    if (away()) return Infinity
     if (asked?.x === x && asked.y === y) return asked.distance
     const t = pick(x, y, NEAR.mouse)
     asked = { x, y, distance: t ? v.set(...t.at).distanceTo(camera.position) - Math.hypot(...t.half) : Infinity }
@@ -176,7 +178,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     if (e.target === canvas && !e.isPrimary) letGo() // two fingers: the view's
     // A hold whose release was never seen (the button let go outside the window) ends with the next press.
     if (held && e.isPrimary) letGo()
-    if (e.target !== canvas || e.button !== 0 || !e.isPrimary || played() || ctx.entries.active || held) return
+    if (e.target !== canvas || e.button !== 0 || !e.isPrimary || away() || held) return
     const touch = e.pointerType === 'touch'
     const thing = pick(e.clientX, e.clientY, touch ? NEAR.touch : NEAR.mouse)
     if (!thing) return
@@ -237,7 +239,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     if (!hover || held) return
     const { x, y } = hover
     hover = null
-    const over = !played() && !ctx.entries.active && pick(x, y, NEAR.mouse)
+    const over = !away() && pick(x, y, NEAR.mouse)
     if (over) canvas.style.cursor = 'grab'
     else if (canvas.style.cursor === 'grab') canvas.style.cursor = ''
   })

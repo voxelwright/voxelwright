@@ -70,7 +70,7 @@ interface Hold { to: Vec3; strength: number; arc: number }
 const HOLD_RATE = 14
 const HOLD_SPEED = 5
 const HOLD_UPRIGHT = 9
-/** A moving bound thing that comes to rest within this (m) of where it was made is set there exactly. */
+/** A moving bound thing that comes to rest within this (m) of where it was made counts as home. */
 const NEARLY_HOME = 0.012
 
 export interface BindSpec {
@@ -646,15 +646,11 @@ export class World implements WorldApi {
         b.woke?.()
       } else {
         // Its last pose is drawn before it is left alone. Come to rest a hair from where it was made (it only
-        // settled, or was put back by hand), it is set there exactly: the house stays as it was drawn.
+        // settled, or was put back by hand), it counts as home: its owner may draw it as it was made. Its body
+        // stays where it settled, so woken again it does not settle again.
         this.pose(b)
         this.stirring.delete(b)
-        const home = !this.holds.has(b) && this.isHome(b, NEARLY_HOME, 3e-4)
-        if (home) {
-          this.core.rest(b.body, b.home.p, b.home.q)
-          this.pose(b)
-        }
-        b.slept?.(home)
+        b.slept?.(!this.holds.has(b) && this.isHome(b, NEARLY_HOME, 3e-4))
       }
     }
   }

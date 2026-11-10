@@ -28,11 +28,13 @@ const HOT = new THREE.Color(6, 3.2, 0.9)
 class Pool {
   readonly mesh: THREE.InstancedMesh
   readonly live: Bit[] = []
+  private drawn = 0
   constructor(geometry: THREE.BufferGeometry, mat: THREE.Material, readonly max: number, name: string, private kind: 'bit' | 'spark' | 'puff') {
     this.mesh = new THREE.InstancedMesh(geometry, mat, max)
     this.mesh.name = name
-    this.mesh.count = 0
-    this.mesh.visible = false
+    // Drawn once at no size, so its buffers are made with the house and not in the middle of a first hit.
+    this.mesh.setMatrixAt(0, matrix.makeScale(0, 0, 0))
+    this.mesh.count = 1
     this.mesh.frustumCulled = false
     this.mesh.castShadow = kind === 'bit'
     this.mesh.setColorAt(0, DUST)
@@ -43,7 +45,7 @@ class Pool {
   }
   step(dt: number) {
     if (!this.live.length) {
-      if (this.mesh.visible) this.mesh.visible = false
+      if (this.mesh.visible && this.drawn++ > 2) this.mesh.visible = false
       return
     }
     let n = 0
