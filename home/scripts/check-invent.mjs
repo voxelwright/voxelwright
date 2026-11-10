@@ -253,23 +253,33 @@ try {
     {
       const r = await ask('[stub-invent-h] a magnet')
       const gid = `${(await world()).trial}/pull`
-      const minh = await page.evaluate(async (gid) => {
+      const got = await page.evaluate(async (gid) => {
         const p = window.village.physics
         const snap = p.snapshot()
         await new Promise((r) => setTimeout(r, 1200))
+        const at = p.thing('house/crate').position
+        p.engine.world.moveTo('house/crate', [at[0] + 0.3, at[1], at[2]], [0, 0, 0])
+        await new Promise((r) => setTimeout(r, 700))
+        const placed = p.snapshot().gadgets[gid].state.placed
         p.restore(snap)
         await new Promise((r) => setTimeout(r, 400))
-        return p.snapshot().gadgets[gid]?.state.minh
+        const s = p.snapshot().gadgets[gid].state
+        return { minh: s.minh, placed: [placed, s.placed] }
       }, gid)
       await undo()
-      check('after a snapshot from an earlier clock is restored, a call still stands for a positive time', r.ok && minh > 0.01, { minh })
+      await page.evaluate(() => window.village.physics.reset())
+      check('after a snapshot from an earlier clock is restored, a call still stands for a positive time and the places are read again at once', r.ok && got.minh > 0.01 && got.placed[1] > got.placed[0], got)
     }
-    // Undo while the code is looping, before anything has noticed.
+    // Undo while a call is still running in the sandbox: nothing has noticed, nothing is asked.
     {
-      const r = await ask('[stub-invent-loop] a magnet')
+      const closed = new Promise((resolve) => page.once('worker', (w) => w.once('close', () => resolve(true))))
+      const r = await ask('[stub-invent-busy] a magnet')
+      await page.waitForTimeout(300)
+      const busy = await page.evaluate(() => { const m = window.village.physics.mechanics().at(-1); return m.stopped === null && m.stats.views === 1 && m.stats.errors === 0 })
       const undone = await undo()
+      const gone = await Promise.race([closed, new Promise((r) => setTimeout(() => r(false), 3000))])
       const after = await world()
-      check('Undo works at once while the code is still looping', r.ok && undone && same(after, baseline), { after: same(after, baseline) ? 'baseline' : after })
+      check('Undo works at once while a call is still running, and its worker ends', r.ok && busy && undone && gone && same(after, baseline), { busy, gone, after: same(after, baseline) ? 'baseline' : after })
     }
     // Nothing of the page exists inside the interpreter.
     {
@@ -295,7 +305,7 @@ try {
       }, `${id}/pull`)
       const mid = await world()
       const f1 = await fridge()
-      check('a forged answer: unknown and fixed things, wild numbers, other gadgets, rules and unknown commands are refused; state keeps numbers only', r.ok && same(seen.state, { ok: 1 }) && seen.stats.refused > 1000 && seen.stats.commands > 0 && seen.fastest <= seen.maxSpeed + 0.5 && seen.lowest > -1 && seen.widest < 50 && mid.rules === baseline.rules && mid.score === baseline.score && mid.polluted === null && same(f0, f1), { ...seen, stats: { ...seen.stats, pageMs: undefined, boxMs: undefined, asks: undefined }, rules: mid.rules === baseline.rules, score: mid.score === baseline.score, fridge: same(f0, f1) })
+      check('a forged answer: unknown and fixed things, wild numbers, other gadgets, rules and unknown commands are refused; state keeps numbers only', r.ok && same(seen.state, { ok: 1, ...Object.fromEntries(Array.from({ length: 15 }, (_, i) => ['n' + i, i])) }) && seen.stats.refused > 1000 && seen.stats.commands > 0 && seen.fastest <= seen.maxSpeed + 0.5 && seen.lowest > -1 && seen.widest < 50 && mid.rules === baseline.rules && mid.score === baseline.score && mid.polluted === null && same(f0, f1), { ...seen, stats: { ...seen.stats, pageMs: undefined, boxMs: undefined, asks: undefined }, rules: mid.rules === baseline.rules, score: mid.score === baseline.score, fridge: same(f0, f1) })
       await undo()
       await page.evaluate(() => window.village.physics.reset())
       check('and Undo leaves the baseline', same(await world(), baseline), await world())
@@ -306,7 +316,7 @@ try {
       const m = await mech()
       await undo()
       await page.evaluate(() => window.village.physics.reset())
-      check('each forged command is checked on its own: 2 of 17 applied, 15 refused', r.ok && m.stats.commands === 2 && m.stats.refused === 15, { commands: m.stats.commands, refused: m.stats.refused })
+      check('each forged command is checked on its own, and only the first 64 are read: 49 applied, 38 refused', r.ok && m.stats.commands === 49 && m.stats.refused === 38, { commands: m.stats.commands, refused: m.stats.refused })
     }
     // Try another, then Undo: the home's things are where they were before the first mechanic, not where it threw them.
     {

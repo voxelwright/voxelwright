@@ -154,15 +154,15 @@ const HOSTILE: Record<string, string> = {
   '[stub-invent-late-loop]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; while (g.state.n > 60) {} }',
   // A few steps of throwing everything that can move into the air: Undo must put each back.
   '[stub-invent-fling]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; if (g.state.n > 8) return; for (const t of w.things) w.push(t.key, [0.2 * t.mass, 1.5 * t.mass, 0]) }',
-  // Writes on its part every step, as real answers like to.
-  '[stub-invent-show]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; g.show("n " + g.state.n) }',
   // Native built-ins never ask the interrupt handler: each call runs for seconds under the budget, and only the page's watchdog ends it.
   '[stub-invent-native]': 'var big = Array.from({ length: 60000 }, () => ({ a: [1, 2, 3] }))\nfunction step(g, w) { for (let i = 0; i < 1e6; i++) JSON.stringify(big) }',
+  // A call the budget cannot end quickly, started again at once: something is always running.
+  '[stub-invent-busy]': 'const big = []\nfor (let i = 0; i < 20000; i++) big.push(i)\nfunction step(g, w) { for (;;) JSON.stringify(big) }',
   // Fails every other step: never three in a row, so it keeps running.
   '[stub-invent-flaky]': 'function step(g, w) { if (Math.round(w.clock * 60) % 2) throw new Error("odd step") }',
-  // Reads the time each call stands for: never zero or less, whatever the clock did.
-  '[stub-invent-h]': 'function step(g, w) { g.state.minh = Math.min(g.state.minh === undefined ? 1 : g.state.minh, w.h) }',
-  // The forged commands once, alone, then nothing: each one is counted.
+  // Reads the time each call stands for (never zero or less, whatever the clock did) and counts each time the places came anew.
+  '[stub-invent-h]': 'let last = null, n = 0\nfunction step(g, w) { if (w.places !== last) { last = w.places; n++ } g.state.placed = n; g.state.minh = Math.min(g.state.minh === undefined ? 1 : g.state.minh, w.h) }',
+  // The forged commands once, then 70 honest pushes, then nothing: each is counted, and only the first 64 are read.
   '[stub-invent-wild-once]': `function step(g, w) {}
 let calls = 0
 globalThis.__tick = (json) => {
@@ -174,6 +174,7 @@ globalThis.__tick = (json) => {
     ['push', key, [1e308, 1e308, 1e308]], ['push', 'house/floor', [0, 5, 0]], ['push', 'villager/alex', [0, 5, 0]], ['push', key, [NaN, 0, 0]], ['push', key, 'up'],
     ['velocity', key, [9999, 0, 0]], ['move', key, [0, -40, 0]], ['move', key, [1e9, 1, 0]], ['move', 'kitchen/fridge', [0, 1, 0]],
     ['fire', id, 'nope', 1], ['fire', 'pinball/score', 'changed', 99999], ['show', id, '<img src=x onerror=alert(1)>'], ['ignite', key], ['setRules', { gravity: [0, 30, 0] }], 'junk', null, 7,
+    ...Array.from({ length: 70 }, () => ['push', key, [0, 0.0001, 0]]),
   ], states: {} })
 }`,
   // Reaches for everything a page script could: none of it exists inside the interpreter.
@@ -192,11 +193,11 @@ globalThis.__tick = (json) => {
     ['velocity', key, [9999, 0, 0]], ['move', key, [0, -40, 0]], ['move', key, [1e9, 1, 0]], ['move', 'kitchen/fridge', [0, 1, 0]],
     ['fire', id, 'nope', 1], ['fire', 'pinball/score', 'changed', 99999], ['show', id, '<img src=x onerror=alert(1)>'], ['ignite', key], ['setRules', { gravity: [0, 30, 0] }], 'junk', null, 7,
     ...many,
-  ], states: { [id]: { ok: 1, bad: 'text', nan: null, ['__proto__']: { polluted: 1 }, constructor: 2, 'a b': 3, deep: { x: 1 } }, 'pinball/score': { value: 99999 } }, rules: { gravity: [0, 30, 0] }, approve: true })
+  ], states: { [id]: { ok: 1, bad: 'text', nan: null, ['__proto__']: { polluted: 1 }, constructor: 2, 'a b': 3, deep: { x: 1 }, ...Object.fromEntries(Array.from({ length: 20 }, (_, i) => ['n' + i, i])) }, 'pinball/score': { value: 99999 } }, rules: { gravity: [0, 30, 0] }, approve: true })
 }`,
 }
 
-/** The stub's mechanic answer for a sentence: the magnet, or a hostile variant by marker. "[stub-invent-flame]" asks for the flame kind in its toy, "[stub-invent-unused]" uses no new kind, "[stub-invent-off]" stands off its surface, "[stub-invent-knob]" declares a knob with a bad range, "[stub-invent-junk]" answers prose. */
+/** The stub's mechanic answer for a sentence: the magnet, or a hostile variant by marker. "[stub-invent-flame]" asks for the flame kind in its toy, "[stub-invent-unused]" uses no new kind, "[stub-invent-off]" stands off its surface, "[stub-invent-knob]" declares a knob whose step is zero, "[stub-invent-junk]" answers prose. */
 export function stubMechanic(text: string, surfaces: OfferedSurface[]): string {
   const t = text.toLowerCase()
   if (t.includes('[stub-invent-junk]')) return 'Sure! A magnet, coming right up.'
@@ -207,6 +208,6 @@ export function stubMechanic(text: string, surfaces: OfferedSurface[]): string {
   if (t.includes('[stub-invent-flame]')) toy.gadgets.push({ id: 'flame', kind: 'flame', part: 'magnet', knobs: { lit: 1 } })
   if (t.includes('[stub-invent-unused]')) toy.gadgets = []
   if (t.includes('[stub-invent-off]')) toy.parts[0].at = [on.half[0] + 1, 0.02, 0]
-  if (t.includes('[stub-invent-knob]')) (m.kind as { knobs: unknown }).knobs = { pull: { min: 5, max: 1, step: 0, default: 'strong' } }
+  if (t.includes('[stub-invent-knob]')) (m.kind as { knobs: unknown }).knobs = { pull: { min: 0, max: 2, step: 0, default: 0.5, about: 'strength' } }
   return mechanicAnswer(`A magnet on ${on.label}: it pulls the steel marbles to it.`, on.id, m)
 }
