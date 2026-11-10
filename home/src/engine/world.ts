@@ -498,7 +498,11 @@ export class World implements WorldApi {
     g.lineWidth = 6
     g.strokeRect(14, 14, 484, 152)
     g.fillStyle = '#4a3326'
-    g.font = '600 104px "Iowan Old Style", Palatino, Georgia, serif'
+    const font = (px: number) => `600 ${px}px "Iowan Old Style", Palatino, Georgia, serif`
+    g.font = font(104)
+    // A longer text (a word and a number) is set smaller, to fit inside the frame.
+    const wide = g.measureText(d.text).width
+    if (wide > 440) g.font = font(Math.floor((104 * 440) / wide))
     g.textAlign = 'center'
     g.textBaseline = 'middle'
     g.fillText(d.text, 256, 96)

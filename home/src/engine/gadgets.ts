@@ -263,6 +263,12 @@ registerGadget({
   },
 })
 
+/** A record's card: the word and the number. */
+const best = (g: Gadget, w: WorldApi) => {
+  const display = setting<string | undefined>(g, 'display')
+  if (display) w.show(`${g.toy}/${display}`, `BEST ${g.knobs.best}`)
+}
+
 /** How bright a lamp's part is: lit, and brighter for the moment of a flash. */
 const LIT = 1, FLASH = 2
 const shine = (g: Gadget, w: WorldApi) => {
@@ -403,6 +409,23 @@ registerGadget({
   knobs: {}, inputs: ['go'], outputs: ['done'],
   receive(g, port, _s, w) {
     if (port === 'go' && w.restartToy(g.toy)) w.fire(g, 'done', { value: 1 })
+  },
+})
+
+registerGadget({
+  kind: 'record', about: 'The best so far. On `in`, when the signal\'s value beats `best`, it keeps that value as `best` and fires `beaten` with it. Shown as "BEST 1230" on the part named by its `display` setting. A reset does not clear it: whoever keeps the house may keep `best` between visits.',
+  knobs: { best: knob(0, 9_999_999, 1, 0, 'the best so far') }, inputs: ['in'], outputs: ['beaten'], settings: { display: 'part' },
+  setup(g, w) {
+    best(g, w)
+  },
+  knob(g, _name, w) {
+    best(g, w)
+  },
+  receive(g, port, s, w) {
+    if (port !== 'in' || !Number.isFinite(s.value) || Math.round(s.value) <= g.knobs.best) return
+    g.knobs.best = Math.min(9_999_999, Math.round(s.value))
+    best(g, w)
+    w.fire(g, 'beaten', { value: g.knobs.best })
   },
 })
 

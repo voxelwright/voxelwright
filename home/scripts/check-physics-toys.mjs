@@ -64,7 +64,9 @@ const ASKS = [
   { kind: 'seesaw', text: 'make a seesaw' },
   { kind: 'pins', text: 'set up ten pins and a ball' },
   // A game, not only a toy (#108): a round, a score and an end, from the logic parts.
-  { kind: 'game', text: 'make a skittles game with a score: three throws to knock them all down' },
+  // The stand-in answers the host's own worked example (skittles). The real model is asked for a game the prompt
+  // has no example of, so what comes back is composed and not copied (--game-ask= asks for another).
+  { kind: 'game', text: 'make a skittles game with a score: three throws to knock them all down', real: opt('game-ask') ?? 'make a tin can alley game: six cans stacked in a pyramid on a little shelf and a ball to throw at them, a point for each can knocked over, I win when all six are down and lose if 20 seconds run out' },
 ]
 
 /**
@@ -115,8 +117,8 @@ async function works(page, kind) {
         throws++
         p.advance(4.5)
       }
-      // A last throw may still be deciding the round.
-      for (let i = 0; i < 8 && !fired('won') && !fired('lost'); i++) p.advance(1)
+      // A last throw may still be deciding the round, or its time limit running out.
+      for (let i = 0; i < 40 && !fired('won') && !fired('lost'); i++) p.advance(1)
       const now = p.snapshot().gadgets
       const scored = Object.entries(counters0).filter(([g, v]) => now[g].state.value !== v).map(([g]) => g.slice(id.length + 1))
       const down = pieces.filter((t) => w.upright(t.key) < 0.7).length
@@ -435,7 +437,7 @@ try {
     for (const a of ASKS.filter((x) => !only || only.includes(x.kind))) {
       for (let i = 0; i < trials; i++) {
         const t0 = Date.now()
-        const r = await ask(a.text)
+        const r = await ask(a.real ?? a.text)
         const ms = Date.now() - t0
         const played = r.ok && r.toy ? await works(page, a.kind) : null
         if (shotsDir && r.ok && r.toy && i === 0) {
@@ -448,7 +450,7 @@ try {
           await page.evaluate(() => window.village.physics.look(null))
         }
         await page.evaluate(() => window.village.physics.made.undo())
-        const row = { ask: a.text, trial: i + 1, built: Boolean(r.ok && r.toy), works: Boolean(played?.pass), reason: r.ok ? (r.toy ? played?.why || '' : 'no toy in the answer') : r.reason ?? r.why, ms, hostMs: r.hostMs, toy: r.ok && r.toy ? { label: r.toy.label, on: r.toy.on, parts: r.toy.parts, clamped: r.toy.clamped.length } : null, played }
+        const row = { ask: a.text, ...(a.real ? { asked: a.real } : {}), trial: i + 1, built: Boolean(r.ok && r.toy), works: Boolean(played?.pass), reason: r.ok ? (r.toy ? played?.why || '' : 'no toy in the answer') : r.reason ?? r.why, ms, hostMs: r.hostMs, toy: r.ok && r.toy ? { label: r.toy.label, on: r.toy.on, parts: r.toy.parts, clamped: r.toy.clamped.length } : null, played }
         if (a.kind === 'game' && played) row.round = { started: played.started, ended: played.ended, down: played.down, pieces: played.pieces, scored: played.scored, again: played.again, gadgets: played.gadgets }
         report.trials.push(row)
         console.error(`${model} | ${a.kind} #${i + 1} | built ${row.built} | works ${row.works} | ${ms} ms | ${row.reason}`)

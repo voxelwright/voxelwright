@@ -28,6 +28,7 @@ import type { WorldApi } from '../engine/api'
 import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
 import { feel } from './feel'
+import { bestScores } from './best'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_MODE, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -103,6 +104,8 @@ export async function start(ctx: Context, gone: () => boolean) {
     if (gone()) return
   }
   own(ctx, world.group)
+  // Each game's best score, as it was kept, and kept again when beaten.
+  bestScores(ctx, world)
   // Every thing in the home a body, read from the scene now; again after every plan change (a
   // placed thing, undo), every time the build mode builds the walls again (it does so in its next
   // frame, after the plan changed) and every thing added to or taken from the scene, in the next

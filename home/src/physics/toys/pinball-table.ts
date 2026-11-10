@@ -14,6 +14,8 @@
 // - A ball lost within twelve seconds of a round starting, or of the last ball being used,
 //   comes back free: a timer, and a blue lamp lit while it counts. A ball that came back
 //   free does not start the timer again.
+// - The best score is a part too (`record`), on its own card over the scoreboard; the home
+//   keeps it between visits (physics/best.ts).
 // - What a hit feels like is parts too: each bumper has its own bell (C, E, G), lanes and
 //   targets theirs, a prize rings a run up and a lost ball a run down; bumpers nudge the
 //   view and a prize jolts it and holds the world for a beat.
@@ -80,6 +82,7 @@ export const PINBALL: ToySpec = {
     { id: 'cabinet', shape: { kind: 'box', half: [W + 0.03, 0.06, L + 0.04] }, material: 'walnut', at: [0, -0.08, 0] },
     { id: 'backbox', shape: { kind: 'box', half: [W + 0.03, 0.17, 0.03] }, material: 'walnut', at: [0, 0.17, -L - 0.07] },
     { id: 'scoreboard', shape: { kind: 'box', half: [0.2, 0.07, 0.004] }, material: 'maple', paint: '#f6ead2', at: [0, 0.2, -L - 0.036] },
+    { id: 'best', shape: { kind: 'box', half: [0.11, 0.026, 0.004] }, material: 'maple', paint: '#f6ead2', at: [0, 0.306, -L - 0.036] },
     lens('life-1', -0.15, '#f2b34a'),
     lens('life-2', -0.09, '#f2b34a'),
     lens('life-3', -0.03, '#f2b34a'),
@@ -160,6 +163,7 @@ export const PINBALL: ToySpec = {
     { id: 'bump', kind: 'shake', knobs: { strength: 0.14 } },
     { id: 'jolt', kind: 'shake', knobs: { strength: 0.8 } },
     { id: 'beat', kind: 'freeze', knobs: { seconds: 0.09 } },
+    { id: 'best', kind: 'record', display: 'best' },
     // The missions.
     { id: 'lanes', kind: 'collect', knobs: { count: 3 } },
     { id: 'targets', kind: 'collect', knobs: { count: 4 } },
@@ -215,7 +219,8 @@ export const PINBALL: ToySpec = {
     ...wires('balls.counting', 'serve.spawn'),
     ...wires('game.during', 'saver.start'),
     ...wires('balls.reached', 'game.lose'),
-    ...wires('game.lost', 'over-lamp.on', 'serve.spawn', 'over-bell.ring', 'saver.stop', 'save-lamp.off'),
+    ...wires('best.beaten', 'prize-bell.ring'),
+    ...wires('game.lost', 'best.in', 'over-lamp.on', 'serve.spawn', 'over-bell.ring', 'saver.stop', 'save-lamp.off'),
   ],
 }
 

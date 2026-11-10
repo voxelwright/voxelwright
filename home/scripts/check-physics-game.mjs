@@ -98,6 +98,7 @@ try {
         p.place('pinball/ball', [-0.065, 0.0136, -0.26])
         p.advance(0.6)
       },
+      best: () => ({ best: p.knobs().find((k) => k.id === 'pinball/best').knobs.best, beaten: p.signals()['pinball/best.beaten'] ?? 0, kept: JSON.parse(localStorage.getItem('village.games.best') ?? '{}')['pinball/best'] ?? null }),
       lit,
     }
   })
@@ -143,6 +144,7 @@ try {
     out.scoreBeforeLast = g.state().score
     g.drain()
     out.three = g.state()
+    out.best = g.best()
     out.lost = p.events().slice(n0).filter((e) => e.kind === 'signal' && e.gadget === 'pinball/game' && e.port === 'lost')
     // After the end: another drain ends nothing again, and costs no ball (none is in play).
     g.drain()
@@ -155,6 +157,7 @@ try {
   check('A spare ball falling back into the gutter costs nothing (it was never in play); the next ball lost costs one', round.spare.balls === 2 && round.two.balls === 1 && round.two.lamps.join() === 'true,false,false', { spare: round.spare, two: round.two })
   check('The third ball ends the round: lost fires once, every lamp is out and the end lamp is lit', round.three.balls === 0 && round.three.fired.lost === 1 && !round.three.lamps.some(Boolean) && round.three.over, round.three)
   check('The end is an event anyone can read: a signal from pinball/game, port lost, carrying the score', round.lost.length === 1 && round.scored > 0 && round.lost[0].value === round.scoreBeforeLast && round.three.score === round.scoreBeforeLast, { lost: round.lost, scored: round.scored, score: round.scoreBeforeLast })
+  check('The round\'s score is the best so far: the record keeps it, says so once, and it is kept for the next visit', round.scoreBeforeLast > 0 && round.best.best === round.scoreBeforeLast && round.best.beaten === 1 && round.best.kept === round.scoreBeforeLast, round.best)
   check('After the end a drain ends nothing again and counts no ball', round.afterEnd.fired.lost === 1 && round.afterEnd.fired.started === 1 && round.afterEnd.balls === 0, round.afterEnd)
   if (shotsDir) {
     await page.evaluate(() => window.village.physics.play(true))
@@ -182,6 +185,7 @@ try {
     g.drain()
     g.drain()
     const ended = g.state()
+    const bestAfter = g.best()
     p.restore(snap)
     const restored = g.state()
     // The restored round carries on: one more drain is the second ball, not a new game.
@@ -190,10 +194,11 @@ try {
     p.reset()
     const reset = g.state()
     g.pull()
-    return { before, ended, restored, carriedOn, reset, startedAfterReset: g.state().fired.started - reset.fired.started }
+    return { before, ended, bestAfter, restored, carriedOn, reset, startedAfterReset: g.state().fired.started - reset.fired.started }
   })
   const same = (a, b) => a.balls === b.balls && a.score === b.score && a.lamps.join() === b.lamps.join() && a.over === b.over
   check('A snapshot puts the game back: balls, a score above zero and every lamp as they were, and the round carries on', undo.ended.over && undo.before.score > 0 && undo.ended.score > undo.before.score && same(undo.before, undo.restored) && undo.carriedOn.balls === undo.before.balls - 1 && !undo.carriedOn.over, undo)
+  check('A later round only changes the best when it beats it', undo.bestAfter.best === Math.max(round.best.best, undo.ended.score) && undo.bestAfter.kept === undo.bestAfter.best, { first: round.best, later: undo.ended.score, best: undo.bestAfter })
   check('Reset puts the game back to before a round (three balls, lamps lit, end lamp dark), and a pull then starts one', undo.reset.balls === 3 && undo.reset.lamps.every(Boolean) && !undo.reset.over && undo.startedAfterReset === 1, undo)
 
   // ── The missions: three lanes for a multiball, four targets for another ball (a round is running) ──
@@ -366,6 +371,13 @@ try {
   check('By finger on a phone-sized screen: the plunger button held and let go starts a round', byFinger.started === before + 1, { before, byFinger })
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'game-playing.jpg'), quality: 88 })
   await game(() => window.village.physics.play(false))
+  // ── The next visit: the best score is on its card again ──
+  const kept = await game(() => window.game.best())
+  await page.reload()
+  await page.evaluate(() => window.village.ready())
+  await page.waitForFunction(() => window.village?.physics?.knobs().some((k) => k.id === 'pinball/best'), null, { timeout: 30_000 })
+  const back = await page.evaluate(() => window.village.physics.knobs().find((k) => k.id === 'pinball/best').knobs.best)
+  check('On the next visit the table shows the best score that was kept', kept.best > 0 && back === kept.best, { kept, back })
   check('No page errors', !errors.length, errors.slice(0, 5))
 } catch (error) {
   check('the check ran to the end', false, String(error?.stack ?? error))
