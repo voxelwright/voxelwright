@@ -204,7 +204,6 @@ export function createJolt(): PhysicsCore {
       cs.mRestitution = spec.restitution
       cs.mGravityFactor = spec.gravityFactor ?? 1
       cs.mLinearDamping = spec.linearDamping ?? 0.05
-      if (spec.angularDamping !== undefined) cs.mAngularDamping = spec.angularDamping
       cs.mIsSensor = Boolean(spec.sensor)
       // Every dynamic body is swept (LinearCast): a 27 mm ball through 5 mm walls tunnels 896 in 1000 without it (bench).
       if (spec.motion === 'dynamic') cs.mMotionQuality = J.EMotionQuality_LinearCast

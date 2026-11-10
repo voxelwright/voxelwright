@@ -115,7 +115,8 @@ try {
     return { keys: keys.length, home: p.home.list().filter((t) => t.motion === 'dynamic').map((t) => t.key), settled, again, clamped }
   })
   // Drawn things touch or overlap a little (a high chair's tray over the table): woken, they settle that much, once.
-  // Fruit lying loose in the bowl (#107) shifts with it by a few millimetres each time the pile is woken: round things on a floor never quite lock.
+  // Fruit lying loose in the bowl (#107) rolls a few millimetres each time the pile is woken: the bowl settles with a lean of about 0.1°
+  // under its uneven load, and a ball on a floor has nothing to hold it but rolling's own small loss (measured: downhill, 5 mm a wake).
   const inBowl = /\/(clementine|apple|pear|lemon)(#\d+)?$/
   check('The home at rest stays at rest: woken whole, no moving thing settles more than 3 cm, none is put back, and woken again none moves over 2 mm (fruit in the bowl: 8 mm)', rest.home.length >= 2 && Object.values(rest.settled).every((d) => d < 0.03) && Object.entries(rest.again).every(([k, d]) => d < (inBowl.test(k) ? 0.008 : 0.002)) && !rest.clamped.length, { keys: rest.keys, worstSettled: Math.max(...Object.values(rest.settled)), worstAgain: Object.entries(rest.again).sort((a, b) => b[1] - a[1]).slice(0, 4), clamped: rest.clamped })
   const shots = await page.evaluate(([SHOTS, BOUNDS]) => {

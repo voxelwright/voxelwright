@@ -145,7 +145,7 @@ export default {
       for (let i = 0; i < 4; i++) thing('plate', { material: 'ceramic', mass: 0.35, round: 'can' }, () => part(cyl(0.12, 0.1, 0.018, 24), '#f2ece0', 'gloss', at(x + 0.02, H + 0.01 + i * 0.019, z0 + 0.3)))
       // The crate is hollow with a deep floor: the onions lie on it, and roll out when it tips.
       thing('onion crate', { material: 'maple', mass: 1.6, hollow: 0.11 }, () => dress(box(0.3, 0.14, 0.4), pine, at(x + 0.02, H + 0.07, z1 - 0.32)))
-      for (let i = 0; i < 6; i++) thing('onion', { material: 'fruit', mass: 0.13, round: 'ball', spin: 12 }, () => part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1)))
+      for (let i = 0; i < 6; i++) thing('onion', { material: 'fruit', mass: 0.13, round: 'ball' }, () => part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1)))
       label('shelf')
       // Two shelves on iron brackets.
       k = leftWall
@@ -293,13 +293,14 @@ export default {
     {
       const bx = 0.36, bz = -0.06, y = TABLE_TOP
       const bowl = new THREE.LatheGeometry([[0, 0], [0.06, 0], [0.07, 0.01], [0.13, 0.05], [0.15, 0.085], [0.142, 0.088], [0.12, 0.055], [0.05, 0.02], [0, 0.02]].map(([u, v]) => new THREE.Vector2(u, v)), 28)
-      // The bowl is hollow, so the fruit rests in it and rolls out when it tips.
-      thing('fruit bowl', { material: 'ceramic', mass: 0.9, round: 'can', hollow: 0.02 }, () => part(bowl, '#4f7896', 'gloss', at(bx, y, bz)))
+      // The bowl is hollow, so the fruit rests in it and rolls out when it tips. Its floor is as high as its drawn wall is
+      // under the fruit, so none shows through the bowl from below.
+      thing('fruit bowl', { material: 'ceramic', mass: 0.9, round: 'can', hollow: 0.036 }, () => part(bowl, '#4f7896', 'gloss', at(bx, y, bz)))
       // One in the middle of the bowl's floor and the rest round it, none leaning on another: woken, they lie as they are.
-      const round = (i: number, r: number): [number, number, number] => [Math.cos(i * 1.2566 + 0.5) * 0.092, 0.021 + r, Math.sin(i * 1.2566 + 0.5) * 0.092]
-      const fruit: Array<[number, number, number, number, string]> = [[0, 0.063, 0, 0.042, '#e8892c'], [...round(0, 0.042), 0.042, '#e8892c'], [...round(1, 0.04), 0.04, '#c0392b'], [...round(2, 0.04), 0.04, '#e8892c'], [...round(3, 0.038), 0.038, '#9bb04a']]
-      for (const [fx, fy, fz, r, c] of fruit) thing(c === '#c0392b' ? 'apple' : c === '#9bb04a' ? 'pear' : 'clementine', { material: 'fruit', mass: 0.14, round: 'ball', spin: 12 }, () => part(ball(r, 14, 10), c, 'satin', at(bx + fx, y + fy, bz + fz)))
-      thing('lemon', { material: 'fruit', mass: 0.12, round: 'ball', spin: 12 }, () => part(ball(0.035, 12, 8).scale(1.35, 1, 1), '#efd24a', 'satin', at(bx + round(4, 0.035)[0], y + 0.056, bz + round(4, 0.035)[2], 0.4)))
+      const round = (i: number, r: number): [number, number, number] => [Math.cos(i * 1.2566 + 0.5) * 0.092, 0.037 + r, Math.sin(i * 1.2566 + 0.5) * 0.092]
+      const fruit: Array<[number, number, number, number, string]> = [[0, 0.079, 0, 0.042, '#e8892c'], [...round(0, 0.042), 0.042, '#e8892c'], [...round(1, 0.04), 0.04, '#c0392b'], [...round(2, 0.04), 0.04, '#e8892c'], [...round(3, 0.038), 0.038, '#9bb04a']]
+      for (const [fx, fy, fz, r, c] of fruit) thing(c === '#c0392b' ? 'apple' : c === '#9bb04a' ? 'pear' : 'clementine', { material: 'fruit', mass: 0.14, round: 'ball' }, () => part(ball(r, 14, 10), c, 'satin', at(bx + fx, y + fy, bz + fz)))
+      thing('lemon', { material: 'fruit', mass: 0.12, round: 'ball' }, () => part(ball(0.035, 12, 8).scale(1.35, 1, 1), '#efd24a', 'satin', at(bx + round(4, 0.035)[0], y + 0.072, bz + round(4, 0.035)[2], 0.4)))
       const jug = new THREE.LatheGeometry([[0, 0], [0.045, 0], [0.055, 0.04], [0.05, 0.1], [0.035, 0.14], [0.04, 0.16], [0.036, 0.162], [0, 0.12]].map(([u, v]) => new THREE.Vector2(u, v)), 20)
       const vx = -0.98, vz = -0.12
       const blooms = ['#f29a7a', '#fff4dc', '#f4d36b', '#e7849c', '#fff4dc']

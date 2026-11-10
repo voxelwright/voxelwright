@@ -31,11 +31,9 @@ export interface BodyData {
   mass?: number
   /** Its body is the ball, or the can standing on its y, inside the box round all its parts (a mug, a plate, a ball), so it rolls. */
   round?: 'ball' | 'can'
-  /** 1/s: how fast its spin dies, in place of what its material gives (an apple is no true ball: it rolls a little and lies still). */
-  spin?: number
 }
 
-const DEFAULT: Required<Omit<BodyData, 'mass' | 'round' | 'spin'>> = { material: 'walnut', motion: 'static' }
+const DEFAULT: Required<Omit<BodyData, 'mass' | 'round'>> = { material: 'walnut', motion: 'static' }
 /** A plane (a floor, a rug, a picture) gets this thickness, m, behind its drawn face. */
 const THIN = 0.004
 /** An instanced mesh past this many copies is left at its first ones (none in the house comes close). */
@@ -220,7 +218,7 @@ function roundOf(boxes: Box[], round: 'ball' | 'can'): Box {
   return { half: [h.x, h.y, h.z], at: [c.x, c.y, c.z], rotation: [0, 0, 0, 1], round }
 }
 
-const dataKey = (data: BodyData) => `${data.motion ?? ''}|${data.material ?? ''}|${data.mass ?? ''}|${data.round ?? ''}|${data.spin ?? ''}`
+const dataKey = (data: BodyData) => `${data.motion ?? ''}|${data.material ?? ''}|${data.mass ?? ''}|${data.round ?? ''}`
 const near = (a: readonly number[], b: readonly number[]) => {
   for (let k = 0; k < a.length; k++) if (Math.abs(a[k] - b[k]) > SAME) return false
   return true
@@ -315,7 +313,7 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
         made.set(f.object, { p: [p.x, p.y, p.z], q: [q.x, q.y, q.z, q.w] })
       }
       const home = motion === 'dynamic' ? { home: made.get(f.object)! } : {}
-      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}), ...drawn, ...home, ...(typeof f.data.spin === 'number' && f.data.spin >= 0 && f.data.spin <= 50 ? { spin: f.data.spin } : {}) })) {
+      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}), ...drawn, ...home })) {
         if (!before) used.delete(key)
         held.delete(f.object)
         refused.push(key)

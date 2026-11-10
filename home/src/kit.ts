@@ -37,8 +37,6 @@ export interface LooseBody {
    * local y: a mug, a jar, a plate), so it rolls. Without it, its parts' boxes.
    */
   round?: 'ball' | 'can'
-  /** 1/s: how fast its spin dies, for a round thing that is not a true ball (an apple, an onion): it rolls a little and lies still. */
-  spin?: number
   /**
    * m: it is hollow (a bowl, a crate), with a floor this thick and walls round the box of all its parts, so
    * what lies in it rests inside and falls out when it tips. With `round: 'can'` the walls stand in a ring.

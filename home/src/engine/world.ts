@@ -85,8 +85,6 @@ export interface BindSpec {
    * its stove steel): indices into shape.boxes. Boxes no part names burn as the thing's material.
    */
   parts?: { name: string; material: string; boxes: number[] }[]
-  /** 1/s, dynamic only: how fast its spin dies, in place of what its material gives. */
-  spin?: number
   /** Where it was made, when that is not where it is now (a thing bound again while it lies thrown): tidying puts it there. */
   home?: { p: Vec3; q: Quat }
   /** Called when its body starts to move (a hand, a bump) and when it has come to rest again: a thing drawn cheaply at rest draws itself in full while it moves (src/kit.ts). */
@@ -179,6 +177,8 @@ export class World implements WorldApi {
   private stirring = new Set<Bound>()
   private holds = new Map<Bound, Hold>()
   private gravitySet = false
+  /** Bound moving things posed (by their body, a tidy, or their owner) since fire last read the moving ones. */
+  private posed = new Set<Bound>()
   private pairs = new Map<string, readonly [number, number]>()
   private pairsVersion = -1
   private clampedAt = new Map<string, number>()
@@ -613,8 +613,6 @@ export class World implements WorldApi {
     const body = this.core.addBody({
       shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
       density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
-      // The softer a thing, the sooner it stops rolling: an apple settles where a steel ball runs on.
-      ...(spec.motion === 'dynamic' ? { angularDamping: spec.spin ?? 0.05 + 1.6 * (1 - mat.hardness) ** 2 } : {}),
     })
     const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: spec.home ?? { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts, woke: spec.woke, slept: spec.slept }
     this.bound.set(key, b)
@@ -631,6 +629,7 @@ export class World implements WorldApi {
     this.byBody[b.body] = undefined
     this.bound.delete(key)
     this.stirring.delete(b)
+    this.posed.delete(b)
     this.version++
   }
 
@@ -788,7 +787,9 @@ export class World implements WorldApi {
       if (b.motion !== 'dynamic') continue
       const d = Math.hypot(b.p.x - b.home.p[0], b.p.y - b.home.p[1], b.p.z - b.home.p[2])
       const turned = 1 - Math.abs(b.q.x * b.home.q[0] + b.q.y * b.home.q[1] + b.q.z * b.home.q[2] + b.q.w * b.home.q[3])
-      if (d > by || turned > 0.002) out[b.key] = d
+      // A ball that only turned where it lies is not out of place.
+      const ball = b.shape.kind === 'compound' && b.shape.boxes.length === 1 && b.shape.boxes[0].round === 'ball'
+      if (d > by || (turned > 0.002 && !ball)) out[b.key] = d
     }
     return out
   }
@@ -805,7 +806,10 @@ export class World implements WorldApi {
       const at = arr(p), turn: Quat = [q.x, q.y, q.z, q.w]
       b.home = { p: at, q: turn }
       if (b.motion === 'static') this.core.setPose(b.body, at, turn)
-      else this.core.setState(b.body, at, [0, 0, 0], turn)
+      else {
+        this.core.setState(b.body, at, [0, 0, 0], turn)
+        this.posed.add(b)
+      }
     }
   }
 
@@ -1017,6 +1021,7 @@ export class World implements WorldApi {
 
   /** A bound moving thing's object goes where its body is. */
   private pose(b: Bound) {
+    this.posed.add(b)
     const p = this.core.position(b.body), q = this.core.rotation(b.body)
     b.p.set(p[0], p[1], p[2])
     // The solver's turn is a float's width off unit length; left so, the object's own (unit) turn would read as its
@@ -1218,7 +1223,11 @@ export class World implements WorldApi {
       else growBy(box3, boxPose, halfOf(t.part.shape), [0, 0, 0], [0, 0, 0, 1])
       push(t.key, t.key, '', t.part.material, t.part.motion === 'dynamic')
     }
-    for (const b of this.bound.values()) {
+    // Asked for the moving ones only (fire asks every frame), a bound thing counts if it has been posed since the
+    // last such ask: a house of sleeping mugs costs nothing here.
+    const boundNow = movingOnly ? [...this.posed] : this.bound.values()
+    if (movingOnly) this.posed.clear()
+    for (const b of boundNow) {
       if (movingOnly && b.motion !== 'dynamic') continue
       if (b.motion === 'dynamic') {
         const pos = this.core.position(b.body), rot = this.core.rotation(b.body)

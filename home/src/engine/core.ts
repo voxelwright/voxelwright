@@ -39,8 +39,6 @@ export interface BodySpec {
   restitution: number
   gravityFactor?: number
   linearDamping?: number
-  /** How fast its spin dies, 1/s (the solver's own small value when not given): a soft thing does not roll far. */
-  angularDamping?: number
   /** Reports contacts but never pushes (trigger zones). */
   sensor?: boolean
 }
