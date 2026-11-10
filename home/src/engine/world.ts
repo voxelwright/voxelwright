@@ -309,7 +309,9 @@ export class World implements WorldApi {
         thing.mesh.name = thing.key
         thing.mesh.position.copy(p)
         thing.mesh.quaternion.copy(q)
-        thing.mesh.castShadow = thing.mesh.receiveShadow = true
+        // A trigger volume that is drawn (a light set into a playfield) is not a solid thing: it casts no shadow.
+        thing.mesh.castShadow = !part.sensor
+        thing.mesh.receiveShadow = true
         this.group.add(thing.mesh)
       }
       this.things.set(thing.key, thing)
