@@ -64,7 +64,7 @@ interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: nu
 
 /** A body that stands for a scene object drawn by someone else (src/physics/home.ts binds the home's things). */
 interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat }; parts?: BindSpec['parts']; woke?: () => void; slept?: (home: boolean) => void }
-/** A thing held by a hand (hold): where it is drawn to, and the most force that draws it. */
+/** A thing held by a hand (carry): where it is drawn to, and the most force that draws it. */
 interface Hold { to: Vec3; strength: number; arc: number }
 /** How fast (1/s) a held thing closes on where it is held to, its top speed (m/s), and how fast it is turned upright (1/s). */
 const HOLD_RATE = 14
@@ -688,11 +688,11 @@ export class World implements WorldApi {
 
   /**
    * A hand takes hold of a moving bound thing (a mug, a chair) and draws it towards `to` (world
-   * space) with at most `strength` newtons, step after step, until hold(key, null) lets it go
+   * space) with at most `strength` newtons, step after step, until carry(key, null) lets it go
    * with the speed it has. A thing too heavy for the hand drags and tips instead of rising.
    * `arc` (m) is how much higher than `to` it may ride while it still has far to go.
    */
-  hold(key: string, to: Vec3 | null, strength = 60, arc = 0) {
+  carry(key: string, to: Vec3 | null, strength = 60, arc = 0) {
     const b = this.boundDynamic(key)
     if (!b) return false
     if (!to) return this.release(b)

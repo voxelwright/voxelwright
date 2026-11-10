@@ -164,12 +164,12 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
       if (!(k > 0 && k < 1)) return
       to = [origin[0] + direction[0] * k, h.height, origin[2] + direction[2] * k]
     }
-    world.hold(h.key, to, GRIP, ARC)
+    world.carry(h.key, to, GRIP, ARC)
   }
 
   const letGo = () => {
     if (!held) return
-    world.hold(held.key, null)
+    world.carry(held.key, null)
     held = null
     canvas.style.cursor = ''
   }
@@ -188,7 +188,7 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
     const s = onScreen(thing.at)
     held = { key: thing.key, pointer: e.pointerId, touch, half: thing.half, x: e.clientX, y: e.clientY, t: e.timeStamp, moved: false, dx: s.x - e.clientX, dy: s.y - e.clientY, height: thing.at[1] + LIFT }
     // Lifted at once, where it stands: the press is felt before the drag.
-    world.hold(thing.key, [thing.at[0], thing.at[1] + LIFT, thing.at[2]], GRIP)
+    world.carry(thing.key, [thing.at[0], thing.at[1] + LIFT, thing.at[2]], GRIP)
     canvas.style.cursor = 'grabbing'
   }
   const onMove = (e: PointerEvent) => {
