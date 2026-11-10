@@ -174,6 +174,8 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
 
   const onDown = (e: PointerEvent) => {
     if (e.target === canvas && !e.isPrimary) letGo() // two fingers: the view's
+    // A hold whose release was never seen (the button let go outside the window) ends with the next press.
+    if (held && e.isPrimary) letGo()
     if (e.target !== canvas || e.button !== 0 || !e.isPrimary || played() || ctx.entries.active || held) return
     const touch = e.pointerType === 'touch'
     const thing = pick(e.clientX, e.clientY, touch ? NEAR.touch : NEAR.mouse)
@@ -189,6 +191,8 @@ export function hand(ctx: Context, world: World, played: () => string | null) {
   }
   const onMove = (e: PointerEvent) => {
     if (!held || e.pointerId !== held.pointer) return
+    // The hold ended without the hand (tidied away, lost and put back), or the mouse came back with its button up.
+    if (!world.isHeld(held.key) || (e.pointerType === 'mouse' && !(e.buttons & 1))) return letGo()
     swallow(e)
     if (!held.moved && Math.hypot(e.clientX - held.x, e.clientY - held.y) <= TAP) return
     if (!held.moved) {

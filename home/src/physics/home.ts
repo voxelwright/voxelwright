@@ -132,7 +132,7 @@ function turnedIn(m: THREE.Matrix4, t: Turned): Box | null {
   // The frame's own scale is taken along the box's sides (kits are not scaled unevenly).
   const half: Vec3 = [Math.max(THIN / 4, t.half[0] * Math.abs(s.x)), Math.max(THIN / 4, t.half[1] * Math.abs(s.y)), Math.max(THIN / 4, t.half[2] * Math.abs(s.z))]
   if (!half.every(Number.isFinite) || ![c.x, c.y, c.z].every(Number.isFinite)) return null
-  return { half, at: [c.x, c.y, c.z], rotation: [q.x, q.y, q.z, q.w] }
+  return { half, at: [c.x, c.y, c.z], rotation: [q.x, q.y, q.z, q.w], ...(t.round ? { round: t.round } : {}) }
 }
 
 /**
@@ -264,6 +264,7 @@ const volume = (boxes: Box[]) => boxes.reduce((v, b) => v + 8 * b.half[0] * b.ha
 
 export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3D[]) {
   const held = new Map<THREE.Object3D, Held>()
+  const made = new WeakMap<THREE.Object3D, { p: Vec3; q: Quat }>()
   const skipped = new Set(skip)
   const used = new Set<string>()
   const refused: string[] = []
@@ -305,7 +306,14 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
       // A kit's loose thing is drawn inside the kit's merged meshes while it rests where it was made, and by its own while it does not.
       const loose = f.object.userData.loose as LooseParts | undefined
       const drawn = loose && motion === 'dynamic' ? { woke: () => loose.cut(), slept: (home: boolean) => void (home && loose.mend()) } : {}
-      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}), ...drawn })) {
+      // Where a moving thing was made is kept from the first time it is seen (at rest, as drawn): bound again while it
+      // lies thrown, its home is still there, so tidying finds it and it is never drawn merged where its body is not.
+      if (motion === 'dynamic' && !made.has(f.object)) {
+        f.object.matrixWorld.decompose(p, q, s)
+        made.set(f.object, { p: [p.x, p.y, p.z], q: [q.x, q.y, q.z, q.w] })
+      }
+      const home = motion === 'dynamic' ? { home: made.get(f.object)! } : {}
+      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}), ...drawn, ...home })) {
         if (!before) used.delete(key)
         held.delete(f.object)
         refused.push(key)

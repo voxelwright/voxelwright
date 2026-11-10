@@ -3,11 +3,12 @@
 // fruit, the kettle, toy blocks) are bodies of their own that cost nothing to draw at rest: each
 // stays inside its kit's merged meshes until it first moves. A mouse lifts a plate, carries it over
 // the table and sets it down; a flick throws the toy ball; a tap nudges; a finger on a phone-sized
-// touch screen does the same, two fingers let go, and the view and the entries still answer.
+// touch screen does the same, two fingers let go, and a drag on bare floor still turns the view
+// (entries under a finger are check-physics-touch's).
 // Tidying puts everything back where it was made and draws it merged again. Impacts are heard by
 // material: pottery clacks, steel and glass ring, wood knocks, soft things thud.
 // Starts its own dev server (no villager host: nothing here talks).
-// Usage: node scripts/check-tactile.mjs [--dev=5441] [--shots-dir=dir]
+// Usage: node scripts/check-tactile.mjs [--dev=5441] [--base=http://localhost:5440/] [--shots-dir=dir]
 import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -19,15 +20,17 @@ const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.l
 const shotsDir = opt('shots-dir')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const devPort = Number(opt('dev') ?? 5441)
-const base = `http://localhost:${devPort}/`
+const base = opt('base') ?? `http://localhost:${devPort}/`
 const checks = []
 const check = (name, pass, detail) => {
   checks.push({ name, pass: Boolean(pass), detail })
   console.error(pass ? 'pass' : 'FAIL', name, JSON.stringify(detail)?.slice(0, 500) ?? '')
 }
 
-const server = spawn('npx', ['vite', '--port', String(devPort), '--strictPort'], { cwd: homeDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
-await new Promise((resolve, reject) => {
+// --base=<url> uses a dev server already running (a loaded machine can take over 30 s to start one).
+const given = opt('base')
+const server = given ? null : spawn('npx', ['vite', '--port', String(devPort), '--strictPort'], { cwd: homeDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+if (server) await new Promise((resolve, reject) => {
   let out = ''
   const timer = setTimeout(() => reject(new Error(`vite did not start: ${out.slice(-400)}`)), 30_000)
   server.stdout.on('data', (d) => (/Local:/.test((out += d)) ? (clearTimeout(timer), resolve()) : undefined))
@@ -73,6 +76,19 @@ async function open(context, query = '') {
       })
       return { things, out: names.length, meshes, drawCalls: window.village.snapshot().render.drawCalls, names: names.slice(0, 8) }
     }),
+    /** Drawn area (m²) of the kitchen kit's merged meshes: what a cut takes out and a mend puts back. */
+    merged: () => world(() => {
+      let area = 0
+      window.village.kernel.root.get('stage').scene.traverse((o) => {
+        if (!o.isMesh || !o.parent?.userData.regions || !/^(furnish|left wall things|right wall things)/.test(o.parent.name)) return
+        const p = o.geometry.attributes.position.array
+        for (let i = 0; i < p.length; i += 9) {
+          const ux = p[i + 3] - p[i], uy = p[i + 4] - p[i + 1], uz = p[i + 5] - p[i + 2], vx = p[i + 6] - p[i], vy = p[i + 7] - p[i + 1], vz = p[i + 8] - p[i + 2]
+          area += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2
+        }
+      })
+      return area
+    }),
     events: (kind) => world((kind) => window.village.physics.events().filter((e) => e.kind === kind), kind),
   }
 }
@@ -88,8 +104,16 @@ try {
   const list = await h.world(() => window.village.physics.home.list().filter((x) => x.key.startsWith('home/kitchen things/')))
   check('The kitchen\'s loose things are bodies of their own, moving ones, each with its material', list.length >= 40 && list.every((x) => x.motion === 'dynamic') && ['ceramic', 'glass', 'paper', 'steel', 'maple', 'rubber', 'fruit'].every((m) => list.some((x) => x.material === m)), { things: list.length, materials: [...new Set(list.map((x) => x.material))] })
   check('At rest none of them is drawn on its own: they are inside the kits\' merged meshes', rest.things === list.length && rest.out === 0 && rest.meshes === 0, rest)
-  const kit = await h.world(() => window.village.physics.home.list().find((x) => x.key === 'home/furnish'))
-  check('The kit\'s own body no longer holds their boxes', kit && kit.motion === 'static' && kit.parts < 149, kit)
+  const kit = await h.world(() => {
+    const regions = window.village.kernel.root.get('stage').scene.getObjectByName('furnish').userData.regions
+    return { ...window.village.physics.home.list().find((x) => x.key === 'home/furnish'), fixed: regions.filter((r) => !r.loose).length, loose: regions.filter((r) => r.loose).length }
+  })
+  check('The kit\'s own body holds its fixed parts\' boxes and none of the loose things\'', kit.motion === 'static' && kit.parts === kit.fixed && kit.loose > 40, kit)
+  const whole = await h.merged()
+  // Putting a quiet house back as it is wakes nothing and cuts nothing out.
+  const quiet = await h.world(() => { const p = window.village.physics; p.restore(p.snapshot()); p.advance(0.2); return true })
+  const afterRestore = await h.drawn()
+  check('Restoring a snapshot of the house at rest wakes nothing: no thing is cut out', quiet && afterRestore.out === 0, afterRestore)
 
   // Everything woken at once settles where it was drawn (the fruit shifts in the bowl, a block tips off its pile).
   const settle = await h.world((T) => {
@@ -122,8 +146,9 @@ try {
   const holding = await h.world(() => window.village.physics.hand.holding())
   check('Over a loose thing the mouse shows a hand; a press takes the plate and lifts it off the pile', cursor === 'grab' && holding === plate && lifted.position[1] - from.position[1] > 0.03, { cursor, holding, lift: lifted.position[1] - from.position[1] })
   const during = await h.drawn()
-  check('The moving plate is drawn by its own mesh, the rest still merged', during.out >= 1 && during.out <= 4, during)
-  const table = await h.screen([-0.45, 0.75, -0.18])
+  const cutArea = await h.merged()
+  check('The moving plate is drawn by its own mesh and no longer by the merged one (its area is gone from it); the rest still merged', during.out >= 1 && during.out <= 4 && whole - cutArea > 0.05, { ...during, whole, cutArea })
+  const table = await h.screen([-0.62, 0.75, 0.48])
   for (let i = 1; i <= 24; i++) {
     await page.mouse.move(at.x + ((table.x - at.x) * i) / 24, at.y + ((table.y - at.y) * i) / 24)
     await h.wait(25)
@@ -134,7 +159,7 @@ try {
   await page.mouse.up()
   await h.wait(1500)
   const down = await h.thing(plate)
-  check('Dragged to the table it follows the pointer over it, and let go it rests on the table top', far([carried.position[0], carried.position[2]], [-0.45, -0.18]) < 0.25 && carried.position[1] > 0.78 && far([down.position[0], down.position[2]], [-0.45, -0.18]) < 0.35 && Math.abs(down.position[1] - 0.76) < 0.04, { carried: carried.position, down: down.position })
+  check('Dragged to the table it follows the pointer over it, and let go it rests on the table top', far([carried.position[0], carried.position[2]], [-0.62, 0.48]) < 0.25 && carried.position[1] > 0.78 && far([down.position[0], down.position[2]], [-0.62, 0.48]) < 0.35 && Math.abs(down.position[1] - 0.76) < 0.04, { carried: carried.position, down: down.position })
   const held = (await h.events('held')).filter((e) => e.thing === plate)
   check('Taking and letting go are told as events', held.length === 2 && held[0].held && !held[1].held && held[0].material === 'ceramic', held.map((e) => e.held))
 
@@ -156,7 +181,8 @@ try {
   const speed = Math.hypot(...thrown.velocity)
   check('A flick throws the toy ball: it leaves the hand at speed and ends well away, inside the house', speed > 1 && speed <= 6 && far(b0.position, b1.position) > 0.5 && b1.position[1] > -0.1 && Math.abs(b1.position[0]) < 9, { speed, travelled: far(b0.position, b1.position), at: b1.position })
   const hits = (await h.events('impact')).filter((e) => e.a === ball || e.b === ball)
-  check('Its landing is an impact with its material (rubber)', hits.length > 0 && hits.every((e) => e.materials.includes('rubber')), hits.length)
+  const heard = await h.world(async (hit) => (await import('/src/sound/map.ts')).MAP['village/physics'](hit), hits.find((e) => e.impulse >= 0.05))
+  check('Its landing is an impact told with its material (rubber), and the sound map plays it as a thud', hits.length > 0 && hits.every((e) => e.materials.includes('rubber')) && heard === 'thud', { hits: hits.length, heard })
 
   // A tap nudges; a press on a wall, or on nothing, is the view's.
   const block = `${T}cup`
@@ -182,16 +208,31 @@ try {
     const { cueOf, struckOf } = await import('/src/sound/palette/impact.ts')
     const box = (x) => ({ kind: 'box', half: [x, x, x] }), floor = { kind: 'box', half: [4, 0.05, 4] }
     const of = (m) => cueOf({ materials: [m, 'plaster'], shapes: [box(0.05), floor] })
+    const { MAP } = await import('/src/sound/map.ts')
+    const map = MAP['village/physics']
+    if (map({ kind: 'held', thing: 'x', material: 'ceramic', shape: box(0.05), at: { x: 0, y: 0, z: 0 }, held: true }) !== 'clack' || map({ kind: 'held', thing: 'x', material: 'ceramic', shape: box(0.05), at: { x: 0, y: 0, z: 0 }, held: false }) !== null) return { map: 'a pick-up is not heard as the thing, or a let-go is heard' }
     return { ceramic: of('ceramic'), glass: of('glass'), steel: of('steel'), maple: of('maple'), felt: of('felt'), fruit: of('fruit'), rubber: of('rubber'), bigSteelSmallWood: cueOf({ materials: ['steel', 'maple'], shapes: [box(0.5), box(0.05)] }), held: cueOf(struckOf({ kind: 'held', material: 'ceramic', shape: box(0.05) })) }
   })
   check('Pottery clacks, glass and steel ring, wood knocks, soft things thud; the smaller thing leads', cues.ceramic === 'clack' && cues.glass === 'ring' && cues.steel === 'ring' && cues.maple === 'knock' && cues.felt === 'thud' && cues.fruit === 'thud' && cues.rubber === 'thud' && cues.bigSteelSmallWood === 'knock' && cues.held === 'clack', cues)
 
-  // Tidy: everything home again.
+  // Tidying while a thing is held ends the hold for good: the next move does not take it again.
+  const ps = await h.screen(plate)
+  await page.mouse.move(ps.x, ps.y)
+  await page.mouse.down()
+  await h.wait(250)
+  const heldBefore = await h.world(() => window.village.physics.hand.holding())
   const back = await h.world(() => window.village.physics.hand.tidy().length)
+  await page.mouse.move(ps.x + 60, ps.y + 20, { steps: 4 })
+  await h.wait(200)
+  const heldAfter = await h.world(() => window.village.physics.hand.holding())
+  await page.mouse.up()
+  const said = (await h.events('held')).filter((e) => e.thing === plate)
+  check('Tidying while the plate is held lets it go, says so, and the hand does not take it back', heldBefore === plate && heldAfter === null && said.at(-2)?.held === true && said.at(-1)?.held === false, { heldBefore, heldAfter, said: said.map((e) => e.held) })
   await h.wait(400)
   const tidy = await h.drawn()
+  const mended = await h.merged()
   const home = await h.thing(plate)
-  check('Tidying puts the plate, the ball and the cup back and draws them merged again', back >= list.length && tidy.out === 0 && far(home.position, from.position) < 0.002 && Object.keys(await h.world(() => window.village.physics.hand.astray())).length === 0, { back, tidy })
+  check('Tidying puts the plate, the ball and the cup back and draws them merged again, the merged meshes whole', back >= list.length && tidy.out === 0 && Math.abs(mended - whole) < 1e-3 && far(home.position, from.position) < 0.002 && Object.keys(await h.world(() => window.village.physics.hand.astray())).length === 0, { back, tidy })
   const stats = await h.world(() => { window.village.physics.clearStats(); return new Promise((r) => setTimeout(() => r(window.village.physics.stats()), 2500)) })
   check('At rest the world still steps in well under a millisecond', stats.stepMs.median <= 0.6 && stats.stepMs.n > 30, stats)
   check('No page errors with a mouse', h.errors.length === 0, h.errors.slice(0, 3))
@@ -212,7 +253,7 @@ try {
   await touch('touchStart', [[js.x + 12, js.y + 10]])
   await m.wait(300)
   const fingerHolds = await m.world(() => window.village.physics.hand.holding())
-  const to = await m.screen([0.25, 0.75, 0.3])
+  const to = await m.screen([-0.5, 0.75, -0.2])
   for (let i = 1; i <= 16; i++) {
     await touch('touchMove', [[js.x + 12 + ((to.x - js.x) * i) / 16, js.y + 10 + ((to.y - js.y) * i) / 16]])
     await m.wait(30)
@@ -224,7 +265,7 @@ try {
   await touch('touchEnd', [])
   await m.wait(1200)
   const j2 = await m.thing(jug)
-  check('A finger near the jug takes it, carries it across the table and sets it down upright', fingerHolds === jug && far(j0.position, j1.position) > 0.4 && far(j1.position, j2.position) < 0.3 && Math.abs(j2.position[1] - j0.position[1]) < 0.05, { fingerHolds, carried: far(j0.position, j1.position), rest: j2.position })
+  check('A finger near the jug takes it, carries it across the table and sets it down upright', fingerHolds === jug && far(j0.position, j1.position) > 0.3 && far(j1.position, j2.position) < 0.3 && Math.abs(j2.position[1] - j0.position[1]) < 0.05, { fingerHolds, carried: far(j0.position, j1.position), rest: j2.position })
   check('While carried it shows above the fingertip, not under it', to.y + 10 - shown.y > 15, { finger: to.y + 10, thing: shown.y })
   // Two fingers are the view's: the held thing is let go.
   const cup = `${T}fruit bowl`
@@ -237,21 +278,13 @@ try {
   const two = await m.world(() => window.village.physics.hand.holding())
   await touch('touchEnd', [])
   check('A second finger lets go of what the first held', one !== null && two === null, { one, two })
-  // An entry is still chosen by a tap.
-  await m.world(() => window.village.physics.look(null))
-  await m.wait(1500)
-  const entry = await m.world(() => {
-    const entries = window.village.kernel.root.get('entries')
-    const e = entries.list().find((x) => x.id === 'notebook') ?? entries.list()[0]
-    return e?.id ?? null
-  })
-  check('No page errors with a finger', m.errors.length === 0, { errors: m.errors.slice(0, 3), entry })
+  check('No page errors with a finger', m.errors.length === 0, m.errors.slice(0, 3))
   await phone.close()
 } catch (error) {
   check('The check ran to its end', false, String(error?.stack ?? error).slice(0, 600))
 } finally {
   await browser.close()
-  try { process.kill(-server.pid) } catch { /* already gone */ }
+  try { if (server) process.kill(-server.pid) } catch { /* already gone */ }
 }
 const failed = checks.filter((c) => !c.pass)
 console.log(JSON.stringify({ checks: checks.length, failed: failed.map((c) => c.name) }, null, 2))

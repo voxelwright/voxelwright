@@ -344,6 +344,9 @@ export function createJolt(): PhysicsCore {
     sleeping(id) {
       return !bi.IsActive(bid(id))
     },
+    wake(id) {
+      bi.ActivateBody(bid(id))
+    },
     activity() {
       const out = stirred
       stirred = []
@@ -367,12 +370,19 @@ export function createJolt(): PhysicsCore {
       ray.mDirection = setV(direction)
       notThese.Clear()
       for (const id of ignore) if (ids[id]) notThese.IgnoreBody(ids[id]!)
-      rayHit.Reset()
-      system.GetNarrowPhaseQuery().CastRay(ray, raySettings, rayHit, anyBroad, anyLayer, notThese, anyShape)
-      if (!rayHit.HadHit()) return null
+      // A trigger volume is not in the way: the ray is cast again without it.
+      let id: BodyId | undefined
+      for (let tries = 0; ; tries++) {
+        rayHit.Reset()
+        system.GetNarrowPhaseQuery().CastRay(ray, raySettings, rayHit, anyBroad, anyLayer, notThese, anyShape)
+        if (!rayHit.HadHit()) return null
+        id = byIndex.get(rayHit.mHit.mBodyID.GetIndexAndSequenceNumber())
+        if (id === undefined) return null
+        if (!sensors[id]) break
+        if (tries >= 8) return null
+        notThese.IgnoreBody(ids[id]!)
+      }
       const hit = rayHit.mHit
-      const id = byIndex.get(hit.mBodyID.GetIndexAndSequenceNumber())
-      if (id === undefined || sensors[id]) return null
       const fraction = hit.mFraction
       const point: Vec3 = [origin[0] + direction[0] * fraction, origin[1] + direction[1] * fraction, origin[2] + direction[2] * fraction]
       const n = bodies[id]!.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, setR(point))

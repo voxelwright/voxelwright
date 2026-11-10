@@ -85,6 +85,8 @@ export interface BindSpec {
    * its stove steel): indices into shape.boxes. Boxes no part names burn as the thing's material.
    */
   parts?: { name: string; material: string; boxes: number[] }[]
+  /** Where it was made, when that is not where it is now (a thing bound again while it lies thrown): tidying puts it there. */
+  home?: { p: Vec3; q: Quat }
   /** Called when its body starts to move (a hand, a bump) and when it has come to rest again: a thing drawn cheaply at rest draws itself in full while it moves (src/kit.ts). */
   woke?: () => void
   /** `home`: it rests where it was made, to the eye. */
@@ -174,6 +176,7 @@ export class World implements WorldApi {
   /** Bound moving things whose bodies are awake: the only ones a step or a frame looks at. */
   private stirring = new Set<Bound>()
   private holds = new Map<Bound, Hold>()
+  private gravitySet = false
   private pairs = new Map<string, readonly [number, number]>()
   private pairsVersion = -1
   private clampedAt = new Map<string, number>()
@@ -234,8 +237,11 @@ export class World implements WorldApi {
   }
 
   private applyRules(next: Rules) {
+    // Changing gravity wakes every moving body (a sleeping one would not feel it); the same gravity again wakes none.
+    const same = this.gravitySet && next.gravity.every((g, i) => g === this.rules.gravity[i])
     this.rules = { ...next, gravity: [...next.gravity] }
-    this.core.setGravity(this.rules.gravity)
+    if (!same) this.core.setGravity(this.rules.gravity)
+    this.gravitySet = true
     this.pairsVersion = -1
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, this.rules.drag)
     for (const b of this.bound.values()) if (b.motion === 'dynamic') this.core.setLinearDamping(b.body, this.rules.drag)
@@ -606,7 +612,7 @@ export class World implements WorldApi {
       shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
       density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
     })
-    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts, woke: spec.woke, slept: spec.slept }
+    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: spec.home ?? { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts, woke: spec.woke, slept: spec.slept }
     this.bound.set(key, b)
     this.byBody[body] = b
     this.version++
@@ -616,11 +622,11 @@ export class World implements WorldApi {
   unbind(key: string) {
     const b = this.bound.get(key)
     if (!b) return
+    this.release(b)
     this.core.removeBody(b.body)
     this.byBody[b.body] = undefined
     this.bound.delete(key)
     this.stirring.delete(b)
-    this.holds.delete(b)
     this.version++
   }
 
@@ -643,7 +649,7 @@ export class World implements WorldApi {
         // settled, or was put back by hand), it is set there exactly: the house stays as it was drawn.
         this.pose(b)
         this.stirring.delete(b)
-        const home = this.isHome(b, NEARLY_HOME, 3e-4)
+        const home = !this.holds.has(b) && this.isHome(b, NEARLY_HOME, 3e-4)
         if (home) {
           this.core.rest(b.body, b.home.p, b.home.q)
           this.pose(b)
@@ -655,6 +661,8 @@ export class World implements WorldApi {
 
   /** Draws a held thing towards where it is held with at most the hold's force, and turns it upright. */
   private pull(b: Bound, hold: Hold, h: number) {
+    // Held still, its body would fall asleep in the hand and hang there when let go.
+    if (this.core.sleeping(b.body)) this.core.wake(b.body)
     const p = this.core.position(b.body), v = this.core.velocity(b.body)
     const mass = this.core.mass(b.body)
     // Carried a long way it rides higher, over what stands between, and comes down as it nears.
@@ -688,11 +696,7 @@ export class World implements WorldApi {
   hold(key: string, to: Vec3 | null, strength = 60, arc = 0) {
     const b = this.boundDynamic(key)
     if (!b) return false
-    if (!to) {
-      if (!this.holds.delete(b)) return false
-      this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: false })
-      return true
-    }
+    if (!to) return this.release(b)
     if (!pointOk(to) || !(strength > 0)) return false
     const held = this.holds.get(b)
     if (held) {
@@ -701,9 +705,7 @@ export class World implements WorldApi {
       held.arc = arc
     } else {
       this.holds.set(b, { to: [...to], strength, arc })
-      // Woken with the speed it has (none): the first step draws it.
-      this.core.setVelocity(b.body, this.core.velocity(b.body))
-      this.core.applyImpulse(b.body, [0, 1e-6, 0])
+      this.core.wake(b.body)
       this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: true })
     }
     return true
@@ -719,6 +721,20 @@ export class World implements WorldApi {
   /** The scene object a bound thing's body stands for. */
   boundObject(key: string) {
     return this.bound.get(key)?.object
+  }
+
+  /** Ends a hold, however it ends (let go, tidied away, lost and put back, unbound), and says so. */
+  private release(b: Bound) {
+    if (!this.holds.delete(b)) return false
+    this.core.wake(b.body)
+    this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: false })
+    return true
+  }
+
+  /** Whether a hand holds this thing now: a hold can end without the hand (tidying, a thing lost and put back). */
+  isHeld(key: string) {
+    const b = this.bound.get(key)
+    return Boolean(b && this.holds.has(b))
   }
 
   /** Every held thing's key. */
@@ -749,7 +765,7 @@ export class World implements WorldApi {
     const back: string[] = []
     for (const b of this.bound.values()) {
       if (b.motion !== 'dynamic' || (keys && !keys.includes(b.key))) continue
-      this.holds.delete(b)
+      this.release(b)
       this.core.rest(b.body, b.home.p, b.home.q)
       this.pose(b)
       this.stirring.delete(b)
@@ -958,7 +974,7 @@ export class World implements WorldApi {
     for (const b of this.stirring) {
       const p = this.core.position(b.body)
       if (!(p.every(Number.isFinite) && p[1] >= LOST_Y && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND)) {
-        this.holds.delete(b)
+        this.release(b)
         this.core.setState(b.body, b.home.p, [0, 0, 0], b.home.q)
         this.emit({ kind: 'clamped', thing: b.key, speed: -1, at: at(b.home.p), reset: true })
         continue
@@ -1293,6 +1309,11 @@ export class World implements WorldApi {
       }
       const speed = Math.hypot(...b.v), k = speed > this.rules.maxSpeed ? this.rules.maxSpeed / speed : 1
       const n = Math.hypot(...b.q)
+      // A thing asleep where the snapshot has it stays asleep: putting a quiet house back wakes nothing.
+      if (speed < 1e-6 && this.core.sleeping(t.body)) {
+        const at = this.core.position(t.body), turn = this.core.rotation(t.body)
+        if (Math.hypot(at[0] - b.p[0], at[1] - b.p[1], at[2] - b.p[2]) < 1e-5 && 1 - Math.abs(turn[0] * b.q[0] + turn[1] * b.q[1] + turn[2] * b.q[2] + turn[3] * b.q[3]) / (n * Math.hypot(...turn)) < 1e-9) continue
+      }
       this.core.setState(t.body, b.p as Vec3, [b.v[0] * k, b.v[1] * k, b.v[2] * k], [b.q[0] / n, b.q[1] / n, b.q[2] / n, b.q[3] / n])
     }
     for (const [id, saved] of Object.entries(s.gadgets ?? {})) {

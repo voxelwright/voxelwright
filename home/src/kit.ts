@@ -45,7 +45,7 @@ export interface LooseBody {
 }
 
 /** A box turned any way: half sizes, middle and turn (a quaternion), in the frame it is kept in. */
-export interface Turned { half: [number, number, number]; at: [number, number, number]; rotation: [number, number, number, number] }
+export interface Turned { half: [number, number, number]; at: [number, number, number]; rotation: [number, number, number, number]; /** The can inside the box (a round thing's floor), not the box. */ round?: 'can' }
 
 /** What a holder carries in `userData.loose`: its shape, and its drawing in or out of the kit's merged meshes. */
 export interface LooseParts {
@@ -163,9 +163,10 @@ function turnedBox(geo: THREE.BufferGeometry, m: THREE.Matrix4): Turned {
 const WALL = 0.008
 /** A floor and walls inside a box of these half sizes about the origin: four walls, or eight in a ring. */
 function hollowBoxes(half: THREE.Vector3, floor: number, ring: boolean): Turned[] {
-  const out: Turned[] = [{ half: [half.x, floor / 2, half.z], at: [0, -half.y + floor / 2, 0], rotation: [0, 0, 0, 1] }]
-  const n = ring ? 8 : 4
   const r = Math.min(half.x, half.z)
+  // A ring's floor is round too: a square one would stick out past the bowl as a ledge no one can see.
+  const out: Turned[] = [{ half: ring ? [r, floor / 2, r] : [half.x, floor / 2, half.z], at: [0, -half.y + floor / 2, 0], rotation: [0, 0, 0, 1], ...(ring ? { round: 'can' as const } : {}) }]
+  const n = ring ? 8 : 4
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2
     // A wall's middle is `reach` out along its turn; it is as wide as the gap between its neighbours.

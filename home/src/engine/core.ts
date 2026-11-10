@@ -113,6 +113,8 @@ export interface PhysicsCore {
   /** kg. */
   mass(id: BodyId): number
   sleeping(id: BodyId): boolean
+  /** Wakes a sleeping body where it is (a held thing must not doze off in the hand). */
+  wake(id: BodyId): void
   /** Bodies that woke or fell asleep since the last call, in order (a sleeping body costs the solver nothing). */
   activity(): { id: BodyId; awake: boolean }[]
   /** rad/s, world space. */
