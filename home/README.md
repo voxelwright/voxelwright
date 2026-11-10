@@ -14,6 +14,9 @@ npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the
 # ?talk=npc and ?build=1 still work. Scripts that need the old plain page add ?talk=off&build=0.
 # Physics (#74): every thing in the home is a body; the pinball table plays with Shift or arrow keys (flip) and Space or the
 # down arrow (plunge); "make gravity like the moon" on the notepad tunes it; ?physics=panel opens the rules panel (dev builds only).
+# Toys (#88): "build a marble run on the table", "make a seesaw", "set up ten pins and a ball" build a toy from parts on the
+# kitchen table's corner or the floor of your room; its tag offers Keep (for this visit: a reload clears kept toys), Undo and
+# Try another. Toy lines go to Sonnet with the kit prompt (--toy-model); rules and acts stay on Haiku (--rules-model).
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
@@ -23,6 +26,7 @@ node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, a walk round a placed bed (#79), step ms
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
+node scripts/check-physics-toys.mjs   # toys from a sentence (#88): three asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 npm run typecheck
 npm run build
@@ -211,7 +215,8 @@ Builds are cached in `~/.cache/village/perf-gate`: a base by commit (`git archiv
 `vite build`), the working tree by the hash of its `home/` tree, untracked files included.
 
 Scenes: `home` (`?talk=off&build=0&q=high`, kitchen seat view), `villagers` (`?talk=npc&q=high`, walking),
-`talk` (the same page after clicking Alex's villager: the close-up), and with `--full`
+`talk` (the same page after clicking Alex's villager: the close-up), `villagers-toys` (the villagers page with
+the three made toys from #88 built through the engine's `addToy`), and with `--full`
 `home-low` (`?talk=off&build=0&q=low`). A scene that needs a plugin the base lacks (villagers, talk: main has
 no villagers yet) runs on the head only, with the absolute gates; one the head lacks is
 skipped and listed.

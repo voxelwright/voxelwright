@@ -28,6 +28,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, extname, join, normalize, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { marbleRun, pins, seesaw } from '../../host/src/toy-examples.ts'
 
 const started = Date.now()
 const HOME = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -87,6 +88,8 @@ const SCENES = [
   { name: 'home-low', page: 'low', query: '?talk=off&build=0&q=low', tier: 'low', full: true },
   { name: 'villagers', page: 'npc', query: '?talk=npc&q=high', tier: 'high', needs: 'talk' },
   { name: 'talk', page: 'npc', query: '?talk=npc&q=high', tier: 'high', needs: 'talk', setup: openTalk },
+  // Toys made from a sentence (#88) cost only while they exist: the villagers scene with all three on the kitchen table, through the engine's addToy (the base has it too).
+  { name: 'villagers-toys', page: 'npc-toys', query: '?talk=npc&q=high', tier: 'high', needs: 'talk', setup: addToys },
 ]
 const wanted = opt('scenes')?.split(',')
 const scenes = wanted ? SCENES.filter((s) => wanted.includes(s.name)) : SCENES.filter((s) => !s.full || args.includes('--full'))
@@ -105,6 +108,27 @@ async function openTalk(page) {
     await page.waitForTimeout(50)
   }
   throw new Error('the talk close-up did not open within 4 s')
+}
+
+/** The marble run on the kitchen table's corner, the seesaw and ten pins on the kitchen floor, as made toys stand, once physics has started. */
+async function addToys(page) {
+  await page.waitForFunction(() => window.village?.physics?.engine, null, { timeout: 20_000 })
+  const at = [
+    [marbleRun, { half: [0.25, 0.17] }, [0.45, 0.76, 0.37], Math.PI / 2],
+    [seesaw, { half: [0.4, 0.3] }, [1.55, 0, 1.0], 0],
+    [pins, { half: [0.6, 0.4] }, [2.3, 0, 0.45], 0],
+  ]
+  const toys = at.map(([make, surface, where, yaw], i) => ({ id: `made-${i + 1}`, inputs: {}, ...make(surface), frame: { at: where, yaw, tilt: 0 } }))
+  await page.evaluate((toys) => {
+    const e = window.village.physics.engine
+    // A base from before #88 has no pivot: the seesaw's plank goes on a slack hinge there, the same bodies at the same cost.
+    const pivot = e.gadgetKinds().some((k) => k.kind === 'pivot')
+    for (const toy of toys) {
+      if (!pivot) toy.gadgets = toy.gadgets.map((g) => (g.kind === 'pivot' ? { ...g, kind: 'hinge', input: 'none', knobs: { torque: 0, swing: g.knobs.swing } } : g))
+      e.addToy(toy)
+    }
+  }, toys)
+  return page.waitForTimeout(2500)
 }
 
 // ── Refs and builds ────────────────────────────────────────────────────────────

@@ -185,6 +185,8 @@ export interface Routed {
   section?: 'talk' | 'tasks'
   /** build: a change to the house, as data (checked again by src/build/intent.ts). */
   intent?: unknown
+  /** physics: the line asks to build a toy (#88). Picks the host's prompt and model only; every toy is checked here. */
+  toy?: boolean
 }
 export type Outcome<T> = ({ ok: true; ms: number } & T) | { ok: false; why: 'away' | 'failed' | 'busy' | 'refused' | 'link'; ms: number }
 
@@ -269,6 +271,9 @@ export const saveTemplate = (person: string, name: string, persona: unknown, dia
 /** A theme written from a sentence (#50): unchecked theme data, a one-line note, and the prop and costume hints. */
 export const askTheme = (person: string, text: string, current: unknown) =>
   call<{ theme: unknown; note: string; hints: { props: unknown; costumes: unknown }; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/theme`, { text, current })
-/** World rules and acts written from a sentence (#74): unchecked rules and acts and a one-line note; physics/ask.ts checks every field and act. `things` names what acts may target. */
-export const askRules = (person: string, text: string, current: unknown, things: string[] = []) =>
-  call<{ rules?: unknown; acts?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things })
+/**
+ * World rules, acts and a toy written from a sentence (#74, #88): unchecked rules, acts and toy and a one-line note;
+ * physics/ask.ts checks every field, act and part. `things` names what acts may target, `surfaces` where a toy may stand.
+ */
+export const askRules = (person: string, text: string, current: unknown, things: string[] = [], surfaces: unknown[] = [], toy = false) =>
+  call<{ rules?: unknown; acts?: unknown; toy?: unknown; note: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }>(`/people/${person}/physics`, { text, current, things, surfaces, ...(toy ? { toy } : {}) })

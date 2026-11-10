@@ -1,4 +1,4 @@
-// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--theme-model sonnet] [--rules-model haiku] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]
+// npm run villager -- [--agent warm|claude|stub] [--model haiku] [--thinking] [--router-model sonnet] [--maker-model sonnet] [--theme-model sonnet] [--rules-model haiku] [--toy-model sonnet] [--sketch-model sonnet] [--sketch-effort low] [--port 5190] [--root ~/.village] [--home http://localhost:5181/]
 // warm (the default, #42) keeps one Claude Code process per person between turns; claude starts one per turn.
 // VILLAGER_PEOPLE=alex:Alex,sam:Sam,mia:Mia lists the synthetic people; the default is alex:Alex.
 // Each entry may add an age band and a language (alex:Alex:adult:en). VILLAGER_PROFILES=<file.json> sets
@@ -28,6 +28,7 @@ const { values } = parseArgs({
     'maker-model': { type: 'string', default: 'sonnet' },
     'theme-model': { type: 'string', default: 'sonnet' },
     'rules-model': { type: 'string', default: 'haiku' },
+    'toy-model': { type: 'string', default: 'sonnet' },
     'sketch-model': { type: 'string', default: 'sonnet' },
     'sketch-effort': { type: 'string', default: 'low' },
     port: { type: 'string', default: '5190' },
@@ -70,7 +71,7 @@ const fiber = root.plugin(villager, {
   maker: values.agent === 'stub' ? stubMaker() : claudeMaker(values['maker-model']),
   villagerMaker: values.agent === 'stub' ? stubVillagerMaker() : claudeVillagerMaker(values['maker-model']),
   themer: values.agent === 'stub' ? stubThemer() : claudeThemer(values['theme-model']),
-  ruler: values.agent === 'stub' ? stubRuler() : claudeRuler(values['rules-model']),
+  ruler: values.agent === 'stub' ? stubRuler() : claudeRuler(values['rules-model'], values['toy-model']),
   sketchMaker: values.agent === 'stub' ? stubSketchMaker(1500) : claudeSketchMaker(values['sketch-model'], values['sketch-effort'] as 'low' | 'medium' | 'high'),
 })
 await fiber.await()

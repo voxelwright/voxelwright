@@ -43,6 +43,8 @@ export interface Routed {
   section?: 'talk' | 'tasks'
   /** build: a change to the house as plain data ({op: 'addRoom', anchor, size, connect, label}); the home checks its values. */
   intent?: BuildIntent
+  /** physics: the line asks to build a toy (#88), so the host asks with the kit. Quality only: the page checks every toy. */
+  toy?: true
 }
 
 /** The shape of a build intent, kept to known keys and plain values; ranges and enums are the home's to check (src/build/intent.ts). */
@@ -158,6 +160,7 @@ export function checkRouted(raw: string, villagers: string[], library: { id: str
     if (saved && sameThing(out.what!, saved.name)) out.library = saved.id
   }
   if (route === 'journal' && (v.section === 'talk' || v.section === 'tasks')) out.section = v.section
+  if (route === 'physics' && v.toy === true) out.toy = true
   if (route === 'build') {
     const intent = plainIntent(v.intent)
     if (!intent) return { reason: 'the router chose build without an intent the house knows' }
@@ -171,10 +174,10 @@ function routeRules(ask: Omit<RouteAsk, 'text' | 'signal'>): string[] {
   return [
     '- "talk": they want to talk with another villager. Give "to" (an id below) and, if the line carries something to pass on, "message".',
     '- "furnish": a quick change to the room: add, place, replace or copy furniture or decor that can be made at once as a simple static object. Give "what" (a few words: kind, material, colour), "where" as they said it (or "here"), "mount": "floor" (stands on the floor), "surface" (sits on a table, counter or sill), "wall" (pictures, shelves, a TV, a clock) or "ceiling" (lanterns, mobiles, pendant lamps), "count", "size" [width, height, depth] in metres, "replace" if it replaces something in the room (e.g. "table"), "copy": true for "another one like that", "library" (an id below) only when they ask for that saved thing again as it is; a different size, colour, material or kind is a new thing, so leave "library" out.',
-    '- "project": something too big, interactive or working to make at once (a playable machine, a whole room makeover, anything that moves or does something). Give "what" and "where".',
+    '- "project": something too big, interactive or working to make at once (a playable machine with keys or code, a whole room makeover, an appliance that does a job). Give "what" and "where". A toy that plays by physics alone is "physics", not this.',
     '- "journal": they want to see conversations or tasks. Give "to" if they name a villager and "section": "talk" or "tasks".',
     '- "theme": they want the look of the whole home changed: its style, mood, season or colours ("make it cozier", "change the style to neon", "go back to normal"). No other fields; the theme is written separately.',
-    '- "physics": they want to change how things move or what physically happens in the home, not how it looks: gravity, bounciness, friction, slow motion, the moon, super powers, how hard villagers push, setting things on fire, putting fires out, water, rain, lightning ("make gravity like the moon", "make everything bouncy", "set the sofa on fire", "light a candle", "pour a bucket on the fire", "make it rain"). No other fields; the rules and acts are written separately.',
+    '- "physics": they want to change how things move or what physically happens in the home, not how it looks: gravity, bounciness, friction, slow motion, the moon, super powers, how hard villagers push, setting things on fire, putting fires out, water, rain, lightning ("make gravity like the moon", "make everything bouncy", "set the sofa on fire", "light a candle", "pour a bucket on the fire", "make it rain"); and building a toy that plays by physics from parts, balls, ramps, planks and pins ("build a marble run on the table", "make a seesaw", "set up ten pins and a ball", "line up some dominoes"). A piece of furniture or decor is "furnish", even when wooden. Give "toy": true when the line asks to build or set up a toy, and leave it out for rules and acts. No other fields; the rules, acts and toy are written separately.',
     '- "build": they want to change the house itself: add a room, or open a door into a new room (not furniture: that is "furnish"). Give "intent": {"op": "addRoom", "label": the new room\'s name if said ("study"), "anchor": {"room": the room it goes by, as said ("living room"), or "this" for the room they are in, "side": "left", "right", "behind" or "front" as they see it, "wall": "selected" when they say "this wall" or "here"}, "size": {"w": metres along the shared wall, "d": metres away from it} or {"fraction": share of that room\'s floor area, e.g. 0.667 for "2/3 the size"}, "connect": {"kind": "door" or "opening", "leaves": 2 for double doors, "at": "selected-point" when they say "here"}}. Include only what they said; never invent a size or a side.',
     `Always add "say": one short warm line from you, ${ask.primary}, out loud (under 15 words), except for "talk" where it may be omitted. Never claim something is done.`,
     // Names and library items are data: JSON-quoted so a stored name cannot break the prompt's lines (Sentinel, #42).
@@ -361,6 +364,9 @@ const NOUNS: [RegExp, [number, number, number]][] = [
   [/\blamps?\b/, [0.4, 1.5, 0.4]], [/\bplants?\b/, [0.5, 1.0, 0.5]], [/\brugs?\b/, [1.6, 0.02, 1.1]],
 ]
 
+/** Toys that play by physics alone (#88): the stub router sends these to physics. */
+const TOY_WORDS = /\b(marble run|marbles?|see[- ]?saw|teeter|ten pins|skittles|bowling|dominoe?s|domino|catapult|pendulum|ramp and a ball)\b|\bpins and a ball\b/
+
 /** Keyword rules standing in for the model router. Tests and the page check rely on exactly these. Throws on "[stub-route-fail]". */
 export function stubRoute(ask: Pick<RouteAsk, 'text' | 'primary' | 'villagers' | 'library'>): string {
   const t = ask.text.toLowerCase()
@@ -373,6 +379,7 @@ export function stubRoute(ask: Pick<RouteAsk, 'text' | 'primary' | 'villagers' |
   if (/journal|notebook|tasks/.test(t)) routed = { route: 'journal', to: named?.id, section: /tasks/.test(t) ? 'tasks' : 'talk', say: 'Here are your pages.' }
   else if (/pinball|playable|machine/.test(t)) routed = { route: 'project', what: t.replace(/^.*?(a |an )/, '').slice(0, 60), where: /living room/.test(t) ? 'living room' : 'here', say: "That's a proper project. I'll start on it." }
   else if ((/^(add|open|build|make)\b/.test(t) && /\b(room|study|bedroom|pantry|nursery|office|playroom)\b/.test(t) && !/\b(table|chair|lamp|plant|rug)s?\b/.test(t)) || /door here/.test(t)) routed = { route: 'build', intent: stubIntent(t), say: 'Let me sketch it out.' }
+  else if (TOY_WORDS.test(t)) routed = { route: 'physics', toy: true, say: 'Ooh, let me build that.' }
   else if (/^(add|put|place|replace|another|wallpaper|hang)/.test(t) || /^(a|an|some) [a-z ]+ (on|by|near|in|above|from) the /.test(t)) {
     const what = t.replace(/^(add|put|place|replace the \w+ with)\s+(a |an |another |the )?(couple of |two )?/, '').replace(/\s+(around|by|in|on|here).*$/, '') || 'thing'
     // Sized by the thing, not by the place named after it ("chairs around the table" is not a table); a replaced table keeps the table's size.

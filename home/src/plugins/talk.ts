@@ -1880,15 +1880,16 @@ export default {
         case 'physics': {
           // #74: how things move, tuned from the person's own words by the physics world; its note is shown as text.
           furnish!.dismiss(guess)
-          if (!asksPhysics(text)) return send(text, undefined, me)
+          // A toy goes on trial and can be undone, so the router's toy flag is enough; rules and acts still need the person's own words.
+          if (routed.toy !== true && !asksPhysics(text)) return send(text, undefined, me)
           if (routed.say) quip(me, routed.say)
-          const request: PhysicsAsk = { text, person: me.person }
+          const request: PhysicsAsk = { text, person: me.person, toy: routed.toy === true }
           ctx.emit('village/physics-ask', request)
           // No answer (physics off or not started yet), a world that stopped while the model answered, or a thrown error all say the same.
           const r = request.answer ? await request.answer.catch((error) => (console.error('Village physics ask failed:', error), null)) : null
           // An act the world refused says why ("the fridge: steel does not burn"), as text.
           const refusedAct = r && !r.ok && r.why === 'refused' && r.acts?.find((a) => a.refused)
-          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : refusedAct ? `${refusedAct.target ?? 'That'}: ${refusedAct.refused}.` : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
+          quip(me, !r || (!r.ok && r.why === 'gone') ? "Things can't move any differently just now." : r.ok ? r.note || 'There. Things move differently now.' : r.toy ? `I couldn't build that: ${r.reason}. Nothing's changed.` : refusedAct ? `${refusedAct.target ?? 'That'}: ${refusedAct.refused}.` : r.why === 'link' ? "I can't hear you through this old link. Open your latest link and say it again." : "I couldn't change how things move just now.")
           return
         }
         case 'build': {

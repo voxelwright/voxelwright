@@ -162,7 +162,8 @@ export class World implements WorldApi {
   private pairsVersion = -1
   private clampedAt = new Map<string, number>()
   private dust: { mesh: THREE.Mesh; life: number; v: THREE.Vector3 }[] = []
-  private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture }>()
+  /** A part's face drawn as a card (a score): its canvas, texture and material, and the text it should show next frame when changed. */
+  private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshStandardMaterial; text: string; drawn: string | null }>()
   private looks = new Map<string, THREE.Material>()
   /** Per toy, its scenery: the parts drawn together, one mesh per look (see build). */
   private scenery = new Map<string, THREE.Mesh[]>()
@@ -338,9 +339,23 @@ export class World implements WorldApi {
     this.version++
   }
 
+  /** How much is built: things, gadgets, joints, wired outputs and drawn looks (to see that taking a toy out leaves nothing behind). */
+  census() {
+    let joints = 0
+    for (const list of this.joints.values()) joints += list.length
+    return { things: this.things.size, gadgets: this.gadgets.size, joints, wires: this.wires.size, looks: this.looks.size, displays: this.displays.size, draws: this.draws, toys: this.frames.size }
+  }
+
+  /** Whether a toy with this id is built. */
+  hasToy(id: string) {
+    return this.frames.has(id)
+  }
+
   /** Everything of a toy out of the world again: joints, bodies, meshes, gadgets, wires, displays. */
-  private removeToy(id: string) {
+  removeToy(id: string) {
     this.version++
+    const lookOf = (part: PartSpec) => `${part.material}:${part.paint ?? ''}`
+    const itsLooks = new Set([...this.things.values()].filter((t) => t.toy === id).map((t) => lookOf(t.part)))
     for (const joint of this.joints.get(id) ?? []) this.core.removeJoint(joint)
     this.joints.delete(id)
     for (const [key, t] of this.things) {
@@ -370,6 +385,7 @@ export class World implements WorldApi {
     for (const [key, d] of this.displays) {
       if (!mine(key)) continue
       d.texture.dispose()
+      d.material.dispose()
       this.displays.delete(key)
     }
     for (const mesh of this.scenery.get(id) ?? []) {
@@ -378,6 +394,15 @@ export class World implements WorldApi {
     }
     this.scenery.delete(id)
     this.frames.delete(id)
+    // A drawn look (and its painted grain) only this toy used goes with it: made toys come in many colours.
+    for (const t of this.things.values()) itsLooks.delete(lookOf(t.part))
+    for (const key of itsLooks) {
+      const look = this.looks.get(key) as THREE.MeshStandardMaterial | undefined
+      if (!look) continue
+      look.map?.dispose()
+      look.dispose()
+      this.looks.delete(key)
+    }
   }
 
   private geometry(shape: Shape): THREE.BufferGeometry {
@@ -406,6 +431,7 @@ export class World implements WorldApi {
     return look
   }
 
+  /** Sets a part's card text; it is drawn once in the next sync, however many times it changed meanwhile. */
   show(key: string, text: string) {
     const thing = this.things.get(key)
     if (!thing?.mesh) return
@@ -416,10 +442,25 @@ export class World implements WorldApi {
       canvas.height = 180
       const texture = new THREE.CanvasTexture(canvas)
       texture.colorSpace = THREE.SRGBColorSpace
-      d = { canvas, texture }
+      const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 })
+      d = { canvas, texture, material, text, drawn: null }
       this.displays.set(key, d)
-      thing.mesh.material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 })
+      thing.mesh.material = material
     }
+    d.text = String(text).slice(0, 12)
+  }
+
+  /** Draws the cards whose text changed since they were last drawn. */
+  private drawDisplays() {
+    for (const d of this.displays.values()) if (d.drawn !== d.text) this.draw(d)
+  }
+
+  /** Cards drawn since the world started. */
+  private draws = 0
+
+  private draw(d: { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; text: string; drawn: string | null }) {
+    this.draws++
+    d.drawn = d.text
     const g = d.canvas.getContext('2d')!
     g.fillStyle = '#f6ead2'
     g.fillRect(0, 0, 512, 180)
@@ -430,7 +471,7 @@ export class World implements WorldApi {
     g.font = '600 104px "Iowan Old Style", Palatino, Georgia, serif'
     g.textAlign = 'center'
     g.textBaseline = 'middle'
-    g.fillText(String(text).slice(0, 12), 256, 96)
+    g.fillText(d.text, 256, 96)
     d.texture.needsUpdate = true
   }
 
@@ -785,6 +826,7 @@ export class World implements WorldApi {
 
   /** Meshes follow bodies; wobbles and dust ease out. */
   private sync(dt: number) {
+    this.drawDisplays()
     const m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1)
     for (const b of this.bound.values()) {
       if (b.motion !== 'dynamic' || this.core.sleeping(b.body)) continue
@@ -843,7 +885,7 @@ export class World implements WorldApi {
     const local = frame ? arr(v3(p).applyMatrix4(frame.clone().invert())) : p
     return {
       key, toy: t?.toy ?? (f ? 'followers' : 'bound'), material: t?.part.material ?? (f ?? b)!.material, shape: this.shapeOf(any),
-      motion: t?.part.motion ?? b?.motion ?? 'dynamic', position: p, rotation: this.core.rotation(any.body), velocity: this.core.velocity(any.body), local,
+      motion: t ? t.part.motion ?? 'static' : b?.motion ?? 'dynamic', position: p, rotation: this.core.rotation(any.body), velocity: this.core.velocity(any.body), local,
       mass: this.core.mass(any.body),
     }
   }

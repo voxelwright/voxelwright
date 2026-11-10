@@ -37,7 +37,7 @@ export interface Signal {
 
 /**
  * A gadget in a toy: a kind from the gadget registry (gadgets.ts: the built-in kit is sensor,
- * kick, hinge, piston, zone, emitter, counter), usually a part it acts on, its knobs (checked
+ * kick, hinge, pivot, piston, zone, emitter, counter), usually a part it acts on, its knobs (checked
  * against the kind's ranges; missing ones take the kind's defaults) and any settings the kind
  * documents (a hinge's anchor and axis, an input name).
  */

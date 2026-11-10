@@ -8,6 +8,12 @@ import type { Signal } from './toy'
 
 export interface Knob { min: number; max: number; step: number; default: number; about: string }
 
+/**
+ * What a kind's spec settings are, for whoever checks a toy written as data (made.ts): a point and a
+ * direction in the toy's frame, a held input's name, or the id of one of the toy's parts.
+ */
+export type Setting = 'point' | 'direction' | 'input' | 'part'
+
 export interface GadgetKind {
   kind: string
   about: string
@@ -15,6 +21,10 @@ export interface GadgetKind {
   /** Ports it reads (wired into) and writes (fires). */
   inputs: string[]
   outputs: string[]
+  /** The spec settings it reads besides `part` and `knobs`. */
+  settings?: Record<string, Setting>
+  /** What its spec must give, so a toy written as data is refused before it is built: a part (`moving`: a dynamic one) and settings by name. */
+  needs?: { part?: 'any' | 'moving' | 'sensor'; settings?: string[] }
   /** Once, when its toy is built. */
   setup?(g: Gadget, w: WorldApi): void
   /** A knob changed value (tuned live, or restored): bring whatever was fixed from it at setup into line. */
@@ -71,7 +81,7 @@ registerGadget({
 registerGadget({
   kind: 'hinge', about: 'A motor hinge on a dynamic part (settings: anchor, axis, input): swings to `swing` rad at `speed` rad/s while the input is held, back when released.',
   knobs: { speed: knob(0, 60, 0.5, 25, 'rad/s'), torque: knob(0, 20, 0.1, 3, 'N·m'), swing: knob(0.1, 1.5, 0.01, 1, 'rad') },
-  inputs: [], outputs: [],
+  inputs: [], outputs: [], settings: { anchor: 'point', axis: 'direction', input: 'input' }, needs: { part: 'moving', settings: ['anchor', 'axis'] },
   setup(g, w) {
     if (!g.part) throw new Error(`${g.id}: a hinge needs a part`)
     g.state.joint = w.addHinge(g.part, setting<Vec3>(g, 'anchor'), setting<Vec3>(g, 'axis'), [0, g.knobs.swing])
@@ -91,7 +101,7 @@ registerGadget({
 registerGadget({
   kind: 'piston', about: 'A dynamic part on a slider (settings: axis, input): pulled back along -axis while the input is held (fully after `charge` s, by `travel` m), driven forward on release at up to `strength` m/s, through its rest point by `travel` so a shot leaves at that speed, then eased back.',
   knobs: { strength: knob(0, 8, 0.05, 4.5, 'm/s'), travel: knob(0.01, 0.12, 0.005, 0.025, 'm'), charge: knob(0.1, 3, 0.05, 0.8, 's') },
-  inputs: [], outputs: ['fired'],
+  inputs: [], outputs: ['fired'], settings: { axis: 'direction', input: 'input' }, needs: { part: 'moving', settings: ['axis'] },
   setup(g, w) {
     if (!g.part) throw new Error(`${g.id}: a piston needs a part`)
     g.state.joint = w.addSlider(g.part, setting<Vec3>(g, 'axis'), [-0.12, 0.12])
@@ -127,7 +137,7 @@ registerGadget({
 
 registerGadget({
   kind: 'zone', about: 'A sensor part: `enter` when a moving thing comes in, about that thing.',
-  knobs: {}, inputs: [], outputs: ['enter'],
+  knobs: {}, inputs: [], outputs: ['enter'], needs: { part: 'sensor' },
   touch(g, t, w) {
     if (t.sensor && w.thing(t.other)?.motion === 'dynamic') w.fire(g, 'enter', { value: 1, thing: t.other, at: t.point })
   },
@@ -135,7 +145,7 @@ registerGadget({
 
 registerGadget({
   kind: 'emitter', about: 'On `spawn`, puts its part back where it started, at rest, after `delay` s: when the signal is about that part, or about nothing.',
-  knobs: { delay: knob(0, 5, 0.1, 0.6, 's') }, inputs: ['spawn'], outputs: ['spawned'],
+  knobs: { delay: knob(0, 5, 0.1, 0.6, 's') }, inputs: ['spawn'], outputs: ['spawned'], needs: { part: 'moving' },
   receive(g, port, s, w) {
     if (port !== 'spawn' || !g.part || (s.thing && s.thing !== g.part)) return
     if (w.respawn(g.part, g.knobs.delay)) w.fire(g, 'spawned', { value: 1, thing: g.part })
@@ -144,7 +154,7 @@ registerGadget({
 
 registerGadget({
   kind: 'counter', about: 'Adds `step` on `add`, zero on `reset`; `changed` carries the total. Shown on the part named by its `display` setting.',
-  knobs: { step: knob(-100, 1000, 1, 1, 'per add') }, inputs: ['add', 'reset'], outputs: ['changed'],
+  knobs: { step: knob(-100, 1000, 1, 1, 'per add') }, inputs: ['add', 'reset'], outputs: ['changed'], settings: { display: 'part' },
   setup(g, w) {
     g.state.value = 0
     const display = setting<string | undefined>(g, 'display')
@@ -156,6 +166,22 @@ registerGadget({
     const display = setting<string | undefined>(g, 'display')
     if (display) w.show(`${g.toy}/${display}`, String(g.state.value).padStart(5, '0'))
     w.fire(g, 'changed', { value: g.state.value })
+  },
+})
+
+registerGadget({
+  kind: 'pivot', about: 'A free hinge on a dynamic part (settings: anchor, axis): it swings either way from where it was made, at most `swing` rad, slowed by `friction`. A seesaw\'s plank, a pendulum, a gate.',
+  knobs: { swing: knob(0.05, 1.5, 0.01, 0.35, 'rad each way'), friction: knob(0, 5, 0.01, 0.02, 'N·m') },
+  inputs: [], outputs: [], settings: { anchor: 'point', axis: 'direction' }, needs: { part: 'moving', settings: ['anchor', 'axis'] },
+  setup(g, w) {
+    if (!g.part) throw new Error(`${g.id}: a pivot needs a part`)
+    g.state.joint = w.addHinge(g.part, setting<Vec3>(g, 'anchor'), setting<Vec3>(g, 'axis'), [-g.knobs.swing, g.knobs.swing])
+    // Set once, not every step: setting a motor wakes its body, and a pivot at rest should sleep.
+    w.setMotor(g.state.joint, 0, g.knobs.friction)
+  },
+  knob(g, name, w) {
+    if (name === 'swing') w.setLimits(g.state.joint, [-g.knobs.swing, g.knobs.swing])
+    if (name === 'friction') w.setMotor(g.state.joint, 0, g.knobs.friction)
   },
 })
 

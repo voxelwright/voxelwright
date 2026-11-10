@@ -5,11 +5,16 @@
 // once. Acts (set a thing alight, pour water on it, rain, lightning) name a thing from the list
 // the page sent; the page checks each against its own list again. The answer is data: it can
 // change how the world moves and what burns or is wet, and nothing else.
+// A toy (#88): the answer may also carry a new toy as parts, gadgets and wires on one of the
+// surfaces the page offered; the host checks its shape, the page checks every field
+// (src/engine/made.ts) and builds it all at once or not at all. Nothing in it runs.
 // `stubRuler` stands in for the model in checks.
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { oneShot, type Call } from './villager-input.ts'
+import { EXAMPLE_SURFACE, marbleRun, pins, seesaw, type OfferedSurface } from './toy-examples.ts'
+import { MADE_KINDS } from '../../home/src/engine/made-kinds.ts'
 
 export interface RulesAsk {
   text: string
@@ -17,6 +22,10 @@ export interface RulesAsk {
   current: unknown
   /** Names of the things in the home that heat and water can act on, as the page sent them: data. */
   things: string[]
+  /** Where a toy may stand, as the page offered it: data. */
+  surfaces: OfferedSurface[]
+  /** The router said the line asks to build a toy: the kit prompt on the toy model. Only quality rides on it; the page checks everything. */
+  toy: boolean
   signal: AbortSignal
 }
 
@@ -24,14 +33,46 @@ export interface RulesAsk {
 export const ACTS = ['ignite', 'douse', 'rain', 'lightning'] as const
 export interface Act { act: (typeof ACTS)[number]; target?: string; seconds?: number }
 export type Ruler = (ask: RulesAsk) => Promise<{ raw: string } & Call>
+/** A toy as the host lets it through: its shape only. The page checks every field. */
+export interface ToyReply { label: string; on: string; parts: unknown[]; gadgets: unknown[]; wires: unknown[] }
 
 const MAX_TEXT = 300
 const MAX_BODY = 64_000
 const MAX_THINGS = 256
-const RULES = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine', 'rules.ts')
+const MAX_SURFACES = 4
+/** Generous over the page's own caps (made.ts): junk past these never crosses the wire. */
+const MAX_TOY = { parts: 60, gadgets: 24, wires: 48, bytes: 48_000 }
+const ENGINE = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine')
+const RULES = join(ENGINE, 'rules.ts')
+
+/**
+ * A file of the engine from the first line matching `from` up to (not including) the next line
+ * matching `to`, as the engine has it now. Throws when either line is not there: a renamed anchor
+ * must break the prompt loudly, not quote the whole file into it.
+ */
+export async function engineText(file: string, from?: RegExp, to?: RegExp, dir = ENGINE) {
+  const lines = (await readFile(join(dir, file), 'utf8')).split('\n')
+  const start = from ? lines.findIndex((l) => from.test(l)) : 0
+  if (start < 0) throw new Error(`the physics prompt: ${file} has no line matching ${from}`)
+  const end = to ? lines.findIndex((l, i) => i > start && to.test(l)) : lines.length
+  if (end < 0) throw new Error(`the physics prompt: ${file} has no line matching ${to} after ${from}`)
+  return lines.slice(start, end).join('\n').trim()
+}
+
+/** The gadget kit's registrations for the kinds a made toy may use, each as gadgets.ts has it. Throws when one is missing. */
+export async function madeKit(dir = ENGINE) {
+  const text = await engineText('gadgets.ts', /^registerGadget\(/, undefined, dir)
+  const blocks = text.split(/\n(?=registerGadget\()/)
+  return MADE_KINDS.map((kind) => {
+    const block = blocks.find((b) => b.includes(`kind: '${kind}'`))
+    if (!block) throw new Error(`the physics prompt: gadgets.ts registers no ${kind}`)
+    return block.slice(0, block.lastIndexOf('})') + 2)
+  }).join('\n\n')
+}
 
 let prompt: Promise<string> | undefined
-/** The system prompt, built once from the home's own rules file (type, ranges, presets), so it never drifts from it. */
+let kitPrompt: Promise<string> | undefined
+/** The rules prompt, built once from the home's own rules file (type, ranges, presets), so it never drifts from it. */
 export function rulesPrompt(): Promise<string> {
   return (prompt ??= (async () => [
     'You tune the physics of Village, a cozy family home in three.js where toys (a pinball table, felt balls, wooden blocks) and villagers are physical bodies. World rules are one JSON object that says how everything moves. Things are made of materials: wood, felt and paper burn, steel and glass do not, water puts fire out. You change the rules, or act on things, from one sentence.',
@@ -49,16 +90,70 @@ export function rulesPrompt(): Promise<string> {
   ].join('\n'))())
 }
 
-export function claudeRuler(model = 'sonnet'): Ruler {
+/**
+ * The prompt for a line that asks to build a toy (#88): the rules prompt and the kit, built once
+ * from the engine's own files (toy.ts's types, materials.ts's registry, gadgets.ts's kinds a made
+ * toy may use), with one worked example.
+ */
+export function toyPrompt(): Promise<string> {
+  return (kitPrompt ??= (async () => [await rulesPrompt(), '', ...(await toyRules())].join('\n'))())
+}
+
+async function toyRules() {
+  const example = { note: 'A marble run: three ramps down a walnut board, with a steel marble at the top.', toy: { on: EXAMPLE_SURFACE.id, ...marbleRun(EXAMPLE_SURFACE) } }
+  return [
+    'Toys. When the sentence asks you to build, make or set up a toy or a contraption (a marble run, a seesaw, pins and a ball, dominoes, a ramp), add "toy" to the answer and build it from parts, the way the home\'s pinball table is built: shapes made of materials, with gadgets wired together. It plays only because of physics, so design it to work under gravity.',
+    '- A toy answer is {"note", "toy"} only: rules and acts in it are not applied.',
+    '- "toy": {"label": "<2 or 3 words>", "on": "<a surface id>", "parts": [PartSpec...], "gadgets": [GadgetSpec...], "wires": [Wire...]}. "on" is copied exactly from the surfaces list: the surface the sentence names, or else the one the toy fits best (a lane or a long run wants the larger one). Leave "toy" out when the sentence asks for none; "note" then says nothing about one.',
+    '- Parts stand in the surface\'s frame: the origin is the centre of its top, x runs along its long side, z across it, y up; metres, and "turn" is [x, y, z] radians (XYZ). Every part stays inside the surface: |x| plus the part\'s half size along x at most half[0], |z| plus its half size along z at most half[1], its bottom at y >= 0 and its top at most height.',
+    '- "motion": "dynamic" for a part that moves (a ball, a pin, a plank on a pivot); leave it out for a fixed part. Never "kinematic", "hidden" or "mass" unless needed. At most 40 parts, 16 moving, 16 gadgets, 32 wires. Half sizes and radii 0.004 to 0.5 m, at real toy scale: a marble has radius 0.0125, a pin is a cylinder of radius 0.016 and halfHeight 0.05.',
+    '- A moving part rests on something: its bottom touching what holds it (a ball on a ramp: its centre one radius above the ramp\'s top there), never inside another part, or it bursts apart.',
+    '- Gadgets come only from the kit below; no other kind is accepted. Use "pivot" for a part that swings freely (a seesaw\'s plank: anchor under the plank\'s centre, axis across the plank), sensor wired to kick for a bumper, zone (on a part with "sensor": true) wired to emitter to send a ball back, counter to keep a score. A toy that needs no gadget has none.',
+    '- A wire runs from "gadget.port" (one of that kind\'s outputs) to "gadget.port" (one of the other kind\'s inputs).',
+    '- Materials set how it moves: steel and glass roll far, lacquer is slick, rubber bounces, felt and cork are dead, maple and walnut are ordinary wood. "paint" (#rrggbb) only changes its colour; choose warm, natural colours.',
+    '- A ball meant to be rolled at something (pins, dominoes) starts at one end with a clear, straight, flat run to it and nothing in between; pins stand a little more than a pin\'s width apart, so one knocks the next.',
+    '- Ramps tilt 0.08 to 0.2 rad down along their length and have rails along both edges so a ball stays on; a ramp ends over the start of the next, a ball diameter plus a few centimetres lower, with a stop just past its end that drops the ball onto the next.',
+    '',
+    'The part, gadget and wire types, as the engine defines them (TypeScript):',
+    await engineText('toy.ts', /^import/, /^\/\*\* Nothing lives farther/),
+    '',
+    'The materials (materials.ts), by name:',
+    await engineText('materials.ts', /^const BUILT_IN/, /^for \(const/),
+    '',
+    `The gadget kit (gadgets.ts), only the kinds a made toy may use (${MADE_KINDS.join(', ')}): each kind, what it does, its knobs with ranges, the ports it reads and fires, and its settings:`,
+    await madeKit(),
+    '',
+    `A worked example, for the surface ${JSON.stringify(EXAMPLE_SURFACE)} and the sentence "build a marble run on the table":`,
+    JSON.stringify(example),
+  ]
+}
+
+/** Rules and acts on `model` with the short prompt; a toy (the router said so) on `toyModel` with the kit prompt. */
+export function claudeRuler(model = 'haiku', toyModel = 'sonnet'): Ruler {
   return async (ask) => {
     const current = ask.current === undefined ? 'none (the normal preset)' : JSON.stringify(ask.current)
-    const { text, ...call } = await oneShot(model, await rulesPrompt(), `Sentence (data): ${JSON.stringify(ask.text)}\nCurrent rules (data): ${current}\nThings (data): ${JSON.stringify(ask.things)}`, ask.signal)
+    const asked = `Sentence (data): ${JSON.stringify(ask.text)}\nCurrent rules (data): ${current}\nThings (data): ${JSON.stringify(ask.things)}`
+    const { text, ...call } = ask.toy
+      ? await oneShot(toyModel, await toyPrompt(), `${asked}\nSurfaces (data): ${JSON.stringify(ask.surfaces)}`, ask.signal)
+      : await oneShot(model, await rulesPrompt(), asked, ask.signal)
     return { raw: text, ...call }
   }
 }
 
-/** The model's answer, shaped like rules and acts or refused. The page checks every field and act again; this only keeps junk off the wire. */
-export function checkRulesReply(raw: string): { rules?: Record<string, unknown>; acts?: Act[]; note: string } | { reason: string } {
+/** A toy shaped as the page expects, or why not. Shape only: the page checks every field. */
+function toyShape(t: unknown): ToyReply | string {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return 'the toy is not an object'
+  const v = t as Record<string, unknown>
+  const list = (x: unknown, max: number) => (x === undefined ? [] : Array.isArray(x) && x.length <= max ? x : null)
+  const parts = list(v.parts, MAX_TOY.parts), gadgets = list(v.gadgets, MAX_TOY.gadgets), wires = list(v.wires, MAX_TOY.wires)
+  if (!parts?.length || !gadgets || !wires) return 'the toy has no list of parts, or too long a one'
+  if (typeof v.on !== 'string' || !v.on || v.on.length > 40) return 'the toy does not say where it stands'
+  if (JSON.stringify(t).length > MAX_TOY.bytes) return 'the toy is too large'
+  return { label: typeof v.label === 'string' ? v.label.slice(0, 40) : '', on: v.on, parts, gadgets, wires }
+}
+
+/** The model's answer, shaped like rules, acts and a toy, or refused. The page checks every field again; this only keeps junk off the wire. */
+export function checkRulesReply(raw: string): { rules?: Record<string, unknown>; acts?: Act[]; toy?: ToyReply; note: string } | { reason: string } {
   const json = /\{[\s\S]*\}/.exec(raw)?.[0]
   let v: unknown
   try {
@@ -81,9 +176,15 @@ export function checkRulesReply(raw: string): { rules?: Record<string, unknown>;
       acts.push(act)
     }
   }
-  if (!rules && !acts.length) return { reason: 'the answer has no rules object' }
+  let toy: ToyReply | undefined
+  if (Object.hasOwn(v, 'toy') && v.toy !== null) {
+    const shaped = toyShape(v.toy)
+    if (typeof shaped === 'string') return { reason: shaped }
+    toy = shaped
+  }
+  if (!rules && !acts.length && !toy) return { reason: 'the answer has no rules object' }
   const note = typeof v.note === 'string' ? v.note.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) : ''
-  return { ...(rules ? { rules } : {}), ...(acts.length ? { acts } : {}), note: note || (rules ? 'The world rules changed.' : 'Done.') }
+  return { ...(rules ? { rules } : {}), ...(acts.length ? { acts } : {}), ...(toy ? { toy } : {}), note: note || (toy ? `A ${toy.label || 'toy'}.` : rules ? 'The world rules changed.' : 'Done.') }
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -107,14 +208,20 @@ const tuning = new Set<string>()
  */
 export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: string, req: IncomingMessage, res: ServerResponse, send: (res: ServerResponse, status: number, value: unknown) => void) {
   if (!ruler) return send(res, 503, { error: 'no ruler' })
-  let b: { text?: unknown; current?: unknown; things?: unknown }
+  let b: { text?: unknown; current?: unknown; things?: unknown; surfaces?: unknown; toy?: unknown }
   try {
     b = ((await readBody(req)) ?? {}) as typeof b
   } catch {
-    return send(res, 400, { error: 'expected JSON {"text", "current"?, "things"?}' })
+    return send(res, 400, { error: 'expected JSON {"text", "current"?, "things"?, "surfaces"?, "toy"?}' })
   }
+  if (b.toy !== undefined && typeof b.toy !== 'boolean') return send(res, 400, { error: 'toy is true or false' })
+  const toy = b.toy === true
   const { text, current } = b
   const things = b.things === undefined ? [] : b.things
+  const surfaces = b.surfaces === undefined ? [] : b.surfaces
+  const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= 10
+  if (!Array.isArray(surfaces) || surfaces.length > MAX_SURFACES || !surfaces.every((s) => s && typeof s === 'object' && typeof s.id === 'string' && /^[a-z0-9-]{1,40}$/.test(s.id) && typeof s.label === 'string' && s.label.length <= 60
+    && Array.isArray(s.half) && s.half.length === 2 && s.half.every(num) && num(s.height))) return send(res, 400, { error: `surfaces is a list of at most ${MAX_SURFACES} {id, label, half: [x, z], height}` })
   if (!Array.isArray(things) || things.length > MAX_THINGS || !things.every((t) => typeof t === 'string' && t.length > 0 && t.length <= 60)) return send(res, 400, { error: `things is a list of at most ${MAX_THINGS} names` })
   if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT) return send(res, 400, { error: `text is 1 to ${MAX_TEXT} characters` })
   if (current !== undefined && (!current || typeof current !== 'object' || Array.isArray(current))) return send(res, 400, { error: 'current is a rules object' })
@@ -125,13 +232,13 @@ export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: st
   const log = (entry: Record<string, unknown>) => mkdir(dir, { recursive: true, mode: 0o700 })
     .then(() => appendFile(join(dir, 'physics.jsonl'), JSON.stringify({ at, text: text.trim(), ...entry }) + '\n', { mode: 0o600 }))
   try {
-    const call = await ruler({ text: text.trim(), current, things: things as string[], signal: AbortSignal.timeout(60_000) })
+    const call = await ruler({ text: text.trim(), current, things: things as string[], surfaces: (surfaces as OfferedSurface[]).map((s) => ({ id: s.id, label: s.label, half: s.half, height: s.height })), toy, signal: AbortSignal.timeout(toy ? 90_000 : 60_000) })
     const ms = Date.now() - started
     const checked = checkRulesReply(call.raw)
     const usage = { ms, models: call.models, costUsd: call.costUsd, outputTokens: call.outputTokens, apiMs: call.apiMs }
-    await log({ ...('reason' in checked ? { refused: checked.reason } : { rules: checked.rules, acts: checked.acts, note: checked.note }), ...usage })
+    await log({ ...('reason' in checked ? { refused: checked.reason } : { rules: checked.rules, acts: checked.acts, ...(checked.toy ? { toy: { label: checked.toy.label, on: checked.toy.on, parts: checked.toy.parts.length } } : {}), note: checked.note }), ...usage })
     if ('reason' in checked) return send(res, 422, { error: checked.reason, ms })
-    return send(res, 200, { rules: checked.rules, acts: checked.acts, note: checked.note, ...usage })
+    return send(res, 200, { rules: checked.rules, acts: checked.acts, toy: checked.toy, note: checked.note, ...usage })
   } catch (error) {
     await log({ failed: String((error as Error).message ?? error).slice(0, 300), ms: Date.now() - started }).catch(() => {})
     return send(res, 422, { error: 'the ruler failed', ms: Date.now() - started })
@@ -167,6 +274,19 @@ export function stubRuler(delayMs = 40): Ruler {
     if (/lightning/.test(t)) return { raw: JSON.stringify({ note: `Lightning strikes the ${named ?? 'house'}.`, acts: [{ act: 'lightning', target: named ?? 'nothing' }] }), ...call }
     if (/water|bucket|douse|put (it |the fire )?out|extinguish/.test(t)) return { raw: JSON.stringify({ note: 'A bucket of water, splash.', acts: [{ act: 'douse', target: named ?? 'fire' }] }), ...call }
     if (/fire|burn|light|alight|ablaze/.test(t)) return { raw: JSON.stringify({ note: `The ${named ?? 'thing'} catches.`, acts: [{ act: 'ignite', target: named ?? 'nothing' }] }), ...call }
+    // Toys (#88): the hand-written ones, on the surface the sentence names ("floor") or else the first the page offered. "[stub-toy-off]" puts one off it, "[stub-toy-junk]" names an unknown gadget kind.
+    const on = ask.surfaces.find((x) => t.includes(x.id)) ?? ask.surfaces[0]
+    const toy = on && (/marble/.test(t) ? marbleRun(on) : /see[- ]?saw/.test(t) ? seesaw(on) : /\bpins\b|skittles|bowling/.test(t) ? pins(on) : null)
+    // On "another take": "[stub-again-off]" answers a toy off its surface, "[stub-again-rules]" only rules, no toy.
+    const again = t.includes('another take')
+    if (toy && again && t.includes('[stub-again-rules]')) return { raw: JSON.stringify({ note: 'Everything bounces a little more.', rules: { bounce: 1.3 }, acts: [{ act: 'rain', seconds: 8 }] }), ...call }
+    if (toy) {
+      if (t.includes('[stub-toy-off]') || (again && t.includes('[stub-again-off]'))) toy.parts[0].at = [on.half[0] + 1, 0.1, 0]
+      if (t.includes('[stub-toy-rules]')) return { raw: JSON.stringify({ note: `${toy.label}, and the moon.`, rules: { gravity: [0, -1.62, 0] }, acts: [{ act: 'rain', seconds: 8 }], toy: { on: on.id, ...toy } }), ...call }
+      if (t.includes('[stub-toy-flame]')) toy.gadgets = [{ id: 'flame', kind: 'flame', part: toy.parts[0].id as string, knobs: { lit: 1 } }]
+      if (t.includes('[stub-toy-junk]')) toy.gadgets = [{ id: 'boom', kind: 'rocket', part: toy.parts[0].id as string }]
+      return { raw: JSON.stringify({ note: `${toy.label}, on ${on.label}.`, toy: { on: on.id, ...toy } }), ...call }
+    }
     if (t.includes('moon')) return { raw: JSON.stringify({ note: 'Moon gravity: everything floats down slowly.', rules: { gravity: [0, -1.62, 0], drag: 0 } }), ...call }
     return { raw: JSON.stringify({ note: 'Everything bounces a little more.', rules: { bounce: 1.3 } }), ...call }
   }

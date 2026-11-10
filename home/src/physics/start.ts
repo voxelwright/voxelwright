@@ -16,7 +16,9 @@ import { Flames } from '../engine/flames'
 import { PRESETS, registerPreset, registerRule, resetRules, type Rules } from '../engine/rules'
 import { registerMaterial, resetMaterials } from '../engine/materials'
 import { gadgetKinds, registerGadget, resetGadgets } from '../engine/gadgets'
-import { ask, askedSoFar } from './ask'
+import { ask, askedSoFar, type Making } from './ask'
+import { MadeToys } from './made'
+import { surfacesFor } from './surfaces'
 import { homeBodies } from './home'
 import { house } from '../build/house'
 import type { PhysicsEvent } from '../engine/events'
@@ -233,9 +235,17 @@ export async function start(ctx: Context, gone: () => boolean) {
     }
   })
 
+  // Toys made from a sentence (#88): built on a surface offered for the person, on trial until kept.
+  const made = new MadeToys(ctx, world)
+  const making: Making = { surfaces: (person) => surfacesFor(ctx.stage.scene, person), made }
+  made.again = async (text, person) => {
+    const r = await ask(world, text, person, making, { retry: true })
+    return { ok: r.ok && Boolean(r.toy) }
+  }
+
   // A notepad line about how things move (src/plugins/talk.ts routes it): asked here, said back there.
   ctx.on('village/physics-ask', (request) => {
-    request.answer = ask(world, request.text, request.person)
+    request.answer = ask(world, request.text, request.person, making, { toy: request.toy })
   })
 
   const api = {
@@ -246,10 +256,14 @@ export async function start(ctx: Context, gone: () => boolean) {
     setRules: (raw: unknown) => world.setRules(raw, 'code'),
     preset: (name: string) => world.preset(name),
     presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.label])),
-    ask: (text: string) => ask(world, text),
+    ask: (text: string, as?: { toy?: boolean }) => ask(world, text, undefined, making, as),
+    /** Toys made from a sentence: the one on trial and the kept ones, and the tag's three choices. */
+    made: { state: () => made.state(), keep: () => made.keep(), undo: () => made.undo(), another: () => made.another(), blocked: (on: string) => made.blocked(on), surfaces: (person?: string) => making.surfaces(person ?? 'alex') },
     asked: askedSoFar,
     play,
     playing: () => playing?.id ?? null,
+    /** The view from `position` toward `look` (world space), or back to the person's own with null: for the checks' pictures. */
+    look: (position: Vec3 | null, look: Vec3 = [0, 0, 0]) => ctx.view.focus(position ? { position: new THREE.Vector3(...position), look: new THREE.Vector3(...look) } : null),
     input: (name: string, down: boolean) => world.input(name, down),
     /**
      * Simulated seconds stepped at once. `watch` names things whose position in their toy's frame
@@ -279,6 +293,9 @@ export async function start(ctx: Context, gone: () => boolean) {
     held: (key: string) => world.heldBack(key),
     place: (key: string, local: Vec3) => world.place(key, local),
     counters: () => world.counters(),
+    census: () => world.census(),
+    /** The renderer's geometry and texture counts. */
+    memory: () => ({ ...(ctx.stage.renderer.info.memory as unknown as Record<string, number>) }),
     signals: () => world.signals(),
     knobs: () => world.knobs(),
     setKnob: (gadget: string, knob: string, value: number) => world.setKnob(gadget, knob, value),
@@ -307,7 +324,7 @@ export async function start(ctx: Context, gone: () => boolean) {
      * addToy. On window.village on every build, like the rest of this handle; the checks and the
      * panel use it now, and a later branch hands agents exactly this, sandboxed.
      */
-    engine: { world: world as WorldApi, addToy: (toy: ToySpec) => world.addToy(toy), registerMaterial, registerGadget, registerRule, registerPreset, gadgetKinds },
+    engine: { world: world as WorldApi, addToy: (toy: ToySpec) => world.addToy(toy), removeToy: (id: string) => world.removeToy(id), hasToy: (id: string) => world.hasToy(id), registerMaterial, registerGadget, registerRule, registerPreset, gadgetKinds },
   }
   ctx.effect(() => {
     const village = (window as unknown as { village?: Record<string, unknown> }).village

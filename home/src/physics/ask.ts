@@ -3,20 +3,29 @@
 // clamped (rules.ts checkRules), then applied all at once. Acts (set a thing alight, pour water on
 // it, rain, lightning) must name a thing from the list sent with the question, and each goes
 // through the world's own calls, which say why not when they refuse (steel does not burn). A
-// failed call or an answer with nothing usable leaves the world as it was.
+// failed call or an answer with nothing usable leaves the world as it was. A toy (#88) must stand
+// on one of the surfaces offered with the question and pass every check (engine/made.ts); it is
+// built first, all at once, after a snapshot, and goes on trial (./made.ts). A refused toy says
+// why and changes nothing, not even the rules that came with it.
 import { askRules, ME } from '../villager'
 import { checkRules, sameRules, type Rules } from '../engine/rules'
+import { checkMadeToy, plain, type Surface } from '../engine/made'
 import type { World } from '../engine/world'
+import type { MadeToys } from './made'
+import { offered } from './surfaces'
 
 /** What one act did: its target as asked, and null or why it did nothing. */
 export interface Done { act: string; target?: string; refused: string | null }
 
-export type Asked =
-  | { ok: true; note: string; rules: Rules; clamped: string[]; acts: Done[]; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
-  /** `link`: no token, or one from an earlier launch: open the latest link. `gone`: the world stopped (physics unloaded) while the model answered. */
-  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'gone'; reason?: string; acts?: Done[]; ms: number }
+/** A toy that was built: its id in the world, what it is called, its parts, and fields that were clamped. */
+export interface MadeDone { id: string; label: string; on: string; parts: number; clamped: string[] }
 
-const asked: ({ text: string } & Asked)[] = []
+export type Asked =
+  | { ok: true; note: string; rules: Rules; clamped: string[]; acts: Done[]; toy?: MadeDone; ms: number; hostMs: number; models: string[]; costUsd: number | null; outputTokens: number | null }
+  /** `link`: no token, or one from an earlier launch: open the latest link. `gone`: the world stopped (physics unloaded) while the model answered. */
+  | { ok: false; why: 'away' | 'busy' | 'failed' | 'refused' | 'link' | 'gone'; reason?: string; acts?: Done[]; /** The answer's toy was refused: `reason` says why, in plain words. */ toy?: true; ms: number }
+
+const asked: ({ text: string; as: AskAs } & Asked)[] = []
 const MAX_ACTS = 4
 /** Names offered to the model at most (the host takes 256). */
 const MAX_TARGETS = 200
@@ -55,16 +64,33 @@ function act(world: World, named: Map<string, { thing: string; part: string }>, 
   return done(kind === 'ignite' ? world.ignite(t.thing, t.part, 'ask') : kind === 'douse' ? world.douse(t.thing, t.part, 'ask') : world.strike(t.thing, t.part))
 }
 
-/** Changes the world's rules, or acts on its things, from one sentence. `person` is whose host session is billed. */
-export async function ask(world: World, text: string, person = ME): Promise<Asked> {
+/** Where toys go and how they are kept: the surfaces offered for a person, and the toys on trial. */
+export interface Making { surfaces: (person: string) => Surface[]; made: MadeToys }
+
+/**
+ * How a line is asked. `toy`: the router said it asks to build a toy, so the host asks with the
+ * kit (quality only: everything is checked here either way). A toy ask, and `retry` (Try
+ * another), builds a toy or does nothing at all: rules and acts in its answer are not applied.
+ */
+export interface AskAs { toy?: boolean; retry?: boolean }
+
+/** Changes the world's rules, acts on its things, or builds a toy, from one sentence. `person` is whose host session is billed. */
+export async function ask(world: World, text: string, person = ME, making?: Making, as: AskAs = {}): Promise<Asked> {
   const t0 = performance.now()
   const named = targets(world)
-  const r = await askRules(person, text, world.rules, [...named.keys(), 'fire'])
+  const surfaces = making?.surfaces(person) ?? []
+  const r = await askRules(person, text, world.rules, [...named.keys(), 'fire'], surfaces.map(offered), Boolean(as.toy || as.retry))
   const ms = () => Math.round(performance.now() - t0)
   let out: Asked
+  // The toy first: when it is refused, nothing else in the answer is applied either.
+  const made = r.ok && !world.disposed && r.toy != null ? makeToy(r.toy, surfaces, text, person, r.note, making) : as.retry ? 'another one did not come with a toy' : as.toy ? 'no toy came back, so nothing was built' : undefined
+  const toy = typeof made === 'string' ? undefined : made
   if (!r.ok) out = { ok: false, why: r.why, ms: ms() }
   // The model call takes up to a minute; the physics plugin may have unloaded and freed the world meanwhile.
   else if (world.disposed) out = { ok: false, why: 'gone', ms: ms() }
+  else if (typeof made === 'string') out = { ok: false, why: 'refused', reason: made, toy: true, ms: ms() }
+  // A toy answer builds the toy and nothing else: Undo takes it all back. Rules and acts are not applied.
+  else if (as.retry || toy) out = { ok: true, note: typeof r.note === 'string' ? r.note.slice(0, 160) : '', rules: world.rules, clamped: [], acts: [], toy, ms: ms(), hostMs: Math.round(r.ms), models: r.models, costUsd: r.costUsd, outputTokens: r.outputTokens }
   else {
     // An answer that changes nothing (every field invalid or unknown, or the same as now) is not a change.
     const before = world.rules
@@ -76,7 +102,7 @@ export async function ask(world: World, text: string, person = ME): Promise<Aske
     // The rules first, then the acts in order (the named things are the ones offered with the question).
     const acts = (Array.isArray(r.acts) ? r.acts : []).slice(0, MAX_ACTS).map((a) => act(world, named, a))
     const did = acts.filter((a) => !a.refused)
-    if (!applied?.ok && !did.length) out = { ok: false, why: 'refused', reason: applied && !applied.ok ? applied.reason : acts[0]?.refused ?? 'nothing to do', acts, ms: ms() }
+    if (!applied?.ok && !did.length && !toy) out = { ok: false, why: 'refused', reason: applied && !applied.ok ? applied.reason : acts[0]?.refused ?? 'nothing to do', acts, ms: ms() }
     else out = {
       ok: true,
       // Shown as text only, never as markup. When an act did nothing, say why instead of the model's hopeful note.
@@ -84,6 +110,7 @@ export async function ask(world: World, text: string, person = ME): Promise<Aske
       rules: world.rules,
       clamped: applied?.ok ? applied.clamped : [],
       acts,
+      ...(toy ? { toy } : {}),
       ms: ms(),
       hostMs: Math.round(r.ms),
       models: r.models,
@@ -91,8 +118,35 @@ export async function ask(world: World, text: string, person = ME): Promise<Aske
       outputTokens: r.outputTokens,
     }
   }
-  asked.push({ text, ...out })
+  asked.push({ text, as, ...out })
   return out
 }
 
 export const askedSoFar = () => asked.slice()
+
+/**
+ * The toy in an answer checked and built, or why not (said to the person as it is). On the surface
+ * it names; when a kept toy stands there, on another offered surface that is free and holds it.
+ */
+function makeToy(raw: unknown, surfaces: Surface[], text: string, person: string, note: unknown, making?: Making): MadeDone | string {
+  if (!making) return "toys can't be made here"
+  const on = raw && typeof raw === 'object' ? (raw as { on?: unknown }).on : undefined
+  const named = surfaces.find((s) => s.id === on)
+  if (!named) return `there is no ${plain(on, 40) || 'place'} here to build on`
+  const id = making.made.nextId()
+  const blocked = making.made.blocked(named.label)
+  let surface = named
+  let checked = checkMadeToy(raw, named, id)
+  if (blocked) {
+    const free = surfaces.filter((s) => s !== named && !making.made.blocked(s.label))
+    const other = free.map((s) => ({ s, c: checkMadeToy(raw, s, id) })).find((o) => !('reason' in o.c))
+    if (!other) return free.length ? `${blocked}, and it doesn't fit on ${free.map((s) => s.label).join(' or ')}` : blocked
+    surface = other.s
+    checked = other.c
+  }
+  if ('reason' in checked) return checked.reason
+  const label = checked.toy.label
+  const built = making.made.build(checked.toy, { text, person, note: typeof note === 'string' && note ? note.slice(0, 160) : `A ${label.toLowerCase()} on ${surface.label}.`, on: surface.label, height: surface.height })
+  if (!built.ok) return built.reason
+  return { id: built.id, label, on: surface.id, parts: checked.toy.parts.length, clamped: checked.clamped }
+}
