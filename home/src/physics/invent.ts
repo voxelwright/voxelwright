@@ -23,10 +23,10 @@ const MAX_GADGETS = 4
 
 const obj = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === 'object' && !Array.isArray(x)
 let count = 0
-const running = new Map<string, Mechanic>()
+const running = new Map<string, { mechanic: Mechanic; code: string }>()
 
-/** The mechanics built this visit that are still in the world, by kind (for the checks and the panel). */
-export const mechanics = () => [...running].map(([kind, m]) => ({ kind, stopped: m.stopped, stats: m.stats }))
+/** The mechanics built this visit that are still in the world: each kind, its code as written, whether it stopped, and its counts and timings (for the checks and the panel). */
+export const mechanics = () => [...running].map(([kind, m]) => ({ kind, code: m.code, stopped: m.mechanic.stopped, stats: m.mechanic.stats }))
 
 /** A mechanic ready to be built into a toy: its kind is registered and its sandbox runs. */
 export interface Ready { kind: string; hooks: string[]; loadMs: number; toy: Record<string, unknown>; spirit(id: string, made: MadeToys): Spirit }
@@ -69,7 +69,7 @@ export async function prepare(world: World, raw: unknown, places: () => Record<s
     opened.box.dispose()
     return refused
   }
-  running.set(kind, mechanic)
+  running.set(kind, { mechanic, code })
   const before: Snapshot = world.snapshot()
   const moved = new Set<string>()
   mechanic.onMoved = (key) => moved.add(key)

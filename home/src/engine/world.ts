@@ -395,7 +395,8 @@ export class World implements WorldApi {
     this.scenery.delete(id)
     this.frames.delete(id)
     // A drawn look (and its painted grain) only this toy used goes with it: made toys come in many colours.
-    for (const t of this.things.values()) itsLooks.delete(lookOf(t.part))
+    // (A hidden part elsewhere draws nothing, so it keeps no look alive.)
+    for (const t of this.things.values()) if (!t.part.hidden) itsLooks.delete(lookOf(t.part))
     for (const key of itsLooks) {
       const look = this.looks.get(key) as THREE.MeshStandardMaterial | undefined
       if (!look) continue

@@ -35,8 +35,9 @@ export function magnet(s: Pick<OfferedSurface, 'half'>) {
         { id: 'magnet', shape: { kind: 'box', half: [0.03, 0.02, 0.02] }, material: 'steel', paint: '#b5483a', at: [0, 0.02, 0] },
         marble('marble-1', [-x, 0.0125, z]), marble('marble-2', [x, 0.0125, -z]), marble('marble-3', [x * 0.6, 0.0125, z]),
         marble('felt-ball', [-x * 0.6, 0.0125, -z], 'felt'),
+        { id: 'card', shape: { kind: 'box', half: [0.03, 0.012, 0.002] }, material: 'paper', at: [0, 0.012, r3(-s.half[1] + 0.01)] },
       ],
-      gadgets: [{ id: 'pull', kind: 'invented', part: 'magnet' }],
+      gadgets: [{ id: 'pull', kind: 'invented', part: 'magnet', display: 'card' }],
       wires: [],
     },
     code: [
@@ -56,6 +57,7 @@ export function magnet(s: Pick<OfferedSurface, 'half'>) {
       'function touch(g, t, w) {',
       "  if (!w.things.some((x) => x.key === t.other && x.material === 'steel')) return",
       '  g.state.caught = (g.state.caught || 0) + 1',
+      "  g.show('caught ' + g.state.caught)",
       "  g.fire('caught', g.state.caught, t.other)",
       '}',
     ].join('\n'),
@@ -80,9 +82,10 @@ export function inventPrompt(): Promise<string> {
     '// the code',
     '```',
     '',
+    '- Be brief: the family is waiting. At most 8 parts and 40 lines of code, no comments.',
     '- "note": one plain sentence (under 20 words) for the family: what it is and how to play with it.',
     '- "kind": the new kind of gadget: {"about": "<one sentence>", "knobs": {"<name>": {"min", "max", "step", "default", "about"}}, "inputs": ["<port>"], "outputs": ["<port>"]}. At most 3 knobs (the numbers a person would want to tune: strength, reach, speed), at most 4 inputs and 4 outputs, names in lowerCamelCase. Leave inputs and outputs empty unless a wire uses them.',
-    '- "toy": {"label": "<2 or 3 words>", "on": "<a surface id>", "parts": [PartSpec...], "gadgets": [GadgetSpec...], "wires": [Wire...]}. Its gadgets use "kind": "invented" for your new kind (1 to 4 of them, each usually with "part": the part it sits on and "knobs" when not the defaults). They may also use the kit kinds below, wired to yours.',
+    '- "toy": {"label": "<2 or 3 words>", "on": "<a surface id>", "parts": [PartSpec...], "gadgets": [GadgetSpec...], "wires": [Wire...]}. Its gadgets use "kind": "invented" for your new kind (1 to 4 of them, each usually with "part": the part it sits on and "knobs" when not the defaults). They may also use the kit kinds below, wired to yours. A gadget that shows a number or a word names a card for it: "display": "<the id of a small flat part>"; `g.show` writes there and the card loses its own colour.',
     '- The mechanic needs a body: at least one part people can see (the magnet, the fan, the pad), at toy scale. Add a few moving parts for it to act on, so it shows what it does the moment it appears: a magnet comes with steel marbles and one felt ball it ignores.',
     '',
     'The code. What it sees and may do, in full (TypeScript, for reading; you write plain JavaScript):',
@@ -90,7 +93,7 @@ export function inventPrompt(): Promise<string> {
     '',
     'Rules for the code:',
     '- Only the functions above exist. No DOM, no network, no timers, no imports. Anything else you need, compute.',
-    '- It acts only on things that can move (`w.things`): never on furniture, walls or people. To steer by a fixed thing of the home, read its point from `w.places` by a name copied exactly from the things list.',
+    '- It acts only on things that can move (`w.things`): never on furniture, walls or people. To steer by a thing of the home, read its point from `w.places` by a name copied exactly from the things list. For a direction along the table or floor, use `g.surface.x` and `g.surface.z`.',
     '- A force is a push every step: `w.push(key, [ax * t.mass * w.h, ay * t.mass * w.h, az * t.mass * w.h])` for an acceleration [ax, ay, az] in m/s². Gravity is `w.gravity` (about 9.81 m/s² down): to float a thing, push it up by `-w.gravity[1] * t.mass * w.h`. Keep accelerations under 30 m/s² and speeds under 6 m/s, and limit reach by distance so the rest of the home stays calm.',
     '- Each call may do only a little work: one or two loops over `w.things`, no nested loops over them, no recursion. A call that runs long is stopped, and a mechanic that keeps failing is switched off.',
     '- Keep what you must remember in `g.state` as numbers. Nothing else survives between calls.',
@@ -156,6 +159,8 @@ const HOSTILE: Record<string, string> = {
   '[stub-invent-late-loop]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; while (g.state.n > 60) {} }',
   // A few steps of throwing everything that can move into the air: Undo must put each back.
   '[stub-invent-fling]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; if (g.state.n > 8) return; for (const t of w.things) w.push(t.key, [0.2 * t.mass, 1.5 * t.mass, 0]) }',
+  // Writes on its part every step, as real answers like to.
+  '[stub-invent-show]': 'function step(g, w) { g.state.n = (g.state.n || 0) + 1; g.show("n " + g.state.n) }',
   // Reaches for everything a page script could: none of it exists inside the interpreter.
   '[stub-invent-reach]': 'function step(g, w) { g.state.reached = [typeof window, typeof document, typeof fetch, typeof XMLHttpRequest, typeof WebSocket, typeof localStorage, typeof postMessage, typeof importScripts, typeof setTimeout, typeof navigator, typeof self, typeof require, typeof process].filter((t) => t !== "undefined").length }',
   // Replaces the prelude's function and answers with commands and states no check should let through.

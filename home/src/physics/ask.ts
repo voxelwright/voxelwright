@@ -40,20 +40,20 @@ const MAX_TARGETS = 200
  * "everything burning".
  */
 export function targets(world: World) {
-  const out = new Map<string, { thing: string; part: string; at: Vec3; moving: boolean }>()
+  const out = new Map<string, { thing: string; part: string; at: Vec3 }>()
   for (const b of world.burnables()) {
     const raw = b.part || b.thing.slice(b.thing.indexOf('/') + 1)
     const name = raw.toLowerCase().replace(/#\d+$/, '').replace(/[-_/#]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
     // The part is always named, '' for a thing's unnamed rest, so an act on "lounge furnish" is not an act on its sofa too.
-    if (name && name !== 'fire' && !out.has(name) && out.size < MAX_TARGETS) out.set(name, { thing: b.thing, part: b.part, at: b.center, moving: b.moving })
+    if (name && name !== 'fire' && !out.has(name) && out.size < MAX_TARGETS) out.set(name, { thing: b.thing, part: b.part, at: b.center })
   }
   return out
 }
 
-/** The home's fixed things by name, each a point: what a mechanic's code may steer by (`w.places`). */
+/** The home's things by the names the model was given, each a point now: what a mechanic's code may steer by (`w.places`). */
 export function places(world: World): Record<string, Vec3> {
   const out: Record<string, Vec3> = {}
-  for (const [name, t] of targets(world)) if (!t.moving) out[name] = t.at.map((v) => Math.round(v * 1e3) / 1e3) as Vec3
+  for (const [name, t] of targets(world)) out[name] = t.at.map((v) => Math.round(v * 1e3) / 1e3) as Vec3
   return out
 }
 

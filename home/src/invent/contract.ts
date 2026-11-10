@@ -30,9 +30,11 @@ export interface Gadget {
   state: Record<string, number>
   /** The part this gadget sits on (its own body), when the toy gave it one. A fixed part has zero velocity. */
   part?: Thing
+  /** Where the toy stands, in world space: the centre of the surface's top and its x and z directions (unit vectors; y is up). A point [a, b, c] of the toy is at + a·x + b·[0, 1, 0] + c·z. */
+  surface: { at: Vec3; x: Vec3; z: Vec3 }
   /** Fires one of the outputs you declared, to whatever is wired to it. */
   fire(port: string, value: number, thing?: string): void
-  /** Draws up to 12 characters on this gadget's part (a count, a word). */
+  /** Writes up to 12 characters (a count, a word) on the toy's part this gadget names as its "display": a small card. Without one, nothing is drawn. */
   show(text: string): void
 }
 
@@ -55,7 +57,7 @@ export interface World {
   gravity: Vec3
   /** Every thing that can move, at most 96, as they were when this call began. */
   things: Thing[]
-  /** Fixed things of the home by name, each a point in world space: `w.places['lamp']`. */
+  /** Things of the home by name, each a point in world space, read again about twice a second: `w.places['lamp']`. A name that is not here is undefined. */
   places: Record<string, Vec3>
   /** Adds momentum to a thing, N·s: `w.push(t.key, [0, 0.01, 0])`. */
   push(key: string, impulse: Vec3): void

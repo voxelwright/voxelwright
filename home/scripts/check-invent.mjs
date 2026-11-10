@@ -159,7 +159,8 @@ try {
 
     // ── Undo puts back what the mechanic moved ──────────────────────────────
     {
-      const loose = (atRest) => page.evaluate((atRest) => { const p = window.village.physics; return Object.fromEntries(p.engine.world.keys().filter((k) => !k.startsWith('made-')).map((k) => [k, p.thing(k)]).filter(([, t]) => t.motion === 'dynamic' && t.toy !== 'bound' && t.toy !== 'followers' && (!atRest || Math.hypot(...t.velocity) < 0.005)).map(([k, t]) => [k, t.position])) }, atRest)
+      // `undo`: Undo first, and read in the same task, before the world steps again.
+      const loose = (atRest, undo) => page.evaluate(([atRest, undo]) => { const p = window.village.physics; if (undo) p.made.undo(); return Object.fromEntries(p.engine.world.keys().filter((k) => !k.startsWith('made-')).map((k) => [k, p.thing(k)]).filter(([, t]) => t.motion === 'dynamic' && t.toy !== 'bound' && t.toy !== 'followers' && (!atRest || Math.hypot(...t.velocity) < 0.005)).map(([k, t]) => [k, t.position])) }, [atRest, undo])
       await page.evaluate(() => window.village.physics.reset())
       await page.waitForTimeout(1500)
       // Only what is at rest now: a ball a villager just kicked is somewhere else by the time the mechanic arrives.
@@ -168,8 +169,7 @@ try {
       await page.waitForTimeout(350)
       const flung = await loose()
       const moved = Object.keys(before).filter((k) => Math.hypot(...before[k].map((v, i) => v - flung[k][i])) > 0.02)
-      await undo()
-      const after = await loose()
+      const after = await loose(false, true)
       const astray = Object.keys(before).filter((k) => Math.hypot(...before[k].map((v, i) => v - after[k][i])) > 0.03)
       check('a mechanic that throws the home\'s loose things about: Undo puts each back where it was', r.ok && moved.length >= 5 && astray.length === 0 && same(await world(), baseline), { loose: Object.keys(before).length, moved: moved.length, astray: astray.map((k) => [k, before[k], after[k]]) })
     }

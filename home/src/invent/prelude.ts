@@ -4,7 +4,7 @@
 // `__tick` returns is the mechanic's answer, checked on the page like any other data.
 //
 // __tick(json) takes one view and returns one answer, both JSON text:
-//   view   { h, clock, gravity, things, places?, gadgets: [{ id, knobs, state, part?, events }] }
+//   view   { h, clock, gravity, things, places?, gadgets: [{ id, knobs, state, surface?, part?, events }] }
 //   answer { commands: [...], states: { [gadget id]: { name: number } } }
 // An event is ['touch', touch] or ['receive', port, signal]. `places` comes only when it changed.
 export const PRELUDE = `
@@ -32,7 +32,7 @@ export const PRELUDE = `
     const states = {}
     for (const v of view.gadgets) {
       const g = {
-        knobs: v.knobs, state: v.state, part: v.part && (byKey.get(v.part.key) || v.part),
+        knobs: v.knobs, state: v.state, surface: v.surface, part: v.part && (byKey.get(v.part.key) || v.part),
         fire(port, value, thing) { commands.push(['fire', v.id, port, value, thing]) },
         show(text) { commands.push(['show', v.id, text]) },
       }

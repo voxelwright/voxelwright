@@ -38,6 +38,8 @@ export const INVENT = {
   view: 48_000,
   /** The longest a view's `h` gets when views were skipped, s. */
   h: 0.1,
+  /** The home's places are read again this often (simulated s) and sent when they changed: a named thing may have moved. */
+  places: 0.5,
 }
 
 /** The sandbox as the engine sees it. Its answers arrive at Mechanic.tock. */
@@ -118,7 +120,10 @@ export class Mechanic {
   private offered = new Set<string>()
   private keys: string[] = []
   private keysVersion = -1
-  private placesSent = false
+  private placesAt = -Infinity
+  private placesSent = ''
+  /** Per gadget: where its toy stands, worked out once. */
+  private surfaces = new Map<string, { at: Vec3; x: Vec3; z: Vec3 } | null>()
   private clock = -1
   private sentClock = -1
   private strikes = 0
@@ -138,6 +143,8 @@ export class Mechanic {
     const { about, knobs, inputs, outputs } = this.decl
     return {
       kind: this.kind, about, knobs, inputs, outputs,
+      // A part of the toy to write on (`show`), as the counter has: naming it gives it a face of its own.
+      settings: { display: 'part' },
       setup: (g) => void this.gadgets.set(g.id, g),
       step: (g, w) => {
         if (this.stopped || !this.gadgets.has(g.id) || w.clock === this.clock) return
@@ -205,7 +212,6 @@ export class Mechanic {
         const t = w.thing(key)
         return t?.motion === 'dynamic' && t.toy !== 'followers' && t.toy !== 'bound'
       }).slice(0, INVENT.things)
-      this.placesSent = false
     }
     const things = new Map<string, unknown>()
     for (const key of this.keys) {
@@ -216,16 +222,25 @@ export class Mechanic {
     const gadgets = [...this.gadgets.values()].map((g) => {
       const part = g.part ? w.thing(g.part) : null
       this.sent.set(g.id, g.state)
+      if (!this.surfaces.has(g.id)) this.surfaces.set(g.id, surfaceOf(w, g.toy))
+      const surface = this.surfaces.get(g.id)
       return {
-        id: g.id, knobs: g.knobs, state: g.state, events: this.events.get(g.id) ?? [],
+        id: g.id, knobs: g.knobs, state: g.state, events: this.events.get(g.id) ?? [], ...(surface ? { surface } : {}),
         ...(part ? { part: { key: part.key, material: part.material, position: round3(part.position), velocity: round3(part.velocity), mass: Number.isFinite(part.mass) ? round(part.mass) : 0, size: sizeOf(part.shape) } } : {}),
       }
     })
     this.events.clear()
     const view = { h: round(Math.min(INVENT.h, this.sentClock < 0 ? 1 / 60 : w.clock - this.sentClock)), clock: round(w.clock), gravity: w.rules.gravity, things: [...things.values()], gadgets }
-    let json = this.placesSent ? '' : JSON.stringify({ ...view, places: this.places() })
+    let json = ''
+    if (w.clock - this.placesAt >= INVENT.places) {
+      this.placesAt = w.clock
+      const places = JSON.stringify(this.places())
+      if (places !== this.placesSent) {
+        json = JSON.stringify({ ...view, places: JSON.parse(places) })
+        if (json.length <= INVENT.view) this.placesSent = places
+      }
+    }
     if (!json || json.length > INVENT.view) json = JSON.stringify(view)
-    else this.placesSent = true
     if (json.length > INVENT.view) {
       this.stats.skipped++
       return
@@ -263,8 +278,9 @@ export class Mechanic {
       if (!g) return false
       if (op === 'show') {
         const said = plain(typeof b === 'number' ? String(b) : b, INVENT.show)
-        if (!g.part || !said) return false
-        w.show(g.part, said)
+        const display = g.spec.display
+        if (typeof display !== 'string' || !said) return false
+        w.show(`${g.toy}/${display}`, said)
         return true
       }
       if (typeof b !== 'string' || !this.decl.outputs.includes(b) || typeof d !== 'number' || !Number.isFinite(d)) return false
@@ -279,6 +295,16 @@ export class Mechanic {
     if (done) this.onMoved(a)
     return done
   }
+}
+
+/** Where a toy stands, from any of its things: its frame's origin and its x and z directions in the world. Null for a toy with no things. */
+function surfaceOf(w: WorldApi, toy: string): { at: Vec3; x: Vec3; z: Vec3 } | null {
+  const key = w.keys().find((k) => k.startsWith(`${toy}/`))
+  const t = key ? w.thing(key) : null
+  if (!t) return null
+  const x = w.toWorldDir(toy, [1, 0, 0]), y = w.toWorldDir(toy, [0, 1, 0]), z = w.toWorldDir(toy, [0, 0, 1])
+  const at = t.position.map((p, i) => p - x[i] * t.local[0] - y[i] * t.local[1] - z[i] * t.local[2]) as Vec3
+  return { at: round3(at), x: round3(x), z: round3(z) }
 }
 
 /** Keeps the last few hundred of a measure. */
