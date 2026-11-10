@@ -15,7 +15,7 @@
 import type { CueName, Cue, Palette, Play, Kit } from '../contract'
 import { BODY, NOTE, crackle, curve, noise, pluck, room, sample, seconds, snap, strike, swell, thump, tock, wobble } from './synth'
 import { SPRITES } from './sprites'
-import { playImpact, type Struck } from './impact'
+import { playImpact, playShatter, type Struck } from './impact'
 import type { Shape } from '../../engine/core'
 
 /** The recorded sprites (public/audio/sfx/, made by scripts/make-sfx.mjs), by what they hold. */
@@ -820,13 +820,14 @@ const SMALL: Shape = { kind: 'box', half: [0.05, 0.05, 0.05] }, TABLE: Shape = {
 const knock = struck('world', 0.03, 0.4, { materials: ['maple', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
 const clack = struck('world', 0.03, 0.9, { materials: ['ceramic', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
 const ring = struck('world', 0.04, 1.6, { materials: ['steel', 'walnut'], shapes: [{ kind: 'cylinder', halfHeight: 0.065, radius: 0.1 }, TABLE], impulse: 0.4 })
+const shatter = { a: cue({ bus: 'world', level: -11, gap: 0.08, length: 0.6, jitter: { cents: 80, db: 1.5 }, play: playShatter }) }
 const thud = struck('world', 0.06, 0.4, { materials: ['felt', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
 
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, clack, ring, thud,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, clack, ring, thud, shatter,
 }
 
 /**
@@ -841,6 +842,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   knock: { a: 'Wood or plaster struck: a short knock, lower for a bigger thing, louder and brighter with the blow. Made from the two materials\' facts.' },
   clack: { a: 'Glazed pottery struck: a bright clack that rings a moment, with the table\'s low knock under it.' },
   ring: { a: 'Metal or glass struck: it rings on, a pot low and long, a jar high and clear; a soft thing striking it only makes it hum.' },
+  shatter: { a: 'A plate or a jar breaking: a spray of short high notes over a bright crash; glass higher and clearer than pottery.' },
   thud: { a: 'Something soft landing (felt, fruit, rubber, a person): a low thud with no ring.' },
   hover: {
     a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',

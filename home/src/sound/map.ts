@@ -36,7 +36,7 @@ const lines = {
   'village/reminder': (e) => (e.state === 'done' ? 'kept' : e.state === 'later' ? null : 'news'),
   // Physics (#74, #107): only impacts are heard, and only ones hard enough to notice; which cue is what the smaller thing is made of.
   // A thing picked up is heard as the fingertip's touch on it.
-  'village/physics': (e) => (e.kind === 'impact' ? (e.impulse * e.impact >= 0.01 ? cueOf(e) : null) : e.kind === 'held' && e.held ? cueOf(struckOf(e)) : null),
+  'village/physics': (e) => (e.kind === 'impact' ? (e.impulse * e.impact >= 0.01 ? cueOf(e) : null) : e.kind === 'held' && e.held ? cueOf(struckOf(e)) : e.kind === 'broke' ? 'shatter' : null),
 } satisfies { [K in keyof Events]?: Line<K> }
 
 export type SoundEvent = keyof typeof lines

@@ -29,6 +29,7 @@ import { touch } from './touch'
 import { hand } from './hand'
 import { impacts } from './impacts'
 import { tidy } from './tidy'
+import { breaks } from './breaks'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -84,7 +85,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   }
   const world = new World(createJolt(), (e) => {
     log.push(e)
-    if (log.length > 500) log.splice(0, 250)
+    // Room for a house of loose things settling at once (#107): at 500 a burst of impacts pushed out the events a check or an agent was about to read.
+    if (log.length > 2000) log.splice(0, 1000)
     ctx.emit('village/physics', e)
   }, grain)
   ctx.effect(() => () => world.dispose(), 'physics solver')
@@ -179,7 +181,16 @@ export async function start(ctx: Context, gone: () => boolean) {
   const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
   // The house's own things, by hand (#107): pick up, carry, stack and throw.
   const grip = hand(ctx, world, () => playing?.id ?? null)
-  tidy(ctx, world, grip.holding)
+  // Brittle things break into shards that are things too; tidying mends them first, then puts everything back.
+  const broke = breaks(ctx, world, (e) => {
+    log.push(e)
+    ctx.emit('village/physics', e)
+  }, () => setTimeout(() => gone() || home.scan(), 0))
+  const tidyUp = (keys?: string[]) => {
+    if (!keys && broke.mend().length) home.scan()
+    return world.tidy(keys)
+  }
+  tidy(ctx, world, grip.holding, broke.broken, tidyUp)
   // What a hit looks like: splinters, chips, sparks and dust by material.
   const bits = impacts(ctx)
   ctx.effect(() => {
@@ -296,7 +307,9 @@ export async function start(ctx: Context, gone: () => boolean) {
     /** The home's things with bodies, the thing a mesh belongs to (or why none), and scan stats. */
     home: { list: home.list, bodyOf: home.bodyOf, scan: home.scan, stats: home.stats },
     /** The hand (#107): what it holds, what a press at a screen point would take, and putting every loose thing back where it was made. */
-    hand: { holding: grip.holding, pick: grip.pick, tidy: (keys?: string[]) => world.tidy(keys), astray: () => world.astray() },
+    hand: { holding: grip.holding, pick: grip.pick, tidy: tidyUp, astray: () => world.astray() },
+    /** Breaking (#107): the things lying in pieces, and breaking one now. */
+    breaks: { broken: broke.broken, shatter: broke.shatter },
     /** Bits in the air from hits (splinters, chips, sparks, dust). */
     flying: bits.flying,
     /** A follower for any scene object (checks walk one into things); `held` says it is held back. */

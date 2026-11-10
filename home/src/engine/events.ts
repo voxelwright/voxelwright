@@ -37,5 +37,7 @@ export type PhysicsEvent =
   | { kind: 'burnt'; thing: string; part: string; material: string; at: At }
   /** A hand took hold of a moving thing of the house (`held` true: a mug lifted off the table), or let it go with the speed it had. */
   | { kind: 'held'; thing: string; material: string; shape: Shape; at: At; held: boolean }
+  /** A brittle thing of the house (a plate, a jar) was hit hard enough to break into `pieces` shards, each a thing of its own; tidying mends it. */
+  | { kind: 'broke'; thing: string; material: string; at: At; pieces: number }
   /** Gadget signals were dropped since the last such event: past the waiting limit, or more than 64 wires from a physical cause (a loop of wires feeding itself). */
   | { kind: 'dropped'; signals: number }

@@ -164,6 +164,15 @@ export function impacts(ctx: Context) {
       b.life = rand(0.45, 0.75)
     })
   })
+  // A thing breaking throws a shower of its own chips.
+  ctx.on('village/physics', (e) => {
+    if (e.kind !== 'broke') return
+    burst(bits, { at: e.at, normal: { x: 0, y: 1, z: 0 } } as Impact, 14, 2, 1.2, (b) => {
+      b.size.setScalar(rand(0.01, 0.022))
+      b.colour = colourOf(e.material).lerp(WHITE, 0.4)
+      b.life = rand(0.5, 1)
+    })
+  })
   ctx.on('village/frame', (dt) => {
     thisFrame = 0
     for (const p of pools) p.step(Math.min(dt, 0.05))

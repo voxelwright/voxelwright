@@ -1,5 +1,6 @@
 // Putting the house back (#107): once loose things lie about, a small paper tag by the sound
-// button offers to tidy up. One press puts every loose thing back where it was made, at rest.
+// button offers to tidy up. One press mends what broke and puts every loose thing back where it
+// was made, at rest.
 // What was knocked over is play, not a change to the house plan, so nothing is saved either way.
 import type { Context } from 'cordis'
 import type { World } from '../engine/world'
@@ -13,7 +14,7 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) { .village-tidy { transition: none; } }
 `
 
-export function tidy(ctx: Context, world: World, holding: () => string | null) {
+export function tidy(ctx: Context, world: World, holding: () => string | null, broken: () => string[], tidyUp: () => void) {
   const style = document.createElement('style')
   style.textContent = CSS
   const button = document.createElement('button')
@@ -22,12 +23,12 @@ export function tidy(ctx: Context, world: World, holding: () => string | null) {
   button.textContent = 'Tidy up'
   button.setAttribute('aria-label', 'Put everything back where it was')
   const show = () => {
-    const on = !holding() && Object.keys(world.astray(0.05)).length > 0
+    const on = !holding() && (broken().length > 0 || Object.keys(world.astray(0.05)).length > 0)
     button.classList.toggle('on', on)
     button.tabIndex = on ? 0 : -1
   }
   button.addEventListener('click', () => {
-    world.tidy()
+    tidyUp()
     show()
   })
   ctx.effect(() => {

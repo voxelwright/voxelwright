@@ -49,6 +49,7 @@ const MOMENT: Record<CueName, string> = {
   clack: 'A mug set down on the table',
   ring: 'A pot set down on the table',
   thud: 'A felt ball landing on the table',
+  shatter: 'A plate breaking on the floor',
 }
 
 /** A realistic payload for each cue, as its event would carry it in the home. */

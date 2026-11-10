@@ -83,6 +83,22 @@ function mode(a: BaseAudioContext, out: AudioNode, t: number, freq: number, gain
   osc.stop(end)
 }
 
+/** A thing breaking: a spray of short, high, glassy notes over a crash of bright noise; pottery lower and duller than glass. */
+export function playShatter(a: BaseAudioContext, out: AudioNode, p: Play, kit: Kit) {
+  const e = p.event as { material?: string; pieces?: number }
+  const v = voiceOf(e.material ?? 'ceramic')
+  const t = snap(a, p.at)
+  const wet = room(a, out, 0.2)
+  const base = v.pitch * 1.3 * p.rate
+  const n = Math.min(14, 6 + (e.pieces ?? 6))
+  for (let i = 0; i < n; i++) {
+    const late = i === 0 ? 0 : p.random() * 0.11
+    // Pieces go on clinking as they land.
+    mode(a, wet, snap(a, t + late), base * (1 + p.random() * 3.2), p.gain * (0.28 - 0.012 * i), 0.012 + p.random() * v.ring * 0.25)
+  }
+  noise(a, out, kit, t, { dur: 0.16, env: strike(0.16, 0.001, 0.035), gain: p.gain * 0.55, random: p.random, type: 'highpass', freq: 1800 + 2600 * (v.hard - 0.8) * 5, q: 0.5, top: 9000 })
+}
+
 export function playImpact(a: BaseAudioContext, out: AudioNode, p: Play, kit: Kit, fallback: Struck) {
   const e: Struck = { ...fallback, ...struckOf(p.event) }
   const t = snap(a, p.at)

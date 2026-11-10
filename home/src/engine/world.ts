@@ -717,6 +717,12 @@ export class World implements WorldApi {
     return out
   }
 
+  /** The key of the bound thing a scene object is, if it is one. */
+  keyOf(object: THREE.Object3D) {
+    for (const b of this.bound.values()) if (b.object === object) return b.key
+    return undefined
+  }
+
   /** The scene object a bound thing's body stands for. */
   boundObject(key: string) {
     return this.bound.get(key)?.object

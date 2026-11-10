@@ -6,7 +6,8 @@
 // touch screen does the same, two fingers let go, and a drag on bare floor still turns the view
 // (entries under a finger are check-physics-touch's).
 // Tidying puts everything back where it was made and draws it merged again. Impacts are heard by
-// material: pottery clacks, steel and glass ring, wood knocks, soft things thud.
+// material: pottery clacks, steel and glass ring, wood knocks, soft things thud. A jar pushed off
+// its shelf breaks into shards that are things too, and tidying mends it.
 // Starts its own dev server (no villager host: nothing here talks).
 // Usage: node scripts/check-tactile.mjs [--dev=5441] [--base=http://localhost:5440/] [--shots-dir=dir]
 import { spawn } from 'node:child_process'
@@ -215,6 +216,21 @@ try {
   })
   check('Pottery clacks, glass and steel ring, wood knocks, soft things thud; the smaller thing leads', cues.ceramic === 'clack' && cues.glass === 'ring' && cues.steel === 'ring' && cues.maple === 'knock' && cues.felt === 'thud' && cues.fruit === 'thud' && cues.rubber === 'thud' && cues.bigSteelSmallWood === 'knock' && cues.held === 'clack', cues)
 
+  // Breaking: a jar pushed off its shelf breaks on the floor into shards that are things; a plate set down did not.
+  const before = await h.world(() => window.village.physics.stats().bodies)
+  await h.world((T) => window.village.physics.engine.world.setVelocity(T + 'jar#3', [1.6, 0.6, 0.2]), T)
+  await h.wait(2500)
+  const smashed = await h.world(async () => {
+    const p = window.village.physics
+    const { MAP } = await import('/src/sound/map.ts')
+    const ev = p.events().filter((e) => e.kind === 'broke')
+    const shards = p.home.list().filter((x) => / shard/.test(x.key))
+    let jarShown = true
+    window.village.kernel.root.get('stage').scene.traverse((o) => { if (o.userData.loose && o.name === 'jar' && !o.visible) jarShown = false })
+    return { broken: p.breaks.broken(), ev, shards: shards.length, kinds: [...new Set(shards.map((x) => `${x.motion} ${x.material}`))], bodies: p.stats().bodies, cue: ev[0] && MAP['village/physics'](ev[0]), jarShown, tag: document.querySelector('.village-tidy').classList.contains('on') }
+  })
+  check('A jar pushed off the shelf breaks on the floor: an event, a shatter cue, and glass shards that are moving things; the set-down plate did not break', smashed.broken.length === 1 && /jar#3$/.test(smashed.broken[0]) && smashed.ev.length === 1 && smashed.ev[0].material === 'glass' && smashed.shards >= 4 && smashed.shards === smashed.ev[0].pieces && smashed.kinds.join() === 'dynamic glass' && smashed.bodies === before + smashed.shards - 1 && smashed.cue === 'shatter' && !smashed.jarShown && smashed.tag, { ...smashed, ev: smashed.ev.length, before })
+
   // Tidying while a thing is held ends the hold for good: the next move does not take it again.
   const ps = await h.screen(plate)
   await page.mouse.move(ps.x, ps.y)
@@ -232,6 +248,8 @@ try {
   const tidy = await h.drawn()
   const mended = await h.merged()
   const home = await h.thing(plate)
+  const mendedJar = await h.world(() => { const p = window.village.physics; return { broken: p.breaks.broken().length, shards: p.home.list().filter((x) => / shard/.test(x.key)).length, bodies: p.stats().bodies } })
+  check('Tidying mends the jar: no shards left, the same bodies as before it broke', mendedJar.broken === 0 && mendedJar.shards === 0 && mendedJar.bodies === before, mendedJar)
   check('Tidying puts the plate, the ball and the cup back and draws them merged again, the merged meshes whole', back >= list.length && tidy.out === 0 && Math.abs(mended - whole) < 1e-3 && far(home.position, from.position) < 0.002 && Object.keys(await h.world(() => window.village.physics.hand.astray())).length === 0, { back, tidy })
   const stats = await h.world(() => { window.village.physics.clearStats(); return new Promise((r) => setTimeout(() => r(window.village.physics.stats()), 2500)) })
   check('At rest the world still steps in well under a millisecond', stats.stepMs.median <= 0.6 && stats.stepMs.n > 30, stats)
