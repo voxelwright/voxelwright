@@ -28,6 +28,7 @@ import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
 import { hand } from './hand'
 import { impacts } from './impacts'
+import { tidy } from './tidy'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -178,6 +179,7 @@ export async function start(ctx: Context, gone: () => boolean) {
   const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
   // The house's own things, by hand (#107): pick up, carry, stack and throw.
   const grip = hand(ctx, world, () => playing?.id ?? null)
+  tidy(ctx, world, grip.holding)
   // What a hit looks like: splinters, chips, sparks and dust by material.
   const bits = impacts(ctx)
   ctx.effect(() => {
