@@ -32,6 +32,8 @@ try {
     const { Villager } = await import('/src/villagers/rig.ts')
     const { softReport } = await import('/src/villagers/soft.ts')
     const eye = new THREE.Vector3(3, 2, 4)
+    // The rig glances about at random; held still here, so each run measures the same motion.
+    Math.random = () => 0.5
     const out = []
     for (let i = 0; i < 3; i++) {
       const fig = KINDS.b.build(i, false, { accent: '#c8553d' })

@@ -604,9 +604,14 @@ export class Villager {
         f.at.copy(tipWorld)
         f.vel.set(0, 0, 0)
       }
+      // Stepped at 60 a second or finer, so a long frame (or a look drawn on twos) cannot blow the spring up.
       const w = 2 * Math.PI * f.hz
-      f.vel.addScaledVector(tipWorld.sub(f.at), w * w * dt).multiplyScalar(Math.max(0, 1 - 2 * 0.22 * w * dt))
-      f.at.addScaledVector(f.vel, dt)
+      const steps = Math.ceil(dt * 60 - 1e-6)
+      const h = dt / steps
+      for (let n = 0; n < steps; n++) {
+        f.vel.addScaledVector(restDir.copy(tipWorld).sub(f.at), w * w * h).multiplyScalar(1 - 2 * 0.22 * w * h)
+        f.at.addScaledVector(f.vel, h)
+      }
       // A tip never trails further than half its own length (a hop, a teleport, a long frame): felt bends, it does not fold back.
       tipWorld.copy(f.tip)
       f.parent.localToWorld(tipWorld)
