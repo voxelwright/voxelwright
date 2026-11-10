@@ -116,6 +116,21 @@ export function createJolt(): PhysicsCore {
   listener.OnContactRemoved = () => {}
   system.SetContactListener(listener)
 
+  // Waking and sleeping, as they happen (inside Step, or when a body is moved or pushed from outside).
+  let stirred: { id: BodyId; awake: boolean }[] = []
+  const activation = new J.BodyActivationListenerJS()
+  const stir = (awake: boolean) => (ptr: number) => {
+    const id = byIndex.get(J.wrapPointer(ptr, J.BodyID).GetIndexAndSequenceNumber())
+    if (id !== undefined) stirred.push({ id, awake })
+  }
+  activation.OnBodyActivated = stir(true)
+  activation.OnBodyDeactivated = stir(false)
+  system.SetBodyActivationListener(activation)
+
+  // Ray casts: one ray, settings, collector and set of filters, reused.
+  const ray = new J.RRayCast(), raySettings = new J.RayCastSettings(), rayHit = new J.CastRayClosestHitCollisionCollector()
+  const anyBroad = new J.BroadPhaseLayerFilter(), anyLayer = new J.ObjectLayerFilter(), anyShape = new J.ShapeFilter(), notThese = new J.IgnoreMultipleBodiesFilter()
+
   /** Convex radius must not exceed the smallest half extent (thin walls, flippers). */
   const boxShape = (half: Vec3) => {
     const he = new J.Vec3(...half)
@@ -130,9 +145,13 @@ export function createJolt(): PhysicsCore {
     if (s.kind === 'compound') {
       const settings = new J.StaticCompoundShapeSettings()
       for (const b of s.boxes) {
-        const box = boxShape(b.half)
-        box.SetDensity(spec.density)
-        settings.AddShapeShape(setV(b.at), setQ(b.rotation), box, 0)
+        // A ball is as wide as the box's middle side (a stripe round it does not make it bigger); a can stands on local y.
+        const [hx, hy, hz] = b.half
+        const part = b.round === 'ball' ? new J.SphereShape([hx, hy, hz].sort((p, q) => p - q)[1])
+          : b.round === 'can' ? new J.CylinderShape(hy, Math.min(hx, hz), Math.min(0.006, 0.4 * Math.min(hx, hy, hz)))
+          : boxShape(b.half)
+        part.SetDensity(spec.density)
+        settings.AddShapeShape(setV(b.at), setQ(b.rotation), part, 0)
       }
       const result = settings.Create()
       if (result.HasError()) {
@@ -323,11 +342,45 @@ export function createJolt(): PhysicsCore {
     sleeping(id) {
       return !bi.IsActive(bid(id))
     },
+    activity() {
+      const out = stirred
+      stirred = []
+      return out
+    },
+    angularVelocity(id) {
+      const v = bi.GetAngularVelocity(bid(id))
+      return [v.GetX(), v.GetY(), v.GetZ()]
+    },
+    setAngularVelocity(id, v) {
+      bi.SetAngularVelocity(bid(id), setV(v))
+    },
+    rest(id, p, rot) {
+      const b = bid(id)
+      bi.SetPositionAndRotation(b, setR(p), setQ(rot), J.EActivation_DontActivate)
+      bi.SetLinearAndAngularVelocity(b, setV([0, 0, 0]), setV([0, 0, 0]))
+      bi.DeactivateBody(b)
+    },
+    castRay(origin, direction, ignore = []) {
+      ray.mOrigin = setR(origin)
+      ray.mDirection = setV(direction)
+      notThese.Clear()
+      for (const id of ignore) if (ids[id]) notThese.IgnoreBody(ids[id]!)
+      rayHit.Reset()
+      system.GetNarrowPhaseQuery().CastRay(ray, raySettings, rayHit, anyBroad, anyLayer, notThese, anyShape)
+      if (!rayHit.HadHit()) return null
+      const hit = rayHit.mHit
+      const id = byIndex.get(hit.mBodyID.GetIndexAndSequenceNumber())
+      if (id === undefined || sensors[id]) return null
+      const fraction = hit.mFraction
+      const point: Vec3 = [origin[0] + direction[0] * fraction, origin[1] + direction[1] * fraction, origin[2] + direction[2] * fraction]
+      const n = bodies[id]!.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, setR(point))
+      return { body: id, point, normal: [n.GetX(), n.GetY(), n.GetZ()], fraction }
+    },
     dispose() {
       // The three layer tables are JoltInterface's: measured on 1.1.1, destroying them after
       // it corrupts the heap (a double free), so they are not freed here.
       J.destroy(jolt)
-      for (const o of [listener, est, tmpV, tmpR, tmpQ]) J.destroy(o)
+      for (const o of [listener, activation, est, tmpV, tmpR, tmpQ, ray, raySettings, rayHit, anyBroad, anyLayer, anyShape, notThese]) J.destroy(o)
       ids.length = bodies.length = jointList.length = 0
       byIndex.clear()
     },

@@ -6,7 +6,7 @@ import { own, replace } from '../kernel'
 import { TABLE_TOP, WALL_Z } from '../layout'
 import { paintBraid, paintClockFace, paintFabric, paintRunner, paintWicker, paintWood } from '../paint'
 import { NEAR_CHAIR } from '../villagers/world'
-import { Kit, at, ball, basketPlant, box, contactDecals, cyl } from '../kit'
+import { Kit, at, ball, basketPlant, box, contactDecals, cyl, type LooseBody } from '../kit'
 
 const LEFT = -3.31 // inner face of the left wall
 const RIGHT = 3.4 // inner face of the right wall
@@ -34,6 +34,13 @@ export default {
     const dress: Kit['dress'] = (...a) => k.dress(...a)
     /** Names what the next parts are, in every kit, so build mode can say "the dresser" (src/build/fixtures.ts). */
     const label = (name: string | null) => { for (const x of [kit, leftWall, rightWall]) x.label = name }
+    /** A loose thing (#107): the parts `make` adds are one thing with a body of its own, to pick up, throw and stack. */
+    const thing = (name: string, body: LooseBody, make: () => void) => {
+      const into = k
+      into.loose(name, body)
+      make()
+      into.loose(null)
+    }
     const flat = new THREE.Group()
     flat.name = 'furnish flat'
 
@@ -72,11 +79,13 @@ export default {
       for (const [dx, dz] of [[0.16, -0.14], [0.16, 0.14], [0.44, -0.14], [0.44, 0.14]]) part(new THREE.TorusGeometry(0.075, 0.008, 6, 20).rotateX(Math.PI / 2), '#4a4440', 'metal', at(x0 + dx, H + 0.014, cz + dz))
       // A red enamel kettle on the front ring, a pot behind.
       const kettle = new THREE.LatheGeometry([[0, 0], [0.09, 0], [0.1, 0.05], [0.085, 0.13], [0.04, 0.17], [0.012, 0.19], [0, 0.2]].map(([x, y]) => new THREE.Vector2(x, y)), 20)
-      part(kettle, '#c2463a', 'gloss', at(x0 + 0.16, H + 0.012, cz + 0.14))
-      part(new THREE.TorusGeometry(0.06, 0.008, 6, 14, Math.PI), '#2b2724', 'satin', at(x0 + 0.16, H + 0.17, cz + 0.14, Math.PI / 2))
-      part(cyl(0.012, 0.02, 0.1, 8), '#c2463a', 'gloss', at(x0 + 0.08, H + 0.1, cz + 0.14, 0, 0, 0.9))
-      part(cyl(0.1, 0.095, 0.13, 20), '#9aa3a6', 'metal', at(x0 + 0.44, H + 0.08, cz - 0.14))
-      part(cyl(0.104, 0.104, 0.012, 20), '#9aa3a6', 'metal', at(x0 + 0.44, H + 0.15, cz - 0.14))
+      thing('kettle', { material: 'steel', mass: 1.1, round: 'can' }, () => {
+        part(kettle, '#c2463a', 'gloss', at(x0 + 0.16, H + 0.012, cz + 0.14))
+        part(new THREE.TorusGeometry(0.06, 0.008, 6, 14, Math.PI), '#2b2724', 'satin', at(x0 + 0.16, H + 0.17, cz + 0.14, Math.PI / 2))
+        part(cyl(0.012, 0.02, 0.1, 8), '#c2463a', 'gloss', at(x0 + 0.08, H + 0.1, cz + 0.14, 0, 0, 0.9))
+      })
+      thing('pot', { material: 'steel', mass: 1.3, round: 'can' }, () => part(cyl(0.1, 0.095, 0.13, 20), '#9aa3a6', 'metal', at(x0 + 0.44, H + 0.08, cz - 0.14)))
+      thing('pot lid', { material: 'steel', mass: 0.35, round: 'can' }, () => part(cyl(0.104, 0.104, 0.012, 20), '#9aa3a6', 'metal', at(x0 + 0.44, H + 0.151, cz - 0.14)))
       // Towel folded over the bar: two hanging leaves and the fold.
       dress(new THREE.PlaneGeometry(0.22, 0.32), towel, at(x0 - 0.052, 0.57, cz + 0.08, -Math.PI / 2))
       dress(new THREE.PlaneGeometry(0.22, 0.26), towel, at(x0 - 0.03, 0.6, cz + 0.08, -Math.PI / 2, 0, 0))
@@ -88,9 +97,11 @@ export default {
       part(box(0.012, 0.74, c1 - c0 - 0.06), '#e8e2d6', 'satin', at(RIGHT - 0.606, 0.42, (c0 + c1) / 2))
       part(ball(0.014, 10, 8), '#8f8a80', 'metal', at(RIGHT - 0.62, 0.7, c1 - 0.08))
       part(box(0.63, 0.04, c1 - c0 + 0.02), '#9a9a96', 'satin', at(RIGHT - 0.31, 0.9, (c0 + c1) / 2))
-      part(cyl(0.06, 0.055, 0.14, 16), '#e8dcc6', 'gloss', at(RIGHT - 0.2, 0.99, c0 + 0.14))
-      for (let i = 0; i < 4; i++) part(cyl(0.006, 0.006, 0.22, 6), i % 2 ? '#b8865a' : '#8a6a4a', 'satin', at(RIGHT - 0.2 + (i - 1.5) * 0.015, 1.08, c0 + 0.14 + (i % 2 - 0.5) * 0.02, 0, 0.1 * (i - 1.5), 0.12 * (i - 1.5)))
-      dress(box(0.02, 0.36, 0.24), pine, at(RIGHT - 0.03, 1.09, c1 - 0.16, 0, 0, -0.12))
+      thing('utensil crock', { material: 'ceramic', mass: 0.9, round: 'can' }, () => {
+        part(cyl(0.06, 0.055, 0.14, 16), '#e8dcc6', 'gloss', at(RIGHT - 0.2, 0.99, c0 + 0.14))
+        for (let i = 0; i < 4; i++) part(cyl(0.006, 0.006, 0.22, 6), i % 2 ? '#b8865a' : '#8a6a4a', 'satin', at(RIGHT - 0.2 + (i - 1.5) * 0.015, 1.08, c0 + 0.14 + (i % 2 - 0.5) * 0.02, 0, 0.1 * (i - 1.5), 0.12 * (i - 1.5)))
+      })
+      thing('bread board', { material: 'maple', mass: 0.8 }, () => dress(box(0.02, 0.36, 0.24), pine, at(RIGHT - 0.03, 1.09, c1 - 0.16, 0, 0, -0.12)))
     }
 
     label('pans')
@@ -131,9 +142,10 @@ export default {
         part(box(0.02, 0.02, 0.14), '#b08a5a', 'metal', at(LEFT + d + 0.025, 0.68, dz))
       }
       // On top: a stack of plates and a fruit crate of onions.
-      for (let i = 0; i < 4; i++) part(cyl(0.12, 0.1, 0.018, 24), '#f2ece0', 'gloss', at(x + 0.02, H + 0.01 + i * 0.019, z0 + 0.3))
-      dress(box(0.3, 0.14, 0.4), pine, at(x + 0.02, H + 0.07, z1 - 0.32))
-      for (let i = 0; i < 6; i++) part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1))
+      for (let i = 0; i < 4; i++) thing('plate', { material: 'ceramic', mass: 0.35, round: 'can' }, () => part(cyl(0.12, 0.1, 0.018, 24), '#f2ece0', 'gloss', at(x + 0.02, H + 0.01 + i * 0.019, z0 + 0.3)))
+      // The crate is hollow with a deep floor: the onions lie on it, and roll out when it tips.
+      thing('onion crate', { material: 'maple', mass: 1.6, hollow: 0.11 }, () => dress(box(0.3, 0.14, 0.4), pine, at(x + 0.02, H + 0.07, z1 - 0.32)))
+      for (let i = 0; i < 6; i++) thing('onion', { material: 'fruit', mass: 0.13, round: 'ball' }, () => part(ball(0.04, 10, 8), i % 2 ? '#c99a5a' : '#b5763c', 'satin', at(x - 0.06 + (i % 2) * 0.1, H + 0.15, z1 - 0.46 + Math.floor(i / 2) * 0.1)))
       label('shelf')
       // Two shelves on iron brackets.
       k = leftWall
@@ -146,10 +158,13 @@ export default {
       let jz = z0 + 0.1
       for (const [fill, h, r] of jars) {
         jz += r
+        const z = jz
         // What a jar keeps shows through the glass: the fill up to its level, a pale glass shoulder above.
-        part(cyl(r, r, h * 0.72, 16), fill, 'satin', at(LEFT + 0.12, 1.434 + h * 0.36, jz))
-        part(cyl(r * 0.92, r, h * 0.28, 16), '#dfe6e2', 'gloss', at(LEFT + 0.12, 1.434 + h * 0.86, jz))
-        part(cyl(r + 0.004, r + 0.004, 0.022, 16), '#7a5a3a', 'satin', at(LEFT + 0.12, 1.434 + h + 0.011, jz))
+        thing('jar', { material: 'glass', mass: 0.5 + h, round: 'can' }, () => {
+          part(cyl(r, r, h * 0.72, 16), fill, 'satin', at(LEFT + 0.12, 1.434 + h * 0.36, z))
+          part(cyl(r * 0.92, r, h * 0.28, 16), '#dfe6e2', 'gloss', at(LEFT + 0.12, 1.434 + h * 0.86, z))
+          part(cyl(r + 0.004, r + 0.004, 0.022, 16), '#7a5a3a', 'satin', at(LEFT + 0.12, 1.434 + h + 0.011, z))
+        })
         jz += r + 0.03
       }
       // Upper shelf: cookbooks standing, two leaning, a small trailing plant.
@@ -157,9 +172,11 @@ export default {
       let bz = z0 + 0.08
       spines.forEach((c, i) => {
         const t = 0.03 + (i % 3) * 0.012, h = 0.2 + ((i * 7) % 5) * 0.018
-        part(box(0.17, h, t), c, 'satin', at(LEFT + 0.1, 1.834 + h / 2, bz + t / 2, 0, i === 7 ? 0 : 0, i >= 6 ? 0 : 0))
+        const z = bz
+        thing('cookbook', { material: 'paper', mass: 0.3 + t * 8 }, () => part(box(0.17, h, t), c, 'satin', at(LEFT + 0.1, 1.834 + h / 2, z + t / 2)))
         bz += t + 0.004
       })
+      // The last one leans on the row; its body is the box round it, so it stays fixed for now.
       part(box(0.17, 0.22, 0.035), '#d9c39a', 'satin', at(LEFT + 0.1, 1.834 + 0.105, bz + 0.05, 0, 0.32))
       part(cyl(0.05, 0.04, 0.09, 14), '#c2714f', 'satin', at(LEFT + 0.12, 1.88, z1 - 0.2))
       for (let i = 0; i < 9; i++) {
@@ -197,8 +214,10 @@ export default {
       dress(box(0.03, 0.06, z1 - z0 - 0.04), pine, at(bx + 0.14, 0.38, cz))
       // Yellow wellies and a small pair of red ones.
       for (const [z, c, s] of [[cz - 0.18, '#e6b832', 1], [cz - 0.08, '#e6b832', 1], [cz + 0.12, '#c8483a', 0.7], [cz + 0.2, '#c8483a', 0.7]] as const) {
-        part(cyl(0.04 * s, 0.045 * s, 0.26 * s, 12), c, 'gloss', at(bx + 0.02, 0.13 * s, z))
-        part(box(0.15 * s, 0.05 * s, 0.075 * s), c, 'gloss', at(bx + 0.06 * s + 0.02, 0.025 * s, z))
+        thing('welly', { material: 'rubber', mass: 0.45 * s }, () => {
+          part(cyl(0.04 * s, 0.045 * s, 0.26 * s, 12), c, 'gloss', at(bx + 0.02, 0.13 * s, z))
+          part(box(0.15 * s, 0.05 * s, 0.075 * s), c, 'gloss', at(bx + 0.06 * s + 0.02, 0.025 * s, z))
+        })
       }
     }
 
@@ -220,9 +239,11 @@ export default {
       part(cyl(0.08, 0.08, 0.09, 16), '#c8483a', 'satin', local(0.12, 0.42, -0.02, 0.3))
       part(cyl(0.083, 0.083, 0.012, 16), '#f2ece0', 'satin', local(0.12, 0.465, -0.035, 0.3))
       const blocks: Array<[number, number, number, string]> = [[0.62, 0.05, 0.12, '#e6b832'], [0.7, 0.05, -0.05, '#5a8ab0'], [0.65, 0.15, 0.04, '#c8483a'], [0.48, 0.05, 0.3, '#79a34a']]
-      for (const [bx2, by, bz2, c] of blocks) part(box(0.1, 0.1, 0.1), c, 'satin', local(bx2, by, bz2, 0, by > 0.1 ? 0.3 : 0))
-      part(ball(0.09, 16, 12), '#d8503e', 'satin', at(-1.62, 0.09, 2.62))
-      part(new THREE.TorusGeometry(0.09, 0.012, 6, 24).rotateX(Math.PI / 2), '#f2ece0', 'satin', at(-1.62, 0.09, 2.62, 0, 0.3))
+      for (const [bx2, by, bz2, c] of blocks) thing('toy block', { material: 'maple', mass: 0.18 }, () => part(box(0.1, 0.1, 0.1), c, 'satin', local(bx2, by, bz2, 0, by > 0.1 ? 0.3 : 0)))
+      thing('toy ball', { material: 'rubber', mass: 0.25, round: 'ball' }, () => {
+        part(ball(0.09, 16, 12), '#d8503e', 'satin', at(-1.62, 0.09, 2.62))
+        part(new THREE.TorusGeometry(0.09, 0.012, 6, 24).rotateX(Math.PI / 2), '#f2ece0', 'satin', at(-1.62, 0.09, 2.62, 0, 0.3))
+      })
     }
 
     label('reading chair')
@@ -244,8 +265,8 @@ export default {
       dress(cyl(0.2, 0.2, 0.03, 24), pine, st(0, 0.55, 0))
       dress(cyl(0.025, 0.03, 0.54, 10), pine, st(0, 0.27, 0))
       dress(cyl(0.14, 0.16, 0.02, 20), pine, st(0, 0.01, 0))
-      part(box(0.16, 0.035, 0.22), '#2f5446', 'satin', st(0.04, 0.585, 0.02))
-      part(cyl(0.035, 0.03, 0.07, 14), '#e8dcc6', 'gloss', st(-0.1, 0.6, -0.06))
+      thing('book', { material: 'paper', mass: 0.45 }, () => part(box(0.16, 0.035, 0.22), '#2f5446', 'satin', st(0.04, 0.5825, 0.02)))
+      thing('cup', { material: 'ceramic', mass: 0.25, round: 'can' }, () => part(cyl(0.035, 0.03, 0.07, 14), '#e8dcc6', 'gloss', st(-0.1, 0.6, -0.06)))
       // Floor lamp behind the chair, its linen shade lit from inside.
       const lamp = (lx: number, ly: number, lz: number) => base.clone().multiply(at(lx, ly, lz))
       part(cyl(0.012, 0.012, 1.4, 8), '#2b2420', 'satin', lamp(-0.58, 0.7, 0.1))
@@ -271,21 +292,24 @@ export default {
     {
       const bx = 0.36, bz = -0.06, y = TABLE_TOP
       const bowl = new THREE.LatheGeometry([[0, 0], [0.06, 0], [0.07, 0.01], [0.13, 0.05], [0.15, 0.085], [0.142, 0.088], [0.12, 0.055], [0.05, 0.02], [0, 0.02]].map(([u, v]) => new THREE.Vector2(u, v)), 28)
-      part(bowl, '#4f7896', 'gloss', at(bx, y, bz))
+      // The bowl is hollow, so the fruit rests in it and rolls out when it tips.
+      thing('fruit bowl', { material: 'ceramic', mass: 0.9, round: 'can', hollow: 0.02 }, () => part(bowl, '#4f7896', 'gloss', at(bx, y, bz)))
       const fruit: Array<[number, number, number, number, string]> = [[-0.04, 0.07, -0.03, 0.042, '#e8892c'], [0.05, 0.07, 0.02, 0.042, '#e8892c'], [-0.01, 0.075, 0.06, 0.04, '#c0392b'], [0.02, 0.11, -0.01, 0.04, '#e8892c'], [0.07, 0.072, -0.06, 0.038, '#9bb04a']]
-      for (const [fx, fy, fz, r, c] of fruit) part(ball(r, 14, 10), c, 'satin', at(bx + fx, y + fy, bz + fz))
-      part(ball(0.035, 12, 8).scale(1.35, 1, 1), '#efd24a', 'satin', at(bx - 0.08, y + 0.1, bz + 0.03, 0.4))
+      for (const [fx, fy, fz, r, c] of fruit) thing(c === '#c0392b' ? 'apple' : c === '#9bb04a' ? 'pear' : 'clementine', { material: 'fruit', mass: 0.14, round: 'ball' }, () => part(ball(r, 14, 10), c, 'satin', at(bx + fx, y + fy, bz + fz)))
+      thing('lemon', { material: 'fruit', mass: 0.12, round: 'ball' }, () => part(ball(0.035, 12, 8).scale(1.35, 1, 1), '#efd24a', 'satin', at(bx - 0.08, y + 0.1, bz + 0.03, 0.4)))
       const jug = new THREE.LatheGeometry([[0, 0], [0.045, 0], [0.055, 0.04], [0.05, 0.1], [0.035, 0.14], [0.04, 0.16], [0.036, 0.162], [0, 0.12]].map(([u, v]) => new THREE.Vector2(u, v)), 20)
       const vx = -0.98, vz = -0.12
-      part(jug, '#f2ece0', 'gloss', at(vx, y, vz))
       const blooms = ['#f29a7a', '#fff4dc', '#f4d36b', '#e7849c', '#fff4dc']
-      for (let i = 0; i < 5; i++) {
-        const a = i * 1.3, tilt = 0.18 + (i % 2) * 0.12
-        const stem = at(vx, y + 0.12, vz, a, tilt)
-        part(cyl(0.003, 0.003, 0.16, 5).translate(0, 0.08, 0), '#5f7a3a', 'matte', stem)
-        part(ball(0.026, 10, 6).scale(1, 0.6, 1), blooms[i], 'matte', stem.clone().multiply(at(0, 0.165, 0)))
-        part(ball(0.03, 8, 6).scale(0.5, 0.2, 1.2), '#5f8a3a', 'matte', stem.clone().multiply(at(0.02, 0.07, 0, 0.5)))
-      }
+      thing('flower jug', { material: 'ceramic', mass: 0.9, round: 'can' }, () => {
+        part(jug, '#f2ece0', 'gloss', at(vx, y, vz))
+        for (let i = 0; i < 5; i++) {
+          const a = i * 1.3, tilt = 0.18 + (i % 2) * 0.12
+          const stem = at(vx, y + 0.12, vz, a, tilt)
+          part(cyl(0.003, 0.003, 0.16, 5).translate(0, 0.08, 0), '#5f7a3a', 'matte', stem)
+          part(ball(0.026, 10, 6).scale(1, 0.6, 1), blooms[i], 'matte', stem.clone().multiply(at(0, 0.165, 0)))
+          part(ball(0.03, 8, 6).scale(0.5, 0.2, 1.2), '#5f8a3a', 'matte', stem.clone().multiply(at(0.02, 0.07, 0, 0.5)))
+        }
+      })
     }
 
     label('clock')
@@ -347,12 +371,15 @@ export default {
       hung.name = name
       hung.position.x = x // the cutaway test reads this group's position as the wall's
       hung.userData.inward = inward
-      const built = wallKit.build(name)
+      // Its loose things (the jars, the cookbooks) stand with the room, not the wall: knocked to the floor, they stay in view when the wall is cut away.
+      const built = wallKit.build(name, loose)
       built.position.x = -x
       hung.add(built)
       return hung
     }
-    const all = [kit.build('furnish'), onWall(leftWall, LEFT, new THREE.Vector3(1, 0, 0), 'left wall things'), onWall(rightWall, RIGHT, new THREE.Vector3(-1, 0, 0), 'right wall things'), flat, clock, shade]
+    const loose = new THREE.Group()
+    loose.name = 'kitchen things'
+    const all = [kit.build('furnish', loose), loose, onWall(leftWall, LEFT, new THREE.Vector3(1, 0, 0), 'left wall things'), onWall(rightWall, RIGHT, new THREE.Vector3(-1, 0, 0), 'right wall things'), flat, clock, shade]
     // Small separate pieces would otherwise reach the GPU only when a camera first
     // turns to them, so a room walk could add memory the first visit never showed.
     for (const o of all) o.traverse((n) => (n.frustumCulled = false))

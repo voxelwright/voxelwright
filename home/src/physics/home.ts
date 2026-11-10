@@ -21,6 +21,7 @@ import * as THREE from 'three/webgpu'
 import type { Quat, Vec3 } from '../engine/core'
 import { isMaterial } from '../engine/materials'
 import type { World } from '../engine/world'
+import type { LooseParts, Turned } from '../kit'
 
 export interface BodyData {
   /** A registered material (src/engine/materials.ts); walnut when not given. */
@@ -28,9 +29,11 @@ export interface BodyData {
   motion?: 'static' | 'dynamic'
   /** kg, dynamic things: furniture is mostly air, so its boxes' volume would weigh far too much. */
   mass?: number
+  /** Its body is the ball, or the can standing on its y, inside the box round all its parts (a mug, a plate, a ball), so it rolls. */
+  round?: 'ball' | 'can'
 }
 
-const DEFAULT: Required<Omit<BodyData, 'mass'>> = { material: 'walnut', motion: 'static' }
+const DEFAULT: Required<Omit<BodyData, 'mass' | 'round'>> = { material: 'walnut', motion: 'static' }
 /** A plane (a floor, a rug, a picture) gets this thickness, m, behind its drawn face. */
 const THIN = 0.004
 /** An instanced mesh past this many copies is left at its first ones (none in the house comes close). */
@@ -38,7 +41,7 @@ const MAX_INSTANCES = 256
 /** Boxes are compared to this (m, and quaternion parts) to tell a changed thing from a swaying leaf. */
 const SAME = 0.02
 
-type Box = { half: Vec3; at: Vec3; rotation: Quat }
+type Box = { half: Vec3; at: Vec3; rotation: Quat; round?: 'ball' | 'can' }
 /** What a box of a merged kit is, for heat: its label ('sofa') and whether it is drawn as metal. */
 type Label = { name: string | null; metal: boolean }
 
@@ -91,7 +94,8 @@ function find(scene: THREE.Scene, skip: Set<THREE.Object3D>): Found[] {
       thing = own
     }
     const m = o as THREE.Mesh
-    if (m.isMesh && m.geometry && !notAThing(m)) {
+    // A kit's loose thing (src/kit.ts) keeps its own boxes: the meshes it is drawn with while out of the kit add nothing.
+    if (m.isMesh && m.geometry && !notAThing(m) && !thing.object.userData.loose) {
       // A kit's merged meshes stand for its parts: their boxes are kept on the kit (src/kit.ts).
       if (m.parent?.userData.regions) thing.kits.add(m.parent)
       else thing.meshes.push(m)
@@ -104,7 +108,7 @@ function find(scene: THREE.Scene, skip: Set<THREE.Object3D>): Found[] {
     out.push(thing)
     visit(top, thing)
   }
-  return out.filter((f) => f.meshes.length || f.kits.size)
+  return out.filter((f) => f.meshes.length || f.kits.size || f.object.userData.loose)
 }
 
 const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(), c = new THREE.Vector3(), h = new THREE.Vector3()
@@ -115,6 +119,18 @@ function boxIn(m: THREE.Matrix4, box: THREE.Box3): Box | null {
   box.getCenter(c).applyMatrix4(m)
   box.getSize(h).multiply(s).multiplyScalar(0.5)
   const half: Vec3 = [Math.max(THIN / 4, Math.abs(h.x)), Math.max(THIN / 4, Math.abs(h.y)), Math.max(THIN / 4, Math.abs(h.z))]
+  if (!half.every(Number.isFinite) || ![c.x, c.y, c.z].every(Number.isFinite)) return null
+  return { half, at: [c.x, c.y, c.z], rotation: [q.x, q.y, q.z, q.w] }
+}
+
+const tq = new THREE.Quaternion()
+/** A box turned in some frame, as a box in the thing's frame, through `m` (that frame to the thing's). */
+function turnedIn(m: THREE.Matrix4, t: Turned): Box | null {
+  m.decompose(p, q, s)
+  c.set(...t.at).applyMatrix4(m)
+  q.multiply(tq.set(...t.rotation))
+  // The frame's own scale is taken along the box's sides (kits are not scaled unevenly).
+  const half: Vec3 = [Math.max(THIN / 4, t.half[0] * Math.abs(s.x)), Math.max(THIN / 4, t.half[1] * Math.abs(s.y)), Math.max(THIN / 4, t.half[2] * Math.abs(s.z))]
   if (!half.every(Number.isFinite) || ![c.x, c.y, c.z].every(Number.isFinite)) return null
   return { half, at: [c.x, c.y, c.z], rotation: [q.x, q.y, q.z, q.w] }
 }
@@ -164,18 +180,45 @@ function boxesOf(f: Found, labels: (Label | null)[] = []): Box[] {
   for (const kit of f.kits) {
     kit.updateWorldMatrix(true, false)
     m.multiplyMatrices(toThing, kit.matrixWorld)
-    for (const r of kit.userData.regions as Array<{ box: THREE.Box3; name?: string | null; metal?: boolean }>) {
-      const b = boxIn(m, r.box)
+    for (const r of kit.userData.regions as Array<{ box: THREE.Box3; turned?: Turned; name?: string | null; metal?: boolean; loose?: true }>) {
+      // A loose thing's boxes are its own body's, below.
+      if (r.loose) continue
+      const b = r.turned ? turnedIn(m, r.turned) : boxIn(m, r.box)
       if (b) {
         out.push(b)
         labels.push({ name: r.name ?? null, metal: Boolean(r.metal) })
       }
     }
   }
+  const loose = f.object.userData.loose as LooseParts | undefined
+  if (loose) {
+    m.makeScale(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z))
+    for (const box of loose.boxes) {
+      const b = turnedIn(m, box)
+      if (b) {
+        out.push(b)
+        labels.push(null)
+      }
+    }
+  }
+  if (f.data.round && out.length) return [roundOf(out, f.data.round)]
   return out
 }
 
-const dataKey = (data: BodyData) => `${data.motion ?? ''}|${data.material ?? ''}|${data.mass ?? ''}`
+/** One round box over all of a thing's boxes (they stand square in its frame, or nearly: their corners are taken as they lie). */
+function roundOf(boxes: Box[], round: 'ball' | 'can'): Box {
+  const all = new THREE.Box3()
+  const turn = new THREE.Quaternion()
+  for (const b of boxes) {
+    turn.set(...b.rotation)
+    for (let i = 0; i < 8; i++) all.expandByPoint(c.set(i & 1 ? b.half[0] : -b.half[0], i & 2 ? b.half[1] : -b.half[1], i & 4 ? b.half[2] : -b.half[2]).applyQuaternion(turn).add(h.set(...b.at)))
+  }
+  all.getCenter(c)
+  all.getSize(h).multiplyScalar(0.5)
+  return { half: [h.x, h.y, h.z], at: [c.x, c.y, c.z], rotation: [0, 0, 0, 1], round }
+}
+
+const dataKey = (data: BodyData) => `${data.motion ?? ''}|${data.material ?? ''}|${data.mass ?? ''}|${data.round ?? ''}`
 const near = (a: readonly number[], b: readonly number[]) => {
   for (let k = 0; k < a.length; k++) if (Math.abs(a[k] - b[k]) > SAME) return false
   return true
@@ -259,7 +302,10 @@ export function homeBodies(world: World, scene: THREE.Scene, skip: THREE.Object3
       const density = world.material(material)!.density
       const mass = motion === 'dynamic' ? (typeof f.data.mass === 'number' && f.data.mass > 0 && f.data.mass < 5000 ? f.data.mass : Math.min(500, Math.max(0.05, density * volume(boxes) * 0.2))) : undefined
       const parts = partsOf(labels, f.object.name || String(f.object.userData.furniture ?? ''), material)
-      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}) })) {
+      // A kit's loose thing is drawn inside the kit's merged meshes while it rests where it was made, and by its own while it does not.
+      const loose = f.object.userData.loose as LooseParts | undefined
+      const drawn = loose && motion === 'dynamic' ? { woke: () => loose.cut(), slept: (home: boolean) => void (home && loose.mend()) } : {}
+      if (!boxes.length || !world.bind(key, f.object, { shape: { kind: 'compound', boxes }, motion, material, ...(mass !== undefined ? { mass } : {}), ...(parts.length ? { parts } : {}), ...drawn })) {
         if (!before) used.delete(key)
         held.delete(f.object)
         refused.push(key)
