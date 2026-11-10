@@ -85,6 +85,8 @@ export interface BindSpec {
    * its stove steel): indices into shape.boxes. Boxes no part names burn as the thing's material.
    */
   parts?: { name: string; material: string; boxes: number[] }[]
+  /** 1/s, dynamic only: how fast its spin dies, in place of what its material gives. */
+  spin?: number
   /** Where it was made, when that is not where it is now (a thing bound again while it lies thrown): tidying puts it there. */
   home?: { p: Vec3; q: Quat }
   /** Called when its body starts to move (a hand, a bump) and when it has come to rest again: a thing drawn cheaply at rest draws itself in full while it moves (src/kit.ts). */
@@ -611,6 +613,8 @@ export class World implements WorldApi {
     const body = this.core.addBody({
       shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
       density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
+      // The softer a thing, the sooner it stops rolling: an apple settles where a steel ball runs on.
+      ...(spec.motion === 'dynamic' ? { angularDamping: spec.spin ?? 0.05 + 1.6 * (1 - mat.hardness) ** 2 } : {}),
     })
     const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: spec.home ?? { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts, woke: spec.woke, slept: spec.slept }
     this.bound.set(key, b)
