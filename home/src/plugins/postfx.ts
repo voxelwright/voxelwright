@@ -18,6 +18,7 @@ import type { Post, Theme } from '../theme/tokens'
 import { makeFx, type FxContext } from '../theme/fx'
 import { asNext } from '../theme/ahead'
 import { fieldLook } from '../engine/heat'
+import { flameLayer } from '../engine/flames'
 import { lens, shallowFocus } from '../lens'
 
 // Each material's shader is built in one task. Inside compileAsync, three r187 builds a
@@ -151,7 +152,11 @@ function build(stage: Stage, built: Theme): Chain {
   }
 
   // Fire's light, char and wetness from the heat field (#74), before bloom so what glows blooms. Reads nothing while the field is idle.
-  color = fieldLook(color, depth.x, stage.camera)
+  color = fieldLook(color, depth, stage.camera, !low)
+  // Flames, embers and smoke are their own layer over that (#105): after the focus, so they stay crisp; before bloom, so they glow.
+  const fire = flameLayer(color, scenePass.getTexture('depth'), stage.renderer, stage.camera)
+  disposables.push(fire)
+  color = fire.color
   for (const s of stages) if (s.hdr) color = s.hdr(color, fxContext)
 
   // The low tier keeps its softer bloom (0.25 where the home's is 0.42) in every theme.

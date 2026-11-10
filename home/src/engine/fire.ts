@@ -339,7 +339,8 @@ export class Fire implements Burner {
         const e = this.extent(p)
         const covered = Math.min(1, [0, 1, 2].reduce((v, i) => v * Math.max(0.02, e.half[i]) / Math.max(0.02, p.b.half[i]), 1))
         p.fuel = Math.max(0, p.fuel - p.th.burnRate * covered * dt * (1 - 0.8 * p.wet))
-        p.char = Math.max(p.char, Math.min(1, 1 - p.fuel, p.burnt / 20))
+        // It blackens in seconds, long before its fuel is gone.
+        p.char = Math.max(p.char, Math.min(0.85, Math.max(1 - p.fuel, p.burnt / 6)))
         if (p.wet > QUENCH || water > 0.5) this.out(p, 'water')
         else if (p.fuel <= 0) {
           p.state = 'burnt'
@@ -444,8 +445,8 @@ export class Fire implements Burner {
 
   /** The parts burning now, for drawing flames: box, how strong (0 to 1) and flammability. */
   flames() {
-    const out: { id: string; center: Vec3; half: Vec3; strength: number; fierce: number }[] = []
-    for (const p of this.order) if (p.state === 'burning') out.push({ id: p.b.id, ...this.extent(p), strength: Math.min(1, 0.3 + p.burnt / 3) * Math.min(1, 0.2 + p.fuel * 5) * (1 - 0.7 * p.wet), fierce: p.th.flammability })
+    const out: { id: string; center: Vec3; half: Vec3; strength: number; fierce: number; box: { center: Vec3; half: Vec3 } }[] = []
+    for (const p of this.order) if (p.state === 'burning') out.push({ id: p.b.id, box: { center: p.b.center, half: p.b.half }, ...this.extent(p), strength: Math.min(1, 0.3 + p.burnt / 3) * Math.min(1, 0.2 + p.fuel * 5) * (1 - 0.7 * p.wet), fierce: p.th.flammability })
     return out
   }
 
