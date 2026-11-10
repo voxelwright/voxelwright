@@ -124,7 +124,7 @@ try {
   })
   for (const p of plush) {
     const r = p.report
-    check(`${p.name}: the felt is skinned to hips, waist, chest, head, two hands and at least one flop bone`, r && r.skinned >= 3 && r.flops >= 1 && r.bones === 6 + r.flops, r)
+    check(`${p.name}: the felt is skinned to hips, waist, chest, head, two hands, two feet and at least one flop bone`, r && r.skinned >= 3 && r.flops >= 1 && r.bones === 8 + r.flops, r)
     check(`${p.name}: every vertex's weights sum to 1, and skinning moves no vertex at rest`, r && r.weightError < 1e-5 && r.restError < 1e-5, r)
     check(`${p.name}: setting off, it gathers first (squashes below 0.97 while moving under 1 cm in the first 0.15 s)`, p.dip < 0.97 && p.gatherMove < 0.01, { dip: p.dip, move: p.gatherMove })
     check(`${p.name}: walking, a planted foot never slides (under 0.1 mm a frame over ${p.steps} steps)`, p.steps >= 4 && p.slide < 1e-4, { slide: p.slide, steps: p.steps })

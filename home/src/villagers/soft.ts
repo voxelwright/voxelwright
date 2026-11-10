@@ -200,7 +200,17 @@ export function soften(fig: Figure): Soft | null {
   // Arms: the meshes directly in a hand's group (what it holds sits a level deeper), measured from the body's axis.
   const armPieces = hands.map((h) => measure(h.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh), pose).pieces)
 
-  const bones: THREE.Object3D[] = [pose, waist, chest, head, ...hands]
+  // Legs: where a foot's own felt reaches up into the body, its upper part stays on the hips, so a leg stretches
+  // from hip to planted foot instead of sliding along under the body. A foot with no leg is left as it is.
+  const { feet } = fig
+  const legs = feet.map((f) => {
+    const pieces = measure(meshesUnder(f, new Set()), pose).pieces
+    const heights = pieces.flatMap((p) => p.at.map((q) => q.y))
+    const low = heights.reduce((a, b) => Math.min(a, b), Infinity), high = heights.reduce((a, b) => Math.max(a, b), -Infinity)
+    return { pieces: high > y0 + 0.1 * tall ? pieces : [], low, high }
+  })
+
+  const bones: THREE.Object3D[] = [pose, waist, chest, head, ...hands, ...feet]
   const flops: Flop[] = []
   const headSlot = measure(meshesUnder(head, new Set()), head)
   const slots = [
@@ -257,11 +267,14 @@ export function soften(fig: Figure): Soft | null {
 
   let skinned = 0
   const seen = new WeakSet<THREE.BufferGeometry>()
-  const skin = (piece: Piece, slot: 'body' | 'head' | number): THREE.SkinnedMesh | null => {
+  const skin = (piece: Piece, slot: 'body' | 'head' | number, leg?: { low: number; high: number }): THREE.SkinnedMesh | null => {
     const n = piece.at.length
     if (slot === 'head' && !piece.group.some((g) => g >= 0)) return null
+    // How much of a leg vertex the hips keep: none over the lower part (the foot itself), all of it near the top.
+    const hips = (y: number) => (leg ? smooth(0.45, 0.9, (y - leg.low) / (leg.high - leg.low)) : 0)
+    if (leg && !piece.at.some((q) => hips(q.y) > 0)) return null
     // An arm: the end nearest the body stays on the chest, the far end goes with the hand.
-    const reach = typeof slot === 'number' ? piece.at.map((q) => Math.hypot(q.x, q.z)) : []
+    const reach = typeof slot === 'number' && !leg ? piece.at.map((q) => Math.hypot(q.x, q.z)) : []
     const near = reach.reduce((a, b) => Math.min(a, b), Infinity), far = reach.reduce((a, b) => Math.max(a, b), -Infinity)
     const index = new Uint16Array(n * 4)
     const weight = new Float32Array(n * 4)
@@ -271,6 +284,10 @@ export function soften(fig: Figure): Soft | null {
       if (slot === 'head') {
         index[i * 4] = 3
         weight[i * 4] = rest
+      } else if (leg) {
+        const up = hips(piece.at[i].y)
+        index.set([0, slot as number], i * 4)
+        weight.set([up, 1 - up], i * 4)
       } else if (typeof slot === 'number') {
         const out = smooth(0.1, 0.75, (reach[i] - near) / Math.max(1e-6, far - near))
         index.set([2, slot], i * 4)
@@ -319,6 +336,7 @@ export function soften(fig: Figure): Soft | null {
   for (const p of body.pieces) skin(p, 'body')
   for (const p of headSlot.pieces) skin(p, 'head')
   armPieces.forEach((ps, i) => ps.forEach((p) => skin(p, 4 + i)))
+  legs.forEach((leg, i) => leg.pieces.forEach((p) => skin(p, 4 + hands.length + i, leg)))
   return { waist, chest, flops, skeleton, skinned }
 }
 

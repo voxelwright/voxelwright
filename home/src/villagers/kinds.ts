@@ -410,6 +410,8 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   const feet = [-1, 1].map((sx) => {
     const f = part(root, new THREE.Group(), sx * R * 0.5, 0, 0)
     part(f, mesh(new THREE.SphereGeometry(0.048, 16, 10), felt(s.felt)), 0, 0.03, 0.02).scale.set(1, 0.65, 1.3)
+    // A short leg up into the body (#104): skinned between foot and hips (./soft.ts), it stretches as the foot steps out.
+    part(f, mesh(new THREE.CapsuleGeometry(0.03, hip + bodyH * 0.22, 6, 12, 8), felt(s.felt)), 0, 0.035 + (hip + bodyH * 0.22) / 2, 0)
     return f
   })
   // Not `stepped` (#104): a soft body's springs and follow-through need every frame; on twos they read as jitter.
