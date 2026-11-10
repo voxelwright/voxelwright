@@ -79,7 +79,7 @@ export function reach(center: Vec3, half: Vec3, origin: Vec3, radius: number): {
   return { center: c, half: h }
 }
 
-export interface FireSnapshot { parts: Record<string, { state: State; fuel: number; wet: number; temp: number; burnt?: number; origin?: Vec3 }>; rain: number }
+export interface FireSnapshot { parts: Record<string, { state: State; fuel: number; wet: number; temp: number; burnt?: number; char?: number; origin?: Vec3 }>; rain: number }
 
 export interface FireStats {
   parts: number
@@ -468,7 +468,7 @@ export class Fire implements Burner {
 
   snapshot(): FireSnapshot {
     const parts: FireSnapshot['parts'] = {}
-    for (const [id, p] of this.parts) if (p.state !== 'cold' || p.fuel < 1 || p.wet > 0 || p.temp > 1) parts[id] = { state: p.state, fuel: p.fuel, wet: p.wet, temp: p.temp, burnt: p.burnt, origin: [...p.origin] }
+    for (const [id, p] of this.parts) if (p.state !== 'cold' || p.fuel < 1 || p.wet > 0 || p.temp > 1) parts[id] = { state: p.state, fuel: p.fuel, wet: p.wet, temp: p.temp, burnt: p.burnt, char: p.char, origin: [...p.origin] }
     return { parts, rain: Math.max(0, this.rainUntil - this.fieldTime) }
   }
 
@@ -502,7 +502,8 @@ export class Fire implements Burner {
         clamped.push(`fire.${id}`)
         continue
       }
-      Object.assign(p, { state: saved.state, fuel: saved.fuel, wet: saved.wet, temp: saved.temp, char: saved.state === 'burnt' ? 1 : Math.min(1, 1 - saved.fuel), burnt: saved.state === 'burning' ? (typeof saved.burnt === 'number' && Number.isFinite(saved.burnt) && saved.burnt >= 0 ? Math.min(saved.burnt, 1e5) : 3) : 0,
+      Object.assign(p, { state: saved.state, fuel: saved.fuel, wet: saved.wet, temp: saved.temp, // Its char as saved (an older snapshot has none: what its fuel says), and how long it burned, which is how far its fire and its char reached.
+        char: saved.state === 'burnt' ? 1 : unit(saved.char) ? saved.char : Math.min(1, 1 - saved.fuel), burnt: typeof saved.burnt === 'number' && Number.isFinite(saved.burnt) && saved.burnt >= 0 ? Math.min(saved.burnt, 1e5) : saved.state === 'burning' ? 3 : 0,
         // Where it caught, from its centre, kept inside the part's box whatever the snapshot said.
         origin: p.b.half.map((h, i) => {
           const o = Array.isArray(saved.origin) ? saved.origin[i] : NaN

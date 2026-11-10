@@ -254,7 +254,7 @@ const glowOf = (t: N) => vec3(smoothstep(420, 700, t), smoothstep(600, 1000, t).
 /**
  * How much firelight falls on each point of the picture, as its own half-size pass: each of the
  * strongest fires (firelight) is a point light that flickers, shading every surface by where it
- * faces and how far it is, and with `shadows` the two strongest cast shadows, found by marching
+ * faces and how far it is, and with `shadows` the two strongest (flames.ts lists them strongest first) cast shadows, found by marching
  * the picture's own depth toward the fire. Its own pass because it is only rendered while a
  * fire is lit (a branch in the main picture's shader still cost several ms when not taken), and
  * half size because firelight is soft.
@@ -283,12 +283,12 @@ function firelightMap(depthTexture: THREE.TextureNode, camera: THREE.Camera, sha
           const flicker = sin(beat).mul(0.09).add(sin(beat.mul(2.3).add(1)).mul(0.06)).add(sin(beat.mul(0.37)).mul(0.08)).add(0.86)
           const heart = fire.xyz.add(vec3(sin(beat.mul(0.9)), sin(beat.mul(1.3).add(2)), sin(beat.mul(1.1).add(4))).mul(0.025))
           const toFire = toView.mul(vec4(heart, 1)).xyz.sub(view)
-          const far = toFire.length()
+          const away = toFire.length()
           const reach = fire.w.sqrt().mul(3).add(0.6)
-          If(far.lessThan(reach), () => {
+          If(away.lessThan(reach), () => {
             // Soft falloff, wrapped a little round the surface so nothing near a fire is ever black.
-            const fall = fire.w.mul(2.6).div(far.div(0.6).pow2().add(1)).mul(smoothstep(reach, reach.mul(0.4), far))
-            const wrap = clamp(dot(facing, toFire.div(far)).add(0.25).div(1.25), 0, 1)
+            const fall = fire.w.mul(2.6).div(away.div(0.6).pow2().add(1)).mul(smoothstep(reach, reach.mul(0.4), away))
+            const wrap = clamp(dot(facing, toFire.div(away)).add(0.25).div(1.25), 0, 1)
             const lightOn = float(1).toVar()
             if (shadows && i < 2) {
               // The fire's shadow: step from the surface toward the fire, and see whether the picture has something standing in the way.

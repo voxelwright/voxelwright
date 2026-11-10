@@ -193,6 +193,8 @@ export class Flames {
     const key = [cx, cy, cz, hx, hy, hz].map((v) => v.toFixed(2)).join()
     const known = this.anchors.get(fire.id)
     if (known?.key === key) return known.points
+    // A thing that has moved since it caught is on the move: its flames ride its box, and the scene is not searched again every time it rolls.
+    const moving = known !== undefined
     const top = cy + hy
     const n = Math.max(1, Math.min(24, Math.round((4 * hx * hz) / 0.045)))
     const nx = Math.max(1, Math.round(Math.sqrt((n * hx) / Math.max(hz, 1e-3))))
@@ -204,7 +206,7 @@ export class Flames {
     }
     const points: Vec3[] = []
     // A flat thing (a rug) is its own top; anything with height is whatever is drawn in its box.
-    if (hy < 0.02) for (const [x, z] of spots) points.push([x, top, z])
+    if (hy < 0.02 || moving) for (const [x, z] of spots) points.push([x, top, z])
     else {
       const box = new THREE.Box3(new THREE.Vector3(cx - hx, cy - hy, cz - hz), new THREE.Vector3(cx + hx, top + 0.02, cz + hz))
       const solids: THREE.Mesh[] = [], bounds = new THREE.Box3()
@@ -223,7 +225,8 @@ export class Flames {
       for (const [x, z] of spots) {
         this.ray.set(from.set(x, top + 0.05, z), down)
         const hit = this.ray.intersectObjects(solids, false)[0]
-        if (hit) points.push([x, hit.point.y, z])
+        // What the ray meets at the very bottom of a tall box is the floor the thing stands on, not the thing.
+        if (hit && (hy < 0.1 || hit.point.y > cy - hy + 0.04)) points.push([x, hit.point.y, z])
       }
       if (!points.length) points.push([cx, top, cz])
     }
@@ -330,12 +333,13 @@ export class Flames {
   /** Every frame while there is firelight: the lights ease to where and how strong their fires are. */
   frame(dt: number) {
     const k = 1 - Math.exp(-dt * 5)
-    for (const [i, s] of this.slots.entries()) {
+    for (const s of this.slots) {
       s.power += (s.target - s.power) * k
       s.at.lerp(s.to, k)
       if (s.target === 0 && s.power < 0.004) s.power = 0
-      firelight.array[i].set(s.at.x, s.at.y, s.at.z, s.power)
     }
+    // Strongest first: the first two cast shadows.
+    for (const [i, s] of [...this.slots].sort((a, b) => b.power - a.power).entries()) firelight.array[i].set(s.at.x, s.at.y, s.at.z, s.power)
   }
 
   /** Whether any fire still lights the room (it fades for a moment after the last flame). */
@@ -361,13 +365,14 @@ export class Flames {
  * something burns; `depth` is the scene pass's depth texture.
  */
 export function flameLayer(color: THREE.Node<'vec4'>, depth: THREE.Texture, renderer: THREE.WebGPURenderer, camera: THREE.Camera): { color: THREE.Node<'vec4'>; dispose(): void } {
-  layer.depth.value = depth
   const flames = pass(layer.scene, camera)
   flames.setResolutionScale(0.5)
   const draw = flames.updateBefore.bind(flames)
   const was = new THREE.Color()
   flames.updateBefore = (frame) => {
     if (layer.on.value === 0) return undefined
+    // This chain's own depth, bound as it draws: another chain may be building beside it.
+    layer.depth.value = depth
     const alpha = renderer.getClearAlpha()
     renderer.getClearColor(was)
     renderer.setClearColor(0x000000, 0)
