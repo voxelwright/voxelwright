@@ -131,14 +131,16 @@ export class Flames {
       // Rounded off at the sheet's sides, narrowing upward, and clear of the quad's top edge.
       const v = crest.sub(p.y).sub(x.mul(x).mul(p.y.mul(0.9).add(0.55))).add(lick).sub(smoothstep(0.85, 1, p.y).mul(0.6)).toVar()
       // Hot at the heart, cooler out to the edge: cream, gold, orange, a deep rim. Past white at the heart, so it blooms.
-      const rim = vec3(0.95, 0.12, 0.0), orange = vec3(1.0, 0.36, 0.02).mul(1.15), gold = vec3(1.0, 0.62, 0.07).mul(1.45), cream = vec3(1.0, 0.86, 0.4).mul(1.9)
+      // The body stays under white so the tone curve keeps it orange (pushed brighter it washes out to pink); only the heart goes past it.
+      const rim = vec3(0.8, 0.16, 0.0).mul(0.7), orange = vec3(1.0, 0.4, 0.02).mul(0.85), gold = vec3(1.0, 0.62, 0.05).mul(1.25), cream = vec3(1.0, 0.88, 0.45).mul(2.2)
       // Cooler toward the tips.
-      const heat = v.sub(p.y.mul(0.22))
-      const c = mix(mix(mix(rim, orange, smoothstep(0.0, 0.05, v)), gold, smoothstep(0.08, 0.2, heat)), cream, smoothstep(0.28, 0.46, heat)).toVar()
+      const heat = v.sub(p.y.mul(0.3))
+      const c = mix(mix(mix(rim, orange, smoothstep(0.0, 0.07, v)), gold, smoothstep(0.1, 0.24, heat)), cream, smoothstep(0.3, 0.5, heat)).toVar()
       // A small calm flame has a blue root.
       c.assign(mix(c, vec3(0.25, 0.4, 1.6), smoothstep(0.2, 0, p.y).mul(smoothstep(0.4, 0, wild)).mul(smoothstep(0.5, 0.1, abs(x))).mul(0.8)))
-      const alpha = smoothstep(0, 0.025, v).mul(strength.mul(0.25).add(0.75)).mul(inFront(0.05))
-      return vec4(c.mul(alpha), alpha.mul(0.94))
+      // It thins out at its root, so it never ends in a straight line where the quad meets a rug.
+      const alpha = smoothstep(0, 0.025, v).mul(strength.mul(0.25).add(0.75)).mul(inFront(0.05)).mul(smoothstep(0.0, 0.09, p.y.add(lick.mul(0.25))))
+      return vec4(c.mul(alpha), alpha)
     })())
     m.positionNode = upright(a.xyz, a.w, b.x)
     return m
@@ -151,7 +153,7 @@ export class Flames {
     const life = fract(time.mul(float(0.3).add(fract(seed.mul(7.13)).mul(0.45))).add(seed))
     // Carried up fast, then slowing and wandering as the draught lets go.
     const up = life.mul(float(2).sub(life)).mul(b.x)
-    const wander = vec3(sin(time.mul(1.9).add(seed.mul(40))).add(sin(time.mul(4.3).add(seed.mul(17))).mul(0.4)), 0, sin(time.mul(1.5).add(seed.mul(23))).add(sin(time.mul(3.7).add(seed.mul(31))).mul(0.4))).mul(life.mul(0.13).add(0.01))
+    const wander = vec3(sin(time.mul(1.9).add(seed.mul(40))).add(sin(time.mul(4.3).add(seed.mul(17))).mul(0.4)), 0, sin(time.mul(1.5).add(seed.mul(23))).add(sin(time.mul(3.7).add(seed.mul(31))).mul(0.4))).mul(life.mul(0.07).add(0.01))
     const start = vec3(fract(seed.mul(3.7)).sub(0.5), 0, fract(seed.mul(5.3)).sub(0.5)).mul(a.w.mul(2))
     const centre = a.xyz.add(start).add(vec3(0, up, 0)).add(wander)
     const size = b.w.mul(float(1).sub(life.mul(0.6)))
@@ -163,7 +165,8 @@ export class Flames {
       const twinkle = sin(time.mul(17).add(seed.mul(90))).mul(0.35).add(0.65)
       return vec4(mix(vec3(1, 0.7, 0.25), vec3(1, 0.2, 0.03), life).mul(glow.mul(twinkle).mul(9)).mul(inFront(0.02)), 0)
     })())
-    m.positionNode = centre.add(right.mul(positionGeometry.x.mul(size))).add(cross(toEye, right).mul(positionGeometry.y.sub(0.5).mul(size)))
+    // Drawn out along its rise while it is fast, a dot once it slows.
+    m.positionNode = centre.add(right.mul(positionGeometry.x.mul(size))).add(cross(toEye, right).mul(positionGeometry.y.sub(0.5).mul(size).mul(float(1.8).sub(life.mul(0.8)))))
     return m
   }
 
@@ -178,9 +181,9 @@ export class Flames {
       const p = uv()
       const n = drift(p.x.mul(0.3).add(seed.mul(0.9)), p.y.mul(0.3).add(time.mul(0.04)).add(seed.mul(0.5))).x
       const d = p.sub(0.5).length().mul(2).add(n.mul(0.4))
-      const alpha = smoothstep(1, 0.15, d).mul(smoothstep(0, 0.15, life)).mul(smoothstep(1, 0.35, life)).mul(0.38).mul(b.z).mul(inFront(0.25))
+      const alpha = smoothstep(1, 0.15, d).mul(smoothstep(0, 0.15, life)).mul(smoothstep(1, 0.35, life)).mul(0.6).mul(b.z).mul(inFront(0.25))
       // Lit from below by its fire while young, grey once it has risen.
-      const c = mix(vec3(0.5, 0.2, 0.06), vec3(0.2, 0.19, 0.19), smoothstep(0, 0.35, life))
+      const c = mix(vec3(0.45, 0.17, 0.05), vec3(0.11, 0.105, 0.105), smoothstep(0, 0.3, life))
       return vec4(c.mul(alpha), alpha)
     })())
     m.positionNode = upright(base, a.w.mul(grow), a.w.mul(grow))
@@ -262,7 +265,7 @@ export class Flames {
         top = Math.max(top, at[1])
         if (i % every) continue
         const seed = seeded(at[0] * 13.7 + at[2] * 7.3 + i)
-        tongues.push({ at, width: width * (0.8 + 0.4 * seeded(seed * 31)), height: height * (0.75 + 0.5 * seeded(seed * 17)), seed, strength: fire.strength, fierce: fire.fierce, far: (at[0] - eye.x) ** 2 + (at[1] - eye.y) ** 2 + (at[2] - eye.z) ** 2 })
+        tongues.push({ at, width: width * (0.8 + 0.4 * seeded(seed * 31)), height: height * (0.5 + 0.9 * seeded(seed * 17)), seed, strength: fire.strength, fierce: fire.fierce, far: (at[0] - eye.x) ** 2 + (at[1] - eye.y) ** 2 + (at[2] - eye.z) ** 2 })
       }
       if (!lit.length) continue
       const spread = Math.sqrt(hx * hz)
@@ -273,9 +276,9 @@ export class Flames {
         ea.set([at[0], at[1] + height * 0.3, at[2], width * 0.5], e * 4)
         eb.set([0.5 + height * 2.5 + seeded(i + cx) * 0.6, seeded(cx * 3 + cz * 5 + i * 5.1), fire.strength, 0.012 + 0.012 * seeded(i * 3.3 + cz)], e * 4)
       }
-      if (fire.fierce > 0.4) for (let i = 0; i < Math.min(4, 1 + Math.round(spread * 6)) && s < SMOKE; i++, s++) {
+      if (fire.fierce > 0.4) for (let i = 0; i < Math.min(6, 2 + Math.round(spread * 8)) && s < SMOKE; i++, s++) {
         const at = lit[(i * 3) % lit.length]
-        sa.set([at[0], at[1] + height * 0.75, at[2], Math.max(0.14, width * 1.1)], s * 4)
+        sa.set([at[0], at[1] + height * 0.7, at[2], Math.max(0.2, width * 1.3)], s * 4)
         sb.set([1.1 + height * 1.5, seeded(cx * 9 + cz + i * 13), fire.strength, 0], s * 4)
       }
     }
@@ -283,7 +286,7 @@ export class Flames {
     tongues.sort((x, y) => y.far - x.far)
     for (const t of tongues.slice(-FLAMES)) {
       // Sunk a little into the surface, so the flame grows out of it.
-      fa.set([t.at[0], t.at[1] - t.height * 0.06, t.at[2], t.width], f * 4)
+      fa.set([t.at[0], t.at[1] - t.height * 0.1, t.at[2], t.width], f * 4)
       fb.set([t.height, t.seed, t.strength, t.fierce], f * 4)
       f++
     }

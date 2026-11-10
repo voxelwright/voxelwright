@@ -339,8 +339,8 @@ export class Fire implements Burner {
         const e = this.extent(p)
         const covered = Math.min(1, [0, 1, 2].reduce((v, i) => v * Math.max(0.02, e.half[i]) / Math.max(0.02, p.b.half[i]), 1))
         p.fuel = Math.max(0, p.fuel - p.th.burnRate * covered * dt * (1 - 0.8 * p.wet))
-        // It blackens in seconds, long before its fuel is gone.
-        p.char = Math.max(p.char, Math.min(0.85, Math.max(1 - p.fuel, p.burnt / 6)))
+        // It blackens long before its fuel is gone, as fast as its material burns: felt at once, wood in seconds, candle wax never.
+        p.char = Math.max(p.char, Math.min(0.85, Math.max(1 - p.fuel, p.burnt * p.th.burnRate * 8)))
         if (p.wet > QUENCH || water > 0.5) this.out(p, 'water')
         else if (p.fuel <= 0) {
           p.state = 'burnt'
