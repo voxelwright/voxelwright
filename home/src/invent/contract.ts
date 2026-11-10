@@ -26,7 +26,7 @@ export interface Thing {
 export interface Gadget {
   /** The knobs you declared, as tuned now. Read only. */
   knobs: Record<string, number>
-  /** Your own numbers, kept between calls and through undo: at most 16, numbers only. Starts empty. */
+  /** Your own numbers, kept between calls and in the world's snapshots: numbers only. Starts empty. */
   state: Record<string, number>
   /** The part this gadget sits on (its own body), when the toy gave it one. A fixed part has zero velocity. */
   part?: Thing
@@ -34,7 +34,7 @@ export interface Gadget {
   surface: { at: Vec3; x: Vec3; z: Vec3 }
   /** Fires one of the outputs you declared, to whatever is wired to it. */
   fire(port: string, value: number, thing?: string): void
-  /** Writes up to 12 characters (a count, a word) on the toy's part this gadget names as its "display": a small card. Without one, nothing is drawn. */
+  /** Writes a few characters (a count, a word) on the toy's part this gadget names as its "display": a small card. Without one, nothing is drawn. */
   show(text: string): void
 }
 
@@ -55,7 +55,7 @@ export interface World {
   /** Simulated seconds since the world started. */
   clock: number
   gravity: Vec3
-  /** Every thing that can move, at most 96, as they were when this call began. */
+  /** The things that can move, as they were when this call began. */
   things: Thing[]
   /** Things of the home by name, each a point in world space, read again about twice a second: `w.places['lamp']`. A name that is not here is undefined. */
   places: Record<string, Vec3>

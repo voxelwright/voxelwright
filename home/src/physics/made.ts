@@ -33,7 +33,7 @@ export class MadeToys {
   private busy = false
   private readonly at = new THREE.Vector3()
   /** Set by the ask path: asks again for another take of `text`, and says how it went. */
-  again?: (text: string, person: string, invent: boolean) => Promise<{ ok: boolean }>
+  again?: (text: string, person: string, make: 'toy' | 'mechanic') => Promise<{ ok: boolean }>
 
   constructor(private ctx: Context, private world: World) {
     ctx.on('village/frame', () => this.follow())
@@ -118,7 +118,7 @@ export class MadeToys {
     this.busy = true
     this.hint('Making another…')
     try {
-      const r = await this.again(trial.text.replace(AGAIN, '').slice(0, 300 - AGAIN.length) + AGAIN, trial.person, Boolean(trial.spirit))
+      const r = await this.again(trial.text.replace(AGAIN, '').slice(0, 300 - AGAIN.length) + AGAIN, trial.person, trial.spirit ? 'mechanic' : 'toy')
       if (this.trial === trial) this.hint(r.ok ? trial.note : "Another one didn't come out, so the one you have is still here.")
       return r
     } finally {

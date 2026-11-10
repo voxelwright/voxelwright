@@ -7,12 +7,10 @@ export const LIMITS = {
   stack: 96 * 1024,
   /** Interrupt asks per call (the interpreter asks about every ten thousand jumps and calls), and for loading. */
   budget: 40,
-  maxBudget: 200,
   loadBudget: 200,
   /** Characters of mechanic code. */
   code: 12_000,
-  /** Characters of one view, and of one answer. */
-  view: 48_000,
+  /** Characters of one answer. */
   answer: 32_000,
   /** Characters of a reason said back. */
   reason: 160,

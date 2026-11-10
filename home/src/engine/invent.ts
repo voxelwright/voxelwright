@@ -11,36 +11,17 @@
 // each gadget's `state`, which snapshots already keep. Nothing here throws into the world's
 // step. A sandbox that is slow skips views; one that keeps failing, or dies, stops the mechanic:
 // its gadgets stay as parts, inert, and the world goes on.
-import type { Gadget, Touch, WorldApi } from './api'
-import type { Shape, Vec3 } from './core'
+import type { Gadget, ThingInfo, Touch, WorldApi } from './api'
+import type { Vec3 } from './core'
 import type { GadgetKind, Knob } from './gadgets'
-import { plain } from './made'
+import { obj, plain } from './made'
+import { halfOf } from './world'
+import { INVENT } from './invent-caps'
 import type { Signal } from './toy'
 
-export const INVENT = {
-  /** Moving things shown per view. */
-  things: 96,
-  /** Commands applied per answer; the rest are dropped and counted. */
-  commands: 64,
-  /** Touches and signals passed on per gadget per view. */
-  events: 16,
-  /** Numbers a gadget's state may hold. */
-  state: 16,
-  /** The most one push may add, N·s. */
-  impulse: 20,
-  /** Failed answers in a row before the mechanic is stopped. */
-  strikes: 3,
-  /** Characters a gadget may show on its part. */
-  show: 12,
-  /** Inputs, and outputs, a kind may declare. */
-  ports: 4,
-  /** Characters of one view; a longer one goes without the home's places, or not at all. */
-  view: 48_000,
-  /** The longest a view's `h` gets when views were skipped, s. */
-  h: 0.1,
-  /** The home's places are read again this often (simulated s) and sent when they changed: a named thing may have moved. */
-  places: 0.5,
-}
+
+/** One answer from the sandbox: its text, or why it has none, with the interrupt asks and ms it took. */
+export interface Tock { out?: string; error?: string; asks: number; ms: number }
 
 /** The sandbox as the engine sees it. Its answers arrive at Mechanic.tock. */
 export interface Box {
@@ -50,10 +31,9 @@ export interface Box {
 }
 
 /** What a mechanic says its kind is, as checked data. */
-export interface KindDecl { about: string; knobs: Record<string, Knob>; inputs: string[]; outputs: string[] }
+interface KindDecl { about: string; knobs: Record<string, Knob>; inputs: string[]; outputs: string[] }
 
 const NAME = /^[a-z][A-Za-z0-9]{0,23}$/
-const obj = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === 'object' && !Array.isArray(x)
 const vec = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x))
 const round = (x: number) => Math.round(x * 1e4) / 1e4
 const round3 = (v: Vec3): Vec3 => [round(v[0]), round(v[1]), round(v[2])]
@@ -62,20 +42,21 @@ const held = (v: Vec3, max: number): Vec3 => {
   const n = Math.hypot(v[0], v[1], v[2])
   return n > max ? [v[0] * max / n, v[1] * max / n, v[2] * max / n] : v
 }
-const sizeOf = (s: Shape) => round(s.kind === 'box' ? Math.max(...s.half) : s.kind === 'sphere' ? s.radius : s.kind === 'compound' ? Math.max(...s.boxes.flatMap((b) => b.half)) : Math.max(s.radius, s.halfHeight))
+/** A thing as a view shows it. */
+const viewOf = (t: ThingInfo) => ({ key: t.key, material: t.material, position: round3(t.position), velocity: round3(t.velocity), mass: Number.isFinite(t.mass) ? round(t.mass) : 0, size: round(Math.max(...halfOf(t.shape))) })
 
 /** A kind declaration from untrusted data, or why it cannot be one. */
 export function checkKind(raw: unknown): KindDecl | { reason: string } {
   if (!obj(raw)) return { reason: 'it did not say what kind of gadget it is' }
   const knobs: Record<string, Knob> = {}
   const rawKnobs = raw.knobs === undefined ? {} : raw.knobs
-  if (!obj(rawKnobs) || Object.keys(rawKnobs).length > 3) return { reason: 'a gadget has at most three knobs' }
+  if (!obj(rawKnobs) || Object.keys(rawKnobs).length > INVENT.knobs) return { reason: `its knobs were not a list of at most ${INVENT.knobs}` }
   for (const [name, k] of Object.entries(rawKnobs)) {
     if (!NAME.test(name) || !obj(k)) return { reason: 'a knob had no plain name' }
     const { min, max, step } = k
     const def = k.default
     if (![min, max, step, def].every((x) => typeof x === 'number' && Number.isFinite(x))) return { reason: `the ${name} knob's range was not numbers` }
-    if ((min as number) > (max as number) || (def as number) < (min as number) || (def as number) > (max as number) || !((step as number) > 0)) return { reason: `the ${name} knob needs min <= default <= max` }
+    if ((min as number) > (max as number) || (def as number) < (min as number) || (def as number) > (max as number) || !((step as number) > 0)) return { reason: `the ${name} knob needs its default between its lowest and highest, and a step above zero` }
     knobs[name] = { min: min as number, max: max as number, step: step as number, default: def as number, about: plain(k.about, 60) }
   }
   const ports = (v: unknown) => {
@@ -88,7 +69,7 @@ export function checkKind(raw: unknown): KindDecl | { reason: string } {
 }
 
 /** A gadget's state from untrusted data: plain names and finite numbers, at most INVENT.state of them. Anything else is left out. */
-export function checkState(raw: unknown): Record<string, number> {
+function checkState(raw: unknown): Record<string, number> {
   const out: Record<string, number> = {}
   if (!obj(raw)) return out
   let n = 0
@@ -127,16 +108,11 @@ export class Mechanic {
   private clock = -1
   private sentClock = -1
   private strikes = 0
-  private box: Box | null = null
   /** Views sent and skipped, commands applied and refused, failed answers; and per view: ms on the page, ms in the sandbox, and interrupt asks. */
   readonly stats = { views: 0, skipped: 0, commands: 0, refused: 0, errors: 0, lastError: '', pageMs: [] as number[], boxMs: [] as number[], asks: [] as number[] }
 
-  /** `hooks` are the functions the code defined ('step', 'touch', 'receive'); `places` names fixed things of the home with a point each. */
-  constructor(readonly kind: string, private decl: KindDecl, private hooks: string[], private places: () => Record<string, Vec3>) {}
-
-  attach(box: Box) {
-    this.box = box
-  }
+  /** `hooks` are the functions the code defined ('step', 'touch', 'receive'); `places` returns the home's named things, each with the point it is at when called. */
+  constructor(readonly kind: string, private decl: KindDecl, private hooks: string[], private places: () => Record<string, Vec3>, private box: Box) {}
 
   /** The kind to register: the trusted adapter between the world's hooks and the sandbox. */
   gadgetKind(): GadgetKind {
@@ -170,7 +146,7 @@ export class Mechanic {
   }
 
   /** The sandbox's answer to the last view, kept until the next step applies it. */
-  tock(reply: { out?: string; error?: string; asks: number; ms: number }) {
+  tock(reply: Tock) {
     if (this.stopped) return
     note(this.stats.boxMs, reply.ms)
     note(this.stats.asks, reply.asks)
@@ -199,7 +175,7 @@ export class Mechanic {
       this.answer = null
       this.apply(w, text)
     }
-    if (this.stopped || !this.box) return
+    if (this.stopped) return
     if (this.box.waiting) {
       this.stats.skipped++
       return
@@ -216,7 +192,7 @@ export class Mechanic {
     const things = new Map<string, unknown>()
     for (const key of this.keys) {
       const t = w.thing(key)
-      if (t) things.set(key, { key, material: t.material, position: round3(t.position), velocity: round3(t.velocity), mass: round(t.mass), size: sizeOf(t.shape) })
+      if (t) things.set(key, viewOf(t))
     }
     this.offered = new Set(things.keys())
     const gadgets = [...this.gadgets.values()].map((g) => {
@@ -226,7 +202,7 @@ export class Mechanic {
       const surface = this.surfaces.get(g.id)
       return {
         id: g.id, knobs: g.knobs, state: g.state, events: this.events.get(g.id) ?? [], ...(surface ? { surface } : {}),
-        ...(part ? { part: { key: part.key, material: part.material, position: round3(part.position), velocity: round3(part.velocity), mass: Number.isFinite(part.mass) ? round(part.mass) : 0, size: sizeOf(part.shape) } } : {}),
+        ...(part ? { part: viewOf(part) } : {}),
       }
     })
     this.events.clear()

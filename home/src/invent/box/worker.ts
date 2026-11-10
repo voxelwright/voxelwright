@@ -31,9 +31,8 @@ function call(fn: QuickJSHandle, arg?: string): { text: string } | { error: stri
   const r = handle ? vm!.callFunction(fn, vm!.undefined, handle) : vm!.callFunction(fn, vm!.undefined)
   handle?.dispose()
   if (r.error) {
-    const dumped: unknown = vm!.dump(r.error)
-    r.error.dispose()
-    const message = dumped && typeof dumped === 'object' && 'message' in dumped ? String((dumped as { message: unknown }).message) : String(dumped)
+    const dumped: unknown = r.error.consume((e) => vm!.dump(e))
+    const message = dumped && typeof dumped === 'object' && 'message' in dumped ? String(dumped.message) : String(dumped)
     return { error: (asks > budget ? 'it ran too long' : message || 'it failed').slice(0, LIMITS.reason) }
   }
   const text = vm!.typeof(r.value) === 'string' ? vm!.getString(r.value) : null
@@ -43,13 +42,11 @@ function call(fn: QuickJSHandle, arg?: string): { text: string } | { error: stri
   return { text }
 }
 
-self.onmessage = async (event: MessageEvent<{ type?: unknown; n?: unknown; wasm?: unknown; code?: unknown; budget?: unknown; view?: unknown }>) => {
+self.onmessage = async (event: MessageEvent<{ type?: unknown; wasm?: unknown; code?: unknown; view?: unknown }>) => {
   const m = event.data
-  const n = m.n
-  if (broken) return post({ type: 'broken', n, reason: 'the sandbox broke earlier' })
+  if (broken) return post({ type: 'broken', reason: 'the sandbox broke earlier' })
   try {
     if (m.type === 'load') {
-      const t0 = performance.now()
       const quickjs = await newQuickJSWASMModuleFromVariant(newVariant(variant, { wasmBinary: m.wasm as ArrayBuffer }))
       const runtime = quickjs.newRuntime()
       runtime.setMemoryLimit(LIMITS.memory)
@@ -58,34 +55,33 @@ self.onmessage = async (event: MessageEvent<{ type?: unknown; n?: unknown; wasm?
       runtime.setInterruptHandler(() => ++asks > budget)
       vm = runtime.newContext()
       const prelude = vm.evalCode(PRELUDE, 'prelude.js')
-      if (prelude.error) throw new Error('the prelude did not run')
+      if (prelude.error) throw new Error('it could not get started')
       prelude.value.dispose()
       asks = 0
       const loaded = vm.evalCode(String(m.code), 'mechanic.js')
       if (loaded.error) {
-        const dumped: unknown = vm.dump(loaded.error)
         loaded.error.dispose()
-        const message = dumped && typeof dumped === 'object' && 'message' in dumped ? String((dumped as { message: unknown }).message) : String(dumped)
-        return post({ type: 'refused', n, reason: (asks > budget ? 'it ran too long' : message).slice(0, LIMITS.reason) })
+        // Said to the person as it is, so not the interpreter's own words (a syntax error names a line of code).
+        return post({ type: 'refused', reason: asks > budget ? 'it ran too long' : 'what was written for it did not load' })
       }
       loaded.value.dispose()
       const hooks = vm.getProp(vm.global, '__hooks')
       const said = call(hooks)
       hooks.dispose()
-      if ('error' in said) return post({ type: 'refused', n, reason: said.error })
+      if ('error' in said) return post({ type: 'refused', reason: said.error })
       tick = vm.getProp(vm.global, '__tick')
-      budget = Math.max(1, Math.min(LIMITS.maxBudget, Number(m.budget) || LIMITS.budget))
-      return post({ type: 'loaded', n, hooks: said.text, ms: performance.now() - t0 })
+      budget = LIMITS.budget
+      return post({ type: 'loaded', hooks: said.text })
     }
     if (m.type === 'tick') {
-      if (!vm || !tick) return post({ type: 'tock', n, error: 'nothing is loaded' })
+      if (!vm || !tick) return post({ type: 'tock', error: 'nothing is loaded', asks: 0, ms: 0 })
       const t0 = performance.now()
       const r = call(tick, String(m.view))
-      return post('error' in r ? { type: 'tock', n, error: r.error, asks, ms: performance.now() - t0 } : { type: 'tock', n, out: r.text, asks, ms: performance.now() - t0 })
+      return post('error' in r ? { type: 'tock', error: r.error, asks, ms: performance.now() - t0 } : { type: 'tock', out: r.text, asks, ms: performance.now() - t0 })
     }
   } catch (error) {
     broken = true
-    post({ type: 'broken', n, reason: String(error instanceof Error ? error.message : error).slice(0, LIMITS.reason) })
+    post({ type: 'broken', reason: String(error instanceof Error ? error.message : error).slice(0, LIMITS.reason) })
   }
 }
 post({ type: 'ready' })

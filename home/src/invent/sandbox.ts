@@ -12,16 +12,17 @@
 // .agents/skills/quickjs-sandbox records why this shape (a native worker's memory is the page's).
 import source from 'virtual:mechanic-box'
 import wasmUrl from '@jitl/quickjs-wasmfile-release-sync/wasm?url'
+import type { Tock } from '../engine/invent'
+import { sealedFrame } from '../sealed'
 import { LIMITS } from './limits'
 import { BOX_PATH } from './relay'
 
-export interface Tock { out?: string; error?: string; asks: number; ms: number }
-export type Opened = { ok: true; box: MechanicBox; hooks: string[]; ms: number } | { ok: false; reason: string }
+type Opened = { ok: true; box: MechanicBox; hooks: string[]; ms: number } | { ok: false; reason: string }
 
 let wasm: Promise<ArrayBuffer> | undefined
 /** The interpreter's bytes, fetched once from this origin; each box gets its own copy. */
 const interpreter = () => (wasm ??= fetch(wasmUrl).then((r) => {
-  if (!r.ok) throw new Error('the interpreter could not be fetched')
+  if (!r.ok) throw new Error('it could not get started')
   return r.arrayBuffer()
 }).catch((error) => {
   wasm = undefined
@@ -38,7 +39,7 @@ export class MechanicBox {
   private sentAt = 0
   private warned = false
   private watch: ReturnType<typeof setInterval> | undefined
-  private loaded: ((m: { type: string; hooks?: string; reason?: string; ms?: number }) => void) | null = null
+  private loaded: ((m: { type: string; hooks?: string; reason?: string }) => void) | null = null
 
   /** Starts a frame and loads `code` into a fresh interpreter. Refused (and closed) when the code does not load. */
   static async open(code: string): Promise<Opened> {
@@ -50,6 +51,13 @@ export class MechanicBox {
       const m = await box.load(code, bytes.slice(0))
       if (m.type !== 'loaded') throw new Error(m.reason || 'its code did not load')
       const hooks: unknown = JSON.parse(m.hooks ?? '[]')
+      // Loaded: from here a call that goes unanswered closes the box.
+      box.watch = setInterval(() => {
+        if (!box.sentAt || performance.now() - box.sentAt < LIMITS.late) return
+        // A page that was itself held up has the answer waiting behind this timer: give it one more turn.
+        if (box.warned) box.die('it stopped answering')
+        else box.warned = true
+      }, 250)
       return { ok: true, box, hooks: Array.isArray(hooks) ? hooks.filter((h): h is string => typeof h === 'string') : [], ms: performance.now() - t0 }
     } catch (error) {
       box.dispose()
@@ -58,26 +66,19 @@ export class MechanicBox {
   }
 
   private start() {
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', 'allow-scripts')
-    frame.setAttribute('referrerpolicy', 'no-referrer')
-    frame.setAttribute('aria-hidden', 'true')
-    frame.tabIndex = -1
-    frame.style.display = 'none'
-    frame.src = BOX_PATH
-    const channel = new MessageChannel()
+    const { frame, port } = sealedFrame(BOX_PATH, source)
     this.frame = frame
-    this.port = channel.port1
+    this.port = port
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('the sandbox did not start')), LIMITS.start)
-      channel.port1.onmessage = (event) => {
+      const timer = setTimeout(() => reject(new Error('it could not get started')), LIMITS.start)
+      port.onmessage = (event) => {
         const m = event.data as { type?: unknown; out?: unknown; error?: unknown; asks?: unknown; ms?: unknown; hooks?: unknown; reason?: unknown }
         this.warned = false
         if (m?.type === 'ready') {
           clearTimeout(timer)
           resolve()
         } else if (m?.type === 'loaded' || m?.type === 'refused') {
-          this.loaded?.({ type: m.type, hooks: typeof m.hooks === 'string' ? m.hooks : undefined, reason: typeof m.reason === 'string' ? m.reason : undefined, ms: Number(m.ms) })
+          this.loaded?.({ type: m.type, hooks: typeof m.hooks === 'string' ? m.hooks : undefined, reason: typeof m.reason === 'string' ? m.reason : undefined })
         } else if (m?.type === 'tock') {
           this.sentAt = 0
           this.onTock({ ...(typeof m.out === 'string' ? { out: m.out } : { error: typeof m.error === 'string' ? m.error : 'it failed' }), asks: Number(m.asks) || 0, ms: Number(m.ms) || 0 })
@@ -86,37 +87,18 @@ export class MechanicBox {
           this.die(m?.type === 'dead' && typeof m.reason === 'string' ? m.reason.slice(0, LIMITS.reason) : 'the sandbox sent something that is not an answer')
         }
       }
-      frame.addEventListener('load', () => {
-        // The frame's origin is opaque, so there is no origin to name; the message carries only the port and the public worker script.
-        frame.contentWindow?.postMessage({ type: 'init', source }, '*', [channel.port2])
-      }, { once: true })
-      document.body.append(frame)
     })
   }
 
   private load(code: string, bytes: ArrayBuffer) {
-    return new Promise<{ type: string; hooks?: string; reason?: string; ms?: number }>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('its code took too long to load')), LIMITS.start)
-      const done = (m: { type: string; hooks?: string; reason?: string }) => {
+    return new Promise<{ type: string; hooks?: string; reason?: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('it took too long to get started')), LIMITS.start)
+      this.loaded = (m) => {
         clearTimeout(timer)
         this.loaded = null
         resolve(m)
       }
-      this.loaded = done
-      const dead = this.onDead
-      this.onDead = (reason) => {
-        this.onDead = dead
-        done({ type: 'refused', reason })
-      }
-      this.port!.postMessage({ type: 'load', n: 0, code, wasm: bytes, budget: LIMITS.budget }, [bytes])
-    }).finally(() => {
-      // Loaded: from here a call that goes unanswered closes the box.
-      this.watch = setInterval(() => {
-        if (!this.sentAt || performance.now() - this.sentAt < LIMITS.late) return
-        // A page that was itself held up has the answer waiting behind this timer: give it one more turn.
-        if (this.warned) this.die('it stopped answering')
-        else this.warned = true
-      }, 250)
+      this.port!.postMessage({ type: 'load', code, wasm: bytes }, [bytes])
     })
   }
 
@@ -129,11 +111,12 @@ export class MechanicBox {
   tick(view: string) {
     if (!this.port) return
     this.sentAt = performance.now()
-    this.port.postMessage({ type: 'tick', n: 0, view })
+    this.port.postMessage({ type: 'tick', view })
   }
 
   private die(reason: string) {
     const said = this.onDead
+    this.loaded?.({ type: 'refused', reason })
     this.dispose()
     said(reason)
   }

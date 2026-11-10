@@ -1,12 +1,13 @@
 // The mechanic sandbox's relay (#106): the document the sealed frame loads. Its text and its
 // policy live here; the home's servers (vite.config.ts) serve them at BOX_PATH with this policy
-// in place of the home's, so the home's own policy needs no exception for it. The #42 prop box
-// (src/props/relay.ts) is the pattern; this is a separate document so that one stays as reviewed.
+// in place of the home's, so the home's own policy needs no exception for it. It is a separate
+// document from the prop box's (src/props/relay.ts) because its policy also allows WebAssembly.
 //
 // The relay never runs mechanic code. It starts the worker from the script text the page hands
 // it, passes the page's calls on, and passes back one answer per call, rebuilt field by field.
 // A message it did not ask for, or one that is not shaped like an answer, ends the worker: the
 // page hears `dead` once and nothing after.
+import { sealedDocument, sealedPolicy } from '../sealed'
 import { LIMITS } from './limits'
 
 /** Where the home's servers serve the relay document. */
@@ -30,12 +31,11 @@ function answer(m) {
   if (m.type === 'ready' && !owed) return port.postMessage({ type: 'ready' })
   if (owed < 1) return die('the sandbox spoke without being asked')
   owed--
-  const n = count(m.n)
-  if (m.type === 'loaded' && text(m.hooks, 200)) return port.postMessage({ type: 'loaded', n, hooks: m.hooks, ms: count(m.ms) })
-  if (m.type === 'refused' && text(m.reason, REASON)) return port.postMessage({ type: 'refused', n, reason: m.reason })
+  if (m.type === 'loaded' && text(m.hooks, 200)) return port.postMessage({ type: 'loaded', hooks: m.hooks })
+  if (m.type === 'refused' && text(m.reason, REASON)) return port.postMessage({ type: 'refused', reason: m.reason })
   if (m.type === 'broken' && text(m.reason, REASON)) return die(m.reason)
-  if (m.type === 'tock' && text(m.out, ANSWER)) return port.postMessage({ type: 'tock', n, out: m.out, asks: count(m.asks), ms: count(m.ms) })
-  if (m.type === 'tock' && text(m.error, REASON)) return port.postMessage({ type: 'tock', n, error: m.error, asks: count(m.asks), ms: count(m.ms) })
+  if (m.type === 'tock' && text(m.out, ANSWER)) return port.postMessage({ type: 'tock', out: m.out, asks: count(m.asks), ms: count(m.ms) })
+  if (m.type === 'tock' && text(m.error, REASON)) return port.postMessage({ type: 'tock', error: m.error, asks: count(m.asks), ms: count(m.ms) })
   die('the sandbox sent something that is not an answer')
 }
 addEventListener('message', function init(e) {
@@ -55,7 +55,7 @@ addEventListener('message', function init(e) {
 })
 `
 
-/** The relay document's policy: its own nonced script, the blob worker it starts, and WebAssembly in that worker. Nothing else, and no network. */
-export const boxPolicy = (nonce: string) => `default-src 'none'; script-src 'nonce-${nonce}' blob: 'wasm-unsafe-eval'; worker-src blob:; frame-ancestors 'self'`
+/** The relay document's policy: the sealed frame's, with WebAssembly allowed in its worker (the interpreter). */
+export const boxPolicy = (nonce: string) => sealedPolicy(nonce, " 'wasm-unsafe-eval'")
 /** The relay document, its script carrying this response's nonce. */
-export const boxDocument = (nonce: string) => `<!doctype html><meta charset="utf-8"><script nonce="${nonce}">${RELAY}</script>`
+export const boxDocument = (nonce: string) => sealedDocument(nonce, RELAY)

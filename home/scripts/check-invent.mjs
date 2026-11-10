@@ -4,7 +4,7 @@
 // count lives in the gadget's state and comes back with a snapshot. Undo takes everything away
 // (toy, kind, frame) and puts back what the mechanic moved, also while its code is looping.
 // Hostile code (loops, memory, deep calls, a forged answer, reaching for the page) is refused or
-// stopped without stalling the page, and what it says is held by the page's checks.
+// stopped with no long task over 200 ms on the page, and what it says is held by the page's checks.
 // With --agent=claude: each sentence in --asks goes to the real model (--invent-model) --trials
 // times; latency, cost, and whether the mechanic built and acted are reported as they are.
 // Usage: node scripts/check-invent.mjs [--dev=5430] [--host=5431] [--agent=claude] [--invent-model=sonnet] [--trials=1] [--asks="a|b"] [--shots-dir=dir] [--video-dir=dir] [--out=file.json]
@@ -89,7 +89,7 @@ try {
     }
   })
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-  const ask = (text) => page.evaluate((t) => window.village.physics.ask(t, { invent: true }), text)
+  const ask = (text) => page.evaluate((t) => window.village.physics.ask(t, { make: 'mechanic' }), text)
   const undo = () => page.evaluate(() => window.village.physics.made.undo())
   const mech = () => page.evaluate(() => window.village.physics.mechanics().at(-1) ?? null)
   const tag = () => page.evaluate(() => window.village.physics.made.state().tag)
@@ -176,7 +176,7 @@ try {
 
     // ── Hostile code ─────────────────────────────────────────────────────────
     // Refused before anything is built: the world is exactly as it was.
-    for (const [marker, words] of [['top-loop', /too long/], ['syntax', /./], ['nothing', /no step/], ['unused', /nothing in it used/], ['flame', /can't have a flame/], ['off', /stand off/], ['knob', /knob/], ['junk', /./]]) {
+    for (const [marker, words] of [['top-loop', /too long/], ['syntax', /did not load/], ['nothing', /no step/], ['unused', /nothing in it used/], ['flame', /can't have a flame/], ['off', /stand off/], ['knob', /knob/], ['junk', /./]]) {
       await page.evaluate(() => (window.longest = 0))
       const r = await ask(`[stub-invent-${marker}] a magnet`)
       const after = await world()
@@ -193,7 +193,7 @@ try {
       const ball = await page.evaluate(() => window.village.physics.thing('pinball/ball')?.position.every(Number.isFinite))
       const undone = await undo()
       const after = await world()
-      check(`stopped without stalling the page, said on its tag, and undone (${marker})`, r.ok && m?.stopped && /It stopped/.test(said ?? '') && !/[<>]/.test(said ?? '') && longest < 200 && ball && undone && same(after, baseline), { ok: r.ok, reason: r.reason, stopped: m?.stopped, said, longest, lastError: m?.stats.lastError, after: same(after, baseline) ? 'baseline' : after })
+      check(`stopped with no long task over 200 ms, said on its tag, and undone (${marker})`, r.ok && m?.stopped && /It stopped/.test(said ?? '') && !/[<>]/.test(said ?? '') && longest < 200 && ball && undone && same(after, baseline), { ok: r.ok, reason: r.reason, stopped: m?.stopped, said, longest, lastError: m?.stats.lastError, after: same(after, baseline) ? 'baseline' : after })
     }
     // Undo while the code is looping, before anything has noticed.
     {
@@ -255,7 +255,7 @@ try {
         if (s.asked) break
         await page.waitForTimeout(100)
       }
-      check('"make a magnet on the floor" typed on the notepad is invented', s.route?.route === 'physics' && s.asked?.as?.invent === true && s.asked?.ok && s.asked?.toy?.mechanic, { route: s.route, asked: s.asked && { ok: s.asked.ok, as: s.asked.as, reason: s.asked.reason, toy: s.asked.toy } })
+      check('"make a magnet on the floor" typed on the notepad is invented', s.route?.route === 'physics' && s.asked?.as?.make === 'mechanic' && s.asked?.ok && s.asked?.toy?.mechanic, { route: s.route, asked: s.asked && { ok: s.asked.ok, as: s.asked.as, reason: s.asked.reason, toy: s.asked.toy } })
       await undo()
     }
     check('the sandbox frames asked the network for their own document and nothing else', boxRequests.length > 0 && boxRequests.every((u) => u === `${base}mechanic-box.html`), [...new Set(boxRequests)])

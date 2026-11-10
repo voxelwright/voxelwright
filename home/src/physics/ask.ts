@@ -83,27 +83,27 @@ export interface Making { surfaces: (person: string) => Surface[]; made: MadeToy
  * kit (quality only: everything is checked here either way). A toy ask, and `retry` (Try
  * another), builds a toy or does nothing at all: rules and acts in its answer are not applied.
  */
-export interface AskAs { toy?: boolean; retry?: boolean; /** The router said it asks for a mechanic the kit does not have (#106): the host asks for code. A mechanic answer builds its toy or does nothing. */ invent?: boolean }
+export interface AskAs { make?: 'toy' | 'mechanic'; retry?: boolean }
 
 /** Changes the world's rules, acts on its things, or builds a toy, from one sentence. `person` is whose host session is billed. */
 export async function ask(world: World, text: string, person = ME, making?: Making, as: AskAs = {}): Promise<Asked> {
   const t0 = performance.now()
   const named = targets(world)
   const surfaces = making?.surfaces(person) ?? []
-  const r = await askRules(person, text, world.rules, [...named.keys(), 'fire'], surfaces.map(offered), Boolean(as.toy || (as.retry && !as.invent)), Boolean(as.invent))
+  const r = await askRules(person, text, world.rules, [...named.keys(), 'fire'], surfaces.map(offered), as.make ?? (as.retry ? 'toy' : undefined))
   const ms = () => Math.round(performance.now() - t0)
   let out: Asked
   // The toy first: when it is refused, nothing else in the answer is applied either.
   const made = r.ok && !world.disposed && r.mechanic != null ? await makeMechanic(world, r.mechanic, surfaces, text, person, r.note, making)
-    : r.ok && !world.disposed && r.toy != null && !as.invent ? makeToy(r.toy, surfaces, text, person, r.note, making)
-    : as.invent ? 'no mechanic came back, so nothing was made' : as.retry ? 'another one did not come with a toy' : as.toy ? 'no toy came back, so nothing was built' : undefined
+    : r.ok && !world.disposed && r.toy != null && as.make !== 'mechanic' ? makeToy(r.toy, surfaces, text, person, r.note, making)
+    : as.make === 'mechanic' ? 'no mechanic came back, so nothing was made' : as.retry ? 'another one did not come with a toy' : as.make === 'toy' ? 'no toy came back, so nothing was built' : undefined
   const toy = typeof made === 'string' ? undefined : made
   if (!r.ok) out = { ok: false, why: r.why, ms: ms() }
   // The model call takes up to a minute; the physics plugin may have unloaded and freed the world meanwhile.
   else if (world.disposed) out = { ok: false, why: 'gone', ms: ms() }
   else if (typeof made === 'string') out = { ok: false, why: 'refused', reason: made, toy: true, ms: ms() }
   // A toy answer builds the toy and nothing else: Undo takes it all back. Rules and acts are not applied.
-  else if (as.retry || as.invent || toy) out = { ok: true, note: typeof r.note === 'string' ? r.note.slice(0, 160) : '', rules: world.rules, clamped: [], acts: [], toy, ms: ms(), hostMs: Math.round(r.ms), models: r.models, costUsd: r.costUsd, outputTokens: r.outputTokens }
+  else if (as.retry || as.make === 'mechanic' || toy) out = { ok: true, note: typeof r.note === 'string' ? r.note.slice(0, 160) : '', rules: world.rules, clamped: [], acts: [], toy, ms: ms(), hostMs: Math.round(r.ms), models: r.models, costUsd: r.costUsd, outputTokens: r.outputTokens }
   else {
     // An answer that changes nothing (every field invalid or unknown, or the same as now) is not a change.
     const before = world.rules
@@ -170,11 +170,9 @@ async function makeMechanic(world: World, raw: unknown, surfaces: Surface[], tex
   if (!making) return "mechanics can't be made here"
   const ready = await prepare(world, raw, () => places(world))
   if (typeof ready === 'string') return ready
-  let spirit: Spirit | undefined
-  const done = makeToy(ready.toy, surfaces, text, person, note, making, { kind: ready.kind, spirit: (id, made) => (spirit = ready.spirit(id, made)) })
+  const done = makeToy(ready.toy, surfaces, text, person, note, making, ready)
   if (typeof done === 'string') {
-    // Refused before it was built (the spirit was never made) or by the build (it was): either way it ends here.
-    ;(spirit ?? ready.spirit('', making.made)).end(false)
+    ready.end(false)
     return done
   }
   return { ...done, mechanic: { kind: ready.kind, hooks: ready.hooks, loadMs: ready.loadMs } }

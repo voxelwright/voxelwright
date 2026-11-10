@@ -9,6 +9,7 @@
 // window "message". Every reply is untrusted until rebuild.ts has validated it.
 // The README section "Prop sandbox (#42)" lists what this relies on.
 import workerSource from 'virtual:prop-box'
+import { sealedFrame } from '../sealed'
 import { BOX_PATH } from './relay'
 
 export { MAX_RESULT_BYTES } from './relay'
@@ -38,22 +39,12 @@ export class PropBox {
   start(): Promise<number> {
     if (this.started) return this.started
     const t0 = performance.now()
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', 'allow-scripts')
-    frame.setAttribute('referrerpolicy', 'no-referrer')
-    frame.setAttribute('aria-hidden', 'true')
-    frame.tabIndex = -1
-    frame.style.display = 'none'
-    // A document of its own, not srcdoc: a srcdoc frame inherits the home's CSP, which
-    // (rightly) refuses inline scripts and blob workers. The dev server serves it with
-    // its own policy (vite.config.ts, relay.ts); the sandbox attribute keeps it opaque.
-    frame.src = BOX_PATH
-    const channel = new MessageChannel()
+    const { frame, port } = sealedFrame(BOX_PATH, workerSource)
     this.frame = frame
-    this.port = channel.port1
+    this.port = port
     const started = new Promise<number>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('the prop sandbox did not start')), 10000)
-      channel.port1.onmessage = (event) => {
+      port.onmessage = (event) => {
         const m = event.data as { type?: unknown; id?: unknown }
         if (m?.type === 'ready') {
           clearTimeout(timer)
@@ -63,17 +54,12 @@ export class PropBox {
         const settle = this.pending.get(m.id)
         if (settle) settle(this.read(m))
       }
-      frame.addEventListener('load', () => {
-        // The frame's origin is opaque, so there is no origin to name; the message carries only the port and the public worker source.
-        frame.contentWindow!.postMessage({ type: 'init', source: workerSource }, '*', [channel.port2])
-      }, { once: true })
     })
     // A start that failed is not kept: the dead frame goes, and the next run starts afresh.
     started.catch(() => {
       if (this.started === started) this.dispose()
     })
     this.started = started
-    document.body.append(frame)
     return started
   }
 

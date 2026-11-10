@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { engineText, madeKit, rulesPrompt, toyPrompt } from '../src/villager-physics.ts'
 import { checkInventReply, inventPrompt, mechanicAnswer, stubMechanic } from '../src/villager-invent.ts'
 import { checkRouted, stubRoute } from '../src/villager-input.ts'
+import { LIMITS } from '../../home/src/invent/limits.ts'
 
 const ENGINE = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine')
 let failed = 0
@@ -32,11 +33,12 @@ const reason = (raw: string) => { const r = checkInventReply(raw); return 'reaso
 const m = { kind: {}, toy: { label: 'X', parts: [{}], gadgets: [], wires: [] }, code: 'function step() {}' }
 check('an answer with no code, no JSON, no kind, no toy, or too much code is refused', [
   reason('Sure! A magnet.'), reason('```json\n{"note": "x"}\n```'), reason('```js\nfunction step() {}\n```'), reason(mechanicAnswer('n', 'table', { ...m, kind: 'magnet' })),
-  reason(mechanicAnswer('n', 'table', { ...m, toy: { label: 'X' } })), reason(mechanicAnswer('n', 'table', { ...m, code: 'x'.repeat(12_001) })),
+  reason(mechanicAnswer('n', 'table', { ...m, toy: { label: 'X' } })), reason(mechanicAnswer('n', 'table', { ...m, code: 'x'.repeat(LIMITS.code + 1) })),
 ].every(Boolean))
 const route = (text: string) => checkRouted(stubRoute({ text, primary: 'Pip', villagers: [], library: [] }), [], [])
 const routed = route('make a magnet')
-check('"make a magnet" routes to physics with invent, and invent is never set with toy', 'routed' in routed && routed.routed.route === 'physics' && routed.routed.invent === true && routed.routed.toy === undefined, routed)
+const odd = checkRouted('{"route": "physics", "make": "rocket", "say": "x"}', [], [])
+check('"make a magnet" routes to physics to make a mechanic, and an unknown thing to make is dropped', 'routed' in routed && routed.routed.route === 'physics' && routed.routed.make === 'mechanic' && 'routed' in odd && odd.routed.make === undefined, { routed, odd })
 
 const dir = await mkdtemp(join(tmpdir(), 'engine-'))
 try {

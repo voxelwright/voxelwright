@@ -37,33 +37,38 @@ memory is the page's, and nothing in the platform caps it. QuickJS has a hard me
 stack limit and an interrupt hook, and the guest has no ambient globals (no `postMessage`,
 timers, `fetch`), so the allowlist is whatever the host binds: here, nothing.
 
-In-page QuickJS (synchronous hooks) was not chosen: AGENTS.md requires generated code to run
-away from the session's origin, and an interpreter bug would then be the only wall. The cost of
-the frame and worker is that hooks answer one step late.
+In-page QuickJS (synchronous hooks) was not chosen: the interpreter would run in the session's
+origin, so one interpreter bug would hand generated code the page and its session (#106 asks
+for generated code to run away from that origin). The frame is a second wall. The cost of the
+frame and worker is that hooks answer one step late.
 
 ## Verified recipes
 
-- **Load without network.** The sealed frame cannot fetch. The page fetches the `.wasm`
+- Load without network. The sealed frame cannot fetch. The page fetches the `.wasm`
   (`import url from '@jitl/quickjs-wasmfile-release-sync/wasm?url'`) and transfers the bytes;
   the worker calls `newQuickJSWASMModuleFromVariant(newVariant(variant, { wasmBinary }))`.
-- **Bundle the worker as one iife string** (Vite `build` with `lib.formats: ['iife']`, as the
+- Bundle the worker as one iife string (Vite `build` with `lib.formats: ['iife']`, as the
   prop box does). The variant's Emscripten glue reads `import.meta.url`, which an iife has
-  none of: without `define: { 'import.meta.url': '"http://…invalid/"' }` it throws
+  none of: without `define: { 'import.meta.url': '"http://mechanic-box.invalid/"' }` it throws
   `Failed to construct 'URL': Invalid base URL`.
-- **Frame policy.** `script-src 'nonce-…' blob: 'wasm-unsafe-eval'; worker-src blob:` under
-  `default-src 'none'`. The blob worker inherits it. The home's own policy is untouched.
-- **Limits.** `runtime.setMemoryLimit(bytes)`, `runtime.setMaxStackSize(bytes)`,
+- Frame policy. `sandbox allow-scripts; default-src 'none'; script-src 'nonce-…' blob:
+  'wasm-unsafe-eval'; worker-src blob:`. The blob worker inherits it. The home's own policy is
+  untouched. The `sandbox` directive in the header matters: the frame's `sandbox` attribute
+  makes the origin opaque only when the home frames the document, and without the header a
+  site that opens the address in its own tab runs a worker with the home's origin (Sentinel's
+  probe, #106: IndexedDB opened there; with the header it is denied).
+- Limits. `runtime.setMemoryLimit(bytes)`, `runtime.setMaxStackSize(bytes)`,
   `runtime.setInterruptHandler(() => ++asks > budget)`. The handler is asked about every
   10,000 jumps and calls, not per time: 50 asks of a tight loop took 2.5 to 4.4 ms. Reset the
   counter before each call. A stopped call's error message is `interrupted`.
-- **One string in, one string out.** Bind no host functions. Pass a JSON string to one guest
+- One string in, one string out. Bind no host functions. Pass a JSON string to one guest
   function and take a JSON string back (`vm.newString`, `vm.callFunction`, `vm.getString`);
   dispose every handle. A 6 KB view with 64 things costs 0.3 ms in the guest (parse, a loop,
   stringify) and about 0.1 ms on the page.
-- **Errors.** `vm.callFunction` returns `{ error }` for a guest exception, a limit or an
+- Errors. `vm.callFunction` returns `{ error }` for a guest exception, a limit or an
   interrupt; the interpreter is usable afterwards. A JavaScript exception thrown *through* the
   wasm (the worker's own stack overflowing) is not recoverable: treat the worker as broken.
-- **Stack.** With `setMaxStackSize(256 KB)` deep recursion overflowed the worker's own stack
+- Stack. With `setMaxStackSize(256 KB)` deep recursion overflowed the worker's own stack
   first (`Maximum call stack size exceeded` from V8). 96 KB gives QuickJS's own
   `stack overflow` error.
 
@@ -78,7 +83,7 @@ the frame and worker is that hooks answer one step late.
   behaviour when the tab is hidden for long (timers throttle; the page's late-answer watchdog
   gives the answer one extra turn).
 - An array bomb took 2.8 s to reach "out of memory" at a 16 MB limit (native `fill` loops are
-  not interrupted). It is off the main thread, and the page's watchdog closes a box that takes
+  not interrupted). The shipped limit is 8 MB (`LIMITS.memory`) and was not timed. It is off the main thread, and the page's watchdog closes a box that takes
   longer than `LIMITS.late`.
 
 ## Refresh when

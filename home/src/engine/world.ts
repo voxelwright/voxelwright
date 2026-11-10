@@ -133,7 +133,7 @@ function growBy(into: THREE.Box3, pose: THREE.Matrix4, half: Vec3, at: Vec3, rot
   partPose.compose(v3(at), new THREE.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]), new THREE.Vector3(1, 1, 1)).premultiply(pose)
   for (let i = 0; i < 8; i++) into.expandByPoint(corner.set(i & 1 ? half[0] : -half[0], i & 2 ? half[1] : -half[1], i & 4 ? half[2] : -half[2]).applyMatrix4(partPose))
 }
-const halfOf = (shape: Shape): Vec3 => shape.kind === 'box' ? shape.half : shape.kind === 'sphere' ? [shape.radius, shape.radius, shape.radius]
+export const halfOf = (shape: Shape): Vec3 => shape.kind === 'box' ? shape.half : shape.kind === 'sphere' ? [shape.radius, shape.radius, shape.radius]
   : shape.kind === 'compound' ? (outline(shape) as { half: Vec3 }).half : [shape.radius, shape.halfHeight + (shape.kind === 'capsule' ? shape.radius : 0), shape.radius]
 const quantile = (xs: number[], q: number) => {
   if (!xs.length) return 0
@@ -936,7 +936,7 @@ export class World implements WorldApi {
 
   moveTo(key: string, position: Vec3, velocity: Vec3, rotation?: Quat) {
     const t = this.dynamic(key)
-    if (!t || !position.every(Number.isFinite) || !pointOk(position) || position[1] < 0 || !velocity.every(Number.isFinite)) return false
+    if (!t || !pointOk(position) || position[1] < 0 || !velocity.every(Number.isFinite)) return false
     const n = rotation ? Math.hypot(...rotation) : 1
     if (!(n > 1e-6)) return false
     const speed = Math.hypot(...velocity), k = speed > this.rules.maxSpeed ? this.rules.maxSpeed / speed : 1
