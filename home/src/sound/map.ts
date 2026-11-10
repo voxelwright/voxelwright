@@ -33,8 +33,8 @@ const lines = {
   'village/refused': () => 'refused',
   // A reminder on the fridge is news: the owner's soft bloop. Ticking it off is a small reward; putting it off is quiet.
   'village/reminder': (e) => (e.state === 'done' ? 'kept' : e.state === 'later' ? null : 'news'),
-  // Physics (#74): only impacts are heard, and only ones hard enough to notice.
-  'village/physics': (e) => (e.kind === 'impact' && e.impulse * e.impact >= 0.01 ? 'knock' : null),
+  // Physics (#74): impacts hard enough to notice, and (#108) a game's bell: a `bell` gadget's `rang` signal, its value the note.
+  'village/physics': (e) => (e.kind === 'impact' ? (e.impulse * e.impact >= 0.01 ? 'knock' : null) : e.kind === 'signal' && e.port === 'rang' ? 'bell' : null),
 } satisfies { [K in keyof Events]?: Line<K> }
 
 export type SoundEvent = keyof typeof lines

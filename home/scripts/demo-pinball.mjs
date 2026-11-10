@@ -1,10 +1,10 @@
 // Plays the pinball table headless on a phone-sized screen and records it (#108): a clip to look
 // at, and numbers about how a round goes (seconds a ball lasts, score a round, flips that met the
 // ball). A simple player in the page holds a flipper when the ball comes down onto it and pulls
-// the plunger when the ball waits in the lane; it sets the table's inputs by name each frame
+// the plunger when a ball waits in the lane (missing a share of them, --skill); it sets the table's inputs by name each frame
 // (headless touch input is too slow to time a flip), so this shows the game, not the fingers:
 // check-physics-touch.mjs and check-physics-game.mjs prove those.
-// Usage: node scripts/demo-pinball.mjs <out.mp4> [--dev=5455] [--rounds=1] [--seconds=90] [--q=high]
+// Usage: node scripts/demo-pinball.mjs <out.mp4> [--dev=5455] [--rounds=1] [--seconds=90] [--skill=0.9] [--q=high]
 import { spawn, execFileSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,10 +15,11 @@ import { chromium } from 'playwright'
 const args = process.argv.slice(2)
 const out = args.find((a) => !a.startsWith('--'))
 const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
-if (!out) throw new Error('usage: demo-pinball.mjs <out.mp4> [--dev=5455] [--rounds=1] [--seconds=90] [--q=high]')
+if (!out) throw new Error('usage: demo-pinball.mjs <out.mp4> [--dev=5455] [--rounds=1] [--seconds=90] [--skill=0.9] [--q=high]')
 const devPort = Number(opt('dev') ?? 5455)
 const rounds = Number(opt('rounds') ?? 1)
 const seconds = Number(opt('seconds') ?? 90)
+const skill = Number(opt('skill') ?? 0.9)
 const query = `?cam=iso&talk=off&build=0&q=${opt('q') ?? 'high'}`
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const base = `http://localhost:${devPort}/`
@@ -67,58 +68,64 @@ try {
   await page.waitForTimeout(2000)
   const start = (Date.now() - t0) / 1000
 
-  stats = await page.evaluate(({ rounds, seconds }) => new Promise((resolve) => {
+  stats = await page.evaluate(({ rounds, seconds, skill }) => new Promise((resolve) => {
     const p = window.village.physics
+    const BALLS = ['pinball/ball', 'pinball/ball-2', 'pinball/ball-3']
     const t0 = performance.now()
-    const s = { rounds: [], balls: [], flips: 0, frames: 0 }
-    let pull = 0, ballFrom = 0, lost = p.signals()['pinball/game.lost'] ?? 0, used = 3
-    const hold = { left: 0, right: 0 }
+    const sig = (k) => p.signals()[`pinball/${k}`] ?? 0
+    const sum = (re) => Object.entries(p.signals()).filter(([k]) => re.test(k)).reduce((a, [, n]) => a + n, 0)
+    const s = { rounds: [], flips: 0, frames: 0 }
+    let pull = 0, lost = sig('game.lost')
+    const hold = { left: 0, right: 0 }, at = { left: null, right: null }
     const tick = () => {
       const now = performance.now()
       s.frames++
-      const ball = p.thing('pinball/ball')
-      const [x, , z] = ball.local
-      const speed = Math.hypot(...ball.velocity)
-      // In the lane and still: pull, hold a while, let go.
-      if (x > 0.22 && z > 0.4 && speed < 0.05 && !pull) {
-        pull = now + 500 + Math.random() * 400
+      // A ball waiting in the lane: pull, hold a while, let go.
+      const waiting = BALLS.some((k) => { const b = p.thing(k); return b.local[0] > 0.22 && b.local[2] > 0.4 && Math.hypot(...b.velocity) < 0.05 })
+      if (!pull && waiting) {
+        pull = now + 450 + Math.random() * 400
         p.input('plunger', true)
-        if (ballFrom) s.balls.push(+((now - ballFrom) / 1000).toFixed(1))
-        ballFrom = 0
       } else if (pull && now > pull) {
         p.input('plunger', false)
         pull = 0
-        ballFrom = now
       }
-      // Coming down onto a flipper: hold it for a moment.
-      for (const [side, lo, hi] of [['left', -0.15, -0.02], ['right', -0.03, 0.1]]) {
-        if (!hold[side] && z > 0.385 && z < 0.47 && x > lo && x < hi && ball.velocity[2] > -0.2) {
-          hold[side] = now + 140
+      // A ball over a flipper: decide once where along the bat to flip (or, now and then, to miss).
+      const want = { left: false, right: false }
+      for (const key of BALLS) {
+        const [x, , z] = p.thing(key).local
+        for (const [side, lo, hi] of [['left', -0.125, -0.027], ['right', -0.023, 0.075]]) {
+          if (z < 0.385 || z > 0.455 || x < lo || x > hi) continue
+          at[side] ??= Math.random() < skill ? (side === 'left' ? -0.08 + Math.random() * 0.035 : 0.03 - Math.random() * 0.035) : 99
+          if (at[side] !== 99 && (side === 'left' ? x >= at[side] : x <= at[side])) want[side] = true
+        }
+      }
+      for (const side of ['left', 'right']) {
+        if (want[side] && !hold[side]) {
+          hold[side] = now + 200
           p.input(side, true)
           s.flips++
-        } else if (hold[side] && now > hold[side] && !(z > 0.385 && z < 0.44 && x > lo && x < hi)) {
+        } else if (hold[side] && now > hold[side]) {
           hold[side] = 0
+          at[side] = null
           p.input(side, false)
         }
       }
-      const balls = p.counters()['pinball/balls']
-      if (balls !== used) used = balls
-      const nowLost = p.signals()['pinball/game.lost'] ?? 0
-      if (nowLost > lost) {
-        lost = nowLost
+      if (sig('game.lost') > lost) {
+        lost = sig('game.lost')
         s.rounds.push({ score: p.counters()['pinball/score'], at: +((now - t0) / 1000).toFixed(1) })
       }
       if (s.rounds.length >= rounds || now - t0 > seconds * 1000) {
         for (const name of ['left', 'right', 'plunger']) p.input(name, false)
-        s.seconds = +((now - t0) / 1000).toFixed(1)
-        s.score = p.counters()['pinball/score']
-        s.hits = Object.entries(p.signals()).filter(([k]) => /bumper-.-sensor\.hit$/.test(k)).reduce((a, [, n]) => a + n, 0)
+        Object.assign(s, {
+          seconds: +((now - t0) / 1000).toFixed(1), score: p.counters()['pinball/score'], bumpers: sum(/bumper-.-sensor\.hit$/), slingshots: sum(/sling-.*-sensor\.hit$/),
+          lanes: sum(/lane-.-zone\.enter$/), targets: sum(/target-.-sensor\.hit$/), multiballs: sig('lanes.all'), targetSets: sig('targets.all'), ballsServed: sig('serve.spawned'),
+        })
         return resolve(s)
       }
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  }), { rounds, seconds })
+  }), { rounds, seconds, skill })
   await page.waitForTimeout(2500)
   await context.close()
   const webm = readdirSync(dir).find((f) => f.endsWith('.webm'))

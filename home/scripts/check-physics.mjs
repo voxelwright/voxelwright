@@ -124,8 +124,11 @@ try {
     const rows = []
     for (let i = 0; i < SHOTS; i++) {
       p.reset()
-      const tally = () => Object.entries(p.signals()).filter(([k]) => /bumper-.-sensor\.hit$/.test(k)).reduce((a, [, n]) => a + n, 0)
-      const hits0 = tally()
+      const count = (re) => Object.entries(p.signals()).filter(([k]) => re.test(k)).reduce((a, [, n]) => a + n, 0)
+      const tally = () => count(/bumper-.-sensor\.hit$/)
+      // What the table's wires say everything struck is worth (#108): bumpers and slingshots 10, a lane 50, a target 30, the two missions 500 and 1000.
+      const worth = () => 10 * count(/pinball\/(bumper|sling)-.*-sensor\.hit$/) + 50 * count(/pinball\/lane-.-zone\.enter$/) + 30 * count(/pinball\/target-.-sensor\.hit$/) + 500 * count(/pinball\/lanes\.all$/) + 1000 * count(/pinball\/targets\.all$/)
+      const hits0 = tally(), worth0 = worth()
       const score0 = p.counters()['pinball/score']
       const hold = 0.2 + rand() * 0.8
       p.input('plunger', true)
@@ -145,7 +148,7 @@ try {
       p.input('right', false)
       const hits = tally() - hits0
       const out = range.min.some((v, k) => v < BOUNDS.min[k]) || range.max.some((v, k) => v > BOUNDS.max[k])
-      rows.push({ hold: +hold.toFixed(2), hits, score: p.counters()['pinball/score'] - score0, out, top: +range.min[2].toFixed(3), range })
+      rows.push({ hold: +hold.toFixed(2), hits, worth: worth() - worth0, score: p.counters()['pinball/score'] - score0, out, top: +range.min[2].toFixed(3), range })
     }
     return rows
   }, [SHOTS, BOUNDS])
@@ -157,7 +160,7 @@ try {
   report.shots = { n: shots.length, tunnelled: tunnelled.length, reachedTop: reachedTop.length, withBumperHits: scored.length, hits: shots.reduce((a, s) => a + s.hits, 0), score: shots.reduce((a, s) => a + s.score, 0) }
   check(`${SHOTS} plunger shots: zero tunnelling (ball centre inside the rails, playfield and lid on every step)`, tunnelled.length === 0, { tunnelled: tunnelled.slice(0, 3), maxPenetrationMm: report.maxPenetrationMm })
   check('Most shots reach the top of the table', reachedTop.length >= SHOTS * 0.6, report.shots)
-  check('Bumpers score through their wires: score = 10 x bumper sensor hits, on every shot', scored.length > 0 && shots.every((s) => s.score === 10 * s.hits), report.shots)
+  check('What is struck scores through its wires: on every shot the score is what its signals add up to (bumpers and slingshots 10, a lane 50, a target 30, the missions 500 and 1000)', scored.length > 0 && shots.every((s) => s.score === s.worth), { ...report.shots, wrong: shots.filter((s) => s.score !== s.worth).slice(0, 3).map((s) => ({ score: s.score, worth: s.worth })) })
   const fired = await page.evaluate(() => window.village.physics.signals())
   const sum = (re) => Object.entries(fired).filter(([k]) => re.test(k)).reduce((a, [, n]) => a + n, 0)
   check('Every bumper hit fires its kick', sum(/bumper-.-kick\.kicked$/) === sum(/bumper-.-sensor\.hit$/) && sum(/kicked$/) > 0, fired)

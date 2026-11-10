@@ -46,6 +46,7 @@ const MOMENT: Record<CueName, string> = {
   walk: 'Walking to another room',
   refused: "A door that isn't open yet",
   knock: 'Two things bump into each other (a steel ball on a rubber post)',
+  bell: 'A game rings its bell (a pinball bumper is hit, a prize is won)',
 }
 
 /** A realistic payload for each cue, as its event would carry it in the home. */
@@ -61,6 +62,7 @@ const EVENT: Partial<Record<CueName, { seconds?: number; event?: Record<string, 
   sat: { seconds: 0.7 },
   walk: { seconds: 0.95, event: { phase: 'leave' } },
   knock: { event: { impulse: 0.1, hardness: 0.6, impact: 1 } },
+  bell: { event: { value: 12 } },
 }
 
 /** What the owner said about each cue in round 1 (November 7), as saved in .sound-lab/picks.json then. */

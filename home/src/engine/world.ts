@@ -49,6 +49,9 @@ const SIGNALS_PER_STEP = 200
 const SIGNALS_WAITING = 1000
 /** A signal more than this many wires away from a physical cause is dropped: a loop of wires feeding itself ends here however slowly it fills the queue. */
 const SIGNAL_HOPS = 64
+/** The longest hit-stop (real seconds), and the rest (ms) after one before the next may start: a held world never stutters. */
+const HOLD_MAX = 0.15
+const HOLD_REST = 250
 /** A lit lamp's emissive strength (glow level 1). */
 const GLOW = 1.4
 
@@ -678,10 +681,23 @@ export class World implements WorldApi {
     return true
   }
 
+  /** Real time (performance.now) until which the world holds still, for a hit-stop. */
+  private heldUntil = 0
+
+  /** Hit-stop: frames step nothing for `seconds` of real time (advance, the checks' clock, never holds). False when one ran too recently. */
+  hold(seconds: number) {
+    const now = performance.now()
+    if (!Number.isFinite(seconds) || seconds <= 0 || now < this.heldUntil + HOLD_REST) return false
+    this.heldUntil = now + Math.min(HOLD_MAX, seconds) * 1000
+    return true
+  }
+
   /** One rendered frame: real seconds in, simulated time out by the rules' time scale. */
   frame(dt: number) {
     const t0 = performance.now()
     this.follows()
+    // Held for a hit-stop: nothing steps and no time is owed for it; what is drawn stays as it is.
+    if (t0 < this.heldUntil) return this.sync(0)
     this.accumulator += Math.min(dt, 0.1) * this.rules.timeScale
     let steps = 0
     while (this.accumulator >= STEP && steps < MAX_STEPS) {

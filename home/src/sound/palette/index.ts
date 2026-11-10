@@ -824,11 +824,23 @@ const knock = {
   }),
 }
 
+const bell = {
+  a: cue({
+    bus: 'world', level: -16, gap: 0.03, length: 0.6, jitter: { cents: 5, db: 1 },
+    play(a, out, p) {
+      // A game's bell (#108): a music-box comb at the note the signal carries, in semitones above middle C.
+      const value = (p.event as { value?: number }).value
+      const note = Math.min(36, Math.max(-12, typeof value === 'number' && Number.isFinite(value) ? value : 12))
+      pluck(a, room(a, out, 0.16), p.at, NOTE.C4 * 2 ** (note / 12) * p.rate, BODY.musicBox, { gain: p.gain * 0.5, dur: 0.6 })
+    },
+  }),
+}
+
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, bell,
 }
 
 /**
@@ -840,6 +852,7 @@ export const CHOSEN: Partial<Record<CueName, string>> = { chose: 'b', card: 'c',
 
 /** One line per variant for the listening page. */
 export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
+  bell: { a: 'A game\'s bell (a pinball bumper, a prize): one music-box note at the pitch the game asks for; runs of them go up for a prize and down for a loss.' },
   knock: { a: 'A physics impact: a felt thump for soft materials, a wooden or steel tock for hard ones, louder with the impulse.' },
   hover: {
     a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',
