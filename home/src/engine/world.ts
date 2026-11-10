@@ -407,7 +407,8 @@ export class World implements WorldApi {
     this.scenery.delete(id)
     this.frames.delete(id)
     // A drawn look (and its painted grain) only this toy used goes with it: made toys come in many colours.
-    for (const t of this.things.values()) itsLooks.delete(lookOf(t.part))
+    // Still worn by a part that is drawn: a hidden part of the same material and paint has no look to keep.
+    for (const t of this.things.values()) if (!t.part.hidden) itsLooks.delete(lookOf(t.part))
     for (const key of itsLooks) {
       const look = this.looks.get(key) as THREE.MeshStandardMaterial | undefined
       if (!look) continue
@@ -1016,6 +1017,29 @@ export class World implements WorldApi {
 
   jointPosition(joint: number) {
     return this.core.jointPosition(joint)
+  }
+
+  upright(key: string) {
+    const t = this.things.get(key)
+    if (!t) return 1
+    // Its own y axis in the world, now and as made: their dot product.
+    const y = (q: Quat): Vec3 => [2 * (q[0] * q[1] - q[3] * q[2]), 1 - 2 * (q[0] * q[0] + q[2] * q[2]), 2 * (q[1] * q[2] + q[3] * q[0])]
+    const a = y(this.core.rotation(t.body)), b = y(t.home.q)
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  }
+
+  restartToy(toy: string) {
+    if (!this.frames.has(toy)) return false
+    for (const t of this.things.values()) {
+      if (t.toy !== toy || t.part.motion !== 'dynamic') continue
+      this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
+      this.respawns.delete(t.key)
+    }
+    for (const g of this.gadgets.values()) {
+      const kind = g.toy === toy ? gadgetKind(g.spec.kind) : undefined
+      if (kind?.inputs.includes('reset')) kind.receive?.(g, 'reset', { value: 0 }, this)
+    }
+    return true
   }
 
   toWorldDir(toy: string, dir: Vec3): Vec3 {

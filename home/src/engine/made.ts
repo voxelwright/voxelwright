@@ -26,8 +26,9 @@ export const MADE = {
   parts: 40,
   /** Moving parts cost every step; ten pins and a ball is 11. */
   moving: 16,
-  gadgets: 16,
-  wires: 32,
+  /** A game is a couple of dozen: a sensor a pin, counters, a round, lamps, a bell (#108). */
+  gadgets: 32,
+  wires: 64,
   /** Half extents and radii, m. */
   size: [0.004, 0.5] as const,
   /** kg. */
@@ -143,23 +144,28 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checke
     if (wires.some((o) => o.from === from && o.to === to)) return { reason: `the wire from ${from} to ${to} was there twice` }
     wires.push({ from, to })
   }
-  // No signal may come back round to where it started: a loop of wires feeds itself every step.
+  // No signal may come back round to where it started in one chain: that loop feeds itself every step. Followed port by
+  // port (#108): a wire into an input goes on only through the outputs that input can fire at once (the kind's `causes`),
+  // so a game's own rings are fine (a round resets its score, whose change the round only remembers; a timer's `done`
+  // restarts the toy that started the timer) and a counter wired back into its own `add` is still refused.
   const next = new Map<string, string[]>()
   for (const w of wires) {
-    const a = w.from.slice(0, w.from.lastIndexOf('.')), b = w.to.slice(0, w.to.lastIndexOf('.'))
-    next.set(a, [...(next.get(a) ?? []), b])
+    const dot = w.to.lastIndexOf('.')
+    const to = w.to.slice(0, dot), kind = gadgetKind(gadgets.find((g) => g.id === to)!.kind)!
+    const fired = Object.hasOwn(kind.causes ?? {}, w.to.slice(dot + 1)) ? kind.causes![w.to.slice(dot + 1)] : kind.outputs
+    next.set(w.from, [...(next.get(w.from) ?? []), ...fired.map((port) => `${to}.${port}`)])
   }
   const state = new Map<string, 1 | 2>()
-  const loops = (g: string): boolean => {
-    if (state.get(g) === 1) return true
-    if (state.get(g) === 2) return false
-    state.set(g, 1)
-    if ((next.get(g) ?? []).some(loops)) return true
-    state.set(g, 2)
+  const loops = (out: string): boolean => {
+    if (state.get(out) === 1) return true
+    if (state.get(out) === 2) return false
+    state.set(out, 1)
+    if ((next.get(out) ?? []).some(loops)) return true
+    state.set(out, 2)
     return false
   }
-  const looped = gadgets.find((g) => loops(g.id))
-  if (looped) return { reason: `its wires run in a loop through the ${looped.id} gadget` }
+  const looped = [...next.keys()].find(loops)
+  if (looped) return { reason: `its wires run in a loop through the ${looped.slice(0, looped.lastIndexOf('.'))} gadget` }
 
   const toy: ToySpec = {
     id,
@@ -197,6 +203,8 @@ function checkPart(p: unknown, surface: Surface, clamped: string[]): PartSpec | 
   if (p.turn !== undefined) part.turn = (p.turn as Vec3).map((a) => Math.max(-Math.PI, Math.min(Math.PI, a))) as Vec3
   if (typeof p.paint === 'string' && /^#[0-9a-f]{6}$/i.test(p.paint)) part.paint = p.paint
   if (p.sensor === true) part.sensor = true
+  // Only a trigger volume may go unseen (#108: the line a throw crosses): it never pushes, so nothing invisible is in anyone's way.
+  if (p.sensor === true && p.hidden === true) part.hidden = true
   if (p.mass !== undefined && motion === 'dynamic') {
     if (typeof p.mass !== 'number' || !Number.isFinite(p.mass)) clamped.push(`${id}.mass`)
     else {

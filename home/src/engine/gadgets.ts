@@ -21,6 +21,13 @@ export interface GadgetKind {
   /** Ports it reads (wired into) and writes (fires). */
   inputs: string[]
   outputs: string[]
+  /**
+   * Per input, the outputs it can fire at once, in the same chain of signals (an input not named
+   * can fire any of them). What a kind fires later from its `step` (a timer's `done`, a bell's
+   * `rang`) is caused by no input: a ring of wires through it runs at most once a wait, so whoever
+   * checks a toy for loops (made.ts) lets it be.
+   */
+  causes?: Record<string, string[]>
   /** The spec settings it reads besides `part` and `knobs`. */
   settings?: Record<string, Setting>
   /** What its spec must give, so a toy written as data is refused before it is built: a part (`moving`: a dynamic one) and settings by name. */
@@ -159,7 +166,7 @@ registerGadget({
 registerGadget({
   kind: 'counter', about: 'A number, `start` at first. `add` adds `step`, `sub` takes `step` away, `plus` adds the signal\'s own value (a `points` gadget\'s); `reset` puts it back to `start`. Every change fires `changed` with the total. A change that is not a reset then fires one of two, never both: `reached` when the total is now `target`, else `counting`. Shown on the part named by its `display` setting.',
   knobs: { step: knob(-100, 1000, 1, 1, 'per add'), start: knob(-1000, 100000, 1, 0, 'at first and on reset'), target: knob(-1000, 1000000, 1, 0, 'fires reached') },
-  inputs: ['add', 'sub', 'plus', 'reset'], outputs: ['changed', 'reached', 'counting'], settings: { display: 'part' },
+  inputs: ['add', 'sub', 'plus', 'reset'], outputs: ['changed', 'reached', 'counting'], causes: { reset: ['changed'] }, settings: { display: 'part' },
   setup(g, w) {
     g.state.value = g.knobs.start
     const display = setting<string | undefined>(g, 'display')
@@ -236,7 +243,7 @@ registerGadget({
 
 registerGadget({
   kind: 'game', about: 'A round of play. `start` begins one unless one is running, and fires `started`. While it runs, `win` ends it with `won` and `lose` ends it with `lost`; `reset` ends it and says nothing. `score` remembers the signal\'s value (wire a counter\'s `changed` to it), and `won` and `lost` carry it. A signal into `during` comes out of `during` while a round runs and out of `idle` when none does, never both (what counts only in play: a ball lost, a point scored).',
-  knobs: {}, inputs: ['start', 'win', 'lose', 'score', 'during', 'reset'], outputs: ['started', 'won', 'lost', 'during', 'idle'],
+  knobs: {}, inputs: ['start', 'win', 'lose', 'score', 'during', 'reset'], outputs: ['started', 'won', 'lost', 'during', 'idle'], causes: { start: ['started'], win: ['won'], lose: ['lost'], score: [], during: ['during', 'idle'], reset: [] },
   setup(g) {
     g.state.playing = 0
     g.state.score = 0
@@ -303,7 +310,7 @@ registerGadget({
 const SLOTS = ['a', 'b', 'c', 'd', 'e', 'f']
 registerGadget({
   kind: 'collect', about: 'A set to complete. Each of its inputs `a` to `f` is remembered the first time it arrives and fires `got` with how many are in; when `count` different ones are in it fires `all` and forgets them, ready to be collected again. `reset` forgets them and says nothing. Three lanes to roll through, four targets to hit.',
-  knobs: { count: knob(1, 6, 1, 3, 'different inputs that complete it') }, inputs: [...SLOTS, 'reset'], outputs: ['got', 'all'],
+  knobs: { count: knob(1, 6, 1, 3, 'different inputs that complete it') }, inputs: [...SLOTS, 'reset'], outputs: ['got', 'all'], causes: { reset: [] },
   setup(g) {
     g.state.have = 0
   },
@@ -324,7 +331,7 @@ registerGadget({
 registerGadget({
   kind: 'spawner', about: 'Puts its moving part into play. On `spawn`, unless the part is out already, it places it at the `at` setting (where it was made, when there is none), moving at `speed` along the `toward` setting, and fires `spawned`. On `back`, when the signal is about its part (or about nothing) and the part is out, it fires `back`: the part is where it fell, out of play until spawned again. Out at first, and again on `reset`, when `out` is 1. Extra balls for a multiball; the next ball after one is lost.',
   knobs: { speed: knob(0, 8, 0.05, 0, 'm/s'), out: knob(0, 1, 1, 0, 'in play at first') },
-  inputs: ['spawn', 'back', 'reset'], outputs: ['spawned', 'back'], settings: { at: 'point', toward: 'direction' }, needs: { part: 'moving' },
+  inputs: ['spawn', 'back', 'reset'], outputs: ['spawned', 'back'], causes: { spawn: ['spawned'], back: ['back'], reset: [] }, settings: { at: 'point', toward: 'direction' }, needs: { part: 'moving' },
   setup(g) {
     if (!g.part) throw new Error(`${g.id}: a spawner needs a part`)
     g.state.out = g.knobs.out
@@ -354,7 +361,7 @@ registerGadget({
 
 registerGadget({
   kind: 'timer', about: 'Counts `seconds` of the world\'s time. `start` begins it (again from the top when it is running) and fires `started`; when the time is up it fires `done`; `stop` and `reset` end it and say nothing. A signal into `pass` comes out of `running` while it counts and out of `idle` when it does not, never both: a grace period after a ball is served, a time limit on a round.',
-  knobs: { seconds: knob(0.1, 600, 0.1, 10, 's') }, inputs: ['start', 'stop', 'pass', 'reset'], outputs: ['started', 'done', 'running', 'idle'],
+  knobs: { seconds: knob(0.1, 600, 0.1, 10, 's') }, inputs: ['start', 'stop', 'pass', 'reset'], outputs: ['started', 'done', 'running', 'idle'], causes: { start: ['started'], stop: [], pass: ['running', 'idle'], reset: [] },
   setup(g) {
     g.state.until = 0
   },
@@ -374,6 +381,31 @@ registerGadget({
   },
 })
 
+registerGadget({
+  kind: 'tilt', about: 'Watches its moving part and fires `fell` once, about that part, when it has tipped more than `angle` from how it was made: a pin knocked down, a tower toppled. `reset` lets it fire again.',
+  knobs: { angle: knob(0.1, 1.5, 0.01, 0.8, 'rad from upright') }, inputs: ['reset'], outputs: ['fell'], causes: { reset: [] }, needs: { part: 'moving' },
+  setup(g) {
+    if (!g.part) throw new Error(`${g.id}: a tilt needs a part`)
+    g.state.fell = 0
+  },
+  step(g, w) {
+    if (g.state.fell || !g.part || w.upright(g.part) >= Math.cos(g.knobs.angle)) return
+    g.state.fell = 1
+    w.fire(g, 'fell', { value: 1, thing: g.part })
+  },
+  receive(g, port) {
+    if (port === 'reset') g.state.fell = 0
+  },
+})
+
+registerGadget({
+  kind: 'restart', about: 'On `go`, puts its whole toy back as it was made and fires `done`: every moving part where it started and at rest, every counter, game, lamp, timer and the like reset. The pins stood up again for the next round.',
+  knobs: {}, inputs: ['go'], outputs: ['done'],
+  receive(g, port, _s, w) {
+    if (port === 'go' && w.restartToy(g.toy)) w.fire(g, 'done', { value: 1 })
+  },
+})
+
 // ── Feedback (#108): what makes a hit land. Each only says what happened; sound and the view listen. ──
 
 /** Seconds between two notes of one bell: a run is heard as notes, and a bell wired to ring itself cannot flood. */
@@ -381,7 +413,7 @@ const RING_GAP = 0.09
 registerGadget({
   kind: 'bell', about: 'Rings. On `ring` it fires `rang` with `note` as the value (semitones above middle C; whoever makes the home\'s sounds plays it), `rings` times in a row, each `step` semitones from the last: one note for a hit, a run up for a prize, a run down for a loss. Heard from where its part is, when it has one.',
   knobs: { note: knob(-12, 36, 1, 12, 'semitones above middle C'), rings: knob(1, 6, 1, 1, 'notes in a row'), step: knob(-12, 12, 1, 7, 'semitones between them') },
-  inputs: ['ring'], outputs: ['rang'],
+  inputs: ['ring'], outputs: ['rang'], causes: { ring: [] },
   setup(g) {
     Object.assign(g.state, { left: 0, n: 0, next: 0 })
   },

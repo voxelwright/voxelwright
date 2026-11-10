@@ -8,7 +8,7 @@
 // the page's checker clamps and refuses hostile data; the route check sends toy lines to physics.
 // With --agent=claude: --trials per toy ask on the --toy-model, one rules ask on the --rules-model, pass counts and latency as they are,
 // and the dividing line between furnish and physics through the real router.
-// Usage: node scripts/check-physics-toys.mjs [--dev=5372] [--host=5373] [--agent=claude] [--toy-model=sonnet] [--rules-model=haiku] [--trials=3] [--shots-dir=dir] [--out=file.json]
+// Usage: node scripts/check-physics-toys.mjs [--dev=5372] [--host=5373] [--agent=claude] [--toy-model=sonnet] [--rules-model=haiku] [--trials=3] [--only=game] [--shots-dir=dir] [--out=file.json]
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,8 @@ const rulesModel = opt('rules-model') ?? 'haiku'
 const model = opt('toy-model') ?? 'sonnet'
 const trials = Number(opt('trials') ?? (agent === 'stub' ? 1 : 3))
 const shotsDir = opt('shots-dir')
+/** With --agent=claude: only these asks (by kind: marble, seesaw, pins, game), and neither the rules ask nor the router's line. */
+const only = opt('only')?.split(',')
 const homeDir = join(dirname(fileURLToPath(import.meta.url)), '..')
 const hostDir = join(homeDir, '..', 'host')
 const root = await mkdtemp(join(process.env.VILLAGE_SCRATCH ?? tmpdir(), 'toys-'))
@@ -61,6 +63,8 @@ const ASKS = [
   { kind: 'marble', text: 'build a marble run on the table' },
   { kind: 'seesaw', text: 'make a seesaw' },
   { kind: 'pins', text: 'set up ten pins and a ball' },
+  // A game, not only a toy (#108): a round, a score and an end, from the logic parts.
+  { kind: 'game', text: 'make a skittles game with a score: three throws to knock them all down' },
 ]
 
 /**
@@ -87,6 +91,45 @@ async function works(page, kind) {
     const built = things.map((t) => ({ id: t.key.slice(id.length + 1), shape: t.shape, motion: t.motion, at: t.local.map((v) => +v.toFixed(3)) }))
     const size = (t) => (t.shape.kind === 'sphere' ? t.shape.radius : t.shape.kind === 'box' ? Math.max(...t.shape.half) : t.shape.halfHeight + t.shape.radius)
     const onSurface = (l, margin = 0.05) => Math.abs(l[0]) <= surface.half[0] + margin && Math.abs(l[2]) <= surface.half[1] + margin && l[1] >= -0.03
+    if (kind === 'game') {
+      // Whatever was built is played the way a person would: the ball flung at the standing pieces, a few times.
+      const gadgets = p.snapshot().gadgets
+      const mine = Object.keys(gadgets).filter((g) => g.startsWith(`${id}/`))
+      const rounds = mine.filter((g) => 'playing' in gadgets[g].state)
+      const counters0 = Object.fromEntries(mine.filter((g) => 'value' in gadgets[g].state).map((g) => [g, gadgets[g].state.value]))
+      const fired = (port) => rounds.reduce((a, g) => a + (p.signals()[`${g}.${port}`] ?? 0), 0)
+      const balls = moving.filter((t) => t.shape.kind === 'sphere').sort((a, b) => b.shape.radius - a.shape.radius)
+      const pieces = moving.filter((t) => t.shape.kind !== 'sphere')
+      if (!rounds.length) return { pass: false, why: 'no game gadget in it', built }
+      if (!balls.length || !pieces.length) return { pass: false, why: 'nothing to throw, or nothing to throw it at', built }
+      const ball = balls[0].key
+      const start = Object.fromEntries(moving.map((t) => [t.key, t.position]))
+      const centre = pieces.reduce((a, t) => a.map((v, i) => v + t.position[i] / pieces.length), [0, 0, 0])
+      let throws = 0
+      for (let t = 0; t < 6 && !fired('won') && !fired('lost'); t++) {
+        const at = w.thing(ball).position
+        const d = [centre[0] - at[0], 0, centre[2] - at[2]], n = Math.hypot(...d)
+        // Off its surface, or resting among the pieces: nothing more to throw.
+        if (!onSurface(w.thing(ball).local, 0.1) || n < 0.05) break
+        w.setVelocity(ball, d.map((v) => (v / n) * 2.2))
+        throws++
+        p.advance(4.5)
+      }
+      // A last throw may still be deciding the round.
+      for (let i = 0; i < 8 && !fired('won') && !fired('lost'); i++) p.advance(1)
+      const now = p.snapshot().gadgets
+      const scored = Object.entries(counters0).filter(([g, v]) => now[g].state.value !== v).map(([g]) => g.slice(id.length + 1))
+      const down = pieces.filter((t) => w.upright(t.key) < 0.7).length
+      const ended = fired('won') ? 'won' : fired('lost') ? 'lost' : null
+      // Played twice: within ten seconds of the end everything stands where it started and the round is over.
+      let again = false
+      for (let i = 0; i < 20 && ended && !again; i++) {
+        p.advance(0.5)
+        again = moving.every((t) => Math.hypot(...w.thing(t.key).position.map((v, k) => v - start[t.key][k])) < 0.02 && w.upright(t.key) > 0.98) && rounds.every((g) => !p.snapshot().gadgets[g].state.playing)
+      }
+      const pass = fired('started') > 0 && scored.length > 0 && Boolean(ended)
+      return { pass, why: pass ? '' : !fired('started') ? 'a throw started no round' : !scored.length ? 'nothing was scored' : 'the round never ended', started: fired('started'), throws, down, pieces: pieces.length, scored, ended, again, gadgets: mine.length, parts: keys.length, ...(pass ? {} : { built }) }
+    }
     if (kind === 'marble') {
       const balls = moving.filter((t) => t.shape.kind === 'sphere')
       if (!balls.length) return { pass: false, why: 'no ball' }
@@ -170,7 +213,8 @@ try {
   const world = () => page.evaluate(() => {
     const p = window.village.physics
     const w = p.engine.world
-    return { census: p.census(), made: w.keys().filter((k) => k.startsWith('made-')).length, ball: w.thing('pinball/ball')?.position.map((v) => +v.toFixed(3)), rules: JSON.stringify(p.rules()), trial: p.made.state().trial?.id ?? null, kept: p.made.state().kept.join() }
+    // Cards drawn are a running count, not something built: a toy with a score card draws, and taking it out does not undraw.
+    return { census: { ...p.census(), draws: 0 }, made: w.keys().filter((k) => k.startsWith('made-')).length, ball: w.thing('pinball/ball')?.position.map((v) => +v.toFixed(3)), rules: JSON.stringify(p.rules()), trial: p.made.state().trial?.id ?? null, kept: p.made.state().kept.join() }
   })
   const ask = (text, as = { toy: true }) => page.evaluate(([t, as]) => window.village.physics.ask(t, as), [text, as])
   // The pinball ball is left out: typing on the notepad reaches its keys, and no toy ask touches it.
@@ -192,6 +236,7 @@ try {
       }
       const played = await works(page, a.kind)
       check(`the ${a.kind} works in the engine`, played.pass, played)
+      if (a.kind === 'game') check('the game made from a sentence is a game: a throw starts a round, pieces knocked down score on its card, the round is won or lost, and it sets itself up to be played again', played.pass && played.down > 0 && played.again, played)
       const undone = await page.evaluate(() => window.village.physics.made.undo())
       const after = await world()
       check(`Undo takes the ${a.kind} away: things, gadgets, joints and wires back to the baseline`, undone && after.made === 0 && same(after.census, baseline.census) && after.rules === baseline.rules, { baseline, after })
@@ -387,7 +432,7 @@ try {
     check('a huge box is clamped (then refused for leaving the surface) and a hostile part is cleaned: mass clamped, hidden and bad paint dropped, label plain, nothing polluted', typeof hostile.clampedBig === 'string' && /off the/.test(hostile.clampedBig) && hostile.proto.part.mass === 10 && !('hidden' in hostile.proto.part) && !('paint' in hostile.proto.part) && !/[<>]/.test(hostile.proto.label) && hostile.proto.polluted === null && hostile.proto.clamped.includes('a.mass'), hostile)
   } else {
     // The real model: trials per ask, each one checked, played and undone.
-    for (const a of ASKS) {
+    for (const a of ASKS.filter((x) => !only || only.includes(x.kind))) {
       for (let i = 0; i < trials; i++) {
         const t0 = Date.now()
         const r = await ask(a.text)
@@ -404,12 +449,13 @@ try {
         }
         await page.evaluate(() => window.village.physics.made.undo())
         const row = { ask: a.text, trial: i + 1, built: Boolean(r.ok && r.toy), works: Boolean(played?.pass), reason: r.ok ? (r.toy ? played?.why || '' : 'no toy in the answer') : r.reason ?? r.why, ms, hostMs: r.hostMs, toy: r.ok && r.toy ? { label: r.toy.label, on: r.toy.on, parts: r.toy.parts, clamped: r.toy.clamped.length } : null, played }
+        if (a.kind === 'game' && played) row.round = { started: played.started, ended: played.ended, down: played.down, pieces: played.pieces, scored: played.scored, again: played.again, gadgets: played.gadgets }
         report.trials.push(row)
         console.error(`${model} | ${a.kind} #${i + 1} | built ${row.built} | works ${row.works} | ${ms} ms | ${row.reason}`)
       }
     }
     const by = (kind) => report.trials.filter((t) => t.ask === ASKS.find((a) => a.kind === kind).text)
-    report.summary = Object.fromEntries(ASKS.map((a) => {
+    report.summary = Object.fromEntries(ASKS.filter((x) => !only || only.includes(x.kind)).map((a) => {
       const rows = by(a.kind)
       const ms = rows.map((r) => r.ms).sort((x, y) => x - y)
       return [a.kind, { built: rows.filter((r) => r.built).length, works: rows.filter((r) => r.works).length, of: rows.length, medianMs: ms[Math.floor(ms.length / 2)], maxMs: ms[ms.length - 1] }]
@@ -419,6 +465,7 @@ try {
     console.error(JSON.stringify(report.summary))
     check(`${model}: toys built and checked as they are (no pass bar; see the summary)`, true, report.summary.total)
 
+    if (!only) {
     // A rules ask, not flagged as a toy: the host answers it on the rules model with the short prompt.
     const t0 = Date.now()
     const rules = await ask('make gravity like the moon', {})
@@ -448,6 +495,7 @@ try {
     const right = routed.filter((r, i) => r.route === lines[i][1] && r.mayRoute && (lines[i][1] !== 'physics' || r.asksPhysics))
     report.router = routed
     check(`the real router sends toy lines to physics and furniture to furnish (${right.length} of ${lines.length})`, right.length === lines.length, routed)
+    }
   }
   check('no page errors', errors.length === 0, errors)
   await browser.close()

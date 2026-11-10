@@ -17,6 +17,7 @@ const throws = async (f: () => Promise<unknown>) => f().then(() => null, (e: Err
 const rules = await rulesPrompt(), toy = await toyPrompt()
 check('the rules prompt has no toy kit', !rules.includes('Toys.') && !rules.includes('registerGadget'), rules.length)
 check('the toy prompt quotes the made kinds and not flame, hinge or piston', ["kind: 'pivot'", "kind: 'sensor'", "kind: 'counter'"].every((k) => toy.includes(k)) && !["kind: 'flame'", "kind: 'hinge'", "kind: 'piston'"].some((k) => toy.includes(k)))
+check('the toy prompt quotes the logic parts a made game is wired from, a game as a second example, and not the kinds that reach past the toy (#108)', ["kind: 'game'", "kind: 'tilt'", "kind: 'timer'", "kind: 'lamp'", "kind: 'bell'", "kind: 'restart'", '"label":"Skittles"'].every((k) => toy.includes(k)) && !["kind: 'spawner'", "kind: 'freeze'", "kind: 'shake'"].some((k) => toy.includes(k)), { length: toy.length })
 check('the toy prompt is the rules prompt and more', toy.startsWith(rules) && toy.length > rules.length * 2, { rules: rules.length, toy: toy.length })
 
 const dir = await mkdtemp(join(tmpdir(), 'engine-'))
