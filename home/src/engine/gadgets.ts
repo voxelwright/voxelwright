@@ -369,7 +369,8 @@ registerGadget({
 
 registerGadget({
   kind: 'timer', about: 'Counts `seconds` of the world\'s time. `start` begins it (again from the top when it is running) and fires `started`; when the time is up it fires `done`; `stop` and `reset` end it and say nothing. A signal into `pass` comes out of `running` while it counts and out of `idle` when it does not, never both: a grace period after a ball is served, a time limit on a round.',
-  knobs: { seconds: knob(0.1, 600, 0.1, 10, 's') }, inputs: ['start', 'stop', 'pass', 'reset'], outputs: ['started', 'done', 'running', 'idle'], causes: { start: ['started'], stop: [], pass: ['running', 'idle'], reset: [] },
+  // A quarter of a second at least: a timer wired to start itself again (a metronome) turns over four times a second at most.
+  knobs: { seconds: knob(0.25, 600, 0.05, 10, 's') }, inputs: ['start', 'stop', 'pass', 'reset'], outputs: ['started', 'done', 'running', 'idle'], causes: { start: ['started'], stop: [], pass: ['running', 'idle'], reset: [] },
   setup(g) {
     g.state.until = 0
   },

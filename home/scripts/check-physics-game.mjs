@@ -409,6 +409,41 @@ try {
   const byFinger = await game(() => ({ started: window.game.state().fired.started, ball: window.village.physics.thing('pinball/ball').local }))
   check('By finger on a phone-sized screen: the plunger button held and let go starts a round', byFinger.started === before + 1, { before, byFinger })
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'game-playing.jpg'), quality: 88 })
+  // ── What a hit feels like, in real time: the table is being played and a finger has touched the page (so sound may play) ──
+  await page.waitForTimeout(2500)
+  const felt = await game(async () => {
+    const p = window.village.physics, g = window.game
+    const camera = window.village.kernel.root.get('stage').camera
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const from = (still) => Math.hypot(...camera.position.toArray().map((v, i) => v - still[i]))
+    const still = camera.position.toArray()
+    const heard0 = window.village.sound.log.length
+    // A bumper is hit: the view jumps and settles, and its bell is heard.
+    g.bump()
+    const shaking = p.shaking()
+    let moved = 0
+    for (let i = 0; i < 8; i++) {
+      await frame()
+      moved = Math.max(moved, from(still))
+    }
+    await wait(900)
+    const settled = from(still)
+    const bells = window.village.sound.log.slice(heard0).filter((l) => l.cue === 'bell').length
+    // A mission is completed: the world holds for a beat (its clock stands still), then carries on.
+    const held0 = p.signals()['pinball/beat.held'] ?? 0
+    for (const x of [-0.1325, -0.0475, 0.0375]) {
+      p.place('pinball/ball', [x, 0.0136, -0.43])
+      p.advance(0.3)
+    }
+    const clock = p.engine.world.clock
+    await wait(45)
+    const during = p.engine.world.clock - clock
+    await wait(400)
+    return { shaking, moved, settled, bells, held: (p.signals()['pinball/beat.held'] ?? 0) - held0, during, after: p.engine.world.clock - clock, jolt: p.signals()['pinball/jolt.shook'] ?? 0 }
+  })
+  check('A bumper hit is felt: the view of the played table jumps (over half a millimetre) and is back where it was within a second, and the bumper\'s bell reaches the home\'s sound', felt.shaking > 0 && felt.moved > 0.0005 && felt.settled < 0.0002 && felt.bells >= 1, felt)
+  check('A completed mission holds the world for a beat: its clock stands still for the first 45 ms and runs again after', felt.held === 1 && felt.during === 0 && felt.after > 0.1 && felt.jolt >= 1, felt)
   await game(() => window.village.physics.play(false))
   // ── The next visit: the best score is on its card again ──
   const kept = await game(() => window.game.best())
