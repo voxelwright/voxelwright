@@ -65,11 +65,14 @@ try {
   // Helpers in the page: the game as its parts say it, a pull of the plunger, and a ball put in the drain.
   await page.evaluate(() => {
     const p = window.village.physics
+    // Signals the engine dropped, counted as they are said (the handle's own list of events is a window that slides).
+    window.dropped = 0
+    window.village.kernel.root.on('village/physics', (e) => { if (e.kind === 'dropped') window.dropped += e.signals })
     const lit = (key) => p.engine.world.keys().includes(key) && window.village.kernel.root.get('stage').scene.getObjectByName(key).material.emissiveIntensity > 0
     window.game = {
       state: () => ({
         score: p.counters()['pinball/score'], balls: p.counters()['pinball/balls'],
-        lamps: [1, 2, 3].map((n) => lit(`pinball/life-${n}`)), over: lit('pinball/over'),
+        lamps: [1, 2, 3].map((n) => lit(`pinball/life-${n}`)), over: lit('pinball/over'), save: lit('pinball/save'),
         fired: Object.fromEntries(['started', 'lost', 'won'].map((port) => [port, p.signals()[`pinball/game.${port}`] ?? 0])),
       }),
       pull(hold = 0.5) {
@@ -78,15 +81,22 @@ try {
         p.input('plunger', false)
         p.advance(0.3)
       },
-      /** The ball dropped just above the drain, then time for it to be put back in the lane. */
-      drain(after = 1) {
+      /** The ball dropped just above the drain, then time for it to be put back in the lane. `free`: within the grace period, as it is. */
+      drain(after = 1, free = false) {
+        if (!free) this.graceOver()
         p.place('pinball/ball', [-0.025, 0.0136, 0.47])
         p.advance(after)
       },
+      /** The grace period waited out, the ball held in the lane meanwhile. */
+      graceOver() {
+        if (!lit('pinball/save')) return
+        p.place('pinball/ball', [0.2405, 0.0135, 0.4345])
+        p.advance(12.2)
+      },
       /** Some score, by the wire a bumper uses: the ball dropped just above one. */
       bump() {
-        p.place('pinball/ball', [-0.065, 0.0136, -0.215])
-        p.advance(0.4)
+        p.place('pinball/ball', [-0.065, 0.0136, -0.26])
+        p.advance(0.6)
       },
       lit,
     }
@@ -113,6 +123,12 @@ try {
     // A second pull while the round runs starts nothing.
     g.pull(0.3)
     out.pulledAgain = g.state().fired.started
+    // Lost within the grace period: the ball comes back and none is used. Then the period runs out.
+    g.drain(1, true)
+    out.saved = g.state()
+    out.savedBack = p.thing('pinball/ball').local
+    g.graceOver()
+    out.graceOver = g.state()
     g.bump()
     out.scored = g.state().score
     g.drain()
@@ -134,6 +150,7 @@ try {
     return out
   })
   check('A pull of the plunger starts a round, once: a second pull while it runs starts nothing', round.started.fired.started === 1 && round.pulledAgain === 1 && round.started.balls === 3, { started: round.started, pulledAgain: round.pulledAgain })
+  check('A ball lost within twelve seconds of the round starting comes back to the lane and costs none; the blue lamp is lit while that holds and goes out after', round.started.save && round.saved.balls === 3 && round.savedBack[0] > 0.2 && round.savedBack[2] > 0.4 && round.saved.save && !round.graceOver.save, { saved: round.saved, savedBack: round.savedBack, graceOver: round.graceOver })
   check('A drained ball costs one ball, puts one lamp out and comes back to the lane', round.one.balls === 2 && round.one.lamps.join() === 'true,true,false' && round.ballBack[0] > 0.2 && round.ballBack[2] > 0.4, { one: round.one, ballBack: round.ballBack })
   check('A spare ball falling back into the gutter costs nothing (it was never in play); the next ball lost costs one', round.spare.balls === 2 && round.two.balls === 1 && round.two.lamps.join() === 'true,false,false', { spare: round.spare, two: round.two })
   check('The third ball ends the round: lost fires once, every lamp is out and the end lamp is lit', round.three.balls === 0 && round.three.fired.lost === 1 && !round.three.lamps.some(Boolean) && round.three.over, round.three)
@@ -185,18 +202,23 @@ try {
     const fired = (k) => p.signals()[`pinball/${k}`] ?? 0
     const live = () => p.counters()['pinball/live']
     const out = {}
+    g.graceOver()
     const s0 = g.state().score, all0 = fired('lanes.all')
     const lanes = { a: -0.1325, b: -0.0475, c: 0.0375 }
     out.lit = []
     for (const k of Object.keys(lanes)) {
       // Just above the lane's light, to roll down over it.
       p.place('pinball/ball', [lanes[k], 0.0136, -0.43])
-      p.advance(0.3)
+      // To the step it rolls onto the light (the third completes the set; a bumper below may send it back through later).
+      const n0 = fired(`lane-${k}-zone.enter`)
+      for (let i = 0; i < 40 && fired(`lane-${k}-zone.enter`) === n0; i++) p.advance(1 / 60)
+      p.advance(1 / 60)
       out.lit.push(Object.keys(lanes).map((j) => g.lit(`pinball/lane-${j}`)).join())
     }
     out.lanes = { all: fired('lanes.all') - all0, gained: g.state().score - s0, live: live(), spares: ['ball-2', 'ball-3'].map((id) => +p.thing(`pinball/${id}`).local[2].toFixed(2)) }
     // Three balls in play: one lost is not a ball used, the last one is.
     const b0 = g.state().balls
+    out.grace = g.state().save
     p.place('pinball/ball-2', [-0.1, 0.0136, 0.47])
     p.advance(0.5)
     out.oneOfThree = { balls: g.state().balls, live: live() }
@@ -221,7 +243,7 @@ try {
     out.again = { all: fired('targets.all') - t0.all, balls: g.state().balls - t0.balls }
     return out
   })
-  check('Each top lane lights as a ball rolls through it; the third pays 500 on top of 50 a lane, puts the three out and releases both spare balls onto the field', missions.lit.join(' ') === 'true,false,false true,true,false false,false,false' && missions.lanes.all === 1 && missions.lanes.gained >= 650 && missions.lanes.live === 3 && missions.lanes.spares.every((z) => z < 0.3), missions)
+  check('Each top lane lights as a ball rolls through it; the third pays 500 on top of 50 a lane, puts the three out and releases both spare balls onto the field', missions.lit.join(' ') === 'true,false,false true,true,false false,false,false' && missions.lanes.all === 1 && missions.lanes.gained >= 650 && missions.lanes.live === 3 && !missions.grace && missions.lanes.spares.every((z) => z < 0.3), missions)
   check('With three balls in play, one lost is not a ball used; when the last is lost one ball is used and the next is served to the lane', missions.oneOfThree.balls === missions.allThree.b0 && missions.oneOfThree.live === 2 && missions.allThree.balls === missions.allThree.b0 - 1 && missions.allThree.live === 1 && missions.allThree.served[0] > 0.2 && missions.allThree.served[2] > 0.4, { oneOfThree: missions.oneOfThree, allThree: missions.allThree })
   check('A side target lights when hit; the fourth pays 1000 on top of 30 a target, puts them out and gives one more ball', missions.threeLit === 'true,true,true,false' && missions.targets.all === 1 && missions.targets.gained >= 1120 && missions.targets.balls === 1 && missions.targets.lit === 'false,false,false,false', { threeLit: missions.threeLit, targets: missions.targets })
   check('A second set of targets in the same round pays again but gives no second ball', missions.again.all === 2 && missions.again.balls === 1, missions.again)
@@ -274,7 +296,7 @@ try {
     const floor = { id: 'floor', shape: { kind: 'box', half: [0.3, 0.02, 0.3] }, material: 'maple', at: [0, 0, 0] }
     const ball = { id: 'ball', shape: { kind: 'sphere', radius: 0.03 }, material: 'steel', motion: 'dynamic', at: [0, 0.3, 0] }
     const bulb = { id: 'bulb', shape: { kind: 'sphere', radius: 0.02 }, material: 'glass', at: [0.2, 0.06, 0] }
-    const dropped = () => p.events().filter((e) => e.kind === 'dropped').reduce((a, e) => a + e.signals, 0)
+    const dropped = () => window.dropped
     const out = {}
     // A game that starts itself again the moment it ends, through a counter that counts each start: a loop with no physical cause in it after the first.
     const d0 = dropped()

@@ -37,7 +37,7 @@ const TOYS = [HOUSE, PINBALL, PINBALL_STAND, CANDLE]
 /** Where the view stands to play the table: at its low end, looking down the playfield. */
 /** A turn of the event loop: the page draws and takes input between the steps of starting. */
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.78, PINBALL.frame.at[2] + 1.4), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12) }
+const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.78, PINBALL.frame.at[2] + 1.4), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12), sharp: true }
 
 /** Runs tasks in order, one per turn of the event loop, until `gone`; one that throws is logged and the rest still run. */
 export function oneByOne(gone: () => boolean) {
