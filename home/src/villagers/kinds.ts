@@ -4,6 +4,7 @@ import * as THREE from 'three/webgpu'
 import { color, dot, float, materialEmissive, max, mix, normalView, positionLocal, positionViewDirection, pow, smoothstep, uniform } from 'three/tsl'
 import { canvas, makeNoise, rng, toTexture } from '../paint'
 import type { Figure, Villager } from './rig'
+import { soften } from './soft'
 
 export interface Spec { name: string; bark: string }
 /** Per-villager touches: `accent` is the owner's colour, worn as a scarf where the direction has one. */
@@ -392,6 +393,7 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   if (scarfColour) {
     const wool = plain(scarfColour)
     const scarf = part(pose, mesh(new THREE.TorusGeometry(R * 0.8, 0.024, 10, 28), wool), 0, hip + bodyH * 0.96, 0)
+    scarf.userData.soft = false
     scarf.rotation.x = Math.PI / 2
     scarf.scale.set(1, 0.9, 1)
     const tail = part(pose, mesh(new THREE.CapsuleGeometry(0.024, 0.15, 4, 8), wool), R * 0.42, hip + bodyH * 0.8, R * 0.66)
@@ -410,7 +412,9 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
     part(f, mesh(new THREE.SphereGeometry(0.048, 16, 10), felt(s.felt)), 0, 0.03, 0.02).scale.set(1, 0.65, 1.3)
     return f
   })
-  return { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, stepped: true, outline }
+  const fig: Figure = { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, outline }
+  fig.soft = soften(fig)
+  return fig
 }
 
 // ─── c: paper cutouts ──────────────────────────────────────────────────────

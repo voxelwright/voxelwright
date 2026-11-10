@@ -10,6 +10,7 @@ import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
 import { BLUSH, feltKit as makeKit, wrapCap, type Wrap } from './kit'
 import type { Figure, Villager } from '../rig'
+import { soften } from '../soft'
 import { check } from './build'
 import { awayFromOwners, faceViews, inspect, LIMITS, markAttachment, OWNER_ACCENTS, surfaceContact, type Measures } from './checks'
 import { sewSkin, type surfaceStats } from './skin'
@@ -345,6 +346,8 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     root, pose, head, eyes, feet, hands, height: box('head').max.y, hip, side,
     stride: g.stride, speed: g.speed, bob: g.bob, stepped: g.stepped, outline, touch,
   }
+  // Last, once every check has measured the rigid parts: the felt is skinned to a spine and flop bones (#104).
+  fig.soft = soften(fig)
   const { name, bark, voice } = checked.spec
   return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures, skinMs }
 }

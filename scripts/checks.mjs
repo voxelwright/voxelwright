@@ -53,6 +53,7 @@ export const CHECKS = [
   { name: 'babble', cwd: 'home', run: ['node', 'scripts/check-babble.mjs', '{base}'], needs: 'devServer', seconds: 40 },
   { name: 'themes', cwd: 'home', run: ['node', 'scripts/check-themes.mjs', '{base}'], needs: 'devServer', serial: true, skip: 'fails on main: texture count grows 83 to 91 over five q=high cycles', local: SOFTWARE_GL, seconds: 160 },
   { name: 'villager-gen', cwd: 'home', run: ['node', 'scripts/check-villager-gen.mjs', '{base}'], needs: 'devServer', local: 'its 50 ms bounds miss on a hosted Linux runner (53 ms in one CI run, #89)', seconds: 60 },
+  { name: 'villager-motion', cwd: 'home', run: ['node', 'scripts/check-villager-motion.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 30 },
   { name: 'music', cwd: 'home', run: ['node', 'scripts/check-music.mjs', '{base}'], needs: 'devServer', serial: true, local: SOFTWARE_GL, seconds: 60 },
   { name: 'sound', cwd: 'home', run: ['node', 'scripts/check-sound.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 60 },
   { name: 'sound-lab', cwd: 'home', run: ['node', 'scripts/check-sound-lab.mjs', '{base}'], needs: 'devServer', needsFile: 'home/.sound-lab/manifest.json', local: SOFTWARE_GL, seconds: 20 },
