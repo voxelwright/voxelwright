@@ -31,6 +31,7 @@ try {
     const { KINDS } = await import('/src/villagers/kinds.ts')
     const { Villager } = await import('/src/villagers/rig.ts')
     const { softReport } = await import('/src/villagers/soft.ts')
+    const { theme } = await import('/src/theme/index.ts')
     const eye = new THREE.Vector3(3, 2, 4)
     // The rig glances about at random; held still here, so each run measures the same motion.
     Math.random = () => 0.5
@@ -56,7 +57,10 @@ try {
         if (run.t - t0 < 0.15) gatherMove = v.pos.distanceTo(start), dip = Math.min(dip, fig.pose.scale.y)
       })
       // Walking: planted feet stay put, the spine twists, parts flop.
-      let slide = 0, twist = 0, chest = 0, flop = 0, arm = 0, steps = 0
+      let slide = 0, twist = 0, chest = 0, flop = 0, arm = 0, steps = 0, bent = 0, frame = 0
+      const body = []
+      fig.pose.traverse((o) => { if (o.isSkinnedMesh && o.geometry.getAttribute('position').count > 300) body.push(o) })
+      const rest = new THREE.Vector3(), now = new THREE.Vector3()
       const last = [new THREE.Vector3(), new THREE.Vector3()], down = [false, false]
       run(3, 1 / 60, () => {
         if (v.state !== 'walk' || v.walk < 0.9) return void (down[0] = down[1] = false)
@@ -72,16 +76,49 @@ try {
         chest = Math.max(chest, Math.abs(fig.soft.chest.rotation.y))
         flop = Math.max(flop, flopAngle())
         arm = Math.max(arm, Math.abs(fig.hands[0].position.z - fig.hands[0].userData.rest.z))
+        // The felt itself: how far skinning carries a body vertex from where a rigid body would hold it (every 6th frame).
+        if (frame++ % 6) return
+        fig.root.updateMatrixWorld(true)
+        fig.soft.skeleton.update()
+        const m = body[0], pos = m.geometry.getAttribute('position')
+        for (let n = 0; n < pos.count; n += 7) bent = Math.max(bent, m.getVertexPosition(n, now).applyMatrix4(m.matrixWorld).distanceTo(rest.fromBufferAttribute(pos, n).applyMatrix4(m.matrixWorld)))
       })
+      // Stopped by the person mid-walk and let go again: it gathers once more before going on.
+      v.chosen = true
+      run(1.5, 1 / 60)
+      const held = v.pos.clone()
+      v.chosen = false
+      let dip2 = 1, move2 = 0
+      run(0.15, 1 / 60, () => (move2 = v.pos.distanceTo(held), dip2 = Math.min(dip2, fig.pose.scale.y)))
       const walkedFinite = finite()
       // Arrived and standing a while: everything settles.
       while (v.state === 'walk' && run.t < 60) run(0.5, 1 / 60)
       run(2.5, 1 / 60)
       const settled = { state: v.state, flop: flopAngle(), spine: Math.abs(fig.soft.waist.rotation.x) + Math.abs(fig.soft.chest.rotation.y), twist: Math.abs(fig.pose.rotation.y) }
       // Long frames (a busy machine), through another walk: nothing blows up, and no flop folds back on itself.
-      let wild = 0
-      run(12, 0.05, () => (wild = Math.max(wild, flopAngle())))
-      out.push({ name: fig.root.name, report, dip, gatherMove, slide, steps, twist, chest, flop, arm, settled, wild, finite: walkedFinite && finite() })
+      let wild = 0, lift = 0, lean = 0, pinned = 0, ticks = 0
+      const waistY = fig.soft.waist.userData.y
+      const strain = () => {
+        wild = Math.max(wild, flopAngle())
+        const up = Math.abs(fig.soft.waist.position.y - waistY)
+        lift = Math.max(lift, up)
+        // A spring that has run away sits on its limit; one that holds only touches it now and then.
+        ticks++
+        if (up > 0.0149) pinned++
+        lean = Math.max(lean, Math.abs(fig.soft.waist.rotation.x), Math.abs(fig.soft.chest.rotation.z), Math.abs(fig.soft.chest.rotation.y))
+      }
+      run(12, 0.05, strain)
+      // A look drawn at 4 poses a second (the slowest a theme may ask for): the springs still hold.
+      theme().motion.characterFps = 4
+      run(12, 1 / 60, strain)
+      const twosFinite = finite() && Number.isFinite(lift)
+      delete theme().motion.characterFps
+      // One that appears already seated starts at rest: no jump of the belly on its first frame.
+      const sitter = KINDS.b.build(i, false, {})
+      const seated = new Villager(sitter, [{ spot: 'seatMid', stay: 20 }], { start: 'seatMid', seated: true })
+      seated.update(1 / 60, 0.1, eye)
+      const jump = Math.abs(sitter.soft.waist.position.y - sitter.soft.waist.userData.y)
+      out.push({ name: fig.root.name, report, dip, gatherMove, bent, dip2, move2, lift, lean, pinned: pinned / ticks, twosFinite, jump, bodyMeshes: body.length, slide, steps, twist, chest, flop, arm, settled, wild, finite: walkedFinite && finite() })
     }
     return out
   })
@@ -91,9 +128,13 @@ try {
     check(`${p.name}: every vertex's weights sum to 1, and skinning moves no vertex at rest`, r && r.weightError < 1e-5 && r.restError < 1e-5, r)
     check(`${p.name}: setting off, it gathers first (squashes below 0.97 while moving under 1 cm in the first 0.15 s)`, p.dip < 0.97 && p.gatherMove < 0.01, { dip: p.dip, move: p.gatherMove })
     check(`${p.name}: walking, a planted foot never slides (under 0.1 mm a frame over ${p.steps} steps)`, p.steps >= 4 && p.slide < 1e-4, { slide: p.slide, steps: p.steps })
-    check(`${p.name}: walking, the hips twist, the chest answers, the arms swing and the floppy parts trail`, p.twist > 0.1 && p.chest > 0.05 && p.arm > 0.04 && p.flop > 0.03, { twist: p.twist, chest: p.chest, arm: p.arm, flop: p.flop })
+    check(`${p.name}: walking, the hips twist and the chest answers`, p.twist > 0.08 && p.chest > 0.05, { twist: p.twist, chest: p.chest })
+    check(`${p.name}: walking, the arms swing over 6 cm (the rigid rig's most was 4.3) and the floppy parts trail`, p.arm > 0.06 && p.flop > 0.03, { arm: p.arm, flop: p.flop })
+    check(`${p.name}: walking, the body's felt bends: skinning carries a vertex over 5 mm (and under 15 cm) from where a rigid body would hold it`, p.bodyMeshes >= 1 && p.bent > 0.005 && p.bent < 0.15, { bent: p.bent })
+    check(`${p.name}: stopped by the person mid-walk and let go, it gathers again before going on`, p.dip2 < 0.97 && p.move2 < 0.01, { dip: p.dip2, move: p.move2 })
     check(`${p.name}: at its chore 2.5 s after arriving, the walk's twist is gone and the floppy parts only sway with the work (under 0.12 rad)`, p.settled.state !== 'walk' && p.settled.flop < 0.12 && p.settled.twist < 0.01, p.settled)
-    check(`${p.name}: at 20 frames a second everything stays finite and no flop bends past 0.8 rad`, p.finite && p.wild < 0.8, { finite: p.finite, wild: p.wild })
+    check(`${p.name}: at 20 frames a second, and drawn at 4 poses a second, everything stays finite, no flop bends past 0.8 rad, the spine never turns past 0.5 rad, and the belly is off its limit nine frames in ten`, p.finite && p.twosFinite && p.wild < 0.8 && p.lean < 0.5 && p.lift <= 0.0301 && p.pinned < 0.1, { finite: p.finite, twos: p.twosFinite, wild: p.wild, lean: p.lean, lift: p.lift, pinned: p.pinned })
+    check(`${p.name}: appearing already seated, its belly does not jump on the first frame`, p.jump < 1e-4, { jump: p.jump })
   }
 
   // Generated villagers (#47): a model-written body, the trusted kit and the sewn skin, softened by the same code.

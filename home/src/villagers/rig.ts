@@ -55,15 +55,24 @@ const pawsAt = new THREE.Vector3()
 
 interface Foot { world: THREE.Vector3; from: THREE.Vector3; swing: boolean; settle: number }
 
-/** A damped spring chasing a target: under-damped, so what it drives overshoots and settles. */
+/**
+ * A damped spring chasing a target: under-damped, so what it drives overshoots and settles. It starts on its
+ * first target (no jump as a villager appears) and steps at 60 a second or finer, so a long frame or a look
+ * drawn on twos (dt up to a quarter second) cannot blow it up.
+ */
 class Spring {
-  x = 0
+  x = NaN
   v = 0
   constructor(private hz: number, private damping: number) {}
   step(target: number, dt: number) {
+    if (Number.isNaN(this.x)) this.x = target
     const w = 2 * Math.PI * this.hz
-    this.v += (w * w * (target - this.x) - 2 * this.damping * w * this.v) * dt
-    this.x += this.v * dt
+    const steps = Math.max(1, Math.ceil(dt * 60 - 1e-6))
+    const h = dt / steps
+    for (let n = 0; n < steps; n++) {
+      this.v += (w * w * (target - this.x) - 2 * this.damping * w * this.v) * h
+      this.x += this.v * h
+    }
     return this.x
   }
 }
@@ -506,14 +515,14 @@ export class Villager {
     if (soft) {
       const gather = this.state === 'walk' && this.windU < 1 ? Math.sin(Math.PI * this.windU) : 0
       // The hips lead; waist and chest trail the acceleration and swing back past upright as it stops.
-      const trail = this.trail.step(THREE.MathUtils.clamp(-this.accel * 0.16, -0.3, 0.3), dt)
+      const trail = this.trail.step(THREE.MathUtils.clamp(-this.accel * 0.09, -0.18, 0.18), dt)
       const sway = this.sway.step(THREE.MathUtils.clamp(-this.yawRate * 0.1, -0.25, 0.25) * Math.min(1, w * 1.5), dt)
       // The belly keeps going when the hips stop: it chases the hips' height on a spring.
       const drop = y - 0.5 * fig.height * (1 - sy)
       const belly = this.bounce.step(drop, dt) - drop
       // The step: hips swing the stepping side forward and shift over the standing foot; the chest answers the other way.
       const swing = Math.sin(2 * Math.PI * p) * w
-      const twist = 0.2 * swing
+      const twist = 0.13 * swing
       const shift = fig.side * 0.55 * swing
       sy *= 1 - 0.1 * gather
       const wide = 1 + (1 - sy) * 0.55
@@ -521,13 +530,13 @@ export class Villager {
       pose.rotation.set(lean * 0.3 - 0.1 * gather, twist, roll * 0.5)
       pose.scale.set(wide, sy, wide)
       const breath = Math.sin(t * 2.1) * (1 - w)
-      soft.waist.rotation.set(lean * 0.4 + trail * 0.5, -twist * 1.3, roll * 0.3 + sway * 0.5)
+      soft.waist.rotation.set(lean * 0.4 + trail * 0.5, -twist, roll * 0.3 + sway * 0.5)
       soft.waist.position.y = (soft.waist.userData.y ??= soft.waist.position.y) + THREE.MathUtils.clamp(belly, -0.03, 0.03) * 0.5
       soft.waist.scale.setScalar(1 + 0.01 * breath)
-      soft.chest.rotation.set(lean * 0.3 + trail * 0.5 + 0.02 * breath, -twist * 0.9 + sway * -0.3, roll * 0.2 + sway * 0.5)
+      soft.chest.rotation.set(lean * 0.3 + trail * 0.5 + 0.02 * breath, -twist * 0.8 - sway * 0.3, roll * 0.2 + sway * 0.5)
       soft.chest.position.y = (soft.chest.userData.y ??= soft.chest.position.y) + THREE.MathUtils.clamp(belly, -0.03, 0.03) * 0.5
       soft.chest.scale.setScalar(1 + 0.018 * breath)
-      spineYaw = twist - twist * 1.3 - twist * 0.9 - sway * 0.3
+      spineYaw = twist - twist - twist * 0.8 - sway * 0.3
       spinePitch = lean + trail - 0.1 * gather
     } else {
       pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
@@ -606,16 +615,16 @@ export class Villager {
       }
       // Stepped at 60 a second or finer, so a long frame (or a look drawn on twos) cannot blow the spring up.
       const w = 2 * Math.PI * f.hz
-      const steps = Math.ceil(dt * 60 - 1e-6)
+      const steps = Math.max(1, Math.ceil(dt * 60 - 1e-6))
       const h = dt / steps
       for (let n = 0; n < steps; n++) {
         f.vel.addScaledVector(restDir.copy(tipWorld).sub(f.at), w * w * h).multiplyScalar(1 - 2 * 0.22 * w * h)
         f.at.addScaledVector(f.vel, h)
       }
-      // A tip never trails further than half its own length (a hop, a teleport, a long frame): felt bends, it does not fold back.
+      // A tip never trails further than 0.4 of its own length (a hop, a teleport, a long frame): felt bends, it does not fold back.
       tipWorld.copy(f.tip)
       f.parent.localToWorld(tipWorld)
-      const reach = f.length * this.k * 0.5
+      const reach = f.length * this.k * 0.4
       if (f.at.distanceTo(tipWorld) > reach) f.at.sub(tipWorld).setLength(reach).add(tipWorld), f.vel.multiplyScalar(0.5)
       nowDir.copy(f.at)
       f.parent.worldToLocal(nowDir)

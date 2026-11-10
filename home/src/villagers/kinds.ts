@@ -412,6 +412,8 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
     part(f, mesh(new THREE.SphereGeometry(0.048, 16, 10), felt(s.felt)), 0, 0.03, 0.02).scale.set(1, 0.65, 1.3)
     return f
   })
+  // Not `stepped` (#104): a soft body's springs and follow-through need every frame; on twos they read as jitter.
+  // A look can still ask for twos (theme motion.characterFps).
   const fig: Figure = { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, outline }
   fig.soft = soften(fig)
   return fig

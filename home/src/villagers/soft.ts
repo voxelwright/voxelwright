@@ -35,6 +35,8 @@ export interface Soft {
 }
 
 const MAX_FLOPS = 6
+/** How many of a slot's largest patches are looked at when joining patches into parts. */
+const MAX_MERGE = 48
 /** Where a part starts to count as standing clear of the core, in core radii, and where it is fully the flop's. */
 const CLEAR = 1.1
 const smooth = (a: number, b: number, x: number) => {
@@ -126,8 +128,10 @@ function clusters(pieces: Piece[]): Cluster[] {
     c.centre.set(0, 0, 0)
     for (const { piece, i } of c.points) c.centre.add(piece.at[i])
     c.centre.divideScalar(c.points.length)
-    c.radius = Math.max(...c.points.map(({ piece, i }) => piece.at[i].distanceTo(c.centre)))
+    c.radius = c.points.reduce((r, { piece, i }) => Math.max(r, piece.at[i].distanceTo(c.centre)), 0)
   }
+  // Only the largest patches can become flops (MAX_FLOPS of them): a coat of a thousand spikes is not merged pair by pair.
+  found.sort((a, b) => b.points.length - a.points.length).splice(MAX_MERGE)
   found.forEach(settle)
   // Join patches that are the same thing: an ear and its lining, the strands of one tuft, a sphere's seam.
   for (let merged = true; merged; ) {
@@ -258,7 +262,7 @@ export function soften(fig: Figure): Soft | null {
     if (slot === 'head' && !piece.group.some((g) => g >= 0)) return null
     // An arm: the end nearest the body stays on the chest, the far end goes with the hand.
     const reach = typeof slot === 'number' ? piece.at.map((q) => Math.hypot(q.x, q.z)) : []
-    const near = Math.min(...reach), far = Math.max(...reach)
+    const near = reach.reduce((a, b) => Math.min(a, b), Infinity), far = reach.reduce((a, b) => Math.max(a, b), -Infinity)
     const index = new Uint16Array(n * 4)
     const weight = new Float32Array(n * 4)
     for (let i = 0; i < n; i++) {

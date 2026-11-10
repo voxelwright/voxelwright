@@ -580,7 +580,8 @@ export default {
       const checked = validate(result.data)
       if ('reason' in checked) throw new Error(`rejected: ${checked.reason}`)
       // Saved round-1 results predate assemble's look checks, so a replay skips them; live results must pass.
-      const a = assemble(checked.prop, result.data, phys, accent, seed, !FROM, undefined, undefined, undefined, role)
+      // The bench shows a puppet with its own motion and grows each piece in by scale: its felt stays unskinned (../soft.ts).
+      const a = assemble(checked.prop, result.data, phys, accent, seed, !FROM, undefined, undefined, undefined, role, undefined, undefined, false)
       // The kit notes the role whose mark it sewed ("kit: keeper's mark, …"), for the checks.
       lastMark = a.fixes.map((f) => /^kit: (\w+)'s mark/.exec(f)?.[1]).find(Boolean) ?? null
       return { fig: a.fig, name: a.about.name, role: a.about.role as string, bark: a.about.bark, voice: a.about.voice as VoiceProfile | null, persona: field(field(field(result.data, 'villager'), 'about'), 'persona') }
