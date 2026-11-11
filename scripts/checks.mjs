@@ -53,6 +53,7 @@ export const CHECKS = [
   { name: 'street-two', cwd: 'street', run: ['node', 'test/two.ts', '--delays', '0'], serial: true, local: SOFTWARE_GL, seconds: 60 },
   { name: 'street-make', cwd: 'street', run: ['node', 'test/make.ts'], serial: true, local: SOFTWARE_GL, seconds: 60 },
   { name: 'street-agent', cwd: 'street', run: ['node', 'test/agent.ts'], serial: true, local: SOFTWARE_GL, seconds: 60 },
+  { name: 'street-door', cwd: 'street', run: ['node', 'test/door.ts'], serial: true, local: SOFTWARE_GL, seconds: 90 },
 
   // Home, a page on the shared dev server
   { name: 'kernel', cwd: 'home', run: ['node', 'scripts/check-kernel.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 30 },

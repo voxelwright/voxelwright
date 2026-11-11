@@ -40,6 +40,9 @@ export interface House {
   door: string
 }
 
+/** The number of the house whose door is the way into the home (server.ts is told the home's address): the first on the sunny side. */
+export const HOME = 102
+
 /** A small repeatable shuffle: the same house for the same numbers on every machine. */
 const pick = (a: number, b: number, of: number) => (((a * 7919 + b * 104729 + 13) * 2654435761) >>> 0) % of
 
@@ -88,6 +91,8 @@ export function housePieces(h: House, fine = true): Piece[] {
   const doorZ = -down * (half - 0.8 - 0.5), doorFoot = ground(doorZ) - 0.12, doorTop = doorFoot + 2.3
   pieces.push(box([0.02, (doorTop - doorFoot) / 2 + 0.26, 0.68], [0.045, (doorTop + doorFoot) / 2 + 0.26, doorZ], TRIM), box([0.02, (doorTop - doorFoot) / 2, 0.5], [0.065, (doorTop + doorFoot) / 2, doorZ], h.door), box([0.02, 0.15, 0.5], [0.065, doorTop + 0.24, doorZ], GLASS))
   if (fine) pieces.push(box([0.025, 0.03, 0.03], [0.09, doorFoot + 1.1, doorZ + down * 0.36], '#e3c26a'))
+  // The home's own door has a lantern beside it and a mat before it.
+  if (fine && h.number === HOME) pieces.push(box([0.07, 0.11, 0.07], [0.12, doorFoot + 1.95, doorZ - down * 0.95], '#ffd27a'), box([0.09, 0.025, 0.09], [0.12, doorFoot + 2.085, doorZ - down * 0.95], '#2c3438'), box([0.3, 0.012, 0.45], [0.4, ground(doorZ) + 0.012, doorZ], '#8c5a3c'))
 
   /** A window on a face that looks at the street: its frame, its glass, and a sill when seen from near. */
   const window = (x: number, y: number, z: number, wide: number, tall: number) => {
@@ -126,6 +131,12 @@ export function housePieces(h: House, fine = true): Piece[] {
 
 /** Where a house's own frame stands in the world: at its front's middle, on its floor, facing the street. */
 export const houseFrame = (h: House, across = 0) => ({ at: [r(across + h.side * FRONT), r(planeAt(h.z0)), r(h.z0 + LOT / 2)] as Vec3, yaw: h.side > 0 ? Math.PI : 0, tilt: 0 })
+
+/** Where a house's door is, on the pavement a step out from it: a place to stand, in the world. */
+export function doorOf(h: House): Vec3 {
+  const z = h.z0 + 1.32
+  return [r(h.side * (FRONT - 0.85)), r(planeAt(z)), r(z)]
+}
 
 /** A house of the block as a toy: one still part. */
 export function houseToy(h: House): ToySpec {

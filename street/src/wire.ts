@@ -40,6 +40,8 @@ export type Ask =
   | { t: 'unmake' }
   /** Back to where residents arrive. */
   | { t: 'top' }
+  /** Stand me at the home's door (I have just come out of it). */
+  | { t: 'door' }
   /** What this resident is called. */
   | { t: 'name'; text: string }
   /** A key for an agent of mine to sit down with. */

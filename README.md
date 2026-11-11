@@ -45,6 +45,8 @@ cd host && npm install && npm run villager
 # The street: a shared block on the engine's World, in its own process. http://localhost:5318
 # (needs home/node_modules; no sign-in, so it listens on this machine unless told a tailnet address)
 cd street && npm install && npm run world    # and in another terminal: npm run page
+# The home's door on the street: tell the world where the home is, and No. 102's door leads there and back.
+cd street && npm run world -- --home http://localhost:5183/
 
 # The Elder: writes a candidate under ~/.village/candidates/
 cd host && npm run elder -- "put a small radio on the windowsill"

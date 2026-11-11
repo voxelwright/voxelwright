@@ -79,6 +79,13 @@ Round it the page alone draws the land (`client/place.ts`): the hill carried on 
 and down to the bay, streets and rows of the same houses along them, a red bridge and the
 hills across the water. Nothing can go there yet. `?land=0` leaves it out.
 
+One house is the way into the home: No. 102, the first on the sunny side, with a lantern by
+its door. Start the world with `--home <the home's address>` and whoever stands at that door
+is offered "Go inside" (F, or a tap). The page becomes the home, which is told where the
+street is and shows a round door button to come back out; coming out, you stand at the door.
+The home believes a street's address only on its own host name. With no `--home` the door is
+only a door.
+
 ## Checks
 
 ```sh
@@ -88,6 +95,7 @@ npm run push -- --delays 0,50,100           # walking into a crate, three worlds
 node test/make.ts                           # making end to end with a stand-in maker
 node test/clear.mjs [lab.json]              # a made thing asked for at a house front, a tree or an end stands in the open
 node test/agent.ts                          # an agent's seat, with a plain MCP client as the agent
+node test/door.ts [pictures/]               # in through the home's door and back out (starts the home's dev server too)
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:
 node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence

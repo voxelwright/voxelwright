@@ -171,6 +171,7 @@ addEventListener('keydown', (e) => {
   // Typing a sentence is not walking; Enter goes to the sentence, Escape back to the street.
   if (e.target === words) { if (e.code === 'Escape') words.blur(); return }
   if (e.code === 'Enter') { words.focus(); e.preventDefault(); return }
+  if (e.code === 'KeyF' && !doorButton.hidden) { goInside(); return }
   if (e.code === 'Space' && !e.repeat) jump = true
   held.add(e.code)
   if (['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault()
@@ -201,11 +202,27 @@ function sample(): Input {
   return input
 }
 
+// ---- the door home
+/** Where the home is and where its door stands on the street, when the world process was told (`--home`). */
+interface HomeDoor { url: string; door: Vec3 }
+let homeDoor = null as HomeDoor | null
+const doorButton = document.getElementById('door') as HTMLButtonElement
+/** Through the door: the picture goes to warm light, then the home opens, told where the street is so it can show the way back. */
+function goInside() {
+  if (!homeDoor) return
+  const to = new URL(homeDoor.url)
+  to.searchParams.set('street', location.origin + location.pathname)
+  document.getElementById('fade')!.classList.add('on')
+  setTimeout(() => { location.href = to.href }, 450)
+}
+doorButton.onclick = goInside
+
 // ---- the wire
 /** Sits down, or says on the page why not: a phone has no console to read. */
 async function connect() {
   if (typeof WebTransport !== 'function') throw new Error('this browser has no WebTransport')
-  const where = await (await fetch('/where')).json() as { port: number; hash: number[] }
+  const where = await (await fetch('/where')).json() as { port: number; hash: number[]; home?: HomeDoor }
+  homeDoor = where.home ?? null
   const host = location.hostname === 'localhost' ? '127.0.0.1' : location.hostname
   const url = `https://${host}:${params.get('port') ?? where.port}/street`
   hud.textContent = `finding the street at ${url}…`
@@ -301,6 +318,9 @@ void (async () => {
         release()
         you = line.you
         me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
+        // Coming out of the home, you stand at its door, under its lantern.
+        if (params.get('from') === 'home' && homeDoor) ask({ t: 'door' })
+        if (homeDoor) scene.add(Object.assign(new THREE.PointLight('#ffc98a', 9, 6, 1.6), { position: new THREE.Vector3(homeDoor.door[0] + 0.5 * Math.sign(homeDoor.door[0]), homeDoor.door[1] + 2, homeDoor.door[2] - 0.9) }))
       } else if (line.t === 'add') build(line.drawn)
       else if (line.t === 'remove') remove(line.toy)
       else told(line)
@@ -395,6 +415,7 @@ function frame(now: number) {
     camera.lookAt(mine.shown.x - bx * past, mine.shown.y + 1 + 0.2 * (1 - boom), mine.shown.z - bz * past)
     focusOn(camera.position.distanceTo(mine.shown), 0.3, LENS)
   }
+  if (homeDoor && mine) doorButton.hidden = Math.hypot(mine.shown.x - homeDoor.door[0], mine.shown.z - homeDoor.door[2]) > 1.7
   // The stage draws after this; names are placed with the camera as it now stands.
   camera.updateMatrixWorld()
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert()

@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { makeCert } from './cert.ts'
 import { Agents, type Outcome, type StreetEvent } from './agents.ts'
 import { Block, FLOOR } from './block.ts'
+import { doorOf, houseAt } from './houses.ts'
 import { checkMade, claudeMaker, clear, make, makePrompt, plotFor, settles, stubMaker, type Maker } from './make.ts'
 import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Ask, type Line } from './wire.ts'
 
@@ -30,6 +31,10 @@ const text1 = (name: string) => all(name)[0]
 const makerName = text1('maker')
 const maker: Maker | null = !makerName ? null : makerName === 'stub' ? stubMaker() : claudeMaker(makerName)
 const dir = text1('world') === 'none' ? undefined : text1('world') ?? join(homedir(), '.village', 'street')
+/** Where the home is (`--home <address>`): one house's door on the block leads there. With none, that door is only a door. */
+const home = text1('home')
+if (home && !/^https?:\/\//.test(home)) throw new Error('--home takes the home\'s address, such as http://localhost:5183/')
+const HOME_DOOR = doorOf(houseAt(0, 1))
 /** Sentences being made into things right now, over every seat; and how long a seat waits between its own. */
 const MAKING = { most: 3, restMs: 2000, text: 200 }
 let making = 0
@@ -175,6 +180,7 @@ function asked(seat: Seat, ask: Ask) {
   if (ask.t === 'make') void makeFor(seat.id, plain(ask.text), Number(ask.yaw)).then((out) => { if (out.quiet) say(seat, { t: 'made', by: seat.id, ok: false, say: out.say }) })
   else if (ask.t === 'say') sayFor(seat.id, ask.text)
   else if (ask.t === 'top') sim.top(seat.id)
+  else if (ask.t === 'door') sim.stand(seat.id, HOME_DOOR)
   else if (ask.t === 'unmake') unmakeFor(seat.id)
   else if (ask.t === 'name') { const name = plain(ask.text, 24); if (name && sim.rename(seat.id, name)) everyone({ t: 'named', by: seat.id, name }) }
   else if (ask.t === 'key') {
@@ -327,7 +333,7 @@ createServer((req, res) => {
   if (req.url?.startsWith('/.well-known/')) { res.statusCode = 404; return res.end() }
   res.setHeader('content-type', 'application/json')
   res.setHeader('cache-control', 'no-store')
-  if (req.url === '/where') return res.end(JSON.stringify({ port, hash }))
+  if (req.url === '/where') return res.end(JSON.stringify({ port, hash, ...(home ? { home: { url: home, door: HOME_DOOR } } : {}) }))
   if (req.url === '/stats') return res.end(JSON.stringify({ tick: sim.tick, awake: sim.awake(), stepMs: spread(sim.stepMs), lateMs: spread(late), seats: rates, load1: +loadavg()[0].toFixed(1) }))
   res.statusCode = 404
   res.end('{}')

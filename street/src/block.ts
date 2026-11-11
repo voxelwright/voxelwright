@@ -8,7 +8,7 @@ import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
 import { HOUSES } from './houses.ts'
 import { BINS, FURNITURE, STREET, cargo, registerBlock, resident } from './scene.ts'
-import { TICK, type Input } from './walk.ts'
+import { NORMAL_UP, TICK, standing, type Input } from './walk.ts'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { checkToy, type ToySpec } from '../../home/src/engine/toy.ts'
@@ -146,6 +146,12 @@ export class Block {
     const seat = this.seats.get(id)
     const spec = seat && this.specs.get(seat.toy)
     if (seat && spec) this.world.moveTo(seat.body, spec.frame.at, [0, 0, 0])
+  }
+
+  /** Stands a seat at a place on the street, still. */
+  stand(id: number, at: Vec3) {
+    const seat = this.seats.get(id)
+    if (seat) this.world.moveTo(seat.body, [at[0], at[1] + standing(NORMAL_UP), at[2]], [0, 0, 0])
   }
 
   /** Builds a toy and gives each of its moving parts a number for the wire. */
