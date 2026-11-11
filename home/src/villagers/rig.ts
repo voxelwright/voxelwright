@@ -306,10 +306,12 @@ export class Villager {
     if (this.state === 'walk' && this.curve) {
       const remaining = this.len - this.s
       const stop = this.chosen || this.blocked || this.paused
-      // From rest it gathers itself first: a short crouch, then off.
+      // From rest it gathers itself first: a short crouch, then off. Not after being blocked (waiting for someone, or
+      // held back by a chair it leans on): it goes on at once. Gathering again there left a held walker standing for
+      // good: the hold lets go for 0.2 s at a time, and the gather used it up.
       const gather = !stop && this.windU < 1 && Boolean(this.fig.soft)
       if (gather) this.windU = Math.min(1, this.windU + dt / 0.22)
-      else if (stop && this.v < 0.01) this.windU = 0
+      else if ((this.chosen || this.paused) && this.v < 0.01) this.windU = 0
       // Sent for by the person, it hurries.
       const cap = stop || (gather && this.windU < 0.75) ? 0 : Math.min(fig.speed * this.k * (this.held ? 1.7 : 1), Math.sqrt(2 * 1.2 * remaining) + 0.04)
       const accel = stop ? 3 : 1.4
