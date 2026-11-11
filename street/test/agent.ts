@@ -51,6 +51,8 @@ try {
   check('it arrives with a name the page reads over its head', !arrived.error && Object.values(names).includes('Ada') && Object.values(names).includes('Pat'), { arrived: arrived.value?.you, names })
   const look = await ada('look')
   check('it is told where it is, who is here and what is loose', look.value.you?.where === 'on the road' && look.value.you.at[1] < -20 && look.value.residents.some((r: { name: string }) => r.name === 'Pat') && /24 wooden crates/.test(look.value.loose), look.value)
+  const still = (look.value.street ?? []) as { what: string; at: [number, number]; away: number }[]
+  check('it is told what stands on the street: sixteen houses, lamps and trees, nearest first', still.filter((x) => /^No\. \d+, a .+ house$/.test(x.what)).length === 16 && still.some((x) => x.what === 'a street lamp') && still.some((x) => x.what === 'a tree') && still.every((x, n) => n === 0 || x.away >= still[n - 1].away), still.slice(0, 4))
 
   const walked = await ada('walk_to', { x: 5, z: -18 })
   const at = walked.value.you?.at ?? [0, 0]

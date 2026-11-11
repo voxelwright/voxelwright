@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { makeCert } from './cert.ts'
 import { Agents, type Outcome, type StreetEvent } from './agents.ts'
 import { Block, FLOOR } from './block.ts'
-import { checkMade, claudeMaker, make, makePrompt, plotFor, settles, stubMaker, type Maker } from './make.ts'
+import { checkMade, claudeMaker, clear, make, makePrompt, plotFor, settles, stubMaker, type Maker } from './make.ts'
 import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Ask, type Line } from './wire.ts'
 
 const args = process.argv.slice(2)
@@ -127,12 +127,14 @@ async function makeFor(by: number, sentence: string, yaw: number): Promise<Outco
   making++
   everyone({ t: 'making', by, text: sentence, at: plot.at })
   try {
-    const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000))
+    const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000), [self.p])
     console.log(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: ${'toy' in result ? `${result.toy.id} (${result.toy.label})` : 'reason' in result ? `refused, ${result.reason}` : 'no thing'}; ${tries} ${tries === 1 ? 'try' : 'tries'}, ${calls.map((c) => c.models.join('+')).join(', ')}`)
     if ('reason' in result) return failed(`That didn't come out right (${result.reason}).`)
     if (!('toy' in result)) { everyone({ t: 'made', by, ok: true, say: result.say }); return { ok: true, say: result.say } }
-    // The asker may have left while it was being made.
-    if (!sim.self(by)) return { ok: false, say: 'You left before it arrived.' }
+    // The asker may have left while it was being made, or walked to where it was going to stand.
+    const now = sim.self(by)
+    if (!now) return { ok: false, say: 'You left before it arrived.' }
+    clear(result.toy, [now.p])
     return placeFor(by, { ...result.toy, id: sim.nextMade() }, sentence, result.say)
   } catch (e) {
     console.error(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: failed, ${e instanceof Error ? e.message : e}`)
@@ -153,7 +155,7 @@ function buildFor(by: number, answer: unknown, yaw: number): Outcome {
   let raw: string
   try { raw = JSON.stringify(answer) } catch { return { ok: false, say: 'That was not data.' } }
   if (raw.length > 60_000) return { ok: false, say: 'That is too much for one thing.' }
-  const result = checkMade(raw, plotFor(self.p, yaw), sim.nextMade())
+  const result = checkMade(raw, plotFor(self.p, yaw), sim.nextMade(), [self.p])
   if ('reason' in result) return { ok: false, say: `It cannot be built: ${result.reason}.` }
   if (!('toy' in result)) return { ok: false, say: 'There was no toy in that.' }
   const why = settles(result.toy)

@@ -144,6 +144,12 @@ export const FURNITURE: ToySpec = {
   ],
 }
 
+/** Where the still things on the pavements stand, as rounds on the ground: across, along (world z), how wide, and from what height up (a tree's crown starts over a head). A made thing is stood clear of them. */
+export const STANDING: { x: number; z: number; r: number; from: number }[] = FURNITURE.parts.flatMap((p) => {
+  const round = (r: number, from = 0) => ({ x: p.at[0], z: p.at[2], r, from })
+  return p.id.startsWith('tree') ? [round(0.2), round(1.35, 1.9)] : p.id.startsWith('lamp') || p.id === 'hydrant' ? [round(0.2)] : p.id === 'letter-box' ? [round(0.4)] : []
+})
+
 /** Two steel bins on the pavements that anything can knock over and send down the hill. */
 export const BINS: ToySpec = {
   id: 'bins', label: 'Bins', frame, gadgets: [], wires: [], inputs: {},

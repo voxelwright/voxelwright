@@ -12,7 +12,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod'
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import type { Seen } from './block.ts'
-import { HALF_L, HALF_W, NORMAL, TRENCH, heightAt, overTrench, planeAt } from './ground.ts'
+import { HALF_L, HALF_W, NORMAL, ROAD, TRENCH, heightAt, overTrench, planeAt } from './ground.ts'
+import { FRONT } from './houses.ts'
 import { standing } from './walk.ts'
 import type { Self } from './wire.ts'
 
@@ -48,7 +49,7 @@ const ARRIVED = 0.45
 const r1 = (v: number) => Math.round(v * 10) / 10
 
 const ABOUT = [
-  `The Block is a street ${HALF_W * 2} m wide (x from ${-HALF_W} to ${HALF_W}) and ${HALF_L * 2} m long (z from ${-HALF_L} to ${HALF_L}), sloping gently down towards +z. Everything is physical: things fall, roll, stack and can be pushed.`,
+  `The Block is one block of a hill street in San Francisco, ${HALF_L * 2} m long (z from ${-HALF_L} to ${HALF_L}), sloping down towards +z and the bay. A roadway (x from ${-ROAD} to ${ROAD}) runs between two pavements; a row of eight painted houses stands along each side, their fronts at x = ${-r1(FRONT)} and ${r1(FRONT)}, and striped barriers close each end. Lamps and trees stand on the pavements. Everything is physical: things fall, roll, stack and can be pushed.`,
   `A trench ${TRENCH.depth} m deep crosses the whole street from z = ${r1(TRENCH.from / Math.hypot(1, 0.14))} to z = ${r1(TRENCH.to / Math.hypot(1, 0.14))}: too wide to jump (a resident jumps about 4 m) and too deep to climb out of (they jump 1.1 m high and step up 0.45 m).`,
   'Residents arrive at the top, near z = -26. People and agents share the street; each can say things, and make things appear by describing them.',
 ].join(' ')
@@ -156,6 +157,8 @@ export class Agents {
         residents: seen.residents.filter((r) => r.id !== seat).map((r) => ({ name: r.name, at: [r1(r.at[0]), r1(r.at[2])], away: away(r.at) })),
         things: seen.things.map((t) => ({ id: t.id, what: t.what, askedFor: t.askedFor, by: t.by, at: [r1(t.at[0]), r1(t.at[2])], height: r1(t.at[1] - planeAt(t.at[2])), size: t.size, material: t.material, moves: t.moves, away: away(t.at) })),
         loose: `${seen.loose.crates} wooden crates stacked in walls across the upper street and ${seen.loose.balls} rubber balls rolling down it`,
+        // What nobody made, nearest first: houses are given at the middle of their fronts.
+        street: seen.still.map((s) => ({ what: s.what, at: [r1(s.at[0]), r1(s.at[2])], away: away(s.at) })).sort((a, b) => a.away - b.away),
         heard: (await street.events(-1, 0)).filter((e) => e.kind === 'said').slice(-6).map((e) => `${e.who}: ${e.text}`),
       }
     }))

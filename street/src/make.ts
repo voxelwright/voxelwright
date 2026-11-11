@@ -5,14 +5,15 @@
 // the shared one, and a thing that fails either is sent back once with the reason.
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt } from '../../home/src/engine/jolt.ts'
-import { checkMadeToy, type Surface } from '../../home/src/engine/made.ts'
+import { boxOf, checkMadeToy, type Surface } from '../../home/src/engine/made.ts'
 import type { Limits } from '../../home/src/engine/made-kinds.ts'
 import type { ToySpec } from '../../home/src/engine/toy.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { engineText } from '../../host/src/villager-physics.ts'
 import { oneShot } from '../../host/src/villager-input.ts'
-import { NORMAL, heightAt, planeAt } from './ground.ts'
-import { STREET_MATERIALS } from './scene.ts'
+import { GRADE, HALF_L, NORMAL, heightAt, planeAt } from './ground.ts'
+import { FRONT } from './houses.ts'
+import { STANDING, STREET_MATERIALS } from './scene.ts'
 
 /** What the street lets a made thing be: far bigger and heavier than a toy on a table, and nearly no gadgets. */
 export const STREET_LIMITS: Limits = { parts: 8, moving: 6, gadgets: 2, wires: 0, size: [0.01, 4], mass: [0.02, 4000], slack: 0.05, pieces: 40, kinds: ['pivot'] }
@@ -148,7 +149,7 @@ export function stubMaker(delayMs = 30): Maker {
 export type Checked = { toy: ToySpec; say: string; clamped: string[] } | { say: string } | { reason: string }
 
 /** A maker's answer as a toy the street can build on `plot`, a kind word when it made nothing, or why the answer cannot be used. */
-export function checkMade(raw: string, plot: Surface, id: string): Checked {
+export function checkMade(raw: string, plot: Surface, id: string, keepOff: Vec3[] = []): Checked {
   let data: unknown
   try { data = JSON.parse(raw.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '')) } catch { return { reason: 'the answer was not one JSON object' } }
   if (!data || typeof data !== 'object' || Array.isArray(data)) return { reason: 'the answer was not one JSON object' }
@@ -159,7 +160,43 @@ export function checkMade(raw: string, plot: Surface, id: string): Checked {
   if ('reason' in checked) return checked
   // Flat on the street, whichever way the asker faced, and a finger's width above it.
   checked.toy.frame = { at: [plot.at[0], plot.at[1] + 0.03, plot.at[2]], yaw: plot.yaw, ...flatOn(plot.yaw) }
+  clear(checked.toy, keepOff)
   return { toy: checked.toy, say: say || checked.toy.label, clamped: checked.clamped }
+}
+
+/** How near the house fronts and the street's ends a made thing may stand (m from the street's middle). */
+const OPEN = { x: FRONT - 0.12, z: HALF_L / Math.hypot(1, GRADE) - 0.35 }
+
+/**
+ * Slides a made toy along the ground until it stands in the open: between the house fronts and the street's
+ * ends, and off what stands on the pavements (a lamp, a tree) and off `keepOff` (whoever asked for it, when
+ * the fronts leave it no room ahead). Asked for facing a wall, a thing appears against the wall, not in it.
+ */
+export function clear(toy: ToySpec, keepOff: Vec3[] = []) {
+  const { lo, hi } = boxOf(toy), at = toy.frame.at, c = Math.cos(toy.frame.yaw), s = Math.sin(toy.frame.yaw)
+  // The box's four corners on the ground, turned as the toy is: half its size across and along the street, and where its middle is from its place.
+  const xs = [lo[0], hi[0]].flatMap((x) => [lo[2], hi[2]].map((z) => x * c + z * s)), zs = [lo[0], hi[0]].flatMap((x) => [lo[2], hi[2]].map((z) => -x * s + z * c))
+  const half = [(Math.max(...xs) - Math.min(...xs)) / 2, (Math.max(...zs) - Math.min(...zs)) / 2], off = [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...zs) + Math.min(...zs)) / 2]
+  const inside = () => {
+    at[0] = Math.max(-OPEN.x + half[0], Math.min(OPEN.x - half[0], at[0] + off[0])) - off[0]
+    at[2] = Math.max(-OPEN.z + half[1], Math.min(OPEN.z - half[1], at[2] + off[1])) - off[1]
+  }
+  inside()
+  const rounds = [...STANDING.filter((o) => hi[1] > o.from), ...keepOff.map((p) => ({ x: p[0], z: p[2], r: 0.5 }))]
+  for (let i = 0; i < 12; i++) {
+    const mid = [at[0] + off[0], at[2] + off[1]]
+    const hit = rounds.find((o) => Math.abs(mid[0] - o.x) < half[0] + o.r && Math.abs(mid[1] - o.z) < half[1] + o.r)
+    if (!hit) break
+    // Out by the shorter way, unless a front or an end is in that way: then by the other.
+    const dx = half[0] + hit.r - Math.abs(mid[0] - hit.x) + 0.05, dz = half[1] + hit.r - Math.abs(mid[1] - hit.z) + 0.05
+    const toX = mid[0] + (mid[0] >= hit.x ? dx : -dx), toZ = mid[1] + (mid[1] >= hit.z ? dz : -dz)
+    const fitsX = Math.abs(toX) + half[0] <= OPEN.x, fitsZ = Math.abs(toZ) + half[1] <= OPEN.z
+    if (fitsX && (dx <= dz || !fitsZ)) at[0] = toX - off[0]
+    else if (fitsZ) at[2] = toZ - off[1]
+    else at[0] = (mid[0] >= hit.x ? mid[0] - dx - 2 * (half[0] + hit.r) : mid[0] + dx + 2 * (half[0] + hit.r)) - off[0]
+    inside()
+  }
+  at[1] = planeAt(at[2]) + 0.03
 }
 
 /**
@@ -194,13 +231,13 @@ export function settles(toy: ToySpec): string | null {
 }
 
 /** One sentence to one toy: the maker, the check, the settling, and one more try with the reason when either fails. */
-export async function make(maker: Maker, text: string, plot: Surface, id: string, signal: AbortSignal): Promise<{ result: Checked; tries: number; calls: Made[] }> {
+export async function make(maker: Maker, text: string, plot: Surface, id: string, signal: AbortSignal, keepOff: Vec3[] = []): Promise<{ result: Checked; tries: number; calls: Made[] }> {
   const calls: Made[] = []
   let repair: MakeAsk['repair']
   for (let tries = 1; ; tries++) {
     const made = await maker({ text, plot, repair, signal })
     calls.push(made)
-    let result = checkMade(made.raw, plot, id)
+    let result = checkMade(made.raw, plot, id, keepOff)
     if ('toy' in result) {
       const why = settles(result.toy)
       if (why) result = { reason: why }

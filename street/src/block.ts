@@ -35,6 +35,8 @@ export interface Seen {
   residents: { id: number; name: string; at: Vec3 }[]
   things: { id: string; what: string; askedFor: string; by: string; at: Vec3; size: Vec3; material: string; moves: boolean }[]
   loose: { crates: number; balls: number }
+  /** What stands on the street that nobody made: the houses (at their doors), the lamps and trees, the bins where they now lie. */
+  still: { what: string; at: Vec3 }[]
 }
 
 const STILL: Input = { seq: 0, x: 0, z: 0, jump: false }
@@ -196,7 +198,12 @@ export class Block {
       return { id, what: thing.toy.label, askedFor: thing.text, by: thing.by, at: t?.position ?? thing.toy.frame.at, size: half.map((h) => +(h * 2).toFixed(2)) as Vec3, material: part.material, moves: part.motion === 'dynamic' }
     })
     const cargo = this.specs.get('cargo')?.parts ?? []
-    return { residents, things, loose: { crates: cargo.filter((p) => p.id.startsWith('crate-')).length, balls: cargo.filter((p) => p.id.startsWith('ball-')).length } }
+    const still = [
+      ...HOUSES.map((house) => ({ what: house.label, at: house.frame.at })),
+      ...FURNITURE.parts.filter((p) => !p.id.startsWith('barrier')).map((p) => ({ what: p.id.startsWith('lamp') ? 'a street lamp' : p.id.startsWith('tree') ? 'a tree' : p.id === 'hydrant' ? 'a hydrant' : 'a letter box', at: p.at })),
+      ...BINS.parts.map((p) => ({ what: 'a steel bin (it can be knocked over)', at: this.world.thing(`bins/${p.id}`)?.position ?? p.at })),
+    ]
+    return { residents, things, loose: { crates: cargo.filter((p) => p.id.startsWith('crate-')).length, balls: cargo.filter((p) => p.id.startsWith('ball-')).length }, still }
   }
   leave(id: number) {
     const seat = this.seats.get(id)

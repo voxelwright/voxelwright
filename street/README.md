@@ -86,6 +86,7 @@ npm run tick -- 1000 100 20                 # the block on World, every body kep
 npm run two -- --delays 0,25,50,100         # two browsers, a fresh world per case
 npm run push -- --delays 0,50,100           # walking into a crate, three worlds per case
 node test/make.ts                           # making end to end with a stand-in maker
+node test/clear.mjs [lab.json]              # a made thing asked for at a house front, a tree or an end stands in the open
 node test/agent.ts                          # an agent's seat, with a plain MCP client as the agent
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:

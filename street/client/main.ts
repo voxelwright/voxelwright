@@ -333,8 +333,8 @@ setInterval(() => send(packPing(performance.now())), 250)
 const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), head = new THREE.Vector3()
 /** How much the lens blurs what is far from where the view looks: the home's miniature look, `?lens=0.5` for a picture. Walking about, everything is sharp. */
 const LENS = Number(params.get('lens') ?? 0)
-/** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand: short of the fronts, and out onto the street across each end. */
-const BOOM = 7, INSIDE_X = HALF_W - 0.7, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) + 2
+/** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand: short of the fronts and their bays, and a little out onto the street across each end. */
+const BOOM = 7, INSIDE_X = HALF_W - 1.3, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) + 2
 let boom = 1
 /** A camera put somewhere by hand, for pictures (test/gallery.ts); null follows your walker. */
 let fixed: { from: Vec3; to: Vec3 } | null = null

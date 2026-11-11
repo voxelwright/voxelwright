@@ -263,6 +263,19 @@ function extent(part: PartSpec): { middle: Vec3; half: Vec3 } {
   return { middle: [middle.x, middle.y, middle.z], half: turned([(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2], part.turn) }
 }
 
+/** The box round a whole toy in the toy's own frame: its lowest and its highest corner. */
+export function boxOf(toy: ToySpec): { lo: Vec3; hi: Vec3 } {
+  const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity]
+  for (const part of toy.parts) {
+    const { middle, half } = extent(part)
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(lo[i], part.at[i] + middle[i] - half[i])
+      hi[i] = Math.max(hi[i], part.at[i] + middle[i] + half[i])
+    }
+  }
+  return { lo, hi }
+}
+
 /** Whether a box (centre, half extents) stays over the surface and under its height. */
 function within(at: Vec3, half: Vec3 | 0, surface: Surface, limits: Limits) {
   const h = half === 0 ? [0, 0, 0] : half
