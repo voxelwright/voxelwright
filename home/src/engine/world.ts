@@ -63,7 +63,15 @@ interface Thing {
 interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; mass: number; last: THREE.Vector3; walked: number; left: boolean; solid: boolean; heldFor: number; aim: THREE.Vector3; passing: boolean; sent: Vec3 }
 
 /** A body that stands for a scene object drawn by someone else (src/physics/home.ts binds the home's things). */
-interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat }; parts?: BindSpec['parts'] }
+interface Bound { key: string; object: THREE.Object3D; body: BodyId; material: string; motion: 'static' | 'dynamic'; shape: Shape; outline: Shape; p: THREE.Vector3; q: THREE.Quaternion; home: { p: Vec3; q: Quat }; parts?: BindSpec['parts']; woke?: () => void; slept?: (home: boolean) => void }
+/** A thing held by a hand (carry): where it is drawn to, and the most force that draws it. */
+interface Hold { to: Vec3; strength: number; arc: number }
+/** How fast (1/s) a held thing closes on where it is held to, its top speed (m/s), and how fast it is turned upright (1/s). */
+const HOLD_RATE = 14
+const HOLD_SPEED = 5
+const HOLD_UPRIGHT = 9
+/** A moving bound thing that comes to rest within this (m) of where it was made counts as home. */
+const NEARLY_HOME = 0.012
 
 export interface BindSpec {
   /** In the object's frame (its world position and turn), at world scale. */
@@ -77,6 +85,12 @@ export interface BindSpec {
    * its stove steel): indices into shape.boxes. Boxes no part names burn as the thing's material.
    */
   parts?: { name: string; material: string; boxes: number[] }[]
+  /** Where it was made, when that is not where it is now (a thing bound again while it lies thrown): tidying puts it there. */
+  home?: { p: Vec3; q: Quat }
+  /** Called when its body starts to move (a hand, a bump) and when it has come to rest again: a thing drawn cheaply at rest draws itself in full while it moves (src/kit.ts). */
+  woke?: () => void
+  /** `home`: it rests where it was made, to the eye. */
+  slept?: (home: boolean) => void
 }
 
 /** A part that can take heat, in world space: what fire.ts keeps a temperature, fuel and wetness for. */
@@ -127,6 +141,7 @@ const outline = (shape: Shape): Shape => {
   }
   return { kind: 'box', half: [0, 1, 2].map((i) => +((hi[i] - lo[i]) / 2).toFixed(3)) as Vec3 }
 }
+const poseM = new THREE.Matrix4(), parentM = new THREE.Matrix4(), ONE = new THREE.Vector3(1, 1, 1), poseS = new THREE.Vector3(), scratchS = new THREE.Vector3()
 const corner = new THREE.Vector3(), box3 = new THREE.Box3(), boxPose = new THREE.Matrix4(), partPose = new THREE.Matrix4()
 /** Grows `into` by a box (half extents, at, turn in a frame) carried by `pose` (that frame to the world). */
 function growBy(into: THREE.Box3, pose: THREE.Matrix4, half: Vec3, at: Vec3, rotation: Quat) {
@@ -158,6 +173,12 @@ export class World implements WorldApi {
   private respawns = new Map<string, number>()
   private followers = new Map<string, Follower>()
   private bound = new Map<string, Bound>()
+  /** Bound moving things whose bodies are awake: the only ones a step or a frame looks at. */
+  private stirring = new Set<Bound>()
+  private holds = new Map<Bound, Hold>()
+  private gravitySet = false
+  /** Bound moving things posed (by their body, a tidy, or their owner) since fire last read the moving ones. */
+  private posed = new Set<Bound>()
   private pairs = new Map<string, readonly [number, number]>()
   private pairsVersion = -1
   private clampedAt = new Map<string, number>()
@@ -218,8 +239,11 @@ export class World implements WorldApi {
   }
 
   private applyRules(next: Rules) {
+    // Changing gravity wakes every moving body (a sleeping one would not feel it); the same gravity again wakes none.
+    const same = this.gravitySet && next.gravity.every((g, i) => g === this.rules.gravity[i])
     this.rules = { ...next, gravity: [...next.gravity] }
-    this.core.setGravity(this.rules.gravity)
+    if (!same) this.core.setGravity(this.rules.gravity)
+    this.gravitySet = true
     this.pairsVersion = -1
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, this.rules.drag)
     for (const b of this.bound.values()) if (b.motion === 'dynamic') this.core.setLinearDamping(b.body, this.rules.drag)
@@ -590,7 +614,7 @@ export class World implements WorldApi {
       shape: spec.shape, motion: spec.motion, position: arr(p), rotation: [q.x, q.y, q.z, q.w], asleep: true,
       density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, ...(spec.mass !== undefined ? { mass: spec.mass } : {}),
     })
-    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts }
+    const b: Bound = { key, object, body, material: spec.material, motion: spec.motion, shape: spec.shape, outline: outline(spec.shape), p, q, home: spec.home ?? { p: arr(p), q: [q.x, q.y, q.z, q.w] }, parts: spec.parts, woke: spec.woke, slept: spec.slept }
     this.bound.set(key, b)
     this.byBody[body] = b
     this.version++
@@ -600,14 +624,180 @@ export class World implements WorldApi {
   unbind(key: string) {
     const b = this.bound.get(key)
     if (!b) return
+    this.release(b)
     this.core.removeBody(b.body)
     this.byBody[b.body] = undefined
     this.bound.delete(key)
+    this.stirring.delete(b)
+    this.posed.delete(b)
     this.version++
   }
 
   boundKeys() {
     return [...this.bound.keys()]
+  }
+
+  /** Bodies that woke or fell asleep: a bound moving thing joins or leaves the ones looked at each step, and is told. */
+  private stirs() {
+    for (const { id, awake } of this.core.activity()) {
+      const b = this.byBody[id]
+      if (!b || !('home' in b) || !('object' in b) || b.motion !== 'dynamic') continue
+      // Said some steps ago, it may no longer be so (a thing tidied away since): the solver is asked.
+      if (awake === this.stirring.has(b) || awake === this.core.sleeping(b.body)) continue
+      if (awake) {
+        this.stirring.add(b)
+        b.woke?.()
+      } else {
+        // Its last pose is drawn before it is left alone. Come to rest a hair from where it was made (it only
+        // settled, or was put back by hand), it counts as home: its owner may draw it as it was made. Its body
+        // stays where it settled, so woken again it does not settle again.
+        this.pose(b)
+        this.stirring.delete(b)
+        b.slept?.(!this.holds.has(b) && this.isHome(b, NEARLY_HOME, 3e-4))
+      }
+    }
+  }
+
+  /** Draws a held thing towards where it is held with at most the hold's force, and turns it upright. */
+  private pull(b: Bound, hold: Hold, h: number) {
+    // Held still, its body would fall asleep in the hand and hang there when let go.
+    if (this.core.sleeping(b.body)) this.core.wake(b.body)
+    const p = this.core.position(b.body), v = this.core.velocity(b.body)
+    const mass = this.core.mass(b.body)
+    // Carried a long way it rides higher, over what stands between, and comes down as it nears.
+    const far = Math.hypot(hold.to[0] - p[0], hold.to[2] - p[2])
+    const to: Vec3 = [hold.to[0], hold.to[1] + Math.min(hold.arc, far * 0.8), hold.to[2]]
+    const want = to.map((x, i) => (x - p[i]) * HOLD_RATE)
+    const speed = Math.hypot(...want)
+    if (speed > HOLD_SPEED) for (let i = 0; i < 3; i++) want[i] *= HOLD_SPEED / speed
+    // Gravity is carried by the hand first; what is left of its strength moves the thing.
+    const g = this.rules.gravity
+    const dv = want.map((w, i) => w - v[i] - g[i] * h)
+    const most = (hold.strength / mass) * h
+    const n = Math.hypot(...dv)
+    const k = n > most ? most / n : 1
+    this.core.setVelocity(b.body, [v[0] + dv[0] * k, v[1] + dv[1] * k, v[2] + dv[2] * k])
+    // Upright: turn its own up towards the world's, as fast as the hand is strong for it; no spin about up.
+    const q = this.core.rotation(b.body)
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(q[0], q[1], q[2], q[3]))
+    const axis = up.clone().cross(new THREE.Vector3(0, 1, 0))
+    const sin = axis.length(), angle = Math.atan2(sin, up.y)
+    const turn = sin > 1e-5 ? axis.multiplyScalar((angle * HOLD_UPRIGHT * Math.min(1, most / 0.5)) / sin) : axis.set(0, 0, 0)
+    this.core.setAngularVelocity(b.body, [turn.x, turn.y, turn.z])
+  }
+
+  /**
+   * A hand takes hold of a moving bound thing (a mug, a chair) and draws it towards `to` (world
+   * space) with at most `strength` newtons, step after step, until carry(key, null) lets it go
+   * with the speed it has. A thing too heavy for the hand drags and tips instead of rising.
+   * `arc` (m) is how much higher than `to` it may ride while it still has far to go.
+   */
+  carry(key: string, to: Vec3 | null, strength = 60, arc = 0) {
+    const b = this.boundDynamic(key)
+    if (!b) return false
+    if (!to) return this.release(b)
+    if (!pointOk(to) || !(strength > 0)) return false
+    const held = this.holds.get(b)
+    if (held) {
+      held.to = [...to]
+      held.strength = strength
+      held.arc = arc
+    } else {
+      this.holds.set(b, { to: [...to], strength, arc })
+      this.core.wake(b.body)
+      this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: true })
+    }
+    return true
+  }
+
+  /** The moving bound things a hand may take: each one's key, where it is (world space) and the half sizes of the box round it. */
+  movables(): { key: string; at: Vec3; half: Vec3 }[] {
+    const out: { key: string; at: Vec3; half: Vec3 }[] = []
+    for (const b of this.bound.values()) if (b.motion === 'dynamic') out.push({ key: b.key, at: [b.p.x, b.p.y, b.p.z], half: halfOf(b.outline) })
+    return out
+  }
+
+  /** The key of the bound thing a scene object is, if it is one. */
+  keyOf(object: THREE.Object3D) {
+    for (const b of this.bound.values()) if (b.object === object) return b.key
+    return undefined
+  }
+
+  /** The scene object a bound thing's body stands for. */
+  boundObject(key: string) {
+    return this.bound.get(key)?.object
+  }
+
+  /** Ends a hold, however it ends (let go, tidied away, lost and put back, unbound), and says so. */
+  private release(b: Bound) {
+    if (!this.holds.delete(b)) return false
+    this.core.wake(b.body)
+    this.emit({ kind: 'held', thing: b.key, material: b.material, shape: b.outline, at: at(this.core.position(b.body)), held: false })
+    return true
+  }
+
+  /** Whether a hand holds this thing now: a hold can end without the hand (tidying, a thing lost and put back). */
+  isHeld(key: string) {
+    const b = this.bound.get(key)
+    return Boolean(b && this.holds.has(b))
+  }
+
+  /** Every held thing's key. */
+  holding() {
+    return [...this.holds.keys()].map((b) => b.key)
+  }
+
+  /**
+   * The first thing a ray from `origin` along `direction` (world space; its length is how far to look) meets, not
+   * counting the things in `ignore`: its key, where, and the surface's normal there.
+   */
+  castRay(origin: Vec3, direction: Vec3, ignore: string[] = []) {
+    if (!pointOk(origin) || !dirOk(direction)) return null
+    const skip = ignore.flatMap((key) => {
+      const t = this.things.get(key) ?? this.followers.get(key) ?? this.bound.get(key)
+      return t ? [t.body] : []
+    })
+    const hit = this.core.castRay(origin, direction, skip)
+    const t = hit && this.byBody[hit.body]
+    return hit && t ? { key: t.key, point: hit.point, normal: hit.normal, fraction: hit.fraction } : null
+  }
+
+  /**
+   * Puts moving bound things back where they were made, at rest (tidying up after play): all of
+   * them, or the ones named. Held things are let go. Returns the keys put back.
+   */
+  tidy(keys?: string[]) {
+    const back: string[] = []
+    for (const b of this.bound.values()) {
+      if (b.motion !== 'dynamic' || (keys && !keys.includes(b.key))) continue
+      this.release(b)
+      this.core.rest(b.body, b.home.p, b.home.q)
+      this.pose(b)
+      this.stirring.delete(b)
+      b.slept?.(true)
+      back.push(b.key)
+    }
+    return back
+  }
+
+  /** Whether a bound thing is within `by` metres of where it was made, and turned no more than `turned` (1 - |q·q₀|: 3e-4 is about 3°). */
+  private isHome(b: Bound, by: number, turned: number) {
+    const d = Math.hypot(b.p.x - b.home.p[0], b.p.y - b.home.p[1], b.p.z - b.home.p[2])
+    return d < by && 1 - Math.abs(b.q.x * b.home.q[0] + b.q.y * b.home.q[1] + b.q.z * b.home.q[2] + b.q.w * b.home.q[3]) < turned
+  }
+
+  /** How far (m) each moving bound thing is from where it was made, for the ones that are not there. */
+  astray(by = 0.02) {
+    const out: Record<string, number> = {}
+    for (const b of this.bound.values()) {
+      if (b.motion !== 'dynamic') continue
+      const d = Math.hypot(b.p.x - b.home.p[0], b.p.y - b.home.p[1], b.p.z - b.home.p[2])
+      const turned = 1 - Math.abs(b.q.x * b.home.q[0] + b.q.y * b.home.q[1] + b.q.z * b.home.q[2] + b.q.w * b.home.q[3])
+      // A ball that only turned where it lies is not out of place.
+      const ball = b.shape.kind === 'compound' && b.shape.boxes.length === 1 && b.shape.boxes[0].round === 'ball'
+      if (d > by || (turned > 0.002 && !ball)) out[b.key] = d
+    }
+    return out
   }
 
   /** Bound objects their owners moved since the last look: their bodies go there, at rest. */
@@ -622,7 +812,10 @@ export class World implements WorldApi {
       const at = arr(p), turn: Quat = [q.x, q.y, q.z, q.w]
       b.home = { p: at, q: turn }
       if (b.motion === 'static') this.core.setPose(b.body, at, turn)
-      else this.core.setState(b.body, at, [0, 0, 0], turn)
+      else {
+        this.core.setState(b.body, at, [0, 0, 0], turn)
+        this.posed.add(b)
+      }
     }
   }
 
@@ -690,7 +883,9 @@ export class World implements WorldApi {
       this.stride(f, p)
     }
     for (const g of this.gadgets.values()) gadgetKind(g.spec.kind)?.step?.(g, this, h)
+    for (const [b, hold] of this.holds) this.pull(b, hold, h)
     this.core.step(h, this.rules.substeps)
+    this.stirs()
     for (const c of this.core.contacts()) this.contact(c)
     for (let n = 0; this.queue.length && n < SIGNALS_PER_STEP; n++) {
       const { from, signal, hops } = this.queue.shift()!
@@ -785,12 +980,18 @@ export class World implements WorldApi {
   /** Too fast is slowed to the speed limit, lost (below the floor, past the world bound) or broken is put back home: never an explosion. */
   private guard() {
     const max = this.rules.maxSpeed
-    for (const b of this.bound.values()) {
-      if (b.motion !== 'dynamic') continue
+    // Only what is awake can be lost or too fast.
+    for (const b of this.stirring) {
       const p = this.core.position(b.body)
-      if (p.every(Number.isFinite) && p[1] >= LOST_Y && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND) continue
-      this.core.setState(b.body, b.home.p, [0, 0, 0], b.home.q)
-      this.emit({ kind: 'clamped', thing: b.key, speed: -1, at: at(b.home.p), reset: true })
+      if (!(p.every(Number.isFinite) && p[1] >= LOST_Y && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND)) {
+        this.release(b)
+        this.core.setState(b.body, b.home.p, [0, 0, 0], b.home.q)
+        this.emit({ kind: 'clamped', thing: b.key, speed: -1, at: at(b.home.p), reset: true })
+        continue
+      }
+      const v = this.core.velocity(b.body)
+      const speed = Math.hypot(...v)
+      if (speed > max) this.core.setVelocity(b.body, [v[0] * max / speed, v[1] * max / speed, v[2] * max / speed])
     }
     for (const t of this.things.values()) {
       if (t.part.motion !== 'dynamic') continue
@@ -824,26 +1025,30 @@ export class World implements WorldApi {
     }
   }
 
+  /** A bound moving thing's object goes where its body is. */
+  private pose(b: Bound) {
+    this.posed.add(b)
+    const p = this.core.position(b.body), q = this.core.rotation(b.body)
+    b.p.set(p[0], p[1], p[2])
+    // The solver's turn is a float's width off unit length; left so, the object's own (unit) turn would read as its
+    // owner having moved it (follows), and the thing's home would follow it wherever it was thrown.
+    b.q.set(q[0], q[1], q[2], q[3]).normalize()
+    // World pose to the object's own (its parent's frame), keeping its scale.
+    const o = b.object
+    const m = poseM.compose(b.p, b.q, ONE)
+    if (o.parent) {
+      o.parent.updateWorldMatrix(true, false)
+      m.premultiply(parentM.copy(o.parent.matrixWorld).invert())
+    }
+    poseS.copy(o.scale)
+    m.decompose(o.position, o.quaternion, scratchS)
+    o.scale.copy(poseS)
+  }
+
   /** Meshes follow bodies; wobbles and dust ease out. */
   private sync(dt: number) {
     this.drawDisplays()
-    const m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1)
-    for (const b of this.bound.values()) {
-      if (b.motion !== 'dynamic' || this.core.sleeping(b.body)) continue
-      const p = this.core.position(b.body), q = this.core.rotation(b.body)
-      b.p.set(p[0], p[1], p[2])
-      b.q.set(q[0], q[1], q[2], q[3])
-      // World pose to the object's own (its parent's frame), keeping its scale.
-      const o = b.object
-      m.compose(b.p, b.q, one)
-      if (o.parent) {
-        o.parent.updateWorldMatrix(true, false)
-        m.premultiply(new THREE.Matrix4().copy(o.parent.matrixWorld).invert())
-      }
-      const s = o.scale.clone()
-      m.decompose(o.position, o.quaternion, new THREE.Vector3())
-      o.scale.copy(s)
-    }
+    for (const b of this.stirring) this.pose(b)
     for (const t of this.things.values()) {
       if (!t.mesh) continue
       if (t.part.motion && t.part.motion !== 'static') {
@@ -910,14 +1115,14 @@ export class World implements WorldApi {
   }
 
   setVelocity(key: string, v: Vec3) {
-    const t = this.dynamic(key)
+    const t = this.dynamic(key) ?? this.boundDynamic(key)
     if (!t || !v.every(Number.isFinite)) return false
     this.core.setVelocity(t.body, v)
     return true
   }
 
   applyImpulse(key: string, impulse: Vec3) {
-    const t = this.dynamic(key)
+    const t = this.dynamic(key) ?? this.boundDynamic(key)
     if (!t || !impulse.every(Number.isFinite)) return false
     this.core.applyImpulse(t.body, impulse)
     return true
@@ -1024,7 +1229,11 @@ export class World implements WorldApi {
       else growBy(box3, boxPose, halfOf(t.part.shape), [0, 0, 0], [0, 0, 0, 1])
       push(t.key, t.key, '', t.part.material, t.part.motion === 'dynamic')
     }
-    for (const b of this.bound.values()) {
+    // Asked for the moving ones only (fire asks every frame), a bound thing counts if it has been posed since the
+    // last such ask: a house of sleeping mugs costs nothing here.
+    const boundNow = movingOnly ? [...this.posed] : this.bound.values()
+    if (movingOnly) this.posed.clear()
+    for (const b of boundNow) {
       if (movingOnly && b.motion !== 'dynamic') continue
       if (b.motion === 'dynamic') {
         const pos = this.core.position(b.body), rot = this.core.rotation(b.body)
@@ -1115,6 +1324,11 @@ export class World implements WorldApi {
       }
       const speed = Math.hypot(...b.v), k = speed > this.rules.maxSpeed ? this.rules.maxSpeed / speed : 1
       const n = Math.hypot(...b.q)
+      // A thing asleep where the snapshot has it stays asleep: putting a quiet house back wakes nothing.
+      if (speed < 1e-6 && this.core.sleeping(t.body)) {
+        const at = this.core.position(t.body), turn = this.core.rotation(t.body)
+        if (Math.hypot(at[0] - b.p[0], at[1] - b.p[1], at[2] - b.p[2]) < 1e-5 && 1 - Math.abs(turn[0] * b.q[0] + turn[1] * b.q[1] + turn[2] * b.q[2] + turn[3] * b.q[3]) / (n * Math.hypot(...turn)) < 1e-9) continue
+      }
       this.core.setState(t.body, b.p as Vec3, [b.v[0] * k, b.v[1] * k, b.v[2] * k], [b.q[0] / n, b.q[1] / n, b.q[2] / n, b.q[3] / n])
     }
     for (const [id, saved] of Object.entries(s.gadgets ?? {})) {

@@ -13,8 +13,11 @@ export type Shape =
   | { kind: 'capsule'; halfHeight: number; radius: number }
   /** Along local y. */
   | { kind: 'cylinder'; halfHeight: number; radius: number }
-  /** Boxes fixed together in the body's frame (a piece of furniture from its parts' boxes). Not for toys. */
-  | { kind: 'compound'; boxes: { half: Vec3; at: Vec3; rotation: Quat }[] }
+  /**
+   * Boxes fixed together in the body's frame (a piece of furniture from its parts' boxes). Not for toys.
+   * A box marked `round` is the ball or the can (a cylinder along its local y) inside it, so the thing rolls.
+   */
+  | { kind: 'compound'; boxes: { half: Vec3; at: Vec3; rotation: Quat; round?: 'ball' | 'can' }[] }
 
 export type Motion = 'static' | 'dynamic' | 'kinematic'
 
@@ -110,5 +113,19 @@ export interface PhysicsCore {
   /** kg. */
   mass(id: BodyId): number
   sleeping(id: BodyId): boolean
+  /** Wakes a sleeping body where it is (a held thing must not doze off in the hand). */
+  wake(id: BodyId): void
+  /** Bodies that woke or fell asleep since the last call, in order (a sleeping body costs the solver nothing). */
+  activity(): { id: BodyId; awake: boolean }[]
+  /** rad/s, world space. */
+  angularVelocity(id: BodyId): Vec3
+  setAngularVelocity(id: BodyId, velocity: Vec3): void
+  /** Puts a moving body somewhere at rest and asleep (tidying up): nothing is woken. */
+  rest(id: BodyId, position: Vec3, rotation: Quat): void
+  /**
+   * The first solid body a ray meets: from `origin` along `direction` (its length is how far to look),
+   * not counting `ignore`. `normal` is the surface's there, world space.
+   */
+  castRay(origin: Vec3, direction: Vec3, ignore?: BodyId[]): { body: BodyId; point: Vec3; normal: Vec3; fraction: number } | null
   dispose(): void
 }

@@ -107,7 +107,7 @@ export type CueName =
   | 'pad-up' | 'pad-down' | 'writing' | 'sketch' | 'sent' | 'routed' | 'unrouted'
   | 'ghost' | 'placed' | 'kept' | 'undone' | 'failed'
   | 'book-open' | 'book-close' | 'page' | 'sat' | 'farewell' | 'news' | 'walk' | 'refused'
-  | 'knock'
+  | 'knock' | 'clack' | 'ring' | 'thud' | 'shatter'
 
 /**
  * Every cue's variants. The palette's CHOSEN names the owner's pick per cue, and `a` plays

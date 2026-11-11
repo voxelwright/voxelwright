@@ -45,7 +45,11 @@ const MOMENT: Record<CueName, string> = {
   news: 'A villager has news (the "!")',
   walk: 'Walking to another room',
   refused: "A door that isn't open yet",
-  knock: 'Two things bump into each other (a steel ball on a rubber post)',
+  knock: 'A wooden block set down on the table',
+  clack: 'A mug set down on the table',
+  ring: 'A pot set down on the table',
+  thud: 'A felt ball landing on the table',
+  shatter: 'A plate breaking on the floor',
 }
 
 /** A realistic payload for each cue, as its event would carry it in the home. */
@@ -60,7 +64,6 @@ const EVENT: Partial<Record<CueName, { seconds?: number; event?: Record<string, 
   page: { seconds: 0.42, event: { leaves: 1, dir: 1 } },
   sat: { seconds: 0.7 },
   walk: { seconds: 0.95, event: { phase: 'leave' } },
-  knock: { event: { impulse: 0.1, hardness: 0.6, impact: 1 } },
 }
 
 /** What the owner said about each cue in round 1 (November 7), as saved in .sound-lab/picks.json then. */
