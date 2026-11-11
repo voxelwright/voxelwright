@@ -10,6 +10,7 @@ import { canvas, paintWood, toTexture } from '../paint'
 import { PHYSICS_PANEL } from '../features'
 import { createJolt, loadJolt } from '../engine/jolt'
 import { World, type Grain } from '../engine/world'
+import { Modes, type GameMode } from '../engine/mode'
 import { Fire } from '../engine/fire'
 import { GpuHeatField } from '../engine/heat'
 import { Flames } from '../engine/flames'
@@ -31,8 +32,10 @@ import { hand } from './hand'
 import { impacts } from './impacts'
 import { tidy } from './tidy'
 import { breaks } from './breaks'
+import { feel } from './feel'
+import { bestScores } from './best'
 import { HOUSE } from './toys/house'
-import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
+import { PINBALL, PINBALL_MODE, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
 
 const STORED = 'village.physics.rules'
@@ -40,7 +43,7 @@ const TOYS = [HOUSE, PINBALL, PINBALL_STAND, CANDLE]
 /** Where the view stands to play the table: at its low end, looking down the playfield. */
 /** A turn of the event loop: the page draws and takes input between the steps of starting. */
 const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
-const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.78, PINBALL.frame.at[2] + 1.4), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12) }
+const PLAY_POSE = { position: new THREE.Vector3(PINBALL.frame.at[0], 1.78, PINBALL.frame.at[2] + 1.4), look: new THREE.Vector3(PINBALL.frame.at[0], 0.86, PINBALL.frame.at[2] - 0.12), sharp: true }
 
 /** Runs tasks in order, one per turn of the event loop, until `gone`; one that throws is logged and the rest still run. */
 export function oneByOne(gone: () => boolean) {
@@ -84,12 +87,17 @@ export async function start(ctx: Context, gone: () => boolean) {
     })
     return texture
   }
-  const world = new World(createJolt(), (e) => {
+  const tell = (e: PhysicsEvent) => {
+    modes?.saw(e)
     log.push(e)
     // Room for a house of loose things settling at once (#107): at 500 a burst of impacts pushed out the events a check or an agent was about to read.
     if (log.length > 2000) log.splice(0, 1000)
     ctx.emit('village/physics', e)
-  }, grain)
+  }
+  // Game modes (#108): a game's own rules and toys, on loan while it is played. They hear every event, to know a rule someone changed.
+  let modes: Modes | undefined
+  const world = new World(createJolt(), tell, grain)
+  modes = new Modes(world, tell)
   ctx.effect(() => () => world.dispose(), 'physics solver')
   // The registries are module-level and outlive this plugin (reload, HMR): what was added at runtime goes with the world.
   ctx.effect(() => () => {
@@ -104,6 +112,8 @@ export async function start(ctx: Context, gone: () => boolean) {
     if (gone()) return
   }
   own(ctx, world.group)
+  // Each game's best score, as it was kept, and kept again when beaten.
+  bestScores(ctx, world)
   // Every thing in the home a body, read from the scene now; again after every plan change (a
   // placed thing, undo), every time the build mode builds the walls again (it does so in its next
   // frame, after the plan changed) and every thing added to or taken from the scene, in the next
@@ -149,9 +159,11 @@ export async function start(ctx: Context, gone: () => boolean) {
     // No storage or not JSON: the normal rules.
   }
   ctx.on('village/physics', (e) => {
-    if (e.kind !== 'rules') return
+    // A game mode's rules are on loan, not the home's tuning: nothing is kept while one runs. When it
+    // ends, what is in force then is kept (the home's own rules, with whatever was tuned meanwhile).
+    if (e.kind === 'mode' ? e.state !== 'ended' : e.kind !== 'rules' || e.by === 'mode' || modes.active) return
     try {
-      localStorage.setItem(STORED, JSON.stringify(e.rules))
+      localStorage.setItem(STORED, JSON.stringify(world.rules))
     } catch {
       // Storage refused: the rules still hold for this visit.
     }
@@ -174,6 +186,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   }
   const play = (on: boolean) => {
     playing = on ? PINBALL : null
+    if (on) modes.start(PINBALL_MODE)
+    else if (modes.active === PINBALL_MODE.id) modes.end()
     ctx.view.focus(on ? PLAY_POSE : null)
     if (!on) for (const name of Object.keys(PINBALL.inputs)) world.input(name, false)
     hands.table(on)
@@ -194,6 +208,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   tidy(ctx, world, grip.holding, broke.broken, tidyUp)
   // What a hit looks like: splinters, chips, sparks and dust by material.
   const bits = impacts(ctx)
+  // The view answers the toy being played (a shake gadget's `shook`).
+  const felt = feel(ctx, () => playing?.id ?? null)
   ctx.effect(() => {
     addEventListener('keydown', onKey, true)
     addEventListener('keyup', onKey, true)
@@ -284,6 +300,10 @@ export async function start(ctx: Context, gone: () => boolean) {
     asked: askedSoFar,
     play,
     playing: () => playing?.id ?? null,
+    /** How much of a view shake is still dying away, 0 to 1. */
+    shaking: () => felt.strength(),
+    /** Game modes: a game's rules and toys started and ended as one (engine/mode.ts). */
+    modes: { start: (mode: GameMode) => modes.start(mode), end: () => modes.end(), active: () => modes.active },
     /** The view from `position` toward `look` (world space), or back to the person's own with null: for the checks' pictures. */
     look: (position: Vec3 | null, look: Vec3 = [0, 0, 0]) => ctx.view.focus(position ? { position: new THREE.Vector3(...position), look: new THREE.Vector3(...look) } : null),
     input: (name: string, down: boolean) => world.input(name, down),

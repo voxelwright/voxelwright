@@ -29,10 +29,12 @@ node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, a walk round a placed bed (#79), step ms
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
-node scripts/check-physics-toys.mjs   # toys from a sentence (#88): three asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
+node scripts/check-physics-toys.mjs   # toys from a sentence (#88) and a game from one (#108, --only=game): asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall, a round of skittles is scored, ends and sets itself up again), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
 node scripts/check-invent.mjs         # invented mechanics (#106): a magnet built, working, tuned, snapshotted and undone; hostile code (loops, memory, forged answers, reaching for the page) refused or stopped with no long task over 200 ms on the page; --agent=claude [--invent-model=sonnet] [--asks="a|b"] --trials=1 for a real model's build rate, latency and cost
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 node scripts/check-tactile.mjs        # a house you can feel (#107): the kitchen's loose things are bodies drawn merged at rest, a mouse and a finger lift, carry, throw and nudge them, tidying puts them back, impacts sound by material
+node scripts/check-physics-game.mjs   # games from logic parts (#108): the pinball table's round, ball save, missions, multiball and best score; game modes; loops of wires; the made-toy checker by port; the plunger by finger
+node scripts/demo-pinball.mjs out.mp4 # records a played round on a phone-sized screen and prints how it went (seconds, score, flips, missions); --skill=0.9 --seconds=90
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"

@@ -50,6 +50,7 @@ const MOMENT: Record<CueName, string> = {
   ring: 'A pot set down on the table',
   thud: 'A felt ball landing on the table',
   shatter: 'A plate breaking on the floor',
+  bell: 'A game rings its bell (a pinball bumper is hit, a prize is won)',
 }
 
 /** A realistic payload for each cue, as its event would carry it in the home. */
@@ -64,6 +65,7 @@ const EVENT: Partial<Record<CueName, { seconds?: number; event?: Record<string, 
   page: { seconds: 0.42, event: { leaves: 1, dir: 1 } },
   sat: { seconds: 0.7 },
   walk: { seconds: 0.95, event: { phase: 'leave' } },
+  bell: { event: { value: 12 } },
 }
 
 /** What the owner said about each cue in round 1 (November 7), as saved in .sound-lab/picks.json then. */

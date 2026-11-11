@@ -823,11 +823,23 @@ const ring = struck('world', 0.04, 1.6, { materials: ['steel', 'walnut'], shapes
 const shatter = { a: cue({ bus: 'world', level: -11, gap: 0.08, length: 0.6, jitter: { cents: 80, db: 1.5 }, play: playShatter }) }
 const thud = struck('world', 0.06, 0.4, { materials: ['felt', 'walnut'], shapes: [SMALL, TABLE], impulse: 0.2 })
 
+const bell = {
+  a: cue({
+    bus: 'world', level: -16, gap: 0.03, length: 0.6, jitter: { cents: 5, db: 1 },
+    play(a, out, p) {
+      // A game's bell (#108): a music-box comb at the note the signal carries, in semitones above middle C.
+      const value = (p.event as { value?: number }).value
+      const note = Math.min(36, Math.max(-12, typeof value === 'number' && Number.isFinite(value) ? value : 12))
+      pluck(a, room(a, out, 0.16), p.at, NOTE.C4 * 2 ** (note / 12) * p.rate, BODY.musicBox, { gain: p.gain * 0.5, dur: 0.6 })
+    },
+  }),
+}
+
 export const PALETTE: Palette = {
   hover, chose, backed, glide, turned, card,
   'pad-up': padUp, 'pad-down': padDown, writing, sketch, sent, routed, unrouted,
   ghost, placed, kept, undone, failed,
-  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, clack, ring, thud, shatter,
+  'book-open': bookOpen, 'book-close': bookClose, page, sat, farewell, news, walk, refused, knock, clack, ring, thud, shatter, bell,
 }
 
 /**
@@ -844,6 +856,7 @@ export const DESCRIPTIONS: Record<CueName, Record<string, string>> = {
   ring: { a: 'Metal or glass struck: it rings on, a pot low and long, a jar high and clear; a soft thing striking it only makes it hum.' },
   shatter: { a: 'A plate or a jar breaking: a spray of short high notes over a bright crash; glass higher and clearer than pottery.' },
   thud: { a: 'Something soft landing (felt, fruit, rubber, a person): a low thud with no ring.' },
+  bell: { a: 'A game\'s bell (a pinball bumper, a prize): one music-box note at the pitch the game asks for; runs of them go up for a prize and down for a loss.' },
   hover: {
     a: 'Round 1: a breath of felt and the faintest kalimba G, under 60 ms; rate-limited to one per 120 ms.',
     d: 'A felt-wrapped wooden tap: a real wooden click (six takes), cut to 60 ms with its top rolled off, so it is a soft "tok".',

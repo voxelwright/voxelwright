@@ -15,7 +15,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import { oneShot, type Call } from './villager-input.ts'
-import { EXAMPLE_SURFACE, marbleRun, pins, seesaw, type OfferedSurface } from './toy-examples.ts'
+import { EXAMPLE_SURFACE, marbleRun, pins, seesaw, skittles, type OfferedSurface } from './toy-examples.ts'
 import { MADE_KINDS } from '../../home/src/engine/made-kinds.ts'
 import { checkInventReply, inventPrompt, stubMechanic } from './villager-invent.ts'
 
@@ -47,7 +47,7 @@ const MAX_BODY = 64_000
 const MAX_THINGS = 256
 const MAX_SURFACES = 4
 /** Generous over the page's own caps (made.ts): junk past these never crosses the wire. */
-const MAX_TOY = { parts: 60, gadgets: 24, wires: 48, bytes: 48_000 }
+const MAX_TOY = { parts: 60, gadgets: 48, wires: 96, bytes: 48_000 }
 const ENGINE = join(import.meta.dirname, '..', '..', 'home', 'src', 'engine')
 const RULES = join(ENGINE, 'rules.ts')
 
@@ -119,15 +119,18 @@ export const toyTypes = async () => [
 
 async function toyRules() {
   const example = { note: 'A marble run: three ramps down a walnut board, with a steel marble at the top.', toy: { on: EXAMPLE_SURFACE.id, ...marbleRun(EXAMPLE_SURFACE) } }
+  const game = { note: 'Skittles: three throws to knock down six, ten points each.', toy: { on: EXAMPLE_SURFACE.id, ...skittles(EXAMPLE_SURFACE) } }
   return [
     'Toys. When the sentence asks you to build, make or set up a toy or a contraption (a marble run, a seesaw, pins and a ball, dominoes, a ramp), add "toy" to the answer and build it from parts, the way the home\'s pinball table is built: shapes made of materials, with gadgets wired together. It plays only because of physics, so design it to work under gravity.',
     '- A toy answer is {"note", "toy"} only: rules and acts in it are not applied.',
     '- "toy": {"label": "<2 or 3 words>", "on": "<a surface id>", "parts": [PartSpec...], "gadgets": [GadgetSpec...], "wires": [Wire...]}. "on" is copied exactly from the surfaces list: the surface the sentence names, or else the one the toy fits best (a lane or a long run wants the larger one). Leave "toy" out when the sentence asks for none; "note" then says nothing about one.',
     TOY_FRAME,
-    '- "motion": "dynamic" for a part that moves (a ball, a pin, a plank on a pivot); leave it out for a fixed part. Never "kinematic", "hidden" or "mass" unless needed. At most 40 parts, 16 moving, 16 gadgets, 32 wires. Half sizes and radii 0.004 to 0.5 m, at real toy scale: a marble has radius 0.0125, a pin is a cylinder of radius 0.016 and halfHeight 0.05.',
+    '- "motion": "dynamic" for a part that moves (a ball, a pin, a plank on a pivot); leave it out for a fixed part. Never "kinematic", "hidden" or "mass" unless needed. At most 40 parts, 16 moving, 32 gadgets, 64 wires. Half sizes and radii 0.004 to 0.5 m, at real toy scale: a marble has radius 0.0125, a pin is a cylinder of radius 0.016 and halfHeight 0.05.',
     '- A moving part rests on something: its bottom touching what holds it (a ball on a ramp: its centre one radius above the ramp\'s top there), never inside another part, or it bursts apart.',
     '- Gadgets come only from the kit below; no other kind is accepted. Use "pivot" for a part that swings freely (a seesaw\'s plank: anchor under the plank\'s centre, axis across the plank), sensor wired to kick for a bumper, zone (on a part with "sensor": true) wired to emitter to send a ball back, counter to keep a score. A toy that needs no gadget has none.',
     '- A wire runs from "gadget.port" (one of that kind\'s outputs) to "gadget.port" (one of the other kind\'s inputs).',
+    '- A game. When the sentence asks for a game (a score, rounds, winning or losing, "play", "beat", "knock them all down"), wire one from the logic parts, the way the second example does: a "game" gadget is the round (something physical starts it: a zone the ball crosses, a sensor that is struck); counters keep the score and what is left (a counter\'s "reached" decides a win or a loss; give the score counter a "display" part, a small upright board, to show it on); "tilt" on a pin or block tells when it has fallen; a "timer" gives a time limit or a pause; "lamp" and "bell" say what happened; "restart", a few seconds after "won" or "lost" by way of a timer, stands everything up again so it can be played twice. Nobody holds a key: the person flings a ball or pokes things with a finger, so make the game one that plays that way. A flung ball rolls along what it rests on and does not fly: stand whatever it must hit on that same floor (a pyramid of cans on the lane itself, never on a raised shelf), with a clear straight run to it. A trigger volume is a part with "sensor": true (and "hidden": true unless it should be seen). Check every part against the surface before answering, the score board and the lamps too: one part off it refuses the whole game.',
+    '- No wire ring may feed itself in one go: a counter\'s "changed" back into its own "add" is refused. A ring through a timer\'s "done" is fine.',
     '- Materials set how it moves: steel and glass roll far, lacquer is slick, rubber bounces, felt and cork are dead, maple and walnut are ordinary wood. "paint" (#rrggbb) only changes its colour; choose warm, natural colours.',
     '- A ball meant to be rolled at something (pins, dominoes) starts at one end with a clear, straight, flat run to it and nothing in between; pins stand a little more than a pin\'s width apart, so one knocks the next.',
     '- Ramps tilt 0.08 to 0.2 rad down along their length and have rails along both edges so a ball stays on; a ramp ends over the start of the next, a ball diameter plus a few centimetres lower, with a stop just past its end that drops the ball onto the next.',
@@ -139,6 +142,9 @@ async function toyRules() {
     '',
     `A worked example, for the surface ${JSON.stringify(EXAMPLE_SURFACE)} and the sentence "build a marble run on the table":`,
     JSON.stringify(example),
+    '',
+    'A second worked example, a game, for the same surface and the sentence "make a skittles game with a score":',
+    JSON.stringify(game),
   ]
 }
 
@@ -274,7 +280,7 @@ export async function rulesRequest(ruler: Ruler | undefined, id: string, dir: st
 
 /**
  * Keyword answers standing in for the model. "rain" rains; "lightning", water words and fire words
- * strike, douse or set alight the longest thing name from the page's list found in the sentence. "[stub-rules-fail]" throws, "[stub-rules-junk]"
+ * strike, douse or set alight the longest thing name from the page's list found in the sentence. "skittles game" answers the game made of logic parts (#108). "[stub-rules-fail]" throws, "[stub-rules-junk]"
  * answers prose, "[stub-rules-malformed]" answers JSON whose rules are a list,
  * "[stub-rules-empty]" answers rules with nothing valid in them,
  * "[stub-rules-hostile]" answers rules full of hostile values, "moon" answers moon gravity,
@@ -300,7 +306,8 @@ export function stubRuler(delayMs = 40): Ruler {
     if (/fire|burn|light|alight|ablaze/.test(t)) return { raw: JSON.stringify({ note: `The ${named ?? 'thing'} catches.`, acts: [{ act: 'ignite', target: named ?? 'nothing' }] }), ...call }
     // Toys (#88): the hand-written ones, on the surface the sentence names ("floor") or else the first the page offered. "[stub-toy-off]" puts one off it, "[stub-toy-junk]" names an unknown gadget kind.
     const on = ask.surfaces.find((x) => t.includes(x.id)) ?? ask.surfaces[0]
-    const toy = on && (/marble/.test(t) ? marbleRun(on) : /see[- ]?saw/.test(t) ? seesaw(on) : /\bpins\b|skittles|bowling/.test(t) ? pins(on) : null)
+    // "skittles game" is the game (#108: a round, a score, a win); "pins", "skittles" or "bowling" alone the plain toy.
+    const toy = on && (/marble/.test(t) ? marbleRun(on) : /see[- ]?saw/.test(t) ? seesaw(on) : /skittles game/.test(t) ? skittles(on) : /\bpins\b|skittles|bowling/.test(t) ? pins(on) : null)
     // On "another take": "[stub-again-off]" answers a toy off its surface, "[stub-again-rules]" only rules, no toy.
     const again = t.includes('another take')
     if (toy && again && t.includes('[stub-again-rules]')) return { raw: JSON.stringify({ note: 'Everything bounces a little more.', rules: { bounce: 1.3 }, acts: [{ act: 'rain', seconds: 8 }] }), ...call }

@@ -21,8 +21,10 @@ export type PhysicsEvent =
   | { kind: 'step'; thing: string; material: string; at: At; heading: At; side: 'left' | 'right'; foot: { length: number; width: number } }
   /** A gadget output fired: a sensor's `hit`, a zone's `enter`, a counter's `changed`. */
   | { kind: 'signal'; gadget: string; port: string; value: number; thing?: string; at?: At }
-  /** The world rules changed, all at once. `clamped` lists fields that were out of range or not numbers. */
-  | { kind: 'rules'; rules: Rules; by: 'preset' | 'panel' | 'talk' | 'code'; preset?: string; clamped: string[] }
+  /** The world rules changed, all at once. `clamped` lists fields that were out of range or not numbers. `by: 'mode'`: a game mode's rules, on loan until it ends (mode.ts). */
+  | { kind: 'rules'; rules: Rules; by: 'preset' | 'panel' | 'talk' | 'code' | 'mode'; preset?: string; clamped: string[] }
+  /** A game mode (mode.ts) started or ended: its rules and toys came or went with it. */
+  | { kind: 'mode'; mode: string; label: string; state: 'started' | 'ended' }
   /** A thing went faster than the speed limit and was slowed to it, or fell out of the world and was put back. */
   | { kind: 'clamped'; thing: string; speed: number; at: At; reset: boolean }
   /**

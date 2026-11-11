@@ -12,7 +12,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Gadget, Snapshot, ThingInfo, Touch, WorldApi } from './api'
 import type { BodyId, Contact, PhysicsCore, Quat, Shape, Vec3 } from './core'
 import type { At, PhysicsEvent } from './events'
-import { gadgetKind } from './gadgets'
+import { digits, gadgetKind } from './gadgets'
 import { material, materialNames, materialsVersion } from './materials'
 import { checkRules, NORMAL, onRuleAdded, presetRules, type Rules } from './rules'
 import { checkToy, WORLD_BOUND, type PartSpec, type Signal, type ToySpec } from './toy'
@@ -49,6 +49,11 @@ const SIGNALS_PER_STEP = 200
 const SIGNALS_WAITING = 1000
 /** A signal more than this many wires away from a physical cause is dropped: a loop of wires feeding itself ends here however slowly it fills the queue. */
 const SIGNAL_HOPS = 64
+/** The longest hit-stop (real seconds), and the rest (ms) after one before the next may start: a held world never stutters. */
+const HOLD_MAX = 0.15
+const HOLD_REST = 250
+/** A lit lamp's emissive strength (glow level 1). */
+const GLOW = 1.4
 
 interface Thing {
   key: string
@@ -186,6 +191,8 @@ export class World implements WorldApi {
   /** A part's face drawn as a card (a score): its canvas, texture and material, and the text it should show next frame when changed. */
   private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshStandardMaterial; text: string; drawn: string | null }>()
   private looks = new Map<string, THREE.Material>()
+  /** A part that glows (a lamp) is drawn with a material of its own: the looks are shared by every part of a material and paint. */
+  private glows = new Map<string, THREE.MeshStandardMaterial>()
   /** Per toy, its scenery: the parts drawn together, one mesh per look (see build). */
   private scenery = new Map<string, THREE.Mesh[]>()
   private tally = new Map<string, number>()
@@ -326,7 +333,9 @@ export class World implements WorldApi {
         thing.mesh.name = thing.key
         thing.mesh.position.copy(p)
         thing.mesh.quaternion.copy(q)
-        thing.mesh.castShadow = thing.mesh.receiveShadow = true
+        // A trigger volume that is drawn (a light set into a playfield) is not a solid thing: it casts no shadow.
+        thing.mesh.castShadow = !part.sensor
+        thing.mesh.receiveShadow = true
         this.group.add(thing.mesh)
       }
       this.things.set(thing.key, thing)
@@ -367,7 +376,7 @@ export class World implements WorldApi {
   census() {
     let joints = 0
     for (const list of this.joints.values()) joints += list.length
-    return { things: this.things.size, gadgets: this.gadgets.size, joints, wires: this.wires.size, looks: this.looks.size, displays: this.displays.size, draws: this.draws, toys: this.frames.size }
+    return { things: this.things.size, gadgets: this.gadgets.size, joints, wires: this.wires.size, looks: this.looks.size, displays: this.displays.size, glows: this.glows.size, draws: this.draws, toys: this.frames.size }
   }
 
   /** Whether a toy with this id is built. */
@@ -412,6 +421,11 @@ export class World implements WorldApi {
       d.material.dispose()
       this.displays.delete(key)
     }
+    for (const [key, glow] of this.glows) {
+      if (!mine(key)) continue
+      glow.dispose()
+      this.glows.delete(key)
+    }
     for (const mesh of this.scenery.get(id) ?? []) {
       this.group.remove(mesh)
       mesh.geometry.dispose()
@@ -419,7 +433,7 @@ export class World implements WorldApi {
     this.scenery.delete(id)
     this.frames.delete(id)
     // A drawn look (and its painted grain) only this toy used goes with it: made toys come in many colours.
-    // (A hidden part elsewhere draws nothing, so it keeps no look alive.)
+    // Still worn by a part that is drawn: a hidden part of the same material and paint has no look to keep.
     for (const t of this.things.values()) if (!t.part.hidden) itsLooks.delete(lookOf(t.part))
     for (const key of itsLooks) {
       const look = this.looks.get(key) as THREE.MeshStandardMaterial | undefined
@@ -475,6 +489,23 @@ export class World implements WorldApi {
     d.text = String(text).slice(0, 12)
   }
 
+  /**
+   * A part glowing in its own colour. Its material is made the first time (a lamp asks at setup, so
+   * nothing compiles in the middle of play); after that only its brightness changes.
+   */
+  glow(key: string, level: number) {
+    const thing = this.things.get(key)
+    if (!thing?.mesh || this.displays.has(key) || !Number.isFinite(level)) return
+    let glow = this.glows.get(key)
+    if (!glow) {
+      glow = (this.look(thing.part) as THREE.MeshStandardMaterial).clone()
+      glow.emissive.set(thing.part.paint ?? material(thing.part.material)!.look.color)
+      this.glows.set(key, glow)
+      thing.mesh.material = glow
+    }
+    glow.emissiveIntensity = GLOW * Math.min(4, Math.max(0, level))
+  }
+
   /** Draws the cards whose text changed since they were last drawn. */
   private drawDisplays() {
     for (const d of this.displays.values()) if (d.drawn !== d.text) this.draw(d)
@@ -493,7 +524,11 @@ export class World implements WorldApi {
     g.lineWidth = 6
     g.strokeRect(14, 14, 484, 152)
     g.fillStyle = '#4a3326'
-    g.font = '600 104px "Iowan Old Style", Palatino, Georgia, serif'
+    const font = (px: number) => `600 ${px}px "Iowan Old Style", Palatino, Georgia, serif`
+    g.font = font(104)
+    // A longer text (a word and a number) is set smaller, to fit inside the frame.
+    const wide = g.measureText(d.text).width
+    if (wide > 440) g.font = font(Math.floor((104 * 440) / wide))
     g.textAlign = 'center'
     g.textBaseline = 'middle'
     g.fillText(d.text, 256, 96)
@@ -846,10 +881,23 @@ export class World implements WorldApi {
     return true
   }
 
+  /** Real time (performance.now) until which the world holds still, for a hit-stop. */
+  private heldUntil = 0
+
+  /** Hit-stop: frames step nothing for `seconds` of real time (advance, the checks' clock, never holds). False when one ran too recently. */
+  hold(seconds: number) {
+    const now = performance.now()
+    if (!Number.isFinite(seconds) || seconds <= 0 || now < this.heldUntil + HOLD_REST) return false
+    this.heldUntil = now + Math.min(HOLD_MAX, seconds) * 1000
+    return true
+  }
+
   /** One rendered frame: real seconds in, simulated time out by the rules' time scale. */
   frame(dt: number) {
     const t0 = performance.now()
     this.follows()
+    // Held for a hit-stop: nothing steps and no time is owed for it; what is drawn stays as it is.
+    if (t0 < this.heldUntil) return this.sync(0)
     this.accumulator += Math.min(dt, 0.1) * this.rules.timeScale
     let steps = 0
     while (this.accumulator >= STEP && steps < MAX_STEPS) {
@@ -1192,6 +1240,29 @@ export class World implements WorldApi {
     return this.core.jointPosition(joint)
   }
 
+  upright(key: string) {
+    const t = this.things.get(key)
+    if (!t) return 1
+    // Its own y axis in the world, now and as made: their dot product.
+    const y = (q: Quat): Vec3 => [2 * (q[0] * q[1] - q[3] * q[2]), 1 - 2 * (q[0] * q[0] + q[2] * q[2]), 2 * (q[1] * q[2] + q[3] * q[0])]
+    const a = y(this.core.rotation(t.body)), b = y(t.home.q)
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  }
+
+  restartToy(toy: string) {
+    if (!this.frames.has(toy)) return false
+    for (const t of this.things.values()) {
+      if (t.toy !== toy || t.part.motion !== 'dynamic') continue
+      this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
+      this.respawns.delete(t.key)
+    }
+    for (const g of this.gadgets.values()) {
+      const kind = g.toy === toy ? gadgetKind(g.spec.kind) : undefined
+      if (kind?.inputs.includes('reset')) kind.receive?.(g, 'reset', { value: 0 }, this)
+    }
+    return true
+  }
+
   toWorldDir(toy: string, dir: Vec3): Vec3 {
     const frame = this.frames.get(toy)
     return frame ? arr(v3(dir).transformDirection(frame)) : dir
@@ -1351,7 +1422,7 @@ export class World implements WorldApi {
       g.state = { ...state, ...('joint' in g.state ? { joint: g.state.joint } : {}) }
       for (const [name, v] of Object.entries(saved.knobs ?? {})) if (!this.applyKnob(g, name, v)) clamped.push(`${id}.${name}`)
       const display = g.spec.display
-      if (typeof display === 'string' && 'value' in g.state) this.show(`${g.toy}/${display}`, String(g.state.value).padStart(5, '0'))
+      if (typeof display === 'string' && 'value' in g.state) this.show(`${g.toy}/${display}`, digits(g.state.value))
     }
     this.respawns = new Map((Array.isArray(s.respawns) ? s.respawns : []).filter((r) => r && this.dynamic(r.key) && typeof r.t === 'number' && Number.isFinite(r.t)).map((r) => [r.key, r.t]))
     if (typeof s.clock === 'number' && Number.isFinite(s.clock)) this.clock = s.clock
@@ -1361,12 +1432,15 @@ export class World implements WorldApi {
     return { clamped }
   }
 
-  /** Every moving thing home and every counter to zero. The rules and knobs stay as tuned. */
+  /** Every moving thing home and every gadget that takes a `reset` back as it started (a counter, a game, a lamp). The rules and knobs stay as tuned. */
   reset() {
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
     this.respawns.clear()
     this.queue.length = 0
-    for (const g of this.gadgets.values()) if ('value' in g.state) gadgetKind(g.spec.kind)?.receive?.(g, 'reset', { value: 0 }, this)
+    for (const g of this.gadgets.values()) {
+      const kind = gadgetKind(g.spec.kind)
+      if (kind?.inputs.includes('reset')) kind.receive?.(g, 'reset', { value: 0 }, this)
+    }
   }
 
   stats(): Stats {
@@ -1390,6 +1464,7 @@ export class World implements WorldApi {
     // A walker held back as the world goes would wait for a body that no longer exists (src/villagers/cast.ts).
     for (const f of this.followers.values()) delete f.object.userData.held
     for (const d of this.displays.values()) d.texture.dispose()
+    for (const glow of this.glows.values()) glow.dispose()
     this.core.dispose()
   }
 }

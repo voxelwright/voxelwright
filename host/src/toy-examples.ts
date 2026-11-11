@@ -70,5 +70,64 @@ export function pins(s: Pick<OfferedSurface, 'half'>): ToyData {
   return { label: 'Ten pins', parts, gadgets: [], wires: [] }
 }
 
+/**
+ * A game, not only a toy (#108): six plaster skittles at the far end of a lacquered lane and a steel ball to fling at
+ * them, wired into a round. Rolling the ball past the line starts a round and uses one of three throws; each skittle
+ * that tips scores ten on the card and counts toward six; all six down wins (a lamp and a run of bells); the third
+ * throw, three seconds on, loses. The ball comes back from the pit behind the skittles, and five seconds after the
+ * end everything stands up again for the next round.
+ */
+export function skittles(s: Pick<OfferedSurface, 'half'>): ToyData {
+  const L = Math.min(0.42, s.half[0] - 0.02)
+  const parts: Record<string, unknown>[] = [
+    { id: 'lane', shape: { kind: 'box', half: v3(L, 0.004, 0.11) }, material: 'lacquer', paint: '#efdcb4', at: v3(0, 0.004, 0) },
+    { id: 'rail-a', shape: { kind: 'box', half: v3(L, 0.018, 0.006) }, material: 'walnut', at: v3(0, 0.018, -0.118) },
+    { id: 'rail-b', shape: { kind: 'box', half: v3(L, 0.018, 0.006) }, material: 'walnut', at: v3(0, 0.018, 0.118) },
+    { id: 'backstop', shape: { kind: 'box', half: v3(0.006, 0.03, 0.124) }, material: 'walnut', at: v3(-L + 0.006, 0.03, 0) },
+    // The score card stands behind the backstop's corner, and a lamp sits on it.
+    { id: 'card', shape: { kind: 'box', half: v3(0.004, 0.03, 0.08) }, material: 'maple', paint: '#f6ead2', at: v3(-L + 0.016, 0.092, 0) },
+    { id: 'lamp', shape: { kind: 'sphere', radius: 0.012 }, material: 'glass', paint: '#f2b34a', at: v3(-L + 0.016, 0.134, 0) },
+    // Trigger volumes: the line a throw crosses, and the pit behind the skittles the ball ends in.
+    { id: 'line', shape: { kind: 'box', half: v3(0.006, 0.03, 0.105) }, material: 'glass', at: v3(L - 0.2, 0.038, 0), sensor: true, hidden: true },
+    { id: 'pit', shape: { kind: 'box', half: v3(0.02, 0.03, 0.105) }, material: 'glass', at: v3(-L + 0.04, 0.038, 0), sensor: true, hidden: true },
+  ]
+  const gadgets: Record<string, unknown>[] = []
+  const wires: { from: string; to: string }[] = []
+  let n = 0
+  for (let row = 0; row < 3; row++) for (let k = 0; k <= row; k++) {
+    n++
+    parts.push({ id: `pin-${n}`, shape: { kind: 'cylinder', halfHeight: 0.04, radius: 0.014 }, material: 'plaster', paint: n % 2 ? '#f6f0e4' : '#d9573f', motion: 'dynamic', at: v3(-L + 0.2 - row * 0.042, 0.008 + 0.04, (k - row / 2) * 0.05) })
+    gadgets.push({ id: `pin-${n}-down`, kind: 'tilt', part: `pin-${n}`, knobs: { angle: 0.8 } })
+    wires.push({ from: `pin-${n}-down.fell`, to: 'score.add' }, { from: `pin-${n}-down.fell`, to: 'down.add' })
+  }
+  parts.push({ id: 'ball', shape: { kind: 'sphere', radius: 0.03 }, material: 'steel', paint: '#4f7896', motion: 'dynamic', at: v3(L - 0.07, 0.008 + 0.03, 0) })
+  gadgets.push(
+    { id: 'score', kind: 'counter', display: 'card', knobs: { step: 10 } },
+    { id: 'down', kind: 'counter', knobs: { step: 1, target: 6 } },
+    { id: 'throws', kind: 'counter', knobs: { step: 1, start: 3, target: 0 } },
+    { id: 'game', kind: 'game' },
+    { id: 'thrown', kind: 'zone', part: 'line' },
+    { id: 'ended', kind: 'zone', part: 'pit' },
+    { id: 'ball-back', kind: 'emitter', part: 'ball', knobs: { delay: 1.2 } },
+    { id: 'last-throw', kind: 'timer', knobs: { seconds: 3 } },
+    { id: 'again', kind: 'timer', knobs: { seconds: 5 } },
+    { id: 'set-up', kind: 'restart' },
+    { id: 'win-lamp', kind: 'lamp', part: 'lamp' },
+    { id: 'win-bell', kind: 'bell', part: 'lamp', knobs: { note: 12, rings: 4, step: 5 } },
+    { id: 'pin-bell', kind: 'bell', knobs: { note: 19 } },
+  )
+  wires.push(
+    { from: 'thrown.enter', to: 'game.start' }, { from: 'thrown.enter', to: 'throws.sub' },
+    { from: 'score.changed', to: 'game.score' }, { from: 'score.changed', to: 'pin-bell.ring' },
+    { from: 'down.reached', to: 'game.win' },
+    { from: 'throws.reached', to: 'last-throw.start' }, { from: 'last-throw.done', to: 'game.lose' },
+    { from: 'game.won', to: 'win-lamp.on' }, { from: 'game.won', to: 'win-bell.ring' }, { from: 'game.won', to: 'again.start' },
+    { from: 'game.lost', to: 'again.start' },
+    { from: 'ended.enter', to: 'ball-back.spawn' },
+    { from: 'again.done', to: 'set-up.go' },
+  )
+  return { label: 'Skittles', parts, gadgets, wires }
+}
+
 /** The worked example the prompt quotes: a marble run on a sample surface. */
 export const EXAMPLE_SURFACE: OfferedSurface = { id: 'table', label: 'the kitchen table', half: [0.4, 0.22], height: 0.45 }
