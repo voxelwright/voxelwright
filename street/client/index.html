@@ -29,6 +29,14 @@
   #invite code { display: block; margin: 6px 0; padding: 6px; background: rgba(29, 39, 51, 0.08); border-radius: 6px; word-break: break-all; user-select: all; -webkit-user-select: all; }
   .bubble.making { font-style: italic; color: #5b6673; }
   .bubble.sorry { background: rgba(255, 240, 236, 0.96); }
+  /* A narrow screen: the sentence keeps the whole width, and the three small buttons sit in a row above it. */
+  @media (max-width: 560px) {
+    #ask { flex-wrap: wrap; justify-content: flex-end; }
+    #ask::before { content: ''; order: 2; flex-basis: 100%; }
+    #ask #undo, #ask #top, #ask #bring { order: 1; padding: 8px 12px; font-size: 13px; }
+    #ask #mode { order: 3; }
+    #ask input { order: 4; }
+  }
   @media (pointer: coarse) { .keys { display: none; } }
   @media (pointer: fine) { .touch { display: none; } }
 </style>

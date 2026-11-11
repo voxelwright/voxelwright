@@ -7,11 +7,18 @@
 // walking into them. `?predict=0` draws your walker like everything else, to feel the
 // difference; `?delay=50` holds everything 50 ms each way.
 import * as THREE from 'three/webgpu'
+import { load, root, type Stage } from '../../home/src/kernel'
+import { focusOn } from '../../home/src/lens'
+import atmosphere from '../../home/src/plugins/atmosphere'
+import postfx from '../../home/src/plugins/postfx'
+import rendererPlugin from '../../home/src/plugins/renderer'
+import { SUN_DIRECTION } from '../../home/src/sky'
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { Puppet } from '../src/puppet.ts'
+import { resident, type Resident } from './figure.ts'
 import { registerBlock } from '../src/scene.ts'
-import { NORMAL, heightAt } from '../src/ground.ts'
+import { GRADE, HALF_L, HALF_W, NORMAL, heightAt } from '../src/ground.ts'
 import { HALF_H, RADIUS, TICK, predict, standing, type Input, type Walker } from '../src/walk.ts'
 import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Ask, type Drawn, type Line, type Pose } from '../src/wire.ts'
 
@@ -22,29 +29,32 @@ const STOP = PREDICT && params.get('stop') === '1'
 let delay = Number(params.get('delay') ?? 0), jitter = Number(params.get('jitter') ?? 0)
 const hud = document.getElementById('hud')!, knobs = document.getElementById('knobs')!
 
-// ---- the picture
-const renderer = new THREE.WebGPURenderer({ antialias: true })
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
-renderer.toneMapping = THREE.NeutralToneMapping
-renderer.toneMappingExposure = 1.1
-renderer.shadowMap.enabled = params.get('shadows') !== '0'
-renderer.shadowMap.type = THREE.PCFShadowMap
-document.body.prepend(renderer.domElement)
-const scene = new THREE.Scene()
-scene.background = new THREE.Color(0xbfd9ee)
-scene.fog = new THREE.Fog(0xbfd9ee, 45, 110)
-scene.add(new THREE.HemisphereLight(0xdcebff, 0x8a8f7a, 1.5))
-const sun = new THREE.DirectionalLight(0xfff1d6, 2.6)
+// ---- the picture: the home's own stage (its renderer with quality tiers, its sky, its post effects), with the street in it
+load(rendererPlugin)
+const stage = await new Promise<Stage>((resolve) => {
+  const look = () => { const s = root.get('stage') as Stage | undefined; if (s) resolve(s); else setTimeout(look, 10) }
+  look()
+})
+// `?post=0` and `?sky=0` leave one out, to see what each costs and adds.
+if (params.get('post') !== '0') load(postfx)
+if (params.get('sky') !== '0') load(atmosphere)
+const { renderer, scene, camera } = stage
+camera.far = 220
+// A tall screen (a phone held upright) sees a narrow slice at the same lens, so it gets a wider one.
+const lens = () => { camera.fov = innerWidth < innerHeight ? 72 : 50; camera.updateProjectionMatrix() }
+lens()
+addEventListener('resize', lens)
+// The sun stands where the sky says it does, and its shadow box goes with whoever the view follows.
+const SHADOW = 20
+const sun = new THREE.DirectionalLight('#ffe2b8', 3.4)
 sun.castShadow = true
-sun.shadow.mapSize.set(2048, 2048)
-sun.shadow.bias = -0.0008
+sun.shadow.mapSize.set(stage.quality === 'low' ? 1024 : 2048, stage.quality === 'low' ? 1024 : 2048)
+sun.shadow.bias = -0.0004
 sun.shadow.normalBias = 0.03
-Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 70 })
-scene.add(sun, sun.target)
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200)
-const resize = () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix() }
-addEventListener('resize', resize)
-resize()
+sun.shadow.radius = 3
+Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 90 })
+scene.add(sun, sun.target, new THREE.HemisphereLight('#cfe4ff', '#b9a98a', 0.9))
+const sunAt = (x: number, y: number, z: number) => { sun.target.position.set(x, y, z); sun.position.set(x, y, z).addScaledVector(SUN_DIRECTION, 45) }
 
 // ---- the world as this page holds it: the engine's World, posed and never stepped
 registerBlock()
@@ -52,7 +62,7 @@ const puppet = new Puppet()
 let world: World | null = null
 interface Sample { tick: number; p: Vec3; q: Quat }
 /** A moving part: its body in the puppet, its poses as heard, and where it is drawn now. */
-interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3 }
+interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; figure?: Resident }
 const views = new Map<number, View>()
 let you = 0, snapEvery = 2
 function build(drawn: Drawn) {
@@ -70,11 +80,18 @@ function build(drawn: Drawn) {
     }
     puppet.pose(view.body, view.p, view.q)
     views.set(id, view)
-    if (view.kind === 'walker') headOf(id).name.textContent = drawn.toy.label
+    if (view.kind === 'walker') {
+      headOf(id).name.textContent = drawn.toy.label
+      // The body the world simulates is a capsule; what is drawn in its place is a resident (figure.ts).
+      const capsule = world!.mesh(view.key)
+      if (capsule) capsule.visible = false
+      view.figure = resident(Number(/\d+/.exec(drawn.toy.id)?.[0] ?? 1) - 1, part.paint ?? '#c8553d', stage.features().has('phys'))
+      scene.add(view.figure.root)
+    }
   })
 }
 function remove(toy: string) {
-  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); heads.get(id)?.el.remove(); heads.delete(id) }
+  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); heads.get(id)?.el.remove(); heads.delete(id) }
   world!.removeToy(toy)
 }
 function heard(pose: Pose, tick: number) {
@@ -185,7 +202,6 @@ function sample(): Input {
 /** Sits down, or says on the page why not: a phone has no console to read. */
 async function connect() {
   if (typeof WebTransport !== 'function') throw new Error('this browser has no WebTransport')
-  await renderer.init()
   const where = await (await fetch('/where')).json() as { port: number; hash: number[] }
   const host = location.hostname === 'localhost' ? '127.0.0.1' : location.hostname
   const url = `https://${host}:${params.get('port') ?? where.port}/street`
@@ -273,10 +289,13 @@ void (async () => {
     for (const text of lines) {
       const line = JSON.parse(text) as Line
       if (line.t === 'hello') {
+        // Building a street's worth of meshes is a long task: the renderer must not read it as a slow GPU and drop a tier.
+        const release = stage.hold()
         world = new World(puppet, () => {}, undefined, line.floor)
         scene.add(world.group)
         snapEvery = Math.round(line.tickHz / line.snapHz)
         line.drawn.forEach(build)
+        release()
         you = line.you
         me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
       } else if (line.t === 'add') build(line.drawn)
@@ -309,6 +328,11 @@ setInterval(() => send(packPing(performance.now())), 250)
 
 // ---- every frame
 const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), head = new THREE.Vector3()
+/** How much the lens blurs what is far from where the view looks: the home's miniature look, `?lens=0.5` for a picture. Walking about, everything is sharp. */
+const LENS = Number(params.get('lens') ?? 0)
+/** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand. */
+const BOOM = 7, INSIDE_X = HALF_W - 0.7, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) - 0.7
+let boom = 1
 /** A camera put somewhere by hand, for pictures (test/gallery.ts); null follows your walker. */
 let fixed: { from: Vec3; to: Vec3 } | null = null
 const frames: number[] = [], works: number[] = []
@@ -325,7 +349,6 @@ function poseAt(view: View, tick: number) {
   view.q[0] = qa.x; view.q[1] = qa.y; view.q[2] = qa.z; view.q[3] = qa.w
 }
 function frame(now: number) {
-  requestAnimationFrame(frame)
   const dt = Math.min(0.1, (now - last) / 1000)
   frames.push(now - last)
   last = now
@@ -348,6 +371,7 @@ function frame(now: number) {
       view.p[0] = me.p[0] + offset.x; view.p[1] = me.p[1] + offset.y; view.p[2] = me.p[2] + offset.z
     } else poseAt(view, then)
     view.shown.set(view.p[0], view.p[1], view.p[2])
+    view.figure?.update(view.shown, dt)
   }
   // The engine draws: its meshes go where the puppet's bodies now are.
   world.frame(dt)
@@ -355,17 +379,23 @@ function frame(now: number) {
   if (fixed) {
     camera.position.set(...fixed.from)
     camera.lookAt(...fixed.to)
-    sun.target.position.set(...fixed.to)
-    sun.position.set(fixed.to[0] + 9, fixed.to[1] + 22, fixed.to[2] - 7)
+    sunAt(...fixed.to)
+    focusOn(Math.hypot(fixed.from[0] - fixed.to[0], fixed.from[1] - fixed.to[1], fixed.from[2] - fixed.to[2]), 0.3, LENS)
   } else if (mine) {
-    const s = Math.sin(yaw), c = Math.cos(yaw)
-    camera.position.set(mine.shown.x - s * 7, mine.shown.y + 3.4, mine.shown.z - c * 7)
-    camera.lookAt(mine.shown.x, mine.shown.y + 0.8, mine.shown.z)
-    sun.target.position.copy(mine.shown)
-    sun.position.set(mine.shown.x + 9, mine.shown.y + 22, mine.shown.z - 7)
+    // The camera rides seven metres behind you, and stays inside the street: where a wall is nearer than that it comes in closer and lower, over your shoulder.
+    const bx = -Math.sin(yaw) * BOOM, bz = -Math.cos(yaw) * BOOM
+    const room = (from: number, by: number, most: number) => (by > 0 ? (most - from) / by : by < 0 ? (-most - from) / by : 1)
+    const fits = Math.max(0.3, Math.min(1, room(mine.shown.x, bx, INSIDE_X), room(mine.shown.z, bz, INSIDE_Z)))
+    boom = fits < boom ? fits : boom + (fits - boom) * (1 - Math.exp(-dt * 5))
+    camera.position.set(mine.shown.x + bx * boom, mine.shown.y + 1.7 + 1.7 * boom, mine.shown.z + bz * boom)
+    camera.lookAt(mine.shown.x, mine.shown.y + 0.8 + 0.4 * (1 - boom), mine.shown.z)
+    sunAt(mine.shown.x, mine.shown.y, mine.shown.z)
+    focusOn(camera.position.distanceTo(mine.shown), 0.3, LENS)
   }
+  // The stage draws after this; names are placed with the camera as it now stands.
+  camera.updateMatrixWorld()
+  camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
   for (const mesh of shimmers.values()) { mesh.rotation.y += dt * 1.8; mesh.rotation.x += dt * 0.7; mesh.scale.setScalar(1 + 0.25 * Math.sin(now / 180)) }
-  renderer.render(scene, camera)
   // A name, and words for a while, stand over each resident's head while they are in front of the camera.
   for (const [by, h] of heads) {
     const view = views.get(by)
@@ -393,9 +423,9 @@ const spread = (values: number[], digits = 1) => {
 }
 function stats() {
   const due = ticks.first ? (ticks.last - ticks.first) / snapEvery + 1 : 0
-  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'webgpu' : 'webgl2' }
+  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: stage.backend, quality: stage.quality, gpuMs: spread(stage.timing.gpu.slice(-300), 2), cpuMs: spread(stage.timing.cpu.slice(-300), 2), tier: stage.timing.tierReason }
 }
-requestAnimationFrame(frame)
+root.on('village/frame', () => frame(performance.now()))
 
 // ---- the test knobs, folded away until asked for
 const knob = (label: string, pressed: boolean, tap: () => void, group = '') => {

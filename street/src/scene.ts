@@ -17,7 +17,7 @@ const CRATE = 0.3, BALL = 0.25, WALL_WIDE = 8, WALL_HIGH = 3
 
 /** What things on the street may be made of beyond the home's materials. Data: the world process and every page register the same. */
 export const STREET_MATERIALS: Record<string, Material> = {
-  asphalt: { density: 2300, friction: 0.9, restitution: 0.05, hardness: 0.8, look: { color: '#8f8a80', roughness: 0.95, metalness: 0 } },
+  asphalt: { density: 2300, friction: 0.9, restitution: 0.05, hardness: 0.8, look: { color: '#8f8a80', roughness: 1, metalness: 0 } },
   stone: { density: 2600, friction: 0.8, restitution: 0.1, hardness: 0.95, look: { color: '#9a958c', roughness: 0.9, metalness: 0 } },
   foam: { density: 40, friction: 0.8, restitution: 0.35, hardness: 0.02, look: { color: '#f2c94c', roughness: 0.9, metalness: 0 }, heat: { flammability: 0.7, ignition: 300, burnRate: 0.08, heatCapacity: 0.3, absorbs: 0.6 } },
   plastic: { density: 950, friction: 0.4, restitution: 0.5, hardness: 0.5, look: { color: '#e8553d', roughness: 0.35, metalness: 0 }, heat: { flammability: 0.4, ignition: 400, burnRate: 0.03, heatCapacity: 1, absorbs: 0 } },

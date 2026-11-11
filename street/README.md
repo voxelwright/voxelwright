@@ -61,6 +61,12 @@ the session goes straight to the tailnet address, accepted by the certificate's 
 `?delay=50` holds everything 50 ms each way; `?stop=1` stops your walker at things as they
 are drawn. The page has buttons for all three, and says on screen why it could not sit down.
 
+The page is drawn on the home's stage (`home/src/plugins/renderer.ts`, its post effects and
+its sky), so it shares the home's quality tiers: `?q=low` asks for the cheapest one.
+`?post=0` leaves the post effects out, `?sky=0` the sky, and `?lens=0.5` adds the home's
+miniature blur for a picture. Residents are drawn as the home's felt villagers
+(`client/figure.ts`) over the capsule the world simulates.
+
 ## Checks
 
 ```sh
@@ -73,6 +79,7 @@ node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this a
 # With a real model, by hand:
 node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence
 node test/gallery.ts out.json pictures/                                  # photograph it all as one sheet
+node test/shots.ts out.json look/ [q=low]                                # the same six views every time, to compare one look with the next
 node test/clip.ts clip/ sonnet "a plank bridge across the trench"        # record the walk, the ask and the crossing
 node test/resident.ts clip/ sonnet sonnet                                # a real Claude Code session as a resident, recorded
 npm run typecheck

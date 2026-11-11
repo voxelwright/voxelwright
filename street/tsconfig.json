@@ -12,5 +12,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "client", "test", "vite.config.ts"]
+  "include": ["src", "client", "test", "vite.config.ts", "../home/src/sound/contract.ts"]
 }
