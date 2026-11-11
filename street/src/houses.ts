@@ -14,16 +14,17 @@ export const LOTS = 8
 export const LOT = (2 * HALF_L) / Math.hypot(1, GRADE) / LOTS
 export const DEPTH = 10
 /** The garage storey's height and each storey's above it. */
-const GARAGE = 2.9, STOREY = 3
+export const GARAGE = 2.9, STOREY = 3
 /** How far a house goes on below its floor: down the hill across its lot, and past the trench's floor. */
-const BELOW = GRADE * LOT + 4.3
+export const BELOW = GRADE * LOT + 4.3
 
 const WALLS: [string, string][] = [
   ['rose', '#e7a39c'], ['mint', '#a8d3c4'], ['butter', '#f2d88c'], ['sky blue', '#9dbbdc'], ['lavender', '#c6b3da'],
   ['peach', '#f1b58b'], ['sage', '#b5d09c'], ['cream', '#efe6d2'], ['teal', '#7fb3b6'], ['terracotta', '#d98d76'],
 ]
 const DOORS = ['#c0392b', '#2f5d73', '#e3ad38', '#3d6b4f', '#7a4a8c', '#22323f']
-const TRIM = '#fbf6ea', GLASS = '#34465a', BASE = '#b3aca1', ROOF = '#6d6470', GARAGE_DOOR = '#f1ead9'
+export const TRIM = '#fbf6ea'
+const GLASS = '#34465a', BASE = '#b3aca1', ROOF = '#6d6470', GARAGE_DOOR = '#f1ead9'
 
 export type Style = 'flat' | 'bay' | 'gable'
 export interface House {

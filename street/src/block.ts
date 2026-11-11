@@ -8,7 +8,7 @@ import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
 import { nearest, placeOf, standsOver, type Box } from './near.ts'
 import { HOUSES } from './houses.ts'
-import { BINS, FURNITURE, STREET, cargo, registerBlock, resident } from './scene.ts'
+import { BINS, CARS, CAR_KINDS, FURNITURE, PARKED, STREET, cargo, registerBlock, resident } from './scene.ts'
 import { NORMAL_UP, TICK, standing, type Input } from './walk.ts'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -80,6 +80,7 @@ export class Block {
     this.build(STREET)
     for (const house of HOUSES) this.build(house)
     this.build(FURNITURE)
+    this.build(CARS)
     this.build(cargo(options.crates, options.balls))
     this.build(BINS)
     this.dir = options.dir && join(options.dir, 'made')
@@ -253,8 +254,9 @@ export class Block {
     const cargo = this.specs.get('cargo')?.parts ?? []
     const still = [
       ...HOUSES.map((house) => ({ what: house.label, at: house.frame.at })),
-      ...FURNITURE.parts.filter((p) => !p.id.startsWith('barrier')).map((p) => ({ what: p.id.startsWith('lamp') ? 'a street lamp' : p.id.startsWith('tree') ? 'a tree' : p.id === 'hydrant' ? 'a hydrant' : 'a letter box', at: p.at })),
-      ...BINS.parts.map((p) => ({ what: 'a steel bin (it can be knocked over)', at: this.world.thing(`bins/${p.id}`)?.position ?? p.at })),
+      ...FURNITURE.parts.filter((p) => !p.id.startsWith('barrier')).map((p) => ({ what: p.id.startsWith('lamp') ? 'a street lamp' : p.id.startsWith('tree') ? 'a tree' : p.id.startsWith('palm') ? 'a palm tree' : p.id === 'hydrant' ? 'a hydrant' : p.id.startsWith('stop') ? 'a stop sign' : p.id.startsWith('newsbox') ? 'a newspaper box' : p.id === 'cabinet' ? 'a utility cabinet' : 'a letter box', at: p.at })),
+      ...BINS.parts.map((p) => ({ what: `${p.id.startsWith('wheelie') ? 'a wheelie bin' : 'a steel bin'} (it can be knocked over)`, at: this.world.thing(`bins/${p.id}`)?.position ?? p.at })),
+      ...PARKED.map((p) => ({ what: `a parked ${p.kind === 'hatch' ? 'hatchback' : p.kind === 'pickup' ? 'pickup truck' : p.kind}, ${CAR_KINDS[p.kind].long} m long`, at: this.world.thing(`cars/${p.id}`)?.position ?? [p.across, 0, p.along] as Vec3 })),
     ]
     return { residents, things, loose: { crates: cargo.filter((p) => p.id.startsWith('crate-')).length, balls: cargo.filter((p) => p.id.startsWith('ball-')).length }, still }
   }

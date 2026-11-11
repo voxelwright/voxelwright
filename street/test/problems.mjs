@@ -14,6 +14,7 @@ try {
   const { Problems, PROBLEMS } = await server.ssrLoadModule('/src/problems.ts')
   const { piecesShape } = await server.ssrLoadModule('../home/src/engine/toy.ts')
   const { planeAt, GRADE } = await server.ssrLoadModule('/src/ground.ts')
+  const { SUN } = await server.ssrLoadModule('/src/sun.ts')
   const sim = await Block.make({ crates: 0, balls: 6 })
   const said = [], solved = [], wanted = new Map(), seats = new Map()
   const problems = new Problems({
@@ -56,17 +57,21 @@ try {
   check('stairs: he climbs them himself and is up, and whoever made them is thanked', solved.length === 1 && solved[0].problem === 'up' && solved[0].solver === 'Tester' && solved[0].with === 'Stairs' && feet('Otis') >= 1.4, { solved, feet: feet('Otis'), at: where('Otis'), said: said.filter(([who]) => who === 'Otis') })
   check('he wants nothing now', wanted.get('Otis') === '')
 
-  // A canopy beside Ines, not between her and the sun, is not shade; one over her is.
+  // A canopy far to one side of Ines is not shade. One whose shadow falls a few steps from her is: the sun is low, so it lies
+  // well to one side of the canopy, and she walks into it herself.
+  const spot = [ines[0] - 0.6, ines[2] - 2.4]
+  const sunward = [spot[0] + (SUN[0] / SUN[1]) * 1.9, ines[1], spot[1] + (SUN[2] / SUN[1]) * 1.9]
   sim.place(made('made-3', 'Canopy', [ines[0] - 4.5, ines[1], ines[2] + 3], [box([1, 0.05, 1], [0, 2.6, 0])]), 'a canopy', 'Tester')
   run(1)
   check('a canopy that stands beside her does not shade her', solved.length === 1, solved)
-  sim.place(made('made-4', 'Canopy', ines, [box([2.2, 0.05, 2.2], [0, 3, 0])]), 'a canopy', 'Tester')
-  run(1)
-  check('one between her head and the sun does, and whoever made it is thanked', solved.length === 2 && solved[1].problem === 'shade' && solved[1].who === 'Ines' && solved[1].solver === 'Tester' && solved[1].with === 'Canopy', solved)
+  sim.place(made('made-4', 'Canopy', sunward, [box([1.3, 0.05, 1.3], [0, 3, 0])]), 'a canopy', 'Tester')
+  run(8, () => solved.length === 2)
+  check('she steps into the shade a canopy throws a few steps away', Math.hypot(where('Ines')[0] - spot[0], where('Ines')[2] - spot[1]) < 1.3 && said.some(([who, words]) => who === 'Ines' && /shade/.test(words)), { at: where('Ines'), spot, said: said.filter(([who]) => who === 'Ines') })
+  check('standing in it she is shaded, and whoever made it is thanked', solved.length === 2 && solved[1].problem === 'shade' && solved[1].who === 'Ines' && solved[1].solver === 'Tester' && solved[1].with === 'Canopy', solved)
 
   // The canopy is changed while she rests: it is a new thing under a new name, and still what shades her.
   sim.take('made-4')
-  sim.place(made('made-5', 'Canopy', ines, [box([2.2, 0.05, 2.2], [0, 3, 0])]), 'a canopy, changed', 'Tester')
+  sim.place(made('made-5', 'Canopy', sunward, [box([1.3, 0.05, 1.3], [0, 3, 0])]), 'a canopy, changed', 'Tester')
   run(14)
   check('after the rest the stairs and that canopy are swept, the rest left, and both want again', sim.madeNow().map((m) => m.id).join() === 'made-1,made-3' && wanted.get('Otis') && wanted.get('Ines'), { made: sim.madeNow().map((m) => m.id), otis: wanted.get('Otis'), ines: wanted.get('Ines') })
   check('Otis is down on the ground again', feet('Otis') < 0.3, { feet: feet('Otis'), at: where('Otis') })
@@ -80,8 +85,9 @@ try {
   run(4)
   check('knocked into the trench while standing, she is back at her place', down < -1.1 && feet('Mabel') > -0.2 && Math.hypot(where('Mabel')[0] - mabel[0], where('Mabel')[2] - mabel[2]) < 0.8, { down, feet: feet('Mabel'), at: where('Mabel') })
 
-  // With nobody on the street but those the world walks, the balls stop where they roll to and the world rests.
-  run(60)
+  // With nobody on the street but those the world walks, the balls stop where they roll to and the world rests. (The last
+  // ball let go when the stairs were swept takes about a minute to roll down into the trench and knock two awake there.)
+  run(80)
   const awake = sim.awake()
   check('with nobody here the balls come to rest: only the three the world walks are awake', awake <= 3, awake)
 } catch (e) { console.log('FAILED:', e?.stack?.split('\n').slice(0, 8).join('\n')); process.exitCode = 1 }

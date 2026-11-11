@@ -7,17 +7,16 @@
 // in front of everyone. A model may write their lines when they are spoken to, try something
 // or are helped; without one they say what is written here.
 import type { Vec3 } from '../../home/src/engine/core.ts'
-import { GRADE, TRENCH, onStreet, planeAt } from './ground.ts'
-import { doorOf, houseAt } from './houses.ts'
+import { GRADE, TRENCH, heightAt, onStreet, planeAt } from './ground.ts'
+import { FRONT, doorOf, houseAt } from './houses.ts'
 import type { Box } from './near.ts'
+import { SUN } from './sun.ts'
 import { NORMAL_UP, standing } from './walk.ts'
 import type { Self } from './wire.ts'
 
 const LEN = Math.hypot(1, GRADE)
 /** The trench in the world's own z. */
 const GAP = { from: TRENCH.from / LEN, to: TRENCH.to / LEN }
-/** Towards the sun, as the sky has it (home/src/sky.ts): what stands on that line from someone's head shades them. */
-const SUN: Vec3 = (([x, y, z]) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l] as Vec3 })([-0.52, 0.78, -0.35])
 
 export interface Problem {
   id: string
@@ -51,8 +50,8 @@ export const PROBLEMS: Problem[] = [
     test: { kind: 'up', high: 1.4 },
   },
   {
-    id: 'shade', who: { name: 'Ines', plush: 2, scarf: '#d65a9a', at: doorOf(houseAt(6, 1)) },
-    about: 'Ines, a potter who lives at No. 114, warm and busy. She is out on the pavement by her door, setting pots to dry, and the afternoon sun is right on her. She wants something to stand under for shade: anything big enough, she is not fussy.',
+    id: 'shade', who: { name: 'Ines', plush: 2, scarf: '#d65a9a', at: doorOf(houseAt(7, 1)) },
+    about: 'Ines, a potter who lives at No. 114, warm and busy. She is out on the pavement by her door, setting pots to dry, and the afternoon sun is right on her. She wants something to stand under for shade: anything big enough, she is not fussy. The sun is low, so the shadow of a thing lies a few steps to one side of it; she will step into any shade that falls near her.',
     wants: 'The sun is right on me out here. Could you make me a bit of shade to stand under?',
     thanks: 'Oh, that is better. You are a star!', done: 'made Ines some shade',
     test: { kind: 'shaded' },
@@ -90,6 +89,8 @@ export interface Stage {
 type Attempt =
   | { kind: 'cross'; thing: MadeNow | null; x: number; lined: boolean; since: number }
   | { kind: 'climb'; thing: MadeNow; side: number; lined: boolean; since: number; best: number }
+  /** Stepping into the shade a made thing throws: to a place on the ground where it stands between a head and the sun. */
+  | { kind: 'shade'; thing: MadeNow; x: number; z: number; since: number }
 
 interface Running {
   problem: Problem
@@ -100,6 +101,8 @@ interface Running {
   /** Made things they have already tried, and fallen from or could not get up. */
   tried: Set<string>
   attempt?: Attempt
+  /** When they last looked round for shade to step into. */
+  looked?: number
   /** Back on their feet at this time, after a fall. */
   up?: number
   spoke: number
@@ -156,9 +159,9 @@ export class Problems {
     this.checked = now
     for (const r of this.running) {
       if (!r.open) { if (now >= r.until && this.clearOf(r)) this.reopen(r); continue }
-      if (!r.attempt && r.up === undefined) this.lookForSomething(r, now)
       const how = this.passes(r)
       if (how) this.solve(r, how, now)
+      else if (!r.attempt && r.up === undefined) this.lookForSomething(r, now)
     }
   }
 
@@ -219,8 +222,18 @@ export class Problems {
   /** A made thing worth trying with their own body: one that reaches both sides of the trench, or one near enough to climb. */
   private lookForSomething(r: Running, now: number) {
     const test = r.problem.test, me = this.stage.self(r.seat)
-    if (!me || test.kind === 'shaded') return
+    if (!me) return
     const fresh = this.stage.made().filter((m) => !r.tried.has(m.id))
+    if (test.kind === 'shaded') {
+      // The sun is low: a thing's shadow lies well to one side of it. Twice a second they look for shade within a few steps, and go and stand in it.
+      if (!fresh.length || now - (r.looked ?? -Infinity) < 500) return
+      r.looked = now
+      const spot = this.shadeNear(r, fresh)
+      if (!spot) return
+      r.attempt = { kind: 'shade', thing: spot.thing, x: spot.x, z: spot.z, since: now }
+      this.speak(r, 'Oh, is that shade? Let me step into it.', `Someone has made ${spot.thing.label} near you, and it throws a shadow on the ground a few steps away. You are stepping into its shade.`)
+      return
+    }
     if (test.kind === 'across') {
       const way = fresh.filter((m) => m.box.z0 < GAP.from + 0.4 && m.box.z1 > GAP.to - 0.4).pop()
       if (!way) return
@@ -235,6 +248,29 @@ export class Problems {
     if (!near) return
     r.attempt = { kind: 'climb', thing: near, side: 0, lined: false, since: now, best: 0 }
     this.speak(r, 'Is that for me? Let me try to get up.', `Someone has made ${near.label} near you. You are about to try climbing it.`)
+  }
+
+  /** The nearest place within a few steps of where they stand by rights at which one of `things` is between a head and the sun, and so is the ground round it; null when there is none. */
+  private shadeNear(r: Running, things: MadeNow[]): { x: number; z: number; thing: MadeNow } | null {
+    const home = r.problem.who.at, REACH = 4.5, STEP = 0.5
+    const shadeAt = (x: number, z: number) => this.stage.meets([x, heightAt(z) + standing(NORMAL_UP) + 0.8, z], [SUN[0] * 14, SUN[1] * 14, SUN[2] * 14], r.seat)
+    const spots: { x: number; z: number; d: number }[] = []
+    for (let dx = -REACH; dx <= REACH; dx += STEP) for (let dz = -REACH; dz <= REACH; dz += STEP) {
+      const x = home[0] + dx, z = home[2] + dz, d = Math.hypot(dx, dz)
+      // On the street, between the fronts, and not over the trench or at its edge.
+      if (d > REACH || Math.abs(x) > FRONT - 0.7 || (z > GAP.from - 0.6 && z < GAP.to + 0.6)) continue
+      spots.push({ x, z, d })
+    }
+    for (const { x, z } of spots.sort((a, b) => a.d - b.d)) {
+      const thing = things.find((m) => m.id === shadeAt(x, z))
+      // Well inside the shadow, not at its edge: a short step each way is shaded by the same thing.
+      if (!thing || [[0.35, 0], [-0.35, 0], [0, 0.35], [0, -0.35]].some(([ax, az]) => shadeAt(x + ax, z + az) !== thing.id)) continue
+      // And free to stand in: nothing made is in the way at the height of a body (the thing's own pole, say).
+      const inWay = this.stage.meets([x, heightAt(z) + standing(NORMAL_UP) + 0.6, z], [0, -(standing(NORMAL_UP) + 0.3), 0], r.seat)
+      if (inWay && things.some((m) => m.id === inWay)) continue
+      return { x, z, thing }
+    }
+    return null
   }
 
   /** Where they put their feet this tick. */
@@ -275,6 +311,11 @@ export class Problems {
       if (!a.lined) a.lined = towards(a.x, GAP.from - 0.9)
       else towards(a.x, GAP.to + 3)
       return
+    }
+    if (a.kind === 'shade') {
+      // Into the shade and stay there: standing in it is the test. A way that is blocked is given up, and not tried twice.
+      if (now - a.since > 9000) return giveUp('I cannot get into that shade.', `You tried to step into the shade of ${a.thing.label} and could not get there: something is in the way.`)
+      return void towards(a.x, a.z, 0.15)
     }
     // Climbing: at the thing from one side, walking in over its middle; a side that does not take them up is followed by the next.
     const box = a.thing.box, mid: [number, number] = [(box.x0 + box.x1) / 2, (box.z0 + box.z1) / 2], [sx, sz] = SIDES[a.side]

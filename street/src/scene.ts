@@ -117,11 +117,30 @@ const lamp = (id: string, side: number, along: number) => stood(id, side * (ROAD
   can(0.13, 0.3, [0, 0.3, 0], IRON), can(0.06, 2.5, [0, 3.1, 0], IRON),
   block([0.55, 0.04, 0.04], [-side * 0.5, 5.55, 0], IRON), block([0.24, 0.06, 0.13], [-side * 0.95, 5.47, 0], IRON), block([0.19, 0.02, 0.09], [-side * 0.95, 5.4, 0], '#fff1c2'),
 ])
-/** A street tree: a trunk and a crown of four balls of leaves. */
-const tree = (id: string, side: number, along: number, n: number) => stood(id, side * (ROAD + 0.7), along, 'maple', [
-  can(0.1, 1.15, [0, 1.15, 0], '#7b5b3d'),
-  ball(0.95, [0, 2.95, 0], LEAVES[n % 4]), ball(0.72, [0.5, 2.6, 0.35], LEAVES[(n + 1) % 4]), ball(0.74, [-0.45, 2.7, -0.3], LEAVES[(n + 2) % 4]), ball(0.6, [0.1, 3.6, 0.1], LEAVES[(n + 3) % 4]),
-])
+/**
+ * A street tree's shapes: a trunk to where it forks, and a crown of balls of leaves round the fork (one at its heart, five on
+ * its boughs, one on top). `n` is which tree: each is a little its own. What the page draws of a tree is laid over these very
+ * shapes (client/look/trees.ts), so its shade and what bumps into it are the world's too.
+ */
+export function treePieces(n: number): Piece[] {
+  const some = (k: number) => { const x = Math.sin((n + 1) * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x) }
+  const r3 = (v: number) => Math.round(v * 1000) / 1000
+  const fork = 2.3 + some(1) * 0.3, lx = (some(2) - 0.5) * 0.3, lz = (some(3) - 0.5) * 0.3
+  const pieces = [can(0.13, r3(fork / 2), [0, r3(fork / 2), 0], '#7b5b3d'), ball(1.15, [r3(lx), r3(fork + 1.4), r3(lz)], LEAVES[n % 4])]
+  for (let i = 0; i < 5; i++) {
+    const round = ((i + some(10 + i) * 0.6) / 5) * Math.PI * 2, out = 0.85 + some(20 + i) * 0.35, up = 0.9 + some(30 + i) * 0.8
+    pieces.push(ball(r3(0.8 + some(40 + i) * 0.25), [r3(lx + Math.cos(round) * out), r3(fork + up), r3(lz + Math.sin(round) * out)], LEAVES[(n + i + 1) % 4]))
+  }
+  pieces.push(ball(0.9, [r3(lx), r3(fork + 2.3), r3(lz)], LEAVES[(n + 2) % 4]))
+  return pieces
+}
+/** A palm's shapes: a tall trunk and one ball where its fronds spread. */
+export function palmPieces(n: number): Piece[] {
+  const tall = 6.4 + ((n * 37) % 5) * 0.25
+  return [can(0.17, tall / 2, [0, tall / 2, 0], '#8a7a66'), ball(1.5, [0, tall + 0.5, 0], LEAVES[n % 4])]
+}
+/** A street tree on the kerb side of a pavement: one with a round crown, or (its id says) a palm. */
+const tree = (id: string, side: number, along: number, n: number) => stood(id, side * (ROAD + 0.7), along, 'maple', id.startsWith('palm') ? palmPieces(n) : treePieces(n))
 /** A striped barrier across the road, where the block ends. */
 const barrier = (id: string, across: number, along: number) => stood(id, across, along, 'maple', [
   ...[-2, -1, 0, 1, 2].map((i) => block([0.22, 0.1, 0.03], [i * 0.44, 0.92, 0], i % 2 ? '#fbf6ea' : '#e8752c')),
@@ -137,23 +156,72 @@ export const FURNITURE: ToySpec = {
   id: 'furniture', label: 'Lamps, trees and barriers', frame: { at: [0, 0, 0], yaw: 0, tilt: 0 }, gadgets: [], wires: [], inputs: {},
   parts: [
     lamp('lamp-1', -1, -24), lamp('lamp-2', 1, -9), lamp('lamp-3', -1, 14.5), lamp('lamp-4', 1, 26),
-    tree('tree-1', 1, -19, 0), tree('tree-2', -1, -13, 1), tree('tree-3', 1, -1, 2), tree('tree-4', -1, 1.5, 3), tree('tree-5', 1, 13, 1), tree('tree-6', -1, 21, 0),
+    tree('tree-1', 1, -19, 0), tree('palm-1', -1, -13, 1), tree('tree-3', 1, -1, 2), tree('tree-4', -1, 1.5, 3), tree('palm-2', 1, 13, 1), tree('tree-6', -1, 21, 0),
     stood('hydrant', -(ROAD + 0.5), -17.5, 'steel', [can(0.1, 0.28, [0, 0.28, 0], '#f3efe4'), ball(0.11, [0, 0.58, 0], '#d7a21a'), can(0.05, 0.16, [0, 0.36, 0], '#d7a21a', [Math.PI / 2, 0, 0]), can(0.13, 0.03, [0, 0.03, 0], '#d7a21a')]),
     stood('letter-box', HALF_W - 0.75, 19.5, 'steel', [block([0.22, 0.3, 0.24], [0, 0.85, 0], '#2f528f'), can(0.24, 0.22, [0, 1.15, 0], '#2f528f', [0, 0, Math.PI / 2]), ...[-1, 1].flatMap((x) => [-1, 1].map((z) => block([0.025, 0.28, 0.025], [x * 0.17, 0.28, z * 0.19], '#2f528f')))]),
     ...[-1, 1].flatMap((end) => [-5, -2.5, 0, 2.5, 5].map((across, i) => barrier(`barrier${end}-${i}`, across, end * (HALF_L + 0.05)))),
+    // A stop sign's post at each end, on the right of whoever is leaving the block that way (the page hangs the sign on it), two boxes of newspapers and a cabinet of the telephone company's.
+    stood('stop-1', -(ROAD + 0.55), HALF_L - 1.4, 'steel', [can(0.03, 1.55, [0, 1.55, 0], '#9a9fa4')]),
+    stood('stop-2', ROAD + 0.55, -(HALF_L - 1.4), 'steel', [can(0.03, 1.55, [0, 1.55, 0], '#9a9fa4')]),
+    ...([['newsbox-1', 26.3, '#c8452e'], ['newsbox-2', 27.0, '#2f6aa3']] as const).map(([id, along, paint]) => stood(id, -(ROAD + 0.62), along, 'steel', [block([0.2, 0.36, 0.19], [0, 0.72, 0], paint), block([0.21, 0.05, 0.2], [0, 1.13, 0], '#22262a'), block([0.04, 0.18, 0.04], [0, 0.18, 0], '#22262a'), block([0.16, 0.14, 0.01], [0, 0.82, 0.19], '#dfe6ea')])),
+    stood('cabinet', HALF_W - 0.5, -26.6, 'steel', [block([0.28, 0.62, 0.5], [0, 0.66, 0], '#5b7461'), block([0.3, 0.03, 0.52], [0, 1.31, 0], '#4a6050'), block([0.3, 0.02, 0.52], [0, 0.03, 0], '#8f8a80')]),
   ],
 }
 
-/** Where the still things on the pavements stand, as rounds on the ground: across, along (world z), how wide, and from what height up (a tree's crown starts over a head). A made thing is stood clear of them. */
+/** A kind of car: how long and wide it is, how high its body comes (its belt), where its cabin starts and ends along it from its nose, how far the glass leans in at the front and the back, and how tall the cabin is over the belt. A pickup has an open bed behind its cabin. */
+export interface CarKind { long: number; wide: number; belt: number; cabin: [number, number]; rake: [number, number]; roof: number; bed?: boolean }
+export const CAR_KINDS = {
+  sedan: { long: 4.5, wide: 1.78, belt: 0.86, cabin: [1.25, 3.75], rake: [0.62, 0.55], roof: 0.52 },
+  hatch: { long: 3.95, wide: 1.72, belt: 0.88, cabin: [1.05, 3.85], rake: [0.55, 0.28], roof: 0.56 },
+  wagon: { long: 4.6, wide: 1.84, belt: 0.98, cabin: [1.2, 4.5], rake: [0.5, 0.22], roof: 0.66 },
+  van: { long: 4.7, wide: 1.9, belt: 1.05, cabin: [0.55, 4.62], rake: [0.4, 0.08], roof: 0.86 },
+  pickup: { long: 5.0, wide: 1.86, belt: 0.98, cabin: [1.35, 3.0], rake: [0.45, 0.1], roof: 0.62, bed: true },
+} satisfies Record<string, CarKind>
+/** A car parked at a kerb: where its middle is across and along the street, which way its nose points (1 down the hill), its kind and its paint. */
+export interface Parked { id: string; across: number; along: number; nose: 1 | -1; kind: keyof typeof CAR_KINDS; paint: string }
+const KERBSIDE = ROAD - 1.04
+/** The block's parked cars: each on its own side of the road, facing the way the traffic on that side goes. None near the top, where residents arrive, by the hydrant, by Otis, or by Ines, where shade has to stand. */
+export const PARKED: Parked[] = [
+  { id: 'car-1', across: -KERBSIDE, along: -11.9, nose: 1, kind: 'sedan', paint: '#2f4a6b' },
+  { id: 'car-2', across: -KERBSIDE, along: -6.2, nose: 1, kind: 'hatch', paint: '#c9cdd1' },
+  { id: 'car-3', across: -KERBSIDE, along: 17.2, nose: 1, kind: 'pickup', paint: '#a8392c' },
+  { id: 'car-4', across: KERBSIDE, along: -3.2, nose: -1, kind: 'wagon', paint: '#3c5a48' },
+  { id: 'car-5', across: KERBSIDE, along: 12.6, nose: -1, kind: 'van', paint: '#ece7da' },
+]
+/** The parked cars as the world holds them: a box for each body and one for its cabin. Still: a thing to stand on, walk round and build against. What the page draws is laid over these (client/look/cars.ts). */
+export const CARS: ToySpec = {
+  id: 'cars', label: 'Parked cars', frame, gadgets: [], wires: [], inputs: {},
+  parts: PARKED.map((p) => {
+    const k: CarKind = CAR_KINDS[p.kind], middle = (k.cabin[0] + k.cabin[1]) / 2, r3 = (v: number) => Math.round(v * 1000) / 1000
+    const pieces = [
+      block([k.wide / 2, r3((k.belt - 0.2) / 2), k.long / 2], [0, r3((k.belt + 0.2) / 2), 0], p.paint),
+      block([k.wide / 2 - 0.16, k.roof / 2, r3((k.cabin[1] - k.cabin[0]) / 2 - 0.2)], [0, r3(k.belt + k.roof / 2), r3(p.nose * (k.long / 2 - middle))], p.paint),
+    ]
+    return { id: p.id, shape: piecesShape(pieces), pieces, material: 'steel', at: [p.across, 0, p.along] as Vec3 }
+  }),
+}
+
+/** Where the still things on the pavements and at the kerbs stand, as rounds on the ground: across, along (world z), how wide, and from what height up (a tree's crown starts over a head; a car is three rounds in a row). A made thing is stood clear of them. */
 export const STANDING: { x: number; z: number; r: number; from: number }[] = FURNITURE.parts.flatMap((p) => {
   const round = (r: number, from = 0) => ({ x: p.at[0], z: p.at[2], r, from })
-  return p.id.startsWith('tree') ? [round(0.2), round(1.35, 1.9)] : p.id.startsWith('lamp') || p.id === 'hydrant' ? [round(0.2)] : p.id === 'letter-box' ? [round(0.4)] : []
-})
+  return p.id.startsWith('tree') ? [round(0.25), round(2.1, 2.2)] : p.id.startsWith('palm') ? [round(0.3), round(1.6, 5.5)] : p.id.startsWith('lamp') || p.id === 'hydrant' ? [round(0.2)] : p.id.startsWith('stop') ? [round(0.15)] : p.id === 'letter-box' || p.id.startsWith('newsbox') ? [round(0.4)] : p.id === 'cabinet' ? [round(0.65)] : []
+}).concat(PARKED.flatMap((p) => [-1.45, 0, 1.45].map((along) => { const at = onStreet(p.across, p.along + along); return { x: at[0], z: at[2], r: 1.2, from: 0 } })))
 
-/** Two steel bins on the pavements that anything can knock over and send down the hill. */
+/** A wheelie bin as households put out: a tall box with a lid, two wheels and a handle. Loose: it can be knocked over and sent down the hill. */
+const wheelie = (id: string, side: number, along: number, paint: string): PartSpec => {
+  const pieces = [
+    block([0.26, 0.46, 0.29], [0, 0.46, 0], paint), block([0.28, 0.035, 0.32], [0, 0.955, 0.01], paint), block([0.22, 0.02, 0.025], [0, 0.93, -0.33], '#1c1e20'),
+    can(0.1, 0.035, [-0.235, 0.11, -0.24], '#1c1e20', [0, 0, Math.PI / 2]), can(0.1, 0.035, [0.235, 0.11, -0.24], '#1c1e20', [0, 0, Math.PI / 2]),
+  ]
+  return { id, shape: piecesShape(pieces), pieces, material: 'plastic', motion: 'dynamic', mass: 16, at: [side * (ROAD + 0.62), 0.005, along] }
+}
+/** Two steel bins on the pavements and the households' wheelie bins at the kerb (rubbish, recycling, compost), all loose: anything can knock one over and send it down the hill. */
 export const BINS: ToySpec = {
   id: 'bins', label: 'Bins', frame, gadgets: [], wires: [], inputs: {},
-  parts: [[1, -11.5], [-1, 17]].map(([side, along], i) => ({ id: `bin-${i + 1}`, shape: { kind: 'cylinder', radius: 0.27, halfHeight: 0.42 } as const, material: 'steel', paint: '#3f6b58', motion: 'dynamic' as const, mass: 9, at: [side * (HALF_W - 0.85), 0.43, along] as Vec3 })),
+  parts: [
+    ...[[1, -11.5], [-1, 17]].map(([side, along], i): PartSpec => ({ id: `bin-${i + 1}`, shape: { kind: 'cylinder', radius: 0.27, halfHeight: 0.42 }, material: 'steel', paint: '#3f6b58', motion: 'dynamic', mass: 9, at: [side * (HALF_W - 0.85), 0.43, along] })),
+    ...([[-1, -22.2], [1, -15.4], [-1, 22.4]] as const).flatMap(([side, along], group) => (['#2b2d30', '#2a5d9a', '#3d7a46'] as const).map((paint, i) => wheelie(`wheelie-${group * 3 + i + 1}`, side, along + i * 0.68, paint))),
+  ],
 }
 
 /** Walls of maple crates across the street above the trench, and rubber balls waiting at its top. */

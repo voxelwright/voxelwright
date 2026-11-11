@@ -335,7 +335,7 @@ export class World implements WorldApi {
       const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
       if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id) && !part.pieces) {
         const look = this.look(part)
-        const key = lookKey(part)
+        const key = this.lookKey(part)
         const group = merged.get(key) ?? merged.set(key, { look, parts: [] }).get(key)!
         group.parts.push(this.geometry(part.shape).applyMatrix4(m))
       } else if (!part.hidden) {
@@ -397,7 +397,7 @@ export class World implements WorldApi {
   /** Everything of a toy out of the world again: joints, bodies, meshes, gadgets, wires, displays. */
   removeToy(id: string) {
     this.version++
-    const lookOf = lookKey
+    const lookOf = (part: PartSpec) => this.lookKey(part)
     const itsLooks = new Set([...this.things.values()].filter((t) => t.toy === id).map((t) => lookOf(t.part)))
     for (const joint of this.joints.get(id) ?? []) this.core.removeJoint(joint)
     this.joints.delete(id)
@@ -487,11 +487,24 @@ export class World implements WorldApi {
     return merged
   }
 
+  /** Whoever draws this world may dress a part its own way (the street's page, #136): a material for it, or null to leave it to the world. One is asked for per material and paint, as the world's own are. */
+  dress?: (part: PartSpec) => THREE.Material | null
+  /** What that dressing depends on beyond a part's material and paint (a crate's slats): parts that differ in it get a look each. */
+  dressKey?: (part: PartSpec) => string
+  private lookKey(part: PartSpec) {
+    return lookKey(part) + (this.dressKey?.(part) ?? '')
+  }
+
   /** One drawn material per material and paint; wood gets a grain painted from its colour. */
   private look(part: PartSpec): THREE.Material {
-    const key = lookKey(part)
+    const key = this.lookKey(part)
     const known = this.looks.get(key)
     if (known) return known
+    const dressed = this.dress?.(part)
+    if (dressed) {
+      this.looks.set(key, dressed)
+      return dressed
+    }
     const l = material(part.material)!.look
     if (part.pieces) {
       const look = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: l.roughness, metalness: l.metalness })

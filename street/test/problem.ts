@@ -46,7 +46,8 @@ try {
   await until(at, (p) => p[0] < 0.3, 6000)
   await s(`s.hold('KeyD', false)`)
   await s(`s.hold('KeyW', true)`)
-  await until(at, (p) => p[2] > (TRENCH.from - 1.6) / LEN, 12_000)
+  // A long walk on a page that has just built a street: with the machine busy it has taken over twelve seconds.
+  await until(at, (p) => p[2] > (TRENCH.from - 1.6) / LEN, 30_000)
   await s(`s.hold('KeyW', false)`)
   await sleep(500)
 

@@ -102,6 +102,40 @@ street is and shows a round door button to come back out; coming out, you stand 
 The home believes a street's address only on its own host name. With no `--home` the door is
 only a door.
 
+## How it looks (November 11, 2026, #136)
+
+The world process holds the street as plain shapes: boxes for a house, a post and balls for a
+tree, two boxes for a car. That is what things collide with and what an agent's `look` lists.
+The page draws its own picture over those shapes, from the same data, and hides the world's
+meshes for them (`client/look/`):
+
+- `sky.ts`: three's scattering sky with clouds painted over it, one sun (`src/sun.ts`, which the
+  shade problem reads too) whose shadow is drawn in three boxes that follow the camera, and a
+  picture of the street taken once at arrival that everything is lit by and glass reflects.
+- `post.ts`: occlusion in corners, air that pales what is far, frames blended into one steady
+  image, a little bloom, sharpening. The light tier keeps the air and smooths edges.
+- `surfaces.ts`: asphalt, concrete, earth, boards, plaster, shingles, glass, water. All painted
+  in the shader from where a point is in the world; no texture files. (Scanned CC0 texture sets
+  were tried on the road: they added only fine grain, and the patches, seams and gutters still
+  had to be painted.)
+- `street.ts`, `facade.ts`, `trees.ts`, `poles.ts`, `signs.ts`, `cars.ts`, `things.ts`: the
+  ground with a raised kerb, the house fronts, trees and palms, poles and wires, signs, parked
+  cars, and the materials of loose and made things.
+- `../place.ts`: the land round the block: streets and yards, three more blocks of the same
+  street built as the block's own houses are, far rows as painted boxes, a waterfront, the bay,
+  the bridge, the hills across it and a skyline up the hill.
+
+The pavement is drawn a kerb's height (13 cm) over the world's one ground plane; what stands on
+it is drawn that much higher. A thing half over the kerb's edge is drawn part way up.
+
+On an M1 Pro at 2560 by 1440 a frame costs the GPU 8 to 9 ms (6.5 to 6.8 before), measured
+with `test/snap.ts ... gpu=1`; the top tier allows 13. `?tone=agx|aces|neutral`, `?expose=`,
+`?sun=`, `?skylight=`, `?ambient=`, `?bounce=`, `?shadows=0`, `?post=0`, `?land=0` try other
+settings, and `?budget=0.01` makes a fast machine step down as a slow one would.
+
+Not done: a real iPhone has not drawn this; a walker can still be drawn a hand inside a lamp
+or a tree before the world corrects it; name labels show through walls.
+
 ## Checks
 
 ```sh
@@ -115,6 +149,8 @@ node test/door.ts [pictures/]               # in through the home's door and bac
 node test/problem.ts [pictures/]            # a problem asked, solved by a bridge, told to all, and asked again
 node test/problems.mjs                      # the other two problems' tests, on the real world with no page
 node test/touch.ts [pictures/]              # WebKit at a phone's size, by touch only: stick, tap, the verb button, a solve, a change
+node test/drawn.ts                          # the page draws its own sky, ground, houses, trees and cars; under 13 ms of GPU a frame; a slow page steps down cleanly
+node test/snap.ts http://localhost:5318/ look/ [arrive,fronts,roof] [gpu=1]   # fixed views of a street that is already running; with gpu=1, what each costs
 node test/three.ts clip/ sonnet             # with a real model, by hand: all three solved by typing, recorded
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:

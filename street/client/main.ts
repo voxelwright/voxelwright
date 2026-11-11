@@ -7,19 +7,24 @@
 // walking into them. `?predict=0` draws your walker like everything else, to feel the
 // difference; `?delay=50` holds everything 50 ms each way.
 import * as THREE from 'three/webgpu'
+import { smoothstep, uv, vec3 } from 'three/tsl'
 import { load, root, type Stage } from '../../home/src/kernel'
-import { focusOn } from '../../home/src/lens'
-import atmosphere from '../../home/src/plugins/atmosphere'
-import postfx from '../../home/src/plugins/postfx'
 import rendererPlugin from '../../home/src/plugins/renderer'
-import { SUN_DIRECTION } from '../../home/src/sky'
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { nearest, standsOver } from '../src/near.ts'
 import { place } from './place.ts'
+import { cars } from './look/cars.ts'
+import { dressed, dressing } from './look/dressing.ts'
+import { houses } from './look/facade.ts'
+import { post, type Post } from './look/post.ts'
+import { sky } from './look/sky.ts'
+import { dress, dressKey } from './look/things.ts'
+import { lift as raised, street } from './look/street.ts'
 import { Puppet } from '../src/puppet.ts'
 import { resident, type Resident } from './figure.ts'
-import { registerBlock } from '../src/scene.ts'
+import { LOTS, houseAt } from '../src/houses.ts'
+import { PARKED, registerBlock } from '../src/scene.ts'
 import { GRADE, HALF_L, HALF_W, NORMAL, heightAt } from '../src/ground.ts'
 import { HALF_H, RADIUS, TICK, predict, standing, type Input, type Walker } from '../src/walk.ts'
 import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Ask, type Drawn, type Line, type Pose } from '../src/wire.ts'
@@ -31,32 +36,32 @@ const STOP = PREDICT && params.get('stop') === '1'
 let delay = Number(params.get('delay') ?? 0), jitter = Number(params.get('jitter') ?? 0)
 const hud = document.getElementById('hud')!, knobs = document.getElementById('knobs')!
 
-// ---- the picture: the home's own stage (its renderer with quality tiers, its sky, its post effects), with the street in it
+// ---- the picture: the home's renderer and its quality tiers, with the street's own sky, light and finish (look/)
 load(rendererPlugin)
 const stage = await new Promise<Stage>((resolve) => {
   const look = () => { const s = root.get('stage') as Stage | undefined; if (s) resolve(s); else setTimeout(look, 10) }
   look()
 })
-// `?post=0` and `?sky=0` leave one out, to see what each costs and adds.
-if (params.get('post') !== '0') load(postfx)
-if (params.get('sky') !== '0') load(atmosphere)
 const { renderer, scene, camera } = stage
 camera.far = 1200
+// `?tone=` tries another curve from light to screen; `?expose=` another exposure.
+const TONES: Record<string, THREE.ToneMapping> = { agx: THREE.AgXToneMapping, aces: THREE.ACESFilmicToneMapping, neutral: THREE.NeutralToneMapping }
+renderer.toneMapping = TONES[params.get('tone') ?? 'neutral'] ?? THREE.NeutralToneMapping
+renderer.toneMappingExposure = Number(params.get('expose') ?? 1.3)
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+const air = sky(stage)
 // A tall screen (a phone held upright) sees a narrow slice at the same lens, so it gets a wider one.
-const lens = () => { camera.fov = innerWidth < innerHeight ? 72 : 50; camera.updateProjectionMatrix() }
+const lens = () => { camera.fov = innerWidth < innerHeight ? 72 : 50; camera.updateProjectionMatrix(); air.resize() }
 lens()
 addEventListener('resize', lens)
-// The sun stands where the sky says it does. Its shadow box holds the whole block and never moves, so no shadow starts or stops as you walk.
-const SHADOW = 40
-const sun = new THREE.DirectionalLight('#ffe2b8', 3.1)
-sun.castShadow = true
-sun.shadow.mapSize.set(stage.quality === 'low' ? 1024 : 2048, stage.quality === 'low' ? 1024 : 2048)
-sun.shadow.bias = -0.0004
-sun.shadow.normalBias = 0.03
-sun.shadow.radius = 3
-Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 170 })
-sun.position.copy(SUN_DIRECTION).multiplyScalar(85)
-scene.add(sun, sun.target, new THREE.HemisphereLight('#e3ecfb', '#c9b89a', 1.7))
+// `?post=0` leaves the finish out, to see what it costs and adds. A change of tier builds it again for that tier.
+let finish: Post | null = params.get('post') !== '0' ? post(stage) : null
+let dressed_: THREE.Group | null = null
+root.on('village/tier', () => {
+  if (finish) { finish.dispose(); finish = post(stage) }
+  air.tier()
+  dressed_?.userData.steady(stage.features().has('traa'))
+})
 // The hill, the bay and the streets round the block: `?land=0` leaves them out.
 const land = params.get('land') !== '0' ? place(scene) : null
 
@@ -66,7 +71,7 @@ const puppet = new Puppet()
 let world: World | null = null
 interface Sample { tick: number; p: Vec3; q: Quat }
 /** A moving part: its body in the puppet, its poses as heard, and where it is drawn now. */
-interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; figure?: Resident; plush?: number }
+interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; mesh?: THREE.Object3D; figure?: Resident; under?: THREE.Mesh; plush?: number }
 const views = new Map<number, View>()
 let you = 0, snapEvery = 2
 /** The made things on the street, as they were put: for showing which one a sentence would change. */
@@ -75,6 +80,12 @@ function build(drawn: Drawn) {
   const first = puppet.size
   world!.addToy(drawn.toy)
   if (drawn.toy.id.startsWith('made-')) made.set(drawn.toy.id, drawn.toy)
+  // The page draws the ground itself (look/street.ts), with a pavement a kerb's height over the world's one plane: what stands still is put up on it here, what moves each frame.
+  for (const mesh of world!.group.children) {
+    if (mesh.name.startsWith('street scenery') || /^house-\d+\//.test(mesh.name) || (mesh.name.startsWith('furniture/') && dressed(mesh.name.slice(10))) || mesh.name.startsWith('cars/')) mesh.visible = false
+    else if (mesh.name.startsWith(`${drawn.toy.id} scenery`)) mesh.position.y = raised(drawn.toy.frame.at[0], drawn.toy.frame.at[2])
+    else if (mesh.name.startsWith(`${drawn.toy.id}/`) && !mesh.userData.lifted) { mesh.userData.lifted = true; mesh.position.y += raised(mesh.position.x, mesh.position.z) }
+  }
   drawn.toy.parts.forEach((part, i) => {
     const id = drawn.ids[part.id], pose = drawn.poses[part.id]
     if (id === undefined || !pose) return
@@ -87,6 +98,7 @@ function build(drawn: Drawn) {
     }
     puppet.pose(view.body, view.p, view.q)
     views.set(id, view)
+    view.mesh = world!.mesh(view.key) ?? undefined
     if (view.kind === 'walker') {
       headOf(id).name.textContent = drawn.toy.label
       // The body the world simulates is a capsule; what is drawn in its place is a resident (figure.ts).
@@ -96,16 +108,26 @@ function build(drawn: Drawn) {
     }
   })
 }
+/** The soft dark round under a figure's feet, where it shuts the sky's light out: the sun is low, so the shadow it casts lies well to one side. One shape and one look for all of them. */
+const underShape = new THREE.CircleGeometry(0.46, 24), underLook = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false })
+underLook.colorNode = vec3(0.02, 0.025, 0.05)
+underLook.opacityNode = smoothstep(1, 0.15, uv().sub(0.5).length().mul(2)).mul(0.42)
 /** Draws a walker as one of the felt figures, in place of whichever it was. */
 function wear(view: View, plush: number, paint: string) {
   if (view.figure) { scene.remove(view.figure.root); view.figure.dispose() }
   view.plush = plush
   view.figure = resident(plush, paint, stage.features().has('phys'))
   scene.add(view.figure.root)
+  if (!view.under) {
+    view.under = new THREE.Mesh(underShape, underLook)
+    view.under.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...NORMAL))
+    view.under.renderOrder = 1
+    scene.add(view.under)
+  }
 }
 function remove(toy: string) {
   made.delete(toy)
-  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); heads.get(id)?.el.remove(); heads.delete(id) }
+  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); if (view.under) scene.remove(view.under); heads.get(id)?.el.remove(); heads.delete(id) }
   world!.removeToy(toy)
 }
 function heard(pose: Pose, tick: number) {
@@ -242,6 +264,7 @@ async function connect() {
   return wt
 }
 const wt = await connect().catch((e) => {
+  document.getElementById('fade')!.classList.remove('on')
   hud.textContent = `could not reach the street\n${e instanceof Error ? e.message : String(e)}\nWebTransport here: ${typeof WebTransport === 'function' ? 'yes' : 'no'} · ${navigator.userAgent.replace(/^.*?\) /, '')}`
   hud.style.whiteSpace = 'pre-wrap'
   throw e
@@ -384,10 +407,17 @@ function heardLine(line: Line) {
     // Building a street's worth of meshes is a long task: the renderer must not read it as a slow GPU and drop a tier.
     const release = stage.hold()
     world = new World(puppet, () => {}, undefined, line.floor)
-    scene.add(world.group)
+    world.dress = dress
+    world.dressKey = dressKey
+    scene.add(world.group, street(), houses(Array.from({ length: LOTS }, (_, lot) => [houseAt(lot, -1), houseAt(lot, 1)]).flat()), (dressed_ = dressing(stage.features().has('traa'))), cars(PARKED))
     snapEvery = Math.round(line.tickHz / line.snapHz)
     line.drawn.forEach(build)
+    // The street lights itself: a picture from over the middle of the road, without what moves.
+    world.frame(0)
+    air.probe(new THREE.Vector3(0, heightAt(-6) + 4, -6), [...views.values()].flatMap((v) => [world!.mesh(v.key), v.figure?.root, v.under]).filter((o): o is THREE.Object3D => !!o))
     release()
+    // The page opens covered (index.html): the street is shown once the frame that builds its looks has been drawn, so arriving is a fade in, not a frozen half-built street.
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('fade')!.classList.remove('on')))
     you = line.you
     me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
     // The first time here, whichever figure the world gave you is who you are from now on.
@@ -427,8 +457,6 @@ setInterval(() => send(packPing(performance.now())), 250)
 
 // ---- every frame
 const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), head = new THREE.Vector3()
-/** How much the lens blurs what is far from where the view looks: the home's miniature look, `?lens=0.5` for a picture. Walking about, everything is sharp. */
-const LENS = Number(params.get('lens') ?? 0)
 /** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand: short of the fronts and their bays, and a little out onto the street across each end. */
 const BOOM = 7, INSIDE_X = HALF_W - 1.3, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) + 2
 let boom = 1
@@ -469,16 +497,17 @@ function frame(now: number) {
       offset.multiplyScalar(Math.exp(-dt * 12))
       view.p[0] = me.p[0] + offset.x; view.p[1] = me.p[1] + offset.y; view.p[2] = me.p[2] + offset.z
     } else poseAt(view, then)
-    view.shown.set(view.p[0], view.p[1], view.p[2])
+    view.shown.set(view.p[0], view.p[1] + raised(view.p[0], view.p[2]), view.p[2])
     view.figure?.update(view.shown, dt)
+    view.under?.position.set(view.shown.x, view.shown.y - standing(NORMAL) + 0.02, view.shown.z)
   }
-  // The engine draws: its meshes go where the puppet's bodies now are.
+  // The engine draws: its meshes go where the puppet's bodies now are, and up onto the pavement where they are over it.
   world.frame(dt)
+  for (const view of views.values()) if (view.mesh) view.mesh.position.y = view.shown.y
   const mine = views.get(you)
   if (fixed) {
     camera.position.set(...fixed.from)
     camera.lookAt(...fixed.to)
-    focusOn(Math.hypot(fixed.from[0] - fixed.to[0], fixed.from[1] - fixed.to[1], fixed.from[2] - fixed.to[2]), 0.3, LENS)
   } else if (mine) {
     // The camera rides seven metres behind you, and stays inside the street: where a wall is nearer than that it comes in closer and lower, over your shoulder.
     const bx = -Math.sin(yaw) * BOOM, bz = -Math.cos(yaw) * BOOM
@@ -489,7 +518,6 @@ function frame(now: number) {
     // It looks a little past you, so the street ahead and the sky over it are in the picture.
     const past = (4 * boom) / BOOM
     camera.lookAt(mine.shown.x - bx * past, mine.shown.y + 1 + 0.2 * (1 - boom), mine.shown.z - bz * past)
-    focusOn(camera.position.distanceTo(mine.shown), 0.3, LENS)
   }
   if (homeDoor && mine) doorButton.hidden = Math.hypot(mine.shown.x - homeDoor.door[0], mine.shown.z - homeDoor.door[2]) > 1.7
   // The stage draws after this; names are placed with the camera as it now stands.
@@ -581,8 +609,9 @@ function mean(now: number) {
     ring.visible = !!near
     if (near) {
       const x = (near.box.x0 + near.box.x1) / 2, z = (near.box.z0 + near.box.z1) / 2
-      ring.position.set(x, heightAt(z) + 0.06, z)
       ring.userData.size = Math.max(0.7, Math.hypot(near.box.x1 - near.box.x0, near.box.z1 - near.box.z0) / 2 + 0.25)
+      // On the ground as it is drawn: up on the pavement where any of the ring lies over it.
+      ring.position.set(x, heightAt(z) + 0.06 + raised(Math.abs(x) + ring.userData.size, z), z)
     }
   }
   if (ring.visible) ring.scale.setScalar(ring.userData.size * (1 + 0.03 * Math.sin(now / 160)))
@@ -642,4 +671,6 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), meant: () => meant, who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+/** What the page draws now, for test/drawn.ts: its own groups by name, how many of the world's meshes for things the page draws itself are showing (none should), and how the sun's shadow is drawn. */
+const drawnNow = () => ({ groups: scene.children.map((o) => o.name).filter(Boolean), doubled: world?.group.children.filter((m) => m.visible && (/^house-\d+\/|^cars\/|^street scenery/.test(m.name) || (m.name.startsWith('furniture/') && dressed(m.name.slice(10))))).length ?? -1, boxed: air.boxed() })
+Object.assign(window, { __street: { stats, drawn: drawnNow, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), meant: () => meant, who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

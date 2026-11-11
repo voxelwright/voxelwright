@@ -11,6 +11,8 @@ const asked = TIER_NAMES.find((t) => t === params.get('q'))
 const gpuMode = params.get('gpu') === '1'
 /** ?fx=csm,gtao names exactly the features to run, overriding the tier's set, so each one's cost is measured alone. */
 const fxParam = params.get('fx')
+/** ?budget=0.1 gives the GPU a tenth of each tier's time, so a fast machine steps down as a slow one would (to check what a step down does). */
+const budget = Number(params.get('budget') ?? 1) || 1
 /** ?webgl=1 runs three.js's WebGL2 backend even where WebGPU is available. */
 const forceWebGL = params.get('webgl') === '1'
 
@@ -123,13 +125,13 @@ export default {
     let since = 0
     const settleTier = (median: number) => {
       const next = TIER_NAMES[TIER_NAMES.indexOf(quality) + 1]
-      if (median <= TIERS[quality].maxGpuMs || !next) {
+      if (median <= TIERS[quality].maxGpuMs * budget || !next) {
         timing.tierReason = `measured ${median.toFixed(2)} ms GPU at ${quality}`
         settled = true
         timing.tierSettled = true
         return
       }
-      timing.tierReason = `${median.toFixed(2)} ms GPU at ${quality} > ${TIERS[quality].maxGpuMs} ms`
+      timing.tierReason = `${median.toFixed(2)} ms GPU at ${quality} > ${TIERS[quality].maxGpuMs * budget} ms`
       quality = next
       renderer.setPixelRatio(dpr())
       ctx.emit('village/tier', quality)
