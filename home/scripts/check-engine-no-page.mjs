@@ -75,6 +75,48 @@ try {
   unregisterGadget('feeler')
   slope.dispose()
 
+  // A part made of pieces is one body: a dog of six shapes falls and lands as a dog, not as six things.
+  const { piecesShape } = await vite.ssrLoadModule('/src/engine/toy.ts')
+  const { checkMadeToy } = await vite.ssrLoadModule('/src/engine/made.ts')
+  const pieces = [
+    { shape: { kind: 'box', half: [0.3, 0.15, 0.12] }, at: [0, 0.3, 0], paint: '#b5452c' },
+    { shape: { kind: 'sphere', radius: 0.12 }, at: [0.38, 0.45, 0], paint: '#b5452c' },
+    ...[[-0.22, -0.08], [-0.22, 0.08], [0.22, -0.08], [0.22, 0.08]].map(([x, z]) => ({ shape: { kind: 'cylinder', halfHeight: 0.08, radius: 0.04 }, at: [x, 0.08, z] })),
+  ]
+  const kennel = new World(createJolt(), () => {})
+  kennel.addToy({ id: 'k', label: 'A dog', frame: { at: [0, 0, 0], yaw: 0.7, tilt: 0, roll: 0 }, gadgets: [], wires: [], inputs: {}, parts: [
+    { id: 'floor', shape: { kind: 'box', half: [2, 0.05, 2] }, material: 'cork', at: [0, -0.05, 0] },
+    { id: 'dog', shape: piecesShape(pieces), pieces, material: 'felt', motion: 'dynamic', mass: 8, at: [0, 0.4, 0] },
+  ] })
+  kennel.advance(2)
+  const dog = kennel.thing('k/dog')
+  check('a part made of pieces is one body that lands and stays whole', kennel.census().things === 2 && dog.mass > 7.9 && dog.mass < 8.1 && Math.abs(dog.position[1]) < 0.02 && kennel.upright('k/dog') > 0.95, { census: kennel.census(), mass: dog.mass, y: dog.position[1], upright: kennel.upright('k/dog') })
+  let noShape = ''
+  try { kennel.addToy({ id: 'bad', label: '', frame: { at: [0, 0, 0], yaw: 0, tilt: 0 }, gadgets: [], wires: [], inputs: {}, parts: [{ id: 'p', shape: { kind: 'box', half: [0.1, 0.1, 0.1] }, pieces, material: 'felt', at: [0, 1, 0] }] }) } catch (e) { noShape = String(e.message) }
+  check('pieces whose part has another shape are refused', /piecesShape/.test(noShape) && !kennel.hasToy('bad'), noShape)
+  kennel.dispose()
+  // A toy written as data may use pieces, held to the limits of the place it is made for.
+  const yard = { id: 'yard', label: 'the yard', at: [0, 0, 0], yaw: 0, half: [2, 2], height: 3 }
+  const big = { parts: 6, moving: 4, gadgets: 0, wires: 0, size: [0.02, 2], mass: [0.05, 500], slack: 0.05, pieces: 24, kinds: [] }
+  const times3 = (x) => ({ ...x, at: x.at.map((v) => v * 3), shape: x.shape.kind === 'box' ? { kind: 'box', half: x.shape.half.map((h) => h * 3) } : x.shape.kind === 'sphere' ? { kind: 'sphere', radius: x.shape.radius * 3 } : { ...x.shape, halfHeight: x.shape.halfHeight * 3, radius: x.shape.radius * 3 } })
+  const asked = { label: 'Big dog', parts: [{ id: 'dog', material: 'felt', motion: 'dynamic', mass: 9000, at: [0, 0.02, 0], pieces: pieces.map(times3) }] }
+  const made = checkMadeToy(asked, yard, 'made-1', [], big)
+  check('a made toy may be one big thing of pieces where the place allows it', 'toy' in made && made.toy.parts[0].pieces.length === 6 && made.toy.parts[0].shape.kind === 'compound' && made.toy.parts[0].mass === 500 && made.clamped.includes('dog.mass'), made)
+  const atHome = checkMadeToy(asked, yard, 'made-2')
+  check('the home holds the same toy to its own sizes', 'toy' in atHome && atHome.toy.parts[0].pieces[0].shape.half[0] === 0.5 && atHome.toy.parts[0].mass === 10 && atHome.clamped.length > 1, atHome)
+  check('too many pieces are refused', 'reason' in checkMadeToy({ parts: [{ id: 'd', material: 'felt', at: [0, 1, 0], pieces: Array.from({ length: 25 }, () => pieces[1]) }] }, yard, 'made-3', [], big))
+  // A frame with a roll lies flat on a slope whichever way it is turned.
+  const tiltOf = (yaw, n) => { const c = Math.cos(-yaw), s = Math.sin(-yaw), mx = c * n[0] + s * n[2], mz = -s * n[0] + c * n[2]; return { tilt: Math.atan2(mz, n[1]), roll: -Math.asin(mx) } }
+  const grade = Math.atan(0.14), normal = [0, Math.cos(grade), Math.sin(grade)]
+  const hill = new World(createJolt(), () => {})
+  hill.addToy({ id: 'slope', label: '', frame: { at: [0, 0, 0], yaw: 0, tilt: grade }, gadgets: [], wires: [], inputs: {}, parts: [{ id: 'road', shape: { kind: 'box', half: [5, 0.25, 5] }, material: 'cork', at: [0, -0.25, 0] }] })
+  hill.addToy({ id: 'slab', label: '', frame: { at: [0, 0, 0], yaw: 1.1, ...tiltOf(1.1, normal) }, gadgets: [], wires: [], inputs: {}, parts: [{ id: 'board', shape: { kind: 'box', half: [1, 0.05, 0.4] }, material: 'maple', motion: 'dynamic', at: [0, 0.051, 0] }] })
+  const before = hill.thing('slab/board'), up0 = hill.upright('slab/board')
+  hill.advance(0.5)
+  const after = hill.thing('slab/board')
+  check('a rolled frame lays a board flat on a slope at any turn', Math.abs(after.position[1] - before.position[1]) < 0.01 && hill.upright('slab/board') > 0.9999 && up0 > 0.9999, { dy: after.position[1] - before.position[1], upright: hill.upright('slab/board') })
+  hill.dispose()
+
   // The floor: a ball over nothing is lost a metre under the home's floor, and falls on where the floor is lower.
   const ball = (id) => ({ id, label: 'A ball', frame: { at: [0, 0, 0], yaw: 0, tilt: 0 }, gadgets: [], wires: [], inputs: {}, parts: [{ id: 'ball', shape: { kind: 'sphere', radius: 0.05 }, material: 'rubber', motion: 'dynamic', at: [0, 0.5, 0] }] })
   const lost = []

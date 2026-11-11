@@ -24,4 +24,20 @@ export const MADE = {
   mass: [0.005, 10] as const,
   /** A part may sink this far into the surface (m) and still be on it. */
   slack: 0.01,
+  /** Shapes one part may be made of (a part made of pieces is one body). */
+  pieces: 24,
+}
+
+/** The limits a place sets on a toy written as data: the home's are MADE; a street asks for bigger things and fewer kinds. */
+export interface Limits {
+  parts: number
+  moving: number
+  gadgets: number
+  wires: number
+  size: readonly [number, number]
+  mass: readonly [number, number]
+  slack: number
+  pieces: number
+  /** The gadget kinds allowed, when not the whole made kit. */
+  kinds?: readonly string[]
 }

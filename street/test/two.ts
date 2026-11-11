@@ -3,37 +3,24 @@
 // watches. It times what a hand would feel (key to motion, touching a crate to the crate
 // moving), how far the page's guess is put right, and what the wire and the world cost.
 // Usage: node test/two.ts [--delays 0,50,100] [--crates 120] [--balls 24] [--headed]
-import { spawn, type ChildProcess } from 'node:child_process'
-import { chromium, type Page } from 'playwright'
+import type { Page } from 'playwright'
+import { browser as launch, sleep, startPage, startWorld } from './lib.ts'
 
 const args = process.argv.slice(2)
 const arg = (name: string, otherwise: string) => { const i = args.indexOf(`--${name}`); return i >= 0 && args[i + 1] ? args[i + 1] : otherwise }
 const delays = arg('delays', '0,50,100').split(',').map(Number)
-const here = new URL('..', import.meta.url).pathname
 const WT = 4533, HTTP = 4534, PAGE = 5328
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const median = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]
 
-function start(command: string, argv: string[], ready: string, env: Record<string, string> = {}): Promise<ChildProcess> {
-  const child = spawn(command, argv, { cwd: here, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-  return new Promise((resolve, reject) => {
-    let seen = ''
-    const on = (chunk: Buffer) => { seen += chunk; if (seen.includes(ready)) resolve(child) }
-    child.stdout!.on('data', on)
-    child.stderr!.on('data', on)
-    child.on('exit', (code) => reject(new Error(`${command} ${argv.join(' ')} ended (${code}):\n${seen}`)))
-    setTimeout(() => reject(new Error(`${command} was not ready in 20 s:\n${seen}`)), 20_000)
-  })
-}
 const street = (page: Page) => ({
   call: <T>(body: string) => page.evaluate(`(async () => { const s = window.__street; return ${body} })()`) as Promise<T>,
 })
 
-const vite = await start('npx', ['vite', '--port', String(PAGE)], 'Local', { STREET_HTTP: String(HTTP) })
-const browser = await chromium.launch({ channel: 'chrome', headless: !args.includes('--headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
+const vite = await startPage(PAGE, WT)
+const browser = await launch(args.includes('--headed'))
 try {
   for (const delay of delays) for (const predict of [1, 0]) {
-    const world = await start('node', ['run.mjs', '--port', String(WT), '--http', String(HTTP), '--crates', arg('crates', '120'), '--balls', arg('balls', '24')], '/where')
+    const world = await startWorld(WT, '--crates', arg('crates', '120'), '--balls', arg('balls', '24'))
     try {
       const a = await browser.newPage({ viewport: { width: 1280, height: 720 } }), b = await browser.newPage({ viewport: { width: 640, height: 400 } })
       const errors: string[] = []

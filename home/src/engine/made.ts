@@ -8,9 +8,9 @@ import * as THREE from 'three/webgpu'
 import type { Shape, Vec3 } from './core'
 import { gadgetKind } from './gadgets'
 import { isMaterial } from './materials'
-import { MADE, MADE_KINDS } from './made-kinds'
+import { MADE, MADE_KINDS, type Limits } from './made-kinds'
 export { MADE }
-import type { GadgetSpec, PartSpec, ToySpec, Wire } from './toy'
+import { piecesShape, type GadgetSpec, type PartSpec, type Piece, type ToySpec, type Wire } from './toy'
 
 /** Where a made toy stands: a surface's top centre, its turn about y, and the room above it (m). */
 export interface Surface {
@@ -39,26 +39,26 @@ export type Checked = { toy: ToySpec; clamped: string[] } | { reason: string }
  * Parts are in the surface's frame: x across, z along, y up from its top. `also` names registered
  * kinds allowed besides the made kit (#106: the kind a mechanic's own code runs).
  */
-export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: readonly string[] = []): Checked {
+export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: readonly string[] = [], limits: Limits = MADE): Checked {
   if (!obj(raw)) return { reason: 'there was no toy in the answer' }
   const clamped: string[] = []
   const lists = ['parts', 'gadgets', 'wires'].map((k) => (raw[k] === undefined && k !== 'parts' ? [] : raw[k]))
   if (!lists.every(Array.isArray)) return { reason: 'its parts, gadgets and wires were not lists' }
   const [rawParts, rawGadgets, rawWires] = lists as unknown[][]
   if (!rawParts.length) return { reason: 'it had no parts' }
-  if (rawParts.length > MADE.parts) return { reason: `it had ${rawParts.length} parts and a toy may have ${MADE.parts}` }
-  if (rawGadgets.length > MADE.gadgets) return { reason: `it had ${rawGadgets.length} gadgets and a toy may have ${MADE.gadgets}` }
-  if (rawWires.length > MADE.wires) return { reason: `it had ${rawWires.length} wires and a toy may have ${MADE.wires}` }
+  if (rawParts.length > limits.parts) return { reason: `it had ${rawParts.length} parts and a toy may have ${limits.parts}` }
+  if (rawGadgets.length > limits.gadgets) return { reason: `it had ${rawGadgets.length} gadgets and a toy may have ${limits.gadgets}` }
+  if (rawWires.length > limits.wires) return { reason: `it had ${rawWires.length} wires and a toy may have ${limits.wires}` }
 
   const parts: PartSpec[] = []
   for (const p of rawParts) {
-    const part = checkPart(p, surface, clamped)
+    const part = checkPart(p, surface, clamped, limits)
     if (typeof part === 'string') return { reason: part }
     if (parts.some((q) => q.id === part.id)) return { reason: `two parts were both called ${part.id}` }
     parts.push(part)
   }
   const moving = parts.filter((p) => p.motion === 'dynamic').length
-  if (moving > MADE.moving) return { reason: `it had ${moving} moving parts and a toy may have ${MADE.moving}` }
+  if (moving > limits.moving) return { reason: `it had ${moving} moving parts and a toy may have ${limits.moving}` }
 
   const ids = new Set(parts.map((p) => p.id))
   const gadgets: GadgetSpec[] = []
@@ -68,7 +68,7 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: r
     const kind = typeof g.kind === 'string' ? gadgetKind(g.kind) : undefined
     if (!kind) return { reason: `there is no gadget called ${plain(g.kind, 32) || 'that'}` }
     // Only the made kit: fire comes from asking for it, and keys are not handed to made toys.
-    if (!(MADE_KINDS as readonly string[]).includes(kind.kind) && !also.includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
+    if (!(limits.kinds ?? MADE_KINDS as readonly string[]).includes(kind.kind) && !also.includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
     const spec: GadgetSpec = { id: g.id, kind: kind.kind }
     if (g.part !== undefined) {
       if (typeof g.part !== 'string' || !ids.has(g.part)) return { reason: `the ${g.id} gadget names a part that is not there` }
@@ -105,7 +105,7 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: r
         if (typeof v !== 'string' || !ids.has(v)) return { reason: `the ${g.id} gadget names a part that is not there` }
         spec[name] = v
       } else if (type === 'point') {
-        if (!vec(v) || !within(v, 0, surface)) return { reason: `the ${g.id} gadget's ${name} is off ${surface.label}` }
+        if (!vec(v) || !within(v, 0, surface, limits)) return { reason: `the ${g.id} gadget's ${name} is off ${surface.label}` }
         spec[name] = [...v]
       } else {
         const d = vec(v) ? v : null
@@ -171,7 +171,7 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: r
   return { toy, clamped }
 }
 
-function checkPart(p: unknown, surface: Surface, clamped: string[]): PartSpec | string {
+function checkPart(p: unknown, surface: Surface, clamped: string[], limits: Limits): PartSpec | string {
   if (!obj(p) || typeof p.id !== 'string' || !ID.test(p.id)) return 'a part had no plain name'
   const id = p.id
   if (!isMaterial(p.material) || NOT_FOR_TOYS.has(p.material)) return `there is no material called ${plain(p.material, 32) || 'that'} for the ${id}`
@@ -179,23 +179,50 @@ function checkPart(p: unknown, surface: Surface, clamped: string[]): PartSpec | 
   if (motion !== 'static' && motion !== 'dynamic') return `the ${id} can stand still or move freely, nothing else`
   if (!vec(p.at)) return `the ${id} has no place`
   if (p.turn !== undefined && !vec(p.turn)) return `the ${id}'s turn is not three angles`
+  const angles = (t: unknown) => (t as Vec3).map((a) => Math.max(-Math.PI, Math.min(Math.PI, a))) as Vec3
   const size = (v: unknown, name: string) => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return NaN
-    const c = Math.min(MADE.size[1], Math.max(MADE.size[0], v))
+    const c = Math.min(limits.size[1], Math.max(limits.size[0], v))
     if (c !== v) clamped.push(`${id}.${name}`)
     return c
   }
-  const s = p.shape
+  /** A plain shape from data, its sizes held to the limits, or null when it is not one. */
+  const plainShape = (s: unknown): Piece['shape'] | null => {
+    let shape: Piece['shape']
+    if (!obj(s)) return null
+    if (s.kind === 'box' && vec(s.half)) shape = { kind: 'box', half: s.half.map((v, i) => size(v, `half[${i}]`)) as Vec3 }
+    else if (s.kind === 'sphere') shape = { kind: 'sphere', radius: size(s.radius, 'radius') }
+    else if (s.kind === 'cylinder' || s.kind === 'capsule') shape = { kind: s.kind, halfHeight: size(s.halfHeight, 'halfHeight'), radius: size(s.radius, 'radius') }
+    else return null
+    return Object.values(shape).flat().some((v) => typeof v === 'number' && Number.isNaN(v)) ? null : shape
+  }
   let shape: Shape
-  if (!obj(s)) return `the ${id} has no shape`
-  if (s.kind === 'box' && vec(s.half)) shape = { kind: 'box', half: s.half.map((v, i) => size(v, `half[${i}]`)) as Vec3 }
-  else if (s.kind === 'sphere') shape = { kind: 'sphere', radius: size(s.radius, 'radius') }
-  else if (s.kind === 'cylinder' || s.kind === 'capsule') shape = { kind: s.kind, halfHeight: size(s.halfHeight, 'halfHeight'), radius: size(s.radius, 'radius') }
-  else return `the ${id} is a box, a sphere, a cylinder or a capsule`
-  if (Object.values(shape).flat().some((v) => typeof v === 'number' && Number.isNaN(v))) return `the ${id}'s sizes are not numbers`
+  let pieces: Piece[] | undefined
+  if (p.pieces !== undefined) {
+    // One body made of several shapes: each checked like a part's own shape, in the part's frame.
+    if (!Array.isArray(p.pieces) || !p.pieces.length) return `the ${id}'s pieces were not a list of shapes`
+    if (p.pieces.length > limits.pieces) return `the ${id} had ${p.pieces.length} pieces and a part may have ${limits.pieces}`
+    pieces = []
+    for (const raw of p.pieces) {
+      const s = obj(raw) ? plainShape(raw.shape) : null
+      if (!obj(raw) || !s) return `a piece of the ${id} is not a box, a sphere, a cylinder or a capsule with sizes`
+      if (!vec(raw.at)) return `a piece of the ${id} has no place`
+      if (raw.turn !== undefined && !vec(raw.turn)) return `a piece of the ${id}'s turn is not three angles`
+      const piece: Piece = { shape: s, at: [...raw.at] }
+      if (raw.turn !== undefined) piece.turn = angles(raw.turn)
+      if (typeof raw.paint === 'string' && /^#[0-9a-f]{6}$/i.test(raw.paint)) piece.paint = raw.paint
+      pieces.push(piece)
+    }
+    shape = piecesShape(pieces)
+  } else {
+    const s = plainShape(p.shape)
+    if (!s) return obj(p.shape) && ['box', 'sphere', 'cylinder', 'capsule'].includes(p.shape.kind as string) ? `the ${id}'s sizes are not numbers` : obj(p.shape) ? `the ${id} is a box, a sphere, a cylinder or a capsule` : `the ${id} has no shape`
+    shape = s
+  }
   const part: PartSpec = { id, shape, material: p.material, at: [...p.at] }
+  if (pieces) part.pieces = pieces
   if (motion === 'dynamic') part.motion = 'dynamic'
-  if (p.turn !== undefined) part.turn = (p.turn as Vec3).map((a) => Math.max(-Math.PI, Math.min(Math.PI, a))) as Vec3
+  if (p.turn !== undefined) part.turn = angles(p.turn)
   if (typeof p.paint === 'string' && /^#[0-9a-f]{6}$/i.test(p.paint)) part.paint = p.paint
   if (p.sensor === true) part.sensor = true
   // Only a trigger volume may go unseen (#108: the line a throw crosses): it never pushes, so nothing invisible is in anyone's way.
@@ -203,27 +230,42 @@ function checkPart(p: unknown, surface: Surface, clamped: string[]): PartSpec | 
   if (p.mass !== undefined && motion === 'dynamic') {
     if (typeof p.mass !== 'number' || !Number.isFinite(p.mass)) clamped.push(`${id}.mass`)
     else {
-      part.mass = Math.min(MADE.mass[1], Math.max(MADE.mass[0], p.mass))
+      part.mass = Math.min(limits.mass[1], Math.max(limits.mass[0], p.mass))
       if (part.mass !== p.mass) clamped.push(`${id}.mass`)
     }
   }
-  if (!within(part.at, extent(part), surface)) return `the ${id} would stand off ${surface.label}`
+  const box = extent(part)
+  if (!within([part.at[0] + box.middle[0], part.at[1] + box.middle[1], part.at[2] + box.middle[2]], box.half, surface, limits)) return `the ${id} would stand off ${surface.label}`
   return part
 }
 
-/** Half the size of a part's box, in the surface's frame, turned as it is. */
-function extent(part: PartSpec): Vec3 {
-  const s = part.shape
-  const local: Vec3 = s.kind === 'box' ? s.half : s.kind === 'sphere' ? [s.radius, s.radius, s.radius]
-    : s.kind === 'cylinder' ? [s.radius, s.halfHeight, s.radius] : s.kind === 'capsule' ? [s.radius, s.halfHeight + s.radius, s.radius] : [0, 0, 0]
-  const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...(part.turn ?? [0, 0, 0]))).elements
+/** Half the size of a plain shape's box in its own frame. */
+const halfOf = (s: Piece['shape']): Vec3 => (s.kind === 'box' ? s.half : s.kind === 'sphere' ? [s.radius, s.radius, s.radius] : s.kind === 'cylinder' ? [s.radius, s.halfHeight, s.radius] : [s.radius, s.halfHeight + s.radius, s.radius])
+/** A box (half extents) turned by Euler angles, as the half extents of the box round it. */
+function turned(local: Vec3, turn: Vec3 | undefined): Vec3 {
+  const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...(turn ?? [0, 0, 0]))).elements
   // Column-major: row i of |R| times the local half extents.
   return [0, 1, 2].map((i) => Math.abs(m[i]) * local[0] + Math.abs(m[i + 4]) * local[1] + Math.abs(m[i + 8]) * local[2]) as Vec3
 }
 
+/** The box round a part in the surface's frame, turned as it is: where its middle is from the part's own place, and half its size. A part made of pieces need not be centred on its place (a dog's is at its feet). */
+function extent(part: PartSpec): { middle: Vec3; half: Vec3 } {
+  if (!part.pieces) return { middle: [0, 0, 0], half: part.shape.kind === 'compound' ? [0, 0, 0] : turned(halfOf(part.shape), part.turn) }
+  const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity]
+  for (const piece of part.pieces) {
+    const h = turned(halfOf(piece.shape), piece.turn)
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(lo[i], piece.at[i] - h[i])
+      hi[i] = Math.max(hi[i], piece.at[i] + h[i])
+    }
+  }
+  const middle = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).applyEuler(new THREE.Euler(...(part.turn ?? [0, 0, 0])))
+  return { middle: [middle.x, middle.y, middle.z], half: turned([(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2], part.turn) }
+}
+
 /** Whether a box (centre, half extents) stays over the surface and under its height. */
-function within(at: Vec3, half: Vec3 | 0, surface: Surface) {
+function within(at: Vec3, half: Vec3 | 0, surface: Surface, limits: Limits) {
   const h = half === 0 ? [0, 0, 0] : half
   return Math.abs(at[0]) + h[0] <= surface.half[0] + 1e-6 && Math.abs(at[2]) + h[2] <= surface.half[1] + 1e-6
-    && at[1] - h[1] >= -MADE.slack && at[1] + h[1] <= surface.height + 1e-6
+    && at[1] - h[1] >= -limits.slack && at[1] + h[1] <= surface.height + 1e-6
 }

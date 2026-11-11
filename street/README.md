@@ -14,9 +14,22 @@ reach past this machine. It is a spike: plain shapes, no sign-in, synthetic resi
   loader, because `World` is written for a bundler.
 - `src/walk.ts`: how a walker moves. The world applies it; the page runs it ahead of the answer.
 - `src/wire.ts`: datagrams for poses and inputs, JSON lines for what must arrive.
+- `src/make.ts`: making by talking. One sentence in, one physical thing out: a model writes the
+  thing as the engine's own toy data (one body drawn as several shapes), the engine's checker
+  holds it to the street's limits, a scratch world lets it settle, and one failed answer is
+  sent back once with the reason. Nothing the model writes runs.
 - `src/puppet.ts`: a solver core that solves nothing: each body is where it was last put.
 - `client/`: the page. It runs the engine's `World` too, over the puppet, so it draws the same
   toys the world process built (their materials, paint and shadows), posed from the wire.
+
+## Play it
+
+Walk with WASD (or the left side of a phone's screen), jump with Space, turn with Q and E or
+by dragging. Press Enter and type what you want: "a big red dog", "a plank bridge across the
+trench", "stairs". It appears on the ground in front of you, for everyone. The `make` button
+switches to `say`, which puts your words over your head. `undo` takes back the last thing you
+made; `top` takes you back to where you arrived. A trench crosses the street, too wide to jump
+and too deep to climb out of.
 
 ## Run it
 
@@ -24,6 +37,9 @@ reach past this machine. It is a spike: plain shapes, no sign-in, synthetic resi
 cd home && npm ci      # the solver is the home's
 cd street && npm ci
 npm run world          # node run.mjs: WebTransport on 127.0.0.1:4433, /where and /stats on 4434
+                       #   -- --maker sonnet   turns making on (spends the signed-in Claude Code's usage);
+                       #                       --maker stub makes a crate of anything, for checks
+                       #   -- --world <dir>    where made things are kept (default ~/.village/street)
 npm run page           # http://localhost:5318
 ```
 
@@ -42,7 +58,12 @@ are drawn. The page has buttons for all three, and says on screen why it could n
 npm run tick -- 1000 100 20                 # the block on World, every body kept awake
 npm run two -- --delays 0,25,50,100         # two browsers, a fresh world per case
 npm run push -- --delays 0,50,100           # walking into a crate, three worlds per case
+node test/make.ts                           # making end to end with a stand-in maker
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
+# With a real model, by hand:
+node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence
+node test/gallery.ts out.json pictures/                                  # photograph it all as one sheet
+node test/clip.ts clip/ sonnet "a plank bridge across the trench"        # record the walk, the ask and the crossing
 npm run typecheck
 ```
 
@@ -141,6 +162,32 @@ less its gadgets and wires, and the page builds it over a solver core that is po
 stepped. Page work is 1.2 ms a frame for 145 moving things (WebGPU, Chrome). `node test/look.ts
 out.png` takes a picture of it.
 
-Not done: the page steps nothing, so a push is still seen late. Next it steps the things near
-your walker with the real solver to guess pushes. Cards and glows are not sent yet. Fire's GPU
-field and invented mechanics' page sandbox have not been tried off the page.
+## Making by talking (November 10, 2026)
+
+Real-model runs by hand, on the owner's signed-in Claude Code:
+
+- Ten street-scale sentences (a big red dog, a pool noodle, a plank bridge, a ladder, a large
+  rubber duck, a park bench, a seesaw, a small car, a snowman, stairs to a platform) on three
+  models: all 30 answers passed the checker and settled. Haiku took 7 s at the middle (9
+  pieces a thing), Sonnet 14 s and Opus 14 s (14 pieces). Sonnet and Opus read clearly as
+  the thing asked for; Haiku is cruder. The run cost about a dollar.
+- Things on a round bottom rolled away down the slope (the snowmen, a duck). The maker is now
+  told about the slope, and a many-pieced thing that is on its side within two seconds is
+  sent back once.
+- End to end: a walker at the trench typed "a plank bridge across the trench"; Sonnet's bridge
+  appeared spanning it 16 s later and the walker crossed. The maker is told where the ground
+  drops away in front of the asker.
+
+What a made thing is: nearly always one part made of pieces (`PartSpec.pieces`), so a dog is one
+body. Its material decides how it moves; the street adds stone, foam, plastic, fur, ice and
+jelly to the home's. The street's limits are sizes to 4 m, 4,000 kg, 8 parts, 40 pieces a part,
+and one gadget kind (a pivot). 80 made things at most, each kept as a file under
+`<world>/made/`, so they are there after a restart.
+
+Walkers now step onto things up to 0.45 m high (a kerb stone, a stair, a bridge's deck), and
+the page keeps your walker at the height the world last said it stands at on a thing.
+
+Not done: the page steps nothing, so a push is still seen late. Cards and glows are not sent,
+so made things have no score cards or lamps. A made thing can land on someone. Asking spends
+the world owner's Claude usage and there is no sign-in: tailnet only. Fire's GPU field and
+invented mechanics' page sandbox have not been tried off the page.

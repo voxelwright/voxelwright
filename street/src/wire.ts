@@ -21,6 +21,21 @@ export type Line =
   | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; floor: number; drawn: Drawn[] }
   | { t: 'add'; drawn: Drawn }
   | { t: 'remove'; toy: string }
+  /** Someone asked for a thing: it is on its way to this spot. */
+  | { t: 'making'; by: number; text: string; at: Vec3 }
+  /** The asking ended: with a thing (its toy was added just before), with only a word, or (`ok` false) with why not. */
+  | { t: 'made'; by: number; ok: boolean; say: string; toy?: string }
+  | { t: 'said'; by: number; text: string }
+
+/** What a page asks of the world, as lines of JSON on its own reliable stream. */
+export type Ask =
+  /** Make a thing from a sentence, on the ground in front of the asker, who faces `yaw`. */
+  | { t: 'make'; text: string; yaw: number }
+  | { t: 'say'; text: string }
+  /** Take back the last thing this seat made. */
+  | { t: 'unmake' }
+  /** Back to where residents arrive. */
+  | { t: 'top' }
 
 /** Positions travel as 2 mm steps in 16 bits: 65 m either way. */
 const STEP = 0.002

@@ -1,27 +1,13 @@
 // A look at the street (#118): a fresh world, one page, a short walk, and a picture of it.
 // Usage: node test/look.ts <out.png> [query, e.g. "shadows=0"] [width] [height]
-import { spawn, type ChildProcess } from 'node:child_process'
-import { chromium } from 'playwright'
+import { browser as launch, sleep, startPage, startWorld } from './lib.ts'
 
 const out = process.argv[2], query = process.argv[3] ?? '', width = Number(process.argv[4] ?? 1280), height = Number(process.argv[5] ?? 720)
 if (!out) throw new Error('Usage: node test/look.ts <out.png> [query] [width] [height]')
-const here = new URL('..', import.meta.url).pathname
-const WT = 4833, HTTP = 4834, PAGE = 5348
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-function start(command: string, argv: string[], ready: string, env: Record<string, string> = {}): Promise<ChildProcess> {
-  const child = spawn(command, argv, { cwd: here, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-  return new Promise((resolve, reject) => {
-    let seen = ''
-    const on = (chunk: Buffer) => { seen += chunk; if (seen.includes(ready)) resolve(child) }
-    child.stdout!.on('data', on)
-    child.stderr!.on('data', on)
-    child.on('exit', (code) => reject(new Error(`${command} ended (${code}):\n${seen}`)))
-    setTimeout(() => reject(new Error(`${command} was not ready in 20 s:\n${seen}`)), 20_000)
-  })
-}
-const vite = await start('npx', ['vite', '--port', String(PAGE)], 'Local', { STREET_HTTP: String(HTTP) })
-const world = await start('node', ['run.mjs', '--port', String(WT), '--http', String(HTTP)], '/where')
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
+const WT = 4833, PAGE = 5348
+const vite = await startPage(PAGE, WT)
+const world = await startWorld(WT)
+const browser = await launch()
 try {
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2 })
   const said: string[] = []

@@ -50,6 +50,7 @@ export const CHECKS = [
   { name: 'street-typecheck', cwd: 'street', run: ['npm', 'run', 'typecheck'], local: NO_STREET_IN_CI, seconds: 10 },
   { name: 'street-block', cwd: 'street', run: ['node', 'test/on-world.mjs', '120', '24', '4'], local: NO_STREET_IN_CI, seconds: 20 },
   { name: 'street-two', cwd: 'street', run: ['node', 'test/two.ts', '--delays', '0'], serial: true, local: SOFTWARE_GL, seconds: 60 },
+  { name: 'street-make', cwd: 'street', run: ['node', 'test/make.ts'], serial: true, local: SOFTWARE_GL, seconds: 60 },
 
   // Home, a page on the shared dev server
   { name: 'kernel', cwd: 'home', run: ['node', 'scripts/check-kernel.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 30 },

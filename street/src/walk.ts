@@ -60,15 +60,25 @@ export function steer(v: Vec3, input: Input, normal: Vec3 | null): Vec3 {
 
 const LIMIT_X = HALF_W - KERB - RADIUS, LIMIT_Z = (HALF_L - KERB - RADIUS) / Math.hypot(1, GRADE)
 
-/** One tick of a walker on the bare street: what the page expects before the world answers. It knows the ground, the kerbs and the end walls, and nothing that moves. */
-export function predict(w: Walker, input: Input): Walker {
-  const rest = (z: number) => heightAt(z) + standing(NORMAL)
+/** A rise in the ground taller than this is a wall to a walker on foot. */
+const STEP_UP = 0.4
+
+/**
+ * One tick of a walker on the bare street: what the page expects before the world answers. It
+ * knows the ground with its trench, the kerbs and the end walls, and nothing that moves.
+ * `floor`, when given, is the height the world last said this walker stands at on some thing (a
+ * bridge, a crate): the walker stays up there until the world says otherwise.
+ */
+export function predict(w: Walker, input: Input, floor = -Infinity): Walker {
+  const rest = (z: number) => Math.max(heightAt(z) + standing(NORMAL), floor)
   const hop = Math.max(0, w.hop - 1)
   const grounded = hop === 0 && w.p[1] - rest(w.p[2]) <= REACH
   const v = steer(w.v, input, grounded ? NORMAL : null)
   const p: Vec3 = [w.p[0] + v[0] * TICK, w.p[1] + v[1] * TICK, w.p[2] + v[2] * TICK]
   if (Math.abs(p[0]) > LIMIT_X) { p[0] = Math.sign(p[0]) * LIMIT_X; v[0] = 0 }
   if (Math.abs(p[2]) > LIMIT_Z) { p[2] = Math.sign(p[2]) * LIMIT_Z; v[2] = 0 }
+  // The trench's wall: ground that rises more than a step ahead of a walker below it stops them.
+  if (rest(p[2]) - w.p[1] > STEP_UP) { p[2] = w.p[2]; v[2] = 0 }
   const jumped = grounded && input.jump
   if (!jumped && (grounded || p[1] < rest(p[2]))) p[1] = rest(p[2])
   return { p, v, hop: jumped ? HOP : hop, grounded }

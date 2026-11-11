@@ -7,7 +7,9 @@ import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
 import { STREET, cargo, registerBlock, resident } from './scene.ts'
 import { TICK, type Input } from './walk.ts'
-import type { ToySpec } from '../../home/src/engine/toy.ts'
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { checkToy, type ToySpec } from '../../home/src/engine/toy.ts'
 import type { Drawn, Pose, Self } from './wire.ts'
 
 export interface BlockOptions {
@@ -15,7 +17,14 @@ export interface BlockOptions {
   balls: number
   /** Nothing ever falls asleep: the worst case, for timing. */
   awake?: boolean
+  /** Where made things are kept, one file each, so they are here again after a restart. None: nothing is kept. */
+  dir?: string
 }
+
+/** A thing someone made by asking: its toy, the sentence, and who asked. */
+export interface MadeThing { toy: ToySpec; text: string; by: string; at: string }
+/** The most made things the street holds, and the most moving bodies in all (1,100 awake cost 9 ms of a 16.7 ms tick). */
+const MOST = { made: 80, moving: 700 }
 
 interface Seat { toy: string; body: string; legs: string; queue: Input[]; newest: number; last: Input; ack: number }
 
@@ -40,6 +49,9 @@ export class Block {
   private seed = 20261110
   private world: World
   private keepAwake: boolean
+  private made = new Map<string, MadeThing>()
+  private madeCount = 0
+  private dir?: string
 
   static async make(options: BlockOptions) {
     await loadJolt()
@@ -55,6 +67,71 @@ export class Block {
     if (!rules.ok) throw new Error(rules.reason)
     this.build(STREET)
     this.build(cargo(options.crates, options.balls))
+    this.dir = options.dir && join(options.dir, 'made')
+    if (this.dir) this.load(this.dir)
+  }
+
+  /** Builds again what was made before this start. A file that no longer builds is left where it is and said. */
+  private load(dir: string) {
+    mkdirSync(dir, { recursive: true })
+    const number = (name: string) => Number(/^made-(\d+)\.json$/.exec(name)?.[1] ?? NaN)
+    for (const name of readdirSync(dir).filter((n) => Number.isFinite(number(n))).sort((a, b) => number(a) - number(b))) {
+      try {
+        const thing = JSON.parse(readFileSync(join(dir, name), 'utf8')) as MadeThing
+        const bad = checkToy(thing.toy)
+        if (bad || thing.toy.id !== name.slice(0, -5)) throw new Error(bad ?? 'its id is not its file name')
+        this.build(thing.toy)
+        this.made.set(thing.toy.id, thing)
+        this.madeCount = Math.max(this.madeCount, number(name))
+      } catch (e) {
+        console.error(`street: ${join(dir, name)} was not built: ${e instanceof Error ? e.message : e}`)
+      }
+    }
+  }
+
+  /** The name the next made thing gets. */
+  nextMade() {
+    return `made-${this.madeCount + 1}`
+  }
+
+  /** Puts a made toy on the street and keeps it. Returns it as a page draws it, or why there is no room. */
+  place(toy: ToySpec, text: string, by: string): Drawn | { reason: string } {
+    const moving = toy.parts.filter((p) => p.motion === 'dynamic').length
+    if (this.made.size >= MOST.made) return { reason: `the street holds ${MOST.made} made things and is full` }
+    if (this.ids.size + moving > MOST.moving) return { reason: 'there are too many moving things on the street already' }
+    this.build(toy)
+    this.madeCount++
+    const thing: MadeThing = { toy, text, by, at: new Date().toISOString() }
+    this.made.set(toy.id, thing)
+    if (this.dir) {
+      // Whole or not at all: written beside, then renamed over.
+      const file = join(this.dir, `${toy.id}.json`)
+      writeFileSync(`${file}.tmp`, JSON.stringify(thing, null, 1))
+      renameSync(`${file}.tmp`, file)
+    }
+    return this.drawnAs(toy)
+  }
+
+  /** Takes the last thing `by` made off the street. Returns its toy's id, or null when they have made nothing that is still here. */
+  unmake(by: string): string | null {
+    const id = [...this.made].reverse().find(([, thing]) => thing.by === by)?.[0]
+    if (!id) return null
+    this.world.removeToy(id)
+    for (const part of this.made.get(id)!.toy.parts) {
+      this.ids.delete(`${id}/${part.id}`)
+      this.sleptAt.delete(`${id}/${part.id}`)
+    }
+    this.specs.delete(id)
+    this.made.delete(id)
+    if (this.dir) rmSync(join(this.dir, `${id}.json`), { force: true })
+    return id
+  }
+
+  /** A seat's walker back where residents arrive. */
+  top(id: number) {
+    const seat = this.seats.get(id)
+    const spec = seat && this.specs.get(seat.toy)
+    if (seat && spec) this.world.moveTo(seat.body, spec.frame.at, [0, 0, 0])
   }
 
   /** Builds a toy and gives each of its moving parts a number for the wire. */

@@ -11,8 +11,9 @@ import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { Puppet } from '../src/puppet.ts'
 import { registerBlock } from '../src/scene.ts'
-import { HALF_H, RADIUS, TICK, predict, type Input, type Walker } from '../src/walk.ts'
-import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Drawn, type Line, type Pose } from '../src/wire.ts'
+import { NORMAL, heightAt } from '../src/ground.ts'
+import { HALF_H, RADIUS, TICK, predict, standing, type Input, type Walker } from '../src/walk.ts'
+import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Ask, type Drawn, type Line, type Pose } from '../src/wire.ts'
 
 const params = new URLSearchParams(location.search)
 const PREDICT = params.get('predict') !== '0'
@@ -101,9 +102,11 @@ let pending: Input[] = []
 let seq = 0, lastSelf = 0
 const offset = new THREE.Vector3()
 const fixes: number[] = []
+/** The height the world last said your walker stands at when that is on some thing, not the bare ground: the guess keeps it up there. */
+let platform = -Infinity
 /** One tick of your walker, ahead of the answer. With STOP it does not walk into a crate or a ball where that is drawn: it is pushed back out sideways and loses its speed into it. */
 function ahead(w: Walker, input: Input): Walker {
-  const next = predict(w, input)
+  const next = predict(w, input, platform)
   if (!STOP) return next
   for (const view of views.values()) {
     if (view.kind === 'walker') continue
@@ -124,6 +127,7 @@ function selfHeard(data: Uint8Array) {
   if (!PREDICT) return
   const before = me?.p
   pending = pending.filter((input) => input.seq > s.ack)
+  platform = s.grounded && s.p[1] - (heightAt(s.p[2]) + standing(NORMAL)) > 0.05 ? s.p[1] : -Infinity
   let w: Walker = { p: s.p, v: s.v, hop: s.hop, grounded: s.grounded }
   for (const input of pending) w = ahead(w, input)
   if (before) {
@@ -141,7 +145,15 @@ function selfHeard(data: Uint8Array) {
 const held = new Set<string>()
 let jump = false, yaw = 0
 const stick = { id: -1, x0: 0, y0: 0, x: 0, z: 0 }, look = { id: -1, x: 0, moved: 0, at: 0 }
-addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) jump = true; held.add(e.code); if (['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault() })
+const words = document.getElementById('words') as HTMLInputElement
+addEventListener('keydown', (e) => {
+  // Typing a sentence is not walking; Enter goes to the sentence, Escape back to the street.
+  if (e.target === words) { if (e.code === 'Escape') words.blur(); return }
+  if (e.code === 'Enter') { words.focus(); e.preventDefault(); return }
+  if (e.code === 'Space' && !e.repeat) jump = true
+  held.add(e.code)
+  if (['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault()
+})
 addEventListener('keyup', (e) => held.delete(e.code))
 addEventListener('blur', () => held.clear())
 renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -194,6 +206,40 @@ const ticks = { first: 0, last: 0, heard: new Set<number>() }
 const send = (data: Uint8Array) => { up += data.byteLength; out.write(data).catch(() => {}) }
 const setDelay = (ms: number, j = jitter) => { delay = ms; jitter = j; for (let i = 0; i < 3; i++) send(packDelay(ms, j)) }
 if (delay || jitter) setDelay(delay, jitter)
+/** What this page asks of the world goes up its own reliable stream, a line of JSON each. */
+const asks = (await wt.createUnidirectionalStream()).getWriter()
+const encoder = new TextEncoder()
+const ask = (line: Ask) => void asks.write(encoder.encode(JSON.stringify(line) + '\n')).catch(() => {})
+
+// ---- words over heads, and the shimmer where a thing is on its way
+const bubbles = new Map<number, { el: HTMLDivElement; until: number }>()
+function bubble(by: number, text: string, kind: 'said' | 'making' | 'made' | 'sorry', seconds = 6) {
+  let b = bubbles.get(by)
+  if (!b) {
+    const el = document.createElement('div')
+    document.body.append(el)
+    bubbles.set(by, (b = { el, until: 0 }))
+  }
+  b.el.className = `bubble ${kind}`
+  b.el.textContent = text
+  b.until = performance.now() + seconds * 1000
+}
+const shimmers = new Map<number, THREE.Mesh>()
+const shimmerLook = new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.45, depthWrite: false })
+function shimmer(by: number, at: Vec3 | null) {
+  const old = shimmers.get(by)
+  if (old) { scene.remove(old); old.geometry.dispose(); shimmers.delete(by) }
+  if (!at) return
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6, 1), shimmerLook)
+  mesh.position.set(at[0], at[1] + 1, at[2])
+  scene.add(mesh)
+  shimmers.set(by, mesh)
+}
+function told(line: Extract<Line, { by: number }>) {
+  if (line.t === 'said') bubble(line.by, line.text, 'said')
+  else if (line.t === 'making') { bubble(line.by, `${line.text}…`, 'making', 120); shimmer(line.by, line.at) }
+  else { bubble(line.by, line.say, line.ok ? 'made' : 'sorry', line.ok ? 5 : 8); shimmer(line.by, null) }
+}
 
 void (async () => {
   const stream = (await wt.incomingUnidirectionalStreams.getReader().read()).value as ReadableStream<Uint8Array>
@@ -214,7 +260,8 @@ void (async () => {
         you = line.you
         me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
       } else if (line.t === 'add') build(line.drawn)
-      else remove(line.toy)
+      else if (line.t === 'remove') remove(line.toy)
+      else told(line)
     }
   }
 })()
@@ -241,7 +288,9 @@ void (async () => {
 setInterval(() => send(packPing(performance.now())), 250)
 
 // ---- every frame
-const qa = new THREE.Quaternion(), qb = new THREE.Quaternion()
+const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), head = new THREE.Vector3()
+/** A camera put somewhere by hand, for pictures (test/gallery.ts); null follows your walker. */
+let fixed: { from: Vec3; to: Vec3 } | null = null
 const frames: number[] = [], works: number[] = []
 let last = performance.now(), owed = 0, lastSecond = last, rates = { up: 0, down: 0, snaps: 0 }
 /** Puts a view where it was at a world tick: between the samples either side, or the nearest one. */
@@ -283,14 +332,29 @@ function frame(now: number) {
   // The engine draws: its meshes go where the puppet's bodies now are.
   world.frame(dt)
   const mine = views.get(you)
-  if (mine) {
+  if (fixed) {
+    camera.position.set(...fixed.from)
+    camera.lookAt(...fixed.to)
+    sun.target.position.set(...fixed.to)
+    sun.position.set(fixed.to[0] + 9, fixed.to[1] + 22, fixed.to[2] - 7)
+  } else if (mine) {
     const s = Math.sin(yaw), c = Math.cos(yaw)
     camera.position.set(mine.shown.x - s * 7, mine.shown.y + 3.4, mine.shown.z - c * 7)
     camera.lookAt(mine.shown.x, mine.shown.y + 0.8, mine.shown.z)
     sun.target.position.copy(mine.shown)
     sun.position.set(mine.shown.x + 9, mine.shown.y + 22, mine.shown.z - 7)
   }
+  for (const mesh of shimmers.values()) { mesh.rotation.y += dt * 1.8; mesh.rotation.x += dt * 0.7; mesh.scale.setScalar(1 + 0.25 * Math.sin(now / 180)) }
   renderer.render(scene, camera)
+  // Words stand over the head of whoever said them, while they are in front of the camera.
+  for (const [by, b] of bubbles) {
+    const view = views.get(by)
+    if (!view || now > b.until) { b.el.remove(); bubbles.delete(by); continue }
+    head.set(view.shown.x, view.shown.y + 1.15, view.shown.z).project(camera)
+    const seen = head.z < 1 && Math.abs(head.x) < 1.2
+    b.el.style.display = seen ? '' : 'none'
+    if (seen) b.el.style.transform = `translate(-50%, -100%) translate(${((head.x + 1) / 2) * innerWidth}px, ${((1 - head.y) / 2) * innerHeight}px)`
+  }
   works.push(performance.now() - t0)
   if (frames.length > 600) { frames.shift(); works.shift() }
   if (now - lastSecond >= 1000) {
@@ -330,6 +394,22 @@ knob(PREDICT ? 'walker ahead' : 'walker from the answer', PREDICT, () => reload(
 if (PREDICT) knob('stops at things', STOP, () => reload('stop', STOP ? '0' : '1'))
 document.getElementById('more')!.onclick = () => document.body.classList.toggle('open')
 
+// ---- the sentence: what you type is made, or said
+let saying = false
+const mode = document.getElementById('mode') as HTMLButtonElement
+const setMode = (say: boolean) => { saying = say; mode.textContent = say ? 'say' : 'make'; words.placeholder = say ? 'say something…' : 'make anything: a big red dog, a bridge, a ladder…' }
+mode.onclick = () => { setMode(!saying); words.focus() }
+setMode(false)
+const speak = (text: string, say = saying) => { if (text.trim()) ask(say ? { t: 'say', text } : { t: 'make', text, yaw }) }
+;(document.getElementById('ask') as HTMLFormElement).onsubmit = (e) => {
+  e.preventDefault()
+  speak(words.value)
+  words.value = ''
+  words.blur()
+}
+document.getElementById('undo')!.onclick = () => ask({ t: 'unmake' })
+document.getElementById('top')!.onclick = () => { ask({ t: 'top' }); pending = []; offset.set(0, 0, 0) }
+
 // For the two-browser check (test/two.ts): what this page sees, and probes that time what a hand would feel.
 const shownOf = (id: number) => views.get(id)?.shown.toArray() ?? null
 /** ms from a key going down to the first frame your walker is drawn somewhere else. */
@@ -368,4 +448,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...bubbles].map(([by, b]) => ({ by, text: b.el.textContent, kind: b.el.className })), toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

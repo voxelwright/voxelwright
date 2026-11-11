@@ -17,6 +17,9 @@ import { material, materialNames, materialsVersion } from './materials'
 import { checkRules, NORMAL, onRuleAdded, presetRules, type Rules } from './rules'
 import { checkToy, WORLD_BOUND, type PartSpec, type Signal, type ToySpec } from './toy'
 
+/** The drawn look a part wears: one per material and paint, and one per material for parts made of pieces (their paints are in the mesh). */
+const lookKey = (part: PartSpec) => (part.pieces ? `${part.material}:pieces` : `${part.material}:${part.paint ?? ''}`)
+
 const STEP = 1 / 60
 const MAX_STEPS = 4
 /** Below this (N·s, after the impact rule) an impact is not reported. */
@@ -310,7 +313,7 @@ export class World implements WorldApi {
   }
 
   private build(toy: ToySpec) {
-    const frame = new THREE.Matrix4().compose(v3(toy.frame.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(toy.frame.tilt, toy.frame.yaw, 0, 'YXZ')), new THREE.Vector3(1, 1, 1))
+    const frame = new THREE.Matrix4().compose(v3(toy.frame.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(toy.frame.tilt, toy.frame.yaw, toy.frame.roll ?? 0, 'YXZ')), new THREE.Vector3(1, 1, 1))
     this.frames.set(toy.id, frame)
     const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3()
     // Scenery: a part that never moves, that no gadget names and that is not the toy's handle is
@@ -330,13 +333,13 @@ export class World implements WorldApi {
         density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor, ...(part.mass !== undefined ? { mass: part.mass } : {}), ...(part.upright ? { upright: true } : {}),
       })
       const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
-      if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id)) {
+      if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id) && !part.pieces) {
         const look = this.look(part)
-        const key = `${part.material}:${part.paint ?? ''}`
+        const key = lookKey(part)
         const group = merged.get(key) ?? merged.set(key, { look, parts: [] }).get(key)!
         group.parts.push(this.geometry(part.shape).applyMatrix4(m))
       } else if (!part.hidden) {
-        thing.mesh = new THREE.Mesh(this.geometry(part.shape), this.look(part))
+        thing.mesh = new THREE.Mesh(part.pieces ? this.piecesGeometry(part) : this.geometry(part.shape), this.look(part))
         thing.mesh.name = thing.key
         thing.mesh.position.copy(p)
         thing.mesh.quaternion.copy(q)
@@ -394,7 +397,7 @@ export class World implements WorldApi {
   /** Everything of a toy out of the world again: joints, bodies, meshes, gadgets, wires, displays. */
   removeToy(id: string) {
     this.version++
-    const lookOf = (part: PartSpec) => `${part.material}:${part.paint ?? ''}`
+    const lookOf = lookKey
     const itsLooks = new Set([...this.things.values()].filter((t) => t.toy === id).map((t) => lookOf(t.part)))
     for (const joint of this.joints.get(id) ?? []) this.core.removeJoint(joint)
     this.joints.delete(id)
@@ -458,15 +461,43 @@ export class World implements WorldApi {
     if (shape.kind === 'cylinder') return new THREE.CylinderGeometry(shape.radius, shape.radius, shape.halfHeight * 2, 28)
     if (shape.kind === 'capsule') return new THREE.CapsuleGeometry(shape.radius, shape.halfHeight * 2, 6, 16)
     const [x, y, z] = shape.half
-    return new RoundedBoxGeometry(x * 2, y * 2, z * 2, 2, Math.min(0.006, 0.45 * Math.min(x, y, z)))
+    // A toy's edge is rounded by 6 mm; a thing the size of a crate or a car by a little more, so it does not read as a razor.
+    const least = Math.min(x, y, z)
+    return new RoundedBoxGeometry(x * 2, y * 2, z * 2, 2, Math.min(Math.max(0.006, Math.min(0.06, 0.08 * least)), 0.45 * least))
+  }
+
+  /** A part made of pieces as one mesh: each piece's shape where it stands in the part, in its own paint (a colour per vertex). */
+  private piecesGeometry(part: PartSpec): THREE.BufferGeometry {
+    const base = part.paint ?? material(part.material)!.look.color
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), c = new THREE.Color()
+    const drawn = part.pieces!.map((piece) => {
+      // A rounded box comes without an index and the round shapes with one: merged, they must all be without.
+      const made = this.geometry(piece.shape), g = made.index ? made.toNonIndexed() : made
+      if (g !== made) made.dispose()
+      g.applyMatrix4(m.compose(v3(piece.at), q.setFromEuler(new THREE.Euler(...(piece.turn ?? [0, 0, 0]))), one))
+      c.set(piece.paint ?? base)
+      const n = g.getAttribute('position').count, colors = new Float32Array(n * 3)
+      for (let i = 0; i < n; i++) colors.set([c.r, c.g, c.b], i * 3)
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+      return g
+    })
+    const merged = drawn.length > 1 ? mergeGeometries(drawn) : drawn[0]
+    if (drawn.length > 1) for (const g of drawn) g.dispose()
+    if (!merged) throw new Error(`${part.id}: its pieces could not be drawn together`)
+    return merged
   }
 
   /** One drawn material per material and paint; wood gets a grain painted from its colour. */
   private look(part: PartSpec): THREE.Material {
-    const key = `${part.material}:${part.paint ?? ''}`
+    const key = lookKey(part)
     const known = this.looks.get(key)
     if (known) return known
     const l = material(part.material)!.look
+    if (part.pieces) {
+      const look = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: l.roughness, metalness: l.metalness })
+      this.looks.set(key, look)
+      return look
+    }
     const color = new THREE.Color(part.paint ?? l.color)
     let map: THREE.Texture | undefined
     if (this.grain && (part.material === 'maple' || part.material === 'walnut' || part.material === 'lacquer')) {
@@ -1020,7 +1051,7 @@ export class World implements WorldApi {
   }
 
   private shapeOf(t: Thing | Follower | Bound): Shape {
-    return 'part' in t ? t.part.shape : 'outline' in t ? t.outline : { kind: 'cylinder', halfHeight: t.lift, radius: t.radius }
+    return 'part' in t ? outline(t.part.shape) : 'outline' in t ? t.outline : { kind: 'cylinder', halfHeight: t.lift, radius: t.radius }
   }
 
   fire(gadget: Gadget, port: string, signal: Signal) {

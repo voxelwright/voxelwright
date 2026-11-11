@@ -5,12 +5,16 @@
 //
 // Usage: node run.mjs [--port 4433] [--http 4434] [--host 127.0.0.1]... [--name host.ts.net]...
 //          [--crates 120] [--balls 24] [--snap 30] [--awake]
+//          [--maker stub|haiku|sonnet|opus]  who makes things from sentences (none: making is off); a model spends the signed-in Claude Code's usage
+//          [--world <dir>]                    where made things are kept (default ~/.village/street; "none" keeps nothing)
 import { Http3Server } from '@fails-components/webtransport'
 import { createServer } from 'node:http'
-import { loadavg } from 'node:os'
+import { homedir, loadavg } from 'node:os'
+import { join } from 'node:path'
 import { makeCert } from './cert.ts'
 import { Block, FLOOR } from './block.ts'
-import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Line } from './wire.ts'
+import { claudeMaker, make, plotFor, stubMaker, type Maker } from './make.ts'
+import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Ask, type Line } from './wire.ts'
 
 const args = process.argv.slice(2)
 const all = (name: string) => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] ? [args[i + 1]] : []))
@@ -19,6 +23,13 @@ const hosts = all('host').length ? all('host') : ['127.0.0.1']
 if (hosts.some((h) => h === '0.0.0.0' || h === '::')) throw new Error('The street has no sign-in yet: name an address (127.0.0.1 or a tailnet one), not every interface.')
 const port = one('port', 4433), httpPort = one('http', 4434), snapEvery = Math.max(1, Math.round(60 / one('snap', 30)))
 const MAX_SEATS = 16, TICK_MS = 1000 / 60
+const text1 = (name: string) => all(name)[0]
+const makerName = text1('maker')
+const maker: Maker | null = !makerName ? null : makerName === 'stub' ? stubMaker() : claudeMaker(makerName)
+const dir = text1('world') === 'none' ? undefined : text1('world') ?? join(homedir(), '.village', 'street')
+/** Sentences being made into things right now, over every seat; and how long a seat waits between its own. */
+const MAKING = { most: 3, restMs: 2000, text: 200 }
+let making = 0
 
 interface Writer { write(data: Uint8Array): Promise<void>; close(): Promise<void> }
 /** A session as the transport library hands it over (its own types ask for options the probe in #81 never needed). */
@@ -27,11 +38,12 @@ interface Session {
   closed: Promise<unknown>
   close(): void
   datagrams: { readable: ReadableStream<Uint8Array>; createWritable(): WritableStream<Uint8Array>; maxDatagramSize: number }
+  incomingUnidirectionalStreams: ReadableStream<ReadableStream<Uint8Array>>
   createUnidirectionalStream(): Promise<WritableStream<Uint8Array>>
 }
-interface Seat { id: number; datagrams: Writer; lines: Writer; room: number; delay: number; jitter: number; out: number; in: number; gone: boolean }
+interface Seat { id: number; datagrams: Writer; lines: Writer; room: number; delay: number; jitter: number; out: number; in: number; gone: boolean; busy: boolean; madeAt: number }
 
-const sim = await Block.make({ crates: one('crates', 120), balls: one('balls', 24), awake: args.includes('--awake') })
+const sim = await Block.make({ crates: one('crates', 120), balls: one('balls', 24), awake: args.includes('--awake'), dir })
 const seats = new Map<number, Seat>()
 const text = new TextEncoder()
 const late: number[] = []
@@ -47,13 +59,78 @@ function send(seat: Seat, data: Uint8Array) {
 }
 const say = (seat: Seat, line: Line) => void seat.lines.write(text.encode(JSON.stringify(line) + '\n')).catch(() => {})
 
+const everyone = (line: Line) => { for (const seat of seats.values()) say(seat, line) }
+/** Plain words from a page: no control characters or angle brackets, one line, not long. */
+const plain = (s: unknown) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAKING.text) : '')
+
+/** One sentence from a seat into one thing on the street, said to everyone as it goes. */
+async function makeFor(seat: Seat, sentence: string, yaw: number) {
+  const by = seat.id
+  const no = (why: string) => say(seat, { t: 'made', by, ok: false, say: why })
+  if (!maker) return no('Making is off here: the world was started without a maker.')
+  if (!sentence) return
+  if (seat.busy) return no('One thing at a time: your last one is still on its way.')
+  if (performance.now() - seat.madeAt < MAKING.restMs) return no('A moment: let the last one land first.')
+  if (making >= MAKING.most) return no('The street is busy making other things. Try again in a moment.')
+  const self = sim.self(by)
+  if (!self || !Number.isFinite(yaw)) return
+  const plot = plotFor(self.p, yaw)
+  seat.busy = true
+  making++
+  everyone({ t: 'making', by, text: sentence, at: plot.at })
+  try {
+    const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000))
+    console.log(`seat ${by} asked for ${JSON.stringify(sentence)}: ${'toy' in result ? `${result.toy.id} (${result.toy.label})` : 'reason' in result ? `refused, ${result.reason}` : 'no thing'}; ${tries} ${tries === 1 ? 'try' : 'tries'}, ${calls.map((c) => c.models.join('+')).join(', ')}`)
+    if ('reason' in result) return everyone({ t: 'made', by, ok: false, say: `That didn't come out right (${result.reason}).` })
+    if (!('toy' in result)) return everyone({ t: 'made', by, ok: true, say: result.say })
+    const drawn = sim.place(result.toy, sentence, sim.toyOf(by) ?? 'someone')
+    if ('reason' in drawn) return everyone({ t: 'made', by, ok: false, say: `No room: ${drawn.reason}.` })
+    everyone({ t: 'add', drawn })
+    everyone({ t: 'made', by, ok: true, say: result.say, toy: result.toy.id })
+  } catch (e) {
+    console.error(`seat ${by} asked for ${JSON.stringify(sentence)}: failed, ${e instanceof Error ? e.message : e}`)
+    everyone({ t: 'made', by, ok: false, say: 'The maker did not answer. Try again.' })
+  } finally {
+    seat.busy = false
+    seat.madeAt = performance.now()
+    making--
+  }
+}
+
+/** What a page asks on its reliable stream, one line of JSON each. */
+function asked(seat: Seat, ask: Ask) {
+  if (ask.t === 'make') void makeFor(seat, plain(ask.text), Number(ask.yaw))
+  else if (ask.t === 'say') { const words = plain(ask.text); if (words) everyone({ t: 'said', by: seat.id, text: words }) }
+  else if (ask.t === 'top') sim.top(seat.id)
+  else if (ask.t === 'unmake') {
+    const toy = sim.unmake(sim.toyOf(seat.id) ?? '')
+    if (toy) everyone({ t: 'remove', toy })
+  }
+}
+async function listen(session: Session, seat: Seat) {
+  const streams = session.incomingUnidirectionalStreams.getReader()
+  const { value: stream } = await streams.read()
+  if (!stream) return
+  const reader = stream.pipeThrough(new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>).getReader()
+  let rest = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done || seat.gone) break
+    const lines = (rest + value).split('\n')
+    rest = lines.pop()!.slice(0, 4000)
+    for (const line of lines) {
+      try { asked(seat, JSON.parse(line) as Ask) } catch { /* not a line of ours */ }
+    }
+  }
+}
+
 async function sit(session: Session) {
   await session.ready
   if (seats.size >= MAX_SEATS) return session.close()
   const datagrams = session.datagrams.createWritable().getWriter()
   const lines = (await session.createUnidirectionalStream()).getWriter()
   const id = sim.join()
-  const seat: Seat = { id, datagrams, lines, room: Math.min(1150, session.datagrams.maxDatagramSize || 1150), delay: 0, jitter: 0, out: 0, in: 0, gone: false }
+  const seat: Seat = { id, datagrams, lines, room: Math.min(1150, session.datagrams.maxDatagramSize || 1150), delay: 0, jitter: 0, out: 0, in: 0, gone: false, busy: false, madeAt: -Infinity }
   for (const other of seats.values()) say(other, { t: 'add', drawn: sim.drawnOf(id) })
   seats.set(id, seat)
   say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, floor: FLOOR, drawn: sim.drawn() })
@@ -68,6 +145,7 @@ async function sit(session: Session) {
     console.log(`seat ${id} left (${seats.size} here)`)
   }
   session.closed.then(leave, leave)
+  listen(session, seat).catch(() => {})
   const reader = session.datagrams.readable.getReader()
   try {
     for (;;) {
