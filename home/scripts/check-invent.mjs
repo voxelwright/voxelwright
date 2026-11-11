@@ -170,7 +170,7 @@ try {
       // Only what is at rest now: a ball a villager just kicked is somewhere else by the time the mechanic arrives.
       const before = await loose(true)
       const r = await ask('[stub-invent-fling] a magnet')
-      // Where each was as the mechanic arrived: a villager may nudge the ball while the ask is on its way, and Undo is right to leave it there.
+      // Where each was as the mechanic arrived: something may nudge the ball while the ask is on its way, and Undo is right to leave it there.
       const arrived = await loose()
       await page.waitForTimeout(350)
       const flung = await loose()
