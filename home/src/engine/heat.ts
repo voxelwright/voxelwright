@@ -40,7 +40,7 @@ const look = {
 }
 
 /** The fires that light the room (flames.ts aims them): where, and how strong (0 is dark). */
-const fires = [0, 1, 2, 3].map(() => new THREE.Vector4())
+const fires = [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, 0))
 export const firelight = { array: fires, node: uniformArray(fires, 'vec4') }
 const fireAt = (i: number) => firelight.node.element(i) as unknown as THREE.Node<'vec4'>
 /** Steps of each firelight shadow's march through the picture's depth. */
