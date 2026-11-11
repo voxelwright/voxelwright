@@ -170,11 +170,14 @@ try {
       // Only what is at rest now: a ball a villager just kicked is somewhere else by the time the mechanic arrives.
       const before = await loose(true)
       const r = await ask('[stub-invent-fling] a magnet')
+      // Where each was as the mechanic arrived: something may nudge the ball while the ask is on its way, and Undo is right to leave it there.
+      const arrived = await loose()
       await page.waitForTimeout(350)
       const flung = await loose()
       const moved = Object.keys(before).filter((k) => Math.hypot(...before[k].map((v, i) => v - flung[k][i])) > 0.02)
       const after = await loose(false, true)
-      const astray = Object.keys(before).filter((k) => Math.hypot(...before[k].map((v, i) => v - after[k][i])) > 0.03)
+      const far = (from, k) => Math.hypot(...from[k].map((v, n) => v - after[k][n])) > 0.03
+      const astray = Object.keys(before).filter((k) => far(before, k) && far(arrived, k))
       check('a mechanic that throws the home\'s loose things about: Undo puts each back where it was', r.ok && moved.length >= 5 && astray.length === 0 && same(await world(), baseline), { loose: Object.keys(before).length, moved: moved.length, astray: astray.map((k) => [k, before[k], after[k]]) })
     }
 

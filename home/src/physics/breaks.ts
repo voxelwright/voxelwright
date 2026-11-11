@@ -9,7 +9,6 @@
 // a plate or a jar's wall, and what a broken pot looks like from across the room.
 import * as THREE from 'three/webgpu'
 import type { Context } from 'cordis'
-import { own } from '../kernel'
 import type { PhysicsEvent } from '../engine/events'
 import type { World } from '../engine/world'
 import type { LooseParts } from '../kit'
@@ -30,8 +29,30 @@ interface Broken { holder: THREE.Object3D; body: unknown; shards: THREE.Group }
 export function breaks(ctx: Context, world: World, emit: (e: PhysicsEvent) => void, rescan: () => void) {
   const group = new THREE.Group()
   group.name = 'broken things'
-  own(ctx, group)
   const broken = new Map<string, Broken>()
+  /** Puts every broken thing together again: its shards go, and it is a thing of the house once more. */
+  function mend() {
+    const keys = [...broken.keys()]
+    for (const [key, b] of broken) {
+      b.shards.removeFromParent()
+      b.shards.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
+      b.holder.userData.body = b.body
+      b.holder.visible = true
+      broken.delete(key)
+    }
+    return keys
+  }
+  // Not `own`: a shard is drawn with the kit's shared material, which is not this plugin's to release,
+  // and a thing left in pieces when the plugin unloads would stay hidden with no body. Unloading mends.
+  ctx.effect(() => {
+    group.userData.villagePlugin = ctx.fiber.name
+    ctx.stage.scene.add(group)
+    ctx.emit('village/owned', group, ctx.fiber.name)
+    return () => {
+      mend()
+      group.removeFromParent()
+    }
+  }, 'broken things')
   let thisStep = 0
 
   /** Whether a material shatters: hard enough to ring, and not metal (the sound's own reading of its facts). */
@@ -97,7 +118,10 @@ export function breaks(ctx: Context, world: World, emit: (e: PhysicsEvent) => vo
         part.add(m)
       }
     }
-    if (parts.size < 2) return false
+    if (parts.size < 2) {
+      for (const part of parts.values()) for (const m of part.children as THREE.Mesh[]) m.geometry.dispose()
+      return false
+    }
     // Each shard's frame is its own middle, so it tumbles about itself; all start where the thing was.
     const box = new THREE.Box3(), mid3 = new THREE.Vector3(), out = new THREE.Vector3()
     const share = thing.mass / parts.size
@@ -168,17 +192,6 @@ export function breaks(ctx: Context, world: World, emit: (e: PhysicsEvent) => vo
       const p = world.thing(key)?.position
       return Boolean(p && shatter(key, hit.set(p[0], p[1], p[2])))
     },
-    /** Puts every broken thing together again: its shards go, and it is a thing of the house once more. */
-    mend() {
-      const keys = [...broken.keys()]
-      for (const [key, b] of broken) {
-        b.shards.removeFromParent()
-        b.shards.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
-        b.holder.userData.body = b.body
-        b.holder.visible = true
-        broken.delete(key)
-      }
-      return keys
-    },
+    mend,
   }
 }
