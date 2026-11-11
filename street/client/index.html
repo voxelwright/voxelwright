@@ -3,21 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>The Block (spike)</title>
+<title>The Block</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #bfd9ee; touch-action: none; -webkit-user-select: none; user-select: none; }
   canvas { display: block; width: 100vw; height: 100vh; }
-  #hud { position: fixed; left: 8px; top: 8px; font: 12px/1.5 ui-monospace, Menlo, monospace; color: #1d2733; background: rgba(255, 255, 255, 0.78); padding: 6px 9px; border-radius: 8px; white-space: pre; }
-  #knobs { position: fixed; right: 8px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 60vw; }
+  .panel { font: 12px/1.5 ui-monospace, Menlo, monospace; color: #1d2733; background: rgba(255, 255, 255, 0.78); border-radius: 8px; }
+  #more { position: fixed; left: 8px; top: 8px; border: 0; padding: 7px 10px; }
+  /* The numbers and test knobs are a workshop panel: folded away until asked for, one column so nothing overlaps on a phone. */
+  #workshop { position: fixed; left: 8px; top: 44px; right: 8px; max-width: 460px; display: none; flex-direction: column; gap: 6px; pointer-events: none; }
+  body.open #workshop { display: flex; }
+  #hud { padding: 6px 9px; white-space: pre-wrap; }
+  #knobs { display: flex; gap: 6px; flex-wrap: wrap; pointer-events: auto; }
   #knobs button { font: 12px ui-monospace, Menlo, monospace; padding: 7px 9px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.78); color: #1d2733; }
   #knobs button[aria-pressed="true"] { background: #1d2733; color: #fff; }
-  #help { position: fixed; left: 8px; bottom: 8px; font: 12px ui-monospace, Menlo, monospace; color: #1d2733; background: rgba(255, 255, 255, 0.6); padding: 5px 8px; border-radius: 8px; }
+  #help { padding: 5px 8px; }
+  @media (pointer: coarse) { .keys { display: none; } }
+  @media (pointer: fine) { .touch { display: none; } }
 </style>
 </head>
 <body>
-<div id="hud">finding the street…</div>
-<div id="knobs"></div>
-<div id="help">WASD walk · Space jump · Q E or drag to turn · touch: left side walks, right side turns, tap jumps</div>
+<button id="more" class="panel">numbers</button>
+<div id="workshop">
+  <div id="hud" class="panel">finding the street…</div>
+  <div id="knobs"></div>
+  <div id="help" class="panel"><span class="keys">WASD walk · Space jump · Q E or drag to turn</span><span class="touch">left side walks · right side turns · tap jumps</span></div>
+</div>
 <script type="module" src="./main.ts"></script>
 </body>
 </html>

@@ -29,7 +29,7 @@ function start(command: string, argv: string[], ready: string, env: Record<strin
 const spread = (v: number[]) => { const s = [...v].sort((a, b) => a - b); return s.length ? `${Math.round(s[Math.floor(s.length / 2)])} (${Math.round(s[0])}-${Math.round(s[s.length - 1])})` : 'none' }
 
 const vite = await start('npx', ['vite', '--port', String(PAGE)], 'Local', { STREET_HTTP: String(HTTP) })
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal'] })
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 try {
   for (const delay of delays) for (const [way, query] of WAYS) {
     const move: number[] = [], deep: number[] = []

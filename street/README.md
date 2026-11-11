@@ -14,7 +14,9 @@ reach past this machine. It is a spike: plain shapes, no sign-in, synthetic resi
   loader, because `World` is written for a bundler.
 - `src/walk.ts`: how a walker moves. The world applies it; the page runs it ahead of the answer.
 - `src/wire.ts`: datagrams for poses and inputs, JSON lines for what must arrive.
-- `client/`: the page (three.js).
+- `src/puppet.ts`: a solver core that solves nothing: each body is where it was last put.
+- `client/`: the page. It runs the engine's `World` too, over the puppet, so it draws the same
+  toys the world process built (their materials, paint and shadows), posed from the wire.
 
 ## Run it
 
@@ -134,7 +136,11 @@ What it found in the engine:
   quarter second hides the event.
 - Solver contact settings are tuned for toy-sized things. They held for 0.6 m crates.
 
-Not done: the page still draws its own plain shapes from sizes and colours it is sent. Next it
-draws the same toys the server built (a `World` there over a solver core that is posed, not
-stepped), and then steps the things near your walker to guess pushes. Fire's GPU field and
-invented mechanics' page sandbox have not been tried off the page.
+The page draws through `World` as well: the world process sends each toy as it built it,
+less its gadgets and wires, and the page builds it over a solver core that is posed, not
+stepped. Page work is 1.2 ms a frame for 145 moving things (WebGPU, Chrome). `node test/look.ts
+out.png` takes a picture of it.
+
+Not done: the page steps nothing, so a push is still seen late. Next it steps the things near
+your walker with the real solver to guess pushes. Cards and glows are not sent yet. Fire's GPU
+field and invented mechanics' page sandbox have not been tried off the page.

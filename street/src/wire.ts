@@ -2,24 +2,25 @@
 // and may be lost, and lines of JSON on a reliable stream for what must arrive. It knows
 // nothing of the transport that carries it.
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
+import type { ToySpec } from '../../home/src/engine/toy.ts'
 import type { Input } from './walk.ts'
 
 export const INPUT = 1, SNAP = 2, PING = 3, SELF = 4, DELAY = 5
 
-/** A thing as the page needs it to draw: what the reliable stream says once. */
-export interface Seen {
-  id: number
-  kind: 'crate' | 'ball' | 'walker'
-  /** A crate's half extents; a ball's radius first. */
-  size: Vec3
-  color: number
-  p: Vec3
-  q: Quat
+/**
+ * A toy as the page needs it to draw: the toy as the world process built it, less its gadgets
+ * and wires (the page simulates nothing), the wire's number for each moving part, and where
+ * those parts are now (they may have moved since they were made).
+ */
+export interface Drawn {
+  toy: ToySpec
+  ids: Record<string, number>
+  poses: Record<string, { p: Vec3; q: Quat }>
 }
 export type Line =
-  | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; things: Seen[] }
-  | { t: 'add'; thing: Seen }
-  | { t: 'remove'; id: number }
+  | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; floor: number; drawn: Drawn[] }
+  | { t: 'add'; drawn: Drawn }
+  | { t: 'remove'; toy: string }
 
 /** Positions travel as 2 mm steps in 16 bits: 65 m either way. */
 const STEP = 0.002

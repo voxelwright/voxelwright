@@ -1,14 +1,18 @@
-// The street's page (#118 spike): plain shapes for what the world process says is there.
-// Other things are drawn a little in the past, between the two poses either side of that
-// moment; your own walker is drawn where your inputs put it now (walk.ts's rule, run ahead of
-// the world's answer) and put right when the answer differs. `?stop=1` makes it stop at things
-// where they are drawn instead of walking into them. `?predict=0` draws your walker like
-// everything else, to feel the difference; `?delay=50` holds everything 50 ms each way.
-import * as THREE from 'three'
-import type { Vec3 } from '../../home/src/engine/core.ts'
-import { SLABS, TILT } from '../src/ground.ts'
+// The street's page (#118). It draws the same toys the world process simulates: the engine's
+// own World (home/src/engine/world.ts) runs here too, over a solver core that solves nothing
+// (src/puppet.ts) and is posed from what the wire says. Other things are drawn a little in
+// the past, between the two poses either side of that moment; your own walker is drawn where
+// your inputs put it now (walk.ts's rule, run ahead of the world's answer) and put right when
+// the answer differs. `?stop=1` makes it stop at things where they are drawn instead of
+// walking into them. `?predict=0` draws your walker like everything else, to feel the
+// difference; `?delay=50` holds everything 50 ms each way.
+import * as THREE from 'three/webgpu'
+import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
+import { World } from '../../home/src/engine/world.ts'
+import { Puppet } from '../src/puppet.ts'
+import { registerBlock } from '../src/scene.ts'
 import { HALF_H, RADIUS, TICK, predict, type Input, type Walker } from '../src/walk.ts'
-import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Line, type Pose, type Seen } from '../src/wire.ts'
+import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Drawn, type Line, type Pose } from '../src/wire.ts'
 
 const params = new URLSearchParams(location.search)
 const PREDICT = params.get('predict') !== '0'
@@ -18,56 +22,58 @@ let delay = Number(params.get('delay') ?? 0), jitter = Number(params.get('jitter
 const hud = document.getElementById('hud')!, knobs = document.getElementById('knobs')!
 
 // ---- the picture
-const renderer = new THREE.WebGLRenderer({ antialias: true })
+const renderer = new THREE.WebGPURenderer({ antialias: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+renderer.toneMapping = THREE.NeutralToneMapping
+renderer.toneMappingExposure = 1.1
+renderer.shadowMap.enabled = params.get('shadows') !== '0'
+renderer.shadowMap.type = THREE.PCFShadowMap
 document.body.prepend(renderer.domElement)
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0xbfd9ee)
-scene.fog = new THREE.Fog(0xbfd9ee, 40, 90)
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f7a, 1.7))
-const sun = new THREE.DirectionalLight(0xfff1d6, 2.2)
-sun.position.set(6, 14, -4)
-scene.add(sun)
+scene.fog = new THREE.Fog(0xbfd9ee, 45, 110)
+scene.add(new THREE.HemisphereLight(0xdcebff, 0x8a8f7a, 1.5))
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.6)
+sun.castShadow = true
+sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.bias = -0.0008
+sun.shadow.normalBias = 0.03
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 70 })
+scene.add(sun, sun.target)
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200)
 const resize = () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix() }
 addEventListener('resize', resize)
 resize()
-const tilt = new THREE.Quaternion(...TILT)
-for (const slab of SLABS) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(slab.half[0] * 2, slab.half[1] * 2, slab.half[2] * 2), new THREE.MeshLambertMaterial({ color: slab.color }))
-  mesh.position.set(...slab.at)
-  mesh.quaternion.copy(tilt)
-  scene.add(mesh)
-}
-const MAX = 4096
-const crates = new THREE.InstancedMesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshLambertMaterial(), MAX)
-const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshLambertMaterial(), MAX)
-for (const mesh of [crates, balls]) { mesh.count = 0; mesh.frustumCulled = false; scene.add(mesh) }
 
-// ---- what the world has said
-interface Sample { tick: number; p: Vec3; q: [number, number, number, number] }
-interface View { seen: Seen; samples: Sample[]; slot: number; mesh?: THREE.Mesh; shown: THREE.Vector3; first: Vec3 }
+// ---- the world as this page holds it: the engine's World, posed and never stepped
+registerBlock()
+const puppet = new Puppet()
+let world: World | null = null
+interface Sample { tick: number; p: Vec3; q: Quat }
+/** A moving part: its body in the puppet, its poses as heard, and where it is drawn now. */
+interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3 }
 const views = new Map<number, View>()
-const slots = { crate: 0, ball: 0 }
 let you = 0, snapEvery = 2
-function add(seen: Seen) {
-  const view: View = { seen, samples: [{ tick: 0, p: seen.p, q: seen.q }], slot: 0, shown: new THREE.Vector3(...seen.p), first: seen.p }
-  if (seen.kind === 'walker') {
-    view.mesh = new THREE.Mesh(new THREE.CapsuleGeometry(RADIUS, HALF_H * 2, 6, 16), new THREE.MeshLambertMaterial({ color: seen.color }))
-    scene.add(view.mesh)
-  } else {
-    const mesh = seen.kind === 'crate' ? crates : balls
-    view.slot = slots[seen.kind]++
-    mesh.count = slots[seen.kind]
-    mesh.setColorAt(view.slot, new THREE.Color(seen.color))
-    mesh.instanceColor!.needsUpdate = true
-  }
-  views.set(seen.id, view)
+function build(drawn: Drawn) {
+  const first = puppet.size
+  world!.addToy(drawn.toy)
+  drawn.toy.parts.forEach((part, i) => {
+    const id = drawn.ids[part.id], pose = drawn.poses[part.id]
+    if (id === undefined || !pose) return
+    const shape = part.shape
+    const view: View = {
+      key: `${drawn.toy.id}/${part.id}`, id, body: first + i,
+      kind: shape.kind === 'sphere' ? 'ball' : shape.kind === 'capsule' ? 'walker' : 'crate',
+      reach: shape.kind === 'box' ? shape.half[0] : shape.kind === 'compound' ? 0.3 : shape.radius,
+      samples: [{ tick: 0, p: pose.p, q: pose.q }], p: [...pose.p], q: [...pose.q], shown: new THREE.Vector3(...pose.p),
+    }
+    puppet.pose(view.body, view.p, view.q)
+    views.set(id, view)
+  })
 }
-function remove(id: number) {
-  const view = views.get(id)
-  if (view?.mesh) scene.remove(view.mesh)
-  views.delete(id)
+function remove(toy: string) {
+  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) views.delete(id)
+  world!.removeToy(toy)
 }
 function heard(pose: Pose, tick: number) {
   const view = views.get(pose.id)
@@ -100,9 +106,9 @@ function ahead(w: Walker, input: Input): Walker {
   const next = predict(w, input)
   if (!STOP) return next
   for (const view of views.values()) {
-    if (view.seen.kind === 'walker') continue
-    const r = RADIUS + view.seen.size[0], dx = next.p[0] - view.shown.x, dz = next.p[2] - view.shown.z, d = Math.hypot(dx, dz)
-    if (d >= r || d < 1e-6 || Math.abs(next.p[1] - view.shown.y) > HALF_H + RADIUS + view.seen.size[0] * 0.5) continue
+    if (view.kind === 'walker') continue
+    const r = RADIUS + view.reach, dx = next.p[0] - view.shown.x, dz = next.p[2] - view.shown.z, d = Math.hypot(dx, dz)
+    if (d >= r || d < 1e-6 || Math.abs(next.p[1] - view.shown.y) > HALF_H + RADIUS + view.reach * 0.5) continue
     const nx = dx / d, nz = dz / d, into = Math.min(0, next.v[0] * nx + next.v[2] * nz)
     next.p[0] = view.shown.x + nx * r
     next.p[2] = view.shown.z + nz * r
@@ -166,6 +172,7 @@ function sample(): Input {
 /** Sits down, or says on the page why not: a phone has no console to read. */
 async function connect() {
   if (typeof WebTransport !== 'function') throw new Error('this browser has no WebTransport')
+  await renderer.init()
   const where = await (await fetch('/where')).json() as { port: number; hash: number[] }
   const host = location.hostname === 'localhost' ? '127.0.0.1' : location.hostname
   const url = `https://${host}:${params.get('port') ?? where.port}/street`
@@ -200,13 +207,14 @@ void (async () => {
     for (const text of lines) {
       const line = JSON.parse(text) as Line
       if (line.t === 'hello') {
-        you = line.you
+        world = new World(puppet, () => {}, undefined, line.floor)
+        scene.add(world.group)
         snapEvery = Math.round(line.tickHz / line.snapHz)
-        line.things.forEach(add)
-        const mine = views.get(you)!.seen
-        me = { p: mine.p, v: [0, 0, 0], hop: 0, grounded: true }
-      } else if (line.t === 'add') add(line.thing)
-      else remove(line.id)
+        line.drawn.forEach(build)
+        you = line.you
+        me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
+      } else if (line.t === 'add') build(line.drawn)
+      else remove(line.toy)
     }
   }
 })()
@@ -233,24 +241,26 @@ void (async () => {
 setInterval(() => send(packPing(performance.now())), 250)
 
 // ---- every frame
-const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), scale = new THREE.Vector3()
+const qa = new THREE.Quaternion(), qb = new THREE.Quaternion()
 const frames: number[] = [], works: number[] = []
 let last = performance.now(), owed = 0, lastSecond = last, rates = { up: 0, down: 0, snaps: 0 }
-/** A view's pose at a world tick: between the samples either side, or the nearest one. */
+/** Puts a view where it was at a world tick: between the samples either side, or the nearest one. */
 function poseAt(view: View, tick: number) {
   const s = view.samples
   let b = s.findIndex((x) => x.tick >= tick)
   if (b < 0) b = s.length - 1
   const a = Math.max(0, b - 1), A = s[a], B = s[b]
   const k = B.tick > A.tick ? Math.max(0, Math.min(1, (tick - A.tick) / (B.tick - A.tick))) : 1
-  p.set(A.p[0] + (B.p[0] - A.p[0]) * k, A.p[1] + (B.p[1] - A.p[1]) * k, A.p[2] + (B.p[2] - A.p[2]) * k)
-  q.set(...A.q).slerp(q2.set(...B.q), k)
+  for (let i = 0; i < 3; i++) view.p[i] = A.p[i] + (B.p[i] - A.p[i]) * k
+  qa.set(...A.q).slerp(qb.set(...B.q), k)
+  view.q[0] = qa.x; view.q[1] = qa.y; view.q[2] = qa.z; view.q[3] = qa.w
 }
 function frame(now: number) {
   requestAnimationFrame(frame)
   const dt = Math.min(0.1, (now - last) / 1000)
   frames.push(now - last)
   last = now
+  if (!world) return
   const t0 = performance.now()
   if (held.has('KeyQ') || held.has('ArrowLeft')) yaw += dt * 2
   if (held.has('KeyE') || held.has('ArrowRight')) yaw -= dt * 2
@@ -264,25 +274,21 @@ function frame(now: number) {
   // Others are drawn two snapshots back, so there is nearly always a pose either side.
   const then = worldTick(now) - snapEvery * 2 - jitter * 0.06
   for (const view of views.values()) {
-    if (view.seen.id === you && PREDICT && me) {
+    if (view.id === you && PREDICT && me) {
       offset.multiplyScalar(Math.exp(-dt * 12))
-      p.set(me.p[0], me.p[1], me.p[2]).add(offset)
-      q.identity()
+      view.p[0] = me.p[0] + offset.x; view.p[1] = me.p[1] + offset.y; view.p[2] = me.p[2] + offset.z
     } else poseAt(view, then)
-    view.shown.copy(p)
-    if (view.mesh) view.mesh.position.copy(p)
-    else {
-      scale.set(...view.seen.size)
-      m.compose(p, q, view.seen.kind === 'ball' ? scale.setScalar(view.seen.size[0]) : scale)
-      ;(view.seen.kind === 'crate' ? crates : balls).setMatrixAt(view.slot, m)
-    }
+    view.shown.set(view.p[0], view.p[1], view.p[2])
   }
-  crates.instanceMatrix.needsUpdate = balls.instanceMatrix.needsUpdate = true
+  // The engine draws: its meshes go where the puppet's bodies now are.
+  world.frame(dt)
   const mine = views.get(you)
   if (mine) {
     const s = Math.sin(yaw), c = Math.cos(yaw)
     camera.position.set(mine.shown.x - s * 7, mine.shown.y + 3.4, mine.shown.z - c * 7)
     camera.lookAt(mine.shown.x, mine.shown.y + 0.8, mine.shown.z)
+    sun.target.position.copy(mine.shown)
+    sun.position.set(mine.shown.x + 9, mine.shown.y + 22, mine.shown.z - 7)
   }
   renderer.render(scene, camera)
   works.push(performance.now() - t0)
@@ -293,7 +299,7 @@ function frame(now: number) {
     up = down = snaps = 0
     lastSecond = now
     const st = stats()
-    hud.textContent = `round trip ${st.rttMs} ms (held ${delay} ms each way)\ndown ${(rates.down / 1000).toFixed(1)} kB/s in ${st.datagramsPerS} datagrams/s · up ${(rates.up / 1000).toFixed(1)} kB/s\nframe ${st.frameMs.p50} ms (p95 ${st.frameMs.p95}) · page work ${st.workMs.p50} ms\nyour walker: ${PREDICT ? `ahead of the answer${STOP ? ', stops at things' : ''}, put right by ${st.fixMm.p50} mm (p95 ${st.fixMm.p95})` : 'drawn from the answer'}\n${views.size} things`
+    hud.textContent = `round trip ${st.rttMs} ms${delay ? ` (held ${delay} ms each way)` : ''} · ${views.size} moving things · drawn with ${st.backend}\ndown ${(rates.down / 1000).toFixed(1)} kB/s · up ${(rates.up / 1000).toFixed(1)} kB/s · frame ${st.frameMs.p50} ms (p95 ${st.frameMs.p95}), page work ${st.workMs.p50} ms\nyour walker: ${PREDICT ? `ahead of the answer${STOP ? ', stops at things' : ''}, put right by ${st.fixMm.p50} mm (p95 ${st.fixMm.p95})` : 'drawn from the answer'}`
   }
 }
 const spread = (values: number[], digits = 1) => {
@@ -302,28 +308,27 @@ const spread = (values: number[], digits = 1) => {
 }
 function stats() {
   const due = ticks.first ? (ticks.last - ticks.first) / snapEvery + 1 : 0
-  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter }
+  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: (renderer.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend ? 'webgpu' : 'webgl2' }
 }
 requestAnimationFrame(frame)
 
-for (const [label, ms] of [['no delay', 0], ['25 ms each way', 25], ['50', 50], ['100', 100]] as const) {
+// ---- the test knobs, folded away until asked for
+const knob = (label: string, pressed: boolean, tap: () => void, group = '') => {
   const b = document.createElement('button')
   b.textContent = label
-  b.setAttribute('aria-pressed', String(ms === delay))
-  b.onclick = () => { setDelay(ms); for (const x of knobs.querySelectorAll('button[data-delay]')) x.setAttribute('aria-pressed', String(x === b)) }
-  b.dataset.delay = String(ms)
+  b.setAttribute('aria-pressed', String(pressed))
+  if (group) b.dataset.group = group
+  b.onclick = tap
   knobs.append(b)
+  return b
 }
-const toggle = document.createElement('button')
-toggle.textContent = PREDICT ? 'walker: ahead (tap for from-the-answer)' : 'walker: from the answer (tap for ahead)'
-toggle.onclick = () => { params.set('predict', PREDICT ? '0' : '1'); params.set('delay', String(delay)); location.search = params.toString() }
-knobs.append(toggle)
-if (PREDICT) {
-  const b = document.createElement('button')
-  b.textContent = STOP ? 'stops at things (tap for walks into them)' : 'walks into things (tap for stops at them)'
-  b.onclick = () => { params.set('stop', STOP ? '0' : '1'); params.set('delay', String(delay)); location.search = params.toString() }
-  knobs.append(b)
+const reload = (key: string, value: string) => { params.set(key, value); params.set('delay', String(delay)); location.search = params.toString() }
+for (const ms of [0, 25, 50, 100]) {
+  const b = knob(ms ? `hold ${ms} ms` : 'no delay', ms === delay, () => { setDelay(ms); for (const x of knobs.querySelectorAll('button[data-group="delay"]')) x.setAttribute('aria-pressed', String(x === b)) }, 'delay')
 }
+knob(PREDICT ? 'walker ahead' : 'walker from the answer', PREDICT, () => reload('predict', PREDICT ? '0' : '1'))
+if (PREDICT) knob('stops at things', STOP, () => reload('stop', STOP ? '0' : '1'))
+document.getElementById('more')!.onclick = () => document.body.classList.toggle('open')
 
 // For the two-browser check (test/two.ts): what this page sees, and probes that time what a hand would feel.
 const shownOf = (id: number) => views.get(id)?.shown.toArray() ?? null
@@ -350,11 +355,11 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
       const mine = views.get(you)!.shown
       if (!touched) {
         for (const view of views.values()) {
-          if (view.seen.kind !== 'crate' || Math.abs(view.shown.y - mine.y) > 0.6) continue
-          if (Math.hypot(view.shown.x - mine.x, view.shown.z - mine.z) < RADIUS + view.seen.size[0] + 0.01) { touched = { view, at: performance.now(), from: view.shown.clone() }; break }
+          if (view.kind !== 'crate' || Math.abs(view.shown.y - mine.y) > 0.6) continue
+          if (Math.hypot(view.shown.x - mine.x, view.shown.z - mine.z) < RADIUS + view.reach + 0.01) { touched = { view, at: performance.now(), from: view.shown.clone() }; break }
         }
       } else {
-        deepest = Math.max(deepest, RADIUS + touched.view.seen.size[0] - Math.hypot(touched.view.shown.x - mine.x, touched.view.shown.z - mine.z))
+        deepest = Math.max(deepest, RADIUS + touched.view.reach - Math.hypot(touched.view.shown.x - mine.x, touched.view.shown.z - mine.z))
         if (touched.view.shown.distanceTo(touched.from) > 0.02) { held.delete(code); return resolve({ touchToMoveMs: performance.now() - touched.at, deepestMm: deepest * 1000 }) }
       }
       if (performance.now() - t0 > 8000) { held.delete(code); return resolve(null) }
@@ -363,4 +368,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

@@ -9,7 +9,7 @@ import { Http3Server } from '@fails-components/webtransport'
 import { createServer } from 'node:http'
 import { loadavg } from 'node:os'
 import { makeCert } from './cert.ts'
-import { Block } from './block.ts'
+import { Block, FLOOR } from './block.ts'
 import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Line } from './wire.ts'
 
 const args = process.argv.slice(2)
@@ -54,16 +54,17 @@ async function sit(session: Session) {
   const lines = (await session.createUnidirectionalStream()).getWriter()
   const id = sim.join()
   const seat: Seat = { id, datagrams, lines, room: Math.min(1150, session.datagrams.maxDatagramSize || 1150), delay: 0, jitter: 0, out: 0, in: 0, gone: false }
-  for (const other of seats.values()) say(other, { t: 'add', thing: sim.see(id) })
+  for (const other of seats.values()) say(other, { t: 'add', drawn: sim.drawnOf(id) })
   seats.set(id, seat)
-  say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, things: sim.seen() })
+  say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, floor: FLOOR, drawn: sim.drawn() })
   console.log(`seat ${id} sat down (${seats.size} here)`)
   const leave = () => {
     if (seat.gone) return
     seat.gone = true
     seats.delete(id)
+    const toy = sim.toyOf(id)
     sim.leave(id)
-    for (const other of seats.values()) say(other, { t: 'remove', id })
+    if (toy) for (const other of seats.values()) say(other, { t: 'remove', toy })
     console.log(`seat ${id} left (${seats.size} here)`)
   }
   session.closed.then(leave, leave)

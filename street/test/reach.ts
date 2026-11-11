@@ -5,7 +5,7 @@ import { chromium, webkit } from 'playwright'
 
 const url = process.argv[2], which = process.argv[3] ?? 'chromium'
 if (!url) throw new Error('Usage: node test/reach.ts <url> [chromium|webkit]')
-const browser = which === 'webkit' ? await webkit.launch() : await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal'] })
+const browser = which === 'webkit' ? await webkit.launch() : await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
 const errors: string[] = []
 page.on('pageerror', (e) => errors.push(String(e)))

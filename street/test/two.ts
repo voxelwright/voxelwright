@@ -30,7 +30,7 @@ const street = (page: Page) => ({
 })
 
 const vite = await start('npx', ['vite', '--port', String(PAGE)], 'Local', { STREET_HTTP: String(HTTP) })
-const browser = await chromium.launch({ channel: 'chrome', headless: !args.includes('--headed'), args: ['--use-angle=metal'] })
+const browser = await chromium.launch({ channel: 'chrome', headless: !args.includes('--headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 try {
   for (const delay of delays) for (const predict of [1, 0]) {
     const world = await start('node', ['run.mjs', '--port', String(WT), '--http', String(HTTP), '--crates', arg('crates', '120'), '--balls', arg('balls', '24')], '/where')

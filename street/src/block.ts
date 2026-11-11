@@ -2,14 +2,13 @@
 // built from the block's toys (scene.ts), with a seat for each resident. It keeps what the
 // wire needs and World does not: a small number for each moving thing, and each seat's
 // inputs in the order they were made. One step is one tick of TICK.
-import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt, loadJolt } from '../../home/src/engine/jolt.ts'
-import { material } from '../../home/src/engine/materials.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
 import { STREET, cargo, registerBlock, resident } from './scene.ts'
 import { TICK, type Input } from './walk.ts'
-import type { Pose, Seen, Self } from './wire.ts'
+import type { ToySpec } from '../../home/src/engine/toy.ts'
+import type { Drawn, Pose, Self } from './wire.ts'
 
 export interface BlockOptions {
   crates: number
@@ -25,13 +24,14 @@ const SEAT_COLORS = ['#f06f6f', '#5fb0e8', '#84c96a', '#e6b95c', '#b48be0']
 /** A sleeping thing is still said for this many ticks after it stops, and now and then after. */
 const SAID_AFTER_SLEEP = 12, SLEEPERS_PER_SNAP = 6
 /** The lowest ground of the block, with room under it: a thing below this is lost. */
-const FLOOR = heightAt(HALF_L) - 6
+export const FLOOR = heightAt(HALF_L) - 6
 
 export class Block {
   tick = 0
   /** How long each of the last steps took, ms. */
   readonly stepMs: number[] = []
   private ids = new Map<string, number>()
+  private specs = new Map<string, ToySpec>()
   private sleptAt = new Map<string, number>()
   private seats = new Map<number, Seat>()
   private nextId = 1
@@ -53,9 +53,15 @@ export class Block {
     // A long hill: things may go faster than in a room, and nothing is slowed by the air (a walker's speed is its own).
     const rules = this.world.setRules({ maxSpeed: 25, drag: 0 }, 'code')
     if (!rules.ok) throw new Error(rules.reason)
-    this.world.addToy(STREET)
-    this.world.addToy(cargo(options.crates, options.balls))
-    for (const pose of this.world.poses(true)) this.ids.set(pose.key, this.nextId++)
+    this.build(STREET)
+    this.build(cargo(options.crates, options.balls))
+  }
+
+  /** Builds a toy and gives each of its moving parts a number for the wire. */
+  private build(toy: ToySpec) {
+    this.world.addToy(toy)
+    this.specs.set(toy.id, toy)
+    for (const part of toy.parts) if (part.motion && part.motion !== 'static') this.ids.set(`${toy.id}/${part.id}`, this.nextId++)
   }
 
   private random() {
@@ -69,9 +75,8 @@ export class Block {
     const toy = `seat-${n + 1}`
     const spec = resident(toy, this.seats.size)
     spec.parts[0].paint = SEAT_COLORS[n % SEAT_COLORS.length]
-    this.world.addToy(spec)
-    const id = this.nextId++
-    this.ids.set(`${toy}/body`, id)
+    this.build(spec)
+    const id = this.ids.get(`${toy}/body`)!
     this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, queue: [], newest: 0, last: STILL, ack: 0 })
     return id
   }
@@ -79,6 +84,7 @@ export class Block {
     const seat = this.seats.get(id)
     if (!seat) return
     this.world.removeToy(seat.toy)
+    this.specs.delete(seat.toy)
     this.ids.delete(seat.body)
     this.sleptAt.delete(seat.body)
     this.seats.delete(id)
@@ -124,22 +130,27 @@ export class Block {
     }
   }
 
-  /** A moving thing as a page needs it to draw. */
-  see(id: number): Seen {
-    const key = [...this.ids].find(([, n]) => n === id)![0]
-    return this.seenAs(key, id)
+  /** A toy as a page needs it to draw. */
+  private drawnAs(toy: ToySpec): Drawn {
+    const ids: Drawn['ids'] = {}, poses: Drawn['poses'] = {}
+    for (const part of toy.parts) {
+      const key = `${toy.id}/${part.id}`, id = this.ids.get(key), t = id === undefined ? null : this.world.thing(key)
+      if (id === undefined || !t) continue
+      ids[part.id] = id
+      poses[part.id] = { p: t.position, q: t.rotation }
+    }
+    return { toy: { ...toy, gadgets: [], wires: [], inputs: {} }, ids, poses }
   }
-  private seenAs(key: string, id: number): Seen {
-    const t = this.world.thing(key)!
-    const kind = t.shape.kind === 'sphere' ? 'ball' : t.shape.kind === 'capsule' ? 'walker' : 'crate'
-    const size: Vec3 = t.shape.kind === 'sphere' ? [t.shape.radius, t.shape.radius, t.shape.radius] : t.shape.kind === 'capsule' ? [t.shape.radius, t.shape.halfHeight, t.shape.radius] : t.shape.kind === 'box' ? t.shape.half : [0.3, 0.3, 0.3]
-    const seat = [...this.seats.values()].find((s) => s.body === key)
-    const paint = seat ? SEAT_COLORS[(Number(seat.toy.slice(5)) - 1) % SEAT_COLORS.length] : material(t.material)?.look.color ?? '#999999'
-    return { id, kind, size, color: Number.parseInt(paint.slice(1), 16), p: t.position, q: t.rotation }
+  /** Everything built, as a new seat needs it. */
+  drawn(): Drawn[] {
+    return [...this.specs.values()].map((toy) => this.drawnAs(toy))
   }
-  /** Everything that moves, as a new seat needs it. */
-  seen(): Seen[] {
-    return [...this.ids].map(([key, id]) => this.seenAs(key, id))
+  /** The toy of one seat. */
+  drawnOf(id: number): Drawn {
+    return this.drawnAs(this.specs.get(this.seats.get(id)!.toy)!)
+  }
+  toyOf(id: number) {
+    return this.seats.get(id)?.toy
   }
 
   /** What moved: every thing awake, each one that just stopped, and a few sleepers in turn (so a pose lost on the way is put right). */
