@@ -1709,6 +1709,29 @@ in and 17 out. Cost $0.0103. First text 5.3 s, whole turn 5.9 s, measured in
 the host from the start of the turn. Screenshot:
 `screenshots/villager-sonnet.jpg`.
 
+## Soft villagers (#104, November 10, 2026)
+
+Villagers move as soft felt, not as rigid parts on pivots. `src/villagers/soft.ts` skins a built
+figure in place: the body to hips, waist and chest by height, each arm between chest and hand, and
+whatever stands clear of a slot's core (ears, a tuft, a scarf end, a tail) to a spring "flop" bone
+hinged where it leaves the core. Weights are worked out from the rest shape, so the hand-made plush
+and generated villagers (#47, called at the end of `gen/assemble.ts`) go through the same code. A
+part marked `userData.soft = false` (a collar) bends with the spine and never flops. `rig.ts`
+drives it: a short gather before a walk, hips that twist and shift over the standing foot with the
+chest answering, the upper body trailing a start or a stop, the head leading into turns, arms
+swinging from the shoulder. The plush is no longer drawn on twos (a theme can still ask, with
+`motion.characterFps`). The setup bench's puppet stays unskinned (its pieces grow in by scale).
+
+- `node scripts/check-villager-motion.mjs [base]` (40 checks, dev server running; in `npm run check`
+  as `villager-motion`): weights sum to 1 and nothing moves at rest, planted feet do not slide, the
+  felt bends, the gather, springs that hold at 4 poses a second, generated fixtures skinned.
+- `node scripts/villagers/motion-shots.mjs <out-dir> --who=Tuft --wait=walk|idle|start|stop` takes a
+  film strip from a camera riding beside one villager (headless; `--dev=<port>`, `--cam=x,y,z`).
+- Blind A/B of walk strips (`screenshots/villager-motion/step1-before-after.jpg`), one Opus and one
+  GPT-6.1 Sol scorer: the new motion preferred in both clips, about 6 against 5 on life and weight.
+  Both ask next for legs that join feet to body, parts that stay out of each other, and softer ear arcs.
+- Cost: the rig, matrices and skeletons for three villagers take 0.028 ms a frame (0.013 on main).
+
 ## Villagers (#42 prototype)
 
 Four art directions for villagers, on one procedural rig, in the real
