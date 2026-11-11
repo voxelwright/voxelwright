@@ -18,6 +18,7 @@ import * as profiles from '../../voice/profiles'
 import { contactShadows, stepCrowd } from '../cast'
 import { KINDS, PLUSH } from '../kinds'
 import { Villager } from '../rig'
+import { softReport } from '../soft'
 import type { Figure } from '../rig'
 import { assemble } from './assemble'
 import { build, check } from './build'
@@ -200,7 +201,7 @@ export default {
     const trial = async (code: string, opts: { accent?: string; species?: boolean; mark?: boolean; kit?: boolean; role?: string; skin?: boolean; attach?: boolean } = {}) => {
       try {
         const m = await fromCode(code, phys, opts.accent ?? '#c8553d', 31, opts.species ?? false, opts.mark ?? false, opts.kit ?? kitOn, opts.role, opts.skin ?? skinOn, opts.attach ?? false)
-        const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, timing: m.timing, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height }
+        const r = { ok: true, name: m.name, role: m.role, persona: m.persona, measures: m.measures, fixes: m.fixes, timing: m.timing, ...measure(m.fig.root), slots: { eyes: m.fig.eyes.length, hands: m.fig.hands.length, feet: m.fig.feet.length }, side: m.fig.side, hip: m.fig.hip, height: m.fig.height, soft: softReport(m.fig) }
         releaseGpu(m.fig.root)
         return r
       } catch (error) {

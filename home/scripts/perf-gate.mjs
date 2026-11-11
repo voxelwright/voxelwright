@@ -90,6 +90,9 @@ const SCENES = [
   { name: 'talk', page: 'npc', query: '?talk=npc&q=high', tier: 'high', needs: 'talk', setup: openTalk },
   // Toys made from a sentence (#88) cost only while they exist: the villagers scene with all three on the kitchen table, through the engine's addToy (the base has it too).
   { name: 'villagers-toys', page: 'npc-toys', query: '?talk=npc&q=high', tier: 'high', needs: 'talk', setup: addToys },
+  // Fire (#105) costs only while something burns: the kitchen table alight, six simulated seconds in (the base burns it too, as it drew fire then).
+  { name: 'home-fire', page: 'fire', query: '?talk=off&build=0&q=high', tier: 'high', setup: lightTable },
+  { name: 'home-fire-low', page: 'fire-low', query: '?talk=off&build=0&q=low', tier: 'low', full: true, setup: lightTable },
 ]
 const wanted = opt('scenes')?.split(',')
 const scenes = wanted ? SCENES.filter((s) => wanted.includes(s.name)) : SCENES.filter((s) => !s.full || args.includes('--full'))
@@ -108,6 +111,17 @@ async function openTalk(page) {
     await page.waitForTimeout(50)
   }
   throw new Error('the talk close-up did not open within 4 s')
+}
+
+/** The kitchen table set alight and burnt for six simulated seconds: flames over it, its chairs and the rug, and their light on the room. */
+async function lightTable(page) {
+  await page.waitForFunction(() => window.village?.physics?.fire, null, { timeout: 20_000 })
+  await page.evaluate(async () => {
+    const fire = window.village.physics.fire
+    fire.ignite('home/table')
+    await fire.run(6)
+  })
+  return page.waitForTimeout(1500)
 }
 
 /** The marble run on the kitchen table's corner, the seesaw and ten pins on the kitchen floor, as made toys stand, once physics has started. */

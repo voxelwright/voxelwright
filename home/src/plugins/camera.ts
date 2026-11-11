@@ -9,6 +9,8 @@ import { HOUSE } from '../layout'
 export interface Pose {
   position: THREE.Vector3
   look: THREE.Vector3
+  /** A focus pose with everything in view sharp (a game being played): the lens does not blur near or far of what it looks at. */
+  sharp?: boolean
 }
 
 /** Where the dollhouse view rests: a floor point, a zoom (0 the whole house, 1 close up) and, optionally, a turn. */
@@ -407,6 +409,7 @@ export default {
         if (pose) {
           last.position.copy(pose.position)
           last.look.copy(pose.look)
+          last.sharp = pose.sharp
         }
         target = pose
         if (reducedMotion.matches) blend = pose ? 1 : 0
@@ -550,7 +553,7 @@ export default {
       camera.lookAt(looked)
       if (MODE === 'seat') {
         // Seated, the whole room is sharp; leaning in to the notebook or the fridge, the room behind it softens.
-        focusOn(camera.position.distanceTo(looked), k, k)
+        focusOn(camera.position.distanceTo(looked), k, last.sharp ? 0 : k)
         return
       }
       // Focus poses were framed at the seat's field of view, so every rig blends back to it.
@@ -561,7 +564,8 @@ export default {
       }
       atmosphere(rigPosition.distanceTo(rigLook) * calm + 3.6 * k, looked, MODE === 'iso' ? Math.max(rig.zoom, k) : 1)
       // Walking in third person nothing blurs, as on the seat: the lens opens only on a focus pose.
-      focusOn(camera.position.distanceTo(looked), MODE === 'iso' ? Math.max(rig.zoom, k) : k, MODE === 'iso' ? 1 : k)
+      // A sharp pose (a game) closes the lens down as the view arrives on it.
+      focusOn(camera.position.distanceTo(looked), MODE === 'iso' ? Math.max(rig.zoom, k) : k, (MODE === 'iso' ? 1 : k) * (last.sharp ? 1 - k : 1))
     })
 
     /**

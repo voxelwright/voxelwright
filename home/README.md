@@ -29,10 +29,12 @@ node scripts/check-place.mjs           # build mode: placing things
 node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/node_modules)
 node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, a walk round a placed bed (#79), step ms
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
-node scripts/check-physics-toys.mjs   # toys from a sentence (#88): three asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
+node scripts/check-physics-toys.mjs   # toys from a sentence (#88) and a game from one (#108, --only=game): asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall, a round of skittles is scored, ends and sets itself up again), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
 node scripts/check-invent.mjs         # invented mechanics (#106): a magnet built, working, tuned, snapshotted and undone; hostile code (loops, memory, forged answers, reaching for the page) refused or stopped with no long task over 200 ms on the page; --agent=claude [--invent-model=sonnet] [--asks="a|b"] --trials=1 for a real model's build rate, latency and cost
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 node scripts/check-tactile.mjs        # a house you can feel (#107): the kitchen's loose things are bodies drawn merged at rest, a mouse and a finger lift, carry, throw and nudge them, tidying puts them back, impacts sound by material
+node scripts/check-physics-game.mjs   # games from logic parts (#108): the pinball table's round, ball save, missions, multiball and best score; game modes; loops of wires; the made-toy checker by port; the plunger by finger
+node scripts/demo-pinball.mjs out.mp4 # records a played round on a phone-sized screen and prints how it went (seconds, score, flips, missions); --skill=0.9 --seconds=90
 npm run typecheck
 npm run build
 npm run perf-gate                    # before merging to main; see "Performance gate"
@@ -1706,6 +1708,29 @@ keep forgetting to water the plants": one `write_note` call created
 in and 17 out. Cost $0.0103. First text 5.3 s, whole turn 5.9 s, measured in
 the host from the start of the turn. Screenshot:
 `screenshots/villager-sonnet.jpg`.
+
+## Soft villagers (#104, November 10, 2026)
+
+Villagers move as soft felt, not as rigid parts on pivots. `src/villagers/soft.ts` skins a built
+figure in place: the body to hips, waist and chest by height, each arm between chest and hand, and
+whatever stands clear of a slot's core (ears, a tuft, a scarf end, a tail) to a spring "flop" bone
+hinged where it leaves the core. Weights are worked out from the rest shape, so the hand-made plush
+and generated villagers (#47, called at the end of `gen/assemble.ts`) go through the same code. A
+part marked `userData.soft = false` (a collar) bends with the spine and never flops. `rig.ts`
+drives it: a short gather before a walk, hips that twist and shift over the standing foot with the
+chest answering, the upper body trailing a start or a stop, the head leading into turns, arms
+swinging from the shoulder. The plush is no longer drawn on twos (a theme can still ask, with
+`motion.characterFps`). The setup bench's puppet stays unskinned (its pieces grow in by scale).
+
+- `node scripts/check-villager-motion.mjs [base]` (40 checks, dev server running; in `npm run check`
+  as `villager-motion`): weights sum to 1 and nothing moves at rest, planted feet do not slide, the
+  felt bends, the gather, springs that hold at 4 poses a second, generated fixtures skinned.
+- `node scripts/villagers/motion-shots.mjs <out-dir> --who=Tuft --wait=walk|idle|start|stop` takes a
+  film strip from a camera riding beside one villager (headless; `--dev=<port>`, `--cam=x,y,z`).
+- Blind A/B of walk strips (`screenshots/villager-motion/step1-before-after.jpg`), one Opus and one
+  GPT-6.1 Sol scorer: the new motion preferred in both clips, about 6 against 5 on life and weight.
+  Both ask next for legs that join feet to body, parts that stay out of each other, and softer ear arcs.
+- Cost: the rig, matrices and skeletons for three villagers take 0.028 ms a frame (0.013 on main).
 
 ## Villagers (#42 prototype)
 

@@ -4,6 +4,7 @@ import * as THREE from 'three/webgpu'
 import { color, dot, float, materialEmissive, max, mix, normalView, positionLocal, positionViewDirection, pow, smoothstep, uniform } from 'three/tsl'
 import { canvas, makeNoise, rng, toTexture } from '../paint'
 import type { Figure, Villager } from './rig'
+import { soften } from './soft'
 
 export interface Spec { name: string; bark: string }
 /** Per-villager touches: `accent` is the owner's colour, worn as a scarf where the direction has one. */
@@ -392,6 +393,7 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   if (scarfColour) {
     const wool = plain(scarfColour)
     const scarf = part(pose, mesh(new THREE.TorusGeometry(R * 0.8, 0.024, 10, 28), wool), 0, hip + bodyH * 0.96, 0)
+    scarf.userData.soft = false
     scarf.rotation.x = Math.PI / 2
     scarf.scale.set(1, 0.9, 1)
     const tail = part(pose, mesh(new THREE.CapsuleGeometry(0.024, 0.15, 4, 8), wool), R * 0.42, hip + bodyH * 0.8, R * 0.66)
@@ -408,9 +410,15 @@ function plush(i: number, phys: boolean, look: Look = {}): Figure {
   const feet = [-1, 1].map((sx) => {
     const f = part(root, new THREE.Group(), sx * R * 0.5, 0, 0)
     part(f, mesh(new THREE.SphereGeometry(0.048, 16, 10), felt(s.felt)), 0, 0.03, 0.02).scale.set(1, 0.65, 1.3)
+    // A short leg up into the body (#104): skinned between foot and hips (./soft.ts), it stretches as the foot steps out.
+    part(f, mesh(new THREE.CapsuleGeometry(0.03, hip + bodyH * 0.22, 6, 12, 8), felt(s.felt)), 0, 0.035 + (hip + bodyH * 0.22) / 2, 0)
     return f
   })
-  return { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, stepped: true, outline }
+  // Not `stepped` (#104): a soft body's springs and follow-through need every frame; on twos they read as jitter.
+  // A look can still ask for twos (theme motion.characterFps).
+  const fig: Figure = { root, pose, head, eyes, feet, hands, height: hy + hr, hip, side: R * 0.5, stride: 0.24, speed: 0.38, bob: 0.04, outline }
+  fig.soft = soften(fig)
+  return fig
 }
 
 // ─── c: paper cutouts ──────────────────────────────────────────────────────

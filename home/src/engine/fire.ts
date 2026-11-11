@@ -79,7 +79,7 @@ export function reach(center: Vec3, half: Vec3, origin: Vec3, radius: number): {
   return { center: c, half: h }
 }
 
-export interface FireSnapshot { parts: Record<string, { state: State; fuel: number; wet: number; temp: number; burnt?: number; origin?: Vec3 }>; rain: number }
+export interface FireSnapshot { parts: Record<string, { state: State; fuel: number; wet: number; temp: number; burnt?: number; char?: number; origin?: Vec3 }>; rain: number }
 
 export interface FireStats {
   parts: number
@@ -285,7 +285,7 @@ export class Fire implements Burner {
     return this.fieldTime - this.lastHot < LINGER || this.fieldTime < this.rainUntil || this.pours.length > 0 || this.damp
   }
 
-  /** The field's sources now: burning parts heat round them, charred ones keep their char, pours and candles. */
+  /** The field's sources now: burning parts heat round them, charred ones keep their char where their fire reached, pours and candles. */
   private sources(): Source[] {
     const out: Source[] = []
     for (const p of this.order) {
@@ -297,7 +297,7 @@ export class Fire implements Burner {
       }
     }
     for (const x of this.pours) out.push(x.source)
-    for (const p of this.order) if (p.state !== 'burning' && p.inside && p.char > 0.02 && out.length < MAX_SOURCES) out.push({ center: p.b.center, half: p.b.half, heat: 0, rate: 0, water: 0, char: p.char })
+    for (const p of this.order) if (p.state !== 'burning' && p.inside && p.char > 0.02 && out.length < MAX_SOURCES) out.push({ ...(p.state === 'burnt' ? p.b : this.extent(p)), heat: 0, rate: 0, water: 0, char: p.char })
     return out.slice(0, MAX_SOURCES)
   }
 
@@ -339,7 +339,8 @@ export class Fire implements Burner {
         const e = this.extent(p)
         const covered = Math.min(1, [0, 1, 2].reduce((v, i) => v * Math.max(0.02, e.half[i]) / Math.max(0.02, p.b.half[i]), 1))
         p.fuel = Math.max(0, p.fuel - p.th.burnRate * covered * dt * (1 - 0.8 * p.wet))
-        p.char = Math.max(p.char, Math.min(1, 1 - p.fuel, p.burnt / 20))
+        // It blackens long before its fuel is gone, as fast as its material burns: felt at once, wood in seconds, candle wax never.
+        p.char = Math.max(p.char, Math.min(0.85, Math.max(1 - p.fuel, p.burnt * p.th.burnRate * 8)))
         if (p.wet > QUENCH || water > 0.5) this.out(p, 'water')
         else if (p.fuel <= 0) {
           p.state = 'burnt'
@@ -444,8 +445,8 @@ export class Fire implements Burner {
 
   /** The parts burning now, for drawing flames: box, how strong (0 to 1) and flammability. */
   flames() {
-    const out: { id: string; center: Vec3; half: Vec3; strength: number; fierce: number }[] = []
-    for (const p of this.order) if (p.state === 'burning') out.push({ id: p.b.id, ...this.extent(p), strength: Math.min(1, 0.3 + p.burnt / 3) * Math.min(1, 0.2 + p.fuel * 5) * (1 - 0.7 * p.wet), fierce: p.th.flammability })
+    const out: { id: string; center: Vec3; half: Vec3; strength: number; fierce: number; box: { center: Vec3; half: Vec3 } }[] = []
+    for (const p of this.order) if (p.state === 'burning') out.push({ id: p.b.id, box: { center: p.b.center, half: p.b.half }, ...this.extent(p), strength: Math.min(1, 0.3 + p.burnt / 3) * Math.min(1, 0.2 + p.fuel * 5) * (1 - 0.7 * p.wet), fierce: p.th.flammability })
     return out
   }
 
@@ -467,7 +468,7 @@ export class Fire implements Burner {
 
   snapshot(): FireSnapshot {
     const parts: FireSnapshot['parts'] = {}
-    for (const [id, p] of this.parts) if (p.state !== 'cold' || p.fuel < 1 || p.wet > 0 || p.temp > 1) parts[id] = { state: p.state, fuel: p.fuel, wet: p.wet, temp: p.temp, burnt: p.burnt, origin: [...p.origin] }
+    for (const [id, p] of this.parts) if (p.state !== 'cold' || p.fuel < 1 || p.wet > 0 || p.temp > 1) parts[id] = { state: p.state, fuel: p.fuel, wet: p.wet, temp: p.temp, burnt: p.burnt, char: p.char, origin: [...p.origin] }
     return { parts, rain: Math.max(0, this.rainUntil - this.fieldTime) }
   }
 
@@ -501,7 +502,8 @@ export class Fire implements Burner {
         clamped.push(`fire.${id}`)
         continue
       }
-      Object.assign(p, { state: saved.state, fuel: saved.fuel, wet: saved.wet, temp: saved.temp, char: saved.state === 'burnt' ? 1 : Math.min(1, 1 - saved.fuel), burnt: saved.state === 'burning' ? (typeof saved.burnt === 'number' && Number.isFinite(saved.burnt) && saved.burnt >= 0 ? Math.min(saved.burnt, 1e5) : 3) : 0,
+      Object.assign(p, { state: saved.state, fuel: saved.fuel, wet: saved.wet, temp: saved.temp, // Its char as saved (an older snapshot has none: what its fuel says), and how long it burned, which is how far its fire and its char reached.
+        char: saved.state === 'burnt' ? 1 : unit(saved.char) ? saved.char : Math.min(1, 1 - saved.fuel), burnt: typeof saved.burnt === 'number' && Number.isFinite(saved.burnt) && saved.burnt >= 0 ? Math.min(saved.burnt, 1e5) : saved.state === 'burning' ? 3 : 0,
         // Where it caught, from its centre, kept inside the part's box whatever the snapshot said.
         origin: p.b.half.map((h, i) => {
           const o = Array.isArray(saved.origin) ? saved.origin[i] : NaN

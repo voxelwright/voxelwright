@@ -10,6 +10,7 @@ import type { PropData, Role } from '../../props/wire'
 import { feltKit, feltTexture } from '../kinds'
 import { BLUSH, feltKit as makeKit, wrapCap, type Wrap } from './kit'
 import type { Figure, Villager } from '../rig'
+import { soften } from '../soft'
 import { check } from './build'
 import { awayFromOwners, faceViews, inspect, LIMITS, markAttachment, OWNER_ACCENTS, surfaceContact, type Measures } from './checks'
 import { sewSkin, type surfaceStats } from './skin'
@@ -58,7 +59,7 @@ const hex = (c: number[]) => '#' + new THREE.Color().setRGB(c[0], c[1], c[2]).ge
  * `skin` (the default since the skin council): each slot's felt is sewn into one surface (./skin.ts); false only to debug.
  * `attachOnSkin`: measure the mark's attachment again on the skin (scripts only; see below).
  */
-export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string, skin = true, attachOnSkin = false): Assembled {
+export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: string, seed = 1, enforce = true, species = true, mark = true, kit = true, requested?: string, skin = true, attachOnSkin = false, soft = true): Assembled {
   const slots = new Map<Role, THREE.Mesh[]>()
   for (const m of prop.meshes) {
     const role = (m.role ?? 'body') as Role
@@ -345,6 +346,9 @@ export function assemble(prop: PropData, raw: unknown, phys: boolean, accent: st
     root, pose, head, eyes, feet, hands, height: box('head').max.y, hip, side,
     stride: g.stride, speed: g.speed, bob: g.bob, stepped: g.stepped, outline, touch,
   }
+  // Last, once every check has measured the rigid parts: the felt is skinned to a spine and flop bones (#104).
+  // Not for a figure that never meets the rig (the setup bench's puppet grows each piece in by its own scale).
+  if (soft) fig.soft = soften(fig)
   const { name, bark, voice } = checked.spec
   return { fig, about: { name, role, bark, gait: g, voice, persona: checked.spec.persona }, fixes, measures, skinMs }
 }

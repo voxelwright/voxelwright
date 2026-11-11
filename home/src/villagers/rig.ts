@@ -5,6 +5,7 @@
 import * as THREE from 'three/webgpu'
 import { route, routeFrom, SEAT_Y, SPOTS, type Paths } from './world'
 import { theme } from '../theme'
+import type { Soft } from './soft'
 
 /** What an art direction builds. Characters face +z; the rig moves `root`. */
 export interface Figure {
@@ -37,6 +38,8 @@ export interface Figure {
   touch?(v: Villager): void
   /** Strength of a soft outline in the owner's colour, 0 to 1, where the direction has one. */
   outline?: { value: number }
+  /** A skinned body: a spine that bends and parts that flop (./soft.ts). Without it the figure moves as rigid parts. */
+  soft?: Soft | null
 }
 
 export interface Task { spot: string; stay: number }
@@ -51,6 +54,32 @@ const chin = new THREE.Vector3()
 const pawsAt = new THREE.Vector3()
 
 interface Foot { world: THREE.Vector3; from: THREE.Vector3; swing: boolean; settle: number }
+
+/**
+ * A damped spring chasing a target: under-damped, so what it drives overshoots and settles. It starts on its
+ * first target (no jump as a villager appears) and steps at 60 a second or finer, so a long frame or a look
+ * drawn on twos (dt up to a quarter second) cannot blow it up.
+ */
+class Spring {
+  x = NaN
+  v = 0
+  constructor(private hz: number, private damping: number) {}
+  step(target: number, dt: number) {
+    if (Number.isNaN(this.x)) this.x = target
+    const w = 2 * Math.PI * this.hz
+    const steps = Math.max(1, Math.ceil(dt * 60 - 1e-6))
+    const h = dt / steps
+    for (let n = 0; n < steps; n++) {
+      this.v += (w * w * (target - this.x) - 2 * this.damping * w * this.v) * h
+      this.x += this.v * h
+    }
+    return this.x
+  }
+}
+const tipWorld = new THREE.Vector3()
+const hingeWorld = new THREE.Vector3()
+const restDir = new THREE.Vector3()
+const nowDir = new THREE.Vector3()
 
 export class Villager {
   readonly fig: Figure
@@ -123,6 +152,14 @@ export class Villager {
   private greetU = 1
   /** Progress of a nod (a pass at the table, #42); 1 is at rest. */
   private nodU = 1
+  /** The gather before a walk: 0 as it starts to crouch, 1 once it is off. */
+  private windU = 1
+  /** Forward acceleration, m/s², smoothed; the soft body's upper half trails it. */
+  private accel = 0
+  private readonly trail = new Spring(1.9, 0.32)
+  private readonly sway = new Spring(1.6, 0.35)
+  private readonly bounce = new Spring(2.6, 0.28)
+  private readonly settleSpring = new Spring(2.2, 0.3)
   /** Height it sits at on a chair: the bare seat, or a booster cushion on it. */
   readonly seatY: number
 
@@ -185,6 +222,7 @@ export class Villager {
     this.spot = task.spot
     this.timer = task.stay
     this.state = 'walk'
+    this.windU = 0
   }
 
   /** Walk to a spot (a chair: sit on it) and stay there until released. */
@@ -236,6 +274,7 @@ export class Villager {
     this.s = 0
     this.spot = spot
     this.state = 'walk'
+    if (this.v < 0.01) this.windU = 0
   }
 
   private startAt(task: Task) {
@@ -260,14 +299,21 @@ export class Villager {
     this.camera.copy(camera)
     const fig = this.fig
     const yaw0 = this.yaw
+    const v0 = this.v
     const toCamera = Math.atan2(camera.x - this.pos.x, camera.z - this.pos.z)
     let goalYaw = this.yaw
 
     if (this.state === 'walk' && this.curve) {
       const remaining = this.len - this.s
       const stop = this.chosen || this.blocked || this.paused
+      // From rest it gathers itself first: a short crouch, then off. Not after being blocked (waiting for someone, or
+      // held back by a chair it leans on): it goes on at once. Gathering again there left a held walker standing for
+      // good: the hold lets go for 0.2 s at a time, and the gather used it up.
+      const gather = !stop && this.windU < 1 && Boolean(this.fig.soft)
+      if (gather) this.windU = Math.min(1, this.windU + dt / 0.22)
+      else if ((this.chosen || this.paused) && this.v < 0.01) this.windU = 0
       // Sent for by the person, it hurries.
-      const cap = stop ? 0 : Math.min(fig.speed * this.k * (this.held ? 1.7 : 1), Math.sqrt(2 * 1.2 * remaining) + 0.04)
+      const cap = stop || (gather && this.windU < 0.75) ? 0 : Math.min(fig.speed * this.k * (this.held ? 1.7 : 1), Math.sqrt(2 * 1.2 * remaining) + 0.04)
       const accel = stop ? 3 : 1.4
       this.v += Math.max(-accel * dt, Math.min(accel * dt, cap - this.v))
       this.v = Math.max(0, this.v)
@@ -336,6 +382,7 @@ export class Villager {
     if (this.state !== 'hop') this.yaw += wrap(goalYaw - this.yaw) * (1 - Math.exp(-dt * (this.state === 'walk' ? 6 : 5)))
     this.yawRate = THREE.MathUtils.lerp(this.yawRate, wrap(this.yaw - yaw0) / Math.max(dt, 1e-3), 1 - Math.exp(-dt * 8))
 
+    this.accel += ((this.v - v0) / Math.max(dt, 1e-3) - this.accel) * (1 - Math.exp(-dt * 14))
     const walking = this.state === 'walk' ? Math.min(1, this.v / (fig.speed * this.k * 0.5)) : 0
     this.walk = walking
     this.working += ((this.state === 'work' && !this.chosen && !this.idle ? 1 : 0) - this.working) * (1 - Math.exp(-dt * 4))
@@ -463,10 +510,41 @@ export class Villager {
     // The little wave: up from the chore, the near hand raised and waggling.
     const greet = this.greetU < 1 && this.state === 'work' ? Math.sin(Math.PI * Math.min(1, this.greetU * 1.25)) : 0
     lean -= (this.working * 0.2 + 0.04) * greet
-    pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
-    pose.rotation.set(lean, 0, roll)
+    const soft = fig.soft
     const sxz = 1 + (1 - sy) * 0.5
-    pose.scale.set(sxz, sy, sxz)
+    /** How far the spine has turned the head off the body's heading; the head turns back by it. */
+    let spineYaw = 0, spinePitch = 0
+    if (soft) {
+      const gather = this.state === 'walk' && this.windU < 1 ? Math.sin(Math.PI * this.windU) : 0
+      // The hips lead; waist and chest trail the acceleration and swing back past upright as it stops.
+      const trail = this.trail.step(THREE.MathUtils.clamp(-this.accel * 0.09, -0.18, 0.18), dt)
+      const sway = this.sway.step(THREE.MathUtils.clamp(-this.yawRate * 0.1, -0.25, 0.25) * Math.min(1, w * 1.5), dt)
+      // The belly keeps going when the hips stop: it chases the hips' height on a spring.
+      const drop = y - 0.5 * fig.height * (1 - sy)
+      const belly = this.bounce.step(drop, dt) - drop
+      // The step: hips swing the stepping side forward and shift over the standing foot; the chest answers the other way.
+      const swing = Math.sin(2 * Math.PI * p) * w
+      const twist = 0.13 * swing
+      const shift = fig.side * 0.55 * swing
+      sy *= 1 - 0.1 * gather
+      const wide = 1 + (1 - sy) * 0.55
+      pose.position.set(shift + 0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, -0.02 * gather)
+      pose.rotation.set(lean * 0.3 - 0.1 * gather, twist, roll * 0.5)
+      pose.scale.set(wide, sy, wide)
+      const breath = Math.sin(t * 2.1) * (1 - w)
+      soft.waist.rotation.set(lean * 0.4 + trail * 0.5, -twist, roll * 0.3 + sway * 0.5)
+      soft.waist.position.y = (soft.waist.userData.y ??= soft.waist.position.y) + THREE.MathUtils.clamp(belly, -0.03, 0.03) * 0.5
+      soft.waist.scale.setScalar(1 + 0.01 * breath)
+      soft.chest.rotation.set(lean * 0.3 + trail * 0.5 + 0.02 * breath, -twist * 0.8 - sway * 0.3, roll * 0.2 + sway * 0.5)
+      soft.chest.position.y = (soft.chest.userData.y ??= soft.chest.position.y) + THREE.MathUtils.clamp(belly, -0.03, 0.03) * 0.5
+      soft.chest.scale.setScalar(1 + 0.018 * breath)
+      spineYaw = twist - twist - twist * 0.8 - sway * 0.3
+      spinePitch = lean + trail - 0.1 * gather
+    } else {
+      pose.position.set(0.012 * Math.sin(t * 0.45) * (1 - w) * (1 - this.seated), y, 0)
+      pose.rotation.set(lean, 0, roll)
+      pose.scale.set(sxz, sy, sxz)
+    }
     // Hands swing against the feet; at work they bob in turn.
     hands.forEach((h, i) => {
       const rest = h.userData.rest as THREE.Vector3
@@ -474,7 +552,10 @@ export class Villager {
       h.position.copy(rest)
       h.position.z += 0.09 * this.seated
       h.position.y += 0.07 * this.seated
-      h.position.z += Math.sin(2 * Math.PI * p) * s * fig.stride * 0.18 * w
+      // Arms pump against the legs; on a soft body they swing wider, in an arc from the shoulder.
+      const pump = Math.sin(2 * Math.PI * p) * s * w
+      h.position.z += pump * fig.stride * (soft ? 0.34 : 0.18)
+      if (soft) h.position.y += (Math.abs(pump) - 0.5) * fig.stride * 0.1 * w
       h.position.y += (Math.sin(t * 5 + i * Math.PI) * 0.02 * this.working) + 0.03 * this.talking * (i ? 0 : 1) * (0.6 + 0.4 * Math.sin(t * 5))
       if (i === 0 && greet > 0) {
         h.position.y += fig.height * 0.32 * greet
@@ -504,13 +585,55 @@ export class Villager {
     const headGoal = listening !== null ? THREE.MathUtils.clamp(wrap(listening - this.yaw), -1.1, 1.1)
       : this.chosen || this.attending || this.speak > 0.5 || greet > 0.3 ? THREE.MathUtils.clamp(wrap(toCamera - this.yaw), -1.1, 1.1) : this.glanceGoal * (1 - w * 0.7)
     this.glance += (headGoal - this.glance) * (1 - Math.exp(-dt * (fps ? 12 : 5)))
-    head.rotation.y = this.glance
+    // The head looks where it is going: into a turn before the body, level over a leaning spine.
+    const lead = soft ? THREE.MathUtils.clamp(this.yawRate * 0.22, -0.6, 0.6) * w : 0
+    head.rotation.y = this.glance - spineYaw * 0.8 + lead
     head.rotation.x = this.talking * 0.06 * Math.sin(t * 6) * (1 - this.think) - this.working * 0.15 - this.think * 0.32 + this.read * 0.24 + this.speak * 0.07 * Math.sin(t * 4.2) + (this.nodU < 1 ? 0.22 * Math.max(0, Math.sin(this.nodU * Math.PI * 4)) * (1 - this.nodU) : 0)
     head.rotation.z = this.seated * 0.08 * Math.sin(t * 0.4 + 1)
+    if (soft) {
+      head.rotation.x -= spinePitch * 0.55
+      head.rotation.z += this.settleSpring.step(-this.yawRate * 0.05 * w, dt)
+      this.flop(dt)
+    }
     // Blink every few seconds.
     this.blinkAt -= dt
     const closed = this.blinkAt < 0.12
     if (this.blinkAt <= 0) this.blinkAt = 2.4 + Math.random() * 3.2
     for (const e of fig.eyes) e.scale.y = closed ? 0.12 : 1
+  }
+
+  /** Ears, tufts and tails: each tip is a particle on a spring to where it would sit, and its bone turns to point at it. */
+  private flop(dt: number) {
+    const soft = this.fig.soft!
+    if (!soft.flops.length) return
+    this.fig.pose.updateMatrixWorld(true)
+    for (const f of soft.flops) {
+      tipWorld.copy(f.tip)
+      f.parent.localToWorld(tipWorld)
+      if (!f.live) {
+        f.live = true
+        f.at.copy(tipWorld)
+        f.vel.set(0, 0, 0)
+      }
+      // Stepped at 60 a second or finer, so a long frame (or a look drawn on twos) cannot blow the spring up.
+      const w = 2 * Math.PI * f.hz
+      const steps = Math.max(1, Math.ceil(dt * 60 - 1e-6))
+      const h = dt / steps
+      for (let n = 0; n < steps; n++) {
+        f.vel.addScaledVector(restDir.copy(tipWorld).sub(f.at), w * w * h).multiplyScalar(1 - 2 * 0.22 * w * h)
+        f.at.addScaledVector(f.vel, h)
+      }
+      // A tip never trails further than 0.4 of its own length (a hop, a teleport, a long frame): felt bends, it does not fold back.
+      tipWorld.copy(f.tip)
+      f.parent.localToWorld(tipWorld)
+      const reach = f.length * this.k * 0.4
+      if (f.at.distanceTo(tipWorld) > reach) f.at.sub(tipWorld).setLength(reach).add(tipWorld), f.vel.multiplyScalar(0.5)
+      nowDir.copy(f.at)
+      f.parent.worldToLocal(nowDir)
+      hingeWorld.copy(f.bone.position)
+      nowDir.sub(hingeWorld).normalize()
+      restDir.copy(f.tip).sub(hingeWorld).normalize()
+      f.bone.quaternion.setFromUnitVectors(restDir, nowDir)
+    }
   }
 }

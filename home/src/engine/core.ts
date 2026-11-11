@@ -78,6 +78,8 @@ export type Combine = (a: BodyId, b: BodyId) => readonly [number, number]
 export interface PhysicsCore {
   readonly name: string
   setGravity(g: Vec3): void
+  /** A body slower than this (m/s) for half a second is put to sleep. */
+  setRestSpeed(speed: number): void
   setCombine(combine: Combine): void
   addBody(spec: BodySpec): BodyId
   removeBody(id: BodyId): void

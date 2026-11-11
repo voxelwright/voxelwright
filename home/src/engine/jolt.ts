@@ -178,6 +178,11 @@ export function createJolt(): PhysicsCore {
 
   const core: PhysicsCore = {
     name: 'jolt',
+    setRestSpeed(speed) {
+      const s = system.GetPhysicsSettings()
+      s.mPointVelocitySleepThreshold = speed
+      system.SetPhysicsSettings(s)
+    },
     setGravity(g) {
       system.SetGravity(setV(g))
       // Sleeping bodies would ignore the new gravity until something touches them.
