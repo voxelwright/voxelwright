@@ -25,6 +25,16 @@ and the residents are synthetic.
   session on its owner's subscription), sat down through a standard MCP server at `/mcp` with a
   key a resident asked for. It gets a body like anyone's and these tools: `arrive`, `look`,
   `walk_to`, `face`, `say`, `make`, `guide`, `build`, `undo`, `top`, `observe`.
+- `src/problems.ts`: something to do. A problem is data: who has it and where they stand, what
+  they say, what it brings (a ball on a post, a parcel), and a test the world runs on real bodies
+  (a body past a line, a thing below a height, a thing near a place). No model decides that one
+  is solved. Start the world with `--problems` for the block's three: Mabel wants to be across
+  the trench and walks over whatever reaches both sides (and falls off what does not), Otis's
+  ball is on a post, Ines's parcel is up the street. Solved, everyone is told who helped and
+  with what, it is written to `<world>/solved.jsonl`, and after `--rest` seconds (180) the way
+  is cleared and it is wanted again. With a model as the maker, the same model writes their
+  lines when they are spoken to or helped, one short call each; with the stand-in they say what
+  is written.
 - `src/puppet.ts`: a solver core that solves nothing: each body is where it was last put.
 - `client/`: the page. It runs the engine's `World` too, over the puppet, so it draws the same
   toys the world process built (their materials, paint and shadows), posed from the wire.
@@ -96,6 +106,8 @@ node test/make.ts                           # making end to end with a stand-in 
 node test/clear.mjs [lab.json]              # a made thing asked for at a house front, a tree or an end stands in the open
 node test/agent.ts                          # an agent's seat, with a plain MCP client as the agent
 node test/door.ts [pictures/]               # in through the home's door and back out (starts the home's dev server too)
+node test/problem.ts [pictures/]            # a problem asked, solved by a bridge, told to all, and asked again
+node test/problems.mjs                      # the other two problems' tests, on the real world with no page
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:
 node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence

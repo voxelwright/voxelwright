@@ -30,6 +30,10 @@ export type Line =
   | { t: 'said'; by: number; text: string }
   /** A resident's name, when it is given or changed; with which felt figure they are and their scarf's colour when those changed too. */
   | { t: 'named'; by: number; name: string; plush?: number; paint?: string }
+  /** What a resident wants, to stand over their head until they have it ('' when they want nothing now). */
+  | { t: 'wants'; by: number; text: string }
+  /** A problem was solved: who had it, who helped, with what, and the few words for it ("got Mabel across the trench"). */
+  | { t: 'solved'; by: number; who: string; solver: string; with: string; done: string }
   /** To the one page that asked: a key that lets one agent sit down, and how to hand it over. */
   | { t: 'key'; key: string; command: string; minutes: number }
 

@@ -5,13 +5,14 @@
 // the shared one, and a thing that fails either is sent back once with the reason.
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt } from '../../home/src/engine/jolt.ts'
-import { boxOf, checkMadeToy, type Surface } from '../../home/src/engine/made.ts'
+import { checkMadeToy, type Surface } from '../../home/src/engine/made.ts'
 import type { Limits } from '../../home/src/engine/made-kinds.ts'
 import type { ToySpec } from '../../home/src/engine/toy.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { engineText } from '../../host/src/villager-physics.ts'
 import { oneShot } from '../../host/src/villager-input.ts'
 import { GRADE, HALF_L, NORMAL, heightAt, planeAt } from './ground.ts'
+import { footprint } from './footprint.ts'
 import { FRONT } from './houses.ts'
 import { STANDING, STREET_MATERIALS } from './scene.ts'
 
@@ -141,6 +142,8 @@ export function stubMaker(delayMs = 30): Maker {
     const none = { models: ['stub'], costUsd: null, outputTokens: null, apiMs: null }
     if (/\bnothing\b/i.test(ask.text)) return { raw: JSON.stringify({ say: 'There is nothing to make of that.' }), ...none }
     if (/\bjunk\b/i.test(ask.text) && !ask.repair) return { raw: '{"say": "here", "toy": {"parts": [{"id": "x", "material": "no-such", "at": [0, 1, 0], "shape": {"kind": "box", "half": [1, 1, 1]}}]}}', ...none }
+    // "bridge": a heavy plank long enough to lie across the trench from the middle of the plot.
+    if (/\bbridge\b/i.test(ask.text)) return { raw: JSON.stringify({ say: 'A plank bridge.', toy: { label: 'Plank bridge', parts: [{ id: 'deck', material: 'maple', motion: 'dynamic', mass: 400, at: [0, 0.02, 0], pieces: [{ shape: { kind: 'box', half: [1.1, 0.07, 3.8] }, at: [0, 0.07, 0], paint: '#c98d5a' }] }], gadgets: [], wires: [] } }), ...none }
     const crate = { id: 'crate', material: 'maple', motion: 'dynamic', mass: 30, at: [0, 0.02, 0], pieces: [{ shape: { kind: 'box', half: [0.4, 0.4, 0.4] }, at: [0, 0.4, 0], paint: '#c98d5a' }, { shape: { kind: 'box', half: [0.42, 0.04, 0.42] }, at: [0, 0.8, 0], paint: '#8a5a33' }] }
     return { raw: JSON.stringify({ say: `A crate, for "${ask.text.slice(0, 30)}".`, toy: { label: 'Crate', parts: [crate], gadgets: [], wires: [] } }), ...none }
   }
@@ -173,16 +176,13 @@ const OPEN = { x: FRONT - 0.12, z: HALF_L / Math.hypot(1, GRADE) - 0.35 }
  * the fronts leave it no room ahead). Asked for facing a wall, a thing appears against the wall, not in it.
  */
 export function clear(toy: ToySpec, keepOff: Vec3[] = []) {
-  const { lo, hi } = boxOf(toy), at = toy.frame.at, c = Math.cos(toy.frame.yaw), s = Math.sin(toy.frame.yaw)
-  // The box's four corners on the ground, turned as the toy is: half its size across and along the street, and where its middle is from its place.
-  const xs = [lo[0], hi[0]].flatMap((x) => [lo[2], hi[2]].map((z) => x * c + z * s)), zs = [lo[0], hi[0]].flatMap((x) => [lo[2], hi[2]].map((z) => -x * s + z * c))
-  const half = [(Math.max(...xs) - Math.min(...xs)) / 2, (Math.max(...zs) - Math.min(...zs)) / 2], off = [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...zs) + Math.min(...zs)) / 2]
+  const { half, off, top } = footprint(toy), at = toy.frame.at
   const inside = () => {
     at[0] = Math.max(-OPEN.x + half[0], Math.min(OPEN.x - half[0], at[0] + off[0])) - off[0]
     at[2] = Math.max(-OPEN.z + half[1], Math.min(OPEN.z - half[1], at[2] + off[1])) - off[1]
   }
   inside()
-  const rounds = [...STANDING.filter((o) => hi[1] > o.from), ...keepOff.map((p) => ({ x: p[0], z: p[2], r: 0.5 }))]
+  const rounds = [...STANDING.filter((o) => top > o.from), ...keepOff.map((p) => ({ x: p[0], z: p[2], r: 0.5 }))]
   for (let i = 0; i < 12; i++) {
     const mid = [at[0] + off[0], at[2] + off[1]]
     const hit = rounds.find((o) => Math.abs(mid[0] - o.x) < half[0] + o.r && Math.abs(mid[1] - o.z) < half[1] + o.r)

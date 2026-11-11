@@ -47,6 +47,8 @@ cd host && npm install && npm run villager
 cd street && npm install && npm run world    # and in another terminal: npm run page
 # The home's door on the street: tell the world where the home is, and No. 102's door leads there and back.
 cd street && npm run world -- --home http://localhost:5183/
+# Something to do there: three residents who each want something (`--maker sonnet` lets you make things by typing).
+cd street && npm run world -- --problems --maker sonnet
 
 # The Elder: writes a candidate under ~/.village/candidates/
 cd host && npm run elder -- "put a small radio on the windowsill"

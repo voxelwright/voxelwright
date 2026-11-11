@@ -6,6 +6,7 @@ import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt, loadJolt } from '../../home/src/engine/jolt.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
+import { footprint } from './footprint.ts'
 import { HOUSES } from './houses.ts'
 import { BINS, FURNITURE, STREET, cargo, registerBlock, resident } from './scene.ts'
 import { NORMAL_UP, TICK, standing, type Input } from './walk.ts'
@@ -129,15 +130,53 @@ export class Block {
   /** Takes the last thing `by` made off the street. Returns its toy's id, or null when they have made nothing that is still here. */
   unmake(by: string): string | null {
     const id = [...this.made].reverse().find(([, thing]) => thing.by === by)?.[0]
-    if (!id) return null
+    return id && this.take(id) ? id : null
+  }
+  /** Takes one made thing off the street, whoever made it. */
+  take(id: string): boolean {
+    if (!this.made.has(id)) return false
+    this.drop(id)
+    this.made.delete(id)
+    if (this.dir) rmSync(join(this.dir, `${id}.json`), { force: true })
+    return true
+  }
+  /** A built toy out of the world, with the numbers its moving parts had on the wire. */
+  private drop(id: string) {
     this.world.removeToy(id)
-    for (const part of this.made.get(id)!.toy.parts) {
+    for (const part of this.specs.get(id)?.parts ?? []) {
       this.ids.delete(`${id}/${part.id}`)
       this.sleptAt.delete(`${id}/${part.id}`)
     }
     this.specs.delete(id)
-    this.made.delete(id)
-    if (this.dir) rmSync(join(this.dir, `${id}.json`), { force: true })
+  }
+  /** A toy of the street's own that nobody made (what a problem brings: a ball on a post). Built, or built again as it began. */
+  prop(toy: ToySpec): { was: boolean; drawn: Drawn } {
+    const was = this.specs.has(toy.id)
+    if (was) this.drop(toy.id)
+    this.build(toy)
+    return { was, drawn: this.drawnAs(toy) }
+  }
+  /** Where a part is now. */
+  where(key: string): Vec3 | null {
+    return this.world.thing(key)?.position ?? null
+  }
+  /** Each made thing, and the ground it stands over now: where it was put, moved as its heaviest part has moved since. */
+  madeNow(): { id: string; label: string; by: string; box: { x0: number; x1: number; z0: number; z1: number } }[] {
+    return [...this.made].map(([id, thing]) => {
+      const { toy } = thing, f = footprint(toy), part = toy.parts.find((p) => p.motion === 'dynamic') ?? toy.parts[0]
+      const c = Math.cos(toy.frame.yaw), s = Math.sin(toy.frame.yaw), now = this.world.thing(`${id}/${part.id}`)?.position
+      const dx = now ? now[0] - (toy.frame.at[0] + part.at[0] * c + part.at[2] * s) : 0, dz = now ? now[2] - (toy.frame.at[2] - part.at[0] * s + part.at[2] * c) : 0
+      const x = toy.frame.at[0] + f.off[0] + dx, z = toy.frame.at[2] + f.off[1] + dz
+      return { id, label: toy.label, by: thing.by, box: { x0: x - f.half[0], x1: x + f.half[0], z0: z - f.half[1], z1: z + f.half[1] } }
+    })
+  }
+  /** A resident the world itself walks (problems.ts): sat down as a felt figure in a scarf of its own, standing at a place. */
+  cast(name: string, plush: number, scarf: string, at: Vec3): number {
+    const id = this.join(name)
+    const seat = this.seats.get(id)!, spec = this.specs.get(seat.toy)!
+    seat.plush = plush
+    spec.parts[0].paint = scarf
+    this.stand(id, at)
     return id
   }
 

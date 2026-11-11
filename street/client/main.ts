@@ -255,20 +255,65 @@ const encoder = new TextEncoder()
 const ask = (line: Ask) => void asks.write(encoder.encode(JSON.stringify(line) + '\n')).catch(() => {})
 
 // ---- names and words over heads, and the shimmer where a thing is on its way
-/** Over each resident's head: their name, and for a while what they said or what was made for them. */
-const heads = new Map<number, { el: HTMLDivElement; name: HTMLSpanElement; words: HTMLDivElement; until: number }>()
+/** Over each resident's head: their name, for a while what they said or what was made for them, and what they want for as long as they want it. */
+const heads = new Map<number, { el: HTMLDivElement; name: HTMLSpanElement; words: HTMLDivElement; want: HTMLDivElement; wants: string; until: number }>()
 function headOf(by: number) {
   let h = heads.get(by)
   if (!h) {
-    const el = document.createElement('div'), words = document.createElement('div'), name = document.createElement('span')
+    const el = document.createElement('div'), words = document.createElement('div'), want = document.createElement('div'), name = document.createElement('span')
     el.className = 'head'
     name.className = 'name'
-    words.hidden = true
-    el.append(words, name)
+    want.className = 'bubble wants'
+    words.hidden = want.hidden = true
+    el.append(words, want, name)
     document.body.append(el)
-    heads.set(by, (h = { el, name, words, until: 0 }))
+    heads.set(by, (h = { el, name, words, want, wants: '', until: 0 }))
   }
   return h
+}
+/** A problem solved: a notice everyone reads for a while, and paper in the air over whoever was helped. */
+const notice = document.getElementById('notice')!
+let noticeUntil = 0
+interface Paper { mesh: THREE.InstancedMesh; p: Float32Array; v: Float32Array; spin: Float32Array; born: number }
+const papers: Paper[] = []
+const paperLook = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), paperShape = new THREE.PlaneGeometry(0.09, 0.13)
+function celebrate(by: number, words: string) {
+  notice.textContent = words
+  notice.classList.add('on')
+  noticeUntil = performance.now() + 7000
+  const at = views.get(by)?.shown
+  if (!at) return
+  const n = 110, mesh = new THREE.InstancedMesh(paperShape, paperLook, n), p = new Float32Array(n * 3), v = new Float32Array(n * 3), spin = new Float32Array(n * 2), tint = new THREE.Color()
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, out = 0.6 + Math.random() * 1.6
+    p.set([at.x, at.y + 1.1, at.z], i * 3)
+    v.set([Math.cos(a) * out, 3.2 + Math.random() * 2.6, Math.sin(a) * out], i * 3)
+    spin.set([Math.random() * 6.28, 4 + Math.random() * 9], i * 2)
+    mesh.setColorAt(i, tint.set(['#e8553d', '#f2c94c', '#5fb0e8', '#84c96a', '#e05a8a', '#fbf6ea'][i % 6]))
+  }
+  mesh.frustumCulled = false
+  scene.add(mesh)
+  papers.push({ mesh, p, v, spin, born: performance.now() })
+}
+const paperAt = new THREE.Object3D()
+/** The paper falls: thrown up, slowed by the air, turning as it comes down; gone after four seconds. */
+function flutter(dt: number, now: number) {
+  for (const paper of [...papers]) {
+    const age = (now - paper.born) / 1000
+    if (age > 4) { scene.remove(paper.mesh); paper.mesh.dispose(); papers.splice(papers.indexOf(paper), 1); continue }
+    for (let i = 0; i < paper.mesh.count; i++) {
+      const drag = Math.exp(-dt * 1.6)
+      paper.v[i * 3] *= drag; paper.v[i * 3 + 2] *= drag
+      paper.v[i * 3 + 1] = Math.max(-1.3, paper.v[i * 3 + 1] - 9 * dt)
+      for (let k = 0; k < 3; k++) paper.p[i * 3 + k] += paper.v[i * 3 + k] * dt
+      paperAt.position.set(paper.p[i * 3], paper.p[i * 3 + 1], paper.p[i * 3 + 2])
+      paperAt.rotation.set(paper.spin[i * 2] + age * paper.spin[i * 2 + 1], age * 3 + i, 0)
+      paperAt.scale.setScalar(age > 3.2 ? Math.max(0, (4 - age) / 0.8) : 1)
+      paperAt.updateMatrix()
+      paper.mesh.setMatrixAt(i, paperAt.matrix)
+    }
+    paper.mesh.instanceMatrix.needsUpdate = true
+  }
 }
 function bubble(by: number, text: string, kind: 'said' | 'making' | 'made' | 'sorry', seconds = 6) {
   const h = headOf(by)
@@ -297,6 +342,8 @@ function told(line: Exclude<Line, { t: 'hello' | 'add' | 'remove' }>) {
     const view = views.get(line.by)
     if (view && line.plush !== undefined && line.plush !== view.plush) wear(view, line.plush, line.paint ?? '#c8553d')
   }
+  else if (line.t === 'wants') { const h = headOf(line.by); h.wants = h.want.textContent = line.text }
+  else if (line.t === 'solved') celebrate(line.by, `${line.solver} ${line.done}${line.with ? ` with ${line.with}` : ''}`)
   else invited(line)
 }
 /** A key for an agent of yours: shown to you alone, in the workshop panel, with the command that hands it over. */
@@ -443,12 +490,17 @@ function frame(now: number) {
   // The stage draws after this; names are placed with the camera as it now stands.
   camera.updateMatrixWorld()
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
+  flutter(dt, now)
+  if (noticeUntil && now > noticeUntil) { notice.classList.remove('on'); noticeUntil = 0 }
   for (const mesh of shimmers.values()) { mesh.rotation.y += dt * 1.8; mesh.rotation.x += dt * 0.7; mesh.scale.setScalar(1 + 0.25 * Math.sin(now / 180)) }
   // A name, and words for a while, stand over each resident's head while they are in front of the camera.
   for (const [by, h] of heads) {
     const view = views.get(by)
     if (!view) continue
     if (!h.words.hidden && now > h.until) h.words.hidden = true
+    // What they want stands there while they say nothing else: in full from near, as a mark from far.
+    h.want.hidden = !h.wants || !h.words.hidden
+    if (!h.want.hidden) { const far = camera.position.distanceTo(view.shown) > 17; if (far !== h.want.classList.contains('far')) { h.want.classList.toggle('far', far); h.want.textContent = far ? '?' : h.wants } }
     head.set(view.shown.x, view.shown.y + 1.05, view.shown.z).project(camera)
     const seen = head.z < 1 && Math.abs(head.x) < 1.2 && (by !== you || !h.words.hidden)
     h.el.style.display = seen ? '' : 'none'
@@ -555,4 +607,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
