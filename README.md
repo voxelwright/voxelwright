@@ -1,17 +1,20 @@
 # Village
 
-Village is a private home hub for a family and its agents. You walk through a
-3D home (a kitchen and a living room today) where each object is a way in: the
-notebook talks to a villager, a person's own helper that keeps notes. The
-Elder turns a one-line request ("put a small radio on the windowsill") into a
-checked change that you can promote into the live home or roll back. It is a
-personal project, tested with synthetic people only, and it is not safe for
-real family data yet.
+Village is a game in the making: one systemic, multiplayer world that people
+make by talking, where their own agents live as characters. Today it has two
+places. The home is a 3D house you walk through (a kitchen and a living room)
+where each object is a way in: the notebook talks to a villager, a person's own
+helper that keeps notes, and the Elder turns a one-line request ("put a small
+radio on the windowsill") into a checked change you can keep or undo. The
+street is a shared, sloping block run by a world process, where each browser
+that joins gets a walker. It is a personal project, tested with synthetic
+people only, and it is not safe for real family data yet.
 
 ## Layout
 
 - `home/`: the 3D home (three.js, Cordis plugins). See `home/README.md`.
 - `host/`: the villager and the Elder, plus the live home. See `host/README.md`.
+- `street/`: the shared street's world process and page. See `street/README.md`.
 - `docs/`: the handbook, published privately with Mintlify.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
@@ -38,6 +41,10 @@ npm run village -- service install    # launchd keeps Village running; `service 
 # villager prints a pairing link for each person not yet paired.
 cd home && npm install && npm run dev
 cd host && npm install && npm run villager
+
+# The street: a shared block on the engine's World, in its own process. http://localhost:5318
+# (needs home/node_modules; no sign-in, so it listens on this machine unless told a tailnet address)
+cd street && npm install && npm run world    # and in another terminal: npm run page
 
 # The Elder: writes a candidate under ~/.village/candidates/
 cd host && npm run elder -- "put a small radio on the windowsill"

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>The Block (spike)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfd9ee; touch-action: none; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 8px; top: 8px; font: 12px/1.5 ui-monospace, Menlo, monospace; color: #1d2733; background: rgba(255, 255, 255, 0.78); padding: 6px 9px; border-radius: 8px; white-space: pre; }
+  #knobs { position: fixed; right: 8px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 60vw; }
+  #knobs button { font: 12px ui-monospace, Menlo, monospace; padding: 7px 9px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.78); color: #1d2733; }
+  #knobs button[aria-pressed="true"] { background: #1d2733; color: #fff; }
+  #help { position: fixed; left: 8px; bottom: 8px; font: 12px ui-monospace, Menlo, monospace; color: #1d2733; background: rgba(255, 255, 255, 0.6); padding: 5px 8px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="hud">finding the street…</div>
+<div id="knobs"></div>
+<div id="help">WASD walk · Space jump · Q E or drag to turn · touch: left side walks, right side turns, tap jumps</div>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

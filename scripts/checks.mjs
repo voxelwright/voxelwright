@@ -18,6 +18,7 @@
 // defaults sit on ports a play server may own). Every page check launches its own Chrome with
 // its own profile, so Chrome itself is not shared. Temp folders come from mkdtemp, never shared.
 const MAC_SANDBOX = 'the Elder\'s gates run the candidate under the macOS Seatbelt sandbox (srt) and shoot a WebGPU page'
+const NO_STREET_IN_CI = 'the workflow does not install street/ yet (changing it needs a GitHub token with the workflow scope)'
 const SOFTWARE_GL = 'timeouts or time bounds on a hosted Linux runner, in software WebGL2 (3 CI runs, #89)'
 
 export const CHECKS = [
@@ -44,6 +45,11 @@ export const CHECKS = [
   { name: 'plan-history', cwd: 'home', run: ['node', 'scripts/check-plan-history.mjs'], seconds: 60 },
   { name: 'route-inside', cwd: 'home', run: ['node', 'scripts/check-route-inside.mjs'], seconds: 20 },
   { name: 'engine-no-page', cwd: 'home', run: ['node', 'scripts/check-engine-no-page.mjs'], seconds: 20 },
+
+  // The street (#118): its world process and page
+  { name: 'street-typecheck', cwd: 'street', run: ['npm', 'run', 'typecheck'], local: NO_STREET_IN_CI, seconds: 10 },
+  { name: 'street-block', cwd: 'street', run: ['node', 'test/on-world.mjs', '120', '24', '4'], local: NO_STREET_IN_CI, seconds: 20 },
+  { name: 'street-two', cwd: 'street', run: ['node', 'test/two.ts', '--delays', '0'], serial: true, local: SOFTWARE_GL, seconds: 60 },
 
   // Home, a page on the shared dev server
   { name: 'kernel', cwd: 'home', run: ['node', 'scripts/check-kernel.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 30 },
