@@ -144,6 +144,11 @@ export function stubMaker(delayMs = 30): Maker {
     if (/\bjunk\b/i.test(ask.text) && !ask.repair) return { raw: '{"say": "here", "toy": {"parts": [{"id": "x", "material": "no-such", "at": [0, 1, 0], "shape": {"kind": "box", "half": [1, 1, 1]}}]}}', ...none }
     // "bridge": a heavy plank long enough to lie across the trench from the middle of the plot.
     if (/\bbridge\b/i.test(ask.text)) return { raw: JSON.stringify({ say: 'A plank bridge.', toy: { label: 'Plank bridge', parts: [{ id: 'deck', material: 'maple', motion: 'dynamic', mass: 400, at: [0, 0.02, 0], pieces: [{ shape: { kind: 'box', half: [1.1, 0.07, 3.8] }, at: [0, 0.07, 0], paint: '#c98d5a' }] }], gadgets: [], wires: [] } }), ...none }
+    // "stairs": five steps and a landing 1.8 m up, climbed from the end nearest whoever asked.
+    if (/\bstairs\b/i.test(ask.text)) {
+      const steps = [0, 1, 2, 3, 4].map((i) => ({ shape: { kind: 'box', half: [0.8, 0.15 * (i + 1), 0.25] }, at: [0, 0.15 * (i + 1), 1.5 - 0.5 * i], paint: '#c98d5a' }))
+      return { raw: JSON.stringify({ say: 'Stairs.', toy: { label: 'Stairs', parts: [{ id: 'steps', material: 'maple', at: [0, 0, 0], pieces: [...steps, { shape: { kind: 'box', half: [0.8, 0.9, 0.6] }, at: [0, 0.9, -1.6], paint: '#b97d4e' }] }], gadgets: [], wires: [] } }), ...none }
+    }
     const crate = { id: 'crate', material: 'maple', motion: 'dynamic', mass: 30, at: [0, 0.02, 0], pieces: [{ shape: { kind: 'box', half: [0.4, 0.4, 0.4] }, at: [0, 0.4, 0], paint: '#c98d5a' }, { shape: { kind: 'box', half: [0.42, 0.04, 0.42] }, at: [0, 0.8, 0], paint: '#8a5a33' }] }
     return { raw: JSON.stringify({ say: `A crate, for "${ask.text.slice(0, 30)}".`, toy: { label: 'Crate', parts: [crate], gadgets: [], wires: [] } }), ...none }
   }

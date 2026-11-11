@@ -30,7 +30,7 @@ try {
   await page.waitForFunction('window.__street?.ready', undefined, { timeout: 30_000 })
   await sleep(700)
   const wants = await s<Record<string, string>>('s.wants()')
-  check('three residents each want something, in words over their heads', Object.keys(wants).sort().join() === 'Ines,Mabel,Otis' && /walk across/.test(wants.Mabel) && /ball/.test(wants.Otis) && /parcel/.test(wants.Ines), wants)
+  check('three residents each want something, in words over their heads', Object.keys(wants).sort().join() === 'Ines,Mabel,Otis' && /walk across/.test(wants.Mabel) && /climb/.test(wants.Otis) && /shade/.test(wants.Ines), wants)
   const home = await s<number[]>(`s.whereIs('Mabel')`)
 
   // An agent is told the same.

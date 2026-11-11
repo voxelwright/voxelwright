@@ -242,12 +242,7 @@ const problems: Problems | null = !withProblems ? null : new Problems({
   others: () => sim.seen().residents.filter((r) => !problems?.cast(r.id)).map(({ name, at }) => ({ name, at })),
   made: () => sim.madeNow(),
   sweep(ids) { for (const id of ids) if (sim.take(id)) { everyone({ t: 'remove', toy: id }); happened('took-back', 'the street sweeper', { thing: id }) } },
-  prop(toy) {
-    const { was, drawn } = sim.prop(toy)
-    if (was) everyone({ t: 'remove', toy: toy.id })
-    everyone({ t: 'add', drawn })
-  },
-  where: (key) => sim.where(key),
+  meets: (from, along, not) => sim.meets(from, along, not),
   wants(by, who, text) {
     everyone({ t: 'wants', by, text })
     if (text) happened('wants', who, { text })

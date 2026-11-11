@@ -26,11 +26,13 @@ and the residents are synthetic.
   key a resident asked for. It gets a body like anyone's and these tools: `arrive`, `look`,
   `walk_to`, `face`, `say`, `make`, `guide`, `build`, `undo`, `top`, `observe`.
 - `src/problems.ts`: something to do. A problem is data: who has it and where they stand, what
-  they say, what it brings (a ball on a post, a parcel), and a test the world runs on real bodies
-  (a body past a line, a thing below a height, a thing near a place). No model decides that one
+  they say, and a test the world runs on real bodies (a body past a line, feet above a height,
+  a made thing between someone and the sun). No model decides that one
   is solved. Start the world with `--problems` for the block's three: Mabel wants to be across
-  the trench and walks over whatever reaches both sides (and falls off what does not), Otis's
-  ball is on a post, Ines's parcel is up the street. Solved, everyone is told who helped and
+  the trench and walks over whatever reaches both sides (and falls off what does not), Otis
+  wants to stand somewhere high and climbs what is made near him from each side in turn (steps
+  and slopes, not a sheer side), Ines wants shade (a made thing between her head and the sun).
+  Solved, everyone is told who helped and
   with what, it is written to `<world>/solved.jsonl`, and after `--rest` seconds (180) the way
   is cleared and it is wanted again. With a model as the maker, the same model writes their
   lines when they are spoken to or helped, one short call each; with the stand-in they say what
@@ -108,13 +110,14 @@ node test/agent.ts                          # an agent's seat, with a plain MCP 
 node test/door.ts [pictures/]               # in through the home's door and back out (starts the home's dev server too)
 node test/problem.ts [pictures/]            # a problem asked, solved by a bridge, told to all, and asked again
 node test/problems.mjs                      # the other two problems' tests, on the real world with no page
+node test/three.ts clip/ sonnet             # with a real model, by hand: all three solved by typing, recorded
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:
 node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence
 node test/gallery.ts out.json pictures/                                  # photograph it all as one sheet
 node test/shots.ts out.json look/ [q=low]                                # the same six views every time, to compare one look with the next
 node test/clip.ts clip/ sonnet "a plank bridge across the trench"        # record the walk, the ask and the crossing
-node test/resident.ts clip/ sonnet sonnet                                # a real Claude Code session as a resident, recorded
+node test/resident.ts clip/ sonnet sonnet [help|help:Otis|help:all]      # a real Claude Code session as a resident, recorded
 npm run typecheck
 ```
 

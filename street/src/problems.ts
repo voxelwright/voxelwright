@@ -1,20 +1,22 @@
 // Problems on the street (#118): someone who wants something, and a test the world itself runs
 // to tell when they have it. A problem is data: who has it and where they stand, what they
-// say, what it brings with it (a ball on a post, a parcel), and the test (a body past a line,
-// a thing below a height, a thing near a place). No model decides that a problem is solved.
-// Whoever has the problem is a resident like any other, walked by the world. A model may
-// write their lines when they are spoken to or helped; without one they say what is written
-// here.
+// say, and the test (their body past a line, their feet higher than a height, a made thing
+// between their head and the sun). No model decides that a problem is solved.
+// Whoever has the problem is a resident like any other, walked by the world: they try what is
+// made for them with their own body, and what does not hold them, or cannot be climbed, fails
+// in front of everyone. A model may write their lines when they are spoken to, try something
+// or are helped; without one they say what is written here.
 import type { Vec3 } from '../../home/src/engine/core.ts'
-import { piecesShape, type PartSpec, type Piece, type ToySpec } from '../../home/src/engine/toy.ts'
 import { GRADE, TRENCH, onStreet, planeAt } from './ground.ts'
 import { doorOf, houseAt } from './houses.ts'
-import { STANDING } from './scene.ts'
+import { NORMAL_UP, standing } from './walk.ts'
 import type { Self } from './wire.ts'
 
 const LEN = Math.hypot(1, GRADE)
 /** The trench in the world's own z. */
 const GAP = { from: TRENCH.from / LEN, to: TRENCH.to / LEN }
+/** Towards the sun, as the sky has it (home/src/sky.ts): what stands on that line from someone's head shades them. */
+const SUN: Vec3 = (([x, y, z]) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l] as Vec3 })([-0.52, 0.78, -0.35])
 
 export interface Problem {
   id: string
@@ -27,18 +29,11 @@ export interface Problem {
   thanks: string
   /** In a few words, for the notice everyone sees: "Pavlo got Mabel across". */
   done: string
-  /** What the world checks: their own body past a line down the street; a thing of theirs lower than a height over the road; a thing of theirs near them. */
-  test: { kind: 'across'; past: number } | { kind: 'down'; thing: string; below: number } | { kind: 'near'; thing: string; within: number }
-  /** What the problem brings with it: built when it opens, and put back when it opens again. */
-  props?: ToySpec
+  /** What the world checks: their own body past a line down the street; their feet this high over the road, standing; a made thing between their head and the sun. */
+  test: { kind: 'across'; past: number } | { kind: 'up'; high: number } | { kind: 'shaded' }
 }
 
-const POST: Vec3 = onStreet(6.3, -15.5), PARCEL: Vec3 = onStreet(1.8, -3.5)
-/** One body of several shapes. */
-const pieced = (id: string, material: string, at: Vec3, pieces: Piece[], more: Partial<PartSpec> = {}): PartSpec => ({ id, material, at, shape: piecesShape(pieces), pieces, ...more })
-const IRON = '#2c3438', TAPE = '#c0392b'
-
-/** The block's three: a way across, a ball down, a parcel home. */
+/** The block's three: a way across, somewhere high, some shade. */
 export const PROBLEMS: Problem[] = [
   {
     id: 'across', who: { name: 'Mabel', plush: 0, scarf: '#2f8f83', at: onStreet(-2.6, TRENCH.from - 1.7) },
@@ -48,38 +43,18 @@ export const PROBLEMS: Problem[] = [
     test: { kind: 'across', past: GAP.to + 1.2 },
   },
   {
-    id: 'ball', who: { name: 'Otis', plush: 1, scarf: '#f08a3c', at: onStreet(4.2, -14.2) },
-    about: 'Otis, eleven, hopeful, a little embarrassed. He kicked his blue ball and it landed on top of a tall post by the pavement, two and a half metres up, in a little tray. He cannot reach it. He wants it back down on the street.',
-    wants: 'My ball is stuck up on that post. Can you get it down?',
-    thanks: 'My ball! Thanks!', done: 'got Otis his ball back',
-    test: { kind: 'down', thing: 'ball', below: 0.9 },
-    props: {
-      id: 'post', label: "Otis's ball on a post", frame: { at: POST, yaw: 0, tilt: 0 }, gadgets: [], wires: [], inputs: {},
-      parts: [
-        // A post with a little tray on top, a low rim round it: the ball sits there until something knocks it out.
-        pieced('post', 'steel', [0, 0, 0], [
-          { shape: { kind: 'cylinder', radius: 0.07, halfHeight: 1.36 }, at: [0, 1.36, 0], paint: IRON },
-          { shape: { kind: 'box', half: [0.34, 0.025, 0.34] }, at: [0, 2.725, 0], paint: IRON },
-          ...([[0.34, 0], [-0.34, 0], [0, 0.34], [0, -0.34]] as const).map(([x, z]): Piece => ({ shape: { kind: 'box', half: x ? [0.02, 0.03, 0.36] : [0.36, 0.03, 0.02] }, at: [x, 2.78, z], paint: IRON })),
-        ]),
-        { id: 'ball', material: 'rubber', motion: 'dynamic', mass: 0.5, paint: '#3d7de0', at: [0, 2.99, 0], shape: { kind: 'sphere', radius: 0.23 } },
-      ],
-    },
+    id: 'up', who: { name: 'Otis', plush: 1, scarf: '#f08a3c', at: onStreet(3.6, -15) },
+    about: 'Otis, eleven, hopeful, a little shy. He has heard you can see the whole bay and the red bridge from up high, but he is small and the houses are in the way. He wants something tall he can climb and stand on. He can go up steps and slopes, not up a sheer side.',
+    wants: 'I want to see the bay over the rooftops. Could you make me something tall I can climb up on?',
+    thanks: 'I can see the bridge from up here!', done: 'got Otis up high',
+    test: { kind: 'up', high: 1.4 },
   },
   {
-    id: 'parcel', who: { name: 'Ines', plush: 2, scarf: '#d65a9a', at: doorOf(houseAt(6, 1)) },
-    about: 'Ines, a potter who lives at No. 114, warm and busy. A parcel for her was left up the street, above the trench, and it is too heavy for her to fetch. She wants it brought to her door.',
-    wants: 'There is a parcel for me up the street, the one with the red tape. Could you bring it to my door?',
-    thanks: 'That is the one. You are a star!', done: 'brought Ines her parcel',
-    test: { kind: 'near', thing: 'box', within: 2.4 },
-    props: {
-      id: 'parcel', label: "Ines's parcel", frame: { at: PARCEL, yaw: 0, tilt: Math.atan(GRADE) }, gadgets: [], wires: [], inputs: {},
-      parts: [pieced('box', 'paper', [0, 0.33, 0], [
-        { shape: { kind: 'box', half: [0.36, 0.3, 0.3] }, at: [0, 0, 0], paint: '#c9a070' },
-        { shape: { kind: 'box', half: [0.365, 0.305, 0.05] }, at: [0, 0, 0], paint: TAPE },
-        { shape: { kind: 'box', half: [0.05, 0.305, 0.305] }, at: [0, 0, 0], paint: TAPE },
-      ], { motion: 'dynamic', mass: 16 })],
-    },
+    id: 'shade', who: { name: 'Ines', plush: 2, scarf: '#d65a9a', at: doorOf(houseAt(6, 1)) },
+    about: 'Ines, a potter who lives at No. 114, warm and busy. She is out on the pavement by her door, setting pots to dry, and the afternoon sun is right on her. She wants something to stand under for shade: anything big enough, she is not fussy.',
+    wants: 'The sun is right on me out here. Could you make me a bit of shade to stand under?',
+    thanks: 'Oh, that is better. You are a star!', done: 'made Ines some shade',
+    test: { kind: 'shaded' },
   },
 ]
 
@@ -91,7 +66,7 @@ export interface Solved { problem: string; who: string; solver: string; with: st
 
 /** What the problems ask of the world process. */
 export interface Stage {
-  /** A resident the world itself walks: sat down as this figure, standing here. Returns its seat. */
+  /** A resident the world itself walks: sat down as this figure in this scarf, standing here. Returns its seat. */
   join(name: string, plush: number, scarf: string, at: Vec3): number
   stand(id: number, at: Vec3): void
   self(id: number): Self | null
@@ -100,11 +75,10 @@ export interface Stage {
   /** Everyone else on the street, and what has been made. */
   others(): { name: string; at: Vec3 }[]
   made(): MadeNow[]
-  /** Takes made things off the street (the way is cleared before a problem opens again). */
+  /** Takes made things off the street (what solved a problem is cleared before it opens again). */
   sweep(ids: string[]): void
-  /** A problem's own things: built, and built again as they began. */
-  prop(toy: ToySpec): void
-  where(key: string): Vec3 | null
+  /** The first thing a line from a point meets (the toy it belongs to), or null: `along` is the way and how far. */
+  meets(from: Vec3, along: Vec3, not: number): string | null
   /** What someone wants, over their head for everyone ('' when they want nothing now). */
   wants(by: number, who: string, text: string): void
   solved(by: number, entry: Solved): void
@@ -112,22 +86,30 @@ export interface Stage {
   line?(about: string, moment: string, signal: AbortSignal): Promise<string | null>
 }
 
+/** Trying a made thing with their own body: walking over it, or climbing it from one side after another. */
+type Attempt =
+  | { kind: 'cross'; thing: MadeNow | null; x: number; lined: boolean; since: number }
+  | { kind: 'climb'; thing: MadeNow; side: number; lined: boolean; since: number; best: number }
+
 interface Running {
   problem: Problem
   seat: number
-  /** Open until solved; then resting until `until`, when the way is cleared and it opens again. */
+  /** Open until solved; then resting until `until`, when what solved it is cleared and it opens again. */
   open: boolean
   until: number
-  /** Made things they have already tried and fallen from. */
+  /** Made things they have already tried, and fallen from or could not get up. */
   tried: Set<string>
-  /** Walking across now: over which thing (or none: someone said to try), along which line, since when. */
-  crossing?: { thing: MadeNow | null; x: number; lined: boolean; since: number }
+  attempt?: Attempt
   /** Back on their feet at this time, after a fall. */
   up?: number
+  /** The made thing that solved it, to be cleared before it is wanted again. */
+  by?: string
   spoke: number
 }
 
 const HEARS = 9, TRY = /\b(try|go|cross|come|walk)\b/i
+/** The four sides a climber comes at a thing from: west, uphill, east, downhill. */
+const SIDES: [number, number][] = [[-1, 0], [0, -1], [1, 0], [0, 1]]
 
 /** The street's problems, run by the world: who stands where, what each wants, whether each is solved. */
 export class Problems {
@@ -138,16 +120,11 @@ export class Problems {
     for (const problem of problems) {
       const seat = stage.join(problem.who.name, problem.who.plush, problem.who.scarf, problem.who.at)
       stage.drive(seat, { x: 0, z: 0, jump: false })
-      if (problem.props) {
-        stage.prop(problem.props)
-        // What it brings that stands still is in a made thing's way like a lamp is: things are stood clear of it.
-        for (const part of problem.props.parts) if ((part.motion ?? 'static') === 'static') STANDING.push({ x: problem.props.frame.at[0] + part.at[0], z: problem.props.frame.at[2] + part.at[2], r: 0.45, from: 0 })
-      }
       this.running.push({ problem, seat, open: true, until: 0, tried: new Set(), spoke: -Infinity })
     }
   }
 
-  /** What is wanted now, for a page that has just sat down and for an agent's `look`. */
+  /** What is wanted now, for a page that has just sat down and for an agent's `look`: who, in their words, and where they stand. */
   wanted(): { by: number; who: string; wants: string; at: Vec3 }[] {
     return this.running.filter((r) => r.open).map((r) => ({ by: r.seat, who: r.problem.who.name, wants: r.problem.wants, at: this.stage.self(r.seat)?.p ?? r.problem.who.at }))
   }
@@ -163,7 +140,7 @@ export class Problems {
       const me = this.stage.self(r.seat)
       if (r.seat === by || !me || Math.hypot(me.p[0] - at[0], me.p[2] - at[2]) > HEARS || now - r.spoke < 4000) continue
       r.spoke = now
-      if (r.open && r.problem.test.kind === 'across' && !r.crossing && TRY.test(text)) { r.crossing = { thing: null, x: me.p[0], lined: true, since: now }; this.speak(r, 'All right. Here I go.', `Someone said: "${text}". You agree to try walking across where you stand.`); continue }
+      if (r.open && r.problem.test.kind === 'across' && !r.attempt && TRY.test(text)) { r.attempt = { kind: 'cross', thing: null, x: me.p[0], lined: true, since: now }; this.speak(r, 'All right. Here I go.', `Someone said: "${text}". You agree to try walking across where you stand.`); continue }
       this.speak(r, r.open ? r.problem.wants : 'All sorted for now, thank you.', `Someone said to you: "${text}". ${r.open ? 'You still need what you need.' : 'Your trouble is over for now.'}`)
     }
   }
@@ -180,69 +157,98 @@ export class Problems {
     if (now - this.checked < 100) return
     this.checked = now
     for (const r of this.running) {
-      if (!r.open) { if (now >= r.until) this.reopen(r); continue }
-      if (r.problem.test.kind === 'across' && !r.crossing && r.up === undefined) this.lookForAWay(r, now)
+      if (!r.open) { if (now >= r.until && this.clearOf(r)) this.reopen(r); continue }
+      if (!r.attempt && r.up === undefined) this.lookForSomething(r, now)
       const how = this.passes(r)
       if (how) this.solve(r, how, now)
     }
   }
 
-  /** The test itself. Returns who helped and with what, or null while it is not passed. */
-  private passes(r: Running): { solver: string; with: string } | null {
-    const test = r.problem.test, me = this.stage.self(r.seat)
-    if (!me) return null
-    const nearest = (at: Vec3) => this.stage.others().map((o) => ({ ...o, d: Math.hypot(o.at[0] - at[0], o.at[2] - at[2]) })).sort((a, b) => a.d - b.d)[0]
-    const madeBy = (at: Vec3, reach: number) => this.stage.made().filter((m) => at[0] > m.box.x0 - reach && at[0] < m.box.x1 + reach && at[2] > m.box.z0 - reach && at[2] < m.box.z1 + reach).pop()
-    if (test.kind === 'across') {
-      if (me.p[2] < test.past || me.p[1] < planeAt(me.p[2]) - 0.5) return null
-      const thing = r.crossing?.thing ?? madeBy([me.p[0], 0, (GAP.from + GAP.to) / 2], 0.5)
-      return { solver: thing?.by ?? nearest(me.p)?.name ?? 'Someone', with: thing?.label ?? '' }
-    }
-    const at = this.stage.where(`${r.problem.props!.id}/${test.thing}`)
-    if (!at) return null
-    if (test.kind === 'down' ? at[1] - planeAt(at[2]) > test.below : Math.hypot(at[0] - me.p[0], at[2] - me.p[2]) > test.within) return null
-    const thing = madeBy(at, 2.5), helper = nearest(at)
-    return { solver: (helper && helper.d < 14 ? helper.name : thing?.by) ?? 'Someone', with: thing?.label ?? '' }
+  /** How high their feet are over the road. */
+  private feet(me: Self) {
+    return me.p[1] - standing(NORMAL_UP) - planeAt(me.p[2])
   }
 
-  private solve(r: Running, how: { solver: string; with: string }, now: number) {
+  /** The test itself. Returns who helped and with what, or null while it is not passed. */
+  private passes(r: Running): { solver: string; with: string; id?: string } | null {
+    const test = r.problem.test, me = this.stage.self(r.seat)
+    if (!me) return null
+    const tried = r.attempt?.thing ?? null
+    if (test.kind === 'across') {
+      if (me.p[2] < test.past || this.feet(me) < -0.5) return null
+      const nearest = this.stage.others().map((o) => ({ ...o, d: Math.hypot(o.at[0] - me.p[0], o.at[2] - me.p[2]) })).sort((a, b) => a.d - b.d)[0]
+      const thing = tried ?? this.stage.made().filter((m) => me.p[0] > m.box.x0 - 0.5 && me.p[0] < m.box.x1 + 0.5 && m.box.z0 < GAP.to && m.box.z1 > GAP.from).pop()
+      return { solver: thing?.by ?? nearest?.name ?? 'Someone', with: thing?.label ?? '' }
+    }
+    if (test.kind === 'up') {
+      // Up, and standing there: not on the way past the top of a jump or a fall.
+      if (this.feet(me) < test.high || !me.grounded || Math.abs(me.v[1]) > 0.4) return null
+      const thing = tried ?? this.stage.made().filter((m) => me.p[0] > m.box.x0 - 0.4 && me.p[0] < m.box.x1 + 0.4 && me.p[2] > m.box.z0 - 0.4 && me.p[2] < m.box.z1 + 0.4).pop()
+      return thing ? { solver: thing.by, with: thing.label, id: thing.id } : null
+    }
+    // From the top of their head towards the sun: a made thing in the way is shade. (A tree or a house is not theirs to thank anyone for.)
+    const over = this.stage.meets([me.p[0], me.p[1] + 0.8, me.p[2]], [SUN[0] * 14, SUN[1] * 14, SUN[2] * 14], r.seat)
+    const thing = over && this.stage.made().find((m) => m.id === over)
+    return thing ? { solver: thing.by, with: thing.label, id: thing.id } : null
+  }
+
+  private solve(r: Running, how: { solver: string; with: string; id?: string }, now: number) {
     r.open = false
+    r.by = how.id
     r.until = now + this.restMs
-    r.crossing = undefined
+    r.attempt = undefined
     const entry: Solved = { problem: r.problem.id, who: r.problem.who.name, solver: how.solver, with: how.with, done: r.problem.done, at: new Date().toISOString() }
     this.stage.wants(r.seat, r.problem.who.name, '')
     this.stage.solved(r.seat, entry)
     this.speak(r, r.problem.thanks, `It is done: ${how.solver} ${r.problem.done}${how.with ? ` with ${how.with}` : ''}. Thank them, and say one thing about how it was done.`)
   }
 
-  /** After the rest: the way that solved it is cleared, what the problem brought is put back, and it is wanted again. */
+  /** Whether what solved it can be cleared now: nobody is on the way across or down in the trench. (A bridge is not swept from under anyone.) */
+  private clearOf(r: Running) {
+    return r.problem.test.kind !== 'across' || !this.stage.others().some((o) => o.at[2] > GAP.from - 1 && o.at[2] < GAP.to + 1)
+  }
+
+  /** After the rest: what solved it is cleared, they are back at their place, and it is wanted again. */
   private reopen(r: Running) {
-    const test = r.problem.test
-    if (test.kind === 'across') this.stage.sweep(this.stage.made().filter((m) => m.box.z0 < GAP.to && m.box.z1 > GAP.from).map((m) => m.id))
-    if (r.problem.props) this.stage.prop(r.problem.props)
+    if (r.problem.test.kind === 'across') this.stage.sweep(this.stage.made().filter((m) => m.box.z0 < GAP.to && m.box.z1 > GAP.from).map((m) => m.id))
+    else if (r.by) this.stage.sweep([r.by])
+    r.by = undefined
     this.stage.stand(r.seat, r.problem.who.at)
     r.open = true
     r.tried.clear()
     this.stage.wants(r.seat, r.problem.who.name, r.problem.wants)
   }
 
-  /** A made thing that reaches both sides of the trench, not yet tried: worth walking onto. */
-  private lookForAWay(r: Running, now: number) {
-    const way = this.stage.made().filter((m) => !r.tried.has(m.id) && m.box.z0 < GAP.from + 0.4 && m.box.z1 > GAP.to - 0.4).pop()
-    if (!way) return
-    const mid = (way.box.x0 + way.box.x1) / 2, room = Math.max(0, (way.box.x1 - way.box.x0) / 2 - 0.5), me = this.stage.self(r.seat)
-    // Across where it is nearest to them, short of its edges.
-    r.crossing = { thing: way, x: Math.max(mid - room, Math.min(mid + room, me?.p[0] ?? mid)), lined: false, since: now }
-    this.speak(r, 'Oh! Let me try that.', `Someone has put ${way.label} across the trench. You are about to try walking over it.`)
+  /** A made thing worth trying with their own body: one that reaches both sides of the trench, or one near enough to climb. */
+  private lookForSomething(r: Running, now: number) {
+    const test = r.problem.test, me = this.stage.self(r.seat)
+    if (!me || test.kind === 'shaded') return
+    const fresh = this.stage.made().filter((m) => !r.tried.has(m.id))
+    if (test.kind === 'across') {
+      const way = fresh.filter((m) => m.box.z0 < GAP.from + 0.4 && m.box.z1 > GAP.to - 0.4).pop()
+      if (!way) return
+      const mid = (way.box.x0 + way.box.x1) / 2, room = Math.max(0, (way.box.x1 - way.box.x0) / 2 - 0.5)
+      // Across where it is nearest to them, short of its edges.
+      r.attempt = { kind: 'cross', thing: way, x: Math.max(mid - room, Math.min(mid + room, me.p[0])), lined: false, since: now }
+      this.speak(r, 'Oh! Let me try that.', `Someone has put ${way.label} across the trench. You are about to try walking over it.`)
+      return
+    }
+    const home = r.problem.who.at
+    const near = fresh.filter((m) => Math.hypot((m.box.x0 + m.box.x1) / 2 - home[0], (m.box.z0 + m.box.z1) / 2 - home[2]) < 9).pop()
+    if (!near) return
+    r.attempt = { kind: 'climb', thing: near, side: 0, lined: false, since: now, best: 0 }
+    this.speak(r, 'Is that for me? Let me try to get up.', `Someone has made ${near.label} near you. You are about to try climbing it.`)
   }
 
   /** Where they put their feet this tick. */
   private walk(r: Running, now: number) {
     const me = this.stage.self(r.seat)
     if (!me) return
+    const still = () => this.stage.drive(r.seat, { x: 0, z: 0, jump: false })
     const towards = (x: number, z: number, near = 0.25) => {
       const dx = x - me.p[0], dz = z - me.p[2], d = Math.hypot(dx, dz)
-      this.stage.drive(r.seat, d < near ? { x: 0, z: 0, jump: false } : { x: dx / d, z: dz / d, jump: false })
+      if (d < near) still()
+      else this.stage.drive(r.seat, { x: dx / d, z: dz / d, jump: false })
       return d < near
     }
     const home = r.problem.who.at
@@ -252,25 +258,34 @@ export class Problems {
       this.stage.stand(r.seat, home)
     }
     // Helped, they stay where they got to until the problem opens again; wanting, they keep to their place.
-    if (!r.open) { this.stage.drive(r.seat, { x: 0, z: 0, jump: false }); return }
-    const c = r.crossing
-    if (!c) { towards(home[0], home[2], 0.4); return }
-    // Into the trench: that was not a way across. Up again in a moment, and not onto that thing twice.
-    if (me.p[1] < planeAt(me.p[2]) - 1.1) {
-      if (c.thing) r.tried.add(c.thing.id)
-      r.crossing = undefined
-      r.up = now + 2200
-      this.stage.drive(r.seat, { x: 0, z: 0, jump: false })
-      this.speak(r, c.thing ? 'Oof! Not that one.' : 'Oof! There is nothing to walk on.', `You tried to walk across${c.thing ? ` on ${c.thing.label}` : ' with nothing there'} and fell into the trench. You are unhurt.`)
+    if (!r.open) return still()
+    const a = r.attempt
+    if (!a) return void towards(home[0], home[2], 0.4)
+    const giveUp = (written: string, moment: string, fell = false) => {
+      if (a.thing) r.tried.add(a.thing.id)
+      r.attempt = undefined
+      if (fell) { r.up = now + 2200; still() }
+      this.speak(r, written, moment)
+    }
+    if (a.kind === 'cross') {
+      // Into the trench: that was not a way across. Up again in a moment, and not onto that thing twice.
+      if (this.feet(me) < -1.1) return giveUp(a.thing ? 'Oof! Not that one.' : 'Oof! There is nothing to walk on.', `You tried to walk across${a.thing ? ` on ${a.thing.label}` : ' with nothing there'} and fell into the trench. You are unhurt.`, true)
+      if (now - a.since > 14_000) return giveUp('I cannot get onto that.', `You tried to get onto ${a.thing?.label ?? 'the way across'} and could not: something is in the way.`)
+      if (!a.lined) a.lined = towards(a.x, GAP.from - 0.9)
+      else towards(a.x, GAP.to + 3)
       return
     }
-    if (now - c.since > 14_000) {
-      if (c.thing) r.tried.add(c.thing.id)
-      r.crossing = undefined
-      this.speak(r, 'I cannot get onto that.', `You tried to get onto ${c.thing?.label ?? 'the way across'} and could not: something is in the way.`)
+    // Climbing: at the thing from one side, walking in over its middle; a side that does not take them up is followed by the next.
+    const box = a.thing.box, mid: [number, number] = [(box.x0 + box.x1) / 2, (box.z0 + box.z1) / 2], [sx, sz] = SIDES[a.side]
+    a.best = Math.max(a.best, this.feet(me))
+    if (now - a.since > 6000) {
+      if (a.side === SIDES.length - 1) return giveUp(a.best > 0.5 ? 'I got a little way up, but not to the top.' : 'I cannot get up on that. It has no way up.', `You tried to climb ${a.thing.label} from every side and could not get up: it has no steps or slope you can manage.`)
+      r.attempt = { ...a, side: a.side + 1, lined: false, since: now }
       return
     }
-    if (!c.lined) c.lined = towards(c.x, GAP.from - 0.9)
-    else towards(c.x, GAP.to + 3)
+    if (!a.lined) a.lined = towards(sx ? (sx < 0 ? box.x0 - 0.9 : box.x1 + 0.9) : mid[0], sz ? (sz < 0 ? box.z0 - 0.9 : box.z1 + 0.9) : mid[1], 0.35)
+    else if (this.feet(me) >= (r.problem.test as { high: number }).high) still()
+    // Up and over its middle, on towards its far side: wherever its top is, they pass it.
+    else towards(sx ? (sx < 0 ? box.x1 - 0.5 : box.x0 + 0.5) : mid[0], sz ? (sz < 0 ? box.z1 - 0.5 : box.z0 + 0.5) : mid[1], 0.2)
   }
 }

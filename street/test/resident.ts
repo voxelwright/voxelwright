@@ -10,21 +10,22 @@ import { planeAt } from '../src/ground.ts'
 import { browser, sleep, startPage, startWorld } from './lib.ts'
 
 const [out, model = 'sonnet', maker = 'sonnet', goal = 'cross'] = process.argv.slice(2)
-if (!out) throw new Error('Usage: node test/resident.ts <out-dir> [agent-model] [maker] [cross|help]')
+if (!out) throw new Error('Usage: node test/resident.ts <out-dir> [agent-model] [maker] [cross|help|help:<name>|help:all]')
+const helping = goal.startsWith('help'), whom = goal.split(':')[1]
 mkdirSync(out, { recursive: true })
 const WT = 5533, PAGE = 5418
 const dir = mkdtempSync(join(tmpdir(), 'street-resident-'))
 const keyFile = join(dir, 'key'), config = join(dir, 'mcp.json')
 const vite = await startPage(PAGE, WT)
-const world = await startWorld(WT, '--maker', maker, '--world', dir, '--crates', '48', '--balls', '10', '--agent-key-file', keyFile, ...(goal === 'help' ? ['--problems'] : []))
+const world = await startWorld(WT, '--maker', maker, '--world', dir, '--crates', '48', '--balls', '10', '--agent-key-file', keyFile, ...(helping ? ['--problems'] : []))
 world.stdout!.on('data', (d) => process.stdout.write(`[world] ${d}`))
 // The key goes into a config file only the owner can read, and nowhere else.
 writeFileSync(config, JSON.stringify({ mcpServers: { street: { type: 'http', url: `http://127.0.0.1:${WT + 1}/mcp`, headers: { Authorization: `Bearer ${readFileSync(keyFile, 'utf8')}` } } } }), { mode: 0o600 })
 // `help` gives it no task of its own: only that some residents want something. Whether one is helped is the world's to say (solved.jsonl).
-const prompt = goal === 'help' ? [
+const prompt = helping ? [
   'You are Juno, a resident of the Block, a small shared street in a physical world. You have a body there through the "street" MCP server.',
-  'Arrive as Juno and look around. Help whoever needs it. Say out loud, briefly, what you are doing as you go, so the people watching can follow.',
-  'Stop when the street tells you that you have helped someone, or when you have tried three different ways for the same person.',
+  `Arrive as Juno and look around. ${whom === 'all' ? 'Help everyone who needs it, one after another.' : whom ? `${whom} needs help: help them.` : 'Help whoever needs it.'} Say out loud, briefly, what you are doing as you go, so the people watching can follow.`,
+  `Stop when the street tells you that you have helped ${whom === 'all' ? 'all of them' : whom ?? 'someone'}, or when you have tried four different ways for the same person.`,
 ].join(' ') : [
   'You are Juno, a resident of the Block, a small shared street in a physical world. You have a body there through the "street" MCP server.',
   'Arrive as Juno and look around. Greet whoever is there. Then get yourself to the far side of the trench (anywhere with z greater than 12). You cannot jump it: make or build something to cross on, and check with look that it is in place before you walk over it.',

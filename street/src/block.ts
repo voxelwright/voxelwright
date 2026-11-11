@@ -149,16 +149,10 @@ export class Block {
     }
     this.specs.delete(id)
   }
-  /** A toy of the street's own that nobody made (what a problem brings: a ball on a post). Built, or built again as it began. */
-  prop(toy: ToySpec): { was: boolean; drawn: Drawn } {
-    const was = this.specs.has(toy.id)
-    if (was) this.drop(toy.id)
-    this.build(toy)
-    return { was, drawn: this.drawnAs(toy) }
-  }
-  /** Where a part is now. */
-  where(key: string): Vec3 | null {
-    return this.world.thing(key)?.position ?? null
+  /** The toy of the first thing a line from a point meets (`along` is the way and how far), leaving out one seat's own body. */
+  meets(from: Vec3, along: Vec3, not: number): string | null {
+    const seat = this.seats.get(not), hit = this.world.castRay(from, along, seat ? [seat.body] : [])
+    return hit ? hit.key.slice(0, hit.key.indexOf('/')) : null
   }
   /** Each made thing, and the ground it stands over now: where it was put, moved as its heaviest part has moved since. */
   madeNow(): { id: string; label: string; by: string; box: { x0: number; x1: number; z0: number; z1: number } }[] {
