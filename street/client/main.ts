@@ -70,10 +70,11 @@ function build(drawn: Drawn) {
     }
     puppet.pose(view.body, view.p, view.q)
     views.set(id, view)
+    if (view.kind === 'walker') headOf(id).name.textContent = drawn.toy.label
   })
 }
 function remove(toy: string) {
-  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) views.delete(id)
+  for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); heads.get(id)?.el.remove(); heads.delete(id) }
   world!.removeToy(toy)
 }
 function heard(pose: Pose, tick: number) {
@@ -211,18 +212,28 @@ const asks = (await wt.createUnidirectionalStream()).getWriter()
 const encoder = new TextEncoder()
 const ask = (line: Ask) => void asks.write(encoder.encode(JSON.stringify(line) + '\n')).catch(() => {})
 
-// ---- words over heads, and the shimmer where a thing is on its way
-const bubbles = new Map<number, { el: HTMLDivElement; until: number }>()
-function bubble(by: number, text: string, kind: 'said' | 'making' | 'made' | 'sorry', seconds = 6) {
-  let b = bubbles.get(by)
-  if (!b) {
-    const el = document.createElement('div')
+// ---- names and words over heads, and the shimmer where a thing is on its way
+/** Over each resident's head: their name, and for a while what they said or what was made for them. */
+const heads = new Map<number, { el: HTMLDivElement; name: HTMLSpanElement; words: HTMLDivElement; until: number }>()
+function headOf(by: number) {
+  let h = heads.get(by)
+  if (!h) {
+    const el = document.createElement('div'), words = document.createElement('div'), name = document.createElement('span')
+    el.className = 'head'
+    name.className = 'name'
+    words.hidden = true
+    el.append(words, name)
     document.body.append(el)
-    bubbles.set(by, (b = { el, until: 0 }))
+    heads.set(by, (h = { el, name, words, until: 0 }))
   }
-  b.el.className = `bubble ${kind}`
-  b.el.textContent = text
-  b.until = performance.now() + seconds * 1000
+  return h
+}
+function bubble(by: number, text: string, kind: 'said' | 'making' | 'made' | 'sorry', seconds = 6) {
+  const h = headOf(by)
+  h.words.className = `bubble ${kind}`
+  h.words.textContent = text
+  h.words.hidden = false
+  h.until = performance.now() + seconds * 1000
 }
 const shimmers = new Map<number, THREE.Mesh>()
 const shimmerLook = new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.45, depthWrite: false })
@@ -235,10 +246,19 @@ function shimmer(by: number, at: Vec3 | null) {
   scene.add(mesh)
   shimmers.set(by, mesh)
 }
-function told(line: Extract<Line, { by: number }>) {
+function told(line: Exclude<Line, { t: 'hello' | 'add' | 'remove' }>) {
   if (line.t === 'said') bubble(line.by, line.text, 'said')
   else if (line.t === 'making') { bubble(line.by, `${line.text}…`, 'making', 120); shimmer(line.by, line.at) }
-  else { bubble(line.by, line.say, line.ok ? 'made' : 'sorry', line.ok ? 5 : 8); shimmer(line.by, null) }
+  else if (line.t === 'made') { bubble(line.by, line.say, line.ok ? 'made' : 'sorry', line.ok ? 5 : 8); shimmer(line.by, null) }
+  else if (line.t === 'named') headOf(line.by).name.textContent = line.name
+  else invited(line)
+}
+/** A key for an agent of yours: shown to you alone, in the workshop panel, with the command that hands it over. */
+function invited(line: Extract<Line, { t: 'key' }>) {
+  const box = document.getElementById('invite')!
+  box.hidden = false
+  box.querySelector('code')!.textContent = line.command
+  document.body.classList.add('open')
 }
 
 void (async () => {
@@ -346,14 +366,15 @@ function frame(now: number) {
   }
   for (const mesh of shimmers.values()) { mesh.rotation.y += dt * 1.8; mesh.rotation.x += dt * 0.7; mesh.scale.setScalar(1 + 0.25 * Math.sin(now / 180)) }
   renderer.render(scene, camera)
-  // Words stand over the head of whoever said them, while they are in front of the camera.
-  for (const [by, b] of bubbles) {
+  // A name, and words for a while, stand over each resident's head while they are in front of the camera.
+  for (const [by, h] of heads) {
     const view = views.get(by)
-    if (!view || now > b.until) { b.el.remove(); bubbles.delete(by); continue }
-    head.set(view.shown.x, view.shown.y + 1.15, view.shown.z).project(camera)
-    const seen = head.z < 1 && Math.abs(head.x) < 1.2
-    b.el.style.display = seen ? '' : 'none'
-    if (seen) b.el.style.transform = `translate(-50%, -100%) translate(${((head.x + 1) / 2) * innerWidth}px, ${((1 - head.y) / 2) * innerHeight}px)`
+    if (!view) continue
+    if (!h.words.hidden && now > h.until) h.words.hidden = true
+    head.set(view.shown.x, view.shown.y + 1.05, view.shown.z).project(camera)
+    const seen = head.z < 1 && Math.abs(head.x) < 1.2 && (by !== you || !h.words.hidden)
+    h.el.style.display = seen ? '' : 'none'
+    if (seen) h.el.style.transform = `translate(-50%, -100%) translate(${((head.x + 1) / 2) * innerWidth}px, ${((1 - head.y) / 2) * innerHeight}px)`
   }
   works.push(performance.now() - t0)
   if (frames.length > 600) { frames.shift(); works.shift() }
@@ -408,6 +429,11 @@ const speak = (text: string, say = saying) => { if (text.trim()) ask(say ? { t: 
   words.blur()
 }
 document.getElementById('undo')!.onclick = () => ask({ t: 'unmake' })
+document.getElementById('bring')!.onclick = () => ask({ t: 'key' })
+document.getElementById('copy')!.onclick = () => void navigator.clipboard?.writeText(document.querySelector('#invite code')!.textContent ?? '')
+// Your name: from the link (?name=), or the one this browser gave before.
+const named = (params.get('name') ?? localStorage.getItem('street.name') ?? '').trim().slice(0, 24)
+if (named) { localStorage.setItem('street.name', named); ask({ t: 'name', text: named }) }
 document.getElementById('top')!.onclick = () => { ask({ t: 'top' }); pending = []; offset.set(0, 0, 0) }
 
 // For the two-browser check (test/two.ts): what this page sees, and probes that time what a hand would feel.
@@ -448,4 +474,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...bubbles].map(([by, b]) => ({ by, text: b.el.textContent, kind: b.el.className })), toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

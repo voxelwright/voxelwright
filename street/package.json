@@ -15,7 +15,9 @@
   "dependencies": {
     "@fails-components/webtransport": "1.6.11",
     "@fails-components/webtransport-transport-http3-quiche": "1.6.11",
-    "three": "0.187.0"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "three": "0.187.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "25.0.3",

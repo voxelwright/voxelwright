@@ -7,13 +7,16 @@
 //          [--crates 120] [--balls 24] [--snap 30] [--awake]
 //          [--maker stub|haiku|sonnet|opus]  who makes things from sentences (none: making is off); a model spends the signed-in Claude Code's usage
 //          [--world <dir>]                    where made things are kept (default ~/.village/street; "none" keeps nothing)
+//          [--agent-key-file <path>]          writes one agent's key there at start (mode 600), for a script that brings an agent
 import { Http3Server } from '@fails-components/webtransport'
+import { chmodSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { homedir, loadavg } from 'node:os'
 import { join } from 'node:path'
 import { makeCert } from './cert.ts'
+import { Agents, type Outcome, type StreetEvent } from './agents.ts'
 import { Block, FLOOR } from './block.ts'
-import { claudeMaker, make, plotFor, stubMaker, type Maker } from './make.ts'
+import { checkMade, claudeMaker, make, makePrompt, plotFor, settles, stubMaker, type Maker } from './make.ts'
 import { DELAY, INPUT, PING, packSelf, packSnap, posesIn, unpackDelay, unpackInputs, type Ask, type Line } from './wire.ts'
 
 const args = process.argv.slice(2)
@@ -41,7 +44,7 @@ interface Session {
   incomingUnidirectionalStreams: ReadableStream<ReadableStream<Uint8Array>>
   createUnidirectionalStream(): Promise<WritableStream<Uint8Array>>
 }
-interface Seat { id: number; datagrams: Writer; lines: Writer; room: number; delay: number; jitter: number; out: number; in: number; gone: boolean; busy: boolean; madeAt: number }
+interface Seat { id: number; datagrams: Writer; lines: Writer; room: number; delay: number; jitter: number; out: number; in: number; gone: boolean }
 
 const sim = await Block.make({ crates: one('crates', 120), balls: one('balls', 24), awake: args.includes('--awake'), dir })
 const seats = new Map<number, Seat>()
@@ -60,53 +63,157 @@ function send(seat: Seat, data: Uint8Array) {
 const say = (seat: Seat, line: Line) => void seat.lines.write(text.encode(JSON.stringify(line) + '\n')).catch(() => {})
 
 const everyone = (line: Line) => { for (const seat of seats.values()) say(seat, line) }
-/** Plain words from a page: no control characters or angle brackets, one line, not long. */
-const plain = (s: unknown) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAKING.text) : '')
+/** Plain words from a page or an agent: no control characters or angle brackets, one line, not long. */
+const plain = (s: unknown, most = MAKING.text) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, most) : '')
 
-/** One sentence from a seat into one thing on the street, said to everyone as it goes. */
-async function makeFor(seat: Seat, sentence: string, yaw: number) {
-  const by = seat.id
-  const no = (why: string) => say(seat, { t: 'made', by, ok: false, say: why })
+// What has happened, for residents who cannot watch (agents): a short log they read from a cursor.
+const events: StreetEvent[] = []
+const waiting = new Set<() => void>()
+let eventSeq = 0
+function happened(kind: StreetEvent['kind'], who: string, more: { text?: string; thing?: string } = {}) {
+  events.push({ seq: ++eventSeq, kind, who, ...more })
+  if (events.length > 400) events.shift()
+  for (const wake of [...waiting]) wake()
+}
+function eventsAfter(cursor: number, ms: number): Promise<StreetEvent[]> {
+  const after = () => events.filter((e) => e.seq > cursor)
+  if (after().length || ms <= 0) return Promise.resolve(after())
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); waiting.delete(done); resolve(after()) }
+    const timer = setTimeout(done, ms)
+    waiting.add(done)
+  })
+}
+
+function sayFor(by: number, words: string) {
+  const text = plain(words)
+  if (!text) return
+  everyone({ t: 'said', by, text })
+  happened('said', sim.nameOf(by), { text })
+}
+
+/** Who is making right now and when each seat last did: a page's seat or an agent's, by its number. */
+const makers = new Map<number, { busy: boolean; madeAt: number }>()
+/** A made toy onto the street, said to everyone. */
+function placeFor(by: number, toy: Parameters<Block['place']>[0], sentence: string, words: string): Outcome {
+  const drawn = sim.place(toy, sentence, sim.nameOf(by))
+  if ('reason' in drawn) {
+    everyone({ t: 'made', by, ok: false, say: `No room: ${drawn.reason}.` })
+    return { ok: false, say: `No room: ${drawn.reason}.` }
+  }
+  everyone({ t: 'add', drawn })
+  everyone({ t: 'made', by, ok: true, say: words, toy: toy.id })
+  happened('made', sim.nameOf(by), { text: sentence, thing: `${toy.id} (${toy.label})` })
+  return { ok: true, say: words, toy: toy.id }
+}
+
+/**
+ * One sentence from a seat into one thing on the street, said to everyone as it goes. `quiet` marks an answer
+ * given before anything started (making is off, one at a time): only the asker needs it.
+ */
+async function makeFor(by: number, sentence: string, yaw: number): Promise<Outcome & { quiet?: boolean }> {
+  const mine = makers.get(by) ?? makers.set(by, { busy: false, madeAt: -Infinity }).get(by)!
+  const no = (why: string) => ({ ok: false, say: why, quiet: true })
   if (!maker) return no('Making is off here: the world was started without a maker.')
-  if (!sentence) return
-  if (seat.busy) return no('One thing at a time: your last one is still on its way.')
-  if (performance.now() - seat.madeAt < MAKING.restMs) return no('A moment: let the last one land first.')
+  if (!sentence) return no('There was nothing to make of that.')
+  if (mine.busy) return no('One thing at a time: your last one is still on its way.')
+  if (performance.now() - mine.madeAt < MAKING.restMs) return no('A moment: let the last one land first.')
   if (making >= MAKING.most) return no('The street is busy making other things. Try again in a moment.')
   const self = sim.self(by)
-  if (!self || !Number.isFinite(yaw)) return
+  if (!self || !Number.isFinite(yaw)) return no('You are not on the street.')
   const plot = plotFor(self.p, yaw)
-  seat.busy = true
+  const failed = (why: string): Outcome => { everyone({ t: 'made', by, ok: false, say: why }); return { ok: false, say: why } }
+  mine.busy = true
   making++
   everyone({ t: 'making', by, text: sentence, at: plot.at })
   try {
     const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000))
-    console.log(`seat ${by} asked for ${JSON.stringify(sentence)}: ${'toy' in result ? `${result.toy.id} (${result.toy.label})` : 'reason' in result ? `refused, ${result.reason}` : 'no thing'}; ${tries} ${tries === 1 ? 'try' : 'tries'}, ${calls.map((c) => c.models.join('+')).join(', ')}`)
-    if ('reason' in result) return everyone({ t: 'made', by, ok: false, say: `That didn't come out right (${result.reason}).` })
-    if (!('toy' in result)) return everyone({ t: 'made', by, ok: true, say: result.say })
-    const drawn = sim.place(result.toy, sentence, sim.toyOf(by) ?? 'someone')
-    if ('reason' in drawn) return everyone({ t: 'made', by, ok: false, say: `No room: ${drawn.reason}.` })
-    everyone({ t: 'add', drawn })
-    everyone({ t: 'made', by, ok: true, say: result.say, toy: result.toy.id })
+    console.log(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: ${'toy' in result ? `${result.toy.id} (${result.toy.label})` : 'reason' in result ? `refused, ${result.reason}` : 'no thing'}; ${tries} ${tries === 1 ? 'try' : 'tries'}, ${calls.map((c) => c.models.join('+')).join(', ')}`)
+    if ('reason' in result) return failed(`That didn't come out right (${result.reason}).`)
+    if (!('toy' in result)) { everyone({ t: 'made', by, ok: true, say: result.say }); return { ok: true, say: result.say } }
+    // The asker may have left while it was being made.
+    if (!sim.self(by)) return { ok: false, say: 'You left before it arrived.' }
+    return placeFor(by, { ...result.toy, id: sim.nextMade() }, sentence, result.say)
   } catch (e) {
-    console.error(`seat ${by} asked for ${JSON.stringify(sentence)}: failed, ${e instanceof Error ? e.message : e}`)
-    everyone({ t: 'made', by, ok: false, say: 'The maker did not answer. Try again.' })
+    console.error(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: failed, ${e instanceof Error ? e.message : e}`)
+    return failed('The maker did not answer. Try again.')
   } finally {
-    seat.busy = false
-    seat.madeAt = performance.now()
+    mine.busy = false
+    mine.madeAt = performance.now()
     making--
   }
 }
 
+/** A thing its asker wrote themselves (an agent, with its own model): checked, settled and placed at once. No maker is called. */
+function buildFor(by: number, answer: unknown, yaw: number): Outcome {
+  const self = sim.self(by)
+  if (!self) return { ok: false, say: 'You are not on the street.' }
+  const mine = makers.get(by) ?? makers.set(by, { busy: false, madeAt: -Infinity }).get(by)!
+  if (performance.now() - mine.madeAt < MAKING.restMs) return { ok: false, say: 'A moment: let the last one land first.' }
+  let raw: string
+  try { raw = JSON.stringify(answer) } catch { return { ok: false, say: 'That was not data.' } }
+  if (raw.length > 60_000) return { ok: false, say: 'That is too much for one thing.' }
+  const result = checkMade(raw, plotFor(self.p, yaw), sim.nextMade())
+  if ('reason' in result) return { ok: false, say: `It cannot be built: ${result.reason}.` }
+  if (!('toy' in result)) return { ok: false, say: 'There was no toy in that.' }
+  const why = settles(result.toy)
+  if (why) return { ok: false, say: `It cannot be built: ${why}.` }
+  mine.madeAt = performance.now()
+  return placeFor(by, result.toy, result.toy.label, result.say)
+}
+
+function unmakeFor(by: number) {
+  const toy = sim.unmake(sim.nameOf(by))
+  if (toy) { everyone({ t: 'remove', toy }); happened('took-back', sim.nameOf(by), { thing: toy }) }
+  return toy
+}
+
 /** What a page asks on its reliable stream, one line of JSON each. */
 function asked(seat: Seat, ask: Ask) {
-  if (ask.t === 'make') void makeFor(seat, plain(ask.text), Number(ask.yaw))
-  else if (ask.t === 'say') { const words = plain(ask.text); if (words) everyone({ t: 'said', by: seat.id, text: words }) }
+  if (ask.t === 'make') void makeFor(seat.id, plain(ask.text), Number(ask.yaw)).then((out) => { if (out.quiet) say(seat, { t: 'made', by: seat.id, ok: false, say: out.say }) })
+  else if (ask.t === 'say') sayFor(seat.id, ask.text)
   else if (ask.t === 'top') sim.top(seat.id)
-  else if (ask.t === 'unmake') {
-    const toy = sim.unmake(sim.toyOf(seat.id) ?? '')
-    if (toy) everyone({ t: 'remove', toy })
+  else if (ask.t === 'unmake') unmakeFor(seat.id)
+  else if (ask.t === 'name') { const name = plain(ask.text, 24); if (name && sim.rename(seat.id, name)) everyone({ t: 'named', by: seat.id, name }) }
+  else if (ask.t === 'key') {
+    // A key for one agent of this resident's, said to this page alone. It is a secret: never logged.
+    const { key, hours } = agents.issue(sim.nameOf(seat.id))
+    say(seat, { t: 'key', key, command: `claude mcp add --transport http street http://127.0.0.1:${httpPort}/mcp --header "Authorization: Bearer ${key}"`, minutes: hours * 60 })
   }
 }
+
+// The agents' door: an agent's seat is a walker like any other, joined and left through MCP calls.
+const agents = new Agents({
+  join(name) {
+    const id = sim.join(name)
+    everyone({ t: 'add', drawn: sim.drawnOf(id) })
+    happened('arrived', name)
+    return id
+  },
+  leave(id) {
+    const toy = sim.toyOf(id), name = sim.nameOf(id)
+    sim.leave(id)
+    makers.delete(id)
+    if (toy) { everyone({ t: 'remove', toy }); happened('left', name) }
+  },
+  rename(id, name) { if (sim.rename(id, name)) everyone({ t: 'named', by: id, name }) },
+  self: (id) => sim.self(id),
+  seen: () => sim.seen(),
+  drive: (id, to) => sim.drive(id, to),
+  say: sayFor,
+  make: (id, words, yaw) => makeFor(id, plain(words), yaw).then(({ ok, say: said, toy }) => ({ ok, say: said, ...(toy ? { toy } : {}) })),
+  build: buildFor,
+  unmake: unmakeFor,
+  top: (id) => sim.top(id),
+  guide: makePrompt,
+  events: eventsAfter,
+}, (line) => console.log(line))
+const keyFile = text1('agent-key-file')
+if (keyFile) {
+  writeFileSync(keyFile, agents.issue('the world\'s keeper').key, { mode: 0o600 })
+  chmodSync(keyFile, 0o600)
+}
+
 async function listen(session: Session, seat: Seat) {
   const streams = session.incomingUnidirectionalStreams.getReader()
   const { value: stream } = await streams.read()
@@ -130,17 +237,20 @@ async function sit(session: Session) {
   const datagrams = session.datagrams.createWritable().getWriter()
   const lines = (await session.createUnidirectionalStream()).getWriter()
   const id = sim.join()
-  const seat: Seat = { id, datagrams, lines, room: Math.min(1150, session.datagrams.maxDatagramSize || 1150), delay: 0, jitter: 0, out: 0, in: 0, gone: false, busy: false, madeAt: -Infinity }
+  const seat: Seat = { id, datagrams, lines, room: Math.min(1150, session.datagrams.maxDatagramSize || 1150), delay: 0, jitter: 0, out: 0, in: 0, gone: false }
   for (const other of seats.values()) say(other, { t: 'add', drawn: sim.drawnOf(id) })
   seats.set(id, seat)
+  happened('arrived', sim.nameOf(id))
   say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, floor: FLOOR, drawn: sim.drawn() })
   console.log(`seat ${id} sat down (${seats.size} here)`)
   const leave = () => {
     if (seat.gone) return
     seat.gone = true
     seats.delete(id)
-    const toy = sim.toyOf(id)
+    const toy = sim.toyOf(id), name = sim.nameOf(id)
     sim.leave(id)
+    makers.delete(id)
+    happened('left', name)
     if (toy) for (const other of seats.values()) say(other, { t: 'remove', toy })
     console.log(`seat ${id} left (${seats.size} here)`)
   }
@@ -178,6 +288,7 @@ function loop() {
   for (let n = 0; now >= next && n < 4; n++) {
     late.push(now - next)
     if (late.length > 3600) late.shift()
+    agents.tick()
     sim.step()
     next += TICK_MS
     if (sim.tick % snapEvery === 0) snapshot()
@@ -209,6 +320,9 @@ setInterval(() => {
 
 // Where the page finds the world, and how the world is doing. This machine only: the page's own server passes it on.
 createServer((req, res) => {
+  // The agents' door answers for itself; a harness that goes looking for OAuth finds nothing and keeps to its key.
+  if (req.url?.startsWith('/mcp')) return void agents.handle(req, res).catch((e) => { console.error('the agents\' door:', e instanceof Error ? e.message : e); if (!res.headersSent) res.writeHead(500); res.end() })
+  if (req.url?.startsWith('/.well-known/')) { res.statusCode = 404; return res.end() }
   res.setHeader('content-type', 'application/json')
   res.setHeader('cache-control', 'no-store')
   if (req.url === '/where') return res.end(JSON.stringify({ port, hash }))

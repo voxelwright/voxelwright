@@ -18,6 +18,10 @@ reach past this machine. It is a spike: plain shapes, no sign-in, synthetic resi
   thing as the engine's own toy data (one body drawn as several shapes), the engine's checker
   holds it to the street's limits, a scratch world lets it settle, and one failed answer is
   sent back once with the reason. Nothing the model writes runs.
+- `src/agents.ts`: a door for agents. A resident may be an agent in its own harness (a Claude Code
+  session on its owner's subscription), sat down through a standard MCP server at `/mcp` with a
+  key a resident asked for. It gets a body like anyone's and these tools: `arrive`, `look`,
+  `walk_to`, `face`, `say`, `make`, `guide`, `build`, `undo`, `top`, `observe`.
 - `src/puppet.ts`: a solver core that solves nothing: each body is where it was last put.
 - `client/`: the page. It runs the engine's `World` too, over the puppet, so it draws the same
   toys the world process built (their materials, paint and shadows), posed from the wire.
@@ -29,7 +33,12 @@ by dragging. Press Enter and type what you want: "a big red dog", "a plank bridg
 trench", "stairs". It appears on the ground in front of you, for everyone. The `make` button
 switches to `say`, which puts your words over your head. `undo` takes back the last thing you
 made; `top` takes you back to where you arrived. A trench crosses the street, too wide to jump
-and too deep to climb out of.
+and too deep to climb out of. Open the page with `?name=Pavlo` to be called that.
+
+To bring an agent of yours: press `+agent`. The page shows you, and only you, a command with a
+key in it (good for 12 hours, one agent). Run it where that agent's Claude Code is, on this
+machine, then tell the agent to join the street: it arrives with a name over its head, can see
+what is around it as data, walk, talk, and make or build things like you.
 
 ## Run it
 
@@ -59,11 +68,13 @@ npm run tick -- 1000 100 20                 # the block on World, every body kep
 npm run two -- --delays 0,25,50,100         # two browsers, a fresh world per case
 npm run push -- --delays 0,50,100           # walking into a crate, three worlds per case
 node test/make.ts                           # making end to end with a stand-in maker
+node test/agent.ts                          # an agent's seat, with a plain MCP client as the agent
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:
 node test/make-lab.mjs out.json sonnet,opus "a big red dog" "a ladder"   # what does a model make of a sentence
 node test/gallery.ts out.json pictures/                                  # photograph it all as one sheet
 node test/clip.ts clip/ sonnet "a plank bridge across the trench"        # record the walk, the ask and the crossing
+node test/resident.ts clip/ sonnet sonnet                                # a real Claude Code session as a resident, recorded
 npm run typecheck
 ```
 
@@ -187,7 +198,21 @@ and one gadget kind (a pivot). 80 made things at most, each kept as a file under
 Walkers now step onto things up to 0.45 m high (a kerb stone, a stair, a bridge's deck), and
 the page keeps your walker at the height the world last said it stands at on a thing.
 
+## An agent as a resident (November 10, 2026)
+
+A real run, by hand: the `claude` CLI (Sonnet) was given a key and one goal, "get to the far
+side of the trench". It arrived as Juno, greeted the resident there, walked down, wrote a stone
+bridge itself and placed it with `build` (the street's maker was not called), checked with
+`look` that it was in place, walked over and said so: 15 turns, 36 s, 18 cents. A page watched
+the whole thing. The world's tick stayed on time (late by 2.2 ms at p95).
+
+An agent thinks in seconds, so it says where to go (`walk_to`) and the world walks its body
+there, hopping once when stuck and reporting `blocked` when that does not help. What it is
+told of the street is data: where it stands, who is near, what was made and by whom, what was
+said. A seat nobody calls for five minutes is given up; its key sits down again.
+
 Not done: the page steps nothing, so a push is still seen late. Cards and glows are not sent,
 so made things have no score cards or lamps. A made thing can land on someone. Asking spends
-the world owner's Claude usage and there is no sign-in: tailnet only. Fire's GPU field and
+the world owner's Claude usage and there is no sign-in: tailnet only. The agents' door listens
+on this machine only, so an agent must run on the same machine as the world. Fire's GPU field and
 invented mechanics' page sandbox have not been tried off the page.

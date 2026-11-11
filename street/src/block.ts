@@ -2,6 +2,7 @@
 // built from the block's toys (scene.ts), with a seat for each resident. It keeps what the
 // wire needs and World does not: a small number for each moving thing, and each seat's
 // inputs in the order they were made. One step is one tick of TICK.
+import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt, loadJolt } from '../../home/src/engine/jolt.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
@@ -26,7 +27,14 @@ export interface MadeThing { toy: ToySpec; text: string; by: string; at: string 
 /** The most made things the street holds, and the most moving bodies in all (1,100 awake cost 9 ms of a 16.7 ms tick). */
 const MOST = { made: 80, moving: 700 }
 
-interface Seat { toy: string; body: string; legs: string; queue: Input[]; newest: number; last: Input; ack: number }
+interface Seat { toy: string; body: string; legs: string; name: string; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean } }
+
+/** What is on the street, as a resident who cannot see a picture is told it. */
+export interface Seen {
+  residents: { id: number; name: string; at: Vec3 }[]
+  things: { id: string; what: string; askedFor: string; by: string; at: Vec3; size: Vec3; material: string; moves: boolean }[]
+  loose: { crates: number; balls: number }
+}
 
 const STILL: Input = { seq: 0, x: 0, z: 0, jump: false }
 const SEAT_COLORS = ['#f06f6f', '#5fb0e8', '#84c96a', '#e6b95c', '#b48be0']
@@ -146,16 +154,45 @@ export class Block {
     return this.seed / 2 ** 32
   }
 
-  /** A new resident at the top of the street. Returns the number of its body. */
-  join(): number {
+  /** A new resident at the top of the street, called `name` (or "Resident 3"). Returns the number of its body. */
+  join(name = ''): number {
     const n = this.seated++
     const toy = `seat-${n + 1}`
     const spec = resident(toy, this.seats.size)
     spec.parts[0].paint = SEAT_COLORS[n % SEAT_COLORS.length]
+    spec.label = name || `Resident ${n + 1}`
     this.build(spec)
     const id = this.ids.get(`${toy}/body`)!
-    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, queue: [], newest: 0, last: STILL, ack: 0 })
+    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, name: spec.label, queue: [], newest: 0, last: STILL, ack: 0 })
     return id
+  }
+  /** A seat's name, as others read it over its head. */
+  nameOf(id: number) {
+    return this.seats.get(id)?.name ?? 'someone'
+  }
+  rename(id: number, name: string) {
+    const seat = this.seats.get(id), spec = seat && this.specs.get(seat.toy)
+    if (!seat || !spec || !name) return false
+    seat.name = spec.label = name
+    return true
+  }
+  /** Walks a seat by the world's own hand (an agent's seat: it says where to go, not which keys are down). Null lets its own inputs walk it again. */
+  drive(id: number, to: { x: number; z: number; jump: boolean } | null) {
+    const seat = this.seats.get(id)
+    if (seat) seat.driven = to ?? undefined
+  }
+
+  /** Who and what is on the street. */
+  seen(): Seen {
+    const residents = [...this.seats].map(([id, seat]) => ({ id, name: seat.name, at: this.world.thing(seat.body)?.position ?? [0, 0, 0] as Vec3 }))
+    const things = [...this.made].map(([id, thing]) => {
+      const part = thing.toy.parts.find((p) => p.motion === 'dynamic') ?? thing.toy.parts[0]
+      const t = this.world.thing(`${id}/${part.id}`)
+      const half = t?.shape.kind === 'box' ? t.shape.half : [0.5, 0.5, 0.5] as Vec3
+      return { id, what: thing.toy.label, askedFor: thing.text, by: thing.by, at: t?.position ?? thing.toy.frame.at, size: half.map((h) => +(h * 2).toFixed(2)) as Vec3, material: part.material, moves: part.motion === 'dynamic' }
+    })
+    const cargo = this.specs.get('cargo')?.parts ?? []
+    return { residents, things, loose: { crates: cargo.filter((p) => p.id.startsWith('crate-')).length, balls: cargo.filter((p) => p.id.startsWith('ball-')).length } }
   }
   leave(id: number) {
     const seat = this.seats.get(id)
@@ -184,7 +221,8 @@ export class Block {
       // A seat that fell behind catches up at once rather than staying late for good.
       while (seat.queue.length > 4) seat.queue.shift()
       const next = seat.queue.shift()
-      const input = next ?? { ...seat.last, jump: false }
+      const input = seat.driven ? { seq: 0, ...seat.driven } : next ?? { ...seat.last, jump: false }
+      if (seat.driven) seat.driven.jump = false
       if (next) { seat.last = next; seat.ack = next.seq }
       this.world.setKnob(seat.legs, 'x', input.x)
       this.world.setKnob(seat.legs, 'z', input.z)

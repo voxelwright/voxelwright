@@ -26,6 +26,10 @@ export type Line =
   /** The asking ended: with a thing (its toy was added just before), with only a word, or (`ok` false) with why not. */
   | { t: 'made'; by: number; ok: boolean; say: string; toy?: string }
   | { t: 'said'; by: number; text: string }
+  /** A resident's name, when it is given or changed. */
+  | { t: 'named'; by: number; name: string }
+  /** To the one page that asked: a key that lets one agent sit down, and how to hand it over. */
+  | { t: 'key'; key: string; command: string; minutes: number }
 
 /** What a page asks of the world, as lines of JSON on its own reliable stream. */
 export type Ask =
@@ -36,6 +40,10 @@ export type Ask =
   | { t: 'unmake' }
   /** Back to where residents arrive. */
   | { t: 'top' }
+  /** What this resident is called. */
+  | { t: 'name'; text: string }
+  /** A key for an agent of mine to sit down with. */
+  | { t: 'key' }
 
 /** Positions travel as 2 mm steps in 16 bits: 65 m either way. */
 const STEP = 0.002
