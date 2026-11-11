@@ -256,8 +256,7 @@ export async function start(ctx: Context, gone: () => boolean) {
     ctx.emit('village/physics', e)
   })
   ctx.effect(() => () => fire.dispose(), 'fire')
-  const flames = new Flames()
-  own(ctx, flames.group)
+  const flames = new Flames(ctx.stage.scene)
   ctx.effect(() => () => flames.dispose(), 'flames')
   let flamesAt = -1
   ctx.on('village/frame', (dt) => {
@@ -265,10 +264,11 @@ export async function start(ctx: Context, gone: () => boolean) {
     fire.frame(dt)
     // Flames follow the fire state a few times a second; their motion is their shaders'.
     const now = performance.now()
-    if (now - flamesAt > 120 && (fire.lit || flames.group.visible)) {
+    if (now - flamesAt > 120 && (fire.lit || flames.visible)) {
       flamesAt = now
-      flames.update(fire.flames())
+      flames.update(fire.flames(), ctx.stage.camera.position)
     }
+    if (fire.lit || flames.glowing) flames.frame(dt)
   })
 
   // Toys made from a sentence (#88): built on a surface offered for the person, on trial until kept.

@@ -11,9 +11,10 @@
 // target and read back without stalling, a few times a second. The whole field is never read.
 // The looks read the same field: fieldLook() lights, chars and wets whatever the camera sees.
 import * as THREE from 'three/webgpu'
-import { abs, clamp, float, floor, Fn, getViewPosition, If, int, ivec2, Loop, max, min, mix, mod, mx_noise_float, mx_worley_noise_vec2, smoothstep, sin, texture, textureLoad, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
+import { abs, clamp, dot, getNormalFromDepth, float, floor, Fn, getScreenPosition, getViewPosition, If, int, interleavedGradientNoise, ivec2, Loop, max, min, mix, mod, perspectiveDepthToViewZ, rtt, screenCoordinate, smoothstep, sin, texture, textureLoad, time, uniform, uniformArray, uv, vec2, vec3, vec4 } from 'three/tsl'
 import type { Vec3 } from './core'
 import { MAX_PROBES, MAX_SOURCES, type HeatField, type Source } from './fire'
+import { drift } from './noise'
 
 export const NX = 64, NY = 16, NZ = 64
 const TILES = 4
@@ -38,6 +39,13 @@ const look = {
   flash: uniform(0),
 }
 
+/** The fires that light the room (flames.ts aims them): where, and how strong (0 is dark). */
+const fires = [0, 1, 2, 3].map(() => new THREE.Vector4())
+export const firelight = { array: fires, node: uniformArray(fires, 'vec4') }
+const fireAt = (i: number) => firelight.node.element(i) as unknown as THREE.Node<'vec4'>
+/** Steps of each firelight shadow's march through the picture's depth. */
+const SHADOW_STEPS = 8
+
 /** Atlas uv of the point g in cell units (cell centres at i + 0.5), in layer y. */
 const atlasUv = (gx: N, y: N, gz: N) => vec2(mod(y, TILES).mul(NX).add(gx).div(W), floor(y.div(TILES)).mul(NZ).add(gz).div(H))
 
@@ -47,7 +55,8 @@ function fieldAt(tex: THREE.TextureNode, p: V3, origin: V3, cell: V3): THREE.Nod
   const gx = clamp(g.x, 0.5, NX - 0.5), gz = clamp(g.z, 0.5, NZ - 0.5)
   const gy = clamp(g.y.sub(0.5), 0, NY - 1)
   const y0 = floor(gy), y1 = min(y0.add(1), NY - 1)
-  return mix(tex.sample(atlasUv(gx, y0, gz)), tex.sample(atlasUv(gx, y1, gz)), gy.sub(y0))
+  // Level 0 by name: a read that leaves the choice of level to the GPU is done whether or not its branch is taken.
+  return mix(tex.sample(atlasUv(gx, y0, gz)).level(float(0)), tex.sample(atlasUv(gx, y1, gz)).level(float(0)), gy.sub(y0))
 }
 
 const target = (w: number, h: number, type: THREE.TextureDataType) => {
@@ -243,55 +252,143 @@ export class GpuHeatField implements HeatField {
 const glowOf = (t: N) => vec3(smoothstep(420, 700, t), smoothstep(600, 1000, t).mul(0.62), smoothstep(900, 1400, t).mul(0.35))
 
 /**
- * What the field does to the picture (the post chain calls it on the lit scene colour): what has
- * charred goes black, what is wet goes darker, fire lights what is near it (a warm light that
- * flickers, from the heat round each surface), and what is hot enough glows: embers in the char,
- * red-hot steel. Nothing is read while nothing has burnt or is wet; one read a pixel while only char remains.
+ * How much firelight falls on each point of the picture, as its own half-size pass: each of the
+ * strongest fires (firelight) is a point light that flickers, shading every surface by where it
+ * faces and how far it is, and with `shadows` the two strongest (flames.ts lists them strongest first) cast shadows, found by marching
+ * the picture's own depth toward the fire. Its own pass because it is only rendered while a
+ * fire is lit (a branch in the main picture's shader still cost several ms when not taken), and
+ * half size because firelight is soft.
  */
-export function fieldLook(color: THREE.Node<'vec4'>, depth: THREE.Node<'float'>, camera: THREE.Camera): THREE.Node<'vec4'> {
+function firelightMap(depthTexture: THREE.TextureNode, camera: THREE.Camera, shadows: boolean) {
+  const projectionInverse = uniform(camera.projectionMatrixInverse)
+  const projection = uniform(camera.projectionMatrix)
+  const toView = uniform(camera.matrixWorldInverse)
+  const lens = camera as THREE.PerspectiveCamera
+  const near = uniform(lens.near), far = uniform(lens.far)
+  const map = rtt(Fn(() => {
+    const light = float(0).toVar()
+    light.assign(0)
+    const depth = depthTexture.sample(uv()).level(float(0)).x
+    If(depth.lessThan(0.99999), () => {
+      const view = getViewPosition(uv(), depth, projectionInverse)
+      // The surface's facing, from the depth alone (no normal target to read).
+      const facing = getNormalFromDepth(uv(), depthTexture.value as unknown as THREE.Node, projectionInverse)
+      const grain = interleavedGradientNoise(screenCoordinate.xy)
+      for (let i = 0; i < firelight.array.length; i++) {
+        const fire = fireAt(i)
+        If(fire.w.greaterThan(0), () => {
+          // Each fire flickers on its own beat, and its heart wanders a little, so its shadows dance.
+          const beat = time.mul(11).add(i * 2.4)
+          const flicker = sin(beat).mul(0.09).add(sin(beat.mul(2.3).add(1)).mul(0.06)).add(sin(beat.mul(0.37)).mul(0.08)).add(0.86)
+          const heart = fire.xyz.add(vec3(sin(beat.mul(0.9)), sin(beat.mul(1.3).add(2)), sin(beat.mul(1.1).add(4))).mul(0.025))
+          const toFire = toView.mul(vec4(heart, 1)).xyz.sub(view)
+          const away = toFire.length()
+          const reach = fire.w.sqrt().mul(4).add(0.6)
+          If(away.lessThan(reach), () => {
+            // Soft falloff, wrapped a little round the surface so nothing near a fire is ever black.
+            const fall = fire.w.mul(3.4).div(away.div(0.75).pow2().add(1)).mul(smoothstep(reach, reach.mul(0.4), away))
+            const wrap = clamp(dot(facing, toFire.div(away)).add(0.25).div(1.25), 0, 1)
+            const lightOn = float(1).toVar()
+            if (shadows && i < 2) {
+              // The fire's shadow: step from the surface toward the fire, and see whether the picture has something standing in the way.
+              const hidden = float(0).toVar()
+              // Only the first metre and a half toward the fire: the picture's depth knows what stands near a surface, and guesses badly across a room.
+              const span = min(away.mul(0.9), 1.5)
+              Loop(SHADOW_STEPS, ({ i: step }) => {
+                const at = view.add(toFire.div(away).mul(float(step).add(grain).div(SHADOW_STEPS).mul(span).add(0.03)))
+                const spot = getScreenPosition(at, projection)
+                const there = perspectiveDepthToViewZ(depthTexture.sample(spot).level(float(0)).x, near, far)
+                const gap = there.sub(at.z)
+                const inside = spot.x.greaterThan(0).and(spot.x.lessThan(1)).and(spot.y.greaterThan(0)).and(spot.y.lessThan(1))
+                hidden.assign(max(hidden, inside.select(smoothstep(0.02, 0.06, gap).mul(smoothstep(0.5, 0.3, gap)), 0)))
+              })
+              // A small flame (a candle) casts none: its own stick would shadow half its pool of light.
+              lightOn.assign(float(1).sub(hidden.mul(0.85).mul(smoothstep(0.12, 0.4, fire.w))))
+            }
+            light.addAssign(fall.mul(wrap).mul(lightOn).mul(flicker))
+          })
+        })
+      }
+    })
+    return vec4(light, 0, 0, 1)
+  })(), null, null, { type: THREE.HalfFloatType })
+  map.setResolutionScale(0.5)
+  const draw = map.updateBefore.bind(map)
+  map.updateBefore = (frame) => {
+    if (!fires.some((f) => f.w > 0)) return undefined
+    near.value = lens.near
+    far.value = lens.far
+    const done = draw(frame)
+    ;(map as typeof map & { onDraw?: (width: number, height: number) => void }).onDraw?.(map.renderTarget!.width, map.renderTarget!.height)
+    return done
+  }
+  return map as typeof map & { onDraw?: (width: number, height: number) => void }
+}
+
+/**
+ * What the field does to the picture (the post chain calls it on the lit scene colour): what has
+ * charred goes black, raggedly, its edge glowing while it still eats forward; what is wet goes
+ * darker; deep char that is still hot glows through its cracks; and fire lights the room
+ * (firelightMap) while the rest of it sinks a little. Nothing is read while nothing has burnt,
+ * is wet or is lit; one read a pixel while only char remains.
+ */
+export function fieldLook(color: THREE.Node<'vec4'>, depthTexture: THREE.TextureNode, camera: THREE.Camera, shadows: boolean): { color: THREE.Node<'vec4'>; dispose(): void } {
   const projectionInverse = uniform(camera.projectionMatrixInverse)
   const world = uniform(camera.matrixWorld)
-  return Fn(() => {
+  const depth = depthTexture.x
+  const firelit = firelightMap(depthTexture, camera, shadows)
+  // One texel of the firelight map, in uv (set as the map is drawn).
+  const texel = uniform(new THREE.Vector2(1 / 1280, 1 / 800))
+  firelit.onDraw = (w, h) => texel.value.set(1 / w, 1 / h)
+  const out = Fn(() => {
     const out = vec4(color).toVar()
-    If(look.active.greaterThan(0.5).and(depth.lessThan(0.99999)), () => {
+    const glare = fireAt(0).w.add(fireAt(1).w).add(fireAt(2).w).add(fireAt(3).w)
+    If(look.active.greaterThan(0.5).or(glare.greaterThan(0)).and(depth.lessThan(0.99999)), () => {
       const view = getViewPosition(uv(), depth, projectionInverse)
       const p = world.mul(vec4(view, 1)).xyz
+      const toEye = world.mul(vec4(0, 0, 0, 1)).xyz.sub(p).normalize()
+      // Each is given its value here, at the top: a variable first met inside a branch would belong to that branch.
+      const color = vec3(0).toVar(), lit = vec3(0).toVar(), T = float(0).toVar(), char = float(0).toVar(), edge = float(0).toVar()
+      color.assign(out.rgb)
+      T.assign(0)
+      char.assign(0)
+      edge.assign(0)
       // Only inside the field's box: past it, a read would be the edge cell's, metres away.
       const g = p.sub(look.origin).div(look.cell)
-      If(min(g.x, min(g.y, g.z)).greaterThanEqual(0).and(g.x.lessThanEqual(NX)).and(g.y.lessThanEqual(NY)).and(g.z.lessThanEqual(NZ)), () => {
-        const toEye = world.mul(vec4(0, 0, 0, 1)).xyz.sub(p).normalize()
+      If(look.active.greaterThan(0.5).and(min(g.x, min(g.y, g.z)).greaterThanEqual(0)).and(g.x.lessThanEqual(NX)).and(g.y.lessThanEqual(NY)).and(g.z.lessThanEqual(NZ)), () => {
         // Char and wet are the surface's own, read where it is; while the field rests, that is the only read.
         const own = fieldAt(look.field, p.sub(toEye.mul(look.cell.x.mul(0.25))), look.origin, look.cell)
-        const color = out.rgb.toVar()
-        const charred = color.mul(mix(vec3(1), vec3(0.2, 0.16, 0.13), own.b.mul(0.92)))
-        out.assign(vec4(charred.mul(float(1).sub(own.g.mul(0.18))), out.a))
+        char.assign(own.b)
+        const wet = own.g.toVar()
         If(look.hot.greaterThan(0.5), () => {
           // Heat is the air's, a little in front of the surface, where its flames are.
           const s = fieldAt(look.field, p.add(toEye.mul(look.cell.x.mul(0.6))), look.origin, look.cell)
-          const T = s.r, wet = max(s.g, own.g), char = max(s.b, own.b)
-          const t = look.time
-          const flicker = sin(t.mul(23).add(p.x.mul(7))).mul(0.08).add(sin(t.mul(37).add(p.z.mul(5))).mul(0.06)).add(0.86)
-          // Char is a warm charcoal over the material (its grain still shows); soot on walls is the same, lighter.
-          const base = color.mul(mix(vec3(1), vec3(0.2, 0.16, 0.13), char.mul(0.92))).mul(float(1).sub(wet.mul(0.18)))
-          // Firelight: the hottest air round the surface, a little above and to each side, so a fire lights the floor and things beside it too.
-          const reach = look.cell.x.mul(2.2)
-          const around = (dx: number, dz: number) => fieldAt(look.field, p.add(vec3(reach.mul(dx), reach.mul(0.6), reach.mul(dz))), look.origin, look.cell).r
-          const near = max(max(around(1, 0), around(-1, 0)), max(around(0, 1), around(0, -1))).mul(0.7)
-          const warmth = smoothstep(30, 500, max(T, near)).mul(flicker)
-          const lit = base.add(color.mul(vec3(1.0, 0.42, 0.12)).mul(warmth.mul(0.75)))
-          // Embers: on deeply charred surfaces that are still hot, a network of glowing cracks between charcoal plates.
-          const ember = vec3(0).toVar()
-          If(char.greaterThan(0.45), () => {
-            const cells = mx_worley_noise_vec2(p.mul(14).add(vec3(0, t.mul(0.05), 0)))
-            const crack = smoothstep(0.05, 0.0, cells.y.sub(cells.x))
-            const pulse = mx_noise_float(p.mul(4).add(vec3(t.mul(0.5)))).mul(0.35).add(0.75)
-            ember.assign(glowOf(max(T, own.r)).mul(smoothstep(0.5, 0.95, char)).mul(smoothstep(450, 650, max(T, own.r))).mul(crack).mul(pulse).mul(1.6))
-          })
-          out.assign(vec4(lit.add(ember), out.a))
+          T.assign(max(s.r, own.r))
+          wet.assign(max(wet, s.g))
+          char.assign(max(char, s.b))
         })
+        // Char eats into a surface raggedly: scorched patches first, then charcoal all over (the grain still shows a little).
+        const tooth = drift(p.x.mul(0.9).add(p.y.mul(0.37)), p.z.mul(0.9).add(p.y.mul(0.53))).x.mul(0.3).add(drift(p.x.mul(3.1).sub(p.y.mul(1.3)), p.z.mul(3.1).add(p.y.mul(0.7))).y.mul(0.2)).add(0.5)
+        const black = smoothstep(tooth.mul(0.55), tooth.mul(0.55).add(0.22), char)
+        color.assign(mix(color, color.mul(vec3(0.06, 0.047, 0.04)).add(vec3(0.004, 0.003, 0.003)), black.mul(0.96)).mul(float(1).sub(wet.mul(0.18))))
+        // Where the char is still eating forward and the air is hot, its edge glows like burning paper.
+        edge.assign(black.mul(float(1).sub(black)).mul(4).mul(smoothstep(150, 450, T)))
       })
+      lit.assign(color)
+      If(glare.greaterThan(0), () => {
+        // The eye settles on the fire: the rest of the room sinks a little, so the firelight reads in daylight too.
+        lit.mulAssign(float(1).sub(smoothstep(0, 2.2, glare).mul(0.5)))
+        // Four reads a texel apart: the shadows' grain melts into soft firelight.
+        const tap = (x: number, y: number) => firelit.sample(uv().add(vec2(x, y).mul(texel))).level(float(0)).x
+        const glow = tap(-1, -1).add(tap(1, -1)).add(tap(-1, 1)).add(tap(1, 1)).mul(0.25)
+        // The lit colour stands in for the surface's own (there is no albedo to read), with a little of the fire's on top.
+        lit.addAssign(color.mul(vec3(1.0, 0.5, 0.16)).add(vec3(0.05, 0.016, 0.003)).mul(glow))
+      })
+      lit.addAssign(vec3(1.0, 0.32, 0.04).mul(edge.mul(1.3)))
+      out.assign(vec4(lit, out.a))
     })
     // Lightning: the whole room goes cold white for a moment.
     return vec4(out.rgb.add(vec3(0.75, 0.82, 1.0).mul(look.flash.mul(0.9))), out.a)
   })()
+  return { color: out, dispose: () => firelit.dispose() }
 }
