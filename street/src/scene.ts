@@ -6,8 +6,8 @@ import type { WorldApi } from '../../home/src/engine/api.ts'
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import { registerGadget } from '../../home/src/engine/gadgets.ts'
 import { registerMaterial, type Material } from '../../home/src/engine/materials.ts'
-import type { PartSpec, ToySpec } from '../../home/src/engine/toy.ts'
-import { GRADE, HALF_L, HALF_W, KERB, TRENCH, heightAt, onStreet } from './ground.ts'
+import { piecesShape, type PartSpec, type Piece, type ToySpec } from '../../home/src/engine/toy.ts'
+import { GRADE, HALF_L, HALF_W, KERB, ROAD, TRENCH, heightAt, onStreet } from './ground.ts'
 import { HALF_H, HOP, MASS, RADIUS, REACH, standing, steer, NORMAL_UP } from './walk.ts'
 
 const TILT = Math.atan(GRADE)
@@ -80,28 +80,74 @@ export function registerBlock() {
 }
 
 const frame = { at: [0, 0, 0] as Vec3, yaw: 0, tilt: TILT }
-const slab = (id: string, half: Vec3, at: Vec3, paint?: string): PartSpec => ({ id, shape: { kind: 'box', half }, material: 'asphalt', at, ...(paint ? { paint } : {}) })
+const ASPHALT = '#6d6e72', PAVEMENT = '#c9c3b6', KERBSTONE = '#e4dfd3', DUG = '#8a7f6f'
+const slab = (id: string, half: Vec3, at: Vec3, paint: string, hidden = false): PartSpec => ({ id, shape: { kind: 'box', half }, material: 'asphalt', at, paint, ...(hidden ? { hidden } : {}) })
 
 /**
- * The road above and below the trench, the trench's floor and sides, the kerbs and the end walls: parts in
- * the street's own flat frame, tilted as one. A part is at most 20 m from its middle (toy.ts), so the kerbs
- * are laid in two lengths.
+ * The street's ground above and below the trench (a roadway between two pavements, each edged with a line of
+ * kerbstone), the trench's floor, and a wall across each end that is there but not drawn. Parts in the street's
+ * own flat frame, tilted as one. Under a hand of road is three metres of earth, so the trench has walls of it;
+ * its sides are the houses' own footings (houses.ts).
  */
 export const STREET: ToySpec = {
   id: 'street', label: 'The street', frame, gadgets: [], wires: [], inputs: {},
   parts: [
-    // The road is three metres thick, so the trench has walls of it.
-    slab('road-top', [HALF_W, 1.5, (HALF_L + TRENCH.from) / 2], [0, -1.5, (TRENCH.from - HALF_L) / 2]),
-    slab('road-bottom', [HALF_W, 1.5, (HALF_L - TRENCH.to) / 2], [0, -1.5, (TRENCH.to + HALF_L) / 2]),
-    slab('trench-floor', [HALF_W, 0.4, (TRENCH.to - TRENCH.from) / 2], [0, -TRENCH.depth - 0.4, (TRENCH.from + TRENCH.to) / 2], '#7d786f'),
-    slab('trench-west', [KERB, TRENCH.depth / 2, (TRENCH.to - TRENCH.from) / 2], [-HALF_W, -TRENCH.depth / 2, (TRENCH.from + TRENCH.to) / 2], '#7d786f'),
-    slab('trench-east', [KERB, TRENCH.depth / 2, (TRENCH.to - TRENCH.from) / 2], [HALF_W, -TRENCH.depth / 2, (TRENCH.from + TRENCH.to) / 2], '#7d786f'),
-    ...[-1, 1].flatMap((end) => [
-      slab(`kerb-west${end}`, [KERB, 0.6, HALF_L / 2], [-HALF_W, 0.6, (end * HALF_L) / 2], '#d9d2c3'),
-      slab(`kerb-east${end}`, [KERB, 0.6, HALF_L / 2], [HALF_W, 0.6, (end * HALF_L) / 2], '#d9d2c3'),
-      slab(`end${end}`, [HALF_W, 1.5, KERB], [0, 1.5, end * HALF_L], '#d9d2c3'),
+    ...([['top', (HALF_L + TRENCH.from) / 2, (TRENCH.from - HALF_L) / 2], ['bottom', (HALF_L - TRENCH.to) / 2, (TRENCH.to + HALF_L) / 2]] as const).flatMap(([name, half, at]) => [
+      slab(`road-${name}`, [ROAD, 0.12, half], [0, -0.12, at], ASPHALT),
+      ...[-1, 1].flatMap((side) => [
+        slab(`kerb-${name}${side}`, [0.09, 0.12, half], [side * (ROAD + 0.09), -0.12, at], KERBSTONE),
+        slab(`pavement-${name}${side}`, [(HALF_W - ROAD - 0.18) / 2, 0.12, half], [side * (HALF_W + ROAD + 0.18) / 2, -0.12, at], PAVEMENT),
+      ]),
+      slab(`earth-${name}`, [HALF_W, 1.38, half], [0, -1.62, at], DUG),
     ]),
+    slab('trench-floor', [HALF_W, 0.4, (TRENCH.to - TRENCH.from) / 2], [0, -TRENCH.depth - 0.4, (TRENCH.from + TRENCH.to) / 2], DUG),
+    ...[-1, 1].map((end) => slab(`end${end}`, [HALF_W, 4, KERB], [0, 4, end * HALF_L], ASPHALT, true)),
   ],
+}
+
+/** A thing that stands on the street, upright whatever the hill does: `at` is across and along the street, its pieces rise from the ground there. */
+const stood = (id: string, across: number, along: number, material: string, pieces: Piece[]): PartSpec => ({ id, shape: piecesShape(pieces), pieces, material, at: onStreet(across, along) })
+const can = (radius: number, halfHeight: number, at: Vec3, paint: string, turn?: Vec3): Piece => ({ shape: { kind: 'cylinder', radius, halfHeight }, at, paint, ...(turn ? { turn } : {}) })
+const block = (half: Vec3, at: Vec3, paint: string, turn?: Vec3): Piece => ({ shape: { kind: 'box', half }, at, paint, ...(turn ? { turn } : {}) })
+const ball = (radius: number, at: Vec3, paint: string): Piece => ({ shape: { kind: 'sphere', radius }, at, paint })
+const IRON = '#2c3438', LEAVES = ['#6fa35a', '#5c954f', '#80b36a', '#679d57']
+
+/** A street lamp on the kerb, its arm out over the road (`side` is which pavement). */
+const lamp = (id: string, side: number, along: number) => stood(id, side * (ROAD + 0.5), along, 'steel', [
+  can(0.13, 0.3, [0, 0.3, 0], IRON), can(0.06, 2.5, [0, 3.1, 0], IRON),
+  block([0.55, 0.04, 0.04], [-side * 0.5, 5.55, 0], IRON), block([0.24, 0.06, 0.13], [-side * 0.95, 5.47, 0], IRON), block([0.19, 0.02, 0.09], [-side * 0.95, 5.4, 0], '#fff1c2'),
+])
+/** A street tree: a trunk and a crown of four balls of leaves. */
+const tree = (id: string, side: number, along: number, n: number) => stood(id, side * (ROAD + 0.7), along, 'maple', [
+  can(0.1, 1.15, [0, 1.15, 0], '#7b5b3d'),
+  ball(0.95, [0, 2.95, 0], LEAVES[n % 4]), ball(0.72, [0.5, 2.6, 0.35], LEAVES[(n + 1) % 4]), ball(0.74, [-0.45, 2.7, -0.3], LEAVES[(n + 2) % 4]), ball(0.6, [0.1, 3.6, 0.1], LEAVES[(n + 3) % 4]),
+])
+/** A striped barrier across the road, where the block ends. */
+const barrier = (id: string, across: number, along: number) => stood(id, across, along, 'maple', [
+  ...[-2, -1, 0, 1, 2].map((i) => block([0.22, 0.1, 0.03], [i * 0.44, 0.92, 0], i % 2 ? '#fbf6ea' : '#e8752c')),
+  ...[-1, 1].flatMap((x) => [block([0.03, 0.55, 0.03], [x * 0.9, 0.5, 0.2], '#fbf6ea', [0.38, 0, 0]), block([0.03, 0.55, 0.03], [x * 0.9, 0.5, -0.2], '#fbf6ea', [-0.38, 0, 0])]),
+])
+
+/**
+ * What stands on the pavements and at the ends: lamps, trees, a hydrant, a letter box, and barriers where the
+ * block stops. Still parts, upright, each made of pieces. The barriers stand on the unseen end walls, past
+ * where a walker's own rule stops it; the rest a walker meets as it meets a made thing.
+ */
+export const FURNITURE: ToySpec = {
+  id: 'furniture', label: 'Lamps, trees and barriers', frame: { at: [0, 0, 0], yaw: 0, tilt: 0 }, gadgets: [], wires: [], inputs: {},
+  parts: [
+    lamp('lamp-1', -1, -24), lamp('lamp-2', 1, -9), lamp('lamp-3', -1, 14.5), lamp('lamp-4', 1, 26),
+    tree('tree-1', 1, -19, 0), tree('tree-2', -1, -13, 1), tree('tree-3', 1, -1, 2), tree('tree-4', -1, 1.5, 3), tree('tree-5', 1, 13, 1), tree('tree-6', -1, 21, 0),
+    stood('hydrant', -(ROAD + 0.5), -17.5, 'steel', [can(0.1, 0.28, [0, 0.28, 0], '#f3efe4'), ball(0.11, [0, 0.58, 0], '#d7a21a'), can(0.05, 0.16, [0, 0.36, 0], '#d7a21a', [Math.PI / 2, 0, 0]), can(0.13, 0.03, [0, 0.03, 0], '#d7a21a')]),
+    stood('letter-box', HALF_W - 0.75, 19.5, 'steel', [block([0.22, 0.3, 0.24], [0, 0.85, 0], '#2f528f'), can(0.24, 0.22, [0, 1.15, 0], '#2f528f', [0, 0, Math.PI / 2]), ...[-1, 1].flatMap((x) => [-1, 1].map((z) => block([0.025, 0.28, 0.025], [x * 0.17, 0.28, z * 0.19], '#2f528f')))]),
+    ...[-1, 1].flatMap((end) => [-5, -2.5, 0, 2.5, 5].map((across, i) => barrier(`barrier${end}-${i}`, across, end * (HALF_L + 0.05)))),
+  ],
+}
+
+/** Two steel bins on the pavements that anything can knock over and send down the hill. */
+export const BINS: ToySpec = {
+  id: 'bins', label: 'Bins', frame, gadgets: [], wires: [], inputs: {},
+  parts: [[1, -11.5], [-1, 17]].map(([side, along], i) => ({ id: `bin-${i + 1}`, shape: { kind: 'cylinder', radius: 0.27, halfHeight: 0.42 } as const, material: 'steel', paint: '#3f6b58', motion: 'dynamic' as const, mass: 9, at: [side * (HALF_W - 0.85), 0.43, along] as Vec3 })),
 }
 
 /** Walls of maple crates across the street above the trench, and rubber balls waiting at its top. */

@@ -1,6 +1,6 @@
-// The block's ground (#118): one plane falling towards +z with a trench cut across it, kerbs
-// along its sides and a wall across each end. scene.ts builds the street's toy from these numbers; the page predicts its
-// own walker on them. Metres, y up.
+// The block's ground (#118): one plane falling towards +z with a trench cut across it, house
+// fronts along its sides (houses.ts) and a wall nobody sees across each end. scene.ts builds the
+// street's toy from these numbers; the page predicts its own walker on them. Metres, y up.
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 
 /** Rise over run: 14 in 100, about 8 degrees. */
@@ -8,6 +8,8 @@ export const GRADE = 0.14
 /** Half the street's width (x) and half its length along the ground (z). */
 export const HALF_W = 8
 export const HALF_L = 30
+/** Half the roadway's width: from there to the fronts is pavement, level with the road (a walker's own rule knows one height across the street). */
+export const ROAD = 5
 export const KERB = 0.25
 
 const ANGLE = Math.atan(GRADE)

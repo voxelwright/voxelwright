@@ -1,12 +1,15 @@
-# The street (spike for #118)
+# The street (#118)
 
-A world process that owns one simulation, and a page that draws it. It answers three
-questions before any of the home's engine is moved: can the solver run a shared world
-outside a page, does your own walker feel right over a network, and does the transport
-reach past this machine. It is a spike: plain shapes, no sign-in, synthetic residents.
+A world process that owns one simulation, and a page that draws it: one block of a hill
+street in San Francisco, shared by everyone on it. It began as a spike that answered three
+questions: can the solver run a shared world outside a page, does your own walker feel
+right over a network, and does the transport reach past this machine. There is no sign-in
+and the residents are synthetic.
 
-- `src/scene.ts`: the block as the engine's own data. The street, crates and balls are toys; a
-  resident is a toy with one upright part and a `walker` gadget whose knobs are the seat's input.
+- `src/scene.ts`: the block as the engine's own data. The street, its lamps and trees, crates,
+  balls and bins are toys; a resident is a toy with one upright part and a `walker` gadget whose
+  knobs are the seat's input.
+- `src/houses.ts`: the houses along it, each a toy of one still part made of pieces.
 - `src/block.ts`: the engine's `World` (`home/src/engine/world.ts`) built from those toys, with
   a seat for each resident.
 - `src/server.ts`: steps it 60 times a second and gives each WebTransport session a seat.
@@ -25,6 +28,7 @@ reach past this machine. It is a spike: plain shapes, no sign-in, synthetic resi
 - `src/puppet.ts`: a solver core that solves nothing: each body is where it was last put.
 - `client/`: the page. It runs the engine's `World` too, over the puppet, so it draws the same
   toys the world process built (their materials, paint and shadows), posed from the wire.
+  `client/place.ts` draws the land round the block, `client/figure.ts` the residents.
 
 ## Play it
 
@@ -66,6 +70,14 @@ its sky), so it shares the home's quality tiers: `?q=low` asks for the cheapest 
 `?post=0` leaves the post effects out, `?sky=0` the sky, and `?lens=0.5` adds the home's
 miniature blur for a picture. Residents are drawn as the home's felt villagers
 (`client/figure.ts`) over the capsule the world simulates.
+
+The block is a place: a roadway between two pavements, sixteen painted houses stepping
+down the hill (`src/houses.ts`, each a toy of one still part made of pieces), lamps, trees,
+two bins that can be knocked over, and barriers where it ends (`src/scene.ts`). All of that
+is the world's data, so the world process, every page and an agent hold the same street.
+Round it the page alone draws the land (`client/place.ts`): the hill carried on to a crest
+and down to the bay, streets and rows of the same houses along them, a red bridge and the
+hills across the water. Nothing can go there yet. `?land=0` leaves it out.
 
 ## Checks
 

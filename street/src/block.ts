@@ -6,7 +6,8 @@ import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt, loadJolt } from '../../home/src/engine/jolt.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
-import { STREET, cargo, registerBlock, resident } from './scene.ts'
+import { HOUSES } from './houses.ts'
+import { BINS, FURNITURE, STREET, cargo, registerBlock, resident } from './scene.ts'
 import { TICK, type Input } from './walk.ts'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -74,7 +75,10 @@ export class Block {
     const rules = this.world.setRules({ maxSpeed: 25, drag: 0 }, 'code')
     if (!rules.ok) throw new Error(rules.reason)
     this.build(STREET)
+    for (const house of HOUSES) this.build(house)
+    this.build(FURNITURE)
     this.build(cargo(options.crates, options.balls))
+    this.build(BINS)
     this.dir = options.dir && join(options.dir, 'made')
     if (this.dir) this.load(this.dir)
   }

@@ -15,6 +15,7 @@ import rendererPlugin from '../../home/src/plugins/renderer'
 import { SUN_DIRECTION } from '../../home/src/sky'
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import { World } from '../../home/src/engine/world.ts'
+import { place } from './place.ts'
 import { Puppet } from '../src/puppet.ts'
 import { resident, type Resident } from './figure.ts'
 import { registerBlock } from '../src/scene.ts'
@@ -39,22 +40,24 @@ const stage = await new Promise<Stage>((resolve) => {
 if (params.get('post') !== '0') load(postfx)
 if (params.get('sky') !== '0') load(atmosphere)
 const { renderer, scene, camera } = stage
-camera.far = 220
+camera.far = 1200
 // A tall screen (a phone held upright) sees a narrow slice at the same lens, so it gets a wider one.
 const lens = () => { camera.fov = innerWidth < innerHeight ? 72 : 50; camera.updateProjectionMatrix() }
 lens()
 addEventListener('resize', lens)
-// The sun stands where the sky says it does, and its shadow box goes with whoever the view follows.
-const SHADOW = 20
-const sun = new THREE.DirectionalLight('#ffe2b8', 3.4)
+// The sun stands where the sky says it does. Its shadow box holds the whole block and never moves, so no shadow starts or stops as you walk.
+const SHADOW = 40
+const sun = new THREE.DirectionalLight('#ffe2b8', 3.1)
 sun.castShadow = true
 sun.shadow.mapSize.set(stage.quality === 'low' ? 1024 : 2048, stage.quality === 'low' ? 1024 : 2048)
 sun.shadow.bias = -0.0004
 sun.shadow.normalBias = 0.03
 sun.shadow.radius = 3
-Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 90 })
-scene.add(sun, sun.target, new THREE.HemisphereLight('#cfe4ff', '#b9a98a', 0.9))
-const sunAt = (x: number, y: number, z: number) => { sun.target.position.set(x, y, z); sun.position.set(x, y, z).addScaledVector(SUN_DIRECTION, 45) }
+Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 170 })
+sun.position.copy(SUN_DIRECTION).multiplyScalar(85)
+scene.add(sun, sun.target, new THREE.HemisphereLight('#e3ecfb', '#c9b89a', 1.7))
+// The hill, the bay and the streets round the block: `?land=0` leaves them out.
+const land = params.get('land') !== '0' ? place(scene) : null
 
 // ---- the world as this page holds it: the engine's World, posed and never stepped
 registerBlock()
@@ -330,8 +333,8 @@ setInterval(() => send(packPing(performance.now())), 250)
 const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), head = new THREE.Vector3()
 /** How much the lens blurs what is far from where the view looks: the home's miniature look, `?lens=0.5` for a picture. Walking about, everything is sharp. */
 const LENS = Number(params.get('lens') ?? 0)
-/** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand. */
-const BOOM = 7, INSIDE_X = HALF_W - 0.7, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) - 0.7
+/** How far behind you the camera rides, how much of that it has now (1 is all of it), and how far from the street's middle it may stand: short of the fronts, and out onto the street across each end. */
+const BOOM = 7, INSIDE_X = HALF_W - 0.7, INSIDE_Z = HALF_L * Math.cos(Math.atan(GRADE)) + 2
 let boom = 1
 /** A camera put somewhere by hand, for pictures (test/gallery.ts); null follows your walker. */
 let fixed: { from: Vec3; to: Vec3 } | null = null
@@ -379,7 +382,6 @@ function frame(now: number) {
   if (fixed) {
     camera.position.set(...fixed.from)
     camera.lookAt(...fixed.to)
-    sunAt(...fixed.to)
     focusOn(Math.hypot(fixed.from[0] - fixed.to[0], fixed.from[1] - fixed.to[1], fixed.from[2] - fixed.to[2]), 0.3, LENS)
   } else if (mine) {
     // The camera rides seven metres behind you, and stays inside the street: where a wall is nearer than that it comes in closer and lower, over your shoulder.
@@ -388,8 +390,9 @@ function frame(now: number) {
     const fits = Math.max(0.3, Math.min(1, room(mine.shown.x, bx, INSIDE_X), room(mine.shown.z, bz, INSIDE_Z)))
     boom = fits < boom ? fits : boom + (fits - boom) * (1 - Math.exp(-dt * 5))
     camera.position.set(mine.shown.x + bx * boom, mine.shown.y + 1.7 + 1.7 * boom, mine.shown.z + bz * boom)
-    camera.lookAt(mine.shown.x, mine.shown.y + 0.8 + 0.4 * (1 - boom), mine.shown.z)
-    sunAt(mine.shown.x, mine.shown.y, mine.shown.z)
+    // It looks a little past you, so the street ahead and the sky over it are in the picture.
+    const past = (4 * boom) / BOOM
+    camera.lookAt(mine.shown.x - bx * past, mine.shown.y + 1 + 0.2 * (1 - boom), mine.shown.z - bz * past)
     focusOn(camera.position.distanceTo(mine.shown), 0.3, LENS)
   }
   // The stage draws after this; names are placed with the camera as it now stands.
@@ -423,7 +426,7 @@ const spread = (values: number[], digits = 1) => {
 }
 function stats() {
   const due = ticks.first ? (ticks.last - ticks.first) / snapEvery + 1 : 0
-  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: stage.backend, quality: stage.quality, gpuMs: spread(stage.timing.gpu.slice(-300), 2), cpuMs: spread(stage.timing.cpu.slice(-300), 2), tier: stage.timing.tierReason }
+  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: stage.backend, quality: stage.quality, landTriangles: land?.triangles ?? 0, gpuMs: spread(stage.timing.gpu.slice(-300), 2), cpuMs: spread(stage.timing.cpu.slice(-300), 2), tier: stage.timing.tierReason }
 }
 root.on('village/frame', () => frame(performance.now()))
 
