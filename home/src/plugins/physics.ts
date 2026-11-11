@@ -9,7 +9,7 @@ declare module 'cordis' {
     'village/physics-ask'(request: PhysicsAsk): void
   }
 }
-export interface PhysicsAsk { text: string; person: string; /** The router said the line asks to build a toy. */ toy?: boolean; answer?: Promise<Asked> }
+export interface PhysicsAsk { text: string; person: string; /** What the router said the line asks to be made: a toy from the kit, or a mechanic the kit does not have (#106). */ make?: 'toy' | 'mechanic'; answer?: Promise<Asked> }
 
 /**
  * The physics world (#74): every thing in the home a body, toys built from parts, materials and

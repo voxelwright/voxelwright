@@ -3,6 +3,8 @@
 // It is served from BOX_PATH with its own CSP, so the home's CSP needs no exception
 // for it (a srcdoc frame would inherit the home's policy instead).
 
+import { sealedDocument, sealedPolicy } from '../sealed'
+
 /** The most bytes (typed-array buffers plus bitmap pixels) one result may carry. Checked in the relay and again by the page. */
 export const MAX_RESULT_BYTES = 64 * 1024 * 1024
 
@@ -88,7 +90,7 @@ addEventListener('message', function init(e) {
 })
 `
 
-/** The relay document's policy: nothing but its own nonced script and the blob worker it starts. */
-export const boxPolicy = (nonce: string) => `default-src 'none'; script-src 'nonce-${nonce}' blob:; worker-src blob:; frame-ancestors 'self'`
+/** The relay document's policy: the sealed frame's, with nothing added. */
+export const boxPolicy = (nonce: string) => sealedPolicy(nonce)
 /** The relay document, its script carrying this response's nonce. */
-export const boxDocument = (nonce: string) => `<!doctype html><meta charset="utf-8"><script nonce="${nonce}">${RELAY}</script>`
+export const boxDocument = (nonce: string) => sealedDocument(nonce, RELAY)

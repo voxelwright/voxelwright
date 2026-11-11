@@ -1,6 +1,7 @@
 // A toy made from a sentence (#88), on trial until the person decides, as furnishing does it:
 // Keep, Undo or Try another, on a paper tag over the toy. It is built all at once. Undo takes
-// that toy out and nothing else: rules, fire, other toys and what it pushed stay as they are. A
+// that toy out and nothing else: rules, fire, other toys and what it pushed stay as they are (a
+// toy that carries a mechanic, #106, also puts back the things its code moved: see Spirit). A
 // new toy (another ask, or Try another) is built before the one on trial is taken out, so when it
 // cannot be built the world is exactly as it was. Kept toys stay for this visit only (a reload
 // clears them), at most MAX_KEPT, one to a surface. The tag follows the toy only while shown.
@@ -11,8 +12,14 @@ import type { ToySpec } from '../engine/toy'
 import { HAND, tagCss } from '../build/sketch'
 
 export type Built = { ok: true; id: string } | { ok: false; reason: string }
+/**
+ * What a toy carries besides its parts (#106: an invented mechanic's sandbox). `end` is called once,
+ * after the toy is out of the world or as the page unloads: `undone` when the toy was taken back
+ * (Undo, or another replaced it), so the things it moved itself go back too.
+ */
+export interface Spirit { end(undone: boolean): void }
 /** `on` is the surface's label: one toy to a surface. */
-interface Trial { toy: ToySpec; text: string; person: string; note: string; on: string; height: number }
+interface Trial { toy: ToySpec; text: string; person: string; note: string; on: string; height: number; spirit?: Spirit }
 
 /** Kept toys at most, for the visit: each costs every step while it exists. */
 export const MAX_KEPT = 3
@@ -21,17 +28,21 @@ const AGAIN = ' (another take: a clearly different design)'
 
 export class MadeToys {
   private trial: Trial | null = null
-  private kept: { id: string; on: string }[] = []
+  private kept: { id: string; on: string; spirit?: Spirit }[] = []
   private count = 0
   private tag: HTMLDivElement | null = null
   private busy = false
   private readonly at = new THREE.Vector3()
   /** Set by the ask path: asks again for another take of `text`, and says how it went. */
-  again?: (text: string, person: string) => Promise<{ ok: boolean }>
+  again?: (text: string, person: string, make: 'toy' | 'mechanic') => Promise<{ ok: boolean }>
 
   constructor(private ctx: Context, private world: World) {
     ctx.on('village/frame', () => this.follow())
     ctx.effect(() => () => this.close(), 'made toy tag')
+    // The world goes with the plugin; what toys carry besides parts (sandboxes) must be ended here.
+    ctx.effect(() => () => {
+      for (const t of [this.trial, ...this.kept]) t?.spirit?.end(false)
+    }, 'made toy spirits')
   }
 
   /** A fresh id for the next made toy. */
@@ -49,7 +60,7 @@ export class MadeToys {
    * Builds a checked toy, all at once. It goes in before the toy on trial (not kept) comes out, so a
    * toy that cannot be built leaves everything as it was, the one on trial included.
    */
-  build(toy: ToySpec, asked: { text: string; person: string; note: string; on: string; height: number }): Built {
+  build(toy: ToySpec, asked: { text: string; person: string; note: string; on: string; height: number; spirit?: Spirit }): Built {
     const why = this.blocked(asked.on)
     if (why) return { ok: false, reason: why }
     try {
@@ -58,7 +69,7 @@ export class MadeToys {
       return { ok: false, reason: plainReason(error) }
     }
     // Added and taken out in the same task: no step runs between, so the two never meet.
-    if (this.trial) this.world.removeToy(this.trial.toy.id)
+    if (this.trial) this.take(this.trial)
     this.trial = { toy, ...asked }
     this.show()
     return { ok: true, id: toy.id }
@@ -66,7 +77,7 @@ export class MadeToys {
 
   keep() {
     if (!this.trial) return false
-    this.kept.push({ id: this.trial.toy.id, on: this.trial.on })
+    this.kept.push({ id: this.trial.toy.id, on: this.trial.on, spirit: this.trial.spirit })
     this.trial = null
     this.close()
     return true
@@ -74,10 +85,31 @@ export class MadeToys {
 
   undo() {
     if (!this.trial) return false
-    this.world.removeToy(this.trial.toy.id)
+    this.take(this.trial)
     this.trial = null
     this.close()
     return true
+  }
+
+  /** A trial's toy out of the world, and then what it carried ended. Each in its own try: neither may keep the other, or the tag, from going. */
+  private take(trial: Trial) {
+    try {
+      this.world.removeToy(trial.toy.id)
+    } catch (error) {
+      console.error('made: a toy did not come out cleanly', error)
+    }
+    try {
+      trial.spirit?.end(true)
+    } catch (error) {
+      console.error('made: what a toy carried did not end cleanly', error)
+    }
+  }
+
+  /** Says something new on the tag of the toy on trial (an invented mechanic that stopped). */
+  say(id: string, note: string) {
+    if (this.trial?.toy.id !== id) return
+    this.trial.note = note
+    this.render()
   }
 
   /** Try another: the toy you have stays until the new one is built. */
@@ -87,7 +119,7 @@ export class MadeToys {
     this.busy = true
     this.hint('Making another…')
     try {
-      const r = await this.again(trial.text.replace(AGAIN, '').slice(0, 300 - AGAIN.length) + AGAIN, trial.person)
+      const r = await this.again(trial.text.replace(AGAIN, '').slice(0, 300 - AGAIN.length) + AGAIN, trial.person, trial.spirit ? 'mechanic' : 'toy')
       if (this.trial === trial) this.hint(r.ok ? trial.note : "Another one didn't come out, so the one you have is still here.")
       return r
     } finally {

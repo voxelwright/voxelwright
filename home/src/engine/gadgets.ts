@@ -186,6 +186,10 @@ registerGadget({
 })
 
 const BUILT_IN = new Map(registry)
+/** Takes out a kind added at runtime (#106: an invented one, undone). False for one of the kit above, or one that is not there. */
+export function unregisterGadget(kind: string) {
+  return !BUILT_IN.has(kind) && registry.delete(kind)
+}
 /** Drops every kind added at runtime, and puts back any built-in one replaced (the plugin unloading). */
 export function resetGadgets() {
   registry.clear()

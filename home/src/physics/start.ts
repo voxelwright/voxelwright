@@ -16,8 +16,9 @@ import { Flames } from '../engine/flames'
 import { PRESETS, registerPreset, registerRule, resetRules, type Rules } from '../engine/rules'
 import { registerMaterial, resetMaterials } from '../engine/materials'
 import { gadgetKinds, registerGadget, resetGadgets } from '../engine/gadgets'
-import { ask, askedSoFar, type Making } from './ask'
+import { ask, askedSoFar, type AskAs, type Making } from './ask'
 import { MadeToys } from './made'
+import { mechanics } from './invent'
 import { surfacesFor } from './surfaces'
 import { homeBodies } from './home'
 import { house } from '../build/house'
@@ -257,14 +258,14 @@ export async function start(ctx: Context, gone: () => boolean) {
   // Toys made from a sentence (#88): built on a surface offered for the person, on trial until kept.
   const made = new MadeToys(ctx, world)
   const making: Making = { surfaces: (person) => surfacesFor(ctx.stage.scene, person), made }
-  made.again = async (text, person) => {
-    const r = await ask(world, text, person, making, { retry: true })
+  made.again = async (text, person, make) => {
+    const r = await ask(world, text, person, making, { retry: true, make })
     return { ok: r.ok && Boolean(r.toy) }
   }
 
   // A notepad line about how things move (src/plugins/talk.ts routes it): asked here, said back there.
   ctx.on('village/physics-ask', (request) => {
-    request.answer = ask(world, request.text, request.person, making, { toy: request.toy })
+    request.answer = ask(world, request.text, request.person, making, { make: request.make })
   })
 
   const api = {
@@ -275,7 +276,9 @@ export async function start(ctx: Context, gone: () => boolean) {
     setRules: (raw: unknown) => world.setRules(raw, 'code'),
     preset: (name: string) => world.preset(name),
     presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.label])),
-    ask: (text: string, as?: { toy?: boolean }) => ask(world, text, undefined, making, as),
+    ask: (text: string, as?: AskAs) => ask(world, text, undefined, making, as),
+    /** Invented mechanics in the world (#106): each kind, whether it stopped, and its counts and timings. */
+    mechanics,
     /** Toys made from a sentence: the one on trial and the kept ones, and the tag's three choices. */
     made: { state: () => made.state(), keep: () => made.keep(), undo: () => made.undo(), another: () => made.another(), blocked: (on: string) => made.blocked(on), surfaces: (person?: string) => making.surfaces(person ?? 'alex') },
     asked: askedSoFar,

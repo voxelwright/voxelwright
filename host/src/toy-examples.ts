@@ -7,7 +7,7 @@ export interface OfferedSurface { id: string; label: string; half: [number, numb
 type V = [number, number, number]
 /** A toy as data, the shape a model writes. */
 export interface ToyData { label: string; parts: Record<string, unknown>[]; gadgets: Record<string, unknown>[]; wires: { from: string; to: string }[] }
-const r3 = (v: number) => Math.round(v * 1000) / 1000
+export const r3 = (v: number) => Math.round(v * 1000) / 1000
 const v3 = (x: number, y: number, z: number): V => [r3(x), r3(y), r3(z)]
 
 /**

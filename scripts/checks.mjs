@@ -63,6 +63,7 @@ export const CHECKS = [
   { name: 'physics', cwd: 'home', run: ['node', 'scripts/check-physics.mjs', '--dev={dev}', '--host={host}'], serial: true, local: SOFTWARE_GL, seconds: 120 },
   { name: 'physics-fire', cwd: 'home', run: ['node', 'scripts/check-physics-fire.mjs', '--dev={dev}', '--host={host}'], local: SOFTWARE_GL, seconds: 120 },
   { name: 'physics-toys', cwd: 'home', run: ['node', 'scripts/check-physics-toys.mjs', '--dev={dev}', '--host={host}'], serial: true, local: SOFTWARE_GL, seconds: 120 },
+  { name: 'invent', cwd: 'home', run: ['node', 'scripts/check-invent.mjs', '--dev={dev}', '--host={host}'], serial: true, local: SOFTWARE_GL, seconds: 90 },
   { name: 'reminders', cwd: 'home', run: ['node', 'scripts/check-reminders.mjs', '--dev={dev}', '--host={host}'], local: SOFTWARE_GL, seconds: 60 },
   { name: 'physics-touch', cwd: 'home', run: ['node', 'scripts/check-physics-touch.mjs', '--dev={dev}'], serial: true, local: SOFTWARE_GL, seconds: 60 },
   { name: 'tactile', cwd: 'home', run: ['node', 'scripts/check-tactile.mjs', '--dev={dev}'], serial: true, local: SOFTWARE_GL, seconds: 90 },

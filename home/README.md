@@ -17,6 +17,9 @@ npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the
 # Toys (#88): "build a marble run on the table", "make a seesaw", "set up ten pins and a ball" build a toy from parts on the
 # kitchen table's corner or the floor of your room; its tag offers Keep (for this visit: a reload clears kept toys), Undo and
 # Try another. Toy lines go to Sonnet with the kit prompt (--toy-model); rules and acts stay on Haiku (--rules-model).
+# Mechanics (#106): "make a magnet", "a fan that blows things across the table", "gravity that points at the candle" invent a
+# new kind of gadget: a model writes its code (--invent-model, Sonnet), which runs only in a sandbox (src/invent: a QuickJS
+# interpreter in a worker in a sealed frame) and acts through checked commands. Same tag: Keep, Undo, Try another.
 npm run measure -- --perf --unload   # with the dev server running, headless
 node scripts/check-kernel.mjs        # plugin failure and draw-pass checks
 node scripts/check-build-plan.mjs http://localhost:5181/   # build mode (#48): pixels (dollhouse, both seated rooms), plan model, drag and bend
@@ -27,6 +30,7 @@ node scripts/check-plan-history.mjs    # build mode: plan versions (needs host/n
 node scripts/check-physics.mjs        # physics (#74): on by default, every thing a body, placing and undo, the pinball table, rules, talk-to-tune and the notepad (stub host), villagers' strength, a walk round a placed bed (#79), step ms
 node scripts/check-physics-fire.mjs   # fire, heat and water (#74): spread, steel and glass, water, events, snapshots, rain, lightning, the candle, the notepad, WebGL2, cost
 node scripts/check-physics-toys.mjs   # toys from a sentence (#88): three asks built, checked and played (marble reaches the bottom, seesaw tips, pins fall), Keep, Undo, Try another, refusals, hostile data; --agent=claude [--toy-model=sonnet] [--rules-model=haiku] --trials=3 for pass counts, latency and the furnish/physics line through the real router
+node scripts/check-invent.mjs         # invented mechanics (#106): a magnet built, working, tuned, snapshotted and undone; hostile code (loops, memory, forged answers, reaching for the page) refused or stopped with no long task over 200 ms on the page; --agent=claude [--invent-model=sonnet] [--asks="a|b"] --trials=1 for a real model's build rate, latency and cost
 node scripts/check-physics-touch.mjs  # physics by finger (#74): 390x844 touch screen, flippers and plunger by hold and swipe, poke and fling the felt ball, entries and the view left alone
 node scripts/check-tactile.mjs        # a house you can feel (#107): the kitchen's loose things are bodies drawn merged at rest, a mouse and a finger lift, carry, throw and nudge them, tidying puts them back, impacts sound by material
 npm run typecheck

@@ -64,6 +64,8 @@ export interface WorldApi {
   readonly rules: Rules
   /** Simulated seconds since the world started. */
   readonly clock: number
+  /** Changes whenever a thing is added or taken away: whoever keeps a list of things reads it again. */
+  readonly version: number
   setRules(raw: unknown, by: Extract<PhysicsEvent, { kind: 'rules' }>['by'], preset?: string): { ok: true; rules: Rules; clamped: string[] } | { ok: false; reason: string }
 
   // Reading
@@ -81,6 +83,8 @@ export interface WorldApi {
   applyImpulse(key: string, impulse: Vec3): boolean
   /** At rest at a point in its toy's frame. */
   place(key: string, local: Vec3): boolean
+  /** At a point in the world at once, moving at `velocity` (held to the speed limit); its turn is kept unless one is given. False for a point outside the world or below the floor. */
+  moveTo(key: string, position: Vec3, velocity: Vec3, rotation?: Quat): boolean
   /** Back where it started, at rest, after `delay` simulated seconds (once, however often asked meanwhile). */
   respawn(key: string, delay: number): boolean
 
