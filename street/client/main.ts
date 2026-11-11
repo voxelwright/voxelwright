@@ -504,7 +504,8 @@ function frame(now: number) {
     head.set(view.shown.x, view.shown.y + 1.05, view.shown.z).project(camera)
     const seen = head.z < 1 && Math.abs(head.x) < 1.2 && (by !== you || !h.words.hidden)
     h.el.style.display = seen ? '' : 'none'
-    if (seen) h.el.style.transform = `translate(-50%, -100%) translate(${((head.x + 1) / 2) * innerWidth}px, ${((1 - head.y) / 2) * innerHeight}px)`
+    // Over their head, but never off the side of the screen: a wide bubble near an edge is moved in.
+    if (seen) { const half = h.el.offsetWidth / 2 + 6; h.el.style.transform = `translate(-50%, -100%) translate(${Math.max(half, Math.min(innerWidth - half, ((head.x + 1) / 2) * innerWidth))}px, ${((1 - head.y) / 2) * innerHeight}px)` }
   }
   works.push(performance.now() - t0)
   if (frames.length > 600) { frames.shift(); works.shift() }
@@ -545,13 +546,15 @@ knob(PREDICT ? 'walker ahead' : 'walker from the answer', PREDICT, () => reload(
 if (PREDICT) knob('stops at things', STOP, () => reload('stop', STOP ? '0' : '1'))
 document.getElementById('more')!.onclick = () => document.body.classList.toggle('open')
 
-// ---- the sentence: what you type is made, or said
-let saying = false
+// ---- the sentence: what you type makes a thing, changes the made thing you face, or is said
+type Verb = 'make' | 'change' | 'say'
+const VERBS: Record<Verb, string> = { make: 'make anything: a big red dog, a bridge, a ladder…', change: 'change the thing you face: turn it into ice, make it bigger…', say: 'say something…' }
+let verb: Verb = 'make'
 const mode = document.getElementById('mode') as HTMLButtonElement
-const setMode = (say: boolean) => { saying = say; mode.textContent = say ? 'say' : 'make'; words.placeholder = say ? 'say something…' : 'make anything: a big red dog, a bridge, a ladder…' }
-mode.onclick = () => { setMode(!saying); words.focus() }
-setMode(false)
-const speak = (text: string, say = saying) => { if (text.trim()) ask(say ? { t: 'say', text } : { t: 'make', text, yaw }) }
+const setMode = (to: Verb) => { verb = to; mode.textContent = to; words.placeholder = VERBS[to] }
+mode.onclick = () => { setMode(verb === 'make' ? 'change' : verb === 'change' ? 'say' : 'make'); words.focus() }
+setMode('make')
+const speak = (text: string, as: Verb = verb) => { if (text.trim()) ask(as === 'say' ? { t: 'say', text } : { t: as, text, yaw }) }
 ;(document.getElementById('ask') as HTMLFormElement).onsubmit = (e) => {
   e.preventDefault()
   speak(words.value)
@@ -607,4 +610,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

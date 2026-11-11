@@ -154,15 +154,31 @@ export class Block {
     const seat = this.seats.get(not), hit = this.world.castRay(from, along, seat ? [seat.body] : [])
     return hit ? hit.key.slice(0, hit.key.indexOf('/')) : null
   }
-  /** Each made thing, and the ground it stands over now: where it was put, moved as its heaviest part has moved since. */
+  /** Where a made thing's own place is now: where it was put, for a thing with a part that stays (a sword in a stone, whatever the sword does); else moved as its first part has moved since. */
+  private placeOf(id: string, toy: ToySpec): [number, number] {
+    const part = toy.parts.find((p) => (p.motion ?? 'static') === 'static') ?? toy.parts[0]
+    const c = Math.cos(toy.frame.yaw), s = Math.sin(toy.frame.yaw), now = this.world.thing(`${id}/${part.id}`)?.position
+    return now ? [toy.frame.at[0] + now[0] - (toy.frame.at[0] + part.at[0] * c + part.at[2] * s), toy.frame.at[2] + now[2] - (toy.frame.at[2] - part.at[0] * s + part.at[2] * c)] : [toy.frame.at[0], toy.frame.at[2]]
+  }
+  /** Each made thing, and the ground it stands over now. */
   madeNow(): { id: string; label: string; by: string; box: { x0: number; x1: number; z0: number; z1: number } }[] {
     return [...this.made].map(([id, thing]) => {
-      const { toy } = thing, f = footprint(toy), part = toy.parts.find((p) => p.motion === 'dynamic') ?? toy.parts[0]
-      const c = Math.cos(toy.frame.yaw), s = Math.sin(toy.frame.yaw), now = this.world.thing(`${id}/${part.id}`)?.position
-      const dx = now ? now[0] - (toy.frame.at[0] + part.at[0] * c + part.at[2] * s) : 0, dz = now ? now[2] - (toy.frame.at[2] - part.at[0] * s + part.at[2] * c) : 0
-      const x = toy.frame.at[0] + f.off[0] + dx, z = toy.frame.at[2] + f.off[1] + dz
+      const { toy } = thing, f = footprint(toy), [px, pz] = this.placeOf(id, toy)
+      const x = px + f.off[0], z = pz + f.off[1]
       return { id, label: toy.label, by: thing.by, box: { x0: x - f.half[0], x1: x + f.half[0], z0: z - f.half[1], z1: z + f.half[1] } }
     })
+  }
+  /** The made thing someone means to change: the one named, or the nearest within reach of where they stand, one they face before one behind them. With where its own place is now and which way it is turned. */
+  madeNear(from: Vec3, yaw: number, named?: string): { id: string; toy: ToySpec; at: [number, number]; yaw: number } | null {
+    const reach = 9, fx = Math.sin(yaw), fz = Math.cos(yaw)
+    const near = this.madeNow().map((m) => {
+      const dx = (m.box.x0 + m.box.x1) / 2 - from[0], dz = (m.box.z0 + m.box.z1) / 2 - from[2]
+      // To its nearest edge, not its middle: a long bridge is near when you stand at its end.
+      const away = Math.hypot(Math.max(m.box.x0 - from[0], 0, from[0] - m.box.x1), Math.max(m.box.z0 - from[2], 0, from[2] - m.box.z1))
+      return { id: m.id, away, behind: dx * fx + dz * fz < 0 }
+    }).filter((m) => (named ? m.id === named : m.away <= reach)).sort((a, b) => a.away + (a.behind ? reach : 0) - (b.away + (b.behind ? reach : 0)))[0]
+    const thing = near && this.made.get(near.id)
+    return thing ? { id: near.id, toy: thing.toy, at: this.placeOf(near.id, thing.toy), yaw: thing.toy.frame.yaw } : null
   }
   /** A resident the world itself walks (problems.ts): sat down as a felt figure in a scarf of its own, standing at a place. */
   cast(name: string, plush: number, scarf: string, at: Vec3): number {

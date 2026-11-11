@@ -45,6 +45,8 @@ export type Ask =
   /** Take back the last thing this seat made. */
   | { t: 'unmake' }
   /** Back to where residents arrive. */
+  /** Change the made thing I am facing as this sentence says ("turn it into ice", "make it twice as wide"). */
+  | { t: 'change'; text: string; yaw: number }
   | { t: 'top' }
   /** Stand me at the home's door (I have just come out of it). */
   | { t: 'door' }

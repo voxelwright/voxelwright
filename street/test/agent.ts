@@ -83,6 +83,14 @@ try {
   const seen = await ada('look')
   check('look lists what was made, by whom', seen.value.things.some((t: { id: string; by: string; what: string }) => t.id === built.value.toy && t.by === 'Ada' && t.what === 'Stool'), seen.value.things)
 
+  // The second verb, by name: its own stool becomes ice, under a new id, and look says so.
+  await sleep(2100)
+  const iced = await ada('change', { text: 'turn it into ice', thing: built.value.toy })
+  const after = await ada('look')
+  check('change rewrites a thing it names: the stool is ice, under a new id', iced.value.ok && iced.value.toy !== built.value.toy && after.value.things.some((t: { id: string; material: string }) => t.id === iced.value.toy && t.material === 'ice') && !after.value.things.some((t: { id: string }) => t.id === built.value.toy), { iced: iced.value, things: after.value.things })
+  const none = await ada('change', { text: 'make it red', thing: 'made-999' })
+  check('change of a thing that is not there is refused', none.value.ok === false, none.value)
+
   const fell = await ada('walk_to', { x: 5, z: 6.5 })
   check('walking over the trench, it falls in and is told so', /in the trench/.test(fell.value.you?.where ?? ''), fell.value)
   const out = await ada('top')

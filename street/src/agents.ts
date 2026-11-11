@@ -33,6 +33,8 @@ export interface Street {
   drive(id: number, to: { x: number; z: number; jump: boolean } | null): void
   say(id: number, text: string): void
   make(id: number, text: string, yaw: number): Promise<Outcome>
+  /** Changes a made thing as a sentence says: the one named, or the nearest the seat faces. */
+  change(id: number, text: string, yaw: number, thing?: string): Promise<Outcome>
   build(id: number, toy: unknown, yaw: number): Outcome
   unmake(id: number): string | null
   top(id: number): void
@@ -198,6 +200,11 @@ export class Agents {
       description: 'Ask the street\'s own maker for a thing, from one sentence ("a plank bridge across the trench", "a big red dog"). It appears in front of you after 10 to 30 s. Prefer build when you can design the thing yourself.',
       inputSchema: { text: z.string().min(2).max(200) },
     }, here(({ text: words }: { text: string }, seat) => street.make(seat, words, session.yaw)))
+
+    server.registerTool('change', {
+      description: 'Change a made thing that is already on the street, from one sentence ("turn it into ice", "make it twice as wide", "give it railings"). Name it by its id from look (things), or leave that out for the nearest one you face. The street\'s maker rewrites it where it stands, in 10 to 30 s; it gets a new id.',
+      inputSchema: { text: z.string().min(2).max(200), thing: z.string().max(40).optional() },
+    }, here(({ text: words, thing }: { text: string; thing?: string }, seat) => street.change(seat, words, session.yaw, thing)))
 
     server.registerTool('guide', {
       description: 'How to write a thing yourself for build: the format, the materials, the sizes and the frame it stands in. Read it once before your first build.',

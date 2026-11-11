@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { makeCert } from './cert.ts'
 import { Agents, type Outcome, type StreetEvent } from './agents.ts'
 import { Block, FLOOR } from './block.ts'
+import { planeAt } from './ground.ts'
 import { doorOf, houseAt } from './houses.ts'
 import { oneShot } from '../../host/src/villager-input.ts'
 import { Problems, type Solved } from './problems.ts'
@@ -122,7 +123,7 @@ function placeFor(by: number, toy: Parameters<Block['place']>[0], sentence: stri
  * One sentence from a seat into one thing on the street, said to everyone as it goes. `quiet` marks an answer
  * given before anything started (making is off, one at a time): only the asker needs it.
  */
-async function makeFor(by: number, sentence: string, yaw: number): Promise<Outcome & { quiet?: boolean }> {
+async function makeFor(by: number, sentence: string, yaw: number, changing?: { thing?: string }): Promise<Outcome & { quiet?: boolean }> {
   const mine = makers.get(by) ?? makers.set(by, { busy: false, madeAt: -Infinity }).get(by)!
   const no = (why: string) => ({ ok: false, say: why, quiet: true })
   if (!maker) return no('Making is off here: the world was started without a maker.')
@@ -132,21 +133,27 @@ async function makeFor(by: number, sentence: string, yaw: number): Promise<Outco
   if (making >= MAKING.most) return no('The street is busy making other things. Try again in a moment.')
   const self = sim.self(by)
   if (!self || !Number.isFinite(yaw)) return no('You are not on the street.')
-  const plot = plotFor(self.p, yaw)
+  // Changing: the made thing they face (or the one named) is what the sentence is about, and the new one stands where it does, turned as it is.
+  const target = changing ? sim.madeNear(self.p, yaw, changing.thing) : null
+  if (changing && !target) return no('There is no made thing near enough to change. Stand by one and face it.')
+  const plot = target ? { ...plotFor(self.p, yaw), at: [target.at[0], planeAt(target.at[1]), target.at[1]] as [number, number, number], yaw: target.yaw } : plotFor(self.p, yaw)
+  const from = target && JSON.stringify({ label: target.toy.label, parts: target.toy.parts.map(({ shape, ...part }) => (part.pieces ? part : { ...part, shape })) })
   const failed = (why: string): Outcome => { everyone({ t: 'made', by, ok: false, say: why }); return { ok: false, say: why } }
   mine.busy = true
   making++
   everyone({ t: 'making', by, text: sentence, at: plot.at })
   try {
-    const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000), [self.p])
+    const { result, tries, calls } = await make(maker, sentence, plot, sim.nextMade(), AbortSignal.timeout(120_000), target ? [] : [self.p], from ?? undefined)
     console.log(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: ${'toy' in result ? `${result.toy.id} (${result.toy.label})` : 'reason' in result ? `refused, ${result.reason}` : 'no thing'}; ${tries} ${tries === 1 ? 'try' : 'tries'}, ${calls.map((c) => c.models.join('+')).join(', ')}`)
     if ('reason' in result) return failed(`That didn't come out right (${result.reason}).`)
     if (!('toy' in result)) { everyone({ t: 'made', by, ok: true, say: result.say }); return { ok: true, say: result.say } }
     // The asker may have left while it was being made, or walked to where it was going to stand.
     const now = sim.self(by)
     if (!now) return { ok: false, say: 'You left before it arrived.' }
-    clear(result.toy, [now.p])
-    return placeFor(by, { ...result.toy, id: sim.nextMade() }, sentence, result.say)
+    // The thing it was goes as the thing it now is arrives.
+    if (target && sim.take(target.id)) everyone({ t: 'remove', toy: target.id })
+    else clear(result.toy, [now.p])
+    return placeFor(by, { ...result.toy, id: sim.nextMade() }, target ? `${target.toy.label}, changed: ${sentence}` : sentence, result.say)
   } catch (e) {
     console.error(`${sim.nameOf(by)} asked for ${JSON.stringify(sentence)}: failed, ${e instanceof Error ? e.message : e}`)
     return failed('The maker did not answer. Try again.')
@@ -184,6 +191,7 @@ function unmakeFor(by: number) {
 /** What a page asks on its reliable stream, one line of JSON each. */
 function asked(seat: Seat, ask: Ask) {
   if (ask.t === 'make') void makeFor(seat.id, plain(ask.text), Number(ask.yaw)).then((out) => { if (out.quiet) say(seat, { t: 'made', by: seat.id, ok: false, say: out.say }) })
+  else if (ask.t === 'change') void makeFor(seat.id, plain(ask.text), Number(ask.yaw), {}).then((out) => { if (out.quiet) say(seat, { t: 'made', by: seat.id, ok: false, say: out.say }) })
   else if (ask.t === 'say') sayFor(seat.id, ask.text)
   else if (ask.t === 'top') sim.top(seat.id)
   else if (ask.t === 'door') sim.stand(seat.id, HOME_DOOR)
@@ -221,6 +229,7 @@ const agents = new Agents({
   drive: (id, to) => sim.drive(id, to),
   say: sayFor,
   make: (id, words, yaw) => makeFor(id, plain(words), yaw).then(({ ok, say: said, toy }) => ({ ok, say: said, ...(toy ? { toy } : {}) })),
+  change: (id, words, yaw, thing) => makeFor(id, plain(words), yaw, { thing }).then(({ ok, say: said, toy }) => ({ ok, say: said, ...(toy ? { toy } : {}) })),
   build: buildFor,
   unmake: unmakeFor,
   top: (id) => sim.top(id),

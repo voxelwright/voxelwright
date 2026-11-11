@@ -3,7 +3,7 @@
 // sentence that asks for nothing gets a word and no thing; undo takes the thing back; and what
 // was made is there again after the world restarts. No model is called.
 // Usage: node test/make.ts
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from 'playwright'
@@ -33,6 +33,7 @@ try {
   const said = await until(() => call<{ text: string; kind: string }[]>(b, 's.bubbles()'), (x) => x.some((y) => y.kind.includes('made')))
   check('and everyone is told what appeared', said.some((x) => x.kind.includes('made') && /crate/i.test(x.text)), said)
   check('it is kept in a file of its own', readdirSync(join(dir, 'made')).join() === 'made-1.json', readdirSync(join(dir, 'made')))
+  const first = JSON.parse(readFileSync(join(dir, 'made', 'made-1.json'), 'utf8'))
   await sleep(2100)
   await call(a, `s.make('some junk')`)
   const second = await until(() => call<string[]>(a, 's.toys()'), (t) => t.includes('made-2'))
@@ -50,15 +51,24 @@ try {
   await call(a, 's.unmake()')
   const fewer = await until(() => call<string[]>(b, 's.toys()'), (t) => !t.includes('made-2'))
   check('undo takes back the last thing you made, for everyone', !fewer.includes('made-2') && fewer.includes('made-1') && readdirSync(join(dir, 'made')).join() === 'made-1.json', fewer)
+  // The second verb: a sentence about the thing you face changes it where it stands.
+  await sleep(2100)
+  await call(a, `s.change('turn it into ice, and bigger')`)
+  const changed = await until(() => call<string[]>(b, 's.toys()'), (t) => t.includes('made-3') && !t.includes('made-1'))
+  const now = existsSync(join(dir, 'made', 'made-3.json')) ? JSON.parse(readFileSync(join(dir, 'made', 'made-3.json'), 'utf8')) : null
+  const was = 0.4, half = now?.toy.parts[0].pieces[0].shape.half[0]
+  check('a sentence about a made thing changes it for everyone: the crate is ice and half as big again, under a new name', changed.includes('made-3') && !changed.includes('made-1') && now?.toy.parts[0].material === 'ice' && Math.abs(half - was * 1.5) < 1e-6 && readdirSync(join(dir, 'made')).join() === 'made-3.json', { changed, material: now?.toy.parts[0].material, half, files: readdirSync(join(dir, 'made')) })
+  check('and it is told as a change', /Now it is ice/.test((await until(() => call<{ text: string; kind: string }[]>(b, 's.bubbles()'), (x) => x.some((y) => /ice/.test(y.text)))).map((x) => x.text).join(' ')))
+  check('it stands where the crate stood', Math.hypot(now.toy.frame.at[0] - first.toy.frame.at[0], now.toy.frame.at[2] - first.toy.frame.at[2]) < 0.5, { now: now.toy.frame.at, first: first.toy.frame.at })
   await a.close(); await b.close()
   await stop(world)
   world = await startWorld(WT, '--maker', 'stub', '--world', dir, '--crates', '0', '--balls', '0')
   const c = await open(chrome)
   const kept = await call<string[]>(c, 's.toys()')
-  check('what was made is there again after the world restarts', kept.includes('made-1') && !kept.includes('made-2'), kept)
+  check('what was made is there again after the world restarts', kept.includes('made-3') && !kept.includes('made-1'), kept)
   await call(c, `s.make('one more')`)
-  const next = await until(() => call<string[]>(c, 's.toys()'), (t) => t.includes('made-2'))
-  check('and the next thing made does not take a kept thing\'s name', next.includes('made-2') && next.includes('made-1'), next)
+  const next = await until(() => call<string[]>(c, 's.toys()'), (t) => t.includes('made-4'))
+  check('and the next thing made does not take a kept thing\'s name', next.includes('made-4') && next.includes('made-3'), next)
 } catch (e) {
   check('ran to the end', false, String(e).split('\n').slice(0, 3))
 } finally {

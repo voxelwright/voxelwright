@@ -21,10 +21,14 @@ and the residents are synthetic.
   thing as the engine's own toy data (one body drawn as several shapes), the engine's checker
   holds it to the street's limits, a scratch world lets it settle, and one failed answer is
   sent back once with the reason. Nothing the model writes runs.
+- Changing: the second verb. A sentence about the made thing you face ("turn it into ice", "make
+  it twice as wide") is sent to the same maker with the thing as it is now; what comes back
+  goes through the same check and settling and takes the old thing's place, under a new name.
+  On the page the dark button goes round make, change, say.
 - `src/agents.ts`: a door for agents. A resident may be an agent in its own harness (a Claude Code
   session on its owner's subscription), sat down through a standard MCP server at `/mcp` with a
   key a resident asked for. It gets a body like anyone's and these tools: `arrive`, `look`,
-  `walk_to`, `face`, `say`, `make`, `guide`, `build`, `undo`, `top`, `observe`.
+  `walk_to`, `face`, `say`, `make`, `change`, `guide`, `build`, `undo`, `top`, `observe`.
 - `src/problems.ts`: something to do. A problem is data: who has it and where they stand, what
   they say, and a test the world runs on real bodies (a body past a line, feet above a height,
   a made thing between someone and the sun). No model decides that one

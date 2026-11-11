@@ -26,6 +26,8 @@ export interface MakeAsk {
   plot: Surface
   /** Why the last answer to this sentence could not be used, when this is the second try. */
   repair?: { answer: string; reason: string }
+  /** The thing as it is now (its label and parts, as JSON), when the sentence says how to change a thing that exists. */
+  from?: string
   signal: AbortSignal
 }
 export interface Made { raw: string; models: string[]; costUsd: number | null; outputTokens: number | null; apiMs: number | null }
@@ -128,7 +130,9 @@ const EXAMPLE = {
 /** The model as the maker: one tool-less call on the owner's own signed-in Claude Code. */
 export function claudeMaker(model = 'sonnet', effort: 'low' | 'medium' | 'high' = 'low'): Maker {
   return async (ask) => {
-    const said = `Sentence (data): ${JSON.stringify(ask.text)}\nThe ground in the patch (data): ${groundOf(ask.plot)}`
+    const said = ask.from
+      ? `A thing that is already on the street is to be changed. The thing as it is now (data):\n${ask.from.slice(0, 30_000)}\n\nHow to change it (data): ${JSON.stringify(ask.text)}\nAnswer with the whole thing as it should now be: the same thing, changed as the sentence says and in nothing else (its shape, size, colours and materials stay unless the change is about them). Say in "say" what became of it.\nThe ground in the patch (data): ${groundOf(ask.plot)}`
+      : `Sentence (data): ${JSON.stringify(ask.text)}\nThe ground in the patch (data): ${groundOf(ask.plot)}`
     const again = ask.repair ? `\n\nYour last answer (data):\n${ask.repair.answer.slice(0, 20_000)}\n\nIt could not be used: ${ask.repair.reason}. Answer again, whole, with that put right.` : ''
     const { text, ...call } = await oneShot(model, await makePrompt(), said + again, ask.signal, effort)
     return { raw: text, ...call }
@@ -142,6 +146,22 @@ export function stubMaker(delayMs = 30): Maker {
     const none = { models: ['stub'], costUsd: null, outputTokens: null, apiMs: null }
     if (/\bnothing\b/i.test(ask.text)) return { raw: JSON.stringify({ say: 'There is nothing to make of that.' }), ...none }
     if (/\bjunk\b/i.test(ask.text) && !ask.repair) return { raw: '{"say": "here", "toy": {"parts": [{"id": "x", "material": "no-such", "at": [0, 1, 0], "shape": {"kind": "box", "half": [1, 1, 1]}}]}}', ...none }
+    // Changing a thing: a material named in the sentence becomes every part's (its paint goes, so the material shows); "bigger" is half as big again.
+    if (ask.from) {
+      const thing = JSON.parse(ask.from) as { label: string; parts: { material: string; paint?: string; at: number[]; pieces?: { shape: { half?: number[]; radius?: number; halfHeight?: number }; at: number[]; paint?: string }[] }[] }
+      const material = ['ice', 'foam', 'jelly', 'stone', 'steel', 'rubber'].find((m) => new RegExp(`\\b${m}\\b`, 'i').test(ask.text))
+      const grow = /\bbigger\b/i.test(ask.text) ? 1.5 : 1
+      for (const part of thing.parts) {
+        if (material) { part.material = material; delete part.paint }
+        for (const piece of part.pieces ?? []) {
+          if (material) delete piece.paint
+          piece.at = piece.at.map((v) => v * grow)
+          for (const key of ['radius', 'halfHeight'] as const) if (piece.shape[key] !== undefined) piece.shape[key]! *= grow
+          if (piece.shape.half) piece.shape.half = piece.shape.half.map((v) => v * grow)
+        }
+      }
+      return { raw: JSON.stringify({ say: material ? `Now it is ${material}.` : grow > 1 ? 'Now it is bigger.' : 'It is as it was.', toy: { ...thing, gadgets: [], wires: [] } }), ...none }
+    }
     // "bridge": a heavy plank long enough to lie across the trench from the middle of the plot.
     if (/\bbridge\b/i.test(ask.text)) return { raw: JSON.stringify({ say: 'A plank bridge.', toy: { label: 'Plank bridge', parts: [{ id: 'deck', material: 'maple', motion: 'dynamic', mass: 400, at: [0, 0.02, 0], pieces: [{ shape: { kind: 'box', half: [1.1, 0.07, 3.8] }, at: [0, 0.07, 0], paint: '#c98d5a' }] }], gadgets: [], wires: [] } }), ...none }
     // "stairs": five steps and a landing 1.8 m up, climbed from the end nearest whoever asked.
@@ -235,12 +255,12 @@ export function settles(toy: ToySpec): string | null {
   }
 }
 
-/** One sentence to one toy: the maker, the check, the settling, and one more try with the reason when either fails. */
-export async function make(maker: Maker, text: string, plot: Surface, id: string, signal: AbortSignal, keepOff: Vec3[] = []): Promise<{ result: Checked; tries: number; calls: Made[] }> {
+/** One sentence to one toy: the maker, the check, the settling, and one more try with the reason when either fails. `from` is a thing that exists, to be changed as the sentence says. */
+export async function make(maker: Maker, text: string, plot: Surface, id: string, signal: AbortSignal, keepOff: Vec3[] = [], from?: string): Promise<{ result: Checked; tries: number; calls: Made[] }> {
   const calls: Made[] = []
   let repair: MakeAsk['repair']
   for (let tries = 1; ; tries++) {
-    const made = await maker({ text, plot, repair, signal })
+    const made = await maker({ text, plot, repair, signal, ...(from ? { from } : {}) })
     calls.push(made)
     let result = checkMade(made.raw, plot, id, keepOff)
     if ('toy' in result) {
