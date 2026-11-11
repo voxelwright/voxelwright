@@ -16,6 +16,8 @@ export interface Drawn {
   toy: ToySpec
   ids: Record<string, number>
   poses: Record<string, { p: Vec3; q: Quat }>
+  /** A resident's toy: which felt figure they are drawn as. */
+  plush?: number
 }
 export type Line =
   | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; floor: number; drawn: Drawn[] }
@@ -26,8 +28,8 @@ export type Line =
   /** The asking ended: with a thing (its toy was added just before), with only a word, or (`ok` false) with why not. */
   | { t: 'made'; by: number; ok: boolean; say: string; toy?: string }
   | { t: 'said'; by: number; text: string }
-  /** A resident's name, when it is given or changed. */
-  | { t: 'named'; by: number; name: string }
+  /** A resident's name, when it is given or changed; with which felt figure they are and their scarf's colour when those changed too. */
+  | { t: 'named'; by: number; name: string; plush?: number; paint?: string }
   /** To the one page that asked: a key that lets one agent sit down, and how to hand it over. */
   | { t: 'key'; key: string; command: string; minutes: number }
 
@@ -43,7 +45,7 @@ export type Ask =
   /** Stand me at the home's door (I have just come out of it). */
   | { t: 'door' }
   /** What this resident is called. */
-  | { t: 'name'; text: string }
+  | { t: 'name'; text: string; plush?: number }
   /** A key for an agent of mine to sit down with. */
   | { t: 'key' }
 

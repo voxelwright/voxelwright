@@ -65,7 +65,7 @@ const puppet = new Puppet()
 let world: World | null = null
 interface Sample { tick: number; p: Vec3; q: Quat }
 /** A moving part: its body in the puppet, its poses as heard, and where it is drawn now. */
-interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; figure?: Resident }
+interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; figure?: Resident; plush?: number }
 const views = new Map<number, View>()
 let you = 0, snapEvery = 2
 function build(drawn: Drawn) {
@@ -88,10 +88,16 @@ function build(drawn: Drawn) {
       // The body the world simulates is a capsule; what is drawn in its place is a resident (figure.ts).
       const capsule = world!.mesh(view.key)
       if (capsule) capsule.visible = false
-      view.figure = resident(Number(/\d+/.exec(drawn.toy.id)?.[0] ?? 1) - 1, part.paint ?? '#c8553d', stage.features().has('phys'))
-      scene.add(view.figure.root)
+      wear(view, drawn.plush ?? Number(/\d+/.exec(drawn.toy.id)?.[0] ?? 1) - 1, part.paint ?? '#c8553d')
     }
   })
+}
+/** Draws a walker as one of the felt figures, in place of whichever it was. */
+function wear(view: View, plush: number, paint: string) {
+  if (view.figure) { scene.remove(view.figure.root); view.figure.dispose() }
+  view.plush = plush
+  view.figure = resident(plush, paint, stage.features().has('phys'))
+  scene.add(view.figure.root)
 }
 function remove(toy: string) {
   for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); heads.get(id)?.el.remove(); heads.delete(id) }
@@ -286,7 +292,11 @@ function told(line: Exclude<Line, { t: 'hello' | 'add' | 'remove' }>) {
   if (line.t === 'said') bubble(line.by, line.text, 'said')
   else if (line.t === 'making') { bubble(line.by, `${line.text}…`, 'making', 120); shimmer(line.by, line.at) }
   else if (line.t === 'made') { bubble(line.by, line.say, line.ok ? 'made' : 'sorry', line.ok ? 5 : 8); shimmer(line.by, null) }
-  else if (line.t === 'named') headOf(line.by).name.textContent = line.name
+  else if (line.t === 'named') {
+    headOf(line.by).name.textContent = line.name
+    const view = views.get(line.by)
+    if (view && line.plush !== undefined && line.plush !== view.plush) wear(view, line.plush, line.paint ?? '#c8553d')
+  }
   else invited(line)
 }
 /** A key for an agent of yours: shown to you alone, in the workshop panel, with the command that hands it over. */
@@ -297,6 +307,8 @@ function invited(line: Extract<Line, { t: 'key' }>) {
   document.body.classList.add('open')
 }
 
+/** Lines from the world that this page failed to act on (none, when all is well). */
+let unread = 0
 void (async () => {
   const stream = (await wt.incomingUnidirectionalStreams.getReader().read()).value as ReadableStream<Uint8Array>
   const reader = stream.pipeThrough(new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>).getReader()
@@ -307,26 +319,38 @@ void (async () => {
     const lines = (rest + value).split('\n')
     rest = lines.pop()!
     for (const text of lines) {
-      const line = JSON.parse(text) as Line
-      if (line.t === 'hello') {
-        // Building a street's worth of meshes is a long task: the renderer must not read it as a slow GPU and drop a tier.
-        const release = stage.hold()
-        world = new World(puppet, () => {}, undefined, line.floor)
-        scene.add(world.group)
-        snapEvery = Math.round(line.tickHz / line.snapHz)
-        line.drawn.forEach(build)
-        release()
-        you = line.you
-        me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
-        // Coming out of the home, you stand at its door, under its lantern.
-        if (params.get('from') === 'home' && homeDoor) ask({ t: 'door' })
-        if (homeDoor) scene.add(Object.assign(new THREE.PointLight('#ffc98a', 9, 6, 1.6), { position: new THREE.Vector3(homeDoor.door[0] + 0.5 * Math.sign(homeDoor.door[0]), homeDoor.door[1] + 2, homeDoor.door[2] - 0.9) }))
-      } else if (line.t === 'add') build(line.drawn)
-      else if (line.t === 'remove') remove(line.toy)
-      else told(line)
+      // One line that cannot be read or acted on must not stop the rest: the page would go on drawing a street it no longer hears.
+      try { heardLine(JSON.parse(text) as Line) } catch (e) {
+        unread++
+        console.error('a line from the street could not be acted on', e)
+      }
     }
   }
 })()
+function heardLine(line: Line) {
+  if (line.t === 'hello') {
+    // Building a street's worth of meshes is a long task: the renderer must not read it as a slow GPU and drop a tier.
+    const release = stage.hold()
+    world = new World(puppet, () => {}, undefined, line.floor)
+    scene.add(world.group)
+    snapEvery = Math.round(line.tickHz / line.snapHz)
+    line.drawn.forEach(build)
+    release()
+    you = line.you
+    me = { p: [...views.get(you)!.p], v: [0, 0, 0], hop: 0, grounded: true }
+    // The first time here, whichever figure the world gave you is who you are from now on.
+    if (localStorage.getItem('street.plush') === null) localStorage.setItem('street.plush', String(views.get(you)!.plush ?? 0))
+    // Coming out of the home, you stand at its door, under its lantern.
+    if (params.get('from') === 'home' && homeDoor) ask({ t: 'door' })
+    if (homeDoor) {
+      const lantern = new THREE.PointLight('#ffc98a', 9, 6, 1.6)
+      lantern.position.set(homeDoor.door[0] + 0.5 * Math.sign(homeDoor.door[0]), homeDoor.door[1] + 2, homeDoor.door[2] - 0.9)
+      scene.add(lantern)
+    }
+  } else if (line.t === 'add') build(line.drawn)
+  else if (line.t === 'remove') remove(line.toy)
+  else told(line)
+}
 void (async () => {
   const reader = dg.readable.getReader()
   for (;;) {
@@ -447,7 +471,7 @@ const spread = (values: number[], digits = 1) => {
 }
 function stats() {
   const due = ticks.first ? (ticks.last - ticks.first) / snapEvery + 1 : 0
-  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, backend: stage.backend, quality: stage.quality, landTriangles: land?.triangles ?? 0, gpuMs: spread(stage.timing.gpu.slice(-300), 2), cpuMs: spread(stage.timing.cpu.slice(-300), 2), tier: stage.timing.tierReason }
+  return { rttMs: Math.round(rtt), snapshotsLostPct: due ? +((1 - ticks.heard.size / due) * 100).toFixed(2) : 0, downBps: Math.round(rates.down), upBps: Math.round(rates.up), datagramsPerS: Math.round(rates.snaps), frameMs: spread(frames), workMs: spread(works, 2), fixMm: spread(fixes.map((f) => f * 1000)), things: views.size, predict: PREDICT, stop: STOP, delay, jitter, unread, backend: stage.backend, quality: stage.quality, landTriangles: land?.triangles ?? 0, gpuMs: spread(stage.timing.gpu.slice(-300), 2), cpuMs: spread(stage.timing.cpu.slice(-300), 2), tier: stage.timing.tierReason }
 }
 root.on('village/frame', () => frame(performance.now()))
 
@@ -485,9 +509,12 @@ const speak = (text: string, say = saying) => { if (text.trim()) ask(say ? { t: 
 document.getElementById('undo')!.onclick = () => ask({ t: 'unmake' })
 document.getElementById('bring')!.onclick = () => ask({ t: 'key' })
 document.getElementById('copy')!.onclick = () => void navigator.clipboard?.writeText(document.querySelector('#invite code')!.textContent ?? '')
-// Your name: from the link (?name=), or the one this browser gave before.
+// Who you are: your name from the link (?name=) or the one this browser gave before, and the felt figure this
+// browser was last time, so you come back out of the home (or back tomorrow) as yourself.
 const named = (params.get('name') ?? localStorage.getItem('street.name') ?? '').trim().slice(0, 24)
-if (named) { localStorage.setItem('street.name', named); ask({ t: 'name', text: named }) }
+const was = localStorage.getItem('street.plush')
+if (named) localStorage.setItem('street.name', named)
+if (named || was !== null) ask({ t: 'name', text: named, ...(was !== null ? { plush: Number(was) } : {}) })
 document.getElementById('top')!.onclick = () => { ask({ t: 'top' }); pending = []; offset.set(0, 0, 0) }
 
 // For the two-browser check (test/two.ts): what this page sees, and probes that time what a hand would feel.
@@ -528,4 +555,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, false), say: (text: string) => speak(text, true), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

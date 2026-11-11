@@ -18,6 +18,11 @@ const vite = await startPage(PAGE, WT)
 const world = await startWorld(WT, '--world', 'none', '--crates', '8', '--balls', '0', '--home', `http://localhost:${HOME}/?talk=off`)
 const chrome = await browser()
 try {
+  // Someone else is on the street first, and watches.
+  const watcher = await chrome.newPage({ viewport: { width: 640, height: 400 } })
+  await watcher.goto(`http://localhost:${PAGE}/?name=Watcher`)
+  await watcher.waitForFunction('window.__street?.ready', undefined, { timeout: 30_000 })
+  const who = (p: typeof watcher) => p.evaluate('window.__street.who()') as Promise<Record<string, number>>
   const page = await chrome.newPage({ viewport: { width: 1280, height: 720 } })
   const s = <T>(body: string) => page.evaluate(`(async () => { const s = window.__street; return ${body} })()`) as Promise<T>
   const at = () => s<number[]>('s.shownOf(s.you)')
@@ -26,6 +31,7 @@ try {
   await page.waitForFunction('window.__street?.ready', undefined, { timeout: 30_000 })
   await sleep(800)
   check('arriving at the top, no way in is offered', !(await shown()))
+  const was = (await who(page)).Pavlo
   // Across to the sunny side, then up the hill to the first door.
   await s(`s.hold('KeyA', true)`)
   for (const t0 = Date.now(); (await at())[0] < door[0] - 0.4 && Date.now() - t0 < 8000;) await sleep(30)
@@ -52,7 +58,12 @@ try {
   const back = await at()
   check('coming out, you stand at the home\'s door', new URL(page.url()).searchParams.get('from') === 'home' && Math.hypot(back[0] - door[0], back[2] - door[2]) < 0.6, { back, door })
   check('and the way in is offered again', await shown())
+  // A new seat would be the next felt figure along: the browser remembers which one it was, and asks to be it again.
+  const now = (await who(page)).Pavlo, seen = (await who(watcher)).Pavlo
+  check('you come out as who you went in: the same name and the same felt figure, to yourself and to others', was !== undefined && now === was && seen === was, { was, now, seen, watcher: await who(watcher) })
   if (out) await page.screenshot({ path: join(out, '3-back-out.png') })
+  const unread = [await s<number>('s.stats().unread'), await watcher.evaluate('window.__street.stats().unread') as number]
+  check('both pages acted on every line the world sent', unread.every((n) => n === 0), unread)
   // A home opened with a street on another machine's name shows no way out: the address is not believed.
   const other = await chrome.newPage()
   await other.goto(`http://localhost:${HOME}/?talk=off&street=${encodeURIComponent('https://elsewhere.example/')}`)

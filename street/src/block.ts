@@ -28,7 +28,7 @@ export interface MadeThing { toy: ToySpec; text: string; by: string; at: string 
 /** The most made things the street holds, and the most moving bodies in all (1,100 awake cost 9 ms of a 16.7 ms tick). */
 const MOST = { made: 80, moving: 700 }
 
-interface Seat { toy: string; body: string; legs: string; name: string; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean } }
+interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean } }
 
 /** What is on the street, as a resident who cannot see a picture is told it. */
 export interface Seen {
@@ -175,7 +175,7 @@ export class Block {
     spec.label = name || `Resident ${n + 1}`
     this.build(spec)
     const id = this.ids.get(`${toy}/body`)!
-    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, name: spec.label, queue: [], newest: 0, last: STILL, ack: 0 })
+    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, name: spec.label, plush: n, queue: [], newest: 0, last: STILL, ack: 0 })
     return id
   }
   /** A seat's name, as others read it over its head. */
@@ -187,6 +187,18 @@ export class Block {
     if (!seat || !spec || !name) return false
     seat.name = spec.label = name
     return true
+  }
+  /** Which felt figure a seat is drawn as, and its scarf's colour with it: a page that was here before asks to be who it was. */
+  wear(id: number, plush: number) {
+    const seat = this.seats.get(id), spec = seat && this.specs.get(seat.toy)
+    if (!seat || !spec || !Number.isInteger(plush) || plush < 0 || plush > 255) return false
+    seat.plush = plush
+    spec.parts[0].paint = SEAT_COLORS[plush % SEAT_COLORS.length]
+    return true
+  }
+  lookOf(id: number) {
+    const seat = this.seats.get(id)
+    return seat ? { plush: seat.plush, paint: this.specs.get(seat.toy)?.parts[0].paint } : {}
   }
   /** Walks a seat by the world's own hand (an agent's seat: it says where to go, not which keys are down). Null lets its own inputs walk it again. */
   drive(id: number, to: { x: number; z: number; jump: boolean } | null) {
@@ -271,7 +283,8 @@ export class Block {
       ids[part.id] = id
       poses[part.id] = { p: t.position, q: t.rotation }
     }
-    return { toy: { ...toy, gadgets: [], wires: [], inputs: {} }, ids, poses }
+    const seat = [...this.seats.values()].find((x) => x.toy === toy.id)
+    return { toy: { ...toy, gadgets: [], wires: [], inputs: {} }, ids, poses, ...(seat ? { plush: seat.plush } : {}) }
   }
   /** Everything built, as a new seat needs it. */
   drawn(): Drawn[] {

@@ -182,7 +182,11 @@ function asked(seat: Seat, ask: Ask) {
   else if (ask.t === 'top') sim.top(seat.id)
   else if (ask.t === 'door') sim.stand(seat.id, HOME_DOOR)
   else if (ask.t === 'unmake') unmakeFor(seat.id)
-  else if (ask.t === 'name') { const name = plain(ask.text, 24); if (name && sim.rename(seat.id, name)) everyone({ t: 'named', by: seat.id, name }) }
+  else if (ask.t === 'name') {
+    // A name, and for a page that was here before, which felt figure it was.
+    const name = plain(ask.text, 24), renamed = !!name && sim.rename(seat.id, name), worn = ask.plush !== undefined && sim.wear(seat.id, Number(ask.plush))
+    if (renamed || worn) everyone({ t: 'named', by: seat.id, name: sim.nameOf(seat.id), ...(worn ? sim.lookOf(seat.id) : {}) })
+  }
   else if (ask.t === 'key') {
     // A key for one agent of this resident's, said to this page alone. It is a secret: never logged.
     const { key, hours } = agents.issue(sim.nameOf(seat.id))
