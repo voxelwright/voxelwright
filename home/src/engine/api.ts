@@ -77,6 +77,11 @@ export interface WorldApi {
   held(input: string): boolean
   /** How many times each gadget output (`toy/gadget.port`) has fired. */
   signals(): Record<string, number>
+  /**
+   * The first thing a ray from `origin` along `direction` meets (world space; the direction's length is how far to look),
+   * not counting the things in `ignore`: its key, where, the surface's normal there, and how far along the ray (0 to 1).
+   */
+  castRay(origin: Vec3, direction: Vec3, ignore?: string[]): { key: string; point: Vec3; normal: Vec3; fraction: number } | null
 
   // Acting on moving things (each returns false when the key is not a dynamic thing)
   setVelocity(key: string, v: Vec3): boolean

@@ -3,15 +3,21 @@
 // wasm heap until J.destroy: temporaries are destroyed where made, per-frame calls reuse
 // one scratch Vec3/RVec3/Quat, and dispose() frees the whole world.
 import initJolt from 'jolt-physics/wasm'
-import wasmUrl from 'jolt-physics/jolt-physics.wasm.wasm?url'
 import type { BodyId, BodySpec, Combine, Contact, HingeSpec, PhysicsCore, Quat, SliderSpec, Vec3 } from './core'
 
 type J = Awaited<ReturnType<typeof initJolt>>
 let J: J
 let loading: Promise<void> | undefined
-/** Fetches and compiles the wasm once per page (needs 'wasm-unsafe-eval' in the page's CSP). */
+/**
+ * Fetches and compiles the wasm once (a page needs 'wasm-unsafe-eval' in its CSP). A page asks
+ * the bundler where the wasm is; Node (the street's world process, #118) finds it beside the
+ * package's own script.
+ */
 export function loadJolt(): Promise<void> {
-  return (loading ??= initJolt({ locateFile: () => wasmUrl } as object).then((j) => void (J = j)))
+  return (loading ??= (typeof document === 'undefined'
+    ? Promise.resolve({})
+    : import('jolt-physics/jolt-physics.wasm.wasm?url').then((m) => ({ locateFile: () => m.default }))
+  ).then((options) => initJolt(options as object)).then((j) => void (J = j)))
 }
 
 /** Statics; things that move; and things that touch nothing for now (a person sitting down). */

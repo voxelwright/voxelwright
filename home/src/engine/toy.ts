@@ -23,6 +23,8 @@ export interface PartSpec {
   sensor?: boolean
   /** kg, a moving part: in place of its material's density × its volume (a sofa is mostly air). */
   mass?: number
+  /** A moving part that never tips or spins: it only moves (a person's body). */
+  upright?: boolean
 }
 
 /** What travels along a wire: a value, and the thing it is about when there is one. */
@@ -94,6 +96,7 @@ export function checkToy(toy: ToySpec): string | null {
     if (part.turn !== undefined && !finite(part.turn, 3)) return `${name}: turn is three finite angles`
     if (part.motion !== undefined && !['static', 'dynamic', 'kinematic'].includes(part.motion)) return `${name}: motion is static, dynamic or kinematic`
     if (part.mass !== undefined && !(typeof part.mass === 'number' && part.mass >= 0.001 && part.mass <= 5000)) return `${name}: mass is 0.001 to 5000 kg`
+    if (part.upright !== undefined && typeof part.upright !== 'boolean') return `${name}: upright is true or false`
     const s = part.shape
     const sizes = s?.kind === 'box' ? (finite(s.half, 3) ? s.half : null) : s?.kind === 'sphere' ? (finite([s.radius], 1) ? [s.radius] : null)
       : s?.kind === 'capsule' || s?.kind === 'cylinder' ? (finite([s.halfHeight, s.radius], 2) ? [s.halfHeight, s.radius] : null) : null

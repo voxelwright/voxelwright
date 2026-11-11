@@ -43,6 +43,7 @@ export const CHECKS = [
   // Home, no browser
   { name: 'plan-history', cwd: 'home', run: ['node', 'scripts/check-plan-history.mjs'], seconds: 60 },
   { name: 'route-inside', cwd: 'home', run: ['node', 'scripts/check-route-inside.mjs'], seconds: 20 },
+  { name: 'engine-no-page', cwd: 'home', run: ['node', 'scripts/check-engine-no-page.mjs'], seconds: 20 },
 
   // Home, a page on the shared dev server
   { name: 'kernel', cwd: 'home', run: ['node', 'scripts/check-kernel.mjs', '{base}'], needs: 'devServer', local: SOFTWARE_GL, seconds: 30 },

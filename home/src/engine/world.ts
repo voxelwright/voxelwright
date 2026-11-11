@@ -22,7 +22,7 @@ const MAX_STEPS = 4
 /** Below this (N·s, after the impact rule) an impact is not reported. */
 const IMPACT_MIN = 0.003
 /** Below the floor by this much, a thing has fallen out of the world and is put back. */
-const LOST_Y = -1
+const LOST = 1
 const STRIDE = 0.32
 /** A follower whose body is this far (m) from its figure jumped (a hop, a seat, a squeeze past): its body follows without touching anything. */
 const JUMP = 0.5
@@ -190,6 +190,8 @@ export class World implements WorldApi {
   private dust: { mesh: THREE.Mesh; life: number; v: THREE.Vector3 }[] = []
   /** A part's face drawn as a card (a score): its canvas, texture and material, and the text it should show next frame when changed. */
   private displays = new Map<string, { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshStandardMaterial; text: string; drawn: string | null }>()
+  /** What each card says, page or no page. */
+  private cards = new Map<string, string>()
   private looks = new Map<string, THREE.Material>()
   /** A part that glows (a lamp) is drawn with a material of its own: the looks are shared by every part of a material and paint. */
   private glows = new Map<string, THREE.MeshStandardMaterial>()
@@ -209,8 +211,12 @@ export class World implements WorldApi {
   rules: Rules = { ...NORMAL, gravity: [...NORMAL.gravity] }
   private unsubscribe: () => void
 
-  /** `emit` receives every event; `grain`, when given, paints wood (else wood is flat colour). */
-  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: Grain) {
+  /** The lowest ground there is, m: the home's floor is 0, a street falls below it. A thing well under it is lost, and nothing is moved below it. Followers still take the floor to be 0 (off it they touch nothing, and their footsteps are said at 0). */
+  private floor: number
+
+  /** `emit` receives every event; `grain`, when given, paints wood (else wood is flat colour); `floor` is the height of the lowest ground. */
+  constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: Grain, floor = 0) {
+    this.floor = floor
     this.group.name = 'physics'
     core.setCombine((a, b) => this.combine(a, b))
     this.applyRules(this.rules)
@@ -321,7 +327,7 @@ export class World implements WorldApi {
       const home = { p: arr(p), q: [q.x, q.y, q.z, q.w] as Quat }
       const body = this.core.addBody({
         shape: part.shape, motion: part.motion ?? 'static', position: home.p, rotation: home.q,
-        density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor, ...(part.mass !== undefined ? { mass: part.mass } : {}),
+        density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor, ...(part.mass !== undefined ? { mass: part.mass } : {}), ...(part.upright ? { upright: true } : {}),
       })
       const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
       if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id)) {
@@ -416,6 +422,7 @@ export class World implements WorldApi {
     const mine = (key: string) => key.startsWith(`${id}/`)
     for (const key of [...this.wires.keys()].filter(mine)) this.wires.delete(key)
     for (const key of [...this.tally.keys()].filter(mine)) this.tally.delete(key)
+    for (const key of [...this.cards.keys()].filter(mine)) this.cards.delete(key)
     for (const [key, d] of this.displays) {
       if (!mine(key)) continue
       d.texture.dispose()
@@ -475,6 +482,9 @@ export class World implements WorldApi {
   show(key: string, text: string) {
     const thing = this.things.get(key)
     if (!thing?.mesh) return
+    this.cards.set(key, String(text).slice(0, 12))
+    // Where there is no page (the street's world process, #118) a card is its text: whoever draws the world reads texts().
+    if (typeof document === 'undefined') return
     let d = this.displays.get(key)
     if (!d) {
       const canvas = document.createElement('canvas')
@@ -487,7 +497,12 @@ export class World implements WorldApi {
       this.displays.set(key, d)
       thing.mesh.material = material
     }
-    d.text = String(text).slice(0, 12)
+    d.text = this.cards.get(key)!
+  }
+
+  /** Each card's text, by its part's key. */
+  texts() {
+    return Object.fromEntries(this.cards)
   }
 
   /**
@@ -496,7 +511,7 @@ export class World implements WorldApi {
    */
   glow(key: string, level: number) {
     const thing = this.things.get(key)
-    if (!thing?.mesh || this.displays.has(key) || !Number.isFinite(level)) return
+    if (!thing?.mesh || this.cards.has(key) || !Number.isFinite(level)) return
     let glow = this.glows.get(key)
     if (!glow) {
       glow = (this.look(thing.part) as THREE.MeshStandardMaterial).clone()
@@ -1033,7 +1048,7 @@ export class World implements WorldApi {
     // Only what is awake can be lost or too fast.
     for (const b of this.stirring) {
       const p = this.core.position(b.body)
-      if (!(p.every(Number.isFinite) && p[1] >= LOST_Y && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND)) {
+      if (!(p.every(Number.isFinite) && p[1] >= this.floor - LOST && Math.abs(p[0]) <= WORLD_BOUND && Math.abs(p[2]) <= WORLD_BOUND && p[1] <= WORLD_BOUND)) {
         this.release(b)
         this.core.setState(b.body, b.home.p, [0, 0, 0], b.home.q)
         this.emit({ kind: 'clamped', thing: b.key, speed: -1, at: at(b.home.p), reset: true })
@@ -1048,7 +1063,7 @@ export class World implements WorldApi {
       const p = this.core.position(t.body)
       const v = this.core.velocity(t.body)
       const speed = Math.hypot(...v)
-      const lost = !p.every(Number.isFinite) || !Number.isFinite(speed) || p[1] < LOST_Y || p[1] > WORLD_BOUND || Math.abs(p[0]) > WORLD_BOUND || Math.abs(p[2]) > WORLD_BOUND
+      const lost = !p.every(Number.isFinite) || !Number.isFinite(speed) || p[1] < this.floor - LOST || p[1] > WORLD_BOUND || Math.abs(p[0]) > WORLD_BOUND || Math.abs(p[2]) > WORLD_BOUND
       if (!lost && speed <= max) continue
       if (lost) this.core.setState(t.body, t.home.p, [0, 0, 0], t.home.q)
       else this.core.setVelocity(t.body, [v[0] * max / speed, v[1] * max / speed, v[2] * max / speed])
@@ -1190,7 +1205,7 @@ export class World implements WorldApi {
 
   moveTo(key: string, position: Vec3, velocity: Vec3, rotation?: Quat) {
     const t = this.dynamic(key)
-    if (!t || !pointOk(position) || position[1] < 0 || !velocity.every(Number.isFinite)) return false
+    if (!t || !pointOk(position) || position[1] < this.floor || !velocity.every(Number.isFinite)) return false
     const n = rotation ? Math.hypot(...rotation) : 1
     if (!(n > 1e-6)) return false
     const speed = Math.hypot(...velocity), k = speed > this.rules.maxSpeed ? this.rules.maxSpeed / speed : 1
@@ -1275,6 +1290,28 @@ export class World implements WorldApi {
 
   mesh(key: string) {
     return this.things.get(key)?.mesh
+  }
+
+  /**
+   * Where each moving thing is now (toy parts and bound things; followers go where their figures go):
+   * what whoever draws this world somewhere else is sent (the street, #118). Only the ones awake,
+   * unless `asleep` asks for the sleeping ones too.
+   */
+  poses(asleep = false): { key: string; position: Vec3; rotation: Quat; awake: boolean }[] {
+    const out: { key: string; position: Vec3; rotation: Quat; awake: boolean }[] = []
+    const add = (key: string, body: BodyId) => {
+      const awake = !this.core.sleeping(body)
+      if (awake || asleep) out.push({ key, position: this.core.position(body), rotation: this.core.rotation(body), awake })
+    }
+    for (const t of this.things.values()) if (t.part.motion && t.part.motion !== 'static') add(t.key, t.body)
+    for (const b of this.bound.values()) if (b.motion === 'dynamic') add(b.key, b.body)
+    return out
+  }
+
+  /** A gadget's own numbers (a copy), or null for an unknown gadget. */
+  state(gadget: string): Record<string, number> | null {
+    const g = this.gadgets.get(gadget)
+    return g ? { ...g.state } : null
   }
 
   /** Each counter-like gadget's `value` state. */

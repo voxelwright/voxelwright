@@ -30,6 +30,11 @@ names). Check the IDL before assuming a C++ method is exposed.
 - Load the wasm in Vite with `initJolt({ locateFile: () => url })` and
   `import url from 'jolt-physics/jolt-physics.wasm.wasm?url'`. The build emits the wasm
   (2.0 MB, 761 KB gzip) and the glue as their own lazy chunk.
+- In Node (the street's world process, #118) `initJolt()` with no `locateFile` finds the wasm
+  beside the package's script. `loadJolt()` chooses by `typeof document`, so never define a
+  stand-in `document` in Node. `World` loads there through Vite's in-process module runner
+  (`server.ssrLoadModule`), as `scripts/check-engine-no-page.mjs` does: it is written for a
+  bundler (imports without extensions, parameter properties), which Node alone refuses.
 - Cold load: about 75 ms in Node, 40 to 48 ms in the page (fetch and compile).
 
 ## Verified recipes (bench code is the reference)
