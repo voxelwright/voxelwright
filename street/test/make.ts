@@ -51,14 +51,20 @@ try {
   await call(a, 's.unmake()')
   const fewer = await until(() => call<string[]>(b, 's.toys()'), (t) => !t.includes('made-2'))
   check('undo takes back the last thing you made, for everyone', !fewer.includes('made-2') && fewer.includes('made-1') && readdirSync(join(dir, 'made')).join() === 'made-1.json', fewer)
-  // The second verb: a sentence about the thing you face changes it where it stands.
+  // The second verb: a sentence about the thing you face changes it where it stands. With the dark button on "change", the page says which thing that is.
   await sleep(2100)
+  check('before "change" is chosen nothing is marked', (await call(a, 's.meant()')) === null)
+  await a.click('#mode')
+  const meant = await until(() => call<{ id: string; label: string } | null>(a, 's.meant()'), (m) => !!m)
+  check('on "change", the thing a sentence would change is ringed and named in the bar', meant?.id === 'made-1' && /^change Crate:/.test(await a.getAttribute('#words', 'placeholder') ?? ''), { meant, bar: await a.getAttribute('#words', 'placeholder') })
   await call(a, `s.change('turn it into ice, and bigger')`)
   const changed = await until(() => call<string[]>(b, 's.toys()'), (t) => t.includes('made-3') && !t.includes('made-1'))
   const now = existsSync(join(dir, 'made', 'made-3.json')) ? JSON.parse(readFileSync(join(dir, 'made', 'made-3.json'), 'utf8')) : null
   const was = 0.4, half = now?.toy.parts[0].pieces[0].shape.half[0]
   check('a sentence about a made thing changes it for everyone: the crate is ice and half as big again, under a new name', changed.includes('made-3') && !changed.includes('made-1') && now?.toy.parts[0].material === 'ice' && Math.abs(half - was * 1.5) < 1e-6 && readdirSync(join(dir, 'made')).join() === 'made-3.json', { changed, material: now?.toy.parts[0].material, half, files: readdirSync(join(dir, 'made')) })
   check('and it is told as a change', /Now it is ice/.test((await until(() => call<{ text: string; kind: string }[]>(b, 's.bubbles()'), (x) => x.some((y) => /ice/.test(y.text)))).map((x) => x.text).join(' ')))
+  const then = await until(() => call<{ id: string } | null>(a, 's.meant()'), (m) => m?.id === 'made-3')
+  check('and after the change, the new thing is the one marked', then?.id === 'made-3', then)
   check('it stands where the crate stood', Math.hypot(now.toy.frame.at[0] - first.toy.frame.at[0], now.toy.frame.at[2] - first.toy.frame.at[2]) < 0.5, { now: now.toy.frame.at, first: first.toy.frame.at })
   await a.close(); await b.close()
   await stop(world)

@@ -15,6 +15,7 @@ import rendererPlugin from '../../home/src/plugins/renderer'
 import { SUN_DIRECTION } from '../../home/src/sky'
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import { World } from '../../home/src/engine/world.ts'
+import { nearest, standsOver } from '../src/near.ts'
 import { place } from './place.ts'
 import { Puppet } from '../src/puppet.ts'
 import { resident, type Resident } from './figure.ts'
@@ -68,9 +69,12 @@ interface Sample { tick: number; p: Vec3; q: Quat }
 interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; figure?: Resident; plush?: number }
 const views = new Map<number, View>()
 let you = 0, snapEvery = 2
+/** The made things on the street, as they were put: for showing which one a sentence would change. */
+const made = new Map<string, Drawn['toy']>()
 function build(drawn: Drawn) {
   const first = puppet.size
   world!.addToy(drawn.toy)
+  if (drawn.toy.id.startsWith('made-')) made.set(drawn.toy.id, drawn.toy)
   drawn.toy.parts.forEach((part, i) => {
     const id = drawn.ids[part.id], pose = drawn.poses[part.id]
     if (id === undefined || !pose) return
@@ -100,6 +104,7 @@ function wear(view: View, plush: number, paint: string) {
   scene.add(view.figure.root)
 }
 function remove(toy: string) {
+  made.delete(toy)
   for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); heads.get(id)?.el.remove(); heads.delete(id) }
   world!.removeToy(toy)
 }
@@ -491,6 +496,7 @@ function frame(now: number) {
   camera.updateMatrixWorld()
   camera.matrixWorldInverse.copy(camera.matrixWorld).invert()
   flutter(dt, now)
+  mean(now)
   if (noticeUntil && now > noticeUntil) { notice.classList.remove('on'); noticeUntil = 0 }
   for (const mesh of shimmers.values()) { mesh.rotation.y += dt * 1.8; mesh.rotation.x += dt * 0.7; mesh.scale.setScalar(1 + 0.25 * Math.sin(now / 180)) }
   // A name, and words for a while, stand over each resident's head while they are in front of the camera.
@@ -555,6 +561,32 @@ const setMode = (to: Verb) => { verb = to; mode.textContent = to; words.placehol
 mode.onclick = () => { setMode(verb === 'make' ? 'change' : verb === 'change' ? 'say' : 'make'); words.focus() }
 setMode('make')
 const speak = (text: string, as: Verb = verb) => { if (text.trim()) ask(as === 'say' ? { t: 'say', text } : { t: as, text, yaw }) }
+/** In `change`: the made thing a sentence would change now (the world picks by the same rule, near.ts), ringed on the ground and named in the bar. */
+let meant: { id: string; label: string } | null = null
+const ring = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 48), new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }))
+ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...NORMAL))
+ring.visible = false
+ring.renderOrder = 2
+scene.add(ring)
+let lookedAt = 0
+function mean(now: number) {
+  const mine = views.get(you)
+  if (verb !== 'change' || !mine) { if (ring.visible) { ring.visible = false; meant = null } return }
+  if (now - lookedAt > 150) {
+    lookedAt = now
+    const where = (key: string): Vec3 | null => { for (const v of views.values()) if (v.key === key) return [v.shown.x, v.shown.y, v.shown.z]; return null }
+    const near = nearest([...made.values()].map((toy) => ({ toy, box: standsOver(toy, where) })), [mine.shown.x, mine.shown.y, mine.shown.z], yaw)
+    if ((near?.toy.id ?? null) !== (meant?.id ?? null)) words.placeholder = near ? `change ${near.toy.label}: turn it into ice, make it bigger…` : 'stand by something made, and face it'
+    meant = near ? { id: near.toy.id, label: near.toy.label } : null
+    ring.visible = !!near
+    if (near) {
+      const x = (near.box.x0 + near.box.x1) / 2, z = (near.box.z0 + near.box.z1) / 2
+      ring.position.set(x, heightAt(z) + 0.06, z)
+      ring.userData.size = Math.max(0.7, Math.hypot(near.box.x1 - near.box.x0, near.box.z1 - near.box.z0) / 2 + 0.25)
+    }
+  }
+  if (ring.visible) ring.scale.setScalar(ring.userData.size * (1 + 0.03 * Math.sin(now / 160)))
+}
 ;(document.getElementById('ask') as HTMLFormElement).onsubmit = (e) => {
   e.preventDefault()
   speak(words.value)
@@ -610,4 +642,4 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
     requestAnimationFrame(look)
   })
 }
-Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+Object.assign(window, { __street: { stats, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), meant: () => meant, who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

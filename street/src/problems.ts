@@ -9,6 +9,7 @@
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import { GRADE, TRENCH, onStreet, planeAt } from './ground.ts'
 import { doorOf, houseAt } from './houses.ts'
+import type { Box } from './near.ts'
 import { NORMAL_UP, standing } from './walk.ts'
 import type { Self } from './wire.ts'
 
@@ -58,7 +59,6 @@ export const PROBLEMS: Problem[] = [
   },
 ]
 
-export interface Box { x0: number; x1: number; z0: number; z1: number }
 /** A made thing as it stands now: its name, who made it, and the ground it is over. */
 export interface MadeNow { id: string; label: string; by: string; box: Box }
 /** A problem solved: who had it, who helped, and with what (a made thing's name, or nothing they made). */
