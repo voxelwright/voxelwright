@@ -97,6 +97,8 @@ const BUILT_IN: Record<string, Material> = {
   paper: { density: 800, friction: 0.5, restitution: 0.1, hardness: 0.2, look: { color: '#efe6d2', roughness: 0.9, metalness: 0 }, heat: { flammability: 1, ignition: 220, burnRate: 0.08, heatCapacity: 0.2, absorbs: 0.8 } },
   /** Glazed pots and bowls: hold heat, never burn. */
   ceramic: { density: 2300, friction: 0.5, restitution: 0.3, hardness: 0.85, look: { color: '#e9e2d4', roughness: 0.4, metalness: 0 }, heat: { flammability: 0, ignition: 2000, burnRate: 0, heatCapacity: 2.5, absorbs: 0.05 } },
+  /** An apple, an onion, a lemon: firm, a little bounce, a dull knock. */
+  fruit: { density: 900, friction: 0.6, restitution: 0.25, hardness: 0.3, look: { color: '#e8892c', roughness: 0.6, metalness: 0 }, heat: { flammability: 0.1, ignition: 400, burnRate: 0.01, heatCapacity: 3, absorbs: 0.1 } },
   villager: { density: 600, friction: 0.7, restitution: 0.05, hardness: 0.05, look: { color: '#c97a5a', roughness: 0.95, metalness: 0 }, heat: { flammability: 0, ignition: 2000, burnRate: 0, heatCapacity: 4, absorbs: 0.5 } },
 }
 for (const [name, m] of Object.entries(BUILT_IN)) registerMaterial(name, m)

@@ -16,8 +16,9 @@ import { Flames } from '../engine/flames'
 import { PRESETS, registerPreset, registerRule, resetRules, type Rules } from '../engine/rules'
 import { registerMaterial, resetMaterials } from '../engine/materials'
 import { gadgetKinds, registerGadget, resetGadgets } from '../engine/gadgets'
-import { ask, askedSoFar, type Making } from './ask'
+import { ask, askedSoFar, type AskAs, type Making } from './ask'
 import { MadeToys } from './made'
+import { mechanics } from './invent'
 import { surfacesFor } from './surfaces'
 import { homeBodies } from './home'
 import { house } from '../build/house'
@@ -26,6 +27,10 @@ import type { Vec3 } from '../engine/core'
 import type { WorldApi } from '../engine/api'
 import type { ToySpec } from '../engine/toy'
 import { touch } from './touch'
+import { hand } from './hand'
+import { impacts } from './impacts'
+import { tidy } from './tidy'
+import { breaks } from './breaks'
 import { HOUSE } from './toys/house'
 import { PINBALL, PINBALL_STAND } from './toys/pinball-table'
 import { CANDLE } from './toys/candle'
@@ -81,7 +86,8 @@ export async function start(ctx: Context, gone: () => boolean) {
   }
   const world = new World(createJolt(), (e) => {
     log.push(e)
-    if (log.length > 500) log.splice(0, 250)
+    // Room for a house of loose things settling at once (#107): at 500 a burst of impacts pushed out the events a check or an agent was about to read.
+    if (log.length > 2000) log.splice(0, 1000)
     ctx.emit('village/physics', e)
   }, grain)
   ctx.effect(() => () => world.dispose(), 'physics solver')
@@ -174,6 +180,20 @@ export async function start(ctx: Context, gone: () => boolean) {
   }
   // Fingers and the mouse: the same inputs as the keys while the table is chosen, and pokes and flings otherwise.
   const hands = touch(ctx, world, (name, down) => world.input(name, down), () => playing?.id ?? null)
+  // The house's own things, by hand (#107): pick up, carry, stack and throw.
+  const grip = hand(ctx, world, () => playing?.id ?? null)
+  // Brittle things break into shards that are things too; tidying mends them first, then puts everything back.
+  const broke = breaks(ctx, world, (e) => {
+    log.push(e)
+    ctx.emit('village/physics', e)
+  }, () => setTimeout(() => gone() || home.scan(), 0))
+  const tidyUp = (keys?: string[]) => {
+    if (!keys && broke.mend().length) home.scan()
+    return world.tidy(keys)
+  }
+  tidy(ctx, world, grip.holding, broke.broken, tidyUp)
+  // What a hit looks like: splinters, chips, sparks and dust by material.
+  const bits = impacts(ctx)
   ctx.effect(() => {
     addEventListener('keydown', onKey, true)
     addEventListener('keyup', onKey, true)
@@ -238,14 +258,14 @@ export async function start(ctx: Context, gone: () => boolean) {
   // Toys made from a sentence (#88): built on a surface offered for the person, on trial until kept.
   const made = new MadeToys(ctx, world)
   const making: Making = { surfaces: (person) => surfacesFor(ctx.stage.scene, person), made }
-  made.again = async (text, person) => {
-    const r = await ask(world, text, person, making, { retry: true })
+  made.again = async (text, person, make) => {
+    const r = await ask(world, text, person, making, { retry: true, make })
     return { ok: r.ok && Boolean(r.toy) }
   }
 
   // A notepad line about how things move (src/plugins/talk.ts routes it): asked here, said back there.
   ctx.on('village/physics-ask', (request) => {
-    request.answer = ask(world, request.text, request.person, making, { toy: request.toy })
+    request.answer = ask(world, request.text, request.person, making, { make: request.make })
   })
 
   const api = {
@@ -256,7 +276,9 @@ export async function start(ctx: Context, gone: () => boolean) {
     setRules: (raw: unknown) => world.setRules(raw, 'code'),
     preset: (name: string) => world.preset(name),
     presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.label])),
-    ask: (text: string, as?: { toy?: boolean }) => ask(world, text, undefined, making, as),
+    ask: (text: string, as?: AskAs) => ask(world, text, undefined, making, as),
+    /** Invented mechanics in the world (#106): each kind, whether it stopped, and its counts and timings. */
+    mechanics,
     /** Toys made from a sentence: the one on trial and the kept ones, and the tag's three choices. */
     made: { state: () => made.state(), keep: () => made.keep(), undo: () => made.undo(), another: () => made.another(), blocked: (on: string) => made.blocked(on), surfaces: (person?: string) => making.surfaces(person ?? 'alex') },
     asked: askedSoFar,
@@ -287,6 +309,12 @@ export async function start(ctx: Context, gone: () => boolean) {
     thing: (key: string) => world.thing(key),
     /** The home's things with bodies, the thing a mesh belongs to (or why none), and scan stats. */
     home: { list: home.list, bodyOf: home.bodyOf, scan: home.scan, stats: home.stats },
+    /** The hand (#107): what it holds, what a press at a screen point would take, and putting every loose thing back where it was made. */
+    hand: { holding: grip.holding, pick: grip.pick, tidy: tidyUp, astray: () => world.astray() },
+    /** Breaking (#107): the things lying in pieces, and breaking one now. */
+    breaks: { broken: broke.broken, shatter: broke.shatter },
+    /** Bits in the air from hits (splinters, chips, sparks, dust). */
+    flying: bits.flying,
     /** A follower for any scene object (checks walk one into things); `held` says it is held back. */
     follow: (key: string, object: THREE.Object3D) => world.follow(key, object),
     unfollow: (key: string) => world.unfollow(key),

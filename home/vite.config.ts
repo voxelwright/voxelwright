@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { build, defineConfig, type Connect, type Plugin } from 'vite'
-import { BOX_PATH, boxDocument, boxPolicy } from './src/props/relay.ts'
+import { build, defineConfig, type Connect, type InlineConfig, type Plugin } from 'vite'
+import * as props from './src/props/relay.ts'
+import * as mechanic from './src/invent/relay.ts'
 
 // The villager host (host/src/villager.ts) listens on 127.0.0.1. The dev server
 // forwards /villager/api/* to it, so the page and the API share an origin. The
@@ -45,39 +46,46 @@ const physicsPolicy: Plugin = {
   configurePreviewServer: (server) => void server.middlewares.use(policy),
 }
 
-// #42 prop sandbox, dev only: `virtual:prop-box` is the sandbox worker bundled into one
-// self-contained script (three core, the painters, the serializer) and exported as a
-// string. The sealed iframe has no network, so the page hands it this text to start
-// its worker from a blob. Only src/props/load.ts imports it, behind the ?props= flag.
-// BOX_PATH is the iframe's relay document, served with its own policy in place of the
-// home's (src/props/relay.ts), so the home's CSP keeps no inline script or blob worker.
-const propBox: Plugin = {
-  name: 'prop-box',
-  apply: 'serve',
-  configureServer(server) {
-    server.middlewares.use(BOX_PATH, (_req, res) => {
-      const nonce = randomBytes(16).toString('hex')
-      res.setHeader('content-security-policy', boxPolicy(nonce))
-      res.setHeader('content-type', 'text/html; charset=utf-8')
-      res.setHeader('cache-control', 'no-store')
-      res.end(boxDocument(nonce))
-    })
-  },
-  resolveId: (id) => (id === 'virtual:prop-box' ? '\0virtual:prop-box' : undefined),
-  async load(id) {
-    if (id !== '\0virtual:prop-box') return
-    const entry = join(import.meta.dirname, 'src/props/box/worker.ts')
-    const out = await build({
-      configFile: false,
-      logLevel: 'warn',
-      resolve: { alias: [{ find: /^three\/webgpu$/, replacement: 'three' }] },
-      build: { write: false, minify: true, lib: { entry, formats: ['iife'], name: 'propBox' } },
-    })
-    const chunk = (Array.isArray(out) ? out[0] : out as { output: { type: string; code?: string; moduleIds?: string[] }[] }).output[0]
-    for (const file of chunk.moduleIds ?? []) if (!file.startsWith('\0') && !file.includes('node_modules')) this.addWatchFile(file)
-    return `export default ${JSON.stringify(chunk.code)}`
-  },
+// Sealed boxes for code the home did not write (src/sealed.ts). Each has a relay document, served at
+// its BOX_PATH with its own policy in place of the home's (so the home's policy keeps no inline script,
+// blob worker or exception), and `virtual:<name>`: its worker bundled into one self-contained script and
+// exported as a string, because the sealed frame has no network and starts its worker from a blob.
+type Relay = { BOX_PATH: string; boxPolicy(nonce: string): string; boxDocument(nonce: string): string }
+function sealedBox(name: string, entry: string, relay: Relay, bundle: InlineConfig): Plugin {
+  const serve: Connect.NextHandleFunction = (_req, res) => {
+    const nonce = randomBytes(16).toString('hex')
+    res.setHeader('content-security-policy', relay.boxPolicy(nonce))
+    res.setHeader('content-type', 'text/html; charset=utf-8')
+    res.setHeader('cache-control', 'no-store')
+    res.end(relay.boxDocument(nonce))
+  }
+  return {
+    name,
+    configureServer: (server) => void server.middlewares.use(relay.BOX_PATH, serve),
+    configurePreviewServer: (server) => void server.middlewares.use(relay.BOX_PATH, serve),
+    resolveId: (id) => (id === `virtual:${name}` ? `\0virtual:${name}` : undefined),
+    async load(id) {
+      if (id !== `\0virtual:${name}`) return
+      const out = await build({ configFile: false, logLevel: 'warn', ...bundle, build: { write: false, minify: true, lib: { entry: join(import.meta.dirname, entry), formats: ['iife'], name: 'box' } } })
+      const chunk = (Array.isArray(out) ? out[0] : out as { output: { type: string; code?: string; moduleIds?: string[] }[] }).output[0]
+      for (const file of chunk.moduleIds ?? []) if (!file.startsWith('\0') && !file.includes('node_modules')) this.addWatchFile(file)
+      return `export default ${JSON.stringify(chunk.code)}`
+    },
+  }
 }
+
+// #42 prop sandbox, dev only (three core, the painters, the serializer). Only src/props/load.ts
+// imports it, behind the ?props= flag.
+const propBox: Plugin = { ...sealedBox('prop-box', 'src/props/box/worker.ts', props, { resolve: { alias: [{ find: /^three\/webgpu$/, replacement: 'three' }] } }), apply: 'serve', configurePreviewServer: undefined }
+
+// #106 mechanic sandbox, on the dev and preview servers and in the build (an invented mechanic is part
+// of the home, not a dev tool): the QuickJS glue and the prelude.
+const mechanicBox = sealedBox('mechanic-box', 'src/invent/box/worker.ts', mechanic, {
+  // The QuickJS glue resolves its .wasm against import.meta.url, which an iife has none of; the bytes are handed in instead (wasmBinary).
+  define: { 'import.meta.url': JSON.stringify('http://mechanic-box.invalid/') },
+  // The glue's own reference to its .wasm goes too: a library build would inline the whole interpreter there as a data: URL, unused.
+  plugins: [{ name: 'no-wasm-url', enforce: 'pre', transform: (code, id) => (id.includes('emscripten-module') ? code.replaceAll('new URL("emscripten-module.wasm",import.meta.url)', 'new URL("http://mechanic-box.invalid/")') : undefined) }],
+})
 
 // #52 listening room, dev only: /sound-lab.html saves the owner's picks here. POST takes
 // { picks: { cue: variant | 'none' | 'keep' | 'change' }, notes: { cue: text } }, checked
@@ -186,7 +194,7 @@ const soundLab: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [physicsPolicy, propBox, soundLab],
+  plugins: [physicsPolicy, propBox, mechanicBox, soundLab],
   // No SPA fallback: an unknown path is a 404, not the page.
   appType: 'mpa',
   server: {

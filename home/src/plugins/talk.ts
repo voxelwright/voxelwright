@@ -1887,10 +1887,11 @@ export default {
         case 'physics': {
           // #74: how things move, tuned from the person's own words by the physics world; its note is shown as text.
           furnish!.dismiss(guess)
-          // A toy goes on trial and can be undone, so the router's toy flag is enough; rules and acts still need the person's own words.
-          if (routed.toy !== true && !asksPhysics(text)) return send(text, undefined, me)
+          // A toy or an invented mechanic (#106) goes on trial and can be undone, so the router's flag is enough; rules and acts still need the person's own words.
+          const make = routed.make === 'toy' || routed.make === 'mechanic' ? routed.make : undefined
+          if (!make && !asksPhysics(text)) return send(text, undefined, me)
           if (routed.say) quip(me, routed.say)
-          const request: PhysicsAsk = { text, person: me.person, toy: routed.toy === true }
+          const request: PhysicsAsk = { text, person: me.person, make }
           ctx.emit('village/physics-ask', request)
           // No answer (physics off or not started yet), a world that stopped while the model answered, or a thrown error all say the same.
           const r = request.answer ? await request.answer.catch((error) => (console.error('Village physics ask failed:', error), null)) : null

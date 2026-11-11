@@ -8,7 +8,8 @@ import * as THREE from 'three/webgpu'
 import type { Shape, Vec3 } from './core'
 import { gadgetKind } from './gadgets'
 import { isMaterial } from './materials'
-import { MADE_KINDS } from './made-kinds'
+import { MADE, MADE_KINDS } from './made-kinds'
+export { MADE }
 import type { GadgetSpec, PartSpec, ToySpec, Wire } from './toy'
 
 /** Where a made toy stands: a surface's top centre, its turn about y, and the room above it (m). */
@@ -22,24 +23,11 @@ export interface Surface {
   height: number
 }
 
-export const MADE = {
-  parts: 40,
-  /** Moving parts cost every step; ten pins and a ball is 11. */
-  moving: 16,
-  gadgets: 16,
-  wires: 32,
-  /** Half extents and radii, m. */
-  size: [0.004, 0.5] as const,
-  /** kg. */
-  mass: [0.005, 10] as const,
-  /** A part may sink this far into the surface (m) and still be on it. */
-  slack: 0.01,
-}
 
 /** Materials a made toy may not use: people are not parts. */
 const NOT_FOR_TOYS = new Set(['villager'])
 const ID = /^[A-Za-z0-9_-]{1,48}$/
-const obj = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === 'object' && !Array.isArray(x)
+export const obj = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === 'object' && !Array.isArray(x)
 const vec = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x))
 /** Text from data as plain words: no control characters or angle brackets, at most n characters. */
 export const plain = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n) : '')
@@ -48,9 +36,10 @@ export type Checked = { toy: ToySpec; clamped: string[] } | { reason: string }
 
 /**
  * A toy from untrusted data, to stand on `surface` with id `id`, or the reason it cannot be made.
- * Parts are in the surface's frame: x across, z along, y up from its top.
+ * Parts are in the surface's frame: x across, z along, y up from its top. `also` names registered
+ * kinds allowed besides the made kit (#106: the kind a mechanic's own code runs).
  */
-export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checked {
+export function checkMadeToy(raw: unknown, surface: Surface, id: string, also: readonly string[] = []): Checked {
   if (!obj(raw)) return { reason: 'there was no toy in the answer' }
   const clamped: string[] = []
   const lists = ['parts', 'gadgets', 'wires'].map((k) => (raw[k] === undefined && k !== 'parts' ? [] : raw[k]))
@@ -79,7 +68,7 @@ export function checkMadeToy(raw: unknown, surface: Surface, id: string): Checke
     const kind = typeof g.kind === 'string' ? gadgetKind(g.kind) : undefined
     if (!kind) return { reason: `there is no gadget called ${plain(g.kind, 32) || 'that'}` }
     // Only the made kit: fire comes from asking for it, and keys are not handed to made toys.
-    if (!(MADE_KINDS as readonly string[]).includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
+    if (!(MADE_KINDS as readonly string[]).includes(kind.kind) && !also.includes(kind.kind)) return { reason: `a made toy can't have a ${kind.kind} in it` }
     const spec: GadgetSpec = { id: g.id, kind: kind.kind }
     if (g.part !== undefined) {
       if (typeof g.part !== 'string' || !ids.has(g.part)) return { reason: `the ${g.id} gadget names a part that is not there` }

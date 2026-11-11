@@ -172,7 +172,7 @@ try {
     const w = p.engine.world
     return { census: p.census(), made: w.keys().filter((k) => k.startsWith('made-')).length, ball: w.thing('pinball/ball')?.position.map((v) => +v.toFixed(3)), rules: JSON.stringify(p.rules()), trial: p.made.state().trial?.id ?? null, kept: p.made.state().kept.join() }
   })
-  const ask = (text, as = { toy: true }) => page.evaluate(([t, as]) => window.village.physics.ask(t, as), [text, as])
+  const ask = (text, as = { make: 'toy' }) => page.evaluate(([t, as]) => window.village.physics.ask(t, as), [text, as])
   // The pinball ball is left out: typing on the notepad reaches its keys, and no toy ask touches it.
   const same = (a, b) => JSON.stringify({ ...a, ball: 0 }) === JSON.stringify({ ...b, ball: 0 })
 
@@ -258,7 +258,7 @@ try {
       await page.evaluate(() => window.village.physics.reset())
       await page.waitForTimeout(300)
       const { asksPhysics } = await page.evaluate(async (lines) => { const m = await import('/src/talk/route-check.ts'); return { asksPhysics: lines.map((l) => m.asksPhysics(l)) } }, lines)
-      check('"make a see saw", "build a catapult on the table", "set up a ramp and a ball" and "build a pendulum" reach the toy ask from the notepad', reached.every((r, i) => r.route === 'physics' && r.text === lines[i] && r.askedAs?.toy === true), { reached, wordList: asksPhysics })
+      check('"make a see saw", "build a catapult on the table", "set up a ramp and a ball" and "build a pendulum" reach the toy ask from the notepad', reached.every((r, i) => r.route === 'physics' && r.text === lines[i] && r.askedAs?.make === 'toy'), { reached, wordList: asksPhysics })
     }
 
     // A toy answer that also carries rules and acts builds the toy and applies nothing else.
