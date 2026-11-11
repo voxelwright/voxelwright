@@ -225,7 +225,7 @@ export const PINBALL: ToySpec = {
 }
 
 /** How the table is played: under its own rules while it is chosen (mode.ts puts them back after). */
-export const PINBALL_MODE: GameMode = { id: 'pinball', label: 'Pinball', rules: { substeps: 2 } }
+export const PINBALL_MODE: GameMode = { id: 'pinball', label: 'Pinball', rules: { substeps: 2, rest: 0.004 } }
 
 /** The table's stand: four walnut legs, upright under the tilted cabinet. Decoration only. */
 const leg = (id: string, x: number, z: number, top: number): PartSpec =>

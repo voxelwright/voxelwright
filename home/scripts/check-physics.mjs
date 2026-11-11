@@ -384,7 +384,7 @@ try {
     const keys = rules.ruleKeys().length
     return { taken, seeded, zest, kept, again: engine.registerRule('lift', { min: 0, max: 20, step: 0.1, default: 0, about: 'again' }), jelly: mats.material('jelly') ?? null, lifter: kinds.gadgetKind('lifter') ?? null, preset: Boolean(rules.PRESETS.moon), keys }
   })
-  check('A rule registered into a running world reads as its default there; unloading drops runtime rules, materials and kinds so the next world starts from the built-ins', typeof registries.taken === 'string' && registries.seeded === null && registries.zest === 2 && registries.kept.zest === 5 && registries.again === null && registries.jelly === null && registries.lifter === null && registries.keys === 10 && registries.preset, registries)
+  check('A rule registered into a running world reads as its default there; unloading drops runtime rules, materials and kinds so the next world starts from the built-ins', typeof registries.taken === 'string' && registries.seeded === null && registries.zest === 2 && registries.kept.zest === 5 && registries.again === null && registries.jelly === null && registries.lifter === null && registries.keys === 11 && registries.preset, registries)
 
   const kept = await page.evaluate(() => { const p = window.village.physics; p.preset('moon'); p.reset(); return p.rules().gravity[1] })
   check('Tuning survives a reset', kept === -1.62, kept)

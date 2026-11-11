@@ -251,6 +251,7 @@ export class World implements WorldApi {
     this.rules = { ...next, gravity: [...next.gravity] }
     if (!same) this.core.setGravity(this.rules.gravity)
     this.gravitySet = true
+    this.core.setRestSpeed(this.rules.rest)
     this.pairsVersion = -1
     for (const t of this.things.values()) if (t.part.motion === 'dynamic') this.core.setLinearDamping(t.body, this.rules.drag)
     for (const b of this.bound.values()) if (b.motion === 'dynamic') this.core.setLinearDamping(b.body, this.rules.drag)

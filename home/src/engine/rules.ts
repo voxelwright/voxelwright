@@ -26,6 +26,8 @@ export interface Rules {
   maxSpeed: number
   /** Collision steps per frame. */
   substeps: number
+  /** A thing slower than this (m/s) for half a second falls asleep. */
+  rest: number
   /** The most force (N) a walking villager pushes with: what needs more holds it back. */
   strength: number
   /** Rules registered at runtime (registerRule): numbers only. */
@@ -44,10 +46,11 @@ export const FIELDS: Record<string, Field> = {
   impact: { min: 0, max: 3, step: 0.01, about: 'multiplies impact sound and dust' },
   maxSpeed: { min: 1, max: 40, step: 0.1, about: 'speed limit, m/s' },
   substeps: { min: 1, max: 4, step: 1, about: 'collision steps per frame' },
+  rest: { min: 0.001, max: 0.1, step: 0.001, about: 'slower than this, a thing falls asleep, m/s' },
   strength: { min: 0, max: 2000, step: 1, about: 'how hard a villager pushes, N' },
 }
 
-export const NORMAL: Rules = { gravity: [0, -9.81, 0], timeScale: 1, bounce: 1, friction: 1, drag: 0.05, kick: 1, impact: 1, maxSpeed: 12, substeps: 1, strength: 120 }
+export const NORMAL: Rules = { gravity: [0, -9.81, 0], timeScale: 1, bounce: 1, friction: 1, drag: 0.05, kick: 1, impact: 1, maxSpeed: 12, substeps: 1, rest: 0.03, strength: 120 }
 
 /** Each preset says only what differs from NORMAL. */
 export const PRESETS: Record<string, { label: string; rules: Partial<Rules> }> = {
