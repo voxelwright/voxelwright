@@ -102,8 +102,6 @@ interface Running {
   attempt?: Attempt
   /** Back on their feet at this time, after a fall. */
   up?: number
-  /** The made thing that solved it, to be cleared before it is wanted again. */
-  by?: string
   spoke: number
 }
 
@@ -194,7 +192,6 @@ export class Problems {
 
   private solve(r: Running, how: { solver: string; with: string; id?: string }, now: number) {
     r.open = false
-    r.by = how.id
     r.until = now + this.restMs
     r.attempt = undefined
     const entry: Solved = { problem: r.problem.id, who: r.problem.who.name, solver: how.solver, with: how.with, done: r.problem.done, at: new Date().toISOString() }
@@ -211,8 +208,8 @@ export class Problems {
   /** After the rest: what solved it is cleared, they are back at their place, and it is wanted again. */
   private reopen(r: Running) {
     if (r.problem.test.kind === 'across') this.stage.sweep(this.stage.made().filter((m) => m.box.z0 < GAP.to && m.box.z1 > GAP.from).map((m) => m.id))
-    else if (r.by) this.stage.sweep([r.by])
-    r.by = undefined
+    // Whatever passes the test now goes, not the thing remembered: it may have been changed since, and is then a new thing.
+    else for (let i = 0, how = this.passes(r); how?.id && i < 6; i++, how = this.passes(r)) this.stage.sweep([how.id])
     this.stage.stand(r.seat, r.problem.who.at)
     r.open = true
     r.tried.clear()
@@ -260,7 +257,11 @@ export class Problems {
     // Helped, they stay where they got to until the problem opens again; wanting, they keep to their place.
     if (!r.open) return still()
     const a = r.attempt
-    if (!a) return void towards(home[0], home[2], 0.4)
+    if (!a) {
+      // Knocked into the trench while only standing there: up again in a moment, as after a fall of their own.
+      if (this.feet(me) < -1.1) { r.up = now + 2200; return still() }
+      return void towards(home[0], home[2], 0.4)
+    }
     const giveUp = (written: string, moment: string, fell = false) => {
       if (a.thing) r.tried.add(a.thing.id)
       r.attempt = undefined

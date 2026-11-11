@@ -14,7 +14,7 @@ try {
   const { Problems, PROBLEMS } = await server.ssrLoadModule('/src/problems.ts')
   const { piecesShape } = await server.ssrLoadModule('../home/src/engine/toy.ts')
   const { planeAt, GRADE } = await server.ssrLoadModule('/src/ground.ts')
-  const sim = await Block.make({ crates: 0, balls: 0 })
+  const sim = await Block.make({ crates: 0, balls: 6 })
   const said = [], solved = [], wanted = new Map(), seats = new Map()
   const problems = new Problems({
     join: (name, plush, scarf, at) => { const id = sim.cast(name, plush, scarf, at); seats.set(name, id); return id },
@@ -64,10 +64,26 @@ try {
   run(1)
   check('one between her head and the sun does, and whoever made it is thanked', solved.length === 2 && solved[1].problem === 'shade' && solved[1].who === 'Ines' && solved[1].solver === 'Tester' && solved[1].with === 'Canopy', solved)
 
+  // The canopy is changed while she rests: it is a new thing under a new name, and still what shades her.
+  sim.take('made-4')
+  sim.place(made('made-5', 'Canopy', ines, [box([2.2, 0.05, 2.2], [0, 3, 0])]), 'a canopy, changed', 'Tester')
   run(14)
   check('after the rest the stairs and that canopy are swept, the rest left, and both want again', sim.madeNow().map((m) => m.id).join() === 'made-1,made-3' && wanted.get('Otis') && wanted.get('Ines'), { made: sim.madeNow().map((m) => m.id), otis: wanted.get('Otis'), ines: wanted.get('Ines') })
   check('Otis is down on the ground again', feet('Otis') < 0.3, { feet: feet('Otis'), at: where('Otis') })
   check('nothing was solved twice', solved.length === 2, solved)
+
+  // Mabel is knocked into the trench while she only stands there: she is back at her place a moment later.
+  const mabel = PROBLEMS.find((p) => p.id === 'across').who.at
+  sim.world.moveTo(`${sim.toyOf(seats.get('Mabel'))}/body`, [mabel[0], planeAt(6) - 1.4, 6], [0, 0, 0])
+  run(1)
+  const down = feet('Mabel')
+  run(4)
+  check('knocked into the trench while standing, she is back at her place', down < -1.1 && feet('Mabel') > -0.2 && Math.hypot(where('Mabel')[0] - mabel[0], where('Mabel')[2] - mabel[2]) < 0.8, { down, feet: feet('Mabel'), at: where('Mabel') })
+
+  // With nobody on the street but those the world walks, the balls stop where they roll to and the world rests.
+  run(60)
+  const awake = sim.awake()
+  check('with nobody here the balls come to rest: only the three the world walks are awake', awake <= 3, awake)
 } catch (e) { console.log('FAILED:', e?.stack?.split('\n').slice(0, 8).join('\n')); process.exitCode = 1 }
 if (bad.length) { console.log(`FAILED: ${bad.join('; ')}`); process.exitCode = 1 }
 await server.close()

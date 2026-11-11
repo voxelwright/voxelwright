@@ -114,6 +114,7 @@ node test/agent.ts                          # an agent's seat, with a plain MCP 
 node test/door.ts [pictures/]               # in through the home's door and back out (starts the home's dev server too)
 node test/problem.ts [pictures/]            # a problem asked, solved by a bridge, told to all, and asked again
 node test/problems.mjs                      # the other two problems' tests, on the real world with no page
+node test/touch.ts [pictures/]              # WebKit at a phone's size, by touch only: stick, tap, the verb button, a solve, a change
 node test/three.ts clip/ sonnet             # with a real model, by hand: all three solved by typing, recorded
 node test/reach.ts <url> [chromium|webkit]  # can a browser sit down from this address
 # With a real model, by hand:

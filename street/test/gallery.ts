@@ -27,6 +27,8 @@ const reach = (toy: ToySpec) => Math.max(1, ...toy.parts.flatMap((p) => (p.piece
 
 const vite = await startPage(PAGE, WT)
 const chrome = await browser()
+/** Where along the street a thing is stood for its picture (world z): six metres apart, none over the trench. */
+const PLACES = [-25, -19, -13, -7, -1, 13, 19, 25]
 const shots: Record<string, string> = {}
 try {
   for (const model of models) {
@@ -34,8 +36,8 @@ try {
     mkdirSync(join(dir, 'made'))
     const stood: { row: Row; at: Vec3; reach: number }[] = []
     rows.filter((r) => r.model === model && r.toy).forEach((row, i) => {
-      // Two files down the street, ten metres apart, each facing up the hill to where its asker would stand.
-      const x = i % 2 ? 4 : -4, z = -24 + Math.floor(i / 2) * 10
+      // Two files down the roadway, clear of the trees and of the trench, each facing up the hill to where its asker would stand.
+      const x = i % 2 ? 2.4 : -2.4, z = PLACES[Math.floor(i / 2) % PLACES.length]
       const at: Vec3 = [x, heightAt(z) + 0.03, z]
       const toy: ToySpec = { ...row.toy!, id: `made-${i + 1}`, frame: { at, yaw: Math.PI, ...FLAT } }
       writeFileSync(join(dir, 'made', `${toy.id}.json`), JSON.stringify({ toy, text: row.text, by: model, at: new Date().toISOString() }))
@@ -50,7 +52,8 @@ try {
       await sleep(2500)
       for (const { row, at, reach: r } of stood) {
         const d = Math.max(3.2, r * 1.9)
-        await page.evaluate(`window.__street.camera(${JSON.stringify([at[0] + d * 0.5, at[1] + d * 0.45 + 0.6, at[2] - d * 0.85])}, ${JSON.stringify([at[0], at[1] + Math.min(1.2, r * 0.4), at[2]])})`)
+        // From up the hill and towards the road's middle, so no tree or house front stands between.
+        await page.evaluate(`window.__street.camera(${JSON.stringify([at[0] - Math.sign(at[0]) * d * 0.5, at[1] + d * 0.45 + 0.6, at[2] - d * 0.85])}, ${JSON.stringify([at[0], at[1] + Math.min(1.2, r * 0.4), at[2]])})`)
         await sleep(350)
         const file = join(out, `${model.replace(/\W+/g, '-')}-${sentences.indexOf(row.text)}.png`)
         await page.screenshot({ path: file })

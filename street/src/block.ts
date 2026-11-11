@@ -29,7 +29,7 @@ export interface MadeThing { toy: ToySpec; text: string; by: string; at: string 
 /** The most made things the street holds, and the most moving bodies in all (1,100 awake cost 9 ms of a 16.7 ms tick). */
 const MOST = { made: 80, moving: 700 }
 
-interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean } }
+interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean }; /** Walked by the world itself (problems.ts): not someone who came. */ cast?: boolean }
 
 /** What is on the street, as a resident who cannot see a picture is told it. */
 export interface Seen {
@@ -185,6 +185,7 @@ export class Block {
     const id = this.join(name)
     const seat = this.seats.get(id)!, spec = this.specs.get(seat.toy)!
     seat.plush = plush
+    seat.cast = true
     spec.parts[0].paint = scarf
     this.stand(id, at)
     return id
@@ -314,11 +315,12 @@ export class Block {
     if (this.stepMs.length > 3600) this.stepMs.shift()
   }
 
-  /** A ball that reached the bottom, or came to rest while someone is here, goes back to the top: the hill never goes still under a resident. */
+  /** A ball that reached the bottom, or came to rest while someone is here, goes back to the top: the hill never goes still under a resident. With nobody here but those the world walks, the balls rest where they stop and so does the world. */
   private roll() {
+    if (![...this.seats.values()].some((seat) => !seat.cast)) return
     for (const pose of this.world.poses(true)) {
       if (!pose.key.startsWith('cargo/ball-')) continue
-      if (pose.position[2] < HALF_L - 3 && (pose.awake || this.seats.size === 0)) continue
+      if (pose.position[2] < HALF_L - 3 && pose.awake) continue
       this.world.moveTo(pose.key, onStreet((this.random() * 2 - 1) * (HALF_W - 1), -HALF_L + 1.5 + this.random(), 1 + this.random() * 3), [0, 0, 0])
     }
   }
