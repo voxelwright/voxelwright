@@ -799,7 +799,9 @@ impl Bodies {
         let away = sub(body.pos, [at[0] as f32, at[1] as f32, at[2] as f32]);
         let far = dot(away, away).sqrt();
         let r = radius as f32;
-        let push = (30.0 * r * r / (far + r) / (body.count as f32).cbrt()).min(160.0);
+        // What a blast throws out lands near: flung as far as it was, a wall lay thinly across the whole street and
+        // there was no heap at its foot.
+        let push = (30.0 * r * r / (far + r) / (body.count as f32).cbrt()).min(160.0) * if body.lump { 0.45 } else { 1.0 };
         let h = |seed: u32| hash3(body.born[0], body.born[1], body.born[2], seed) as f32 / u32::MAX as f32 - 0.5;
         body.vel = add(body.vel, scale(add(unit(away), [h(4) * 0.5, 0.35 + h(5) * 0.3, h(6) * 0.5]), push));
         body.spin = add(body.spin, scale([h(1), h(2), h(3)], (push * 0.12).min(9.0)));

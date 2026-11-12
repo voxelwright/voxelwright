@@ -137,11 +137,10 @@ export const ROWS = [
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
-    // From further back and looking level, so that what lies at the houses' feet is in the picture.
-    stand: [-2, 3.6, 5, 9, 3], near: [18, ...HOUSE], falls: 300,
+    // From the road, low: three big charges at the feet of the houses across it, and what they bring down.
+    stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600,
     act: async (page) => {
-      // Five charges across the front, half a second apart, a storey up: each lands in what the last left moving.
-      for (const turn of [-0.22, 0, 0.22, -0.11, 0.11]) { await charge(page, turn, 16, 0.24); await page.waitForTimeout(500) }
+      for (const turn of [-0.3, 0, 0.3]) { await charge(page, turn, 32, 0.02); await page.waitForTimeout(700) }
     } },
   { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 20.0], state: 'level',
     // The near wall of the yard's office of glass, struck a little above the eye.
