@@ -292,6 +292,14 @@ falls). The cutter and the brick are edits of the page's own, told to the solver
   carries its wall's boards.
 - Cost: the bench's places are within 3% of before.
 
+## Fire and smoke are not cells (`page/puffs.ts`)
+
+A puff was first drawn in lumps two cells across with a stepped edge, "as everything here is made
+of cells". Beside the reference a blind judge called them low-resolution sprites, and they were.
+A puff is now a soft ball whose edge is eaten by two sizes of billow that drift up it as it ages,
+lit as a ball from the sun's side, with fire's heart brighter than its edge. Same count of puffs,
+same cost. Things are made of cells; smoke is not a thing.
+
 ## Coming down into heaps (#160, `bodies.rs`: `sitting`, `lumps`; `page/sun.ts`; `page/world.ts`)
 
 Counted first (`cargo test --release where_the_stuff_goes -- --ignored --nocapture`, `SPARKS=1`

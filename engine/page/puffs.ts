@@ -36,24 +36,35 @@ fn lump(c: vec2i, seed: u32) -> f32 {
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
+// Lumps with soft sides: the hash at the corners of a square, eased between them.
+fn cloud(p: vec2f, seed: u32) -> f32 {
+  let c = vec2i(floor(p));
+  let f = fract(p);
+  let e = f * f * (3.0 - 2.0 * f);
+  return mix(mix(lump(c, seed), lump(c + vec2i(1, 0), seed), e.x), mix(lump(c + vec2i(0, 1), seed), lump(c + vec2i(1, 1), seed), e.x), e.y);
+}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let heat = in.more.x;
   let age = in.more.z;
-  // A puff is lumps about two cells across (in.more.w is half of how many fit across it): its edge is ragged in
-  // steps, as everything here is made of cells.
-  let fine = in.more.w;
-  let cell = vec2i(floor(in.uv * fine + 64.0));
-  let rag = lump(cell, u32(in.more.y));
-  let r = length((vec2f(cell) - 63.5) / fine);
-  let body = 1.0 - smoothstep(0.5, 1.0, r + (rag - 0.5) * 0.5);
-  if (body <= 0.0) { discard; }
+  let seed = u32(in.more.y);
+  // A puff is a soft ball whose edge is eaten by billows that drift up it as it ages. Things here are made of
+  // cells, but smoke is not a thing: drawn in squares it read as a picture of smoke, not smoke.
+  let r = length(in.uv);
+  if (r >= 1.0) { discard; }
+  let drift = vec2f(f32(seed & 15u), age * 2.2 + f32((seed >> 4u) & 15u));
+  let billow = cloud(in.uv * 2.1 + drift, seed) * 0.62 + cloud(in.uv * 4.6 + drift * 1.7, seed + 7u) * 0.38;
+  let body = smoothstep(1.0, 0.3, r + (billow - 0.5) * 0.85) * (1.0 - r * r * r);
+  if (body <= 0.004) { discard; }
   let fade = smoothstep(0.0, 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
   let cover = in.colour.a * body * fade * (1.0 - heat * 0.8);
-  // Smoke is lit from above and on the sun's side; the lumps differ a little.
-  let lit = 0.55 + 0.3 * in.uv.y * -1.0 + 0.25 * dot(in.uv, vec2f(dot(u.sun, u.right), -dot(u.sun, u.up))) + (rag - 0.5) * 0.25;
-  let smoke = in.colour.rgb * clamp(lit, 0.2, 1.3);
-  // Fire: white-yellow when hottest, orange, then a dull red as it goes out.
-  let glow = mix(vec3f(1.0, 0.22, 0.03), vec3f(1.0, 0.86, 0.45), heat * heat) * (heat * (0.5 + rag)) * body * fade * 1.6;
+  // Smoke is lit as the ball it is: bright on the sun's side and on top, dark underneath and in its folds.
+  let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
+  let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
+  let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
+  let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35);
+  // Fire: white-yellow at its heart and when hottest, orange, then a dull red as it goes out.
+  let core = body * body;
+  let glow = mix(vec3f(1.0, 0.2, 0.02), vec3f(1.0, 0.88, 0.5), clamp(heat * heat * (0.35 + core), 0.0, 1.0)) * heat * (0.35 + billow) * body * fade * 2.0;
   return vec4f(smoke * cover + glow, cover);
 }
 `
