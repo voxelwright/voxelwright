@@ -55,7 +55,7 @@ impl Bodies {
 
     /// Sets one cell alight if it is there, can burn and is not burning. `late` is how many turns longer it lasts than its material says.
     fn light(&mut self, c: [i32; 3], late: u16) -> bool {
-        if self.fire.alight.len() >= MOST || self.fire.alight.contains_key(&c) || !self.ground.solid(c[0], c[1], c[2]) {
+        if self.fire.alight.len() >= MOST || self.fire.alight.contains_key(&c) || !self.ground.fuel(c[0], c[1], c[2]) {
             return false;
         }
         let (lasts, _) = burns(material(self.ground.kind(c[0], c[1], c[2])));
@@ -91,7 +91,8 @@ impl Bodies {
                 // It may set each neighbour alight: the one above twice as readily, and now and then one two above.
                 for (i, d) in [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0], [0, 2, 0]].into_iter().enumerate() {
                     let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
-                    if self.fire.alight.contains_key(&n) || !self.ground.solid(n[0], n[1], n[2]) {
+                    // Most neighbours are air or will not burn: that is asked first, and quickly.
+                    if !self.ground.fuel(n[0], n[1], n[2]) || self.fire.alight.contains_key(&n) {
                         continue;
                     }
                     let (_, catches) = burns(material(self.ground.kind(n[0], n[1], n[2])));

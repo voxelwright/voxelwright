@@ -84,7 +84,18 @@ export const ROWS = [
     } },
   { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 40.8], state: 'none' },
   { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'none' },
-  { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'none' },
+  { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'behind',
+    stand: [0, 17, -13, 3.3 / DEG, -0.5 / DEG],
+    act: async (page) => {
+      // Big charges at the feet of the houses across the street, one after another.
+      for (const turn of [-0.5, -0.25, 0, 0.25, 0.5]) {
+        await page.evaluate((yaw) => { globalThis.engine.pose.yaw = yaw; globalThis.engine.pose.pitch = -0.62 }, 3.3 + turn)
+        await page.waitForTimeout(60)
+        await page.evaluate(() => globalThis.engine.blast(40))
+        await page.evaluate(() => { globalThis.engine.pose.yaw = 3.3; globalThis.engine.pose.pitch = -0.5 })
+        await page.waitForTimeout(900)
+      }
+    } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'none' },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'none' },

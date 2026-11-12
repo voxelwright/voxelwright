@@ -130,8 +130,9 @@ pub extern "C" fn ground_at(x: i32, z: i32) -> i32 {
 
 /// How big a box round a change is asked what still holds: 16 m across and deep, 22 m tall.
 pub const SETTLE: [usize; 3] = [160, 224, 160];
-/// How many times over what has landed is asked again whether it holds: a heap took six to come to rest.
-pub const ROUNDS: u32 = 8;
+/// How many times over what has landed is asked again whether it holds, in the support rule's own tests: a heap
+/// took six to come to rest, and nine once a cell could be crushed by what rests on it.
+pub const ROUNDS: u32 = 12;
 
 // ── Bodies: what has come loose and moves (bodies.rs). One instance, in a worker of its own or the world process. ──
 

@@ -12,7 +12,7 @@
 //! process decides is what everyone sees.
 
 use crate::hash::hash3;
-use crate::kinds::{GLASS, breaks_at, material, weighs};
+use crate::kinds::{ASPHALT, EARTH, GLASS, GRASS, ROCK, SAND, WATER, breaks_at, burns, material, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::support::{self, Region};
 use crate::tree::{CELLS, Kind, SIDE, at};
@@ -41,6 +41,9 @@ const OLD: f32 = 8.0;
 const MOST: usize = 700;
 /// A body under this many cells does not break further.
 const WHOLE: usize = 12;
+/// How hard a body must strike the standing world to break it: its weight times the speed it loses. A lump of fifty
+/// cells of brick falling three metres does; a crumb does not.
+const HARD: f32 = 8000.0;
 
 type V = [f32; 3];
 type Q = [f32; 4];
@@ -81,7 +84,8 @@ pub(crate) type Map<K, T> = HashMap<K, T, BuildHasherDefault<Mix>>;
 enum Sector {
     Air,
     Solid,
-    Bits(Box<[u64; CELLS / 64]>),
+    /// A bit a cell for whether it is solid, and a bit a cell for whether it can burn.
+    Bits(Box<[u64; CELLS / 64]>, Box<[u64; CELLS / 64]>),
 }
 
 /// The standing world as a body meets it: solid or not at any cell. Sectors are made when first asked for (the
@@ -160,6 +164,15 @@ impl Ground {
         self.boxes.insert(at, b);
     }
 
+    /// Takes back the last edit: the sectors it reached are forgotten again.
+    fn undo(&mut self) {
+        if let (Some(_), Some(_), Some(b)) = (self.edits.pop(), self.ours.pop(), self.boxes.pop()) {
+            self.forget(b);
+            let s = SIDE as i32;
+            self.whole.retain(|(k, _)| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]));
+        }
+    }
+
     fn forget(&mut self, (lo, hi): ([i32; 3], [i32; 3])) {
         let s = SIDE as i32;
         self.sectors.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= lo[a] || k[a] * s >= hi[a]));
@@ -172,12 +185,14 @@ impl Ground {
                 let Some(sector) = self.sectors.get_mut(&[sx, r.y >> 6, r.z >> 6]) else { continue };
                 if let Sector::Air | Sector::Solid = sector {
                     let all = if matches!(sector, Sector::Solid) { u64::MAX } else { 0 };
-                    *sector = Sector::Bits(Box::new([all; CELLS / 64]));
+                    *sector = Sector::Bits(Box::new([all; CELLS / 64]), Box::new([0; CELLS / 64]));
                 }
-                let Sector::Bits(bits) = sector else { unreachable!() };
+                let Sector::Bits(bits, fuel) = sector else { unreachable!() };
+                let burns = burns(material(r.kind)).0 != 0;
                 for x in r.x0.max(sx * s)..r.x1.min((sx + 1) * s) {
                     let i = at((x & 63) as usize, (r.y & 63) as usize, (r.z & 63) as usize);
                     if r.kind == 0 { bits[i >> 6] &= !(1 << (i & 63)) } else { bits[i >> 6] |= 1 << (i & 63) }
+                    if burns { fuel[i >> 6] |= 1 << (i & 63) } else { fuel[i >> 6] &= !(1 << (i & 63)) }
                 }
             }
         }
@@ -194,16 +209,21 @@ impl Ground {
         fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
         self.holds = Some(key);
         let mut bits = Box::new([0u64; CELLS / 64]);
+        let mut fuel = Box::new([0u64; CELLS / 64]);
         let (mut any, mut all) = (false, true);
         for (i, &kind) in self.scratch.cells.iter().enumerate() {
             if kind != 0 {
                 bits[i >> 6] |= 1 << (i & 63);
+                if burns(material(kind)).0 != 0 {
+                    fuel[i >> 6] |= 1 << (i & 63);
+                }
                 any = true;
             } else {
                 all = false;
             }
         }
-        if !any { Sector::Air } else if all { Sector::Solid } else { Sector::Bits(bits) }
+        // A sector that is all one solid thing is under the ground: nothing there burns.
+        if !any { Sector::Air } else if all { Sector::Solid } else { Sector::Bits(bits, fuel) }
     }
 
     #[inline]
@@ -216,10 +236,27 @@ impl Ground {
         match &self.sectors[&key] {
             Sector::Air => false,
             Sector::Solid => true,
-            Sector::Bits(bits) => {
+            Sector::Bits(bits, _) => {
                 let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
                 bits[i >> 6] >> (i & 63) & 1 != 0
             }
+        }
+    }
+
+    /// Whether the cell is there and is of something that burns. As quick as `solid`: a fire asks it of every neighbour.
+    #[inline]
+    pub fn fuel(&mut self, x: i32, y: i32, z: i32) -> bool {
+        let key = [x >> 6, y >> 6, z >> 6];
+        if !self.sectors.contains_key(&key) {
+            let made = self.make(key);
+            self.sectors.insert(key, made);
+        }
+        match &self.sectors[&key] {
+            Sector::Bits(_, fuel) => {
+                let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
+                fuel[i >> 6] >> (i & 63) & 1 != 0
+            }
+            _ => false,
         }
     }
 
@@ -227,12 +264,12 @@ impl Ground {
     pub fn kind(&mut self, x: i32, y: i32, z: i32) -> Kind {
         let key = [x >> 6, y >> 6, z >> 6];
         let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
-        if let Some(found) = self.whole.iter().position(|(k, _)| *k == key) {
+        if let Some(found) = self.whole.iter().rposition(|(k, _)| *k == key) {
             return self.whole[found].1[i];
         }
         fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
         self.holds = Some(key);
-        if self.whole.len() >= 12 {
+        if self.whole.len() >= 32 {
             self.whole.remove(0);
         }
         self.whole.push((key, self.scratch.cells.clone()));
@@ -490,15 +527,19 @@ pub struct Bodies {
     /// How many steps the last call took, and what was counted in them: for measuring.
     pub steps: u32,
     pub tried: u32,
+    pub paired: u32,
+    pub crushes: u32,
     /// How old each body was when it came to rest, in tenths of a second: for measuring.
     pub rested: Vec<u32>,
+    /// Seconds since a landing last broke the world.
+    since_crush: f32,
     /// What burns (fire.rs).
     pub fire: crate::fire::Fire,
 }
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, rested: Vec::new(), fire: crate::fire::Fire::default() }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default() }
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -535,8 +576,15 @@ impl Bodies {
     /// What is no longer held round a point comes loose and is a body. `radius` is how big the blast there was:
     /// what it loosened is thrown from it, small pieces harder than big. Returns how many bodies were made.
     pub fn release(&mut self, at: [i32; 3], radius: i32) -> usize {
-        let low = [at[0] - SETTLE[0] as i32 / 2, at[1] - 48, at[2] - SETTLE[2] as i32 / 2];
-        let mut region = Region::gather(low, SETTLE, &self.ground.edits, &mut self.ground.scratch);
+        self.release_in(at, radius, SETTLE[0])
+    }
+
+    /// The same, asked of a box `side` cells across (and 7/5 as tall, most of it above the point): a small change
+    /// needs only a small box, which is quick.
+    pub fn release_in(&mut self, at: [i32; 3], radius: i32, side: usize) -> usize {
+        let size = [side, side * 7 / 5, side];
+        let low = [at[0] - side as i32 / 2, at[1] - (side * 3 / 10) as i32, at[2] - side as i32 / 2];
+        let mut region = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
         self.ground.holds = None;
         let (pieces, dust) = support::release(&mut region);
         let mut taken: Vec<Run> = Vec::new();
@@ -571,7 +619,19 @@ impl Bodies {
         self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, after);
         let left = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
         self.ground.holds = None;
-        // The emptied cells, gathered into lumps a few cells across whose edges wander.
+        let made = self.lumps(&before, &left, at, radius);
+        // What can burn round the blast, and is still there, may catch: about one cell in twelve.
+        if spark {
+            self.ignite(at, radius + radius / 2, true);
+        }
+        // A hammer blow is asked about in a small box, a charge in the whole one.
+        made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]))
+    }
+
+    /// What a blast emptied (the cells solid in `before` and not in `left`), as bodies thrown from it: lumps a few cells
+    /// across whose edges wander. Glass, and the middle of the blast, are dust. Returns how many were made.
+    fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32) -> usize {
+        let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
         let wander = |a: i32, b: i32, seed: u32| (hash3(a >> 2, b >> 2, seed as i32, 11) & 3) as i32;
         for y in 0..size[1] {
@@ -619,11 +679,44 @@ impl Bodies {
             self.list.push(body);
             made += 1;
         }
-        // What can burn round the blast, and is still there, may catch: about one cell in twelve.
-        if spark {
-            self.ignite(at, radius + radius / 2, true);
+        made
+    }
+
+    /// A body that lands hard breaks what it lands on: where it struck, the world is emptied as by a small blast (as
+    /// far as each material gives), what was there comes out as lumps, and what that leaves unheld comes loose.
+    /// `push` is how hard it struck: its weight times the speed it lost.
+    fn crush(&mut self, at: [i32; 3], push: f32) {
+        let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
+        let far = radius * 3 + 2;
+        let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
+        let before = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        // What a blast there would leave is asked of the world with the blast in it; then the blast is taken back
+        // and what it emptied goes in as rows of the solver's own, which is how the page hears of it.
+        self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, None);
+        let left = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        self.ground.undo();
+        self.ground.holds = None;
+        let mut gone: Vec<Run> = Vec::new();
+        for y in 0..size[1] {
+            for z in 0..size[2] {
+                for x in 0..size[0] {
+                    let i = before.at(x, y, z);
+                    if before.cells[i] != 0 && left.cells[i] == 0 {
+                        let (wx, wy, wz) = (low[0] + x as i32, low[1] + y as i32, low[2] + z as i32);
+                        match gone.last_mut() {
+                            Some(r) if r.y == wy && r.z == wz && r.x1 == wx => r.x1 += 1,
+                            _ => gone.push(Run { x0: wx, x1: wx + 1, y: wy, z: wz, kind: 0 }),
+                        }
+                    }
+                }
+            }
         }
-        made + self.release(at, radius)
+        if gone.is_empty() {
+            return;
+        }
+        self.change(gone);
+        self.lumps(&before, &left, at, radius);
+        self.release_in(at, radius, 64);
     }
 
     /// A blast's push on a body: stronger near, and on small things, with a little spin.
@@ -692,6 +785,7 @@ impl Bodies {
         self.owed = (self.owed + dt).min(STEP * STEPS);
         self.steps = 0;
         self.tried = 0;
+        self.paired = 0;
         while self.owed >= STEP && !self.list.is_empty() {
             self.owed -= STEP;
             self.step(STEP);
@@ -756,6 +850,7 @@ impl Bodies {
                 }
                 for (one, other, flip) in [(i, j, false), (j, i, true)] {
                     let (a, b) = (&self.list[one], &self.list[other]);
+                    self.paired += a.points.len() as u32;
                     for &point in &a.points {
                         let ra = turn(a.rot, point);
                         let p = add(a.pos, ra);
@@ -840,6 +935,26 @@ impl Bodies {
                 let (ma, mb) = (self.list[t.a].inv_mass, self.list[t.b].inv_mass);
                 self.list[t.a].pos = add(self.list[t.a].pos, scale(t.n, ease * ma / (ma + mb)));
                 self.list[t.b].pos = sub(self.list[t.b].pos, scale(t.n, ease * mb / (ma + mb)));
+            }
+        }
+        // Where a big body struck the standing world hardest, the world breaks too: one such place a step, a few a second.
+        self.since_crush += h;
+        if self.since_crush > 0.12 && self.list.len() < MOST {
+            let mut worst: Option<([i32; 3], f32)> = None;
+            for t in &self.touches {
+                let body = &self.list[t.a];
+                if t.b == NONE && body.count >= 60 && t.pushed > HARD && worst.is_none_or(|(_, p)| t.pushed > p) {
+                    let p = sub(add(body.pos, t.ra), scale(t.n, 0.5));
+                    worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed));
+                }
+            }
+            // The ground itself is not broken by what lands on it: only what is built.
+            if let Some((at, push)) = worst {
+                if !matches!(material(self.ground.kind(at[0], at[1], at[2])), 0 | EARTH | ROCK | GRASS | SAND | WATER | ASPHALT) {
+                    self.since_crush = 0.0;
+                    self.crushes += 1;
+                    self.crush(at, push);
+                }
             }
         }
         // What was knocked harder than it can take breaks where it is.
@@ -1056,11 +1171,13 @@ mod tests {
         let put = run(&mut bodies, 8.0);
         assert!(bodies.list.is_empty(), "the blocks did not come to rest in eight seconds: {:?}", bodies.list.iter().map(|b| (b.id, b.pos, b.vel, b.spin, b.rot, b.apart, b.still)).collect::<Vec<_>>());
         let cells: i32 = put.iter().map(|r| r.x1 - r.x0).sum();
-        assert_eq!(cells, 800, "both lie square and whole");
+        // The second, landing from three metres, chips the first: lumps of it are thrown and lie about.
+        let lying: i32 = put.iter().map(|r| if r.kind == 0 { -(r.x1 - r.x0) } else { r.x1 - r.x0 }).sum();
+        assert!((lying - 800).abs() <= 40, "about as many cells lie as fell ({lying} of 800; {cells} rows' worth told)");
         // The street climbs a tread under the first, so heights are told from where it lies.
-        let (low, top) = (put.iter().map(|r| r.y).min().unwrap(), put.iter().map(|r| r.y).max().unwrap());
+        let (low, top) = (put.iter().map(|r| r.y).min().unwrap(), put.iter().filter(|r| r.kind != 0).map(|r| r.y).max().unwrap());
         assert!(low <= ground + 2, "the first lies on the street");
-        assert_eq!(top, low + 7, "the second lies on the first, nothing between them");
+        assert!(top >= low + 5 && top <= low + 9, "the second lies on the first (its top is {} cells over the first's foot)", top - low);
     }
 
     #[test]
@@ -1083,6 +1200,44 @@ mod tests {
         let (half, most, last) = (ages[ages.len() / 2], ages[ages.len() * 9 / 10], ages[ages.len() - 1]);
         eprintln!("{} bodies of {loose} cells: half at rest by {:.1} s, nine in ten by {:.1} s, the last at {:.1} s; {down} cells lie down", ages.len(), half as f32 / 10.0, most as f32 / 10.0, last as f32 / 10.0);
         assert!(most <= 40, "nine lumps in ten lie still within four seconds (it took {:.1} s)", most as f32 / 10.0);
+    }
+
+    /// Not a check: how long the solver's calls take when big charges go off along a row of houses. `cargo test --release big_charges -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn big_charges_timed() {
+        use crate::city::{BLOCK_X, BLOCK_Z, Block, block as what};
+        use std::time::Instant;
+        let (bx, bz) = (-12..12).flat_map(|bz| (-12..12).map(move |bx| (bx, bz))).find(|&(bx, bz)| what(bx, bz) == Block::Homes && city::ground(bx * BLOCK_X + 500, bz * BLOCK_Z + 150) > 80).unwrap();
+        let (x, z) = (bx * BLOCK_X + 140 + 76 * 4 + 38, bz * BLOCK_Z + 150);
+        let mut bodies = Bodies::new();
+        let mut t = 0.0f32;
+        let mut worst = (0.0f32, 0usize, 0.0f32);
+        for k in 0..5 {
+            let at = [x - 150 + k * 76, city::ground(x, z) + 20, z + 20];
+            let t0 = Instant::now();
+            let made = bodies.blast(at, 40, None, false);
+            eprintln!("{t:5.1} s: blast {k} made {made} bodies in {:.0} ms; {} moving", t0.elapsed().as_secs_f32() * 1000.0, bodies.list.len());
+            for _ in 0..54 {
+                bodies.out.clear();
+                let (n, t0) = (bodies.list.len(), Instant::now());
+                bodies.advance(1.0 / 60.0);
+                let ms = t0.elapsed().as_secs_f32() * 1000.0;
+                if ms > worst.0 { worst = (ms, n, t) }
+                if ms > 30.0 { eprintln!("{t:5.1} s: a call took {ms:.0} ms with {n} bodies ({} cells), {} points tried, {} pair points, {} crushes, {} put down", bodies.list.iter().map(|b| b.count).sum::<usize>(), bodies.tried, bodies.paired, bodies.crushes, bodies.rested.len()) }
+                t += 1.0 / 60.0;
+            }
+        }
+        while !bodies.list.is_empty() && t < 40.0 {
+            bodies.out.clear();
+            let (n, t0) = (bodies.list.len(), Instant::now());
+            bodies.advance(1.0 / 60.0);
+            let ms = t0.elapsed().as_secs_f32() * 1000.0;
+            if ms > worst.0 { worst = (ms, n, t) }
+            if ms > 30.0 { eprintln!("{t:5.1} s: a call took {ms:.0} ms with {n} bodies, {} points tried, {} pair points, {} crushes", bodies.tried, bodies.paired, bodies.crushes) }
+            t += 1.0 / 60.0;
+        }
+        eprintln!("all at rest at {t:.1} s; the longest call took {:.0} ms with {} bodies at {:.1} s; {} bodies in all", worst.0, worst.1, worst.2, bodies.rested.len());
     }
 
     #[test]

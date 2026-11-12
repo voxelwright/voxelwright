@@ -152,3 +152,17 @@ pub const fn burns(material: u8) -> (u16, u8) {
         _ => (0, 0),
     }
 }
+
+/// How many cells can rest on one cell of this material before it is crushed. A wall of brick bears a house; one
+/// brick does not.
+pub const fn bears(material: u8) -> u32 {
+    match material {
+        STEEL => 400_000,
+        ROCK | CONCRETE => 40_000,
+        WOOD | ASPHALT => 20_000,
+        BRICK => 6_000,
+        PLASTER | ROOFING | LAMP => 4_000,
+        GLASS => 3_000,
+        _ => 1 << 30,
+    }
+}

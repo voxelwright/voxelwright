@@ -132,8 +132,8 @@ touch was refused.
 - Loose cells that touch are a piece. A piece that reaches the box's sides or top is left
   alone (nobody knows what holds it beyond), so a tower taller than the box does not come
   loose yet. Each other piece is taken out of the world and is a body.
-- It is reach and a count of cells, not weight or stress: a one-cell post under a house
-  still holds it, and a row of houses holds up a house whose ground floor is gone.
+- It is reach and counts of cells, not stress. A house whose front is blasted out stands on
+  its side walls; its neighbours' walls do not hang it up, but its own may.
 - `support::settle` (pieces dropped straight down in whole cells) is no longer what the page
   does; it stays as what the rule's own tests drive.
 
@@ -175,8 +175,27 @@ touch was refused.
   gap of 33 ms in ten seconds; a blast worked out in 60 to 80 ms; the solver's longest
   frame 19 ms. Of a charge's lumps nine in ten lie still within 2.3 s, and 98% of their
   cells lie down. A cut tree goes over and lies in the street.
-- Not done: bodies cast no shadow and take none; a body does not damage what it lands on;
-  nothing bends; a body that leaves the sectors near the eye is still moved.
+- A body of sixty cells or more that strikes something built hard enough (its weight times
+  the speed it loses, over 8,000) breaks it (`crush`): the world there is emptied as by a
+  blast of two to six cells, what was there comes out as lumps, and a box 6.4 m across is
+  asked what that left unheld. One such place a step, eight a second at most. The ground
+  itself (earth, rock, grass, sand, asphalt) is not broken by what lands on it.
+- What rests on a cell must not be more than it can bear (`kinds.rs` `bears`: brick 6,000
+  cells, glass 3,000, concrete 40,000, steel 400,000): a house does not stand on a post one
+  cell thick. The untouched city still stands with this.
+- A blast is asked about in a box sized to it: a hammer blow 6.4 m across, a charge 16 m.
+- Measured natively, five charges of 4 m radius along a row of houses: 2,300 bodies in all,
+  about 900 at once, a blast worked out in 220 to 290 ms, the longest step 62 ms. In the
+  browser the same took the worker up to 196 ms for one answer, during which bodies stand
+  still in the air; frames were not late (picture at 0.3 of full size, 261,000 cells down).
+  `cargo test --release big_charges -- --ignored --nocapture` times it.
+- Fire asks whether each neighbour can burn from a bit a cell kept beside the solid bit.
+  Asking what each neighbour was made of, with twelve sectors kept whole, took 4.4 s for one
+  answer once a fire had spread over more sectors than that.
+- Not done: bodies cast no shadow; nothing bends; a body that leaves the sectors near the
+  eye is still moved; a piece taller than the box round a blast is left standing, so a
+  tower does not go over; the support rule and a big blast stall the solver for up to a
+  fifth of a second.
 
 ## The look (`page/march.ts`: `LIGHT`, `SUNLIT`, `sky`, `openness`)
 
@@ -270,12 +289,16 @@ front coming down, staying down and losing no cell.
 
 ## Not built
 
+- When the eye moves far between two frames (30 m, as when frames are slow and it is flown
+  fast), mapped and traced shadows differ in 14.5% of pixels until the maps catch up, and
+  the fall-back to a traced shadow does not cover it: tiles that have wrapped round are
+  still marked drawn. `test/shadows.mjs` shows it whenever it runs beside another check.
 - Mapped shadows have edges in steps a cell wide and differ from traced ones in about 1.4%
   of a street view's pixels. Crumbs and anything else that moves cast none. A map's texel
   holds a distance as a 32-bit float from the world's zero: fine across a city, too coarse
   a thousand kilometres out.
-- What stands is reach and a count, not weight or stress. A body does not damage what it
-  lands on. Nothing bends or flows.
+- What stands is reach and counts of cells, not stress. Nothing bends or flows. A tower
+  does not go over.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
 - No walking, only flying. No real San Francisco: the city is made up.
 - The look has no texture on materials, no light from lamps or windows, no night, no smoke.
