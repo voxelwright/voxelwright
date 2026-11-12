@@ -687,3 +687,15 @@ front coming down, staying down and losing no cell.
   water nearly all of it is within 250 m), and the quarter roofs for mirrored looks (the
   quarter a sunset look is in holds the mountains). A ray may say it keeps to one quarter
   (`eyed`); looks from the eye and what the sea mirrors of them do.
+
+## Dust that hangs, and a darkening not taken (November 12)
+
+- The judge named dust and fine debris in two rows and in its summary. There was dust where a
+  body came to rest, but it was gone in 1 to 3 s, and the board's rest pictures are taken
+  after that. It now goes out along the ground and hangs 4 to 9 s (`puffs.ts` `dust`), and
+  small bits of the stuff are scattered round what landed and lie for most of a minute
+  (`crumbs.ts` `burst` with `lasts` and `fast`). Both are for the eye only: the bits are not
+  cells, and they lie on the land's own ground, not on a heap.
+- Corner darkening wider than one cell was tried as eight more lookups (two and four cells
+  off on each side). It cost 20 to 25% on every row with shadows on and showed little in a
+  street picture. Not taken. A wider darkening needs another way than more lookups a pixel.

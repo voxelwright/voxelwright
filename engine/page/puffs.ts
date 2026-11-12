@@ -135,8 +135,10 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
     },
     dust(at, radius, count, colour) {
+      // Thrown out along the ground more than up, and slow to clear: it hangs over where a thing came down for
+      // some seconds after all is still.
       for (let k = count; k > 0; k--) {
-        puff(at, radius * 0.6, rnd(6, 26), rnd(2, 12), { size: rnd(3, 7) + radius * 0.3, grow: rnd(4, 9), life: rnd(1.2, 2.6), heat: 0, cool: 0, rise: 3, drag: 2.2, colour, cover: 0.34 })
+        puff(at, radius * 0.7, rnd(10, 34), rnd(1, 7), { size: rnd(5, 11) + radius * 0.45, grow: rnd(5, 11), life: rnd(4, 9), heat: 0, cool: 0, rise: 2, drag: 1.7, colour, cover: 0.36 })
       }
     },
     flame(at, dt) {

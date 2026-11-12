@@ -43,7 +43,8 @@ const FAR = 100000.0;
 
 export interface Crumbs {
   /** Throws `count` crumbs of one colour (linear red, green, blue) out of a ball at `at` (finest cells, the world's), `radius` cells across. */
-  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number): void
+  /** `lasts` is how many seconds they are there for (a few, unless said); `fast` how hard they are thrown, 1 as a blast throws. */
+  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number, lasts?: number, fast?: number): void
   /** Moves them `dt` seconds on. `ground` says how high the land is at a column. */
   step(dt: number, ground: (x: number, z: number) => number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
@@ -72,16 +73,16 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
   return {
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
-    burst(at, radius, count, colour, size) {
+    burst(at, radius, count, colour, size, lasts = 2.5, fast = 1) {
       for (let k = 0; k < count; k++) {
         const i = next++ % MOST
         // Somewhere in the ball, thrown outwards and up.
         let dx = 0, dy = 0, dz = 0
         do { dx = Math.random() * 2 - 1; dy = Math.random() * 2 - 1; dz = Math.random() * 2 - 1 } while (dx * dx + dy * dy + dz * dz > 1)
         p[i * 3] = at[0] + dx * radius; p[i * 3 + 1] = at[1] + dy * radius; p[i * 3 + 2] = at[2] + dz * radius
-        const speed = 25 + Math.random() * 60
-        v[i * 3] = dx * speed; v[i * 3 + 1] = dy * speed + 20 + Math.random() * 30; v[i * 3 + 2] = dz * speed
-        life[i] = 1.6 + Math.random() * 1.8
+        const speed = (25 + Math.random() * 60) * fast
+        v[i * 3] = dx * speed; v[i * 3 + 1] = dy * speed + (20 + Math.random() * 30) * fast; v[i * 3 + 2] = dz * speed
+        life[i] = lasts * (0.65 + Math.random() * 0.7)
         edge[i] = size * (0.6 + Math.random() * 0.8)
         const shade = 0.75 + Math.random() * 0.4
         tone[i * 3] = colour[0] * shade; tone[i * 3 + 1] = colour[1] * shade; tone[i * 3 + 2] = colour[2] * shade

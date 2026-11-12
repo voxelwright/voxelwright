@@ -343,7 +343,11 @@ async function main() {
       // Dust of what it is made of, where it came to rest.
       const c = hue(piece.born.faces[1] >> 16), size = piece.born.size
       // Paler than the stuff itself, and as the screen shows it.
-      if (piece.born.cells > 20) smoke.dust(piece.pos, (size[0] + size[2]) / 4, Math.min(6, 1 + Math.round(piece.born.cells / 150)), [0.35 + 0.5 * c[0] ** 0.45, 0.35 + 0.5 * c[1] ** 0.45, 0.35 + 0.5 * c[2] ** 0.45])
+      if (piece.born.cells > 20) {
+        smoke.dust(piece.pos, (size[0] + size[2]) / 4, Math.min(8, 2 + Math.round(piece.born.cells / 120)), [0.35 + 0.5 * c[0] ** 0.45, 0.35 + 0.5 * c[1] ** 0.45, 0.35 + 0.5 * c[2] ** 0.45])
+        // And small bits of it, scattered round where it lies. They are for the eye only, and lie for most of a minute.
+        debris.burst(piece.pos, (size[0] + size[2]) / 4, Math.min(10, 1 + Math.round(piece.born.cells / 70)), [c[0], c[1], c[2]], 0.9, 40, 0.45)
+      }
     }
     for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
     bodies = answer.bodies
