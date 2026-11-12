@@ -40,7 +40,11 @@ export async function start() {
   /** The city page, not flying, once its engine is up. */
   const city = async (query = '', options) => {
     const p = await page(options)
-    const broke = new Promise((_, reject) => p.once('pageerror', (e) => reject(new Error(`the page failed as it started: ${e.message}`))))
+    const broke = new Promise((_, reject) => {
+      p.once('pageerror', (e) => reject(new Error(`the page failed as it started: ${e.message}`)))
+      // A file of the page that the server could not give (one that does not parse, say).
+      p.on('response', (r) => { if (r.status() >= 500) reject(new Error(`the page failed as it started: ${r.status()} for ${r.url()}`)) })
+    })
     broke.catch(() => {})   // it may fail before anything waits on it
     await p.goto(`${url}/city?fly=0&${query}`)
     // Beside other checks on one GPU the engine can take a while to come up. A page that fails as it starts (a shader

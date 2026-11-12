@@ -67,7 +67,8 @@ struct Globals {
   up: vec3f, time: f32,
   forward: vec3f, levels: u32,
   sun: vec3f, flags: u32,
-  res: vec2f, most: u32, pad: u32,
+  // sea: how high the top of the sea is.
+  res: vec2f, most: u32, sea: f32,
   // How wide a pixel is one cell away, and how many pixels wide a thing must be to be drawn as itself.
   // And the hour: day is 1 by day and 0 at night; low is how near the horizon the sun is, 1 at sunrise and sunset.
   pixel: f32, detail: f32, day: f32, low: f32,
@@ -230,7 +231,8 @@ const ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64)
 const BLOCK_ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64) * 2 + grid[0] * grid[2]}u;
 const UNIFORM = 0x80000000u;
 
-struct Hit { t: f32, kind: u32, n: vec3f, level: u32, cell: vec3i }
+// left: the ray went out through the far side of the last box (it did not run out of steps).
+struct Hit { t: f32, kind: u32, n: vec3f, level: u32, cell: vec3i, left: bool }
 // How many steps this pixel's rays have taken, all told.
 var<private> work: u32;
 
@@ -258,7 +260,7 @@ fn meet(lo: vec3f, hi: vec3f, q0: vec3f, k: vec3f) -> Met {
 // a node narrower than the ray is taken whole, as the kind most of it is. A rough ray (one towards the sun)
 // also takes the boxes two at a time once it has left the one it began in. A ray sent through does not stop
 // at what it meets: it goes on to the end and says where it last left something solid.
-fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool) -> Hit {
+fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool) -> Hit {
   var hit: Hit;
   hit.t = -1.0;
   let inv = 1.0 / rd;
@@ -496,6 +498,35 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     t = min(max(next, t), leaveAt) + eps;
   }
   hit.level = min(L, g.levels - 1u);
+  hit.left = L >= g.levels;
+  return hit;
+}
+// What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
+// lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
+// that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
+// last box there is no sea, as there is no land. This is asked once, after the march and not in it. The march is
+// left as it was, and a ray over deep water is walked on down to the floor (the far view is 8% dearer for it):
+// one more test a pass in there, or even one more number kept and one more min() a box, made every look a tenth
+// dearer, sea in it or not.
+fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool) -> Hit {
+  var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through);
+  if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
+  let t = (g.sea - ro.y) / rd.y;
+  if (hit.t >= 0.0 && hit.t <= t) { return hit; }
+  let p = ro + rd * t;
+  // The finest box the place is in.
+  var L = g.levels;
+  for (var k = level0; k < g.levels; k++) {
+    let q = (p.xz - g.level[k].boxMin.xz) * g.level[k].scale;
+    if (all(q >= vec2f(0.0)) && all(q < g.level[k].boxSize.xz)) { L = k; break; }
+  }
+  if (L == g.levels || (hit.t < 0.0 && !hit.left)) { return hit; }
+  let lv = g.level[L];
+  hit.t = t;
+  hit.kind = 5u;
+  hit.n = vec3f(0.0, 1.0, 0.0);
+  hit.level = L;
+  hit.cell = vec3i(floor((p - lv.boxMin) * lv.scale - vec3f(0.0, 0.5, 0.0))) + lv.cells;
   return hit;
 }
 
@@ -950,6 +981,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       u[19] = flags
       f.set(size, 20)
       u[22] = 384
+      // The top of the sea is the world's zero (city.rs SEA).
+      f[23] = -anchor[1]
       f[24] = (2 * view.tanHalf) / size[1]
       f[25] = detail
       f[26] = day

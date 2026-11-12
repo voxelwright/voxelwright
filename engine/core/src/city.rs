@@ -21,9 +21,11 @@ const LOTS: i32 = 15;
 const STOREY: i32 = 30;
 const TOWER_WIDE: i32 = 380;
 const TOWER_STOREY: i32 = 36;
-/// The sea's top layer of cells. It is under zero so that it is the same layer at every coarseness (-1 >> k is -1):
-/// the sea lies level from the finest copy to the coarsest. With 0 here a coarse cell of sea stood 2^k cells
-/// high, a step up at the edge of every box, seen from the shore as dark lines across the water.
+/// The layer of cells under the top of the sea: the sea's top is the world's zero. The still sea is not cells. It is
+/// all that lies under zero with nothing else in it, and the page draws its top as a level plane (march.ts): a look
+/// through it then crosses open space as fast as air, what sinks in it sinks, and it lies level at every
+/// coarseness. As cells it was crossed in small steps (a look under water cost three times a look through air),
+/// and a coarse cell of it stood 2^k cells high, a step at the edge of every box.
 pub const SEA: i32 = -1;
 /// Nothing but earth lies further than this under the ground.
 pub const DEEP: i32 = 192;
@@ -739,13 +741,13 @@ pub fn make(s: &mut Scratch) {
     let side = SIDE as i32;
     let (lo, hi) = s.bounds();
     let near = k <= SHAPES_TO;
-    // The ground, a column at a time: earth up to its top cell, then what the surface is, then the sea.
+    // The ground, a column at a time: earth up to its top cell, then what the surface is.
     for cz in 0..side {
         for cx in 0..side {
             let (x, z) = (((s.low[0] + cx) << k) + half, ((s.low[2] + cz) << k) + half);
             let g = ground(x, z);
             let (top, raise) = surface(x, z, g);
-            // Under the sea a coarse column keeps a cell of water over its ground, however shallow the water: far
+            // Under the sea a coarse column's ground stays a cell under the sea's top, however shallow the water: far
             // water stays water.
             let gy = if g < SEA { (g >> k).min((SEA >> k) - 1) } else { g >> k } - s.low[1];
             let (ux, uz) = (cx as usize, cz as usize);
@@ -757,10 +759,6 @@ pub fn make(s: &mut Scratch) {
                 if y >= 0 && y < side {
                     s.cells[at(ux, y as usize, uz)] = top;
                 }
-            }
-            let sea = (SEA >> k) - s.low[1];
-            for y in (gy + 1).max(0)..=sea.min(side - 1) {
-                s.cells[at(ux, y as usize, uz)] = kind(WATER, OWN);
             }
             if !near {
                 if let Some((t, wall, roof)) = standing(x, z) {

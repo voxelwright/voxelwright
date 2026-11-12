@@ -524,11 +524,25 @@ front coming down, staying down and losing no cell.
 
 ## Water seen from the shore (November 12)
 
-- The sea's top layer is cell -1, not 0 (`city.rs` `SEA`). `-1 >> k` is -1 at every coarseness,
-  so the sea lies level across all the boxes. With 0 a coarse sea cell stood 2^k cells high: a
-  step up at each box's edge, seen from the shore as dark lines across the water. A coarse
-  column under the sea keeps one cell of water over its ground however shallow the water, so
-  far water stays water.
+- The still sea is a level plane at the world's zero, not cells (`city.rs` `SEA`, `march.ts`
+  `trace`). This is the one exception to "everything is cells"; `WATER` stays a material for
+  water that moves. As cells the sea had two faults. A coarse cell of it stood 2^k cells high,
+  a step up at each box's edge, seen from the shore as dark lines across the water. And a look
+  through it took small steps: from under water a picture cost three times one through air,
+  and a shadow ray as much as the look. Now the floor is in the sun's maps, what falls in
+  sinks, and a look under water crosses open space.
+- The sea is decided once after the march, not in it: a ray that came down from over the top
+  and met nothing before it (or went out of the last box under it) met the sea. Two cheaper-
+  looking ways were measured and thrown out: the same test at every pass inside the march,
+  and one more number kept there with one more `min` a box. Each made every look 10 to 17%
+  dearer, sea in it or not: the march's loop does not bear another live value. The cost of
+  asking afterwards is that a ray over deep water walks on down to the floor: the `far`
+  bench row is 8% dearer (38.7 against 35.8 ms).
+- A coarse column under the sea keeps its ground a cell under the top, however shallow the
+  water, so far shallows stay water.
+- `test/sea.mjs`: looks down over the lake meet the top at the eye's height over it, also on
+  the last three cells of water before the shore, with skips and without; from under it no
+  look meets it.
 - A wave tilted towards the eye sends the mirrored look down into the water it came off: dark
   specks all over the middle distance. The look is kept at or above level for water.
 - Ripples are smooth noise and fade out by 60 m; further off there are many waves to a pixel.

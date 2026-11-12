@@ -101,7 +101,8 @@ export async function flight(f: Flown) {
     const start = performance.now(), leg = (f.seconds * 1000) / (route.length - 1)
     let mark = start
     for (;;) {
-      const now = await nextFrame(), along = (now - start) / leg
+      // A frame's time is when it began, which can be before `start` was read: never before the first leg.
+      const now = await nextFrame(), along = Math.max(0, (now - start) / leg)
       if (along >= route.length - 1) break
       const a = route[Math.floor(along)], b = route[Math.floor(along) + 1], u = along - Math.floor(along), k = u * u * (3 - 2 * u)
       for (const key of ['x', 'y', 'z', 'yaw', 'pitch'] as const) pose[key] = a[key] + (b[key] - a[key]) * k
