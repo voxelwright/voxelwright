@@ -43,6 +43,10 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   // The corners of the picture a little darker, as a lens leaves them.
   let d = in.uv - 0.5;
   c *= 1.0 - dot(d, d) * 0.42;
+  // The grade: a little more colour and a little more contrast than the tone curve leaves.
+  c = clamp(c, vec3f(0.0), vec3f(1.0));
+  c = mix(vec3f(dot(c, vec3f(0.3, 0.59, 0.11))), c, 1.25);
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.35);
   return vec4f(c, 1.0);
 }
 `
@@ -119,7 +123,7 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     const quarter = [Math.max(1, from.size[0] >> 2), Math.max(1, from.size[1] >> 2)]
     const texture = () => device.createTexture({ size: quarter, format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
     const textures = [texture(), texture()], views = textures.map((t) => t.createView())
-    const blocks = [block([1 / from.size[0], 1 / from.size[1]]), block([1 / quarter[0], 0]), block([0, 1 / quarter[1]]), block([0, 0], 0.85)]
+    const blocks = [block([1 / from.size[0], 1 / from.size[1]]), block([1.8 / quarter[0], 0]), block([0, 1.8 / quarter[1]]), block([0, 0], 1.0)]
     const bind = (picture: GPUTextureView, spread: GPUTextureView, uniforms: GPUBuffer) => device.createBindGroup({ layout, entries: [{ binding: 0, resource: picture }, { binding: 1, resource: sampler }, { binding: 2, resource: spread }, { binding: 3, resource: { buffer: uniforms } }] })
     kept = { from, textures, blocks, views, binds: [bind(from.color, views[1], blocks[0]), bind(views[0], views[0], blocks[1]), bind(views[1], views[1], blocks[2]), bind(from.color, views[0], blocks[3])] }
     return kept

@@ -742,19 +742,22 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         }
     }
     let (p, d) = (peaks(x, z), dry(x, z));
-    // How steep: the most the ground changes over 1.6 m to either side, in cells a cell.
+    // How steep: the most the ground changes over 4.8 m to either side, in cells a cell. Taken over that much so
+    // that snow and rock lie in sheets and faces, not cell by cell.
     let steep = || {
-        let (a, b, c, e) = (ground(x - 16, z), ground(x + 16, z), ground(x, z - 16), ground(x, z + 16));
-        ((a - b).abs().max((c - e).abs())) as f32 / 32.0
+        let (a, b, c, e) = (ground(x - 48, z), ground(x + 48, z), ground(x, z - 48), ground(x, z + 48));
+        ((a - b).abs().max((c - e).abs())) as f32 / 96.0
     };
     if p > 0.0 {
         let s = steep();
         // The snow lies from about 650 m up, on all but the steepest faces; its line wanders by 130 m either way.
         if g > 5200 + (noise(x, z, 5200, 41) * 2600.0) as i32 && s < 1.7 {
-            return kind(ROCK, WHITE);
+            // Snow is sand in white: it lies even, where rock is rough.
+            return kind(SAND, WHITE);
         }
         if s > 0.85 || g > 5000 {
-            return kind(ROCK, grey(5 + (hash(x >> 5, z >> 5, 42) % 4) as u8));
+            // Rock in bands a few hundred metres across.
+            return kind(ROCK, grey(5 + (noise(x, z, 3100, 42) * 4.0) as u8));
         }
         if wooded(x, z, g) {
             return kind(GRASS, colour(8, 6));

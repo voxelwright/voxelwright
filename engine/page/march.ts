@@ -138,10 +138,10 @@ fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32,
   let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
   let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
   let SUN_LIGHT = g.lightSun.rgb;
-  var col = albedo * (SUN_LIGHT * direct * 3.1 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
+  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
   let hv = normalize(sun - rd);
   col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
-  col += albedo * glow * 6.0;
+  col += albedo * glow * 3.2;
   return col;
 }
 // From light to what a screen shows: bright things keep their colour and do not clip.
@@ -849,8 +849,8 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
     }
   }
   // They show most looking towards where the light comes from.
-  let facing = 0.35 + 0.65 * pow(max(dot(rd, sun), 0.0), 3.0);
-  col += g.lightSun.rgb * vec3f(0.45, 0.95, 0.85) * shafts * 0.1 * (reach / 450.0) * facing * 2.2;
+  let facing = 0.6 + 0.4 * pow(max(dot(rd, sun), 0.0), 3.0);
+  col += g.lightSun.rgb * vec3f(0.45, 0.95, 0.85) * shafts * 0.1 * (reach / 450.0) * facing * 3.6;
   return col;
 }
 
@@ -931,6 +931,10 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       var n = hit.n;
       if (dot(n, n) < 0.5) { n = -rd; }
       let p = g.eye + rd * hit.t;
+      if ((hit.kind & 15u) == 6u || (hit.kind & 15u) == 7u) {
+        // Wet road is not flat: what it mirrors is drawn out into streaks towards the eye.
+        n = normalize(n + vec3f(noise2(p.xz * 0.23) - 0.5, 0.0, noise2(p.zx * 0.29) - 0.5) * 0.022);
+      }
       if ((hit.kind & 15u) == 5u) {
         // Small waves, drawn as themselves only near: further off there are many to a pixel and they are noise.
         let ripple = vec2f(noise2(p.xz * 0.11 + vec2f(g.time * 0.5, g.time * 0.31)), noise2(p.zx * 0.13 - vec2f(g.time * 0.43, g.time * 0.27))) - 0.5
@@ -968,7 +972,7 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       let facing = 1.0 - max(dot(-rd, n), 0.0);
       let fresnel = 0.04 + 0.96 * pow(facing, 5.0);
       col = mix(col, seen, clamp(mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));
-      col += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 2.2, g.day) * path;
+      col += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 3.6, g.day) * path;
     }
     col = air(col, rd, hit.t);
   }
@@ -1063,12 +1067,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const some = 0.1 + 0.9 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, rain * by)
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * rain), day * (1 - 0.5 * low) * (1 - 0.6 * rain),
-      ...wet(times(mix([0.3, 0.4, 0.58], [0.34, 0.3, 0.42], low), some), 0.7), some,
+      ...wet(times(mix([0.24, 0.33, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
-      ...wet(hour(dark, [0.66, 0.79, 0.93], [0.6, 0.44, 0.5])), 0.6 * low * day * (1 - rain),
-      ...wet(hour(dark, [0.66, 0.79, 0.93], [1, 0.45, 0.12])), sx / flat,
-      ...times(hour(cloudy, white, [0.55, 0.36, 0.48]), 1 - 0.5 * rain), sz / flat,
-      ...times(hour(cloudy, white, [1, 0.5, 0.2]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
+      ...wet(hour(dark, [0.66, 0.79, 0.93], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - rain),
+      ...wet(hour(dark, [0.66, 0.79, 0.93], [1.25, 0.5, 0.1])), sx / flat,
+      ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * rain), sz / flat,
+      ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
       // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
       rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), 0,
     ], 36 + MAX_LEVELS * 32)

@@ -636,3 +636,19 @@ front coming down, staying down and losing no cell.
 - `test/skips.mjs` asks rising looks too, and the reference (PLAIN) no longer uses the rising
   clamp at a box's roof, so a wrong roof shows: with one quarter's roof set low 109 of 504
   looks fail.
+
+## Light and colour after the third judge (November 12)
+
+- The judge's first finding was that our light is flat and our colour weak. What was changed,
+  all of it constants or work outside the marcher, so the bench did not move (within 2%):
+  the sun is stronger against the sky's fill (3.6 against 3.1, fill at four fifths); the last
+  pass (`glow.ts` `last`) adds a quarter more colour and an S-curve after the tone curve; the
+  glow spreads nearly twice as far; a lamp glows at 3.2 times its colour, not 6, so it stays
+  warm and does not clip to white; at dusk the sky towards the sun and the clouds on that
+  side are stronger and the clouds away from it darker; the sun's path on water is brighter;
+  shafts under water show whichever way the eye looks.
+- Snow is `SAND` in white (it lies even; `ROCK` in white was speckled), and steepness is taken
+  over 4.8 m to either side, so snow and rock lie in sheets and faces, not cell by cell. Rock
+  is banded by a slow noise, not by 3.2 m squares.
+- Wet road has a small slow ripple in what it mirrors. A fine strong one scrambled a shop
+  sign's mirror image into a blob.
