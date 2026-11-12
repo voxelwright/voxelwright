@@ -169,7 +169,8 @@ export const ROWS = [
     // From over the yard, the row of houses across the street: big charges at their feet, one after another.
     stand: [8, 17, 13, 0, -0.5 / DEG], near: [60, ...HOUSE, 14], falls: 1000,
     act: async (page) => {
-      for (const turn of [-0.5, -0.25, 0, 0.25, 0.5]) { await charge(page, turn, 40, -0.62); await page.waitForTimeout(900) }
+      // The biggest charge on the bar, six times.
+      for (const turn of [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(800) }
     } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'none' },

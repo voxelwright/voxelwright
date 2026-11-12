@@ -4,7 +4,7 @@
 // only says where the body is and how it is turned. It is lit as the world is and stands in the
 // world's shadows (the sun's maps); it casts none of its own.
 import { shader, type Target } from '../probe/gpu.ts'
-import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
+import { GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
 import type { Born } from './told.ts'
 
 const CODE = /* wgsl */ `
@@ -67,28 +67,18 @@ const FAR = 100000.0;
   out.kind = b >> 16u;
   return out;
 }
-fn hash3i(c: vec3i, seed: u32) -> f32 {
-  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 19349663u) ^ (u32(c.z) * 83492791u) ^ (seed * 2654435761u);
-  h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
-  h = (h ^ (h >> 12u)) * 0x297a2d39u;
-  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
-}
+${PAINT}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let m = looks.material[in.kind & 15u];
-  let ci = (in.kind >> 8u) & 255u;
-  var paint = m.colour;
-  if (ci != 0u) { paint = looks.palette[ci].rgb; }
-  let cell = vec3i(floor(in.at - in.n * 0.5)) + u.cells;
-  let own = hash3i(cell, 1u);
-  let blot = hash3i(cell >> vec3u(2u), 2u);
-  paint *= 1.0 + (own - 0.5) * 0.4 * m.wander + (blot - 0.5) * 0.16 * m.wander;
+  // The cell as it was in the world when the body came loose, and the face as it then looked.
+  let albedo = paint(in.kind, vec3i(floor(in.at - in.n * 0.5)) + u.cells, in.n, 1.0);
   var direct = max(dot(in.facing, u.sun), 0.0);
   if (direct > 0.0) {
     // In the world's shadow where the sun's maps say so; where they cannot say, in the sun.
     let sunny = sunlit(in.seen + u.eye, in.facing, 0u);
     if (sunny >= 0.0) { direct *= sunny; }
   }
-  return vec4f(tone(shade(paint, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow)), 1.0);
+  return vec4f(tone(shade(albedo, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow)), 1.0);
 }
 `
 

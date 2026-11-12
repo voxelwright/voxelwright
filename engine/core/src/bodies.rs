@@ -1503,7 +1503,8 @@ mod tests {
         let home = [700, city::ground(700, 4070), 4070];
         let (low, size) = ([380, home[1] - 60, 3820], [640usize, 300, 320]);
         let built = |k: Kind| !matches!(material(k), 0 | EARTH | ROCK | GRASS | SAND | ASPHALT);
-        // The rows as rows.mjs has them: where the eye is, how it is turned and tilted, the charges' turns and size.
+        // The rows as rows.mjs had them on November 12 (ruin has since used six charges of 32): where the eye is, how
+        // it is turned and tilted, the charges' turns and size.
         let rows: [(&str, [i32; 3], f32, f32, [f32; 5], i32); 2] = [
             ("rubble", [home[0], home[1] + 35, home[2] + 40], 9f32.to_radians(), 12.6f32.to_radians(), [-0.22, 0.0, 0.22, -0.11, 0.11], 16),
             ("ruin", [home[0] + 80, home[1] + 170, home[2] + 130], 0.0, -0.62, [-0.5, -0.25, 0.0, 0.25, 0.5], 40),

@@ -12,11 +12,12 @@ export const MAX_LEVELS = 10
 export function palette(): Float32Array<ArrayBuffer> {
   const out = new Float32Array(256 * 4)
   const set = (i: number, r: number, g: number, b: number) => { out[i * 4] = r ** 2.2; out[i * 4 + 1] = g ** 2.2; out[i * 4 + 2] = b ** 2.2; out[i * 4 + 3] = 1 }
-  for (let i = 1; i < 16; i++) { const v = 0.96 - ((i - 1) / 14) * 0.9; set(i, v, v, v * 0.99) }
+  // Nothing painted is brighter than white paint is: a wall as bright as paper comes out of the sun as white, whatever is on it.
+  for (let i = 1; i < 16; i++) { const v = 0.86 - ((i - 1) / 14) * 0.8; set(i, v, v, v * 0.99) }
   // Saturation and value of the ten tones.
   const TONES: [number, number][] = [[0.14, 0.97], [0.26, 0.94], [0.4, 0.88], [0.55, 0.8], [0.78, 0.86], [0.7, 0.55], [0.6, 0.32], [0.16, 0.8], [0.26, 0.62], [0.3, 0.42]]
   for (let hue = 0; hue < 24; hue++) for (let tone = 0; tone < 10; tone++) {
-    const [s, v] = TONES[tone], h = hue / 4
+    const [s, bright] = TONES[tone], v = bright * 0.84, h = hue / 4
     const f = (n: number) => { const k = (n + h) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)) }
     set(16 + hue * 10 + tone, f(5), f(3), f(1))
   }
@@ -35,7 +36,7 @@ export function materials(): Float32Array<ArrayBuffer> {
     ['#5a5b60', 0.7, 0.92, 0, 0], // asphalt
     ['#a9a69f', 0.5, 0.85, 0, 0], // concrete
     ['#a4553d', 0.9, 0.9, 0, 0], // brick
-    ['#e8e0d0', 0.3, 0.9, 0, 0], // plaster
+    ['#cfc6b4', 0.3, 0.9, 0, 0], // plaster
     ['#b98a5a', 0.7, 0.75, 0, 0], // wood
     ['#9fc3d6', 0.1, 0.05, 0.75, 0], // glass
     ['#8f959c', 0.25, 0.35, 0.3, 0], // steel
@@ -129,9 +130,73 @@ fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32,
 }
 // From light to what a screen shows: bright things keep their colour and do not clip.
 fn tone(c: vec3f) -> vec3f {
-  let x = c * 0.6;
+  let x = c * 0.43;
   let y = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
   return pow(clamp(y, vec3f(0.0), vec3f(1.0)), vec3f(0.4545));
+}
+`
+
+/**
+ * What a face of a cell looks like: its material's colour or its own from the palette, then what the material is made
+ * as. Bricks two cells long in courses, each its own shade; boards across a painted wall; planks; slabs with joints.
+ * Nothing is finer than a cell, and all of it is from where the cell is, so a wall keeps its courses as a body. In the
+ * coarser copies a cell is many cells, and only the shade of a patch is kept. For the world and for bodies.
+ */
+export const PAINT = /* wgsl */ `
+fn hash3i(c: vec3i, seed: u32) -> f32 {
+  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 19349663u) ^ (u32(c.z) * 83492791u) ^ (seed * 2654435761u);
+  h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
+  h = (h ^ (h >> 12u)) * 0x297a2d39u;
+  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
+}
+// cell: the finest cell the face is of. n: which way the face looks. fine: 1 where a cell is drawn as a cell, 0 in the coarse copies.
+fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32) -> vec3f {
+  let stuff = kind & 15u;
+  let m = looks.material[stuff];
+  let ci = (kind >> 8u) & 255u;
+  var base = m.colour;
+  if (ci != 0u) { base = looks.palette[ci].rgb; }
+  let own = hash3i(cell, 1u);
+  let blot = hash3i(cell >> vec3u(2u), 2u);
+  var v = 1.0 + ((own - 0.5) * 0.4 * fine + (blot - 0.5) * 0.16) * m.wander;
+  // Along the face and up it: a wall's two ways, or a floor's.
+  let wall = abs(n.y) < 0.5;
+  var along = cell.x;
+  var across = cell.z;
+  if (abs(n.x) > 0.5) { along = cell.z; across = cell.x; }
+  var up = cell.y;
+  if (!wall) { up = cell.z; across = cell.y; }
+  // Stains and wear, the size of a door.
+  let worn = hash3i(vec3i(cell.x >> 4u, cell.y >> 4u, cell.z >> 4u), 3u) - 0.5;
+  if (stuff == 8u) {
+    // Brick: courses a cell high, bricks two long, every other course half a brick along.
+    let brick = vec3i((along + (up & 1)) >> 1u, up, across);
+    let shade = hash3i(brick, 4u);
+    v = 1.0 + ((shade - 0.5) * 0.44 - select(0.0, 0.22, shade > 0.9)) * fine + (own - 0.5) * 0.08 * fine + worn * 0.12;
+  } else if (stuff == 9u) {
+    // A painted wall of boards two cells high, each lapped over the one below: the lower cell is in its shade.
+    if (wall && (up & 1) == 0) { v -= 0.17 * fine; }
+    v += worn * 0.14;
+  } else if (stuff == 10u) {
+    // Wood: planks two cells wide, upright on a wall and along a floor, each its own shade, with a grain along it.
+    var plank = vec3i(along >> 1u, across, 0);
+    var run = up;
+    if (!wall) { plank = vec3i(cell.z >> 1u, cell.y, 1); run = cell.x; }
+    v = 1.0 + ((hash3i(plank, 5u) - 0.5) * 0.3 + (hash3i(vec3i(plank.x, plank.y, run >> 2u), 6u) - 0.5) * 0.12) * fine + (own - 0.5) * 0.06 * fine;
+  } else if (stuff == 7u) {
+    // Concrete: slabs sixteen cells across with a joint between, and stains.
+    if (((along & 15) == 0 || (up & 15) == 0)) { v -= 0.14 * fine; }
+    v += worn * 0.14;
+  } else if (stuff == 14u) {
+    // Roofing: rows of shingles two cells long, every other row half a shingle along.
+    let shingle = vec3i((cell.x + (cell.z & 1)) >> 1u, cell.y, cell.z);
+    v = 1.0 + (hash3i(shingle, 7u) - 0.5) * 0.3 * fine + worn * 0.1;
+  } else if (stuff == 6u || stuff == 1u || stuff == 3u) {
+    // Road, earth and grass: patches.
+    v += worn * 0.12;
+    if (stuff == 3u) { base = mix(base, vec3f(0.42, 0.4, 0.12), clamp(worn + 0.2, 0.0, 0.35)); }
+  }
+  return base * max(v, 0.2);
 }
 `
 
@@ -420,13 +485,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 }
 
 ${LIGHT}
-fn hash3i(c: vec3i, seed: u32) -> f32 {
-  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 19349663u) ^ (u32(c.z) * 83492791u) ^ (seed * 2654435761u);
-  h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
-  h = (h ^ (h >> 12u)) * 0x297a2d39u;
-  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
-}
-
+${PAINT}
 // The sky without sun or cloud: what the air between is the colour of.
 fn skyBase(rd: vec3f) -> vec3f {
   let up = clamp(rd.y, 0.0, 1.0);
@@ -478,16 +537,6 @@ fn sky(rd: vec3f) -> vec3f {
     }
   }
   return col;
-}
-
-fn paint(kind: u32, cell: vec3i) -> vec3f {
-  let m = looks.material[kind & 15u];
-  let ci = (kind >> 8u) & 255u;
-  var base = m.colour;
-  if (ci != 0u) { base = looks.palette[ci].rgb; }
-  let own = hash3i(cell, 1u);
-  let blot = hash3i(cell >> vec3u(2u), 2u);
-  return base * (1.0 + (own - 0.5) * 0.4 * m.wander + (blot - 0.5) * 0.16 * m.wander);
 }
 
 ${SUNLIT}
@@ -593,7 +642,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var n = hit.n;
   let faced = dot(n, n) >= 0.5;
   if (!faced) { n = -rd; }
-  let albedo = paint(hit.kind, hit.cell);
+  // The finest cell the hit's cell begins at; its pattern only where it is drawn as itself.
+  let albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), n, select(0.0, 1.0, hit.level == 0u && faced));
   // Earth, grass, sand, asphalt and paving lie on the hills in steps a cell high. A step's riser is lit as the tread
   // is, so a street reads as a slope: a riser is a side face with air over its cell and ground under the cell before it.
   let stuff = hit.kind & 15u;

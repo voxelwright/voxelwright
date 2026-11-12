@@ -276,6 +276,22 @@ falls). The cutter and the brick are edits of the page's own, told to the solver
 - Not done: fire gives no light to what is near it; smoke casts no shadow and is not blown
   round things; a body that is alight goes out; water does not put fire out.
 
+## What surfaces are made as (`page/march.ts` `PAINT`, shared with `pieces.ts`)
+
+- Walls looked flat because they were too bright to show anything. The palette's pastels were
+  0.94 to 0.97 bright, so a sunlit wall came out of `tone()` at the top of its curve, where a
+  surface 15% darker shows 2% darker. Worked out by hand from `shade()` and `tone()` before any
+  pattern was drawn. The palette is now no brighter than white paint (values times 0.84), plaster
+  is darker, and the exposure in `tone()` is 0.43 (was 0.6).
+- `paint(kind, cell, n, fine)` is one WGSL function for the world and for bodies: bricks two
+  cells long in courses, each its own shade; boards two cells high across a painted wall, the
+  lower cell in the lap's shade; planks; concrete slabs sixteen cells across with joints; rows of
+  shingles; patches on road, earth and grass. Nothing is finer than a cell.
+- It is keyed on the finest cell (`hit.cell * (1 << level)`) and drawn only at the finest level
+  and on a face; a body's cells are keyed on where they were when it came loose, so a heap
+  carries its wall's boards.
+- Cost: the bench's places are within 3% of before.
+
 ## Coming down into heaps (#160, `bodies.rs`: `sitting`, `lumps`; `page/sun.ts`; `page/world.ts`)
 
 Counted first (`cargo test --release where_the_stuff_goes -- --ignored --nocapture`, `SPARKS=1`
@@ -312,6 +328,10 @@ What a burning street cost, each found by switching parts of a frame off (`engin
 Still slow: a charge of 40 is worked out in 0.25 s native and 0.65 s in the page, and the solver
 falls behind real time with 1,800 bodies (frames are held; things move late and slowly).
 
+Filmed (`node test/clip.mjs --row ruin --seconds 16`, M1 Pro, November 12, five charges of 40 with
+sparks): 960 frames in 16.0 s, no gap over 16.7 ms, 2,684 bodies in all, 1,883 at once, the
+picture at 0.40 of full size. The board's ruin row has since used the big charge tool's 32.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as
@@ -337,7 +357,7 @@ falls behind real time with 1,800 bodies (frames are held; things move late and 
 
 ## Checks, and the bar
 
-`npm run check` in `engine/` runs everything in about three minutes: `cargo test`, `tsc`, and
+`npm run check` in `engine/` runs everything in four to six minutes (237 to 333 s on November 12): `cargo test`, `tsc`, and
 the real page in the installed Chrome with WebGPU (`test/city.mjs`, `blast.mjs`, `shadows.mjs`,
 `falls.mjs`, `flight.mjs`, `flight.mjs --phone`, `probe.mjs`), sharing one server and one
 browser through `test/kit.mjs`. None stubs anything. `cargo test` holds the support rule to:
