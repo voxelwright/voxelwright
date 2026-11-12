@@ -7,6 +7,9 @@
 // with the sides unnamed (`versus --blind`, test/judge.md) and the row showed its thing:
 //   none    we have nothing to show        behind  we show it, theirs is better
 //   level   as good to look at             ahead   ours is better
+// The judge's scores are out of ten: two or more apart is ahead or behind, one apart is level.
+// Judged November 13 (dispatch log): fire 7 v 4, glass 5 v 4, tools 6 v 5 to us. Tumble's 7 v 5 was void: their
+// frame was not the film's best wall, and is now.
 // Shown live and measured counts for nothing until a row is level to look at.
 import { still } from './kit.mjs'
 
@@ -72,8 +75,8 @@ export async function showed(page, row, was) {
 }
 
 const blast = (page, radius) => page.evaluate((r) => globalThis.engine.blast(r), radius)
-/** The house fronts across the street from the start, from the yard's side of it. */
-const FRONT = [0, 3.5, 4, 9, 12.6]
+/** The house fronts across the street from the start, from the road: the kerbs are parked up. */
+const FRONT = [-2, 3.2, 1.5, 9, 15]
 /** Turns the head `turn` radians from where it looks, breaks what is ahead, and turns it back. */
 const charge = async (page, turn, radius, pitch) => {
   const was = await page.evaluate(([turn, pitch]) => { const p = globalThis.engine.pose, was = [p.yaw, p.pitch]; p.yaw += turn; if (pitch !== null) p.pitch = pitch; return was }, [turn, pitch ?? null])
@@ -96,8 +99,8 @@ export const ROWS = [
     // water tower and chimney.
     stand: { from: [15, 404.5], up: 2.2, to: [60, 412], high: 6 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
-    stand: [0, 1.8, 0, 60, 5] },
-  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 30.0], state: 'behind',
+    stand: [-9, 1.8, 2.2, 62, 5] },
+  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'behind',
     stand: FRONT, near: [16, ...HOUSE], inAir: true, falls: 20,
     act: async (page) => {
       await blast(page, 16)
@@ -106,12 +109,13 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'behind',
-    // The water tower in the yard: its two legs on this side are cut near the ground, and it comes this way.
-    stand: { from: [YARD.tower[0] - 27, YARD.tower[1] - 9], up: 3, to: YARD.tower, high: 9 }, near: [40, STEEL, WOOD], inAir: true, falls: 1,
+    // The water tower in the yard, from the street beside it: its two legs on one side are cut near the ground, and
+    // it goes over across the picture. Seen from in front of its fall it looked upright.
+    stand: { from: [YARD.tower[0] - 5, YARD.tower[1] - 23], up: 2.5, to: YARD.tower, high: 12.5 }, near: [45, STEEL, WOOD], inAir: true, falls: 1,
     act: async (page) => {
       const [x, z] = YARD.tower
       for (const dz of [-1.9, 1.9]) await strikeAt(page, [x - 1.9, z + dz], 1.2, 14, false)
-      await page.waitForFunction(() => globalThis.engine.leaning > 38, null, { timeout: 12_000 })
+      await page.waitForFunction(() => globalThis.engine.leaning > 42, null, { timeout: 12_000 })
       return page.screenshot()
     } },
   { key: 'blast', what: 'An explosion: a ball of fire, smoke, pieces flung', theirs: ['engine', 38.6], state: 'behind',
@@ -122,7 +126,7 @@ export const ROWS = [
       await page.waitForTimeout(200)
       return page.screenshot()
     } },
-  { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 53.6], state: 'behind',
+  { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 53.6], state: 'ahead',
     stand: [-1, 1.8, -0.83, -0.88 / DEG, 0.5 / DEG], near: [12, LEAVES], burns: true,
     act: async (page) => {
       // A street tree's crown set alight, and watched from under it.
@@ -133,12 +137,13 @@ export const ROWS = [
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
-    stand: FRONT, near: [16, ...HOUSE], falls: 300,
+    // From further back and looking level, so that what lies at the houses' feet is in the picture.
+    stand: [-2, 3.6, 5, 9, 3], near: [18, ...HOUSE], falls: 300,
     act: async (page) => {
-      // Five charges across the front, half a second apart: each lands in what the last left moving.
-      for (const turn of [-0.22, 0, 0.22, -0.11, 0.11]) { await charge(page, turn, 16); await page.waitForTimeout(500) }
+      // Five charges across the front, half a second apart, a storey up: each lands in what the last left moving.
+      for (const turn of [-0.22, 0, 0.22, -0.11, 0.11]) { await charge(page, turn, 16, 0.24); await page.waitForTimeout(500) }
     } },
-  { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 20.0], state: 'behind',
+  { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 20.0], state: 'level',
     // The near wall of the yard's office of glass, struck a little above the eye.
     stand: { from: [YARD.office[0] - 3, YARD.office[1] - 14], up: 2.2, to: [YARD.office[0], YARD.office[1] - 5], high: 3 }, near: [14, GLASS], inAir: true,
     act: async (page) => {
@@ -157,7 +162,7 @@ export const ROWS = [
         await page.waitForTimeout(500)
       }
     } },
-  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'behind',
+  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'level',
     stand: FRONT, near: [16, ...HOUSE],
     act: async (page) => {
       // The bar, the cannon picked, and its ball on the way to a house front.

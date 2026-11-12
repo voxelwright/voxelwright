@@ -277,11 +277,11 @@ async function main() {
     putting = []
     change(all)
   }
-  /** How far over the furthest-gone big body is, in degrees from upright: for a picture taken as a tall thing goes over. */
+  /** How far over the biggest body is, in degrees from upright: for a picture taken as a tall thing goes over. */
   const leaning = () => {
-    let most = 0
-    for (const { born, rot: [x, , z] } of moving.values()) if (born.cells >= 400) most = Math.max(most, Math.acos(Math.max(-1, Math.min(1, 1 - 2 * (x * x + z * z)))) * 180 / Math.PI)
-    return most
+    let most = 0, lean = 0
+    for (const { born, rot: [x, , z] } of moving.values()) if (born.cells > most) { most = born.cells; lean = Math.acos(Math.max(-1, Math.min(1, 1 - 2 * (x * x + z * z)))) * 180 / Math.PI }
+    return lean
   }
   const fell = { asks: 0, pieces: 0, cells: 0, dust: 0, ms: 0, stepMs: 0, worstMs: 0, tried: 0, most: 0 }
   const hue = (kind: number) => (kind >> 8 ? colours.subarray((kind >> 8) * 4, (kind >> 8) * 4 + 3) : stuff.subarray((kind & 15) * 8, (kind & 15) * 8 + 3))

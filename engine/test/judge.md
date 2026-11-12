@@ -25,5 +25,10 @@ The judge is one short-lived agent, logged in `.agents/dispatch-log.jsonl`. This
 > Read nothing else and run nothing. Reply with a table of the rows in order, then at most three
 > sentences on what separates the two engines.
 
+Scores are noisy: the same picture can come back a point apart. A row is `ahead` or `behind` when the
+scores are two or more apart, and `level` when they are one apart or the same. Before a row is
+written up as ahead, look again at the film for a better showing of that thing than the frame the
+judge was given: the second pass put our falling wall ahead of a frame that was not their best wall.
+
 A void row is a fault in the board (a shot that misses, or a frame of theirs from the wrong
 moment), to be mended before the row is judged again.
