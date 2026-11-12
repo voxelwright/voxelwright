@@ -668,3 +668,22 @@ front coming down, staying down and losing no cell.
   lit-window line in `hours` was set at 0.85% when lamps alone left 0.6% and windows 1.1%;
   after lamps down every street and the grade the pair was 0.2% and 0.9%, and the line was
   passing by 0.05%. Re-measure the mutant when what it measures against changes.
+
+## What the lake at sunset cost, and where it went (November 12)
+
+- Counted at the sunset row's stand at full size (`engine.steps`, `engine.paced`): rays 25.3
+  steps a pixel and 38.2 ms; with mirrors 41.7 steps and 89.5 ms.
+- Half the ray time was the walk under the sea: a ray that met nothing before the sea's top
+  was marched on down to the floor, through the weed, before `trace` said it had met the sea.
+  Each box is now left at the sea's top at the latest (`march`, in the once-a-box part):
+  rays 18.0 ms there, and the bench's far row 10% cheaper. This is the same idea that made
+  every row a tenth dearer when it was tried with a number kept across the loop; written in
+  place, in the once-a-box part, it costs nothing. So: no new value that lives across the
+  march's loop; work it out where it is used.
+- What water mirrors is asked for three times as coarsely as what glass mirrors, and every
+  other box: it is seen through ripples. With mirrors 48.6 ms. The row holds 0.40 of full size
+  where it held 0.30.
+- Tried and no use here: asking for the mirror image only within 250 m (from 4 m over the
+  water nearly all of it is within 250 m), and the quarter roofs for mirrored looks (the
+  quarter a sunset look is in holds the mountains). A ray may say it keeps to one quarter
+  (`eyed`); looks from the eye and what the sea mirrors of them do.

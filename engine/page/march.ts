@@ -267,7 +267,9 @@ fn meet(lo: vec3f, hi: vec3f, q0: vec3f, k: vec3f) -> Met {
 // a node narrower than the ray is taken whole, as the kind most of it is. A rough ray (one towards the sun)
 // also takes the boxes two at a time once it has left the one it began in. A ray sent through does not stop
 // at what it meets: it goes on to the end and says where it last left something solid.
-fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool) -> Hit {
+// eyed: the ray lies in the quarter of each box, as seen from the eye, that it points into. So do looks from the
+// eye, and what the sea mirrors of them (a level mirror turns a look up, not aside).
+fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
   var hit: Hit;
   hit.t = -1.0;
   let inv = 1.0 / rd;
@@ -309,10 +311,13 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       let far = max(a, b);
       let comeAt = max(near.x, max(near.y, near.z));
       leaveAt = min(far.x, min(far.y, far.z));
-      // The roof that counts: for a look from the eye, its quarter's.
+      // The roof that counts: for a ray that keeps to one quarter, that quarter's.
       var roof = lv.roof;
-      if (all(ro == g.eye)) { roof = lv.roofs[u32(rd.x > 0.0) + 2u * u32(rd.z > 0.0)]; }
+      if (eyed) { roof = lv.roofs[u32(rd.x > 0.0) + 2u * u32(rd.z > 0.0)]; }
       if (rd.y > 0.0 && !plain) { leaveAt = min(leaveAt, (roof - ro.y) * inv.y); }
+      // A ray that comes down from over the sea is taken no further than its top (trace says what it met there):
+      // under it is the floor and what grows on it, a long walk for nothing.
+      if (rd.y < 0.0 && ro.y > g.sea && !through) { leaveAt = min(leaveAt, (g.sea - ro.y) * inv.y); }
       have = 0u;
       supAt = 0xffffffffu;
       fresh = false;
@@ -518,8 +523,8 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 // left as it was, and a ray over deep water is walked on down to the floor (the far view is 8% dearer for it):
 // one more test a pass in there, or even one more number kept and one more min() a box, made every look a tenth
 // dearer, sea in it or not.
-fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool) -> Hit {
-  var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through);
+fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
+  var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through, eyed);
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -745,7 +750,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     if (sunny < 0.0 && shadows == 1u) {
       // No map drawn here yet: ask the world itself.
       let lift = 0.05 / g.level[hit.level].scale;
-      let s = trace(at + n * lift, g.sun, 0.0, hit.level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false);
+      let s = trace(at + n * lift, g.sun, 0.0, hit.level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false, false);
       sunny = select(1.0, 0.0, s.t >= 0.0);
     }
     direct *= max(sunny, 0.0);
@@ -879,7 +884,7 @@ fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   let far = max(a, b);
   let come = max(near.x, max(near.y, near.z));
   if (come >= min(far.x, min(far.y, far.z))) { return vec4f(-1e30, 0.0, 0.0, 1.0); }
-  let hit = trace(o, g.sun, come + 0.01 * sunTile.texel, sunTile.level, 768u, 0.0, 0.0, false, true);
+  let hit = trace(o, g.sun, come + 0.01 * sunTile.texel, sunTile.level, 768u, 0.0, 0.0, false, true, false);
   // The line starts wherever the eye is level with, so what it last left may well be behind that: only its kind says it met nothing.
   if (hit.kind == 0u) { return vec4f(-1e30, 0.0, 0.0, 1.0); }
   return vec4f(dot(o, g.sun) + hit.t + g.sunFar, 0.0, 0.0, 1.0);
@@ -900,7 +905,7 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
   let shadows = g.flags & 1u;
-  var hit = trace(g.eye, rd, 0.0, 0u, g.most, 0.0, g.pixel * g.detail, false, false);
+  var hit = trace(g.eye, rd, 0.0, 0u, g.most, 0.0, g.pixel * g.detail, false, false, true);
   // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
   if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
   var depth = 1.0;
@@ -945,7 +950,10 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       // A wave tilted towards the eye would send the look down into the water it came off, a dark speck: seen
       // from low over water the waves hide those sides of each other, and what shows is sky.
       if ((hit.kind & 15u) == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
-      let safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
+      var safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
+      // What the sea mirrors is kept on the look's own side of both ways across: a wave can tip it a little over,
+      // and it is then marched with the roofs of the quarter the look is in.
+      if ((hit.kind & 15u) == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
       let lift = 0.05 / g.level[hit.level].scale;
       // What is across is asked of the world only where it can be made out: glass a pane of which is two pixels or
       // more, water within 600 m. Further off it shows the sky. From high up every window of the town is a mirror a
@@ -954,7 +962,10 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       // Unasked, it is the sky a little darker: half of what is across from a far window is town.
       var seen = sky(safe) * 0.8;
       if (((hit.kind & 15u) == 5u && hit.t < 6000.0) || ((hit.kind & 15u) != 5u && across >= 2.0)) {
-        let far = trace(p + n * lift, safe, 0.0, hit.level, 64u, hit.t * g.pixel * 2.0, g.pixel * 2.0, false, false);
+        // What water mirrors is seen through its ripples, so it is asked for coarsely: three times as coarse as
+        // what a pane of glass mirrors, and every other box.
+        let coarse = select(2.0, 6.0, (hit.kind & 15u) == 5u);
+        let far = trace(p + n * lift, safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, (hit.kind & 15u) == 5u, false, (hit.kind & 15u) == 5u);
         seen = sky(safe);
         if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
       }

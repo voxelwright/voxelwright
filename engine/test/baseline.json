@@ -1,23 +1,23 @@
 {
   "apple 2560x1440": {
     "kept": "2026-11-12",
-    "quiet": 1.51,
+    "quiet": 1.42,
     "ms": {
-      "street rays": 19.77,
-      "street shadows": 25.01,
-      "street all": 33.44,
-      "fronts rays": 17.51,
-      "fronts shadows": 21.88,
-      "fronts all": 29.19,
-      "roofs rays": 18.83,
-      "roofs shadows": 23.46,
-      "roofs all": 29.06,
-      "high rays": 26.39,
-      "high shadows": 36.11,
-      "high all": 41.3,
-      "far rays": 21.34,
-      "far shadows": 30.69,
-      "far all": 36.26
+      "street rays": 19.33,
+      "street shadows": 24.52,
+      "street all": 33.17,
+      "fronts rays": 17.22,
+      "fronts shadows": 21.33,
+      "fronts all": 28.42,
+      "roofs rays": 18.57,
+      "roofs shadows": 23.05,
+      "roofs all": 28.45,
+      "high rays": 25.95,
+      "high shadows": 35.72,
+      "high all": 40.9,
+      "far rays": 19.11,
+      "far shadows": 26.99,
+      "far all": 33.79
     }
   }
 }
