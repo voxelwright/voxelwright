@@ -32,7 +32,7 @@ export function materials(): Float32Array<ArrayBuffer> {
     ['#5f8a3c', 1.0, 0.95, 0, 0], // grass
     ['#d9c79a', 0.6, 0.95, 0, 0], // sand
     ['#2f6f86', 0.15, 0.06, 0.9, 0], // water
-    ['#3a3b3f', 0.7, 0.92, 0, 0], // asphalt
+    ['#5a5b60', 0.7, 0.92, 0, 0], // asphalt
     ['#a9a69f', 0.5, 0.85, 0, 0], // concrete
     ['#a4553d', 0.9, 0.9, 0, 0], // brick
     ['#e8e0d0', 0.3, 0.9, 0, 0], // plaster
@@ -51,7 +51,8 @@ export function materials(): Float32Array<ArrayBuffer> {
   return out
 }
 
-const code = (world: World, grid = world.options.grid) => /* wgsl */ `
+/** The view, the boxes and the sun's maps as the shaders are told them. */
+export const GLOBALS = /* wgsl */ `
 struct Level {
   boxMin: vec3f, scale: f32,
   // roof: the height nothing in this box stands above.
@@ -76,6 +77,66 @@ struct Globals {
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
+`
+
+/** The sun's shadow at a point, from its maps: needs `g` (the globals) and `sunMap`. */
+export const SUNLIT = /* wgsl */ `
+// Whether the sun reaches a point: 1 where it does, 0 where it does not, between the two across a shadow's edge,
+// and -1 where the maps cannot say. p is on a face whose normal is n, in box level. The map asked is the finest one
+// that holds the point's line to the sun and has that tile drawn; four of its texels are weighed, so an edge is soft.
+fn sunlit(p: vec3f, n: vec3f, level: u32) -> f32 {
+  for (var L = level; L < g.levels; L++) {
+    let texel = 1.0 / g.level[L].scale;
+    // Asked a little off the face, so a face does not shadow itself across a texel.
+    let q = p + n * (0.6 * texel);
+    let uv = vec2f(dot(q, g.sunU), dot(q, g.sunV)) / texel;
+    let eye = vec2f(dot(g.eye, g.sunU), dot(g.eye, g.sunV)) / texel;
+    if (any(abs(uv - eye) > vec2f(${7 * SUN_TILE - 2}.0))) { continue; }
+    let sl = g.sunLevel[L];
+    let wrap = vec2i(${SUN_SIDE - 1});
+    let at = (vec2i(floor(uv + sl.base)) + ${SUN_SIDE}) & wrap;
+    let tile = u32(at.x >> ${Math.log2(SUN_TILE)}u) + ${SUN_SIDE / SUN_TILE}u * u32(at.y >> ${Math.log2(SUN_TILE)}u);
+    let word = select(sl.drawn0, sl.drawn1, (tile >> 5u) >= 4u)[(tile >> 5u) & 3u];
+    if (((word >> (tile & 31u)) & 1u) == 0u) { continue; }
+    let d = dot(q, g.sun) + g.sunFar + 0.35 * texel;
+    let between = uv + sl.base - 0.5;
+    let low = vec2i(floor(between)) + ${SUN_SIDE};
+    let f = fract(between);
+    let s00 = step(textureLoad(sunMap, low & wrap, L, 0).r, d);
+    let s10 = step(textureLoad(sunMap, (low + vec2i(1, 0)) & wrap, L, 0).r, d);
+    let s01 = step(textureLoad(sunMap, (low + vec2i(0, 1)) & wrap, L, 0).r, d);
+    let s11 = step(textureLoad(sunMap, (low + vec2i(1, 1)) & wrap, L, 0).r, d);
+    return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+  }
+  return -1.0;
+}
+`
+
+/** How a face is lit and how light becomes a picture: the same for the world and for bodies. */
+export const LIGHT = /* wgsl */ `
+// The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
+// and from the side away from the sun; less of the last two in corners (open: 1 in the open, 0 shut in).
+const SUN_LIGHT = vec3f(1.0, 0.93, 0.82);
+fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
+  let above = 0.5 + 0.5 * n.y;
+  let skylight = mix(vec3f(0.15, 0.145, 0.14), vec3f(0.36, 0.47, 0.66), above);
+  let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0));
+  var col = albedo * (SUN_LIGHT * direct * 3.1 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
+  let hv = normalize(sun - rd);
+  col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
+  col += albedo * glow * 6.0;
+  return col;
+}
+// From light to what a screen shows: bright things keep their colour and do not clip.
+fn tone(c: vec3f) -> vec3f {
+  let x = c * 0.6;
+  let y = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+  return pow(clamp(y, vec3f(0.0), vec3f(1.0)), vec3f(0.4545));
+}
+`
+
+const code = (world: World, grid = world.options.grid) => /* wgsl */ `
+${GLOBALS}
 // One tile of a map being drawn: where its first texel's middle is (across and up from the anchor), a texel's width, the box, the tile's corner in the map.
 struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
@@ -358,6 +419,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   return hit;
 }
 
+${LIGHT}
 fn hash3i(c: vec3i, seed: u32) -> f32 {
   var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 19349663u) ^ (u32(c.z) * 83492791u) ^ (seed * 2654435761u);
   h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
@@ -365,16 +427,57 @@ fn hash3i(c: vec3i, seed: u32) -> f32 {
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
 
-fn sky(rd: vec3f) -> vec3f {
+// The sky without sun or cloud: what the air between is the colour of.
+fn skyBase(rd: vec3f) -> vec3f {
   let up = clamp(rd.y, 0.0, 1.0);
-  let horizon = vec3f(0.62, 0.74, 0.88);
-  let zenith = vec3f(0.16, 0.36, 0.74);
-  var col = mix(horizon, zenith, pow(up, 0.5));
+  let horizon = vec3f(0.66, 0.79, 0.93);
+  let zenith = vec3f(0.11, 0.3, 0.7);
+  var col = mix(horizon, zenith, pow(up, 0.42));
   let toward = max(dot(rd, g.sun), 0.0);
-  col += vec3f(1.0, 0.72, 0.42) * pow(toward, 8.0) * 0.25;
-  col += vec3f(1.0, 0.95, 0.85) * pow(toward, 900.0) * 30.0;
+  col += vec3f(1.0, 0.74, 0.46) * pow(toward, 6.0) * 0.22;
   // Below the horizon the sky is the haze the far ground fades into.
-  return mix(col, horizon * 0.92, clamp(-rd.y * 6.0, 0.0, 1.0));
+  return mix(col, horizon * 0.94, clamp(-rd.y * 6.0, 0.0, 1.0));
+}
+// A quick number for a place on a plane: clouds need many and need them only to look unruly.
+fn hash2i(c: vec2i) -> f32 {
+  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
+  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
+  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
+}
+fn noise2(p: vec2f) -> f32 {
+  let i = vec2i(floor(p));
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2i(i), hash2i(i + vec2i(1, 0)), u.x), mix(hash2i(i + vec2i(0, 1)), hash2i(i + vec2i(1, 1)), u.x), u.y);
+}
+fn cloud(p: vec2f) -> f32 {
+  var q = p;
+  var sum = 0.0;
+  var weight = 0.5;
+  for (var o = 0; o < 4; o++) {
+    sum += noise2(q) * weight;
+    q = q * 2.03 + vec2f(17.3, 9.1);
+    weight *= 0.5;
+  }
+  return sum;
+}
+// The sky as it is seen: the sun, and clouds on a level 1.5 km up that drift with the wind.
+fn sky(rd: vec3f) -> vec3f {
+  var col = skyBase(rd);
+  let toward = max(dot(rd, g.sun), 0.0);
+  col += SUN_LIGHT * (pow(toward, 900.0) * 30.0 + pow(toward, 60.0) * 0.35);
+  if (rd.y > 0.015) {
+    let far = (15000.0 - g.eye.y) / rd.y;
+    let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
+    let thick = cloud(at);
+    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y);
+    if (cover > 0.0) {
+      // Bright where it is thin, at its edges; grey in its thick middle.
+      let body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
+      col = mix(col, body * 1.25, cover * 0.92);
+    }
+  }
+  return col;
 }
 
 fn paint(kind: u32, cell: vec3i) -> vec3f {
@@ -387,59 +490,146 @@ fn paint(kind: u32, cell: vec3i) -> vec3f {
   return base * (1.0 + (own - 0.5) * 0.4 * m.wander + (blot - 0.5) * 0.16 * m.wander);
 }
 
-// Whether the sun reaches a point (1), does not (0), or the maps cannot say (-1). p is on a face whose normal is n,
-// in box level. The map asked is the finest one that holds the point's line to the sun and has that tile drawn.
-fn sunlit(p: vec3f, n: vec3f, level: u32) -> f32 {
-  for (var L = level; L < g.levels; L++) {
-    let texel = 1.0 / g.level[L].scale;
-    // Asked a little off the face, so a face does not shadow itself across a texel.
-    let q = p + n * (0.6 * texel);
-    let uv = vec2f(dot(q, g.sunU), dot(q, g.sunV)) / texel;
-    let eye = vec2f(dot(g.eye, g.sunU), dot(g.eye, g.sunV)) / texel;
-    if (any(abs(uv - eye) > vec2f(${7 * SUN_TILE - 2}.0))) { continue; }
-    let sl = g.sunLevel[L];
-    let at = (vec2i(floor(uv + sl.base)) + ${SUN_SIDE}) & vec2i(${SUN_SIDE - 1});
-    let tile = u32(at.x >> ${Math.log2(SUN_TILE)}u) + ${SUN_SIDE / SUN_TILE}u * u32(at.y >> ${Math.log2(SUN_TILE)}u);
-    let word = select(sl.drawn0, sl.drawn1, (tile >> 5u) >= 4u)[(tile >> 5u) & 3u];
-    if (((word >> (tile & 31u)) & 1u) == 0u) { continue; }
-    let last = textureLoad(sunMap, at, L, 0).r;
-    return select(0.0, 1.0, dot(q, g.sun) + g.sunFar >= last - 0.35 * texel);
-  }
-  return -1.0;
+${SUNLIT}
+// A box's sector that holds a cell: where its tree is (or, with UNIFORM, the one kind it is), 0 for none. Outside the box there is none.
+fn sectorOf(c: vec3i, L: u32) -> u32 {
+  let lv = g.level[L];
+  if (any(c < vec3i(0)) || any(c >= vec3i(lv.boxSize))) { return 0u; }
+  let w = (vec3u(c >> vec3u(6u)) + lv.wrap) & (GRID - 1u);
+  let base = L * STRIDE;
+  let sup = w >> vec3u(2u);
+  let at = base + SLOTS + 2u * (sup.x + (GRID.x >> 2u) * (sup.z + (GRID.z >> 2u) * sup.y));
+  if (!has(top[at], top[at + 1u], (w.x & 3u) + 4u * (w.z & 3u) + 16u * (w.y & 3u))) { return 0u; }
+  return top[base + w.x + GRID.x * (w.z + GRID.z * w.y)];
+}
+// The part of a sector 16 cells across that holds a cell: where its node is in the pool, 0 where it is empty, 1 where it is all one solid kind.
+fn midOf(entry: u32, rootLo: u32, rootHi: u32, rootChild: u32, c: vec3i) -> u32 {
+  let cm = vec3u(c >> vec3u(4u)) & vec3u(3u);
+  let bit = cm.x + 4u * cm.z + 16u * cm.y;
+  if (!has(rootLo, rootHi, bit)) { return 0u; }
+  let mid = entry + (rootChild & 0xfffffu) + 4u * before(rootLo, rootHi, bit);
+  let info = pool[mid + 3u];
+  if ((info & UNIFORM) != 0u) { return select(0u, 1u, (info & 0xffffu) != 0u); }
+  return mid;
+}
+// Whether a cell is solid, given its sector and the part of it that holds the cell (from midOf).
+fn solidInMid(entry: u32, mid: u32, c: vec3i) -> bool {
+  if (mid < 2u) { return mid == 1u; }
+  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
+  let bit = cl.x + 4u * cl.z + 16u * cl.y;
+  let midLo = pool[mid];
+  let midHi = pool[mid + 1u];
+  if (!has(midLo, midHi, bit)) { return false; }
+  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
+  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return (pool[leaf + 3u] & 0xffffu) != 0u; }
+  let cc = vec3u(c) & vec3u(3u);
+  return has(pool[leaf], pool[leaf + 1u], cc.x + 4u * cc.z + 16u * cc.y);
+}
+// Whether a cell is solid, given its sector (from sectorOf) and that sector's first three words.
+fn solidIn(entry: u32, rootLo: u32, rootHi: u32, rootChild: u32, c: vec3i) -> bool {
+  if ((entry & UNIFORM) != 0u) { return (entry & 0xffffu) != 0u; }
+  return solidInMid(entry, midOf(entry, rootLo, rootHi, rootChild, c), c);
 }
 
-// What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray, 2 from the maps only.
+// Whether a cell of box L is solid, from nothing.
+fn solidAt(c: vec3i, L: u32) -> bool {
+  let entry = sectorOf(c, L);
+  if (entry == 0u) { return false; }
+  if ((entry & UNIFORM) != 0u) { return (entry & 0xffffu) != 0u; }
+  return solidIn(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
+}
+
+// How open a point on a face is to the sky round it: 1 in the open, less where the cells beside the face stand
+// up round it. The four cells beside the one in front of the face are asked, and the four corners of the face are
+// weighed by where on it the point is: so a corner darkens smoothly into the wall. (Asking the four diagonal ones
+// too cost twice as much for a difference nobody would see.)
+fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
+  let lv = g.level[hit.level];
+  let front = hit.cell - lv.cells + vec3i(n);
+  var u = vec3i(1, 0, 0);
+  var v = vec3i(0, 0, 1);
+  if (abs(n.x) > 0.5) { u = vec3i(0, 1, 0); } else if (abs(n.z) > 0.5) { v = vec3i(0, 1, 0); }
+  let q = (p - lv.boxMin) * lv.scale - vec3f(hit.cell - lv.cells);
+  let fu = clamp(dot(q, vec3f(u)), 0.0, 1.0);
+  let fv = clamp(dot(q, vec3f(v)), 0.0, 1.0);
+  // The four are nearly always in one sector, and in one part of it 16 cells across: those are found once.
+  let entry = sectorOf(front, hit.level);
+  let whole = entry == 0u || (entry & UNIFORM) != 0u;
+  var rootLo = 0u; var rootHi = 0u; var rootChild = 0u;
+  var mid = 0u;
+  if (!whole) { rootLo = pool[entry]; rootHi = pool[entry + 1u]; rootChild = pool[entry + 2u]; mid = midOf(entry, rootLo, rootHi, rootChild, front); }
+  var side = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+  for (var i = 0; i < 4; i++) {
+    let c = front + select(u, v, i >= 2) * select(-1, 1, (i & 1) == 1);
+    if (all((c >> vec3u(6u)) == (front >> vec3u(6u)))) {
+      if (entry != 0u) {
+        if (!whole && all((c >> vec3u(4u)) == (front >> vec3u(4u)))) { side[i] = f32(solidInMid(entry, mid, c)); } else { side[i] = f32(solidIn(entry, rootLo, rootHi, rootChild, c)); }
+      }
+      // A street climbs a hill a cell at a time: a step one cell high beside a tread is the slope, not a corner.
+      if (ground && side[i] > 0.5 && !solidAt(c + vec3i(0, 1, 0), hit.level)) { side[i] = 0.0; }
+    } else {
+      let other = sectorOf(c, hit.level);
+      if (other != 0u) {
+        if ((other & UNIFORM) != 0u) { side[i] = f32((other & 0xffffu) != 0u); } else { side[i] = f32(solidIn(other, pool[other], pool[other + 1u], pool[other + 2u], c)); }
+      }
+    }
+  }
+  let w = side[0]; let e = side[1]; let s = side[2]; let nn = side[3];
+  // A corner of the face with one side standing is a little dark; with both, as dark as it gets.
+  let c00 = 3.0 - (w + s + w * s);
+  let c10 = 3.0 - (e + s + e * s);
+  let c01 = 3.0 - (w + nn + w * nn);
+  let c11 = 3.0 - (e + nn + e * nn);
+  return mix(mix(c00, c10, fu), mix(c01, c11, fu), fv) / 3.0;
+}
+
+// What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
+// 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
 fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   let m = looks.material[hit.kind & 15u];
   let p = ro + rd * hit.t;
+  // Where the sun is asked about: the point itself, but for a step's riser.
+  var at = p;
   var n = hit.n;
-  if (dot(n, n) < 0.5) { n = -rd; }
+  let faced = dot(n, n) >= 0.5;
+  if (!faced) { n = -rd; }
   let albedo = paint(hit.kind, hit.cell);
+  // Earth, grass, sand, asphalt and paving lie on the hills in steps a cell high. A step's riser is lit as the tread
+  // is, so a street reads as a slope: a riser is a side face with air over its cell and ground under the cell before it.
+  let stuff = hit.kind & 15u;
+  let ground = stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u || stuff == 7u;
+  if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
+    let c = hit.cell - g.level[hit.level].cells;
+    if (!solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
+      // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
+      let lv = g.level[hit.level];
+      at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
+      n = vec3f(0.0, 1.0, 0.0);
+    }
+  }
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {
     var sunny = -1.0;
-    if (g.sunMaps != 0u) { sunny = sunlit(p, n, hit.level); }
+    if (g.sunMaps != 0u) { sunny = sunlit(at, n, hit.level); }
     if (sunny < 0.0 && shadows == 1u) {
       // No map drawn here yet: ask the world itself.
       let lift = 0.05 / g.level[hit.level].scale;
-      let s = trace(p + n * lift, g.sun, 0.0, hit.level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false);
+      let s = trace(at + n * lift, g.sun, 0.0, hit.level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false);
       sunny = select(1.0, 0.0, s.t >= 0.0);
     }
     direct *= max(sunny, 0.0);
   }
-  let above = 0.5 + 0.5 * n.y;
-  let ambient = mix(vec3f(0.1, 0.095, 0.09), vec3f(0.3, 0.38, 0.5), above);
-  var col = albedo * (vec3f(1.0, 0.94, 0.84) * direct * 2.4 + ambient);
-  let hv = normalize(g.sun - rd);
-  col += vec3f(1.0, 0.95, 0.85) * pow(max(dot(n, hv), 0.0), 2.0 / max(m.rough * m.rough, 0.002)) * direct * (1.0 - m.rough) * 0.6;
-  col += albedo * m.glow * 6.0;
-  return col;
+  var open = 1.0;
+  // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
+  let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
+  if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { open = mix(1.0, 0.25 + 0.75 * openness(p, hit.n, hit, ground && hit.n.y > 0.5), clamp(wide - 1.5, 0.0, 1.0)); }
+  return shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
 }
 
 fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   // dist is in the finest cells: the air thickens over kilometres.
-  let f = 1.0 - exp(-dist * 0.000022);
-  return mix(col, sky(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)), f);
+  let f = 1.0 - exp(-dist * 0.00003);
+  return mix(col, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6, f);
 }
 
 // One texel of a sun map: along the line to the sun through it, how far towards the sun the last solid thing is.
@@ -516,8 +706,7 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     return Drawn(vec4f(h, h * h, pow(h, 4.0), 1.0), depth);
   }
   if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), depth); }
-  col = col / (col + 0.75) * 1.45;
-  return Drawn(vec4f(pow(clamp(col, vec3f(0.0), vec3f(1.0)), vec3f(0.4545)), 1.0), depth);
+  return Drawn(vec4f(tone(col), 1.0), depth);
 }
 `
 
@@ -530,7 +719,8 @@ export interface View {
   tanHalf: number
 }
 
-export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16
+/** FLAT leaves corners as bright as the open: for seeing what the darkening costs. */
+export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32
 /** Tiles of the sun's maps drawn each frame. */
 const SUN_TILES_A_FRAME = 8
 
@@ -543,6 +733,8 @@ export interface Marcher {
   readonly sun: SunMaps
   /** The colours and materials as the GPU holds them, for whatever else is drawn into the picture. */
   readonly looks: GPUBuffer
+  /** What the shaders are told of the view, the boxes and the sun's maps (GLOBALS), for whatever else is lit by them. */
+  readonly globals: GPUBuffer
   /** Whether the maps are used for shadows (they are, unless a check wants every shadow traced). */
   maps: boolean
   /** What is straight ahead of a view: how far in the finest cells, what it is made of, its colour in the palette. Null for sky. */
@@ -633,6 +825,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     },
     get sun() { return sunMaps },
     get looks() { return looks },
+    get globals() { return globals },
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
     tend(encoder, view, ready) {

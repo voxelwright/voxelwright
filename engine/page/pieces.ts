@@ -1,10 +1,10 @@
 // A body on its way (#140, #146). While it moves it is not cells of the world, so the rays do
 // not see it: it is drawn as its outside faces, rows of them merged in the core, over the
 // marched picture and tested against its depth. The faces are sent to the GPU once; each frame
-// only says where the body is and how it is turned. It is lit as the world is, without a shadow
-// of its own or on it.
+// only says where the body is and how it is turned. It is lit as the world is and stands in the
+// world's shadows (the sun's maps); it casts none of its own.
 import { shader, type Target } from '../probe/gpu.ts'
-import type { View } from './march.ts'
+import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
 import type { Born } from './told.ts'
 
 const CODE = /* wgsl */ `
@@ -27,12 +27,18 @@ struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32
 struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var<uniform> looks: Looks;
+${GLOBALS}
+@group(1) @binding(0) var<uniform> g: Globals;
+@group(1) @binding(1) var sunMap: texture_2d_array<f32>;
+${SUNLIT}
+${LIGHT}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) at: vec3f,
   @location(1) @interpolate(flat) n: vec3f,
   @location(2) @interpolate(flat) kind: u32,
   @location(3) @interpolate(flat) facing: vec3f,
+  @location(4) seen: vec3f,
 }
 const NEAR = 1.0;
 const FAR = 100000.0;
@@ -57,6 +63,7 @@ const FAR = 100000.0;
   out.at = p;
   out.n = n;
   out.facing = turned * n;
+  out.seen = world;
   out.kind = b >> 16u;
   return out;
 }
@@ -75,10 +82,13 @@ fn hash3i(c: vec3i, seed: u32) -> f32 {
   let own = hash3i(cell, 1u);
   let blot = hash3i(cell >> vec3u(2u), 2u);
   paint *= 1.0 + (own - 0.5) * 0.4 * m.wander + (blot - 0.5) * 0.16 * m.wander;
-  let above = 0.5 + 0.5 * in.facing.y;
-  var col = paint * (vec3f(1.0, 0.94, 0.84) * max(dot(in.facing, u.sun), 0.0) * 2.4 + mix(vec3f(0.1, 0.095, 0.09), vec3f(0.3, 0.38, 0.5), above));
-  col = col / (col + 0.75) * 1.45;
-  return vec4f(pow(clamp(col, vec3f(0.0), vec3f(1.0)), vec3f(0.4545)), 1.0);
+  var direct = max(dot(in.facing, u.sun), 0.0);
+  if (direct > 0.0) {
+    // In the world's shadow where the sun's maps say so; where they cannot say, in the sun.
+    let sunny = sunlit(in.seen + u.eye, in.facing, 0u);
+    if (sunny >= 0.0) { direct *= sunny; }
+  }
+  return vec4f(tone(shade(paint, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow)), 1.0);
 }
 `
 
@@ -99,7 +109,8 @@ export interface Pieces {
   readonly faces: number
 }
 
-export async function pieces(device: GPUDevice, format: GPUTextureFormat, looks: GPUBuffer): Promise<Pieces> {
+export async function pieces(device: GPUDevice, format: GPUTextureFormat, march: Marcher): Promise<Pieces> {
+  const looks = march.looks
   const module = await shader(device, 'pieces', CODE)
   const pipeline = await device.createRenderPipelineAsync({
     label: 'pieces', layout: 'auto',
@@ -108,6 +119,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, looks:
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   })
+  const lit = device.createBindGroup({ layout: pipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }] })
   interface Held extends Piece { faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number }
   const live = new Set<Held>()
   return {
@@ -132,6 +144,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, looks:
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setPipeline(pipeline)
+      pass.setBindGroup(1, lit)
       for (const piece of live) {
         const [x, y, z, w] = piece.rot, b = piece.born
         f.set([piece.pos[0] - anchor[0], piece.pos[1] - anchor[1], piece.pos[2] - anchor[2]], 20)

@@ -178,6 +178,29 @@ touch was refused.
 - Not done: bodies cast no shadow and take none; a body does not damage what it lands on;
   nothing bends; a body that leaves the sectors near the eye is still moved.
 
+## The look (`page/march.ts`: `LIGHT`, `SUNLIT`, `sky`, `openness`)
+
+- One lighting model for the world and for bodies (`shade`, `tone`, exported as WGSL text):
+  the sun where it reaches, the sky from above, what lit ground throws back from below, and
+  a tone curve that keeps colour in bright things.
+- Sky: a gradient, a sun, and clouds from four octaves of value noise on a level 1.5 km up,
+  bright at their thin edges. The air between (`air`) is the sky without sun or cloud.
+- Corners (`openness`): the four cells beside the one in front of a face are asked whether
+  they are solid, and the face's four corners are weighed by where on it the point is. Asked
+  only where a cell is over a pixel and a half wide. It costs 3 ms of a 20 ms frame at
+  2560 x 1440 on the M1 Pro, and sharing the tree walk between the four did not make it
+  cheaper: the cost is not in the reads.
+- Shadows' edges: four texels of the sun's map weighed, at no measurable cost.
+- A street on a hill is steps a cell high. A step's riser (a side face with air over its
+  cell and ground under the cell before it) is lit as its tread, and asks about the sun from
+  the middle of the cell's top; a one-cell step beside a tread does not darken it. So streets
+  and pavements read as slopes. Before this every riser away from the sun was a black square.
+- Bodies ask the same sun maps (`pieces.ts` binds the marcher's globals and maps), so they
+  stand in the world's shadows; they cast none.
+- Cost, paced at full size on the M1 Pro: street level with everything on went from 14.3 to
+  20 ms (the page holds 60 frames a second there with the picture at about 0.65 of full
+  size, from about 0.8). `?flat=1` turns the corners off.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as
@@ -234,5 +257,5 @@ front coming down, staying down and losing no cell.
   lands on. Nothing bends, burns or flows.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
 - No walking, only flying. No real San Francisco: the city is made up.
-- The look is plain: no occlusion in corners, no clouds, hard shadow edges, 10 cm treads on
-  hills.
+- The look has no texture on materials, no light from lamps or windows, no night, no smoke.
+  Bodies and crumbs cast no shadow.

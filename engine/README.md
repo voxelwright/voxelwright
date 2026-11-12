@@ -29,7 +29,7 @@ thumb moves, the right thumb looks, and the red button breaks. H shows how many 
 pixel took, L and M turn shadows and mirrors off, K traces every shadow instead of using the sun's maps.
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
-`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?heat=1` `?fly=0` `?seconds=40`.
+`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?heat=1` `?fly=0` `?seconds=40`.
 
 To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
 `node live.mjs` run after each merge so that the link serves main and not a working tree.

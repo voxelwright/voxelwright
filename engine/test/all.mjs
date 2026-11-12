@@ -1,14 +1,14 @@
 // Every check with one command (#144): the core's tests, the types, and each check of the real
 // page in the installed Chrome, the phone-shaped flight among them. The page checks share one
-// server and one browser and run a few at a time, so the times they print are not for quoting:
+// server and one browser and run two at a time, so the times they print are not for quoting:
 // `node test/bench.mjs` measures.
 //
-//   node test/all.mjs [--only falls,blast] [--jobs 3]
+//   node test/all.mjs [--only falls,blast] [--jobs 2]
 import { spawn, spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { arg, CHROME, here, serve } from './kit.mjs'
 
-const only = arg('only', '').split(',').filter(Boolean), jobs = Number(arg('jobs', '3'))
+const only = arg('only', '').split(',').filter(Boolean), jobs = Number(arg('jobs', '2'))
 const t0 = Date.now()
 const built = spawnSync('npm', ['run', '-s', 'core'], { cwd: here, encoding: 'utf8' })
 if (built.status !== 0) { console.error(built.stdout + built.stderr); console.error('FAILED: the core did not build'); process.exit(1) }

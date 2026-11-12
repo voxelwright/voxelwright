@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { stretch } from '../probe/rays.ts'
 import { fill } from '../probe/fill.ts'
-import { HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
+import { FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { ball, rows, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
@@ -52,7 +52,7 @@ async function main() {
   const march = await marcher(device, gpu.format, world)
   const blit = await stretch(gpu)
   const debris = await crumbs(device, gpu.format)
-  const falling = await pieces(device, gpu.format, march.looks)
+  const falling = await pieces(device, gpu.format, march)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
@@ -150,7 +150,7 @@ async function main() {
     if (!target || target.size[0] !== size[0] || target.size[1] !== size[1]) { target?.destroy(); target = offscreen(gpu, size) }
     return target
   }
-  let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0)
+  let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') flags ^= HEAT
     if (e.code === 'KeyL') flags ^= SHADOWS
