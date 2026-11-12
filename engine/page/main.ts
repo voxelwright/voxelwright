@@ -187,9 +187,12 @@ async function main() {
     debris.light(sun, day)
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
+  // `?rain=1` or the R key: rain.
+  march.rain = Number(query.get('rain') ?? 0)
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') flags ^= HEAT
+    if (e.code === 'KeyR') march.rain = march.rain > 0 ? 0 : 1
     if (e.code === 'BracketRight') setHour((hour ?? 14) + 0.5)
     if (e.code === 'BracketLeft') setHour((hour ?? 14) - 0.5)
     if (e.code === 'KeyL') flags ^= SHADOWS
@@ -247,7 +250,7 @@ async function main() {
     if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
     if (!off.has('crumbs')) debris.draw(encoder, to, v)
     if (!off.has('puffs')) smoke.draw(encoder, to, v)
-    blit(encoder, to, context.getCurrentTexture().createView())
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')
@@ -534,7 +537,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

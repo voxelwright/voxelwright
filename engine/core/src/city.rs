@@ -630,6 +630,8 @@ fn stamp_shop(h: &Built, s: &mut Scratch, name: &str) {
     // The board stands out past a bay over it, so the bay does not hide what it says.
     h.put(s, (6, w - 6), (-9, 0), (27, 38), kind(WOOD, colour(hue, 6)), Meet::Middle);
     if s.lod == 0 {
+        // The letters are lamp, in a pale tint of the shop's own: white by day, lit in that colour after dark.
+        let lit = kind(LAMP, colour((h.seed >> 23) as u8 % 24, 1));
         let long = name.len() as i32 * 6 - 1;
         let from = (w - long) / 2;
         for (n, c) in name.bytes().enumerate() {
@@ -639,7 +641,7 @@ fn stamp_shop(h: &Built, s: &mut Scratch, name: &str) {
                         let across = from + n as i32 * 6 + col;
                         // From the street a front that runs back along +z is seen with x to the left.
                         let u = if h.back > 0 { w - 1 - across } else { across };
-                        h.put(s, (u, u + 1), (-10, -9), (35 - row as i32, 36 - row as i32), kind(PLASTER, WHITE), Meet::Touch);
+                        h.put(s, (u, u + 1), (-10, -9), (35 - row as i32, 36 - row as i32), lit, Meet::Touch);
                     }
                 }
             }
@@ -940,8 +942,11 @@ pub fn make(s: &mut Scratch) {
                     stamp_stop(s, cx, cz, dx, dz);
                 }
             }
-            // A lamp at each corner of the crossing on the block's low corner.
-            for (cx, cz, dx, dz) in [(x0 + 8, z0 + 8, 1, 0), (x0 + STREET - 10, z0 + 8, 0, 1), (x0 + 8, z0 + STREET - 10, 0, -1), (x0 + STREET - 10, z0 + STREET - 10, -1, 0)] {
+            // A lamp at each corner of the crossing on the block's low corner, and down both streets at the kerb, now on
+            // one side and now on the other: between lots, clear of the street trees and the shops' boards. (The page
+            // works out the light they throw from these same places: march.ts LAMPS.)
+            let along = [(x0 + STREET + 3 * LOT_WIDE, z0 + 20, 0, 1), (x0 + STREET + 7 * LOT_WIDE, z0 + STREET - 22, 0, -1), (x0 + STREET + 11 * LOT_WIDE, z0 + 20, 0, 1), (x0 + 20, z0 + STREET + 220, 1, 0), (x0 + STREET - 22, z0 + STREET + 440, -1, 0)];
+            for (cx, cz, dx, dz) in [(x0 + 8, z0 + 8, 1, 0), (x0 + STREET - 10, z0 + 8, 0, 1), (x0 + 8, z0 + STREET - 10, 0, -1), (x0 + STREET - 10, z0 + STREET - 10, -1, 0)].into_iter().chain(along) {
                 if reaches(cx - 16, cx + 18, cz - 16, cz + 18) {
                     stamp_lamp(s, cx, cz, dx, dz);
                 }

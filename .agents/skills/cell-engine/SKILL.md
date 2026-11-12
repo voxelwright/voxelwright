@@ -569,3 +569,22 @@ front coming down, staying down and losing no cell.
   is about 8 ms for as many pixels). A grove is as dear to look through as tree crowns.
 - Weed is `LEAVES`, so it would burn. Nothing sways.
 - A board row may say where in the picture its thing is (`aim`), when the middle is not it.
+
+## Rain, lit signs and street lamps (November 12)
+
+- `?rain=1`, the R key or `engine.rain` (0 to 1): the sun goes behind cloud, sky and fill go
+  grey, lights come on (`weather.z`), road and paving mirror (a film everywhere, puddles by a
+  slow noise), and streaks fall. The streaks are a pass of their own in `glow.ts`, added over
+  the finished picture only while it rains.
+- A shop's letters are `LAMP` in a pale tint. Lamp in any colour but a street lamp's own
+  (palette 46) is a sign: white by day, and lit in its colour made strong when the lights are
+  on. A shop's window (glass of palette 146) is always lit then.
+- Lamps stand down both streets of a block now, not only at the crossing (`city.rs`), and
+  the page lights the ground under each from the same nine places (`march.ts`, in `lit`).
+  The two lists must agree: there is no check that they do.
+- The dry day must not pay for the weather, and the bench says when it does. What cost 8 to
+  10% on every row, each found by putting 0.0 in place of the uniform and benching again:
+  the streaks behind `if (rain > 0)` in the marcher's shader, and any read of `g.weather` in
+  `sky()` (the clouds' cover, the stars' brightness), even in a branch the day never takes.
+  Reads of it in `lit()` and in the mirror branch cost nothing. So in rain the clouds are not
+  thicker and the stars still show: both are wrong, and both want a way that is free by day.

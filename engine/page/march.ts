@@ -84,6 +84,10 @@ struct Globals {
   // clouds' tint away from the sun and towards it. The last three carry where the sun is on the horizon (x, z) and
   // how bright the sun's own disc is.
   lightSun: vec4f, lightFill: vec4f, skyZenith: vec4f, skyHorizon: vec4f, skyHorizonSun: vec4f, cloudTint: vec4f, cloudTintSun: vec4f,
+  // The weather: how hard it rains (0 to 1), how wet the ground is, and how far windows, lamps and signs are lit.
+  // Not to be read in sky(): each of three tries at it there (the clouds' cover, the stars twice) made the dry day
+  // 8 to 10% dearer, though none of them runs by day.
+  weather: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
@@ -744,32 +748,40 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
   let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
   if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
-  var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
-  if (g.day < 0.98) {
-    // Windows and lamps are lit well before the day has gone.
-    let dark = 1.0 - smoothstep(0.55, 0.95, g.day);
+  // A sign is lamp in any colour but a street lamp's own: it is lit only when the lights are.
+  let ci = (hit.kind >> 8u) & 255u;
+  let sign = stuff == 15u && ci != 46u;
+  var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, select(m.glow, 0.0, sign));
+  if (g.weather.z > 0.0) {
+    // Windows, lamps and signs are lit well before the day has gone, and in rain.
+    let dark = g.weather.z;
+    // Its light is its colour made strong: a pale tint by day is a coloured tube by night.
+    if (sign) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
     let fine = hit.cell * i32(1u << hit.level);
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
     // brighter low in the room than at the ceiling. Glass out in the street is a car's and stays dark.
     let lot = block.x >= 140.0 && block.y >= 140.0;
     if (stuff == 11u && lot) {
-      let w = litWindow(fine);
+      // A shop's window (its own pale glass) is always lit.
+      let w = max(litWindow(fine), select(0.0, 0.8, ci == 146u));
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
       col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
     }
-    // The lamps at each crossing: their light falls on what is under and round them. Where the lamps are is the
-    // town's rule (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp
-    // stands in the sea.
+    // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
+    // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
+    // the sea.
     var pool = 0.0;
-    for (var k = 0; k < 4 && stuff != 5u; k++) {
-      let lamp = array<vec2f, 4>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0))[k];
-      // The same lamps stand at the next crossings along: the nearest of them is the one that counts.
+    for (var k = 0; k < 9 && stuff != 5u; k++) {
+      // Each lamp's light, by where it hangs in its block: four at the crossing, three down the street along x,
+      // two down the one along z.
+      let lamp = array<vec2f, 9>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0), vec2f(369.0, 35.0), vec2f(673.0, 105.0), vec2f(977.0, 35.0), vec2f(35.0, 361.0), vec2f(105.0, 581.0))[k];
+      // The same lamps stand in the next blocks along: the nearest of them is the one that counts.
       var d = abs(block - lamp);
       d = min(d, vec2f(1280.0, 800.0) - d);
       pool += 1.0 / (1.0 + dot(d, d) / 6400.0);
     }
-    col += albedo * vec3f(1.0, 0.78, 0.48) * pool * pool * dark * (0.35 + 0.65 * max(n.y, 0.0)) * 2.4;
+    col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;
   }
   return col;
 }
@@ -891,8 +903,15 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     col = lit(g.eye, rd, hit, shadows);
     // A window lit from within at night shows its light, not what is across from it.
     let lot = inBlock(hit.cell * i32(1u << hit.level));
-    let glows = g.day < 0.98 && (hit.kind & 15u) == 11u && lot.x >= 140.0 && lot.y >= 140.0 && litWindow(hit.cell * i32(1u << hit.level)) > 0.0;
-    if (m.mirror > 0.0 && (g.flags & 2u) != 0u && !glows) {
+    let glows = g.weather.z > 0.0 && (hit.kind & 15u) == 11u && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(hit.cell * i32(1u << hit.level)) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u);
+    // Road and paving that are wet mirror too: a film of water everywhere, puddles where it gathers.
+    var mirror = m.mirror;
+    if (g.weather.y > 0.0 && ((hit.kind & 15u) == 6u || (hit.kind & 15u) == 7u) && hit.n.y > 0.5) {
+      let place = vec2f((hit.cell * i32(1u << hit.level)).xz);
+      mirror = g.weather.y * (0.45 + 0.5 * smoothstep(0.42, 0.6, noise2(place * 0.023)));
+      col *= 1.0 - 0.35 * g.weather.y;
+    }
+    if (mirror > 0.0 && (g.flags & 2u) != 0u && !glows) {
       // Water and glass show what is across from them.
       var n = hit.n;
       if (dot(n, n) < 0.5) { n = -rd; }
@@ -933,7 +952,7 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       }
       let facing = 1.0 - max(dot(-rd, n), 0.0);
       let fresnel = 0.04 + 0.96 * pow(facing, 5.0);
-      col = mix(col, seen, clamp(m.mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));
+      col = mix(col, seen, clamp(mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));
       col += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 2.2, g.day) * path;
     }
     col = air(col, rd, hit.t);
@@ -982,6 +1001,8 @@ export interface Marcher {
   pick(view: View, plain?: boolean): Promise<{ t: number; material: number; colour: number } | null>
   /** How many pixels wide a thing must be to be drawn as itself: 1 is every cell that can be seen, 2 is half as fine. */
   detail: number
+  /** How hard it rains, 0 to 1: the sky greys, the ground is wet and mirrors, lights come on. */
+  rain: number
   /** Whether the eye is under the sea: what is in it is then lit as under water. */
   under: boolean
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
@@ -996,7 +1017,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
   const pipeline = await device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 112 + 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 112 + 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1011,7 +1032,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 112 + 112), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 112 + 128), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -1023,14 +1044,18 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const times = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k]
     const hour = (night: Colour, noon: Colour, dusk: Colour) => mix(night, mix(noon, dusk, low), day)
     const [sx, , sz] = sunMaps.s, flat = Math.hypot(sx, sz) || 1, white: Colour = [1, 1, 1], dark: Colour = [0.03, 0.045, 0.085], cloudy: Colour = [0.035, 0.045, 0.075]
+    // Rain: the sun is behind cloud, the sky and its fill go grey, the clouds darken.
+    const some = 0.1 + 0.9 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, rain * by)
     f.set([
-      ...mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), day * (1 - 0.5 * low),
-      ...times(mix([0.3, 0.4, 0.58], [0.34, 0.3, 0.42], low), 0.1 + 0.9 * day), 0.1 + 0.9 * day,
-      ...hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.07, 0.11, 0.36]), 0.42 + 0.18 * low,
-      ...hour(dark, [0.66, 0.79, 0.93], [0.6, 0.44, 0.5]), 0.6 * low * day,
-      ...hour(dark, [0.66, 0.79, 0.93], [1, 0.45, 0.12]), sx / flat,
-      ...hour(cloudy, white, [0.55, 0.36, 0.48]), sz / flat,
-      ...hour(cloudy, white, [1, 0.5, 0.2]), 30 - 18 * low,
+      ...times(mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * rain), day * (1 - 0.5 * low) * (1 - 0.6 * rain),
+      ...wet(times(mix([0.3, 0.4, 0.58], [0.34, 0.3, 0.42], low), some), 0.7), some,
+      ...wet(hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
+      ...wet(hour(dark, [0.66, 0.79, 0.93], [0.6, 0.44, 0.5])), 0.6 * low * day * (1 - rain),
+      ...wet(hour(dark, [0.66, 0.79, 0.93], [1, 0.45, 0.12])), sx / flat,
+      ...times(hour(cloudy, white, [0.55, 0.36, 0.48]), 1 - 0.5 * rain), sz / flat,
+      ...times(hour(cloudy, white, [1, 0.5, 0.2]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
+      // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
+      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), 0,
     ], 36 + MAX_LEVELS * 28)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
@@ -1073,13 +1098,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
-  let detail = 1, day = 1, low = 0, under = false
+  let detail = 1, day = 1, low = 0, under = false, rain = 0
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
   const point: Target = { color: pointTexture.createView(), depth: device.createTexture({ size: [1, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView(), size: [1, 1] }
   const pointRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const self: Marcher = {
+    get rain() { return rain },
+    set rain(v: number) { rain = Math.max(0, Math.min(1, v)); colours() },
     get under() { return under },
     set under(v: boolean) { under = v },
     get detail() { return detail },

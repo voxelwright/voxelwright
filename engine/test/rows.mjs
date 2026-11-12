@@ -15,7 +15,7 @@ import { still } from './kit.mjs'
 
 export const DEG = Math.PI / 180
 /** The core's materials a shot may be asked to face (kinds.rs). */
-const WATER = 5, CONCRETE = 7, BRICK = 8, PLASTER = 9, WOOD = 10, GLASS = 11, STEEL = 12, LEAVES = 13
+const WATER = 5, CONCRETE = 7, BRICK = 8, PLASTER = 9, WOOD = 10, GLASS = 11, STEEL = 12, LEAVES = 13, LAMP = 15
 const HOUSE = [BRICK, PLASTER, WOOD, GLASS, CONCRETE]
 
 /** Where the page starts: over the middle of a street, houses on its -z side, the works yard on the other. Shots are given from there, metres and degrees. */
@@ -46,8 +46,8 @@ export async function place(page, row) {
   await page.evaluate(() => { globalThis.engine.home ??= { ...globalThis.engine.pose } })
   if (Array.isArray(row.stand)) await from(page, ...row.stand)
   else await lookFrom(page, row.stand.from, row.stand.up, row.stand.to, row.stand.high)
-  // The hour the row is of, if it names one: the sun's maps are drawn again for it before the picture.
-  await page.evaluate((hour) => { globalThis.engine.hour = hour }, row.hour ?? null)
+  // The hour and the rain the row is of, if it names them: the sun's maps are drawn again for the hour before the picture.
+  await page.evaluate(([hour, rain]) => Object.assign(globalThis.engine, { hour, rain }), [row.hour ?? null, row.rain ?? 0])
   await page.waitForTimeout(400)
   await still(page, { sun: true })
 }
@@ -90,7 +90,7 @@ const charge = async (page, turn, radius, pitch) => {
 /**
  * The rows. `theirs` is a film and the second to take the frame at. `stand` is where our shot is taken from: metres
  * from the start along x, over the street, along z, then degrees turned and tilted; or a place to stand and a point
- * to look at. `hour` is the time of day, if not the page's own. `near` is what must be ahead there (see `aimed`),
+ * to look at. `hour` is the time of day, if not the page's own, and `rain` how hard it rains (0 to 1). `near` is what must be ahead there (see `aimed`),
  * or, with `aim`, that far right of and above the middle of the picture (radians). `act` is what is done, and may return a picture
  * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
@@ -189,12 +189,16 @@ export const ROWS = [
     // where the light comes in. (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
     stand: { from: [-1276, 398], up: 2.5, to: [-1262, 412], high: 5.5 }, near: [60, 2, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'none' },
-  { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'none' },
+  { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'behind',
+    // Down the street by the start from low over the wet road: a record shop's sign and the lit windows in it.
+    stand: [30, 1.5, 2.2, 300, 5], hour: 21, rain: 1, near: [80, LAMP] },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'none' },
   { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },
-  { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'none' },
+  { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'behind',
+    // The crossing west of the start: a hardware shop's sign and window, lamps, parked cars. One sign, no people.
+    stand: [-45, 1.8, 2.2, 318, 5], hour: 21, rain: 0.35, near: [80, LAMP] },
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'behind',
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
