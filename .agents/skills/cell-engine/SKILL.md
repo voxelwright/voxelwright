@@ -714,3 +714,34 @@ front coming down, staying down and losing no cell.
 - Rows restaged: `town` from in the yard (the tower close, the shops across the street),
   `signs` along the five shops on a wet night, `frame` at the six-storey office with ten
   charges, `ruin` with ten big charges along as much of the row as the picture holds.
+
+## Material finer than a cell, and what the light ceiling showed (November 12, after the fourth judge)
+
+Both judges said the same thing in kind: theirs has material and weight, ours is a toy with flat light and debris
+of cubes. Constants and staging had been tried. Before building anything, a grid of pictures, cost ignored:
+
+- **Light ceiling.** Each stand shot under 24 suns from a 1.5 degree disc and 64 lights from all over the sky, every
+  still with exact traced shadows, read out before the tone curve and averaged (scratch branch
+  `scratch/140-ceiling`, never merged: `march.probe`, flags 256 and 512, `rawOut`). Near things gained depth (a
+  tree's crown, doorways, under cars). The far view did not change at all. The street still read as a toy. Light
+  is not the first gap. If it is built later it belongs off the pixel (per sector, a map, or over frames).
+- **Their cell size.** About 10 cm, as ours: a timber is two cells, a lamp post two. What differs is that they draw
+  finer than a cell (plank seams and mortar a pixel wide), smooth the picture, and paint things the colours real
+  things are.
+- **Material finer than a cell.** `paint()` now takes where on the cell a pixel is and how many pixels wide the cell
+  is. Mortar, lap shadows, plank seams, slab joints and grain cost nothing the bench can see (all fifteen rows
+  within 3%): it is asked once a pixel, after the march, not in it.
+- **Wall paints.** Tones 0, 1, 2 and 7 are what walls are painted. They hold less colour in green, blue and pink
+  than in cream and brick (`HOLDS` in `palette()`), and are a little darker. The cells did not change: the town's
+  sum is as it was.
+- **A sloping road.** The risers of a street's steps were lit as the tread but still asked about corners, so every
+  step had a dark foot and a road looked cobbled. They are no longer asked (`slope` in `lit`).
+
+Two things the experiment cost: a light pointing exactly along an axis (a zero in its direction) hangs the GPU in
+the march and loses the device, and other pages on the machine with it; 320-step traces of every pixel at full
+size did the same. Keep probe lights off the axes and the picture small.
+
+The rubble row was shot three ways after the judge called its debris "frozen in mid-air": as it was, with crumbs
+off, with fire off. Crumbs were not it. With fire on the houses are still coming down forty seconds later (83
+bodies moving, 7,586 cells burning) and the still is of a collapse. With fire off all is at rest, and what lies
+there is tilted slabs in house colours, not a heap. The row is now shot without fire; the heap is the next lever.

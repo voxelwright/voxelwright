@@ -92,7 +92,8 @@ const charge = async (page, turn, radius, pitch) => {
  * from the start along x, over the street, along z, then degrees turned and tilted; or a place to stand and a point
  * to look at. `hour` is the time of day, if not the page's own, and `rain` how hard it rains (0 to 1). `near` is what must be ahead there (see `aimed`),
  * or, with `aim`, that far right of and above the middle of the picture (radians). `act` is what is done, and may return a picture
- * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
+ * taken mid-way (things in the air), else the picture is taken when all is still again. `query` is what the page is
+ * opened with, if anything. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
 // States as the fourth blind judge left them (November 12, main a4411d9a, logged): ours first, theirs second. town 5 v 7,
@@ -104,6 +105,8 @@ const charge = async (page, turn, radius, pitch) => {
 // light 5.5 v 7.5, tumble 6.5 v 5.5, topple 6 v 7, blast 6.5 v 6, fire 6.5 v 3.5, rubble 6 v 7, glass 5.5 v 5,
 // frame 4.5 v 7, tools 6 v 5, ruin 5.5 v 7, sunset 5.5 v 8.5, under 6 v 8, snow 5 v 7, rain 6 v 8.5, road 6.5 v 7.5,
 // whole 5 v 7.5, dusk 6 v 6.5.
+// Tools is level, not ahead: the judge could not read their bar's labels, but was handed their frame at 960 wide
+// from a compressed film. At the film's own size the bar reads plainly, twelve named tools to our seven.
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
@@ -149,8 +152,10 @@ export const ROWS = [
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
-    // From the road, low: three big charges at the feet of the houses across it, and what they bring down.
-    stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600,
+    // From the road, low: three big charges at the feet of the houses across it, and what they bring down. Without
+    // fire: with it the houses were still coming down forty seconds on, and the picture was of things in the air
+    // (the fourth judge: "frozen in mid-air"), not of what lies there.
+    stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600, query: 'fire=0',
     act: async (page) => {
       for (const turn of [-0.3, 0, 0.3]) { await charge(page, turn, 32, 0.02); await page.waitForTimeout(700) }
     } },
@@ -174,7 +179,7 @@ export const ROWS = [
         await page.waitForTimeout(500)
       }
     } },
-  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'ahead',
+  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'level',
     stand: FRONT, near: [16, ...HOUSE],
     act: async (page) => {
       // The bar, the cannon picked, and its ball on the way to a house front.

@@ -71,7 +71,7 @@ ${PAINT}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let m = looks.material[in.kind & 15u];
   // The cell as it was in the world when the body came loose, and the face as it then looked.
-  let albedo = paint(in.kind, vec3i(floor(in.at - in.n * 0.5)) + u.cells, in.n, 1.0);
+  let albedo = paint(in.kind, vec3i(floor(in.at - in.n * 0.5)) + u.cells, in.n, 1.0, fract(in.at - in.n * 0.5), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022));
   var direct = max(dot(in.facing, u.sun), 0.0);
   if (direct > 0.0) {
     // In the world's shadow where the sun's maps say so; where they cannot say, in the sun.
