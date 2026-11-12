@@ -110,7 +110,7 @@ fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
             let r = if *kind == 0 { radius * 3 + 2 } else { radius + 1 };
             (centre.map(|c| c - r), centre.map(|c| c + r + 1))
         }
-        Edit::Runs(runs) => {
+        Edit::Runs(runs) | Edit::Rows(runs) => {
             let (mut lo, mut hi) = ([i32::MAX; 3], [i32::MIN; 3]);
             for r in runs {
                 lo = [lo[0].min(r.x0), lo[1].min(r.y), lo[2].min(r.z)];
@@ -152,7 +152,7 @@ impl Ground {
         let last = at == self.edits.len();
         match (&e, last) {
             // Rows put last change the sectors already made in place.
-            (Edit::Runs(runs), true) => self.rows(runs),
+            (Edit::Runs(runs) | Edit::Rows(runs), true) => self.rows(runs),
             _ => self.forget(b),
         }
         self.holds = None;
@@ -1330,6 +1330,83 @@ mod tests {
             t += 1.0 / 60.0;
         }
         eprintln!("all at rest at {t:.1} s; the longest call took {:.0} ms with {} bodies at {:.1} s; {} bodies in all", worst.0, worst.1, worst.2, bodies.rested.len());
+    }
+
+    /// Not a check: where the stuff goes when the board's rubble and ruin rows are acted on the houses across from the
+    /// start (#160). `cargo test --release where_the_stuff_goes -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn where_the_stuff_goes() {
+        use crate::kinds::*;
+        let home = [700, city::ground(700, 4070), 4070];
+        let (low, size) = ([380, home[1] - 60, 3820], [640usize, 300, 320]);
+        let built = |k: Kind| !matches!(material(k), 0 | EARTH | ROCK | GRASS | SAND | ASPHALT);
+        // The rows as rows.mjs has them: where the eye is, how it is turned and tilted, the charges' turns and size.
+        let rows: [(&str, [i32; 3], f32, f32, [f32; 5], i32); 2] = [
+            ("rubble", [home[0], home[1] + 35, home[2] + 40], 9f32.to_radians(), 12.6f32.to_radians(), [-0.22, 0.0, 0.22, -0.11, 0.11], 16),
+            ("ruin", [home[0] + 80, home[1] + 170, home[2] + 130], 0.0, -0.62, [-0.5, -0.25, 0.0, 0.25, 0.5], 40),
+        ];
+        for (name, eye, yaw, pitch, turns, radius) in rows {
+            for spark in [false, true] {
+                let mut bodies = Bodies::new();
+                let before = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+                let solid = |r: &Region, p: [f32; 3]| {
+                    let c = [p[0].floor() as i32 - low[0], p[1].floor() as i32 - low[1], p[2].floor() as i32 - low[2]];
+                    c.iter().zip(size).all(|(&v, n)| v >= 0 && (v as usize) < n) && r.cells[r.at(c[0] as usize, c[1] as usize, c[2] as usize)] != 0
+                };
+                let (mut emptied, mut middle, mut glass, mut born_small, mut born_big, mut biggest, mut t) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0.0f32);
+                for turn in turns {
+                    let (y, p) = (yaw + turn, pitch);
+                    let f = [y.sin() * p.cos(), p.sin(), -y.cos() * p.cos()];
+                    let now = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+                    let mut d = 0.0f32;
+                    while d < 900.0 && !solid(&now, [eye[0] as f32 + f[0] * d, eye[1] as f32 + f[1] * d, eye[2] as f32 + f[2] * d]) { d += 0.5 }
+                    let reach = d + radius as f32 * 0.3;
+                    let at = [(eye[0] as f32 + f[0] * reach).round() as i32, (eye[1] as f32 + f[1] * reach).round() as i32, (eye[2] as f32 + f[2] * reach).round() as i32];
+                    bodies.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, None);
+                    let left = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+                    bodies.ground.undo();
+                    for i in 0..now.cells.len() {
+                        if now.cells[i] != 0 && left.cells[i] == 0 {
+                            emptied += 1;
+                            let (x, yy, z) = ((i % size[0]) as i32 + low[0], (i / (size[0] * size[2])) as i32 + low[1], ((i / size[0]) % size[2]) as i32 + low[2]);
+                            let dd = (x - at[0]).pow(2) + (yy - at[1]).pow(2) + (z - at[2]).pow(2);
+                            if material(now.cells[i]) == GLASS { glass += 1 } else if (dd as f32) < (radius * radius) as f32 * 0.16 { middle += 1 }
+                        }
+                    }
+                    let first = bodies.next;
+                    bodies.blast(at, radius, None, spark);
+                    for b in bodies.list.iter().filter(|b| b.id >= first) {
+                        if b.count <= 100 { born_small += b.count } else { born_big += b.count }
+                        biggest = biggest.max(b.count);
+                    }
+                    eprintln!("  {name} spark {spark}: charge at {at:?}, {d:.0} cells off; {} bodies now", bodies.list.len());
+                    for _ in 0..40 { bodies.out.clear(); bodies.advance(1.0 / 60.0); t += 1.0 / 60.0 }
+                }
+                while (!bodies.list.is_empty() || !bodies.fire.alight.is_empty()) && t < 200.0 { bodies.out.clear(); bodies.advance(1.0 / 60.0); t += 1.0 / 60.0 }
+                let after = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+                let (s0, s1) = (before.cells.iter().filter(|&&k| built(k)).count(), after.cells.iter().filter(|&&k| built(k)).count());
+                // What is where nothing was: by height over the ground there, and street side or house side of the fronts.
+                let (mut gone, mut new, mut by_height, mut street, mut wood0, mut wood1) = (0usize, 0usize, [0usize; 4], 0usize, 0usize, 0usize);
+                for i in 0..before.cells.len() {
+                    let (b, a) = (before.cells[i], after.cells[i]);
+                    if matches!(material(b), WOOD | ROOFING | LEAVES) { wood0 += 1 }
+                    if matches!(material(a), WOOD | ROOFING | LEAVES) { wood1 += 1 }
+                    if b != 0 && a == 0 { gone += 1 }
+                    if b == 0 && a != 0 {
+                        new += 1;
+                        let (x, y, z) = ((i % size[0]) as i32 + low[0], (i / (size[0] * size[2])) as i32 + low[1], ((i / size[0]) % size[2]) as i32 + low[2]);
+                        let h = y - city::ground(x, z);
+                        by_height[if h < 5 { 0 } else if h < 15 { 1 } else if h < 40 { 2 } else { 3 }] += 1;
+                        if z >= 4000 { street += 1 }
+                    }
+                }
+                eprintln!("{name}, sparks {spark}: at rest after {t:.0} s. Built cells {s0} before, {s1} after ({} lost).", s0 as i64 - s1 as i64);
+                eprintln!("  the charges emptied {emptied}: {middle} in their middles (dust), {glass} glass (dust); bodies born of {born_small} cells in lumps of 100 or fewer, {born_big} in bigger (the biggest {biggest})");
+                eprintln!("  cells gone from where they were {gone}; cells now where nothing was {new}: {} under 0.5 m over the ground, {} to 1.5 m, {} to 4 m, {} higher; {street} of them on the street side of the fronts", by_height[0], by_height[1], by_height[2], by_height[3]);
+                eprintln!("  what burns (wood, roofing, leaves): {wood0} before, {wood1} after\n");
+            }
+        }
     }
 
     #[test]

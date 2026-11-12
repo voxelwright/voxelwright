@@ -27,12 +27,20 @@ try {
     await page.evaluate(([y, pt]) => { globalThis.engine.pose.yaw = y; globalThis.engine.pose.pitch = pt }, [Math.atan2(d[0], -d[2]), Math.atan2(d[1], Math.hypot(d[0], d[2]))])
   }
   // Look round for the nearest tree trunk.
-  let trunk = null
-  for (let pitch = 0.02; pitch < 0.2; pitch += 0.04) for (let yaw = -3.1; yaw < 3.1; yaw += 0.02) {
-    await page.evaluate(([y, p]) => { globalThis.engine.pose.yaw = y; globalThis.engine.pose.pitch = p }, [yaw, pitch])
-    const hit = await pick()
-    if (hit && hit.material === WOOD && hit.colour === TRUNK && hit.t < 400 && (!trunk || hit.t < trunk.hit.t)) trunk = { yaw, pitch, hit }
-  }
+  // Asked in the page, a turn of the head a frame: asked from here, each look is a trip to the browser and back.
+  const trunk = await page.evaluate(async ([WOOD, TRUNK]) => {
+    const e = globalThis.engine, full = e.scale
+    // A small picture while looking round: each look waits on the frames being drawn.
+    e.scale = 0.25
+    let trunk = null
+    for (let pitch = 0.02; pitch < 0.2; pitch += 0.04) for (let yaw = -3.1; yaw < 3.1; yaw += 0.02) {
+      e.pose.yaw = yaw; e.pose.pitch = pitch
+      const hit = await e.pick()
+      if (hit && hit.material === WOOD && hit.colour === TRUNK && hit.t < 400 && (!trunk || hit.t < trunk.hit.t)) trunk = { yaw, pitch, hit }
+    }
+    e.scale = full
+    return trunk
+  }, [WOOD, TRUNK])
   check(!!trunk, `found a tree trunk ${trunk ? (trunk.hit.t / 10).toFixed(1) : '?'} m away`)
   if (trunk) {
     // Where the trunk is, and a place to stand 7 m from it.

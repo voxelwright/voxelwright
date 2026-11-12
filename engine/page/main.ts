@@ -12,7 +12,7 @@ import { fill } from '../probe/fill.ts'
 import { FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { puffs } from './puffs.ts'
-import { ball, rows, type Edit } from './edits.ts'
+import { ball, rows, stream, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
 import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
@@ -40,11 +40,19 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { ground_at(x: number, z: number): number }
+  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number }
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
   const world = new World(device, {
+    merge: (edits, lod, x0, x1, z0, z1) => {
+      const words = stream(edits), room = core.edits_room(words.length)
+      new Int32Array(core.memory.buffer, room, words.length).set(words)
+      const n = core.merge_rows(lod, x0, x1, z0, z1), merged = new Int32Array(core.memory.buffer, core.merged_words(), n).slice()
+      let y0 = 0, y1 = 0
+      for (let i = 2; i < n; i += 5) { y0 = i === 2 ? merged[4] : Math.min(y0, merged[i + 2]); y1 = i === 2 ? merged[4] + 1 : Math.max(y1, merged[i + 2] + 1) }
+      return { words: merged, box: [x0, y0, z0, x1, y1, z1] }
+    },
     grid,
     levels: Number(query.get('levels') ?? (phone ? 8 : 9)),
     poolWords: (poolMb << 20) / 4,
@@ -175,7 +183,14 @@ async function main() {
 
   const watchers = new Set<(gap: number) => void>()
   let paused = false, saying = ''
+  /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
+  const off = new Set<string>()
+  /** What a frame costs this thread, smoothed, in ms; and what each part of it costs, by name. `heard` is the mover's answers, summed. */
+  let cpuMs = 0, mark = 0
+  const spent: Record<string, number> = { heard: 0 }
+  const lap = (name: string) => { const t = performance.now(); spent[name] = (spent[name] ?? 0) * 0.95 + (t - mark) * 0.05; mark = t }
   const frame = (now: number) => {
+    const began = mark = performance.now()
     const dt = Math.min(0.1, (now - last) / 1000)
     for (const each of watchers) each(now - last)
     if (paused) { last = now; requestAnimationFrame(frame); return }
@@ -186,22 +201,29 @@ async function main() {
     walk(dt)
     steer(Math.max(1000 / 60, screenMs))
     const v = view(), to = fit()
+    lap('steer')
     fallOn(dt)
+    lap('fallOn')
     world.update(v.eye)
-    if (spoiled.length && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
+    lap('update')
+    if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
+    lap('spoil')
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
     debris.step(dt, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
     smoke.step(dt)
+    lap('step')
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
+    lap('tend')
     march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
-    falling.draw(encoder, to, v, march.sun.s)
-    debris.draw(encoder, to, v)
-    smoke.draw(encoder, to, v)
+    if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
+    if (!off.has('crumbs')) debris.draw(encoder, to, v)
+    if (!off.has('puffs')) smoke.draw(encoder, to, v)
     blit(encoder, to, context.getCurrentTexture().createView())
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
+    lap('draw')
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -215,6 +237,7 @@ async function main() {
       const s = world.stats
       hud.textContent = `${saying ? `${saying} · ` : ''}${(1000 / frameMs).toFixed(0)} fps · march ${gpuMs.toFixed(1)} ms at ${to.size[0]} x ${to.size[1]} · ${s.wanted ? `making ${s.wanted} sectors` : 'world made'} · ${(s.poolUsed / 262144).toFixed(0)} of ${(s.poolWords / 262144).toFixed(0)} MB${s.full ? ` · ${s.full} did not fit` : ''} · ${pose.x.toFixed(0)}, ${pose.y.toFixed(0)}, ${pose.z.toFixed(0)} m · ${speed.toFixed(0)} m/s`
     }
+    cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)
@@ -264,7 +287,8 @@ async function main() {
   const fell = { asks: 0, pieces: 0, cells: 0, dust: 0, ms: 0, stepMs: 0, worstMs: 0, tried: 0, most: 0 }
   const hue = (kind: number) => (kind >> 8 ? colours.subarray((kind >> 8) * 4, (kind >> 8) * 4 + 3) : stuff.subarray((kind & 15) * 8, (kind & 15) * 8 + 3))
   mover.onmessage = (e: MessageEvent<Answer>) => {
-    const answer = e.data
+    const answer = e.data, t0 = performance.now()
+    queueMicrotask(() => { spent.heard += performance.now() - t0 })
     if (answer.released) waiting--
     else ticking = false
     if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
@@ -317,7 +341,7 @@ async function main() {
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
     if ((bodies > 0 || burning > 0) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
     if (bodies === 0 && burning === 0) owed = 0
-    for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
+    if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     // A body that is cells again is drawn until those cells are in the picture.
     const made = world.stats.stale === 0 && world.stats.wanted === 0
     lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })
@@ -486,7 +510,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

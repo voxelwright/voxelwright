@@ -19,6 +19,8 @@ export interface WorldOptions {
   /** How many words of trees the GPU keeps. */
   poolWords: number
   workers: number
+  /** Edits of rows, one after another, as one edit that leaves the column from x0, z0 to x1, z1 the same in the copy `lod` times coarser (the core's `merge_rows`). */
+  merge(edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit
 }
 
 /** A run of the pool that is free. */
@@ -113,6 +115,8 @@ class Level {
 }
 
 const mod = (a: number, n: number) => ((a % n) + n) % n
+/** One number for a column of sectors. */
+const column = (sx: number, sz: number) => (sx + 0x200000) * 0x400000 + (sz + 0x200000)
 
 export interface WorldStats {
   ready: number
@@ -136,9 +140,11 @@ export class World {
   /** Words a level takes in the top buffer. */
   readonly stride: number
   private workers: { worker: Worker; busy: number }[] = []
-  private asks: (Ask & { rank: number })[] = []
+  private asks: { level: number; sx: number; sz: number; y0: number; y1: number; rank: number }[] = []
   private nextId = 1
   private edits: Edit[] = []
+  /** For each box, the edits that reach each column of its sectors, in order: a column made again is told only of those. */
+  private reach: Map<number, Edit[]>[] = []
   private plan = true
   /** The boxes that moved in the last update. */
   moved: number[] = []
@@ -172,6 +178,11 @@ export class World {
       const size = SIDE << level.index
       const lo = [e.box[0], e.box[1], e.box[2]].map((v) => Math.floor(v / size))
       const hi = [e.box[3] - 1, e.box[4] - 1, e.box[5] - 1].map((v) => Math.floor(v / size))
+      const columns = this.reach[level.index] ??= new Map()
+      for (let sz = lo[2]; sz <= hi[2]; sz++) for (let sx = lo[0]; sx <= hi[0]; sx++) {
+        const key = column(sx, sz), list = columns.get(key)
+        if (list) list.push(e); else columns.set(key, [e])
+      }
       for (let sy = lo[1]; sy <= hi[1]; sy++) for (let sz = lo[2]; sz <= hi[2]; sz++) for (let sx = lo[0]; sx <= hi[0]; sx++) {
         if (!level.holds(sx, sy, sz)) continue
         const slot = level.slot(sx, sy, sz)
@@ -239,8 +250,7 @@ export class World {
         if (y0 > y1) continue
         // How far the column is from the eye, in this level's sectors: every box fills from its middle outwards, the far ones a little sooner.
         const far = Math.hypot((sx + 0.5) * size - eye[0], (sz + 0.5) * size - eye[2]) / size
-        const reach = this.edits.filter((e) => e.box[3] > sx * size && e.box[0] < (sx + 1) * size && e.box[5] > sz * size && e.box[2] < (sz + 1) * size)
-        this.asks.push({ id: 0, level: level.index, sx, sz, y0, y1, edits: stream(reach), heights: Int32Array.from(reach.flatMap((e) => [e.box[1], e.box[4]])), rank: stale ? -1 : far - level.index * 0.05 })
+        this.asks.push({ level: level.index, sx, sz, y0, y1, rank: stale ? -1 : far - level.index * 0.05 })
         for (let sy = y0; sy <= y1; sy++) {
           const slot = level.slot(sx, sy, sz)
           if (level.state[slot] === MISSING) level.state[slot] = QUEUED
@@ -262,12 +272,32 @@ export class World {
           else if (level.state[slot] === STALE) { level.state[slot] = STALE_FLYING; any = true }
         }
         if (!any) continue
-        const { rank: _rank, ...message } = ask
-        message.id = this.nextId++
+        const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
+        if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
+        const heights = new Int32Array(reach.length * 2)
+        for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
         w.busy++
-        w.worker.postMessage(message)
+        w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights } satisfies Ask)
       }
     }
+  }
+
+  /**
+   * A column's edits made fewer: each run of edits of rows, one after another, becomes one. A column that burns is
+   * edited ten times a second, and every sector of it made again is told all of them.
+   */
+  private tidy(reach: Edit[], level: number, sx: number, sz: number) {
+    const size = SIDE << level, out: Edit[] = []
+    for (let i = 0; i < reach.length;) {
+      let j = i
+      while (j < reach.length && reach[j].words[0] !== 0) j++
+      if (j - i >= 2) out.push(this.options.merge(reach.slice(i, j), level, sx * size, (sx + 1) * size, sz * size, (sz + 1) * size))
+      else if (j > i) out.push(reach[i])
+      if (j < reach.length) out.push(reach[j])
+      i = j + 1
+    }
+    reach.length = 0
+    reach.push(...out)
   }
 
   /** A worker's answer: keep each sector that is still wanted. */

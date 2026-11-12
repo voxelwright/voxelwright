@@ -153,8 +153,9 @@ impl Scratch {
 
     /// Sets rows of cells: a piece taken out of the world (kind 0) or put down in it. The rows are sorted by y, then z,
     /// then x. A copy a little coarser takes a row where it passes through a cell's middle. A copy coarser still, in
-    /// which a house is solid, takes each line of rows from its first cell to its last, as the solid thing the piece is.
-    pub fn runs(&mut self, runs: &[Run]) {
+    /// which a house is solid, takes each line of rows from its first cell to its last, as the solid thing the piece is:
+    /// when the rows are one piece's (`lines`), and each row by itself when they are what many edits came to.
+    pub fn runs(&mut self, runs: &[Run], lines: bool) {
         let (k, side) = (self.lod, SIDE as i32);
         if k == 0 {
             for r in runs {
@@ -187,7 +188,7 @@ impl Scratch {
             if y < 0 || y >= side || z < 0 || z >= side {
                 continue;
             }
-            if k >= 2 {
+            if k >= 2 && lines {
                 let (x0, x1) = self.span(0, line[0].x0, line[line.len() - 1].x1, Meet::Middle);
                 if x0 < x1 {
                     self.cells[at(x0, y as usize, z as usize)..at(x1, y as usize, z as usize)].fill(line[0].kind);
@@ -200,6 +201,104 @@ impl Scratch {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Edits of rows, one after another, as rows that leave a column of sectors the same in the copy `lod` times coarser:
+/// only what that copy reads of them (see `Scratch::runs`), a later row over an earlier, cut to the column (`x` and
+/// `z`, low and high, in the finest cells). Sorted by y, then z, then x. Edits that are not rows are passed over.
+pub fn merged(edits: &[crate::Edit], lod: u32, x: [i32; 2], z: [i32; 2]) -> Vec<Run> {
+    use std::collections::BTreeMap;
+    let (half, mask) = ((1 << lod) / 2, (1 << lod) - 1);
+    let mut lines: BTreeMap<(i32, i32), Vec<Run>> = BTreeMap::new();
+    let mut lay = |r: Run| {
+        let r = Run { x0: r.x0.max(x[0]), x1: r.x1.min(x[1]), ..r };
+        if r.x0 >= r.x1 {
+            return;
+        }
+        let line = lines.entry((r.y, r.z)).or_default();
+        // What it covers of the rows already there is cut away.
+        let mut kept = Vec::with_capacity(line.len() + 2);
+        for old in line.drain(..) {
+            if old.x1 <= r.x0 || old.x0 >= r.x1 {
+                kept.push(old);
+                continue;
+            }
+            if old.x0 < r.x0 {
+                kept.push(Run { x1: r.x0, ..old });
+            }
+            if old.x1 > r.x1 {
+                kept.push(Run { x0: r.x1, ..old });
+            }
+        }
+        kept.push(r);
+        kept.sort_unstable_by_key(|r| r.x0);
+        *line = kept;
+    };
+    for e in edits {
+        let (runs, whole) = match e {
+            crate::Edit::Runs(runs) => (runs, lod >= 2),
+            crate::Edit::Rows(runs) => (runs, false),
+            _ => continue,
+        };
+        let mut i = 0;
+        while i < runs.len() {
+            let mut j = i + 1;
+            while j < runs.len() && runs[j].y == runs[i].y && runs[j].z == runs[i].z {
+                j += 1;
+            }
+            let line = &runs[i..j];
+            i = j;
+            let (y, wz) = (line[0].y, line[0].z);
+            if wz < z[0] || wz >= z[1] || (lod > 0 && (y & mask != half || wz & mask != half)) {
+                continue;
+            }
+            if whole {
+                lay(Run { x0: line[0].x0, x1: line[line.len() - 1].x1, ..line[0] });
+            } else {
+                for r in line {
+                    lay(*r);
+                }
+            }
+        }
+    }
+    lines.into_values().flatten().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kinds::{BRICK, kind};
+    use crate::{Edit, fill, hash::hash};
+
+    #[test]
+    fn many_edits_of_rows_merged_leave_every_copy_the_same() {
+        // Rows scattered through one sector's place at each coarseness, some over others, some emptying.
+        for lod in 0..4u32 {
+            let side = (SIDE as i32) << lod;
+            let (sx, sy, sz) = (3, 0, 5);
+            let low = [sx * side, sy * side, sz * side];
+            let edits: Vec<Edit> = (0..12)
+                .map(|e| {
+                    let mut runs: Vec<Run> = (0..300)
+                        .map(|i| {
+                            let h = |n: u32| hash(e, i, n) as i32;
+                            let x0 = low[0] - 20 + h(1).rem_euclid(side + 20);
+                            Run { x0, x1: x0 + 1 + h(2).rem_euclid(40 << lod), y: low[1] + h(3).rem_euclid(side), z: low[2] - 4 + h(4).rem_euclid(side + 8), kind: if h(5) % 3 == 0 { 0 } else { kind(BRICK, 1 + (e as u8 % 5)) } }
+                        })
+                        .collect();
+                    runs.sort_unstable_by_key(|r| (r.y, r.z, r.x0));
+                    Edit::Runs(runs)
+                })
+                .collect();
+            let (mut one, mut other) = (Scratch::new(), Scratch::new());
+            fill(&mut one, sx, sy, sz, lod, &edits);
+            let rows = merged(&edits, lod, [low[0], low[0] + side], [low[2], low[2] + side]);
+            assert!(rows.windows(2).all(|w| (w[0].y, w[0].z, w[0].x1) <= (w[1].y, w[1].z, w[1].x0)), "the merged rows are in order and none lies over another");
+            fill(&mut other, sx, sy, sz, lod, &[Edit::Rows(rows)]);
+            let differ = one.cells.iter().zip(&other.cells).filter(|(a, b)| a != b).count();
+            assert_eq!(differ, 0, "{lod} times coarser, {differ} cells differ between the edits one after another and merged");
         }
     }
 }

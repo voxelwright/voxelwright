@@ -41,7 +41,8 @@ export async function start() {
   const city = async (query = '', options) => {
     const p = await page(options)
     await p.goto(`${url}/city?fly=0&${query}`)
-    await p.waitForFunction(() => globalThis.engine, null, { timeout: 30_000 })
+    // Beside other checks on one GPU the engine can take a while to come up.
+    await p.waitForFunction(() => globalThis.engine, null, { timeout: 90_000 })
     return p
   }
   const url = shared ? shared.url : server.url

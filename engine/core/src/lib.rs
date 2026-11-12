@@ -25,6 +25,9 @@ use tree::Whole;
 pub enum Edit {
     Ball { centre: [i32; 3], radius: i32, kind: tree::Kind },
     Runs(Vec<scratch::Run>),
+    /// Rows of cells set or emptied, each by itself in every copy however coarse: what many edits of rows come to
+    /// (`merged`).
+    Rows(Vec<scratch::Run>),
 }
 
 /// One sector's cells as the world stands: the city's rules, then the edits, in order.
@@ -36,7 +39,8 @@ pub fn fill(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: &[Edit]
             // The edge's lumps are the blast's own: the same wherever it is worked out.
             Edit::Ball { centre, radius, kind: 0 } => s.blast(*centre, *radius, hash::hash(centre[0], centre[2], centre[1] as u32)),
             Edit::Ball { centre, radius, kind } => s.ball(*centre, *radius, *kind, 0, 0, None),
-            Edit::Runs(runs) => s.runs(runs),
+            Edit::Runs(runs) => s.runs(runs, true),
+            Edit::Rows(runs) => s.runs(runs, false),
         }
     }
 }
@@ -47,7 +51,8 @@ pub fn sector(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: &[Edi
     tree::encode(&s.cells, out)
 }
 
-/// Edits as whole numbers, one after another: 0, x, y, z, radius, kind for a ball; 1, how many rows, then x0, x1, y, z, kind for each.
+/// Edits as whole numbers, one after another: 0, x, y, z, radius, kind for a ball; 1, how many rows, then x0, x1, y, z, kind for each;
+/// 2 as 1, for rows that many edits came to.
 pub fn read_edits(words: &[i32]) -> Vec<Edit> {
     let (mut out, mut i) = (Vec::new(), 0);
     while i < words.len() {
@@ -56,7 +61,8 @@ pub fn read_edits(words: &[i32]) -> Vec<Edit> {
             i += 6;
         } else {
             let n = words[i + 1] as usize;
-            out.push(Edit::Runs(words[i + 2..i + 2 + n * 5].chunks_exact(5).map(|r| scratch::Run { x0: r[0], x1: r[1], y: r[2], z: r[3], kind: r[4] as tree::Kind }).collect()));
+            let rows = words[i + 2..i + 2 + n * 5].chunks_exact(5).map(|r| scratch::Run { x0: r[0], x1: r[1], y: r[2], z: r[3], kind: r[4] as tree::Kind }).collect();
+            out.push(if words[i] == 2 { Edit::Rows(rows) } else { Edit::Runs(rows) });
             i += 2 + n * 5;
         }
     }
@@ -71,12 +77,14 @@ struct Instance {
     /// Edits for the next calls, as `read_edits` reads them.
     edits: Vec<i32>,
     out: [i32; 4],
+    /// What `merge_rows` made, as `read_edits` reads it.
+    merged: Vec<i32>,
     /// What has come loose and moves, in the one instance that is asked to move it.
     bodies: Option<Box<bodies::Bodies>>,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], bodies: None });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None });
 }
 
 /// Room for edits of `words` whole numbers (see `read_edits`); write them at the address returned. They stay for every call until asked for again.
@@ -87,6 +95,27 @@ pub extern "C" fn edits_room(words: usize) -> *mut i32 {
         i.edits.resize(words, 0);
         i.edits.as_mut_ptr()
     })
+}
+
+/// The edits in the room, all of rows, as one edit of rows that leaves a column of sectors the same in the copy
+/// `lod` times coarser: the column from `x0`, `z0` up to `x1`, `z1` in the finest cells. Returns how many words it
+/// is; they are at `merged_words`.
+#[unsafe(no_mangle)]
+pub extern "C" fn merge_rows(lod: u32, x0: i32, x1: i32, z0: i32, z1: i32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let rows = scratch::merged(&read_edits(&i.edits), lod, [x0, x1], [z0, z1]);
+        i.merged.clear();
+        i.merged.extend([2, rows.len() as i32]);
+        for r in rows {
+            i.merged.extend([r.x0, r.x1, r.y, r.z, r.kind as i32]);
+        }
+        i.merged.len()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn merged_words() -> *const i32 {
+    INSTANCE.with_borrow(|i| i.merged.as_ptr())
 }
 
 /// Makes a sector. Returns how many words its tree is: 0 for all air, 1 for all one kind (that kind is the one word), else the tree. The words are at `tree_words`.
