@@ -340,6 +340,18 @@ Filmed (`node test/clip.mjs --row ruin --seconds 16`, M1 Pro, November 12, five 
 sparks): 960 frames in 16.0 s, no gap over 16.7 ms, 2,684 bodies in all, 1,883 at once, the
 picture at 0.40 of full size. The board's ruin row has since used the big charge tool's 32.
 
+## A skip must not go past where the ray leaves its box (`page/march.ts` `trace`)
+
+Seen from 30 m up, the yard had a grid of earth-coloured pits. The generator and the trees were
+right (`cargo test --release bare_earth -- --ignored --nocapture`), and so were the roofs. A ray
+over the roofs of a column of sectors crosses the column in one step; with the finest box all
+above the ground, the ray leaves that box through its floor before the column's far side, and
+the step carried it on, so it began in the coarser copy already under the ground. The step is now
+no longer than to where the ray leaves the box. `test/city.mjs` looks down on the yard from 30
+and 40 m and fails on bare earth. The honest path costs: `roofs` and `high` in the bench are 11
+to 14% slower, and the baseline is theirs now. Found by switching each skip off in turn for the
+pick; reasoning about the shader alone had cleared it three times.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as

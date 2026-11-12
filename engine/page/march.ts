@@ -335,7 +335,9 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
         let leave = min(o.x, o.y);
         if (q0.y + rd.y * (leave * lv.scale) > roofTop) {
           n = -sign(rd) * vec3f(f32(o.x <= leave), 0.0, f32(o.y <= leave));
-          t = max(leave, t) + eps;
+          // Not past where the ray leaves the box: a box whose floor is over the ground is left through its floor,
+          // before these columns' far side, and the ray would be under the ground of the coarser copy when it got there.
+          t = min(max(leave, t), leaveAt) + eps;
           continue;
         }
         let down = (roofTop - q0.y) * k.y;

@@ -656,6 +656,37 @@ mod tests {
         (x.div_euclid(64), ground(x, z).div_euclid(64), z.div_euclid(64))
     }
 
+    /// Looking for earth laid bare: in the yard across from the start, at each coarseness, how many columns of a
+    /// sector at the ground have earth as their top cell. `cargo test --release bare_earth -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bare_earth() {
+        for lod in 0..3u32 {
+            let side = (SIDE as i32) << lod;
+            let mut s = Scratch::new();
+            for (x, z) in [(900, 4300), (1000, 4400), (1100, 4350), (600, 4500), (760, 4110), (800, 4200), (900, 4352), (1000, 4250)] {
+                let g = ground(x, z);
+                let (sx, sy, sz) = (x.div_euclid(side), g.div_euclid(side), z.div_euclid(side));
+                s.start(sx, sy, sz, lod);
+                make(&mut s);
+                let (mut bare, mut tops) = (0, std::collections::BTreeMap::new());
+                for cz in 0..SIDE {
+                    for cx in 0..SIDE {
+                        if let Some(y) = (0..SIDE).rev().find(|&y| s.cells[at(cx, y, cz)] != 0) {
+                            *tops.entry(s.cells[at(cx, y, cz)]).or_insert(0) += 1;
+                            if s.cells[at(cx, y, cz)] == EARTH_KIND && y < SIDE - 1 { bare += 1 }
+                        }
+                    }
+                }
+                let mut tree = Vec::new();
+                let whole = encode(&s.cells, &mut tree);
+                let high = if tree.len() > 2 { ((tree[2] >> 24) & 15) as usize * 4 + 4 } else { 0 };
+                let top = (0..SIDE).rev().find(|&y| (0..SIDE).any(|z| (0..SIDE).any(|x| s.cells[at(x, y, z)] != 0))).unwrap_or(0);
+                eprintln!("lod {lod} at {x},{z} (ground {g}, sector {sx} {sy} {sz}): {bare} columns bare; highest cell {top}, the tree says {high} ({}); tops {tops:?}", match whole { Whole::Empty => "empty", Whole::Uniform(_) => "uniform", _ => "tree" });
+            }
+        }
+    }
+
     #[test]
     fn same_sector_twice_is_the_same() {
         let (mut a, mut b) = (Scratch::new(), Scratch::new());

@@ -33,6 +33,25 @@ try {
     console.log(`  ${name}: made in ${(took / 1000).toFixed(1)} s, march ${m.gpuMs.toFixed(2)} ms, frame ${m.frameMs.toFixed(1)} ms`)
     if (out) await page.screenshot({ path: `${out}/${name}.png` })
   }
+  // From 30 and 40 m over the yard, looking down on it: the ground is drawn from a coarser copy, the finest box
+  // being all above it. No ray may come to the earth under the yard's floor. Rays that skipped across the empty
+  // columns of the fine box once went on past its floor, and showed a grid of pits.
+  for (const up of [30, 40]) {
+    await page.evaluate(([b, up]) => { const p = globalThis.engine.pose; p.x = b.x + 8; p.y = b.y - 12 + up; p.z = b.z + 60; p.yaw = 0; p.pitch = -30 * Math.PI / 180 }, [base, up])
+    await page.waitForTimeout(300)
+    await made()
+    const earth = await page.evaluate(async () => {
+      // A small picture while looking: each look waits on the frames being drawn.
+      const e = globalThis.engine, full = e.scale
+      e.scale = 0.25
+      let earth = 0
+      for (let up = -0.3; up <= 0.1; up += 0.04) for (let right = -0.1; right <= 0.5; right += 0.04) if ((await e.pick(right, up))?.material === 1) earth++
+      e.scale = full
+      return earth
+    })
+    if (earth > 2) failures.push(`from ${up} m over the yard, ${earth} of 176 looks came to bare earth`)
+    else console.log(`  from ${up} m over the yard: ${earth} of 176 looks came to bare earth`)
+  }
 } catch (e) {
   failures.push(String(e))
 }
