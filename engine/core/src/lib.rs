@@ -208,3 +208,27 @@ pub extern "C" fn bodies_ignite(x: i32, y: i32, z: i32, radius: i32) -> usize {
 pub extern "C" fn bodies_burning() -> usize {
     INSTANCE.with_borrow_mut(|i| moving(i).fire.alight.len())
 }
+
+/// Sends a ball of `kind`, `radius` cells across its half, from a place at a speed (cells a second). Returns how many
+/// words tell it, at `bodies_words`: the body born.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_throw(x: f32, y: f32, z: f32, vx: f32, vy: f32, vz: f32, radius: i32, kind: u32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.throw_ball([x, y, z], [vx, vy, vz], radius, kind as tree::Kind);
+        b.out.len()
+    })
+}
+
+/// What is no longer held round a point comes loose as bodies (after an edit told with `world_edit`). Returns how
+/// many words tell it, at `bodies_words`.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_release(x: i32, y: i32, z: i32, radius: i32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.release([x, y, z], radius);
+        b.out.len()
+    })
+}

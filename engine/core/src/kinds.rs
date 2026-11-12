@@ -166,3 +166,14 @@ pub const fn bears(material: u8) -> u32 {
         _ => 1 << 30,
     }
 }
+
+/// How far, in cells, the weight on a thing of this material may lie outside what carries it before it goes over:
+/// how well it takes being bent. A steel post holds an arm out; a brick chimney must stand over its own foot.
+pub const fn leans(material: u8) -> f32 {
+    match material {
+        STEEL | LAMP => 9.0,
+        WOOD | LEAVES => 4.0,
+        CONCRETE => 2.0,
+        _ => 1.0,
+    }
+}

@@ -15,6 +15,23 @@ export const from = (page, dx, up, dz, yaw, pitch) => page.evaluate(([dx, up, dz
   Object.assign(e.pose, { x: e.home.x + dx, y: e.home.y - 12 + up, z: e.home.z + dz, yaw, pitch })
 }, [dx, up, dz, yaw * DEG, pitch * DEG])
 
+import { still } from './kit.mjs'
+
+/** The works yard's things, metres from the world's corner (city.rs: the yard is block 1, 5; a block is 128 m by 80 m). */
+const YARD = { tower: [168, 425], chimney: [198, 419], office: [228, 460] }
+
+/** Stands the eye `up` metres over the ground at a place and turns it to look at a point `high` metres over the ground at another. */
+export const lookFrom = (page, [x, z], up, [tx, tz], high) => page.evaluate(([x, z, up, tx, tz, high]) => {
+  const e = globalThis.engine, y = e.ground(x, z) + up, ty = e.ground(tx, tz) + high
+  Object.assign(e.pose, { x, y, z, yaw: Math.atan2(tx - x, -(tz - z)), pitch: Math.atan2(ty - y, Math.hypot(tx - x, tz - z)) })
+}, [x, z, up, tx, tz, high])
+
+/** A blast at a point `high` metres over the ground at a place. */
+export const strikeAt = (page, [x, z], high, radius, spark = true) => page.evaluate(([x, z, high, radius, spark]) => {
+  const e = globalThis.engine
+  e.strike([Math.round(x * 10), Math.round((e.ground(x, z) + high) * 10), Math.round(z * 10)], radius, spark)
+}, [x, z, high, radius, spark])
+
 /**
  * The rows. `theirs` is a film and the second to take the frame at. `stand` is where our shot is taken from (metres
  * from the start along x, over the street, along z; then degrees turned and tilted); `act` is what is done there, and
@@ -23,7 +40,8 @@ export const from = (page, dx, up, dz, yaw, pitch) => page.evaluate(([dx, up, dz
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
-    stand: [0, 1.8, 0, 90, -2] },
+    // The works yard down the street from the start: a water tower, a chimney, a canopy, an office of glass.
+    stand: [78, 5, 6, 118, 6] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
     stand: [0, 1.8, 0, 60, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 30.0], state: 'behind',
@@ -35,13 +53,15 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 28.8], state: 'behind',
-    stand: [-1, 1.8, -0.83, -0.88 / DEG, -0.086 / DEG],
+    stand: [70, 4, 8, 100, 10],
     act: async (page) => {
-      // A street tree's trunk cut through; then the head is lifted to watch it go.
-      await page.evaluate(() => globalThis.engine.blast(6))
-      await page.evaluate(() => { globalThis.engine.pose.pitch += 0.3 })
-      await page.waitForFunction(() => globalThis.engine.dropping > 0, null, { timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(900)
+      // The water tower in the yard: its two legs on this side are cut near the ground, and it comes this way.
+      const [x, z] = YARD.tower
+      await lookFrom(page, [x - 27, z - 9], 3, [x, z], 9)
+      await page.waitForTimeout(500)
+      await still(page, { sun: true })
+      for (const dz of [-1.9, 1.9]) await strikeAt(page, [x - 1.9, z + dz], 1.2, 14, false)
+      await page.waitForTimeout(1900)
       return page.screenshot()
     } },
   { key: 'blast', what: 'An explosion: a ball of fire, smoke, pieces flung', theirs: ['engine', 38.6], state: 'behind',
@@ -82,8 +102,28 @@ export const ROWS = [
       await page.waitForTimeout(250)
       return page.screenshot()
     } },
-  { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 40.8], state: 'none' },
-  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'none' },
+  { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 40.8], state: 'behind',
+    stand: [130, 6, 30, 120, 0],
+    act: async (page) => {
+      // The yard's office of glass: charges along its near side and inside it take the glass and leave the steel.
+      const [x, z] = YARD.office
+      await lookFrom(page, [x - 22, z - 20], 7, [x, z], 5)
+      await page.waitForTimeout(500)
+      await still(page, { sun: true })
+      for (const [dx, dz, high] of [[-5, -4, 2], [0, -4, 6], [4, -3, 3], [-2, 2, 5], [3, 3, 8]]) {
+        await strikeAt(page, [x + dx, z + dz], high, 26, false)
+        await page.waitForTimeout(500)
+      }
+    } },
+  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'behind',
+    stand: [0, 3.5, -4, 3.3 / DEG, 0.22 / DEG],
+    act: async (page) => {
+      // The bar, the cannon picked, and its ball on the way to a house front.
+      await page.addStyleTag({ content: '#tools { display: flex !important }' })
+      await page.evaluate(() => { globalThis.engine.pickTool(3); globalThis.engine.shoot() })
+      await page.waitForTimeout(330)
+      return page.screenshot()
+    } },
   { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'behind',
     stand: [0, 17, -13, 3.3 / DEG, -0.5 / DEG],
     act: async (page) => {

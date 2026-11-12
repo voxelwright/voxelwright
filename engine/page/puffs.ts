@@ -109,11 +109,12 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       // The flash: one puff of light, gone in a tenth of a second.
       puff(at, 0, 0, 0, { size: r * 2.6, grow: r * 6, life: 0.12, heat: 1, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
       // The ball of fire: hot lumps thrown out, cooling to black smoke in under a second.
-      for (let k = Math.min(36, Math.max(8, Math.round(r * 1.4))); k > 0; k--) {
+      // A big blast's puffs are bigger, not many more: they are drawn over one another, and that is what costs.
+      for (let k = Math.min(16, Math.max(6, Math.round(r * 0.8))); k > 0; k--) {
         puff(at, r * 0.5, rnd(20, 70), 30, { size: r * rnd(0.45, 0.9), grow: r * 1.3, life: rnd(0.55, 1.0), heat: 1, cool: rnd(1.3, 2.0), rise: 70, drag: 3.2, colour: [0.13, 0.12, 0.11], cover: 0.7 })
       }
       // The smoke it leaves: grey, slow, rising for seconds.
-      for (let k = Math.min(26, Math.max(6, Math.round(r))); k > 0; k--) {
+      for (let k = Math.min(12, Math.max(5, Math.round(r * 0.5))); k > 0; k--) {
         const grey = rnd(0.3, 0.55)
         puff(at, r * 0.7, rnd(8, 30), rnd(15, 40), { size: r * rnd(0.6, 1.0), grow: r * 0.55, life: rnd(2.6, 5.2), heat: 0, cool: 0, rise: 22, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.5 })
       }

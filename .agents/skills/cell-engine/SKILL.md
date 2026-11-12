@@ -137,6 +137,41 @@ touch was refused.
 - `support::settle` (pieces dropped straight down in whole cells) is no longer what the page
   does; it stays as what the rule's own tests drive.
 
+## What stands over its own foot (`support::topple`), and the yard
+
+- Reach cannot say that a tank on two of its four legs falls: it is still reached. So each
+  thing that stands free in the box (cells that touch, not the ground's, not reaching the
+  box's sides or top) is asked, level by level from its foot up, where the weight of all at
+  and above that level lies. If that is further outside the stretch the thing covers at that
+  level than its material can lean (`kinds.rs` `leans`: steel 9 cells, wood 4, brick 1),
+  everything from there up is loose and goes over as one body. A lamp holds its arm out; a
+  chimney with half its foot gone does not stand.
+- A first version measured the stretch of ground under the thing's lowest cells. Footings
+  dug into the ground made that stretch whole whatever was blasted above it.
+- A body is at rest only when slow and, if it is 1,500 cells or more, when its weight is
+  over what it touches: a chimney starting to go over is slow, not still, and was being put
+  back where it stood. Old and still moving is left to it for three times as long.
+- The yard (`city.rs` `Block::Yard`, always the block at 1, 5 down the street from the start,
+  and one block in seventeen): a water tower (wooden tank, steel legs, braces, a steel deck:
+  a wooden deck tore under the tank by the rule's own counts), a brick chimney 18 m tall, an
+  office of glass on a steel frame with concrete floors, a concrete canopy on six posts.
+  Blasts take glass 2.75 radii out and steel a quarter, so the office is stripped to its
+  frame by charges that leave the frame standing.
+- The at-rest test now also fails on anything unheld that merely lies where it is and on
+  anything out of balance, for the yard. In some houses a floor is, by the rule's counts,
+  more than its joins carry; it lies there until something near is disturbed. Asking again
+  after each tear so that loads find other paths (`AGAIN`) is written and off: some houses
+  never settled in forty rounds.
+
+## Tools (`page/main.ts`)
+
+Keys 1 to 7 or the bar: hammer (a blast of 5 cells, no fire), charge (12), big charge (32),
+cannon (a steel ball 80 cm across at 42 m/s, a body: what it strikes breaks by `crush`),
+torch (lights what can burn within 4 cells), cutter (a level slot two cells thick and 9 m
+across: what stood on it comes loose), brick (a ball of brick; with nothing under it, it
+falls). The cutter and the brick are edits of the page's own, told to the solver with
+`world_edit`, which is then asked what they left unheld. `test/tools.mjs` uses each.
+
 ## Bodies: what comes loose and moves (`core/src/bodies.rs`)
 
 - A body is a small box of cells with a place, a turn, a speed and a spin. Lengths are cells,

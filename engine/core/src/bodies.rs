@@ -327,9 +327,13 @@ pub struct Body {
     age: f32,
     /// How long since it last touched anything.
     apart: f32,
+    /// The stretch its touches cover this step, from its middle of mass: least and most along x and z.
+    footing: [f32; 4],
     /// The hardest single knock it took in the last step, as a change of speed; and how many times it has broken already.
     knock: f32,
     broken: u8,
+    /// What most of it is made of.
+    stuff: u8,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
 }
@@ -347,7 +351,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, knock: 0.0, broken: 0, born: low,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, born: low,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -364,6 +368,7 @@ impl Body {
                 }
             }
         }
+        b.stuff = b.mostly();
         b.com = scale(sum, 1.0 / mass);
         b.inv_mass = 1.0 / mass;
         // What resists turning: each cell as a small cube away from the middle.
@@ -422,8 +427,16 @@ impl Body {
         b
     }
 
-    /// What it is made of, as far as one cell says.
-    fn first(&self) -> Kind { self.cells.iter().copied().find(|&k| k != 0).unwrap_or(0) }
+    /// What most of it is made of: a tank on steel legs breaks as wood does.
+    fn mostly(&self) -> u8 {
+        let mut counts = [0u32; 16];
+        for &k in &self.cells {
+            if k != 0 {
+                counts[(material(k) & 15) as usize] += 1;
+            }
+        }
+        (0..16).max_by_key(|&m| counts[m]).unwrap_or(0) as u8
+    }
 
     #[inline]
     fn turn_resist(&self, v: V) -> V {
@@ -579,11 +592,12 @@ impl Bodies {
         self.release_in(at, radius, SETTLE[0])
     }
 
-    /// The same, asked of a box `side` cells across (and 7/5 as tall, most of it above the point): a small change
-    /// needs only a small box, which is quick.
+    /// The same, asked of a box `side` cells across (22 m tall, most of it above the point): a small change needs
+    /// only a narrow box, which is quick.
     pub fn release_in(&mut self, at: [i32; 3], radius: i32, side: usize) -> usize {
-        let size = [side, side * 7 / 5, side];
-        let low = [at[0] - side as i32 / 2, at[1] - (side * 3 / 10) as i32, at[2] - side as i32 / 2];
+        // As tall as ever, however narrow: a thing that reaches the box's top is left alone, and things are tall.
+        let size = [side, SETTLE[1], side];
+        let low = [at[0] - side as i32 / 2, at[1] - 48, at[2] - side as i32 / 2];
         let mut region = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
         self.ground.holds = None;
         let (pieces, dust) = support::release(&mut region);
@@ -719,6 +733,28 @@ impl Bodies {
         self.release_in(at, radius, 64);
     }
 
+    /// A ball of one kind, `radius` cells across its half, sent from a place at a speed: a cannon's shot. What it
+    /// strikes hard enough breaks (`crush`), and so may it.
+    pub fn throw_ball(&mut self, from: V, speed: V, radius: i32, kind: Kind) {
+        let side = (2 * radius + 1) as usize;
+        let mut grid = vec![0 as Kind; side * side * side];
+        for y in -radius..=radius {
+            for z in -radius..=radius {
+                for x in -radius..=radius {
+                    if x * x + y * y + z * z <= radius * radius {
+                        grid[(x + radius) as usize + side * ((z + radius) as usize + side * (y + radius) as usize)] = kind;
+                    }
+                }
+            }
+        }
+        let low = [from[0].round() as i32 - radius, from[1].round() as i32 - radius, from[2].round() as i32 - radius];
+        let mut body = Body::new(self.next, grid, [side; 3], low);
+        self.next += 1;
+        body.vel = speed;
+        self.born(&body);
+        self.list.push(body);
+    }
+
     /// A blast's push on a body: stronger near, and on small things, with a little spin.
     fn throw(&self, body: &mut Body, at: [i32; 3], radius: i32) {
         let away = sub(body.pos, [at[0] as f32, at[1] as f32, at[2] as f32]);
@@ -814,6 +850,7 @@ impl Bodies {
             b.age += h;
             b.apart += h;
             b.knock = 0.0;
+            b.footing = [f32::MAX, f32::MIN, f32::MAX, f32::MIN];
             let (pos, rot) = (b.pos, b.rot);
             for k in 0..self.list[i].points.len() {
                 let r = turn(rot, self.list[i].points[k]);
@@ -873,6 +910,15 @@ impl Bodies {
                     self.list[j].apart = 0.0;
                 }
                 keep(&mut found, i, j, &mut self.touches);
+            }
+        }
+        // What each body stands on: the stretch its touches cover.
+        for t in &self.touches {
+            for (who, r) in [(t.a, t.ra), (t.b, t.rb)] {
+                if who != NONE {
+                    let f = &mut self.list[who].footing;
+                    *f = [f[0].min(r[0]), f[1].max(r[0]), f[2].min(r[2]), f[3].max(r[2])];
+                }
             }
         }
         // Each touch stops what is closing and rubs against what is sliding, a few times over.
@@ -961,7 +1007,7 @@ impl Bodies {
         let mut i = 0;
         while i < self.list.len() {
             let b = &self.list[i];
-            if b.count >= WHOLE && b.knock > breaks_at(material(b.first())) * (1.0 + b.broken as f32) && self.list.len() < MOST {
+            if b.count >= WHOLE && b.knock > breaks_at(b.stuff) * (1.0 + b.broken as f32) && self.list.len() < MOST {
                 let whole = self.list.swap_remove(i);
                 self.shatter(whole);
             } else {
@@ -987,8 +1033,14 @@ impl Bodies {
             // The longer a body has been about, the less still it need be: something rocking in a corner is put down.
             let ease = 1.0 + (b.age - 2.5).max(0.0) * 0.8;
             let slow = dot(b.vel, b.vel) < (STILL_SPEED * ease).powi(2) && dot(b.spin, b.spin) < (STILL_SPIN * ease).powi(2);
-            b.still = if slow && b.apart < 0.1 { b.still + h } else { 0.0 };
-            if b.still >= STILL_FOR || b.age >= OLD {
+            // And it is at rest only if its weight is over what it touches: a chimney starting to go over is slow, not still.
+            let f = b.footing;
+            // Asked only of big things: a lump lies as it lands, propped on whatever is under it.
+            let over = b.count < 1500 || (f[0] <= 0.5 && f[1] >= -0.5 && f[2] <= 0.5 && f[3] >= -0.5);
+            b.still = if slow && b.apart < 0.1 && (over || b.age > OLD) { b.still + h } else { 0.0 };
+            // Old and still on its way (a chimney going over takes its time) is left to it, up to a point.
+            let stuck = b.age >= OLD && dot(b.vel, b.vel) < 400.0 && dot(b.spin, b.spin) < 0.25;
+            if b.still >= STILL_FOR || stuck || b.age >= OLD * 3.0 {
                 let body = self.list.swap_remove(i);
                 self.rested.push((body.age * 10.0) as u32);
                 self.rest(body);
@@ -1200,6 +1252,46 @@ mod tests {
         let (half, most, last) = (ages[ages.len() / 2], ages[ages.len() * 9 / 10], ages[ages.len() - 1]);
         eprintln!("{} bodies of {loose} cells: half at rest by {:.1} s, nine in ten by {:.1} s, the last at {:.1} s; {down} cells lie down", ages.len(), half as f32 / 10.0, most as f32 / 10.0, last as f32 / 10.0);
         assert!(most <= 40, "nine lumps in ten lie still within four seconds (it took {:.1} s)", most as f32 / 10.0);
+    }
+
+    #[test]
+    fn a_water_tower_with_two_legs_cut_goes_over() {
+        use crate::city::{BLOCK_X, BLOCK_Z, YARD, YARD_TOWER};
+        let (x, z) = (YARD.0 * BLOCK_X + YARD_TOWER.0, YARD.1 * BLOCK_Z + YARD_TOWER.1);
+        let g = city::ground(x, z);
+        let mut bodies = Bodies::new();
+        // Untouched, nothing comes loose.
+        let made = bodies.release([x, g + 10, z], 0);
+        assert_eq!(made, 0, "the tower stands by itself: {:?}", bodies.list.iter().map(|b| (b.count, b.size, [b.born[0] - x, b.born[1] - g, b.born[2] - z], b.stuff)).collect::<Vec<_>>());
+        // The two legs on its low-x side are cut through near the ground.
+        for dz in [-19, 19] {
+            // Steel gives a quarter as far as the blast is wide: this cuts a leg two cells thick.
+            bodies.blast([x - 19, g + 12, z + dz], 14, None, false);
+        }
+        let big = bodies.list.iter().map(|b| b.count).max().unwrap_or(0);
+        assert!(big > 8000, "the tank, its platform and what is left of the legs came loose as one body ({big} cells)");
+        let put = run(&mut bodies, 16.0);
+        assert!(bodies.list.is_empty(), "{} bodies never came to rest", bodies.list.len());
+        let top = put.iter().filter(|r| r.kind != 0).map(|r| r.y).max().unwrap();
+        assert!(top < g + 100, "the tank is down (the highest cell put back is {} over the ground; it stood 170)", top - g);
+    }
+
+    #[test]
+    fn a_chimney_with_its_foot_blown_out_on_one_side_goes_over() {
+        use crate::city::{BLOCK_X, BLOCK_Z, YARD, YARD_CHIMNEY};
+        let (x, z) = (YARD.0 * BLOCK_X + YARD_CHIMNEY.0, YARD.1 * BLOCK_Z + YARD_CHIMNEY.1);
+        let g = city::ground(x, z);
+        let mut bodies = Bodies::new();
+        bodies.blast([x + 6, g + 10, z], 18, None, false);
+        let big = bodies.list.iter().map(|b| b.count).max().unwrap_or(0);
+        assert!(big > 5000, "the chimney came loose as one body ({big} cells)");
+        let put = run(&mut bodies, 16.0);
+        assert!(bodies.list.is_empty(), "{} bodies never came to rest", bodies.list.len());
+        // Where it stood nothing is put back high up (a lump thrown by the blast may land on a roof down the street).
+        let top = put.iter().filter(|r| r.kind != 0 && (r.x0 - x).abs() < 12 && (r.z - z).abs() < 12).map(|r| r.y).max().unwrap_or(g);
+        assert!(top < g + 60, "the chimney lies down (the highest cell put back where it stood is {} over the ground; it stood 178)", top - g);
+        let far = put.iter().filter(|r| r.kind != 0).map(|r| ((r.x0 - x).abs()).max((r.z - z).abs())).max().unwrap();
+        assert!(far > 60, "it lies along the ground: cells are put back {far} cells from where it stood");
     }
 
     /// Not a check: how long the solver's calls take when big charges go off along a row of houses. `cargo test --release big_charges -- --ignored --nocapture`

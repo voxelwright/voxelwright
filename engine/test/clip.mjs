@@ -14,7 +14,7 @@ await mkdir(out, { recursive: true })
 const { city, failures, finish } = await start()
 try {
   const page = await city('', { size: [1280, 720], dpr: 2 })
-  await page.addStyleTag({ content: '#aim, #boom { display: none }' })
+  await page.addStyleTag({ content: '#aim, #boom, #tools { display: none }' })
   await still(page)
   await from(page, ...row.stand)
   await page.waitForTimeout(400)

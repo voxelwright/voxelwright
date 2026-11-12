@@ -39,11 +39,18 @@ pub(crate) enum Block {
     Park,
     Homes,
     Towers,
+    /// A works yard: a few things that each stand, and so come down, in their own way.
+    Yard,
 }
+
+/// The yard everyone starts beside: the block down the street from where the page begins.
+pub const YARD: (i32, i32) = (1, 5);
 
 pub(crate) fn block(bx: i32, bz: i32) -> Block {
     if ground(bx * BLOCK_X + BLOCK_X / 2, bz * BLOCK_Z + BLOCK_Z / 2) < 15 {
         Block::Shore
+    } else if (bx, bz) == YARD || hash(bx, bz, 23) % 17 == 0 {
+        Block::Yard
     } else if noise(bx, bz, 7, 21) > 0.64 {
         Block::Towers
     } else if hash(bx, bz, 22) % 14 == 0 {
@@ -289,6 +296,131 @@ fn stamp_lamp(s: &mut Scratch, x: i32, z: i32, dx: i32, dz: i32) {
     s.fill([ax - 1, g + 67, az - 1], [ax + 3, g + 70, az + 3], kind(LAMP, colour(3, 0)), Meet::Touch);
 }
 
+/// A level disc of cells: `r` cells across its half, from `y0` up to `y1`, solid or (`shell`) a ring that many cells thick.
+fn disc(s: &mut Scratch, x: i32, z: i32, y0: i32, y1: i32, r: i32, shell: Option<i32>, k: Kind) {
+    for dz in -r..=r {
+        let half = (((r * r - dz * dz) as f32).sqrt()) as i32;
+        let inner = shell.map(|t| {
+            let q = r - t;
+            if dz.abs() >= q { -1 } else { (((q * q - dz * dz) as f32).sqrt()) as i32 }
+        });
+        match inner {
+            Some(q) if q >= 0 => {
+                s.fill([x - half, y0, z + dz], [x - q, y1, z + dz + 1], k, Meet::Touch);
+                s.fill([x + q, y0, z + dz], [x + half + 1, y1, z + dz + 1], k, Meet::Touch);
+            }
+            _ => s.fill([x - half, y0, z + dz], [x + half + 1, y1, z + dz + 1], k, Meet::Touch),
+        }
+    }
+}
+
+/// A water tower: a wooden tank on four steel legs, braced. Cut the legs on one side and it goes over.
+fn stamp_water_tower(s: &mut Scratch, x: i32, z: i32) {
+    let g = ground(x, z);
+    let (steel, wood) = (kind(STEEL, grey(5)), kind(WOOD, colour(2, 6)));
+    for (dx, dz) in [(-20, -20), (18, -20), (-20, 18), (18, 18)] {
+        s.fill([x + dx, g - 10, z + dz], [x + dx + 2, g + 112, z + dz + 2], steel, Meet::Touch);
+    }
+    for h in [36, 74, 110] {
+        for d in [-20, 18] {
+            s.fill([x - 20, g + h, z + d], [x + 20, g + h + 2, z + d + 2], steel, Meet::Touch);
+            s.fill([x + d, g + h, z - 20], [x + d + 2, g + h + 2, z + 20], steel, Meet::Touch);
+        }
+    }
+    // Steel joists under the deck: a wooden deck alone cannot carry the tank (support.rs counts what each join bears).
+    for dz in (-20..20).step_by(6) {
+        s.fill([x - 20, g + 110, z + dz], [x + 20, g + 112, z + dz + 2], steel, Meet::Touch);
+    }
+    // The deck is steel plate, painted: wood would not carry the tank.
+    s.fill([x - 24, g + 112, z - 24], [x + 24, g + 114, z + 24], kind(STEEL, colour(2, 8)), Meet::Touch);
+    disc(s, x, z, g + 114, g + 116, 20, None, wood);
+    disc(s, x, z, g + 116, g + 158, 20, Some(2), wood);
+    for band in [126, 146] {
+        disc(s, x, z, g + band, g + band + 2, 21, Some(1), kind(STEEL, grey(3)));
+    }
+    // Its roof, a low cone of sheet steel.
+    for step in 0..6 {
+        disc(s, x, z, g + 158 + step * 2, g + 160 + step * 2, 21 - step * 3, None, kind(STEEL, grey(12)));
+    }
+}
+
+/// A brick chimney, hollow, a little narrower at each third of its height, with a pale band at each step.
+fn stamp_chimney(s: &mut Scratch, x: i32, z: i32) {
+    let g = ground(x, z);
+    let (brick, band) = (kind(BRICK, OWN), kind(PLASTER, WHITE));
+    for (third, half) in [7, 6, 5].into_iter().enumerate() {
+        let (y0, y1) = (g - 8 + third as i32 * 62, g - 8 + (third as i32 + 1) * 62);
+        for (lo, hi) in [([-half, -half], [half, -half + 2]), ([-half, half - 2], [half, half]), ([-half, -half], [-half + 2, half]), ([half - 2, -half], [half, half])] {
+            s.fill([x + lo[0], y0, z + lo[1]], [x + hi[0], y1 - 2, z + hi[1]], brick, Meet::Touch);
+            s.fill([x + lo[0], y1 - 2, z + lo[1]], [x + hi[0], y1, z + hi[1]], band, Meet::Touch);
+        }
+    }
+}
+
+/// An office of glass hung on a steel frame with concrete floors. A blast takes the glass and leaves the frame.
+fn stamp_office(s: &mut Scratch, x0: i32, z0: i32) {
+    let (wide, deep, storey, storeys) = (120, 100, 34, 3);
+    let g = ground(x0 + wide / 2, z0 + deep / 2);
+    let (base, top) = (g + 1, g + 1 + storey * storeys);
+    let glass = kind(GLASS, OWN);
+    for (lo, hi) in [([0, 0], [wide, 1]), ([0, deep - 1], [wide, deep]), ([0, 0], [1, deep]), ([wide - 1, 0], [wide, deep])] {
+        s.fill([x0 + lo[0], base, z0 + lo[1]], [x0 + hi[0], top, z0 + hi[1]], glass, Meet::Middle);
+    }
+    // Its footing goes well into the ground: the yard may slope.
+    s.fill([x0, g - 40, z0], [x0 + wide, base, z0 + deep], kind(CONCRETE, grey(4)), Meet::Touch);
+    for k in 1..=storeys {
+        s.fill([x0, base + storey * k - 2, z0], [x0 + wide, base + storey * k, z0 + deep], kind(CONCRETE, grey(6)), Meet::Touch);
+    }
+    for cx in [0, 39, 78, wide - 3] {
+        for cz in [0, 48, deep - 3] {
+            s.fill([x0 + cx, base, z0 + cz], [x0 + cx + 3, top, z0 + cz + 3], kind(STEEL, grey(4)), Meet::Touch);
+        }
+    }
+}
+
+/// A flat concrete roof on six steel posts, open underneath.
+fn stamp_canopy(s: &mut Scratch, x0: i32, z0: i32) {
+    let (wide, deep) = (150, 80);
+    let g = ground(x0 + wide / 2, z0 + deep / 2);
+    for cx in [8, wide / 2 - 1, wide - 11] {
+        for cz in [10, deep - 13] {
+            s.fill([x0 + cx, g - 8, z0 + cz], [x0 + cx + 3, g + 36, z0 + cz + 3], kind(STEEL, grey(8)), Meet::Touch);
+        }
+    }
+    s.fill([x0, g + 36, z0], [x0 + wide, g + 39, z0 + deep], kind(CONCRETE, WHITE), Meet::Touch);
+    s.fill([x0, g + 39, z0], [x0 + wide, g + 40, z0 + deep], kind(CONCRETE, colour(1, 5)), Meet::Touch);
+}
+
+/// A works yard. Where each thing stands, from the block's low corner.
+pub const YARD_TOWER: (i32, i32) = (400, 250);
+pub const YARD_CHIMNEY: (i32, i32) = (700, 190);
+pub const YARD_OFFICE: (i32, i32) = (940, 550);
+pub const YARD_CANOPY: (i32, i32) = (400, 470);
+
+fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32, i32) -> bool) {
+    let (tx, tz) = (x0 + YARD_TOWER.0, z0 + YARD_TOWER.1);
+    if reaches(tx - 26, tx + 26, tz - 26, tz + 26) {
+        stamp_water_tower(s, tx, tz);
+    }
+    let (cx, cz) = (x0 + YARD_CHIMNEY.0, z0 + YARD_CHIMNEY.1);
+    if reaches(cx - 8, cx + 8, cz - 8, cz + 8) {
+        stamp_chimney(s, cx, cz);
+    }
+    let (ox, oz) = (x0 + YARD_OFFICE.0, z0 + YARD_OFFICE.1);
+    if reaches(ox, ox + 120, oz, oz + 100) {
+        stamp_office(s, ox, oz);
+    }
+    let (px, pz) = (x0 + YARD_CANOPY.0, z0 + YARD_CANOPY.1);
+    if reaches(px, px + 150, pz, pz + 80) {
+        stamp_canopy(s, px, pz);
+    }
+    for (i, (dx, dz)) in [(250, 180), (560, 420), (860, 300), (1050, 200), (200, 620), (700, 620)].into_iter().enumerate() {
+        if reaches(x0 + dx - 20, x0 + dx + 20, z0 + dz - 20, z0 + dz + 20) {
+            stamp_tree(s, x0 + dx, z0 + dz, hash(x0 + dx, z0 + dz, 61 + i as u32), (ANYWHERE, ANYWHERE));
+        }
+    }
+}
+
 /// What the ground's top cell is at a column, and how many cells stand on it (a pavement is a kerb above the road).
 fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
     if g < SEA + 6 {
@@ -298,7 +430,7 @@ fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
     let (along_z, along_x) = (lx < STREET, lz < STREET);
     if !along_z && !along_x {
         let kind_of = block(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z));
-        return (if kind_of == Block::Towers { kind(CONCRETE, grey(4)) } else { kind(GRASS, OWN) }, 0);
+        return (match kind_of { Block::Towers => kind(CONCRETE, grey(4)), Block::Yard => kind(ASPHALT, grey(9)), _ => kind(GRASS, OWN) }, 0);
     }
     let asphalt = kind(ASPHALT, OWN);
     if along_z && along_x {
@@ -347,6 +479,7 @@ fn reach(b: Block) -> i32 {
         Block::Homes => 160,
         Block::Park => 90,
         Block::Shore => 90,
+        Block::Yard => 220,
     }
 }
 
@@ -498,6 +631,7 @@ pub fn make(s: &mut Scratch) {
                     }
                 }
             }
+            Block::Yard => stamp_yard(s, x0, z0, &reaches),
             Block::Shore => {}
         }
         if sort != Block::Shore {
@@ -577,7 +711,7 @@ mod tests {
 
     #[test]
     fn the_city_has_all_sorts_of_block() {
-        let mut seen = [0; 4];
+        let mut seen = [0; 5];
         for bz in -20..20 {
             for bx in -20..20 {
                 seen[block(bx, bz) as usize] += 1;

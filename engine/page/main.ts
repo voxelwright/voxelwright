@@ -69,15 +69,17 @@ async function main() {
   let speed = 12
 
   // ── Moving ──────────────────────────────────────────────────────────────
+  /** What a click does: the tool picked (set once the tools are made). */
+  let use = () => {}
   const keys = new Set<string>()
   addEventListener('keydown', (e) => keys.add(e.code))
   addEventListener('keyup', (e) => keys.delete(e.code))
   canvas.addEventListener('click', () => {
     if (phone) return
-    if (document.pointerLockElement === canvas) void blast()
+    if (document.pointerLockElement === canvas) use()
     else void canvas.requestPointerLock()
   })
-  document.querySelector('#boom')?.addEventListener('click', () => void blast())
+  document.querySelector('#boom')?.addEventListener('click', () => use())
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return
     pose.yaw += e.movementX * 0.0022
@@ -223,8 +225,7 @@ async function main() {
   /** Whether blasts set things alight: `?fire=0` for checks that need a blast to be only a blast. */
   const sparks = query.get('fire') !== '0'
   /** How big a blast is, in cells: keys 1, 2 and 3 pick a hammer blow, a charge, a big one. */
-  let force = 8
-  addEventListener('keydown', (e) => { const pick = { Digit1: 4, Digit2: 8, Digit3: 16 }[e.code]; if (pick) force = pick; if (e.code === 'KeyF') void ignite() })
+  const force = 12
 
   // ── What comes loose ────────────────────────────────────────────────────
   // After a blast a worker says what is no longer held (the core's support rule) and moves it: each piece is a
@@ -322,17 +323,21 @@ async function main() {
     if (!hit) return null
     // A little inside the face, so a wall is broken through and not grazed.
     const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + radius * 0.3))) as [number, number, number]
+    strike(at, radius, spark)
+    const colour = hit.colour ? colours.subarray(hit.colour * 4, hit.colour * 4 + 3) : stuff.subarray(hit.material * 8, hit.material * 8 + 3)
+    // Glass goes in many small pieces, the rest in fewer lumps; dust of the same stuff either way.
+    const glass = hit.material === 11
+    debris.burst(at, radius * (glass ? 2 : 1), Math.min(900, radius * radius * (glass ? 9 : 4)), [colour[0], colour[1], colour[2]], glass ? 0.5 : 1.1)
+    return { at, ...hit }
+  }
+  /** A blast at a place (the world's finest cells), whatever is or is not there. */
+  const strike = (at: readonly [number, number, number], radius = force, spark = sparks) => {
     put()
     change(ball(at[0], at[1], at[2], radius, 0))
     fell.asks++
     waiting++
-    mover.postMessage({ blast: at, radius, after: heard, spark } satisfies Ask)
-    const colour = hit.colour ? colours.subarray(hit.colour * 4, hit.colour * 4 + 3) : stuff.subarray(hit.material * 8, hit.material * 8 + 3)
-    // Glass goes in many small pieces, the rest in fewer lumps; dust of the same stuff either way.
-    const glass = hit.material === 11
+    mover.postMessage({ blast: [at[0], at[1], at[2]], radius, after: heard, spark } satisfies Ask)
     smoke.blast(at, radius)
-    debris.burst(at, radius * (glass ? 2 : 1), Math.min(900, radius * radius * (glass ? 9 : 4)), [colour[0], colour[1], colour[2]], glass ? 0.5 : 1.1)
-    return { at, ...hit }
   }
 
   /** Sets alight what can burn round what is straight ahead. Returns where, or null for sky. */
@@ -345,6 +350,75 @@ async function main() {
     mover.postMessage({ ignite: at, radius, tick: 0 } satisfies Ask)
     return { at, ...hit }
   }
+
+  /** A cannon's shot: a steel ball 80 cm across, sent the way the eye looks at 42 m a second. What it strikes breaks. */
+  const shoot = () => {
+    const v = view()
+    mover.postMessage({ ball: { from: [v.eye[0] + v.forward[0] * 14, v.eye[1] + v.forward[1] * 14, v.eye[2] + v.forward[2] * 14], speed: [v.forward[0] * 420, v.forward[1] * 420, v.forward[2] * 420], radius: 4, kind: 12 | (5 << 8) } } satisfies Ask)
+    // Until the answer says how many bodies there are, there is at least this one to move.
+    bodies = Math.max(bodies, 1)
+  }
+
+  /** An edit of the page's own making, told to the mover, which is then asked what it left unheld round `at`. */
+  const make = (edit: Edit, at: [number, number, number]) => {
+    put()
+    change(edit)
+    waiting++
+    mover.postMessage({ edit: edit.words, after: heard, release: at } satisfies Ask)
+  }
+
+  /** Cuts level through what is ahead: a slot two cells thick and 9 m across. What stood on it has nothing under it. */
+  const cut = async () => {
+    const v = view(), hit = await march.pick(v)
+    if (!hit) return null
+    const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + 2))) as [number, number, number], reach = 44, runs: number[] = []
+    for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) {
+      const half = Math.floor(Math.sqrt(reach * reach - dz * dz))
+      runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
+    }
+    make(rows(Int32Array.from(runs), [at[0] - reach, at[1], at[2] - reach, at[0] + reach + 1, at[1] + 2, at[2] + reach + 1]), at)
+    return { at, ...hit }
+  }
+
+  /** Puts a ball of brick a metre across against what is ahead. With nothing under it, it falls. */
+  const place = async () => {
+    const v = view(), hit = await march.pick(v)
+    if (!hit) return null
+    const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t - 6))) as [number, number, number]
+    make(ball(at[0], at[1], at[2], 5, 8 | (30 << 8)), at)
+    return { at, ...hit }
+  }
+
+  // ── Tools ───────────────────────────────────────────────────────────────
+  // What a click, a tap on the red button, or the space of a touch does: one of these, picked by key or from the bar.
+  const tools: { name: string; use: () => unknown }[] = [
+    { name: 'Hammer', use: () => blast(5, false) },
+    { name: 'Charge', use: () => blast(12) },
+    { name: 'Big charge', use: () => blast(32) },
+    { name: 'Cannon', use: shoot },
+    { name: 'Torch', use: () => ignite(4) },
+    { name: 'Cutter', use: cut },
+    { name: 'Brick', use: place },
+  ]
+  let tool = 1
+  const bar = document.querySelector('#tools')!
+  const pickTool = (i: number) => {
+    tool = i
+    bar.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === i))
+  }
+  tools.forEach((t, i) => {
+    const b = document.createElement('button')
+    b.innerHTML = `<i>${i + 1}</i>${t.name}`
+    b.addEventListener('click', () => pickTool(i))
+    bar.append(b)
+  })
+  pickTool(tool)
+  addEventListener('keydown', (e) => {
+    const i = Number(e.code.replace('Digit', '')) - 1
+    if (e.code.startsWith('Digit') && i >= 0 && i < tools.length) pickTool(i)
+    if (e.code === 'KeyF') void ignite()
+  })
+  use = () => void tools[tool].use()
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
   const pick = async (right = 0, up = 0) => {
@@ -406,7 +480,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, ignite, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

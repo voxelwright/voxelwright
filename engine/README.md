@@ -24,8 +24,8 @@ npm run serve       # http://127.0.0.1:5740/city to fly; / runs the measuring fl
 ```
 
 Fly with WASD, the mouse after a click, Space and C for up and down, Shift for fast, the
-wheel for speed. A click breaks what is ahead; 1, 2 and 3 pick how hard; F sets what is ahead alight. On a phone the left
-thumb moves, the right thumb looks, and the red button breaks. H shows how many steps each
+wheel for speed. A click uses the tool picked on what is ahead; keys 1 to 7 or the bar pick it: a hammer, a charge, a big charge, a cannon, a torch, a cutter (a level cut 9 m across), a brick. F sets what is ahead alight whatever is picked. On a phone the left
+thumb moves, the right thumb looks, and the red button uses the tool picked. H shows how many steps each
 pixel took, L and M turn shadows and mirrors off, K traces every shadow instead of using the sun's maps.
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
@@ -50,7 +50,7 @@ node live.mjs                 # after a merge: the owner's link serves main from
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
-further than a wall), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
+further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
 (a cut tree goes over and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
 in the installed Chrome; none stubs anything. They share one server and one browser and run

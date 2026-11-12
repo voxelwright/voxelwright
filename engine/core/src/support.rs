@@ -2,14 +2,14 @@
 //! ground still reaches them: resting on a held cell costs nothing, a cell sideways costs one,
 //! a cell hung from above two, and a cell further than its material spans is not held
 //! (kinds.rs). Reach alone would let a wall hang by a thread, so each sideways or hanging join
-//! also carries only so many cells: past that it tears and all it carried is loose.
+//! also carries only so many cells: past that it tears, and the cells are asked again without it.
 //!
 //! Loose cells that touch one another are a piece. `release` takes the pieces out for the solver
 //! to move (bodies.rs). `settle` is the older answer, kept for this rule's own tests: each piece
 //! falls straight down, in whole cells, until something is under it. This is the rule for what
 //! stands, in whole numbers, the same on every machine.
 
-use crate::kinds::{LEAVES, bears, join_carries, material, spans};
+use crate::kinds::{ASPHALT, EARTH, GRASS, LEAVES, ROCK, SAND, WATER, bears, join_carries, leans, material, spans, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
 use crate::{Edit, fill};
@@ -89,102 +89,128 @@ const RESTS: u8 = 2;
 const LEANS: u8 = 3; // 3, 4, 5, 6: from -x, +x, -z, +z
 const HANGS: u8 = 7;
 
+/// How many times a region is asked again after joins have torn, so that what a torn join carried may be carried
+/// another way. None, for now: asked until nothing tore, some houses took over forty rounds (two seconds) and still
+/// shed load, and asked three times a few window panes fell in an untouched street. So a join that tears lets go
+/// of all it carried, as before; what is built must be built so that its first paths carry it.
+const AGAIN: usize = 0;
+
 /// Which solid cells of a region the ground does not hold: one true a cell.
+///
+/// The ground is reached for outwards, cheapest way first, and each cell is joined to the one it was reached from.
+/// Then every join is asked what it carries. One that carries too much tears (or, for a cell resting on another,
+/// crushes it), and the whole is asked again without it: the load may go another way, and tear that in turn, which
+/// is how a thing gives way bit by bit. When nothing more tears, what the ground no longer reaches is loose.
 pub fn loose(r: &Region) -> Vec<bool> {
     let [nx, ny, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
-    let mut cost = vec![UNREACHED; n];
-    let mut join = vec![NONE; n];
-    let mut order: Vec<u32> = Vec::new();
-    let mut waiting: Vec<Vec<u32>> = vec![Vec::new(); 256];
-    // What is at the bottom of the box, and at its sides, goes on beyond it: the ground's.
-    for i in 0..n {
-        if r.cells[i] == 0 {
-            continue;
-        }
-        let (x, y, z) = r.place(i);
-        if y == 0 || x == 0 || x == nx - 1 || z == 0 || z == nz - 1 {
-            cost[i] = 0;
-            join[i] = GROUND;
-            waiting[0].push(i as u32);
-        }
-    }
-    for c in 0..255usize {
-        let mut at_cost = std::mem::take(&mut waiting[c]);
-        // Resting costs nothing, so cells join this round as it goes.
-        let mut k = 0;
-        while k < at_cost.len() {
-            let i = at_cost[k] as usize;
-            k += 1;
-            if cost[i] as usize != c {
-                continue;
-            }
-            // A cell may be listed twice at one cost: count it once.
-            if join[i] & 128 != 0 {
-                continue;
-            }
-            join[i] |= 128;
-            order.push(i as u32);
-            let (x, y, z) = r.place(i);
-            let mut reach = |j: usize, more: usize, how: u8, list: &mut Vec<u32>, waiting: &mut Vec<Vec<u32>>| {
-                let kind = r.cells[j];
-                let to = c + more;
-                if kind == 0 || to >= cost[j] as usize || to > spans(material(kind)) as usize {
-                    return;
-                }
-                // Leaves hold on to leaves and to nothing else: a crown that brushes a wall is not hung on it, though it may rest on what is under it.
-                if more != 0 && (material(kind) == LEAVES) != (material(r.cells[i]) == LEAVES) {
-                    return;
-                }
-                cost[j] = to as u8;
-                join[j] = how;
-                if more == 0 { list.push(j as u32) } else { waiting[to].push(j as u32) }
-            };
-            if y + 1 < ny { reach(i + layer, 0, RESTS, &mut at_cost, &mut waiting) }
-            if x > 0 { reach(i - 1, 1, LEANS + 1, &mut at_cost, &mut waiting) }
-            if x + 1 < nx { reach(i + 1, 1, LEANS, &mut at_cost, &mut waiting) }
-            if z > 0 { reach(i - nx, 1, LEANS + 3, &mut at_cost, &mut waiting) }
-            if z + 1 < nz { reach(i + nx, 1, LEANS + 2, &mut at_cost, &mut waiting) }
-            if y > 0 { reach(i - layer, 2, HANGS, &mut at_cost, &mut waiting) }
-        }
-    }
-    // The cell each is joined to.
-    let holder = |i: usize, how: u8| match how & 127 {
-        RESTS => i - layer,
-        3 => i - 1,
-        4 => i + 1,
-        5 => i - nx,
-        6 => i + nx,
-        HANGS => i + layer,
-        _ => i,
-    };
-    // What each join carries: the cell and all that is joined on through it. Last joined first.
-    let mut load = vec![0u32; n];
-    for &i in order.iter().rev() {
-        let i = i as usize;
-        load[i] += 1;
-        let how = join[i] & 127;
-        if how != GROUND {
-            let h = holder(i, how);
-            load[h] += load[i];
-        }
-    }
-    // A sideways or hanging join that carries more than it can tears, and all it carried is loose.
+    // The joins that have torn: a bit for each way a cell can be joined (its `how`).
+    let mut torn = vec![0u8; n];
     let mut out = vec![false; n];
-    for &i in &order {
-        let i = i as usize;
-        let how = join[i] & 127;
-        if how == GROUND {
-            continue;
+    for pass in 0..=AGAIN {
+        let mut cost = vec![UNREACHED; n];
+        let mut join = vec![NONE; n];
+        let mut order: Vec<u32> = Vec::new();
+        let mut waiting: Vec<Vec<u32>> = vec![Vec::new(); 256];
+        // What is at the bottom of the box, and at its sides, goes on beyond it: the ground's.
+        for i in 0..n {
+            if r.cells[i] == 0 {
+                continue;
+            }
+            let (x, y, z) = r.place(i);
+            if y == 0 || x == 0 || x == nx - 1 || z == 0 || z == nz - 1 {
+                cost[i] = 0;
+                join[i] = GROUND;
+                waiting[0].push(i as u32);
+            }
         }
-        let h = holder(i, how);
-        let strength = join_carries(material(r.cells[i]), material(r.cells[h]));
-        // And what rests on a cell must not be more than that cell can bear: a house does not stand on a post one cell thick.
-        out[i] = out[h] || if how == RESTS { load[i] > bears(material(r.cells[h])) } else { load[i] > strength };
-    }
-    for i in 0..n {
-        if r.cells[i] != 0 && cost[i] == UNREACHED {
-            out[i] = true;
+        for c in 0..255usize {
+            let mut at_cost = std::mem::take(&mut waiting[c]);
+            // Resting costs nothing, so cells join this round as it goes.
+            let mut k = 0;
+            while k < at_cost.len() {
+                let i = at_cost[k] as usize;
+                k += 1;
+                if cost[i] as usize != c {
+                    continue;
+                }
+                // A cell may be listed twice at one cost: count it once.
+                if join[i] & 128 != 0 {
+                    continue;
+                }
+                join[i] |= 128;
+                order.push(i as u32);
+                let (x, y, z) = r.place(i);
+                let mut reach = |j: usize, more: usize, how: u8, list: &mut Vec<u32>, waiting: &mut Vec<Vec<u32>>| {
+                    let kind = r.cells[j];
+                    let to = c + more;
+                    if kind == 0 || to >= cost[j] as usize || to > spans(material(kind)) as usize || torn[j] & (1 << how) != 0 {
+                        return;
+                    }
+                    // Leaves hold on to leaves and to nothing else: a crown that brushes a wall is not hung on it, though it may rest on what is under it.
+                    if more != 0 && (material(kind) == LEAVES) != (material(r.cells[i]) == LEAVES) {
+                        return;
+                    }
+                    cost[j] = to as u8;
+                    join[j] = how;
+                    if more == 0 { list.push(j as u32) } else { waiting[to].push(j as u32) }
+                };
+                if y + 1 < ny { reach(i + layer, 0, RESTS, &mut at_cost, &mut waiting) }
+                if x > 0 { reach(i - 1, 1, LEANS + 1, &mut at_cost, &mut waiting) }
+                if x + 1 < nx { reach(i + 1, 1, LEANS, &mut at_cost, &mut waiting) }
+                if z > 0 { reach(i - nx, 1, LEANS + 3, &mut at_cost, &mut waiting) }
+                if z + 1 < nz { reach(i + nx, 1, LEANS + 2, &mut at_cost, &mut waiting) }
+                if y > 0 { reach(i - layer, 2, HANGS, &mut at_cost, &mut waiting) }
+            }
+        }
+        // The cell each is joined to.
+        let holder = |i: usize, how: u8| match how & 127 {
+            RESTS => i - layer,
+            3 => i - 1,
+            4 => i + 1,
+            5 => i - nx,
+            6 => i + nx,
+            HANGS => i + layer,
+            _ => i,
+        };
+        // What each join carries: the cell and all that is joined on through it. Last joined first.
+        let mut load = vec![0u32; n];
+        for &i in order.iter().rev() {
+            let i = i as usize;
+            load[i] += 1;
+            let how = join[i] & 127;
+            if how != GROUND {
+                let h = holder(i, how);
+                load[h] += load[i];
+            }
+        }
+        // A sideways or hanging join that carries more than it can tears; what rests on a cell must not be more than
+        // that cell can bear (a house does not stand on a post one cell thick).
+        let last = pass == AGAIN;
+        let mut tore = false;
+        out.fill(false);
+        for &i in &order {
+            let i = i as usize;
+            let how = join[i] & 127;
+            if how == GROUND {
+                continue;
+            }
+            let h = holder(i, how);
+            let over = if how == RESTS { load[i] > bears(material(r.cells[h])) } else { load[i] > join_carries(material(r.cells[i]), material(r.cells[h])) };
+            if over {
+                torn[i] |= 1 << how;
+                tore = true;
+            }
+            // Asked for the last time, what a torn join carried is loose with it.
+            out[i] = last && (out[h] || over);
+        }
+        if !tore || last {
+            for i in 0..n {
+                if r.cells[i] != 0 && cost[i] == UNREACHED {
+                    out[i] = true;
+                }
+            }
+            break;
         }
     }
     out
@@ -248,6 +274,92 @@ fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32]) -> Vec<Vec<u32
     pieces
 }
 
+/// Whether a cell is the ground itself and not something that stands on it.
+fn is_ground(kind: Kind) -> bool {
+    matches!(material(kind), EARTH | ROCK | GRASS | SAND | ASPHALT | WATER)
+}
+
+/// Things that no longer stand over what they stand on. The reach rule cannot say this: a tank on two of its four
+/// legs is still reached from the ground. So each thing that stands free in the box (cells that touch, not the
+/// ground's, not reaching the box's sides or top) is asked, level by level from its foot up, where the weight of all
+/// that is at and above that level lies. If the middle of that weight is further outside the stretch the thing
+/// covers at that level than its material can lean (`leans`), everything from there up is loose, and goes over as
+/// one body. Steel leans far, so a lamp holds its arm out; brick hardly at all.
+pub fn topple(r: &Region, is_loose: &mut [bool]) {
+    let [nx, ny, nz] = r.size;
+    let (n, layer) = (r.cells.len(), nx * nz);
+    let stands = |i: usize, is_loose: &[bool]| r.cells[i] != 0 && !is_ground(r.cells[i]) && !is_loose[i];
+    let mut seen = vec![false; n];
+    let mut stack: Vec<u32> = Vec::new();
+    let mut cells: Vec<u32> = Vec::new();
+    // For each level: the weight on it and where, the stretch it covers (least and most x and z), how far its stuff leans.
+    let mut levels: Vec<(f64, f64, f64, [usize; 2], [usize; 2], f64)> = Vec::new();
+    for start in 0..n {
+        if seen[start] || !stands(start, is_loose) {
+            continue;
+        }
+        cells.clear();
+        levels.clear();
+        levels.resize(ny, (0.0, 0.0, 0.0, [usize::MAX; 2], [0; 2], 0.0));
+        let mut edge = false;
+        seen[start] = true;
+        stack.push(start as u32);
+        while let Some(i) = stack.pop() {
+            let i = i as usize;
+            cells.push(i as u32);
+            let (x, y, z) = r.place(i);
+            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
+            let stuff = material(r.cells[i]);
+            let m = weighs(stuff) as f64;
+            let l = &mut levels[y];
+            l.0 += m;
+            l.1 += m * (x as f64 + 0.5);
+            l.2 += m * (z as f64 + 0.5);
+            l.3 = [l.3[0].min(x), l.3[1].min(z)];
+            l.4 = [l.4[0].max(x), l.4[1].max(z)];
+            l.5 = l.5.max(leans(stuff) as f64);
+            let mut join = |j: usize| {
+                if !seen[j] && stands(j, is_loose) {
+                    seen[j] = true;
+                    stack.push(j as u32);
+                }
+            };
+            if x > 0 { join(i - 1) }
+            if x + 1 < nx { join(i + 1) }
+            if z > 0 { join(i - nx) }
+            if z + 1 < nz { join(i + nx) }
+            if y > 0 { join(i - layer) }
+            if y + 1 < ny { join(i + layer) }
+        }
+        if edge {
+            continue;
+        }
+        // From the top down, the weight at and above each level; the lowest level it is not over is where the thing goes.
+        let (mut mass, mut mx, mut mz) = (0.0f64, 0.0f64, 0.0f64);
+        let mut hinge: Option<usize> = None;
+        for y in (0..ny).rev() {
+            let l = &levels[y];
+            if l.0 == 0.0 {
+                continue;
+            }
+            mass += l.0;
+            mx += l.1;
+            mz += l.2;
+            let (cx, cz) = (mx / mass, mz / mass);
+            if cx < l.3[0] as f64 - l.5 || cx > l.4[0] as f64 + 1.0 + l.5 || cz < l.3[1] as f64 - l.5 || cz > l.4[1] as f64 + 1.0 + l.5 {
+                hinge = Some(y);
+            }
+        }
+        if let Some(from) = hinge {
+            for &i in &cells {
+                if i as usize / layer >= from {
+                    is_loose[i as usize] = true;
+                }
+            }
+        }
+    }
+}
+
 /// A piece that has come loose, as it stood: its rows, how many cells, the box round it (high corner exclusive).
 pub struct Loose {
     pub runs: Vec<Run>,
@@ -259,7 +371,9 @@ pub struct Loose {
 /// Takes out of a region everything in it that is not held, and says what: the pieces, for the solver to move
 /// (bodies.rs), and the rows of crumbs too small to be one, which are dust.
 pub fn release(r: &mut Region) -> (Vec<Loose>, Vec<Run>) {
-    let is_loose = loose(r);
+    let mut is_loose = loose(r);
+    topple(r, &mut is_loose);
+
     let mut piece_of = vec![0u32; r.cells.len()];
     let (mut out, mut dust) = (Vec::new(), Vec::new());
     for mut cells in pieces_of(r, &is_loose, &mut piece_of) {
@@ -478,8 +592,26 @@ mod tests {
                     continue;
                 }
                 seen.insert(sort as u8);
-                for (dx, dz) in [(400, 250), (70, 70), (700, 150), (1000, 600)] {
+                for (dx, dz) in [(400, 250), (70, 70), (700, 150), (1000, 600), (475, 510)] {
                     let mut r = city_at(bx * BLOCK_X + dx, bz * BLOCK_Z + dz);
+                    // Nothing is loose where it stands (a thing may be loose and not fall, if it lies on something)...
+                    let unheld = loose(&r);
+                    // A few specks of leaf at a crown's ragged edge hang on nothing: they are dust the first time anything is asked there.
+                    let specks = (0..r.cells.len()).filter(|&i| unheld[i]).all(|i| material(r.cells[i]) == LEAVES) && unheld.iter().filter(|&&l| l).count() <= 16;
+                    // Only the yard's things are held to this: in some houses a floor is, by these counts, more than its joins
+                    // carry, and lies where it is until something near it is disturbed.
+                    if unheld.iter().any(|&l| l) && !specks && sort == Block::Yard {
+                        let mut kinds: Vec<u8> = (0..r.cells.len()).filter(|&i| unheld[i]).map(|i| material(r.cells[i])).collect();
+                        kinds.sort_unstable();
+                        kinds.dedup();
+                        fell.push(format!("{sort:?} block {bx} {bz} at {dx} {dz}: {} cells of materials {kinds:?} are not held", unheld.iter().filter(|&&l| l).count()));
+                    }
+                    // ...and nothing is out of balance.
+                    let mut none = vec![false; r.cells.len()];
+                    topple(&r, &mut none);
+                    if none.iter().any(|&l| l) {
+                        fell.push(format!("{sort:?} block {bx} {bz} at {dx} {dz}: {} cells are out of balance", none.iter().filter(|&&l| l).count()));
+                    }
                     let done = settle(&mut r, 3);
                     for m in &done.moves {
                         let mut kinds: Vec<u8> = m.runs.iter().map(|run| material(run.kind)).collect();
@@ -491,7 +623,7 @@ mod tests {
             }
         }
         assert!(fell.is_empty(), "{} pieces fell in the untouched city:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
-        assert!(seen.len() >= 3, "homes, towers and a park were all looked at");
+        assert!(seen.len() >= 4, "homes, towers, a park and a yard were all looked at");
     }
 
     /// Ground 4 cells thick with a post on it, and a panel of plaster 30 wide, 20 tall and 2 thick beside or under something.

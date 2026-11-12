@@ -33,7 +33,7 @@ try {
     if (!row.stand) continue
     // A fresh town for each row, at the size of the owner's screen, the picture's size left to the page.
     const page = await city('', { size: [1280, 720], dpr: 2 })
-    await page.addStyleTag({ content: '#hud, #aim, #boom { display: none }' })
+    await page.addStyleTag({ content: '#hud, #aim, #boom, #tools { display: none }' })
     await still(page)
     await from(page, ...row.stand)
     await page.waitForTimeout(400)
