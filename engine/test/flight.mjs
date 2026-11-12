@@ -36,6 +36,7 @@ try {
   const tree = last?.breaks?.find((b) => b.name === 'tree'), fronts = last?.breaks?.filter((b) => b.name === 'front') ?? []
   check(tree?.hit && tree.cells > 3000, `the cut tree did not come down (${tree?.cells} cells)`)
   check(fronts.length === 5 && fronts.every((b) => b.hit) && fronts.reduce((n, b) => n + b.cells, 0) > 300, `the house front did not come down (${fronts.map((b) => b.cells).join(' ')} cells)`)
+  check(fronts.every((b) => b.off < 20), `a charge meant for the house front across the street struck something else (${fronts.map((b) => b.off).join(' ')} m off)`)
   check(last?.breaks?.every((b) => !b.late), 'a break was not over in 15 s')
   check(!last?.notes?.some((n) => n.startsWith('settl')), `settling failed: ${last?.notes?.join(' | ')}`)
   check(last?.world?.whole === last?.world?.levels, `only ${last?.world?.whole} of ${last?.world?.levels} boxes were whole`)

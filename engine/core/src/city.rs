@@ -43,8 +43,9 @@ pub(crate) enum Block {
     Yard,
 }
 
-/// The yard everyone starts beside: the block down the street from where the page begins.
-pub const YARD: (i32, i32) = (1, 5);
+/// The yard everyone starts beside: the block across the street from where the page begins. The rule below puts a
+/// yard there by itself; naming it keeps it there, for the board's shots and the tests stand in it.
+pub const YARD: (i32, i32) = (0, 5);
 
 pub(crate) fn block(bx: i32, bz: i32) -> Block {
     if ground(bx * BLOCK_X + BLOCK_X / 2, bz * BLOCK_Z + BLOCK_Z / 2) < 15 {

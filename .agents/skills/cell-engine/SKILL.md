@@ -318,8 +318,23 @@ front coming down, staying down and losing no cell.
   size says nothing about what the owner will see.
 - `test/clip.mjs` films a row in real time (the canvas's own stream) and prints every gap
   between frames over 25 ms and when. Turning and tumbling cannot be judged from a still.
+- A row says what its shot must face (`near`: a material within so many metres) and what its
+  act must have done by the time of the picture (`falls`, `inAir`, `burns`). `versus` and `clip`
+  refuse a row that fails either, and `test/aims.mjs` (in `npm run check`) stands at every shot
+  and asks what is ahead, breaking nothing. Why: the yard rule put a yard across the street
+  from the start, and for a whole merge four shots charged a glass tower 90 m off, the topple
+  shot was taken before the tower leaned, and `versus` still printed "ok". The flight's charges
+  had moved with them, so it reports how far off each struck and checks that too.
+- A picture of things in the air is taken on a measure, not a count of milliseconds:
+  `engine.leaning` (degrees over of the furthest-gone big body), `engine.bodies`.
+- Stand shots at named things (`YARD`, `FRONT` in `rows.mjs`), not at offsets whose meaning
+  the town's rules can change.
+- Their frame for a row is the film's best showing of that thing: tile a frame a second of each
+  film and pick, and look at the pick. Three of the first picks were of the wrong moment.
 - A row's state moves to level or ahead only after a judge who did not make it has seen both
-  sheets; log that dispatch.
+  pictures with the sides unnamed: `versus --blind` draws the sheets, `test/judge.md` is what to
+  ask, and the dispatch is logged. A row where either picture does not show the thing is void,
+  not scored. The first pass (November 12) voided seven rows and so found all of the above.
 - `node live.mjs` after each merge: the owner's link serves a checkout of main.
 
 ## Not built

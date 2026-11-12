@@ -42,6 +42,8 @@ npm run check                 # every check, about three minutes: the core's tes
 node test/all.mjs --only falls,blast
 node test/bench.mjs           # how fast the march is against test/baseline.json; says when the GPU was too busy to tell
 node test/versus.mjs --out dir --fetch   # the board: our shots beside frames of the reference films
+node test/versus.mjs --out dir --blind   # the same, and sheets for a judge with the sides unnamed (test/judge.md)
+node test/aims.mjs            # every shot of the board still faces its thing
 node test/clip.mjs --row rubble --out dir   # a row of the board filmed as the page shows it, with the gaps between frames
 node test/look.mjs --out file.png --at x,y,z --look yaw,pitch   # one look, with settings
 node test/read.mjs            # what devices have reported
@@ -50,7 +52,7 @@ node live.mjs                 # after a merge: the owner's link serves main from
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
-further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
+further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
 (a cut tree goes over and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
 in the installed Chrome; none stubs anything. They share one server and one browser and run

@@ -32,7 +32,7 @@ export interface Flown {
   /** How long to fly between the places at the end, seconds. */
   seconds: number
   /** Breaks what is straight ahead, as a hand would; null for sky. */
-  blast(radius: number): Promise<unknown>
+  blast(radius: number): Promise<{ t: number; material: number } | null>
   /** What is loose: whether a blast is still being worked out, bodies not yet part of the town again, all that has come loose so far, the longest the solver took over a frame and the most bodies it moved at once. */
   falling(): { settling: boolean; dropping: number; pieces: number; cells: number; ms: number; stepMs: number; most: number }
   /** Whether to break things at the end. */
@@ -120,10 +120,10 @@ export async function flight(f: Flown) {
   if (f.breaks) {
     // Last, so that nothing above is timed in a broken town: a street tree's trunk is cut, then five charges go
     // across a house front. Each is watched until what it left unheld has landed and the town is made again.
-    const front = { x: street.x, y: street.y + 3.5, z: street.z - 4, pitch: 0.22 }
+    const front = { x: street.x, y: street.y + 3.5, z: street.z + 4, pitch: 0.22 }
     const aims: [string, Pose, number][] = [
       ['tree', { x: street.x - 1, y: street.y + 1.8, z: street.z - 0.83, yaw: -0.88, pitch: -0.086 }, 6],
-      ...[-0.22, 0, 0.22, -0.11, 0.11].map((turn): [string, Pose, number] => ['front', { ...front, yaw: 3.3 + turn }, 16]),
+      ...[-0.22, 0, 0.22, -0.11, 0.11].map((turn): [string, Pose, number] => ['front', { ...front, yaw: 0.16 + turn }, 16]),
     ]
     const still = () => world.stats.wanted === 0 && world.stats.stale === 0
     const broken: Record<string, unknown>[] = report.breaks = []
@@ -147,7 +147,7 @@ export async function flight(f: Flown) {
       gaps.sort((p, q) => p - q)
       const after = f.falling(), live = f.now()
       broken.push({
-        name, hit: hit !== null, pieces: after.pieces - before.pieces, cells: after.cells - before.cells, workedMs: Math.round(after.ms), answeredMs: Math.round(answered), allMs: Math.round(performance.now() - t0), late, stepMs: round(after.stepMs, 1), most: after.most,
+        name, hit: hit !== null, off: hit ? round(hit.t / 10, 1) : null, pieces: after.pieces - before.pieces, cells: after.cells - before.cells, workedMs: Math.round(after.ms), answeredMs: Math.round(answered), allMs: Math.round(performance.now() - t0), late, stepMs: round(after.stepMs, 1), most: after.most,
         frames: gaps.length, p50: round(gaps[gaps.length >> 1] ?? 0, 1), p95: round(gaps[Math.floor(gaps.length * 0.95)] ?? 0, 1), max: round(gaps[gaps.length - 1] ?? 0, 1), long: gaps.filter((g) => g > 25).length, scale: live.scale,
       })
     }

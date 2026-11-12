@@ -5,8 +5,8 @@
 import { spawnSync } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { arg, film, start, still } from './kit.mjs'
-import { from, ROWS } from './rows.mjs'
+import { arg, film, start } from './kit.mjs'
+import { aimed, place, ROWS } from './rows.mjs'
 
 const row = ROWS.find((r) => r.key === arg('row', '')), out = resolve(arg('out', '.')), seconds = Number(arg('seconds', '5'))
 if (!row?.stand) { console.error(`no shot of ours for the row "${arg('row', '')}"; rows with one: ${ROWS.filter((r) => r.stand).map((r) => r.key).join(' ')}`); process.exit(2) }
@@ -15,10 +15,9 @@ const { city, failures, finish } = await start()
 try {
   const page = await city('', { size: [1280, 720], dpr: 2 })
   await page.addStyleTag({ content: '#aim, #boom, #tools { display: none }' })
-  await still(page)
-  await from(page, ...row.stand)
-  await page.waitForTimeout(400)
-  await still(page, { sun: true })
+  await place(page, row)
+  const wrong = await aimed(page, row)
+  if (wrong) throw new Error(wrong)
   // A still taken mid-way would stall the page it is filming.
   page.screenshot = async () => null
   const took = await film(page, seconds, async () => { await row.act?.(page) })
