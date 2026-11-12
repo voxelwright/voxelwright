@@ -201,6 +201,27 @@ touch was refused.
   20 ms (the page holds 60 frames a second there with the picture at about 0.65 of full
   size, from about 0.8). `?flat=1` turns the corners off.
 
+## Fire, smoke and dust (`core/src/fire.rs`, `page/puffs.ts`)
+
+- Wood, leaves, roofing and grass burn (`kinds.rs` `burns`: how long a cell lasts alight and
+  how readily it catches). Ten times a second each burning cell may light each neighbour that
+  can burn, the one above twice as readily; burnt out, leaves and roofing are gone, grass is
+  bare earth, wood is gone or (two in five) char that still stands. Whole numbers and hashes.
+- Fire lives in the solver's instance: it reads the same standing world and changes it by the
+  same edits, and once a second asks the support rule what the fire left unheld, which falls.
+  A blast lights about one burnable cell in twelve round it (`?fire=0` stops that, for checks). `engine.ignite()` (key F) lights
+  what is ahead.
+- The page is told how many cells burn and where some 260 of them are, and draws flames and
+  smoke there. Puffs are lumps facing the eye, about two cells a lump so their edges are in
+  steps; hot ones add their light and cool to smoke, which covers, swells and rises. They are
+  sorted far to near each frame (3,072 at most) and are not lit by the sun's maps.
+- A blast shows a flash, a ball of fire, the smoke it leaves; a body coming to rest throws up
+  dust of its own colour.
+- Measured on the M1 Pro: a street tree set alight burns away in about 8 s with no frame gap
+  over 25 ms; asking what the fire left unheld took the worker 85 ms once.
+- Not done: fire gives no light to what is near it; smoke casts no shadow and is not blown
+  round things; a body that is alight goes out; water does not put fire out.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as
@@ -254,7 +275,7 @@ front coming down, staying down and losing no cell.
   holds a distance as a 32-bit float from the world's zero: fine across a city, too coarse
   a thousand kilometres out.
 - What stands is reach and a count, not weight or stress. A body does not damage what it
-  lands on. Nothing bends, burns or flows.
+  lands on. Nothing bends or flows.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
 - No walking, only flying. No real San Francisco: the city is made up.
 - The look has no texture on materials, no light from lamps or windows, no night, no smoke.

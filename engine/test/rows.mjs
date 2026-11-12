@@ -44,8 +44,24 @@ export const ROWS = [
       await page.waitForTimeout(900)
       return page.screenshot()
     } },
-  { key: 'blast', what: 'An explosion: a ball of fire, smoke, pieces flung', theirs: ['engine', 38.6], state: 'none' },
-  { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 48.2], state: 'none' },
+  { key: 'blast', what: 'An explosion: a ball of fire, smoke, pieces flung', theirs: ['engine', 38.6], state: 'behind',
+    stand: [0, 3.5, -4, 3.3 / DEG, 0.22 / DEG],
+    act: async (page) => {
+      await page.evaluate(() => globalThis.engine.blast(16))
+      await page.waitForTimeout(260)
+      return page.screenshot()
+    } },
+  { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 48.2], state: 'behind',
+    stand: [-1, 1.8, -0.83, -0.88 / DEG, 0.3 / DEG * 1],
+    act: async (page) => {
+      // A street tree's crown set alight, and watched from under it.
+      await page.evaluate(() => { globalThis.engine.pose.pitch = 0.5 })
+      await page.waitForTimeout(100)
+      await page.evaluate(() => globalThis.engine.ignite(4))
+      await page.evaluate(() => { globalThis.engine.pose.pitch = 0.3 })
+      await page.waitForTimeout(2600)
+      return page.screenshot()
+    } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 45.8], state: 'behind',
     stand: [0, 3.5, -4, 3.3 / DEG, 0.22 / DEG],

@@ -76,7 +76,7 @@ impl Hasher for Mix {
     fn write(&mut self, bytes: &[u8]) { for &b in bytes { self.0 = (self.0 ^ b as u64).wrapping_mul(0x100_0000_01b3) } }
     fn write_i32(&mut self, v: i32) { self.0 = (self.0.rotate_left(23) ^ v as u32 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) }
 }
-type Map<K, T> = HashMap<K, T, BuildHasherDefault<Mix>>;
+pub(crate) type Map<K, T> = HashMap<K, T, BuildHasherDefault<Mix>>;
 
 enum Sector {
     Air,
@@ -95,6 +95,8 @@ pub struct Ground {
     pub(crate) scratch: Scratch,
     /// The sector the scratch holds whole, for asking what a cell is made of.
     holds: Option<[i32; 3]>,
+    /// A few sectors kept whole, for asking what many cells are made of (a fire asks about every neighbour).
+    whole: Vec<([i32; 3], Vec<Kind>)>,
 }
 
 /// The box an edit can change (high corner exclusive). A blast reaches as far as the weakest material gives: under three radii.
@@ -117,7 +119,7 @@ fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
 
 impl Ground {
     pub fn new() -> Self {
-        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), scratch: Scratch::new(), holds: None }
+        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), scratch: Scratch::new(), holds: None, whole: Vec::new() }
     }
 
     /// How many edits of this solver's own are in the world.
@@ -150,6 +152,9 @@ impl Ground {
             _ => self.forget(b),
         }
         self.holds = None;
+        // Kept sectors the edit reaches are forgotten: asked for again, they are made with it.
+        let s = SIDE as i32;
+        self.whole.retain(|(k, _)| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]));
         self.edits.insert(at, e);
         self.ours.insert(at, ours);
         self.boxes.insert(at, b);
@@ -218,16 +223,21 @@ impl Ground {
         }
     }
 
-    /// What the cell is made of. Slower than `solid`: the sector is made again unless it was the last one asked about.
+    /// What the cell is made of. Slower than `solid`: its sector is made whole, and the last few asked about are kept.
     pub fn kind(&mut self, x: i32, y: i32, z: i32) -> Kind {
         let key = [x >> 6, y >> 6, z >> 6];
-        if self.holds != Some(key) {
-            fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
-            self.holds = Some(key);
+        let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
+        if let Some(found) = self.whole.iter().position(|(k, _)| *k == key) {
+            return self.whole[found].1[i];
         }
-        self.scratch.cells[at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize)]
+        fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
+        self.holds = Some(key);
+        if self.whole.len() >= 12 {
+            self.whole.remove(0);
+        }
+        self.whole.push((key, self.scratch.cells.clone()));
+        self.scratch.cells[i]
     }
-
 }
 
 /// The shortest way out of the solid for a point in a solid cell, and how far that is: straight through one face,
@@ -466,6 +476,7 @@ pub const BORN: u32 = 2; // id, cells, size (3), middle of mass (3, as floats), 
 pub const GONE: u32 = 3; // id
 pub const DUST: u32 = 4; // where (3, as floats), kind, how much
 pub const MOVES: u32 = 5; // for each body: id, place (3 floats), turn (4 floats)
+pub const FIRE: u32 = 7; // how many cells are alight, then where some of them are (3 floats each)
 pub const BROKE: u32 = 6; // id: the body is no more, and the pieces it broke into have been born
 
 pub struct Bodies {
@@ -481,21 +492,23 @@ pub struct Bodies {
     pub tried: u32,
     /// How old each body was when it came to rest, in tenths of a second: for measuring.
     pub rested: Vec<u32>,
+    /// What burns (fire.rs).
+    pub fire: crate::fire::Fire,
 }
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, rested: Vec::new() }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, rested: Vec::new(), fire: crate::fire::Fire::default() }
     }
 
-    fn record(&mut self, tag: u32, words: &[u32]) {
+    pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
         self.out.push(tag);
         self.out.push(words.len() as u32);
         self.out.extend_from_slice(words);
     }
 
     /// An edit of the solver's own: into its world, and told.
-    fn change(&mut self, mut runs: Vec<Run>) {
+    pub(crate) fn change(&mut self, mut runs: Vec<Run>) {
         if runs.is_empty() {
             return;
         }
@@ -549,8 +562,9 @@ impl Bodies {
 
     /// A blast at a point. What it empties does not all vanish: away from its middle the stuff comes out in lumps,
     /// which are bodies thrown from it (glass, and the middle, are dust). Then what it left unheld comes loose.
-    /// `after` is how many of the solver's own edits the blast's maker had heard of. Returns how many bodies were made.
-    pub fn blast(&mut self, at: [i32; 3], radius: i32, after: Option<usize>) -> usize {
+    /// `after` is how many of the solver's own edits the blast's maker had heard of; `spark` is whether it sets things
+    /// alight. Returns how many bodies were made.
+    pub fn blast(&mut self, at: [i32; 3], radius: i32, after: Option<usize>, spark: bool) -> usize {
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
         let before = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
@@ -604,6 +618,10 @@ impl Bodies {
             self.born(&body);
             self.list.push(body);
             made += 1;
+        }
+        // What can burn round the blast, and is still there, may catch: about one cell in twelve.
+        if spark {
+            self.ignite(at, radius + radius / 2, true);
         }
         made + self.release(at, radius)
     }
@@ -682,6 +700,7 @@ impl Bodies {
         if self.list.is_empty() {
             self.owed = 0.0;
         }
+        self.burn(dt);
         let mut words: Vec<u32> = Vec::with_capacity(self.list.len() * 8);
         for b in &self.list {
             words.push(b.id);
@@ -1052,7 +1071,7 @@ mod tests {
         let (x, z) = (bx * BLOCK_X + 140 + 76 * 4 + 38, bz * BLOCK_Z + 150);
         let at = [x, city::ground(x, z) + 40, z + 30];
         let mut bodies = Bodies::new();
-        let made = bodies.blast(at, 16, None);
+        let made = bodies.blast(at, 16, None, false);
         assert!(made > 20, "a charge in a wall threw out {made} lumps");
         let loose: usize = bodies.list.iter().map(|b| b.count).sum();
         let put = run(&mut bodies, 12.0);

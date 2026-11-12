@@ -4,12 +4,12 @@
 // share of pixels differ.
 //
 //   node test/shadows.mjs
-import { start } from './kit.mjs'
+import { start, still as rest } from './kit.mjs'
 
 const { city, check, failures, finish } = await start()
 const percent = (x) => `${(x * 100).toFixed(2)}%`
 try {
-  const page = await city('scale=0.5')
+  const page = await city('scale=0.5&fire=0')
   const settled = () => page.waitForFunction(() => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.world.stats.ready > 0 && e.march.sun.undrawn === 0 }, null, { timeout: 120_000 })
   const differ = () => page.evaluate(() => globalThis.engine.shadowsDiffer())
   const paced = (maps) => page.evaluate(async (m) => { const e = globalThis.engine, was = e.march.maps; e.march.maps = m; const ms = await e.paced(); e.march.maps = was; return ms }, maps)
@@ -37,9 +37,11 @@ try {
   // A blast: what it took away must stop casting its shadow.
   const hit = await page.evaluate(() => globalThis.engine.blast(12))
   check(!!hit, 'a blast hit something')
+  // Until what it threw out has come to rest, the town is made again and the sun's maps are drawn.
   await page.waitForTimeout(200)
-  await settled()
+  await rest(page, { sun: true })
   await page.waitForTimeout(1500)
+  await rest(page, { sun: true })
   const broken = await differ()
   check(broken < 0.04, `after a blast and its sectors made again, ${percent(broken)} differ`)
 } catch (e) {

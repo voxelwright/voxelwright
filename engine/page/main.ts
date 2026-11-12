@@ -11,6 +11,7 @@ import { stretch } from '../probe/rays.ts'
 import { fill } from '../probe/fill.ts'
 import { FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
+import { puffs } from './puffs.ts'
 import { ball, rows, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -52,6 +53,7 @@ async function main() {
   const march = await marcher(device, gpu.format, world)
   const blit = await stretch(gpu)
   const debris = await crumbs(device, gpu.format)
+  const smoke = await puffs(device, gpu.format)
   const falling = await pieces(device, gpu.format, march)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
@@ -188,11 +190,13 @@ async function main() {
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
     debris.step(dt, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+    smoke.step(dt)
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
     march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     falling.draw(encoder, to, v, march.sun.s)
     debris.draw(encoder, to, v)
+    smoke.draw(encoder, to, v)
     blit(encoder, to, context.getCurrentTexture().createView())
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
@@ -216,9 +220,11 @@ async function main() {
   // ── Breaking ────────────────────────────────────────────────────────────
   // The sun's maps are spoiled where the world changed, once the sectors that reached have been made again.
   const spoiled: Edit[] = []
+  /** Whether blasts set things alight: `?fire=0` for checks that need a blast to be only a blast. */
+  const sparks = query.get('fire') !== '0'
   /** How big a blast is, in cells: keys 1, 2 and 3 pick a hammer blow, a charge, a big one. */
   let force = 8
-  addEventListener('keydown', (e) => { const pick = { Digit1: 4, Digit2: 8, Digit3: 16 }[e.code]; if (pick) force = pick })
+  addEventListener('keydown', (e) => { const pick = { Digit1: 4, Digit2: 8, Digit3: 16 }[e.code]; if (pick) force = pick; if (e.code === 'KeyF') void ignite() })
 
   // ── What comes loose ────────────────────────────────────────────────────
   // After a blast a worker says what is no longer held (the core's support rule) and moves it: each piece is a
@@ -229,7 +235,9 @@ async function main() {
   const moving = new Map<number, Piece>()
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
-  let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0
+  let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
+  /** Where it burns, as the mover last said: some of the burning cells. */
+  let flames = new Float32Array(0)
   const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: readonly number[] }[] = [], putSince = 0
@@ -262,8 +270,9 @@ async function main() {
       put()
       change(rows(runs, box))
     }
-    for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
+    // Born first: a shard may be born and break again within the one answer.
     for (const born of told.born) { moving.set(born.id, falling.add(born)); fell.pieces++; fell.cells += born.cells }
+    for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
     for (const at of [...told.moves, ...told.gone]) {
       const piece = moving.get(at.id)
       if (piece) { piece.pos = at.pos; piece.rot = at.rot }
@@ -275,10 +284,14 @@ async function main() {
       lying.push({ piece, shown: 0 })
       // Dust of what it is made of, where it came to rest.
       const c = hue(piece.born.faces[1] >> 16), size = piece.born.size
-      debris.burst(piece.pos, Math.min(6, (size[0] + size[2]) / 6), Math.min(24, 2 + piece.born.cells / 60), [c[0], c[1], c[2]], 0.5)
+      // Paler than the stuff itself, and as the screen shows it.
+      if (piece.born.cells > 20) smoke.dust(piece.pos, (size[0] + size[2]) / 4, Math.min(6, 1 + Math.round(piece.born.cells / 150)), [0.35 + 0.5 * c[0] ** 0.45, 0.35 + 0.5 * c[1] ** 0.45, 0.35 + 0.5 * c[2] ** 0.45])
     }
     for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
     bodies = answer.bodies
+    burning = answer.burning
+    if (told.fire) flames = told.fire
+    if (!burning) flames = new Float32Array(0)
     fell.most = Math.max(fell.most, bodies)
     if (answer.released) {
       fell.ms = answer.ms
@@ -295,15 +308,16 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (bodies > 0 && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
-    if (bodies === 0) owed = 0
+    if ((bodies > 0 || burning > 0) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
+    if (bodies === 0 && burning === 0) owed = 0
+    for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     // A body that is cells again is drawn until those cells are in the picture.
     const made = world.stats.stale === 0 && world.stats.wanted === 0
     lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })
   }
 
   /** Breaks what is straight ahead. What it is made of decides how far the break goes (the core's kinds), and what that leaves unheld falls. Returns where, or null for sky. */
-  const blast = async (radius = force) => {
+  const blast = async (radius = force, spark = sparks) => {
     const v = view(), hit = await march.pick(v)
     if (!hit) return null
     // A little inside the face, so a wall is broken through and not grazed.
@@ -312,11 +326,23 @@ async function main() {
     change(ball(at[0], at[1], at[2], radius, 0))
     fell.asks++
     waiting++
-    mover.postMessage({ blast: at, radius, after: heard } satisfies Ask)
+    mover.postMessage({ blast: at, radius, after: heard, spark } satisfies Ask)
     const colour = hit.colour ? colours.subarray(hit.colour * 4, hit.colour * 4 + 3) : stuff.subarray(hit.material * 8, hit.material * 8 + 3)
     // Glass goes in many small pieces, the rest in fewer lumps; dust of the same stuff either way.
     const glass = hit.material === 11
+    smoke.blast(at, radius)
     debris.burst(at, radius * (glass ? 2 : 1), Math.min(900, radius * radius * (glass ? 9 : 4)), [colour[0], colour[1], colour[2]], glass ? 0.5 : 1.1)
+    return { at, ...hit }
+  }
+
+  /** Sets alight what can burn round what is straight ahead. Returns where, or null for sky. */
+  const ignite = async (radius = 4) => {
+    const v = view(), hit = await march.pick(v)
+    if (!hit) return null
+    const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + 1))) as [number, number, number]
+    // The answer says how many cells burn, which is what keeps the mover asked from then on.
+    ticking = true
+    mover.postMessage({ ignite: at, radius, tick: 0 } satisfies Ask)
     return { at, ...hit }
   }
 
@@ -380,7 +406,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, pick, debris, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, ignite, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.
@@ -396,7 +422,8 @@ async function main() {
       now: () => ({ frameMs, gpuMs, scale }),
       watch: (each) => { watchers.add(each); return () => watchers.delete(each) },
       say: (text) => { saying = text },
-      blast,
+      // The flight measures breaking by itself, as it did before there was fire.
+      blast: (radius) => blast(radius, false),
       falling: () => ({ settling: waiting > 0, dropping: moving.size + lying.length + putting.length, pieces: fell.pieces, cells: fell.cells, ms: fell.ms, stepMs: fell.worstMs, most: fell.most }),
       breaks: query.get('breaks') !== '0',
       seconds: Number(query.get('seconds') ?? 40),

@@ -15,14 +15,16 @@ export interface Told {
   dust: { at: [number, number, number]; kind: number; amount: number }[]
   /** Bodies that broke: they are no more, and what they broke into has been born. */
   broke: number[]
+  /** Where it burns, if the fire was moved on: some of the burning cells (x, y, z each, the world's finest cells). */
+  fire: Float32Array<ArrayBuffer> | null
   moves: Placed[]
 }
 
-const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6
+const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7
 
 export function read(words: Uint32Array<ArrayBuffer>): Told {
   const f = new Float32Array(words.buffer, words.byteOffset, words.length), i32 = new Int32Array(words.buffer, words.byteOffset, words.length)
-  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], moves: [] }
+  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [] }
   const placed = (at: number): Placed => ({ id: words[at], pos: [f[at + 1], f[at + 2], f[at + 3]], rot: [f[at + 4], f[at + 5], f[at + 6], f[at + 7]] })
   for (let i = 0; i < words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
@@ -31,6 +33,7 @@ export function read(words: Uint32Array<ArrayBuffer>): Told {
     else if (tag === GONE) told.gone.push(placed(at))
     else if (tag === DUST) told.dust.push({ at: [f[at], f[at + 1], f[at + 2]], kind: words[at + 3], amount: words[at + 4] })
     else if (tag === BROKE) told.broke.push(words[at])
+    else if (tag === FIRE) told.fire = f.slice(at + 1, at + n)
     else if (tag === MOVES) for (let k = at; k < at + n; k += 8) told.moves.push(placed(k))
     i = at + n
   }

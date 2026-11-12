@@ -7,6 +7,7 @@
 
 pub mod bodies;
 pub mod city;
+pub mod fire;
 pub mod hash;
 pub mod kinds;
 pub mod scratch;
@@ -154,14 +155,15 @@ pub extern "C" fn world_edit(after: i32) {
 
 /// A blast at a point, of the solver's own doing: the edit is made here (do not also tell it with `world_edit`),
 /// what it empties comes out as lumps, and what it leaves unheld comes loose. `after` is how many of the solver's own
-/// edits the blast's maker had heard of; under zero puts it last. Returns how many words tell it, at `bodies_words`:
+/// edits the blast's maker had heard of; under zero puts it last. `spark` (not zero) lets it set alight what can
+/// burn round it. Returns how many words tell it, at `bodies_words`:
 /// records as in bodies.rs (cells taken out of the world, each body born, dust).
 #[unsafe(no_mangle)]
-pub extern "C" fn bodies_blast(x: i32, y: i32, z: i32, radius: i32, after: i32) -> usize {
+pub extern "C" fn bodies_blast(x: i32, y: i32, z: i32, radius: i32, after: i32, spark: i32) -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let b = moving(i);
         b.out.clear();
-        b.blast([x, y, z], radius, if after < 0 { None } else { Some(after as usize) });
+        b.blast([x, y, z], radius, if after < 0 { None } else { Some(after as usize) }, spark != 0);
         b.out.len()
     })
 }
@@ -192,4 +194,16 @@ pub extern "C" fn bodies_count() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_tried() -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).tried)
+}
+
+/// Sets alight what can burn within `radius` cells of a point. Returns how many cells caught.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_ignite(x: i32, y: i32, z: i32, radius: i32) -> usize {
+    INSTANCE.with_borrow_mut(|i| moving(i).ignite([x, y, z], radius, false))
+}
+
+/// How many cells are alight.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_burning() -> usize {
+    INSTANCE.with_borrow_mut(|i| moving(i).fire.alight.len())
 }

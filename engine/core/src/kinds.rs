@@ -140,3 +140,15 @@ pub const fn breaks_at(material: u8) -> f32 {
         _ => 40.0,
     }
 }
+
+/// How a material burns: how many tenths of a second a cell of it lasts alight, and how readily it catches from a
+/// burning neighbour (of 256, each tenth of a second). Nothing at all for what does not burn.
+pub const fn burns(material: u8) -> (u16, u8) {
+    match material {
+        LEAVES => (14, 60),
+        GRASS => (20, 9),
+        WOOD => (80, 7),
+        ROOFING => (60, 6),
+        _ => (0, 0),
+    }
+}

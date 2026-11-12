@@ -12,7 +12,7 @@ const { city, check, failures, finish } = await start()
 const WOOD = 10, LEAVES = 13, TRUNK = 45
 try {
   // A phone's boxes: cells twice as big beyond 25 m, four times beyond 51 m, so the far look is at a coarse copy.
-  const page = await city('scale=1&grid=8,8,8&levels=8')
+  const page = await city('scale=1&grid=8,8,8&levels=8&fire=0')
   const still = () => rest(page)
   await still()
   await page.evaluate(() => { const p = globalThis.engine.pose; p.y -= 10.2 })

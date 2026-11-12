@@ -11,7 +11,7 @@ if (out) await mkdir(out, { recursive: true })
 const { city, check, failures, finish } = await start()
 const GLASS = 11, WALLS = [8, 9, 10]
 try {
-  const page = await city('scale=1')
+  const page = await city('scale=1&fire=0')
   const made = () => page.waitForFunction(() => globalThis.engine.world.stats.wanted === 0 && globalThis.engine.world.stats.ready > 0, null, { timeout: 120_000 })
   await made()
   // Stand in the street and face the houses on one side.
