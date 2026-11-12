@@ -497,7 +497,7 @@ front coming down, staying down and losing no cell.
 - What stands is reach and counts of cells, not stress. Nothing bends or flows. A tower
   does not go over.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
-- No walking, only flying. No real San Francisco: the city is made up.
+- No walking, only flying. No real San Francisco: the city and the land round it are made up.
 - Bodies and crumbs cast no shadow. Fire lights nothing round it.
 - The hour is set, it does not pass. At night a window is lit by a rule of where it is, and a
   lamp's pool of light by where the town's rule stands lamps: a house brought down leaves no
@@ -588,3 +588,51 @@ front coming down, staying down and losing no cell.
   `sky()` (the clouds' cover, the stars' brightness), even in a branch the day never takes.
   Reads of it in `lit()` and in the mirror branch cost nothing. So in rain the clouds are not
   thicker and the stars still show: both are wrong, and both want a way that is free by day.
+
+## The land round the town (November 12)
+
+- `core/src/land.rs` owns `ground()` and where things are. Within 3 km of the start (`HOME`)
+  the land is the town's own and no cell of it may move: `city.rs`
+  `the_town_is_cell_for_cell_what_it_was` sums sectors there at every coarseness. If the town
+  is meant to change, take the board's pictures and the bench's baseline again and set the
+  sum to what the failure prints. By 4 km the town has given way to open country (`open`):
+  mountains to the north (`peaks`, towards -z, ridged noise to 3.6 km high), a dry plain to
+  the east (`dry`) with the road out of town along the start's own street, grass between.
+- `city.rs`: a block past the edge is `Block::Open` (no streets). `country()` says what
+  covers a column: road, snow from about 650 m on all but the steepest faces, rock where it
+  is steep, sand on the plain, darker grass under the woods. `stamp_country` puts one thing
+  in each 4.8 m patch: pines in the woods, bushes and stones on the plain, a tree now and
+  then in the grass; poles stand along the road.
+- Things in open country must stand by the support rule (`open_country_is_at_rest`). The
+  first pines did not: tiers 5 m across on a 2 x 2 trunk are more than leaves hold, and a
+  blast in the woods would have dropped the forest. Tiers are eight-sided and at most 2.7 m
+  across now, on a 3 x 3 trunk. The check looks only at level places: its box is cut level,
+  and on a slope that cuts trees from the ground they stand in.
+- The air thins with height (`march.ts` `air`): a third as thick 1.3 km up. Without it the
+  mountains were a pale wall from 4 km. It costs 1 to 3% on every row.
+- A box has a roof for each quarter round the eye's own sector (`Level.roofs`, `world.ts`
+  `roofs`): a look from the eye stays in one quarter and is not held up by mountains
+  behind it. It took the view from 130 m up from 19.4 steps a pixel to 15.8. A skyline in
+  sixteen directions for each box was tried too and changed nothing: the extra steps were
+  not looks at the sky.
+- `engine.steps(flags)` counts the steps a picture's rays take (mean and most). Time on the
+  GPU is steps times what a step costs: it says which of the two a change moved, and it does
+  not care whether another thread is drawing.
+- What the land costs the town's own views, by the bench with the GPU quiet, against main
+  on the same day (fronts row, rays only: main 15.3 ms): the land with main's shader 16.7;
+  no land with today's shader 16.7; both 16.9. So the far boxes with mountains in them cost a
+  town view about 9%, the quarter roofs take most of that back, and their own code costs
+  about as much again. Taking the height haze out, the quarter-roof line out, or the four
+  numbers out of `Level` each changed nothing by itself. The view over the roofs is 36 to
+  48% dearer because it looks north, at hills and mountains where there was a lake and flat
+  town; from 130 m up 12 to 20%; from 730 m up 8% cheaper. The baseline is re-taken.
+- The steps a picture takes must be counted at the size the page draws at: what is drawn as
+  one block goes by how big a pixel is. Counted small they were the same with the land and
+  without; that proved nothing.
+- The lamps' light is worked out from the block rule, and it fell on the open plain, the
+  mountains and the lake's floor too: a grid of lit patches at night, found only by taking a
+  night picture of the land. It is kept to town blocks above the sea now, and `test/hours.mjs`
+  looks at the plain at night. After a change to what the land is, look at it at night.
+- `test/skips.mjs` asks rising looks too, and the reference (PLAIN) no longer uses the rising
+  clamp at a box's roof, so a wrong roof shows: with one quarter's roof set low 109 of 504
+  looks fail.

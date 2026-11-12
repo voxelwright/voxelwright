@@ -15,7 +15,7 @@ import { still } from './kit.mjs'
 
 export const DEG = Math.PI / 180
 /** The core's materials a shot may be asked to face (kinds.rs). */
-const WATER = 5, CONCRETE = 7, BRICK = 8, PLASTER = 9, WOOD = 10, GLASS = 11, STEEL = 12, LEAVES = 13, LAMP = 15
+const ROCK = 2, SAND = 4, WATER = 5, ASPHALT = 6, CONCRETE = 7, BRICK = 8, PLASTER = 9, WOOD = 10, GLASS = 11, STEEL = 12, LEAVES = 13, LAMP = 15
 const HOUSE = [BRICK, PLASTER, WOOD, GLASS, CONCRETE]
 
 /** Where the page starts: over the middle of a street, houses on its -z side, the works yard on the other. Shots are given from there, metres and degrees. */
@@ -188,11 +188,15 @@ export const ROWS = [
     // On the floor of the town's lake, 11 m down, at a clearing in a grove of ribbon weed, looking up the slope to
     // where the light comes in. (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
     stand: { from: [-1276, 398], up: 2.5, to: [-1262, 412], high: 5.5 }, near: [60, 2, 4, LEAVES] },
-  { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'none' },
+  { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
+    // The range north of the town from the hills before it: pines below, rock, snow on the tops and in the gullies.
+    stand: { from: [300, -5200], up: 60, to: [-300, -9000], high: 1700 }, near: [8000, ROCK] },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'behind',
     // Down the street by the start from low over the wet road: a record shop's sign and the lit windows in it.
     stand: [30, 1.5, 2.2, 300, 5], hour: 21, rain: 1, near: [80, LAMP] },
-  { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'none' },
+  { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'behind',
+    // The road out of town across the dry plain, 6 km east of the start, at sunrise: poles down one side of it.
+    stand: { from: [6100, 407], up: 1.8, to: [9000, 407], high: 25 }, hour: 6.45, near: [300, SAND, ASPHALT] },
   { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },

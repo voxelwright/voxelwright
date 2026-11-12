@@ -60,6 +60,9 @@ struct Level {
   boxSize: vec3f, roof: f32,
   wrap: vec3u, pad1: u32,
   cells: vec3i, pad2: i32,
+  // The same for each quarter of the box as seen from the eye's own sector: towards -x and -z, +x and -z, -x and +z,
+  // +x and +z. A look from the eye stays in one quarter, and need not be held up by a mountain that is behind it.
+  roofs: vec4f,
 }
 struct Globals {
   eye: vec3f, tanHalf: f32,
@@ -306,7 +309,10 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       let far = max(a, b);
       let comeAt = max(near.x, max(near.y, near.z));
       leaveAt = min(far.x, min(far.y, far.z));
-      if (rd.y > 0.0) { leaveAt = min(leaveAt, (lv.roof - ro.y) * inv.y); }
+      // The roof that counts: for a look from the eye, its quarter's.
+      var roof = lv.roof;
+      if (all(ro == g.eye)) { roof = lv.roofs[u32(rd.x > 0.0) + 2u * u32(rd.z > 0.0)]; }
+      if (rd.y > 0.0 && !plain) { leaveAt = min(leaveAt, (roof - ro.y) * inv.y); }
       have = 0u;
       supAt = 0xffffffffu;
       fresh = false;
@@ -315,7 +321,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       // Over everything in this box and coming down: skip to where the roofs begin.
       // No further than to where the ray leaves the box: a box with nothing in it has its roofs at the bottom of
       // everything, and a ray sent there was past every box. From 100 m up the town was not drawn at all.
-      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof && !plain) { t = min((lv.roof - ro.y) * inv.y, leaveAt) + eps; }
+      if (rd.y < 0.0 && ro.y + rd.y * t > roof && !plain) { t = min((roof - ro.y) * inv.y, leaveAt) + eps; }
     }
     if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
     let q = q0 + rd * (t * lv.scale);
@@ -770,9 +776,12 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     }
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
-    // the sea.
+    // the sea or under it, nor in open country: a block whose middle is more than 3.5 km from where the page starts
+    // (land.rs HOME and open).
+    let out = (floor(vec2f(fine.xz) / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
+    let lamps = stuff != 5u && fine.y >= 0 && dot(out, out) < 35000.0 * 35000.0;
     var pool = 0.0;
-    for (var k = 0; k < 9 && stuff != 5u; k++) {
+    for (var k = 0; k < 9 && lamps; k++) {
       // Each lamp's light, by where it hangs in its block: four at the crossing, three down the street along x,
       // two down the one along z.
       let lamp = array<vec2f, 9>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0), vec2f(369.0, 35.0), vec2f(673.0, 105.0), vec2f(977.0, 35.0), vec2f(35.0, 361.0), vec2f(105.0, 581.0))[k];
@@ -846,8 +855,14 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
 }
 
 fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
-  // dist is in the finest cells: the air thickens over kilometres.
-  let f = 1.0 - exp(-dist * 0.00003);
+  // dist is in the finest cells: the air thickens over kilometres. It is thickest by the sea and thins upward (to a
+  // third in 1.3 km), so a mountain stands clear over the haze its foot is lost in: what counts is the air along
+  // the look, from the eye's height to the height of what is seen.
+  let low = (g.eye.y - g.sea) / 12000.0;
+  let rise = rd.y * dist / 12000.0;
+  var thick = exp(-max(low, 0.0));
+  if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
+  let f = 1.0 - exp(-dist * 0.00003 * thick);
   return mix(col, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6, f);
 }
 
@@ -1017,7 +1032,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
   const pipeline = await device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 112 + 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1032,7 +1047,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 112 + 128), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 128), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -1056,7 +1071,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       ...times(hour(cloudy, white, [1, 0.5, 0.2]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
       // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
       rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), 0,
-    ], 36 + MAX_LEVELS * 28)
+    ], 36 + MAX_LEVELS * 32)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   const tell = (view: View, size: readonly [number, number], flags: number, time: number) => {
@@ -1082,10 +1097,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       f.set(sunMaps.v, 32)
       u[35] = maps ? 1 : 0
       world.levels.forEach((level, k) => {
-        const told = sunMaps.tell(k, anchor as [number, number, number]), sunAt = 36 + MAX_LEVELS * 16 + k * 12
+        const told = sunMaps.tell(k, anchor as [number, number, number]), sunAt = 36 + MAX_LEVELS * 20 + k * 12
         f.set(told.base, sunAt)
         u.set(told.drawn, sunAt + 4)
-        const at = 36 + k * 16, cell = 1 << k, { low, high } = level.whole
+        const at = 36 + k * 20, cell = 1 << k, { low, high } = level.whole
         for (let a = 0; a < 3; a++) {
           f[at + a] = low[a] * SIDE * cell - anchor[a]
           f[at + 4 + a] = (high[a] - low[a]) * SIDE
@@ -1094,6 +1109,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         }
         f[at + 3] = 1 / cell
         f[at + 7] = level.roof - anchor[1]
+        for (let q = 0; q < 4; q++) f[at + 16 + q] = level.roofs[q] - anchor[1]
       })
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]

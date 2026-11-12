@@ -10,6 +10,7 @@ pub mod city;
 pub mod fire;
 pub mod hash;
 pub mod kinds;
+pub mod land;
 pub mod scratch;
 pub mod support;
 pub mod tree;

@@ -696,6 +696,38 @@ mod tests {
     }
 
     #[test]
+    fn open_country_is_at_rest() {
+        // In the hills before the mountains with their pine woods, and on the dry plain by the road with its poles and
+        // bushes: nothing may be loose, and nothing may drop.
+        let (mut grown, mut fell) = (0, Vec::new());
+        // The box that is looked at is cut level: on a steep slope it cuts trees off from the ground they stand in.
+        // So the places in the hills are those where the ground keeps within 3 m across the box.
+        let level = |x: i32, z: i32| {
+            let (w, d) = (SETTLE[0] as i32 / 2, SETTLE[2] as i32 / 2);
+            let at = [ground(x, z), ground(x - w, z - d), ground(x + w, z - d), ground(x - w, z + d), ground(x + w, z + d)];
+            at.iter().max().unwrap() - at.iter().min().unwrap() <= 30
+        };
+        let hills = (-56_000..-46_000).step_by(700).flat_map(|z| (-4000..6000).step_by(900).map(move |x| (x, z))).filter(|&(x, z)| level(x, z)).take(10);
+        for (x, z) in hills.chain([(61_000, 4000), (61_400, 4070), (64_000, 5200), (58_000, 3000)]) {
+            let mut r = city_at(x, z);
+            grown += r.cells.iter().filter(|&&k| matches!(material(k), LEAVES | WOOD)).count();
+            let held = loose(&r);
+            let unheld = held.iter().filter(|&&l| l).count();
+            if unheld > 0 {
+                let mut kinds: Vec<u8> = (0..r.cells.len()).filter(|&i| held[i]).map(|i| material(r.cells[i])).collect();
+                kinds.sort_unstable();
+                kinds.dedup();
+                fell.push(format!("at {x} {z}: {unheld} cells of materials {kinds:?} are not held"));
+            }
+            for m in &settle(&mut r, 3).moves {
+                fell.push(format!("at {x} {z}: {} cells dropped {}", m.cells, m.drop));
+            }
+        }
+        assert!(grown > 2000, "the boxes looked at hold trees, bushes and poles ({grown} cells of them)");
+        assert!(fell.is_empty(), "{} things in open country are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
+    }
+
+    #[test]
     fn what_grows_on_the_sea_floor_is_at_rest() {
         // The lake west of the start, over its groves and meadows. The sea is not cells, so weed has only the sand
         // it stands in to hold it: nothing may be loose, and nothing may drop.

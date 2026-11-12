@@ -77,6 +77,8 @@ class Level {
   dirty = true
   /** The height nothing in the box stands above, in the finest cells: a ray over it and rising has nothing more to meet here. */
   roof = -1e9
+  /** The same for each quarter of the box round the eye's own sector (which is in all four): -x -z, +x -z, -x +z, +x +z. */
+  roofs = [-1e9, -1e9, -1e9, -1e9]
   /** The part of the box that is whole: low and high corners in this level's sectors (high exclusive). Empty when low equals high. */
   whole: { low: [number, number, number]; high: [number, number, number] } = { low: [0, 0, 0], high: [0, 0, 0] }
   readonly index: number
@@ -356,6 +358,7 @@ export class World {
     const [gx, gy, gz] = level.grid, slots = gx * gy * gz, columns = slots + (slots / 64) * 2, blocks = columns + gx * gz
     const NONE = -(1 << 30), roofs = new Int32Array(level.top.buffer, columns * 4, gx * gz + (gx * gz) / 16).fill(NONE)
     let roof = NONE
+    const quarters = [NONE, NONE, NONE, NONE], o = level.origin
     for (let wz = 0; wz < gz; wz++) for (let wx = 0; wx < gx; wx++) {
       let high = NONE
       for (let wy = 0; wy < gy; wy++) {
@@ -366,8 +369,13 @@ export class World {
       const block = blocks - columns + (wx >> 2) + (gx >> 2) * (wz >> 2)
       roofs[block] = Math.max(roofs[block], high)
       roof = Math.max(roof, high)
+      // Which quarters the column is in: the eye's sector is the middle one of the box, and its row and its column
+      // are in the quarters on both sides of them.
+      const rx = (((wx - o[0]) % gx) + gx) % gx - (gx >> 1), rz = (((wz - o[2]) % gz) + gz) % gz - (gz >> 1)
+      for (let q = 0; q < 4; q++) if ((q & 1 ? rx >= 0 : rx <= 0) && (q & 2 ? rz >= 0 : rz <= 0)) quarters[q] = Math.max(quarters[q], high)
     }
     level.roof = roof === NONE ? -1e9 : roof * (1 << level.index)
+    level.roofs = quarters.map((high) => (high === NONE ? -1e9 : high * (1 << level.index)))
   }
 
   /** The biggest box round the middle of a level in which every sector is made: from the middle sector, a face at a time, while the layer it would take in is all made. */

@@ -6,6 +6,7 @@
 
 use crate::hash::{hash, noise, unit};
 use crate::kinds::*;
+use crate::land::{HOME, dry, off_road, open, peaks};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -32,10 +33,7 @@ pub const DEEP: i32 = 192;
 
 const EARTH_KIND: Kind = kind(EARTH, OWN);
 
-/// How high the ground is at a column: its top cell.
-pub fn ground(x: i32, z: i32) -> i32 {
-    (noise(x, z, 9000, 11) * 1200.0 + noise(x, z, 2600, 12) * 300.0 + noise(x, z, 700, 13) * 50.0 - 560.0).floor() as i32
-}
+pub use crate::land::ground;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Block {
@@ -45,14 +43,23 @@ pub(crate) enum Block {
     Towers,
     /// A works yard: a few things that each stand, and so come down, in their own way.
     Yard,
+    /// Open country, past the town's edge: no streets, nothing built (land.rs says what the land is).
+    Open,
 }
 
 /// The yard everyone starts beside: the block across the street from where the page begins. The rule below puts a
 /// yard there by itself; naming it keeps it there, for the board's shots and the tests stand in it.
 pub const YARD: (i32, i32) = (0, 5);
 
+/// Whether a block lies past the town's edge.
+fn is_open(bx: i32, bz: i32) -> bool {
+    open(bx * BLOCK_X + BLOCK_X / 2, bz * BLOCK_Z + BLOCK_Z / 2) > 0.5
+}
+
 pub(crate) fn block(bx: i32, bz: i32) -> Block {
-    if ground(bx * BLOCK_X + BLOCK_X / 2, bz * BLOCK_Z + BLOCK_Z / 2) < 15 {
+    if is_open(bx, bz) {
+        Block::Open
+    } else if ground(bx * BLOCK_X + BLOCK_X / 2, bz * BLOCK_Z + BLOCK_Z / 2) < 15 {
         Block::Shore
     } else if (bx, bz) == YARD || hash(bx, bz, 23) % 17 == 0 {
         Block::Yard
@@ -697,6 +704,9 @@ fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
     if g < SEA + 6 {
         return (kind(SAND, OWN), 0);
     }
+    if is_open(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z)) {
+        return (country(x, z, g), 0);
+    }
     let (lx, lz) = (x.rem_euclid(BLOCK_X), z.rem_euclid(BLOCK_Z));
     let (along_z, along_x) = (lx < STREET, lz < STREET);
     if !along_z && !along_x {
@@ -720,6 +730,115 @@ fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
         return (kind(ASPHALT, colour(4, 3)), 0);
     }
     (asphalt, 0)
+}
+
+/// What open country is covered with at a column: the road, snow where it is high and not too steep, bare rock
+/// where it is steep, sand on the dry plain, forest floor under the pines, else grass.
+fn country(x: i32, z: i32, g: i32) -> Kind {
+    if let Some(off) = off_road(x, z) {
+        if off < 36 {
+            let along = x - HOME.0;
+            return if off < 1 && (along / 30) % 2 == 0 { kind(ASPHALT, colour(4, 3)) } else if off == 32 || off == 33 { kind(ASPHALT, WHITE) } else { kind(ASPHALT, OWN) };
+        }
+    }
+    let (p, d) = (peaks(x, z), dry(x, z));
+    // How steep: the most the ground changes over 1.6 m to either side, in cells a cell.
+    let steep = || {
+        let (a, b, c, e) = (ground(x - 16, z), ground(x + 16, z), ground(x, z - 16), ground(x, z + 16));
+        ((a - b).abs().max((c - e).abs())) as f32 / 32.0
+    };
+    if p > 0.0 {
+        let s = steep();
+        // The snow lies from about 650 m up, on all but the steepest faces; its line wanders by 130 m either way.
+        if g > 5200 + (noise(x, z, 5200, 41) * 2600.0) as i32 && s < 1.7 {
+            return kind(ROCK, WHITE);
+        }
+        if s > 0.85 || g > 5000 {
+            return kind(ROCK, grey(5 + (hash(x >> 5, z >> 5, 42) % 4) as u8));
+        }
+        if wooded(x, z, g) {
+            return kind(GRASS, colour(8, 6));
+        }
+    }
+    if d > 0.0 && unit(x >> 3, z >> 3, 43) < d * 1.4 {
+        if d > 0.5 && steep() > 0.7 {
+            return kind(ROCK, colour(1, 9));
+        }
+        // Paler and darker in drifts a few hundred metres across, speckled.
+        let tone = noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2;
+        return kind(SAND, colour(2, [9, 8, 8, 7][(tone as usize).min(3)]));
+    }
+    kind(GRASS, OWN)
+}
+
+/// Whether pines grow at a place: on the mountains' lower slopes and in the hills before them, in woods with
+/// clearings between, not up where the snow lies nor down by the sea.
+fn wooded(x: i32, z: i32, g: i32) -> bool {
+    g > 300 && g < 4800 && peaks(x, z) > 0.02 && noise(x, z, 2600, 45) > 0.42
+}
+
+/// Open country is cut into patches this many cells square, and each may hold one thing.
+const FIELD: i32 = 48;
+
+/// What stands in one patch of open country: a pine in the woods, a bush or a stone on the dry plain, now and
+/// then a tree in the grass.
+fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
+    if s.lod > 2 {
+        return;
+    }
+    let seed = hash(px, pz, 81);
+    let (x, z) = (px * FIELD + 6 + (seed % 36) as i32, pz * FIELD + 6 + ((seed >> 6) % 36) as i32);
+    let g = ground(x, z);
+    if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) {
+        return;
+    }
+    let sort = (seed >> 12) % 24;
+    if wooded(x, z, g) {
+        if sort < 17 {
+            stamp_pine(s, x, z, g, seed);
+        }
+    } else if dry(x, z) > 0.5 {
+        if sort < 4 {
+            let r = 3 + ((seed >> 17) % 4) as i32;
+            s.ball([x, g + r - 1, z], r, kind(LEAVES, colour(6, [8, 9, 9][(seed >> 20) as usize % 3])), 0, seed, None);
+        } else if sort == 4 {
+            let r = 3 + ((seed >> 17) % 8) as i32;
+            s.ball([x, g - r / 3, z], r, kind(ROCK, colour(1, 9)), 0, seed, None);
+        }
+    } else if sort == 0 && peaks(x, z) == 0.0 {
+        stamp_tree(s, x, z, seed, (ANYWHERE, ANYWHERE));
+    }
+}
+
+/// A pine: a trunk and tiers of needles that narrow to a point, the upper ones white where it stands near the snow.
+/// A tier is eight-sided (two oblongs crossed) and no wider than leaves hold from a trunk.
+fn stamp_pine(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
+    let tiers = 5 + ((seed >> 17) % 4) as i32;
+    let green = kind(LEAVES, colour(8 + (seed >> 20) as u8 % 2, [6, 6, 9][(seed >> 22) as usize % 3]));
+    s.fill([x - 1, g + 1, z - 1], [x + 2, g + 14 + tiers * 8, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
+    for tier in 0..tiers {
+        let (r, y) = ((3 + (tiers - 1 - tier) * 2).min(13), g + 12 + tier * 8);
+        let needles = if g > 3800 && tier * 2 >= tiers { kind(LEAVES, WHITE) } else { green };
+        let narrow = r * 3 / 5;
+        s.fill([x - r, y, z - narrow], [x + 1 + r, y + 5, z + 1 + narrow], needles, Meet::Middle);
+        s.fill([x - narrow, y, z - r], [x + 1 + narrow, y + 5, z + 1 + r], needles, Meet::Middle);
+    }
+    // The point.
+    s.fill([x - 1, g + 14 + tiers * 8, z - 1], [x + 2, g + 20 + tiers * 8, z + 2], if g > 3800 { kind(LEAVES, WHITE) } else { green }, Meet::Middle);
+}
+
+/// A pole by the road: a post and a bar across its top.
+fn stamp_pole(s: &mut Scratch, x: i32, z: i32) {
+    if s.lod > 2 {
+        return;
+    }
+    let g = ground(x, z);
+    if g < SEA + 10 {
+        return;
+    }
+    let wood = kind(WOOD, colour(2, 9));
+    s.fill([x, g + 1, z], [x + 2, g + 92, z + 2], wood, Meet::Touch);
+    s.fill([x, g + 84, z - 9], [x + 2, g + 86, z + 11], wood, Meet::Touch);
 }
 
 /// What stands at a column, for a copy too coarse for walls and windows: its top cell, its sides and its roof.
@@ -751,6 +870,7 @@ fn reach(b: Block) -> i32 {
         Block::Park => 90,
         Block::Shore => 90,
         Block::Yard => 220,
+        Block::Open => 130,
     }
 }
 
@@ -913,8 +1033,24 @@ pub fn make(s: &mut Scratch) {
                     }
                 }
             }
+            Block::Open => {}
         }
-        if sort != Block::Shore {
+        if sort == Block::Open {
+            // Open country, patch by patch: the patches of this block that reach into the sector.
+            for pz in (lo[2] - 40).max(z0).div_euclid(FIELD)..=(hi[2] + 40).min(z0 + BLOCK_Z - 1).div_euclid(FIELD) {
+                for px in (lo[0] - 40).max(x0).div_euclid(FIELD)..=(hi[0] + 40).min(x0 + BLOCK_X - 1).div_euclid(FIELD) {
+                    stamp_country(s, px, pz);
+                }
+            }
+            // Poles along the north side of the road, one every 40 m.
+            if z0 <= HOME.1 - 70 && HOME.1 - 70 < z0 + BLOCK_Z {
+                for pole in (lo[0] - 40).max(x0).div_euclid(400)..=(hi[0] + 40).min(x0 + BLOCK_X - 1).div_euclid(400) {
+                    if pole * 400 >= x0 && pole * 400 > HOME.0 {
+                        stamp_pole(s, pole * 400, HOME.1 - 70);
+                    }
+                }
+            }
+        } else if sort != Block::Shore {
             // Along the street on the block's low z side and the one on its low x side: cars parked at both kerbs,
             // and now and then something small on the pavement.
             for (along_x, length) in [(true, BLOCK_X - STREET), (false, BLOCK_Z - STREET)] {
@@ -963,6 +1099,32 @@ mod tests {
     /// The ground a sector of the finest cells stands on, at its middle.
     fn sector_at_ground(x: i32, z: i32) -> (i32, i32, i32) {
         (x.div_euclid(64), ground(x, z).div_euclid(64), z.div_euclid(64))
+    }
+
+    /// The town is the same town, cell for cell: sectors at the start, in the yard, on the lake and its floor, and out
+    /// to 2.5 km, at every coarseness the page draws them at, made and summed. The board's judged pictures, the bench's
+    /// views and the flight all stand inside this. A change to the land round the town, or to anything else, that
+    /// moves a cell here fails; if the town was meant to change, the pictures and the baseline are to be taken
+    /// again and the sum set to what the failure prints.
+    #[test]
+    fn the_town_is_cell_for_cell_what_it_was() {
+        let mut sum = 0xcbf29ce484222325u64;
+        let mut s = Scratch::new();
+        let places: [(i32, i32); 12] = [(700, 4070), (400, 4250), (700, 4190), (940, 4550), (680, 4040), (-12000, 4070), (-16300, 4070), (-12760, 3980), (30700, 4070), (15000, 15000), (-20000, -10000), (0, 25000)];
+        for (n, &(x, z)) in places.iter().enumerate() {
+            // Coarse copies only round the start: further out their sectors reach past the town.
+            for lod in if n == 0 { 0..9u32 } else { 0..4u32 } {
+                let side = (SIDE as i32) << lod;
+                for up in 0..2 {
+                    s.start(x.div_euclid(side), ground(x, z).div_euclid(side) + up, z.div_euclid(side), lod);
+                    make(&mut s);
+                    for &k in &s.cells {
+                        sum = (sum ^ k as u64).wrapping_mul(0x100000001b3);
+                    }
+                }
+            }
+        }
+        assert_eq!(sum, 11921755020700526686, "the town's sum");
     }
 
     /// Looking for earth laid bare: in the yard across from the start, at each coarseness, how many columns of a

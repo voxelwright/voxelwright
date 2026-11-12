@@ -32,6 +32,16 @@ try {
   // With no window lit the lamps alone leave 0.6% of this picture bright; with them it is 1.1%.
   check(night.bright > 0.0085, `and windows are lit in it: ${percent(night.bright)} of the picture is bright`)
 
+  // No lamp stands in open country: over the dry plain east of the town the night has nothing lit in it. (The page
+  // works the lamps' light out from where the town's rule stands lamps, and once did so on bare land too.)
+  const here = await page.evaluate(() => ({ ...globalThis.engine.pose }))
+  await page.evaluate(() => Object.assign(globalThis.engine.pose, { x: 6100, z: 407, y: globalThis.engine.ground(6100, 407) + 30, yaw: Math.PI / 2, pitch: -0.25 }))
+  await at(22)
+  const plain = await look()
+  // With the lamps' light on it the plain was 19% of full and 0.15% of it bright.
+  check(plain.bright < 0.0005 && plain.mean < 0.14, `at night over the plain nothing is lit: ${percent(plain.bright)} of the picture is bright, ${percent(plain.mean)} of full on the whole`)
+  await page.evaluate((p) => Object.assign(globalThis.engine.pose, p), here)
+
   await at(null)
   const again = await look()
   check(Math.abs(again.mean - day.mean) < 0.02, `with no hour asked the day is back: ${percent(again.mean)} of full, ${percent(day.mean)} before`)

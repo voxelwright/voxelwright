@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
+import { COUNT, FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { puffs } from './puffs.ts'
 import { ball, rows, stream, type Edit } from './edits.ts'
@@ -486,6 +486,30 @@ async function main() {
   }
 
   /**
+   * How many steps the rays of a picture from here take (with the flags given): the mean for a pixel and the most. Time on the GPU is steps times what a step costs: this says which
+   * of the two a change moved. For the bench and for finding what is slow.
+   */
+  const steps = async (withFlags = flags) => {
+    // At the size the page draws at: what is drawn as one block goes by how big a pixel is.
+    const size: [number, number] = [canvas.width, canvas.height], v = view()
+    const to = offscreen(gpu, size), read = device.createBuffer({ size: size[0] * size[1] * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    const encoder = device.createCommandEncoder()
+    paused = true
+    march.draw(encoder, to, v, (withFlags & ~HEAT) | COUNT, 0)
+    encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read, bytesPerRow: size[0] * 4 }, size)
+    device.queue.submit([encoder.finish()])
+    await read.mapAsync(GPUMapMode.READ)
+    const bytes = new Uint8Array(read.getMappedRange().slice(0))
+    read.unmap(); read.destroy(); to.destroy()
+    paused = false
+    // The count is in the first two colours, low byte first; a picture kept blue-first has them the other way about.
+    const low = gpu.format.startsWith('bgra') ? 2 : 0
+    let sum = 0, most = 0
+    for (let i = 0; i < bytes.length; i += 4) { const n = bytes[i + low] + bytes[i + 1] * 256; sum += n; most = Math.max(most, n) }
+    return { mean: sum / (bytes.length / 4), most }
+  }
+
+  /**
    * How much of the picture from here differs between shadows from the sun's maps and shadows traced: the share
    * of pixels (of a small picture) that differ by more than a tenth of the range in any colour. For the checks.
    */
@@ -537,7 +561,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.
