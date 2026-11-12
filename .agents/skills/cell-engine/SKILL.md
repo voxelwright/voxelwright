@@ -408,7 +408,7 @@ and now reads 0.45 to 0.65; the phone-shaped flight (the Mac in a phone's settin
 full size" (November 11) held only where the town was in view, near the ground. What a real
 phone holds from high up is not known.
 
-Filmed November 13 (`clip`, sparks on): ruin, six charges of 32, 960 frames in 16 s, no gap over
+Filmed November 12 (`clip`, sparks on): ruin, six charges of 32, 960 frames in 16 s, no gap over
 16.7 ms, 2,396 bodies, 1,230 at once; rubble, three charges of 32, 720 frames in 12 s, no gap
 over 16.7 ms, 1,780 bodies, 923 at once.
 
@@ -503,7 +503,7 @@ front coming down, staying down and losing no cell.
   lamp's pool of light by where the town's rule stands lamps: a house brought down leaves no
   lit windows, but a lamp knocked down still lights the crossing.
 
-## The hour (November 13)
+## The hour (November 12)
 
 - `?hour=`, the `[` and `]` keys or `engine.hour` set the time of day (`main.ts` `setHour`): the
   sun's place, `day` (1 by day, 0 at night) and `low` (1 with the sun at the horizon). The
@@ -521,3 +521,19 @@ front coming down, staying down and losing no cell.
 - `test/kit.mjs` `city()` fails at once when the page fails as it starts (a shader that does not
   compile). Before, it waited 90 s, and a scratch script piped through `grep` hung for ever
   because the page server it had started kept the pipe open: send output to a file.
+
+## Water seen from the shore (November 12)
+
+- The sea's top layer is cell -1, not 0 (`city.rs` `SEA`). `-1 >> k` is -1 at every coarseness,
+  so the sea lies level across all the boxes. With 0 a coarse sea cell stood 2^k cells high: a
+  step up at each box's edge, seen from the shore as dark lines across the water. A coarse
+  column under the sea keeps one cell of water over its ground however shallow the water, so
+  far water stays water.
+- A wave tilted towards the eye sends the mirrored look down into the water it came off: dark
+  specks all over the middle distance. The look is kept at or above level for water.
+- Ripples are smooth noise and fade out by 60 m; further off there are many waves to a pixel.
+  The sun's path (and the moon's) is added as thrown-back light, not through the mirror's
+  mix, so it reaches from the far shore to the near one.
+- `engine.ground(x, z)` is the sea's floor where there is sea: a stand worked out from it over
+  water is under water. Stand on land.
+- Lamp pools are worked out from the block rule and fell on the sea too; water takes none.

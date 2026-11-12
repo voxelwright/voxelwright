@@ -21,8 +21,10 @@ const LOTS: i32 = 15;
 const STOREY: i32 = 30;
 const TOWER_WIDE: i32 = 380;
 const TOWER_STOREY: i32 = 36;
-/// The sea's top layer of cells.
-pub const SEA: i32 = 0;
+/// The sea's top layer of cells. It is under zero so that it is the same layer at every coarseness (-1 >> k is -1):
+/// the sea lies level from the finest copy to the coarsest. With 0 here a coarse cell of sea stood 2^k cells
+/// high, a step up at the edge of every box, seen from the shore as dark lines across the water.
+pub const SEA: i32 = -1;
 /// Nothing but earth lies further than this under the ground.
 pub const DEEP: i32 = 192;
 
@@ -743,7 +745,9 @@ pub fn make(s: &mut Scratch) {
             let (x, z) = (((s.low[0] + cx) << k) + half, ((s.low[2] + cz) << k) + half);
             let g = ground(x, z);
             let (top, raise) = surface(x, z, g);
-            let gy = (g >> k) - s.low[1];
+            // Under the sea a coarse column keeps a cell of water over its ground, however shallow the water: far
+            // water stays water.
+            let gy = if g < SEA { (g >> k).min((SEA >> k) - 1) } else { g >> k } - s.low[1];
             let (ux, uz) = (cx as usize, cz as usize);
             for y in 0..gy.clamp(0, side) {
                 s.cells[at(ux, y as usize, uz)] = EARTH_KIND;

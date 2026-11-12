@@ -80,7 +80,8 @@ struct Globals {
   // the light that comes straight (the sun's or the moon's) with how much of it the ground throws back; the sky's
   // fill from above with how much comes from under; the sky overhead with the power its blend to the horizon goes
   // by; the horizon away from the sun with how strong a low sun's wide glow is; the horizon towards the sun; the
-  // clouds' tint away from the sun and towards it. The last three carry where the sun is on the horizon (x, z).
+  // clouds' tint away from the sun and towards it. The last three carry where the sun is on the horizon (x, z) and
+  // how bright the sun's own disc is.
   lightSun: vec4f, lightFill: vec4f, skyZenith: vec4f, skyHorizon: vec4f, skyHorizonSun: vec4f, cloudTint: vec4f, cloudTintSun: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
@@ -543,7 +544,7 @@ fn sky(rd: vec3f) -> vec3f {
   var col = skyBase(rd);
   let toward = max(dot(rd, g.sun), 0.0);
   // The sun, or at night the moon: a disc and the brightness round it.
-  if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * 30.0 + pow(toward, 60.0) * 0.35) * g.day; }
+  if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35) * g.day; }
   if (g.day < 1.0) { col += vec3f(0.8, 0.86, 1.0) * (smoothstep(0.99975, 0.9998, toward) * 0.9 + pow(toward, 400.0) * 0.06) * (1.0 - g.day); }
   if (g.day < 0.98 && rd.y > 0.0) {
     // Stars: one in some of the small squares the sky is cut into, the brighter the fewer.
@@ -560,7 +561,7 @@ fn sky(rd: vec3f) -> vec3f {
       // Bright where it is thin, at its edges; grey in its thick middle.
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
       // Lit by whatever lights the day: gold and rose under a low sun, on the side towards it most; dark at night.
-      if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward * toward); }
+      if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward); }
       col = mix(col, body * 1.25, cover * 0.92);
     }
   }
@@ -714,7 +715,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
   var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
   if (g.day < 0.98) {
-    let dark = 1.0 - g.day;
+    // Windows and lamps are lit well before the day has gone.
+    let dark = 1.0 - smoothstep(0.55, 0.95, g.day);
     let fine = hit.cell * i32(1u << hit.level);
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
@@ -726,9 +728,10 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
     }
     // The lamps at each crossing: their light falls on what is under and round them. Where the lamps are is the
-    // town's rule (city.rs), so the light is worked out from the place; a lamp knocked down still casts it.
+    // town's rule (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp
+    // stands in the sea.
     var pool = 0.0;
-    for (var k = 0; k < 4; k++) {
+    for (var k = 0; k < 4 && stuff != 5u; k++) {
       let lamp = array<vec2f, 4>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0))[k];
       // The same lamps stand at the next crossings along: the nearest of them is the one that counts.
       var d = abs(block - lamp);
@@ -802,10 +805,15 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       if (dot(n, n) < 0.5) { n = -rd; }
       let p = g.eye + rd * hit.t;
       if ((hit.kind & 15u) == 5u) {
-        let ripple = vec2f(hash3i(vec3i(floor(p * 0.5 + g.time * 1.3)), 7u), hash3i(vec3i(floor(p.zyx * 0.5 - g.time * 1.1)), 8u)) - 0.5;
-        n = normalize(n + vec3f(ripple.x, 0.0, ripple.y) * 0.06);
+        // Small waves, drawn as themselves only near: further off there are many to a pixel and they are noise.
+        let ripple = vec2f(noise2(p.xz * 0.11 + vec2f(g.time * 0.5, g.time * 0.31)), noise2(p.zx * 0.13 - vec2f(g.time * 0.43, g.time * 0.27))) - 0.5
+          + (vec2f(noise2(p.xz * 0.37 - vec2f(g.time * 0.9, 0.0)), noise2(p.zx * 0.41 + vec2f(0.0, g.time * 0.8))) - 0.5) * 0.5;
+        n = normalize(n + vec3f(ripple.x, 0.0, ripple.y) * 0.16 * clamp(600.0 / hit.t, 0.0, 1.0));
       }
-      let back = reflect(rd, n);
+      var back = reflect(rd, n);
+      // A wave tilted towards the eye would send the look down into the water it came off, a dark speck: seen
+      // from low over water the waves hide those sides of each other, and what shows is sky.
+      if ((hit.kind & 15u) == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
       let safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
       let lift = 0.05 / g.level[hit.level].scale;
       // What is across is asked of the world only where it can be made out: glass a pane of which is two pixels or
@@ -819,9 +827,21 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
         seen = sky(safe);
         if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
       }
+      // The sun's path on water, or the moon's: all the small waves together smear its image into a streak that runs
+      // over the water towards it, narrow across and long, glinting. It is light thrown back, not a picture in a
+      // mirror, so it shows however steeply the water is looked at.
+      var path = 0.0;
+      if ((hit.kind & 15u) == 5u) {
+        let flat = reflect(rd, vec3f(0.0, 1.0, 0.0));
+        let across = dot(normalize(flat.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a));
+        let rise = flat.y - g.sun.y;
+        let glint = 0.35 + 1.3 * noise2(p.xz * 0.05 + vec2f(g.time * 1.1, g.time * 0.8)) * noise2(p.zx * 0.21 - vec2f(g.time * 0.7, g.time * 1.3));
+        path = pow(max(across, 0.0), 300.0) * exp(-rise * rise * 5.0) * glint;
+      }
       let facing = 1.0 - max(dot(-rd, n), 0.0);
       let fresnel = 0.04 + 0.96 * pow(facing, 5.0);
       col = mix(col, seen, clamp(m.mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));
+      col += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 2.2, g.day) * path;
     }
     col = air(col, rd, hit.t);
   }
@@ -910,11 +930,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     f.set([
       ...mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), day * (1 - 0.5 * low),
       ...times(mix([0.3, 0.4, 0.58], [0.34, 0.3, 0.42], low), 0.1 + 0.9 * day), 0.1 + 0.9 * day,
-      ...hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.1, 0.15, 0.4]), 0.42 + 0.18 * low,
-      ...hour(dark, [0.66, 0.79, 0.93], [0.62, 0.5, 0.56]), 0.3 * low * day,
-      ...hour(dark, [0.66, 0.79, 0.93], [1, 0.5, 0.2]), sx / flat,
-      ...hour(cloudy, white, [0.72, 0.5, 0.52]), sz / flat,
-      ...hour(cloudy, white, [1, 0.62, 0.36]), 0,
+      ...hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.07, 0.11, 0.36]), 0.42 + 0.18 * low,
+      ...hour(dark, [0.66, 0.79, 0.93], [0.6, 0.44, 0.5]), 0.6 * low * day,
+      ...hour(dark, [0.66, 0.79, 0.93], [1, 0.45, 0.12]), sx / flat,
+      ...hour(cloudy, white, [0.55, 0.36, 0.48]), sz / flat,
+      ...hour(cloudy, white, [1, 0.5, 0.2]), 30 - 18 * low,
     ], 36 + MAX_LEVELS * 28)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
