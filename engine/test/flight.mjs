@@ -35,17 +35,22 @@ try {
   for (;;) {
     await page.waitForTimeout(500)
     last = (await kept()).at(-1)
-    if (last?.stage === 'flight' || last?.stage === 'error' || Date.now() - t0 > 240_000) break
+    if (last?.stage === 'breaks' || last?.stage === 'error' || Date.now() - t0 > 240_000) break
   }
   if (shot) await page.screenshot({ path: shot })
   const all = await kept()
-  for (const stage of ['start', 'made', 'places', 'flight']) check(all.some((r) => r.stage === stage), `no "${stage}" report was kept`)
+  for (const stage of ['start', 'made', 'places', 'flight', 'breaks']) check(all.some((r) => r.stage === stage), `no "${stage}" report was kept`)
   check(last?.stage !== 'error', `the page failed: ${last?.notes?.join(' | ')}`)
   check(!last?.faults?.length, `the device reported: ${last?.faults?.join(' | ')}`)
   check(last?.places?.length === 5 && last.places.every((p) => p.rays > 0 && p.shadows > 0 && p.all > 0), 'a place has no timings')
   check(last?.world?.full === 0 && last?.full === 0, `${last?.world?.full} sectors did not fit`)
   if (phone) check(last?.env?.touch > 0 && last?.world?.grid?.join() === '8,8,8' && last?.world?.levels === 8, `the page did not take a phone's settings (touch ${last?.env?.touch}, grid ${last?.world?.grid})`)
   check(last?.places?.every((p) => p.undrawn === 0), `sun maps were not all drawn at a place: ${last?.places?.map((p) => p.undrawn).join(' ')}`)
+  const tree = last?.breaks?.find((b) => b.name === 'tree'), fronts = last?.breaks?.filter((b) => b.name === 'front') ?? []
+  check(tree?.hit && tree.cells > 3000, `the cut tree did not come down (${tree?.cells} cells)`)
+  check(fronts.length === 5 && fronts.every((b) => b.hit) && fronts.reduce((n, b) => n + b.cells, 0) > 300, `the house front did not come down (${fronts.map((b) => b.cells).join(' ')} cells)`)
+  check(last?.breaks?.every((b) => !b.late), 'a break was not over in 15 s')
+  check(!last?.notes?.some((n) => n.startsWith('settl')), `settling failed: ${last?.notes?.join(' | ')}`)
   check(last?.world?.whole === last?.world?.levels, `only ${last?.world?.whole} of ${last?.world?.levels} boxes were whole`)
 } catch (e) {
   failures.push(String(e))

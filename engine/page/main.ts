@@ -25,7 +25,7 @@ const phone = navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.heig
 
 /** Cells in a metre. */
 const M = 10
-const { report, post } = reporter('city-3')
+const { report, post } = reporter('city-4')
 const flying = (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
 
 async function main() {
@@ -249,6 +249,7 @@ async function main() {
   const landAll = () => { for (const d of dropping) if (!d.landed) land(d) }
   settler.onmessage = (e: MessageEvent<Settled>) => {
     waiting--
+    if (e.data.failed) report.notes.push(`settling failed: ${e.data.failed}`)
     // An answer to an older blast describes a world that has changed since.
     if (e.data.id !== asked) return
     const now = performance.now()
@@ -264,7 +265,10 @@ async function main() {
       end = Math.max(end, lands)
       dropping.push({ fall, start, lands, piece: null, landed: false, shown: 0 })
     }
+    // Broken by hand, a device says so too: what fell and how the frames are.
+    if (!flying) { report.hand = { ...fell, fps: Math.round(1000 / frameMs), scale }; void post('hand') }
   }
+  settler.onerror = (e) => { waiting = Math.max(0, waiting - 1); report.notes.push(`settler: ${e.message}`) }
   /** Moves what is falling on to `now`. */
   const fallOn = (now: number) => {
     for (const d of dropping) {
@@ -362,6 +366,9 @@ async function main() {
       now: () => ({ frameMs, gpuMs, scale }),
       watch: (each) => { watchers.add(each); return () => watchers.delete(each) },
       say: (text) => { saying = text },
+      blast,
+      falling: () => ({ settling: waiting > 0, dropping: dropping.length, pieces: fell.pieces, cells: fell.cells, ms: fell.ms }),
+      breaks: query.get('breaks') !== '0',
       seconds: Number(query.get('seconds') ?? 40),
     })
     saying = 'Measured and sent. Fly where you like'

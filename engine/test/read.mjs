@@ -34,6 +34,8 @@ for (const r of runs.values()) {
     console.log(`         p95 gap ms: ${s.map((x) => x.p95).join(' ')}`)
     console.log(`         scale:      ${s.map((x) => x.scale).join(' ')}`)
   }
+  for (const b of r.breaks ?? []) console.log(`  break  ${b.name.padEnd(5)} ${b.hit ? '' : '(missed) '}${b.pieces} pieces, ${b.cells} cells; worked out in ${b.workedMs} ms, answered after ${b.answeredMs} ms, town whole again after ${b.allMs} ms${b.late ? ' (gave up waiting)' : ''}; ${b.frames} frames, gaps p50 ${b.p50} p95 ${b.p95} max ${b.max} ms, ${b.long} over 25 ms; scale ${b.scale}`)
+  if (r.hand) console.log(`  hand   ${r.hand.asks} breaks: ${r.hand.pieces} pieces, ${r.hand.cells} cells fell; the last worked out in ${Math.round(r.hand.ms)} ms; ${r.hand.fps} fps at scale ${r.hand.scale}`)
   if (r.notes?.length) console.log(`  notes  ${r.notes.join(' | ')}`)
   if (r.faults?.length) console.log(`  faults ${r.faults.join(' | ')}`)
 }

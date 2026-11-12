@@ -40,7 +40,7 @@ cd engine/core && cargo test --release
 cd engine && npm run typecheck
 node test/probe.mjs     # the probe page in Chrome with WebGPU, its report read back
 node test/city.mjs      # the city made, looked at from five places
-node test/flight.mjs    # the measuring flight, each part's report read back (--phone: as a phone)
+node test/flight.mjs    # the measuring flight, then a tree cut and a house front broken, each part's report read back (--phone: as a phone)
 node test/blast.mjs     # glass breaks further than a wall
 node test/shadows.mjs   # the sun's maps against traced shadows: still, after moving, after a blast
 node test/falls.mjs     # a tree with its trunk cut comes down and lies as cells

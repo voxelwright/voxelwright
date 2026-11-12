@@ -31,6 +31,12 @@ export interface Flown {
   say(text: string): void
   /** How long to fly between the places at the end, seconds. */
   seconds: number
+  /** Breaks what is straight ahead, as a hand would; null for sky. */
+  blast(radius: number): Promise<unknown>
+  /** What is falling: whether a blast is still being worked out, pieces not yet part of the town again, and all that has fallen so far. */
+  falling(): { settling: boolean; dropping: number; pieces: number; cells: number; ms: number }
+  /** Whether to break things at the end. */
+  breaks: boolean
 }
 
 const DEG = Math.PI / 180
@@ -110,6 +116,42 @@ export async function flight(f: Flown) {
     stop()
     report.full = world.stats.full
     await f.post('flight')
+  }
+  if (f.breaks) {
+    // Last, so that nothing above is timed in a broken town: a street tree's trunk is cut, then five charges go
+    // across a house front. Each is watched until what it left unheld has landed and the town is made again.
+    const front = { x: street.x, y: street.y + 3.5, z: street.z - 4, pitch: 0.22 }
+    const aims: [string, Pose, number][] = [
+      ['tree', { x: street.x - 1, y: street.y + 1.8, z: street.z - 0.83, yaw: -0.88, pitch: -0.086 }, 6],
+      ...[-0.22, 0, 0.22, -0.11, 0.11].map((turn): [string, Pose, number] => ['front', { ...front, yaw: 3.3 + turn }, 16]),
+    ]
+    const still = () => world.stats.wanted === 0 && world.stats.stale === 0
+    const broken: Record<string, unknown>[] = report.breaks = []
+    for (const [i, [name, at, radius]] of aims.entries()) {
+      f.say(`Breaking a ${name === 'tree' ? 'tree' : 'house front'} (${i + 1} of ${aims.length})`)
+      Object.assign(pose, at)
+      let t0 = performance.now()
+      for (;;) { const now = await nextFrame(); if ((still() && march.sun.undrawn === 0 && now - t0 > 400) || now - t0 > 10_000) break }
+      const before = f.falling(), gaps: number[] = []
+      const stop = f.watch((gap) => gaps.push(gap))
+      t0 = performance.now()
+      const hit = await f.blast(radius)
+      let answered = 0, late = false
+      for (;;) {
+        const now = await nextFrame(), s = f.falling()
+        if (!answered && !s.settling) answered = now - t0
+        if (!s.settling && s.dropping === 0 && still()) break
+        if (now - t0 > 15_000) { late = true; break }
+      }
+      stop()
+      gaps.sort((p, q) => p - q)
+      const after = f.falling(), live = f.now()
+      broken.push({
+        name, hit: hit !== null, pieces: after.pieces - before.pieces, cells: after.cells - before.cells, workedMs: Math.round(after.ms), answeredMs: Math.round(answered), allMs: Math.round(performance.now() - t0), late,
+        frames: gaps.length, p50: round(gaps[gaps.length >> 1] ?? 0, 1), p95: round(gaps[Math.floor(gaps.length * 0.95)] ?? 0, 1), max: round(gaps[gaps.length - 1] ?? 0, 1), long: gaps.filter((g) => g > 25).length, scale: live.scale,
+      })
+    }
+    await f.post('breaks')
   }
   Object.assign(pose, places[0][1])
   f.say('')

@@ -15,7 +15,7 @@ export interface Fall {
   round: number
   cells: number
 }
-export interface Settled { id: number; falls: Fall[]; dust: number; ms: number }
+export interface Settled { id: number; falls: Fall[]; dust: number; ms: number; /** Why nothing could be worked out, when it could not. */ failed?: string }
 
 interface Core {
   memory: WebAssembly.Memory
@@ -26,25 +26,31 @@ interface Core {
 const ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
 
 self.onmessage = async (e: MessageEvent<{ id: number; edits: Int32Array; at: [number, number, number] }>) => {
-  const core = await ready, { id, edits, at } = e.data, t0 = performance.now()
-  const roomAt = core.edits_room(edits.length)
-  new Int32Array(core.memory.buffer, roomAt, edits.length).set(edits)
-  const n = core.settle_round(at[0], at[1], at[2])
-  const words = new Int32Array(core.memory.buffer, core.settled_words(), n)
-  const falls: Fall[] = [], keep: ArrayBuffer[] = []
-  let i = 2
-  for (let m = 0; m < words[0]; m++) {
-    const runs = words[i + 9], faces = words[i + 10], from = i + 11
-    const fall: Fall = {
-      drop: words[i], round: words[i + 1], cells: words[i + 2],
-      box: [words[i + 3], words[i + 4], words[i + 5], words[i + 6], words[i + 7], words[i + 8]],
-      runs: words.slice(from, from + runs * 5),
-      faces: new Uint32Array(words.slice(from + runs * 5, from + runs * 5 + faces * 2).buffer),
+  const { id, edits, at } = e.data, t0 = performance.now()
+  try {
+    const core = await ready
+    const roomAt = core.edits_room(edits.length)
+    new Int32Array(core.memory.buffer, roomAt, edits.length).set(edits)
+    const n = core.settle_round(at[0], at[1], at[2])
+    const words = new Int32Array(core.memory.buffer, core.settled_words(), n)
+    const falls: Fall[] = [], keep: ArrayBuffer[] = []
+    let i = 2
+    for (let m = 0; m < words[0]; m++) {
+      const runs = words[i + 9], faces = words[i + 10], from = i + 11
+      const fall: Fall = {
+        drop: words[i], round: words[i + 1], cells: words[i + 2],
+        box: [words[i + 3], words[i + 4], words[i + 5], words[i + 6], words[i + 7], words[i + 8]],
+        runs: words.slice(from, from + runs * 5),
+        faces: new Uint32Array(words.slice(from + runs * 5, from + runs * 5 + faces * 2).buffer),
+      }
+      falls.push(fall)
+      keep.push(fall.runs.buffer, fall.faces.buffer)
+      i = from + runs * 5 + faces * 2
     }
-    falls.push(fall)
-    keep.push(fall.runs.buffer, fall.faces.buffer)
-    i = from + runs * 5 + faces * 2
+    const answer: Settled = { id, falls, dust: words[1], ms: performance.now() - t0 }
+    ;(self as unknown as Worker).postMessage(answer, keep)
+  } catch (failed) {
+    // Out of memory, most likely: the page is told, so that a device can report it.
+    ;(self as unknown as Worker).postMessage({ id, falls: [], dust: 0, ms: performance.now() - t0, failed: String(failed) } satisfies Settled)
   }
-  const answer: Settled = { id, falls, dust: words[1], ms: performance.now() - t0 }
-  ;(self as unknown as Worker).postMessage(answer, keep)
 }
