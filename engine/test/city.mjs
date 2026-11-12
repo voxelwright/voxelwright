@@ -30,6 +30,12 @@ try {
     const took = await made()
     await page.waitForTimeout(1500)
     const m = await page.evaluate(() => ({ gpuMs: globalThis.engine.gpuMs, frameMs: globalThis.engine.frameMs }))
+    // Looking down from up high, there is a town to see. From 100 m up there was none: a box with nothing in it sent
+    // every downward ray past all the others, and nothing asked.
+    if (pitch < -15) {
+      const seen = await page.evaluate(() => globalThis.engine.pick())
+      if (!seen) failures.push(`from the ${name} place the look ahead and down met nothing`)
+    }
     console.log(`  ${name}: made in ${(took / 1000).toFixed(1)} s, march ${m.gpuMs.toFixed(2)} ms, frame ${m.frameMs.toFixed(1)} ms`)
     if (out) await page.screenshot({ path: `${out}/${name}.png` })
   }

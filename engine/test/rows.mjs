@@ -184,7 +184,8 @@ export const ROWS = [
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'none' },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'none' },
   { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
-    stand: [0, 130, 0, 30, -22] },
+    // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
+    stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },
   { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'none' },
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'none' },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'none' },

@@ -382,6 +382,20 @@ pick; reasoning about the shader alone had cleared it three times.
   street. The street things still cost 16% more rays at street level and the shop and car glass
   3 ms of mirrors: the baseline is theirs.
 
+## From 100 m up the town was not drawn (`trace`, the jump to a box's roofs)
+
+A box with nothing in it has its roofs at the bottom of everything (-1e9). A ray coming down in
+it was sent to those roofs, which put it past every box, and it met nothing: with the eye more
+than about 100 m over the ground the finest box is empty, and the whole town was the colour of
+the haze. The jump is now no further than to where the ray leaves the box. It had been so since
+the roofs were first skipped; the bench's `far` place (2.8 ms) and half of `high` had been timing
+an empty picture, and the board's `whole` row was that picture. `test/city.mjs` now fails when a
+look down from its high places meets nothing. Seen whole, the town costs 37 to 43 ms at full size
+from those places (60 frames a second at 0.4): that is the next thing to make cheaper.
+
+Both this and the pits (above) are one rule: nothing that moves a ray along may take it past
+`leaveAt`.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as

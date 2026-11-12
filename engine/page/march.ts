@@ -298,7 +298,9 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       // A ray is only ever in a box it is inside of now: it never goes back to finer cells.
       if (comeAt > t || leaveAt <= t) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
       // Over everything in this box and coming down: skip to where the roofs begin.
-      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof) { t = (lv.roof - ro.y) * inv.y + eps; }
+      // No further than to where the ray leaves the box: a box with nothing in it has its roofs at the bottom of
+      // everything, and a ray sent there was past every box. From 100 m up the town was not drawn at all.
+      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof) { t = min((lv.roof - ro.y) * inv.y, leaveAt) + eps; }
     }
     if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
     let q = q0 + rd * (t * lv.scale);
