@@ -450,11 +450,11 @@ async function main() {
   use = () => void tools[tool].use()
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
-  const pick = async (right = 0, up = 0) => {
+  const pick = async (right = 0, up = 0, plain = false) => {
     pose.yaw += right; pose.pitch += up
     const v = view()
     pose.yaw -= right; pose.pitch -= up
-    return march.pick(v)
+    return march.pick(v, plain)
   }
 
   /**

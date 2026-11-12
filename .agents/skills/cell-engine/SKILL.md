@@ -396,6 +396,22 @@ from those places (60 frames a second at 0.4): that is the next thing to make ch
 Both this and the pits (above) are one rule: nothing that moves a ray along may take it past
 `leaveAt`.
 
+`test/skips.mjs` (in `npm run check`) holds the rule: 240 looks from 20 to 800 m up, level to
+straight down, are asked with the skips and with `PLAIN` (flag 64: no roof skips and no step
+over 4 x 4 x 4 empty sectors), and must meet the same thing at the same distance. With either
+old fault put back it fails (193 and 29 looks). The step over 4 x 4 x 4 sectors is counted from
+the box's own slots and could reach outside the box too; it is held to `leaveAt` as well.
+
+What the empty picture had been telling us: the Mac flight's picture size read 1 in mid flight
+and now reads 0.45 to 0.65; the phone-shaped flight (the Mac in a phone's settings) now drops to
+53 to 58 frames a second over its high legs; and the iPhone's "60 frames a second for 39 s at
+full size" (November 11) held only where the town was in view, near the ground. What a real
+phone holds from high up is not known.
+
+Filmed November 13 (`clip`, sparks on): ruin, six charges of 32, 960 frames in 16 s, no gap over
+16.7 ms, 2,396 bodies, 1,230 at once; rubble, three charges of 32, 720 frames in 12 s, no gap
+over 16.7 ms, 1,780 bodies, 923 at once.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as
@@ -421,7 +437,7 @@ Both this and the pits (above) are one rule: nothing that moves a ray along may 
 
 ## Checks, and the bar
 
-`npm run check` in `engine/` runs everything in four to six minutes (237 to 333 s on November 12): `cargo test`, `tsc`, and
+`npm run check` in `engine/` runs twelve checks in four to six minutes (199 to 333 s on November 12 and 13): `cargo test`, `tsc`, and
 the real page in the installed Chrome with WebGPU (`test/city.mjs`, `blast.mjs`, `shadows.mjs`,
 `falls.mjs`, `flight.mjs`, `flight.mjs --phone`, `probe.mjs`), sharing one server and one
 browser through `test/kit.mjs`. None stubs anything. `cargo test` holds the support rule to:

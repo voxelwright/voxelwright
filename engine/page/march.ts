@@ -259,6 +259,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   var t = t0;
   var n = vec3f(0.0);
   var L = level0;
+  let plain = (g.flags & 64u) != 0u;
   // The nodes the ray is inside, kept from step to step: how deep they go (1 a sector, 2 a mid, 3 a leaf), a cell in them, their masks.
   var have = 0u;
   var held = vec3i(0);
@@ -300,7 +301,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       // Over everything in this box and coming down: skip to where the roofs begin.
       // No further than to where the ray leaves the box: a box with nothing in it has its roofs at the bottom of
       // everything, and a ray sent there was past every box. From 100 m up the town was not drawn at all.
-      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof) { t = min((lv.roof - ro.y) * inv.y, leaveAt) + eps; }
+      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof && !plain) { t = min((lv.roof - ro.y) * inv.y, leaveAt) + eps; }
     }
     if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
     let q = q0 + rd * (t * lv.scale);
@@ -332,7 +333,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
         across = 64.0;
         corner = vec2f(kSec.xz * 64);
       }
-      if (q.y > roofTop) {
+      if (q.y > roofTop && !plain) {
         let o = ((corner + ahead.xz * across) - q0.xz) * k.xz;
         let leave = min(o.x, o.y);
         if (q0.y + rd.y * (leave * lv.scale) > roofTop) {
@@ -351,7 +352,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       }
       let at = base + SLOTS + 2u * (sup.x + (GRID.x >> 2u) * (sup.z + (GRID.z >> 2u) * sup.y));
       if (at != supAt) { supAt = at; supLo = top[at]; supHi = top[at + 1u]; }
-      if ((supLo | supHi) == 0u) {
+      if ((supLo | supHi) == 0u && !plain) {
         size = 256;
         low = (kSec - vec3i(w & vec3u(3u))) * 64;
       } else if (!has(supLo, supHi, (w.x & 3u) + 4u * (w.z & 3u) + 16u * (w.y & 3u))) {
@@ -482,7 +483,9 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     let next = min(out.x, min(out.y, out.z));
     if (kind != 0u) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
     n = -sign(rd) * vec3f(out <= vec3f(next));
-    t = max(next, t) + eps;
+    // Not past where the ray leaves the box: 4 x 4 x 4 sectors with nothing in them are stepped over as one, and
+    // they are counted from the box's own slots, so the step can reach outside it.
+    t = min(max(next, t), leaveAt) + eps;
   }
   hit.level = min(L, g.levels - 1u);
   return hit;
@@ -774,7 +777,8 @@ export interface View {
 }
 
 /** FLAT leaves corners as bright as the open: for seeing what the darkening costs. */
-export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32
+/** PLAIN: no skip over empty air but from node to node. Slower and never wrong: what the skips are checked against. */
+export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64
 /** Tiles of the sun's maps drawn each frame. */
 const SUN_TILES_A_FRAME = 8
 
@@ -792,7 +796,8 @@ export interface Marcher {
   /** Whether the maps are used for shadows (they are, unless a check wants every shadow traced). */
   maps: boolean
   /** What is straight ahead of a view: how far in the finest cells, what it is made of, its colour in the palette. Null for sky. */
-  pick(view: View): Promise<{ t: number; material: number; colour: number } | null>
+  /** What is straight ahead: how far (finest cells), of what, what colour. `plain` asks without the skips over empty air. */
+  pick(view: View, plain?: boolean): Promise<{ t: number; material: number; colour: number } | null>
   /** How many pixels wide a thing must be to be drawn as itself: 1 is every cell that can be seen, 2 is half as fine. */
   detail: number
 }
@@ -864,9 +869,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const self: Marcher = {
     get detail() { return detail },
     set detail(v: number) { detail = v },
-    async pick(view) {
+    async pick(view, plain = false) {
       const encoder = device.createCommandEncoder()
-      self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK, 0)
+      self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | (plain ? PLAIN : 0), 0)
       encoder.copyTextureToBuffer({ texture: pointTexture }, { buffer: pointRead }, [1, 1])
       device.queue.submit([encoder.finish()])
       await pointRead.mapAsync(GPUMapMode.READ)
