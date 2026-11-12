@@ -748,9 +748,17 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
       let back = reflect(rd, n);
       let safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
       let lift = 0.05 / g.level[hit.level].scale;
-      let far = trace(p + n * lift, safe, 0.0, hit.level, 64u, hit.t * g.pixel * 2.0, g.pixel * 2.0, false, false);
-      var seen = sky(safe);
-      if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
+      // What is across is asked of the world only where it can be made out: glass a pane of which is two pixels or
+      // more, water within 600 m. Further off it shows the sky. From high up every window of the town is a mirror a
+      // pixel wide, and asking for each was a third of the picture's cost there.
+      let across = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
+      // Unasked, it is the sky a little darker: half of what is across from a far window is town.
+      var seen = sky(safe) * 0.8;
+      if (((hit.kind & 15u) == 5u && hit.t < 6000.0) || ((hit.kind & 15u) != 5u && across >= 2.0)) {
+        let far = trace(p + n * lift, safe, 0.0, hit.level, 64u, hit.t * g.pixel * 2.0, g.pixel * 2.0, false, false);
+        seen = sky(safe);
+        if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
+      }
       let facing = 1.0 - max(dot(-rd, n), 0.0);
       let fresnel = 0.04 + 0.96 * pow(facing, 5.0);
       col = mix(col, seen, clamp(m.mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));

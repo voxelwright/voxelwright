@@ -412,6 +412,17 @@ Filmed November 13 (`clip`, sparks on): ruin, six charges of 32, 960 frames in 1
 16.7 ms, 2,396 bodies, 1,230 at once; rubble, three charges of 32, 720 frames in 12 s, no gap
 over 16.7 ms, 1,780 bodies, 923 at once.
 
+## What the far view costs (`fs`, mirrors)
+
+Measured from the bench's `high` and `far` places and across the lake, at half size: how wide a
+thing must be to be drawn as itself (`detail` 1 to 3) changes nothing; the steps a ray takes are
+few (`?heat=1`); rays cost a quarter more a pixel than at the street. What cost was mirrors, a
+third of the picture: from high up every window in the town is a mirror a pixel wide, each
+asking the world what is across from it. Now glass asks only where a pane is two pixels or more
+and water within 600 m; further off they show the sky, a fifth darker. All on: `far` 42.8 to
+36.7 ms, `high` 37.5 to 34.7, the street 32.3 to 30.2; the board's far view holds 0.55 of full
+size, not 0.40.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as
