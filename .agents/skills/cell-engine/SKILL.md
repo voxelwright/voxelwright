@@ -745,3 +745,23 @@ The rubble row was shot three ways after the judge called its debris "frozen in 
 off, with fire off. Crumbs were not it. With fire on the houses are still coming down forty seconds later (83
 bodies moving, 7,586 cells burning) and the still is of a collapse. With fire off all is at rest, and what lies
 there is tilted slabs in house colours, not a heap. The row is now shot without fire; the heap is the next lever.
+
+## Rubble lies as heaps (`bodies.rs`: `pour`, `heap`; November 12)
+
+A body that stopped askew used to be cut along the world's cells: a slab of stairs with holes in it, in house
+colours. And most of what a charge emptied was nothing: its middle, lumps under three cells, and everything once
+there were 700 bodies.
+
+- **`heap(loose)`** takes loose cells, the lowest first, each where it was. A cell comes down its column onto what
+  is under it, then down any side that is two cells lower (one in four also down a side one lower, so a heap's
+  foot spreads), at most 24 times. What lies there has nothing empty under it and no side steeper than one in one.
+  Seven cells in ten become the grey of dust, by patches two cells across; cell by cell it read as confetti.
+- **`pour(body)`**: masonry and glass that stop askew go to `heap`. Steel and wood keep their shape and are cut
+  along the cells as before. A body lying square is still put down cell for cell.
+- **A blast** throws the outer part of what it empties as lumps and gives the inner part (within 0.67 of its
+  radius), and whatever there can be no body for, to `heap`. Nothing a blast empties is lost now but glass.
+- **Cost**: a wall of 10,800 cells is put down in about 10 ms (the core's test holds it under 40). A charge of 40
+  takes 20 to 35 ms more than its 260 to 340 ms. The solver's calls are no slower.
+- **Not done**: houses still stand as shells whatever is charged out of them (the support rule lets floors hold
+  the walls over them), so a district "brought down" is a row of gutted fronts with rubble at their feet. The
+  heap appears at once, under the ball of fire; nothing is seen to fall into it.

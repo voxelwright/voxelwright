@@ -677,11 +677,13 @@ impl Bodies {
         made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]))
     }
 
-    /// What a blast emptied (the cells solid in `before` and not in `left`), as bodies thrown from it: lumps a few cells
-    /// across whose edges wander. Glass, and the middle of the blast, are dust. Returns how many were made.
+    /// What a blast emptied (the cells solid in `before` and not in `left`): the outer part of it as bodies thrown from
+    /// it, lumps a few cells across whose edges wander; the inner part, and what there can be no body for, as rubble
+    /// that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
     fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32) -> usize {
         let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
+        let mut loose: Vec<([i32; 3], Kind)> = Vec::new();
         let wander = |a: i32, b: i32, seed: u32| (hash3(a >> 2, b >> 2, seed as i32, 11) & 3) as i32;
         // Bigger lumps from a bigger blast: it empties more than there can be bodies for at the size a charge's are,
         // and what had no body was nothing.
@@ -696,7 +698,9 @@ impl Bodies {
                     }
                     let c = [low[0] + x as i32, low[1] + y as i32, low[2] + z as i32];
                     let d = sub([c[0] as f32, c[1] as f32, c[2] as f32], [at[0] as f32, at[1] as f32, at[2] as f32]);
-                    if dot(d, d) < (radius * radius) as f32 * 0.16 {
+                    // The inner part of what a blast empties is ground small and falls where it was, as rubble.
+                    if dot(d, d) < (radius * radius) as f32 * 0.45 {
+                        loose.push((c, kind));
                         continue;
                     }
                     let key = [(c[0] + wander(c[1], c[2], 1)).div_euclid(wide), (c[1] + wander(c[0], c[2], 2)).div_euclid(tall), (c[2] + wander(c[0], c[1], 3)).div_euclid(wide)];
@@ -709,7 +713,9 @@ impl Bodies {
         let mut made = 0;
         for key in keys {
             let cells = &lumps[&key];
+            // What is too small to be a body, or one more than there can be, falls as rubble too.
             if cells.len() < 3 || self.list.len() >= MOST {
+                loose.extend(cells.iter().copied());
                 continue;
             }
             let (mut lo, mut hi) = ([i32::MAX; 3], [i32::MIN; 3]);
@@ -732,6 +738,8 @@ impl Bodies {
             self.list.push(body);
             made += 1;
         }
+        loose.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
+        self.heap(&loose);
         made
     }
 
@@ -1118,6 +1126,13 @@ impl Bodies {
         let stays = if body.broken == 0 && body.count >= BREAKS && brittle(body.stuff) && self.list.len() < MOST { Some(self.sitting(&body, lo, hi)) } else { None };
         let across = (hi[0] - lo[0]) as usize;
         let deep = (hi[2] - lo[2]) as usize;
+        if !square && pours(body.stuff) {
+            self.pour(&body, lo, hi, stays.as_deref());
+            let mut words = vec![body.id];
+            words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
+            self.record(GONE, &words);
+            return;
+        }
         let mut runs: Vec<Run> = Vec::new();
         for y in lo[1]..hi[1] {
             for z in lo[2]..hi[2] {
@@ -1151,6 +1166,100 @@ impl Bodies {
         let mut words = vec![body.id];
         words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
         self.record(GONE, &words);
+    }
+}
+
+/// Whether a body mostly of this, stopped askew, lies as rubble: masonry and glass do. Steel and wood keep their shape
+/// and are cut along the world's cells as they lie.
+fn pours(material: u8) -> bool {
+    brittle(material) || material == GLASS
+}
+
+/// How far a cell of rubble comes down a heap's side before it stays where it is, in cells sideways.
+const SLIDES: usize = 24;
+/// The furthest a cell of rubble falls to what is under it.
+const FALLS: i32 = 3000;
+
+impl Bodies {
+    /// A body of masonry that has stopped askew cannot lie as cells of the world, which are square to it: cut along
+    /// them it was a slab of stairs with holes in it. It is rubble. Each of its cells, the lowest first, comes down
+    /// its own column onto what is under it, and where the heap beside it is two cells or more lower, on down that
+    /// side: so what lies there is a heap with nothing under it empty and sides no steeper than one in one. Most
+    /// of it is the grey of its dust; a bit here and there keeps the colour it had. `stays` is `sitting`'s answer, if asked.
+    fn pour(&mut self, body: &Body, lo: [i32; 3], hi: [i32; 3], stays: Option<&[bool]>) {
+        let (across, deep) = ((hi[0] - lo[0]) as usize, (hi[2] - lo[2]) as usize);
+        let mut loose: Vec<([i32; 3], Kind)> = Vec::new();
+        for y in lo[1]..hi[1] {
+            for z in lo[2]..hi[2] {
+                for x in lo[0]..hi[0] {
+                    let (cell, _) = body.cell_at([x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5]);
+                    let here = stays.is_none_or(|stays| stays[(x - lo[0]) as usize + across * ((z - lo[2]) as usize + deep * (y - lo[1]) as usize)]);
+                    if here && body.solid(cell) {
+                        loose.push(([x, y, z], body.cells[body.at(cell[0] as usize, cell[1] as usize, cell[2] as usize)]));
+                    }
+                }
+            }
+        }
+        self.heap(&loose);
+    }
+
+    /// Loose cells, the lowest first, each where it was when it came loose, come down as rubble: see `pour`.
+    fn heap(&mut self, loose: &[([i32; 3], Kind)]) {
+        let mut put: Map<[i32; 3], Kind> = Map::default();
+        let ground = &mut self.ground;
+        let mut full = |put: &Map<[i32; 3], Kind>, c: [i32; 3]| put.contains_key(&c) || ground.solid(c[0], c[1], c[2]);
+        for &(at, kind) in loose {
+            // Where it lay in something, the cell is on top of it.
+            let mut c = at;
+            let mut up = 0;
+            while full(&put, c) && up < 12 {
+                c[1] += 1;
+                up += 1;
+            }
+            if full(&put, c) {
+                continue;
+            }
+            let floor = c[1] - FALLS;
+            for slide in 0..=SLIDES {
+                while c[1] > floor && !full(&put, [c[0], c[1] - 1, c[2]]) {
+                    c[1] -= 1;
+                }
+                if slide == SLIDES {
+                    break;
+                }
+                // The four sides, begun at one that differs from cell to cell: down the first that is two lower,
+                // and now and then down one that is only one lower, so a heap's foot spreads a little.
+                let h = hash3(c[0], c[1], c[2], 77);
+                let lazy = h >> 8 & 3 == 0;
+                let mut slid = false;
+                for d in 0..4 {
+                    let (dx, dz) = [(1, 0), (-1, 0), (0, 1), (0, -1)][((h + d) % 4) as usize];
+                    let s = [c[0] + dx, c[1], c[2] + dz];
+                    if !full(&put, s) && !full(&put, [s[0], s[1] - 1, s[2]]) && (lazy || !full(&put, [s[0], s[1] - 2, s[2]])) {
+                        c = [s[0], s[1] - 1, s[2]];
+                        slid = true;
+                        break;
+                    }
+                }
+                if !slid {
+                    break;
+                }
+            }
+            // Dust: most of a heap is the grey of what the stuff is ground to, a bit here and there the colour it was.
+            // By patches two cells across: cell by cell it was confetti.
+            let d = hash3(c[0] >> 1, c[1] >> 1, c[2] >> 1, 91);
+            put.insert(c, if d % 100 < 72 { crate::kinds::kind(material(kind), crate::kinds::grey(4 + (d >> 8) as u8 % 3)) } else { kind });
+        }
+        let mut cells: Vec<([i32; 3], Kind)> = put.into_iter().collect();
+        cells.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
+        let mut runs: Vec<Run> = Vec::new();
+        for (c, kind) in cells {
+            match runs.last_mut() {
+                Some(r) if r.y == c[1] && r.z == c[2] && r.x1 == c[0] && r.kind == kind => r.x1 += 1,
+                _ => runs.push(Run { x0: c[0], x1: c[0] + 1, y: c[1], z: c[2], kind }),
+            }
+        }
+        self.change(runs);
     }
 }
 
@@ -1356,6 +1465,53 @@ mod tests {
         let low = put.iter().map(|r| r.y).min().unwrap();
         assert_eq!(low, ground + 1, "it lies on the street, not in it or over it (street at {ground}): {:?}", put.iter().map(|r| r.y).collect::<std::collections::BTreeSet<_>>());
         assert!(put.iter().all(|r| r.y < ground + 10), "it lies flat or on its side, not on end in the air");
+    }
+
+    /// A wall of brick six metres long that stops leaning a third of the way over lies as a heap: nothing under any
+    /// cell of it is empty, no side of it is steeper than one in one, and little of it is lost.
+    #[test]
+    fn masonry_that_stops_askew_lies_as_a_heap() {
+        use std::time::Instant;
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let size = [60, 30, 6];
+        let mut wall = Body::new(1, block(size, kind(BRICK, OWN)), size, [X - 30, ground + 1, Z]);
+        // Turned about its length, and a little about the way up, with its lowest corner on the street.
+        let (a, b) = (0.3f32, 0.1f32);
+        wall.rot = [a.sin(), b.sin(), 0.0, a.cos() * b.cos()];
+        let l = wall.rot.iter().map(|v| v * v).sum::<f32>().sqrt();
+        wall.rot = wall.rot.map(|v| v / l);
+        let low = (0..8).map(|d| add(wall.pos, turn(wall.rot, sub([if d & 1 == 0 { 0.0 } else { 60.0 }, if d & 2 == 0 { 0.0 } else { 30.0 }, if d & 4 == 0 { 0.0 } else { 6.0 }], wall.com)))[1]).fold(f32::MAX, f32::min);
+        wall.pos[1] += (ground + 1) as f32 - low;
+        // It has been looked at for what sits (`sitting`) already: this is what did.
+        wall.broken = 1;
+        let t0 = Instant::now();
+        bodies.rest(wall);
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        let (mut top, mut cells): (Map<[i32; 2], i32>, i32) = (Map::default(), 0);
+        let (mut i, out) = (0, bodies.out.clone());
+        while i < out.len() {
+            let (tag, n) = (out[i], out[i + 1] as usize);
+            if tag == EDIT {
+                for r in out[i + 8..i + 2 + n].chunks_exact(5) {
+                    for x in r[0] as i32..r[1] as i32 {
+                        let (y, z) = (r[2] as i32, r[3] as i32);
+                        cells += 1;
+                        let t = top.entry([x, z]).or_insert(i32::MIN);
+                        *t = (*t).max(y);
+                        assert!(bodies.ground.solid(x, y - 1, z), "a cell of the heap at {x}, {y}, {z} has nothing under it");
+                    }
+                }
+            }
+            i += 2 + n;
+        }
+        let high = top.values().max().unwrap() - ground;
+        eprintln!("{cells} cells of {} lie over {} columns, the highest {high} over the street, put down in {ms:.1} ms", 60 * 30 * 6, top.len());
+        assert!(cells as f32 > 60.0 * 30.0 * 6.0 * 0.9 && (cells as f32) < 60.0 * 30.0 * 6.0 * 1.1, "{cells} cells of {} lie down", 60 * 30 * 6);
+        assert!(high < 20, "a wall three metres high lying as rubble is a heap {high} cells high");
+        let steep = top.iter().filter(|&(&[x, z], &y)| [[1, 0], [-1, 0], [0, 1], [0, -1]].iter().any(|d| y - top.get(&[x + d[0], z + d[1]]).copied().unwrap_or_else(|| city::ground(x + d[0], z + d[1])) > 2)).count();
+        assert_eq!(steep, 0, "{steep} of {} columns stand more than two cells over the one beside them", top.len());
+        assert!(ms < 40.0, "putting it down took {ms:.1} ms");
     }
 
     #[test]
