@@ -69,12 +69,19 @@ struct Globals {
   sun: vec3f, flags: u32,
   res: vec2f, most: u32, pad: u32,
   // How wide a pixel is one cell away, and how many pixels wide a thing must be to be drawn as itself.
-  pixel: f32, detail: f32, pad3: f32, pad4: f32,
+  // And the hour: day is 1 by day and 0 at night; low is how near the horizon the sun is, 1 at sunrise and sunset.
+  pixel: f32, detail: f32, day: f32, low: f32,
   // The sun's maps: their across and up, how far towards the sun the anchor is, whether to use them.
   sunU: vec3f, sunFar: f32,
   sunV: vec3f, sunMaps: u32,
   level: array<Level, ${MAX_LEVELS}>,
   sunLevel: array<SunLevel, ${MAX_LEVELS}>,
+  // The hour's colours, worked out once when the hour is set (Marcher.light) so that no pixel works them out:
+  // the light that comes straight (the sun's or the moon's) with how much of it the ground throws back; the sky's
+  // fill from above with how much comes from under; the sky overhead with the power its blend to the horizon goes
+  // by; the horizon away from the sun with how strong a low sun's wide glow is; the horizon towards the sun; the
+  // clouds' tint away from the sun and towards it. The last three carry where the sun is on the horizon (x, z).
+  lightSun: vec4f, lightFill: vec4f, skyZenith: vec4f, skyHorizon: vec4f, skyHorizonSun: vec4f, cloudTint: vec4f, cloudTintSun: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
@@ -117,11 +124,11 @@ fn sunlit(p: vec3f, n: vec3f, level: u32) -> f32 {
 export const LIGHT = /* wgsl */ `
 // The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
 // and from the side away from the sun; less of the last two in corners (open: 1 in the open, 0 shut in).
-const SUN_LIGHT = vec3f(1.0, 0.93, 0.82);
 fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
   let above = 0.5 + 0.5 * n.y;
-  let skylight = mix(vec3f(0.12, 0.118, 0.115), vec3f(0.3, 0.4, 0.58), above);
-  let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0));
+  let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
+  let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
+  let SUN_LIGHT = g.lightSun.rgb;
   var col = albedo * (SUN_LIGHT * direct * 3.1 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
   let hv = normalize(sun - rd);
   col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
@@ -496,11 +503,15 @@ ${PAINT}
 // The sky without sun or cloud: what the air between is the colour of.
 fn skyBase(rd: vec3f) -> vec3f {
   let up = clamp(rd.y, 0.0, 1.0);
-  let horizon = vec3f(0.66, 0.79, 0.93);
-  let zenith = vec3f(0.11, 0.3, 0.7);
-  var col = mix(horizon, zenith, pow(up, 0.42));
+  var horizon = g.skyHorizon.rgb;
+  if (g.low > 0.0) {
+    // A low sun reddens the side of the sky it is on.
+    let sunward = max(dot(normalize(rd.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a)), 0.0);
+    horizon = mix(horizon, g.skyHorizonSun.rgb, sunward * sunward);
+  }
+  var col = mix(horizon, g.skyZenith.rgb, pow(up, g.skyZenith.a));
   let toward = max(dot(rd, g.sun), 0.0);
-  col += vec3f(1.0, 0.74, 0.46) * pow(toward, 6.0) * 0.22;
+  col += g.lightSun.rgb * vec3f(1.0, 0.8, 0.56) * (pow(toward, 6.0) * 0.22 + pow(toward, 3.0) * g.skyHorizon.a);
   // Below the horizon the sky is the haze the far ground fades into.
   return mix(col, horizon * 0.94, clamp(-rd.y * 6.0, 0.0, 1.0));
 }
@@ -531,7 +542,15 @@ fn cloud(p: vec2f) -> f32 {
 fn sky(rd: vec3f) -> vec3f {
   var col = skyBase(rd);
   let toward = max(dot(rd, g.sun), 0.0);
-  col += SUN_LIGHT * (pow(toward, 900.0) * 30.0 + pow(toward, 60.0) * 0.35);
+  // The sun, or at night the moon: a disc and the brightness round it.
+  if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * 30.0 + pow(toward, 60.0) * 0.35) * g.day; }
+  if (g.day < 1.0) { col += vec3f(0.8, 0.86, 1.0) * (smoothstep(0.99975, 0.9998, toward) * 0.9 + pow(toward, 400.0) * 0.06) * (1.0 - g.day); }
+  if (g.day < 0.98 && rd.y > 0.0) {
+    // Stars: one in some of the small squares the sky is cut into, the brighter the fewer.
+    let square = vec3i(floor(rd * 220.0));
+    let star = hash3i(square, 19u);
+    col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9;
+  }
   if (rd.y > 0.015) {
     let far = (15000.0 - g.eye.y) / rd.y;
     let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
@@ -539,7 +558,9 @@ fn sky(rd: vec3f) -> vec3f {
     let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y);
     if (cover > 0.0) {
       // Bright where it is thin, at its edges; grey in its thick middle.
-      let body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
+      var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
+      // Lit by whatever lights the day: gold and rose under a low sun, on the side towards it most; dark at night.
+      if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward * toward); }
       col = mix(col, body * 1.25, cover * 0.92);
     }
   }
@@ -639,6 +660,17 @@ fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
   return mix(mix(c00, c10, fu), mix(c01, c11, fu), fv) / 3.0;
 }
 
+// Whether a pane of glass is a window with a light on behind it at night, and how bright: by the window, a storey
+// of a house or a bay of a tower, about two in five of them.
+fn litWindow(fine: vec3i) -> f32 {
+  let w = hash3i(vec3i(fine.x >> 4u, fine.y / 30, fine.z >> 4u), 23u);
+  return smoothstep(0.7, 0.72, w) * (0.35 + 0.65 * fract(w * 17.0));
+}
+// Where a cell is in its block of the town (city.rs: a block is 1280 cells by 800, its streets along its low sides).
+fn inBlock(fine: vec3i) -> vec2f {
+  return vec2f(f32(fine.x - i32(floor(f32(fine.x) / 1280.0)) * 1280), f32(fine.z - i32(floor(f32(fine.z) / 800.0)) * 800));
+}
+
 // What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
 // 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
 fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
@@ -680,7 +712,32 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
   let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
   if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
-  return shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
+  var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
+  if (g.day < 0.98) {
+    let dark = 1.0 - g.day;
+    let fine = hit.cell * i32(1u << hit.level);
+    let block = inBlock(fine);
+    // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
+    // brighter low in the room than at the ceiling. Glass out in the street is a car's and stays dark.
+    let lot = block.x >= 140.0 && block.y >= 140.0;
+    if (stuff == 11u && lot) {
+      let w = litWindow(fine);
+      let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
+      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
+    }
+    // The lamps at each crossing: their light falls on what is under and round them. Where the lamps are is the
+    // town's rule (city.rs), so the light is worked out from the place; a lamp knocked down still casts it.
+    var pool = 0.0;
+    for (var k = 0; k < 4; k++) {
+      let lamp = array<vec2f, 4>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0))[k];
+      // The same lamps stand at the next crossings along: the nearest of them is the one that counts.
+      var d = abs(block - lamp);
+      d = min(d, vec2f(1280.0, 800.0) - d);
+      pool += 1.0 / (1.0 + dot(d, d) / 6400.0);
+    }
+    col += albedo * vec3f(1.0, 0.78, 0.48) * pool * pool * dark * (0.35 + 0.65 * max(n.y, 0.0)) * 2.4;
+  }
+  return col;
 }
 
 fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
@@ -732,11 +789,14 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     if (hit.t >= 0.0) { v = (u32(clamp(hit.t, 0.0, 131071.0) * 8.0) & 0xfffffu) | ((hit.kind & 15u) << 20u) | (((hit.kind >> 8u) & 255u) << 24u); }
     return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, depth);
   }
-  var col = sky(rd);
-  if (hit.t >= 0.0) {
+  var col: vec3f;
+  if (hit.t < 0.0) { col = sky(rd); } else {
     let m = looks.material[hit.kind & 15u];
     col = lit(g.eye, rd, hit, shadows);
-    if (m.mirror > 0.0 && (g.flags & 2u) != 0u) {
+    // A window lit from within at night shows its light, not what is across from it.
+    let lot = inBlock(hit.cell * i32(1u << hit.level));
+    let glows = g.day < 0.98 && (hit.kind & 15u) == 11u && lot.x >= 140.0 && lot.y >= 140.0 && litWindow(hit.cell * i32(1u << hit.level)) > 0.0;
+    if (m.mirror > 0.0 && (g.flags & 2u) != 0u && !glows) {
       // Water and glass show what is across from them.
       var n = hit.n;
       if (dot(n, n) < 0.5) { n = -rd; }
@@ -808,6 +868,9 @@ export interface Marcher {
   pick(view: View, plain?: boolean): Promise<{ t: number; material: number; colour: number } | null>
   /** How many pixels wide a thing must be to be drawn as itself: 1 is every cell that can be seen, 2 is half as fine. */
   detail: number
+  /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
+  light(sun: readonly [number, number, number], day: number, low: number): void
+  readonly day: number
 }
 
 export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World): Promise<Marcher> {
@@ -817,7 +880,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
   const pipeline = await device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 112 + 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -832,7 +895,28 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 112), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 112 + 112), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  /**
+   * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
+   * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
+   * light at a tenth, a night to see by, as films light it.
+   */
+  const colours = () => {
+    type Colour = readonly [number, number, number]
+    const mix = (a: Colour, b: Colour, t: number): Colour => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    const times = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k]
+    const hour = (night: Colour, noon: Colour, dusk: Colour) => mix(night, mix(noon, dusk, low), day)
+    const [sx, , sz] = sunMaps.s, flat = Math.hypot(sx, sz) || 1, white: Colour = [1, 1, 1], dark: Colour = [0.03, 0.045, 0.085], cloudy: Colour = [0.035, 0.045, 0.075]
+    f.set([
+      ...mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), day * (1 - 0.5 * low),
+      ...times(mix([0.3, 0.4, 0.58], [0.34, 0.3, 0.42], low), 0.1 + 0.9 * day), 0.1 + 0.9 * day,
+      ...hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.1, 0.15, 0.4]), 0.42 + 0.18 * low,
+      ...hour(dark, [0.66, 0.79, 0.93], [0.62, 0.5, 0.56]), 0.3 * low * day,
+      ...hour(dark, [0.66, 0.79, 0.93], [1, 0.5, 0.2]), sx / flat,
+      ...hour(cloudy, white, [0.72, 0.5, 0.52]), sz / flat,
+      ...hour(cloudy, white, [1, 0.62, 0.36]), 0,
+    ], 36 + MAX_LEVELS * 28)
+  }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   const tell = (view: View, size: readonly [number, number], flags: number, time: number) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
@@ -848,6 +932,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       u[22] = 384
       f[24] = (2 * view.tanHalf) / size[1]
       f[25] = detail
+      f[26] = day
+      f[27] = low
       f.set(sunMaps.u, 28)
       f[31] = sunMaps.s[0] * anchor[0] + sunMaps.s[1] * anchor[1] + sunMaps.s[2] * anchor[2]
       f.set(sunMaps.v, 32)
@@ -869,7 +955,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
-  let detail = 1
+  let detail = 1, day = 1, low = 0
+  colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
   const point: Target = { color: pointTexture.createView(), depth: device.createTexture({ size: [1, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView(), size: [1, 1] }
@@ -877,6 +964,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const self: Marcher = {
     get detail() { return detail },
     set detail(v: number) { detail = v },
+    get day() { return day },
+    light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
     async pick(view, plain = false) {
       const encoder = device.createCommandEncoder()
       self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | (plain ? PLAIN : 0), 0)

@@ -164,9 +164,32 @@ async function main() {
     if (!target || target.size[0] !== size[0] || target.size[1] !== size[1]) { target?.destroy(); target = offscreen(gpu, size) }
     return target
   }
+  // ── The hour ────────────────────────────────────────────────────────────
+  // Unasked, the sun stands where it always has. `?hour=18.4` or the [ and ] keys set the time of day: the sun goes
+  // from the east at six over the south to the sea in the west at eighteen, and the moon lights the night.
+  let hour: number | null = null
+  const setHour = (h: number | null) => {
+    hour = h === null ? null : ((h % 24) + 24) % 24
+    let sun: [number, number, number] = [0.52, 0.62, 0.59], day = 1, low = 0
+    if (hour !== null) {
+      const a = ((hour - 6) / 12) * Math.PI, east = [0.8, 0, 0.6], top = [-0.27, 0.9, 0.36]
+      const at = east.map((e, i) => Math.cos(a) * e + Math.sin(a) * top[i])
+      const ease = (lo: number, hi: number, v: number) => { const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo))); return t * t * (3 - 2 * t) }
+      day = ease(-0.1, 0.1, at[1])
+      low = 1 - ease(0.02, 0.5, at[1])
+      // By night the moon's light, from a fixed place; by day the sun's, never from under the ground.
+      sun = day === 0 ? [0.45, 0.7, -0.55] : [at[0], Math.max(at[1], 0.06), at[2]]
+    }
+    march.light(sun, day, low)
+    smoke.light(sun, day)
+    debris.light(sun, day)
+  }
+  if (query.has('hour')) setHour(Number(query.get('hour')))
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') flags ^= HEAT
+    if (e.code === 'BracketRight') setHour((hour ?? 14) + 0.5)
+    if (e.code === 'BracketLeft') setHour((hour ?? 14) - 0.5)
     if (e.code === 'KeyL') flags ^= SHADOWS
     if (e.code === 'KeyM') flags ^= MIRRORS
     if (e.code === 'KeyK') march.maps = !march.maps
@@ -509,7 +532,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

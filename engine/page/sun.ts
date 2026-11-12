@@ -27,9 +27,9 @@ export class SunMaps {
   /** One map, to draw into. */
   readonly layers: GPUTextureView[]
   /** Towards the sun, and two directions square to it and to each other: a map's across and up. */
-  readonly s: V3
-  readonly u: V3
-  readonly v: V3
+  s: V3 = [0, 1, 0]
+  u: V3 = [1, 0, 0]
+  v: V3 = [0, 0, 1]
   /** Which tile of the world each slot holds (two numbers a slot), whether it is drawn, and when. */
   private held: Int32Array[]
   private drawn: Uint32Array[]
@@ -47,16 +47,23 @@ export class SunMaps {
     this.texture = device.createTexture({ label: 'sun maps', size: [SUN_SIDE, SUN_SIDE, levels], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
     this.all = this.texture.createView({ dimension: '2d-array' })
     this.layers = Array.from({ length: levels }, (_, i) => this.texture.createView({ dimension: '2d', baseArrayLayer: i, arrayLayerCount: 1 }))
-    const length = Math.hypot(sun[0], sun[1], sun[2])
-    this.s = [sun[0] / length, sun[1] / length, sun[2] / length]
-    // Across: level, square to the sun. Up: square to both.
-    const across = Math.hypot(this.s[2], this.s[0])
-    this.u = [this.s[2] / across, 0, -this.s[0] / across]
-    this.v = [this.s[1] * this.u[2] - this.s[2] * this.u[1], this.s[2] * this.u[0] - this.s[0] * this.u[2], this.s[0] * this.u[1] - this.s[1] * this.u[0]]
     this.held = Array.from({ length: levels }, () => new Int32Array(TILES * TILES * 2).fill(0x7fffffff))
     this.drawn = Array.from({ length: levels }, () => new Uint32Array(8))
     this.wrong = Array.from({ length: levels }, () => new Uint32Array(8))
     this.when = Array.from({ length: levels }, () => new Float64Array(TILES * TILES))
+    this.turn(sun)
+  }
+
+  /** The light comes from somewhere else: the maps' two ways are set to it, and every tile is to be drawn again. */
+  turn(sun: V3) {
+    const length = Math.hypot(sun[0], sun[1], sun[2])
+    this.s = [sun[0] / length, sun[1] / length, sun[2] / length]
+    // Across: level, square to the sun. Up: square to both.
+    const across = Math.max(1e-4, Math.hypot(this.s[2], this.s[0]))
+    this.u = [this.s[2] / across, 0, -this.s[0] / across]
+    this.v = [this.s[1] * this.u[2] - this.s[2] * this.u[1], this.s[2] * this.u[0] - this.s[0] * this.u[2], this.s[0] * this.u[1] - this.s[1] * this.u[0]]
+    for (const h of this.held) h.fill(0x7fffffff)
+    this.spoilAll()
   }
 
   private clear(level: number, slot: number) { this.drawn[level][slot >> 5] &= ~(1 << (slot & 31)); this.wrong[level][slot >> 5] &= ~(1 << (slot & 31)) }

@@ -9,7 +9,7 @@ const MOST = 4096
 const EACH = 8
 
 const CODE = /* wgsl */ `
-struct U { eye: vec3f, tanHalf: f32, right: vec3f, aspect: f32, up: vec3f, pad0: f32, forward: vec3f, pad1: f32, sun: vec3f, pad2: f32 }
+struct U { eye: vec3f, tanHalf: f32, right: vec3f, aspect: f32, up: vec3f, pad0: f32, forward: vec3f, pad1: f32, sun: vec3f, day: f32 }
 @group(0) @binding(0) var<uniform> u: U;
 struct Out { @builtin(position) pos: vec4f, @location(0) colour: vec3f, @location(1) @interpolate(flat) n: vec3f }
 const NEAR = 1.0;
@@ -35,7 +35,7 @@ const FAR = 100000.0;
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let above = 0.5 + 0.5 * in.n.y;
-  var col = in.colour * (vec3f(1.0, 0.94, 0.84) * max(dot(in.n, u.sun), 0.0) * 2.4 + mix(vec3f(0.1, 0.095, 0.09), vec3f(0.3, 0.38, 0.5), above));
+  var col = in.colour * (vec3f(1.0, 0.94, 0.84) * max(dot(in.n, u.sun), 0.0) * 2.4 * u.day + mix(vec3f(0.1, 0.095, 0.09), vec3f(0.3, 0.38, 0.5), above) * mix(0.06, 1.0, u.day));
   col = col / (col + 0.75) * 1.45;
   return vec4f(pow(clamp(col, vec3f(0.0), vec3f(1.0)), vec3f(0.4545)), 1.0);
 }
@@ -47,6 +47,8 @@ export interface Crumbs {
   /** Moves them `dt` seconds on. `ground` says how high the land is at a column. */
   step(dt: number, ground: (x: number, z: number) => number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
+  /** Where the light comes from and how much of the day it is. */
+  light(sun: readonly number[], day: number): void
   readonly live: number
 }
 
@@ -66,8 +68,9 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3), life = new Float32Array(MOST), edge = new Float32Array(MOST), tone = new Float32Array(MOST * 3)
   const packed = new Float32Array(MOST * EACH)
   let next = 0, live = 0
-  const sun = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2])
+  let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   return {
+    light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
     burst(at, radius, count, colour, size) {
       for (let k = 0; k < count; k++) {
@@ -115,7 +118,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
       device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
       device.queue.writeBuffer(uniforms, 0, new Float32Array([
         view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf,
-        ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), 0,
+        ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), day,
       ]))
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],

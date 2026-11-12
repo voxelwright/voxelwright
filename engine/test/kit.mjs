@@ -40,9 +40,12 @@ export async function start() {
   /** The city page, not flying, once its engine is up. */
   const city = async (query = '', options) => {
     const p = await page(options)
+    const broke = new Promise((_, reject) => p.once('pageerror', (e) => reject(new Error(`the page failed as it started: ${e.message}`))))
+    broke.catch(() => {})   // it may fail before anything waits on it
     await p.goto(`${url}/city?fly=0&${query}`)
-    // Beside other checks on one GPU the engine can take a while to come up.
-    await p.waitForFunction(() => globalThis.engine, null, { timeout: 90_000 })
+    // Beside other checks on one GPU the engine can take a while to come up. A page that fails as it starts (a shader
+    // that does not compile) will never have one: `broke` says so at once, not after the wait.
+    await Promise.race([p.waitForFunction(() => globalThis.engine, null, { timeout: 90_000 }), broke])
     return p
   }
   const url = shared ? shared.url : server.url

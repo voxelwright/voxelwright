@@ -498,5 +498,26 @@ front coming down, staying down and losing no cell.
   does not go over.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
 - No walking, only flying. No real San Francisco: the city is made up.
-- The look has no texture on materials, no light from lamps or windows, no night, no smoke.
-  Bodies and crumbs cast no shadow.
+- Bodies and crumbs cast no shadow. Fire lights nothing round it.
+- The hour is set, it does not pass. At night a window is lit by a rule of where it is, and a
+  lamp's pool of light by where the town's rule stands lamps: a house brought down leaves no
+  lit windows, but a lamp knocked down still lights the crossing.
+
+## The hour (November 13)
+
+- `?hour=`, the `[` and `]` keys or `engine.hour` set the time of day (`main.ts` `setHour`): the
+  sun's place, `day` (1 by day, 0 at night) and `low` (1 with the sun at the horizon). The
+  sun's maps are spoiled and drawn again for the new sun (`sun.ts` `turn`); `test/hours.mjs`
+  checks they match traced shadows afterwards, that night is dark with windows lit, and that
+  the day comes back unchanged.
+- Cost lesson: the first version mixed day, dusk and night colours in the shader from two
+  uniforms, and the day got 2 ms dearer a frame at full size (10 to 16%), though the picture
+  by day was the same. A uniform is not a constant: every pixel did the mixing. The colours
+  are now worked out once when the hour is set (`march.ts` `colours`) and handed over at the
+  end of `Globals`; what only the night or a low sun needs sits behind a branch on `g.day` or
+  `g.low`. Day costs what it did; night costs no more than day.
+- The same bench run found `sky()` asked for every pixel and thrown away where something was
+  hit: it is now asked only where nothing is.
+- `test/kit.mjs` `city()` fails at once when the page fails as it starts (a shader that does not
+  compile). Before, it waited 90 s, and a scratch script piped through `grep` hung for ever
+  because the page server it had started kept the pipe open: send output to a file.

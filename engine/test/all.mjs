@@ -29,6 +29,7 @@ const checks = [
   ['tools', 'node', ['test/tools.mjs'], true],
   ['aims', 'node', ['test/aims.mjs'], true],
   ['skips', 'node', ['test/skips.mjs'], true],
+  ['hours', 'node', ['test/hours.mjs'], true],
   ['flight', 'node', ['test/flight.mjs'], true],
   ['phone', 'node', ['test/flight.mjs', '--phone'], true],
   ['probe', 'node', ['test/probe.mjs', '--heat', '2'], true],

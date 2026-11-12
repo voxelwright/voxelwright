@@ -10,7 +10,7 @@ const MOST = 3072
 const EACH = 12
 
 const CODE = /* wgsl */ `
-struct U { eye: vec3f, tanHalf: f32, right: vec3f, aspect: f32, up: vec3f, pad0: f32, forward: vec3f, pad1: f32, sun: vec3f, pad2: f32 }
+struct U { eye: vec3f, tanHalf: f32, right: vec3f, aspect: f32, up: vec3f, pad0: f32, forward: vec3f, pad1: f32, sun: vec3f, day: f32 }
 @group(0) @binding(0) var<uniform> u: U;
 struct Out {
   @builtin(position) pos: vec4f,
@@ -61,7 +61,7 @@ fn cloud(p: vec2f, seed: u32) -> f32 {
   let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
   let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
   let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
-  let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35);
+  let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35) * mix(0.07, 1.0, u.day);
   // Fire: white-yellow at its heart and when hottest, orange, then a dull red as it goes out.
   let core = body * body;
   let glow = mix(vec3f(1.0, 0.2, 0.02), vec3f(1.0, 0.88, 0.5), clamp(heat * heat * (0.35 + core), 0.0, 1.0)) * heat * (0.35 + billow) * body * fade * 2.0;
@@ -78,6 +78,8 @@ export interface Puffs {
   flame(at: readonly [number, number, number], dt: number): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
+  /** Where the light comes from and how much of the day it is: smoke is lit by it. */
+  light(sun: readonly number[], day: number): void
   readonly live: number
 }
 
@@ -101,7 +103,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
   let next = 0, live = 0
-  const sun = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2])
+  let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
   const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number }) => {
@@ -116,6 +118,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   }
   return {
     get live() { return live },
+    light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     blast(at, r) {
       // The flash: one puff of light, gone in a tenth of a second.
       puff(at, 0, 0, 0, { size: r * 2.6, grow: r * 6, life: 0.12, heat: 1, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
@@ -178,7 +181,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
       device.queue.writeBuffer(uniforms, 0, new Float32Array([
         view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf,
-        ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), 0,
+        ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), day,
       ]))
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
