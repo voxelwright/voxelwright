@@ -6,6 +6,8 @@ import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
 
 const MOST = 3072
+/** A puff that lives longer than this many seconds is one of the first KEPT. */
+const LASTS = 8, KEPT = 384
 /** Numbers a puff as the GPU is told it: where (finest cells from the anchor) and how big; its colour and how much it covers; how hot, its own number, how far through its life. */
 const EACH = 12
 
@@ -102,12 +104,14 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
   const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
-  let next = 0, live = 0
+  let next = 0, lasting = 0, live = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
   const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number }) => {
-    const i = next++ % MOST
+    // What lasts has places of its own: a street on fire makes hundreds of flames a second, and they would take the
+    // place of the smoke and dust over it within seconds.
+    const i = o.life > LASTS ? lasting++ % KEPT : KEPT + (next++ % (MOST - KEPT))
     let dx = 0, dy = 0, dz = 0
     do { dx = Math.random() * 2 - 1; dy = Math.random() * 2 - 1; dz = Math.random() * 2 - 1 } while (dx * dx + dy * dy + dz * dz > 1)
     p[i * 3] = at[0] + dx * spread; p[i * 3 + 1] = at[1] + dy * spread; p[i * 3 + 2] = at[2] + dz * spread
@@ -122,6 +126,10 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     blast(at, r) {
       // The flash: one puff of light, gone in a tenth of a second.
       puff(at, 0, 0, 0, { size: r * 2.6, grow: r * 6, life: 0.12, heat: 1, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+      // Its light on what is round it, for as long as the ball of fire burns: a wide dull glow, added to the picture.
+      puff(at, 0, 0, 0, { size: r * 4.2, grow: r * 1.5, life: 0.7, heat: 0.34, cool: 0.5, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+      // The heart of it stays white-hot longest.
+      for (let k = 3; k > 0; k--) puff(at, r * 0.2, rnd(5, 20), 20, { size: r * rnd(0.4, 0.6), grow: r * 0.9, life: rnd(0.7, 1.0), heat: 1, cool: rnd(0.7, 1.0), rise: 50, drag: 3, colour: [0.13, 0.12, 0.11], cover: 0.5 })
       // The ball of fire: hot lumps thrown out, cooling to black smoke in under a second.
       // A big blast's puffs are bigger, not many more: they are drawn over one another, and that is what costs.
       for (let k = Math.min(16, Math.max(6, Math.round(r * 0.8))); k > 0; k--) {
@@ -132,6 +140,13 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       for (let k = Math.min(18, Math.max(7, Math.round(r * 0.8))); k > 0; k--) {
         const grey = rnd(0.16, 0.42)
         puff(at, r * 0.7, rnd(8, 30), rnd(15, 45), { size: r * rnd(0.6, 1.1), grow: r * 0.6, life: rnd(3.5, 7.5), heat: 0, cool: 0, rise: 24, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.62 })
+      }
+      // And the air it leaves: the dust of what it broke, wide and thin, that hangs over the place for a minute
+      // and more. It is heavy in the air (the wind moves it a metre in ten seconds): lighter, it had left the
+      // street it was made in before anyone looked. Two a blast, however big: they are wide, and wide things drawn over one another cost.
+      if (r >= 12) for (let k = 2; k > 0; k--) {
+        const pale = rnd(0.5, 0.62)
+        puff(at, r * 1.2, rnd(4, 14), rnd(4, 10), { size: r * rnd(3, 4.4), grow: r * 0.12, life: rnd(70, 110), heat: 0, cool: 0, rise: 4, drag: 6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.3 })
       }
     },
     dust(at, radius, count, colour) {
@@ -147,6 +162,13 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const grey = rnd(0.2, 0.36)
         puff(at, 1.5, rnd(2, 8), rnd(25, 45), { size: rnd(3, 6), grow: rnd(3, 6), life: rnd(3, 6), heat: 0, cool: 0, rise: 30, drag: 0.9, colour: [grey, grey, grey], cover: 0.42 })
       }
+      // Now and then a big dark billow that climbs high: a house on fire stands under a column of smoke.
+      if (Math.random() < dt * 0.22) {
+        const grey = rnd(0.17, 0.32)
+        puff(at, 3, rnd(2, 8), rnd(30, 50), { size: rnd(10, 16), grow: rnd(5, 8), life: rnd(10, 18), heat: 0, cool: 0, rise: 26, drag: 0.7, colour: [grey, grey, grey * 1.03], cover: 0.44 })
+      }
+      // And its light on what is near: a dull glow round it, added to the picture.
+      if (Math.random() < dt * 0.1) puff(at, 1, 0, 0, { size: rnd(14, 22), grow: 0, life: rnd(0.6, 1.0), heat: 0.11, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
     },
     step(dt) {
       live = 0

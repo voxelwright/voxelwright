@@ -780,3 +780,20 @@ to 7 of a kind were unused: the material is the low four bits, the colour the hi
 
 The rubble row is shot with fire again, as the page shows itself: at forty seconds heaps lie in the foreground
 while the houses burn (25 bodies still moving in one run).
+
+## Air where things break (`page/puffs.ts`, November 12)
+
+The judges' words were "no smoke or air between the camera and the destruction" and fire that "casts no light".
+
+- A blast has a white-hot heart that cools slowest, a wide dull glow added over what is round it for 0.7 s, and
+  leaves two wide thin puffs of pale dust that hang for 70 to 110 s. They are heavy in the air (drag 6): at the
+  smoke's drag the wind had carried them 30 m off before a picture was taken.
+- A burning cell now and then sends up a big dark billow that lives 10 to 18 s, so a burning house stands under a
+  column, and a dull glow round it. The glow is rare (a tenth of a second's chance) and faint: at 1.5 a second and
+  heat 0.16 the glows of a burning tree added up to a white blob.
+- **Puffs that last have places of their own** (`KEPT`, life over `LASTS` seconds). All puffs shared one ring of
+  3,072, and a street on fire makes hundreds of flames a second: the smoke and dust over it were overwritten within
+  five seconds, which is why none ever showed in a still.
+- Cost: the ruin row holds 60 frames a second at 0.35 to 0.40 of full size with the smoke over it (0.40 before).
+
+Judged after it (four rows): blast 5 v 6, fire 6 v 3, rubble 6 v 5, ruin 5 v 6. Ruin is level.

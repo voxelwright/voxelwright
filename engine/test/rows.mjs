@@ -105,6 +105,9 @@ const charge = async (page, turn, radius, pitch) => {
 // and blast are level; ruin is behind. What both judges say is still between the two: theirs has grey stuff that
 // reads as concrete, fire that lights what is round it, and dust and haze between the eye and the break; ours is
 // crisp, and its pale painted pieces read as toys.
+// After smoke that climbs over fires, dust that hangs where a blast was and fire's glow on what is near, a third
+// judge of four rows (logged): blast 5 v 6, fire 6 v 3, rubble 6 v 5, ruin 5 v 6. Ruin is level. Its words for what
+// is left: ours is bright, toy-coloured and evenly lit, a diorama; theirs has grey mass, haze and light.
 // The fourth judge's scores, for the noise between passes: town 5 v 7, light 5 v 7, tumble 6 v 5, topple 5 v 7,
 // blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4, ruin 5 v 7, sunset 7 v 8, under 6 v 8,
 // snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7, there 6 v 5. Glass is kept level, not
@@ -192,7 +195,7 @@ export const ROWS = [
       await page.waitForTimeout(330)
       return page.screenshot()
     } },
-  { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'behind',
+  { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'level',
     // From over the yard, the row of houses across the street: big charges at their feet, one after another.
     stand: [8, 17, 13, 0, -0.5 / DEG], near: [60, ...HOUSE, 14], falls: 1000,
     act: async (page) => {
