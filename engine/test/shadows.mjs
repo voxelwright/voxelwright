@@ -10,7 +10,7 @@ const { city, check, failures, finish } = await start()
 const percent = (x) => `${(x * 100).toFixed(2)}%`
 try {
   const page = await city('scale=0.5&fire=0')
-  const settled = () => page.waitForFunction(() => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.world.stats.ready > 0 && e.march.sun.undrawn === 0 }, null, { timeout: 120_000 })
+  const settled = () => page.waitForFunction(() => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.world.stats.ready > 0 && e.march.sun.undrawn === 0 && e.march.sun.spoiled === 0 }, null, { timeout: 120_000 })
   const differ = () => page.evaluate(() => globalThis.engine.shadowsDiffer())
   const paced = (maps) => page.evaluate(async (m) => { const e = globalThis.engine, was = e.march.maps; e.march.maps = m; const ms = await e.paced(); e.march.maps = was; return ms }, maps)
 

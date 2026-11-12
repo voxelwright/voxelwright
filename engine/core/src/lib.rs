@@ -32,6 +32,11 @@ pub enum Edit {
 
 /// One sector's cells as the world stands: the city's rules, then the edits, in order.
 pub fn fill(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: &[Edit]) {
+    fill_of(s, sx, sy, sz, lod, edits.iter());
+}
+
+/// As `fill`, of edits picked out by whoever knows which can reach the sector: the order is still theirs.
+pub fn fill_of<'a>(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: impl Iterator<Item = &'a Edit>) {
     s.start(sx, sy, sz, lod);
     city::make(s);
     for e in edits {

@@ -158,7 +158,9 @@ impl Scratch {
     pub fn runs(&mut self, runs: &[Run], lines: bool) {
         let (k, side) = (self.lod, SIDE as i32);
         if k == 0 {
-            for r in runs {
+            // The rows are sorted by y: only those at this sector's heights are looked at.
+            let (first, last) = (runs.partition_point(|r| r.y < self.low[1]), runs.partition_point(|r| r.y < self.low[1] + side));
+            for r in &runs[first..last] {
                 let (y, z) = (r.y - self.low[1], r.z - self.low[2]);
                 if y < 0 || y >= side || z < 0 || z >= side {
                     continue;

@@ -59,7 +59,7 @@ export async function start() {
 /** Waits until the town round the eye is made, nothing waits to be made again, nothing is falling and (if asked) the sun's maps are drawn. */
 export const still = (page, { sun = false, limit = 120_000 } = {}) => page.waitForFunction((sun) => {
   const e = globalThis.engine, s = e.world.stats
-  return s.wanted === 0 && s.stale === 0 && s.ready > 0 && !e.settling && e.dropping === 0 && (!sun || e.march.sun.undrawn === 0)
+  return s.wanted === 0 && s.stale === 0 && s.ready > 0 && !e.settling && e.dropping === 0 && (!sun || (e.march.sun.undrawn === 0 && e.march.sun.spoiled === 0))
 }, sun, { timeout: limit })
 
 /**

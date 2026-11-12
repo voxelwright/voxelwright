@@ -39,13 +39,18 @@ impl Region {
 
     /// The world as it stands in this box: the city's rules, then the edits, a sector at a time.
     pub fn gather(low: [i32; 3], size: [usize; 3], edits: &[Edit], s: &mut Scratch) -> Self {
+        Region::gather_with(low, size, s, |s, sx, sy, sz| fill(s, sx, sy, sz, 0, edits))
+    }
+
+    /// As `gather`, each sector filled by `make`: for one who knows which edits reach a sector.
+    pub fn gather_with(low: [i32; 3], size: [usize; 3], s: &mut Scratch, mut make: impl FnMut(&mut Scratch, i32, i32, i32)) -> Self {
         let mut region = Region::new(low, size);
         let side = SIDE as i32;
         let high = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
         for sy in low[1].div_euclid(side)..=(high[1] - 1).div_euclid(side) {
             for sz in low[2].div_euclid(side)..=(high[2] - 1).div_euclid(side) {
                 for sx in low[0].div_euclid(side)..=(high[0] - 1).div_euclid(side) {
-                    fill(s, sx, sy, sz, 0, edits);
+                    make(s, sx, sy, sz);
                     // The part of the sector that is in the box.
                     let from = [(low[0] - sx * side).max(0), (low[1] - sy * side).max(0), (low[2] - sz * side).max(0)];
                     let to = [(high[0] - sx * side).min(side), (high[1] - sy * side).min(side), (high[2] - sz * side).min(side)];
@@ -275,7 +280,7 @@ fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32]) -> Vec<Vec<u32
 }
 
 /// Whether a cell is the ground itself and not something that stands on it.
-fn is_ground(kind: Kind) -> bool {
+pub(crate) fn is_ground(kind: Kind) -> bool {
     matches!(material(kind), EARTH | ROCK | GRASS | SAND | ASPHALT | WATER)
 }
 

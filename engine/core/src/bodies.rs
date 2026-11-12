@@ -12,11 +12,11 @@
 //! process decides is what everyone sees.
 
 use crate::hash::hash3;
-use crate::kinds::{ASPHALT, EARTH, GLASS, GRASS, ROCK, SAND, WATER, breaks_at, burns, material, weighs};
+use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, PLASTER, ROCK, ROOFING, SAND, WATER, breaks_at, burns, material, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::support::{self, Region};
 use crate::tree::{CELLS, Kind, SIDE, at};
-use crate::{Edit, SETTLE, city, fill};
+use crate::{Edit, SETTLE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -198,6 +198,25 @@ impl Ground {
         }
     }
 
+    /// One sector as the world stands, in the scratch: the city's rules, then the edits that reach it. The list of
+    /// edits only grows, and most of them are of somewhere else.
+    fn fill(&mut self, key: [i32; 3]) {
+        let s = SIDE as i32;
+        let (lo, hi) = (key.map(|k| k * s), key.map(|k| (k + 1) * s));
+        let reaching = self.edits.iter().zip(&self.boxes).filter(|(_, (a, b))| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])).map(|(e, _)| e);
+        fill_of(&mut self.scratch, key[0], key[1], key[2], 0, reaching);
+    }
+
+    /// The world as it stands in a box (see `Region::gather`).
+    pub(crate) fn region(&mut self, low: [i32; 3], size: [usize; 3]) -> Region {
+        let s = SIDE as i32;
+        let (edits, boxes) = (&self.edits, &self.boxes);
+        Region::gather_with(low, size, &mut self.scratch, |scratch, sx, sy, sz| {
+            let (lo, hi) = ([sx * s, sy * s, sz * s], [(sx + 1) * s, (sy + 1) * s, (sz + 1) * s]);
+            fill_of(scratch, sx, sy, sz, 0, edits.iter().zip(boxes).filter(|(_, (a, b))| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])).map(|(e, _)| e));
+        })
+    }
+
     fn make(&mut self, key: [i32; 3]) -> Sector {
         let s = SIDE as i32;
         let (lo, hi) = (key.map(|k| k * s), key.map(|k| (k + 1) * s));
@@ -206,7 +225,7 @@ impl Ground {
         if (key[1] < first || key[1] > last) && !self.boxes.iter().any(|(a, b)| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])) {
             return if key[1] < first { Sector::Solid } else { Sector::Air };
         }
-        fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
+        self.fill(key);
         self.holds = Some(key);
         let mut bits = Box::new([0u64; CELLS / 64]);
         let mut fuel = Box::new([0u64; CELLS / 64]);
@@ -267,7 +286,7 @@ impl Ground {
         if let Some(found) = self.whole.iter().rposition(|(k, _)| *k == key) {
             return self.whole[found].1[i];
         }
-        fill(&mut self.scratch, key[0], key[1], key[2], 0, &self.edits);
+        self.fill(key);
         self.holds = Some(key);
         if self.whole.len() >= 32 {
             self.whole.remove(0);
@@ -334,6 +353,8 @@ pub struct Body {
     broken: u8,
     /// What most of it is made of.
     stuff: u8,
+    /// Whether it is a lump a blast threw out: these are many, and are not tried against each other however big.
+    lump: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
 }
@@ -351,7 +372,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, born: low,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, born: low,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -595,10 +616,16 @@ impl Bodies {
     /// The same, asked of a box `side` cells across (22 m tall, most of it above the point): a small change needs
     /// only a narrow box, which is quick.
     pub fn release_in(&mut self, at: [i32; 3], radius: i32, side: usize) -> usize {
-        // As tall as ever, however narrow: a thing that reaches the box's top is left alone, and things are tall.
-        let size = [side, SETTLE[1], side];
+        self.release_box(at, radius, [side, SETTLE[1], side])
+    }
+
+    /// As `release`, asked in a box of a given size round the place. A thing that reaches the box's top is left alone,
+    /// so a blast asks in one as tall as ever, however narrow. A landing's dent asks in a small one: it is asked eight
+    /// times a second while a house comes down, and the asking is most of what the solver then does.
+    fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3]) -> usize {
+        let side = size[0];
         let low = [at[0] - side as i32 / 2, at[1] - 48, at[2] - side as i32 / 2];
-        let mut region = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        let mut region = self.ground.region(low, size);
         self.ground.holds = None;
         let (pieces, dust) = support::release(&mut region);
         let mut taken: Vec<Run> = Vec::new();
@@ -629,11 +656,19 @@ impl Bodies {
     pub fn blast(&mut self, at: [i32; 3], radius: i32, after: Option<usize>, spark: bool) -> usize {
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
-        let before = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        #[cfg(test)]
+        let t0 = std::time::Instant::now();
+        let before = self.ground.region(low, size);
+        #[cfg(test)]
+        let t1 = std::time::Instant::now();
         self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, after);
-        let left = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        let left = self.ground.region(low, size);
         self.ground.holds = None;
+        #[cfg(test)]
+        let t2 = std::time::Instant::now();
         let made = self.lumps(&before, &left, at, radius);
+        #[cfg(test)]
+        if std::env::var("TIMES").is_ok() { eprintln!("    blast of {radius}: before {:.0} ms, push and left {:.0} ms, lumps {:.0} ms", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
         // What can burn round the blast, and is still there, may catch: about one cell in twelve.
         if spark {
             self.ignite(at, radius + radius / 2, true);
@@ -648,6 +683,9 @@ impl Bodies {
         let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
         let wander = |a: i32, b: i32, seed: u32| (hash3(a >> 2, b >> 2, seed as i32, 11) & 3) as i32;
+        // Bigger lumps from a bigger blast: it empties more than there can be bodies for at the size a charge's are,
+        // and what had no body was nothing.
+        let (wide, tall) = ((radius / 3).clamp(5, 14), (radius / 4).clamp(4, 11));
         for y in 0..size[1] {
             for z in 0..size[2] {
                 for x in 0..size[0] {
@@ -661,7 +699,7 @@ impl Bodies {
                     if dot(d, d) < (radius * radius) as f32 * 0.16 {
                         continue;
                     }
-                    let key = [(c[0] + wander(c[1], c[2], 1)).div_euclid(5), (c[1] + wander(c[0], c[2], 2)).div_euclid(4), (c[2] + wander(c[0], c[1], 3)).div_euclid(5)];
+                    let key = [(c[0] + wander(c[1], c[2], 1)).div_euclid(wide), (c[1] + wander(c[0], c[2], 2)).div_euclid(tall), (c[2] + wander(c[0], c[1], 3)).div_euclid(wide)];
                     lumps.entry(key).or_default().push((c, kind));
                 }
             }
@@ -688,6 +726,7 @@ impl Bodies {
             }
             let mut body = Body::new(self.next, grid, size, lo);
             self.next += 1;
+            body.lump = true;
             self.throw(&mut body, at, radius);
             self.born(&body);
             self.list.push(body);
@@ -703,11 +742,11 @@ impl Bodies {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
-        let before = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        let before = self.ground.region(low, size);
         // What a blast there would leave is asked of the world with the blast in it; then the blast is taken back
         // and what it emptied goes in as rows of the solver's own, which is how the page hears of it.
         self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, None);
-        let left = Region::gather(low, size, &self.ground.edits, &mut self.ground.scratch);
+        let left = self.ground.region(low, size);
         self.ground.undo();
         self.ground.holds = None;
         let mut gone: Vec<Run> = Vec::new();
@@ -730,7 +769,7 @@ impl Bodies {
         }
         self.change(gone);
         self.lumps(&before, &left, at, radius);
-        self.release_in(at, radius, 64);
+        self.release_box(at, radius, [48, 96, 48]);
     }
 
     /// A ball of one kind, `radius` cells across its half, sent from a place at a speed: a cannon's shot. What it
@@ -872,11 +911,12 @@ impl Bodies {
         }
         // Body against body: the points of each tried in the cells of the other. Only pairs with a big body in them
         // are tried, so each big body is asked which others are near it.
-        let big: Vec<usize> = (0..self.list.len()).filter(|&i| self.list[i].count >= SMALL).collect();
+        let is_big = |b: &Body| b.count >= SMALL && !b.lump;
+        let big: Vec<usize> = (0..self.list.len()).filter(|&i| is_big(&self.list[i])).collect();
         for &i in &big {
             for j in 0..self.list.len() {
                 // Two big bodies are a pair once.
-                if j == i || (self.list[j].count >= SMALL && j < i) {
+                if j == i || (is_big(&self.list[j]) && j < i) {
                     continue;
                 }
                 let (a, b) = (&self.list[i], &self.list[j]);
@@ -1072,13 +1112,21 @@ impl Bodies {
             }
         }
         let (lo, hi) = (lo.map(|v| (v + 0.01).floor() as i32), hi.map(|v| (v - 0.01).ceil() as i32));
+        // A big piece of masonry that has stopped is no one stiff thing: see `sitting`.
+        let stays = if body.broken == 0 && body.count >= BREAKS && brittle(body.stuff) && self.list.len() < MOST { Some(self.sitting(&body, lo, hi)) } else { None };
+        let across = (hi[0] - lo[0]) as usize;
+        let deep = (hi[2] - lo[2]) as usize;
         let mut runs: Vec<Run> = Vec::new();
         for y in lo[1]..hi[1] {
             for z in lo[2]..hi[2] {
                 let mut open: Option<Run> = None;
                 for x in lo[0]..hi[0] {
                     let (cell, _) = body.cell_at([x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5]);
-                    let kind = if body.solid(cell) && !self.ground.solid(x, y, z) { body.cells[body.at(cell[0] as usize, cell[1] as usize, cell[2] as usize)] } else { 0 };
+                    let here = match &stays {
+                        Some(stays) => stays[(x - lo[0]) as usize + across * ((z - lo[2]) as usize + deep * (y - lo[1]) as usize)],
+                        None => true,
+                    };
+                    let kind = if here && body.solid(cell) && !self.ground.solid(x, y, z) { body.cells[body.at(cell[0] as usize, cell[1] as usize, cell[2] as usize)] } else { 0 };
                     match &mut open {
                         Some(r) if r.kind == kind && kind != 0 => r.x1 = x + 1,
                         _ => {
@@ -1101,6 +1149,120 @@ impl Bodies {
         let mut words = vec![body.id];
         words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
         self.record(GONE, &words);
+    }
+}
+
+/// A body this big, of stuff that breaks, is looked at for what sits when it stops.
+const BREAKS: usize = 600;
+/// How far apart the middles of its chunks are, in cells.
+const CHUNK: i32 = 24;
+
+/// Whether a big body mostly of this breaks up where it is not held up: masonry does, steel and wood hold together.
+fn brittle(material: u8) -> bool {
+    matches!(material, BRICK | PLASTER | CONCRETE | ROOFING | ROCK | ASPHALT)
+}
+
+impl Bodies {
+    /// Which cells of a big body that has stopped stay where it lies: for each cell of the box `lo` to `hi`, x then z
+    /// then y. Two storeys of a house that stop on the walls either side of a hole would lie across it like a plank,
+    /// so the body is taken as chunks a room's wall across. A chunk stays when half of its underside is on the
+    /// world, or on a chunk that stays, with its middle over that. The rest are bodies again, each by itself, and
+    /// come down.
+    fn sitting(&mut self, body: &Body, lo: [i32; 3], hi: [i32; 3]) -> Vec<bool> {
+        let size = [(hi[0] - lo[0]) as usize, (hi[1] - lo[1]) as usize, (hi[2] - lo[2]) as usize];
+        let at = |x: i32, y: i32, z: i32| (x - lo[0]) as usize + size[0] * ((z - lo[2]) as usize + size[2] * (y - lo[1]) as usize);
+        // Which chunk each cell is of (one more than its place in `chunks`), and what it is made of.
+        let mut chunk_of = vec![0u32; size[0] * size[1] * size[2]];
+        let mut kinds = vec![0 as Kind; chunk_of.len()];
+        let mut of: Map<[i32; 3], u32> = Map::default();
+        let mut chunks: Vec<Vec<[i32; 3]>> = Vec::new();
+        for y in lo[1]..hi[1] {
+            for z in lo[2]..hi[2] {
+                for x in lo[0]..hi[0] {
+                    let (cell, _) = body.cell_at([x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5]);
+                    if !body.solid(cell) || self.ground.solid(x, y, z) {
+                        continue;
+                    }
+                    // The nearest of middles scattered one to a box of CHUNK cells.
+                    let c = [x, y, z];
+                    let g = c.map(|v| v.div_euclid(CHUNK));
+                    let (mut best, mut near) = ([0; 3], i32::MAX);
+                    for d in 0..27 {
+                        let b = [g[0] + d % 3 - 1, g[1] + d / 3 % 3 - 1, g[2] + d / 9 - 1];
+                        let m = [0, 1, 2].map(|a| b[a] * CHUNK + (hash3(b[0], b[1], b[2], 31 + a as u32) % CHUNK as u32) as i32);
+                        let far = (0..3).map(|a| (c[a] - m[a]).pow(2)).sum::<i32>();
+                        if far < near {
+                            (best, near) = (b, far);
+                        }
+                    }
+                    let next = chunks.len() as u32 + 1;
+                    let id = *of.entry(best).or_insert_with(|| {
+                        chunks.push(Vec::new());
+                        next
+                    });
+                    chunk_of[at(x, y, z)] = id;
+                    kinds[at(x, y, z)] = body.cells[body.at(cell[0] as usize, cell[1] as usize, cell[2] as usize)];
+                    chunks[id as usize - 1].push(c);
+                }
+            }
+        }
+        // Asked again while any more are found to sit, for a chunk can sit on a chunk.
+        let mut sits = vec![false; chunks.len()];
+        loop {
+            let mut more = false;
+            for k in 0..chunks.len() {
+                if sits[k] {
+                    continue;
+                }
+                let (mut under, mut on, mut low, mut high, mut mid) = (0usize, 0usize, [i32::MAX; 2], [i32::MIN; 2], [0i64; 2]);
+                for &[x, y, z] in &chunks[k] {
+                    mid = [mid[0] + x as i64, mid[1] + z as i64];
+                    let below = if y > lo[1] { chunk_of[at(x, y - 1, z)] } else { 0 };
+                    if below == k as u32 + 1 {
+                        continue;
+                    }
+                    under += 1;
+                    if (below != 0 && sits[below as usize - 1]) || (below == 0 && self.ground.solid(x, y - 1, z)) {
+                        on += 1;
+                        low = [low[0].min(x), low[1].min(z)];
+                        high = [high[0].max(x), high[1].max(z)];
+                    }
+                }
+                let n = chunks[k].len() as i64;
+                let mid = [(mid[0] / n) as i32, (mid[1] / n) as i32];
+                if on * 2 >= under && on > 0 && mid[0] >= low[0] - 2 && mid[0] <= high[0] + 2 && mid[1] >= low[1] - 2 && mid[1] <= high[1] + 2 {
+                    sits[k] = true;
+                    more = true;
+                }
+            }
+            if !more {
+                break;
+            }
+        }
+        // What does not sit is a body again, where it is, and will not be asked this twice.
+        for (k, cells) in chunks.iter().enumerate() {
+            if sits[k] || cells.len() < 4 {
+                continue;
+            }
+            let (mut low, mut high) = ([i32::MAX; 3], [i32::MIN; 3]);
+            for c in cells {
+                for a in 0..3 {
+                    low[a] = low[a].min(c[a]);
+                    high[a] = high[a].max(c[a] + 1);
+                }
+            }
+            let part = [(high[0] - low[0]) as usize, (high[1] - low[1]) as usize, (high[2] - low[2]) as usize];
+            let mut grid = vec![0 as Kind; part[0] * part[1] * part[2]];
+            for c in cells {
+                grid[(c[0] - low[0]) as usize + part[0] * ((c[2] - low[2]) as usize + part[2] * (c[1] - low[1]) as usize)] = kinds[at(c[0], c[1], c[2])];
+            }
+            let mut chunk = Body::new(self.next, grid, part, low);
+            self.next += 1;
+            chunk.broken = 1;
+            self.born(&chunk);
+            self.list.push(chunk);
+        }
+        chunk_of.iter().map(|&k| k != 0 && sits[k as usize - 1]).collect()
     }
 }
 
@@ -1347,7 +1509,8 @@ mod tests {
             ("ruin", [home[0] + 80, home[1] + 170, home[2] + 130], 0.0, -0.62, [-0.5, -0.25, 0.0, 0.25, 0.5], 40),
         ];
         for (name, eye, yaw, pitch, turns, radius) in rows {
-            for spark in [false, true] {
+            // With fire too when asked: SPARKS=1.
+            for spark in if std::env::var("SPARKS").is_ok() { vec![false, true] } else { vec![false] } {
                 let mut bodies = Bodies::new();
                 let before = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
                 let solid = |r: &Region, p: [f32; 3]| {
@@ -1423,12 +1586,17 @@ mod tests {
             }
         }
         let at = [x, y, z];
+        // What is built in a box well round the house, before anything moves and when all is still again.
+        let (low, size) = ([x - 200, y - 80, z - 200], [400usize, 320, 400]);
+        let built = |bodies: &mut Bodies| Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch).cells.iter().filter(|&&k| k != 0 && !crate::support::is_ground(k)).count();
+        let before = built(&mut bodies);
         let made = bodies.release(at, 16);
         assert!(made > 0, "nothing came loose");
         let loose: usize = bodies.list.iter().map(|b| b.count).sum();
-        let put = run(&mut bodies, 14.0);
+        run(&mut bodies, 40.0);
         assert!(bodies.list.is_empty(), "{} bodies never came to rest", bodies.list.len());
-        let down: i32 = put.iter().filter(|r| r.kind != 0).map(|r| r.x1 - r.x0).sum();
-        assert!(down as f32 > loose as f32 * 0.8 && (down as f32) < loose as f32 * 1.2, "{loose} cells came loose and {down} lie down");
+        // No cell is made by falling, and under a tenth are lost: what lands hard breaks, and the smallest bits of that are dust.
+        let after = built(&mut bodies);
+        assert!(after <= before && (before - after) * 10 < loose, "{before} cells were built before {loose} of them came loose, and {after} when they lay down")
     }
 }

@@ -276,6 +276,42 @@ falls). The cutter and the brick are edits of the page's own, told to the solver
 - Not done: fire gives no light to what is near it; smoke casts no shadow and is not blown
   round things; a body that is alight goes out; water does not put fire out.
 
+## Coming down into heaps (#160, `bodies.rs`: `sitting`, `lumps`; `page/sun.ts`; `page/world.ts`)
+
+Counted first (`cargo test --release where_the_stuff_goes -- --ignored --nocapture`, `SPARKS=1`
+for fire too): where the cells go when the board's rubble and ruin rows are acted. What it found,
+and what was done:
+
+- A big piece the reach rule lets go (two storeys of a house, 60,000 cells) was one stiff body,
+  stopped on the walls either side of the hole and was put back where it was. So a big body
+  mostly of masonry that has stopped is taken as chunks 2.4 m across (`sitting`): a chunk with
+  half its underside on the world, or on a chunk that stays, stays; the rest are bodies again
+  and come down. Breaking the piece when it comes loose was tried first and is wrong: a chimney
+  must go over whole.
+- A charge of 40 emptied more than there could be bodies for; what had no body was nothing.
+  Lumps grow with the blast (5 cells across for a charge of 16, 13 for one of 40) and are not
+  tried against each other.
+- Ruin row, sparks off: cells that end somewhere new 17,000 before, 139,000 after. 192,000 built
+  cells are still lost (the blasts' middles, glass, what no body was made for).
+- A landing's dent asks what it left unheld in a box 4.8 m a side and 9.6 m tall, not 6.4 by
+  22.4: the asking was most of the solver's time while a house came down.
+- The solver fills a sector only from the edits whose box reaches it, and rows by height.
+
+What a burning street cost, each found by switching parts of a frame off (`engine.off`,
+`engine.spent`, `engine.cpuMs`):
+
+- `world.update` 20 to 40 ms a frame: every sector made again was told every edit. Edits are
+  kept by column, and a column's edits of rows are merged (core `merge_rows`, a test holds every
+  coarseness to the same cells). 3 ms after.
+- The march 33 ms at half size: an edit threw away the sun's tiles on its lines, so the shader
+  traced every shadow there, and eight tiles a frame were drawn again. A spoiled tile is now used
+  until drawn again, two a frame. 12.6 ms after.
+- A tenth of a second when a house's worth of bodies lay down together: the page sorted their
+  rows. The core does it.
+
+Still slow: a charge of 40 is worked out in 0.25 s native and 0.65 s in the page, and the solver
+falls behind real time with 1,800 bodies (frames are held; things move late and slowly).
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as

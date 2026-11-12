@@ -131,7 +131,7 @@ export async function flight(f: Flown) {
       f.say(`Breaking a ${name === 'tree' ? 'tree' : 'house front'} (${i + 1} of ${aims.length})`)
       Object.assign(pose, at)
       let t0 = performance.now()
-      for (;;) { const now = await nextFrame(); if ((still() && march.sun.undrawn === 0 && now - t0 > 400) || now - t0 > 10_000) break }
+      for (;;) { const now = await nextFrame(); if ((still() && march.sun.undrawn === 0 && march.sun.spoiled === 0 && now - t0 > 400) || now - t0 > 10_000) break }
       const before = f.falling(), gaps: number[] = []
       const stop = f.watch((gap) => gaps.push(gap))
       t0 = performance.now()

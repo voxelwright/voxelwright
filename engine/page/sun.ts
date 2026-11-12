@@ -33,11 +33,14 @@ export class SunMaps {
   /** Which tile of the world each slot holds (two numbers a slot), whether it is drawn, and when. */
   private held: Int32Array[]
   private drawn: Uint32Array[]
+  /** Which drawn tiles an edit has since made wrong: used as they are until drawn again, which is soon. */
+  private wrong: Uint32Array[]
   private when: Float64Array[]
   private clock = 0
   private levels: number
-  /** How many tiles round the eye are not drawn yet, as of the last plan. */
+  /** How many tiles round the eye are not drawn yet, as of the last plan; and how many are drawn but wrong since an edit. */
   undrawn = 0
+  spoiled = 0
 
   constructor(device: GPUDevice, levels: number, sun: V3) {
     this.levels = levels
@@ -52,22 +55,24 @@ export class SunMaps {
     this.v = [this.s[1] * this.u[2] - this.s[2] * this.u[1], this.s[2] * this.u[0] - this.s[0] * this.u[2], this.s[0] * this.u[1] - this.s[1] * this.u[0]]
     this.held = Array.from({ length: levels }, () => new Int32Array(TILES * TILES * 2).fill(0x7fffffff))
     this.drawn = Array.from({ length: levels }, () => new Uint32Array(8))
+    this.wrong = Array.from({ length: levels }, () => new Uint32Array(8))
     this.when = Array.from({ length: levels }, () => new Float64Array(TILES * TILES))
   }
 
-  private clear(level: number, slot: number) { this.drawn[level][slot >> 5] &= ~(1 << (slot & 31)) }
+  private clear(level: number, slot: number) { this.drawn[level][slot >> 5] &= ~(1 << (slot & 31)); this.wrong[level][slot >> 5] &= ~(1 << (slot & 31)) }
+  private isWrong(level: number, slot: number) { return (this.wrong[level][slot >> 5] >>> (slot & 31)) & 1 }
   private isDrawn(level: number, slot: number) { return (this.drawn[level][slot >> 5] >>> (slot & 31)) & 1 }
 
   /**
    * Moves each map to be round the eye (in the finest cells of the world) and says which tiles to draw now:
-   * up to `most` that are not drawn, the finest and nearest first; then, while there is room, tiles whose
-   * box has moved since they were drawn (they are still used meanwhile), then the oldest one, so a tile
+   * up to `most` that are not drawn, the finest and nearest first; then those an edit made wrong; then, while
+   * there is room, tiles whose box has moved since they were drawn (all still used meanwhile), then the oldest one, so a tile
    * drawn while the world behind it was still being made does not stay wrong. `ready` is whether the
    * world is made enough to draw from.
    */
   plan(eye: V3, most: number, ready: boolean): SunTile[] {
     this.clock++
-    const want: (SunTile & { rank: number })[] = [], aged: (SunTile & { rank: number })[] = []
+    const want: (SunTile & { rank: number })[] = [], wrong: (SunTile & { rank: number })[] = [], aged: (SunTile & { rank: number })[] = []
     let oldest: (SunTile & { rank: number }) | null = null
     for (let level = 0; level < this.levels; level++) {
       const texel = 1 << level, held = this.held[level]
@@ -78,25 +83,34 @@ export class SunMaps {
         const tile = { level, slotX, slotY, tx, ty }
         const rank = (tx - cx) ** 2 + (ty - cy) ** 2 + level * 6
         if (!this.isDrawn(level, slot)) want.push({ ...tile, rank })
+        else if (this.isWrong(level, slot)) wrong.push({ ...tile, rank })
         else if (this.when[level][slot] === 0) aged.push({ ...tile, rank })
         else if (!oldest || this.when[level][slot] < oldest.rank) oldest = { ...tile, rank: this.when[level][slot] }
       }
     }
     this.undrawn = want.length
+    this.spoiled = wrong.length
     if (!ready) return []
     want.sort((a, b) => a.rank - b.rank)
+    wrong.sort((a, b) => a.rank - b.rank)
     aged.sort((a, b) => a.rank - b.rank)
-    const out: SunTile[] = [...want, ...aged].slice(0, most)
+    // A tile that is used meanwhile is not worth a frame's time: two of those a frame, each a pass of long rays.
+    const out: SunTile[] = [...want, ...wrong, ...aged].slice(0, Math.min(most, want.length + 2))
     if (out.length < most && oldest && this.clock - oldest.rank > 600) out.push(oldest)
     for (const t of out) {
       const slot = t.slotX + TILES * t.slotY
       this.drawn[t.level][slot >> 5] |= 1 << (slot & 31)
+      this.wrong[t.level][slot >> 5] &= ~(1 << (slot & 31))
       this.when[t.level][slot] = this.clock
     }
     return out
   }
 
-  /** An edit changes what is on the sun's lines through it: every tile those lines cross is to be drawn again. */
+  /**
+   * An edit changes what is on the sun's lines through it: every tile those lines cross is to be drawn again. It is
+   * used as it is until then: a shadow a few frames late is not seen, and a street that burns is edited ten times a
+   * second, which with its tiles thrown away had the shader tracing every shadow there (three times the march).
+   */
   spoil(e: Edit) {
     // The ball round the edit's box: every line to the sun through it.
     const b = e.box, at: V3 = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2], r = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2
@@ -105,7 +119,7 @@ export class SunMaps {
       const size = (1 << level) * SUN_TILE, held = this.held[level]
       for (let ty = Math.floor((v - r) / size); ty <= Math.floor((v + r) / size); ty++) for (let tx = Math.floor((u - r) / size); tx <= Math.floor((u + r) / size); tx++) {
         const slot = mod(tx, TILES) + TILES * mod(ty, TILES)
-        if (held[slot * 2] === tx && held[slot * 2 + 1] === ty) this.clear(level, slot)
+        if (held[slot * 2] === tx && held[slot * 2 + 1] === ty && this.isDrawn(level, slot)) this.wrong[level][slot >> 5] |= 1 << (slot & 31)
       }
     }
   }
@@ -118,7 +132,7 @@ export class SunMaps {
   age(level: number) { this.when[level].fill(0) }
 
   /** Everything is to be drawn again: the world behind the maps changed wholesale. */
-  spoilAll() { for (const d of this.drawn) d.fill(0) }
+  spoilAll() { for (const d of this.drawn) d.fill(0); for (const w of this.wrong) w.fill(0) }
 
   /** Where a map's texels are counted from, for the shader: the anchor's place in the map, in texels, wrapped. And which tiles are drawn. */
   tell(level: number, anchor: V3): { base: [number, number]; drawn: Uint32Array } {

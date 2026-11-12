@@ -44,15 +44,17 @@ async function main() {
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
+  /** Edits of rows, one after another, as one edit of rows a column of sectors reads the same (the core's `merge_rows`). */
+  const merge = (edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit => {
+    const words = stream(edits), room = core.edits_room(words.length)
+    new Int32Array(core.memory.buffer, room, words.length).set(words)
+    const n = core.merge_rows(lod, x0, x1, z0, z1), merged = new Int32Array(core.memory.buffer, core.merged_words(), n).slice()
+    let y0 = 0, y1 = 0
+    for (let i = 2; i < n; i += 5) { y0 = i === 2 ? merged[4] : Math.min(y0, merged[i + 2]); y1 = i === 2 ? merged[4] + 1 : Math.max(y1, merged[i + 2] + 1) }
+    return { words: merged, box: [x0, y0, z0, x1, y1, z1] }
+  }
   const world = new World(device, {
-    merge: (edits, lod, x0, x1, z0, z1) => {
-      const words = stream(edits), room = core.edits_room(words.length)
-      new Int32Array(core.memory.buffer, room, words.length).set(words)
-      const n = core.merge_rows(lod, x0, x1, z0, z1), merged = new Int32Array(core.memory.buffer, core.merged_words(), n).slice()
-      let y0 = 0, y1 = 0
-      for (let i = 2; i < n; i += 5) { y0 = i === 2 ? merged[4] : Math.min(y0, merged[i + 2]); y1 = i === 2 ? merged[4] + 1 : Math.max(y1, merged[i + 2] + 1) }
-      return { words: merged, box: [x0, y0, z0, x1, y1, z1] }
-    },
+    merge,
     grid,
     levels: Number(query.get('levels') ?? (phone ? 8 : 9)),
     poolWords: (poolMb << 20) / 4,
@@ -264,19 +266,16 @@ async function main() {
   let flames = new Float32Array(0)
   const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit) }
   /** Cells that bodies have become, waiting to be put in the world together. */
-  let putting: { runs: Int32Array<ArrayBuffer>; box: readonly number[] }[] = [], putSince = 0
+  let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
     if (!putting.length) return
-    // One edit of them all, its rows in the order rows are kept: up, then along z, then along x. No two are of the same cell.
-    const n = putting.reduce((sum, p) => sum + p.runs.length / 5, 0), order = new Uint32Array(n), all = new Int32Array(n * 5), box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
-    let at = 0
-    for (const p of putting) { all.set(p.runs, at); at += p.runs.length; for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], p.box[a]); box[a + 3] = Math.max(box[a + 3], p.box[a + 3]) } }
-    for (let i = 0; i < n; i++) order[i] = i
-    order.sort((a, b) => all[a * 5 + 2] - all[b * 5 + 2] || all[a * 5 + 3] - all[b * 5 + 3] || all[a * 5] - all[b * 5])
-    const sorted = new Int32Array(n * 5)
-    for (let i = 0; i < n; i++) sorted.set(all.subarray(order[i] * 5, order[i] * 5 + 5), i * 5)
+    // One edit of them all, its rows in order and none over another: the core sorts them, which here took a tenth of
+    // a second when a house's worth of bodies lay down together.
+    const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+    for (const p of putting) for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], p.box[a]); box[a + 3] = Math.max(box[a + 3], p.box[a + 3]) }
+    const all = merge(putting.map((p) => rows(p.runs, p.box)), 0, box[0], box[3], box[2], box[5])
     putting = []
-    change(rows(sorted, box as [number, number, number, number, number, number]))
+    change(all)
   }
   /** How far over the furthest-gone big body is, in degrees from upright: for a picture taken as a tall thing goes over. */
   const leaning = () => {
