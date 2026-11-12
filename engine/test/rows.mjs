@@ -95,16 +95,21 @@ const charge = async (page, turn, radius, pitch) => {
  * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
-// States as the fourth blind judge left them (November 12, main a4411d9a, logged): ours first, theirs second. town 5 v 7,
-// light 5 v 7, tumble 6 v 5, topple 5 v 7, blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4,
-// ruin 5 v 7, sunset 7 v 8, under 6 v 8, snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7,
-// there 6 v 5. Two or more apart is ahead or behind, one apart or the same is level. Glass is kept level, not
-// ahead: their film has a better glass frame than the one the judge was given (19.6 s, panes going in a ball of
-// fire), and it is the frame from now on. The third judge's scores, for the noise between passes: town 5 v 8,
-// light 5.5 v 7.5, tumble 6.5 v 5.5, topple 6 v 7, blast 6.5 v 6, fire 6.5 v 3.5, rubble 6 v 7, glass 5.5 v 5,
-// frame 4.5 v 7, tools 6 v 5, ruin 5.5 v 7, sunset 5.5 v 8.5, under 6 v 8, snow 5 v 7, rain 6 v 8.5, road 6.5 v 7.5,
-// whole 5 v 7.5, dusk 6 v 6.5.
-// Tools is level, not ahead: the judge could not read their bar's labels, but was handed their frame at 960 wide
+// States as the fifth blind judge left them (November 12, main 6bd6d317, logged), after material finer than a cell,
+// the wall paints and rubble in heaps: ours first, theirs second. town 5 v 7, light 6 v 7, topple 6 v 7, fire 6 v 4,
+// glass 6 v 5, frame 5 v 7, tools 5 v 4, sunset 7 v 8, under 6 v 8, snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8,
+// signs 3 v 8, dusk 6 v 7, there 6 v 5. Tumble (5 v 7) and blast (5 v 7) had dropped: with the inner part of a blast
+// poured as rubble, less of it flew. Lumps are thrown as before again, and a second judge saw those two and the two
+// rows of heaps as they now are: tumble 5 v 6, blast 5 v 6, rubble 5 v 6 (7 v 6 from the first of the two), ruin
+// 5 v 7 (6 v 7). Two or more apart is ahead or behind, one apart or the same is level. Light, topple, rubble, tumble
+// and blast are level; ruin is behind. What both judges say is still between the two: theirs has grey stuff that
+// reads as concrete, fire that lights what is round it, and dust and haze between the eye and the break; ours is
+// crisp, and its pale painted pieces read as toys.
+// The fourth judge's scores, for the noise between passes: town 5 v 7, light 5 v 7, tumble 6 v 5, topple 5 v 7,
+// blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4, ruin 5 v 7, sunset 7 v 8, under 6 v 8,
+// snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7, there 6 v 5. Glass is kept level, not
+// ahead: their film has a better glass frame than the one that judge was given (19.6 s), and it is the frame now.
+// Tools is level, not ahead: that judge could not read their bar's labels, but was handed their frame at 960 wide
 // from a compressed film. At the film's own size the bar reads plainly, twelve named tools to our seven.
 export const ROWS = [
   // The town of cells being broken.
@@ -112,7 +117,7 @@ export const ROWS = [
     // From in the works yard: its water tower on its legs close by, and across the street five shops with their
     // names over the doors, cars at the kerb.
     stand: { from: [54, 437], up: 1.8, to: [33, 400], high: 7 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
-  { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
+  { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'level',
     stand: [-9, 1.8, 2.2, 62, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'level',
     stand: FRONT, near: [16, ...HOUSE], inAir: true, falls: 20,
@@ -122,7 +127,7 @@ export const ROWS = [
       await page.waitForTimeout(450)
       return page.screenshot()
     } },
-  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'behind',
+  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'level',
     // The water tower in the yard, from the street beside it: its two legs on one side are cut near the ground, and
     // it goes over across the picture. Seen from in front of its fall it looked upright.
     stand: { from: [YARD.tower[0] - 5, YARD.tower[1] - 23], up: 2.5, to: YARD.tower, high: 12.5 }, near: [45, STEEL, WOOD], inAir: true, falls: 1,
@@ -150,7 +155,7 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
-  { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
+  { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'level',
     // From the road, low: three big charges at the feet of the houses across it, and what they bring down. The
     // houses burn and are still letting things go forty seconds on, when the picture is taken. Before rubble lay in
     // heaps that picture was of things in the air (the fourth judge: "frozen in mid-air").

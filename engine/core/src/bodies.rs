@@ -677,9 +677,9 @@ impl Bodies {
         made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]))
     }
 
-    /// What a blast emptied (the cells solid in `before` and not in `left`): the outer part of it as bodies thrown from
-    /// it, lumps a few cells across whose edges wander; the inner part, and what there can be no body for, as rubble
-    /// that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
+    /// What a blast emptied (the cells solid in `before` and not in `left`): all but its middle as bodies thrown from
+    /// it, lumps a few cells across whose edges wander; and its inner part, and what there can be no body for, as
+    /// rubble that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
     fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32) -> usize {
         let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
@@ -698,9 +698,13 @@ impl Bodies {
                     }
                     let c = [low[0] + x as i32, low[1] + y as i32, low[2] + z as i32];
                     let d = sub([c[0] as f32, c[1] as f32, c[2] as f32], [at[0] as f32, at[1] as f32, at[2] as f32]);
-                    // The inner part of what a blast empties is ground small and falls where it was, as rubble.
+                    // The inner part of what a blast empties is ground small and falls where it was, as rubble. All but
+                    // the very middle of it is thrown as lumps too: stuff broken small takes up about half as much room
+                    // again as the wall it was, and a blast that threw less looked like a hole and specks.
                     if dot(d, d) < (radius * radius) as f32 * 0.45 {
                         loose.push((c, kind));
+                    }
+                    if dot(d, d) < (radius * radius) as f32 * 0.16 {
                         continue;
                     }
                     let key = [(c[0] + wander(c[1], c[2], 1)).div_euclid(wide), (c[1] + wander(c[0], c[2], 2)).div_euclid(tall), (c[2] + wander(c[0], c[1], 3)).div_euclid(wide)];
