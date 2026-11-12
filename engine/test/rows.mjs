@@ -95,11 +95,15 @@ const charge = async (page, turn, radius, pitch) => {
  * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
-// States as the third blind judge left them (November 12, main b34dc40e, logged): ours first, theirs second. town 5 v 8,
+// States as the fourth blind judge left them (November 12, main a4411d9a, logged): ours first, theirs second. town 5 v 7,
+// light 5 v 7, tumble 6 v 5, topple 5 v 7, blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4,
+// ruin 5 v 7, sunset 7 v 8, under 6 v 8, snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7,
+// there 6 v 5. Two or more apart is ahead or behind, one apart or the same is level. Glass is kept level, not
+// ahead: their film has a better glass frame than the one the judge was given (19.6 s, panes going in a ball of
+// fire), and it is the frame from now on. The third judge's scores, for the noise between passes: town 5 v 8,
 // light 5.5 v 7.5, tumble 6.5 v 5.5, topple 6 v 7, blast 6.5 v 6, fire 6.5 v 3.5, rubble 6 v 7, glass 5.5 v 5,
 // frame 4.5 v 7, tools 6 v 5, ruin 5.5 v 7, sunset 5.5 v 8.5, under 6 v 8, snow 5 v 7, rain 6 v 8.5, road 6.5 v 7.5,
-// whole 5 v 7.5, dusk 6 v 6.5; signs void (ours is one sign in a quiet street, not a square). Two or more apart is
-// ahead or behind, one apart or the same is level; ruin, a point and a half behind, is kept as behind.
+// whole 5 v 7.5, dusk 6 v 6.5.
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
@@ -116,7 +120,7 @@ export const ROWS = [
       await page.waitForTimeout(450)
       return page.screenshot()
     } },
-  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'level',
+  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'behind',
     // The water tower in the yard, from the street beside it: its two legs on one side are cut near the ground, and
     // it goes over across the picture. Seen from in front of its fall it looked upright.
     stand: { from: [YARD.tower[0] - 5, YARD.tower[1] - 23], up: 2.5, to: YARD.tower, high: 12.5 }, near: [45, STEEL, WOOD], inAir: true, falls: 1,
@@ -144,13 +148,13 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
-  { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'level',
+  { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
     // From the road, low: three big charges at the feet of the houses across it, and what they bring down.
     stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600,
     act: async (page) => {
       for (const turn of [-0.3, 0, 0.3]) { await charge(page, turn, 32, 0.02); await page.waitForTimeout(700) }
     } },
-  { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 20.0], state: 'level',
+  { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 19.6], state: 'level',
     // The near wall of the yard's office of glass, struck a little above the eye.
     stand: { from: [YARD.office[0] - 3, YARD.office[1] - 14], up: 2.2, to: [YARD.office[0], YARD.office[1] - 5], high: 3 }, near: [14, GLASS], inAir: true,
     act: async (page) => {
@@ -170,7 +174,7 @@ export const ROWS = [
         await page.waitForTimeout(500)
       }
     } },
-  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'level',
+  { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'ahead',
     stand: FRONT, near: [16, ...HOUSE],
     act: async (page) => {
       // The bar, the cannon picked, and its ball on the way to a house front.
@@ -187,7 +191,7 @@ export const ROWS = [
       for (const turn of [-0.9, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(700) }
     } },
   // The same engine as the Earth.
-  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'behind',
+  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
     // From the town's shore over its lake to where the sun goes down over the mountains beyond it, towers either side.
     stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.35, near: [400, WATER] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
@@ -213,7 +217,7 @@ export const ROWS = [
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'none' },
-  { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'behind',
+  { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'level',
     // In the pine woods before the mountains, 5 km north of the town: a charge among the trees.
     stand: { from: [-145, -4970], up: 2.2, to: [-145, -5070], high: 14 }, near: [16, LEAVES, WOOD], inAir: true,
     act: async (page) => {
