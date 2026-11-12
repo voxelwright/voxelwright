@@ -4,16 +4,19 @@
 // inputs in the order they were made. One step is one tick of TICK.
 import type { Vec3 } from '../../home/src/engine/core.ts'
 import { createJolt, loadJolt } from '../../home/src/engine/jolt.ts'
-import { World } from '../../home/src/engine/world.ts'
+import { World, bitToy, type CutRecord } from '../../home/src/engine/world.ts'
 import { HALF_L, HALF_W, heightAt, onStreet } from './ground.ts'
 import { nearest, placeOf, standsOver, type Box } from './near.ts'
-import { HOUSES } from './houses.ts'
-import { BINS, CARS, CAR_KINDS, FURNITURE, PARKED, STREET, cargo, registerBlock, resident } from './scene.ts'
+import { HOUSES, LOTS, houseAt } from './houses.ts'
+import { houseCells } from './house-cells.ts'
+import { BINS, CARS, CARS_IN_CELLS, CAR_KINDS, FURNITURE, PARKED, STREET, cargo, registerBlock, resident } from './scene.ts'
 import { NORMAL_UP, TICK, standing, type Input } from './walk.ts'
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { cellsToy } from '../../home/src/engine/cells.ts'
 import { checkToy, type ToySpec } from '../../home/src/engine/toy.ts'
-import type { Drawn, Pose, Self } from './wire.ts'
+import { solidCells, sumOf } from '../../home/src/engine/voxels.ts'
+import { TOOLS, type Drawn, type Pose, type Self, type Tool } from './wire.ts'
 
 export interface BlockOptions {
   crates: number
@@ -22,12 +25,16 @@ export interface BlockOptions {
   awake?: boolean
   /** Where made things are kept, one file each, so they are here again after a restart. None: nothing is kept. */
   dir?: string
+  /** The street made of cells this big (m): everything on it is drawn from cells and breaks (#138). None: boxes, as before. */
+  cell?: number
 }
 
 /** A thing someone made by asking: its toy, the sentence, and who asked. */
 export interface MadeThing { toy: ToySpec; text: string; by: string; at: string }
 /** The most made things the street holds, and the most moving bodies in all (1,100 awake cost 9 ms of a 16.7 ms tick). */
-const MOST = { made: 80, moving: 700 }
+const MOST = { made: 80, moving: 700, bits: 140 }
+/** A number on the wire is not given to a new thing until this many ticks after the old one went: a pose still on its way must not move the new thing. */
+const ID_REST = 180
 
 interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean }; /** Walked by the world itself (problems.ts): not someone who came. */ cast?: boolean }
 
@@ -64,6 +71,13 @@ export class Block {
   private made = new Map<string, MadeThing>()
   private madeCount = 0
   private dir?: string
+  /** A cell's edge when the street is made of cells, else 0. */
+  readonly cell: number
+  /** Loose pieces broken off things, oldest first. */
+  private bits: string[] = []
+  private bitCount = 0
+  private freed: { id: number; tick: number }[] = []
+  private struck = new Map<number, number>()
 
   static async make(options: BlockOptions) {
     await loadJolt()
@@ -73,14 +87,17 @@ export class Block {
 
   private constructor(options: BlockOptions) {
     this.keepAwake = options.awake === true
+    this.cell = options.cell ?? 0
     this.world = new World(createJolt(), () => {}, undefined, FLOOR)
     // A long hill: things may go faster than in a room, and nothing is slowed by the air (a walker's speed is its own).
     const rules = this.world.setRules({ maxSpeed: 25, drag: 0 }, 'code')
     if (!rules.ok) throw new Error(rules.reason)
     this.build(STREET)
-    for (const house of HOUSES) this.build(house)
+    // On a street of cells a house is built to be broken into (house-cells.ts): hollow, with floors and glass.
+    if (this.cell) for (let lot = 0; lot < LOTS; lot++) for (const side of [-1, 1] as const) this.build(houseCells(houseAt(lot, side), this.cell))
+    else for (const house of HOUSES) this.build(house)
     this.build(FURNITURE)
-    this.build(CARS)
+    this.build(this.cell ? CARS_IN_CELLS : CARS)
     this.build(cargo(options.crates, options.balls))
     this.build(BINS)
     this.dir = options.dir && join(options.dir, 'made')
@@ -115,7 +132,7 @@ export class Block {
     const moving = toy.parts.filter((p) => p.motion === 'dynamic').length
     if (this.made.size >= MOST.made) return { reason: `the street holds ${MOST.made} made things and is full` }
     if (this.ids.size + moving > MOST.moving) return { reason: 'there are too many moving things on the street already' }
-    this.build(toy)
+    const built = this.build(toy)
     this.madeCount++
     const thing: MadeThing = { toy, text, by, at: new Date().toISOString() }
     this.made.set(toy.id, thing)
@@ -125,7 +142,7 @@ export class Block {
       writeFileSync(`${file}.tmp`, JSON.stringify(thing, null, 1))
       renameSync(`${file}.tmp`, file)
     }
-    return this.drawnAs(toy)
+    return this.drawnAs(built)
   }
 
   /** Takes the last thing `by` made off the street. Returns its toy's id, or null when they have made nothing that is still here. */
@@ -145,15 +162,53 @@ export class Block {
   private drop(id: string) {
     this.world.removeToy(id)
     for (const part of this.specs.get(id)?.parts ?? []) {
+      const number = this.ids.get(`${id}/${part.id}`)
+      if (number !== undefined) this.freed.push({ id: number, tick: this.tick })
       this.ids.delete(`${id}/${part.id}`)
       this.sleptAt.delete(`${id}/${part.id}`)
     }
     this.specs.delete(id)
   }
+
+  /**
+   * A seat strikes the street at a point. Every thing of cells there loses what the tool bites out;
+   * what that cuts loose falls as things of its own. Returns what to tell every page, or why not.
+   */
+  blow(by: number, at: Vec3, tool: Tool): { cuts: CutRecord[]; added: Drawn[]; removed: string[]; radius: number } | { reason: string } {
+    const seat = this.seats.get(by), from = seat && this.world.thing(seat.body)?.position, t = TOOLS[tool]
+    if (!this.cell) return { reason: 'this street is not made of cells' }
+    if (!seat || !from || !t || !Array.isArray(at) || at.length !== 3 || !at.every(Number.isFinite)) return { reason: 'a blow needs a place' }
+    if (Math.hypot(at[0] - from[0], at[1] - from[1], at[2] - from[2]) > t.reach) return { reason: 'that is out of reach' }
+    if (performance.now() - (this.struck.get(by) ?? -1e9) < t.rest) return { reason: 'too soon' }
+    this.struck.set(by, performance.now())
+    const cuts: CutRecord[] = [], added: Drawn[] = [], removed: string[] = []
+    for (const did of this.world.blast(at, t.radius, t.push, t.rough, t.lumps, t.fling)) {
+      cuts.push(did.record)
+      const toy = did.record.thing.slice(0, did.record.thing.indexOf('/'))
+      const label = this.specs.get(toy)?.label ?? 'something'
+      // A moving thing with nothing left of it is gone.
+      if (did.empty) { this.bits = this.bits.filter((b) => b !== toy); if (this.made.has(toy)) this.take(toy); else this.drop(toy); removed.push(toy) }
+      for (const bit of did.bits) {
+        const spec = bitToy(`bit-${++this.bitCount}`, `a piece of ${label.replace(/^a piece of /, '')}`, bit)
+        if (checkToy(spec)) continue
+        this.build(spec)
+        this.world.setVelocity(`${spec.id}/bit`, bit.velocity)
+        this.bits.push(spec.id)
+        added.push(this.drawnAs(spec))
+      }
+    }
+    // The street holds so many loose pieces: the oldest go.
+    while (this.bits.length > MOST.bits) { const old = this.bits.shift()!; this.drop(old); removed.push(old) }
+    return { cuts, added: added.filter((d) => !removed.includes(d.toy.id)), removed, radius: t.radius }
+  }
   /** The toy of the first thing a line from a point meets (`along` is the way and how far), leaving out one seat's own body. */
   meets(from: Vec3, along: Vec3, not: number): string | null {
     const seat = this.seats.get(not), hit = this.world.castRay(from, along, seat ? [seat.body] : [])
     return hit ? hit.key.slice(0, hit.key.indexOf('/')) : null
+  }
+  /** Each thing of cells: how many cells it has and a number that a true copy of them shares (the checks compare a page's with these). */
+  cellSums(): Record<string, [number, number]> {
+    return Object.fromEntries(this.world.cellKeys().map((key) => { const v = this.world.cellsOf(key)!.v; return [key, [solidCells(v), sumOf(v)]] }))
   }
   /** Where a part is now, for the rules that ask (near.ts). */
   private where = (key: string) => this.world.thing(key)?.position ?? null
@@ -191,10 +246,16 @@ export class Block {
   }
 
   /** Builds a toy and gives each of its moving parts a number for the wire. */
-  private build(toy: ToySpec) {
+  private build(made: ToySpec) {
+    // A street of cells: every toy but a resident's is made of them.
+    const toy = this.cell && !made.id.startsWith('seat-') ? cellsToy(made, this.cell) : made
     this.world.addToy(toy)
     this.specs.set(toy.id, toy)
-    for (const part of toy.parts) if (part.motion && part.motion !== 'static') this.ids.set(`${toy.id}/${part.id}`, this.nextId++)
+    for (const part of toy.parts) if (part.motion && part.motion !== 'static') {
+      const rested = this.freed.findIndex((f) => this.tick - f.tick > ID_REST)
+      this.ids.set(`${toy.id}/${part.id}`, rested >= 0 ? this.freed.splice(rested, 1)[0].id : this.nextId++)
+    }
+    return toy
   }
 
   private random() {
@@ -322,7 +383,8 @@ export class Block {
       poses[part.id] = { p: t.position, q: t.rotation }
     }
     const seat = [...this.seats.values()].find((x) => x.toy === toy.id)
-    return { toy: { ...toy, gadgets: [], wires: [], inputs: {} }, ids, poses, ...(seat ? { plush: seat.plush } : {}) }
+    // A thing of cells is told as its cells are now: a page that comes later sees what has been broken.
+    return { toy: { ...toy, parts: toy.parts.map((part) => (part.cells ? this.world.partNow(`${toy.id}/${part.id}`) ?? part : part)), gadgets: [], wires: [], inputs: {} }, ids, poses, ...(seat ? { plush: seat.plush } : {}) }
   }
   /** Everything built, as a new seat needs it. */
   drawn(): Drawn[] {

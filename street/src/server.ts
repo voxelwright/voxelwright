@@ -56,7 +56,9 @@ interface Session {
 }
 interface Seat { id: number; datagrams: Writer; lines: Writer; room: number; delay: number; jitter: number; out: number; in: number; gone: boolean }
 
-const sim = await Block.make({ crates: one('crates', 120), balls: one('balls', 24), awake: args.includes('--awake'), dir })
+/** `--cells [metres]` (or STREET_CELLS in the environment, for the checks): the street is made of cells this big (0.1 when only the flag is given) and everything on it breaks (#138). */
+const cell = args.includes('--cells') || process.env.STREET_CELLS ? (Number(all('cells')[0] ?? process.env.STREET_CELLS) > 0 && Number(all('cells')[0] ?? process.env.STREET_CELLS) < 1 ? Number(all('cells')[0] ?? process.env.STREET_CELLS) : 0.1) : 0
+const sim = await Block.make({ crates: one('crates', 120), balls: one('balls', 24), awake: args.includes('--awake'), dir, cell })
 const seats = new Map<number, Seat>()
 const text = new TextEncoder()
 const late: number[] = []
@@ -182,6 +184,19 @@ function buildFor(by: number, answer: unknown, yaw: number): Outcome {
   return placeFor(by, result.toy, result.toy.label, result.say)
 }
 
+/** A seat's blow on the street, told to everyone: what it took out, what came loose, what is gone. */
+function blowFor(by: number, at: unknown, tool: unknown): { ok: boolean; say: string } {
+  if (tool !== 'hammer' && tool !== 'boom') return { ok: false, say: 'There is a hammer and a boom.' }
+  const did = sim.blow(by, at as [number, number, number], tool)
+  if ('reason' in did) return { ok: false, say: did.reason }
+  if (!did.cuts.length && !did.removed.length) return { ok: true, say: 'It hit nothing.' }
+  everyone({ t: 'blow', by, at: at as [number, number, number], radius: did.radius, tool, cuts: did.cuts })
+  for (const drawn of did.added) everyone({ t: 'add', drawn })
+  for (const toy of did.removed) everyone({ t: 'remove', toy })
+  happened('broke', sim.nameOf(by), { thing: [...new Set(did.cuts.map((c) => c.thing.slice(0, c.thing.indexOf('/'))))].join(', ') })
+  return { ok: true, say: `Broke ${did.cuts.length} thing${did.cuts.length === 1 ? '' : 's'}; ${did.added.length} piece${did.added.length === 1 ? '' : 's'} came loose.` }
+}
+
 function unmakeFor(by: number) {
   const toy = sim.unmake(sim.nameOf(by))
   if (toy) { everyone({ t: 'remove', toy }); happened('took-back', sim.nameOf(by), { thing: toy }) }
@@ -194,6 +209,7 @@ function asked(seat: Seat, ask: Ask) {
   else if (ask.t === 'change') void makeFor(seat.id, plain(ask.text), Number(ask.yaw), {}).then((out) => { if (out.quiet) say(seat, { t: 'made', by: seat.id, ok: false, say: out.say }) })
   else if (ask.t === 'say') sayFor(seat.id, ask.text)
   else if (ask.t === 'top') sim.top(seat.id)
+  else if (ask.t === 'blow') blowFor(seat.id, ask.at, ask.tool)
   else if (ask.t === 'door') sim.stand(seat.id, HOME_DOOR)
   else if (ask.t === 'unmake') unmakeFor(seat.id)
   else if (ask.t === 'name') {
@@ -301,7 +317,7 @@ async function sit(session: Session) {
   for (const other of seats.values()) say(other, { t: 'add', drawn: sim.drawnOf(id) })
   seats.set(id, seat)
   happened('arrived', sim.nameOf(id))
-  say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, floor: FLOOR, drawn: sim.drawn() })
+  say(seat, { t: 'hello', you: id, tickHz: 60, snapHz: 60 / snapEvery, tick: sim.tick, floor: FLOOR, drawn: sim.drawn(), ...(sim.cell ? { cell: sim.cell } : {}) })
   for (const want of problems?.wanted() ?? []) say(seat, { t: 'wants', by: want.by, text: want.wants })
   console.log(`seat ${id} sat down (${seats.size} here)`)
   const leave = () => {
@@ -388,6 +404,7 @@ createServer((req, res) => {
   res.setHeader('content-type', 'application/json')
   res.setHeader('cache-control', 'no-store')
   if (req.url === '/where') return res.end(JSON.stringify({ port, hash, ...(home ? { home: { url: home, door: HOME_DOOR } } : {}) }))
+  if (req.url === '/cells') return res.end(JSON.stringify(sim.cellSums()))
   if (req.url === '/stats') return res.end(JSON.stringify({ tick: sim.tick, awake: sim.awake(), stepMs: spread(sim.stepMs), lateMs: spread(late), seats: rates, load1: +loadavg()[0].toFixed(1) }))
   res.statusCode = 404
   res.end('{}')

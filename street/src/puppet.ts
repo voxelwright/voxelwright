@@ -53,6 +53,7 @@ export class Puppet implements PhysicsCore {
   mass() { return 1 }
   sleeping() { return false }
   wake() {}
+  wakeIn() {}
   activity() { return [] }
   angularVelocity() { return STILL }
   setAngularVelocity() {}

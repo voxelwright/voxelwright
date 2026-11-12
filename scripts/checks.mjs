@@ -47,6 +47,7 @@ export const CHECKS = [
   { name: 'engine-no-page', cwd: 'home', run: ['node', 'scripts/check-engine-no-page.mjs'], seconds: 20 },
 
   // The street (#118): its world process and page
+  { name: 'voxels', cwd: 'home', run: ['node', 'scripts/check-voxels.mjs', '300'], seconds: 20 },
   { name: 'street-typecheck', cwd: 'street', run: ['npm', 'run', 'typecheck'], local: NO_STREET_IN_CI, seconds: 10 },
   { name: 'street-block', cwd: 'street', run: ['node', 'test/on-world.mjs', '120', '24', '4'], local: NO_STREET_IN_CI, seconds: 20 },
   { name: 'street-clear', cwd: 'street', run: ['node', 'test/clear.mjs'], local: NO_STREET_IN_CI, seconds: 20 },
@@ -57,6 +58,7 @@ export const CHECKS = [
   { name: 'street-door', cwd: 'street', run: ['node', 'test/door.ts'], serial: true, local: SOFTWARE_GL, seconds: 90 },
   { name: 'street-problem', cwd: 'street', run: ['node', 'test/problem.ts'], serial: true, local: SOFTWARE_GL, seconds: 90 },
   { name: 'street-touch', cwd: 'street', run: ['node', 'test/touch.ts'], serial: true, local: SOFTWARE_GL, seconds: 90 },
+  { name: 'street-cells', cwd: 'street', run: ['node', 'test/cells.ts'], serial: true, local: SOFTWARE_GL, seconds: 120 },
   { name: 'street-look', cwd: 'street', run: ['node', 'test/drawn.ts'], serial: true, local: SOFTWARE_GL, seconds: 90 },
 
   // Home, a page on the shared dev server

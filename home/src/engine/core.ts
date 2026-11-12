@@ -41,6 +41,11 @@ export interface BodySpec {
   linearDamping?: number
   /** Reports contacts but never pushes (trigger zones). */
   sensor?: boolean
+  /**
+   * False: a moving body is not swept along its path each step. Sweeping stops a small fast thing going through a thin wall, and
+   * is what a moving body gets unless this says otherwise; a body of many boxes (a loose piece of cells) pays far too much for it.
+   */
+  swept?: boolean
 }
 
 export type BodyId = number
@@ -117,6 +122,8 @@ export interface PhysicsCore {
   sleeping(id: BodyId): boolean
   /** Wakes a sleeping body where it is (a held thing must not doze off in the hand). */
   wake(id: BodyId): void
+  /** Wakes every sleeping body in a box of the world (low corner, high corner): what rested on something that has just gone must fall. */
+  wakeIn(low: Vec3, high: Vec3): void
   /** Bodies that woke or fell asleep since the last call, in order (a sleeping body costs the solver nothing). */
   activity(): { id: BodyId; awake: boolean }[]
   /** rad/s, world space. */

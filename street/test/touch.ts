@@ -70,10 +70,24 @@ try {
   check('a sentence typed into the bar by touch solves a problem', said === 'Phone got Mabel across the trench with Plank bridge', said)
   if (out) { await sleep(400); await page.screenshot({ path: join(out, '2-solved.png') }) }
 
-  // The dark button goes round its three verbs; in "change" the sentence is about the bridge.
+  // The dark button goes round its verbs (on a street of cells the hammer and the boom are among them); in "change" the sentence is about the bridge.
   const verbs: string[] = []
-  for (let i = 0; i < 3; i++) { await page.tap('#mode'); verbs.push((await page.textContent('#mode'))!) }
-  check('tapping the dark button goes round make, change, say', verbs.join() === 'change,say,make', verbs)
+  const round = (await page.evaluate('window.__street.cells().cell')) ? 'change,say,hammer,boom,make' : 'change,say,make'
+  for (let i = 0; i < round.split(',').length; i++) { await page.tap('#mode'); verbs.push((await page.textContent('#mode'))!) }
+  check('tapping the dark button goes round make, change, say', verbs.join() === round, verbs)
+  if (round.includes('boom')) {
+    // On a street of cells: with the boom in hand, a tap on the street strikes it there.
+    for (let i = 0; i < 4; i++) await page.tap('#mode')
+    const sums = () => page.evaluate('JSON.stringify(window.__street.cellSums())') as Promise<string>
+    const before = await sums()
+    let spot: [number, number] | null = null
+    for (const [px, py] of [[300, 330], [330, 260], [250, 400], [350, 420]] as const) if (await page.evaluate(`window.__street.meets(${px}, ${py})`)) { spot = [px, py]; break }
+    if (spot) await page.touchscreen.tap(spot[0], spot[1])
+    let after = before
+    for (const t0 = Date.now(); after === before && Date.now() - t0 < 5000;) { await sleep(150); after = await sums() }
+    check('with the boom in hand, a tap strikes the street where it points', spot && after !== before, { spot, mode: await page.textContent('#mode') })
+    await page.tap('#mode')
+  }
   await page.tap('#mode')
   await sleep(2200)
   await page.tap('#words')

@@ -67,10 +67,13 @@ const STEP_UP = 0.4
  * One tick of a walker on the bare street: what the page expects before the world answers. It
  * knows the ground with its trench, the kerbs and the end walls, and nothing that moves.
  * `floor`, when given, is the height the world last said this walker stands at on some thing (a
- * bridge, a crate): the walker stays up there until the world says otherwise.
+ * bridge, a crate): the walker stays up there until the world says otherwise, and the street
+ * still stops it where the street is higher. `pit`, on a street of cells, is the height the
+ * world last gave where the street itself has been blown away under the walker: there the
+ * street's own shape is no guide, and the walker is kept at that height.
  */
-export function predict(w: Walker, input: Input, floor = -Infinity): Walker {
-  const rest = (z: number) => Math.max(heightAt(z) + standing(NORMAL), floor)
+export function predict(w: Walker, input: Input, floor = -Infinity, pit: number | null = null): Walker {
+  const rest = (z: number) => pit ?? Math.max(heightAt(z) + standing(NORMAL), floor)
   const hop = Math.max(0, w.hop - 1)
   const grounded = hop === 0 && w.p[1] - rest(w.p[2]) <= REACH
   const v = steer(w.v, input, grounded ? NORMAL : null)

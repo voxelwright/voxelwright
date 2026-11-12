@@ -11,6 +11,8 @@ import { smoothstep, uv, vec3 } from 'three/tsl'
 import { load, root, type Stage } from '../../home/src/kernel'
 import rendererPlugin from '../../home/src/plugins/renderer'
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
+import { material as materialFacts } from '../../home/src/engine/materials.ts'
+import { cellAt, solidCells, sumOf } from '../../home/src/engine/voxels.ts'
 import { World } from '../../home/src/engine/world.ts'
 import { nearest, standsOver } from '../src/near.ts'
 import { place } from './place.ts'
@@ -20,14 +22,15 @@ import { houses } from './look/facade.ts'
 import { post, type Post } from './look/post.ts'
 import { sky } from './look/sky.ts'
 import { dress, dressKey } from './look/things.ts'
-import { lift as raised, street } from './look/street.ts'
+import { Bursts, CellsView, Crumbs, cellStats } from './look/cells.ts'
+import { lift as kerbLift, street } from './look/street.ts'
 import { Puppet } from '../src/puppet.ts'
 import { resident, type Resident } from './figure.ts'
 import { LOTS, houseAt } from '../src/houses.ts'
 import { PARKED, registerBlock } from '../src/scene.ts'
 import { GRADE, HALF_L, HALF_W, NORMAL, heightAt } from '../src/ground.ts'
 import { HALF_H, RADIUS, TICK, predict, standing, type Input, type Walker } from '../src/walk.ts'
-import { PING, SELF, SNAP, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Ask, type Drawn, type Line, type Pose } from '../src/wire.ts'
+import { PING, SELF, SNAP, TOOLS, packDelay, packInputs, packPing, rounded, unpackPing, unpackSelf, unpackSnap, type Ask, type Drawn, type Line, type Pose, type Tool } from '../src/wire.ts'
 
 const params = new URLSearchParams(location.search)
 const PREDICT = params.get('predict') !== '0'
@@ -71,8 +74,16 @@ const puppet = new Puppet()
 let world: World | null = null
 interface Sample { tick: number; p: Vec3; q: Quat }
 /** A moving part: its body in the puppet, its poses as heard, and where it is drawn now. */
-interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; mesh?: THREE.Object3D; figure?: Resident; under?: THREE.Mesh; plush?: number }
+interface View { key: string; id: number; body: number; kind: 'crate' | 'ball' | 'walker'; reach: number; samples: Sample[]; p: Vec3; q: Quat; shown: THREE.Vector3; mesh?: THREE.Object3D; figure?: Resident; under?: THREE.Mesh; plush?: number; cells?: CellsView }
 const views = new Map<number, View>()
+/** A street made of cells (#138): a cell's edge in metres, else 0. Then what is drawn is the world's own cells, and nothing of the page's is laid over them. */
+let cellSize = 0
+const cellViews = new Map<string, CellsView>()
+/** How far up the page draws a thing that stands on the pavement: nothing on a street of cells, whose kerb is the world's. */
+const raised = (x: number, z: number) => (cellSize ? 0 : kerbLift(x, z))
+const crumbs = new Crumbs(2400, (_x, z) => heightAt(z)), bursts = new Bursts()
+scene.add(crumbs.mesh, bursts.group)
+let shake = 0
 let you = 0, snapEvery = 2
 /** The made things on the street, as they were put: for showing which one a sentence would change. */
 const made = new Map<string, Drawn['toy']>()
@@ -81,7 +92,17 @@ function build(drawn: Drawn) {
   world!.addToy(drawn.toy)
   if (drawn.toy.id.startsWith('made-')) made.set(drawn.toy.id, drawn.toy)
   // The page draws the ground itself (look/street.ts), with a pavement a kerb's height over the world's one plane: what stands still is put up on it here, what moves each frame.
-  for (const mesh of world!.group.children) {
+  // Parts made of cells are drawn from them, where the part stands.
+  for (const part of drawn.toy.parts) {
+    const key = `${drawn.toy.id}/${part.id}`, cells = part.cells && world!.cellsOf(key)
+    if (!cells) continue
+    const view = new CellsView(key, cells.v, cells.low)
+    view.group.position.set(...cells.position)
+    view.group.quaternion.set(...cells.rotation)
+    scene.add(view.group)
+    cellViews.set(key, view)
+  }
+  if (!cellSize) for (const mesh of world!.group.children) {
     if (mesh.name.startsWith('street scenery') || /^house-\d+\//.test(mesh.name) || (mesh.name.startsWith('furniture/') && dressed(mesh.name.slice(10))) || mesh.name.startsWith('cars/')) mesh.visible = false
     else if (mesh.name.startsWith(`${drawn.toy.id} scenery`)) mesh.position.y = raised(drawn.toy.frame.at[0], drawn.toy.frame.at[2])
     else if (mesh.name.startsWith(`${drawn.toy.id}/`) && !mesh.userData.lifted) { mesh.userData.lifted = true; mesh.position.y += raised(mesh.position.x, mesh.position.z) }
@@ -98,7 +119,8 @@ function build(drawn: Drawn) {
     }
     puppet.pose(view.body, view.p, view.q)
     views.set(id, view)
-    view.mesh = world!.mesh(view.key) ?? undefined
+    view.cells = cellViews.get(view.key)
+    view.mesh = view.cells?.group ?? world!.mesh(view.key) ?? undefined
     if (view.kind === 'walker') {
       headOf(id).name.textContent = drawn.toy.label
       // The body the world simulates is a capsule; what is drawn in its place is a resident (figure.ts).
@@ -128,6 +150,7 @@ function wear(view: View, plush: number, paint: string) {
 function remove(toy: string) {
   made.delete(toy)
   for (const [id, view] of views) if (view.key.startsWith(`${toy}/`)) { views.delete(id); view.figure?.dispose(); if (view.under) scene.remove(view.under); heads.get(id)?.el.remove(); heads.delete(id) }
+  for (const [key, view] of cellViews) if (key.startsWith(`${toy}/`)) { view.dispose(); cellViews.delete(key) }
   world!.removeToy(toy)
 }
 function heard(pose: Pose, tick: number) {
@@ -158,9 +181,11 @@ const offset = new THREE.Vector3()
 const fixes: number[] = []
 /** The height the world last said your walker stands at when that is on some thing, not the bare ground: the guess keeps it up there. */
 let platform = -Infinity
+/** On a street of cells: the height the world last gave your walker where the road under it has been blown away (standing in the hole, or still falling into it). */
+let pit: number | null = null
 /** One tick of your walker, ahead of the answer. With STOP it does not walk into a crate or a ball where that is drawn: it is pushed back out sideways and loses its speed into it. */
 function ahead(w: Walker, input: Input): Walker {
-  const next = predict(w, input, platform)
+  const next = predict(w, input, platform, pit)
   if (!STOP) return next
   for (const view of views.values()) {
     if (view.kind === 'walker') continue
@@ -181,7 +206,10 @@ function selfHeard(data: Uint8Array) {
   if (!PREDICT) return
   const before = me?.p
   pending = pending.filter((input) => input.seq > s.ack)
-  platform = s.grounded && s.p[1] - (heightAt(s.p[2]) + standing(NORMAL)) > 0.05 ? s.p[1] : -Infinity
+  const bare = heightAt(s.p[2]) + standing(NORMAL)
+  platform = s.grounded && s.p[1] - bare > 0.05 ? s.p[1] : -Infinity
+  // Below the bare street, which only a street of cells allows: standing in a hole, the guess keeps that height; falling into one, it must not hold the walker up on a road that is gone.
+  pit = cellSize && bare - s.p[1] > 0.05 ? (s.grounded ? s.p[1] : s.p[1] - 1) : null
   let w: Walker = { p: s.p, v: s.v, hop: s.hop, grounded: s.grounded }
   for (const input of pending) w = ahead(w, input)
   if (before) {
@@ -205,6 +233,7 @@ addEventListener('keydown', (e) => {
   if (e.target === words) { if (e.code === 'Escape') words.blur(); return }
   if (e.code === 'Enter') { words.focus(); e.preventDefault(); return }
   if (e.code === 'KeyF' && !doorButton.hidden) { goInside(); return }
+  if (cellSize && /^Digit[1-5]$/.test(e.code)) { setMode((['make', 'change', 'say', 'hammer', 'boom'] as const)[Number(e.code.slice(5)) - 1]); return }
   if (e.code === 'Space' && !e.repeat) jump = true
   held.add(e.code)
   if (['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault()
@@ -221,7 +250,13 @@ addEventListener('pointermove', (e) => {
 })
 const lift = (e: PointerEvent) => {
   if (e.pointerId === stick.id) Object.assign(stick, { id: -1, x: 0, z: 0 })
-  if (e.pointerId === look.id) { if (e.pointerType === 'touch' && look.moved < 8 && performance.now() - look.at < 300) jump = true; look.id = -1 }
+  if (e.pointerId === look.id) {
+    const tap = look.moved < 8 && performance.now() - look.at < (e.pointerType === 'touch' ? 300 : 600)
+    // With a tool in hand a tap or a click strikes the street there; otherwise a tap on a phone is a jump.
+    if (tap && tool()) strike(e.clientX, e.clientY)
+    else if (tap && e.pointerType === 'touch') jump = true
+    look.id = -1
+  }
 }
 addEventListener('pointerup', lift)
 addEventListener('pointercancel', lift)
@@ -361,7 +396,35 @@ function shimmer(by: number, at: Vec3 | null) {
   scene.add(mesh)
   shimmers.set(by, mesh)
 }
-function told(line: Exclude<Line, { t: 'hello' | 'add' | 'remove' }>) {
+const spot = new THREE.Vector3(), turnOf = new THREE.Quaternion()
+/** A blow landed: each thing it reached loses the same cells here as in the world, and what went flies off as crumbs. */
+function blown(line: Extract<Line, { t: 'blow' }>) {
+  for (const record of line.cuts) {
+    const cells = world!.cellsOf(record.thing)
+    if (!cells) continue
+    // Some of the cells about to go, as crumbs in their own colours, thrown away from the blow.
+    const { v, low } = cells, r = record.r, most = line.tool === 'boom' ? 110 : 16
+    turnOf.set(...cells.rotation)
+    for (let n = 0, thrown = 0; n < most * 6 && thrown < most; n++) {
+      const x = record.at[0] + Math.round((Math.random() * 2 - 1) * r), y = record.at[1] + Math.round((Math.random() * 2 - 1) * r), z = record.at[2] + Math.round((Math.random() * 2 - 1) * r)
+      const kind = cellAt(v, x, y, z)
+      if (!kind || (x - record.at[0]) ** 2 + (y - record.at[1]) ** 2 + (z - record.at[2]) ** 2 > r * r) continue
+      spot.set(low[0] + (x + 0.5) * v.cell, low[1] + (y + 0.5) * v.cell, low[2] + (z + 0.5) * v.cell).applyQuaternion(turnOf)
+      const k = v.kinds[kind - 1]
+      crumbs.throw([cells.position[0] + spot.x, cells.position[1] + spot.y, cells.position[2] + spot.z], line.at, line.tool === 'boom' ? 7 : 2.2, v.cell, k.paint ?? materialFacts(k.material)?.look.color ?? '#888888')
+      thrown++
+    }
+    const dirty = world!.applyCut(record)
+    if (dirty) cellViews.get(record.thing)?.changed(dirty)
+  }
+  if (line.tool === 'boom') {
+    bursts.boom(line.at, line.radius)
+    for (let i = 0; i < 26; i++) crumbs.throw([line.at[0] + (Math.random() - 0.5) * 0.6, line.at[1] + (Math.random() - 0.5) * 0.6, line.at[2] + (Math.random() - 0.5) * 0.6], line.at, 9, 0.05, 'ember')
+  } else bursts.knock(line.at, line.radius)
+  const mine = views.get(you)
+  if (mine && line.tool === 'boom') shake = Math.max(shake, Math.min(0.5, 6 / (4 + mine.shown.distanceTo(spot.set(...line.at)))))
+}
+function told(line: Exclude<Line, { t: 'hello' | 'add' | 'remove' | 'blow' }>) {
   if (line.t === 'said') bubble(line.by, line.text, 'said')
   else if (line.t === 'making') { bubble(line.by, `${line.text}…`, 'making', 120); shimmer(line.by, line.at) }
   else if (line.t === 'made') { bubble(line.by, line.say, line.ok ? 'made' : 'sorry', line.ok ? 5 : 8); shimmer(line.by, null) }
@@ -409,12 +472,16 @@ function heardLine(line: Line) {
     world = new World(puppet, () => {}, undefined, line.floor)
     world.dress = dress
     world.dressKey = dressKey
-    scene.add(world.group, street(), houses(Array.from({ length: LOTS }, (_, lot) => [houseAt(lot, -1), houseAt(lot, 1)]).flat()), (dressed_ = dressing(stage.features().has('traa'))), cars(PARKED))
+    cellSize = line.cell ?? 0
+    document.body.classList.toggle('cells', cellSize > 0)
+    // A street of cells is drawn from the world's cells alone; otherwise the page lays its own ground, fronts, trees and cars over the world's boxes.
+    if (cellSize) scene.add(world.group)
+    else scene.add(world.group, street(), houses(Array.from({ length: LOTS }, (_, lot) => [houseAt(lot, -1), houseAt(lot, 1)]).flat()), (dressed_ = dressing(stage.features().has('traa'))), cars(PARKED))
     snapEvery = Math.round(line.tickHz / line.snapHz)
     line.drawn.forEach(build)
     // The street lights itself: a picture from over the middle of the road, without what moves.
     world.frame(0)
-    air.probe(new THREE.Vector3(0, heightAt(-6) + 4, -6), [...views.values()].flatMap((v) => [world!.mesh(v.key), v.figure?.root, v.under]).filter((o): o is THREE.Object3D => !!o))
+    air.probe(new THREE.Vector3(0, heightAt(-6) + 4, -6), [...views.values()].flatMap((v) => [v.mesh, world!.mesh(v.key), v.figure?.root, v.under]).filter((o): o is THREE.Object3D => !!o))
     release()
     // The page opens covered (index.html): the street is shown once the frame that builds its looks has been drawn, so arriving is a fade in, not a frozen half-built street.
     requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('fade')!.classList.remove('on')))
@@ -431,6 +498,7 @@ function heardLine(line: Line) {
     }
   } else if (line.t === 'add') build(line.drawn)
   else if (line.t === 'remove') remove(line.toy)
+  else if (line.t === 'blow') blown(line)
   else told(line)
 }
 void (async () => {
@@ -497,6 +565,7 @@ function frame(now: number) {
       offset.multiplyScalar(Math.exp(-dt * 12))
       view.p[0] = me.p[0] + offset.x; view.p[1] = me.p[1] + offset.y; view.p[2] = me.p[2] + offset.z
     } else poseAt(view, then)
+    if (view.cells) { view.cells.group.position.set(view.p[0], view.p[1], view.p[2]); view.cells.group.quaternion.set(view.q[0], view.q[1], view.q[2], view.q[3]) }
     view.shown.set(view.p[0], view.p[1] + raised(view.p[0], view.p[2]), view.p[2])
     view.figure?.update(view.shown, dt)
     view.under?.position.set(view.shown.x, view.shown.y - standing(NORMAL) + 0.02, view.shown.z)
@@ -504,6 +573,8 @@ function frame(now: number) {
   // The engine draws: its meshes go where the puppet's bodies now are, and up onto the pavement where they are over it.
   world.frame(dt)
   for (const view of views.values()) if (view.mesh) view.mesh.position.y = view.shown.y
+  crumbs.update(dt)
+  bursts.update(dt)
   const mine = views.get(you)
   if (fixed) {
     camera.position.set(...fixed.from)
@@ -518,6 +589,8 @@ function frame(now: number) {
     // It looks a little past you, so the street ahead and the sky over it are in the picture.
     const past = (4 * boom) / BOOM
     camera.lookAt(mine.shown.x - bx * past, mine.shown.y + 1 + 0.2 * (1 - boom), mine.shown.z - bz * past)
+    // A blast near by shakes the picture for a moment.
+    if (shake > 0.002) { camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake; shake *= Math.exp(-dt * 9) }
   }
   if (homeDoor && mine) doorButton.hidden = Math.hypot(mine.shown.x - homeDoor.door[0], mine.shown.z - homeDoor.door[2]) > 1.7
   // The stage draws after this; names are placed with the camera as it now stands.
@@ -581,14 +654,33 @@ if (PREDICT) knob('stops at things', STOP, () => reload('stop', STOP ? '0' : '1'
 document.getElementById('more')!.onclick = () => document.body.classList.toggle('open')
 
 // ---- the sentence: what you type makes a thing, changes the made thing you face, or is said
-type Verb = 'make' | 'change' | 'say'
-const VERBS: Record<Verb, string> = { make: 'make anything: a big red dog, a bridge, a ladder…', change: 'change the thing you face: turn it into ice, make it bigger…', say: 'say something…' }
+type Verb = 'make' | 'change' | 'say' | Tool
+const strikes = matchMedia('(pointer: coarse)').matches ? 'tap' : 'click'
+const VERBS: Record<Verb, string> = { make: 'make anything: a big red dog, a bridge, a ladder…', change: 'change the thing you face: turn it into ice, make it bigger…', say: 'say something…', hammer: `${strikes} something near you to knock a piece out of it`, boom: `${strikes} anything you can see to blow a hole in it` }
 let verb: Verb = 'make'
 const mode = document.getElementById('mode') as HTMLButtonElement
-const setMode = (to: Verb) => { verb = to; mode.textContent = to; words.placeholder = VERBS[to] }
-mode.onclick = () => { setMode(verb === 'make' ? 'change' : verb === 'change' ? 'say' : 'make'); words.focus() }
+function setMode(to: Verb) { verb = to; mode.textContent = to; words.placeholder = VERBS[to]; words.disabled = to === 'hammer' || to === 'boom' }
+/** The dark button goes round the verbs; on a street of cells the hammer and the boom are among them. */
+mode.onclick = () => { const round: Verb[] = cellSize ? ['make', 'change', 'say', 'hammer', 'boom'] : ['make', 'change', 'say']; setMode(round[(round.indexOf(verb) + 1) % round.length]); if (!tool()) words.focus() }
 setMode('make')
-const speak = (text: string, as: Verb = verb) => { if (text.trim()) ask(as === 'say' ? { t: 'say', text } : { t: as, text, yaw }) }
+const speak = (text: string, as: Verb = verb) => { if (text.trim() && (as === 'make' || as === 'change' || as === 'say')) ask(as === 'say' ? { t: 'say', text } : { t: as, text, yaw }) }
+/** The tool in hand, if the verb is one. */
+function tool(): Tool | null { return verb === 'hammer' || verb === 'boom' ? verb : null }
+const aim = new THREE.Raycaster(), pointer = new THREE.Vector2()
+/** Where a line from the eye through a point of the screen first meets something made of cells. */
+function meets(x: number, y: number): Vec3 | null {
+  aim.setFromCamera(pointer.set((x / innerWidth) * 2 - 1, 1 - (y / innerHeight) * 2), camera)
+  const hit = aim.intersectObjects([...cellViews.values()].map((v) => v.group), true)[0]
+  // A hair inside the face, so the blow is in the thing and not in the air before it.
+  return hit ? [hit.point.x + aim.ray.direction.x * 0.03, hit.point.y + aim.ray.direction.y * 0.03, hit.point.z + aim.ray.direction.z * 0.03] : null
+}
+/** Strikes the street where a point of the screen looks, with the tool in hand: the hammer only within its reach of you. */
+function strike(x: number, y: number) {
+  const with_ = tool(), at = with_ && meets(x, y), mine = views.get(you)
+  if (!with_ || !at || !mine) return
+  if (Math.hypot(at[0] - mine.p[0], at[1] - mine.p[1], at[2] - mine.p[2]) > TOOLS[with_].reach) { bursts.knock(at, 0.12); return }
+  ask({ t: 'blow', at, tool: with_ })
+}
 /** In `change`: the made thing a sentence would change now (the world picks by the same rule, near.ts), ringed on the ground and named in the bar. */
 let meant: { id: string; label: string } | null = null
 const ring = new THREE.Mesh(new THREE.RingGeometry(0.93, 1, 48), new THREE.MeshBasicMaterial({ color: '#ffd76a', transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }))
@@ -673,4 +765,7 @@ function pushCrate(code = 'KeyW'): Promise<{ touchToMoveMs: number; deepestMm: n
 }
 /** What the page draws now, for test/drawn.ts: its own groups by name, how many of the world's meshes for things the page draws itself are showing (none should), and how the sun's shadow is drawn. */
 const drawnNow = () => ({ groups: scene.children.map((o) => o.name).filter(Boolean), doubled: world?.group.children.filter((m) => m.visible && (/^house-\d+\/|^cars\/|^street scenery/.test(m.name) || (m.name.startsWith('furniture/') && dressed(m.name.slice(10))))).length ?? -1, boxed: air.boxed() })
-Object.assign(window, { __street: { stats, drawn: drawnNow, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), meant: () => meant, who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })
+/** For the checks: each thing of cells this page holds (how many cells, and the number a true copy shares), and where a thing of cells stands and how big it is. */
+const cellSums = () => Object.fromEntries([...cellViews.keys()].map((key) => { const v = world!.cellsOf(key)!.v; return [key, [solidCells(v), sumOf(v)]] }))
+const cellPlace = (key: string) => { const view = cellViews.get(key), c = world?.cellsOf(key); return view && c ? { at: view.group.position.toArray(), size: c.v.size.map((n) => n * c.v.cell) } : null }
+Object.assign(window, { __street: { cells: () => ({ ...cellStats, things: cellViews.size, cell: cellSize }), cellSums, cellPlace, meets, blow: (at: Vec3, tool: Tool) => ask({ t: 'blow', at, tool }), setMode, stats, drawn: drawnNow, shownOf, keyToMotion, pushCrate, setDelay, hold: (code: string, down: boolean) => (down ? held.add(code) : held.delete(code)), census: () => world?.census(), make: (text: string) => speak(text, 'make'), change: (text: string) => speak(text, 'change'), say: (text: string) => speak(text, 'say'), unmake: () => ask({ t: 'unmake' }), bubbles: () => [...heads].filter(([, h]) => !h.words.hidden).map(([by, h]) => ({ by, text: h.words.textContent, kind: h.words.className })), whereIs: (name: string) => { const id = [...heads].find(([, h]) => h.name.textContent === name)?.[0]; const v = id === undefined ? undefined : views.get(id); return v ? [v.shown.x, v.shown.y, v.shown.z] : null }, wants: () => Object.fromEntries([...heads].filter(([, h]) => h.wants).map(([by, h]) => [h.name.textContent, h.wants])), notice: () => (notice.classList.contains('on') ? notice.textContent : ''), meant: () => meant, who: () => Object.fromEntries([...views.values()].filter((v) => v.kind === 'walker').map((v) => [headOf(v.id).name.textContent, v.plush])), names: () => Object.fromEntries([...heads].map(([by, h]) => [by, h.name.textContent])), invite: () => ask({ t: 'key' }), invitation: () => document.querySelector('#invite code')?.textContent ?? '', toys: () => [...new Set([...views.values()].map((v) => v.key.slice(0, v.key.indexOf('/'))))], turn: (to: number) => { yaw = to }, camera: (from: Vec3 | null, to: Vec3) => { fixed = from ? { from, to } : null }, get you() { return you }, get ready() { return you > 0 && clock !== null }, clearFixes: () => { fixes.length = 0 } } })

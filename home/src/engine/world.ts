@@ -15,7 +15,8 @@ import type { At, PhysicsEvent } from './events'
 import { digits, gadgetKind } from './gadgets'
 import { material, materialNames, materialsVersion } from './materials'
 import { checkRules, NORMAL, onRuleAdded, presetRules, type Rules } from './rules'
-import { checkToy, WORLD_BOUND, type PartSpec, type Signal, type ToySpec } from './toy'
+import { checkToy, WORLD_BOUND, type CellsSpec, type PartSpec, type Signal, type ToySpec } from './toy'
+import { boxesOf, drop, fillSphere, loosened, pack, solidCells, take, takeSphere, unpack, weigh, type Box as CellBox, type Voxels } from './voxels'
 
 /** The drawn look a part wears: one per material and paint, and one per material for parts made of pieces (their paints are in the mesh). */
 const lookKey = (part: PartSpec) => (part.pieces ? `${part.material}:pieces` : `${part.material}:${part.paint ?? ''}`)
@@ -62,10 +63,56 @@ interface Thing {
   key: string
   toy: string
   part: PartSpec
+  /** Its body. A still part of cells has one body for each chunk of it that has cells; this is one of them (or a stand-in that touches nothing, when it has none). */
   body: BodyId
   mesh?: THREE.Mesh
   home: { p: Vec3; q: Quat }
   wobble: number
+  cells?: Cells
+}
+
+/** A part's cells as the world holds them (#138). */
+interface Cells {
+  v: Voxels
+  /** The block's low corner in the part's frame, m. */
+  low: Vec3
+  held: number
+  /** A still part: the body of each chunk that has cells, by the chunk's number. */
+  chunks: Map<number, BodyId>
+  /** A moving part that still collides as its part's own shape: it has not been cut. */
+  smooth: boolean
+  /** How many cells it had when it was made (a part with a set mass loses it in proportion). */
+  made: number
+}
+/** Cells a side of the piece of a still block that one body stands for: a blow rebuilds only the chunks it touched. */
+const CHUNK = 32
+/** A piece that comes loose with fewer cells than this is dust: it is gone, not a thing. */
+const CRUMB = 10
+
+/** What a cut did to a block, as whoever keeps a copy of the block needs it to do the same (applyCut). Whole numbers of cells. */
+export interface CutRecord {
+  thing: string
+  at: Vec3
+  r: number
+  kind: number
+  /** How ragged the hole's edge is (0 a clean ball, towards 1 very), and the number its raggedness is worked out from. */
+  rough: number
+  seed: number
+  /** The lowest layers left alone: a still thing's footing. */
+  keep: number
+  /** Cells that came loose too small to be things, by their number in the block. */
+  gone: number[]
+  /** Pieces that came loose: each one's low corner in the block and its own cells. */
+  took: { low: Vec3; size: [number, number, number]; data: string }[]
+}
+/** A piece that came loose from a block: its cells and where it is. Whoever asked for the cut makes a toy of it (bitToy). */
+export interface Bit { cells: CellsSpec; material: string; position: Vec3; rotation: Quat; velocity: Vec3 }
+
+/** A loose piece as a toy of one moving part. */
+export function bitToy(id: string, label: string, bit: Bit): ToySpec {
+  const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(bit.rotation[0], bit.rotation[1], bit.rotation[2], bit.rotation[3]), 'YXZ')
+  const half = bit.cells.size.map((n) => (n * bit.cells.cell) / 2) as Vec3
+  return { id, label, frame: { at: bit.position, yaw: e.y, tilt: e.x, roll: e.z }, gadgets: [], wires: [], inputs: {}, parts: [{ id: 'bit', shape: { kind: 'box', half }, material: bit.material, motion: 'dynamic', at: [0, 0, 0], cells: bit.cells }] }
 }
 
 interface Follower { key: string; object: THREE.Object3D; body: BodyId; lift: number; radius: number; material: string; mass: number; last: THREE.Vector3; walked: number; left: boolean; solid: boolean; heldFor: number; aim: THREE.Vector3; passing: boolean; sent: Vec3 }
@@ -218,7 +265,11 @@ export class World implements WorldApi {
   private floor: number
 
   /** `emit` receives every event; `grain`, when given, paints wood (else wood is flat colour); `floor` is the height of the lowest ground. */
+  /** Whether this world's solver solves: a world that only shows another's (the street's page) builds no shapes for cells to collide as. */
+  private solid: boolean
+
   constructor(private core: PhysicsCore, private emit: (e: PhysicsEvent) => void, private grain?: Grain, floor = 0) {
+    this.solid = core.name !== 'puppet'
     this.floor = floor
     this.group.name = 'physics'
     core.setCombine((a, b) => this.combine(a, b))
@@ -299,7 +350,10 @@ export class World implements WorldApi {
     const bad = checkToy(toy)
     if (bad) throw new Error(bad)
     if (this.frames.has(toy.id)) throw new Error(`${toy.id}: a toy with this id is already built`)
-    for (const part of toy.parts) if (!material(part.material)) throw new Error(`${toy.id}/${part.id}: no material ${part.material}`)
+    for (const part of toy.parts) {
+      if (!material(part.material)) throw new Error(`${toy.id}/${part.id}: no material ${part.material}`)
+      for (const kind of part.cells?.kinds ?? []) if (!material(kind.material)) throw new Error(`${toy.id}/${part.id}: no material ${kind.material}`)
+    }
     for (const g of toy.gadgets) {
       if (!gadgetKind(g.kind)) throw new Error(`${toy.id}/${g.id}: no gadget kind ${g.kind}`)
       if (g.part !== undefined && !toy.parts.some((p) => p.id === g.part)) throw new Error(`${toy.id}/${g.id}: no part ${g.part}`)
@@ -328,12 +382,21 @@ export class World implements WorldApi {
       m.premultiply(frame).decompose(p, q, s)
       const mat = material(part.material)!
       const home = { p: arr(p), q: [q.x, q.y, q.z, q.w] as Quat }
-      const body = this.core.addBody({
+      const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body: -1, home, wobble: 0 }
+      if (part.cells) {
+        const c = part.cells, v = unpack(c.size, c.cell, c.kinds, c.data)
+        thing.cells = { v, low: [...c.low], held: c.held ?? 0, chunks: new Map(), smooth: c.smooth === true, made: solidCells(v) }
+      }
+      if (thing.cells && this.solid && !(thing.cells.smooth && part.motion === 'dynamic')) this.collide(thing)
+      else thing.body = this.core.addBody({
         shape: part.shape, motion: part.motion ?? 'static', position: home.p, rotation: home.q,
         density: mat.density, friction: mat.friction, restitution: mat.restitution, linearDamping: this.rules.drag, sensor: part.sensor, ...(part.mass !== undefined ? { mass: part.mass } : {}), ...(part.upright ? { upright: true } : {}),
       })
-      const thing: Thing = { key: `${toy.id}/${part.id}`, toy: toy.id, part, body, home, wobble: 0 }
-      if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id) && !part.pieces) {
+      const body = thing.body
+      // Cells are drawn by whoever draws this world (cellsOf): the world keeps them and what they collide as.
+      if (part.cells) {
+        // Nothing to draw here.
+      } else if (!part.hidden && (part.motion ?? 'static') === 'static' && !named.has(part.id) && !part.pieces) {
         const look = this.look(part)
         const key = this.lookKey(part)
         const group = merged.get(key) ?? merged.set(key, { look, parts: [] }).get(key)!
@@ -403,8 +466,10 @@ export class World implements WorldApi {
     this.joints.delete(id)
     for (const [key, t] of this.things) {
       if (t.toy !== id) continue
-      this.core.removeBody(t.body)
-      this.byBody[t.body] = undefined
+      for (const body of this.bodiesOf(t)) {
+        this.core.removeBody(body)
+        this.byBody[body] = undefined
+      }
       if (t.mesh) {
         this.group.remove(t.mesh)
         t.mesh.geometry.dispose()
@@ -453,6 +518,230 @@ export class World implements WorldApi {
       look.dispose()
       this.looks.delete(key)
     }
+  }
+
+  // ── Cells (#138) ─────────────────────────────────────────────────────────
+
+  /** Every body that stands for a thing: its one body, or a still block of cells' chunks. */
+  private bodiesOf(t: Thing): BodyId[] {
+    return t.cells?.chunks.size ? [...t.cells.chunks.values()] : t.body >= 0 ? [t.body] : []
+  }
+
+  /** The boxes of some cells as a shape in the part's frame. */
+  private cellShape(c: Cells, within?: CellBox): Shape | null {
+    const boxes = boxesOf(c.v, within), cell = c.v.cell
+    if (!boxes.length) return null
+    const out: Extract<Shape, { kind: 'compound' }>['boxes'] = []
+    for (let i = 0; i < boxes.length; i += 6) out.push({
+      half: [((boxes[i + 3] - boxes[i]) * cell) / 2, ((boxes[i + 4] - boxes[i + 1]) * cell) / 2, ((boxes[i + 5] - boxes[i + 2]) * cell) / 2],
+      at: [c.low[0] + ((boxes[i] + boxes[i + 3]) * cell) / 2, c.low[1] + ((boxes[i + 1] + boxes[i + 4]) * cell) / 2, c.low[2] + ((boxes[i + 2] + boxes[i + 5]) * cell) / 2],
+      rotation: [0, 0, 0, 1],
+    })
+    return { kind: 'compound', boxes: out }
+  }
+
+  /**
+   * What a thing of cells collides as, built or built again from its cells. A still one: a body
+   * for each chunk in `within` (all of it when not said). A moving one: one body of all its
+   * cells, where the old one was and moving as it did.
+   */
+  private collide(t: Thing, within?: CellBox) {
+    const c = t.cells!, mat = material(t.part.material)!, [nx, ny, nz] = c.v.size
+    const common = { density: mat.density, friction: mat.friction, restitution: mat.restitution }
+    if ((t.part.motion ?? 'static') === 'static') {
+      const b = within ?? [0, 0, 0, nx, ny, nz], across = Math.ceil(nx / CHUNK), deep = Math.ceil(nz / CHUNK)
+      const was = this.byBody[t.body] === t && !c.chunks.size ? t.body : -1
+      for (let cy = Math.floor(b[1] / CHUNK); cy * CHUNK < b[4]; cy++) for (let cz = Math.floor(b[2] / CHUNK); cz * CHUNK < b[5]; cz++) for (let cx = Math.floor(b[0] / CHUNK); cx * CHUNK < b[3]; cx++) {
+        const n = cx + across * (cz + deep * cy), old = c.chunks.get(n)
+        if (old !== undefined) { this.core.removeBody(old); this.byBody[old] = undefined; c.chunks.delete(n) }
+        const shape = this.cellShape(c, [cx * CHUNK, cy * CHUNK, cz * CHUNK, (cx + 1) * CHUNK, (cy + 1) * CHUNK, (cz + 1) * CHUNK])
+        if (!shape) continue
+        const body = this.core.addBody({ shape, motion: 'static', position: t.home.p, rotation: t.home.q, ...common })
+        c.chunks.set(n, body)
+        this.byBody[body] = t
+      }
+      // What rested on cells that have gone must fall: a sleeping body is not told its floor went, so wake whatever is in the box that changed (a walker standing still over a blast stayed in the air).
+      if (within) {
+        const turn = new THREE.Quaternion(t.home.q[0], t.home.q[1], t.home.q[2], t.home.q[3]), lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity], at = new THREE.Vector3()
+        for (let i = 0; i < 8; i++) {
+          at.set(c.low[0] + b[i & 1 ? 3 : 0] * c.v.cell, c.low[1] + b[i & 2 ? 4 : 1] * c.v.cell, c.low[2] + b[i & 4 ? 5 : 2] * c.v.cell).applyQuaternion(turn)
+          for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], t.home.p[k] + at.getComponent(k) - 1.2); hi[k] = Math.max(hi[k], t.home.p[k] + at.getComponent(k) + 1.2) }
+        }
+        this.core.wakeIn(lo, hi)
+      }
+      if (c.chunks.size) {
+        // The stand-in goes once there is a real body; the thing's own body is any of its chunks'.
+        if (was >= 0) { this.core.removeBody(was); this.byBody[was] = undefined }
+        if (![...c.chunks.values()].includes(t.body)) t.body = c.chunks.values().next().value!
+      } else if (was < 0) {
+        // Nothing left of it: a stand-in that touches nothing keeps its place.
+        t.body = this.core.addBody({ shape: { kind: 'sphere', radius: 0.01 }, motion: 'static', position: t.home.p, rotation: t.home.q, ...common })
+        this.core.setSolid(t.body, false)
+        this.byBody[t.body] = t
+      }
+      return
+    }
+    const shape = this.cellShape(c)
+    if (!shape) return
+    const weight = weigh(c.v, (k) => material(k.material)?.density ?? mat.density).mass
+    const mass = t.part.mass !== undefined ? Math.max(0.001, (t.part.mass * solidCells(c.v)) / Math.max(1, c.made)) : Math.max(0.001, weight)
+    const old = t.body
+    const pose = old >= 0 ? { position: this.core.position(old), rotation: this.core.rotation(old), velocity: this.core.velocity(old), spin: this.core.angularVelocity(old) } : { position: t.home.p, rotation: t.home.q, velocity: [0, 0, 0] as Vec3, spin: [0, 0, 0] as Vec3 }
+    if (old >= 0) { this.core.removeBody(old); this.byBody[old] = undefined }
+    // Not swept along its path: a body of many boxes cast against chunks of many boxes cost steps of half a second (street/test/voxel-blows.mjs).
+    t.body = this.core.addBody({ shape, motion: 'dynamic', position: pose.position, rotation: pose.rotation, velocity: pose.velocity, mass, linearDamping: this.rules.drag, swept: false, ...common })
+    this.core.setAngularVelocity(t.body, pose.spin)
+    this.byBody[t.body] = t
+    c.smooth = false
+  }
+
+  /** A thing's cells, for whoever draws them or asks what is there: the block, its low corner in the part's frame, and the part's pose in the world now. */
+  cellsOf(key: string): { v: Voxels; low: Vec3; position: Vec3; rotation: Quat; moves: boolean } | null {
+    const t = this.things.get(key)
+    if (!t?.cells) return null
+    const moves = (t.part.motion ?? 'static') !== 'static'
+    return { v: t.cells.v, low: t.cells.low, position: moves ? this.core.position(t.body) : t.home.p, rotation: moves ? this.core.rotation(t.body) : t.home.q, moves }
+  }
+
+  /** Every thing made of cells, by key. */
+  cellKeys() {
+    return [...this.things.values()].filter((t) => t.cells).map((t) => t.key)
+  }
+
+  /** A thing's part as it is now: its spec with its cells as they stand (a cut thing is not what it was made as). */
+  partNow(key: string): PartSpec | null {
+    const t = this.things.get(key)
+    if (!t) return null
+    return t.cells ? { ...t.part, cells: { ...t.part.cells!, data: pack(t.cells.v) } } : t.part
+  }
+
+  /**
+   * Sets the cells of a thing within `r` cells of cell `at` to a kind of its own (0 takes them
+   * out). What that cuts off from a still thing's footing, or from the rest of a moving thing,
+   * comes loose: pieces big enough to be things are returned as bits (the caller makes toys of
+   * them), smaller ones are gone. Null when nothing changed. `empty` says a moving thing has no
+   * cells left and should be taken away.
+   */
+  cut(key: string, at: Vec3, r: number, kind = 0, rough = 0, lumps = 0, fling = 0): { record: CutRecord; bits: Bit[]; changed: number; empty: boolean } | null {
+    const t = this.things.get(key), c = t?.cells
+    if (!t || !c || ![...at, r, kind].every(Number.isInteger) || r < 0 || r > 64 || kind < 0 || kind > c.v.kinds.length) return null
+    const seed = (Math.random() * 0x7fffffff) | 0
+    const moves = (t.part.motion ?? 'static') !== 'static'
+    // What a still thing stands on is never cut: a street's lowest layer is the bottom of the world.
+    const keep = moves ? 0 : c.held
+    const hit = fillSphere(c.v, at, r, kind, kind ? 'air' : 'solid', rough, seed, keep)
+    if (!hit) return null
+    const record: CutRecord = { thing: key, at, r, kind, rough, seed, keep, gone: [], took: [] }, bits: Bit[] = []
+    const dirty: CellBox = [...hit.box]
+    const [nx, , nz] = c.v.size, cell = c.v.cell
+    const p = moves ? this.core.position(t.body) : t.home.p, q = moves ? this.core.rotation(t.body) : t.home.q, velocity = moves ? this.core.velocity(t.body) : [0, 0, 0] as Vec3
+    const turn = new THREE.Quaternion(q[0], q[1], q[2], q[3])
+    const most = (block: Voxels) => {
+      const count = new Map<string, number>()
+      for (let i = 0; i < block.cells.length; i++) if (block.cells[i]) { const m = block.kinds[block.cells[i] - 1].material; count.set(m, (count.get(m) ?? 0) + 1) }
+      return [...count].sort((x, y) => y[1] - x[1])[0][0]
+    }
+    // Lumps knocked out of the hole's rim, thrown away from the blow: rubble that lies about and can be walked on.
+    for (let i = 0; i < lumps; i++) {
+      const a = Math.random() * Math.PI * 2, up = Math.random() * 1.6 - 0.8, flat = Math.sqrt(1 - Math.min(1, up * up) * 0.6), size = 2 + ((Math.random() * 2) | 0)
+      const dir = [Math.cos(a) * flat, up * 0.75, Math.sin(a) * flat], reach = r + size - 1
+      const mid: Vec3 = [Math.round(at[0] + dir[0] * reach), Math.round(at[1] + dir[1] * reach), Math.round(at[2] + dir[2] * reach)]
+      const lump = takeSphere(c.v, mid, size, keep)
+      if (!lump) continue
+      const low: Vec3 = [mid[0] - size, mid[1] - size, mid[2] - size], side = 2 * size + 1
+      for (let k = 0; k < 3; k++) { dirty[k] = Math.min(dirty[k], Math.max(0, low[k])); dirty[k + 3] = Math.max(dirty[k + 3], Math.min(c.v.size[k], low[k] + side)) }
+      const data = pack(lump.block)
+      record.took.push({ low, size: [side, side, side], data })
+      if (lump.cells < CRUMB) continue
+      const out = new THREE.Vector3(dir[0], dir[1], dir[2]).applyQuaternion(turn), where = new THREE.Vector3(c.low[0] + (mid[0] + 0.5) * cell, c.low[1] + (mid[1] + 0.5) * cell, c.low[2] + (mid[2] + 0.5) * cell).applyQuaternion(turn)
+      const speed = fling * (0.5 + Math.random() * 0.7)
+      bits.push({
+        cells: { size: [side, side, side], cell, kinds: lump.block.kinds, data, low: [(-side * cell) / 2, (-side * cell) / 2, (-side * cell) / 2] },
+        material: most(lump.block), position: [p[0] + where.x, p[1] + where.y, p[2] + where.z], rotation: [...q] as Quat, velocity: [velocity[0] + out.x * speed, velocity[1] + out.y * speed + fling * 0.35, velocity[2] + out.z * speed],
+      })
+    }
+    const { list, labels } = loosened(c.v, dirty, moves ? 0 : c.held, kind !== 0)
+    for (const piece of list) {
+      const b = piece.box
+      for (let i = 0; i < 3; i++) { dirty[i] = Math.min(dirty[i], b[i]); dirty[i + 3] = Math.max(dirty[i + 3], b[i + 3]) }
+      if (piece.cells < CRUMB) {
+        for (let y = b[1]; y < b[4]; y++) for (let z = b[2]; z < b[5]; z++) for (let x = b[0]; x < b[3]; x++) if (labels[x + nx * (z + nz * y)] === piece.label) record.gone.push(x + nx * (z + nz * y))
+        drop(c.v, piece, labels)
+        continue
+      }
+      const block = take(c.v, piece, labels), data = pack(block), size = [...block.size] as [number, number, number]
+      record.took.push({ low: [b[0], b[1], b[2]], size, data })
+      // The bit's own frame is at its block's middle: where that is in the world now.
+      const mid = new THREE.Vector3(c.low[0] + (b[0] + size[0] / 2) * cell, c.low[1] + (b[1] + size[1] / 2) * cell, c.low[2] + (b[2] + size[2] / 2) * cell).applyQuaternion(turn)
+      bits.push({
+        cells: { size, cell, kinds: block.kinds, data, low: [(-size[0] * cell) / 2, (-size[1] * cell) / 2, (-size[2] * cell) / 2] },
+        material: most(block), position: [p[0] + mid.x, p[1] + mid.y, p[2] + mid.z], rotation: [...q] as Quat, velocity: [...velocity] as Vec3,
+      })
+    }
+    const empty = moves && solidCells(c.v) === 0
+    if (this.solid && !empty) this.collide(t, dirty)
+    this.version++
+    return { record, bits, changed: hit.changed, empty }
+  }
+
+  /** Does to a copy of a block what a cut did to the block itself (a page's world, told by the world process). Returns the cells that changed, as a box, or null when there is no such thing. */
+  applyCut(record: CutRecord): CellBox | null {
+    const c = this.things.get(record.thing)?.cells
+    if (!c) return null
+    const [nx, ny, nz] = c.v.size, layer = nx * nz
+    const dirty: CellBox = fillSphere(c.v, record.at, record.r, record.kind, record.kind ? 'air' : 'solid', record.rough, record.seed, record.keep)?.box ?? [nx, ny, nz, 0, 0, 0]
+    const grow = (x: number, y: number, z: number) => { dirty[0] = Math.min(dirty[0], x); dirty[1] = Math.min(dirty[1], y); dirty[2] = Math.min(dirty[2], z); dirty[3] = Math.max(dirty[3], x + 1); dirty[4] = Math.max(dirty[4], y + 1); dirty[5] = Math.max(dirty[5], z + 1) }
+    for (const i of record.gone) {
+      if (!(i >= 0 && i < c.v.cells.length)) continue
+      c.v.cells[i] = 0
+      const y = Math.floor(i / layer), rem = i - y * layer, z = Math.floor(rem / nx)
+      grow(rem - z * nx, y, z)
+    }
+    for (const piece of record.took) {
+      const block = unpack(piece.size, c.v.cell, c.v.kinds, piece.data), [bx, by, bz] = block.size, [x0, y0, z0] = piece.low
+      for (let y = 0; y < by; y++) for (let z = 0; z < bz; z++) for (let x = 0; x < bx; x++) {
+        if (!block.cells[x + bx * (z + bz * y)]) continue
+        const X = x + x0, Y = y + y0, Z = z + z0
+        if (X < 0 || Y < 0 || Z < 0 || X >= nx || Y >= ny || Z >= nz) continue
+        c.v.cells[X + nx * (Z + nz * Y)] = 0
+      }
+      grow(x0, y0, z0)
+      grow(x0 + bx - 1, y0 + by - 1, z0 + bz - 1)
+    }
+    return dirty[3] > dirty[0] ? dirty : null
+  }
+
+  /**
+   * A blow at a point in the world: every thing of cells within `radius` metres loses the cells
+   * inside it (`rough` makes the hole's edge ragged, `lumps` knocks that many bits of rubble out of each
+   * still thing's rim at up to `fling` m/s), and every moving thing near is pushed away with `push` N·s.
+   * Returns what each cut did, as `cut` does.
+   */
+  blast(point: Vec3, radius: number, push = 0, rough = 0, lumps = 0, fling = 0): NonNullable<ReturnType<World['cut']>>[] {
+    if (!pointOk(point) || !(radius > 0 && radius <= 8)) return []
+    const out: NonNullable<ReturnType<World['cut']>>[] = []
+    const local = new THREE.Vector3(), turn = new THREE.Quaternion()
+    for (const t of [...this.things.values()]) {
+      const c = t.cells
+      if (!c || !this.things.has(t.key)) continue
+      const moves = (t.part.motion ?? 'static') !== 'static'
+      const p = moves ? this.core.position(t.body) : t.home.p, q = moves ? this.core.rotation(t.body) : t.home.q
+      local.set(point[0] - p[0], point[1] - p[1], point[2] - p[2]).applyQuaternion(turn.set(-q[0], -q[1], -q[2], q[3]))
+      const cell = c.v.cell, at: Vec3 = [Math.floor((local.x - c.low[0]) / cell), Math.floor((local.y - c.low[1]) / cell), Math.floor((local.z - c.low[2]) / cell)]
+      const r = Math.max(1, Math.round(radius / cell))
+      if (at[0] < -r || at[1] < -r || at[2] < -r || at[0] >= c.v.size[0] + r || at[1] >= c.v.size[1] + r || at[2] >= c.v.size[2] + r) continue
+      // Lumps come out of what stands still (a wall, the road): a loose thing just loses the bite.
+      const did = this.cut(t.key, at, r, 0, rough, moves ? 0 : lumps, fling)
+      if (did) out.push(did)
+    }
+    if (push > 0) for (const t of this.things.values()) {
+      if (t.part.motion !== 'dynamic' || t.part.upright) continue
+      const p = this.core.position(t.body), d: Vec3 = [p[0] - point[0], p[1] - point[1], p[2] - point[2]], far = Math.hypot(...d)
+      if (far > radius * 3 || far < 1e-6) continue
+      const k = (push * Math.min(1, (radius / Math.max(far, radius * 0.5)) ** 2)) / far
+      this.core.applyImpulse(t.body, [d[0] * k, d[1] * k + push * 0.25, d[2] * k])
+    }
+    return out
   }
 
   private geometry(shape: Shape): THREE.BufferGeometry {
@@ -851,7 +1140,7 @@ export class World implements WorldApi {
     if (!pointOk(origin) || !dirOk(direction)) return null
     const skip = ignore.flatMap((key) => {
       const t = this.things.get(key) ?? this.followers.get(key) ?? this.bound.get(key)
-      return t ? [t.body] : []
+      return t ? ('part' in t ? this.bodiesOf(t) : [t.body]) : []
     })
     const hit = this.core.castRay(origin, direction, skip)
     const t = hit && this.byBody[hit.body]

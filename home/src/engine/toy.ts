@@ -3,6 +3,7 @@
 // toy is: a pinball table works because a steel ball sits among walls, rubber posts and
 // flippers, with sensors wired to kicks and a counter. world.ts builds and runs any toy.
 import type { Motion, Quat, Shape, Vec3 } from './core'
+import type { Kind } from './voxels'
 
 /** One shape of a part made of several (PartSpec.pieces), in the part's own frame. */
 export interface Piece {
@@ -13,10 +14,34 @@ export interface Piece {
   turn?: Vec3
   /** Paint over the part's own colour. */
   paint?: string
+  /** What this piece's cells are made of, when the part is turned into cells and that is not the part's material (a car's glass, a lamp's pane). The part collides and weighs as its own material while whole. */
+  material?: string
+}
+
+/**
+ * A part made of cells (voxels.ts, #138): what it is drawn from, and what a blow takes out of it.
+ * A still part collides as its cells. A moving one collides as its cells too, unless `smooth`
+ * keeps its `shape` (a ball that rolls, a crate that is one box) until the first blow.
+ */
+export interface CellsSpec {
+  /** Cells along x, y and z, and a cell's edge in metres. */
+  size: [number, number, number]
+  cell: number
+  /** What its cells are made of: cell k is kinds[k - 1]. */
+  kinds: Kind[]
+  /** The cells, as voxels.ts pack() tells them. */
+  data: string
+  /** The block's low corner in the part's frame, metres. */
+  low: Vec3
+  /** A still part: how many of its lowest layers hold it up. What a blow cuts off from them falls. */
+  held?: number
+  smooth?: boolean
 }
 
 export interface PartSpec {
   id: string
+  /** Made of cells: drawn from them, and breakable. `shape` is then the box round them, or with `smooth` what it collides as while whole. */
+  cells?: CellsSpec
   /** A box, a sphere, a cylinder or a capsule. With `pieces` it is the compound piecesShape() makes of them. */
   shape: Shape
   /** One body made of several shapes (a dog: a body, a head, four legs), each drawn as it is. They move as one. */
@@ -88,10 +113,12 @@ export const WORLD_BOUND = 50
 const SIZE = [0.001, 20] as const
 /** The most pieces one part is made of. */
 const PIECES = 64
+/** The most cells one part is made of. */
+const CELLS = 8e6
 const ID = /^[A-Za-z0-9_-]{1,48}$/
 
 /** Euler angles (XYZ order, radians) as a quaternion. */
-const quatOf = ([x, y, z]: Vec3): Quat => {
+export const quatOf = ([x, y, z]: Vec3): Quat => {
   const c1 = Math.cos(x / 2), c2 = Math.cos(y / 2), c3 = Math.cos(z / 2), s1 = Math.sin(x / 2), s2 = Math.sin(y / 2), s3 = Math.sin(z / 2)
   return [s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 + s1 * s2 * c3, c1 * c2 * c3 - s1 * s2 * s3]
 }
@@ -137,6 +164,17 @@ export function checkToy(toy: ToySpec): string | null {
     const sizesOf = (s: Shape | undefined) => s?.kind === 'box' ? (finite(s.half, 3) ? s.half : null) : s?.kind === 'sphere' ? (finite([s.radius], 1) ? [s.radius] : null)
       : s?.kind === 'capsule' || s?.kind === 'cylinder' ? (finite([s.halfHeight, s.radius], 2) ? [s.halfHeight, s.radius] : null) : null
     const s = part.shape
+    if (part.cells !== undefined) {
+      const c = part.cells
+      if (!c || !finite(c.size, 3) || !c.size.every((n) => Number.isInteger(n) && n >= 1 && n <= 1024) || c.size[0] * c.size[1] * c.size[2] > CELLS) return `${name}: cells are 1 to 1024 a side and at most ${CELLS} in all`
+      if (!(typeof c.cell === 'number' && c.cell >= 0.01 && c.cell <= 2)) return `${name}: a cell is 0.01 to 2 m`
+      if (!Array.isArray(c.kinds) || !c.kinds.length || c.kinds.length > 255 || !c.kinds.every((k) => k && typeof k.material === 'string' && (k.paint === undefined || /^#[0-9a-f]{6}$/i.test(k.paint)))) return `${name}: cells have 1 to 255 kinds, each a material and perhaps a #rrggbb paint`
+      if (typeof c.data !== 'string' || c.data.length > 8e6) return `${name}: cells' data is packed text`
+      if (!finite(c.low, 3) || !inside(c.low)) return `${name}: cells' low corner is a finite point inside the world`
+      if (c.held !== undefined && !(Number.isInteger(c.held) && c.held >= 0 && c.held <= 1024)) return `${name}: held is a number of layers`
+      // The box round a block of cells may be as big as the block (a street's ground is one).
+      if (!part.pieces && s?.kind === 'box' && finite(s.half, 3) && s.half.every((x) => x >= SIZE[0] && x <= 1024)) continue
+    }
     if (part.pieces !== undefined) {
       // Made of pieces: each a plain shape in the part's frame, and the part's shape the compound of exactly those.
       if (!Array.isArray(part.pieces) || !part.pieces.length || part.pieces.length > PIECES) return `${name}: pieces is a list of 1 to ${PIECES} shapes`
@@ -144,6 +182,7 @@ export function checkToy(toy: ToySpec): string | null {
         const sizes = sizesOf(piece?.shape)
         if (!sizes || sizes.some((x) => x < SIZE[0] || x > SIZE[1])) return `${name}: a piece needs a box, sphere, cylinder or capsule with finite sizes from ${SIZE[0]} to ${SIZE[1]} m`
         if (!finite(piece.at, 3) || !inside(piece.at) || (piece.turn !== undefined && !finite(piece.turn, 3))) return `${name}: a piece's at is a finite point and its turn three finite angles`
+        if (piece.material !== undefined && typeof piece.material !== 'string') return `${name}: a piece's material is a name`
       }
       if (s?.kind !== 'compound' || s.boxes.length !== part.pieces.length) return `${name}: a part made of pieces has the shape piecesShape() makes of them`
       continue

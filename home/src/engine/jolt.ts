@@ -217,7 +217,7 @@ export function createJolt(): PhysicsCore {
       cs.mLinearDamping = spec.linearDamping ?? 0.05
       cs.mIsSensor = Boolean(spec.sensor)
       // Every dynamic body is swept (LinearCast): a 27 mm ball through 5 mm walls tunnels 896 in 1000 without it (bench).
-      if (spec.motion === 'dynamic') cs.mMotionQuality = J.EMotionQuality_LinearCast
+      if (spec.motion === 'dynamic' && spec.swept !== false) cs.mMotionQuality = J.EMotionQuality_LinearCast
       const body = bi.CreateBody(cs)
       J.destroy(cs)
       const b = body.GetID()
@@ -354,6 +354,13 @@ export function createJolt(): PhysicsCore {
     },
     sleeping(id) {
       return !bi.IsActive(bid(id))
+    },
+    wakeIn(low, high) {
+      const lo = new J.Vec3(...low), hi = new J.Vec3(...high), box = new J.AABox(lo, hi)
+      bi.ActivateBodiesInAABox(box, anyBroad, anyLayer)
+      J.destroy(box)
+      J.destroy(lo)
+      J.destroy(hi)
     },
     wake(id) {
       bi.ActivateBody(bid(id))

@@ -24,6 +24,8 @@ export const STREET_MATERIALS: Record<string, Material> = {
   fur: { density: 250, friction: 0.85, restitution: 0.08, hardness: 0.03, look: { color: '#a8744a', roughness: 1, metalness: 0 }, heat: { flammability: 0.8, ignition: 250, burnRate: 0.1, heatCapacity: 0.5, absorbs: 0.9 } },
   ice: { density: 917, friction: 0.03, restitution: 0.05, hardness: 0.7, look: { color: '#cfe9f5', roughness: 0.15, metalness: 0 } },
   jelly: { density: 1000, friction: 0.6, restitution: 0.92, hardness: 0.02, look: { color: '#e05a8a', roughness: 0.25, metalness: 0 } },
+  /** A pane that gives light: a lantern's, a street lamp's. Drawn glowing. */
+  lamp: { density: 2500, friction: 0.2, restitution: 0.3, hardness: 0.9, look: { color: '#fff1c2', roughness: 0.3, metalness: 0 } },
 }
 
 /** Registers what the block needs beyond the home's kit. Call once before building. */
@@ -115,7 +117,7 @@ const IRON = '#2c3438', LEAVES = ['#6fa35a', '#5c954f', '#80b36a', '#679d57']
 /** A street lamp on the kerb, its arm out over the road (`side` is which pavement). */
 const lamp = (id: string, side: number, along: number) => stood(id, side * (ROAD + 0.5), along, 'steel', [
   can(0.13, 0.3, [0, 0.3, 0], IRON), can(0.06, 2.5, [0, 3.1, 0], IRON),
-  block([0.55, 0.04, 0.04], [-side * 0.5, 5.55, 0], IRON), block([0.24, 0.06, 0.13], [-side * 0.95, 5.47, 0], IRON), block([0.19, 0.02, 0.09], [-side * 0.95, 5.4, 0], '#fff1c2'),
+  block([0.55, 0.04, 0.04], [-side * 0.5, 5.55, 0], IRON), block([0.24, 0.06, 0.13], [-side * 0.95, 5.47, 0], IRON), { ...block([0.19, 0.02, 0.09], [-side * 0.95, 5.4, 0], '#fff1c2'), material: 'lamp' },
 ])
 /**
  * A street tree's shapes: a trunk to where it forks, and a crown of balls of leaves round the fork (one at its heart, five on
@@ -126,7 +128,8 @@ export function treePieces(n: number): Piece[] {
   const some = (k: number) => { const x = Math.sin((n + 1) * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x) }
   const r3 = (v: number) => Math.round(v * 1000) / 1000
   const fork = 2.3 + some(1) * 0.3, lx = (some(2) - 0.5) * 0.3, lz = (some(3) - 0.5) * 0.3
-  const pieces = [can(0.13, r3(fork / 2), [0, r3(fork / 2), 0], '#7b5b3d'), ball(1.15, [r3(lx), r3(fork + 1.4), r3(lz)], LEAVES[n % 4])]
+  // The trunk goes on up into the crown, so the two are one thing: cut the trunk and the crown comes down with it.
+  const pieces = [can(0.13, r3(fork / 2), [0, r3(fork / 2), 0], '#7b5b3d'), can(0.1, 0.5, [r3(lx * 0.5), r3(fork + 0.4), r3(lz * 0.5)], '#7b5b3d'), ball(1.15, [r3(lx), r3(fork + 1.4), r3(lz)], LEAVES[n % 4])]
   for (let i = 0; i < 5; i++) {
     const round = ((i + some(10 + i) * 0.6) / 5) * Math.PI * 2, out = 0.85 + some(20 + i) * 0.35, up = 0.9 + some(30 + i) * 0.8
     pieces.push(ball(r3(0.8 + some(40 + i) * 0.25), [r3(lx + Math.cos(round) * out), r3(fork + up), r3(lz + Math.sin(round) * out)], LEAVES[(n + i + 1) % 4]))
@@ -199,6 +202,37 @@ export const CARS: ToySpec = {
     ]
     return { id: p.id, shape: piecesShape(pieces), pieces, material: 'steel', at: [p.across, 0, p.along] as Vec3 }
   }),
+}
+
+/**
+ * A parked car as a street of cells holds it: a body on four wheels, a cabin of dark glass under a painted roof on four
+ * posts, bumpers, lamps in front and behind. Each piece says what it is made of, so glass breaks as glass.
+ */
+export function carPieces(p: Parked): Piece[] {
+  const k: CarKind = CAR_KINDS[p.kind], r3 = (v: number) => Math.round(v * 1000) / 1000, n = p.nose
+  const middle = n * (k.long / 2 - (k.cabin[0] + k.cabin[1]) / 2), cabin = (k.cabin[1] - k.cabin[0]) / 2 - 0.1, wide = k.wide / 2
+  const of = (piece: Piece, material: string): Piece => ({ ...piece, material })
+  const pieces: Piece[] = [
+    block([wide, r3((k.belt - 0.3) / 2), k.long / 2], [0, r3((k.belt + 0.3) / 2), 0], p.paint),
+    of(block([wide - 0.15, k.roof / 2, r3(cabin)], [0, r3(k.belt + k.roof / 2), r3(middle)], '#27343f'), 'glass'),
+    block([wide - 0.1, 0.05, r3(cabin + 0.05)], [0, r3(k.belt + k.roof + 0.05), r3(middle)], p.paint),
+    ...[-1, 1].flatMap((x) => [-1, 1].map((z) => block([0.05, k.roof / 2, 0.05], [x * (wide - 0.15), r3(k.belt + k.roof / 2), r3(middle + z * cabin)], p.paint))),
+    ...[-1, 1].flatMap((x) => [-1, 1].flatMap((z) => [
+      of(can(0.33, 0.11, [x * (wide - 0.08), 0.33, r3(z * (k.long / 2 - 0.85))], '#1c1e20', [0, 0, Math.PI / 2]), 'rubber'),
+      can(0.15, 0.12, [x * (wide - 0.06), 0.33, r3(z * (k.long / 2 - 0.85))], '#b9bcc0', [0, 0, Math.PI / 2]),
+    ])),
+    ...[-1, 1].map((z) => block([wide - 0.05, 0.09, 0.06], [0, 0.45, r3(z * (k.long / 2 + 0.03))], '#2c2f33')),
+    ...[-1, 1].map((x) => of(block([0.14, 0.07, 0.04], [x * (wide - 0.25), r3(k.belt - 0.14), r3(n * (k.long / 2 + 0.01))], '#fff1c2'), 'lamp')),
+    ...[-1, 1].map((x) => block([0.14, 0.07, 0.04], [x * (wide - 0.25), r3(k.belt - 0.14), r3(-n * (k.long / 2 + 0.01))], '#c0392b')),
+  ]
+  // A pickup's bed: low sides behind the cabin instead of a boot.
+  if ('bed' in k && k.bed) pieces.push(...[-1, 1].map((x) => block([0.06, 0.16, r3((k.long - k.cabin[1]) / 2 - 0.05)], [x * (wide - 0.06), r3(k.belt + 0.16), r3(-n * (k.cabin[1] / 2))], p.paint)))
+  return pieces
+}
+/** The parked cars for a street of cells: the same cars in the same places, each made of the pieces above. */
+export const CARS_IN_CELLS: ToySpec = {
+  id: 'cars', label: 'Parked cars', frame, gadgets: [], wires: [], inputs: {},
+  parts: PARKED.map((p) => { const pieces = carPieces(p); return { id: p.id, shape: piecesShape(pieces), pieces, material: 'steel', at: [p.across, 0, p.along] as Vec3 } }),
 }
 
 /** Where the still things on the pavements and at the kerbs stand, as rounds on the ground: across, along (world z), how wide, and from what height up (a tree's crown starts over a head; a car is three rounds in a row). A made thing is stood clear of them. */

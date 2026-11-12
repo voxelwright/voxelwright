@@ -18,7 +18,7 @@ import { standing } from './walk.ts'
 import type { Self } from './wire.ts'
 
 /** Something that happened on the street, as a resident who was not looking is told it. */
-export interface StreetEvent { seq: number; kind: 'arrived' | 'left' | 'said' | 'made' | 'took-back' | 'wants' | 'solved'; who: string; text?: string; thing?: string }
+export interface StreetEvent { seq: number; kind: 'arrived' | 'left' | 'said' | 'made' | 'took-back' | 'wants' | 'solved' | 'broke'; who: string; text?: string; thing?: string }
 export interface Outcome { ok: boolean; say: string; toy?: string }
 
 /** What the door asks of the world process behind it. */

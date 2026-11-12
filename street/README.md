@@ -46,6 +46,32 @@ and the residents are synthetic.
   toys the world process built (their materials, paint and shadows), posed from the wire.
   `client/place.ts` draws the land round the block, `client/figure.ts` the residents.
 
+## A street made of cells (November 11, 2026, #138)
+
+Start the world with `--cells` and everything on the block is made of 10 cm cells, each a
+material from the engine's registry under a paint: the ground, the houses (hollow, with wall
+layers, floors, rooms and glass), lamps, trees, cars, bins, crates and whatever a sentence makes.
+The page then draws the world's cells and nothing of its own over them, and the dark button
+gains two tools: `hammer` (click something within arm's reach) and `boom` (click anything you
+can see). A blow takes cells out for everyone; what it cuts off from a thing's footing falls as a
+thing of its own, and lumps fly from the rim. Keys 1 to 5 pick the verb.
+
+- `home/src/engine/voxels.ts`: a block of cells and every edit on one, in whole numbers.
+  `cells.ts` turns any toy into cells. `world.ts` holds parts of cells: a body a chunk, `cut`,
+  `blast`, and `applyCut` for a copy.
+- `src/house-cells.ts`: a house built to be broken into.
+- `client/look/cells.ts`: the drawing: greedy faces a chunk at a time, crumbs, fire and smoke.
+- The cut is what travels (`blow` lines carry `CutRecord`s). A page that comes later is sent
+  each thing's cells as they stand.
+
+Measured on this Mac while busy: the block is 24 million cells, built in a second and 63 kB
+packed; a tick with two walkers 0.3 ms (max 7); a blow 1 to 7 ms; the page 87 thousand quads,
+6 ms of GPU at 1280 x 720. `test/voxel-tick.mjs` and `test/voxel-world.mjs` time it headless;
+`test/break.ts <url> <out>` blasts a running street for pictures. Facts and limits:
+`.agents/skills/voxel-world/SKILL.md`. Not there yet: what is broken is not saved, nothing burns
+or floods cell by cell, residents are still felt figures, and the land round the block is the
+page's old scenery.
+
 ## Play it
 
 Walk with WASD (or the left side of a phone's screen), jump with Space, turn with Q and E or
@@ -149,6 +175,8 @@ node test/door.ts [pictures/]               # in through the home's door and bac
 node test/problem.ts [pictures/]            # a problem asked, solved by a bridge, told to all, and asked again
 node test/problems.mjs                      # the other two problems' tests, on the real world with no page
 node test/touch.ts [pictures/]              # WebKit at a phone's size, by touch only: stick, tap, the verb button, a solve, a change
+node test/cells.ts [pictures/]              # a street of cells: two pages, a late one and the world hold the same cells through a make, a blow and a lamp cut down
+node test/voxel-world.mjs                   # the whole block as cells on World, headless: build time, tick, what blows cost
 node test/drawn.ts                          # the page draws its own sky, ground, houses, trees and cars; under 13 ms of GPU a frame; a slow page steps down cleanly
 node test/snap.ts http://localhost:5318/ look/ [arrive,fronts,roof] [gpu=1]   # fixed views of a street that is already running; with gpu=1, what each costs
 node test/three.ts clip/ sonnet             # with a real model, by hand: all three solved by typing, recorded

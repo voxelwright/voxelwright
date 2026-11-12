@@ -3,9 +3,17 @@
 // nothing of the transport that carries it.
 import type { Quat, Vec3 } from '../../home/src/engine/core.ts'
 import type { ToySpec } from '../../home/src/engine/toy.ts'
+import type { CutRecord } from '../../home/src/engine/world.ts'
 import type { Input } from './walk.ts'
 
 export const INPUT = 1, SNAP = 2, PING = 3, SELF = 4, DELAY = 5
+
+/** What a blow is struck with: how wide it bites (m), how far its holder can reach (m), how hard it shoves what is loose (N·s), how long before the same seat may strike again (ms), how ragged its hole is, and how many lumps of rubble it knocks out of what stands still and how fast they fly (m/s). */
+export const TOOLS = {
+  hammer: { radius: 0.35, reach: 4, push: 12, rest: 140, rough: 0.35, lumps: 1, fling: 2 },
+  boom: { radius: 1.6, reach: 70, push: 260, rest: 450, rough: 0.5, lumps: 7, fling: 7 },
+} as const
+export type Tool = keyof typeof TOOLS
 
 /**
  * A toy as the page needs it to draw: the toy as the world process built it, less its gadgets
@@ -20,7 +28,10 @@ export interface Drawn {
   plush?: number
 }
 export type Line =
-  | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; floor: number; drawn: Drawn[] }
+  /** `cell` is set when the street is made of cells (#138): a cell's edge in metres. The page then draws the world's cells and nothing of its own over them. */
+  | { t: 'hello'; you: number; tickHz: number; snapHz: number; tick: number; floor: number; drawn: Drawn[]; cell?: number }
+  /** A blow landed: where (for the flash and the dust), how big, whose it was, and what it took out of each thing of cells it reached. Pieces that came loose follow as `add` lines. */
+  | { t: 'blow'; by: number; at: Vec3; radius: number; tool: Tool; cuts: CutRecord[] }
   | { t: 'add'; drawn: Drawn }
   | { t: 'remove'; toy: string }
   /** Someone asked for a thing: it is on its way to this spot. */
@@ -48,6 +59,8 @@ export type Ask =
   /** Change the made thing I am facing as this sentence says ("turn it into ice", "make it twice as wide"). */
   | { t: 'change'; text: string; yaw: number }
   | { t: 'top' }
+  /** Strike the world at a point with a tool: a hammer within arm's reach, a blast from afar. */
+  | { t: 'blow'; at: Vec3; tool: Tool }
   /** Stand me at the home's door (I have just come out of it). */
   | { t: 'door' }
   /** What this resident is called. */
