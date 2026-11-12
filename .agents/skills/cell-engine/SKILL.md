@@ -100,8 +100,13 @@ That is 3.7 ms a megapixel at street level with everything on: about 11 ms at it
 Its limits match Safari on the Mac but for 1 GB buffers; it has `timestamp-query`, shared
 memory, wasm SIMD and threads, and WebTransport.
 
-Not measured there: held sideways (a wider view), more than 39 s (heat), the desk's bigger
-world. Its GPU clock is not to be believed (0.01 to 10 ms for the same work), so the
+Two later runs the same evening, with falling in the build: the flight again at 60 frames a
+second at full size, upright (1320 x 2265) and held sideways (2478 x 1080). At the end of the
+sideways run the page cut a tree and put five charges across a house front: the tree's 7,805
+cells were worked out in 349 ms (242 ms on the M1 Pro), a charge in about 90 ms, the town
+whole again in under a second each time, and no gap between frames longer than 17.7 ms.
+
+Not measured there: more than 39 s (heat), the desk's bigger world. Its GPU clock is not to be believed (0.01 to 10 ms for the same work), so the
 picture's size follows late frames there, not the clock. A wake lock asked for before any
 touch was refused.
 
@@ -163,19 +168,28 @@ touch was refused.
 - The page's parts are set up in order and the frame loop starts before the flight awaits:
   anything the loop reads must be declared before the first await after it.
 
-## Checks
+## Checks, and the bar
 
-`cargo test --release` in `engine/core`; in `engine/`: `node test/probe.mjs`,
-`node test/city.mjs`, `node test/flight.mjs` (and `--phone`: a phone's screen with touch, so
-the page takes a phone's settings), `node test/blast.mjs`, `node test/shadows.mjs` (mapped
-against traced shadows: still, straight after flying 90 m away from the sun, later, and after
-a blast; about 1% of pixels differ in each), `node test/falls.mjs` (a tree with its trunk cut
-comes down and lies as cells, seen near and from 81 m at a coarse copy). All drive the real
-page in the installed Chrome with WebGPU; none stubs anything. `cargo test` holds the support
-rule to: the untouched city at rest in every sort of block, a panel hung by one cell falling
-and one joined along its edge standing, what reaches the box's top left alone, and a blasted
-house front coming down, staying down and losing no cell. `test/look.mjs` and `test/read.mjs` are
-tools for the hand.
+`npm run check` in `engine/` runs everything in about three minutes: `cargo test`, `tsc`, and
+the real page in the installed Chrome with WebGPU (`test/city.mjs`, `blast.mjs`, `shadows.mjs`,
+`falls.mjs`, `flight.mjs`, `flight.mjs --phone`, `probe.mjs`), sharing one server and one
+browser through `test/kit.mjs`. None stubs anything. `cargo test` holds the support rule to:
+the untouched city at rest in every sort of block, a panel hung by one cell falling and one
+joined along its edge standing, what reaches the box's top left alone, and a blasted house
+front coming down, staying down and losing no cell.
+
+- `test/bench.mjs` paces five places three ways against `test/baseline.json` and fails on a
+  tenth slower. It also paces a fixed piece of work that is none of the engine's (1.4 ms on the
+  M1 Pro when quiet); when that is a third slower the GPU is busy and it says nothing.
+- `test/versus.mjs` draws the board: `test/rows.mjs` has one row for each thing a viewer sees
+  in the reference's two films, a frame of theirs and a shot of ours, taken at the picture size
+  the page holds 60 frames a second at and stamped with it. A milestone picture forced to full
+  size says nothing about what the owner will see.
+- `test/clip.mjs` films a row in real time (the canvas's own stream) and prints every gap
+  between frames over 25 ms and when. Turning and tumbling cannot be judged from a still.
+- A row's state moves to level or ahead only after a judge who did not make it has seen both
+  sheets; log that dispatch.
+- `node live.mjs` after each merge: the owner's link serves a checkout of main.
 
 ## Not built
 

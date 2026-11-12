@@ -1,37 +1,19 @@
-// Runs the probe for real (#140): the page server on a port of its own, the installed Chrome
-// drawing with WebGPU, and the report read back from the file the server kept. Nothing is
-// stubbed: the numbers printed are this machine's.
+// Runs the probe for real (#140): the page in the installed Chrome drawing with WebGPU, and
+// the reports it posts read off the wire. Nothing is stubbed: the numbers printed are this
+// machine's.
 //
 //   node test/probe.mjs [--heat 5] [--shot picture.png] [--headed]
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { arg, start } from './kit.mjs'
 
-const here = new URL('..', import.meta.url).pathname
-const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
-const port = 5741, heat = arg('heat', '3'), shot = arg('shot', '')
-const reports = join(await mkdtemp(join(tmpdir(), 'engine-probe-')), 'reports.jsonl')
-
-const server = spawn('node', ['serve.mjs', '--port', String(port), '--reports', reports], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
-await new Promise((resolve, reject) => {
-  server.stdout.on('data', (chunk) => { if (String(chunk).includes('engine page on')) resolve() })
-  server.on('exit', (code) => reject(new Error(`the server ended (${code})`)))
-  setTimeout(() => reject(new Error('the server was not ready in 10 s')), 10_000)
-})
-
-const failures = []
-const check = (ok, what) => { if (!ok) failures.push(what) }
-const browser = await chromium.launch({ channel: 'chrome', headless: !process.argv.includes('--headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
+const heat = arg('heat', '3'), shot = arg('shot', '')
+const { url, page: open, check, failures, finish } = await start()
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(`  page ${m.type()}: ${m.text()}`) })
-  page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  await page.goto(`http://127.0.0.1:${port}/probe?heat=${heat}`)
+  const page = await open()
+  const kept = []
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/report')) kept.push(r.postDataJSON()) })
+  await page.goto(`${url}/probe?heat=${heat}`)
   await page.waitForFunction(() => document.body.dataset.done, null, { timeout: 180_000 })
   if (shot) await page.screenshot({ path: shot })
-  const kept = (await readFile(reports, 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
   const last = kept[kept.length - 1]
   check(kept.some((r) => r.stage === 'sweep'), 'no sweep report was kept')
   check(last.stage !== 'error', `the page failed: ${last.notes?.join(' | ')}`)
@@ -47,9 +29,7 @@ try {
   for (const r of last.rays ?? []) console.log(`  rays   ${r.view}${r.shadow ? '+shadow' : ''} ${r.size.join('x')}: ${r.ms} ms (gpu ${r.gpuMs}), ${r.steps} steps`)
   if (last.heat) console.log(`  heat   ${last.heat.size.join('x')}: paced ${last.heat.paced.map((p) => p.ms).join(', ')} ms; frames a second ${last.heat.seconds.map((s) => s.frames).join(' ')}`)
   if (last.notes?.length) console.log(`  notes  ${last.notes.join(' | ')}`)
-} finally {
-  await browser.close()
-  server.kill()
+} catch (e) {
+  failures.push(String(e))
 }
-if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
-console.log('probe: ok')
+await finish('probe')

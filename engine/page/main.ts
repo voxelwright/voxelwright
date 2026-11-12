@@ -8,6 +8,7 @@
 //   ?shadows=0  ?mirrors=0  ?heat=1 (show how many steps each pixel took)  ?detail=1 (pixels a thing must be wide to be drawn as itself)
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { stretch } from '../probe/rays.ts'
+import { fill } from '../probe/fill.ts'
 import { HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { ball, rows, stream, type Edit } from './edits.ts'
@@ -349,8 +350,22 @@ async function main() {
     return p.ms
   }
 
+  /**
+   * A fixed piece of work that is none of the engine's (four layers of lit pixels at the canvas's size) at the device's
+   * own pace, ms a frame: how busy the GPU is with other things, so that a timing taken beside it can be trusted or not.
+   */
+  let filler: ReturnType<typeof fill> | null = null
+  const quiet = async () => {
+    const to = offscreen(gpu, [canvas.width, canvas.height]), draw = (await (filler ??= fill(gpu))).draw(4)
+    paused = true
+    const p = await pace(gpu, to, draw, 60)
+    paused = false
+    to.destroy()
+    return p.ms
+  }
+
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, blast, pick, debris, shadowsDiffer, fell, get dropping() { return dropping.length }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, pick, debris, shadowsDiffer, fell, get dropping() { return dropping.length }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

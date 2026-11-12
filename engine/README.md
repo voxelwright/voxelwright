@@ -31,22 +31,33 @@ pixel took, L and M turn shadows and mirrors off, K traces every shadow instead 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?heat=1` `?fly=0` `?seconds=40`.
 
-To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`.
+To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
+`node live.mjs` run after each merge so that the link serves main and not a working tree.
 
-## Checks
+## Checks and tools
 
 ```sh
-cd engine/core && cargo test --release
-cd engine && npm run typecheck
-node test/probe.mjs     # the probe page in Chrome with WebGPU, its report read back
-node test/city.mjs      # the city made, looked at from five places
-node test/flight.mjs    # the measuring flight, then a tree cut and a house front broken, each part's report read back (--phone: as a phone)
-node test/blast.mjs     # glass breaks further than a wall
-node test/shadows.mjs   # the sun's maps against traced shadows: still, after moving, after a blast
-node test/falls.mjs     # a tree with its trunk cut comes down and lies as cells
-node test/read.mjs      # what devices have reported
-node test/demo.mjs --out dir   # not a check: pictures of a house front being broken
+cd engine
+npm run check                 # every check, about three minutes: the core's tests, the types, and the real page in Chrome
+node test/all.mjs --only falls,blast
+node test/bench.mjs           # how fast the march is against test/baseline.json; says when the GPU was too busy to tell
+node test/versus.mjs --out dir --fetch   # the board: our shots beside frames of the reference films
+node test/clip.mjs --row rubble --out dir   # a row of the board filmed as the page shows it, with the gaps between frames
+node test/look.mjs --out file.png --at x,y,z --look yaw,pitch   # one look, with settings
+node test/read.mjs            # what devices have reported
+node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 ```
 
-Each drives the real page in the installed Chrome; none stubs anything. Times are this
-machine's while it is busy: compare settings in turn (`node test/look.mjs --ab ...`).
+`npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
+`test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
+further than a wall), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
+(a cut tree comes down and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
+cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
+in the installed Chrome; none stubs anything. They share one server and one browser and run
+three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.
+
+The board (`test/rows.mjs`) is the bar: one row for each thing a viewer sees in the two films of
+the review the owner linked, a frame of theirs and a repeatable shot of ours, stamped with the
+frames a second and the picture size the page held by itself. A row's state changes only when
+both have been looked at side by side by someone who did not make ours. The films live in
+`~/.village/engine/ref/`, never in the repo.

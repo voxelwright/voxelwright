@@ -1,23 +1,14 @@
 // Looks at the city from one place with given settings (#140): node test/look.mjs --out file.png [--at x,y,z] [--look yaw,pitch] [--query "heat=1"] [--set "flags=5"] [--wait 1500]
 // Prints the march time. A tool for the hand, not a check.
-import { spawn } from 'node:child_process'
-import { chromium } from 'playwright'
-const here = new URL('..', import.meta.url).pathname
-const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
-const port = Number(arg('port', '5743'))
-const server = spawn('node', ['serve.mjs', '--port', String(port), '--reports', '/dev/null'], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
-await new Promise((resolve) => server.stdout.on('data', (chunk) => { if (String(chunk).includes('engine page on')) resolve() }))
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
+import { arg, start } from './kit.mjs'
+const { url, page: open, failures, finish } = await start()
 try {
-  const [w, h] = arg('size', '1280,720').split(',').map(Number)
-  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: Number(arg('dpr', '2')) })
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(`  page ${m.type()}: ${m.text().slice(0, 800)}`) })
-  page.on('pageerror', (e) => console.log(`  page error: ${e.message}`))
+  const page = await open({ size: arg('size', '1280,720').split(',').map(Number), dpr: Number(arg('dpr', '2')) })
   const q = new URLSearchParams(arg('query', ''))
   if (arg('at', '')) q.set('at', arg('at', ''))
   if (arg('look', '')) q.set('look', arg('look', ''))
   q.set('fly', '0')
-  await page.goto(`http://127.0.0.1:${port}/city?${q}`)
+  await page.goto(`${url}/city?${q}`)
   await page.waitForFunction(() => globalThis.engine, null, { timeout: 30_000 })
   await page.waitForFunction(() => globalThis.engine.world.stats.wanted === 0 && globalThis.engine.world.stats.ready > 0, null, { timeout: 120_000 })
   const views = arg('views', '').split(';').filter(Boolean)
@@ -46,4 +37,7 @@ try {
     const out = arg('out', '')
     if (out) await page.screenshot({ path: shots.length > 1 ? out.replace(/\.png$/, `-${i}.png`) : out })
   }
-} finally { await browser.close(); server.kill() }
+} catch (e) {
+  failures.push(String(e))
+}
+await finish('look')

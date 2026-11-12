@@ -3,25 +3,15 @@
 // Glass must be gone further from the blast than the blast is wide; a wall must not be.
 //
 //   node test/blast.mjs [--out dir]
-import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { chromium } from 'playwright'
+import { arg, start } from './kit.mjs'
 
-const here = new URL('..', import.meta.url).pathname
-const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
-const port = Number(arg('port', '5745')), out = arg('out', '')
+const out = arg('out', '')
 if (out) await mkdir(out, { recursive: true })
-const server = spawn('node', ['serve.mjs', '--port', String(port), '--reports', '/dev/null'], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
-await new Promise((resolve) => server.stdout.on('data', (chunk) => { if (String(chunk).includes('engine page on')) resolve() }))
-const failures = []
-const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
+const { city, check, failures, finish } = await start()
 const GLASS = 11, WALLS = [8, 9, 10]
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
-  page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  await page.goto(`http://127.0.0.1:${port}/city?fly=0&scale=1`)
-  await page.waitForFunction(() => globalThis.engine, null, { timeout: 30_000 })
+  const page = await city('scale=1')
   const made = () => page.waitForFunction(() => globalThis.engine.world.stats.wanted === 0 && globalThis.engine.world.stats.ready > 0, null, { timeout: 120_000 })
   await made()
   // Stand in the street and face the houses on one side.
@@ -82,9 +72,5 @@ try {
   check(stats.full === 0, 'every sector made again fitted the pool')
 } catch (e) {
   failures.push(String(e))
-} finally {
-  await browser.close()
-  server.kill()
 }
-if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
-console.log('blast: ok')
+await finish('blast')

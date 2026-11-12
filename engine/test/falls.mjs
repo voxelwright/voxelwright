@@ -3,28 +3,17 @@
 // ground as cells of the world.
 //
 //   node test/falls.mjs [--out dir]
-import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
-import { chromium } from 'playwright'
+import { arg, start, still as rest } from './kit.mjs'
 
-const here = new URL('..', import.meta.url).pathname
-const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
-const port = 5747, out = arg('out', '')
+const out = arg('out', '')
 if (out) await mkdir(out, { recursive: true })
-const server = spawn('node', ['serve.mjs', '--port', String(port), '--reports', '/dev/null'], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
-await new Promise((resolve) => server.stdout.on('data', (chunk) => { if (String(chunk).includes('engine page on')) resolve() }))
-const failures = []
-const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
+const { city, check, failures, finish } = await start()
 const WOOD = 10, LEAVES = 13, TRUNK = 45
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
-  page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  page.on('console', (m) => { if (m.type() === 'error') console.log(`  page error: ${m.text().slice(0, 300)}`) })
   // A phone's boxes: cells twice as big beyond 25 m, four times beyond 51 m, so the far look is at a coarse copy.
-  await page.goto(`http://127.0.0.1:${port}/city?fly=0&scale=1&grid=8,8,8&levels=8`)
-  await page.waitForFunction(() => globalThis.engine, null, { timeout: 30_000 })
-  const still = () => page.waitForFunction(() => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.world.stats.ready > 0 && !e.settling && e.dropping === 0 }, null, { timeout: 120_000 })
+  const page = await city('scale=1&grid=8,8,8&levels=8')
+  const still = () => rest(page)
   await still()
   await page.evaluate(() => { const p = globalThis.engine.pose; p.y -= 10.2 })
   await page.waitForTimeout(300)
@@ -106,9 +95,5 @@ try {
   }
 } catch (e) {
   failures.push(String(e))
-} finally {
-  await browser.close()
-  server.kill()
 }
-if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
-console.log('falls: ok')
+await finish('falls')

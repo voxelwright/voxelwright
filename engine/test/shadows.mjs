@@ -4,22 +4,12 @@
 // share of pixels differ.
 //
 //   node test/shadows.mjs
-import { spawn } from 'node:child_process'
-import { chromium } from 'playwright'
+import { start } from './kit.mjs'
 
-const here = new URL('..', import.meta.url).pathname
-const port = 5746
-const server = spawn('node', ['serve.mjs', '--port', String(port), '--reports', '/dev/null'], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
-await new Promise((resolve) => server.stdout.on('data', (chunk) => { if (String(chunk).includes('engine page on')) resolve() }))
-const failures = []
-const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
+const { city, check, failures, finish } = await start()
 const percent = (x) => `${(x * 100).toFixed(2)}%`
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--use-angle=metal'] })
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
-  page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  await page.goto(`http://127.0.0.1:${port}/city?fly=0&scale=0.5`)
-  await page.waitForFunction(() => globalThis.engine, null, { timeout: 30_000 })
+  const page = await city('scale=0.5')
   const settled = () => page.waitForFunction(() => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.world.stats.ready > 0 && e.march.sun.undrawn === 0 }, null, { timeout: 120_000 })
   const differ = () => page.evaluate(() => globalThis.engine.shadowsDiffer())
   const paced = (maps) => page.evaluate(async (m) => { const e = globalThis.engine, was = e.march.maps; e.march.maps = m; const ms = await e.paced(); e.march.maps = was; return ms }, maps)
@@ -54,9 +44,5 @@ try {
   check(broken < 0.04, `after a blast and its sectors made again, ${percent(broken)} differ`)
 } catch (e) {
   failures.push(String(e))
-} finally {
-  await browser.close()
-  server.kill()
 }
-if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
-console.log('shadows: ok')
+await finish('shadows')

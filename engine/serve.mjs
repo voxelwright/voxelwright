@@ -59,8 +59,9 @@ const server = createServer((req, res) => {
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
   if (req.method === 'POST' && url.pathname === '/report') return done(report(req, res))
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')
+  if (url.pathname === '/favicon.ico') return send(res, 204, '')
   // The address a phone is sent is the city, which measures itself; the probe keeps its own.
   const path = url.pathname === '/' || url.pathname === '/city' ? 'page/index.html' : url.pathname === '/probe' ? 'probe/index.html' : url.pathname
   done(file(res, path))
 })
-server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${port}/ (reports kept in ${reports})`))
+server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${server.address().port}/ (reports kept in ${reports})`))
