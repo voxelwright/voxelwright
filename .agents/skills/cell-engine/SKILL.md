@@ -130,20 +130,53 @@ touch was refused.
   only so many cells (`carries`), counted along the paths the search found; a join over its
   limit tears and all it carried is loose. Leaves join only to leaves, and rest on anything.
 - Loose cells that touch are a piece. A piece that reaches the box's sides or top is left
-  alone (nobody knows what holds it beyond). The rest fall straight down in whole cells, the
-  lowest first, and are cells of the world again where they land. This is repeated, up to
-  eight times, until nothing more falls (a heap took six). Cells are conserved.
+  alone (nobody knows what holds it beyond), so a tower taller than the box does not come
+  loose yet. Each other piece is taken out of the world and is a body.
 - It is reach and a count of cells, not weight or stress: a one-cell post under a house
-  still holds it, and a row of houses holds up a house whose ground floor is gone. A cut
-  tree drops onto its stump and stands there. Nothing turns, tumbles or breaks on landing.
-- On the page (`settler.ts`, `pieces.ts`, `main.ts`): a worker settles; each piece is taken
-  out of the world when it starts to fall, drawn as faces merged along rows in the core
-  (sent to the GPU once, moved by a uniform), and put back when it lands. Before the next
-  blast everything still in the air lands at once, so the world is as the core said.
-- Far copies in which houses are solid take a fallen piece as its filled outline, row by
-  row, or its shell would leave the solid inside standing.
-- Measured: a tree of 7,805 cells worked out in 0.24 s on the Mac; a house front in 0.3 s.
-  The worker's memory reaches 100 MB.
+  still holds it, and a row of houses holds up a house whose ground floor is gone.
+- `support::settle` (pieces dropped straight down in whole cells) is no longer what the page
+  does; it stays as what the rule's own tests drive.
+
+## Bodies: what comes loose and moves (`core/src/bodies.rs`)
+
+- A body is a small box of cells with a place, a turn, a speed and a spin. Lengths are cells,
+  times seconds, a step 1/120 s, at most three steps a call: when the solver cannot keep up
+  things move slower, they do not pile up work.
+- It meets things at points: corners of its own cells, at most 160 and fewer for a small
+  body (sharp corners kept first). A point in a solid cell is pushed the shortest way out
+  through one face, to the nearest empty cell within three. Pushing towards all the empty
+  neighbours at once made every stair tread a ramp and bodies crept down a street.
+- Of the touches between a body and the world (or another body) only the furthest out each
+  of fourteen ways and the deepest are kept; each stops what is closing and rubs against
+  what slides, eight times over; overlap is eased apart without becoming speed.
+- A body that has lain nearly still for 0.3 s is cells again, as it lies: one within about
+  eight degrees of square is put down square, cell for cell; one askew is cut along the
+  world's cells (about 2% fewer or more). The longer it has been about the less still it
+  need be, and at eight seconds it is put down regardless. This is what keeps a ruin cheap:
+  a heap is the world, and the next thing lands on it.
+- A blast (`Bodies::blast`) makes the edit itself: the box round it is gathered before and
+  after, and what it emptied comes out as lumps about five cells across with wandering
+  edges, thrown from the middle (glass and the middle fifth are dust). Then what it left
+  unheld is released. A body knocked harder than its material takes (`kinds.rs`
+  `breaks_at`) is shared out among a few points in it and each share is a body.
+- Bodies under 160 cells do not meet each other, only the world and big bodies. With all
+  pairs tried, 700 lumps in one cloud took 111 ms a frame; without, 19 ms.
+- The world as bodies meet it (`Ground`) is one bit a cell in sectors made on first touch.
+  The solver's own edits (cells out, cells back) change those bits in place; anyone else's
+  edit forgets the sectors it reaches. Every edit has one place in one order: a blast says
+  how many of the solver's edits its maker had applied, and goes in after those.
+- On the page: `mover.ts` is the worker (one instance of the core), `told.ts` reads its
+  words, `pieces.ts` draws each body's faces with its turn, `main.ts` asks for a step each
+  frame and never twice before an answer. Cells that bodies have become wait up to 180 ms
+  to be put in the world together: applied one by one, a heap of 250 bodies had every
+  sector near it made again 250 times and the town was not whole for 15 s.
+- Measured on the M1 Pro (Chrome, picture at 0.55 of 2560 x 1440): five charges across a
+  house front make 1,150 bodies of 29,000 cells, 627 at once; 60 frames a second with one
+  gap of 33 ms in ten seconds; a blast worked out in 60 to 80 ms; the solver's longest
+  frame 19 ms. Of a charge's lumps nine in ten lie still within 2.3 s, and 98% of their
+  cells lie down. A cut tree goes over and lies in the street.
+- Not done: bodies cast no shadow and take none; a body does not damage what it lands on;
+  nothing bends; a body that leaves the sectors near the eye is still moved.
 
 ## Lessons paid for
 
@@ -197,8 +230,8 @@ front coming down, staying down and losing no cell.
   of a street view's pixels. Crumbs and anything else that moves cast none. A map's texel
   holds a distance as a 32-bit float from the world's zero: fine across a city, too coarse
   a thousand kilometres out.
-- Nothing turns, tumbles or breaks when it lands: falling is straight down in whole cells.
-  No weight or stress. Nothing bends, burns or flows. No bodies that move about.
+- What stands is reach and a count, not weight or stress. A body does not damage what it
+  lands on. Nothing bends, burns or flows.
 - Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
 - No walking, only flying. No real San Francisco: the city is made up.
 - The look is plain: no occlusion in corners, no clouds, hard shadow edges, 10 cm treads on

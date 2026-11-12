@@ -4,10 +4,10 @@
 //! (kinds.rs). Reach alone would let a wall hang by a thread, so each sideways or hanging join
 //! also carries only so many cells: past that it tears and all it carried is loose.
 //!
-//! Loose cells that touch one another are a piece. A piece falls straight down, in whole cells,
-//! until something is under it, the lowest piece first, and is then cells of the world again.
-//! Nothing here turns or bounces: this is the rule for what stands, in whole numbers, the same
-//! on every machine. What a falling thing does on the way is the solver's, and not built.
+//! Loose cells that touch one another are a piece. `release` takes the pieces out for the solver
+//! to move (bodies.rs). `settle` is the older answer, kept for this rule's own tests: each piece
+//! falls straight down, in whole cells, until something is under it. This is the rule for what
+//! stands, in whole numbers, the same on every machine.
 
 use crate::kinds::{LEAVES, join_carries, material, spans};
 use crate::scratch::{Run, Scratch};
@@ -204,52 +204,95 @@ fn rows(r: &Region, cells: &mut [u32]) -> Vec<Run> {
     runs
 }
 
+/// The loose cells of a region as pieces: loose cells that touch are one. A piece that reaches the box's sides or
+/// top goes on beyond it, and what it is joined to there is not known, so it is left where it is (and comes back empty).
+fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32]) -> Vec<Vec<u32>> {
+    let [nx, ny, nz] = r.size;
+    let (n, layer) = (r.cells.len(), nx * nz);
+    piece_of.fill(0);
+    let mut pieces: Vec<Vec<u32>> = Vec::new();
+    let mut stack: Vec<u32> = Vec::new();
+    for start in 0..n {
+        if !is_loose[start] || piece_of[start] != 0 {
+            continue;
+        }
+        let id = pieces.len() as u32 + 1;
+        let mut cells: Vec<u32> = Vec::new();
+        let mut edge = false;
+        piece_of[start] = id;
+        stack.push(start as u32);
+        while let Some(i) = stack.pop() {
+            let i = i as usize;
+            cells.push(i as u32);
+            let (x, y, z) = r.place(i);
+            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1;
+            let mut join = |j: usize| {
+                if is_loose[j] && piece_of[j] == 0 {
+                    piece_of[j] = id;
+                    stack.push(j as u32);
+                }
+            };
+            if x > 0 { join(i - 1) }
+            if x + 1 < nx { join(i + 1) }
+            if z > 0 { join(i - nx) }
+            if z + 1 < nz { join(i + nx) }
+            if y > 0 { join(i - layer) }
+            if y + 1 < ny { join(i + layer) }
+        }
+        if edge {
+            cells.clear();
+        }
+        pieces.push(cells);
+    }
+    pieces
+}
+
+/// A piece that has come loose, as it stood: its rows, how many cells, the box round it (high corner exclusive).
+pub struct Loose {
+    pub runs: Vec<Run>,
+    pub cells: usize,
+    pub low: [i32; 3],
+    pub high: [i32; 3],
+}
+
+/// Takes out of a region everything in it that is not held, and says what: the pieces, for the solver to move
+/// (bodies.rs), and the rows of crumbs too small to be one, which are dust.
+pub fn release(r: &mut Region) -> (Vec<Loose>, Vec<Run>) {
+    let is_loose = loose(r);
+    let mut piece_of = vec![0u32; r.cells.len()];
+    let (mut out, mut dust) = (Vec::new(), Vec::new());
+    for mut cells in pieces_of(r, &is_loose, &mut piece_of) {
+        if cells.is_empty() {
+            continue;
+        }
+        let runs = rows(r, &mut cells);
+        for &i in &cells {
+            r.cells[i as usize] = 0;
+        }
+        if cells.len() < 4 {
+            dust.extend(runs);
+            continue;
+        }
+        let (mut low, mut high) = ([i32::MAX; 3], [i32::MIN; 3]);
+        for run in &runs {
+            low = [low[0].min(run.x0), low[1].min(run.y), low[2].min(run.z)];
+            high = [high[0].max(run.x1), high[1].max(run.y + 1), high[2].max(run.z + 1)];
+        }
+        out.push(Loose { runs, cells: cells.len(), low, high });
+    }
+    (out, dust)
+}
+
 /// Lets everything in a region that is not held fall until it is. At most `rounds` times over: what lands may
 /// leave something perched. The region is left as the world then stands.
 pub fn settle(r: &mut Region, rounds: u32) -> Settled {
-    let [nx, ny, nz] = r.size;
+    let [nx, _, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
     let mut done = Settled { moves: Vec::new(), dust: 0 };
     let mut piece_of = vec![0u32; n];
     for round in 0..rounds {
         let is_loose = loose(r);
-        // Loose cells that touch are one piece.
-        piece_of.fill(0);
-        let mut pieces: Vec<Vec<u32>> = Vec::new();
-        let mut stack: Vec<u32> = Vec::new();
-        for start in 0..n {
-            if !is_loose[start] || piece_of[start] != 0 {
-                continue;
-            }
-            let id = pieces.len() as u32 + 1;
-            let mut cells: Vec<u32> = Vec::new();
-            let mut edge = false;
-            piece_of[start] = id;
-            stack.push(start as u32);
-            while let Some(i) = stack.pop() {
-                let i = i as usize;
-                cells.push(i as u32);
-                let (x, y, z) = r.place(i);
-                edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1;
-                let mut join = |j: usize| {
-                    if is_loose[j] && piece_of[j] == 0 {
-                        piece_of[j] = id;
-                        stack.push(j as u32);
-                    }
-                };
-                if x > 0 { join(i - 1) }
-                if x + 1 < nx { join(i + 1) }
-                if z > 0 { join(i - nx) }
-                if z + 1 < nz { join(i + nx) }
-                if y > 0 { join(i - layer) }
-                if y + 1 < ny { join(i + layer) }
-            }
-            // A piece that reaches the box's edge goes on beyond it: what it is joined to there is not known, so it is left.
-            if edge {
-                cells.clear();
-            }
-            pieces.push(cells);
-        }
+        let pieces = pieces_of(r, &is_loose, &mut piece_of);
         // Crumbs are gone; pieces come out of the region, to be put back where they land.
         let mut falling: Vec<(Vec<u32>, Vec<Kind>)> = Vec::new();
         // A crumb swept away may have been what something rested on: that is a change too.
@@ -332,12 +375,23 @@ pub fn settle(r: &mut Region, rounds: u32) -> Settled {
 /// many cells long (8 bits), which axis it looks along (2), which way (1), and the kind (16).
 pub fn faces(m: &Move) -> Vec<u32> {
     let size = [(m.high[0] - m.low[0]) as usize, (m.high[1] - m.low[1]) as usize, (m.high[2] - m.low[2]) as usize];
+    faces_of(&grid_of(&m.runs, m.low, size), size)
+}
+
+/// Rows of cells as a box of cells laid out flat: x + across * (z + deep * y), from the box's low corner.
+pub fn grid_of(runs: &[Run], low: [i32; 3], size: [usize; 3]) -> Vec<Kind> {
     let mut grid = vec![0 as Kind; size[0] * size[1] * size[2]];
-    let at = |x: usize, y: usize, z: usize| x + size[0] * (z + size[2] * y);
-    for run in &m.runs {
-        let (y, z) = ((run.y - m.low[1]) as usize, (run.z - m.low[2]) as usize);
-        grid[at((run.x0 - m.low[0]) as usize, y, z)..at((run.x1 - m.low[0]) as usize, y, z)].fill(run.kind);
+    for run in runs {
+        let (y, z) = ((run.y - low[1]) as usize, (run.z - low[2]) as usize);
+        let row = size[0] * (z + size[2] * y);
+        grid[row + (run.x0 - low[0]) as usize..row + (run.x1 - low[0]) as usize].fill(run.kind);
     }
+    grid
+}
+
+/// The outside of a box of cells as faces (see `faces`).
+pub fn faces_of(grid: &[Kind], size: [usize; 3]) -> Vec<u32> {
+    let at = |x: usize, y: usize, z: usize| x + size[0] * (z + size[2] * y);
     let open = |x: i32, y: i32, z: i32| x < 0 || y < 0 || z < 0 || x >= size[0] as i32 || y >= size[1] as i32 || z >= size[2] as i32 || grid[at(x as usize, y as usize, z as usize)] == 0;
     let mut out: Vec<u32> = Vec::new();
     let mut put = |x: usize, y: usize, z: usize, len: usize, axis: u32, side: u32, kind: Kind| {

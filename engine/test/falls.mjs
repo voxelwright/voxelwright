@@ -1,5 +1,5 @@
 // What is no longer held falls, for real (#140): the city page in the installed Chrome with
-// WebGPU. A street tree's trunk is cut through; its crown must come down and lie on the
+// WebGPU. A street tree's trunk is cut through; its crown must come down (it goes over, as a body) and lie on the
 // ground as cells of the world.
 //
 //   node test/falls.mjs [--out dir]
@@ -73,9 +73,9 @@ try {
       const now = await pick(0, crown.up)
       check(!now || now.material !== LEAVES || Math.abs(now.t - crown.hit.t) > 5, `where the top of the crown was there is no crown (now ${now ? `material ${now.material} at ${now.t.toFixed(0)}` : 'sky'})`)
     }
-    // It lies on the ground: leaves low down where there were none.
+    // It lies on the ground, whichever way it went over: leaves low down, within 12 m, where there were none.
     let low = null
-    for (let down = 0.3; down > -0.4 && !low; down -= 0.04) { const hit = await pick(0, down); if (hit?.material === LEAVES) low = hit }
+    for (let right = -1.4; right <= 1.4 && !low; right += 0.14) for (let down = 0.05; down > -0.45 && !low; down -= 0.05) { const hit = await pick(right, down); if (hit?.material === LEAVES && hit.t < 120) low = hit }
     check(!!low, 'leaves lie on the ground')
     const differ = await page.evaluate(() => globalThis.engine.shadowsDiffer())
     check(differ < 0.05, `mapped and traced shadows agree after the fall (${(differ * 100).toFixed(2)}% differ)`)

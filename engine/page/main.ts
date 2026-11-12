@@ -11,9 +11,10 @@ import { stretch } from '../probe/rays.ts'
 import { fill } from '../probe/fill.ts'
 import { HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
-import { ball, rows, stream, type Edit } from './edits.ts'
+import { ball, rows, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
-import type { Fall, Settled } from './settler.ts'
+import type { Answer, Ask } from './mover.ts'
+import { read } from './told.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
@@ -181,7 +182,7 @@ async function main() {
     walk(dt)
     steer(Math.max(1000 / 60, screenMs))
     const v = view(), to = fit()
-    fallOn(now)
+    fallOn(dt)
     world.update(v.eye)
     if (spoiled.length && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
     const encoder = device.createCommandEncoder()
@@ -219,85 +220,99 @@ async function main() {
   let force = 8
   addEventListener('keydown', (e) => { const pick = { Digit1: 4, Digit2: 8, Digit3: 16 }[e.code]; if (pick) force = pick })
 
-  // ── Falling ─────────────────────────────────────────────────────────────
-  // After a blast a worker says what is no longer held (the core's support rule). Each piece is taken out of the
-  // world when it starts to fall, drawn as faces on the way down, and put back as cells where it lands.
-  const settler = new Worker('/page/settler.ts', { type: 'module' })
-  interface Dropping { fall: Fall; start: number; lands: number; piece: Piece | null; landed: boolean; shown: number }
-  let dropping: Dropping[] = [], asked = 0, waiting = 0
-  const fell = { asks: 0, pieces: 0, cells: 0, dust: 0, ms: 0 }
-  /** Cells a second a second. */
-  const G = 98
-  const takeOff = (d: Dropping) => {
-    const take = rows(d.fall.runs, d.fall.box, 0, 0)
-    world.edit(take)
-    spoiled.push(take)
-    d.piece = falling.add(d.fall)
+  // ── What comes loose ────────────────────────────────────────────────────
+  // After a blast a worker says what is no longer held (the core's support rule) and moves it: each piece is a
+  // body that falls, turns and strikes things, drawn as faces while it moves, and cells of the world again where
+  // it comes to rest (bodies.rs). The worker makes edits of its own (cells out, cells back); they are applied here
+  // in the order it made them, and it is told how many of them a blast came after.
+  const mover = new Worker('/page/mover.ts', { type: 'module' })
+  const moving = new Map<number, Piece>()
+  /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
+  let lying: { piece: Piece; shown: number }[] = []
+  let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0
+  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit) }
+  /** Cells that bodies have become, waiting to be put in the world together. */
+  let putting: { runs: Int32Array<ArrayBuffer>; box: readonly number[] }[] = [], putSince = 0
+  const put = () => {
+    if (!putting.length) return
+    // One edit of them all, its rows in the order rows are kept: up, then along z, then along x. No two are of the same cell.
+    const n = putting.reduce((sum, p) => sum + p.runs.length / 5, 0), order = new Uint32Array(n), all = new Int32Array(n * 5), box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+    let at = 0
+    for (const p of putting) { all.set(p.runs, at); at += p.runs.length; for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], p.box[a]); box[a + 3] = Math.max(box[a + 3], p.box[a + 3]) } }
+    for (let i = 0; i < n; i++) order[i] = i
+    order.sort((a, b) => all[a * 5 + 2] - all[b * 5 + 2] || all[a * 5 + 3] - all[b * 5 + 3] || all[a * 5] - all[b * 5])
+    const sorted = new Int32Array(n * 5)
+    for (let i = 0; i < n; i++) sorted.set(all.subarray(order[i] * 5, order[i] * 5 + 5), i * 5)
+    putting = []
+    change(rows(sorted, box as [number, number, number, number, number, number]))
   }
-  const land = (d: Dropping) => {
-    if (!d.piece) takeOff(d)
-    const put = rows(d.fall.runs, d.fall.box, d.fall.drop)
-    world.edit(put)
-    spoiled.push(put)
-    d.piece!.down = d.fall.drop
-    d.landed = true
-    d.shown = 0
-    // Dust of what it is made of, where it came down.
-    const b = d.fall.box, kind = d.fall.runs[4], colour = kind >> 8 ? colours.subarray((kind >> 8) * 4, (kind >> 8) * 4 + 3) : stuff.subarray((kind & 15) * 8, (kind & 15) * 8 + 3)
-    debris.burst([(b[0] + b[3]) / 2, b[1] - d.fall.drop + 2, (b[2] + b[5]) / 2], Math.min(14, (b[3] - b[0] + b[5] - b[2]) / 4), Math.min(160, 6 + d.fall.cells / 12), [colour[0], colour[1], colour[2]], 0.9)
-  }
-  /** Everything still in the air lands at once: before the world is changed again, it must stand as the core said it would. */
-  const landAll = () => { for (const d of dropping) if (!d.landed) land(d) }
-  settler.onmessage = (e: MessageEvent<Settled>) => {
-    waiting--
-    if (e.data.failed) report.notes.push(`settling failed: ${e.data.failed}`)
-    // An answer to an older blast describes a world that has changed since.
-    if (e.data.id !== asked) return
-    const now = performance.now()
-    fell.pieces += e.data.falls.length
-    fell.cells += e.data.falls.reduce((n, f) => n + f.cells, 0)
-    fell.dust += e.data.dust
-    fell.ms = e.data.ms
-    // A round starts when the one before it has landed.
-    let start = now, end = now, round = 0
-    for (const fall of e.data.falls) {
-      if (fall.round !== round) { round = fall.round; start = end + 80 }
-      const lands = start + Math.sqrt((2 * fall.drop) / G) * 1000
-      end = Math.max(end, lands)
-      dropping.push({ fall, start, lands, piece: null, landed: false, shown: 0 })
+  const fell = { asks: 0, pieces: 0, cells: 0, dust: 0, ms: 0, stepMs: 0, worstMs: 0, tried: 0, most: 0 }
+  const hue = (kind: number) => (kind >> 8 ? colours.subarray((kind >> 8) * 4, (kind >> 8) * 4 + 3) : stuff.subarray((kind & 15) * 8, (kind & 15) * 8 + 3))
+  mover.onmessage = (e: MessageEvent<Answer>) => {
+    const answer = e.data
+    if (answer.released) waiting--
+    else ticking = false
+    if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
+    const told = read(answer.words)
+    for (const { runs, box } of told.edits) {
+      heard++
+      // Cells put back wait a moment for others near them: a heap comes down as hundreds of bodies, and the town
+      // is made again once for many of them. Cells taken out go at once, after whatever was waiting.
+      if (runs[4] !== 0) { if (!putting.length) putSince = performance.now(); putting.push({ runs, box }); continue }
+      put()
+      change(rows(runs, box))
     }
-    // Broken by hand, a device says so too: what fell and how the frames are.
-    if (!flying) { report.hand = { ...fell, fps: Math.round(1000 / frameMs), scale }; void post('hand') }
-  }
-  settler.onerror = (e) => { waiting = Math.max(0, waiting - 1); report.notes.push(`settler: ${e.message}`) }
-  /** Moves what is falling on to `now`. */
-  const fallOn = (now: number) => {
-    for (const d of dropping) {
-      if (d.landed) { d.shown++; continue }
-      if (now < d.start) continue
-      if (!d.piece) takeOff(d)
-      const t = (now - d.start) / 1000
-      d.piece!.down = Math.min(d.fall.drop, 0.5 * G * t * t)
-      if (now >= d.lands) land(d)
+    for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
+    for (const born of told.born) { moving.set(born.id, falling.add(born)); fell.pieces++; fell.cells += born.cells }
+    for (const at of [...told.moves, ...told.gone]) {
+      const piece = moving.get(at.id)
+      if (piece) { piece.pos = at.pos; piece.rot = at.rot }
     }
-    // A landed piece is drawn until the cells it has become are in the picture.
+    for (const { id } of told.gone) {
+      const piece = moving.get(id)
+      if (!piece) continue
+      moving.delete(id)
+      lying.push({ piece, shown: 0 })
+      // Dust of what it is made of, where it came to rest.
+      const c = hue(piece.born.faces[1] >> 16), size = piece.born.size
+      debris.burst(piece.pos, Math.min(6, (size[0] + size[2]) / 6), Math.min(24, 2 + piece.born.cells / 60), [c[0], c[1], c[2]], 0.5)
+    }
+    for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
+    bodies = answer.bodies
+    fell.most = Math.max(fell.most, bodies)
+    if (answer.released) {
+      fell.ms = answer.ms
+      // Broken by hand, a device says so too: what came loose and how the frames are.
+      if (!flying) { report.hand = { ...fell, fps: Math.round(1000 / frameMs), scale }; void post('hand') }
+    } else {
+      fell.stepMs = answer.ms
+      fell.worstMs = Math.max(fell.worstMs, answer.ms)
+      fell.tried = answer.tried
+    }
+  }
+  mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`) }
+  /** Moves what is loose on by `dt` seconds: the worker is asked once a frame, and not again until it has answered. */
+  const fallOn = (dt: number) => {
+    owed = Math.min(owed + dt, 0.1)
+    if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
+    if (bodies > 0 && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
+    if (bodies === 0) owed = 0
+    // A body that is cells again is drawn until those cells are in the picture.
     const made = world.stats.stale === 0 && world.stats.wanted === 0
-    dropping = dropping.filter((d) => { if (d.landed && d.shown > 2 && made) { d.piece?.destroy(); return false } return true })
+    lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })
   }
 
   /** Breaks what is straight ahead. What it is made of decides how far the break goes (the core's kinds), and what that leaves unheld falls. Returns where, or null for sky. */
   const blast = async (radius = force) => {
     const v = view(), hit = await march.pick(v)
     if (!hit) return null
-    landAll()
     // A little inside the face, so a wall is broken through and not grazed.
     const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + radius * 0.3))) as [number, number, number]
-    const edit = ball(at[0], at[1], at[2], radius, 0)
-    world.edit(edit)
-    spoiled.push(edit)
+    put()
+    change(ball(at[0], at[1], at[2], radius, 0))
     fell.asks++
     waiting++
-    settler.postMessage({ id: ++asked, edits: stream(world.done()), at })
+    mover.postMessage({ blast: at, radius, after: heard } satisfies Ask)
     const colour = hit.colour ? colours.subarray(hit.colour * 4, hit.colour * 4 + 3) : stuff.subarray(hit.material * 8, hit.material * 8 + 3)
     // Glass goes in many small pieces, the rest in fewer lumps; dust of the same stuff either way.
     const glass = hit.material === 11
@@ -365,7 +380,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, pick, debris, shadowsDiffer, fell, get dropping() { return dropping.length }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, quiet, blast, pick, debris, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.
@@ -382,7 +397,7 @@ async function main() {
       watch: (each) => { watchers.add(each); return () => watchers.delete(each) },
       say: (text) => { saying = text },
       blast,
-      falling: () => ({ settling: waiting > 0, dropping: dropping.length, pieces: fell.pieces, cells: fell.cells, ms: fell.ms }),
+      falling: () => ({ settling: waiting > 0, dropping: moving.size + lying.length + putting.length, pieces: fell.pieces, cells: fell.cells, ms: fell.ms, stepMs: fell.worstMs, most: fell.most }),
       breaks: query.get('breaks') !== '0',
       seconds: Number(query.get('seconds') ?? 40),
     })

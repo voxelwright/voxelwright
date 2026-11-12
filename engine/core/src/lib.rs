@@ -5,6 +5,7 @@
 //! What the outside calls is at the bottom: plain functions over the instance's own memory,
 //! no generated glue. An instance does one thing at a time; a page runs one in each worker.
 
+pub mod bodies;
 pub mod city;
 pub mod hash;
 pub mod kinds;
@@ -69,12 +70,12 @@ struct Instance {
     /// Edits for the next calls, as `read_edits` reads them.
     edits: Vec<i32>,
     out: [i32; 4],
-    /// What `settle_round` found, as whole numbers.
-    settled: Vec<i32>,
+    /// What has come loose and moves, in the one instance that is asked to move it.
+    bodies: Option<Box<bodies::Bodies>>,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], settled: Vec::new() });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], bodies: None });
 }
 
 /// Room for edits of `words` whole numbers (see `read_edits`); write them at the address returned. They stay for every call until asked for again.
@@ -131,37 +132,64 @@ pub const SETTLE: [usize; 3] = [160, 224, 160];
 /// How many times over what has landed is asked again whether it holds: a heap took six to come to rest.
 pub const ROUNDS: u32 = 8;
 
-/// Lets what is no longer held round a point fall, with the edits given as the world. Returns how many whole numbers
-/// tell it, at `settled_words`: how many pieces, how many crumbs were lost, then for each piece its drop, its round,
-/// how many cells, its low and high corners, how many rows and how many faces, the rows (x0, x1, y, z, kind) and the
-/// faces (two words each, see `support::faces`).
+// ── Bodies: what has come loose and moves (bodies.rs). One instance, in a worker of its own or the world process. ──
+
+fn moving(i: &mut Instance) -> &mut bodies::Bodies {
+    i.bodies.get_or_insert_with(|| Box::new(bodies::Bodies::new()))
+}
+
+/// Tells the solver of edits made by someone else (a blast): the edits written at `edits_room`. `after` is how many of
+/// the solver's own edits their maker had heard of when it made them, so that everyone applies all edits in one order;
+/// under zero puts them last.
 #[unsafe(no_mangle)]
-pub extern "C" fn settle_round(x: i32, y: i32, z: i32) -> usize {
+pub extern "C" fn world_edit(after: i32) {
     INSTANCE.with_borrow_mut(|i| {
         let edits = read_edits(&i.edits);
-        // Most of the box is above the point: what a blast undermines is over it.
-        let low = [x - SETTLE[0] as i32 / 2, y - 48, z - SETTLE[2] as i32 / 2];
-        let mut region = support::Region::gather(low, SETTLE, &edits, &mut i.scratch);
-        let done = support::settle(&mut region, ROUNDS);
-        let out = &mut i.settled;
-        out.clear();
-        out.extend_from_slice(&[done.moves.len() as i32, done.dust as i32]);
-        for m in &done.moves {
-            let faces = support::faces(m);
-            out.extend_from_slice(&[m.drop, m.round as i32, m.cells as i32]);
-            out.extend_from_slice(&m.low);
-            out.extend_from_slice(&m.high);
-            out.extend_from_slice(&[m.runs.len() as i32, (faces.len() / 2) as i32]);
-            for r in &m.runs {
-                out.extend_from_slice(&[r.x0, r.x1, r.y, r.z, r.kind as i32]);
-            }
-            out.extend(faces.iter().map(|&w| w as i32));
+        let b = moving(i);
+        for e in edits {
+            b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
-        out.len()
+    })
+}
+
+/// A blast at a point, of the solver's own doing: the edit is made here (do not also tell it with `world_edit`),
+/// what it empties comes out as lumps, and what it leaves unheld comes loose. `after` is how many of the solver's own
+/// edits the blast's maker had heard of; under zero puts it last. Returns how many words tell it, at `bodies_words`:
+/// records as in bodies.rs (cells taken out of the world, each body born, dust).
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_blast(x: i32, y: i32, z: i32, radius: i32, after: i32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.blast([x, y, z], radius, if after < 0 { None } else { Some(after as usize) });
+        b.out.len()
+    })
+}
+
+/// Moves the bodies on by `dt` seconds. Returns how many words tell it, at `bodies_words`: where each body is, which
+/// have come to rest and the cells they are now.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_advance(dt: f32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.advance(dt);
+        b.out.len()
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn settled_words() -> *const i32 {
-    INSTANCE.with_borrow(|i| i.settled.as_ptr())
+pub extern "C" fn bodies_words() -> *const u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).out.as_ptr())
+}
+
+/// How many bodies are moving, and how many points were tried against the world in the last call: for measuring.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_count() -> usize {
+    INSTANCE.with_borrow_mut(|i| moving(i).list.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_tried() -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).tried)
 }

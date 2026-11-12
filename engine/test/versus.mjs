@@ -12,7 +12,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { arg, has, start, still } from './kit.mjs'
-import { ROWS } from './rows.mjs'
+import { from, ROWS } from './rows.mjs'
 
 const FILMS = join(homedir(), '.village', 'engine', 'ref')
 const SOURCE = { engine: 'https://somethingbig.ai/assets/fable-5-2/media/voxel-film.mp4', earth: 'https://somethingbig.ai/assets/fable-5-2/media/earth-720.mp4' }
@@ -30,12 +30,15 @@ try {
       const film = join(FILMS, `${row.theirs[0]}.mp4`)
       if (existsSync(film)) { spawnSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(row.theirs[1]), '-i', film, '-frames:v', '1', '-vf', 'scale=960:-1', join(out, `${row.key}-theirs.jpg`)]); row.their = `${row.key}-theirs.jpg` }
     }
-    if (!row.ours) continue
+    if (!row.stand) continue
     // A fresh town for each row, at the size of the owner's screen, the picture's size left to the page.
     const page = await city('', { size: [1280, 720], dpr: 2 })
     await page.addStyleTag({ content: '#hud, #aim, #boom { display: none }' })
     await still(page)
-    const early = await row.ours(page)
+    await from(page, ...row.stand)
+    await page.waitForTimeout(400)
+    await still(page, { sun: true })
+    const early = await row.act?.(page)
     if (!early) { await page.waitForTimeout(400); await still(page, { sun: true }); await page.waitForTimeout(2500) }
     const live = await page.evaluate(() => ({ fps: Math.round(1000 / globalThis.engine.frameMs), scale: globalThis.engine.scale, ms: globalThis.engine.gpuMs }))
     await writeFile(join(out, `${row.key}-ours.png`), early || await page.screenshot())

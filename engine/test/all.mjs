@@ -43,9 +43,15 @@ const run = ([name, command, args, , cwd = here]) => new Promise((resolve) => {
 // What does not draw runs beside what does; what draws takes turns, a few at a time.
 const drawing = checks.filter((c) => c[3]), results = checks.filter((c) => !c[3]).map(run)
 let next = 0
-const lane = async () => { const mine = []; while (next < drawing.length) mine.push(await run(drawing[next++])); return mine }
-const lanes = await Promise.all(Array.from({ length: jobs }, lane))
-const all = [...(await Promise.all(results)), ...lanes.flat()]
+const lane = async () => { const mine = []; while (next < drawing.length) { const i = next++; mine.push([i, await run(drawing[i])]) } return mine }
+const lanes = (await Promise.all(Array.from({ length: jobs }, lane))).flat().sort((a, b) => a[0] - b[0]).map((r) => r[1])
+// A check that draws and failed beside others is run once more with the GPU to itself: some of them time things.
+for (const [i, ok] of lanes.entries()) {
+  if (ok) continue
+  console.log(`again, alone: ${drawing[i][0]}`)
+  lanes[i] = await run(drawing[i])
+}
+const all = [...(await Promise.all(results)), ...lanes]
 await browser.close()
 server.stop()
 const failed = all.filter((ok) => !ok).length

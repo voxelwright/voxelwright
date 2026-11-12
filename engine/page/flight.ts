@@ -33,8 +33,8 @@ export interface Flown {
   seconds: number
   /** Breaks what is straight ahead, as a hand would; null for sky. */
   blast(radius: number): Promise<unknown>
-  /** What is falling: whether a blast is still being worked out, pieces not yet part of the town again, and all that has fallen so far. */
-  falling(): { settling: boolean; dropping: number; pieces: number; cells: number; ms: number }
+  /** What is loose: whether a blast is still being worked out, bodies not yet part of the town again, all that has come loose so far, the longest the solver took over a frame and the most bodies it moved at once. */
+  falling(): { settling: boolean; dropping: number; pieces: number; cells: number; ms: number; stepMs: number; most: number }
   /** Whether to break things at the end. */
   breaks: boolean
 }
@@ -147,7 +147,7 @@ export async function flight(f: Flown) {
       gaps.sort((p, q) => p - q)
       const after = f.falling(), live = f.now()
       broken.push({
-        name, hit: hit !== null, pieces: after.pieces - before.pieces, cells: after.cells - before.cells, workedMs: Math.round(after.ms), answeredMs: Math.round(answered), allMs: Math.round(performance.now() - t0), late,
+        name, hit: hit !== null, pieces: after.pieces - before.pieces, cells: after.cells - before.cells, workedMs: Math.round(after.ms), answeredMs: Math.round(answered), allMs: Math.round(performance.now() - t0), late, stepMs: round(after.stepMs, 1), most: after.most,
         frames: gaps.length, p50: round(gaps[gaps.length >> 1] ?? 0, 1), p95: round(gaps[Math.floor(gaps.length * 0.95)] ?? 0, 1), max: round(gaps[gaps.length - 1] ?? 0, 1), long: gaps.filter((g) => g > 25).length, scale: live.scale,
       })
     }

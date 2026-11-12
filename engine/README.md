@@ -4,11 +4,11 @@ Village's own engine: a world of 10 cm cells, drawn with raw WebGPU by marching 
 its core in Rust built as wasm. Synthetic data, this machine or the tailnet only. What it is,
 what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 
-- `core/`: Rust. Cells, sectors as trees, the generated city, blasts, what stands and what falls.
+- `core/`: Rust. Cells, sectors as trees, the generated city, blasts, what stands, and the bodies that come loose: they fall, turn, strike, break, and are cells again where they lie.
   One build for the page and (later) a world process.
 - `page/`: the city, flown through. `main.ts` (the page), `world.ts` (boxes of sectors round
   the camera), `worker.ts` (makes sectors), `march.ts` (the ray marcher), `sun.ts` (the sun's shadows kept in maps), `edits.ts`,
-  `settler.ts` (the worker that says what falls), `pieces.ts` (a piece on its way down), `crumbs.ts`,
+  `mover.ts` (the worker that moves what has come loose), `told.ts` (what it says), `pieces.ts` (a body on its way), `crumbs.ts`,
   `flight.ts` (the flight that measures a device).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
@@ -51,7 +51,7 @@ node live.mjs                 # after a merge: the owner's link serves main from
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree comes down and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
+(a cut tree goes over and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
 in the installed Chrome; none stubs anything. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.

@@ -6,8 +6,6 @@
 //   none    we have nothing to show        behind  we show it, theirs is better
 //   level   as good to look at             ahead   ours is better
 // Shown live and measured counts for nothing until a row is level to look at.
-import { still } from './kit.mjs'
-
 export const DEG = Math.PI / 180
 
 /** Where the page starts: over the middle of a street. Shots are given from there, metres and degrees. */
@@ -18,43 +16,52 @@ export const from = (page, dx, up, dz, yaw, pitch) => page.evaluate(([dx, up, dz
 }, [dx, up, dz, yaw * DEG, pitch * DEG])
 
 /**
- * The rows. `theirs` is a film and the second to take the frame at; `ours` sets the shot up on the city page and
- * may return a picture taken mid-way (things in the air), else the picture is taken when it returns.
+ * The rows. `theirs` is a film and the second to take the frame at. `stand` is where our shot is taken from (metres
+ * from the start along x, over the street, along z; then degrees turned and tilted); `act` is what is done there, and
+ * may return a picture taken mid-way (things in the air), else the picture is taken when all is still again.
  */
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
-    ours: async (page) => { await from(page, 0, 1.8, 0, 90, -2) } },
+    stand: [0, 1.8, 0, 90, -2] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
-    ours: async (page) => { await from(page, 0, 1.8, 0, 60, 5) } },
+    stand: [0, 1.8, 0, 60, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 30.0], state: 'behind',
-    ours: async (page) => {
-      await from(page, 0, 3.5, -4, 3.3 / DEG, 0.22 / DEG)
-      await still(page, { sun: true })
+    stand: [0, 3.5, -4, 3.3 / DEG, 0.22 / DEG],
+    act: async (page) => {
       await page.evaluate(() => globalThis.engine.blast(16))
       await page.waitForFunction(() => globalThis.engine.dropping > 0, null, { timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(200)
+      await page.waitForTimeout(450)
       return page.screenshot()
     } },
-  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 28.8], state: 'none' },
+  { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 28.8], state: 'behind',
+    stand: [-1, 1.8, -0.83, -0.88 / DEG, -0.086 / DEG],
+    act: async (page) => {
+      // A street tree's trunk cut through; then the head is lifted to watch it go.
+      await page.evaluate(() => globalThis.engine.blast(6))
+      await page.evaluate(() => { globalThis.engine.pose.pitch += 0.3 })
+      await page.waitForFunction(() => globalThis.engine.dropping > 0, null, { timeout: 4000 }).catch(() => {})
+      await page.waitForTimeout(900)
+      return page.screenshot()
+    } },
   { key: 'blast', what: 'An explosion: a ball of fire, smoke, pieces flung', theirs: ['engine', 38.6], state: 'none' },
   { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 48.2], state: 'none' },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 45.8], state: 'behind',
-    ours: async (page) => {
-      await from(page, 0, 3.5, -4, 3.3 / DEG, 0.22 / DEG)
+    stand: [0, 3.5, -4, 3.3 / DEG, 0.22 / DEG],
+    act: async (page) => {
+      // Five charges across the front, half a second apart: each lands in what the last left moving.
       for (const turn of [-0.22, 0, 0.22, -0.11, 0.11]) {
-        await still(page, { sun: true })
         await page.evaluate((yaw) => { globalThis.engine.pose.yaw = yaw }, 3.3 + turn)
-        await page.waitForTimeout(80)
+        await page.waitForTimeout(60)
         await page.evaluate(() => globalThis.engine.blast(16))
+        await page.evaluate(() => { globalThis.engine.pose.yaw = 3.3 })
+        await page.waitForTimeout(500)
       }
-      await page.evaluate(() => { globalThis.engine.pose.yaw = 3.3 })
     } },
   { key: 'glass', what: 'Glass fronts that break by the pane', theirs: ['engine', 19.4], state: 'behind',
-    ours: async (page) => {
-      await from(page, 0, 1.8, 0, 0, 7)
-      await still(page, { sun: true })
+    stand: [0, 1.8, 0, 0, 7],
+    act: async (page) => {
       await page.evaluate(() => globalThis.engine.blast(8))
       await page.waitForTimeout(250)
       return page.screenshot()
@@ -69,7 +76,7 @@ export const ROWS = [
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'none' },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'none' },
   { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 22.6], state: 'behind',
-    ours: async (page) => { await from(page, 0, 130, 0, 30, -22) } },
+    stand: [0, 130, 0, 30, -22] },
   { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'none' },
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'none' },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'none' },

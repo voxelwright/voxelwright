@@ -110,3 +110,33 @@ pub const fn join_carries(a: u8, b: u8) -> u32 {
     let (ca, cb) = (carries(a), carries(b));
     if ca > cb { ca } else { cb }
 }
+
+/// How heavy a cell of this material is, against one of water: what a body weighs and how hard it is to turn.
+pub const fn weighs(material: u8) -> f32 {
+    match material {
+        STEEL => 7.8,
+        ROCK => 2.6,
+        CONCRETE | GLASS => 2.4,
+        ASPHALT => 2.2,
+        BRICK | LAMP => 1.9,
+        EARTH | SAND | PLASTER | ROOFING => 1.6,
+        WOOD => 0.6,
+        LEAVES => 0.15,
+        _ => 1.0,
+    }
+}
+
+/// How hard a knock a body of this material takes before it breaks: a change of speed, cells a second. A brick
+/// wall dropped a metre holds; dropped three, it does not.
+pub const fn breaks_at(material: u8) -> f32 {
+    match material {
+        STEEL => 500.0,
+        WOOD => 90.0,
+        CONCRETE | ROCK => 70.0,
+        LEAVES => 60.0,
+        BRICK | LAMP | ROOFING | ASPHALT => 48.0,
+        PLASTER => 38.0,
+        GLASS => 14.0,
+        _ => 40.0,
+    }
+}
