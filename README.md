@@ -15,6 +15,7 @@ people only, and it is not safe for real family data yet.
 - `home/`: the 3D home (three.js, Cordis plugins). See `home/README.md`.
 - `host/`: the villager and the Elder, plus the live home. See `host/README.md`.
 - `street/`: the shared street's world process and page. See `street/README.md`.
+- `engine/`: Village's own engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`.
 - `docs/`: the handbook, published privately with Mintlify.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 

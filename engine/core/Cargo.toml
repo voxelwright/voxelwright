@@ -1,0 +1,18 @@
+[package]
+name = "village-core"
+version = "0.0.0"
+edition = "2024"
+description = "Issue #140: the engine's core. Cells, sectors, the generated city, and later what simulates them. One build for the page and the world process."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.test]
+opt-level = 2

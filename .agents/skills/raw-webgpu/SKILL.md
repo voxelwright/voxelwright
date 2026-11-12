@@ -1,0 +1,98 @@
+---
+name: raw-webgpu
+description: Verified facts, recipes and traps for raw WebGPU and WGSL in Village's engine pages (#140), with no scene library: opening a device, timing honestly on a busy or frame-capped device, WGSL and layout traps, serving TypeScript with Node's type stripper, driving Chrome and Safari. Load before changing engine/probe, engine/page shaders or pipelines, or any timing claim.
+---
+
+# Raw WebGPU in the engine's pages
+
+Adopted November 11, 2026 (#140). The engine's pages use the browser's WebGPU directly: no
+three.js, no bundler. Types come from `@webgpu/types` 0.1.74. Verified in Chrome 158 (headless,
+through Playwright 1.65) and Safari 27.2 on an M1 Pro. Primary sources: the WebGPU and WGSL
+specifications, and the probes in `engine/probe` and `engine/test`.
+
+## Opening a device
+
+- Ask for the limits you use by name (`requiredLimits`), copied from the adapter. A device
+  opened with none has the specification's lowest, which understates every machine
+  (`probe/gpu.ts` `openGpu`).
+- `timestamp-query` is optional: ask for it only when the adapter has it. Both browsers on
+  the Mac offer it. Do not design round other optional features until a device's own report
+  lists them (`node test/read.mjs --all`).
+- Safari 27.2 on the Mac: 2 GB storage buffer bindings, 3D textures to 2048, storage buffers
+  readable in fragment shaders. Not yet read from an iPhone.
+- Compile errors: `await module.getCompilationInfo()` and throw the messages (`shader()`).
+  A page that fails must post why (`probe/tell.ts`), or a phone's failure is invisible.
+
+## Timing honestly
+
+- A page's frames are held to the screen's rate, so frames a second says nothing about room
+  to spare. **Pace** instead: draw a batch of frames into a texture nobody shows, wait for
+  `queue.onSubmittedWorkDone()` and a one-pixel read back, divide (`pace()`). It agreed with
+  the GPU's own clock within 2% on a quiet GPU.
+- Both the paced time and `timestamp-query` are wall time on a shared GPU. On this Mac the
+  same probe read twice as slow an hour later because another thread was drawing. Compare two
+  settings in one session, in turn (`test/look.mjs --ab`), and run `test/probe.mjs` as a
+  reference before believing a regression.
+- Apple GPUs throw hidden opaque layers away, so a fill test must blend its layers or it
+  times one.
+- This machine runs at load 11 to 18 all day. Trust ratios, not milliseconds.
+
+## WGSL and layout traps (each cost a run)
+
+- A backtick inside a WGSL comment ends the TypeScript template string round it.
+- Avoid names WGSL may reserve (`patch`, `half`, `far`, `filter`, `sample`): use others.
+- `vec3f` followed by one `f32` packs into 16 bytes; a struct array in a uniform must start
+  on a multiple of 16. Write uniforms through one `ArrayBuffer` with float, uint and int views.
+- `1.0 / rd` needs every component of `rd` away from zero: clamp tiny components first.
+- A value read from a storage buffer of `u32` as a signed number needs `bitcast<i32>`.
+- A counter all of a pixel's rays add to is a `var<private>` at module scope.
+- One shader module can serve two pipelines with different bindings: with `layout: 'auto'` each pipeline's groups hold only what its own entry point uses, so each needs its own bind groups.
+- A layer of a texture array is drawn into through a view of that one layer (`dimension: '2d'`, `baseArrayLayer`), a tile of it with `setViewport` and `setScissorRect`. `r32float` can be drawn into and read with `textureLoad`.
+- Every `queue.writeBuffer` before a `submit` lands before any of that submit's passes: one uniform buffer written twice shows only the second to all of them. Passes that need different values need different buffers.
+- To write depth from a full-screen pass: return a struct with `@builtin(frag_depth)` and
+  give the pipeline a depth target with compare `always`.
+
+## Serving TypeScript with no bundler
+
+- `engine/serve.mjs` sends `.ts` files through Node's `stripTypeScriptTypes` (Node 25.1,
+  experimental), so a visit always runs what is on disk and imports name `.ts` files.
+- Only syntax that erases is allowed (`erasableSyntaxOnly`): no constructor parameter
+  properties, no enums. `tsc --noEmit` checks it.
+- `queue.writeBuffer` wants `Uint32Array<ArrayBuffer>`, not the default `ArrayBufferLike`.
+- The server sends `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`: pages are cross-origin isolated, through
+  `tailscale serve` too. A module worker is `new Worker('/page/worker.ts', { type: 'module' })`.
+
+## Driving browsers
+
+- Chrome: Playwright `channel: 'chrome'`, headless, `--enable-unsafe-webgpu --use-angle=metal`.
+- Safari: `open -g -a Safari <address>` and let the page post its own report. Driving Safari
+  by script needs a permission prompt; do not wait on one.
+- A phone: `tailscale serve --bg --https=10140 http://127.0.0.1:5740` (tailnet only; never
+  `funnel`, never `reset`, the other entries belong to other threads).
+
+## Measured (M1 Pro, Chrome and Safari agree, quiet GPU, 2560 x 1440)
+
+| Work | Cost |
+|---|---|
+| A lit pixel | 0.09 to 0.12 ms a megapixel a layer |
+| Small unmerged faces | 2.3 ms a million |
+| Rays through a small two-level grid of cells | 45 to 50 microseconds a megapixel a step |
+| The city's march, a step through open air | about 70 microseconds a megapixel |
+| The city's march, a step that loads tree nodes | about 600 microseconds a megapixel |
+
+## A real iPhone (iOS 27.0, Chrome over WebKit, November 11, 2026)
+
+- The same features as Safari on the Mac, `timestamp-query` among them; 1 GB for buffers
+  and storage bindings; cross-origin isolated through `tailscale serve`; shared memory, wasm
+  SIMD and threads, WebTransport all present.
+- **Its `timestamp-query` is not a measure.** A pass's time read 0.01 to 10 ms for the same
+  work from one second to the next. Pacing (`pace()`) gave steady figures. Steer by late
+  frames on a phone.
+- `navigator.wakeLock.request('screen')` before any touch was refused: ask again on the
+  first touch.
+- `navigator.hardwareConcurrency` said 4.
+
+## Not verified
+
+- Compute shaders. Workers that draw. A phone held sideways, or for more than a minute.

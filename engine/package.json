@@ -1,0 +1,19 @@
+{
+  "name": "village-engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Issue #140: Village's own engine. A world of cells drawn with raw WebGPU. Synthetic data, localhost or tailnet only.",
+  "scripts": {
+    "core": "cd core && cargo build --release --target wasm32-unknown-unknown && cp target/wasm32-unknown-unknown/release/village_core.wasm ../page/core.wasm",
+    "serve": "node serve.mjs",
+    "probe": "node test/probe.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.3",
+    "@webgpu/types": "0.1.74",
+    "playwright": "1.65.0",
+    "typescript": "5.9.3"
+  }
+}
