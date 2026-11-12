@@ -103,9 +103,9 @@ const charge = async (page, turn, radius, pitch) => {
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
-    // From the crossing by the start: cars at both kerbs, house fronts, and across the street the works yard with its
-    // water tower and chimney.
-    stand: { from: [15, 404.5], up: 2.2, to: [60, 412], high: 6 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
+    // From in the works yard: its water tower on its legs close by, and across the street five shops with their
+    // names over the doors, cars at the kerb.
+    stand: { from: [54, 437], up: 1.8, to: [33, 400], high: 7 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
     stand: [-9, 1.8, 2.2, 62, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'level',
@@ -160,11 +160,12 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 41.6], state: 'behind',
-    // The yard's office of glass: charges along its near side and inside it take the glass and leave the steel.
-    stand: { from: [YARD.office[0] - 15, YARD.office[1] - 14], up: 6, to: YARD.office, high: 5 }, near: [30, GLASS, STEEL, CONCRETE], falls: 100,
+    // The yard's office, six storeys of glass: charges along its near side and inside it take the glass and leave
+    // the steel and the floors.
+    stand: { from: [YARD.office[0] - 21, YARD.office[1] - 20], up: 7, to: YARD.office, high: 9 }, near: [40, GLASS, STEEL, CONCRETE], falls: 100,
     act: async (page) => {
       const [x, z] = YARD.office
-      for (const [dx, dz, high] of [[-5, -4, 2], [0, -4, 6], [4, -3, 3], [-2, 2, 5], [3, 3, 8]]) {
+      for (const [dx, dz, high] of [[-5, -4, 2], [0, -4, 6], [4, -3, 3], [-2, 2, 5], [3, 3, 8], [-4, -3, 11], [2, -4, 14], [4, 2, 12], [-3, 3, 16], [0, 0, 9]]) {
         await strikeAt(page, [x + dx, z + dz], high, 26, false)
         await page.waitForTimeout(500)
       }
@@ -182,8 +183,8 @@ export const ROWS = [
     // From over the yard, the row of houses across the street: big charges at their feet, one after another.
     stand: [8, 17, 13, 0, -0.5 / DEG], near: [60, ...HOUSE, 14], falls: 1000,
     act: async (page) => {
-      // The biggest charge on the bar, six times.
-      for (const turn of [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(800) }
+      // The biggest charge on the bar, ten times, along as much of the row as the picture holds.
+      for (const turn of [-0.9, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(700) }
     } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'behind',
@@ -206,8 +207,8 @@ export const ROWS = [
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },
   { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'behind',
-    // The crossing west of the start: a hardware shop's sign and window, lamps, parked cars. One sign, no people.
-    stand: [-45, 1.8, 2.2, 318, 5], hour: 21, rain: 0.35, near: [80, LAMP] },
+    // The five shops across from the yard's water tower, on a wet night: a sign over every door. No square, no people.
+    stand: { from: [46, 411], up: 1.7, to: [30, 399.8], high: 3.4 }, hour: 21, rain: 0.35, near: [80, LAMP] },
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'level',
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },

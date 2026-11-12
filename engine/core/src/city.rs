@@ -433,21 +433,41 @@ fn stamp_chimney(s: &mut Scratch, x: i32, z: i32) {
 
 /// An office of glass hung on a steel frame with concrete floors. A blast takes the glass and leaves the frame.
 fn stamp_office(s: &mut Scratch, x0: i32, z0: i32) {
-    let (wide, deep, storey, storeys) = (120, 100, 34, 3);
+    // Six storeys of glass on a frame that is meant to be seen when the glass is gone: thick steel columns, a deep
+    // concrete floor at each storey with a steel beam round its edge, and braces across two bays of each long side.
+    let (wide, deep, storey, storeys) = (120, 100, 30, 6);
     let g = ground(x0 + wide / 2, z0 + deep / 2);
     let (base, top) = (g + 1, g + 1 + storey * storeys);
-    let glass = kind(GLASS, OWN);
+    let (glass, steel) = (kind(GLASS, OWN), kind(STEEL, grey(4)));
     for (lo, hi) in [([0, 0], [wide, 1]), ([0, deep - 1], [wide, deep]), ([0, 0], [1, deep]), ([wide - 1, 0], [wide, deep])] {
         s.fill([x0 + lo[0], base, z0 + lo[1]], [x0 + hi[0], top, z0 + hi[1]], glass, Meet::Middle);
     }
     // Its footing goes well into the ground: the yard may slope.
     s.fill([x0, g - 40, z0], [x0 + wide, base, z0 + deep], kind(CONCRETE, grey(4)), Meet::Touch);
     for k in 1..=storeys {
-        s.fill([x0, base + storey * k - 2, z0], [x0 + wide, base + storey * k, z0 + deep], kind(CONCRETE, grey(6)), Meet::Touch);
+        let y = base + storey * k;
+        s.fill([x0 + 1, y - 3, z0 + 1], [x0 + wide - 1, y, z0 + deep - 1], kind(CONCRETE, grey(6)), Meet::Touch);
+        for (lo, hi) in [([0, 0], [wide, 2]), ([0, deep - 2], [wide, deep]), ([0, 0], [2, deep]), ([wide - 2, 0], [wide, deep])] {
+            s.fill([x0 + lo[0], y - 4, z0 + lo[1]], [x0 + hi[0], y, z0 + hi[1]], steel, Meet::Touch);
+        }
     }
-    for cx in [0, 39, 78, wide - 3] {
-        for cz in [0, 48, deep - 3] {
-            s.fill([x0 + cx, base, z0 + cz], [x0 + cx + 3, top, z0 + cz + 3], kind(STEEL, grey(4)), Meet::Touch);
+    for cx in [0, 38, 77, wide - 5] {
+        for cz in [0, 47, deep - 5] {
+            s.fill([x0 + cx, base, z0 + cz], [x0 + cx + 5, top, z0 + cz + 5], steel, Meet::Touch);
+        }
+    }
+    // Braces: a steel bar from the foot of one column to the head of the next, storey by storey, in the first and
+    // the last bay of both long sides. A step of cells along, a step up.
+    if s.lod <= 1 {
+        for z in [z0 + 1, z0 + deep - 3] {
+            for (from, to) in [(5, 38), (82, 115)] {
+                for k in 0..storeys {
+                    for n in 0..storey - 4 {
+                        let x = x0 + from + (to - from) * n / (storey - 4);
+                        s.fill([x, base + storey * k + n, z], [x + 3, base + storey * k + n + 2, z + 2], steel, Meet::Touch);
+                    }
+                }
+            }
         }
     }
 }
@@ -610,6 +630,13 @@ const SHOPS: [&str; 10] = ["CAFE", "BOOKS", "BAKERY", "FLOWERS", "BIKES", "RECOR
 /// Whether a house keeps a shop on its ground floor: the houses at a block's ends mostly, one in seven of the rest.
 fn shop(h: &Built, i: i32) -> Option<&'static str> {
     let ends = i == 0 || i == LOTS - 1;
+    // Across the street from the yard's water tower the first five houses of the row are shops, each with the
+    // next name on the list. (No further along: the houses across from the start keep their doors and their
+    // street trees, which the checks stand at.)
+    let market = i <= 4 && h.back < 0 && (0..=12).contains(&(YARD.1 * BLOCK_Z - h.front)) && h.x0.div_euclid(BLOCK_X) == YARD.0;
+    if market {
+        return Some(SHOPS[(i as usize + (h.seed >> 14) as usize % 3) % SHOPS.len()]);
+    }
     ((ends && (h.seed >> 11) % 3 != 0) || (h.seed >> 11) % 7 == 0).then(|| SHOPS[(h.seed >> 14) as usize % SHOPS.len()])
 }
 
@@ -1108,12 +1135,13 @@ mod tests {
     /// to 2.5 km, at every coarseness the page draws them at, made and summed. The board's judged pictures, the bench's
     /// views and the flight all stand inside this. A change to the land round the town, or to anything else, that
     /// moves a cell here fails; if the town was meant to change, the pictures and the baseline are to be taken
-    /// again and the sum set to what the failure prints.
+    /// again and the sum set to what the failure prints. (Set again on November 12 for the shopping street across
+    /// from the water tower and the yard's six-storey office; the shops' row is one of the places since then.)
     #[test]
     fn the_town_is_cell_for_cell_what_it_was() {
         let mut sum = 0xcbf29ce484222325u64;
         let mut s = Scratch::new();
-        let places: [(i32, i32); 12] = [(700, 4070), (400, 4250), (700, 4190), (940, 4550), (680, 4040), (-12000, 4070), (-16300, 4070), (-12760, 3980), (30700, 4070), (15000, 15000), (-20000, -10000), (0, 25000)];
+        let places: [(i32, i32); 13] = [(700, 4070), (330, 3990), (400, 4250), (700, 4190), (940, 4550), (680, 4040), (-12000, 4070), (-16300, 4070), (-12760, 3980), (30700, 4070), (15000, 15000), (-20000, -10000), (0, 25000)];
         for (n, &(x, z)) in places.iter().enumerate() {
             // Coarse copies only round the start: further out their sectors reach past the town.
             for lod in if n == 0 { 0..9u32 } else { 0..4u32 } {
@@ -1127,7 +1155,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(sum, 11921755020700526686, "the town's sum");
+        assert_eq!(sum, 12774791369607163724, "the town's sum");
     }
 
     /// Looking for earth laid bare: in the yard across from the start, at each coarseness, how many columns of a

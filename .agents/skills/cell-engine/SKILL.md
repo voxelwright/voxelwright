@@ -699,3 +699,18 @@ front coming down, staying down and losing no cell.
 - Corner darkening wider than one cell was tried as eight more lookups (two and four cells
   off on each side). It cost 20 to 25% on every row with shadows on and showed little in a
   street picture. Not taken. A wider darkening needs another way than more lookups a pixel.
+
+## The town changed on purpose (November 12)
+
+- Across the street from the yard's water tower the first five houses of the row are shops,
+  a sign over every door (`city.rs` `shop`). No further along: the houses across from the
+  start keep their doors and street trees, which the fire test, the falls check and the
+  flight stand at. Making the whole row shops took the trees with it and those failed.
+- The yard's office is six storeys: steel columns five cells thick, a concrete floor at each
+  storey with a steel beam round it, braces across two bays of each long side. With its glass
+  blown out it stands as a frame.
+- The town's sum was set again for these, and the shops' row added to its places (it had
+  passed with the shops in, because no summed sector held them). The baseline was re-taken.
+- Rows restaged: `town` from in the yard (the tower close, the shops across the street),
+  `signs` along the five shops on a wet night, `frame` at the six-storey office with ten
+  charges, `ruin` with ten big charges along as much of the row as the picture holds.
