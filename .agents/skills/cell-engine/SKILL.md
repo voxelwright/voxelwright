@@ -352,6 +352,27 @@ and 40 m and fails on bare earth. The honest path costs: `roofs` and `high` in t
 to 14% slower, and the baseline is theirs now. Found by switching each skip off in turn for the
 pick; reasoning about the shader alone had cleared it three times.
 
+## Things on the street (`core/src/city.rs`; `support::adrift`)
+
+- Parked cars at both kerbs of every street (a painted steel body, a hollow cabin of glass, four
+  wheels that each reach down to the street under them, lamps), a hydrant, mailbox or bin now and
+  then, a stop sign at two corners of each crossing, containers stacked in the yard. Houses at a
+  block's ends and one in seven others keep a shop: a window, a striped awning, and a board that
+  says what it sells in letters five cells by seven (`letter`, `SHOPS`), mirrored on fronts that
+  are seen with x to the left.
+- The balance rule called every car on a slope out of balance: its lowest level is one wheel.
+  Where a thing stands on the ground higher up as well, that footing now counts in the stretch
+  below it.
+- The rule of reach knows no difference between standing on the ground and being part of it, so
+  a blast moved nothing it did not break. `adrift`: a thing mostly of steel and glass, of 20,000
+  cells or fewer, that touches nothing but the ground and is within two radii of a blast comes
+  loose whole and is thrown. Trees and masonry are left: they are rooted.
+- A sign board must stand out past a bay window over it, and no street tree stands before a
+  shop, or the board cuts its crown and a clump of leaves is left hanging (the at-rest test).
+- Steel mirrors nothing now. Parked cars each asking what was across from them cost 9 ms at the
+  street. The street things still cost 16% more rays at street level and the shop and car glass
+  3 ms of mirrors: the baseline is theirs.
+
 ## Lessons paid for
 
 - A view "at street level" that was inside the ground timed fast and was reported as

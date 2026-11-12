@@ -627,7 +627,7 @@ impl Bodies {
         let low = [at[0] - side as i32 / 2, at[1] - 48, at[2] - side as i32 / 2];
         let mut region = self.ground.region(low, size);
         self.ground.holds = None;
-        let (pieces, dust) = support::release(&mut region);
+        let (pieces, dust) = support::release(&mut region, Some((at, radius)));
         let mut taken: Vec<Run> = Vec::new();
         for r in dust.iter().chain(pieces.iter().flat_map(|p| p.runs.iter())) {
             taken.push(Run { kind: 0, ..*r });

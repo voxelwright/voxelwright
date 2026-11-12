@@ -5,6 +5,9 @@
 //
 //   node test/all.mjs [--only falls,blast] [--jobs 2]
 import { spawn, spawnSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { arg, CHROME, here, serve } from './kit.mjs'
 
@@ -38,7 +41,13 @@ const run = ([name, command, args, , cwd = here]) => new Promise((resolve) => {
   child.on('exit', (code) => {
     const ok = code === 0
     console.log(`${ok ? 'ok    ' : 'FAILED'} ${name.padEnd(8)} ${((Date.now() - began) / 1000).toFixed(0)} s`)
-    if (!ok) console.log(out.split('\n').slice(-40).map((l) => `    ${l}`).join('\n'))
+    if (!ok) {
+      console.log(out.split('\n').slice(-40).map((l) => `    ${l}`).join('\n'))
+      // All of what it said is kept: a check that fails beside the others and passes alone leaves nothing else to go on.
+      const kept = join(tmpdir(), `engine-check-${name}-${Date.now()}.log`)
+      writeFileSync(kept, out)
+      console.log(`    all of it: ${kept}`)
+    }
     resolve(ok)
   })
 })

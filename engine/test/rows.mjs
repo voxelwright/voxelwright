@@ -92,8 +92,9 @@ const charge = async (page, turn, radius, pitch) => {
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
-    // The works yard across the street from the start: a water tower, a chimney, a canopy, an office of glass.
-    stand: { from: [16, 409], up: 3.5, to: [62, 433], high: 10 }, near: [60, STEEL, WOOD, BRICK, GLASS] },
+    // From the crossing by the start: cars at both kerbs, house fronts, and across the street the works yard with its
+    // water tower and chimney.
+    stand: { from: [15, 404.5], up: 2.2, to: [60, 412], high: 6 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'behind',
     stand: [0, 1.8, 0, 60, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 30.0], state: 'behind',

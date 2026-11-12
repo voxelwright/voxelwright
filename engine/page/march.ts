@@ -39,7 +39,7 @@ export function materials(): Float32Array<ArrayBuffer> {
     ['#cfc6b4', 0.3, 0.9, 0, 0], // plaster
     ['#b98a5a', 0.7, 0.75, 0, 0], // wood
     ['#9fc3d6', 0.1, 0.05, 0.75, 0], // glass
-    ['#8f959c', 0.25, 0.35, 0.3, 0], // steel
+    ['#8f959c', 0.25, 0.4, 0, 0], // steel: most of it here is painted. It glints (rough 0.4) and mirrors nothing: a street of parked cars each asking what is across from it cost 9 ms
     ['#4f8a3a', 1.2, 0.95, 0, 0], // leaves
     ['#4a4744', 0.6, 0.95, 0, 0], // roofing
     ['#ffe2a8', 0.05, 0.5, 0, 1], // lamp

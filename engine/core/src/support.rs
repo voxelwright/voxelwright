@@ -9,7 +9,7 @@
 //! falls straight down, in whole cells, until something is under it. This is the rule for what
 //! stands, in whole numbers, the same on every machine.
 
-use crate::kinds::{ASPHALT, EARTH, GRASS, LEAVES, ROCK, SAND, WATER, bears, join_carries, leans, material, spans, weighs};
+use crate::kinds::{ASPHALT, EARTH, GLASS, GRASS, LAMP, LEAVES, ROCK, SAND, STEEL, WATER, bears, join_carries, leans, material, spans, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
 use crate::{Edit, fill};
@@ -289,7 +289,8 @@ pub(crate) fn is_ground(kind: Kind) -> bool {
 /// ground's, not reaching the box's sides or top) is asked, level by level from its foot up, where the weight of all
 /// that is at and above that level lies. If the middle of that weight is further outside the stretch the thing
 /// covers at that level than its material can lean (`leans`), everything from there up is loose, and goes over as
-/// one body. Steel leans far, so a lamp holds its arm out; brick hardly at all.
+/// one body. Steel leans far, so a lamp holds its arm out; brick hardly at all. Where the thing stands on the ground
+/// higher up as well (a car across a slope, its uphill wheels shorter), that footing is part of the stretch below.
 pub fn topple(r: &Region, is_loose: &mut [bool]) {
     let [nx, ny, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
@@ -299,6 +300,8 @@ pub fn topple(r: &Region, is_loose: &mut [bool]) {
     let mut cells: Vec<u32> = Vec::new();
     // For each level: the weight on it and where, the stretch it covers (least and most x and z), how far its stuff leans.
     let mut levels: Vec<(f64, f64, f64, [usize; 2], [usize; 2], f64)> = Vec::new();
+    // And the stretch of it that stands on the ground at that level.
+    let mut feet: Vec<([usize; 2], [usize; 2])> = Vec::new();
     for start in 0..n {
         if seen[start] || !stands(start, is_loose) {
             continue;
@@ -306,6 +309,8 @@ pub fn topple(r: &Region, is_loose: &mut [bool]) {
         cells.clear();
         levels.clear();
         levels.resize(ny, (0.0, 0.0, 0.0, [usize::MAX; 2], [0; 2], 0.0));
+        feet.clear();
+        feet.resize(ny, ([usize::MAX; 2], [0; 2]));
         let mut edge = false;
         seen[start] = true;
         stack.push(start as u32);
@@ -323,6 +328,10 @@ pub fn topple(r: &Region, is_loose: &mut [bool]) {
             l.3 = [l.3[0].min(x), l.3[1].min(z)];
             l.4 = [l.4[0].max(x), l.4[1].max(z)];
             l.5 = l.5.max(leans(stuff) as f64);
+            if y > 0 && is_ground(r.cells[i - layer]) {
+                let f = &mut feet[y];
+                *f = ([f.0[0].min(x), f.0[1].min(z)], [f.1[0].max(x), f.1[1].max(z)]);
+            }
             let mut join = |j: usize| {
                 if !seen[j] && stands(j, is_loose) {
                     seen[j] = true;
@@ -342,6 +351,8 @@ pub fn topple(r: &Region, is_loose: &mut [bool]) {
         // From the top down, the weight at and above each level; the lowest level it is not over is where the thing goes.
         let (mut mass, mut mx, mut mz) = (0.0f64, 0.0f64, 0.0f64);
         let mut hinge: Option<usize> = None;
+        // Where it stands on the ground above the level asked about.
+        let (mut low, mut high) = ([usize::MAX; 2], [0usize; 2]);
         for y in (0..ny).rev() {
             let l = &levels[y];
             if l.0 == 0.0 {
@@ -351,9 +362,11 @@ pub fn topple(r: &Region, is_loose: &mut [bool]) {
             mx += l.1;
             mz += l.2;
             let (cx, cz) = (mx / mass, mz / mass);
-            if cx < l.3[0] as f64 - l.5 || cx > l.4[0] as f64 + 1.0 + l.5 || cz < l.3[1] as f64 - l.5 || cz > l.4[1] as f64 + 1.0 + l.5 {
+            let (lo, hi) = ([l.3[0].min(low[0]), l.3[1].min(low[1])], [l.4[0].max(high[0]), l.4[1].max(high[1])]);
+            if cx < lo[0] as f64 - l.5 || cx > hi[0] as f64 + 1.0 + l.5 || cz < lo[1] as f64 - l.5 || cz > hi[1] as f64 + 1.0 + l.5 {
                 hinge = Some(y);
             }
+            (low, high) = ([low[0].min(feet[y].0[0]), low[1].min(feet[y].0[1])], [high[0].max(feet[y].1[0]), high[1].max(feet[y].1[1])]);
         }
         if let Some(from) = hinge {
             for &i in &cells {
@@ -375,9 +388,12 @@ pub struct Loose {
 
 /// Takes out of a region everything in it that is not held, and says what: the pieces, for the solver to move
 /// (bodies.rs), and the rows of crumbs too small to be one, which are dust.
-pub fn release(r: &mut Region) -> (Vec<Loose>, Vec<Run>) {
+pub fn release(r: &mut Region, shove: Option<([i32; 3], i32)>) -> (Vec<Loose>, Vec<Run>) {
     let mut is_loose = loose(r);
     topple(r, &mut is_loose);
+    if let Some((at, radius)) = shove {
+        adrift(r, at, radius, &mut is_loose);
+    }
 
     let mut piece_of = vec![0u32; r.cells.len()];
     let (mut out, mut dust) = (Vec::new(), Vec::new());
@@ -401,6 +417,54 @@ pub fn release(r: &mut Region) -> (Vec<Loose>, Vec<Run>) {
         out.push(Loose { runs, cells: cells.len(), low, high });
     }
     (out, dust)
+}
+
+/// Things a blast shoves: what only stands on the ground, joined to nothing, is not held against a push. A car or a
+/// container within two of the blast's radii comes loose whole, for the solver to throw. Only things mostly of steel
+/// and glass, and not big ones: a tree is rooted and a chimney is built into the ground, though the rule of reach
+/// knows no difference between standing on the ground and being part of it. `at` is the blast's middle in the world.
+pub fn adrift(r: &Region, at: [i32; 3], radius: i32, is_loose: &mut [bool]) {
+    let [nx, ny, nz] = r.size;
+    let (n, layer) = (r.cells.len(), nx * nz);
+    let centre = [at[0] - r.low[0], at[1] - r.low[1], at[2] - r.low[2]];
+    let reach = (2 * radius as i64).pow(2);
+    let mut seen = vec![false; n];
+    let mut stack: Vec<u32> = Vec::new();
+    let mut cells: Vec<u32> = Vec::new();
+    for start in 0..n {
+        if seen[start] || r.cells[start] == 0 || is_ground(r.cells[start]) || is_loose[start] {
+            continue;
+        }
+        cells.clear();
+        let (mut edge, mut hard, mut near) = (false, 0usize, i64::MAX);
+        seen[start] = true;
+        stack.push(start as u32);
+        while let Some(i) = stack.pop() {
+            let i = i as usize;
+            cells.push(i as u32);
+            let (x, y, z) = r.place(i);
+            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
+            hard += matches!(material(r.cells[i]), STEEL | GLASS | LAMP) as usize;
+            near = near.min((x as i64 - centre[0] as i64).pow(2) + (y as i64 - centre[1] as i64).pow(2) + (z as i64 - centre[2] as i64).pow(2));
+            let mut join = |j: usize| {
+                if !seen[j] && r.cells[j] != 0 && !is_ground(r.cells[j]) && !is_loose[j] {
+                    seen[j] = true;
+                    stack.push(j as u32);
+                }
+            };
+            if x > 0 { join(i - 1) }
+            if x + 1 < nx { join(i + 1) }
+            if z > 0 { join(i - nx) }
+            if z + 1 < nz { join(i + nx) }
+            if y > 0 { join(i - layer) }
+            if y + 1 < ny { join(i + layer) }
+        }
+        if !edge && near <= reach && cells.len() <= 20_000 && hard * 10 >= cells.len() * 7 {
+            for &i in &cells {
+                is_loose[i as usize] = true;
+            }
+        }
+    }
 }
 
 /// Lets everything in a region that is not held fall until it is. At most `rounds` times over: what lands may

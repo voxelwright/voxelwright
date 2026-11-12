@@ -393,10 +393,199 @@ fn stamp_canopy(s: &mut Scratch, x0: i32, z0: i32) {
 }
 
 /// A works yard. Where each thing stands, from the block's low corner.
+/// A parked car, 4.2 m by 1.8 m: a painted steel body on four wheels, a cabin of glass under a steel roof, lamps
+/// at both ends. `along_x` is which way it points; its wheels reach down to the street, which may slope under it.
+fn stamp_car(s: &mut Scratch, x: i32, z: i32, along_x: bool, seed: u32) {
+    if s.lod > 2 {
+        return;
+    }
+    let (long, wide) = (42, 18);
+    // A box told along the car and across it from its low corner.
+    let at = |a: (i32, i32), c: (i32, i32)| if along_x { ([x + a.0, z + c.0], [x + a.1, z + c.1]) } else { ([x + c.0, z + a.0], [x + c.1, z + a.1]) };
+    let wheels = [((5, 12), (0, 3)), ((5, 12), (wide - 3, wide)), ((30, 37), (0, 3)), ((30, 37), (wide - 3, wide))];
+    let under = |w: &((i32, i32), (i32, i32))| {
+        let (lo, hi) = at(w.0, w.1);
+        ground((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
+    };
+    let base = wheels.iter().map(under).max().unwrap() + 1;
+    if base < 8 {
+        return;
+    }
+    let mut put = |s: &mut Scratch, a: (i32, i32), c: (i32, i32), y: (i32, i32), k: Kind| {
+        let (lo, hi) = at(a, c);
+        s.fill([lo[0], y.0, lo[1]], [hi[0], y.1, hi[1]], k, Meet::Middle);
+    };
+    let paint = kind(STEEL, [colour((seed >> 4) as u8 % 24, [3, 4, 5, 8][(seed >> 10) as usize & 3]), grey(1), grey(11), grey(6)][(seed >> 13) as usize & 3]);
+    let dark = kind(STEEL, grey(13));
+    for w in &wheels {
+        put(s, w.0, w.1, (under(w) + 1, base + 6), dark);
+    }
+    put(s, (0, long), (0, wide), (base + 3, base + 9), paint);
+    // The cabin: glass all round, hollow, a roof on it.
+    let cabin = if (seed >> 16) & 1 == 0 { (9, 33) } else { (7, 38) };
+    put(s, cabin, (1, wide - 1), (base + 9, base + 15), kind(GLASS, colour(14, 9)));
+    if s.lod == 0 {
+        put(s, (cabin.0 + 1, cabin.1 - 1), (2, wide - 2), (base + 9, base + 14), 0);
+    }
+    put(s, cabin, (1, wide - 1), (base + 14, base + 15), paint);
+    if s.lod <= 1 {
+        for c in [(2, 5), (wide - 5, wide - 2)] {
+            put(s, (long - 1, long), c, (base + 5, base + 7), kind(LAMP, colour(3, 0)));
+            put(s, (0, 1), c, (base + 5, base + 7), kind(STEEL, colour(0, 4)));
+        }
+    }
+}
+
+/// A fire hydrant, a mailbox, or a bin: small things that stand on the pavement.
+fn stamp_small(s: &mut Scratch, x: i32, z: i32, which: u32) {
+    if s.lod > 1 {
+        return;
+    }
+    let g = ground(x, z) + 2;
+    if g < 8 {
+        return;
+    }
+    match which % 3 {
+        0 => {
+            s.fill([x, g - 2, z], [x + 3, g + 7, z + 3], kind(STEEL, colour(4, 4)), Meet::Touch);
+            s.fill([x - 1, g + 4, z + 1], [x + 4, g + 5, z + 2], kind(STEEL, grey(2)), Meet::Touch);
+            s.fill([x, g + 7, z], [x + 3, g + 8, z + 3], kind(STEEL, grey(2)), Meet::Touch);
+        }
+        1 => {
+            // Its legs go into the pavement, which may step under it.
+            s.fill([x + 1, g - 3, z + 1], [x + 2, g + 3, z + 2], kind(STEEL, grey(12)), Meet::Touch);
+            s.fill([x + 3, g - 3, z + 3], [x + 4, g + 3, z + 4], kind(STEEL, grey(12)), Meet::Touch);
+            s.fill([x, g + 3, z], [x + 5, g + 12, z + 5], kind(STEEL, colour(16, 5)), Meet::Touch);
+            s.fill([x, g + 12, z + 1], [x + 5, g + 13, z + 4], kind(STEEL, colour(16, 5)), Meet::Touch);
+        }
+        _ => {
+            s.fill([x, g - 2, z], [x + 4, g + 9, z + 4], kind(STEEL, colour(9, 9)), Meet::Touch);
+            s.fill([x, g + 9, z], [x + 4, g + 10, z + 4], kind(STEEL, grey(12)), Meet::Touch);
+        }
+    }
+}
+
+/// A stop sign on a pole, its face across the way `dx`, `dz` points along.
+fn stamp_stop(s: &mut Scratch, x: i32, z: i32, dx: i32, dz: i32) {
+    if s.lod > 1 {
+        return;
+    }
+    let g = ground(x, z) + 2;
+    if g < 8 {
+        return;
+    }
+    s.fill([x, g - 2, z], [x + 1, g + 24, z + 1], kind(STEEL, grey(8)), Meet::Touch);
+    // Eight sides, as near as cells go: a square with its corners off.
+    for (row, half) in [3, 4, 4, 4, 4, 4, 3].into_iter().enumerate() {
+        let y = g + 19 + row as i32;
+        let red = kind(STEEL, colour(0, if row == 3 { 0 } else { 4 }));
+        if dx != 0 {
+            s.fill([x + dx, y, z - half], [x + dx + 1, y + 1, z + half + 1], red, Meet::Touch);
+        } else {
+            s.fill([x - half, y, z + dz], [x + half + 1, y + 1, z + dz + 1], red, Meet::Touch);
+        }
+    }
+}
+
+/// A shipping container, 6 m by 2.4 m by 2.6 m: a hollow box of painted steel with doors at one end, standing on `y`.
+fn stamp_container(s: &mut Scratch, x: i32, y: i32, z: i32, along_x: bool, seed: u32) {
+    let (long, wide, tall) = (60, 24, 26);
+    let (ex, ez) = if along_x { (long, wide) } else { (wide, long) };
+    let paint = kind(STEEL, colour([1, 16, 9, 3, 13, 21][(seed % 6) as usize], [5, 4, 8, 3][(seed >> 5) as usize & 3]));
+    s.fill([x, y, z], [x + ex, y + tall, z + ez], paint, Meet::Touch);
+    if s.lod <= 1 {
+        s.fill([x + 1, y + 1, z + 1], [x + ex - 1, y + tall - 1, z + ez - 1], 0, Meet::Within);
+        // Its doors: a darker end with a bar down the middle.
+        let door = kind(STEEL, grey(10));
+        if along_x {
+            s.fill([x + long - 1, y + 2, z + wide / 2 - 1], [x + long, y + tall - 2, z + wide / 2 + 1], door, Meet::Touch);
+        } else {
+            s.fill([x + wide / 2 - 1, y + 2, z + long - 1], [x + wide / 2 + 1, y + tall - 2, z + long], door, Meet::Touch);
+        }
+    }
+}
+
+/// The letters a shop's sign is told in: five cells wide and seven tall, a row of bits each, the top row first.
+fn letter(c: u8) -> [u8; 7] {
+    match c {
+        b'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        b'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
+        b'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
+        b'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
+        b'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+        b'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
+        b'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111],
+        b'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        b'I' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111],
+        b'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
+        b'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        b'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
+        b'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        b'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
+        b'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
+        b'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        b'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        b'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
+        b'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+        _ => [0; 7],
+    }
+}
+
+/// What the shops are.
+const SHOPS: [&str; 10] = ["CAFE", "BOOKS", "BAKERY", "FLOWERS", "BIKES", "RECORDS", "TEA", "HARDWARE", "LAUNDRY", "GROCER"];
+
+/// Whether a house keeps a shop on its ground floor: the houses at a block's ends mostly, one in seven of the rest.
+fn shop(h: &Built, i: i32) -> Option<&'static str> {
+    let ends = i == 0 || i == LOTS - 1;
+    ((ends && (h.seed >> 11) % 3 != 0) || (h.seed >> 11) % 7 == 0).then(|| SHOPS[(h.seed >> 14) as usize % SHOPS.len()])
+}
+
+/// A shop's front on a house: a window where the garage was, an awning in stripes over the pavement, and over that
+/// a board with what it sells in letters. The letters read from the street, whichever way the house faces.
+fn stamp_shop(h: &Built, s: &mut Scratch, name: &str) {
+    if s.lod > 1 {
+        return;
+    }
+    let w = h.wide();
+    let hue = (h.seed >> 19) as u8 % 24;
+    h.put(s, (6, w - 6), (0, 1), (8, 23), 0, Meet::Middle);
+    h.put(s, (6, w - 6), (1, 2), (2, 23), kind(GLASS, colour(13, 0)), Meet::Middle);
+    h.put(s, (6, w - 6), (0, 2), (2, 8), h.trim, Meet::Middle);
+    // The door is kept: it is cut again through the sill.
+    let door = if (h.seed >> 28) & 1 == 0 { (52, 64) } else { (10, 22) };
+    h.put(s, door, (0, 1), (2, 25), 0, Meet::Middle);
+    h.put(s, door, (1, 2), (2, 25), kind(WOOD, colour(hue, 5)), Meet::Middle);
+    for stripe in 0..(w - 8) / 4 {
+        let cloth = if stripe % 2 == 0 { kind(PLASTER, colour(hue, 4)) } else { kind(PLASTER, WHITE) };
+        // No further out than a street tree's crown is kept from the fronts.
+        h.put(s, (4 + stripe * 4, 8 + stripe * 4), (-7, 0), (25, 26), cloth, Meet::Middle);
+        h.put(s, (4 + stripe * 4, 8 + stripe * 4), (-7, -6), (23, 25), cloth, Meet::Middle);
+    }
+    // The board stands out past a bay over it, so the bay does not hide what it says.
+    h.put(s, (6, w - 6), (-9, 0), (27, 38), kind(WOOD, colour(hue, 6)), Meet::Middle);
+    if s.lod == 0 {
+        let long = name.len() as i32 * 6 - 1;
+        let from = (w - long) / 2;
+        for (n, c) in name.bytes().enumerate() {
+            for (row, bits) in letter(c).into_iter().enumerate() {
+                for col in 0..5 {
+                    if bits >> (4 - col) & 1 == 1 {
+                        let across = from + n as i32 * 6 + col;
+                        // From the street a front that runs back along +z is seen with x to the left.
+                        let u = if h.back > 0 { w - 1 - across } else { across };
+                        h.put(s, (u, u + 1), (-10, -9), (35 - row as i32, 36 - row as i32), kind(PLASTER, WHITE), Meet::Touch);
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub const YARD_TOWER: (i32, i32) = (400, 250);
 pub const YARD_CHIMNEY: (i32, i32) = (700, 190);
 pub const YARD_OFFICE: (i32, i32) = (940, 550);
 pub const YARD_CANOPY: (i32, i32) = (400, 470);
+pub const YARD_STACK: (i32, i32) = (560, 560);
 
 fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32, i32) -> bool) {
     let (tx, tz) = (x0 + YARD_TOWER.0, z0 + YARD_TOWER.1);
@@ -410,6 +599,19 @@ fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32
     let (ox, oz) = (x0 + YARD_OFFICE.0, z0 + YARD_OFFICE.1);
     if reaches(ox, ox + 120, oz, oz + 100) {
         stamp_office(s, ox, oz);
+    }
+    // Containers stacked by the far fence: three on the ground, two on them.
+    let (kx, kz) = (x0 + YARD_STACK.0, z0 + YARD_STACK.1);
+    if reaches(kx, kx + 200, kz, kz + 70) && s.lod <= 2 {
+        let g = (0..3).map(|n| ground(kx + n * 66 + 30, kz + 12)).max().unwrap() + 1;
+        for n in 0..3 {
+            // Each stands on footings down to the yard, which may slope.
+            s.fill([kx + n * 66, ground(kx + n * 66 + 30, kz + 12) - 2, kz], [kx + n * 66 + 60, g, kz + 24], kind(CONCRETE, grey(8)), Meet::Touch);
+            stamp_container(s, kx + n * 66, g, kz, true, hash(x0 + n, z0, 71));
+        }
+        for n in 0..2 {
+            stamp_container(s, kx + 30 + n * 66, g + 26, kz, true, hash(x0 + n, z0, 72));
+        }
     }
     let (px, pz) = (x0 + YARD_CANOPY.0, z0 + YARD_CANOPY.1);
     if reaches(px, px + 150, pz, pz + 80) {
@@ -588,9 +790,13 @@ pub fn make(s: &mut Scratch) {
                         if let Some(h) = house(bx, bz, row, i) {
                             if h.base - 30 < hi[1] && h.base + house_tall(&h) + 8 > lo[1] {
                                 stamp_house(&h, s);
+                                if let Some(name) = shop(&h, i) {
+                                    stamp_shop(&h, s, name);
+                                }
                             }
                             // A tree on the pavement in front of some, its crown kept clear of the house fronts and their bays.
-                            if (h.seed >> 5) % 5 < 2 {
+                            // None before a shop: its board stands further out than a crown is kept back.
+                            if (h.seed >> 5) % 5 < 2 && shop(&h, i).is_none() {
                                 let (tz, keep) = if row == 0 { (z0 + STREET - 16, [i32::MIN, z0 + STREET - 8]) } else { (z0 + BLOCK_Z + 16, [z0 + BLOCK_Z + 8, i32::MAX]) };
                                 stamp_tree(s, lx + LOT_WIDE / 2, tz, h.seed, (ANYWHERE, keep));
                             }
@@ -636,6 +842,33 @@ pub fn make(s: &mut Scratch) {
             Block::Shore => {}
         }
         if sort != Block::Shore {
+            // Along the street on the block's low z side and the one on its low x side: cars parked at both kerbs,
+            // and now and then something small on the pavement.
+            for (along_x, length) in [(true, BLOCK_X - STREET), (false, BLOCK_Z - STREET)] {
+                for n in 0..(length - 80) / 58 {
+                    let along = STREET + 40 + n * 58;
+                    for (side, across) in [(0, PAVEMENT + 2), (1, STREET - PAVEMENT - 20)] {
+                        let seed = hash(bx * 64 + n, bz * 4 + side + if along_x { 0 } else { 2 }, 61);
+                        let (cx, cz) = if along_x { (x0 + along, z0 + across) } else { (x0 + across, z0 + along) };
+                        if seed % 100 < 55 && reaches(cx, cx + 42, cz, cz + 42) {
+                            stamp_car(s, cx, cz, along_x, seed);
+                        }
+                        if (seed >> 7) % 5 == 0 {
+                            let edge = if side == 0 { PAVEMENT - 5 } else { STREET - PAVEMENT + 1 };
+                            let (px, pz) = if along_x { (x0 + along + 48, z0 + edge) } else { (x0 + edge, z0 + along + 48) };
+                            if reaches(px - 2, px + 6, pz - 2, pz + 6) {
+                                stamp_small(s, px, pz, seed >> 9);
+                            }
+                        }
+                    }
+                }
+            }
+            // A stop sign at two corners of the crossing, facing who comes to it.
+            for (cx, cz, dx, dz) in [(x0 + STREET - 3, z0 + STREET + 6, 0, 1), (x0 + STREET + 6, z0 + 2, -1, 0)] {
+                if reaches(cx - 6, cx + 6, cz - 6, cz + 6) {
+                    stamp_stop(s, cx, cz, dx, dz);
+                }
+            }
             // A lamp at each corner of the crossing on the block's low corner.
             for (cx, cz, dx, dz) in [(x0 + 8, z0 + 8, 1, 0), (x0 + STREET - 10, z0 + 8, 0, 1), (x0 + 8, z0 + STREET - 10, 0, -1), (x0 + STREET - 10, z0 + STREET - 10, -1, 0)] {
                 if reaches(cx - 16, cx + 18, cz - 16, cz + 18) {

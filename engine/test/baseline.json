@@ -3,21 +3,21 @@
     "kept": "2026-11-12",
     "quiet": 1.45,
     "ms": {
-      "street rays": 14.78,
-      "street shadows": 19.78,
-      "street all": 25.98,
-      "fronts rays": 12.82,
-      "fronts shadows": 16.7,
-      "fronts all": 19.54,
+      "street rays": 17.18,
+      "street shadows": 22.42,
+      "street all": 31.89,
+      "fronts rays": 15.1,
+      "fronts shadows": 19.11,
+      "fronts all": 26.12,
       "roofs rays": 12.39,
-      "roofs shadows": 15.22,
-      "roofs all": 20.18,
-      "high rays": 5.81,
-      "high shadows": 5.94,
-      "high all": 8.22,
-      "far rays": 2.81,
-      "far shadows": 2.81,
-      "far all": 2.8
+      "roofs shadows": 15.23,
+      "roofs all": 20.6,
+      "high rays": 5.76,
+      "high shadows": 5.95,
+      "high all": 8.01,
+      "far rays": 2.84,
+      "far shadows": 2.82,
+      "far all": 2.84
     }
   }
 }
