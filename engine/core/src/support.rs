@@ -9,7 +9,7 @@
 //! falls straight down, in whole cells, until something is under it. This is the rule for what
 //! stands, in whole numbers, the same on every machine.
 
-use crate::kinds::{ASPHALT, EARTH, GLASS, GRASS, LAMP, LEAVES, ROCK, SAND, STEEL, WATER, bears, join_carries, leans, material, spans, weighs};
+use crate::kinds::{ASPHALT, EARTH, GLASS, GRASS, LAMP, LEAVES, ROCK, SAND, STEEL, WATER, bears, join_carries, leans, material, rubble, spans, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
 use crate::{Edit, fill};
@@ -150,6 +150,11 @@ pub fn loose(r: &Region) -> Vec<bool> {
                     let kind = r.cells[j];
                     let to = c + more;
                     if kind == 0 || to >= cost[j] as usize || to > spans(material(kind)) as usize || torn[j] & (1 << how) != 0 {
+                        return;
+                    }
+                    // Rubble lies on what is under it and that is all: it is joined to nothing beside it or over it,
+                    // and nothing beside it or under it is joined to it.
+                    if more != 0 && (rubble(kind) || rubble(r.cells[i])) {
                         return;
                     }
                     // Leaves hold on to leaves and to nothing else: a crown that brushes a wall is not hung on it, though it may rest on what is under it.

@@ -92,8 +92,7 @@ const charge = async (page, turn, radius, pitch) => {
  * from the start along x, over the street, along z, then degrees turned and tilted; or a place to stand and a point
  * to look at. `hour` is the time of day, if not the page's own, and `rain` how hard it rains (0 to 1). `near` is what must be ahead there (see `aimed`),
  * or, with `aim`, that far right of and above the middle of the picture (radians). `act` is what is done, and may return a picture
- * taken mid-way (things in the air), else the picture is taken when all is still again. `query` is what the page is
- * opened with, if anything. `falls`, `inAir` and `burns`
+ * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
 // States as the fourth blind judge left them (November 12, main a4411d9a, logged): ours first, theirs second. town 5 v 7,
@@ -152,10 +151,10 @@ export const ROWS = [
     } },
   { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'behind',
-    // From the road, low: three big charges at the feet of the houses across it, and what they bring down. Without
-    // fire: with it the houses were still coming down forty seconds on, and the picture was of things in the air
-    // (the fourth judge: "frozen in mid-air"), not of what lies there.
-    stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600, query: 'fire=0',
+    // From the road, low: three big charges at the feet of the houses across it, and what they bring down. The
+    // houses burn and are still letting things go forty seconds on, when the picture is taken. Before rubble lay in
+    // heaps that picture was of things in the air (the fourth judge: "frozen in mid-air").
+    stand: [-2, 2.2, 3.5, 9, 6], near: [18, ...HOUSE], falls: 600,
     act: async (page) => {
       for (const turn of [-0.3, 0, 0.3]) { await charge(page, turn, 32, 0.02); await page.waitForTimeout(700) }
     } },

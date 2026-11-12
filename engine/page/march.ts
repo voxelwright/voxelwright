@@ -203,6 +203,8 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
   let sub = vec2u(clamp(vec2f(fa, fu) * 4.0, vec2f(0.0), vec2f(3.0)));
   let speck = hash3i(cell, 40u + sub.x + 4u * sub.y) - 0.5;
   var over = vec4f(0.0);
+  // Rubble (kinds.rs RUBBLE) is its stuff broken small: no courses, boards or joints, each bit its own shade, rough.
+  if ((kind & 16u) != 0u) { return base * max(0.88 + (own - 0.5) * 0.34 * fine + (blot - 0.5) * 0.2 + speck * 0.24 * grain, 0.2); }
   if (stuff == 8u) {
     // Brick: courses a cell high, bricks two long, every other course half a brick along.
     let brick = vec3i((along + (up & 1)) >> 1u, up, across);

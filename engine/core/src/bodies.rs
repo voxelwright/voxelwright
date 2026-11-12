@@ -1248,7 +1248,7 @@ impl Bodies {
             // Dust: most of a heap is the grey of what the stuff is ground to, a bit here and there the colour it was.
             // By patches two cells across: cell by cell it was confetti.
             let d = hash3(c[0] >> 1, c[1] >> 1, c[2] >> 1, 91);
-            put.insert(c, if d % 100 < 72 { crate::kinds::kind(material(kind), crate::kinds::grey(4 + (d >> 8) as u8 % 3)) } else { kind });
+            put.insert(c, crate::kinds::RUBBLE | if d % 100 < 72 { crate::kinds::kind(material(kind), crate::kinds::grey(4 + (d >> 8) as u8 % 3)) } else { kind });
         }
         let mut cells: Vec<([i32; 3], Kind)> = put.into_iter().collect();
         cells.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
@@ -1512,6 +1512,28 @@ mod tests {
         let steep = top.iter().filter(|&(&[x, z], &y)| [[1, 0], [-1, 0], [0, 1], [0, -1]].iter().any(|d| y - top.get(&[x + d[0], z + d[1]]).copied().unwrap_or_else(|| city::ground(x + d[0], z + d[1])) > 2)).count();
         assert_eq!(steep, 0, "{steep} of {} columns stand more than two cells over the one beside them", top.len());
         assert!(ms < 40.0, "putting it down took {ms:.1} ms");
+    }
+
+    /// A heap is loose: a stub of wall that touches its side, with nothing under it, is not held up by it.
+    #[test]
+    fn a_heap_holds_up_nothing_beside_it() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        // A heap: a block of brick eight cells each way, poured where it stands.
+        let loose: Vec<([i32; 3], Kind)> = (1..=8).flat_map(|y| (0..8).flat_map(move |z| (0..8).map(move |x| ([X + x, ground + y, Z + z], kind(BRICK, OWN))))).collect();
+        bodies.heap(&loose);
+        bodies.out.clear();
+        // A place on its side where a cell of it has air beside it and under that air: a step two cells high.
+        let (x, y) = (1..12).rev().flat_map(|y| (0..40).map(move |x| (x, y))).find(|&(x, y)| {
+            let g = &mut bodies.ground;
+            g.solid(X + x - 1, ground + y, Z + 4) && !g.solid(X + x, ground + y, Z + 4) && !g.solid(X + x, ground + y - 1, Z + 4) && (0..4).all(|k| !g.solid(X + x + k, ground + y - 1, Z + 4) && !g.solid(X + x + k, ground + y, Z + 4))
+        }).expect("the heap has a step on its side");
+        // The stub: four cells of brick out from that cell, level, with nothing under any of them.
+        bodies.change(vec![Run { x0: X + x, x1: X + x + 4, y: ground + y, z: Z + 4, kind: kind(BRICK, OWN) }]);
+        let made = bodies.release([X + x + 2, ground + y, Z + 4], 4);
+        let left = (0..4).filter(|&k| bodies.ground.solid(X + x + k, ground + y, Z + 4)).count();
+        eprintln!("a stub at {x}, {y} over the street: release made {made} bodies and left {left} of its four cells in the air");
+        assert_eq!(left, 0, "{left} cells of a stub beside a heap, with nothing under them, stay in the air");
     }
 
     #[test]

@@ -765,3 +765,18 @@ there were 700 bodies.
 - **Not done**: houses still stand as shells whatever is charged out of them (the support rule lets floors hold
   the walls over them), so a district "brought down" is a row of gutted fronts with rubble at their feet. The
   heap appears at once, under the ball of fire; nothing is seen to fall into it.
+
+## Rubble is a mark on the kind (`kinds.rs` `RUBBLE`, bit 4)
+
+A heap kept each cell's material, so the support rule let it hold a wall stub that touched it sideways with nothing
+under it (the core's test `a_heap_holds_up_nothing_beside_it` failed: four of four cells stayed in the air). Bits 4
+to 7 of a kind were unused: the material is the low four bits, the colour the high byte. Bit 4 now says rubble.
+
+- `material(kind)` masks to four bits. Everything that asks what a cell is made of goes through it.
+- `support::loose`: rubble is reached only by resting on what is under it, and nothing is reached through it
+  sideways or hung from it.
+- `paint()` draws rubble as its stuff broken small: no courses, laps or joints.
+- The shaders already took the material as `kind & 15`, so nothing else on the page changed.
+
+The rubble row is shot with fire again, as the page shows itself: at forty seconds heaps lie in the foreground
+while the houses burn (25 bodies still moving in one run).

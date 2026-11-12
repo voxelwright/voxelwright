@@ -40,7 +40,14 @@ pub const fn kind(material: u8, colour: u8) -> Kind {
 }
 #[inline]
 pub const fn material(kind: Kind) -> u8 {
-    kind as u8
+    (kind & 15) as u8
+}
+/// A cell that is rubble: stuff that came down and lies loose (bodies.rs `heap`). It is still its material, to
+/// break and to burn, but it holds nothing up beside it and hangs from nothing (support.rs), and is drawn broken.
+pub const RUBBLE: Kind = 16;
+#[inline]
+pub const fn rubble(kind: Kind) -> bool {
+    kind & RUBBLE != 0
 }
 
 /// How far a blast reaches into each material, in sixteenths of its own radius: what a thing
