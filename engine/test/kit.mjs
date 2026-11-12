@@ -105,3 +105,23 @@ export async function film(page, seconds, act = async () => {}) {
   gaps.sort((a, b) => a - b)
   return { webm: Buffer.from(webm, 'base64'), frames: gaps.length, p50: gaps[gaps.length >> 1], p95: gaps[Math.floor(gaps.length * 0.95)], worst: gaps.at(-1), long, seconds: at / 1000 }
 }
+
+/** The picture as it is on the screen, made small: how bright on the whole (0 to 1), what share of it is bright, and its mean red, green and blue. */
+export async function seen(page) {
+  const png = (await page.screenshot()).toString('base64')
+  return page.evaluate(async (png) => {
+    const picture = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob())
+    const paper = new OffscreenCanvas(160, 90).getContext('2d')
+    paper.drawImage(picture, 0, 0, 160, 90)
+    const d = paper.getImageData(0, 0, 160, 90).data, n = d.length / 4
+    let sum = 0, bright = 0
+    const rgb = [0, 0, 0]
+    for (let i = 0; i < d.length; i += 4) {
+      const l = (d[i] + d[i + 1] + d[i + 2]) / 765
+      sum += l
+      if (l > 0.45) bright++
+      for (let c = 0; c < 3; c++) rgb[c] += d[i + c] / 255 / n
+    }
+    return { mean: sum / n, bright: bright / n, rgb }
+  }, png)
+}

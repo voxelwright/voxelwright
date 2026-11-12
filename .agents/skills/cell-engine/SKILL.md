@@ -551,3 +551,21 @@ front coming down, staying down and losing no cell.
 - `engine.ground(x, z)` is the sea's floor where there is sea: a stand worked out from it over
   water is under water. Stand on land.
 - Lamp pools are worked out from the block rule and fell on the sea too; water takes none.
+
+## Under the sea (November 12)
+
+- `main.ts` tells the marcher each frame whether the eye is under the sea (`march.under`: under
+  zero, where the ground by itself lies under zero too, so not in a pit dug on land). The
+  shader then draws `deep()`: what is met is lit as usual (the floor and the weed are in the
+  sun's maps), times a moving net of light, less its red with depth and distance, fading to
+  the water's own colour by about 80 m; looking up, the sky through a round window; ten
+  samples along the look for shafts of light. Nothing over the top is seen from under it, and a
+  pick from under it stops there too.
+- `city.rs` `stamp_sea_floor`: the floor is cut into patches 3.2 m square; ribbon weed grows in
+  groves and eelgrass in meadows (two slow noises), with bare sand and a few boulders between.
+  All of it stands in the sand: `what_grows_on_the_sea_floor_is_at_rest` (support.rs). Boulders
+  are whole balls; a ragged one left single cells hanging.
+- Cost at the under row's stand, 0.92 megapixels: 11 to 13 ms with everything on (the street
+  is about 8 ms for as many pixels). A grove is as dear to look through as tree crowns.
+- Weed is `LEAVES`, so it would burn. Nothing sways.
+- A board row may say where in the picture its thing is (`aim`), when the middle is not it.

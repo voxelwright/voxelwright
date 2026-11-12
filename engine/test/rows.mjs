@@ -58,9 +58,9 @@ export async function place(page, row) {
  */
 export async function aimed(page, row) {
   if (!row.near) return null
-  const [within, ...materials] = row.near, seen = []
+  const [within, ...materials] = row.near, seen = [], [aside, above] = row.aim ?? [0, 0]
   for (const right of [0, -0.04, 0.04]) for (const up of [0, -0.04, 0.04]) {
-    const hit = await page.evaluate(([r, u]) => globalThis.engine.pick(r, u), [right, up])
+    const hit = await page.evaluate(([r, u]) => globalThis.engine.pick(r, u), [aside + right, above + up])
     if (hit && hit.t / 10 <= within && materials.includes(hit.material)) return null
     seen.push(hit ? `${hit.material} at ${(hit.t / 10).toFixed(0)} m` : 'sky')
   }
@@ -90,7 +90,8 @@ const charge = async (page, turn, radius, pitch) => {
 /**
  * The rows. `theirs` is a film and the second to take the frame at. `stand` is where our shot is taken from: metres
  * from the start along x, over the street, along z, then degrees turned and tilted; or a place to stand and a point
- * to look at. `hour` is the time of day, if not the page's own. `near` is what must be ahead there (see `aimed`). `act` is what is done, and may return a picture
+ * to look at. `hour` is the time of day, if not the page's own. `near` is what must be ahead there (see `aimed`),
+ * or, with `aim`, that far right of and above the middle of the picture (radians). `act` is what is done, and may return a picture
  * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
@@ -183,7 +184,10 @@ export const ROWS = [
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'behind',
     // From the town's shore over its lake to where the sun goes down behind the far shore, towers either side.
     stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.6, near: [400, WATER] },
-  { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'none' },
+  { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
+    // On the floor of the town's lake, 11 m down, at a clearing in a grove of ribbon weed, looking up the slope to
+    // where the light comes in. (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
+    stand: { from: [-1276, 398], up: 2.5, to: [-1262, 412], high: 5.5 }, near: [60, 2, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'none' },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'none' },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'none' },

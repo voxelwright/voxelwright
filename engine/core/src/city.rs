@@ -285,6 +285,68 @@ fn stamp_tree(s: &mut Scratch, x: i32, z: i32, seed: u32, keep: ([i32; 2], [i32;
 
 const ANYWHERE: [i32; 2] = [i32::MIN, i32::MAX];
 
+/// The sea's floor is cut into patches this many cells square, and each may hold one thing.
+const PATCH: i32 = 32;
+
+/// What grows and lies on the sea's floor in one patch: eelgrass in tufts, ribbon weed that climbs towards the light
+/// where the water is deep enough for it, here and there a boulder. Weed grows in groves and grass in meadows, with
+/// bare sand between: most of the sea is open water, as it is, and a look through it crosses few things.
+fn stamp_sea_floor(s: &mut Scratch, px: i32, pz: i32) {
+    if s.lod > 2 {
+        return;
+    }
+    let seed = hash(px, pz, 71);
+    let (x, z) = (px * PATCH + 4 + (seed % 24) as i32, pz * PATCH + 4 + ((seed >> 5) % 24) as i32);
+    let g = ground(x, z);
+    // How many cells of water lie over the floor here.
+    let deep = SEA - g;
+    if deep < 12 {
+        return;
+    }
+    let sort = (seed >> 10) % 16;
+    let (grove, meadow) = (noise(px, pz, 14, 75) > 0.6, noise(px, pz, 9, 76) > 0.62);
+    if sort == 0 {
+        let r = 5 + ((seed >> 14) % 9) as i32;
+        s.ball([x, g - r / 3, z], r, kind(ROCK, grey(7 + (seed >> 18) as u8 % 4)), 0, seed, None);
+    } else if meadow && sort <= 12 {
+        // Eelgrass: a tuft of blades a cell thick, none reaching the top of the water.
+        for blade in 0..14u32 {
+            let h = hash(px * 16 + blade as i32, pz, 72);
+            let (bx, bz) = (x - 11 + (h % 23) as i32, z - 11 + ((h >> 5) % 23) as i32);
+            let tall = (5 + ((h >> 8) % 16) as i32).min(deep - 3);
+            let green = kind(LEAVES, colour(5 + (h >> 12) as u8 % 4, [1, 2, 3, 4][(h >> 14) as usize % 4]));
+            s.fill([bx, g - 1, bz], [bx + 1, g + 1 + tall, bz + 1], green, Meet::Touch);
+        }
+    } else if grove && sort <= 11 && deep > 40 {
+        // Ribbon weed: a few strands that wander as they climb, a short blade to one side at every other step,
+        // to somewhere between half and nine tenths of the way up.
+        for strand in 0..3 + (seed >> 14) % 3 {
+            let h = hash(px * 16 + strand as i32, pz, 73);
+            let (mut wx, mut wz) = (x - 9 + (h % 19) as i32, z - 9 + ((h >> 5) % 19) as i32);
+            let tall = (deep * (50 + ((h >> 10) % 40) as i32) / 100).min(120);
+            let weed = kind(LEAVES, colour(5 + (h >> 16) as u8 % 4, [2, 3, 4, 3][(h >> 18) as usize % 4]));
+            let mut y = g - 1;
+            let mut step = 0;
+            while y < g + tall {
+                let turn = hash(wx * 8 + step, wz * 8 + strand as i32, 74);
+                s.fill([wx, y, wz], [wx + 2, y + 6, wz + 2], weed, Meet::Touch);
+                if step % 2 == 1 {
+                    let (dx, dz): (i32, i32) = [(1, 0), (-1, 0), (0, 1), (0, -1)][(turn >> 4) as usize % 4];
+                    // A frond: out from the strand and up a little, wider than the strand is thick.
+                    for (out, up) in [(2, 2), (4, 3), (6, 4)] {
+                        let (fx, fz) = (wx + dx * out - dz.abs(), wz + dz * out - dx.abs());
+                        s.fill([fx, y + up, fz], [fx + 2 + dz.abs() * 2, y + up + 2, fz + 2 + dx.abs() * 2], weed, Meet::Middle);
+                    }
+                }
+                wx += [-1, 0, 0, 1][turn as usize % 4];
+                wz += [0, -1, 1, 0][(turn >> 2) as usize % 4];
+                y += 6;
+                step += 1;
+            }
+        }
+    }
+}
+
 /// A street lamp: a post, an arm out over the road (`dx`, `dz` say which way), a light.
 fn stamp_lamp(s: &mut Scratch, x: i32, z: i32, dx: i32, dz: i32) {
     if s.lod > 2 {
@@ -841,7 +903,14 @@ pub fn make(s: &mut Scratch) {
                 }
             }
             Block::Yard => stamp_yard(s, x0, z0, &reaches),
-            Block::Shore => {}
+            Block::Shore => {
+                // The sea's floor, patch by patch: the patches of this block that reach into the sector.
+                for pz in (lo[2] - 40).max(z0).div_euclid(PATCH)..=(hi[2] + 40).min(z0 + BLOCK_Z - 1).div_euclid(PATCH) {
+                    for px in (lo[0] - 40).max(x0).div_euclid(PATCH)..=(hi[0] + 40).min(x0 + BLOCK_X - 1).div_euclid(PATCH) {
+                        stamp_sea_floor(s, px, pz);
+                    }
+                }
+            }
         }
         if sort != Block::Shore {
             // Along the street on the block's low z side and the one on its low x side: cars parked at both kerbs,

@@ -695,6 +695,31 @@ mod tests {
         assert!(seen.len() >= 4, "homes, towers, a park and a yard were all looked at");
     }
 
+    #[test]
+    fn what_grows_on_the_sea_floor_is_at_rest() {
+        // The lake west of the start, over its groves and meadows. The sea is not cells, so weed has only the sand
+        // it stands in to hold it: nothing may be loose, and nothing may drop.
+        let (mut weed, mut fell) = (0, Vec::new());
+        for z in (3800..4500).step_by(140) {
+            for x in (-14200..-12900).step_by(160) {
+                if ground(x, z) > -40 {
+                    continue;
+                }
+                let mut r = city_at(x, z);
+                weed += r.cells.iter().filter(|&&k| material(k) == LEAVES).count();
+                let unheld = loose(&r).iter().filter(|&&l| l).count();
+                if unheld > 0 {
+                    fell.push(format!("at {x} {z}: {unheld} cells are not held"));
+                }
+                for m in &settle(&mut r, 3).moves {
+                    fell.push(format!("at {x} {z}: {} cells dropped {}", m.cells, m.drop));
+                }
+            }
+        }
+        assert!(weed > 2000, "the boxes looked at hold weed ({weed} cells of it)");
+        assert!(fell.is_empty(), "{} things on the sea floor are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
+    }
+
     /// Ground 4 cells thick with a post on it, and a panel of plaster 30 wide, 20 tall and 2 thick beside or under something.
     fn yard() -> Region {
         let mut r = Region::new([0, 0, 0], [96, 96, 48]);

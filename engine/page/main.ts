@@ -123,6 +123,8 @@ async function main() {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
     const right = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]] as const
+    // Under the sea: under its top, where the ground by itself lies under it too (not in a pit dug on land).
+    march.under = pose.y < 0 && core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) < -1
     return { eye: [pose.x * M, pose.y * M, pose.z * M], forward, right, up, tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) }
   }
   const walk = (dt: number) => {

@@ -1,10 +1,10 @@
 // The sea is a level plane, not cells: a look that comes down over it must meet its top at the
 // height of the eye over it, however deep the floor or shallow the water, and a look from under
 // it must never meet it. The check goes also to the last few cells of water before the shore,
-// with the skips over empty air and without.
+// with the skips over empty air and without. And from under the sea the picture is the water's.
 //
 //   node test/sea.mjs
-import { start, still } from './kit.mjs'
+import { seen, start, still } from './kit.mjs'
 
 const WATER = 5, SAND = 4
 const { city, check, failures, finish } = await start()
@@ -61,6 +61,20 @@ try {
   check(met.length === 0, `from under the sea no look meets it${met.length ? `; these do:\n       ${met.map(said).join('\n       ')}` : ''}`)
   const down = under.filter((r) => r.pitch < -1)
   check(down.every((r) => r.hit && r.hit.material === SAND), `and looks down from there meet the floor: ${down.map(said).join('; ')}`)
+
+  // The look from under it: the page knows it is under, and the picture is the water's colour, not the day's.
+  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools { display: none }' })
+  const from = async (y, pitch) => {
+    await page.evaluate(([x, z, y, pitch]) => Object.assign(globalThis.engine.pose, { x, y, z, yaw: 0.4, pitch }), [...middle, y, pitch])
+    await page.waitForTimeout(400)
+    await still(page, { limit: 120_000 })
+    await page.waitForTimeout(600)
+    return { under: await page.evaluate(() => globalThis.engine.march.under), ...(await seen(page)) }
+  }
+  const [over, below] = [await from(3, -0.3), await from(-5, -0.3)]
+  check(!over.under && below.under, `the page says it is under the sea 5 m under its top (${below.under}) and not 3 m over it (${over.under})`)
+  const [r, g, b] = below.rgb
+  check(g > r * 2 && b > r * 2, `from under it the picture is blue-green: red ${r.toFixed(2)}, green ${g.toFixed(2)}, blue ${b.toFixed(2)}`)
 } catch (e) {
   failures.push(String(e).slice(0, 400))
 }

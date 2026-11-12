@@ -774,6 +774,65 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   return col;
 }
 
+// The net of light that waves throw on what is under them: bright lines where two slow patterns agree. at is a
+// place on the top of the sea, in cells.
+fn net(at: vec2f) -> f32 {
+  let a = noise2(at * 0.034 + vec2f(g.time * 0.21, g.time * 0.13));
+  let b = noise2(at * 0.047 - vec2f(g.time * 0.17, g.time * 0.24) + vec2f(7.3, 1.9));
+  return pow(clamp(1.0 - abs(a - b) * 3.2, 0.0, 1.0), 5.0);
+}
+// Under the sea. What is looked at is lit through the water over it, in the moving net of light the waves throw;
+// water takes the red out of light on its way down and back, and with distance everything goes to the water's
+// own colour. Looking up, the sky shows through a round window overhead and the rest of the top mirrors the deep.
+// Where the waves gather the light, shafts of it stand in the water. grain is a number that differs from pixel to
+// pixel.
+fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
+  let M = 0.1;
+  let down = (g.sea - g.eye.y) * M;
+  // Where the look leaves the water through its top, if it is rising.
+  var out = 1e9;
+  if (rd.y > 0.0) { out = (g.sea - g.eye.y) / rd.y; }
+  // The sun as it stands under water: bent towards overhead.
+  let sun = normalize(vec3f(g.sun.x * 0.75, sqrt(1.0 - dot(g.sun.xz, g.sun.xz) * 0.5625), g.sun.z * 0.75));
+  let strength = max(g.lightSun.r, max(g.lightSun.g, g.lightSun.b));
+  // The water's own light: brighter looking up, dimmer the deeper the eye.
+  let glow = mix(vec3f(0.01, 0.13, 0.19), vec3f(0.1, 0.6, 0.64), smoothstep(-0.7, 0.8, rd.y)) * exp(-down * 0.03) * (0.25 + 0.75 * strength);
+  var col: vec3f;
+  var far = min(out, 6000.0);
+  if (hit.t >= 0.0) {
+    far = hit.t;
+    let p = g.eye + rd * hit.t;
+    let under = max(g.sea - p.y, 0.0);
+    col = lit(g.eye, rd, hit, shadows) * (0.75 + 1.5 * net(p.xz + sun.xz * (under / sun.y)));
+    col *= exp(-vec3f(0.2, 0.035, 0.02) * (under * M + hit.t * M * 0.4));
+  } else {
+    let at = g.eye.xz + rd.xz * out;
+    let ripple = vec2f(noise2(at * 0.09 + vec2f(g.time * 0.5, g.time * 0.3)), noise2(at.yx * 0.11 - vec2f(g.time * 0.4, g.time * 0.27))) - 0.5;
+    // Through the window the sky, bent as water bends it; outside it the top is a mirror of the deep.
+    let window = smoothstep(0.6, 0.74, rd.y + (ripple.x + ripple.y) * 0.22);
+    let flat = vec2f(rd.x, rd.z) * 1.33 + ripple * 0.35;
+    let bent = normalize(vec3f(flat.x, sqrt(max(1.0 - dot(flat, flat), 0.01)), flat.y));
+    col = mix(glow * 0.55, sky(bent) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * net(at) * 0.4, window);
+  }
+  col = mix(col, glow, 1.0 - exp(-far * M * 0.036));
+  // Shafts: at ten places along the look, how much light the waves send down through each.
+  let reach = min(far, 450.0);
+  var shafts = 0.0;
+  for (var i = 0; i < 10; i++) {
+    let s = g.eye + rd * (reach * (f32(i) + grain) * 0.1);
+    let under = g.sea - s.y;
+    if (under > 0.0) {
+      let at = s.xz + sun.xz * (under / sun.y);
+      let gathered = noise2(at * 0.021 + vec2f(g.time * 0.06, g.time * 0.045)) * noise2(at * 0.057 - vec2f(g.time * 0.05, g.time * 0.08));
+      shafts += smoothstep(0.22, 0.6, gathered) * exp(-under * M * 0.09);
+    }
+  }
+  // They show most looking towards where the light comes from.
+  let facing = 0.35 + 0.65 * pow(max(dot(rd, sun), 0.0), 3.0);
+  col += g.lightSun.rgb * vec3f(0.45, 0.95, 0.85) * shafts * 0.1 * (reach / 450.0) * facing * 2.2;
+  return col;
+}
+
 fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   // dist is in the finest cells: the air thickens over kilometres.
   let f = 1.0 - exp(-dist * 0.00003);
@@ -814,7 +873,9 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
   let shadows = g.flags & 1u;
-  let hit = trace(g.eye, rd, 0.0, 0u, g.most, 0.0, g.pixel * g.detail, false, false);
+  var hit = trace(g.eye, rd, 0.0, 0u, g.most, 0.0, g.pixel * g.detail, false, false);
+  // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
+  if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
   var depth = 1.0;
   if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
   if ((g.flags & 16u) != 0u) {
@@ -824,7 +885,8 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, depth);
   }
   var col: vec3f;
-  if (hit.t < 0.0) { col = sky(rd); } else {
+  if ((g.flags & 128u) != 0u) { col = deep(rd, hit, shadows, hash3i(vec3i(vec2i(at.xy), i32(g.time * 60.0)), 31u)); }
+  else if (hit.t < 0.0) { col = sky(rd); } else {
     let m = looks.material[hit.kind & 15u];
     col = lit(g.eye, rd, hit, shadows);
     // A window lit from within at night shows its light, not what is across from it.
@@ -897,7 +959,8 @@ export interface View {
 
 /** FLAT leaves corners as bright as the open: for seeing what the darkening costs. */
 /** PLAIN: no skip over empty air but from node to node. Slower and never wrong: what the skips are checked against. */
-export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64
+/** UNDER: the eye is under the sea. The marcher sets it itself, from `under`. */
+export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64, UNDER = 128
 /** Tiles of the sun's maps drawn each frame. */
 const SUN_TILES_A_FRAME = 8
 
@@ -919,6 +982,8 @@ export interface Marcher {
   pick(view: View, plain?: boolean): Promise<{ t: number; material: number; colour: number } | null>
   /** How many pixels wide a thing must be to be drawn as itself: 1 is every cell that can be seen, 2 is half as fine. */
   detail: number
+  /** Whether the eye is under the sea: what is in it is then lit as under water. */
+  under: boolean
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
@@ -978,7 +1043,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       f.set(view.forward, 12)
       u[15] = world.levels.length
       f.set(sunMaps.s, 16)
-      u[19] = flags
+      u[19] = flags | (under ? UNDER : 0)
       f.set(size, 20)
       u[22] = 384
       // The top of the sea is the world's zero (city.rs SEA).
@@ -1008,13 +1073,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
-  let detail = 1, day = 1, low = 0
+  let detail = 1, day = 1, low = 0, under = false
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
   const point: Target = { color: pointTexture.createView(), depth: device.createTexture({ size: [1, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView(), size: [1, 1] }
   const pointRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const self: Marcher = {
+    get under() { return under },
+    set under(v: boolean) { under = v },
     get detail() { return detail },
     set detail(v: number) { detail = v },
     get day() { return day },
