@@ -300,6 +300,15 @@ A puff is now a soft ball whose edge is eaten by two sizes of billow that drift 
 lit as a ball from the sun's side, with fire's heart brighter than its edge. Same count of puffs,
 same cost. Things are made of cells; smoke is not a thing.
 
+## The last pass (`page/glow.ts`)
+
+The picture is stretched to the screen by `glow`, not the probe's `stretch`: what is brighter than
+0.8 in it is taken at a quarter size, spread along x and along y, and added back at 0.85, and
+the picture's corners are a little darker. Three quarter-size passes and the stretch; the bench
+did not move. The picture is a new texture whenever its size changes, so what the glow keeps for
+it is thrown away and made again then. Corners in the world are darker too (`open` squared), the
+sky's fill is a fifth less, and a blast leaves a thicker, darker column of smoke.
+
 ## Coming down into heaps (#160, `bodies.rs`: `sitting`, `lumps`; `page/sun.ts`; `page/world.ts`)
 
 Counted first (`cargo test --release where_the_stuff_goes -- --ignored --nocapture`, `SPARKS=1`

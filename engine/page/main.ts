@@ -7,7 +7,7 @@
 //   ?fly=1 (on by default at the address /): the flight that measures this device and posts what it found; ?seconds=40 how long it flies
 //   ?shadows=0  ?mirrors=0  ?heat=1 (show how many steps each pixel took)  ?detail=1 (pixels a thing must be wide to be drawn as itself)
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
-import { stretch } from '../probe/rays.ts'
+import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
 import { FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
@@ -61,7 +61,7 @@ async function main() {
     workers: Number(query.get('workers') ?? Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2))),
   })
   const march = await marcher(device, gpu.format, world)
-  const blit = await stretch(gpu)
+  const blit = await glow(gpu)
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
   const falling = await pieces(device, gpu.format, march)

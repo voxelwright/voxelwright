@@ -120,7 +120,7 @@ export const LIGHT = /* wgsl */ `
 const SUN_LIGHT = vec3f(1.0, 0.93, 0.82);
 fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
   let above = 0.5 + 0.5 * n.y;
-  let skylight = mix(vec3f(0.15, 0.145, 0.14), vec3f(0.36, 0.47, 0.66), above);
+  let skylight = mix(vec3f(0.12, 0.118, 0.115), vec3f(0.3, 0.4, 0.58), above);
   let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0));
   var col = albedo * (SUN_LIGHT * direct * 3.1 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
   let hv = normalize(sun - rd);
@@ -674,7 +674,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var open = 1.0;
   // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
   let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
-  if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { open = mix(1.0, 0.25 + 0.75 * openness(p, hit.n, hit, ground && hit.n.y > 0.5), clamp(wide - 1.5, 0.0, 1.0)); }
+  if (shadows == 1u && faced && (g.flags & 32u) == 0u && wide > 1.5) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
   return shade(albedo, n, rd, g.sun, direct, open, m.rough, m.glow);
 }
 

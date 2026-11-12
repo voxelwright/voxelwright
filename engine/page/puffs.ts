@@ -125,9 +125,10 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         puff(at, r * 0.5, rnd(20, 70), 30, { size: r * rnd(0.45, 0.9), grow: r * 1.3, life: rnd(0.55, 1.0), heat: 1, cool: rnd(1.3, 2.0), rise: 70, drag: 3.2, colour: [0.13, 0.12, 0.11], cover: 0.7 })
       }
       // The smoke it leaves: grey, slow, rising for seconds.
-      for (let k = Math.min(12, Math.max(5, Math.round(r * 0.5))); k > 0; k--) {
-        const grey = rnd(0.3, 0.55)
-        puff(at, r * 0.7, rnd(8, 30), rnd(15, 40), { size: r * rnd(0.6, 1.0), grow: r * 0.55, life: rnd(2.6, 5.2), heat: 0, cool: 0, rise: 22, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.5 })
+      // Dark at first and thick, a column that stands for some seconds.
+      for (let k = Math.min(18, Math.max(7, Math.round(r * 0.8))); k > 0; k--) {
+        const grey = rnd(0.16, 0.42)
+        puff(at, r * 0.7, rnd(8, 30), rnd(15, 45), { size: r * rnd(0.6, 1.1), grow: r * 0.6, life: rnd(3.5, 7.5), heat: 0, cool: 0, rise: 24, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.62 })
       }
     },
     dust(at, radius, count, colour) {
