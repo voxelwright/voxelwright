@@ -212,7 +212,15 @@ export const ROWS = [
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'none' },
-  { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'none' },
+  { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'behind',
+    // In the pine woods before the mountains, 5 km north of the town: a charge among the trees.
+    stand: { from: [-145, -4970], up: 2.2, to: [-145, -5070], high: 14 }, near: [16, LEAVES, WOOD], inAir: true,
+    act: async (page) => {
+      await blast(page, 20)
+      await page.waitForFunction(() => globalThis.engine.bodies > 0, null, { timeout: 6000 })
+      await page.waitForTimeout(350)
+      return page.screenshot()
+    } },
   // What their films do not show. These count only on top of the rows above.
   { key: 'live', what: 'Shown live, 60 frames a second on an M1 Pro (their film was captured frame by frame)', state: 'ahead', note: 'node test/flight.mjs; node test/bench.mjs' },
   { key: 'phone', what: '60 frames a second on a real iPhone, things falling', state: 'ahead', note: 'the owner\'s iPhone, November 11: node test/read.mjs' },

@@ -8,6 +8,7 @@
 //! changes it the same way. Flames and smoke are the page's, drawn where this says cells burn.
 
 use crate::bodies::{Bodies, FIRE, Map};
+use crate::city;
 use crate::hash::hash3;
 use crate::kinds::{EARTH, GRASS, ROCK, WOOD, burns, grey, kind, material};
 use crate::scratch::Run;
@@ -56,6 +57,10 @@ impl Bodies {
     /// Sets one cell alight if it is there, can burn and is not burning. `late` is how many turns longer it lasts than its material says.
     fn light(&mut self, c: [i32; 3], late: u16) -> bool {
         if self.fire.alight.len() >= MOST || self.fire.alight.contains_key(&c) || !self.ground.fuel(c[0], c[1], c[2]) {
+            return false;
+        }
+        // Nothing burns under the sea: its weed is leaves, and leaves burn.
+        if c[1] <= city::SEA && city::ground(c[0], c[2]) < city::SEA {
             return false;
         }
         let (lasts, _) = burns(material(self.ground.kind(c[0], c[1], c[2])));
@@ -147,6 +152,18 @@ mod tests {
     use crate::bodies::Bodies;
     use crate::city;
     use crate::kinds::{LEAVES, material};
+
+    #[test]
+    fn weed_under_the_lake_does_not_catch() {
+        // The grove the board's under-water row looks at: weed is leaves, and leaves burn anywhere else.
+        let mut bodies = Bodies::new();
+        let found = (-12_800..-12_600).step_by(3).flat_map(|x| (3960..4140).step_by(3).map(move |z| (x, z))).find_map(|(x, z)| {
+            let ground = city::ground(x, z);
+            (ground < -40).then(|| (ground + 8..ground + 40).find(|&y| material(bodies.ground.kind(x, y, z)) == LEAVES).map(|y| (x, y, z))).flatten()
+        });
+        let Some((x, y, z)) = found else { panic!("no weed in the lake where the under-water row looks: the check needs some") };
+        assert_eq!(bodies.ignite([x, y, z], 4, false), 0, "weed {} cells under the sea's top caught", -y);
+    }
 
     #[test]
     fn a_tree_set_alight_burns_away_and_the_fire_goes_out() {

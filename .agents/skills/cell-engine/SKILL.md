@@ -652,3 +652,19 @@ front coming down, staying down and losing no cell.
   is banded by a slow noise, not by 3.2 m squares.
 - Wet road has a small slow ripple in what it mirrors. A fine strong one scrambled a shop
   sign's mirror image into a blob.
+
+## Three things settled after the third judge (November 12)
+
+- The board's speed stamp read the page's own running figures at the wrong moment: taking a
+  picture stalls the page, so rows whose picture is taken mid-act were stamped 22 to 29
+  frames a second, and the march time was left over from another picture size. Films of
+  those rows (`clip.mjs`) hold 60 with no gap over 16.7 ms. `versus.mjs` now counts frames
+  over a second and gives the worst gap. Claim a frame rate only from a count or a film.
+- Out in the land things break and burn as in the town: a charge among the pines made 547
+  bodies and set them alight, frames held. That is the board's `there` row. Weed under the
+  lake caught fire too, being leaves; nothing burns under the sea's top in a sea column now
+  (`fire.rs` `light`, test `weed_under_the_lake_does_not_catch`).
+- A threshold set against a measured pair goes stale when either side of the pair moves. The
+  lit-window line in `hours` was set at 0.85% when lamps alone left 0.6% and windows 1.1%;
+  after lamps down every street and the grade the pair was 0.2% and 0.9%, and the line was
+  passing by 0.05%. Re-measure the mutant when what it measures against changes.

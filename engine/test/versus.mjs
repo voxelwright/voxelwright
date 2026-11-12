@@ -47,10 +47,20 @@ try {
     if (wrong) { failures.push(wrong); console.log(`  ${row.key.padEnd(7)} NOT SHOWN: ${wrong}`); await page.context().close(); continue }
     // The picture when all is still again; or, where fire keeps letting things go, after forty seconds of it.
     if (!early) { await page.waitForTimeout(400); await still(page, { sun: true, limit: 40_000 }).catch(() => {}); await page.waitForTimeout(2500) }
-    const live = await page.evaluate(() => ({ fps: Math.round(1000 / globalThis.engine.frameMs), scale: globalThis.engine.scale, ms: globalThis.engine.gpuMs }))
+    // How fast the page is drawing here: its frames counted over a second, and the worst gap between two. The page's
+    // own running figures are not used: taking a picture stalls it, and they then read 22 frames a second for a
+    // row that a film shows holding 60, or a march time left over from another picture size.
+    const live = await page.evaluate(() => new Promise((done) => {
+      let frames = 0, worst = 0, last = performance.now()
+      const began = last, tick = (now) => {
+        frames++; worst = Math.max(worst, now - last); last = now
+        if (now - began < 1000) requestAnimationFrame(tick); else done({ fps: Math.round((frames * 1000) / (now - began)), worst, scale: globalThis.engine.scale })
+      }
+      requestAnimationFrame(tick)
+    }))
     await writeFile(join(out, `${row.key}-ours.png`), early || await page.screenshot())
     row.our = `${row.key}-ours.png`
-    row.stamp = `${live.fps} frames a second with the picture at ${live.scale.toFixed(2)} of 2560 x 1440 (march ${live.ms.toFixed(1)} ms)`
+    row.stamp = `${live.fps} frames a second (worst gap ${live.worst.toFixed(0)} ms) with the picture at ${live.scale.toFixed(2)} of 2560 x 1440`
     console.log(`  ${row.key.padEnd(7)} ${row.stamp}`)
     await page.context().close()
   }

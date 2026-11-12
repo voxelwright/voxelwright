@@ -29,8 +29,9 @@ try {
   await at(22)
   const night = await look()
   check(night.mean < day.mean * 0.4, `at twenty-two the picture is dark: ${percent(night.mean)} of full, ${percent(day.mean)} by day`)
-  // With no window lit the lamps alone leave 0.6% of this picture bright; with them it is 1.1%.
-  check(night.bright > 0.0085, `and windows are lit in it: ${percent(night.bright)} of the picture is bright`)
+  // With no window lit the lamps alone leave 0.2% of this picture bright; with them it is 0.9% (measured again after
+  // the lamps down the streets and the grade, November 12).
+  check(night.bright > 0.005, `and windows are lit in it: ${percent(night.bright)} of the picture is bright`)
 
   // No lamp stands in open country: over the dry plain east of the town the night has nothing lit in it. (The page
   // works the lamps' light out from where the town's rule stands lamps, and once did so on bare land too.)
