@@ -797,3 +797,30 @@ The judges' words were "no smoke or air between the camera and the destruction" 
 - Cost: the ruin row holds 60 frames a second at 0.35 to 0.40 of full size with the smoke over it (0.40 before).
 
 Judged after it (four rows): blast 5 v 6, fire 6 v 3, rubble 6 v 5, ruin 5 v 6. Ruin is level.
+
+## Water that flows (`core/src/water.rs`, `page/water.ts`, November 12)
+
+- **Not cells.** A tank of 40,000 cells emptying as cells would be on the order of a hundred thousand cell edits a
+  second, where a burning house is a few hundred, and each edit is a sector made again and a sun tile spoiled. It
+  is a depth over each column of a window (384 columns of two cells: 77 m), moved from column to column by pipes
+  that keep their flow and gain by the height between their ends. Still water stays the plane.
+- **What it flows over is the world.** A column's floor is looked for where the water arrives (down from just over
+  its top, or up out of whatever is there) and looked for again where an edit's box says the world changed
+  (`Ground.latest`). So a wall keeps it in, a hole lets it out, and rubble that lands in it raises the floor.
+- **Its source is the town's own**: the tank of a yard's water tower (`city::tank_near`) holds 40.7 cubic metres by
+  rule. No cell of the town changed, so the town's sum did not. A hole in the tank's wall or floor lets it out,
+  faster the deeper under the water left (`holes`, looked for when the world changes near it).
+- **Stepped from `advance`**, as fire is, and told as a FLOW record twenty times a second while it moves: one word a
+  column of the box round the wet ones. The page asks the mover for time while `bodies_flowing` says so, and once
+  after anything is broken.
+- **Drawn as a surface** over the marched picture, tested against its depth and written to it: one square a wet
+  column, corners at the mean of the wet columns that share them, foam where it runs fast, falls or thins. Nothing
+  is in `march`.
+- **Numbers** (core test `a_tank_with_a_hole_in_it_empties_over_the_yard`): a call 0.08 ms on average and 2.2 ms at
+  worst; 4,600 columns wet at most; at rest after 75 s; 315 kB told a second; every cell accounted for (left in
+  the tank, lying, soaked away, gone out of the window). On the page 360 frames in 6 s while it ran, none late.
+- **Rough**: the water that leaves a hole is not seen falling (it appears on the deck and comes off its edge as a
+  curtain); a tower that goes over spills where it stood, not where it lands; the pool's edge is toothed at the
+  width of a column; it soaks away in about a minute and does not reach the lake; one window, so one tower's water
+  at a time; it wets nothing and puts no fire out.
+- WGSL: `patch` is a reserved word.

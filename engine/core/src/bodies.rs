@@ -101,6 +101,8 @@ pub struct Ground {
     holds: Option<[i32; 3]>,
     /// A few sectors kept whole, for asking what many cells are made of (a fire asks about every neighbour).
     whole: Vec<([i32; 3], Vec<Kind>)>,
+    /// The boxes of the edits made since the water last asked (water.rs): what flows goes by what stands.
+    pub(crate) latest: Vec<([i32; 3], [i32; 3])>,
 }
 
 /// The box an edit can change (high corner exclusive). A blast reaches as far as the weakest material gives: under three radii.
@@ -123,7 +125,7 @@ fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
 
 impl Ground {
     pub fn new() -> Self {
-        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), scratch: Scratch::new(), holds: None, whole: Vec::new() }
+        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), scratch: Scratch::new(), holds: None, whole: Vec::new(), latest: Vec::new() }
     }
 
     /// How many edits of this solver's own are in the world.
@@ -162,6 +164,7 @@ impl Ground {
         self.edits.insert(at, e);
         self.ours.insert(at, ours);
         self.boxes.insert(at, b);
+        self.latest.push(b);
     }
 
     /// Takes back the last edit: the sectors it reached are forgotten again.
@@ -549,6 +552,7 @@ pub const DUST: u32 = 4; // where (3, as floats), kind, how much
 pub const MOVES: u32 = 5; // for each body: id, place (3 floats), turn (4 floats)
 pub const FIRE: u32 = 7; // how many cells are alight, then where some of them are (3 floats each)
 pub const BROKE: u32 = 6; // id: the body is no more, and the pieces it broke into have been born
+pub const FLOW: u32 = 8; // water that flows, as heights over a window of columns (water.rs `tell`)
 
 pub struct Bodies {
     pub ground: Ground,
@@ -569,11 +573,13 @@ pub struct Bodies {
     since_crush: f32,
     /// What burns (fire.rs).
     pub fire: crate::fire::Fire,
+    /// What flows (water.rs).
+    pub water: crate::water::Water,
 }
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default() }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default() }
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -884,6 +890,7 @@ impl Bodies {
             self.owed = 0.0;
         }
         self.burn(dt);
+        self.flow(dt);
         let mut words: Vec<u32> = Vec::with_capacity(self.list.len() * 8);
         for b in &self.list {
             words.push(b.id);

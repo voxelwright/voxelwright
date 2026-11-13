@@ -14,6 +14,7 @@ pub mod land;
 pub mod scratch;
 pub mod support;
 pub mod tree;
+pub mod water;
 
 use scratch::Scratch;
 use std::cell::RefCell;
@@ -242,6 +243,12 @@ pub extern "C" fn bodies_ignite(x: i32, y: i32, z: i32, radius: i32) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_burning() -> usize {
     INSTANCE.with_borrow_mut(|i| moving(i).fire.alight.len())
+}
+
+/// Whether water is flowing, or may: 1 while the page should keep asking for time.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_flowing() -> usize {
+    INSTANCE.with_borrow_mut(|i| moving(i).water.flowing() as usize)
 }
 
 /// Sends a ball of `kind`, `radius` cells across its half, from a place at a speed (cells a second). Returns how many

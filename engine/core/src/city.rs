@@ -689,6 +689,17 @@ pub const YARD_OFFICE: (i32, i32) = (940, 550);
 pub const YARD_CANOPY: (i32, i32) = (400, 470);
 pub const YARD_STACK: (i32, i32) = (560, 560);
 
+/// The tank of the water tower in the yard a place is in, if it is in one: the middle of its floor, inside
+/// (`stamp_water_tower`). Whether it still stands is the world's to say.
+pub fn tank_near(x: i32, z: i32) -> Option<[i32; 3]> {
+    let (bx, bz) = (x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z));
+    if block(bx, bz) != Block::Yard {
+        return None;
+    }
+    let (tx, tz) = (bx * BLOCK_X + YARD_TOWER.0, bz * BLOCK_Z + YARD_TOWER.1);
+    Some([tx, ground(tx, tz) + 116, tz])
+}
+
 fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32, i32) -> bool) {
     let (tx, tz) = (x0 + YARD_TOWER.0, z0 + YARD_TOWER.1);
     if reaches(tx - 26, tx + 26, tz - 26, tz + 26) {

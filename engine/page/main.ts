@@ -11,6 +11,7 @@ import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
 import { COUNT, FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
+import { flowing } from './water.ts'
 import { puffs } from './puffs.ts'
 import { ball, rows, stream, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
@@ -64,6 +65,7 @@ async function main() {
   const blit = await glow(gpu)
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
+  const water = await flowing(device, gpu.format)
   const falling = await pieces(device, gpu.format, march)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
@@ -185,6 +187,7 @@ async function main() {
     march.light(sun, day, low)
     smoke.light(sun, day)
     debris.light(sun, day)
+    water.light(sun, day)
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   // `?rain=1` or the R key: rain.
@@ -247,6 +250,7 @@ async function main() {
     march.tend(encoder, v, world.nearlyWhole())
     lap('tend')
     march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+    if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
     if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
     if (!off.has('crumbs')) debris.draw(encoder, to, v)
     if (!off.has('puffs')) smoke.draw(encoder, to, v)
@@ -290,6 +294,8 @@ async function main() {
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
   let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
+  /** Whether water is flowing, or may be: after anything is broken the mover is asked once, and says. */
+  let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
   let flames = new Float32Array(0)
   const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit) }
@@ -352,6 +358,8 @@ async function main() {
     for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
     bodies = answer.bodies
     burning = answer.burning
+    running = answer.flowing || answer.released
+    if (told.water) water.set(told.water)
     if (told.fire) flames = told.fire
     if (!burning) flames = new Float32Array(0)
     fell.most = Math.max(fell.most, bodies)
@@ -370,8 +378,8 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if ((bodies > 0 || burning > 0) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
-    if (bodies === 0 && burning === 0) owed = 0
+    if ((bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
+    if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     // A body that is cells again is drawn until those cells are in the picture.
     const made = world.stats.stale === 0 && world.stats.wanted === 0
@@ -565,7 +573,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

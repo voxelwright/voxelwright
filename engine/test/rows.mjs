@@ -69,10 +69,11 @@ export async function aimed(page, row) {
 
 /** Whether a row's act did what its picture is of, asked just after the picture: null, or what is wrong. */
 export async function showed(page, row, was) {
-  const now = await page.evaluate(() => ({ pieces: globalThis.engine.fell.pieces, bodies: globalThis.engine.bodies, burning: globalThis.engine.burning }))
+  const now = await page.evaluate(() => ({ pieces: globalThis.engine.fell.pieces, bodies: globalThis.engine.bodies, burning: globalThis.engine.burning, wet: globalThis.engine.water.columns }))
   if (row.falls && now.pieces - was < row.falls) return `${row.key}: ${now.pieces - was} bodies came of the act, ${row.falls} were to`
   if (row.inAir && now.bodies === 0) return `${row.key}: the picture was to be of things in the air, and nothing was moving`
   if (row.burns && now.burning === 0) return `${row.key}: the picture was to be of fire, and nothing was burning`
+  if (row.flows && now.wet < row.flows) return `${row.key}: the picture was to be of water over ${row.flows} columns, and it lay over ${now.wet}`
   return null
 }
 
@@ -92,7 +93,7 @@ const charge = async (page, turn, radius, pitch) => {
  * from the start along x, over the street, along z, then degrees turned and tilted; or a place to stand and a point
  * to look at. `hour` is the time of day, if not the page's own, and `rain` how hard it rains (0 to 1). `near` is what must be ahead there (see `aimed`),
  * or, with `aim`, that far right of and above the middle of the picture (radians). `act` is what is done, and may return a picture
- * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir` and `burns`
+ * taken mid-way (things in the air), else the picture is taken when all is still again. `falls`, `inAir`, `burns` and `flows`
  * say what the act must have done for the picture to be of the row's thing (see `showed`).
  */
 // States as the fifth blind judge left them (November 12, main 6bd6d317, logged), after material finer than a cell,
@@ -157,7 +158,16 @@ export const ROWS = [
       await page.waitForTimeout(2600)
       return page.screenshot()
     } },
-  { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'none' },
+  { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'behind',
+    // The yard's water tower from beside it: a charge low on its tank, and the forty cubic metres in it come down
+    // the tower and out over the yard. Flowing water is not cells (the core's water.rs): it is a surface.
+    stand: { from: [32.5, 415.5], up: 1.3, to: YARD.tower, high: 4.2 }, near: [40, STEEL, WOOD], aim: [0, 0.6], flows: 2500,
+    act: async (page) => {
+      await strikeAt(page, [YARD.tower[0] - 1.25, YARD.tower[1] - 1.43], 12.6, 8, false)
+      await page.waitForFunction(() => globalThis.engine.water.columns > 2500, null, { timeout: 12_000 })
+      await page.waitForTimeout(500)
+      return page.screenshot()
+    } },
   { key: 'rubble', what: 'What came down lies in heaps', theirs: ['engine', 51.8], state: 'level',
     // From the road, low: three big charges at the feet of the houses across it, and what they bring down. The
     // houses burn and are still letting things go forty seconds on, when the picture is taken. Before rubble lay in
