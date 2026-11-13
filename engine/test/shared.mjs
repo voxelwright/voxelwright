@@ -89,6 +89,33 @@ try {
   await a.waitForTimeout(400)
   const seen = [await a.evaluate(() => globalThis.engine.others), await b.evaluate(() => globalThis.engine.others)]
   check(seen[0] === 1 && seen[1] === 1, `each page sees one other in the world (${seen})`)
+  // A seat (#218): a body the world moves for someone with no page. It walks where it is told at a walk, stops at a
+  // house front and says why, is heard by who is near, and the pages see it there.
+  const post = (path, body) => fetch(`${server.url}/world/${path}`, { method: 'POST', body: JSON.stringify(body) })
+  const told = async (path) => (await fetch(`${server.url}/world/${path}`)).json()
+  const wren = (await (await post('join', { by: 'wren', at: [1000, 4009] })).json()).you
+  await post('walk', { by: 'wren', to: [1050, 4009] })
+  await a.waitForTimeout(5200)
+  const walked = (await told('me?by=wren')).you
+  await post('walk', { by: 'wren', to: [1050, 3920] })
+  await a.waitForTimeout(6000)
+  const stopped = (await told('me?by=wren')).you
+  check(Math.abs(walked.at[0] - 1050) <= 1 && !walked.walking && stopped.at[2] > 3960 && /in the way/.test(stopped.stopped ?? ''), `a seat walks fifty cells east (to ${walked.at}), and walked at a house stops at its front and says why (${stopped.stopped})`)
+  await post('join', { by: 'ada', at: [1062, 4009] })
+  const said = await post('say', { by: 'wren', text: 'hello\u0007 <b>there</b>' })
+  const around = await told('around?by=ada')
+  check(said.status === 200 && around.heard.length === 1 && around.heard[0].text === 'hello  <b>there</b>' && around.heard[0].name === 'wren' && around.people.some((p) => p.name === 'wren' && p.far < 60) && around.sees.length === 8 && around.sees.some((s) => s.to === 'north' && s.meets !== 'nothing' && s.far < 40 && s.walk < 40) && around.sees.some((s) => s.to === 'east' && s.walk > 100), `who is near hears it as plain text and is told who is there and what stands round them (${around.people.map((p) => `${p.name} ${p.far} ${p.towards}`)}; north: ${around.sees[0].meets} at ${around.sees[0].far}, ${around.sees[0].walk} cells to walk; east ${around.sees[2].walk})`)
+  const none = await told(`around?by=ada&since=${around.heard_up_to}`)
+  await a.waitForTimeout(400)
+  const [withSeats, nobody, nameless] = [await a.evaluate(() => globalThis.engine.others), await post('walk', { by: 'nobody', to: [1, 2] }), await post('join', {})]
+  check(none.heard.length === 0 && withSeats === 3 && nobody.status === 409 && nameless.status === 400, `nothing is heard twice, a page sees both seats as well as the other page (${withSeats}), and a body nobody joined cannot be walked (${nobody.status}, ${nameless.status})`)
+  // A blast beside a seat knocks it down for a few seconds; it is not hurt, and walks again after.
+  await ask({ by: 'node', blast: [1062, stopped.at[1] + 6, 4020], radius: 6, spark: false })
+  await a.waitForTimeout(300)
+  const down = (await told('me?by=ada')).you, refused = await post('walk', { by: 'ada', to: [1075, 4009] })
+  await a.waitForTimeout(4200)
+  const risen = (await told('me?by=ada')).you, walks = await post('walk', { by: 'ada', to: [1075, 4009] })
+  check(down.down && refused.status === 409 && !risen.down && walks.status === 200, `a blast beside a seat knocks it down (walk refused: ${refused.status}); four seconds on it is up and walks (${walks.status})`)
   const big = await ask({ blast: at, radius: 5000 }), long = await ask({ edit: new Array(20000).fill(0), release: at }), odd = await ask({ edit: [1, 9, 0], release: at })
   check(big.status === 400 && long.status === 400 && odd.status === 400, `a blast of radius 5000, an edit of 20,000 numbers and a malformed edit are refused (${big.status}, ${long.status}, ${odd.status})`)
   const still1 = await ask({ blast: [at[0] + 30, at[1], at[2]], radius: 6, spark: false })

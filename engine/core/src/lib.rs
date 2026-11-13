@@ -164,6 +164,20 @@ pub extern "C" fn ground_at(x: i32, z: i32) -> i32 {
     city::ground(x, z)
 }
 
+/// Where someone on foot stands at a column by the town's rule (city::footing): the height of their feet.
+#[unsafe(no_mangle)]
+pub extern "C" fn feet_at(x: i32, z: i32) -> i32 {
+    city::footing(x, z).0
+}
+
+/// What is under someone on foot at a column by the town's rule: the sort of block (0 open country, 1 shore, 2 park,
+/// 3 homes, 4 towers, 5 yard), and 8 more if it is paving.
+#[unsafe(no_mangle)]
+pub extern "C" fn paving_at(x: i32, z: i32) -> i32 {
+    let (_, paved, sort) = city::footing(x, z);
+    sort + if paved { 8 } else { 0 }
+}
+
 /// How big a box round a change is asked what still holds: 16 m across and deep, 22 m tall.
 pub const SETTLE: [usize; 3] = [160, 224, 160];
 /// How many times over what has landed is asked again whether it holds, in the support rule's own tests: a heap

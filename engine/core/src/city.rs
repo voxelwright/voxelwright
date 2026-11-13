@@ -737,6 +737,17 @@ fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32
     }
 }
 
+/// Where someone on foot stands at a column by the town's rule (#218): how high their feet are (the first cell over
+/// the ground's top and its kerb), whether what is under them is paving (a street's pavement, a paved lot), and what
+/// sort of block it is (0 open country, 1 shore, 2 park, 3 homes, 4 towers, 5 yard). It reads the rule and changes
+/// nothing: the people of the town are never cells of it.
+pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
+    let g = ground(x, z);
+    let (top, kerb) = surface(x, z, g);
+    let sort = match block(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z)) { Block::Open => 0, Block::Shore => 1, Block::Park => 2, Block::Homes => 3, Block::Towers => 4, Block::Yard => 5 };
+    (g + 1 + kerb, material(top) == CONCRETE, sort)
+}
+
 /// What the ground's top cell is at a column, and how many cells stand on it (a pavement is a kerb above the road).
 fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
     if g < SEA + 6 {

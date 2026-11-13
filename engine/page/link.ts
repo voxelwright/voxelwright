@@ -7,30 +7,43 @@ import type { Answer, Ask } from './mover.ts'
 
 /** An ask as the world did it: who asked, and what. An edit comes with the box of cells it can change, worked out by the server. */
 export interface Echo { by: string; blast?: [number, number, number]; radius?: number; spark?: boolean; ignite?: [number, number, number]; edit?: number[]; box?: [number, number, number, number, number, number]; release?: [number, number, number] }
+/** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
+export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null
   onerror: ((e: { message: string }) => void) | null
   /** An ask of anyone's, as the world does it. `live` is false for what was done before this page joined. */
   onecho: ((echo: Echo, live: boolean) => void) | null
-  /** Says where this page's eye is (the world's finest cells) and which way it faces. */
-  here(at: readonly [number, number, number], yaw: number): void
-  /** Where someone else in the world is, when they say. */
-  onhere: ((who: { by: string; at: [number, number, number]; yaw: number }) => void) | null
+  /** Says where this page's eye is (the world's finest cells) and which way it faces, under a name others see. */
+  here(at: readonly [number, number, number], yaw: number, name?: string): void
+  /** Where someone else in the world is, when the world says. */
+  onhere: ((who: Someone) => void) | null
+  /** Says something as this page's body (a name for it, then the words): everyone near hears. */
+  say(name: string, text: string): void
+  /** Something someone said, this page's own words among them. What it holds is text someone typed: to be shown, never obeyed. */
+  onsaid: ((said: { n: number; by: string; name: string; text: string; at: [number, number, number] }) => void) | null
+  /** Seconds on the world's own clock, which every page of it shares: the town's residents go by it. */
+  clock(): number
   /** This page's name in the world: an echo `by` it is its own. */
   readonly me: string
   /** Whether all that was kept before this page joined has been read. */
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6
 
 export function link(): Link {
   let live = false
+  // How far this machine's clock is behind the world's, ms.
+  let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
-    onmessage: null, onerror: null, onecho: null, onhere: null,
-    here(at, yaw) { void fetch('/world/here', { method: 'POST', body: JSON.stringify({ by: self.me, at, yaw }) }).catch(() => {}) },
+    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null,
+    here(at, yaw, name) { void fetch('/world/here', { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw }) }).catch(() => {}) },
+    // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.
+    say(name, text) { void fetch('/world/say', { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
+    clock: () => (Date.now() + behind) / 1000,
     get live() { return live },
     postMessage(ask) {
       // The world has its own clock: a page never asks it for time.
@@ -57,7 +70,8 @@ export function link(): Link {
         if (held.length - at < 12 + size) break
         const payload = held.slice(at + 12, at + 12 + size)
         at += 12 + size
-        if (kind === NOW) live = true
+        if (kind === NOW) { live = true; if (size >= 8) behind = new Float64Array(payload.buffer, 0, 1)[0] - Date.now() }
+        else if (kind === SAID) self.onsaid?.(JSON.parse(new TextDecoder().decode(payload)))
         else if (kind === ECHO) self.onecho?.(JSON.parse(new TextDecoder().decode(payload)) as Echo, live)
         else if (kind === HERE) { const who = JSON.parse(new TextDecoder().decode(payload)); if (who.by !== self.me) self.onhere?.(who) }
         else if (kind === LOG || kind === STATE) {
