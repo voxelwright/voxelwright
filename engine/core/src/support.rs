@@ -956,8 +956,10 @@ mod tests {
         // The refuge below the pass: its house, its hut, its mast with the line of flags, its wall and cairn, and
         // a stake on its way among the high pines.
         let (rx, rz) = (crate::land::REFUGE.0, crate::land::REFUGE.1);
+        // By the road on the plain: a windpump with its tank and trough, a sign, the fence.
+        let roadside = [(82_960, 4450), (83_010, 4460), (82_300, 4130), (82_060, 4170)];
         let refuge = [(rx, rz), (rx + 60, rz), (rx - 120, rz - 20), (rx + 90, rz + 60), (rx + 60, rz - 150), (rx - 100, rz - 150), (rx + 110, rz - 140)];
-        for (x, z) in hills.chain([(61_000, 4000), (61_400, 4070), (64_000, 5200), (58_000, 3000)]).chain(refuge) {
+        for (x, z) in hills.chain([(61_000, 4000), (61_400, 4070), (64_000, 5200), (58_000, 3000)]).chain(refuge).chain(roadside) {
             let mut r = city_at(x, z);
             grown += r.cells.iter().filter(|&&k| matches!(material(k), LEAVES | WOOD)).count();
             let held = loose(&r);

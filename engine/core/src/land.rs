@@ -240,8 +240,12 @@ pub fn ground(x: i32, z: i32) -> i32 {
         let away = ease(1_500.0, 9_000.0, (z - HOME.1).abs() as f32);
         let table = noise(x, z, 6400, 37) * 0.75 + noise(x, z, 17_000, 70) * 0.25 + (noise(x, z, 1300, 61) - 0.5) * 0.04 + (noise(x, z, 240, 62) - 0.5) * 0.01 - (1.0 - away) * 0.3;
         let wash = 1.0 - (noise(x, z, 3900, 63) * 2.0 - 1.0).abs();
+        // Nearer the road stand what is left of tables worn away: buttes some tens of metres across and spires, each
+        // on its own skirt, none within 60 m of the road.
+        let butte = noise(x, z, 2300, 83) * 0.8 + noise(x, z, 520, 84) * 0.2 - (1.0 - ease(600.0, 3000.0, (z - HOME.1).abs() as f32)) * 0.35;
         let plain = 420.0 + noise(x, z, 7000, 35) * 200.0 * (0.3 + 0.7 * away) + noise(x, z, 1100, 36) * 40.0 - ease(0.86, 0.97, wash) * 26.0 * away
-            + ease(0.5, 0.6, table) * 220.0 + ease(0.6, 0.612, table) * 800.0 + ease(0.67, 0.68, table) * 600.0;
+            + ease(0.5, 0.6, table) * 220.0 + ease(0.6, 0.612, table) * 800.0 + ease(0.67, 0.68, table) * 600.0
+            + ease(0.66, 0.74, butte) * 130.0 + ease(0.74, 0.752, butte) * (300.0 + noise(x, z, 9000, 85) * 500.0) + ease(0.79, 0.8, butte) * 260.0;
         h += (plain - h) * d;
     }
     if p > 0.0 {

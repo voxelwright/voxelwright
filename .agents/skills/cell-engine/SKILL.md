@@ -1403,3 +1403,31 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
   towns are quarters, streams run in dark gullies. Folds of noise are kept down to 0.6 of a pixel (at 1 to 3 the
   far land smeared), and the air takes more than its share when the look is nearly level.
 - Roads drawn where a noise crosses its middle are white worms. A road wants two ends.
+
+## The road row: scrub, buttes and things by the road (#229, November 12)
+
+- **The plain was sparse dots on flat colour.** Scrub now stands in 21 patches of 24 (clumps of two to four
+  bushes up to 70 cm, tufts of fourteen blades, stones), and from 205 to 410 m a clump is one low lump, so it does
+  not stop in a line. The earth has pale crusts and dark stone fields some metres across (two noises, 19 m and
+  4.7 m) and a scatter of dull yellow, and the road has a shoulder of grit. A scatter of green squares on the
+  ground read as lawn tiles in the sun: keep it dull and thin (8%).
+- **Buttes nearer the road** (`land.rs`, the plain block, `butte`): a second noise at 230 m, with "how far from the
+  road" taken off it over 300 m, gives small tables and spires on skirts from 60 m off the road. One more noise in
+  `ground()`: the plain costs 106 ns a column (was 92).
+- **An old road** (`country()`): the lines are worn through in places, lengths are mended darker, the edge is
+  broken into the grit. A crack is where a noise crosses its middle between one column and the next, so it is one
+  cell wide wherever it runs; "within 0.004 of the middle" was a blot metres wide where the noise lay level.
+- **Things by the road, south of it** (`stamp_fence`, `stamp_sign`, `stamp_windpump`): a wire fence 10 m off, a
+  sign every 1.2 km, a windpump with a wheel, a vane, a rusted tank with water in it and a trough every 1.2 km.
+  All in the one row of blocks the road runs through, and within 40 cells of their own block's edge (the margin
+  `blocks()` allows), so a sector over a block's edge still gets them.
+- **The hour**: at 6.8 the plain was in shade under a bright sky. At 7.1 the sun is still over the table of rock
+  and the scrub is lit. At 16.9 looking the same way the table glows red and banded under a plain blue sky.
+- **Steps a pixel at the stand: 18.6 on main, 21.0 now** (the far lumps of scrub cost none of it). On a GPU
+  shared by seven threads the size the page held said nothing: main itself held 0.30 and 0.45 in two runs a
+  minute apart. Count steps; do not read the held size.
+- **A row's `near` straight ahead can be the horizon.** The road row's look met ground 800 m off once the land
+  changed; it asks for asphalt under the middle now (`aim`). The snow row asks for the refuge's roof.
+- **Still rough**: the sun is a white blob and the sky is pale beside the film's (the engine thread's); the tables'
+  walls are smooth, with no fallen blocks at their feet; nothing moves or stands on the road; the pale crusts are
+  bright and square-edged close to.

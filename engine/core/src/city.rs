@@ -788,7 +788,22 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     if let Some(off) = off_road(x, z) {
         if off < 36 {
             let along = x - HOME.0;
-            return if off < 1 && (along / 30) % 2 == 0 { kind(ASPHALT, colour(4, 3)) } else if off == 32 || off == 33 { kind(ASPHALT, WHITE) } else { kind(ASPHALT, OWN) };
+            // An old road: its lines worn through in places, cracks across and along it, darker lengths where it was
+            // mended, and its edges broken.
+            let worn = unit(x >> 3, z >> 2, 87);
+            if off < 1 && (along / 30) % 2 == 0 && worn > 0.12 {
+                return kind(ASPHALT, colour(4, 3));
+            }
+            if (off == 32 || off == 33) && worn > 0.08 {
+                return kind(ASPHALT, WHITE);
+            }
+            if off > 33 && unit(x >> 2, z, 88) < (off - 33) as f32 * 0.3 {
+                return kind(SAND, colour(2, 8));
+            }
+            // A crack is where a noise crosses its middle between this column and the next: one cell wide wherever it runs.
+            let side = |n: f32| n > 0.5;
+            let crack = side(noise(x * 5, z, 900, 89)) != side(noise(x * 5 + 5, z + 1, 900, 89)) || side(noise(x, z * 7, 1300, 90)) != side(noise(x + 1, z * 7 + 7, 1300, 90));
+            return kind(ASPHALT, if crack { grey(13) } else if noise(x, z * 3, 700, 91) > 0.68 { grey(11) } else { OWN });
         }
     }
     let (p, d) = (peaks(x, z), dry(x, z));
@@ -848,7 +863,22 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
             let bed = (g + (noise(x, z, 2600, 67) * 60.0) as i32).div_euclid(28);
             return kind(ROCK, colour(1 + (hash(bed, 0, 68) % 2) as u8, [9, 8, 9, 5, 8][(hash(bed, 1, 68) % 5) as usize]));
         }
-        // Red earth, paler and darker in drifts a few hundred metres across, speckled; pale in the washes.
+        // By the road a shoulder of grit. Then red earth, paler and darker in drifts a few hundred metres across,
+        // speckled: pale crusts some metres across, dark fields of small stones, and everywhere the dull green of
+        // what grows low, which far off is all that is seen of the scrub.
+        if off_road(x, z).is_some_and(|off| off < 60) {
+            return kind(SAND, colour(2, if unit(x >> 1, z >> 1, 92) > 0.5 { 8 } else { 7 }));
+        }
+        let patch = noise(x, z, 190, 93) * 0.6 + noise(x, z, 47, 94) * 0.4;
+        if unit(x >> 3, z >> 3, 95) < 0.08 && unit(x >> 2, z >> 2, 96) < 0.7 {
+            return kind(SAND, colour(4, 9));
+        }
+        if patch > 0.66 {
+            return kind(SAND, colour(2, 7));
+        }
+        if patch < 0.3 {
+            return kind(SAND, colour(1, 9));
+        }
         let tone = noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2;
         return kind(SAND, colour(if noise(x, z, 5300, 69) > 0.5 { 1 } else { 2 }, [8, 8, 9, 5][(tone as usize).min(3)]));
     }
@@ -1075,6 +1105,9 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         let g = ground(x, z);
         if (seed >> 12) % 24 < pines(x, z, g) && !cleared(x, z) {
             stamp_pine(s, x, z, g, seed);
+        } else if (seed >> 12) % 24 < 11 && s.lod == 3 && g > SEA + 10 && dry(x, z) > 0.5 && !off_road(x, z).is_some_and(|off| off < 60) {
+            // A clump of scrub as one low lump.
+            s.fill([x - 5, g - 2, z - 5], [x + 6, g + 7, z + 6], kind(LEAVES, colour(6 + (seed % 3) as u8, [8, 9, 7, 8][(seed >> 2) as usize % 4])), Meet::Middle);
         }
         return;
     }
@@ -1091,27 +1124,26 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
             stamp_pine(s, x, z, g, seed);
         }
     } else if dry(x, z) > 0.5 {
-        // Scrub: grey-green bushes alone and in clumps, tufts of dry grass, a spiked plant on a stem now and then,
-        // stones.
+        // Scrub: grey-green bushes in clumps, tufts of dry grass, a spiked plant on a stem now and then, stones.
         let dusty = |n: u32| kind(LEAVES, colour(6 + (n % 3) as u8, [8, 9, 7, 8][(n >> 2) as usize % 4]));
-        if sort < 8 {
-            for n in 0..1 + (seed >> 17) % 3 {
+        if sort < 11 {
+            for n in 0..2 + (seed >> 17) % 3 {
                 let h = hash(px * 4 + n as i32, pz, 85);
-                let (bx, bz, r) = (x - 8 + (h % 17) as i32, z - 8 + ((h >> 5) % 17) as i32, 2 + ((h >> 10) % 4) as i32);
+                let (bx, bz, r) = (x - 12 + (h % 25) as i32, z - 12 + ((h >> 5) % 25) as i32, 3 + ((h >> 10) % 5) as i32);
                 s.ball([bx, ground(bx, bz) + r - 2, bz], r, dusty(h >> 13), 0, h, None);
             }
-        } else if sort < 13 {
-            for blade in 0..8u32 {
-                let h = hash(px * 8 + blade as i32, pz, 86);
-                let (bx, bz) = (x - 5 + (h % 11) as i32, z - 5 + ((h >> 4) % 11) as i32);
+        } else if sort < 17 {
+            for blade in 0..14u32 {
+                let h = hash(px * 16 + blade as i32, pz, 86);
+                let (bx, bz) = (x - 7 + (h % 15) as i32, z - 7 + ((h >> 4) % 15) as i32);
                 let bg = ground(bx, bz);
-                s.fill([bx, bg - 1, bz], [bx + 1, bg + 3 + ((h >> 8) % 5) as i32, bz + 1], kind(LEAVES, colour(3 + (h >> 12) as u8 % 2, [7, 8, 2][(h >> 14) as usize % 3])), Meet::Touch);
+                s.fill([bx, bg - 1, bz], [bx + 1, bg + 3 + ((h >> 8) % 7) as i32, bz + 1], kind(LEAVES, colour(3 + (h >> 12) as u8 % 2, [7, 8, 2][(h >> 14) as usize % 3])), Meet::Touch);
             }
-        } else if sort == 13 {
+        } else if sort == 17 {
             let tall = 7 + ((seed >> 17) % 9) as i32;
             s.fill([x, g - 2, z], [x + 2, g + tall, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
             s.ball([x + 1, g + tall + 1, z + 1], 3, kind(LEAVES, colour(7, 9)), 0, seed, None);
-        } else if sort < 16 {
+        } else if sort < 21 {
             let r = 3 + ((seed >> 17) % 8) as i32;
             s.ball([x, g - r / 3, z], r, kind(ROCK, colour(1, 9)), 0, seed, None);
         }
@@ -1281,6 +1313,102 @@ fn stamp_stake(s: &mut Scratch, x: i32, z: i32) {
     s.fill([x, g + 36, z], [x + 2, g + 46, z + 2], kind(WOOD, colour(1, 4)), Meet::Touch);
     if s.lod <= 2 {
         s.fill([x - 3, g + 40, z], [x + 5, g + 43, z + 2], kind(WOOD, colour(1, 4)), Meet::Touch);
+    }
+}
+
+/// A windpump on the plain, south of the road: a tower of four steel legs that lean in, braced, a wheel of blades at
+/// its head turned to the road and a vane behind it, and beside it a round tank of rusted steel and a trough.
+fn stamp_windpump(s: &mut Scratch, x: i32, z: i32) {
+    if s.lod > 4 {
+        return;
+    }
+    let g = [ground(x - 12, z - 12), ground(x + 12, z - 12), ground(x - 12, z + 12), ground(x + 12, z + 12)].into_iter().min().unwrap();
+    let (steel, rust) = (kind(STEEL, grey(6)), kind(STEEL, colour(1, 9)));
+    // The legs, in lengths that step in towards the head; a ring of braces at the top of each length.
+    for part in 0..9 {
+        let (out, y) = (12 - part, g - 6 + part * 11);
+        for (dx, dz) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            let (lx, lz) = (x + dx * out - (dx - 1) / 2 * 0 - if dx > 0 { 2 } else { 0 }, z + dz * out - if dz > 0 { 2 } else { 0 });
+            s.fill([lx, y, lz], [lx + 2, y + 12, lz + 2], steel, Meet::Touch);
+        }
+        if s.lod <= 2 && part % 2 == 1 {
+            s.fill([x - out, y + 10, z - out], [x + out, y + 12, z - out + 2], steel, Meet::Touch);
+            s.fill([x - out, y + 10, z + out - 2], [x + out, y + 12, z + out], steel, Meet::Touch);
+            s.fill([x - out, y + 10, z - out], [x - out + 2, y + 12, z + out], steel, Meet::Touch);
+            s.fill([x + out - 2, y + 10, z - out], [x + out, y + 12, z + out], steel, Meet::Touch);
+        }
+    }
+    // The head: a block, the wheel west of it (a ring and eight blades, one cell thick), the vane east of it.
+    let top = g - 6 + 99;
+    s.fill([x - 4, top, z - 4], [x + 4, top + 4, z + 4], steel, Meet::Touch);
+    let (wx, wy) = (x - 7, top + 2);
+    s.fill([x - 7, top + 1, z - 1], [x - 4, top + 3, z + 1], steel, Meet::Touch);
+    if s.lod <= 2 {
+        for a in -13..=13i32 {
+            for b in -13..=13i32 {
+                let d2 = a * a + b * b;
+                // Blades: wedges round the hub, with gaps between; and the rim.
+                let blade = d2 > 9 && d2 <= 150 && (a * b == 0 || a.abs() == b.abs() || (a.abs() - b.abs()).abs() == 1 || a.abs() == 1 || b.abs() == 1);
+                if d2 <= 9 || blade || (d2 > 150 && d2 <= 180) {
+                    s.fill([wx, wy + a, z + b], [wx + 1, wy + a + 1, z + b + 1], if d2 > 150 { steel } else { kind(STEEL, grey(3)) }, Meet::Touch);
+                }
+            }
+        }
+    } else {
+        s.fill([wx, wy - 12, z - 12], [wx + 1, wy + 13, z + 13], kind(STEEL, grey(4)), Meet::Middle);
+    }
+    s.fill([x + 4, top + 1, z], [x + 16, top + 3, z + 1], steel, Meet::Touch);
+    s.fill([x + 16, top - 3, z], [x + 26, top + 7, z + 1], kind(STEEL, colour(0, 5)), Meet::Touch);
+    // The tank: eight-sided, open, water in it; and the pipe from the tower.
+    let (tx, tz) = (x + 45, z + 5);
+    let tg = ground(tx, tz);
+    for (half, wide) in [(18, 8), (14, 14), (8, 18)] {
+        s.fill([tx - half, tg - 8, tz - wide], [tx + half, tg + 22, tz + wide], rust, Meet::Touch);
+    }
+    if s.lod <= 1 {
+        for (half, wide) in [(16, 7), (13, 13), (7, 16)] {
+            s.fill([tx - half, tg + 16, tz - wide], [tx + half, tg + 22, tz + wide], 0, Meet::Within);
+            s.fill([tx - half, tg + 14, tz - wide], [tx + half, tg + 17, tz + wide], kind(WATER, OWN), Meet::Within);
+        }
+        s.fill([x + 12, tg + 2, z], [tx - 17, tg + 4, z + 2], steel, Meet::Touch);
+        // The trough.
+        s.fill([tx - 10, tg - 3, tz + 26], [tx + 22, tg + 6, tz + 36], kind(CONCRETE, grey(5)), Meet::Touch);
+        s.fill([tx - 8, tg + 3, tz + 28], [tx + 20, tg + 6, tz + 34], kind(WATER, OWN), Meet::Touch);
+    }
+}
+
+/// A sign by the road: two posts and a board, green with a white band and an arrow's head.
+fn stamp_sign(s: &mut Scratch, x: i32, z: i32) {
+    if s.lod > 3 {
+        return;
+    }
+    let g = ground(x, z).min(ground(x, z + 22));
+    let post = kind(STEEL, grey(7));
+    s.fill([x, g - 4, z], [x + 2, g + 34, z + 2], post, Meet::Touch);
+    s.fill([x, g - 4, z + 22], [x + 2, g + 34, z + 24], post, Meet::Touch);
+    s.fill([x - 1, g + 20, z - 3], [x, g + 34, z + 27], kind(STEEL, colour(9, 6)), Meet::Touch);
+    if s.lod <= 1 {
+        s.fill([x - 2, g + 21, z - 2], [x - 1, g + 22, z + 26], kind(STEEL, WHITE), Meet::Touch);
+        s.fill([x - 2, g + 32, z - 2], [x - 1, g + 33, z + 26], kind(STEEL, WHITE), Meet::Touch);
+        for n in 0..5 {
+            s.fill([x - 2, g + 27 - n, z + 6 + n], [x - 1, g + 28 + n, z + 7 + n], kind(STEEL, WHITE), Meet::Touch);
+        }
+        s.fill([x - 2, g + 26, z + 10], [x - 1, g + 29, z + 20], kind(STEEL, WHITE), Meet::Touch);
+    }
+}
+
+/// A length of the fence south of the road: a post every 4 m and two wires between.
+fn stamp_fence(s: &mut Scratch, x: i32, z: i32) {
+    let (g, next) = (ground(x, z), ground(x + 40, z));
+    s.fill([x, g - 4, z], [x + 2, g + 13, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
+    if s.lod <= 1 {
+        // The wires run from this post's height to the next one's, a cell at a time.
+        for n in 2..40 {
+            let lift = (next - g) * n / 40;
+            for wire in [6, 11] {
+                s.fill([x + n, g + wire + lift, z], [x + n + 1, g + wire + lift + 1, z + 1], kind(STEEL, grey(8)), Meet::Touch);
+            }
+        }
     }
 }
 
@@ -1535,6 +1663,25 @@ pub fn make(s: &mut Scratch) {
                         if reaches(sx, sx + 2, sz, sz + 2) && sx >= x0 && sx < x0 + BLOCK_X && sz >= z0 && sz < z0 + BLOCK_Z {
                             stamp_stake(s, sx, sz);
                         }
+                    }
+                }
+            }
+            // South of the road: a fence, a sign every 1.2 km and a windpump every 1.2 km, 5 m and 38 m off it.
+            if z0 <= HOME.1 + 600 && HOME.1 + 100 < z0 + BLOCK_Z && x0 > HOME.0 + 40_000 {
+                if s.lod <= 2 && reaches(lo[0], hi[0], HOME.1 + 100, HOME.1 + 104) {
+                    for post in (lo[0] - 40).max(x0).div_euclid(40)..=(hi[0] + 40).min(x0 + BLOCK_X - 1).div_euclid(40) {
+                        if post * 40 >= x0 && z0 <= HOME.1 + 100 && HOME.1 + 100 < z0 + BLOCK_Z && dry(post * 40, HOME.1) > 0.5 {
+                            stamp_fence(s, post * 40, HOME.1 + 100);
+                        }
+                    }
+                }
+                for n in (x0 - 400).div_euclid(12_000)..=(x0 + BLOCK_X + 400).div_euclid(12_000) {
+                    let (sx, wx) = (n * 12_000 + 10_300, n * 12_000 + 10_960);
+                    if reaches(sx - 4, sx + 4, HOME.1 + 50, HOME.1 + 80) && sx >= x0 && sx < x0 + BLOCK_X && z0 <= HOME.1 + 50 && HOME.1 + 50 < z0 + BLOCK_Z {
+                        stamp_sign(s, sx, HOME.1 + 50);
+                    }
+                    if reaches(wx - 30, wx + 80, HOME.1 + 340, HOME.1 + 420) && wx >= x0 && wx < x0 + BLOCK_X && z0 <= HOME.1 + 380 && HOME.1 + 380 < z0 + BLOCK_Z {
+                        stamp_windpump(s, wx, HOME.1 + 380);
                     }
                 }
             }
