@@ -2,6 +2,8 @@
 // WebGPU. Run by itself a script starts its own; under `node test/all.mjs` they all share the
 // one server and the one browser that it started (ENGINE_KIT says where).
 import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from 'playwright'
 
 export const here = new URL('..', import.meta.url).pathname
@@ -10,8 +12,8 @@ export const has = (name) => process.argv.includes(`--${name}`)
 export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] }
 
 /** Starts the page server on a port of its own; reports it is sent are thrown away unless a file is named. */
-export async function serve(reports = '/dev/null') {
-  const server = spawn('node', ['serve.mjs', '--port', '0', '--reports', reports], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
+export async function serve(reports = '/dev/null', more = []) {
+  const server = spawn('node', ['serve.mjs', '--port', '0', '--reports', reports, ...more], { cwd: here, stdio: ['ignore', 'pipe', 'inherit'] })
   const port = await new Promise((resolve, reject) => {
     server.stdout.on('data', (chunk) => { const m = /engine page on http:\/\/127\.0\.0\.1:(\d+)/.exec(String(chunk)); if (m) resolve(Number(m[1])) })
     server.on('exit', (code) => reject(new Error(`the server ended (${code})`)))
@@ -24,8 +26,12 @@ export async function serve(reports = '/dev/null') {
  * `finish(name)` closes what this script started and ends the process, failed if anything did.
  */
 export async function start() {
-  const shared = process.env.ENGINE_KIT ? JSON.parse(process.env.ENGINE_KIT) : null
-  const server = shared ? null : await serve()
+  // ENGINE_SHARED: the check is run in a shared world (world.mjs), on a server of its own that keeps one in a file
+  // of its own, and every page it opens is in that world. The checks that break things are run this way too
+  // (test/shared.mjs): what holds for the worker in the page must hold for the world behind the server.
+  const world = process.env.ENGINE_SHARED ? join(tmpdir(), `engine-world-${process.pid}-${Date.now()}.log`) : null
+  const shared = process.env.ENGINE_KIT && !world ? JSON.parse(process.env.ENGINE_KIT) : null
+  const server = shared ? null : await serve('/dev/null', world ? ['--world', world] : [])
   const browser = shared ? await chromium.connect(shared.ws) : await chromium.launch(CHROME)
   const failures = []
   const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
@@ -46,7 +52,7 @@ export async function start() {
       p.on('response', (r) => { if (r.status() >= 500) reject(new Error(`the page failed as it started: ${r.status()} for ${r.url()}`)) })
     })
     broke.catch(() => {})   // it may fail before anything waits on it
-    await p.goto(`${url}/city?fly=0&${query}`)
+    await p.goto(`${url}/city?fly=0&${world ? 'shared=1&' : ''}${query}`)
     // Beside other checks on one GPU the engine can take a while to come up. A page that fails as it starts (a shader
     // that does not compile) will never have one: `broke` says so at once, not after the wait.
     await Promise.race([p.waitForFunction(() => globalThis.engine, null, { timeout: 90_000 }), broke])

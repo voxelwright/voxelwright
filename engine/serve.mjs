@@ -2,11 +2,16 @@
 // (Node's own stripper, so there is no bundler and a visit always runs what is on disk), and it
 // keeps what a page reports about the device it ran on: one JSON line a report, outside the repo.
 //
-//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl]
+//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--world file]
+//
+// With --world it also keeps one shared world (world.mjs): everyone who opens the page with ?shared=1 is in it,
+// what any of them breaks all of them see, and it is kept in that file across restarts. Without it there is none.
 //
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
 import { createServer } from 'node:http'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { Worker } from 'node:worker_threads'
 import { stripTypeScriptTypes } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, extname, join, normalize, sep } from 'node:path'
@@ -54,10 +59,200 @@ async function report(req, res) {
   send(res, 200, '{"kept":true}', TYPES['.json'])
 }
 
+// ── The shared world ─────────────────────────────────────────────────────
+// A stream of frames, each twelve bytes of header (its kind, its number, how many bytes follow) and what follows.
+//   1 log     what must never be missed: four counts (bodies, cells alight, water flowing, whether it answers an
+//             ask), then the core's words (cells out and back, bodies born and gone, dust). Numbered and kept.
+//   2 state   where things are now: the same counts, then bodies, fire, water. Latest wins; a slow reader skips them.
+//   3 echo    an ask, as JSON, at the moment the world did it: a page applies it then. Numbered and kept.
+//   4 now     the reader has been sent all that was kept: from here on it is as it happens.
+//   5 here    where someone in the world is, as JSON: who, where their eye is (the finest cells), which way they face.
+const worldFile = arg('world', '')
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5
+/** What someone outside a browser is told when they ask what this is. */
+const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does, and it is kept.
+Places are whole numbers of cells: x east, y up, z south. The town's start is near x 700, z 4070, on a street that runs east and west; houses front it on the north side.
+
+GET  /world/at?x=&y=&z=   what one cell is: {kind, material, colour, rubble, ground}. material 0 is air; 6 asphalt, 7 concrete, 8 brick, 9 plaster, 10 wood, 11 glass, 12 steel, 13 leaves. rubble says it fell there. ground is the height of the land's own top cell at that x and z (154 at the start): stand a cell or more above it.
+GET  /world/look?x=&y=&z=&dx=&dy=&dz=   the first thing along a line from a place, within ${800} cells: {at: [x, y, z], kind, material, colour, rubble, far}; at is null if nothing is met. North is dz -1.
+POST /world/ask           JSON, one of:
+       {"by": name, "blast": [x, y, z], "radius": 1 to ${40}, "spark": false}   break what is there; what it leaves unheld falls
+       {"by": name, "ignite": [x, y, z], "radius": 1 to 8}                     set alight what can burn there
+       {"by": name, "ball": {"from": [x, y, z], "speed": [vx, vy, vz], "radius": 1 to 6, "kind": 12}}   throw a ball (cells a second, under 800)
+       {"by": name, "edit": [0, x, y, z, radius, kind], "release": [x, y, z]}  fill a ball with a kind (kind = material + 256 * colour)
+     The reply says only that the ask was taken. Asks are done one after another. A big blast takes up to a second, and a question asked meanwhile waits for it. What is thrown or falls takes a few seconds to come to rest; then it is cells again, and at and look find it.
+POST /world/here          {"by": name, "at": [x, y, z], "yaw": radians}   say where you are, a few times a second: others see you there
+GET  /world/stream        everything that happens, as it happens (binary frames: see engine/serve.mjs)
+`
+/** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
+const RADIUS_MOST = 40, EDIT_MOST = 4096, ASKS_A_SECOND = 60
+const frame = (kind, seq, payload) => { const head = Buffer.alloc(12); head.writeUInt32LE(kind, 0); head.writeUInt32LE(seq, 4); head.writeUInt32LE(payload.length, 8); return Buffer.concat([head, payload]) }
+const words = (counts, w) => Buffer.concat([Buffer.from(Uint32Array.from(counts).buffer), Buffer.from(w.buffer, w.byteOffset, w.byteLength)])
+/** The edit a kept frame made, in the core's own form (page/edits.ts), or null if it made none; and the frame as it is kept: the edit and no more. */
+function kept(kind, payload) {
+  if (kind === ECHO) {
+    const ask = JSON.parse(payload.toString('utf8'))
+    if (ask.blast) return { edit: Int32Array.of(0, ...ask.blast, ask.radius, 0), payload }
+    if (ask.edit) return { edit: Int32Array.from(ask.edit), payload }
+    return null
+  }
+  const w = new Uint32Array(payload.buffer.slice(payload.byteOffset + 16, payload.byteOffset + payload.length))
+  const edits = [], records = []
+  for (let i = 0; i < w.length;) {
+    const size = 2 + w[i + 1]
+    if (w[i] === 1) {
+      records.push(w.subarray(i, i + size))
+      edits.push(1, (size - 8) / 5)
+      for (const v of new Int32Array(w.buffer, w.byteOffset + (i + 8) * 4, size - 8)) edits.push(v)
+    }
+    i += size
+  }
+  if (!edits.length) return null
+  const only = new Uint32Array(records.reduce((n, r) => n + r.length, 0))
+  let at = 0
+  for (const r of records) { only.set(r, at); at += r.length }
+  return { edit: Int32Array.from(edits), payload: words([0, 0, 0, 0], only) }
+}
+const whole = (v, most = 2 ** 30) => Number.isInteger(v) && Math.abs(v) <= most
+const place = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => whole(v))
+/** An ask as the world will do it, with nothing in it but what it may hold; or why it may not be done. */
+function allowed(body) {
+  if (!body || typeof body !== 'object') return 'an ask is an object'
+  const by = typeof body.by === 'string' ? body.by.slice(0, 24) : ''
+  if (body.blast) return place(body.blast) && whole(body.radius) && body.radius >= 1 && body.radius <= RADIUS_MOST ? { by, blast: body.blast, radius: body.radius, spark: !!body.spark } : `a blast is at a place and at most ${RADIUS_MOST} cells in radius`
+  if (body.ignite) return place(body.ignite) && whole(body.radius) && body.radius >= 1 && body.radius <= 8 ? { by, ignite: body.ignite, radius: body.radius } : 'a fire is lit at a place, within 8 cells'
+  if (body.ball) {
+    const b = body.ball, three = (a, most) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) <= most)
+    return b && three(b.from, 2 ** 30) && three(b.speed, 800) && whole(b.radius) && b.radius >= 1 && b.radius <= 6 && whole(b.kind) && b.kind >= 1 && b.kind <= 65535 ? { by, ball: { from: b.from, speed: b.speed, radius: b.radius, kind: b.kind } } : 'a ball has a place, a speed under 800, a radius of 1 to 6 and a kind'
+  }
+  if (body.edit) {
+    const e = body.edit
+    if (!Array.isArray(e) || e.length > EDIT_MOST || !e.every((v) => whole(v)) || !place(body.release)) return `an edit is at most ${EDIT_MOST} whole numbers, with a place to ask what it left unheld`
+    // Its box is worked out here, not taken on trust: pages make the town again by it.
+    const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], grow = (lo, hi) => { for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], lo[a]); box[a + 3] = Math.max(box[a + 3], hi[a]) } }
+    for (let i = 0; i < e.length;) {
+      if (e[i] === 0 && i + 6 <= e.length && e[i + 4] >= 1 && e[i + 4] <= RADIUS_MOST && e[i + 5] >= 0 && e[i + 5] <= 65535) {
+        const r = e[i + 5] === 0 ? Math.ceil((e[i + 4] * 44) / 16) + 1 : e[i + 4]
+        grow([e[i + 1] - r, e[i + 2] - r, e[i + 3] - r], [e[i + 1] + r + 1, e[i + 2] + r + 1, e[i + 3] + r + 1])
+        i += 6
+      } else if (e[i] === 1 && e[i + 1] >= 1 && i + 2 + e[i + 1] * 5 <= e.length) {
+        for (let k = i + 2; k < i + 2 + e[i + 1] * 5; k += 5) {
+          if (!(e[k] < e[k + 1] && e[k + 1] - e[k] <= 4096 && e[k + 4] >= 0 && e[k + 4] <= 65535)) return 'a row of an edit runs from one cell to a higher one, of a kind'
+          grow([e[k], e[k + 2], e[k + 3]], [e[k + 1], e[k + 2] + 1, e[k + 3] + 1])
+        }
+        i += 2 + e[i + 1] * 5
+      } else return 'an edit is balls and rows (page/edits.ts)'
+    }
+    return e.length ? { by, edit: e, box, release: body.release } : 'an edit of nothing'
+  }
+  return 'an ask is a blast, a fire, a ball or an edit'
+}
+let world = null
+if (worldFile) {
+  mkdirSync(dirname(worldFile), { recursive: true })
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm') } })
+  // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
+  // that were in the air when the world last stopped are lost; where they came from is as they left it).
+  const log = []
+  if (existsSync(worldFile)) {
+    const all = readFileSync(worldFile)
+    for (let at = 0; at + 12 <= all.length;) {
+      const kind = all.readUInt32LE(at), size = all.readUInt32LE(at + 8)
+      if (at + 12 + size > all.length) break
+      const k = kept(kind, all.subarray(at + 12, at + 12 + size))
+      if (k) { thread.postMessage({ replay: k.edit }); log.push(frame(kind, log.length, k.payload)) }
+      at += 12 + size
+    }
+  }
+  writeFileSync(worldFile, Buffer.concat(log))
+  const readers = new Set()
+  let down = ''
+  const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
+  /** Questions waiting for the world's answer, by number. */
+  const waiting = new Map()
+  let questions = 0
+  thread.on('message', (m) => {
+    if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
+    if (m.echo) return keep(ECHO, Buffer.from(JSON.stringify(m.echo)))
+    if (!m.counts) return
+    if (m.log.length) keep(LOG, words(m.counts, m.log))
+    const now = frame(STATE, 0, words(m.counts, m.state))
+    // A reader a megabyte behind is not sent where things are: by the time it read that, they would be elsewhere.
+    for (const r of readers) if (r.writableLength < 1 << 20) r.write(now)
+  })
+  thread.on('error', (e) => { down = String(e); console.error(`the world stopped: ${down}`) })
+  let asked = 0, since = Date.now()
+  const body = async (req, most) => { const parts = []; let size = 0; for await (const chunk of req) { size += chunk.length; if (size > most) return null; parts.push(chunk) } try { return JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return undefined } }
+  world = {
+    guide: (res) => send(res, 200, GUIDE),
+    /** What a cell is, asked of the world itself. */
+    async at(url, res) {
+      const at = ['x', 'y', 'z'].map((k) => Number(url.searchParams.get(k)))
+      if (down) return send(res, 503, 'the world has stopped')
+      if (!place(at)) return send(res, 400, 'a place is x, y and z, whole numbers of cells')
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ at, id }) })
+      send(res, 200, JSON.stringify({ kind: m.kind, material: m.kind & 15, colour: m.kind >> 8, rubble: (m.kind & 16) !== 0, ground: m.ground }), TYPES['.json'])
+    },
+    /** The first thing along a line, asked of the world itself. */
+    async look(url, res) {
+      const [x, y, z, dx, dy, dz] = ['x', 'y', 'z', 'dx', 'dy', 'dz'].map((k) => Number(url.searchParams.get(k)))
+      if (down) return send(res, 503, 'the world has stopped')
+      if (!place([x, y, z]) || ![dx, dy, dz].every(Number.isFinite) || !(Math.hypot(dx, dy, dz) > 0)) return send(res, 400, 'a look is from x, y and z (whole cells) along dx, dy and dz')
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ look: { from: [x + 0.5, y + 0.5, z + 0.5], to: [dx, dy, dz] }, id }) })
+      send(res, 200, JSON.stringify({ at: m.at, kind: m.kind, material: m.kind & 15, colour: m.kind >> 8, rubble: (m.kind & 16) !== 0, far: m.far }), TYPES['.json'])
+    },
+    /** Where someone is: told to everyone, kept by no one. */
+    async here(req, res) {
+      const b = await body(req, 1024)
+      if (!b || typeof b.by !== 'string' || !Array.isArray(b.at) || b.at.length !== 3 || !b.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) || !Number.isFinite(b.yaw ?? 0)) return send(res, 400, 'where you are is {by, at: [x, y, z], yaw}')
+      const f = frame(HERE, 0, Buffer.from(JSON.stringify({ by: b.by.slice(0, 24), at: b.at, yaw: b.yaw ?? 0 })))
+      for (const r of readers) if (r.writableLength < 1 << 20) r.write(f)
+      send(res, 202, '{}', TYPES['.json'])
+    },
+    stream(res, from) {
+      res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
+      for (let i = Math.max(0, from); i < log.length; i++) res.write(log[i])
+      res.write(frame(NOW, log.length, Buffer.alloc(0)))
+      readers.add(res)
+      res.on('close', () => readers.delete(res))
+    },
+    async ask(req, res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const now = Date.now()
+      if (now - since > 1000) { since = now; asked = 0 }
+      if (++asked > ASKS_A_SECOND) return send(res, 429, 'too many asks')
+      const parts = []
+      let size = 0
+      for await (const chunk of req) { size += chunk.length; if (size > 1 << 18) return send(res, 413, 'too much'); parts.push(chunk) }
+      let body
+      try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
+      const ask = allowed(body)
+      if (typeof ask === 'string') return send(res, 400, ask)
+      thread.postMessage({ ask })
+      send(res, 202, '{"asked":true}', TYPES['.json'])
+    },
+  }
+  console.log(`a shared world is kept in ${worldFile} (${log.length} things done to it so far)`)
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
   if (req.method === 'POST' && url.pathname === '/report') return done(report(req, res))
+  if (url.pathname.startsWith('/world/')) {
+    if (!world) return send(res, 404, 'no shared world is kept here')
+    // A page from somewhere else may not act here through the browser of someone who can reach this.
+    if (req.headers.origin && URL.parse(req.headers.origin)?.host !== req.headers.host) return send(res, 403, 'not from another site')
+    if (req.method === 'GET' && url.pathname === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
+    if (req.method === 'POST' && url.pathname === '/world/ask') return done(world.ask(req, res))
+    if (req.method === 'POST' && url.pathname === '/world/here') return done(world.here(req, res))
+    if (req.method === 'GET' && url.pathname === '/world/at') return done(world.at(url, res))
+    if (req.method === 'GET' && url.pathname === '/world/look') return done(world.look(url, res))
+    if (req.method === 'GET' && url.pathname === '/world/') return world.guide(res)
+    return send(res, 404, 'not here')
+  }
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')
   if (url.pathname === '/favicon.ico') return send(res, 204, '')
   // The address a phone is sent is the city, which measures itself; the probe keeps its own.

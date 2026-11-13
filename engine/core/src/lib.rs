@@ -245,6 +245,12 @@ pub extern "C" fn bodies_burning() -> usize {
     INSTANCE.with_borrow_mut(|i| moving(i).fire.alight.len())
 }
 
+/// What a cell of the world the solver moves in is made of, edits and all: 0 for air (kinds.rs for the rest).
+#[unsafe(no_mangle)]
+pub extern "C" fn world_kind(x: i32, y: i32, z: i32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ground.kind(x, y, z) as u32)
+}
+
 /// Whether water is flowing, or may: 1 while the page should keep asking for time.
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_flowing() -> usize {

@@ -496,7 +496,7 @@ front coming down, staying down and losing no cell.
   a thousand kilometres out.
 - What stands is reach and counts of cells, not stress. Nothing bends or flows. A tower
   does not go over.
-- Nothing is shared, kept or seen by agents: one page, its own edits, gone on reload.
+- A page by itself is still its own world, gone on reload. A shared one is kept (see the shared world, below).
 - No walking, only flying. No real San Francisco: the city and the land round it are made up.
 - Bodies and crumbs cast no shadow. Fire lights nothing round it.
 - The hour is set, it does not pass. At night a window is lit by a rule of where it is, and a
@@ -881,3 +881,34 @@ eye at its middle, so the ground is out of it 6.5 km up.
 - `water.rs` `changed()` looked every tank over on every edit anywhere and woke the water each time. A tank is
   looked over only when an edit's box reaches it, and water wakes only where the world changed under it.
 - WGSL in a template string: no backticks in comments (again).
+
+## A shared world (November 12)
+
+One world process runs the core and orders everything; pages are views of what it says. It is `engine/world.mjs`, a
+worker thread behind `serve.mjs --world file`. A page with `?shared=1` talks to it through `page/link.ts`, which
+stands where the page's own mover worker stood: the same messages in, the same words out.
+
+- **Nobody else decides anything.** A page in a shared world does not apply its own blast: it asks, and applies the
+  echo when the world sends it, in the world's order. Two pages that break things at once agree (twenty looks of
+  twenty in `test/shared.mjs`).
+- **The stream** (`GET /world/stream?from=n`) is frames with a 12-byte head (kind, number, bytes): 1 what must not be
+  missed (cells out and back, bodies born and gone, dust), 2 where things are now (bodies, fire, water: dropped for
+  a reader a megabyte behind), 3 an ask as it is done (JSON), 4 "you are now up to date", 5 where someone is.
+- **What is kept** is the file of frames 1 and 3. On a restart it is cut down to the edits alone and those go back
+  into the core (`world_edit(-1)`): bodies in the air when it stopped are lost, where they came from stays as it was.
+- **Anything that can send a request is in it** (`GET /world/` says how): `at` (one cell), `look` (the first thing
+  along a line, within 800 cells), `ask` (blast, ignite, ball, edit), `here` (where you are; others draw you as
+  three cubes for five seconds). Caps: radius 40, an edit of 4,096 numbers with its box worked out by the server, 60
+  asks a second, 256 KB. A request with an `Origin` that is not the server's own is refused, so a page of another
+  site cannot act through the browser of someone who can reach it. There is no asking who anyone is.
+- **A real model was put in it** (Sonnet, as "wren", through curl alone, 31 requests): it found a house front by
+  asking cell after cell, blew a doorway and threw a ball through. What it found wrong with the guide is fixed:
+  the street's height (154 at the start, and `ground` says it anywhere), the `rubble` field, that an answer waits
+  behind a big blast (710 ms measured), and nothing to see with. `look` came of that.
+- **Faults met**: reading `core.memory.buffer` before a call that may grow the memory leaves a detached buffer
+  (ask for room first, then read). A check that the blast's middle is air afterwards is wrong: rubble lands there.
+- **Run before changing the solver or the carrying**: `node test/shared.mjs --suite` (blast, falls, tools and water
+  with `ENGINE_SHARED=1`, each page a view of a world of its own behind a server of its own).
+- **Not there**: no agent lives in it (one came, acted and left). A person is three cubes, with no name shown.
+  Nothing is said or heard. Sixty-four people in one street has not been tried: two pages and a script have.
+  The world's clock is one thread: a big blast holds everything else for most of a second.

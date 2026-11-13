@@ -13,6 +13,7 @@ import { COUNT, FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type 
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
 import { space } from './space.ts'
+import { link } from './link.ts'
 import { puffs } from './puffs.ts'
 import { ball, rows, stream, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
@@ -305,7 +306,13 @@ async function main() {
   // body that falls, turns and strikes things, drawn as faces while it moves, and cells of the world again where
   // it comes to rest (bodies.rs). The worker makes edits of its own (cells out, cells back); they are applied here
   // in the order it made them, and it is told how many of them a blast came after.
-  const mover = new Worker('/page/mover.ts', { type: 'module' })
+  // `?shared=1`: the world is the one the page server keeps for everyone (world.mjs), and this page is a view of
+  // it. It applies nothing of its own: what it asks comes back in the world's stream, in the world's order, with
+  // what everyone else asked.
+  const far = query.has('shared') ? link() : null
+  const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker('/page/mover.ts', { type: 'module' })
+  /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
+  const asked: boolean[] = []
   const moving = new Map<number, Piece>()
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
@@ -338,7 +345,8 @@ async function main() {
   mover.onmessage = (e: MessageEvent<Answer>) => {
     const answer = e.data, t0 = performance.now()
     queueMicrotask(() => { spent.heard += performance.now() - t0 })
-    if (answer.released) waiting--
+    if (far) { if (answer.released && asked.shift()) waiting-- }
+    else if (answer.released) waiting--
     else ticking = false
     if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
     const told = read(answer.words)
@@ -371,7 +379,7 @@ async function main() {
         debris.burst(piece.pos, (size[0] + size[2]) / 4, Math.min(10, 1 + Math.round(piece.born.cells / 70)), [c[0], c[1], c[2]], 0.9, 40, 0.45)
       }
     }
-    for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
+    if (!far || far.live) for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
     bodies = answer.bodies
     burning = answer.burning
     running = answer.flowing || answer.released
@@ -394,7 +402,7 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if ((bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
@@ -418,12 +426,41 @@ async function main() {
   }
   /** A blast at a place (the world's finest cells), whatever is or is not there. */
   const strike = (at: readonly [number, number, number], radius = force, spark = sparks) => {
-    put()
-    change(ball(at[0], at[1], at[2], radius, 0))
     fell.asks++
     waiting++
     mover.postMessage({ blast: [at[0], at[1], at[2]], radius, after: heard, spark } satisfies Ask)
-    smoke.blast(at, radius)
+    // In a shared world the blast is made when the world says so (its echo), for everyone at once.
+    if (!far) struck(at, radius)
+  }
+  /** A blast as it is made in the world this page draws: the cells it empties, its fire and smoke. */
+  const struck = (at: readonly [number, number, number], radius: number, seen = true) => {
+    put()
+    change(ball(at[0], at[1], at[2], radius, 0))
+    if (seen) smoke.blast(at, radius)
+  }
+  // Others in a shared world: each says where it is ten times a second, and is drawn there as a figure of three
+  // cubes (legs, body, head) in a colour of its own, for five seconds after it was last heard from.
+  const others = new Map<string, { at: [number, number, number]; yaw: number; heard: number }>()
+  if (far) {
+    far.onhere = (who) => others.set(who.by, { at: who.at, yaw: who.yaw, heard: performance.now() })
+    setInterval(() => {
+      far.here([pose.x * M, pose.y * M, pose.z * M], pose.yaw)
+      const now = performance.now(), cubes: { at: [number, number, number]; edge: number; colour: [number, number, number] }[] = []
+      for (const [by, o] of others) {
+        if (now - o.heard > 5000) { others.delete(by); continue }
+        let h = 0
+        for (const ch of by) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+        const colour: [number, number, number] = [0.25 + 0.6 * ((h & 255) / 255), 0.25 + 0.6 * (((h >> 8) & 255) / 255), 0.25 + 0.6 * (((h >> 16) & 255) / 255)]
+        // The eye is the head: the body and the legs hang under it.
+        cubes.push({ at: [o.at[0], o.at[1] - 1, o.at[2]], edge: 3, colour: [0.85, 0.7, 0.58] }, { at: [o.at[0], o.at[1] - 6.5, o.at[2]], edge: 6, colour }, { at: [o.at[0], o.at[1] - 13, o.at[2]], edge: 5, colour: [colour[0] * 0.5, colour[1] * 0.5, colour[2] * 0.5] })
+      }
+      debris.show(cubes)
+    }, 100)
+  }
+  if (far) far.onecho = (echo, live) => {
+    if (echo.blast || echo.edit) asked.push(echo.by === far.me)
+    if (echo.blast) struck(echo.blast, echo.radius ?? force, live)
+    else if (echo.edit && echo.box) { put(); change({ words: Int32Array.from(echo.edit), box: echo.box }) }
   }
 
   /** Sets alight what can burn round what is straight ahead. Returns where, or null for sky. */
@@ -447,10 +484,11 @@ async function main() {
 
   /** An edit of the page's own making, told to the mover, which is then asked what it left unheld round `at`. */
   const make = (edit: Edit, at: [number, number, number]) => {
-    put()
-    change(edit)
     waiting++
     mover.postMessage({ edit: edit.words, after: heard, release: at } satisfies Ask)
+    if (far) return
+    put()
+    change(edit)
   }
 
   /** Cuts level through what is ahead: a slot two cells thick and 9 m across. What stood on it has nothing under it. */
@@ -590,7 +628,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, march, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others.size }, shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

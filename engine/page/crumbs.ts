@@ -50,6 +50,8 @@ export interface Crumbs {
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is. */
   light(sun: readonly number[], day: number): void
+  /** Cubes to draw as well, until told otherwise: where each is (the world's finest cells), its edge, its colour. Others in a shared world are drawn so. */
+  show(cubes: readonly { at: readonly [number, number, number]; edge: number; colour: readonly [number, number, number] }[]): void
   readonly live: number
 }
 
@@ -69,10 +71,12 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3), life = new Float32Array(MOST), edge = new Float32Array(MOST), tone = new Float32Array(MOST * 3)
   const packed = new Float32Array(MOST * EACH)
   let next = 0, live = 0
+  let shown: readonly { at: readonly [number, number, number]; edge: number; colour: readonly [number, number, number] }[] = []
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   return {
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
+    show(cubes) { shown = cubes },
     burst(at, radius, count, colour, size, lasts = 2.5, fast = 1) {
       for (let k = 0; k < count; k++) {
         const i = next++ % MOST
@@ -105,10 +109,15 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
       }
     },
     draw(encoder, to, view) {
-      if (!live) return
+      if (!live && !shown.length) return
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
       let n = 0
-      for (let i = 0; i < MOST; i++) {
+      for (const c of shown) {
+        const o = n++ * EACH
+        packed[o] = c.at[0] - anchor[0]; packed[o + 1] = c.at[1] - anchor[1]; packed[o + 2] = c.at[2] - anchor[2]; packed[o + 3] = c.edge
+        packed[o + 4] = c.colour[0]; packed[o + 5] = c.colour[1]; packed[o + 6] = c.colour[2]; packed[o + 7] = 1
+      }
+      for (let i = 0; i < MOST && n < MOST; i++) {
         if (life[i] <= 0) continue
         const o = n++ * EACH
         packed[o] = p[i * 3] - anchor[0]; packed[o + 1] = p[i * 3 + 1] - anchor[1]; packed[o + 2] = p[i * 3 + 2] - anchor[2]

@@ -32,5 +32,6 @@ for (const pid of old.split('\n').filter(Boolean)) {
 const logs = join(homedir(), '.village', 'engine')
 mkdirSync(logs, { recursive: true })
 const log = openSync(join(logs, 'serve.log'), 'a')
-spawn('node', ['serve.mjs', '--port', port], { cwd: join(live, 'engine'), detached: true, stdio: ['ignore', log, log] }).unref()
+// The link keeps one shared world (`?shared=1` on the address), in a file that outlives each merge.
+spawn('node', ['serve.mjs', '--port', port, '--world', join(logs, 'world', 'main.log')], { cwd: join(live, 'engine'), detached: true, stdio: ['ignore', log, log] }).unref()
 console.log(`the link now serves ${at} from ${live}`)

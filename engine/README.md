@@ -12,7 +12,9 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
   `flight.ts` (the flight that measures a device).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
-  report in `~/.village/engine/reports.jsonl`.
+  report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world.
+- `world.mjs`: the shared world's own process, a thread behind the server that runs the core: it does what it is
+  asked in order and says what happened. `page/link.ts` is a page's line to it.
 
 ## Run it
 
@@ -28,6 +30,12 @@ wheel for speed. A click uses the tool picked on what is ahead; keys 1 to 7 or t
 thumb moves, the right thumb looks, and the red button uses the tool picked. H shows how many steps each
 pixel took, L and M turn shadows and mirrors off, K traces every shadow instead of using the sun's maps.
 
+A shared world: `node serve.mjs --world ~/.village/engine/world/some.log`, then `/city?shared=1` in as many
+windows as you like. Everyone there sees what anyone breaks, builds or burns, and each other as a small figure; the
+file keeps it across restarts. Anything that can send a request can act in it too: `curl http://127.0.0.1:5740/world/`
+says how (what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit). Nobody is asked
+who they are: whoever can reach the server can change that world.
+
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40`.
 
@@ -38,7 +46,7 @@ To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:
 
 ```sh
 cd engine
-npm run check                 # every check, about three minutes: the core's tests, the types, and the real page in Chrome
+npm run check                 # every check, about eight minutes: the core's tests, the types, and the real page in Chrome
 node test/all.mjs --only falls,blast
 node test/bench.mjs           # how fast the march is against test/baseline.json; says when the GPU was too busy to tell
 node test/versus.mjs --out dir --fetch   # the board: our shots beside frames of the reference films
@@ -48,12 +56,13 @@ node test/clip.mjs --row rubble --out dir   # a row of the board filmed as the p
 node test/look.mjs --out file.png --at x,y,z --look yaw,pitch   # one look, with settings
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
+node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
 ```
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/flight.mjs` (the measuring flight, then a tree
+(a cut tree goes over and lies as cells), `test/shared.mjs` (two pages and a plain request in one world: all see the same, after a reload and a restart too), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
 in the installed Chrome; none stubs anything. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.

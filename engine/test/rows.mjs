@@ -268,5 +268,8 @@ export const ROWS = [
   // What their films do not show. These count only on top of the rows above.
   { key: 'live', what: 'Shown live, 60 frames a second on an M1 Pro (their film was captured frame by frame)', state: 'ahead', note: 'node test/flight.mjs; node test/bench.mjs' },
   { key: 'phone', what: '60 frames a second on a real iPhone, things falling', state: 'ahead', note: 'the owner\'s iPhone, November 11: node test/read.mjs' },
-  { key: 'shared', what: 'People and agents in one world that is kept', state: 'none' },
+  // Behind, by our own account (no film shows this, so no judge can see it): two pages, a plain request and one
+  // model's visit have been in one kept world, but worlds made elsewhere (Spawn's) hold more people and keep agents.
+  // It moves up when an agent lives there and a person there has a body and a name.
+  { key: 'shared', what: 'People and agents in one world that is kept', state: 'behind', note: 'node test/shared.mjs; a model acted in it once over HTTP (dispatch log); nobody lives there, and a person is three cubes' },
 ]
