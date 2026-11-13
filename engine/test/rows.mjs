@@ -116,6 +116,13 @@ const charge = async (page, turn, radius, pitch) => {
 // point either way from pass to pass (tumble's six passes: ours 6, 6.5, 6, 5, 5, 5 to theirs 5, 5.5, 5, 7, 6, 7).
 // Water's lack: the falling water is "an opaque white pillar", with no foam and nothing seen through it. The grade
 // by day was softened after this pass (glow.ts) and no judge has seen that yet.
+// The seventh full judge (logged, main bb9e9226, 22 rows: the softer day grade, water's streaked fall and the planet
+// from space for the first time): town 5 v 7, light 6 v 7, tumble 6 v 7, topple 6 v 7, blast 7 v 6, fire 6 v 4,
+// water 5 v 6, rubble 7 v 6, glass 5 v 4, frame 5 v 7, tools 5 v 4, ruin 6 v 7, sunset 7 v 8, under 6 v 8, snow 5 v 7,
+// rain 6 v 8, road 7 v 6, whole 6 v 7, signs 4 v 8, dusk 6 v 7, space 7 v 8, there 6 v 5. The states below are that
+// judge's: nothing to show 1, behind 6, level 15, ahead 3. What it still lacks, row by row: town (no fuel station, a
+// dark empty road over half the picture), frame (in shadow and haze, low contrast), under (no shafts of light), snow
+// (flat light on terraced slopes), rain (no lamps, no warm wet reflections), signs (no square, no people).
 // The fourth judge's scores, for the noise between passes: town 5 v 7, light 5 v 7, tumble 6 v 5, topple 5 v 7,
 // blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4, ruin 5 v 7, sunset 7 v 8, under 6 v 8,
 // snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7, there 6 v 5. Glass is kept level, not
@@ -130,7 +137,7 @@ export const ROWS = [
     stand: { from: [54, 437], up: 1.8, to: [33, 400], high: 7 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'level',
     stand: [-9, 1.8, 2.2, 62, 5] },
-  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'behind',
+  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'level',
     stand: FRONT, near: [16, ...HOUSE], inAir: true, falls: 20,
     act: async (page) => {
       await blast(page, 16)
@@ -165,7 +172,7 @@ export const ROWS = [
       await page.waitForTimeout(2600)
       return page.screenshot()
     } },
-  { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'behind',
+  { key: 'water', what: 'Water that flows and foams', theirs: ['engine', 21.6], state: 'level',
     // The yard's water tower from beside it: a charge low on its tank, and the forty cubic metres in it come down
     // the tower and out over the yard. Flowing water is not cells (the core's water.rs): it is a surface.
     stand: { from: [32.5, 415.5], up: 1.3, to: YARD.tower, high: 4.2 }, near: [40, STEEL, WOOD], aim: [0, 0.6], flows: 2500,
@@ -220,7 +227,7 @@ export const ROWS = [
       for (const turn of [-0.9, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(700) }
     } },
   // The same engine as the Earth.
-  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'behind',
+  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
     // From the town's shore over its lake to where the sun goes down over the mountains beyond it, towers either side.
     stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.35, near: [400, WATER] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
@@ -236,7 +243,7 @@ export const ROWS = [
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'level',
     // The road out of town across the dry plain, 6 km east of the start, at sunrise: poles down one side of it.
     stand: { from: [6100, 407], up: 1.8, to: [9000, 407], high: 25 }, hour: 6.45, near: [300, SAND, ASPHALT] },
-  { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
+  { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'level',
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },
   { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'behind',
@@ -245,7 +252,7 @@ export const ROWS = [
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'level',
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
-  { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'behind',
+  { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'level',
     // From 250 km over the land west of the town, looking north along the coast the town stands near. Over 6 km
     // up the planet is drawn by a pass of its own (page/space.ts). It is an invented planet: the row is of the Earth.
     stand: [-40_000, 250_000, 0, 350, -28], hour: 13 },
