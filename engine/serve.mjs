@@ -85,7 +85,7 @@ POST /world/here          {"by": name, "at": [x, y, z], "yaw": radians}   say wh
 GET  /world/stream        everything that happens, as it happens (binary frames: see engine/serve.mjs)
 `
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
-const RADIUS_MOST = 40, EDIT_MOST = 4096, ASKS_A_SECOND = 60
+const RADIUS_MOST = 40, EDIT_MOST = 16384, ASKS_A_SECOND = 60
 const frame = (kind, seq, payload) => { const head = Buffer.alloc(12); head.writeUInt32LE(kind, 0); head.writeUInt32LE(seq, 4); head.writeUInt32LE(payload.length, 8); return Buffer.concat([head, payload]) }
 const words = (counts, w) => Buffer.concat([Buffer.from(Uint32Array.from(counts).buffer), Buffer.from(w.buffer, w.byteOffset, w.byteLength)])
 /** The edit a kept frame made, in the core's own form (page/edits.ts), or null if it made none; and the frame as it is kept: the edit and no more. */

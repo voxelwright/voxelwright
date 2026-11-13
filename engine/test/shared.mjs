@@ -89,8 +89,8 @@ try {
   await a.waitForTimeout(400)
   const seen = [await a.evaluate(() => globalThis.engine.others), await b.evaluate(() => globalThis.engine.others)]
   check(seen[0] === 1 && seen[1] === 1, `each page sees one other in the world (${seen})`)
-  const big = await ask({ blast: at, radius: 5000 }), long = await ask({ edit: new Array(5000).fill(0), release: at }), odd = await ask({ edit: [1, 9, 0], release: at })
-  check(big.status === 400 && long.status === 400 && odd.status === 400, `a blast of radius 5000, an edit of 5000 numbers and a malformed edit are refused (${big.status}, ${long.status}, ${odd.status})`)
+  const big = await ask({ blast: at, radius: 5000 }), long = await ask({ edit: new Array(20000).fill(0), release: at }), odd = await ask({ edit: [1, 9, 0], release: at })
+  check(big.status === 400 && long.status === 400 && odd.status === 400, `a blast of radius 5000, an edit of 20,000 numbers and a malformed edit are refused (${big.status}, ${long.status}, ${odd.status})`)
   const still1 = await ask({ blast: [at[0] + 30, at[1], at[2]], radius: 6, spark: false })
   await a.waitForTimeout(1200)
   await still(a, { limit: 90_000 })
