@@ -38,6 +38,35 @@ says how: a body of its own that walks, turns, speaks and is told what is around
 world by), what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit. Nobody is asked
 who they are: whoever can reach the server can change that world, and can use any name, another's included.
 
+## Making (#220)
+
+Say what you want and where, and a model makes it in a shared world out of the world's own cells: breakable,
+burnable, seen by everyone there.
+
+```sh
+node serve.mjs --port 5741 --world ~/.village/engine/world/try.log    # a world of your own; then open /city?shared=1
+node make.mjs "a market stall with a striped awning" --world http://127.0.0.1:5741 --me   # in front of you (the page's eye)
+node make.mjs "a red telephone box" --world http://127.0.0.1:5741 --at 700,4070           # at a place, in cells
+node make.mjs --undo --world http://127.0.0.1:5741                                        # takes the last one out again
+```
+
+- **The model is your own Claude Code**, run once on your machine on your subscription (`--model opus` by default;
+  `sonnet` is about twice as fast and plainer). It is started with no tools, no servers, no settings and no session,
+  in an empty temporary folder, and is told only the brief in `make/brief.mjs` and your wish. The binary itself adds
+  your account's email and that folder's path to what it sends: `.agents/skills/claude-code-headless/SKILL.md`.
+- **The world's server never runs a model.** The maker is a client like a page: it asks the world what is where and
+  sends the thing as one ordinary edit (`POST /world/ask`), which the world takes whole or refuses whole.
+- **A reply is data.** It is a list of boxes, bars, balls, slopes, stripes and words in named materials and colours
+  (`make/form.mjs`). Anything else is refused; nothing in it is run; no kind number is taken from it. It is turned
+  into cells here, checked to be joined to the ground, stood in a core of the maker's own to see that nothing of it
+  would fall, and only then sent. A reply that cannot be used is asked for again, told why, up to three times.
+- **Where**: on the ground only, facing whoever asked, its feet carried down to a sloping street, near the place
+  if the place itself is taken. A thing is at most 64 by 80 by 64 cells and 3,276 runs (one edit).
+- What was made is written in `~/.village/engine/made.jsonl` before it is sent and after, so `--undo` can take it
+  out, and a send whose answer was lost is looked for in the world, never sent twice.
+- `node test/make.mjs` checks all of that with replies kept in the check: **no model is run by it.** Real runs
+  (November 12, 2026): twenty wishes to Opus 5.5, nineteen made; times and what failed are in the cell-engine skill.
+
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?people=0` (a town with nobody in it) `?name=Ada` (in a shared world).
 
@@ -64,9 +93,9 @@ node test/shared.mjs --suite  # before a change to the solver or to how a shared
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
-cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each drives the real page
-in the installed Chrome; none stubs anything. They share one server and one browser and run
+(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
+cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
+in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.
 
 The board (`test/rows.mjs`) is the bar: one row for each thing a viewer sees in the two films of

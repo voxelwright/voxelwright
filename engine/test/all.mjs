@@ -35,6 +35,7 @@ const checks = [
   ['space', 'node', ['test/space.mjs'], true],
   ['shared', 'node', ['test/shared.mjs'], true],
   ['people', 'node', ['test/people.mjs'], true],
+  ['make', 'node', ['test/make.mjs'], false],
   ['flight', 'node', ['test/flight.mjs'], true],
   ['phone', 'node', ['test/flight.mjs', '--phone'], true],
   ['probe', 'node', ['test/probe.mjs', '--heat', '2'], true],

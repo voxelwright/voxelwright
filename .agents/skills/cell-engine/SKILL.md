@@ -1110,3 +1110,50 @@ lake): nothing there may change. So what the under-water and sunset rows lacked 
   little. They want creased ridges and gullies before the snow row is judged again.
 - The planet's pass paints the plain red and the massif white to match the cells (`space.ts`); from 7 km the plain
   is still a square with soft edges, as `dry()` is.
+## Things made by a model (#220, November 12)
+
+`engine/make.mjs` and `engine/make/`: a wish and a place become a thing of cells in a shared world. The maker is a
+client of the world, never part of its server; the model is the asker's own Claude Code (`claude-code-headless`
+skill). What was learned about the engine on the way:
+
+- **An edit of rows overwrites.** A hand-written stall put at a guessed place replaced part of a house front. A
+  maker has to ask first: a look straight down every column of the footprint (`/world/look`), and nothing may be
+  more than six cells above the place.
+- **`ground` from `/world/at` is the land's own top, not where things stand.** A pavement is a cell or two above
+  it, and a street slopes along its length (the first block's road rises about 30 cells in 70 m). Stand a thing on
+  what a look down meets, at the highest of its feet, and carry each lowest cell down to its own ground as a
+  parked car's wheels are. A solid-bottomed thing on a slope so gets a plinth of its own material.
+- **Rows run along x only.** A thing's cost in an edit is its number of x-runs, so it depends on which way it
+  faces: stripes across x on a 34 by 18 awning are 162 rows, the same stripes across z are 18. Count after turning.
+- **818 rows was not enough** for one thing with detail at 10 cm (11 of 19 made things were over it; the largest
+  2,147). An edit may now be 16,384 numbers, 3,276 rows (PR 221). One thing is one edit so that it arrives whole.
+- **Where the release is asked matters.** `bodies_release(x, y, z, 0)` treats its place as a blast of no size, and
+  `support::adrift` lets go of any thing mostly of steel, glass or lamp that has a cell at that place. Asked at a
+  made thing's middle, a steel vending machine "fell" whole, and so did everything joined to it. Ask at a cell of
+  air beside the thing: the core's box (16 m across, from 4.8 m below the place to 17 m above) still holds it.
+  The world's own guide does not say this.
+- **Ask the core before sending.** The maker stands the thing in a core of its own (`page/core.wasm` in Node: the
+  edit, then the release) and reads which rows are gone. What the core's rule lets fall is then never sent, and the
+  model can be told which part it was. That core has only the rules in it, so a thing stood on something another
+  person built is judged as standing on air; for now things stand on the ground only.
+- **What the model gets wrong**, of 29 replies from Opus 5.5 for 20 wishes: ten refused. Five had a few cells or a
+  part a cell off, touching nothing (three of those would now pass: up to twelve stray cells are left out and
+  counted); four were refused by the core's rule (an umbrella's canopy, a tower's cabin, a windmill's sails: big
+  plaster or wood held by a thin join); one had an argument too many. Thirteen wishes were usable at the first
+  reply, five at the second, one at the third, and one (a food cart with an umbrella) never.
+- **Times** (Opus 5.5, the binary started each time): 16 to 44 s when the first reply is usable, half within 29 s;
+  up to 78 s with a second or third. Sonnet 5.5: 17 to 20 s, plainer things (no signs, fewer parts). A made thing
+  is 742 to 26,136 cells (half under 4,300) in 140 to 2,147 rows.
+- **What it costs the frame could not be told** on a GPU shared by five threads: five things in view, turn about
+  with and without, the least of eight paced frames a turn, four turns, gave 14.3 to 18.3 ms without and 10.4 to
+  24.3 ms with. They are cells in the same trees as the town, drawn by the same march.
+- **A wall's foot is not ground.** A look that meets a house front a metre up is within a kerb's height of the
+  land's own top; what tells it from ground is the cell above it (wall, not air). The maker then stands the thing
+  with its back at the wall. Asked there, the core's release let go of nothing of the house.
+- **The command itself** adds 3.5 to 5 s to the model's time: the looks down every column, the core of its own, the
+  send, and 1.5 s of watching that the thing stays.
+- **Pictures of a made thing**: stand within 4.6 m and above it. From further back on this street the eye is
+  inside a parked car at the kerb.
+- **Not there**: no asking from inside the page (a browser cannot run the binary; that needs a helper on the
+  asker's machine). Nothing a model writes is run: rules and mechanics made at runtime need a sandbox and are not
+  begun. Things do not stand on other made things. A thin wheel or a bicycle at 10 cm is at the edge of what reads.
