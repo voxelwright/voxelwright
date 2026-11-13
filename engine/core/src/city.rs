@@ -6,7 +6,7 @@
 
 use crate::hash::{hash, hash3, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, REFUGE, arid, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, reef_column, reef_form, way};
+use crate::land::{HOME, REFUGE, SURF, arid, coast_fold, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, reef_column, reef_form, way};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -822,15 +822,35 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         (((a - b).abs().max((c - e).abs())) as f32 / (far * 2) as f32, (c - e) * 48 / far, (a + b + c + e) as f32 / 4.0 - g as f32)
     };
     let steep = || lie(48).0;
-    // By the sea: dark rock where the land falls to it in cliffs and where stacks stand out of it, a beach where it
-    // comes down gently.
-    if offshore(x, z).is_some_and(|s| s > -1400.0) {
+    // By the sea: surf where the water meets the land; rock in beds where the land falls to it in cliffs and where
+    // stacks stand out of it; a beach where it comes down gently; and on the hills behind, dark under the woods,
+    // dry gold grass and olive scrub in the open.
+    if let Some(off) = offshore(x, z).filter(|&off| off > if p > 0.0 { -1400.0 } else { -7000.0 }) {
+        if g <= SURF + 1 && g >= SURF {
+            return kind(SAND, WHITE);
+        }
         let s = steep();
-        if s > 0.75 {
-            return kind(ROCK, if noise(x, z + g * 3, 260, 47) > 0.5 { colour(2, 9) } else { grey(9 + (noise(x, z, 900, 48) * 3.0) as u8) });
+        // (Only what is steeper than a tree can stand on, on the folded hills: at 0.75 whole hillsides were striped
+        // rock. Stacks and what stands in the sea are rock from 0.75, as they were.)
+        if s > if off > 0.0 || p > 0.0 { 0.75 } else { 1.25 } {
+            // Beds two metres thick, tilted a little, umber and grey and a pale one now and then; darker where wet.
+            let bed = (g + (noise(x, z, 1700, 47) * 90.0) as i32 + x / 9).div_euclid(21);
+            let tone = hash(bed, 0, 48) % 7;
+            return kind(ROCK, if g < 14 { grey(12) } else { [colour(2, 9), grey(10), colour(2, 9), grey(10), colour(3, 9), grey(11), colour(2, 9)][tone as usize] });
         }
         if g < 26 + (noise(x, z, 400, 49) * 30.0) as i32 {
             return kind(SAND, colour(3, 7));
+        }
+        if p == 0.0 && off > -7000.0 && off < 0.0 {
+            if shore_woods(x, z, g) > 0 {
+                return kind(GRASS, [colour(8, 6), colour(7, 9), colour(8, 9)][(unit(x >> 2, z >> 2, 93) * 3.0) as usize]);
+            }
+            // Open hillside: gold where it is dry on the ridges, olive in the folds, paler in drifts.
+            let dryness = coast_fold(x, z) + (noise(x, z, 900, 94) - 0.5) * 0.6 + (unit(x >> 2, z >> 2, 95) - 0.5) * 0.25;
+            let fade = ease(-7000.0, -5200.0, off);
+            if unit(x >> 3, z >> 3, 96) < fade {
+                return kind(GRASS, if dryness > 0.62 { colour(4, 8) } else if dryness > 0.4 { colour(5, 8) } else { colour(6, 9) });
+            }
         }
     }
     if p > 0.0 {
@@ -1278,6 +1298,32 @@ fn stamp_bush(s: &mut Scratch, x: i32, z: i32, seed: u32) {
     }
 }
 
+/// How many patches of every 24 hold a tree on the hills by the sea: woods fill the folds and stand in belts on the
+/// slopes, with open hillside on the ridges between; none on the beach, the cliffs or the last metres above them.
+fn shore_woods(x: i32, z: i32, g: i32) -> u32 {
+    let Some(off) = offshore(x, z).filter(|&off| off > -7000.0 && off < -40.0) else { return 0 };
+    if g < 40 || peaks(x, z) > 0.0 {
+        return 0;
+    }
+    let stand = noise(x, z, 2300, 97) + (0.5 - coast_fold(x, z)) * 0.7 - (1.0 - ease(-7000.0, -5000.0, off)) * 0.5;
+    if stand > 0.3 { 21 } else if stand > 0.18 { 9 } else { 2 }
+}
+
+/// A tree of the coast: a dark crown spread flat on a short trunk and drawn over to the east by the wind off the
+/// sea. Far off it is its crown alone.
+fn stamp_shore_tree(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
+    let (tall, r) = (12 + (seed >> 17) as i32 % 16, 9 + (seed >> 21) as i32 % 6);
+    let dark = kind(LEAVES, [colour(8, 6), colour(9, 6), colour(8, 9), colour(7, 6)][(seed >> 24) as usize % 4]);
+    if s.lod > 2 {
+        s.fill([x - r, g + tall - 2, z - r], [x + r + 4, g + tall + r, z + r + 1], dark, if s.lod > 3 { Meet::Touch } else { Meet::Middle });
+        return;
+    }
+    s.fill([x - 1, g - 3, z - 1], [x + 1, g + tall + r / 2, z + 1], kind(WOOD, colour(2, 9)), Meet::Touch);
+    // The crown: a wide low ball over the trunk, and a smaller one to the lee of it and a little lower.
+    s.ball([x, g + tall + r / 3, z], r, dark, 0, seed, Some(([i32::MIN, g + tall, i32::MIN], [i32::MAX, g + tall + r * 3 / 4 + 2, i32::MAX])));
+    s.ball([x + r * 2 / 3, g + tall + r / 4, z + (seed >> 27) as i32 % 5 - 2], r * 3 / 4, dark, 0, seed ^ 3, Some(([i32::MIN, g + tall + 1, i32::MIN], [i32::MAX, g + tall + r * 2 / 3, i32::MAX])));
+}
+
 /// Whether a place is kept clear of trees: the refuge's yard, and its way.
 fn cleared(x: i32, z: i32) -> bool {
     ((x - REFUGE.0).abs() < 300 && (z - REFUGE.1).abs() < 300) || way(x, z).is_some_and(|w| w.1.abs() < 22)
@@ -1299,6 +1345,8 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         let g = ground(x, z);
         if (seed >> 12) % 24 < pines(x, z, g) && !cleared(x, z) {
             stamp_pine(s, x, z, g, seed);
+        } else if (seed >> 12) % 24 < shore_woods(x, z, g) {
+            stamp_shore_tree(s, x, z, g, seed);
         } else if let Some(wood) = grove(x, z, g) {
             // A wood far off is still its trees.
             if (seed >> 12) % 24 < if wood > 0.58 { 15 } else if wood > 0.52 { 5 } else { 1 } {
@@ -1326,7 +1374,21 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         return;
     }
     let sort = if verge { 11 + (seed >> 12) % 13 } else { (seed >> 12) % 24 };
-    if pines(x, z, g) > 0 {
+    if offshore(x, z).is_some_and(|off| off > -7000.0) && peaks(x, z) == 0.0 {
+        // By the sea: trees in the woods; in the open low scrub in clumps, sunk into the ground, and a stone or two.
+        if sort < shore_woods(x, z, g) {
+            stamp_shore_tree(s, x, z, g, seed);
+        } else if sort >= 19 && sort < 23 {
+            for n in 0..1 + (seed >> 17) % 3 {
+                let h = hash(px * 4 + n as i32, pz, 98);
+                let (bx, bz, r) = (x - 10 + (h % 21) as i32, z - 10 + ((h >> 5) % 21) as i32, 3 + ((h >> 10) % 4) as i32);
+                s.ball([bx, ground(bx, bz) + r - 3, bz], r, kind(LEAVES, colour(6 + (h >> 13) as u8 % 2, [9, 8, 9, 6][(h >> 15) as usize % 4])), 0, h, None);
+            }
+        } else if sort == 23 {
+            let r = 3 + ((seed >> 17) % 6) as i32;
+            s.ball([x, g - r / 3, z], r, kind(ROCK, grey(9 + (seed >> 21) as u8 % 3)), 0, seed, None);
+        }
+    } else if pines(x, z, g) > 0 {
         if sort < pines(x, z, g) {
             stamp_pine(s, x, z, g, seed);
         }

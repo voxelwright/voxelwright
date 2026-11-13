@@ -1037,6 +1037,37 @@ fell.push(format!("at {x} {z}: {unheld} cells of materials {kinds:?} are not hel
         assert!(fell.is_empty(), "{} things on the reefs are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
     }
 
+    #[test]
+    fn what_grows_by_the_sea_is_at_rest() {
+        // The hills along the coast west of the town, with their woods and scrub, where the ground is near level
+        // across the box (on a slope the box cuts trees from the ground they stand in): nothing may be loose or drop.
+        let (mut grown, mut fell, mut boxes) = (0, Vec::new(), 0);
+        for z in (-24_000..24_000).step_by(410) {
+            for x in (-66_000..-58_000).step_by(190) {
+                let g = ground(x, z);
+                if g < 60 || !crate::land::offshore(x, z).is_some_and(|off| off > -6500.0 && off < 0.0) || [(-80, -80), (80, -80), (-80, 80), (80, 80), (0, 80), (80, 0), (-80, 0), (0, -80)].iter().any(|&(dx, dz)| (ground(x + dx, z + dz) - g).abs() > 14) {
+                    continue;
+                }
+                boxes += 1;
+                let mut r = city_at(x, z);
+                grown += r.cells.iter().filter(|&&k| matches!(material(k), LEAVES | WOOD)).count();
+                let held = loose(&r);
+                let unheld = held.iter().filter(|&&l| l).count();
+                if unheld > 0 {
+                    let mut kinds: Vec<Kind> = (0..r.cells.len()).filter(|&i| held[i]).map(|i| r.cells[i]).collect();
+                    kinds.sort_unstable();
+                    kinds.dedup();
+                    fell.push(format!("at {x} {z}: {unheld} cells of kinds {kinds:?} are not held"));
+                }
+                for m in &settle(&mut r, 3).moves {
+                    fell.push(format!("at {x} {z}: {} cells dropped {}", m.cells, m.drop));
+                }
+            }
+        }
+        assert!(grown > 20_000, "the {boxes} boxes looked at hold trees and scrub ({grown} cells of them)");
+        assert!(fell.is_empty(), "{} things by the sea are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
+    }
+
     /// Ground 4 cells thick with a post on it, and a panel of plaster 30 wide, 20 tall and 2 thick beside or under something.
     fn yard() -> Region {
         let mut r = Region::new([0, 0, 0], [96, 96, 48]);

@@ -233,6 +233,17 @@ pub fn offshore(x: i32, z: i32) -> Option<f32> {
     Some(west - 66_000.0 + (noise(x, z, 23_000, 51) - 0.5) * 20_000.0 + (0.5 - cape) * 10_000.0 + (noise(x, z, 1500, 53) - 0.5) * 1800.0)
 }
 
+/// The top cell of a column where surf lies: one over the sea's own (city.rs `SEA` is -1).
+pub const SURF: i32 = 1;
+
+/// How far up a fold of the coast's hills a place is, 0 in a gully to 1 on a ridge: the folds run from inland down
+/// to the sea (the noise is asked three times as long that way as along the coast) and bend a little.
+pub fn coast_fold(x: i32, z: i32) -> f32 {
+    let bent = z + ((noise(x, z, 5200, 86) - 0.5) * 1800.0) as i32;
+    let crest = 1.0 - (noise(x.div_euclid(3), bent, 1900, 77) * 2.0 - 1.0).abs();
+    crest * 0.75 + (1.0 - (noise(x.div_euclid(2), bent, 640, 79) * 2.0 - 1.0).abs()) * 0.25
+}
+
 /// One of the columns a reef is grown over with, 0 to 1: they are three cells square, and each stands to a height
 /// of its own (city.rs colours a column by the same number, pale where it stands tall).
 pub fn reef_column(x: i32, z: i32) -> f32 {
@@ -286,10 +297,15 @@ pub fn ground(x: i32, z: i32) -> i32 {
     if let Some(s) = offshore(x, z).filter(|_| w < 1.0) {
         let o = open(x, z) * (1.0 - w);
         if s > -7000.0 && o > 0.0 {
-            // Hills stand along the coast and end in cliffs where they are high, in a beach where they are low.
+            // Hills stand along the coast, folded: ridges run down to the sea and end in headlands, with gullies
+            // between that come down to it sooner. Their last third falls in a cliff; where they are low, a beach.
             let hills = noise(x, z, 8200, 54);
-            h += o * ease(-7000.0, -500.0, s) * (ease(0.3, 0.75, hills) * 1300.0 + noise(x, z, 2100, 55) * 260.0);
-            if s > -500.0 {
+            let fold = coast_fold(x, z);
+            let rise = ease(0.2, 0.7, hills) * 2000.0 + 400.0;
+            h += o * ease(-7000.0, -900.0, s) * (rise * (0.4 + 0.6 * fold) + noise(x, z, 2100, 55) * 260.0 + noise(x, z, 330, 78) * 50.0 * fold);
+            // A ridge keeps its height further out than a gully does.
+            let down = s + (0.5 - fold) * 700.0;
+            if down > -2000.0 {
                 // The sea's floor: a shelf of sand with reefs standing off it in mounds, then down into the deep.
                 let shelf = ease(100.0, 700.0, s);
                 let reef = ease(0.5, 0.8, noise(x, z, 900, 56));
@@ -298,12 +314,24 @@ pub fn ground(x: i32, z: i32) -> i32 {
                     // What grows stops short of the top of the water: two metres under it, or where the rock was.
                     bed = (bed + overgrown(x, z) * reef * shelf).min(bed.max(-20.0));
                 }
-                // Stacks of rock stand out of the water off the headlands.
+                // Stacks of rock stand out of the water off the headlands, in ledges, some with level tops.
                 let stack = noise(x, z, 310, 59);
                 if stack > 0.8 && s < 5000.0 {
-                    bed += ease(0.8, 0.9, stack) * (260.0 + noise(x, z, 2900, 60) * 300.0) * shelf * (1.0 - ease(2500.0, 5000.0, s));
+                    let lump = ease(0.8, 0.9, stack) * (260.0 + noise(x, z, 2900, 60) * 300.0) + noise(x, z, 41, 81) * 36.0 * ease(0.8, 0.86, stack);
+                    // (Ledges a third of the way: more, and with their tops cut level, they were boxes.)
+                    let ledged = (lump / 55.0).floor() * 55.0 * 0.3 + lump * 0.7 + noise(x, z, 17, 82) * 14.0 * ease(0.8, 0.84, stack);
+                    bed += ledged * shelf * (1.0 - ease(2500.0, 5000.0, s));
                 }
-                h += (bed - h) * o * ease(-500.0, 60.0, s);
+                // Two thirds of the height go in a steep slope, the last third in a cliff at the water.
+                let fall = 0.66 * ease(-2000.0, -150.0, down) + 0.34 * ease(-500.0, 60.0, s);
+                h += (bed - h) * o * if s > 60.0 { 1.0 } else { fall.min(1.0) };
+                // Surf: where the sea meets the land, at a beach, a cliff's foot or a stack, a broken line of white
+                // a cell over the water (city.rs paints it). Water that moves is not this.
+                // (Round a stack, whose sides are steep, the band is taken wider: a cell or two of white else.)
+                let band = if stack > 0.8 { (-26.0, 14.0) } else { (-7.0, 4.0) };
+                if o == 1.0 && h > band.0 && h < band.1 && s > -600.0 && s < 6000.0 && noise(x, z, 70, 80) > 0.33 {
+                    h = SURF as f32 + 0.5;
+                }
             }
         }
     }

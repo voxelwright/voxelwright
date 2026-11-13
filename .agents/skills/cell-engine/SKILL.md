@@ -1546,3 +1546,35 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
   the shoulder from 4.2 m off the road's middle.
 - Steps a pixel: snow 27.1, road 21.5. `flight` fails beside four other checks on a busy GPU ("a break was not
   over in 15 s") and passes alone: 0.59 ms a sector.
+
+## The folded coast: woods, bedded cliffs, stacks in ledges, surf (#227, November 12)
+
+- **The coast's hills are folded** (`land.rs` `coast_fold`): ridges run from inland down to the sea and end in
+  headlands, with gullies between that come down to it sooner. The noise is asked three times as long inland as
+  along the coast, and its crest lines (`1 - |2n - 1|`) are the ridges. Two thirds of a hill's height go in a steep
+  slope and the last third in a cliff at the water. The coast's own line (`offshore`) is untouched: the planet's pass
+  draws the same line.
+- **Woods by the sea** (`city.rs` `shore_woods`, `stamp_shore_tree`): a dark crown spread flat on a short trunk and
+  drawn to the east by the wind off the sea; thickest in the folds, thin on the ridges, none on beach or cliff. Far
+  off a tree is its crown alone, as the pines are. Open hillside is gold on the ridges and olive in the folds.
+  `what_grows_by_the_sea_is_at_rest` asks 16 m boxes where the ground is near level.
+- **Rock only where it is steeper than 1.25 on these hills.** At 0.75 (the rule for cliffs and stacks, which stays
+  for what stands in the sea) whole hillsides were striped rock. Cliff rock lies in beds two metres thick, tilted a
+  little, umber and grey, darker in the first metre over the water.
+- **Stacks**: ledges a third of the way and a fine roughness. Ledges all the way, with tops cut level, were boxes.
+- **Surf is a top cell one over the sea** (`land.rs` `SURF`): where the ground by the sea lies within a few cells of
+  the water's top it is set to that cell, in a broken line, and `country` paints it white. A beach gets a band
+  some metres wide, a cliff's foot a cell or two, and a stack a ring (its band is taken wider, its sides being
+  steep). From 16 cells under to 7 over it was a white road along the shore; from 7 under to 4 over it is a line.
+  Nothing moves: water that moves is `water.rs`.
+- **Which way the row looks.** At 17.35 the sun is west-south-west: stands that look south along the coast have no
+  sun in them. The row looks north-west from over a headland.
+- **Later is not better, yet.** From 17.5 the sun is on the horizon in gold, and two ranking reads put those frames
+  under the 17.35 one: "the sun is a blown-out blob", "a hard horizontal streak ... looks like a rendering bug".
+  That is the sky and the last pass (asked on #140). Also theirs to give: the sea beyond 60 m is a mirror with no
+  ripples, so the sun's path does not glitter.
+- **Cost.** Steps a pixel at the new stand 26.3 against 23.1 at the old (the woods); the town seen whole 22.6, as it
+  was.
+- **Reads** (dispatch log): two rankings of six, theirs 8 and 7.5, the row's stand 5.5 and 5, main's old row 3.5.
+- **Rough still**: a tree is two balls; the woods are one sort of tree; cliffs have beds but no caves or arches; the
+  surf is still; from the beach the hills behind are steep enough to be mostly cliff in places.

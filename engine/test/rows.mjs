@@ -259,10 +259,13 @@ export const ROWS = [
     } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
-    // From a headland on the coast 6 km west of the town, down over its stacks of rock to where the sun goes into the
-    // sea, a cliff beyond. (Until the land had a coast this was the town's lake, and the eighth judge saw "no real
-    // coastline, just a flat skyline strip".)
-    stand: { from: [-6000, 400], up: 60, to: [-6800, -100], high: 20 }, hour: 17.35, near: [1500, WATER, ROCK, 3] },
+    // From over a wooded headland on the coast 6 km west of the town, north-west along it: stacks of rock in ledges
+    // with surf at their feet, a beach under the woods, headlands one behind another, the sun going down over the
+    // sea. (Until the land had a coast this was the town's lake, and the eighth judge saw "no real coastline, just
+    // a flat skyline strip"; the first coast had a lawn with a tree here and there on it, a smooth brown cliff and
+    // no surf.) Own ranking reads, November 12 (dispatch log, #227): theirs 8 and 7.5, this stand 5.5 and 5, the
+    // stand before it 3.5. Later than this hour the sun is a blot with a streak across it, and scored lower.
+    stand: { from: [-6100, 600], up: 50, to: [-6700, -400], high: 0 }, hour: 17.35, near: [1500, WATER, ROCK, 3, LEAVES, SAND] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
     // In a kelp forest on a reef off that coast, six metres down in the morning, the sun behind the eye: giant kelp
     // in gold and olive with its fronds hanging, the reef's pale mounds and small things in front, sand with
