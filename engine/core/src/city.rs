@@ -897,7 +897,7 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
             return kind(GRASS, colour(4, 9));
         }
     }
-    kind(GRASS, OWN)
+    if grove(x, z, g).is_some() { meadow(x, z, g) } else { kind(GRASS, OWN) }
 }
 
 /// Snow at a place, `steep` cells a cell. It is sand in white (it lies even, where rock is rough), and not one
@@ -1220,6 +1220,61 @@ fn pines(x: i32, z: i32, g: i32) -> u32 {
     }
 }
 
+/// How much of a broadleaf wood a place in the grass country is, 0 to 1 (a wood from 0.58, its edge from 0.52):
+/// `None` out of that country, which is the town's own land between the mountains, the plain and a kilometre short
+/// of the coast, above the lakes' shores.
+fn grove(x: i32, z: i32, g: i32) -> Option<f32> {
+    if g < SEA + 6 || peaks(x, z) > 0.0 || dry(x, z) > 0.0 || far(x, z) > 0.0 || offshore(x, z).is_some_and(|s| s > -10_000.0) {
+        return None;
+    }
+    Some(noise(x, z, 3400, 97) * 0.7 + noise(x, z, 900, 98) * 0.3)
+}
+
+/// What the grass country is covered with: under the woods a dark floor with fallen leaves; by the water dark wet
+/// grass; else meadow in several greens, dry and yellow on some swells, and in places thick with small flowers.
+fn meadow(x: i32, z: i32, g: i32) -> Kind {
+    if grove(x, z, g).is_some_and(|w| w > 0.58) {
+        return kind(GRASS, if unit(x >> 1, z >> 1, 102) < 0.22 { colour(2, 9) } else { colour(8, 9) });
+    }
+    if g < SEA + 14 + (noise(x, z, 300, 103) * 14.0) as i32 {
+        return kind(GRASS, colour(8, 6));
+    }
+    if noise(x, z, 600, 101) > 0.68 && unit(x >> 1, z >> 1, 104) < 0.07 {
+        return kind(GRASS, colour([4, 4, 0, 20, 2][hash(x >> 1, z >> 1, 105) as usize % 5], 4));
+    }
+    let tone = noise(x, z, 1700, 99) * 0.6 + noise(x, z, 310, 100) * 0.4;
+    kind(GRASS, if tone < 0.36 { colour(6, 8) } else if tone < 0.5 { OWN } else if tone < 0.66 { colour(7, 3) } else { colour(8, 8) })
+}
+
+/// A broad-leaved tree of the grass country: a stout trunk, a crown of three or four balls of leaves, some tall and
+/// narrow and some low and wide, each its own green. Far off it is its crown.
+fn stamp_oak(s: &mut Scratch, x: i32, z: i32, seed: u32) {
+    let g = ground(x, z);
+    let (tall, r) = (22 + (seed % 26) as i32, 10 + ((seed >> 5) % 7) as i32);
+    let leaves = kind(LEAVES, colour(6 + (seed >> 8) as u8 % 4, [3, 5, 8, 9, 6][(seed >> 11) as usize % 5]));
+    if s.lod <= 2 {
+        s.fill([x - 1, g - 3, z - 1], [x + 2, g + 1 + tall, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
+    }
+    // Whole balls: a crown thinned out leaves single cells in the air, which nothing holds.
+    let thin = 0;
+    s.ball([x, g + tall + r / 2, z], r, leaves, thin, seed, None);
+    for n in 0..2 + (seed >> 14) % 2 {
+        let h = hash(x, z + n as i32, 109);
+        let (dx, dz) = ((h % 15) as i32 - 7, ((h >> 4) % 15) as i32 - 7);
+        s.ball([x + dx, g + tall + r / 2 + ((h >> 8) % 6) as i32 + 1, z + dz], r * 2 / 3, leaves, thin, h, None);
+    }
+}
+
+/// A bush: two or three balls of leaves sunk a little into the ground.
+fn stamp_bush(s: &mut Scratch, x: i32, z: i32, seed: u32) {
+    let leaves = kind(LEAVES, colour(7 + (seed >> 8) as u8 % 3, [5, 8, 9, 6][(seed >> 11) as usize % 4]));
+    for n in 0..2 + (seed >> 14) % 2 {
+        let h = hash(x + n as i32, z, 106);
+        let (bx, bz, r) = (x - 6 + (h % 13) as i32, z - 6 + ((h >> 4) % 13) as i32, 4 + ((h >> 8) % 5) as i32);
+        s.ball([bx, ground(bx, bz) + r - 3, bz], r, leaves, 0, h, None);
+    }
+}
+
 /// Whether a place is kept clear of trees: the refuge's yard, and its way.
 fn cleared(x: i32, z: i32) -> bool {
     ((x - REFUGE.0).abs() < 300 && (z - REFUGE.1).abs() < 300) || way(x, z).is_some_and(|w| w.1.abs() < 22)
@@ -1241,6 +1296,11 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         let g = ground(x, z);
         if (seed >> 12) % 24 < pines(x, z, g) && !cleared(x, z) {
             stamp_pine(s, x, z, g, seed);
+        } else if let Some(wood) = grove(x, z, g) {
+            // A wood far off is still its trees.
+            if (seed >> 12) % 24 < if wood > 0.58 { 15 } else if wood > 0.52 { 5 } else { 1 } {
+                stamp_oak(s, x, z, seed);
+            }
         } else if (seed >> 12) % 24 < 11 && s.lod == 3 && g > SEA + 10 && dry(x, z) > 0.5 && !off_road(x, z).is_some_and(|off| off < 60) {
             // A clump of scrub as one low lump.
             s.fill([x - 5, g - 2, z - 5], [x + 6, g + 7, z + 6], kind(LEAVES, colour(6 + (seed % 3) as u8, [8, 9, 7, 8][(seed >> 2) as usize % 4])), Meet::Middle);
@@ -1287,8 +1347,42 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
             let r = 3 + ((seed >> 17) % 8) as i32;
             s.ball([x, g - r / 3, z], r, kind(ROCK, colour(1, 9)), 0, seed, None);
         }
-    } else if sort == 0 && peaks(x, z) == 0.0 {
-        stamp_tree(s, x, z, seed, (ANYWHERE, ANYWHERE));
+    } else if let Some(wood) = grove(x, z, g) {
+        // The grass country: woods of broad-leaved trees with bushes under them and thick at their edges; in the
+        // meadows a tree now and then, bushes, tall grass in tufts, a boulder; reeds where the ground is low and wet.
+        let (trees, bushes) = if wood > 0.58 { (15, 19) } else if wood > 0.52 { (5, 13) } else { (1, 3) };
+        if sort < trees {
+            stamp_oak(s, x, z, seed);
+        } else if sort < bushes {
+            stamp_bush(s, x, z, seed);
+        } else if g < SEA + 26 && sort < 17 {
+            // Reeds: tall thin stems, some with a brown head.
+            for stem in 0..12u32 {
+                let h = hash(px * 16 + stem as i32, pz, 107);
+                let (bx, bz) = (x - 8 + (h % 17) as i32, z - 8 + ((h >> 5) % 17) as i32);
+                let (bg, tall) = (ground(bx, bz), 10 + ((h >> 10) % 12) as i32);
+                if bg > SEA {
+                    s.fill([bx, bg - 1, bz], [bx + 1, bg + tall, bz + 1], kind(LEAVES, colour(6, 8)), Meet::Touch);
+                    if h >> 28 < 6 {
+                        s.fill([bx, bg + tall, bz], [bx + 1, bg + tall + 3, bz + 1], kind(LEAVES, colour(2, 9)), Meet::Touch);
+                    }
+                }
+            }
+        } else if wood <= 0.52 && sort < 9 {
+            // Tall grass in a tuft, green going to straw.
+            for blade in 0..12u32 {
+                let h = hash(px * 16 + blade as i32, pz, 108);
+                let (bx, bz) = (x - 6 + (h % 13) as i32, z - 6 + ((h >> 4) % 13) as i32);
+                let bg = ground(bx, bz);
+                s.fill([bx, bg - 1, bz], [bx + 1, bg + 3 + ((h >> 8) % 6) as i32, bz + 1], kind(LEAVES, colour(5 + (h >> 12) as u8 % 3, [8, 3, 7][(h >> 14) as usize % 3])), Meet::Touch);
+            }
+        } else if wood <= 0.52 && sort == 9 {
+            let r = 4 + ((seed >> 17) % 8) as i32;
+            s.ball([x, g - r / 3, z], r, kind(ROCK, grey(5 + (seed >> 21) as u8 % 4)), 0, seed, None);
+        }
+    } else if sort == 0 && peaks(x, z) == 0.0 && g >= 6 {
+        // (The town's own tree has a thinned crown, which leaves single cells in the air: the rest check found them.)
+        stamp_oak(s, x, z, seed);
     }
 }
 

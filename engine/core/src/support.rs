@@ -958,8 +958,10 @@ mod tests {
         let (rx, rz) = (crate::land::REFUGE.0, crate::land::REFUGE.1);
         // By the road on the plain: a windpump with its tank and trough, a sign, the fence.
         let roadside = [(82_960, 4450), (83_010, 4460), (82_300, 4130), (82_060, 4170)];
+        // In the grass country: woods, their edges, meadow with bushes and tall grass, reeds by a lake.
+        let grass = (0..10).map(|n| (5000 + n * 2300, 46_000 + (n % 4) * 1700)).chain((0..8).map(|n| (-58_000 + n * 1500, 2000 + (n % 3) * 2600)));
         let refuge = [(rx, rz), (rx + 60, rz), (rx - 120, rz - 20), (rx + 90, rz + 60), (rx + 60, rz - 150), (rx - 100, rz - 150), (rx + 110, rz - 140)];
-        for (x, z) in hills.chain([(61_000, 4000), (61_400, 4070), (64_000, 5200), (58_000, 3000)]).chain(refuge).chain(roadside) {
+        for (x, z) in hills.chain([(61_000, 4000), (61_400, 4070), (64_000, 5200), (58_000, 3000)]).chain(refuge).chain(roadside).chain(grass) {
             let mut r = city_at(x, z);
             grown += r.cells.iter().filter(|&&k| matches!(material(k), LEAVES | WOOD)).count();
             let held = loose(&r);
@@ -968,7 +970,7 @@ mod tests {
                 let mut kinds: Vec<u8> = (0..r.cells.len()).filter(|&i| held[i]).map(|i| material(r.cells[i])).collect();
                 kinds.sort_unstable();
                 kinds.dedup();
-                fell.push(format!("at {x} {z}: {unheld} cells of materials {kinds:?} are not held"));
+fell.push(format!("at {x} {z}: {unheld} cells of materials {kinds:?} are not held"));
             }
             for m in &settle(&mut r, 3).moves {
                 fell.push(format!("at {x} {z}: {} cells dropped {}", m.cells, m.drop));

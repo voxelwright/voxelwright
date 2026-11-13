@@ -1509,3 +1509,23 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - Shot at 400, 150, 60, 25, 10, 7 and 5.8 km (`~/.village/engine/land/228/descent-third.jpg`). What is left is
   the corner of the massif and the plain (#229's `peaks` and `dry`), the pale air from 10 km down, and the cells
   ending at their box.
+
+## The grass country between (#229, November 12)
+
+- **It was one lime green with a lollipop tree now and then.** `city.rs` `grove` says how much of a broadleaf wood
+  a place is (a wood from 0.58, its edge from 0.52), in the town's own land between the mountains, the plain and
+  a kilometre short of the coast. `meadow` covers it: a dark floor with fallen leaves under the woods, dark wet
+  grass by the water, four greens in the meadows, small flowers in places (single ground cells in vivid colour).
+- **What stands there** (`stamp_country`): in a wood a tree in 15 patches of 24 and bushes under them; at its edge
+  fewer trees and more bushes; in the meadow a tree, bushes, tall grass in tufts, a boulder; reeds where the
+  ground is within 2.5 m of the water. From 205 to 820 m a tree is its crown, so a wood is seen from far.
+- **`stamp_oak` is open country's tree**: a 3 x 3 trunk and a crown of three or four whole balls. The town's
+  `stamp_tree` thins its crown at the finest cells, which leaves single cells in the air; `open_country_is_at_rest`
+  found them in every box with such a tree (the town's own check lets crumbs go). The town's tree is not changed:
+  it is in the town's sum. A side ball of a crown must not hang below the trunk's top by more than a few cells:
+  leaves reach 40 from where they rest, and a cell hung costs two.
+- The rest check looks at eighteen more places, in woods, meadows and by a lake. A place within 4 km of the start
+  can be a town block still (`is_open` goes by the block's middle): keep test places further out.
+- **Not there**: streams (water is one level: a lake is ground under the sea's height, so nothing runs downhill),
+  tracks, a farm or a ruin. Crowns are still balls. The far land past 40 km and the kilometre by the coast keep
+  their plain grass (other lanes).
