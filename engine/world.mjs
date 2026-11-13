@@ -20,7 +20,7 @@ import { residents } from './page/residents.ts'
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.core), {})
 const core = instance.exports
 /** The core's records (bodies.rs): which are log and which are state. */
-const STATE = new Set([5, 7, 8])
+const STATE = new Set([5, 7, 8, 10, 11])   // 10 what struck what and 11 how living things are doing (#245): heard as they happen, never kept
 
 /** The words of the last call, parted into what is log and what is state. */
 function told(n, released) {

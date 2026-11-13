@@ -203,6 +203,8 @@ pub extern "C" fn world_edit(after: i32) {
         for e in edits {
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
+        // The world has changed somewhere: whatever sleeps is stepped again, and sleeps again if nothing reached it.
+        b.stir_all();
     })
 }
 
@@ -295,4 +297,53 @@ pub extern "C" fn bodies_release(x: i32, y: i32, z: i32, radius: i32) -> usize {
         b.release([x, y, z], radius);
         b.out.len()
     })
+}
+
+// ── Living things (bodies/living.rs, #245): bodies that are kept, and driven from outside the solver. ──
+
+/// Makes a living thing of cells written at `edits_room` (one kind a word, laid out x, then z, then y, `sx * sy * sz`
+/// of them) with its low corner at a place. With `take` not zero those cells are taken out of the world as it is
+/// born: a thing that stood there as cells gets up. Returns how many words tell it, at `bodies_words` (the cells
+/// taken out, the body born); `living_last` is its id, 0 if it could not be made.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_spawn(sx: u32, sy: u32, sz: u32, x: i32, y: i32, z: i32, take: i32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let size = [sx as usize, sy as usize, sz as usize];
+        let count = size[0].saturating_mul(size[1]).saturating_mul(size[2]);
+        let cells: Vec<tree::Kind> = if count <= i.edits.len() { i.edits[..count].iter().map(|&k| k as tree::Kind).collect() } else { Vec::new() };
+        let b = moving(i);
+        b.out.clear();
+        b.spawn(cells, size, [x, y, z], take != 0);
+        b.out.len()
+    })
+}
+
+/// The id of the thing `living_spawn` last made, 0 if it made none.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_last() -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).spawned)
+}
+
+/// Gives a living thing its motor: `count` numbers written at `edits_room` as the bits of floats (`Live::set`:
+/// front, grip, power, top, steer, hover, lift, upright, turns, jump, tough, then x, y, z, reach, steers, drives for
+/// each foot). Returns 1 if it was taken.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_motor(id: u32, count: usize) -> u32 {
+    INSTANCE.with_borrow_mut(|i| {
+        let numbers: Vec<f32> = i.edits.iter().take(count).map(|&w| f32::from_bits(w as u32)).collect();
+        (numbers.len() == count && moving(i).motor(id, &numbers)) as u32
+    })
+}
+
+/// Tells a living thing what to do, until it is told again or a second has gone: go, turn and rise from -1 to 1,
+/// whether to roll over once and whether to jump. Returns 1 if there is such a thing.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_drive(id: u32, go: f32, turn: f32, rise: f32, roll: i32, jump: i32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).drive(id, go, turn, rise, roll != 0, jump != 0) as u32)
+}
+
+/// A living thing lives no more: it is a loose body, and cells again where it comes to lie. Returns 1 if there was one.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_end(id: u32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).end(id) as u32)
 }

@@ -22,13 +22,24 @@ export interface Told {
   water: Uint32Array<ArrayBuffer> | null
   /** Blasts the solver set off itself (something that goes up when hit went up): where, and how big, for their fire and smoke. The cells they emptied come as edits. */
   bursts: { at: [number, number, number]; radius: number }[]
+  /** What struck what (#245), the hardest few of the call: for sound, and for whoever wants to know what a thing ran into. */
+  struck: Struck[]
+  /** How each living thing that is awake is doing (#245): its speed along its front (cells a second), how many feet are on the ground, how many touches it had in the last step, what it is told, and whether it is in the air. */
+  live: { id: number; speed: number; feet: number; touches: number; go: number; turn: number; rise: number; aloft: boolean }[]
 }
+/**
+ * One thing meeting another: `a` the body that struck, `b` the body struck or 0 for the standing world; where (the
+ * world's finest cells); how fast the two were closing (cells a second: 10 is 1 m/s); how hard (weight times the
+ * speed lost); the kind of each at the touch (`kind & 15` is the material); and flags: 1 `a` is a living thing,
+ * 2 `b` is, 4 the blow broke something. Things resting on each other are not told.
+ */
+export interface Struck { a: number; b: number; at: [number, number, number]; speed: number; push: number; kindA: number; kindB: number; flags: number }
 
-const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8, BURST = 9
+const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8, BURST = 9, STRUCK = 10, LIVE = 11
 
 export function read(words: Uint32Array<ArrayBuffer>): Told {
   const f = new Float32Array(words.buffer, words.byteOffset, words.length), i32 = new Int32Array(words.buffer, words.byteOffset, words.length)
-  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [], water: null, bursts: [] }
+  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [], water: null, bursts: [], struck: [], live: [] }
   const placed = (at: number): Placed => ({ id: words[at], pos: [f[at + 1], f[at + 2], f[at + 3]], rot: [f[at + 4], f[at + 5], f[at + 6], f[at + 7]] })
   for (let i = 0; i < words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
@@ -40,6 +51,8 @@ export function read(words: Uint32Array<ArrayBuffer>): Told {
     else if (tag === FIRE) told.fire = f.slice(at + 1, at + n)
     else if (tag === FLOW) told.water = words.slice(at, at + n)
     else if (tag === BURST) told.bursts.push({ at: [f[at], f[at + 1], f[at + 2]], radius: words[at + 3] })
+    else if (tag === STRUCK) told.struck.push({ a: words[at], b: words[at + 1], at: [f[at + 2], f[at + 3], f[at + 4]], speed: f[at + 5], push: f[at + 6], kindA: words[at + 7], kindB: words[at + 8], flags: words[at + 9] })
+    else if (tag === LIVE) for (let k = at; k < at + n; k += 8) told.live.push({ id: words[k], speed: f[k + 1], feet: words[k + 2], touches: words[k + 3], go: f[k + 4], turn: f[k + 5], rise: f[k + 6], aloft: words[k + 7] !== 0 })
     else if (tag === MOVES) for (let k = at; k < at + n; k += 8) told.moves.push(placed(k))
     i = at + n
   }

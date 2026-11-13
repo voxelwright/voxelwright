@@ -1598,3 +1598,62 @@ moments are useless), it was that: a flash, a ball for 0.3 s, then dark smoke wi
 - The blast row's picture is taken about 0.7 s after the charge (0.35 s after the first body); the wall row's 0.9 s after
   twenty bodies, when the ball has gone to smoke and the pieces are still in the air.
 - Cost: ten more puffs a blast, each small. Not timed (load average over 100).
+
+## Living things: bodies that are kept and driven (#245, `core/src/bodies/living.rs`, `page/living.ts`; November 13)
+
+A body with `live` set is never put down for lying still. It is moved each step by a motor that is all numbers
+(`Live::set`: front, grip, power, top, steer, hover, lift, upright, turns, jump, tough, then feet) from what it was
+last told: go, turn and rise from -1 to 1, a roll, a jump (`living_drive`). Whoever tells it (keys, a script, a
+resident) is not the core's to know. What is told holds for one second, so a page that has gone leaves no car at
+full speed: say it again four times a second.
+
+- **Measured first** (a steel box 4.2 m long on the street, pushed along with a force): uphill it did not move at
+  twice its own weight, downhill it slid at 0.8. The road rises a cell at a time and `way_out` pushes a corner back
+  out of each riser. So nothing that goes over ground slides on its belly: it stands on **feet**, rays cast down
+  from the body, each a spring carrying its share (pressed in 0.4 of its reach at rest, damped 0.7), gripping
+  sideways and, if it drives, pushing along. A foot takes a step of the road over a thirtieth of a second.
+- **A wheel's cells meet nothing.** `motor()` drops the body's points under each foot, or the wheels catch as the
+  box's corners did.
+- **Grip and drive act 0.7 of the way up from the road to the middle's height.** Applied at the road a car at
+  12 m/s went onto two wheels in a turn (tipped 13 degrees, two feet off). Steering is then the plain bicycle rule:
+  measured 0.52 rad/s at 2.8 m/s and 0.88 at 5.2, which is speed times tan(steer) over the wheelbase. Feet steer
+  less the faster it goes. A steering assist was tried and taken out: it was not needed.
+- **From standing it pulls twice as hard** (a low gear, up to 3 m/s); backwards it gets to a third of its speed;
+  told nothing it rolls to a stop and holds on a hill.
+- **Sleep, not rest.** A living thing told nothing and still for a second sleeps: `step` skips it, `busy()` does not
+  count it, so a parked car asks for no steps and sends no moves (30 s parked: under 6 ms of solver in all). It is
+  woken by being told something, by a touch from another body, by a blast near, by an edit of the solver's own in
+  its reach, and by any edit from outside (`world_edit` wakes all: it does not say where). `rest` would cut a car
+  parked askew along the world's cells each time.
+- **What breaks it** is how much of its speed one step takes (`tough`, 120 = 12 m/s lost in 1/120 s), not the
+  hardest single touch (`knock`): a car's blow is shared by many touches and no one of them reached steel's 500. A
+  car into brick at 9 m/s lives; at 14 m/s it is shattered as any body is, and its pieces are plain bodies. A blast
+  that reaches it ends it; one further off throws it (`shove`).
+- **Its weight breaks nothing.** `crush` asks a living thing's touch to be closing at 1.5 m/s or more: resting, a
+  car's push on each touch is over `HARD` every step, and a pavement of concrete would be eaten under it.
+- **Three things held a car that had broken a wall**, each found by what the page said held it (`LIVE`'s touches):
+  rubble under its belly (a thing told to go ploughs through cells marked rubble, 48 a step, told as dust); and its
+  own nose, pushed onward: a point half through a thin wall has its short way out on the far side, so the touch
+  pulled the car on and it could not back off. A living thing's point is never pushed out through a face that looks
+  the way the point itself sticks out from the body's middle (`way_back`). The third was the check itself: the
+  street has cars parked 1 m to the right of the lane, and a turn to the right met them every time.
+- **Hover, fly, roll, jump** are the same motor: `hover` holds a height over the ground when told nothing and near
+  it, `lift` is the climb, `upright` turns it to its heading (and banks and noses down in the air), a roll is one
+  turn about its front in 0.8 s, a jump is a speed up and its top speed forward. Proved natively only: a broom of 80
+  cells hovers 1 m up, flies, rolls and sleeps where it hangs; a frog of 24 cells hops 1.5 m a hop.
+- **Living things meet every body**, however small either is, lumps too: bricks ride on a bonnet.
+- **Records**: `STRUCK` (10) what struck what, from the closing speed before anything was pushed (8 cells a second
+  or more, the hardest eight a call, kinds looked up only for those: `ground.kind` keeps whole sectors); `LIVE` (11)
+  each waking thing's speed, feet down, touches and what it is told. Both are state in a shared world (`world.mjs`
+  `STATE`): never kept in the file.
+- **Cost** (native, M1 Pro): one car driven 20 µs a step, eight 96 µs: 0.04 and 0.19 ms a frame of two steps.
+  Asleep, nothing.
+- **On the page**: `engine.alive.spawn(engine.car([x, y, z]))`; near it a cue (`hud.cue`), E gets on (a `mounted`
+  mode in `input.ts`, solid), the scheme's lines are the card (`hud.card`), the eye rides behind and turns with it,
+  a phone's left stick drives. Schemes (drive, fly, hover, ride) are data in `living.ts`.
+- **A key tapped by a script** goes down and up inside one frame: read from a held set once a frame it is missed.
+  Keys pressed once (E, Q, Space) are taken in the mode's `key`, which hears every keydown.
+- **Not there**: living things in a shared world (the page sends nothing to a world process yet; that process must
+  be the one to move them, and a restart loses bodies while the edit that took their cells is kept). No rider's
+  figure, no hinged parts, no behaviour scripts. A thing's feet see the standing world only: it drives through
+  nothing but does not ride up onto another body. No shadow under it (no body casts one).

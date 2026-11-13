@@ -12,13 +12,16 @@
 //! process decides is what everyone sees.
 
 use crate::hash::hash3;
-use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, charged, material, weighs};
+use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, charged, material, rubble, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::support::{self, Region};
 use crate::tree::{CELLS, Kind, SIDE, at, at as at_cell};
 use crate::{Edit, SETTLE, WIDE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+
+mod living;
+pub use living::{Foot, Live, Struck};
 
 /// How fast things fall faster: cells a second, each second.
 pub const G: f32 = 98.0;
@@ -586,9 +589,21 @@ impl Ground {
 /// to the nearest empty cell within three. A point just under a floor is pushed up, however near a step's edge it is;
 /// one that went in through a wall is pushed back out of the wall. Nothing if it is shut in deeper than that.
 #[inline]
-fn way_out(p: V, cell: [i32; 3], mut solid: impl FnMut([i32; 3]) -> bool) -> Option<(V, f32)> {
+fn way_out(p: V, cell: [i32; 3], solid: impl FnMut([i32; 3]) -> bool) -> Option<(V, f32)> {
+    way_back(p, cell, [0.0; 3], solid)
+}
+
+/// As `way_out`, for a point of a living thing that is `r` from its body's middle: never out through a face that
+/// looks the way the point itself sticks out. A car's nose went half through what it hit, the short way out of it
+/// was onward, and so the car was held by its nose and could not back away.
+#[inline]
+fn way_back(p: V, cell: [i32; 3], r: V, mut solid: impl FnMut([i32; 3]) -> bool) -> Option<(V, f32)> {
     let mut best: Option<(V, f32)> = None;
+    let long = dot(r, r).sqrt() * 0.35;
     for (a, d) in [(1, 1), (0, 1), (0, -1), (2, 1), (2, -1), (1, -1)] {
+        if long > 0.0 && r[a] * d as f32 > long {
+            continue;
+        }
         let inside = p[a] - cell[a] as f32;
         let first = if d > 0 { 1.0 - inside } else { inside };
         for k in 1..=3 {
@@ -647,6 +662,10 @@ pub struct Body {
     thrown: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
+    /// What makes it a living thing (living.rs), if it is one: it is then never put down as cells for lying still.
+    pub live: Option<Box<Live>>,
+    /// Whether it sleeps: a living thing left alone is not stepped until something stirs it.
+    pub asleep: bool,
 }
 
 impl Body {
@@ -662,7 +681,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, born: low,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, born: low, live: None, asleep: false,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -784,6 +803,8 @@ struct Touch {
     depth: f32,
     pushed: f32,
     rubbed: [f32; 2],
+    /// How fast the two were closing along `n` before anything was pushed (under zero when they close).
+    closing: f32,
 }
 const NONE: usize = usize::MAX;
 
@@ -820,7 +841,7 @@ fn keep(found: &mut Vec<(V, V, V, f32)>, a: usize, b: usize, out: &mut Vec<Touch
     }
     for i in picked {
         let (ra, rb, n, depth) = found[i];
-        out.push(Touch { a, b, ra, rb, n, depth, pushed: 0.0, rubbed: [0.0; 2] });
+        out.push(Touch { a, b, ra, rb, n, depth, pushed: 0.0, rubbed: [0.0; 2], closing: 0.0 });
     }
     found.clear();
 }
@@ -837,6 +858,8 @@ pub const MOVES: u32 = 5; // for each body: id, place (3 floats), turn (4 floats
 pub const FIRE: u32 = 7; // how many cells are alight, then where some of them are (3 floats each)
 pub const BROKE: u32 = 6; // id: the body is no more, and the pieces it broke into have been born
 pub const FLOW: u32 = 8; // water that flows, as heights over a window of columns (water.rs `tell`)
+pub const STRUCK: u32 = 10; // what struck what (living.rs `Struck`): a, b or 0 for the world, where (3 floats), closing speed, push, a's kind, b's kind, flags
+pub const LIVE: u32 = 11; // for each living thing awake: id, speed along its front (float), feet on the ground, how many touches it had in the last step, what it is told (go, turn, rise as floats), flags (1 aloft)
 pub const BURST: u32 = 9; // where (3, as floats), radius: a blast the solver set off itself (something went up), for its fire and smoke
 
 pub struct Bodies {
@@ -868,6 +891,10 @@ pub struct Bodies {
     fuses: Vec<([i32; 3], i32, f32)>,
     /// Seconds since the fire was last asked whether it has reached something that goes up.
     since_lit: f32,
+    /// What struck what since it was last told (living.rs).
+    struck: Vec<Struck>,
+    /// The id of the living thing last made, 0 if the last asked for could not be.
+    pub spawned: u32,
 }
 
 /// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
@@ -890,13 +917,13 @@ struct Found {
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0 }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0, struck: Vec::new(), spawned: 0 }
     }
 
     /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
     /// called on, for what a charge left standing may yet come loose.
     pub fn busy(&self) -> usize {
-        self.list.len() + self.far.len() + self.fuses.len()
+        self.list.iter().filter(|b| !b.asleep).count() + self.far.len() + self.fuses.len()
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -918,6 +945,7 @@ impl Bodies {
             words.extend_from_slice(&[r.x0 as u32, r.x1 as u32, r.y as u32, r.z as u32, r.kind as u32]);
         }
         self.record(EDIT, &words);
+        self.stir(lo, hi);
         self.ground.push(Edit::Runs(runs), true, None);
     }
 
@@ -1104,6 +1132,7 @@ impl Bodies {
         #[cfg(test)]
         let t2 = std::time::Instant::now();
         self.caught(&before, at, radius);
+        self.shove(at, radius);
         let made = self.lumps(&before, &left, at, radius);
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    blast of {radius}: before {:.0} ms, push and left {:.0} ms, lumps {:.0} ms", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
@@ -1403,14 +1432,15 @@ impl Bodies {
             let (at, radius, _) = self.fuses.remove(due);
             self.went_off(at, radius);
         }
-        while self.owed >= STEP && !self.list.is_empty() {
+        while self.owed >= STEP && self.list.iter().any(|b| !b.asleep) {
             self.owed -= STEP;
             self.step(STEP);
             self.steps += 1;
         }
-        if self.list.is_empty() {
+        if !self.list.iter().any(|b| !b.asleep) {
             self.owed = 0.0;
         }
+        self.tell_struck();
         self.burn(dt);
         // A fire beside something that goes up sets it off: asked five times a second, of some of what burns, and only
         // once a sector has been made that holds any such thing.
@@ -1436,6 +1466,7 @@ impl Bodies {
             words.extend(b.pos.iter().chain(b.rot.iter()).map(|v| v.to_bits()));
         }
         self.record(MOVES, &words);
+        self.tell_live();
     }
 
     fn step(&mut self, h: f32) {
@@ -1443,13 +1474,19 @@ impl Bodies {
         let mut lap = std::time::Instant::now();
         #[cfg(test)]
         let mut mark = |k: usize| { SPENT.with(|s| s.borrow_mut()[k] += lap.elapsed().as_secs_f64()); lap = std::time::Instant::now(); };
-        // What pulls and what touches.
+        // What lives is moved by its motor; then what pulls and what touches.
+        self.motors(h);
         self.touches.clear();
         let mut found: Vec<(V, V, V, f32)> = Vec::new();
+        let mut ploughed: Vec<[i32; 3]> = Vec::new();
         for i in 0..self.list.len() {
             let b = &mut self.list[i];
+            if b.asleep {
+                continue;
+            }
             b.vel[1] -= G * h;
             b.spin = scale(b.spin, 1.0 - 0.4 * h);
+
             b.age += h;
             b.apart += h;
             b.knock = 0.0;
@@ -1465,9 +1502,16 @@ impl Bodies {
                 if !self.ground.solid(cell[0], cell[1], cell[2]) {
                     continue;
                 }
+                // A living thing that is told to go ploughs through loose rubble, from standing too: a car that broke a wall sat on the heap
+                // with its belly caught on it, and could go neither on nor back.
+                if self.list[i].live.as_ref().is_some_and(|live| live.going()) && ploughed.len() < 48 && rubble(self.ground.kind(cell[0], cell[1], cell[2])) {
+                    ploughed.push(cell);
+                    continue;
+                }
                 // Shut in deep: out is back towards the body's own middle.
                 let ground = &mut self.ground;
-                let (n, deep) = way_out(p, cell, |c| ground.solid(c[0], c[1], c[2])).unwrap_or_else(|| (unit(scale(r, -1.0)), 1.0));
+                let out_of = if self.list[i].live.is_some() { r } else { [0.0; 3] };
+                let (n, deep) = way_back(p, cell, out_of, |c| ground.solid(c[0], c[1], c[2])).unwrap_or_else(|| (unit(scale(r, -1.0)), 1.0));
                 found.push((r, [0.0; 3], n, deep));
             }
             if !found.is_empty() {
@@ -1475,17 +1519,27 @@ impl Bodies {
             }
             keep(&mut found, i, NONE, &mut self.touches);
         }
+        if !ploughed.is_empty() {
+            ploughed.sort_unstable();
+            ploughed.dedup();
+            for c in ploughed.iter().step_by(6) {
+                let kind = self.ground.kind(c[0], c[1], c[2]);
+                self.record(DUST, &[(c[0] as f32 + 0.5).to_bits(), (c[1] as f32 + 0.5).to_bits(), (c[2] as f32 + 0.5).to_bits(), kind as u32, 6]);
+            }
+            self.change(ploughed.iter().map(|c| Run { x0: c[0], x1: c[0] + 1, y: c[1], z: c[2], kind: 0 }).collect());
+        }
         #[cfg(test)]
         mark(0);
         // Body against body: the points of each tried in the cells of the other. Only pairs with a big body in them
         // are tried, so each big body is asked which others are near it.
-        let is_big = |b: &Body| b.count >= SMALL && !b.lump;
+        // A living thing meets every other body, however small either is: a frog is not passed through.
+        let is_big = |b: &Body| (b.count >= SMALL && !b.lump) || b.live.is_some();
         let big: Vec<usize> = (0..self.list.len()).filter(|&i| is_big(&self.list[i])).collect();
         for &i in &big {
             for j in 0..self.list.len() {
                 // Two big bodies are a pair once. What a blast threw out meets only the world: a house coming down in
                 // forty panels among a thousand lumps tried each panel against every lump near it.
-                if j == i || (is_big(&self.list[j]) && j < i) || self.list[j].lump {
+                if j == i || (is_big(&self.list[j]) && j < i) || (self.list[j].lump && self.list[i].live.is_none()) || (self.list[i].asleep && self.list[j].asleep) {
                     continue;
                 }
                 let (a, b) = (&self.list[i], &self.list[j]);
@@ -1514,8 +1568,10 @@ impl Bodies {
                     }
                 }
                 if !found.is_empty() {
-                    self.list[i].apart = 0.0;
-                    self.list[j].apart = 0.0;
+                    for k in [i, j] {
+                        self.list[k].apart = 0.0;
+                        self.list[k].asleep = false;
+                    }
                 }
                 keep(&mut found, i, j, &mut self.touches);
             }
@@ -1550,7 +1606,7 @@ impl Bodies {
             });
             (ds, weights, spins_a, spins_b)
         }).collect();
-        for _ in 0..8 {
+        for round in 0..8 {
             for t in 0..self.touches.len() {
                 let (a, b, ra, rb, n) = { let t = &self.touches[t]; (t.a, t.b, t.ra, t.rb, t.n) };
                 let (ds, weights, spins_a, spins_b) = &ways[t];
@@ -1569,6 +1625,9 @@ impl Bodies {
                 };
                 let v = rel(&self.list);
                 let closing = dot(v, n);
+                if round == 0 {
+                    self.touches[t].closing = closing;
+                }
                 let bounce = if closing < -40.0 { 0.12 } else { 0.0 };
                 let was = self.touches[t].pushed;
                 let now = (was - (1.0 + bounce) * closing / weights[0]).max(0.0);
@@ -1610,22 +1669,28 @@ impl Bodies {
                 self.list[t.b].pos = sub(self.list[t.b].pos, scale(t.n, ease * mb / (ma + mb)));
             }
         }
+        // What met hard enough to be told of (living.rs), before anything of it is broken.
+        let met = self.meetings();
         // Where a big body struck the standing world hardest, the world breaks too: one such place a step, a few a second.
         self.since_crush += h;
         if self.since_crush > 0.12 && self.list.len() < MOST {
-            let mut worst: Option<([i32; 3], f32)> = None;
+            let mut worst: Option<([i32; 3], f32, u32, Option<(V, V)>)> = None;
             for t in &self.touches {
                 let body = &self.list[t.a];
-                if t.b == NONE && body.count >= 60 && t.pushed > HARD && worst.is_none_or(|(_, p)| t.pushed > p) {
+                // A living thing may stand on a pavement for an hour: its weight alone breaks nothing, only a blow.
+                if t.b == NONE && body.count >= 60 && t.pushed > HARD && (body.live.is_none() || t.closing < -15.0) && worst.as_ref().is_none_or(|w| t.pushed > w.1) {
                     let p = sub(add(body.pos, t.ra), scale(t.n, 0.5));
-                    worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed));
+                    worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed, body.id, body.live.is_some().then_some((add(body.pos, t.ra), t.n))));
                 }
             }
             // The ground itself is not broken by what lands on it: only what is built.
-            if let Some((at, push)) = worst {
+            if let Some((at, push, id, live)) = worst {
+                // A living thing goes fast and what it hits may be thin: the cell it met is looked for.
+                let at = live.and_then(|(p, n)| self.met(p, n)).unwrap_or(at);
                 if !matches!(material(self.ground.kind(at[0], at[1], at[2])), 0 | EARTH | ROCK | GRASS | SAND | WATER | ASPHALT) {
                     self.since_crush = 0.0;
                     self.crushes += 1;
+                    self.broke(id, met);
                     self.crush(at, push);
                 }
             }
@@ -1636,8 +1701,18 @@ impl Bodies {
         let mut i = 0;
         while i < self.list.len() {
             let b = &self.list[i];
-            if b.count >= WHOLE && b.knock > breaks_at(b.stuff) * (1.0 + b.broken as f32) && self.list.len() < MOST {
+            // A living thing breaks at the knock its motor says, or when a blast has reached it; and then lives no more.
+            let (knock, takes) = match &b.live {
+                None => (b.knock, breaks_at(b.stuff) * (1.0 + b.broken as f32)),
+                Some(live) => { let lost = sub(b.vel, live.was); (if live.hurt { f32::MAX } else { dot(lost, lost).sqrt() }, live.tough) }
+            };
+            if let Some(live) = &mut self.list[i].live {
+                live.jolt = live.jolt.max(knock);
+            }
+            let b = &self.list[i];
+            if b.count >= WHOLE && !b.asleep && knock > takes && self.list.len() < MOST {
                 let whole = self.list.swap_remove(i);
+                self.broke(whole.id, met);
                 self.shatter(whole);
             } else {
                 i += 1;
@@ -1649,6 +1724,10 @@ impl Bodies {
         let mut i = 0;
         while i < self.list.len() {
             let b = &mut self.list[i];
+            if b.asleep {
+                i += 1;
+                continue;
+            }
             b.pos = add(b.pos, scale(b.vel, h));
             let w = b.spin;
             let q = b.rot;
@@ -1671,7 +1750,10 @@ impl Bodies {
             b.still = if slow && b.apart < 0.1 && (over || b.age > OLD) { b.still + h } else { 0.0 };
             // Old and still on its way (a chimney going over takes its time) is left to it, up to a point.
             let stuck = b.age >= OLD && dot(b.vel, b.vel) < 400.0 && dot(b.spin, b.spin) < 0.25;
-            if b.still >= STILL_FOR || stuck || b.age >= OLD * 3.0 {
+            if b.live.is_some() {
+                Self::drowse(b, h);
+                i += 1;
+            } else if b.still >= STILL_FOR || stuck || b.age >= OLD * 3.0 {
                 let body = self.list.swap_remove(i);
                 self.rested.push((body.age * 10.0) as u32);
                 self.rest(body);
