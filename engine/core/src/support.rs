@@ -757,6 +757,35 @@ mod tests {
         assert!(fell.is_empty(), "{} things on the sea floor are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
     }
 
+    #[test]
+    fn what_grows_on_the_reefs_is_at_rest() {
+        // The sea off the coast west of the town, over its reefs with their kelp: nothing may be loose or drop.
+        let (mut weed, mut fell) = (0, Vec::new());
+        for z in (-17_000..-12_000).step_by(330) {
+            for x in (-64_600..-63_000).step_by(270) {
+                let g = ground(x, z);
+                if g > -50 || g < -140 {
+                    continue;
+                }
+                let mut r = city_at(x, z);
+                weed += r.cells.iter().filter(|&&k| material(k) == LEAVES).count();
+                let unheld = loose(&r).iter().filter(|&&l| l).count();
+                if unheld > 0 {
+                    let held = loose(&r);
+                    let mut kinds: Vec<Kind> = (0..r.cells.len()).filter(|&i| held[i]).map(|i| r.cells[i]).collect();
+                    kinds.sort_unstable();
+                    kinds.dedup();
+                    fell.push(format!("at {x} {z}: {unheld} cells of kinds {kinds:?} are not held"));
+                }
+                for m in &settle(&mut r, 3).moves {
+                    fell.push(format!("at {x} {z}: {} cells dropped {}", m.cells, m.drop));
+                }
+            }
+        }
+        assert!(weed > 2000, "the boxes looked at hold kelp ({weed} cells of it)");
+        assert!(fell.is_empty(), "{} things on the reefs are not at rest:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
+    }
+
     /// Ground 4 cells thick with a post on it, and a panel of plaster 30 wide, 20 tall and 2 thick beside or under something.
     fn yard() -> Region {
         let mut r = Region::new([0, 0, 0], [96, 96, 48]);

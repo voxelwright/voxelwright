@@ -899,6 +899,8 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
     let under = max(g.sea - p.y, 0.0);
     col = lit(g.eye, rd, hit, shadows) * (0.75 + 1.5 * net(p.xz + sun.xz * (under / sun.y)));
     col *= exp(-vec3f(0.2, 0.035, 0.02) * (under * M + hit.t * M * 0.4));
+    // Light comes from every side under water: what the sun does not reach is not black.
+    col += glow * select(0.22, 0.42, abs(hit.n.y) < 0.5);
   } else {
     let at = g.eye.xz + rd.xz * out;
     let ripple = vec2f(noise2(at * 0.09 + vec2f(g.time * 0.5, g.time * 0.3)), noise2(at.yx * 0.11 - vec2f(g.time * 0.4, g.time * 0.27))) - 0.5;
@@ -906,21 +908,27 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
     let window = smoothstep(0.6, 0.74, rd.y + (ripple.x + ripple.y) * 0.22);
     let flat = vec2f(rd.x, rd.z) * 1.33 + ripple * 0.35;
     let bent = normalize(vec3f(flat.x, sqrt(max(1.0 - dot(flat, flat), 0.01)), flat.y));
-    col = mix(glow * 0.55, sky(bent) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * net(at) * 0.4, window);
+    // The waves seen from under them: lines of light all over the top, fine near and running together far off.
+    let wa = noise2(at * 0.13 + vec2f(g.time * 0.4, g.time * 0.23));
+    let wb = noise2(at * 0.19 - vec2f(g.time * 0.31, g.time * 0.37) + vec2f(3.1, 8.7));
+    let waves = pow(clamp(1.0 - abs(wa - wb) * 2.6, 0.0, 1.0), 3.0) * (0.45 + 0.55 * noise2(at * 0.023 + vec2f(g.time * 0.05, 0.0)));
+    let mirror = glow * 0.7 + vec3f(0.3, 0.85, 0.82) * strength * waves * 0.5;
+    col = mix(mirror, sky(bent) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
   }
-  col = mix(col, glow, 1.0 - exp(-far * M * 0.036));
+  col = mix(col, glow, 1.0 - exp(-far * M * 0.026));
   // Shafts: at ten places along the look, how much light the waves send down through each.
   let reach = min(far, 450.0);
   var shafts = 0.0;
-  for (var i = 0; i < 10; i++) {
-    let s = g.eye + rd * (reach * (f32(i) + grain) * 0.1);
+  for (var i = 0; i < 14; i++) {
+    let s = g.eye + rd * (reach * (f32(i) + grain) / 14.0);
     let under = g.sea - s.y;
     if (under > 0.0) {
       let at = s.xz + sun.xz * (under / sun.y);
       let gathered = noise2(at * 0.021 + vec2f(g.time * 0.06, g.time * 0.045)) * noise2(at * 0.057 - vec2f(g.time * 0.05, g.time * 0.08));
-      shafts += smoothstep(0.24, 0.44, gathered) * exp(-under * M * 0.07);
+      shafts += smoothstep(0.27, 0.5, gathered) * exp(-under * M * 0.07);
     }
   }
+  shafts *= 10.0 / 14.0;
   // They show most looking towards where the light comes from.
   let facing = 0.6 + 0.4 * pow(max(dot(rd, sun), 0.0), 3.0);
   col += g.lightSun.rgb * vec3f(0.5, 0.95, 0.82) * shafts * 0.1 * (reach / 450.0) * facing * 4.4;
@@ -985,7 +993,7 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, depth);
   }
   var col: vec3f;
-  if ((g.flags & 128u) != 0u) { col = deep(rd, hit, shadows, hash3i(vec3i(vec2i(at.xy), i32(g.time * 60.0)), 31u)); }
+  if ((g.flags & 128u) != 0u) { col = deep(rd, hit, shadows, fract(52.9829189 * fract(dot(at.xy, vec2f(0.06711056, 0.00583715))))); }
   else if (hit.t < 0.0) { col = sky(rd); } else {
     let m = looks.material[hit.kind & 15u];
     col = lit(g.eye, rd, hit, shadows);

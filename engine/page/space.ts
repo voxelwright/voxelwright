@@ -68,6 +68,11 @@ fn cells(x: f32, z: f32, period: f32, seed: u32) -> f32 {
 fn townGround(x: f32, z: f32) -> f32 {
   return cells(x, z, 9000.0, 11u) * 1200.0 + cells(x, z, 2600.0, 12u) * 300.0 + cells(x, z, 700.0, 13u) * 50.0 - 560.0;
 }
+// How far a place is out to sea, in cells: the coast west of the town (land.rs offshore). Over 0 is sea.
+fn offshore(x: f32, z: f32) -> f32 {
+  let cape = 1.0 - abs(cells(x, z, 7300.0, 52u) * 2.0 - 1.0);
+  return 700.0 - x - 66000.0 + (cells(x, z, 23000.0, 51u) - 0.5) * 20000.0 + (0.5 - cape) * 10000.0 + (cells(x, z, 1500.0, 53u) - 0.5) * 1800.0;
+}
 // The town and the country round it as the cells have them, seen from over it: its lakes where its ground is under
 // the sea's level, its blocks 128 m by 80 m with a street along two sides, and each block what city.rs block says
 // it is. p is km east and south of the start; the answer is colour before light, and in a how much of it is water.
@@ -133,12 +138,13 @@ fn land(p: vec2f) -> Land {
   let open = smoothstep(3.0, 4.0, far);
   let peaks = open * smoothstep(4.5, 8.5, -p.y) * near;
   let plain = open * smoothstep(3.8, 6.0, p.x) * (1.0 - smoothstep(2.5, 5.0, -p.y)) * near;
-  col = mix(col, vec3f(0.4, 0.33, 0.22), plain);
+  col = mix(col, vec3f(0.36, 0.17, 0.1), plain);
   // Ridges, lit from the sun's side: rock, with snow along the tops.
   let crest = 1.0 - abs(wisps(p, 26.0, 31u) * 2.0 - 1.0);
   let sunward = 1.0 - abs(wisps(p + normalize(u.sun.xz + vec2f(1e-5, 0.0)) * 0.8, 26.0, 31u) * 2.0 - 1.0);
   let rock = vec3f(0.2, 0.19, 0.18) * clamp(1.0 + (crest - sunward) * 9.0, 0.45, 1.6);
-  col = mix(col, mix(rock, vec3f(0.6, 0.62, 0.65), smoothstep(0.8, 0.93, crest)), peaks);
+  // Snow on all but the steepest of it, as the cells have it from about 430 m.
+  col = mix(col, mix(rock, vec3f(0.6, 0.62, 0.65) * clamp(1.0 + (crest - sunward) * 5.0, 0.6, 1.25), smoothstep(0.35, 0.6, crest) * smoothstep(0.2, 0.95, peaks)), peaks);
   out.sea = 1.0 - smoothstep(-0.006, 0.0, c);
   // The sea: dark and blue far out, green-blue over the shallows by the land; ice on it where it is coldest.
   let water = mix(vec3f(0.03, 0.2, 0.24), vec3f(0.012, 0.05, 0.13), smoothstep(0.0, 0.035, -c));
@@ -153,6 +159,14 @@ fn land(p: vec2f) -> Land {
     let keep = close * (1.0 - smoothstep(0.2, 0.6, max(peaks, plain)) * (1.0 - lake));
     col = mix(col, made, keep);
     out.sea = mix(out.sea, lake, keep);
+  }
+  // The sea west of the town, as land.rs has it: its coast with its coves and capes, pale over the shelf.
+  if (p.x < -4.2 && far < 120.0) {
+    let s = offshore(700.0 + p.x * 10000.0, 4070.0 + p.y * 10000.0);
+    let wet = smoothstep(-160.0, -60.0, s) * near;
+    col = mix(col, mix(vec3f(0.05, 0.27, 0.3), vec3f(0.012, 0.05, 0.13), smoothstep(0.0, 9000.0, s)), wet);
+    out.sea = max(out.sea, wet);
+    out.high *= 1.0 - wet;
   }
   out.colour = col;
   return out;

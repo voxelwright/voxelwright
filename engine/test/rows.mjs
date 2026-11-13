@@ -251,25 +251,31 @@ export const ROWS = [
     } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
-    // From the town's shore over its lake to where the sun goes down over the mountains beyond it, towers either side.
-    stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.35, near: [400, WATER] },
+    // From a headland on the coast 6 km west of the town, down over its stacks of rock to where the sun goes into the
+    // sea, a cliff beyond. (Until the land had a coast this was the town's lake, and the eighth judge saw "no real
+    // coastline, just a flat skyline strip".)
+    stand: { from: [-6000, 400], up: 60, to: [-6800, -100], high: 20 }, hour: 17.35, near: [1500, WATER, ROCK, 3] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
-    // On the floor of the town's lake where the weed is short, in the middle of the morning, looking up and towards
-    // the sun: the shafts the waves send down, the top of the water, a grove of ribbon weed to one side.
+    // On a reef off that coast, seven metres down in the middle of the morning: kelp standing to the top of the
+    // water, the reef's small things round its foot, sand between, the shafts the waves send down and the waves
+    // themselves seen from under. (The town's lake has only ribbon weed on flat sand, and may not change: the eighth
+    // judge saw there "bare vertical sticks with no leafy kelp form and no seabed detail".)
     // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
-    stand: { from: [-1300, 380], up: 3, to: [-1280, 395], high: 8 }, hour: 10, near: [60, 2, 4, LEAVES] },
+    stand: { from: [-6400, -1625], up: 2.5, to: [-6415, -1605], high: 7 }, hour: 10, near: [60, 2, 3, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
-    // The range north of the town from the hills before it, late in the afternoon with the sun low in the west:
-    // white slopes with one side of each peak in shadow, pines below. (From close under the peaks at the same hour
-    // the eighth judge saw "a close, grey, dithered peak with no distance, no scale and no white snow".)
-    stand: { from: [300, -5200], up: 60, to: [-300, -9000], high: 1700 }, hour: 16.3, near: [8000, ROCK] },
+    // The massif north of the town from over the pine hills at its foot, in the middle of the morning with the sun
+    // behind the eye: three kilometres of it, white where snow lies and dark where rock is too steep to hold it.
+    // (From close under the peaks late in the day the eighth judge saw "a close, grey, dithered peak with no
+    // distance, no scale and no white snow".)
+    stand: { from: [1500, -6500], up: 150, to: [-1500, -8250], high: -600 }, hour: 9, near: [8000, ROCK, SAND] },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'level',
     // Down the street by the start from the middle of the wet road: a lamp over it with its glow, the lamps' light
     // drawn out on the road, lit windows and a shop's sign, the towers' windows beyond.
     stand: [-14, 1.6, 1.5, 84, 6], hour: 21, rain: 1, near: [80, LAMP], aim: [0.28, 0.29] },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'level',
-    // The road out of town across the dry plain, 6 km east of the start, at sunrise: poles down one side of it.
-    stand: { from: [6100, 407], up: 1.8, to: [9000, 407], high: 25 }, hour: 6.45, near: [300, SAND, ASPHALT] },
+    // The road out of town across the dry plain, 8 km east of the start, soon after sunrise: red earth and scrub,
+    // poles down one side, tables of rock standing off it with the sun coming up over one.
+    stand: { from: [8200, 407], up: 4, to: [11000, 900], high: 25 }, hour: 6.8, near: [300, SAND, ASPHALT, LEAVES] },
   { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },

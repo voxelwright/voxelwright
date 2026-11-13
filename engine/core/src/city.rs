@@ -6,7 +6,7 @@
 
 use crate::hash::{hash, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, dry, off_road, open, peaks};
+use crate::land::{HOME, dry, off_road, offshore, open, peaks};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -750,10 +750,11 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
 
 /// What the ground's top cell is at a column, and how many cells stand on it (a pavement is a kerb above the road).
 fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
+    let country_here = is_open(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z));
     if g < SEA + 6 {
-        return (kind(SAND, OWN), 0);
+        return (if country_here { sea_bed(x, z, g) } else { kind(SAND, OWN) }, 0);
     }
-    if is_open(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z)) {
+    if country_here {
         return (country(x, z, g), 0);
     }
     let (lx, lz) = (x.rem_euclid(BLOCK_X), z.rem_euclid(BLOCK_Z));
@@ -793,20 +794,37 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     let (p, d) = (peaks(x, z), dry(x, z));
     // How steep: the most the ground changes over 4.8 m to either side, in cells a cell. Taken over that much so
     // that snow and rock lie in sheets and faces, not cell by cell.
-    let steep = || {
+    // Also how far the ground falls to the south over that much (cells): a face that looks south.
+    let lie = || {
         let (a, b, c, e) = (ground(x - 48, z), ground(x + 48, z), ground(x, z - 48), ground(x, z + 48));
-        ((a - b).abs().max((c - e).abs())) as f32 / 96.0
+        (((a - b).abs().max((c - e).abs())) as f32 / 96.0, c - e)
     };
-    if p > 0.0 {
+    let steep = || lie().0;
+    // By the sea: dark rock where the land falls to it in cliffs and where stacks stand out of it, a beach where it
+    // comes down gently.
+    if offshore(x, z).is_some_and(|s| s > -1400.0) {
         let s = steep();
-        // The snow lies from about 650 m up, on all but the steepest faces; its line wanders by 130 m either way.
-        if g > 5200 + (noise(x, z, 5200, 41) * 2600.0) as i32 && s < 1.7 {
+        if s > 0.75 {
+            return kind(ROCK, if noise(x, z + g * 3, 260, 47) > 0.5 { colour(2, 9) } else { grey(9 + (noise(x, z, 900, 48) * 3.0) as u8) });
+        }
+        if g < 26 + (noise(x, z, 400, 49) * 30.0) as i32 {
+            return kind(SAND, colour(3, 7));
+        }
+    }
+    if p > 0.0 {
+        let (s, south) = lie();
+        // The snow lies from about 430 m up, lower on faces that look north than on those that look south, and in
+        // patches for the first 90 m; on all but the steep faces, and how steep a face holds it wanders too, so
+        // rock breaks through in bands and not along one line.
+        let south = south.clamp(-60, 60);
+        let line = 4300 + (noise(x, z, 5200, 41) * 2000.0) as i32 + south * 12;
+        if g > line && noise(x, z, 330, 50) * 900.0 < (g - line) as f32 && s < 1.3 + noise(x, z, 1300, 40) * 0.3 {
             // Snow is sand in white: it lies even, where rock is rough.
             return kind(SAND, WHITE);
         }
         if s > 0.85 || g > 5000 {
-            // Rock in bands a few hundred metres across.
-            return kind(ROCK, grey(5 + (noise(x, z, 3100, 42) * 4.0) as u8));
+            // Rock, dark beside the snow, in bands a few hundred metres across.
+            return kind(ROCK, grey(8 + (noise(x, z + g * 2, 2100, 42) * 4.0) as u8));
         }
         if wooded(x, z, g) {
             return kind(GRASS, colour(8, 6));
@@ -814,13 +832,158 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     }
     if d > 0.0 && unit(x >> 3, z >> 3, 43) < d * 1.4 {
         if d > 0.5 && steep() > 0.7 {
-            return kind(ROCK, colour(1, 9));
+            // The walls of the tables: beds of rock a few metres thick, red and paler, one over another.
+            let bed = (g + (noise(x, z, 2600, 67) * 60.0) as i32).div_euclid(28);
+            return kind(ROCK, colour(1 + (hash(bed, 0, 68) % 2) as u8, [9, 8, 9, 5, 8][(hash(bed, 1, 68) % 5) as usize]));
         }
-        // Paler and darker in drifts a few hundred metres across, speckled.
+        // Red earth, paler and darker in drifts a few hundred metres across, speckled; pale in the washes.
         let tone = noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2;
-        return kind(SAND, colour(2, [9, 8, 8, 7][(tone as usize).min(3)]));
+        return kind(SAND, colour(if noise(x, z, 5300, 69) > 0.5 { 1 } else { 2 }, [8, 8, 9, 5][(tone as usize).min(3)]));
     }
     kind(GRASS, OWN)
+}
+
+/// How much of a reef a place on the sea's floor is: 0 on the open sand, 1 on the mounds (land.rs raises them by the
+/// same noise).
+fn reef(x: i32, z: i32) -> f32 {
+    let r = noise(x, z, 900, 56);
+    ((r - 0.5) / 0.3).clamp(0.0, 1.0) * (0.4 + 0.6 * noise(x, z, 230, 57))
+}
+
+/// What the sea's floor is covered with out of town: pale sand in drifts, and on the reefs rock with what grows flat
+/// on it in patches a few metres across, rose and olive and ochre.
+fn sea_bed(x: i32, z: i32, g: i32) -> Kind {
+    if g < SEA && reef(x, z) > 0.12 {
+        let sort = noise(x, z, 37, 62) + (unit(x >> 2, z >> 2, 63) - 0.5) * 0.12;
+        return if sort < 0.32 {
+            kind(ROCK, grey(5 + (unit(x >> 2, z >> 2, 64) * 3.0) as u8))
+        } else if sort < 0.45 {
+            kind(ROCK, colour(22, 7))
+        } else if sort < 0.6 {
+            kind(GRASS, colour(6, 7))
+        } else if sort < 0.72 {
+            kind(ROCK, colour(4, 1))
+        } else {
+            kind(GRASS, colour(7, 2))
+        };
+    }
+    // Ripples in the sand: a paler line every few cells, bent by a slow noise; darker sand in drifts.
+    let ripple = (x + (noise(x, z, 90, 65) * 60.0) as i32).rem_euclid(6);
+    kind(SAND, if ripple == 0 { colour(3, 0) } else if noise(x, z, 300, 66) > 0.6 { colour(3, 7) } else { OWN })
+}
+
+/// Kelp: a holdfast on the rock, a stipe that wanders as it climbs to just under the top of the water, and blades
+/// off it to every side all the way up, each out from a float and up, then hanging over at its end.
+fn stamp_kelp(s: &mut Scratch, x: i32, z: i32, g: i32, deep: i32, seed: u32) {
+    let hue = 4 + (seed >> 3) as u8 % 2;
+    let (stem, dark, mid, pale) = (kind(LEAVES, colour(4, 9)), kind(LEAVES, colour(hue + 1, 5)), kind(LEAVES, colour(hue, 4)), kind(LEAVES, colour(hue, 2)));
+    s.ball([x, g, z], 4, stem, 0, seed, None);
+    let tall = deep * (74 + (seed >> 8) as i32 % 22) / 100;
+    let (mut wx, mut wz, mut y, mut step) = (x - 1, z - 1, g, 0);
+    while y < g + tall {
+        let turn = hash(wx * 8 + step, wz * 8 + (seed & 7) as i32, 77);
+        s.fill([wx, y, wz], [wx + 3, y + 5, wz + 3], stem, Meet::Touch);
+        // Two blades at a step, to opposite sides, the pair turned a quarter from the pair below: long low down
+        // and shorter towards the top, three or five cells wide, two thick.
+        if step >= 2 {
+            for side in 0..2 {
+                let t = turn >> (8 + side * 9);
+                let (dx, dz): (i32, i32) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(step as usize + side as usize * 2) % 4];
+                if t % 5 == 0 {
+                    continue;
+                }
+                let long = (6 + (t % 9) as i32).min(6 + (g + tall - y) / 4);
+                let shade = [dark, mid, mid, pale][(t >> 3) as usize % 4];
+                // The float it grows from.
+                s.fill([wx + dx * 2, y + 1, wz + dz * 2], [wx + 3 + dx * 2, y + 4, wz + 3 + dz * 2], pale, Meet::Middle);
+                for out in 3..=long {
+                    let rise = (out.min(long * 2 / 3) - (out - long * 2 / 3).max(0) * 2) / 2;
+                    let wide = if out > long - 2 || out < 4 { 1 } else { 2 };
+                    let (bx, bz) = (wx + 1 + dx * out, wz + 1 + dz * out);
+                    s.fill([bx - dz.abs() * wide, y + 1 + rise, bz - dx.abs() * wide], [bx + 1 + dz.abs() * wide, y + 3 + rise, bz + 1 + dx.abs() * wide], shade, Meet::Middle);
+                }
+            }
+        }
+        wx += [-1, 0, 0, 1, 0, 0][turn as usize % 6];
+        wz += [0, -1, 1, 0, 0, 0][(turn >> 2) as usize % 6];
+        y += 5;
+        step += 1;
+    }
+}
+
+/// What grows and lies on the sea's floor in one patch out of town. On the reefs kelp stands in forests with open
+/// water between, and round it the small things of a reef: tubes in bunches, round heads of rock, red weed, dark
+/// urchins. On the sand eelgrass in meadows and a boulder now and then.
+fn stamp_reef(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
+    let deep = SEA - g;
+    if deep < 14 {
+        return;
+    }
+    let (px, pz) = (x.div_euclid(FIELD), z.div_euclid(FIELD));
+    let sort = (seed >> 12) % 24;
+    let on = reef(x, z);
+    if on > 0.12 {
+        if deep > 45 && sort < 7 && noise(px, pz, 5, 78) > 0.42 {
+            stamp_kelp(s, x, z, g, deep, seed);
+            if sort < 3 {
+                let (ox, oz) = (x + 9 - (seed >> 20) as i32 % 19, z + 9 - (seed >> 25) as i32 % 19);
+                let og = ground(ox, oz);
+                stamp_kelp(s, ox, oz, og, SEA - og, seed ^ 0x5bd1);
+            }
+            return;
+        }
+        // Small things, a few to a patch, each on its own ground.
+        for n in 0..4u32 {
+            let h = hash(px * 8 + n as i32, pz, 79);
+            let (tx, tz) = (px * FIELD + 3 + (h % 42) as i32, pz * FIELD + 3 + ((h >> 6) % 42) as i32);
+            let tg = ground(tx, tz);
+            if SEA - tg < 14 {
+                continue;
+            }
+            match (h >> 12) % 9 {
+                0 | 1 => {
+                    // Tubes in a bunch, pale at their mouths.
+                    let hue = [4u8, 18, 21, 6][(h >> 16) as usize % 4];
+                    for tube in 0..3 + (h >> 18) % 4 {
+                        let t = hash(tx + tube as i32, tz, 80);
+                        let (ux, uz, high) = (tx - 3 + (t % 7) as i32, tz - 3 + ((t >> 3) % 7) as i32, 4 + ((t >> 6) % 9) as i32);
+                        let ug = ground(ux, uz);
+                        s.fill([ux, ug - 2, uz], [ux + 2, ug + high, uz + 2], kind(ROCK, colour(hue, 3)), Meet::Touch);
+                        s.fill([ux, ug + high, uz], [ux + 2, ug + high + 1, uz + 2], kind(ROCK, colour(hue, 0)), Meet::Middle);
+                    }
+                }
+                2 => {
+                    let r = 3 + ((h >> 16) % 5) as i32;
+                    s.ball([tx, tg + r / 2, tz], r, kind(ROCK, colour([4u8, 3, 20, 7][(h >> 20) as usize % 4], [1, 2, 7][(h >> 22) as usize % 3])), 0, h, None);
+                }
+                3 | 4 => {
+                    // Red weed: a low tuft.
+                    for blade in 0..7u32 {
+                        let t = hash(tx + blade as i32, tz, 82);
+                        let (ux, uz) = (tx - 4 + (t % 9) as i32, tz - 4 + ((t >> 4) % 9) as i32);
+                        let ug = ground(ux, uz);
+                        s.fill([ux, ug, uz], [ux + 1, ug + 3 + ((t >> 8) % 6) as i32, uz + 1], kind(LEAVES, colour(21, [3, 4, 2][(t >> 12) as usize % 3])), Meet::Touch);
+                    }
+                }
+                5 => s.ball([tx, tg, tz], 2, kind(ROCK, colour(18, 5)), 0, h, None),
+                _ => {}
+            }
+        }
+        return;
+    }
+    if noise(px, pz, 9, 83) > 0.6 && sort < 14 {
+        // Eelgrass on the sand, a tuft of blades.
+        for blade in 0..12u32 {
+            let h = hash(px * 16 + blade as i32, pz, 84);
+            let (bx, bz) = (x - 11 + (h % 23) as i32, z - 11 + ((h >> 5) % 23) as i32);
+            let bg = ground(bx, bz);
+            let tall = (5 + ((h >> 8) % 14) as i32).min(SEA - bg - 3);
+            s.fill([bx, bg, bz], [bx + 1 + (h >> 16) as i32 % 2, bg + 1 + tall, bz + 1], kind(LEAVES, colour(7 + (h >> 12) as u8 % 2, [3, 4, 5, 2][(h >> 14) as usize % 4])), Meet::Touch);
+        }
+    } else if sort == 23 {
+        let r = 4 + ((seed >> 17) % 8) as i32;
+        s.ball([x, g - r / 3, z], r, kind(ROCK, grey(8 + (seed >> 21) as u8 % 3)), 0, seed, None);
+    }
 }
 
 /// Whether pines grow at a place: on the mountains' lower slopes and in the hills before them, in woods with
@@ -841,6 +1004,9 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
     let seed = hash(px, pz, 81);
     let (x, z) = (px * FIELD + 6 + (seed % 36) as i32, pz * FIELD + 6 + ((seed >> 6) % 36) as i32);
     let g = ground(x, z);
+    if g < SEA {
+        return stamp_reef(s, x, z, g, seed);
+    }
     if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) {
         return;
     }
@@ -850,10 +1016,27 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
             stamp_pine(s, x, z, g, seed);
         }
     } else if dry(x, z) > 0.5 {
-        if sort < 4 {
-            let r = 3 + ((seed >> 17) % 4) as i32;
-            s.ball([x, g + r - 1, z], r, kind(LEAVES, colour(6, [8, 9, 9][(seed >> 20) as usize % 3])), 0, seed, None);
-        } else if sort == 4 {
+        // Scrub: grey-green bushes alone and in clumps, tufts of dry grass, a spiked plant on a stem now and then,
+        // stones.
+        let dusty = |n: u32| kind(LEAVES, colour(6 + (n % 3) as u8, [8, 9, 7, 8][(n >> 2) as usize % 4]));
+        if sort < 8 {
+            for n in 0..1 + (seed >> 17) % 3 {
+                let h = hash(px * 4 + n as i32, pz, 85);
+                let (bx, bz, r) = (x - 8 + (h % 17) as i32, z - 8 + ((h >> 5) % 17) as i32, 2 + ((h >> 10) % 4) as i32);
+                s.ball([bx, ground(bx, bz) + r - 2, bz], r, dusty(h >> 13), 0, h, None);
+            }
+        } else if sort < 13 {
+            for blade in 0..8u32 {
+                let h = hash(px * 8 + blade as i32, pz, 86);
+                let (bx, bz) = (x - 5 + (h % 11) as i32, z - 5 + ((h >> 4) % 11) as i32);
+                let bg = ground(bx, bz);
+                s.fill([bx, bg - 1, bz], [bx + 1, bg + 3 + ((h >> 8) % 5) as i32, bz + 1], kind(LEAVES, colour(3 + (h >> 12) as u8 % 2, [7, 8, 2][(h >> 14) as usize % 3])), Meet::Touch);
+            }
+        } else if sort == 13 {
+            let tall = 7 + ((seed >> 17) % 9) as i32;
+            s.fill([x, g - 2, z], [x + 2, g + tall, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
+            s.ball([x + 1, g + tall + 1, z + 1], 3, kind(LEAVES, colour(7, 9)), 0, seed, None);
+        } else if sort < 16 {
             let r = 3 + ((seed >> 17) % 8) as i32;
             s.ball([x, g - r / 3, z], r, kind(ROCK, colour(1, 9)), 0, seed, None);
         }

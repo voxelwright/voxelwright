@@ -1046,3 +1046,67 @@ never cells of the town (the town's sum is untouched) and the rays never see one
   each other and through people. A person at a page is a figure hanging from wherever its camera flies. Nobody
   sits, carries anything but a bag, a phone or an umbrella, or goes indoors. Sixty-four people in one street has
   not been tried.
+
+## The coast, and the sea off it (#217, November 12)
+
+The town's lake, its floor and its weed are inside the town's sum (three of the sum's thirteen places are on that
+lake): nothing there may change. So what the under-water and sunset rows lacked was built out of town instead.
+
+- **A coast 6.6 km west of the start** (`land.rs` `offshore`, signed cells: over 0 is sea). Its line wanders by three
+  noises, the middle one folded (`1 - |2n - 1|`) so that headlands come to points. Hills rise towards it and end in
+  cliffs where they are high, a beach where they are low; off it a shelf of sand with reefs in mounds, stacks of rock
+  out of the water, then the deep. `offshore` is `None` east of 4.3 km west, so the town and most of the country
+  ask nothing more than before.
+- **`land.rs` has a map to look at**: `LAND_MAP=file.ppm LAND_AT=x,z,span cargo test --release land_map -- --ignored`.
+  A tenth of a second, no GPU. Shape land there first, then go and stand in it.
+- **The planet's pass has the same coast** (`space.ts` `offshore`, the core's noise asked in whole cells), out to
+  120 km from the start. Past that the cells' coast runs on north and south for ever and the planet's does not:
+  the far ground is still to be made to follow the planet.
+- **Out of town the sea's floor is `sea_bed` and `stamp_reef`** (`city.rs`), behind `is_open`. Kelp is a 3 x 3
+  stipe with a float and a blade to two sides at every step, the blades three to five cells wide and two thick:
+  one or two cells thick was "sticks" at the 0.35 to 0.5 of full size that the page holds under water. Small things
+  stand on the ground of their own column (a bunch placed by its middle's height hung a cell in the water on a
+  slope, and the rest check `what_grows_on_the_reefs_is_at_rest` found it).
+- **Water takes the red out**: at seven metres a quarter of it is left. Orange and red things on the floor are black.
+  What reads down there is yellow (it turns green), violet, pink and anything pale.
+- **`deep()`**: side faces out of the sun were black, a stair of dark risers up every mound; the water's own light
+  is added to what is met (more on side faces). The top seen from under is lines of light all over (two noises'
+  difference, as `net`), not only a window of sky. Shafts take fourteen samples and an even weave from pixel to
+  pixel (interleaved gradient noise) in place of a hash that changed every frame: specks became beams.
+  The haze is thinner (0.026 for 0.036): the far kelp shows.
+- **What the new land cost the town's views: nothing in steps.** Steps a picture takes at the town's stands, the
+  finished change against main: town 21.6 and 21.6, light 17.2 and 17.2, whole 22.4 and 22.8, dusk 16.7 and 16.6.
+  The new under-water stand takes 26.2 steps a pixel, the old one in the lake 25.3.
+- **What `deep()` cost: about 8% under water.** At the old lake stand the cells are the same on both sides, so only
+  the shader differs: the least of four paced frames at 2560 x 1440, two runs each on a busy GPU, 48.3 ms against
+  main's 44.6 (four more shaft samples, the wave lines on the top). Steps cannot see shader work: time it.
+- **A turn-about timing of two pages in one script hung** (no row in ten minutes, twice). Count steps one server at
+  a time, each row printed as it is done, output to a file and never through `tail`. A scratch script killed part
+  way leaves its page server running: find it by its working directory (`lsof -a -p PID -d cwd`), kill it by PID.
+
+## Mountains, snow and the dry plain (#217, November 12)
+
+- **Ridged value noise asked straight runs along its own squares.** From over them the mountains were a maze of
+  ridges north to south and east to west (the map shows it at once). `land.rs` `high` asks each size of ridge at its
+  own slant (whole-number turns: `(x * c - z * s) / 16`), bends the big ones by a slow noise, lets the fine ridges
+  stand only on the flanks of the big, and has a slow mask for wide valleys between massifs. The massif north of
+  the town is kept whole whatever the mask says: a row's stand needs something to look at.
+- **The snow row was grey for three reasons, none of them shading**: the rule made everything from 500 m to the
+  snow line rock; the stand looked into the sun, so every face towards the eye was in shade; and `lookFrom`'s `high`
+  is over the ground at the target, so 1,700 m over a peak aimed the eye at the sky. Now snow lies from about 430 m
+  (lower on north faces, in patches for the first 90 m), rock is dark and shows only where it is steep, and the
+  stand has the sun behind it (hour 9, looking west of north).
+- **How steep a face may be and still hold snow must not wander much.** With 0.7 of noise in it the rock came out
+  in round blots like camouflage; with 0.3 it follows the faces.
+- **Tables of rock on the plain**: a threshold on a noise gives a level top and a wall; a skirt below it and a
+  second step above make it a mesa. Multiplying their height by "how far from the road" cut straight cliffs along
+  the road: take the distance off the noise instead, and they shrink towards it. Their walls are banded by height
+  (`country`), red and paler beds.
+- **Things made of thinned balls leave single cells in the air** (a bush with `thin` 30): the rest check finds
+  them. Bushes are whole balls sunk two cells into the ground.
+- The plain at sunrise (6.45) was black ground under a bright sky. At 6.8 the sun is on it.
+- **Still wrong with the mountains**: seen close they are smooth as dunes, and rock shows through the snow in
+  rings and blots, because value noise crossed at a level makes closed loops. A low sun from the side models them
+  little. They want creased ridges and gullies before the snow row is judged again.
+- The planet's pass paints the plain red and the massif white to match the cells (`space.ts`); from 7 km the plain
+  is still a square with soft edges, as `dry()` is.
