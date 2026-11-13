@@ -109,6 +109,13 @@ const charge = async (page, turn, radius, pitch) => {
 // After smoke that climbs over fires, dust that hangs where a blast was and fire's glow on what is near, a third
 // judge of four rows (logged): blast 5 v 6, fire 6 v 3, rubble 6 v 5, ruin 5 v 6. Ruin is level. Its words for what
 // is left: ours is bright, toy-coloured and evenly lit, a diorama; theirs has grey mass, haze and light.
+// The sixth full judge (logged, main 91cb6a20, 21 rows, water among them for the first time): town 5 v 7, light 6 v 7,
+// tumble 5 v 7, topple 7 v 6, blast 6 v 5, fire 6 v 4, water 4 v 6, rubble 7 v 6, glass 5 v 4, frame 4 v 7, tools 6 v 5,
+// ruin 7 v 6, sunset 6 v 8, under 6 v 8, snow 5 v 7, rain 5 v 8, road 6 v 5, whole 5 v 7, signs 4 v 8, dusk 6 v 7,
+// there 6 v 5. The states below are that judge's. Tumble and sunset went back to behind on scores that have moved a
+// point either way from pass to pass (tumble's six passes: ours 6, 6.5, 6, 5, 5, 5 to theirs 5, 5.5, 5, 7, 6, 7).
+// Water's lack: the falling water is "an opaque white pillar", with no foam and nothing seen through it. The grade
+// by day was softened after this pass (glow.ts) and no judge has seen that yet.
 // The fourth judge's scores, for the noise between passes: town 5 v 7, light 5 v 7, tumble 6 v 5, topple 5 v 7,
 // blast 6 v 5, fire 6 v 4, rubble 5 v 7, glass 6 v 4, frame 5 v 7, tools 6 v 4, ruin 5 v 7, sunset 7 v 8, under 6 v 8,
 // snow 5 v 7, rain 5 v 8, road 6 v 7, whole 5 v 8, signs 3 v 8, dusk 6 v 7, there 6 v 5. Glass is kept level, not
@@ -123,7 +130,7 @@ export const ROWS = [
     stand: { from: [54, 437], up: 1.8, to: [33, 400], high: 7 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'level',
     stand: [-9, 1.8, 2.2, 62, 5] },
-  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'level',
+  { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'behind',
     stand: FRONT, near: [16, ...HOUSE], inAir: true, falls: 20,
     act: async (page) => {
       await blast(page, 16)
@@ -213,7 +220,7 @@ export const ROWS = [
       for (const turn of [-0.9, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(700) }
     } },
   // The same engine as the Earth.
-  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
+  { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'behind',
     // From the town's shore over its lake to where the sun goes down over the mountains beyond it, towers either side.
     stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.35, near: [400, WATER] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',

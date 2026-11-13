@@ -172,6 +172,8 @@ async function main() {
   // Unasked, the sun stands where it always has. `?hour=18.4` or the [ and ] keys set the time of day: the sun goes
   // from the east at six over the south to the sea in the west at eighteen, and the moon lights the night.
   let hour: number | null = null
+  /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
+  let grade: [number, number] = [0.9, 0.1]
   const setHour = (h: number | null) => {
     hour = h === null ? null : ((h % 24) + 24) % 24
     let sun: [number, number, number] = [0.52, 0.62, 0.59], day = 1, low = 0
@@ -185,6 +187,9 @@ async function main() {
       sun = day === 0 ? [0.45, 0.7, -0.55] : [at[0], Math.max(at[1], 0.06), at[2]]
     }
     march.light(sun, day, low)
+    // Full day is 1, dusk and night 0.
+    const noon = day * (1 - low)
+    grade = [1.25 - 0.35 * noon, 0.35 - 0.25 * noon]
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)
@@ -254,7 +259,7 @@ async function main() {
     if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
     if (!off.has('crumbs')) debris.draw(encoder, to, v)
     if (!off.has('puffs')) smoke.draw(encoder, to, v)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')

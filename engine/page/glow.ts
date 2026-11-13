@@ -43,10 +43,13 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   // The corners of the picture a little darker, as a lens leaves them.
   let d = in.uv - 0.5;
   c *= 1.0 - dot(d, d) * 0.42;
-  // The grade: a little more colour and a little more contrast than the tone curve leaves.
+  // The grade, which follows the hour (u.step here is how much colour, how much contrast). With the sun low and at
+  // night, more of both than the tone curve leaves: that is what made the sunset. By day, a little less colour and
+  // nearly no more contrast: with the evening's grade a street by day was called bright and toy-coloured by every
+  // judge who saw it, and the same pictures with the grade undone sat beside the films' far better.
   c = clamp(c, vec3f(0.0), vec3f(1.0));
-  c = mix(vec3f(dot(c, vec3f(0.3, 0.59, 0.11))), c, 1.25);
-  c = mix(c, c * c * (3.0 - 2.0 * c), 0.35);
+  c = mix(vec3f(dot(c, vec3f(0.3, 0.59, 0.11))), c, u.step.x);
+  c = mix(c, c * c * (3.0 - 2.0 * c), u.step.y);
   return vec4f(c, 1.0);
 }
 `
@@ -83,8 +86,8 @@ fn chance(c: vec2i) -> f32 {
 }
 `
 
-/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. Returns the pass to call each frame. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number) => void> {
+/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for. Returns the pass to call each frame. */
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number]) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -135,8 +138,9 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     p.draw(3)
     p.end()
   }
-  return (encoder, from, to, rain = 0, time = 0) => {
+  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35]) => {
     const k = keep(from)
+    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, 0]))
     pass(encoder, bright, k.binds[0], k.views[0])
     pass(encoder, blur, k.binds[1], k.views[1])
     pass(encoder, blur, k.binds[2], k.views[0])
