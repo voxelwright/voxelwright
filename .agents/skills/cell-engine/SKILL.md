@@ -1578,3 +1578,23 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - **Reads** (dispatch log): two rankings of six, theirs 8 and 7.5, the row's stand 5.5 and 5, main's old row 3.5.
 - **Rough still**: a tree is two balls; the woods are one sort of tree; cliffs have beds but no caves or arches; the
   surf is still; from the beach the hills behind are steep enough to be mostly cliff in places.
+
+## A ball of fire that can be seen to be one (`page/puffs.ts`, #160, November 12)
+
+The eighth judge on the blast row: "no real fireball, only a dark smudge with a little orange". Filmed and tiled at ten
+frames a second (a scratch script round `kit.film`; a screenshot takes over a second on a loaded Mac, so stills at set
+moments are useless), it was that: a flash, a ball for 0.3 s, then dark smoke with a little orange.
+
+- **It cooled in half a second** (`cool` 1.3 to 2.0). The ball's lumps now start at heat 0.6 to 0.8 and cool at 0.42 to
+  0.62, live 1.2 to 1.9 s, and are thrown out and up by the blast's size; ten small fast tongues make its edge ragged.
+- **It was covered by its own smoke from the first.** A puff's cover was `1 - heat * 0.8`; it is now nearly nothing
+  until the heat is under 0.6. The smoke a blast leaves comes late (`late`, the fourth of `more`): it shows as the ball
+  goes out.
+- **Colour by heat**, not heat squared: white-yellow only at the heart and when hottest, then yellow, orange for most of
+  its life, a dull red as it goes out; its folds are darker, so it rolls.
+- **Puffs add up.** With the new colours at twice the old strength the ball was a white-out for 0.8 s (sixteen lumps over
+  one another, and the last pass's bloom). Strength 0.9, and the wide glow on what is round it at heat 0.13, not 0.34.
+- A burning cell's flames share the shader: at heat 1 a burning crown was a white blob, so flames start at 0.62.
+- The blast row's picture is taken about 0.7 s after the charge (0.35 s after the first body); the wall row's 0.9 s after
+  twenty bodies, when the ball has gone to smoke and the pieces are still in the air.
+- Cost: ten more puffs a blast, each small. Not timed (load average over 100).

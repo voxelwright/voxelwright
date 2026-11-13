@@ -57,16 +57,22 @@ fn cloud(p: vec2f, seed: u32) -> f32 {
   let billow = cloud(in.uv * 2.1 + drift, seed) * 0.62 + cloud(in.uv * 4.6 + drift * 1.7, seed + 7u) * 0.38;
   let body = smoothstep(1.0, 0.3, r + (billow - 0.5) * 0.85) * (1.0 - r * r * r);
   if (body <= 0.004) { discard; }
-  let fade = smoothstep(0.0, 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
-  let cover = in.colour.a * body * fade * (1.0 - heat * 0.8);
+  // The smoke a blast leaves comes late (more.w): it shows as the ball of fire goes out, not in front of it.
+  let fade = smoothstep(in.more.w, in.more.w + 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
+  // While it burns it is fire and not smoke: its smoke shows as it cools. Covered by its own smoke from the first, a
+  // ball of fire was a dark smudge with a little orange a third of a second after it went off.
+  let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat));
   // Smoke is lit as the ball it is: bright on the sun's side and on top, dark underneath and in its folds.
   let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
   let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
   let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
   let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35) * mix(0.07, 1.0, u.day);
-  // Fire: white-yellow at its heart and when hottest, orange, then a dull red as it goes out.
+  // Fire: white-yellow at its heart and when hottest, then yellow, orange for most of its life, and a dull red only
+  // as it goes out. Its folds are darker, so it rolls.
   let core = body * body;
-  let glow = mix(vec3f(1.0, 0.2, 0.02), vec3f(1.0, 0.88, 0.5), clamp(heat * heat * (0.35 + core), 0.0, 1.0)) * heat * (0.35 + billow) * body * fade * 2.0;
+  let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
+  let flame = mix(mix(vec3f(0.7, 0.06, 0.01), vec3f(1.0, 0.4, 0.05), smoothstep(0.06, 0.36, hot)), vec3f(1.0, 0.9, 0.55), smoothstep(0.42, 0.95, hot));
+  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.3 + billow * 1.15) * body * fade * 0.9;
   return vec4f(smoke * cover + glow, cover);
 }
 `
@@ -104,13 +110,13 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
   const size = new Float32Array(MOST), grow = new Float32Array(MOST), life = new Float32Array(MOST), span = new Float32Array(MOST)
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
-  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST)
+  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
   let next = 0, lasting = 0, live = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
-  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number }) => {
+  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number }) => {
     // What lasts has places of its own: a street on fire makes hundreds of flames a second, and they would take the
     // place of the smoke and dust over it within seconds.
     const i = o.life > LASTS ? lasting++ % KEPT : KEPT + (next++ % (MOST - KEPT))
@@ -121,6 +127,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     size[i] = o.size; grow[i] = o.grow; life[i] = span[i] = o.life; heat[i] = o.heat; cool[i] = o.cool; rise[i] = o.rise; drag[i] = o.drag
     tone.set([o.colour[0], o.colour[1], o.colour[2], o.cover], i * 4)
     seed[i] = Math.floor(Math.random() * 65536)
+    late[i] = o.late ?? 0
   }
   return {
     get live() { return live },
@@ -129,19 +136,24 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       // The flash: one puff of light, gone in a tenth of a second.
       puff(at, 0, 0, 0, { size: r * 2.6, grow: r * 6, life: 0.12, heat: 1, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
       // Its light on what is round it, for as long as the ball of fire burns: a wide dull glow, added to the picture.
-      puff(at, 0, 0, 0, { size: r * 4.2, grow: r * 1.5, life: 0.7, heat: 0.34, cool: 0.5, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+      puff(at, 0, 0, 0, { size: r * 4.2, grow: r * 1.5, life: 0.7, heat: 0.13, cool: 0.18, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
       // The heart of it stays white-hot longest.
-      for (let k = 3; k > 0; k--) puff(at, r * 0.2, rnd(5, 20), 20, { size: r * rnd(0.4, 0.6), grow: r * 0.9, life: rnd(0.7, 1.0), heat: 1, cool: rnd(0.7, 1.0), rise: 50, drag: 3, colour: [0.13, 0.12, 0.11], cover: 0.5 })
-      // The ball of fire: hot lumps thrown out, cooling to black smoke in under a second.
+      for (let k = 3; k > 0; k--) puff(at, r * 0.2, rnd(5, 20), 20, { size: r * rnd(0.35, 0.5), grow: r * 0.6, life: rnd(1.1, 1.5), heat: 0.95, cool: rnd(0.6, 0.75), rise: 50, drag: 3, colour: [0.13, 0.12, 0.11], cover: 0.5 })
+      // The ball of fire: hot lumps thrown out, that swell and climb, and are black smoke in a second and a half.
+      // Cooling in half a second, the ball was gone before it could be seen to be one.
       // A big blast's puffs are bigger, not many more: they are drawn over one another, and that is what costs.
       for (let k = Math.min(16, Math.max(6, Math.round(r * 0.8))); k > 0; k--) {
-        puff(at, r * 0.5, rnd(20, 70), 30, { size: r * rnd(0.45, 0.9), grow: r * 1.3, life: rnd(0.55, 1.0), heat: 1, cool: rnd(1.3, 2.0), rise: 70, drag: 3.2, colour: [0.13, 0.12, 0.11], cover: 0.7 })
+        puff(at, r * 0.5, r * rnd(2, 5.5), r * 2, { size: r * rnd(0.45, 0.9), grow: r * 1.2, life: rnd(1.2, 1.9), heat: rnd(0.6, 0.8), cool: rnd(0.42, 0.62), rise: 70, drag: 3.2, colour: [0.13, 0.12, 0.11], cover: 0.7 })
+      }
+      // Tongues of it: small, fast and soon out, so its edge is ragged and not a disc.
+      for (let k = Math.min(10, Math.max(5, Math.round(r * 0.5))); k > 0; k--) {
+        puff(at, r * 0.4, r * rnd(6, 11), r * 2.5, { size: r * rnd(0.18, 0.34), grow: r * 0.5, life: rnd(0.45, 0.8), heat: 0.85, cool: rnd(0.9, 1.3), rise: 40, drag: 3.6, colour: [0.1, 0.09, 0.08], cover: 0.3 })
       }
       // The smoke it leaves: grey, slow, rising for seconds.
       // Dark at first and thick, a column that stands for some seconds.
       for (let k = Math.min(18, Math.max(7, Math.round(r * 0.8))); k > 0; k--) {
         const grey = rnd(0.16, 0.42)
-        puff(at, r * 0.7, rnd(8, 30), rnd(15, 45), { size: r * rnd(0.6, 1.1), grow: r * 0.6, life: rnd(3.5, 7.5), heat: 0, cool: 0, rise: 24, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.62 })
+        puff(at, r * 0.7, rnd(8, 30), rnd(15, 45), { size: r * rnd(0.6, 1.1), grow: r * 0.6, life: rnd(3.5, 7.5), heat: 0, cool: 0, rise: 24, drag: 1.1, colour: [grey, grey, grey * 1.04], cover: 0.62, late: 0.16 })
       }
       // And the air it leaves: the dust of what it broke, wide and thin, that hangs over the place for a minute
       // and more. It is heavy in the air (the wind moves it a metre in ten seconds): lighter, it had left the
@@ -159,7 +171,8 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
     },
     flame(at, dt) {
-      if (Math.random() < dt * 9) puff(at, 0.8, rnd(1, 5), rnd(18, 40), { size: rnd(1.6, 3.4), grow: rnd(1, 3), life: rnd(0.35, 0.7), heat: 1, cool: rnd(1.4, 2.4), rise: 60, drag: 1.5, colour: [0.05, 0.045, 0.04], cover: 0.25 })
+      // Not white-hot: with the fire's colours as a blast's are, a burning crown at heat 1 was a white blob.
+      if (Math.random() < dt * 9) puff(at, 0.8, rnd(1, 5), rnd(18, 40), { size: rnd(1.6, 3.4), grow: rnd(1, 3), life: rnd(0.35, 0.7), heat: 0.62, cool: rnd(0.9, 1.5), rise: 60, drag: 1.5, colour: [0.05, 0.045, 0.04], cover: 0.25 })
       if (Math.random() < dt * 1.2) {
         const grey = rnd(0.2, 0.36)
         puff(at, 1.5, rnd(2, 8), rnd(25, 45), { size: rnd(3, 6), grow: rnd(3, 6), life: rnd(3, 6), heat: 0, cool: 0, rise: 30, drag: 0.9, colour: [grey, grey, grey], cover: 0.42 })
@@ -205,7 +218,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const i = sorted[k], o = k * EACH
         packed[o] = p[i * 3] - anchor[0]; packed[o + 1] = p[i * 3 + 1] - anchor[1]; packed[o + 2] = p[i * 3 + 2] - anchor[2]; packed[o + 3] = size[i]
         packed[o + 4] = tone[i * 4]; packed[o + 5] = tone[i * 4 + 1]; packed[o + 6] = tone[i * 4 + 2]; packed[o + 7] = tone[i * 4 + 3]
-        packed[o + 8] = heat[i]; packed[o + 9] = seed[i]; packed[o + 10] = 1 - life[i] / span[i]; packed[o + 11] = Math.min(12, Math.max(3, size[i] / 2))
+        packed[o + 8] = heat[i]; packed[o + 9] = seed[i]; packed[o + 10] = 1 - life[i] / span[i]; packed[o + 11] = late[i]
       }
       device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
       device.queue.writeBuffer(uniforms, 0, new Float32Array([

@@ -158,7 +158,8 @@ export const ROWS = [
     act: async (page) => {
       await blast(page, 16)
       await page.waitForFunction(() => globalThis.engine.bodies > 20, null, { timeout: 4000 })
-      await page.waitForTimeout(450)
+      // When the ball of fire has gone to smoke and the pieces are still in the air.
+      await page.waitForTimeout(900)
       return page.screenshot()
     } },
   { key: 'topple', what: 'A tall thing leans over and comes down whole', theirs: ['engine', 3.4], state: 'level',
@@ -176,7 +177,8 @@ export const ROWS = [
     act: async (page) => {
       await blast(page, 16)
       await page.waitForFunction(() => globalThis.engine.bodies > 0, null, { timeout: 4000 })
-      await page.waitForTimeout(200)
+      // The ball of fire is at its fullest about 0.7 s after the charge: before that it is a flash, after it smoke.
+      await page.waitForTimeout(350)
       return page.screenshot()
     } },
   { key: 'fire', what: 'Fire that keeps burning, with smoke rising from it', theirs: ['engine', 53.6], state: 'ahead',
