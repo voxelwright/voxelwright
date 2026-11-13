@@ -10,7 +10,7 @@
 use crate::bodies::{Bodies, FIRE, Map};
 use crate::city;
 use crate::hash::hash3;
-use crate::kinds::{EARTH, GRASS, ROCK, WOOD, burns, grey, kind, material};
+use crate::kinds::{EARTH, GRASS, ROCK, WOOD, burns, grey, kind};
 use crate::scratch::Run;
 
 /// One turn of the fire, seconds.
@@ -63,7 +63,7 @@ impl Bodies {
         if c[1] <= city::SEA && city::ground(c[0], c[2]) < city::SEA {
             return false;
         }
-        let (lasts, _) = burns(material(self.ground.kind(c[0], c[1], c[2])));
+        let (lasts, _) = burns(self.ground.fuel_stuff(c[0], c[1], c[2]));
         if lasts == 0 {
             return false;
         }
@@ -100,7 +100,7 @@ impl Bodies {
                     if !self.ground.fuel(n[0], n[1], n[2]) || self.fire.alight.contains_key(&n) {
                         continue;
                     }
-                    let (_, catches) = burns(material(self.ground.kind(n[0], n[1], n[2])));
+                    let (_, catches) = burns(self.ground.fuel_stuff(n[0], n[1], n[2]));
                     let chance = match i { 5 => catches as u32 * 2, 6 => catches as u32 / 2, 4 => catches as u32 / 2, _ => catches as u32 };
                     if chance > 0 && hash3(n[0], n[1], n[2], turn.wrapping_mul(7).wrapping_add(i as u32)) % 256 < chance {
                         self.light(n, 0);
@@ -112,8 +112,7 @@ impl Bodies {
                 }
                 self.fire.alight.remove(&c);
                 // Burnt out: leaves and roofing are gone, grass is bare earth, wood is gone or (two times in five) char that still stands.
-                let was = self.ground.kind(c[0], c[1], c[2]);
-                let now = match material(was) {
+                let now = match self.ground.fuel_stuff(c[0], c[1], c[2]) {
                     GRASS => kind(EARTH, grey(3)),
                     WOOD if hash3(c[0], c[1], c[2], 33) % 5 < 2 => kind(ROCK, grey(2)),
                     _ => 0,

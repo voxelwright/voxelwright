@@ -12,11 +12,11 @@
 //! process decides is what everyone sees.
 
 use crate::hash::hash3;
-use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, PLASTER, ROCK, ROOFING, SAND, WATER, breaks_at, burns, material, weighs};
+use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, material, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::support::{self, Region};
-use crate::tree::{CELLS, Kind, SIDE, at};
-use crate::{Edit, SETTLE, city, fill_of};
+use crate::tree::{CELLS, Kind, SIDE, at, at as at_cell};
+use crate::{Edit, SETTLE, WIDE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -26,6 +26,8 @@ pub const G: f32 = 98.0;
 pub const STEP: f32 = 1.0 / 120.0;
 /// The most points a body meets things at.
 const POINTS: usize = 160;
+/// And for a lump that a blast threw out.
+const LUMP_POINTS: usize = 36;
 /// A body under this many cells does not meet other small bodies: lumps and shards land on the world and on big
 /// things, and a heap of them is the world, not bodies on bodies. There is a lot of rubble.
 const SMALL: usize = 160;
@@ -44,6 +46,9 @@ const WHOLE: usize = 12;
 /// How hard a body must strike the standing world to break it: its weight times the speed it loses. A lump of fifty
 /// cells of brick falling three metres does; a crumb does not.
 const HARD: f32 = 8000.0;
+/// A blast this big or bigger is asked about again in a wide box, this many seconds on.
+const FAR_FROM: i32 = 12;
+const FAR_AFTER: f32 = 0.25;
 
 type V = [f32; 3];
 type Q = [f32; 4];
@@ -81,11 +86,57 @@ impl Hasher for Mix {
 }
 pub(crate) type Map<K, T> = HashMap<K, T, BuildHasherDefault<Mix>>;
 
+/// A sector kept whole: all of one kind (air, or the ground far down), or its cells.
+enum Kept {
+    Same(Kind),
+    Cells(Box<[Kind]>),
+}
+
+/// How many sectors are kept as cells (half a megabyte each): a wide box is a hundred, and many of those are air.
+const KEEPS: usize = 112;
+
 enum Sector {
     Air,
     Solid,
-    /// A bit a cell for whether it is solid, and a bit a cell for whether it can burn.
-    Bits(Box<[u64; CELLS / 64]>, Box<[u64; CELLS / 64]>),
+    /// A bit a cell for whether it is solid, and a bit a cell for whether it can burn; and the sector in blocks.
+    Bits(Box<[u64; CELLS / 64]>, Box<[u64; CELLS / 64]>, Box<Coarse>),
+}
+
+/// How many blocks a sector is across, and how many it holds (support.rs `BLOCK`, `Blocks`).
+const ACROSS: usize = SIDE / support::BLOCK;
+const BLOCKS: usize = ACROSS * ACROSS * ACROSS;
+
+/// A sector in blocks, kept as the sector changes, for asking what stands over a box too wide to gather cell by
+/// cell (`Bodies::far`): the strongest stuff in each block, how many of its cells are built, and a bit a cell for
+/// whether it is built (solid, and not the ground). When cells leave a block, what it is of is not looked for again
+/// until none are left: it may be taken for stronger than it is, never for weaker.
+struct Coarse {
+    /// Which of the four stuffs that burn a cell is of, in two bits (`FUELS`): a fire asks it of every neighbour.
+    sort: [[u64; CELLS / 64]; 2],
+    built: [u64; CELLS / 64],
+    kind: [Kind; BLOCKS],
+    count: [u8; BLOCKS],
+}
+
+/// The stuffs that burn (kinds.rs `burns`), as `Coarse::sort` numbers them.
+const FUELS: [u8; 4] = [LEAVES, GRASS, WOOD, ROOFING];
+
+impl Coarse {
+    #[inline]
+    fn sorted(&mut self, i: usize, material: u8) {
+        let n = FUELS.iter().position(|&f| f == material).unwrap_or(0) as u64;
+        for (bit, plane) in self.sort.iter_mut().enumerate() {
+            plane[i >> 6] = plane[i >> 6] & !(1 << (i & 63)) | (n >> bit & 1) << (i & 63);
+        }
+    }
+    fn new(kind: Kind) -> Box<Coarse> {
+        Box::new(Coarse { sort: [[0; CELLS / 64]; 2], built: [0; CELLS / 64], kind: [kind; BLOCKS], count: [0; BLOCKS] })
+    }
+    #[inline]
+    fn block(i: usize) -> usize {
+        let (x, y, z) = (i % SIDE, i / (SIDE * SIDE), i / SIDE % SIDE);
+        x / support::BLOCK + ACROSS * (z / support::BLOCK + ACROSS * (y / support::BLOCK))
+    }
 }
 
 /// The standing world as a body meets it: solid or not at any cell. Sectors are made when first asked for (the
@@ -95,12 +146,19 @@ pub struct Ground {
     /// Which edits this solver made itself (pieces taken out, bodies put down), and the box each edit reaches.
     ours: Vec<bool>,
     boxes: Vec<([i32; 3], [i32; 3])>,
-    sectors: Map<[i32; 3], Sector>,
+    /// The sectors made, by where each is kept in `slots`; the one last asked about is remembered, for a body's points
+    /// are asked about one after another and lie together.
+    sectors: Map<[i32; 3], u32>,
+    slots: Vec<Sector>,
+    spare: Vec<u32>,
+    last: ([i32; 3], u32),
     pub(crate) scratch: Scratch,
-    /// The sector the scratch holds whole, for asking what a cell is made of.
-    holds: Option<[i32; 3]>,
-    /// A few sectors kept whole, for asking what many cells are made of (a fire asks about every neighbour).
-    whole: Vec<([i32; 3], Vec<Kind>)>,
+    /// Sectors kept whole, as cells, with when each was last asked for: the ones the solver is at work in. What the
+    /// solver does itself (cells out, cells back, a blast put last) changes them where they are, so that a box of
+    /// the world is copied out of them and not made again from every edit there has been. Made so, a box 5 m across
+    /// took up to 293 ms once a street had burnt and fallen (tens of thousands of edits).
+    kept: Map<[i32; 3], (Kept, u32)>,
+    asked: u32,
     /// The boxes of the edits made since the water last asked (water.rs): what flows goes by what stands.
     pub(crate) latest: Vec<([i32; 3], [i32; 3])>,
 }
@@ -125,7 +183,7 @@ fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
 
 impl Ground {
     pub fn new() -> Self {
-        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), scratch: Scratch::new(), holds: None, whole: Vec::new(), latest: Vec::new() }
+        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), slots: Vec::new(), spare: Vec::new(), last: ([i32::MIN; 3], 0), scratch: Scratch::new(), kept: Map::default(), asked: 0, latest: Vec::new() }
     }
 
     /// How many edits of this solver's own are in the world.
@@ -157,10 +215,36 @@ impl Ground {
             (Edit::Runs(runs) | Edit::Rows(runs), true) => self.rows(runs),
             _ => self.forget(b),
         }
-        self.holds = None;
-        // Kept sectors the edit reaches are forgotten: asked for again, they are made with it.
         let s = SIDE as i32;
-        self.whole.retain(|(k, _)| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]));
+        match (&e, last) {
+            // Rows put last change the sectors kept whole in place too: a street that burns while it comes down asks
+            // what hundreds of cells are made of between one landing and the next, and with every landing forgetting
+            // the sectors it reached, each asking made a sector again from thousands of edits (9 to 15 s a call).
+            (Edit::Runs(runs) | Edit::Rows(runs), true) => {
+                for (k, (kept, _)) in &mut self.kept {
+                    if (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]) {
+                        continue;
+                    }
+                    for r in runs.iter().filter(|r| r.y >> 6 == k[1] && r.z >> 6 == k[2]) {
+                        let (x0, x1) = (r.x0.max(k[0] * s), r.x1.min((k[0] + 1) * s));
+                        if x0 >= x1 {
+                            continue;
+                        }
+                        if let Kept::Same(kind) = *kept {
+                            if kind == r.kind {
+                                continue;
+                            }
+                            *kept = Kept::Cells(vec![kind; CELLS].into_boxed_slice());
+                        }
+                        let Kept::Cells(cells) = kept else { unreachable!() };
+                        let i = at_cell((x0 & 63) as usize, (r.y & 63) as usize, (r.z & 63) as usize);
+                        cells[i..i + (x1 - x0) as usize].fill(r.kind);
+                    }
+                }
+            }
+            // Kept sectors any other edit reaches are forgotten: asked for again, they are made with it.
+            _ => self.kept.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a])),
+        }
         self.edits.insert(at, e);
         self.ours.insert(at, ours);
         self.boxes.insert(at, b);
@@ -168,56 +252,210 @@ impl Ground {
     }
 
     /// Takes back the last edit: the sectors it reached are forgotten again.
+    #[cfg(test)]
     fn undo(&mut self) {
         if let (Some(_), Some(_), Some(b)) = (self.edits.pop(), self.ours.pop(), self.boxes.pop()) {
             self.forget(b);
             let s = SIDE as i32;
-            self.whole.retain(|(k, _)| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]));
+            self.kept.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]));
         }
     }
 
     fn forget(&mut self, (lo, hi): ([i32; 3], [i32; 3])) {
         let s = SIDE as i32;
-        self.sectors.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= lo[a] || k[a] * s >= hi[a]));
+        let spare = &mut self.spare;
+        self.sectors.retain(|k, slot| {
+            let keeps = (0..3).any(|a| (k[a] + 1) * s <= lo[a] || k[a] * s >= hi[a]);
+            if !keeps {
+                spare.push(*slot);
+            }
+            keeps
+        });
+        self.last.0 = [i32::MIN; 3];
     }
 
     fn rows(&mut self, runs: &[Run]) {
         let s = SIDE as i32;
         for r in runs {
             for sx in r.x0 >> 6..=(r.x1 - 1) >> 6 {
-                let Some(sector) = self.sectors.get_mut(&[sx, r.y >> 6, r.z >> 6]) else { continue };
+                let Some(&slot) = self.sectors.get(&[sx, r.y >> 6, r.z >> 6]) else { continue };
+                let sector = &mut self.slots[slot as usize];
                 if let Sector::Air | Sector::Solid = sector {
-                    let all = if matches!(sector, Sector::Solid) { u64::MAX } else { 0 };
-                    *sector = Sector::Bits(Box::new([all; CELLS / 64]), Box::new([0; CELLS / 64]));
+                    let solid = matches!(sector, Sector::Solid);
+                    *sector = Sector::Bits(Box::new([if solid { u64::MAX } else { 0 }; CELLS / 64]), Box::new([0; CELLS / 64]), Coarse::new(if solid { EARTH as Kind } else { 0 }));
                 }
-                let Sector::Bits(bits, fuel) = sector else { unreachable!() };
+                let Sector::Bits(bits, fuel, coarse) = sector else { unreachable!() };
                 let burns = burns(material(r.kind)).0 != 0;
+                let built = r.kind != 0 && !support::is_ground(r.kind);
                 for x in r.x0.max(sx * s)..r.x1.min((sx + 1) * s) {
                     let i = at((x & 63) as usize, (r.y & 63) as usize, (r.z & 63) as usize);
                     if r.kind == 0 { bits[i >> 6] &= !(1 << (i & 63)) } else { bits[i >> 6] |= 1 << (i & 63) }
                     if burns { fuel[i >> 6] |= 1 << (i & 63) } else { fuel[i >> 6] &= !(1 << (i & 63)) }
+                    if burns {
+                        coarse.sorted(i, material(r.kind));
+                    }
+                    // The same cell in the sector's blocks.
+                    let b = Coarse::block(i);
+                    let was = coarse.built[i >> 6] >> (i & 63) & 1 != 0;
+                    if built { coarse.built[i >> 6] |= 1 << (i & 63) } else { coarse.built[i >> 6] &= !(1 << (i & 63)) }
+                    coarse.count[b] = coarse.count[b] + built as u8 - was as u8;
+                    if r.kind != 0 {
+                        if coarse.kind[b] == 0 || support::rank(r.kind) > support::rank(coarse.kind[b]) {
+                            coarse.kind[b] = r.kind;
+                        }
+                    } else if coarse.count[b] == 0 {
+                        // Nothing built is left in the block: it is ground, if anything of it is solid still.
+                        let (bx, by, bz) = ((x & 60) as usize, (r.y & 60) as usize, (r.z & 60) as usize);
+                        let any = (0..16).any(|k| { let j = at(bx, by + k / 4, bz + k % 4); bits[j >> 6] >> (j & 63) & 15 != 0 });
+                        coarse.kind[b] = if any { EARTH as Kind } else { 0 };
+                    }
                 }
             }
         }
     }
 
-    /// One sector as the world stands, in the scratch: the city's rules, then the edits that reach it. The list of
-    /// edits only grows, and most of them are of somewhere else.
-    fn fill(&mut self, key: [i32; 3]) {
+    /// Has a sector kept whole: as the world stands, the city's rules and then the edits that reach it, if it is not
+    /// kept already. The list of edits only grows, and most of them are of somewhere else.
+    fn keep(&mut self, key: [i32; 3]) {
+        self.asked += 1;
+        if let Some(kept) = self.kept.get_mut(&key) {
+            kept.1 = self.asked;
+            return;
+        }
         let s = SIDE as i32;
         let (lo, hi) = (key.map(|k| k * s), key.map(|k| (k + 1) * s));
         let reaching = self.edits.iter().zip(&self.boxes).filter(|(_, (a, b))| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])).map(|(e, _)| e);
         fill_of(&mut self.scratch, key[0], key[1], key[2], 0, reaching);
+        self.store(key);
+    }
+
+    /// Keeps what the scratch holds as a sector's cells. The longest unasked for of those kept as cells make room.
+    fn store(&mut self, key: [i32; 3]) {
+        let first = self.scratch.cells[0];
+        let kept = if self.scratch.cells.iter().all(|&k| k == first) { Kept::Same(first) } else { Kept::Cells(self.scratch.cells.clone().into_boxed_slice()) };
+        self.kept.insert(key, (kept, self.asked));
+        while self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count() > KEEPS {
+            let oldest = *self.kept.iter().filter(|(_, k)| matches!(k.0, Kept::Cells(_))).min_by_key(|(_, k)| k.1).unwrap().0;
+            self.kept.remove(&oldest);
+        }
+        if self.kept.len() > 4096 {
+            self.kept.retain(|_, k| matches!(k.0, Kept::Cells(_)));
+        }
+    }
+
+    /// One sector as the world stands, in the scratch.
+    fn fill(&mut self, key: [i32; 3]) {
+        self.keep(key);
+        self.scratch.start(key[0], key[1], key[2], 0);
+        match &self.kept[&key].0 {
+            Kept::Same(kind) => self.scratch.cells.fill(*kind),
+            Kept::Cells(cells) => self.scratch.cells.copy_from_slice(cells),
+        }
     }
 
     /// The world as it stands in a box (see `Region::gather`).
     pub(crate) fn region(&mut self, low: [i32; 3], size: [usize; 3]) -> Region {
+        let mut region = Region::new(low, size);
+        region.sectors(|sx, sy, sz, region| {
+            self.keep([sx, sy, sz]);
+            match &self.kept[&[sx, sy, sz]].0 {
+                Kept::Same(kind) => region.take_cells(None, *kind, sx, sy, sz),
+                Kept::Cells(cells) => region.take_cells(Some(cells), 0, sx, sy, sz),
+            }
+        });
+        region
+    }
+
+    /// The box round a blast as it stands and as the blast leaves it. Each sector is made once: the blast is
+    /// worked on what the scratch then holds. With `made`, the blast goes into the world as its last edit, and the
+    /// sectors kept whole are kept as it left them.
+    fn blasted(&mut self, at: [i32; 3], radius: i32, low: [i32; 3], size: [usize; 3], made: bool) -> (Region, Region) {
+        let (mut before, mut left) = (Region::new(low, size), Region::new(low, size));
+        let seed = crate::hash::hash(at[0], at[2], at[1] as u32);
+        let edit = Edit::Ball { centre: at, radius, kind: 0 };
+        let (lo, hi) = reach(&edit);
         let s = SIDE as i32;
-        let (edits, boxes) = (&self.edits, &self.boxes);
-        Region::gather_with(low, size, &mut self.scratch, |scratch, sx, sy, sz| {
-            let (lo, hi) = ([sx * s, sy * s, sz * s], [(sx + 1) * s, (sy + 1) * s, (sz + 1) * s]);
-            fill_of(scratch, sx, sy, sz, 0, edits.iter().zip(boxes).filter(|(_, (a, b))| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])).map(|(e, _)| e));
-        })
+        before.sectors(|sx, sy, sz, before| {
+            self.keep([sx, sy, sz]);
+            match &self.kept[&[sx, sy, sz]].0 {
+                Kept::Same(kind) => before.take_cells(None, *kind, sx, sy, sz),
+                Kept::Cells(cells) => before.take_cells(Some(cells), 0, sx, sy, sz),
+            }
+            // Air stays air, and a sector the blast does not reach stays as it is.
+            let key = [sx, sy, sz];
+            if matches!(self.kept[&key].0, Kept::Same(0)) || (0..3).any(|a| (key[a] + 1) * s <= lo[a] || key[a] * s >= hi[a]) {
+                match &self.kept[&key].0 {
+                    Kept::Same(kind) => left.take_cells(None, *kind, sx, sy, sz),
+                    Kept::Cells(cells) => left.take_cells(Some(cells), 0, sx, sy, sz),
+                }
+                return;
+            }
+            self.fill(key);
+            self.scratch.blast(at, radius, seed);
+            left.take(&self.scratch, sx, sy, sz);
+            if made {
+                self.store(key);
+            }
+        });
+        if made {
+            self.forget((lo, hi));
+            self.edits.push(edit);
+            self.ours.push(false);
+            self.boxes.push((lo, hi));
+            self.latest.push((lo, hi));
+        }
+        (before, left)
+    }
+
+    /// Makes up to `most` of the sectors a box reaches that are not yet made. Returns how many it made, and whether
+    /// all of the box's are now there.
+    fn ready(&mut self, low: [i32; 3], size: [usize; 3], most: usize) -> (usize, bool) {
+        let s = SIDE as i32;
+        let mut made = 0;
+        for sy in low[1].div_euclid(s)..=(low[1] + size[1] as i32 - 1).div_euclid(s) {
+            for sz in low[2].div_euclid(s)..=(low[2] + size[2] as i32 - 1).div_euclid(s) {
+                for sx in low[0].div_euclid(s)..=(low[0] + size[0] as i32 - 1).div_euclid(s) {
+                    if self.sectors.contains_key(&[sx, sy, sz]) {
+                        continue;
+                    }
+                    if made == most {
+                        return (made, false);
+                    }
+                    self.slot([sx, sy, sz]);
+                    made += 1;
+                }
+            }
+        }
+        (made, true)
+    }
+
+    /// A box of whole sectors, all of them made (`ready`), in blocks.
+    fn blocks(&self, low: [i32; 3], size: [usize; 3]) -> support::Blocks {
+        let (s, by) = (SIDE as i32, support::BLOCK);
+        let mut region = Region::new(low, [size[0] / by, size[1] / by, size[2] / by]);
+        let mut count = vec![0u8; region.cells.len()];
+        for sy in 0..size[1] / SIDE {
+            for sz in 0..size[2] / SIDE {
+                for sx in 0..size[0] / SIDE {
+                    let key = [low[0].div_euclid(s) + sx as i32, low[1].div_euclid(s) + sy as i32, low[2].div_euclid(s) + sz as i32];
+                    for y in 0..ACROSS {
+                        for z in 0..ACROSS {
+                            let to = region.at(sx * ACROSS, sy * ACROSS + y, sz * ACROSS + z);
+                            let from = ACROSS * (z + ACROSS * y);
+                            match &self.slots[self.sectors[&key] as usize] {
+                                Sector::Air => {}
+                                Sector::Solid => region.cells[to..to + ACROSS].fill(EARTH as Kind),
+                                Sector::Bits(_, _, coarse) => {
+                                    region.cells[to..to + ACROSS].copy_from_slice(&coarse.kind[from..from + ACROSS]);
+                                    count[to..to + ACROSS].copy_from_slice(&coarse.count[from..from + ACROSS]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        support::Blocks { region, count, by }
     }
 
     fn make(&mut self, key: [i32; 3]) -> Sector {
@@ -229,13 +467,24 @@ impl Ground {
             return if key[1] < first { Sector::Solid } else { Sector::Air };
         }
         self.fill(key);
-        self.holds = Some(key);
         let mut bits = Box::new([0u64; CELLS / 64]);
         let mut fuel = Box::new([0u64; CELLS / 64]);
+        let mut coarse = Coarse::new(0);
         let (mut any, mut all) = (false, true);
         for (i, &kind) in self.scratch.cells.iter().enumerate() {
             if kind != 0 {
                 bits[i >> 6] |= 1 << (i & 63);
+                let b = Coarse::block(i);
+                if coarse.kind[b] == 0 || support::rank(kind) > support::rank(coarse.kind[b]) {
+                    coarse.kind[b] = kind;
+                }
+                if !support::is_ground(kind) {
+                    coarse.built[i >> 6] |= 1 << (i & 63);
+                    coarse.count[b] += 1;
+                }
+                if burns(material(kind)).0 != 0 {
+                    coarse.sorted(i, material(kind));
+                }
                 if burns(material(kind)).0 != 0 {
                     fuel[i >> 6] |= 1 << (i & 63);
                 }
@@ -245,20 +494,44 @@ impl Ground {
             }
         }
         // A sector that is all one solid thing is under the ground: nothing there burns.
-        if !any { Sector::Air } else if all { Sector::Solid } else { Sector::Bits(bits, fuel) }
+        if !any { Sector::Air } else if all { Sector::Solid } else { Sector::Bits(bits, fuel, coarse) }
+    }
+
+    /// Where a sector is kept, made if it is not yet.
+    #[inline]
+    fn slot(&mut self, key: [i32; 3]) -> usize {
+        if key == self.last.0 {
+            return self.last.1 as usize;
+        }
+        let slot = match self.sectors.get(&key) {
+            Some(&slot) => slot,
+            None => {
+                let made = self.make(key);
+                let slot = match self.spare.pop() {
+                    Some(slot) => {
+                        self.slots[slot as usize] = made;
+                        slot
+                    }
+                    None => {
+                        self.slots.push(made);
+                        self.slots.len() as u32 - 1
+                    }
+                };
+                self.sectors.insert(key, slot);
+                slot
+            }
+        };
+        self.last = (key, slot);
+        slot as usize
     }
 
     #[inline]
     pub fn solid(&mut self, x: i32, y: i32, z: i32) -> bool {
-        let key = [x >> 6, y >> 6, z >> 6];
-        if !self.sectors.contains_key(&key) {
-            let made = self.make(key);
-            self.sectors.insert(key, made);
-        }
-        match &self.sectors[&key] {
+        let slot = self.slot([x >> 6, y >> 6, z >> 6]);
+        match &self.slots[slot] {
             Sector::Air => false,
             Sector::Solid => true,
-            Sector::Bits(bits, _) => {
+            Sector::Bits(bits, _, _) => {
                 let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
                 bits[i >> 6] >> (i & 63) & 1 != 0
             }
@@ -268,13 +541,9 @@ impl Ground {
     /// Whether the cell is there and is of something that burns. As quick as `solid`: a fire asks it of every neighbour.
     #[inline]
     pub fn fuel(&mut self, x: i32, y: i32, z: i32) -> bool {
-        let key = [x >> 6, y >> 6, z >> 6];
-        if !self.sectors.contains_key(&key) {
-            let made = self.make(key);
-            self.sectors.insert(key, made);
-        }
-        match &self.sectors[&key] {
-            Sector::Bits(_, fuel) => {
+        let slot = self.slot([x >> 6, y >> 6, z >> 6]);
+        match &self.slots[slot] {
+            Sector::Bits(_, fuel, _) => {
                 let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
                 fuel[i >> 6] >> (i & 63) & 1 != 0
             }
@@ -282,20 +551,30 @@ impl Ground {
         }
     }
 
+    /// What the cell is made of, if it is there and is of something that burns; nothing (0) if not. As quick as
+    /// `fuel`. A fire asked `kind` of each neighbour that could burn, and a street on fire burns in more sectors than
+    /// are kept whole: while it also came down, every such asking made a sector again from thousands of edits, and
+    /// one call of the solver took 9 to 15 s.
+    #[inline]
+    pub fn fuel_stuff(&mut self, x: i32, y: i32, z: i32) -> u8 {
+        if !self.fuel(x, y, z) {
+            return 0;
+        }
+        let slot = self.slot([x >> 6, y >> 6, z >> 6]);
+        let Sector::Bits(_, _, coarse) = &self.slots[slot] else { return 0 };
+        let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
+        FUELS[(coarse.sort[0][i >> 6] >> (i & 63) & 1 | (coarse.sort[1][i >> 6] >> (i & 63) & 1) << 1) as usize]
+    }
+
     /// What the cell is made of. Slower than `solid`: its sector is made whole, and the last few asked about are kept.
     pub fn kind(&mut self, x: i32, y: i32, z: i32) -> Kind {
         let key = [x >> 6, y >> 6, z >> 6];
         let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
-        if let Some(found) = self.whole.iter().rposition(|(k, _)| *k == key) {
-            return self.whole[found].1[i];
+        self.keep(key);
+        match &self.kept[&key].0 {
+            Kept::Same(kind) => *kind,
+            Kept::Cells(cells) => cells[i],
         }
-        self.fill(key);
-        self.holds = Some(key);
-        if self.whole.len() >= 32 {
-            self.whole.remove(0);
-        }
-        self.whole.push((key, self.scratch.cells.clone()));
-        self.scratch.cells[i]
     }
 }
 
@@ -344,6 +623,8 @@ pub struct Body {
     pub spin: V,
     /// Where it meets things: corners of its cells, from its middle of mass.
     points: Vec<V>,
+    /// The same as they are turned in this step, from its middle.
+    turned: Vec<V>,
     radius: f32,
     still: f32,
     age: f32,
@@ -375,7 +656,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, born: low,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, born: low,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -471,12 +752,6 @@ impl Body {
     #[inline]
     fn speed_at(&self, r: V) -> V { add(self.vel, cross(self.spin, r)) }
 
-    #[inline]
-    fn push(&mut self, r: V, j: V) {
-        self.vel = add(self.vel, scale(j, self.inv_mass));
-        self.spin = add(self.spin, self.turn_resist(cross(r, j)));
-    }
-
     /// A point of the world as the body's own cell, if it is in one.
     #[inline]
     fn cell_at(&self, world: V) -> ([i32; 3], V) {
@@ -544,6 +819,9 @@ fn keep(found: &mut Vec<(V, V, V, f32)>, a: usize, b: usize, out: &mut Vec<Touch
     found.clear();
 }
 
+#[cfg(test)]
+thread_local! { pub static SPENT: std::cell::RefCell<[f64; 8]> = const { std::cell::RefCell::new([0.0; 8]) }; }
+
 /// What the solver tells whoever draws: a stream of records, each a tag, how many words follow, and the words.
 pub const EDIT: u32 = 1; // low corner (3), high corner (3), then rows of x0, x1, y, z, kind
 pub const BORN: u32 = 2; // id, cells, size (3), middle of mass (3, as floats), where it was (3), then faces (two words each)
@@ -575,11 +853,39 @@ pub struct Bodies {
     pub fire: crate::fire::Fire,
     /// What flows (water.rs).
     pub water: crate::water::Water,
+    /// Wide boxes waiting to be asked about: see `far`.
+    far: Vec<Far>,
+    /// The last charges, each a place and a radius: a wide box lets go only of what one of them reached.
+    scars: Vec<([i32; 3], i32)>,
+}
+
+/// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
+/// waits, and, once it has been asked, what came loose and is being gathered.
+struct Far {
+    low: [i32; 3],
+    wait: f32,
+    found: Option<Found>,
+}
+
+/// What a wide box said is loose: the blocks, which of them, and the cells of the box round them, gathered a few
+/// sectors a step (the sectors still to come are `keys` from `next` on).
+struct Found {
+    blocks: support::Blocks,
+    loose: Vec<bool>,
+    part: Region,
+    keys: Vec<[i32; 3]>,
+    next: usize,
 }
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default() }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new() }
+    }
+
+    /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
+    /// called on, for what a charge left standing may yet come loose.
+    pub fn busy(&self) -> usize {
+        self.list.len() + self.far.len()
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -631,9 +937,19 @@ impl Bodies {
     fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3]) -> usize {
         let side = size[0];
         let low = [at[0] - side as i32 / 2, at[1] - 48, at[2] - side as i32 / 2];
+        #[cfg(test)]
+        let t0 = std::time::Instant::now();
         let mut region = self.ground.region(low, size);
-        self.ground.holds = None;
+        #[cfg(test)]
+        let t1 = std::time::Instant::now();
         let (pieces, dust) = support::release(&mut region, Some((at, radius)));
+        #[cfg(test)]
+        if std::env::var("TIMES").is_ok() { eprintln!("    release in {size:?}: gathered in {:.0} ms, asked in {:.0} ms, {} pieces", (t1 - t0).as_secs_f32() * 1e3, t1.elapsed().as_secs_f32() * 1e3, pieces.len()) }
+        self.take(pieces, dust, Some((at, radius)))
+    }
+
+    /// Pieces that have come loose leave the world and are bodies; crumbs of them are dust. A blast throws them.
+    fn take(&mut self, pieces: Vec<support::Loose>, dust: Vec<Run>, thrown: Option<([i32; 3], i32)>) -> usize {
         let mut taken: Vec<Run> = Vec::new();
         for r in dust.iter().chain(pieces.iter().flat_map(|p| p.runs.iter())) {
             taken.push(Run { kind: 0, ..*r });
@@ -643,15 +959,114 @@ impl Bodies {
             self.record(DUST, &words);
         }
         self.change(taken);
+        // What nothing threw (a fire ate what held it, a wide box let it go) and is small comes down as rubble at
+        // once, and is told as dust. As bodies, a burning street's crumbs were 500 new ones a second for as long as it
+        // burnt (asked once a second, where the fire last ate), and the solver never caught up.
+        let quiet = thrown.is_none_or(|(_, radius)| radius == 0);
+        let (crumbs, pieces): (Vec<support::Loose>, Vec<support::Loose>) = pieces.into_iter().partition(|p| quiet && p.cells < SMALL);
+        if !crumbs.is_empty() {
+            let mut loose: Vec<([i32; 3], Kind)> = Vec::new();
+            for p in &crumbs {
+                let words = [((p.low[0] + p.high[0]) as f32 * 0.5).to_bits(), ((p.low[1] + p.high[1]) as f32 * 0.5).to_bits(), ((p.low[2] + p.high[2]) as f32 * 0.5).to_bits(), p.runs[0].kind as u32, p.cells as u32];
+                self.record(DUST, &words);
+                loose.extend(p.runs.iter().flat_map(|r| (r.x0..r.x1).map(move |x| ([x, r.y, r.z], r.kind))));
+            }
+            loose.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
+            self.heap(&loose);
+        }
         let made = pieces.len();
         for p in pieces {
             let size = [(p.high[0] - p.low[0]) as usize, (p.high[1] - p.low[1]) as usize, (p.high[2] - p.low[2]) as usize];
             let mut body = Body::new(self.next, support::grid_of(&p.runs, p.low, size), size, p.low);
             self.next += 1;
-            self.throw(&mut body, at, radius);
+            if let Some((at, radius)) = thrown {
+                self.throw(&mut body, at, radius);
+            }
             self.born(&body);
             self.list.push(body);
         }
+        made
+    }
+
+    /// Has a wide box round a place asked about in a moment (`far`). Boxes are whole sectors, so charges set near
+    /// one another ask about the same box, and one that is waiting waits again from now.
+    fn ask_far(&mut self, at: [i32; 3], radius: i32) {
+        let s = SIDE as i32;
+        let low = [(at[0] - WIDE[0] as i32 / 2 + s / 2).div_euclid(s) * s, (at[1] - s).div_euclid(s) * s, (at[2] - WIDE[2] as i32 / 2 + s / 2).div_euclid(s) * s];
+        if self.scars.len() >= 48 {
+            self.scars.remove(0);
+        }
+        self.scars.push((at, radius));
+        match self.far.iter_mut().find(|f| f.low == low) {
+            Some(waiting) => *waiting = Far { low, wait: FAR_AFTER, found: None },
+            None => self.far.push(Far { low, wait: FAR_AFTER, found: None }),
+        }
+    }
+
+    /// What a narrow box could not say: a thing wider than the box round a blast stands on that box's sides, which
+    /// are taken for ground, however little is left under it. So a moment after a charge a box twice as wide is asked
+    /// about in blocks of four cells (support.rs `far_loose`), and what is loose there, of what a charge reached,
+    /// comes out as bodies. The work is spread over the solver's calls, at most `most` sectors made in each: a wide
+    /// box is a hundred sectors, and made in one call they held everything in the air still for a third of a second.
+    /// Returns how many bodies were made.
+    fn far(&mut self, mut most: usize) -> usize {
+        let Some(k) = self.far.iter().position(|f| f.wait <= 0.0) else { return 0 };
+        let low = self.far[k].low;
+        #[cfg(test)]
+        let t0 = std::time::Instant::now();
+        if self.far[k].found.is_none() {
+            let (made, all) = self.ground.ready(low, WIDE, most);
+                if !all {
+                return 0;
+            }
+            most -= made;
+            let blocks = self.ground.blocks(low, WIDE);
+            let loose = support::far_loose(&blocks, &self.scars);
+            let Some((lo, hi)) = support::far_box(&blocks, &loose) else {
+                self.far.remove(k);
+                return 0;
+            };
+            let s = SIDE as i32;
+            let mut keys = Vec::new();
+            for sy in lo[1].div_euclid(s)..=(hi[1] - 1).div_euclid(s) {
+                for sz in lo[2].div_euclid(s)..=(hi[2] - 1).div_euclid(s) {
+                    for sx in lo[0].div_euclid(s)..=(hi[0] - 1).div_euclid(s) {
+                        keys.push([sx, sy, sz]);
+                    }
+                }
+            }
+            let part = Region::new(lo, [(hi[0] - lo[0]) as usize, (hi[1] - lo[1]) as usize, (hi[2] - lo[2]) as usize]);
+            #[cfg(test)]
+            if std::env::var("TIMES").is_ok() { eprintln!("    far at {low:?}: asked in {:.0} ms ({made} sectors made); loose from {lo:?} to {hi:?}, {} sectors to gather", t0.elapsed().as_secs_f32() * 1e3, keys.len()) }
+            self.far[k].found = Some(Found { blocks, loose, part, keys, next: 0 });
+        }
+        let found = self.far[k].found.as_mut().unwrap();
+        while found.next < found.keys.len() {
+            if most == 0 {
+                return 0;
+            }
+            let key = found.keys[found.next];
+            self.ground.fill(key);
+            found.part.take(&self.ground.scratch, key[0], key[1], key[2]);
+            found.next += 1;
+            most -= 1;
+        }
+        let Far { found: Some(mut found), .. } = self.far.remove(k) else { unreachable!() };
+        // The gathering took several calls: a cell that has left the world since (another charge, a landing) is not taken twice.
+        let ground = &mut self.ground;
+        let (pieces, dust) = support::release_far(&mut found.part, &found.blocks, &found.loose, |c| ground.solid(c[0], c[1], c[2]));
+        // What stands in one piece across several houses is not one stiff thing.
+        #[cfg(test)]
+        let t1 = std::time::Instant::now();
+        let whole = pieces.len();
+        let pieces: Vec<support::Loose> = pieces.into_iter().flat_map(parts).collect();
+        #[cfg(test)]
+        let t2 = std::time::Instant::now();
+        let (n, cells, biggest) = (pieces.len(), pieces.iter().map(|p| p.cells).sum::<usize>(), pieces.iter().map(|p| p.cells).max().unwrap_or(0));
+        let made = self.take(pieces, dust, None);
+        #[cfg(test)]
+        if std::env::var("TIMES").is_ok() { eprintln!("    far at {low:?}: last gather and pieces {:.0} ms, parts {:.0} ms, bodies {:.0} ms; {whole} pieces as {n} bodies of {cells} cells, the biggest {biggest}", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
+        let _ = (whole, n, cells, biggest);
         made
     }
 
@@ -664,12 +1079,17 @@ impl Bodies {
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
         #[cfg(test)]
         let t0 = std::time::Instant::now();
-        let before = self.ground.region(low, size);
+        // The blast of someone who had not heard of all the solver's edits goes in among them, and the box is
+        // gathered twice; one that goes in last (as nearly all do) is worked out on each sector as it is made.
+        let (before, left) = if after.is_none_or(|k| k >= self.ground.own()) {
+            self.ground.blasted(at, radius, low, size, true)
+        } else {
+            let before = self.ground.region(low, size);
+            self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, after);
+            (before, self.ground.region(low, size))
+        };
         #[cfg(test)]
         let t1 = std::time::Instant::now();
-        self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, after);
-        let left = self.ground.region(low, size);
-        self.ground.holds = None;
         #[cfg(test)]
         let t2 = std::time::Instant::now();
         let made = self.lumps(&before, &left, at, radius);
@@ -679,7 +1099,10 @@ impl Bodies {
         if spark {
             self.ignite(at, radius + radius / 2, true);
         }
-        // A hammer blow is asked about in a small box, a charge in the whole one.
+        // A hammer blow is asked about in a small box, a charge in the whole one, and then in a wider one.
+        if radius >= FAR_FROM {
+            self.ask_far(at, radius);
+        }
         made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]))
     }
 
@@ -743,6 +1166,13 @@ impl Bodies {
             let mut body = Body::new(self.next, grid, size, lo);
             self.next += 1;
             body.lump = true;
+            // A lump meets only the world, and lies where it lands: a few points do. With all a body's size allows
+            // (112 for a lump of a hundred cells) 1,700 bodies were tried at 150,000 points a call, and in the page
+            // the solver ran four times behind.
+            if body.points.len() > LUMP_POINTS {
+                let all = std::mem::take(&mut body.points);
+                body.points = (0..LUMP_POINTS).map(|k| all[k * all.len() / LUMP_POINTS]).collect();
+            }
             self.throw(&mut body, at, radius);
             self.born(&body);
             self.list.push(body);
@@ -760,13 +1190,9 @@ impl Bodies {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
-        let before = self.ground.region(low, size);
-        // What a blast there would leave is asked of the world with the blast in it; then the blast is taken back
-        // and what it emptied goes in as rows of the solver's own, which is how the page hears of it.
-        self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, None);
-        let left = self.ground.region(low, size);
-        self.ground.undo();
-        self.ground.holds = None;
+        // What a blast there would leave is asked without the blast going into the world: what it emptied goes in as
+        // rows of the solver's own, which is how the page hears of it.
+        let (before, left) = self.ground.blasted(at, radius, low, size, false);
         let mut gone: Vec<Run> = Vec::new();
         for y in 0..size[1] {
             for z in 0..size[2] {
@@ -881,6 +1307,11 @@ impl Bodies {
         self.steps = 0;
         self.tried = 0;
         self.paired = 0;
+        // One wide box that has waited its time is asked about.
+        for waiting in &mut self.far {
+            waiting.wait -= dt;
+        }
+        self.far(if self.list.len() > 200 { 3 } else { 6 });
         while self.owed >= STEP && !self.list.is_empty() {
             self.owed -= STEP;
             self.step(STEP);
@@ -900,6 +1331,10 @@ impl Bodies {
     }
 
     fn step(&mut self, h: f32) {
+        #[cfg(test)]
+        let mut lap = std::time::Instant::now();
+        #[cfg(test)]
+        let mut mark = |k: usize| { SPENT.with(|s| s.borrow_mut()[k] += lap.elapsed().as_secs_f64()); lap = std::time::Instant::now(); };
         // What pulls and what touches.
         self.touches.clear();
         let mut found: Vec<(V, V, V, f32)> = Vec::new();
@@ -912,8 +1347,10 @@ impl Bodies {
             b.knock = 0.0;
             b.footing = [f32::MAX, f32::MIN, f32::MAX, f32::MIN];
             let (pos, rot) = (b.pos, b.rot);
+            self.list[i].turned.clear();
             for k in 0..self.list[i].points.len() {
                 let r = turn(rot, self.list[i].points[k]);
+                self.list[i].turned.push(r);
                 let p = add(pos, r);
                 let cell = [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32];
                 self.tried += 1;
@@ -930,14 +1367,17 @@ impl Bodies {
             }
             keep(&mut found, i, NONE, &mut self.touches);
         }
+        #[cfg(test)]
+        mark(0);
         // Body against body: the points of each tried in the cells of the other. Only pairs with a big body in them
         // are tried, so each big body is asked which others are near it.
         let is_big = |b: &Body| b.count >= SMALL && !b.lump;
         let big: Vec<usize> = (0..self.list.len()).filter(|&i| is_big(&self.list[i])).collect();
         for &i in &big {
             for j in 0..self.list.len() {
-                // Two big bodies are a pair once.
-                if j == i || (is_big(&self.list[j]) && j < i) {
+                // Two big bodies are a pair once. What a blast threw out meets only the world: a house coming down in
+                // forty panels among a thousand lumps tried each panel against every lump near it.
+                if j == i || (is_big(&self.list[j]) && j < i) || self.list[j].lump {
                     continue;
                 }
                 let (a, b) = (&self.list[i], &self.list[j]);
@@ -949,8 +1389,7 @@ impl Bodies {
                 for (one, other, flip) in [(i, j, false), (j, i, true)] {
                     let (a, b) = (&self.list[one], &self.list[other]);
                     self.paired += a.points.len() as u32;
-                    for &point in &a.points {
-                        let ra = turn(a.rot, point);
+                    for &ra in &a.turned {
                         let p = add(a.pos, ra);
                         let rb = sub(p, b.pos);
                         if dot(rb, rb) > b.radius * b.radius {
@@ -973,6 +1412,8 @@ impl Bodies {
                 keep(&mut found, i, j, &mut self.touches);
             }
         }
+        #[cfg(test)]
+        mark(1);
         // What each body stands on: the stretch its touches cover.
         for t in &self.touches {
             for (who, r) in [(t.a, t.ra), (t.b, t.rb)] {
@@ -982,54 +1423,71 @@ impl Bodies {
                 }
             }
         }
-        // Each touch stops what is closing and rubs against what is sliding, a few times over.
+        // Each touch stops what is closing and rubs against what is sliding, a few times over. How hard each touch
+        // is to push along its own way and the two ways across it is worked out once: nothing turns while the pushes
+        // are shared out, and worked out at every push it was half of all the solver did.
+        // For each touch: the three ways, how hard each is to push, and the spin a push of one along each gives its
+        // two bodies.
+        let ways: Vec<([V; 3], [f32; 3], [V; 3], [V; 3])> = self.touches.iter().map(|t| {
+            let across = if t.n[1].abs() < 0.9 { unit(cross(t.n, [0.0, 1.0, 0.0])) } else { unit(cross(t.n, [1.0, 0.0, 0.0])) };
+            let ds = [t.n, across, cross(t.n, across)];
+            let spins_a = ds.map(|d| self.list[t.a].turn_resist(cross(t.ra, d)));
+            let spins_b = if t.b == NONE { [[0.0; 3]; 3] } else { ds.map(|d| self.list[t.b].turn_resist(cross(t.rb, d))) };
+            let weights = [0, 1, 2].map(|k| {
+                let mut w = self.list[t.a].inv_mass + dot(cross(spins_a[k], t.ra), ds[k]);
+                if t.b != NONE {
+                    w += self.list[t.b].inv_mass + dot(cross(spins_b[k], t.rb), ds[k]);
+                }
+                w
+            });
+            (ds, weights, spins_a, spins_b)
+        }).collect();
         for _ in 0..8 {
             for t in 0..self.touches.len() {
                 let (a, b, ra, rb, n) = { let t = &self.touches[t]; (t.a, t.b, t.ra, t.rb, t.n) };
+                let (ds, weights, spins_a, spins_b) = &ways[t];
+                // A push of `by` along the touch's way `k`: on the first body, and back on the second.
+                let push = |list: &mut Vec<Body>, k: usize, by: f32| {
+                    list[a].vel = add(list[a].vel, scale(ds[k], by * list[a].inv_mass));
+                    list[a].spin = add(list[a].spin, scale(spins_a[k], by));
+                    if b != NONE {
+                        list[b].vel = sub(list[b].vel, scale(ds[k], by * list[b].inv_mass));
+                        list[b].spin = sub(list[b].spin, scale(spins_b[k], by));
+                    }
+                };
                 let rel = |list: &Vec<Body>| {
                     let va = list[a].speed_at(ra);
                     if b == NONE { va } else { sub(va, list[b].speed_at(rb)) }
-                };
-                let weight = |list: &Vec<Body>, d: V| {
-                    let mut k = list[a].inv_mass + dot(cross(list[a].turn_resist(cross(ra, d)), ra), d);
-                    if b != NONE {
-                        k += list[b].inv_mass + dot(cross(list[b].turn_resist(cross(rb, d)), rb), d);
-                    }
-                    k
                 };
                 let v = rel(&self.list);
                 let closing = dot(v, n);
                 let bounce = if closing < -40.0 { 0.12 } else { 0.0 };
                 let was = self.touches[t].pushed;
-                let now = (was - (1.0 + bounce) * closing / weight(&self.list, n)).max(0.0);
+                let now = (was - (1.0 + bounce) * closing / weights[0]).max(0.0);
                 self.touches[t].pushed = now;
-                let j = scale(n, now - was);
                 let knock = now * self.list[a].inv_mass;
                 self.list[a].knock = self.list[a].knock.max(knock);
                 if b != NONE {
                     let knock = now * self.list[b].inv_mass;
                     self.list[b].knock = self.list[b].knock.max(knock);
                 }
-                self.list[a].push(ra, j);
-                if b != NONE {
-                    self.list[b].push(rb, scale(j, -1.0));
-                }
+                push(&mut self.list, 0, now - was);
                 // Rubbing, across the touch, no more than the push allows.
-                let across = if n[1].abs() < 0.9 { unit(cross(n, [0.0, 1.0, 0.0])) } else { unit(cross(n, [1.0, 0.0, 0.0])) };
-                for (k, d) in [across, cross(n, across)].into_iter().enumerate() {
+                for k in 0..2 {
+                    let d = ds[k + 1];
                     let sliding = dot(rel(&self.list), d);
                     let most = 0.7 * self.touches[t].pushed;
                     let was = self.touches[t].rubbed[k];
-                    let now = (was - sliding / weight(&self.list, d)).clamp(-most, most);
+                    let now = (was - sliding / weights[k + 1]).clamp(-most, most);
                     self.touches[t].rubbed[k] = now;
-                    let j = scale(d, now - was);
-                    self.list[a].push(ra, j);
-                    if b != NONE {
-                        self.list[b].push(rb, scale(j, -1.0));
-                    }
+                    push(&mut self.list, k + 1, now - was);
                 }
             }
         }
+        #[cfg(test)]
+        mark(2);
+        #[cfg(test)]
+        SPENT.with(|s| s.borrow_mut()[6] += self.touches.len() as f64);
         // What overlaps is eased apart, without that becoming speed.
         for t in &self.touches {
             let ease = ((t.depth - 0.05) * 0.2).clamp(0.0, 0.3);
@@ -1064,6 +1522,8 @@ impl Bodies {
                 }
             }
         }
+        #[cfg(test)]
+        mark(3);
         // What was knocked harder than it can take breaks where it is.
         let mut i = 0;
         while i < self.list.len() {
@@ -1075,6 +1535,8 @@ impl Bodies {
                 i += 1;
             }
         }
+        #[cfg(test)]
+        mark(4);
         // On they go; what has lain still long enough is cells again.
         let mut i = 0;
         while i < self.list.len() {
@@ -1109,6 +1571,8 @@ impl Bodies {
                 i += 1;
             }
         }
+        #[cfg(test)]
+        mark(5);
     }
 
     /// A body that has come to rest is cells of the world again, as it lies. One lying nearly square to the world is
@@ -1274,6 +1738,57 @@ impl Bodies {
     }
 }
 
+/// A piece this big that a wide box let go is taken apart as it comes loose, unless it is a tall thin thing.
+const APART: usize = 24_000;
+/// How far apart the middles of its parts are, in cells: a room's width, so walls and floors come down as panels.
+const PART: i32 = 48;
+
+/// A piece that came loose, as the parts that fall: itself, or, if it is big and not a tall thin thing (which goes
+/// over whole), its cells shared out among middles scattered one to a box of `PART` cells.
+fn parts(piece: support::Loose) -> Vec<support::Loose> {
+    let size = [0, 1, 2].map(|a| piece.high[a] - piece.low[a]);
+    if piece.cells < APART || size[1] >= 2 * size[0].max(size[2]) {
+        return vec![piece];
+    }
+    let mut shares: Map<[i32; 3], support::Loose> = Map::default();
+    let mut put = |x0: i32, x1: i32, r: &Run, to: [i32; 3]| {
+        let part = shares.entry(to).or_insert_with(|| support::Loose { runs: Vec::new(), cells: 0, low: [i32::MAX; 3], high: [i32::MIN; 3] });
+        part.runs.push(Run { x0, x1, ..*r });
+        part.cells += (x1 - x0) as usize;
+        part.low = [part.low[0].min(x0), part.low[1].min(r.y), part.low[2].min(r.z)];
+        part.high = [part.high[0].max(x1), part.high[1].max(r.y + 1), part.high[2].max(r.z + 1)];
+    };
+    for r in &piece.runs {
+        let (mut from, mut of) = (r.x0, nearest_middle([r.x0, r.y, r.z], PART));
+        for x in r.x0 + 1..r.x1 {
+            let to = nearest_middle([x, r.y, r.z], PART);
+            if to != of {
+                put(from, x, r, of);
+                (from, of) = (x, to);
+            }
+        }
+        put(from, r.x1, r, of);
+    }
+    let mut keys: Vec<[i32; 3]> = shares.keys().copied().collect();
+    keys.sort_unstable();
+    keys.into_iter().map(|k| shares.remove(&k).unwrap()).collect()
+}
+
+/// The nearest to a cell of middles scattered one to a box of `apart` cells: which box it is in.
+fn nearest_middle(c: [i32; 3], apart: i32) -> [i32; 3] {
+    let g = c.map(|v| v.div_euclid(apart));
+    let (mut best, mut near) = ([0; 3], i32::MAX);
+    for d in 0..27 {
+        let b = [g[0] + d % 3 - 1, g[1] + d / 3 % 3 - 1, g[2] + d / 9 - 1];
+        let m = [0, 1, 2].map(|a| b[a] * apart + (hash3(b[0], b[1], b[2], 31 + a as u32) % apart as u32) as i32);
+        let far = (0..3).map(|a| (c[a] - m[a]).pow(2)).sum::<i32>();
+        if far < near {
+            (best, near) = (b, far);
+        }
+    }
+    best
+}
+
 /// A body this big, of stuff that breaks, is looked at for what sits when it stops.
 const BREAKS: usize = 600;
 /// How far apart the middles of its chunks are, in cells.
@@ -1307,16 +1822,7 @@ impl Bodies {
                     }
                     // The nearest of middles scattered one to a box of CHUNK cells.
                     let c = [x, y, z];
-                    let g = c.map(|v| v.div_euclid(CHUNK));
-                    let (mut best, mut near) = ([0; 3], i32::MAX);
-                    for d in 0..27 {
-                        let b = [g[0] + d % 3 - 1, g[1] + d / 3 % 3 - 1, g[2] + d / 9 - 1];
-                        let m = [0, 1, 2].map(|a| b[a] * CHUNK + (hash3(b[0], b[1], b[2], 31 + a as u32) % CHUNK as u32) as i32);
-                        let far = (0..3).map(|a| (c[a] - m[a]).pow(2)).sum::<i32>();
-                        if far < near {
-                            (best, near) = (b, far);
-                        }
-                    }
+                    let best = nearest_middle(c, CHUNK);
                     let next = chunks.len() as u32 + 1;
                     let id = *of.entry(best).or_insert_with(|| {
                         chunks.push(Vec::new());
@@ -1649,6 +2155,81 @@ mod tests {
         assert!(far > 60, "it lies along the ground: cells are put back {far} cells from where it stood");
     }
 
+    #[test]
+    fn what_the_solver_keeps_is_the_world() {
+        // Charges with fire along a row of houses, and what they bring down left to fall for a while: then every
+        // sector the solver keeps (as cells, as bits, in blocks) must be what the rules and all the edits make.
+        use crate::city::{BLOCK_X, BLOCK_Z, Block, block as what};
+        let (bx, bz) = (-12..12).flat_map(|bz| (-12..12).map(move |bx| (bx, bz))).find(|&(bx, bz)| what(bx, bz) == Block::Homes && city::ground(bx * BLOCK_X + 500, bz * BLOCK_Z + 150) > 80).unwrap();
+        let (x, z) = (bx * BLOCK_X + 140 + 76 * 4 + 38, bz * BLOCK_Z + 150);
+        let mut bodies = Bodies::new();
+        for k in 0..3 {
+            bodies.blast([x - 60 + k * 60, city::ground(x, z) + 15, z + 10 + k * 25], 32, None, true);
+            for _ in 0..90 { bodies.out.clear(); bodies.advance(1.0 / 60.0) }
+        }
+        for _ in 0..240 { bodies.out.clear(); bodies.advance(1.0 / 60.0) }
+        let ground = &mut bodies.ground;
+        let mut fresh = Scratch::new();
+        let (mut cells, mut bits) = (0, 0);
+        let keys: Vec<[i32; 3]> = ground.kept.keys().copied().collect();
+        assert!(keys.len() > 40, "{} sectors are kept", keys.len());
+        for key in keys {
+            crate::fill(&mut fresh, key[0], key[1], key[2], 0, &ground.edits);
+            match &ground.kept[&key].0 {
+                Kept::Same(kind) => assert!(fresh.cells.iter().all(|k| k == kind), "the sector {key:?} is kept as all {kind} and is not"),
+                Kept::Cells(kept) => {
+                    let wrong = (0..CELLS).filter(|&i| kept[i] != fresh.cells[i]).count();
+                    assert_eq!(wrong, 0, "{wrong} cells of the sector {key:?} are not kept as they are");
+                    cells += 1;
+                }
+            }
+            if let Some(Sector::Bits(solid, fuel, coarse)) = ground.sectors.get(&key).map(|&slot| &ground.slots[slot as usize]) {
+                let mut count = [0u8; BLOCKS];
+                for (i, &k) in fresh.cells.iter().enumerate() {
+                    assert_eq!(solid[i >> 6] >> (i & 63) & 1 != 0, k != 0, "the sector {key:?}: a cell's solid bit");
+                    assert_eq!(fuel[i >> 6] >> (i & 63) & 1 != 0, k != 0 && burns(material(k)).0 != 0, "the sector {key:?}: a cell's fuel bit");
+                    let built = k != 0 && !support::is_ground(k);
+                    assert_eq!(coarse.built[i >> 6] >> (i & 63) & 1 != 0, built, "the sector {key:?}: a cell's built bit");
+                    count[Coarse::block(i)] += built as u8;
+                }
+                assert!(count == coarse.count, "the sector {key:?}: its blocks' counts");
+                bits += 1;
+            }
+        }
+        assert!(cells > 10 && bits > 10, "{cells} sectors kept as cells and {bits} as bits were looked at");
+    }
+
+    #[test]
+    fn a_house_with_its_walls_charged_comes_down_and_the_one_two_doors_off_stands() {
+        // A house in a row, 7.6 m wide and about 19 m deep: charges at the feet of both its side walls, from the front
+        // back. The box round each charge is 16 m across and takes its own sides for ground, so by that alone the
+        // storeys above stand on the neighbours; asked again in a wide box they come down.
+        use crate::city::{BLOCK_X, BLOCK_Z, Block, block as what};
+        let (bx, bz) = (-12..12).flat_map(|bz| (-12..12).map(move |bx| (bx, bz))).find(|&(bx, bz)| what(bx, bz) == Block::Homes && city::ground(bx * BLOCK_X + 500, bz * BLOCK_Z + 150) > 80).unwrap();
+        let (x, z) = (bx * BLOCK_X + 140 + 76 * 4 + 38, bz * BLOCK_Z + 150);
+        let ground = city::ground(x, z);
+        let mut bodies = Bodies::new();
+        // What is built 3.5 m or more over the street in a lot: `lot` is how many lots along from the one charged.
+        let up = |bodies: &mut Bodies, lot: i32| {
+            let r = bodies.ground.region([x - 38 + lot * 76, ground + 35, z - 10], [76, 140, 220]);
+            r.cells.iter().filter(|&&k| k != 0 && !support::is_ground(k)).count()
+        };
+        let before = [up(&mut bodies, 0), up(&mut bodies, 2)];
+        for dz in [20, 70, 120, 170] {
+            for dx in [-38, 38] {
+                bodies.blast([x + dx, ground + 15, z + dz], 32, None, false);
+                for _ in 0..30 { bodies.out.clear(); bodies.advance(1.0 / 60.0) }
+            }
+        }
+        let mut t = 0.0;
+        while bodies.busy() > 0 && t < 60.0 { bodies.out.clear(); bodies.advance(1.0 / 60.0); t += 1.0 / 60.0 }
+        assert_eq!(bodies.busy(), 0, "bodies still move after a minute");
+        let after = [up(&mut bodies, 0), up(&mut bodies, 2)];
+        // Its front and back walls stay: the neighbours' walls hold them, within three metres either side.
+        assert!(after[0] * 2 < before[0], "of {} cells built over the charged house's ground floor {} still are", before[0], after[0]);
+        assert!(after[1] * 100 > before[1] * 97, "of {} cells built over the ground floor two doors off {} still are", before[1], after[1]);
+    }
+
     /// Not a check: how long the solver's calls take when big charges go off along a row of houses. `cargo test --release big_charges -- --ignored --nocapture`
     #[test]
     #[ignore]
@@ -1763,6 +2344,163 @@ mod tests {
                 eprintln!("  cells gone from where they were {gone}; cells now where nothing was {new}: {} under 0.5 m over the ground, {} to 1.5 m, {} to 4 m, {} higher; {street} of them on the street side of the fronts", by_height[0], by_height[1], by_height[2], by_height[3]);
                 eprintln!("  what burns (wood, roofing, leaves): {wood0} before, {wood1} after\n");
             }
+        }
+    }
+
+    /// Not a check: what holds up what still stands when the board's ruin row has been acted (#160): for every built
+    /// cell over the street's first metre, where the path that holds it reaches the ground (the box's floor or one
+    /// of its sides) and what the path cost. `cargo test --release what_holds_a_gutted_front -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn what_holds_a_gutted_front() {
+        use crate::kinds::*;
+        let home = [700, city::ground(700, 4070), 4070];
+        let eye = [home[0] + 80, home[1] + 170, home[2] + 130];
+        let mut bodies = Bodies::new();
+        let (low, size) = ([380, home[1] - 60, 3820], [640usize, 300, 320]);
+        let mut struck: Vec<[i32; 3]> = Vec::new();
+        for turn in [-0.9f32, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9] {
+            let (y, p) = (turn, -0.62f32);
+            let f = [y.sin() * p.cos(), p.sin(), -y.cos() * p.cos()];
+            let mut d = 0.0f32;
+            while d < 900.0 && !bodies.ground.solid((eye[0] as f32 + f[0] * d).floor() as i32, (eye[1] as f32 + f[1] * d).floor() as i32, (eye[2] as f32 + f[2] * d).floor() as i32) { d += 0.5 }
+            let reach = d + 32.0 * 0.3;
+            let at = [(eye[0] as f32 + f[0] * reach).round() as i32, (eye[1] as f32 + f[1] * reach).round() as i32, (eye[2] as f32 + f[2] * reach).round() as i32];
+            bodies.blast(at, 32, None, std::env::var("SPARKS").is_ok());
+            struck.push(at);
+            for _ in 0..42 { bodies.out.clear(); let (n, big, t0) = (bodies.list.len(), bodies.list.iter().map(|b| b.count).max().unwrap_or(0), std::time::Instant::now()); bodies.advance(1.0 / 60.0); let ms = t0.elapsed().as_secs_f32() * 1e3; if ms > 80.0 { eprintln!("    a call took {ms:.0} ms with {n} bodies (the biggest {big} cells), {} after; {} words told", bodies.list.len(), bodies.out.len()) } }
+        }
+        // GRID=1: charges set through the houses as well, at the feet of the walls that carry them, every 5 m.
+        if std::env::var("GRID").is_ok() {
+            for z in [3850, 3900, 3950] {
+                for x in (600..=950).step_by(50) {
+                    let at = [x, city::ground(x, z) + 15, z];
+                    let n = bodies.blast(at, 32, None, std::env::var("SPARKS").is_ok());
+                    struck.push(at);
+                    eprintln!("  charge at {at:?} made {n} bodies; {} moving", bodies.list.len());
+                    for _ in 0..42 { bodies.out.clear(); let (n, big, t0) = (bodies.list.len(), bodies.list.iter().map(|b| b.count).max().unwrap_or(0), std::time::Instant::now()); bodies.advance(1.0 / 60.0); let ms = t0.elapsed().as_secs_f32() * 1e3; if ms > 80.0 { eprintln!("    a call took {ms:.0} ms with {n} bodies (the biggest {big} cells), {} after; {} words told", bodies.list.len(), bodies.out.len()) } }
+                }
+            }
+        }
+        let mut t = 0.0;
+        while (!bodies.list.is_empty() || !bodies.far.is_empty()) && t < 120.0 { bodies.out.clear(); let (n, big, t0) = (bodies.list.len(), bodies.list.iter().map(|b| b.count).max().unwrap_or(0), std::time::Instant::now()); bodies.advance(1.0 / 60.0); let ms = t0.elapsed().as_secs_f32() * 1e3; if ms > 80.0 { eprintln!("    a call took {ms:.0} ms with {n} bodies (the biggest {big} cells), {} after; {} words told", bodies.list.len(), bodies.out.len()) } t += 1.0 / 60.0; if ((t * 60.0) as i32) % 120 == 0 { eprintln!("  {t:.0} s on: {} bodies moving of {} cells, {} born so far; lumps {}, broken {}, other under 160 cells {}, other bigger {}; points {}; oldest {:.0} s", bodies.list.len(), bodies.list.iter().map(|b| b.count).sum::<usize>(), bodies.next, bodies.list.iter().filter(|b| b.lump).count(), bodies.list.iter().filter(|b| !b.lump && b.broken > 0).count(), bodies.list.iter().filter(|b| !b.lump && b.broken == 0 && b.count < 160).count(), bodies.list.iter().filter(|b| !b.lump && b.broken == 0 && b.count >= 160).count(), bodies.list.iter().map(|b| b.points.len()).sum::<usize>(), bodies.list.iter().map(|b| b.age).fold(0.0, f32::max)) } }
+        eprintln!("at rest {t:.0} s after the last charge; {} bodies in all, {} still moving, {} crushes", bodies.next, bodies.list.len(), bodies.crushes);
+        SPENT.with(|s| { let s = s.borrow(); eprintln!("the steps spent: points against the world {:.1} s, bodies against bodies {:.1} s, the touches' pushes {:.1} s ({:.0} touches in all), easing and crushing {:.1} s, breaking {:.1} s, moving on and lying down {:.1} s", s[0], s[1], s[2], s[6], s[3], s[4], s[5]) });
+        if std::env::var("FAST").is_ok() { return }
+        let tell = |name: &str, r: &Region| {
+            let (out, join, cost) = support::loose_how(r, None);
+            let [nx, _, nz] = r.size;
+            let layer = nx * nz;
+            // Where each cell's path ends: 1 the floor, 2 to 5 the sides -x, +x, -z, +z; 0 not followed yet.
+            let mut root = vec![0u8; r.cells.len()];
+            let (mut by_root, mut by_cost, mut by_stuff, mut unheld) = ([0usize; 6], [0usize; 6], std::collections::BTreeMap::<(u8, u8), usize>::new(), 0usize);
+            let mut path: Vec<usize> = Vec::new();
+            for i in 0..r.cells.len() {
+                let k = r.cells[i];
+                if k == 0 || support::is_ground(k) { continue }
+                let (x, y, z) = (i % nx, i / layer, i / nx % nz);
+                if (r.low[1] + y as i32) < city::ground(r.low[0] + x as i32, r.low[2] + z as i32) + 10 { continue }
+                if out[i] { unheld += 1; continue }
+                path.clear();
+                let mut j = i;
+                while root[j] == 0 {
+                    path.push(j);
+                    let (jx, jy, jz) = (j % nx, j / layer, j / nx % nz);
+                    match join[j] & 127 {
+                        1 => { root[j] = if jx == 0 { 2 } else if jx == nx - 1 { 3 } else if jz == 0 { 4 } else if jz == nz - 1 { 5 } else if jy == 0 { 1 } else { 1 }; }
+                        2 => j -= layer,
+                        3 => j -= 1,
+                        4 => j += 1,
+                        5 => j -= nx,
+                        6 => j += nx,
+                        7 => j += layer,
+                        _ => { root[j] = 1 }
+                    }
+                }
+                let at = root[j];
+                for &p in &path { root[p] = at }
+                by_root[at as usize] += 1;
+                let c = cost[i];
+                let b = if c == 0 { 0 } else if c <= 10 { 1 } else if c <= 30 { 2 } else if c <= 50 { 3 } else if c <= 90 { 4 } else { 5 };
+                by_cost[b] += 1;
+                if c > 0 { *by_stuff.entry((material(k), b as u8)).or_insert(0) += 1 }
+            }
+            eprintln!("{name}: paths end at the floor {}, the sides -x {}, +x {}, -z {}, +z {}; not held {unheld}", by_root[1], by_root[2], by_root[3], by_root[4], by_root[5]);
+            eprintln!("  by cost: resting all the way {}, 1 to 10 {}, to 30 {}, to 50 {}, to 90 {}, more {}", by_cost[0], by_cost[1], by_cost[2], by_cost[3], by_cost[4], by_cost[5]);
+            eprintln!("  not resting, by (material, cost band): {by_stuff:?}");
+            // The pieces the unheld cells make, and why each is or is not let go.
+            let unreached = (0..r.cells.len()).filter(|&i| out[i] && cost[i] == 255).count();
+            eprintln!("  of all unheld cells {} were never reached, {} were on a join that tore", unreached, out.iter().filter(|&&l| l).count() - unreached);
+            let mut seen = vec![false; r.cells.len()];
+            let mut pieces: Vec<(usize, [usize; 3], [usize; 3], usize)> = Vec::new();
+            for start in 0..r.cells.len() {
+                if !out[start] || seen[start] { continue }
+                let (mut n, mut lo, mut hi, mut torn, mut stack) = (0usize, [usize::MAX; 3], [0usize; 3], 0usize, vec![start]);
+                seen[start] = true;
+                while let Some(i) = stack.pop() {
+                    n += 1;
+                    if cost[i] != 255 { torn += 1 }
+                    let c = [i % nx, i / layer, i / nx % nz];
+                    for a in 0..3 { lo[a] = lo[a].min(c[a]); hi[a] = hi[a].max(c[a]) }
+                    let mut go = |j: usize| if out[j] && !seen[j] { seen[j] = true; stack.push(j) };
+                    if c[0] > 0 { go(i - 1) }
+                    if c[0] + 1 < nx { go(i + 1) }
+                    if c[2] > 0 { go(i - nx) }
+                    if c[2] + 1 < nz { go(i + nx) }
+                    if c[1] > 0 { go(i - layer) }
+                    if c[1] + 1 < r.size[1] { go(i + layer) }
+                }
+                pieces.push((n, lo, hi, torn));
+            }
+            pieces.sort_unstable_by_key(|p| std::cmp::Reverse(p.0));
+            for (n, lo, hi, torn) in pieces.iter().take(8) {
+                let edge = lo[0] == 0 || lo[2] == 0 || hi[0] == nx - 1 || hi[2] == nz - 1 || hi[1] == r.size[1] - 1;
+                eprintln!("    a piece of {n} cells ({torn} on torn joins) from {:?} to {:?} in the world{}", [0, 1, 2].map(|a| r.low[a] + lo[a] as i32), [0, 1, 2].map(|a| r.low[a] + hi[a] as i32), if edge { ": at the box's edge, left alone" } else { "" });
+            }
+            eprintln!("    {} pieces in all", pieces.len());
+        };
+        let untouched = Region::gather(low, size, &[], &mut bodies.ground.scratch);
+        tell("the whole row before anything, in one box", &untouched);
+        let t0 = std::time::Instant::now();
+        let whole = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+        let t1 = std::time::Instant::now();
+        support::loose(&whole);
+        eprintln!("gathering the whole row ({} edits) took {:.0} ms, asking what is loose in it {:.0} ms", bodies.ground.edits.len(), (t1 - t0).as_secs_f32() * 1e3, t1.elapsed().as_secs_f32() * 1e3);
+        tell("the whole row in one box", &whole);
+        // Asked again where each charge went off, round after round, until nothing more comes loose.
+        let census = |bodies: &mut Bodies| {
+            let r = Region::gather(low, size, &bodies.ground.edits, &mut bodies.ground.scratch);
+            let (mut high, mut street) = (0usize, 0usize);
+            for i in 0..r.cells.len() {
+                let k = r.cells[i];
+                if k == 0 || support::is_ground(k) { continue }
+                let (x, y, z) = (low[0] + (i % size[0]) as i32, low[1] + (i / (size[0] * size[2])) as i32, low[2] + (i / size[0] % size[2]) as i32);
+                let h = y - city::ground(x, z);
+                if z < 4000 && h >= 30 && x >= 560 && x < 980 { high += 1 }
+                if z >= 4012 && h >= 2 { street += 1 }
+            }
+            (high, street)
+        };
+        eprintln!("built cells 3 m or more up behind the fronts, and cells over the street: {:?}", census(&mut bodies));
+        if std::env::var("AGAIN").is_ok() {
+            for round in 0..8 {
+                let (mut made, t0) = (0, std::time::Instant::now());
+                for at in &struck { made += bodies.release(*at, 0) }
+                let ms = t0.elapsed().as_secs_f32() * 1e3;
+                let cells: usize = bodies.list.iter().map(|b| b.count).sum();
+                let biggest = bodies.list.iter().map(|b| (b.count, b.stuff)).max().unwrap_or((0, 0));
+                let mut t = 0.0;
+                while (!bodies.list.is_empty() || !bodies.far.is_empty()) && t < 120.0 { bodies.out.clear(); bodies.advance(1.0 / 60.0); t += 1.0 / 60.0 }
+                eprintln!("round {round}: asking again made {made} bodies of {cells} cells (the biggest {biggest:?}) in {ms:.0} ms, at rest in {t:.0} s; {:?}", census(&mut bodies));
+                if made == 0 { break }
+            }
+        }
+        for at in [struck[4], struck[5]] {
+            let r = Region::gather([at[0] - 80, at[1] - 48, at[2] - 80], SETTLE, &bodies.ground.edits, &mut bodies.ground.scratch);
+            let t0 = std::time::Instant::now();
+            support::loose(&r);
+            eprintln!("asking what is loose in the box round a charge took {:.0} ms", t0.elapsed().as_secs_f32() * 1e3);
+            tell(&format!("the box round the charge at {at:?}"), &r);
         }
     }
 

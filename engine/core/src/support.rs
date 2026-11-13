@@ -14,6 +14,7 @@ use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
 use crate::{Edit, fill};
 
+
 /// A box of the world's finest cells, laid out flat: x + across * (z + deep * y).
 pub struct Region {
     pub low: [i32; 3],
@@ -32,7 +33,7 @@ impl Region {
     }
 
     #[inline]
-    fn place(&self, i: usize) -> (usize, usize, usize) {
+    pub(crate) fn place(&self, i: usize) -> (usize, usize, usize) {
         let layer = self.size[0] * self.size[2];
         (i % self.size[0], i / layer, (i % layer) / self.size[0])
     }
@@ -45,27 +46,53 @@ impl Region {
     /// As `gather`, each sector filled by `make`: for one who knows which edits reach a sector.
     pub fn gather_with(low: [i32; 3], size: [usize; 3], s: &mut Scratch, mut make: impl FnMut(&mut Scratch, i32, i32, i32)) -> Self {
         let mut region = Region::new(low, size);
+        region.sectors(|sx, sy, sz, region| {
+            make(s, sx, sy, sz);
+            region.take(s, sx, sy, sz);
+        });
+        region
+    }
+
+    /// Each sector the box reaches, in turn.
+    pub fn sectors(&mut self, mut each: impl FnMut(i32, i32, i32, &mut Region)) {
         let side = SIDE as i32;
+        let (low, size) = (self.low, self.size);
         let high = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
         for sy in low[1].div_euclid(side)..=(high[1] - 1).div_euclid(side) {
             for sz in low[2].div_euclid(side)..=(high[2] - 1).div_euclid(side) {
                 for sx in low[0].div_euclid(side)..=(high[0] - 1).div_euclid(side) {
-                    make(s, sx, sy, sz);
-                    // The part of the sector that is in the box.
-                    let from = [(low[0] - sx * side).max(0), (low[1] - sy * side).max(0), (low[2] - sz * side).max(0)];
-                    let to = [(high[0] - sx * side).min(side), (high[1] - sy * side).min(side), (high[2] - sz * side).min(side)];
-                    for y in from[1]..to[1] {
-                        for z in from[2]..to[2] {
-                            let src = at(from[0] as usize, y as usize, z as usize);
-                            let dst = region.at((sx * side + from[0] - low[0]) as usize, (sy * side + y - low[1]) as usize, (sz * side + z - low[2]) as usize);
-                            let n = (to[0] - from[0]) as usize;
-                            region.cells[dst..dst + n].copy_from_slice(&s.cells[src..src + n]);
-                        }
-                    }
+                    each(sx, sy, sz, self);
                 }
             }
         }
-        region
+    }
+
+    /// Takes from a sector held whole in the scratch the part of it that is in the box.
+    pub fn take(&mut self, s: &Scratch, sx: i32, sy: i32, sz: i32) {
+        self.take_cells(Some(&s.cells), 0, sx, sy, sz);
+    }
+
+    /// Takes the part of a sector that is in the box: from the sector's cells, or, with none, as all of one kind.
+    pub fn take_cells(&mut self, cells: Option<&[Kind]>, same: Kind, sx: i32, sy: i32, sz: i32) {
+        let side = SIDE as i32;
+        let (low, size) = (self.low, self.size);
+        let high = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
+        let from = [(low[0] - sx * side).max(0), (low[1] - sy * side).max(0), (low[2] - sz * side).max(0)];
+        let to = [(high[0] - sx * side).min(side), (high[1] - sy * side).min(side), (high[2] - sz * side).min(side)];
+        if from[0] >= to[0] {
+            return;
+        }
+        for y in from[1]..to[1] {
+            for z in from[2]..to[2] {
+                let src = at(from[0] as usize, y as usize, z as usize);
+                let dst = self.at((sx * side + from[0] - low[0]) as usize, (sy * side + y - low[1]) as usize, (sz * side + z - low[2]) as usize);
+                let n = (to[0] - from[0]) as usize;
+                match cells {
+                    Some(cells) => self.cells[dst..dst + n].copy_from_slice(&cells[src..src + n]),
+                    None => self.cells[dst..dst + n].fill(same),
+                }
+            }
+        }
     }
 }
 
@@ -107,25 +134,89 @@ const AGAIN: usize = 0;
 /// crushes it), and the whole is asked again without it: the load may go another way, and tear that in turn, which
 /// is how a thing gives way bit by bit. When nothing more tears, what the ground no longer reaches is loose.
 pub fn loose(r: &Region) -> Vec<bool> {
+    loose_how(r, None).0
+}
+
+/// A box of the world taken coarsely: each cell of `region` stands for a block of cells `by` a side, and is of the
+/// strongest stuff in it; `count` is how many cells of the block are built. The same rule is asked of it (`loose_how`),
+/// with a step sideways costing `by` and each block weighing and carrying by its cells: so a thing can be asked about
+/// over a box far wider than could be gathered and searched cell by cell.
+pub struct Blocks {
+    pub region: Region,
+    pub count: Vec<u8>,
+    pub by: usize,
+}
+
+impl Blocks {
+    pub fn of(r: &Region, by: usize) -> Blocks {
+        let size = [r.size[0] / by, r.size[1] / by, r.size[2] / by];
+        let mut region = Region::new(r.low, size);
+        let mut count = vec![0u8; region.cells.len()];
+        for y in 0..size[1] * by {
+            for z in 0..size[2] * by {
+                let (row, to) = (r.at(0, y, z), region.at(0, y / by, z / by));
+                for x in 0..size[0] * by {
+                    let k = r.cells[row + x];
+                    if k == 0 {
+                        continue;
+                    }
+                    let b = to + x / by;
+                    if region.cells[b] == 0 || rank(k) > rank(region.cells[b]) {
+                        region.cells[b] = k;
+                    }
+                    count[b] += !is_ground(k) as u8;
+                }
+            }
+        }
+        Blocks { region, count, by }
+    }
+}
+
+/// How well a stuff carries, for picking what a block is of: the ground least, then rubble, then leaves (a crown that
+/// brushes a wall must not make the wall's block one that joins only to leaves), then by how far it spans.
+pub(crate) fn rank(k: Kind) -> u32 {
+    if is_ground(k) { 0 } else if rubble(k) { 1 } else if material(k) == LEAVES { 2 } else { 3 + spans(material(k)) as u32 }
+}
+
+/// As `loose`, and with it how each cell was joined to what holds it and what reaching it cost: for counting.
+/// With `blocks`, the region's cells are blocks (see `Blocks`).
+pub(crate) fn loose_how(r: &Region, blocks: Option<(&[u8], usize)>) -> (Vec<bool>, Vec<u8>, Vec<u8>) {
+    let by = blocks.map_or(1, |b| b.1);
+    // How many cells a block is, and how many cells' worth of joins a face of it has.
+    let cells_of = |i: usize| blocks.map_or(1, |b| (b.0[i] as u32).max(1));
+    let face = |i: usize| blocks.map_or(1, |b| (b.0[i] as u32 / b.1 as u32).max(1));
     let [nx, ny, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
     // The joins that have torn: a bit for each way a cell can be joined (its `how`).
     let mut torn = vec![0u8; n];
     let mut out = vec![false; n];
+    let mut cost = vec![UNREACHED; n];
+    let mut join = vec![NONE; n];
     for pass in 0..=AGAIN {
-        let mut cost = vec![UNREACHED; n];
-        let mut join = vec![NONE; n];
+        cost.fill(UNREACHED);
+        join.fill(NONE);
         let mut order: Vec<u32> = Vec::new();
         let mut waiting: Vec<Vec<u32>> = vec![Vec::new(); 256];
         // What is at the bottom of the box, and at its sides, goes on beyond it: the ground's.
+        // So is the ground that lies on it, cell on cell, all the way up: most of what is solid in a box is that, and
+        // none of it need be reached for. Only the ground's cells that something else touches are where reaching starts.
         for i in 0..n {
             if r.cells[i] == 0 {
                 continue;
             }
             let (x, y, z) = r.place(i);
-            if y == 0 || x == 0 || x == nx - 1 || z == 0 || z == nz - 1 {
+            if y == 0 || x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || (is_ground(r.cells[i]) && join[i - layer] == GROUND) {
                 cost[i] = 0;
                 join[i] = GROUND;
+            }
+        }
+        for i in 0..n {
+            if join[i] != GROUND {
+                continue;
+            }
+            let (x, y, z) = r.place(i);
+            let waits = |j: usize| r.cells[j] != 0 && join[j] != GROUND;
+            if (y + 1 < ny && waits(i + layer)) || (x > 0 && waits(i - 1)) || (x + 1 < nx && waits(i + 1)) || (z > 0 && waits(i - nx)) || (z + 1 < nz && waits(i + nx)) || (y > 0 && waits(i - layer)) {
                 waiting[0].push(i as u32);
             }
         }
@@ -166,11 +257,11 @@ pub fn loose(r: &Region) -> Vec<bool> {
                     if more == 0 { list.push(j as u32) } else { waiting[to].push(j as u32) }
                 };
                 if y + 1 < ny { reach(i + layer, 0, RESTS, &mut at_cost, &mut waiting) }
-                if x > 0 { reach(i - 1, 1, LEANS + 1, &mut at_cost, &mut waiting) }
-                if x + 1 < nx { reach(i + 1, 1, LEANS, &mut at_cost, &mut waiting) }
-                if z > 0 { reach(i - nx, 1, LEANS + 3, &mut at_cost, &mut waiting) }
-                if z + 1 < nz { reach(i + nx, 1, LEANS + 2, &mut at_cost, &mut waiting) }
-                if y > 0 { reach(i - layer, 2, HANGS, &mut at_cost, &mut waiting) }
+                if x > 0 { reach(i - 1, by, LEANS + 1, &mut at_cost, &mut waiting) }
+                if x + 1 < nx { reach(i + 1, by, LEANS, &mut at_cost, &mut waiting) }
+                if z > 0 { reach(i - nx, by, LEANS + 3, &mut at_cost, &mut waiting) }
+                if z + 1 < nz { reach(i + nx, by, LEANS + 2, &mut at_cost, &mut waiting) }
+                if y > 0 { reach(i - layer, 2 * by, HANGS, &mut at_cost, &mut waiting) }
             }
         }
         // The cell each is joined to.
@@ -187,7 +278,7 @@ pub fn loose(r: &Region) -> Vec<bool> {
         let mut load = vec![0u32; n];
         for &i in order.iter().rev() {
             let i = i as usize;
-            load[i] += 1;
+            load[i] += cells_of(i);
             let how = join[i] & 127;
             if how != GROUND {
                 let h = holder(i, how);
@@ -206,7 +297,7 @@ pub fn loose(r: &Region) -> Vec<bool> {
                 continue;
             }
             let h = holder(i, how);
-            let over = if how == RESTS { load[i] > bears(material(r.cells[h])) } else { load[i] > join_carries(material(r.cells[i]), material(r.cells[h])) };
+            let over = if how == RESTS { load[i] > bears(material(r.cells[h])).saturating_mul(face(h)) } else { load[i] > join_carries(material(r.cells[i]), material(r.cells[h])).saturating_mul(face(i).min(face(h))) };
             if over {
                 torn[i] |= 1 << how;
                 tore = true;
@@ -223,7 +314,7 @@ pub fn loose(r: &Region) -> Vec<bool> {
             break;
         }
     }
-    out
+    (out, join, cost)
 }
 
 /// The rows a set of cells makes, sorted by y, then z, then x: neighbours along x of one kind are one row.
@@ -243,7 +334,7 @@ fn rows(r: &Region, cells: &mut [u32]) -> Vec<Run> {
 
 /// The loose cells of a region as pieces: loose cells that touch are one. A piece that reaches the box's sides or
 /// top goes on beyond it, and what it is joined to there is not known, so it is left where it is (and comes back empty).
-fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32]) -> Vec<Vec<u32>> {
+fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32], [sides, top]: [bool; 2]) -> Vec<Vec<u32>> {
     let [nx, ny, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
     piece_of.fill(0);
@@ -262,7 +353,7 @@ fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32]) -> Vec<Vec<u32
             let i = i as usize;
             cells.push(i as u32);
             let (x, y, z) = r.place(i);
-            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1;
+            edge |= (sides && (x == 0 || x == nx - 1 || z == 0 || z == nz - 1)) || (top && y == ny - 1);
             let mut join = |j: usize| {
                 if is_loose[j] && piece_of[j] == 0 {
                     piece_of[j] = id;
@@ -399,10 +490,118 @@ pub fn release(r: &mut Region, shove: Option<([i32; 3], i32)>) -> (Vec<Loose>, V
     if let Some((at, radius)) = shove {
         adrift(r, at, radius, &mut is_loose);
     }
+    taken(r, &is_loose)
+}
 
+/// How big the blocks are that a wide box is asked about in, in cells.
+pub const BLOCK: usize = 4;
+
+/// Which blocks of a wide box come loose: those the rule does not hold (`loose_how`, in blocks), in pieces (blocks
+/// that touch), and of the pieces only those a blast has reached. `scars` are blasts, each a place and a radius. A
+/// narrow box's sides are taken for ground, so a row of storeys wider than it stands on them however little is left
+/// under it; here it is found loose. But by the blocks' counts a few things in the town as made are loose as well (a
+/// house built out over a slope, a pane at a tower's corner), and those must not fall because a charge went off down
+/// the street: so the rule lets go only of what something has broken into.
+pub fn far_loose(blocks: &Blocks, scars: &[([i32; 3], i32)]) -> Vec<bool> {
+    let r = &blocks.region;
+    let [nx, ny, nz] = r.size;
+    let layer = nx * nz;
+    let by = blocks.by as i32;
+    let unheld = loose_how(r, Some((&blocks.count, blocks.by))).0;
+    let mut out = vec![false; unheld.len()];
+    let mut seen = vec![false; unheld.len()];
+    let (mut stack, mut piece): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+    for start in 0..unheld.len() {
+        if !unheld[start] || seen[start] || blocks.count[start] == 0 {
+            continue;
+        }
+        piece.clear();
+        let mut struck = false;
+        seen[start] = true;
+        stack.push(start as u32);
+        while let Some(i) = stack.pop() {
+            let i = i as usize;
+            piece.push(i as u32);
+            let (x, y, z) = r.place(i);
+            if !struck {
+                let c = [r.low[0] + x as i32 * by + by / 2, r.low[1] + y as i32 * by + by / 2, r.low[2] + z as i32 * by + by / 2];
+                struck = scars.iter().any(|(at, radius)| {
+                    let reach = (radius * 3 / 2 + 2 * by) as i64;
+                    (0..3).map(|a| ((c[a] - at[a]) as i64).pow(2)).sum::<i64>() <= reach * reach
+                });
+            }
+            let mut join = |j: usize| {
+                if unheld[j] && !seen[j] && blocks.count[j] > 0 {
+                    seen[j] = true;
+                    stack.push(j as u32);
+                }
+            };
+            if x > 0 { join(i - 1) }
+            if x + 1 < nx { join(i + 1) }
+            if z > 0 { join(i - nx) }
+            if z + 1 < nz { join(i + nx) }
+            if y > 0 { join(i - layer) }
+            if y + 1 < ny { join(i + layer) }
+        }
+        if struck {
+            for &i in &piece {
+                out[i as usize] = true;
+            }
+        }
+    }
+    out
+}
+
+/// The box of cells round the blocks that come loose, within the blocks' region: its low and high corners in the
+/// world. Nothing if none do.
+pub fn far_box(blocks: &Blocks, loose: &[bool]) -> Option<([i32; 3], [i32; 3])> {
+    let r = &blocks.region;
+    let by = blocks.by as i32;
+    let (mut lo, mut hi) = ([i32::MAX; 3], [i32::MIN; 3]);
+    for i in (0..loose.len()).filter(|&i| loose[i]) {
+        let (x, y, z) = r.place(i);
+        let c = [x as i32, y as i32, z as i32];
+        for k in 0..3 {
+            lo[k] = lo[k].min(r.low[k] + c[k] * by);
+            hi[k] = hi[k].max(r.low[k] + (c[k] + 1) * by);
+        }
+    }
+    (lo[0] != i32::MAX).then_some((lo, hi))
+}
+
+/// Takes out of `part` (the world's cells in the box `far_box` gave) every built cell of a loose block, as pieces
+/// and dust (see `release`). Leaves stay: in blocks a crown that brushes a wall is cut off by it, and trees are the
+/// narrow box's business.
+pub fn release_far(part: &mut Region, blocks: &Blocks, loose: &[bool], mut still: impl FnMut([i32; 3]) -> bool) -> (Vec<Loose>, Vec<Run>) {
+    let r = &blocks.region;
+    let by = blocks.by as i32;
+    let mut is_loose = vec![false; part.cells.len()];
+    for i in 0..part.cells.len() {
+        let k = part.cells[i];
+        if k == 0 || is_ground(k) || material(k) == LEAVES {
+            continue;
+        }
+        let (x, y, z) = part.place(i);
+        let b = [(part.low[0] + x as i32 - r.low[0]) / by, (part.low[1] + y as i32 - r.low[1]) / by, (part.low[2] + z as i32 - r.low[2]) / by];
+        // `still` says whether a cell is in the world yet: one that has gone since the part was gathered is not there to take.
+        if loose[r.at(b[0] as usize, b[1] as usize, b[2] as usize)] {
+            if still([part.low[0] + x as i32, part.low[1] + y as i32, part.low[2] + z as i32]) { is_loose[i] = true } else { part.cells[i] = 0 }
+        }
+    }
+    // A piece that reaches the top of the whole box goes on above it. The part's own sides are not the box's.
+    let top = part.low[1] + part.size[1] as i32 == r.low[1] + r.size[1] as i32 * by;
+    taken_from(part, &is_loose, [false, top])
+}
+
+/// Takes the loose cells out of a region as pieces and dust (see `release`).
+fn taken(r: &mut Region, is_loose: &[bool]) -> (Vec<Loose>, Vec<Run>) {
+    taken_from(r, is_loose, [true; 2])
+}
+
+fn taken_from(r: &mut Region, is_loose: &[bool], edged: [bool; 2]) -> (Vec<Loose>, Vec<Run>) {
     let mut piece_of = vec![0u32; r.cells.len()];
     let (mut out, mut dust) = (Vec::new(), Vec::new());
-    for mut cells in pieces_of(r, &is_loose, &mut piece_of) {
+    for mut cells in pieces_of(r, is_loose, &mut piece_of, edged) {
         if cells.is_empty() {
             continue;
         }
@@ -481,7 +680,7 @@ pub fn settle(r: &mut Region, rounds: u32) -> Settled {
     let mut piece_of = vec![0u32; n];
     for round in 0..rounds {
         let is_loose = loose(r);
-        let pieces = pieces_of(r, &is_loose, &mut piece_of);
+        let pieces = pieces_of(r, &is_loose, &mut piece_of, [true; 2]);
         // Crumbs are gone; pieces come out of the region, to be put back where they land.
         let mut falling: Vec<(Vec<u32>, Vec<Kind>)> = Vec::new();
         // A crumb swept away may have been what something rested on: that is a change too.
@@ -638,7 +837,7 @@ mod tests {
     use super::*;
     use crate::city::{BLOCK_X, BLOCK_Z, Block, block, ground};
     use crate::kinds::*;
-    use crate::{ROUNDS, SETTLE};
+    use crate::{ROUNDS, SETTLE, WIDE};
 
     fn count(r: &Region) -> std::collections::BTreeMap<Kind, usize> {
         let mut m = std::collections::BTreeMap::new();
@@ -698,6 +897,47 @@ mod tests {
         }
         assert!(fell.is_empty(), "{} pieces fell in the untouched city:\n{}", fell.len(), fell[..fell.len().min(12)].join("\n"));
         assert!(seen.len() >= 4, "homes, towers, a park and a yard were all looked at");
+    }
+
+    #[test]
+    fn one_charge_brings_down_nothing_it_did_not_reach() {
+        // In every sort of block: a wide box of the untouched town, and a charge of 32 that has only been set off in
+        // the telling (a scar at the box's middle, a metre and a half up, and no cell emptied). By the blocks' counts
+        // a few things in the town as made are loose; none of them may be taken unless the charge reached it, and
+        // what it reached and takes may not be much.
+        let mut fell: Vec<String> = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut s = Scratch::new();
+        let (mut asked, mut most) = (0, 0);
+        for bz in -12..12 {
+            for bx in -12..12 {
+                let sort = block(bx, bz);
+                if sort == Block::Shore || seen.contains(&(sort as u8)) && (bx + bz) % 7 != 0 {
+                    continue;
+                }
+                seen.insert(sort as u8);
+                for (dx, dz) in [(400, 250), (70, 70), (700, 150), (1000, 600), (475, 510)] {
+                    let (x, z) = (bx * BLOCK_X + dx, bz * BLOCK_Z + dz);
+                    let low = [(x - WIDE[0] as i32 / 2).div_euclid(64) * 64, (ground(x, z) - 64).div_euclid(64) * 64, (z - WIDE[2] as i32 / 2).div_euclid(64) * 64];
+                    let r = Region::gather(low, WIDE, &[], &mut s);
+                    let blocks = Blocks::of(&r, BLOCK);
+                    let loose = far_loose(&blocks, &[([x, ground(x, z) + 15, z], 32)]);
+                    asked += 1;
+                    let Some((lo, hi)) = far_box(&blocks, &loose) else { continue };
+                    let mut part = Region::gather(lo, [(hi[0] - lo[0]) as usize, (hi[1] - lo[1]) as usize, (hi[2] - lo[2]) as usize], &[], &mut s);
+                    let (pieces, _) = release_far(&mut part, &blocks, &loose, |_| true);
+                    let cells: usize = pieces.iter().map(|p| p.cells).sum();
+                    most = most.max(cells);
+                    if cells > 600 {
+                        fell.push(format!("{sort:?} block {bx} {bz} at {dx} {dz}: {cells} cells in {} pieces, the biggest {:?}", pieces.len(), pieces.iter().map(|p| (p.cells, p.low, p.high)).max()));
+                    }
+                }
+            }
+        }
+        assert!(asked > 100, "{asked} boxes were asked about");
+        // One box of 380 does (November 12): a house built out over a steep slope, which the blocks' counts call loose
+        // as it was made, loses 9,232 cells to a charge set right beside it. Such houses are the town's to mend.
+        assert!(fell.len() * 50 <= asked, "a charge that emptied nothing brought down ({} of {asked} boxes; the most {most} cells):\n{}", fell.len(), fell.join("\n"));
     }
 
     #[test]

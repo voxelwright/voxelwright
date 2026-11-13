@@ -180,6 +180,8 @@ pub extern "C" fn paving_at(x: i32, z: i32) -> i32 {
 
 /// How big a box round a change is asked what still holds: 16 m across and deep, 22 m tall.
 pub const SETTLE: [usize; 3] = [160, 224, 160];
+/// The box a charge is asked about in again, in blocks (support.rs `release_far`): 32 m across, 25.6 m tall, whole sectors.
+pub const WIDE: [usize; 3] = [320, 256, 320];
 /// How many times over what has landed is asked again whether it holds, in the support rule's own tests: a heap
 /// took six to come to rest, and nine once a cell could be crushed by what rests on it.
 pub const ROUNDS: u32 = 12;
@@ -239,7 +241,7 @@ pub extern "C" fn bodies_words() -> *const u32 {
 /// How many bodies are moving, and how many points were tried against the world in the last call: for measuring.
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_count() -> usize {
-    INSTANCE.with_borrow_mut(|i| moving(i).list.len())
+    INSTANCE.with_borrow_mut(|i| moving(i).busy())
 }
 
 #[unsafe(no_mangle)]

@@ -1202,3 +1202,84 @@ skill). What was learned about the engine on the way:
   and 120 km out the west coast shifts as the planet's rule takes over, and the two can differ in that band.
 - Reefs and kelp keep to the shelf (`city.rs` `SHELF`, 26 m of water): with no limit, kelp stood 90 m tall in the deep.
 - A check that looks at the picture after moving the eye waits for the page's own frames, not for a fixed time.
+
+## What held the gutted fronts, and the wide box (#160, #153; November 12, the collapse thread)
+
+Counted before anything was built (`cargo test --release what_holds_a_gutted_front -- --ignored --nocapture`; `GRID=1` sets
+charges through the houses too, `SPARKS=1` lights them, `TIMES=1` times each ask, `FAST=1` stops after the act). The ruin
+row then left every upper storey standing over a gutted ground floor. Three things held them, none of them `spans`:
+
+- **The party walls.** Ten charges at the fronts take the front 3.6 m of each ground floor. The walls between the houses
+  run 17 to 21 m back and stand to the ground, and the floors, fronts and roofs hang between them. Asked again and again
+  where each charge went off, 9% more came down. A house comes down when its side walls are charged from the front back:
+  the row's act does that now (thirty charges of 32).
+- **The box's sides are ground.** `loose` takes whatever is at the sides of its 16 m box for held, so a thing wider than
+  the box stands on the box. With the walls charged, one wide box said 426,000 standing cells were unheld (two pieces of
+  285,000 and 97,000: whole upper storeys); every 16 m box held them. The skill's older line that a piece reaching the
+  box's sides "is left alone" was never what happened: side cells are seeds, so only the top's rule ever fired.
+- **Stiff wooden floors.** A floor of 35,000 to 50,000 cells comes loose, wedges between the walls, is put back, and comes
+  loose again each time it is asked about.
+
+What was built:
+
+- **The rule asked in blocks** (`support::Blocks`, `far_loose`, `release_far`; `Bodies::far`). A box 32 m across and 25.6 m
+  tall (whole sectors, `WIDE`) is asked in blocks of four cells: a block is of the strongest stuff in it (`rank`: ground,
+  rubble, leaves, then by span) and weighs its built cells; a step sideways costs four, a face carries by its cells. Same
+  function as the fine rule (`loose_how`, with `blocks`). 410,000 blocks are asked in 4 to 8 ms.
+- **It lets go only of what a charge reached.** By the blocks' counts a few things in the untouched town are loose (a house
+  built out over a steep slope, corner panes of a tower, slivers of tree crowns behind walls). A piece of loose blocks is
+  taken only if one of the last 48 charges reached it (within 1.5 radii). Leaves are never taken by blocks. Tried first
+  and dropped: a mask of what was loose in the town as made, which cost a second gather of a hundred sectors.
+- **Spread over the solver's calls.** A charge of 12 or more queues its wide box for 0.25 s on; each call makes at most 3
+  to 6 sectors, then the ask, then the cells of the loose part are gathered a few sectors a call, and a cell that has left
+  the world meanwhile (`ground.solid`) is not taken. Done in one call it held everything in the air still for 0.3 s.
+  `bodies_count()` counts a waiting box, so the page and the world keep calling while one waits.
+- **Big pieces come apart as they come loose** (`parts`, 24,000 cells or more, middles 4.8 m apart), unless tall and thin
+  (a chimney goes over whole). Walls and floors come down as panels a room wide.
+
+What it cost, and what that found (the solver had four faults that only a street both burning and falling showed):
+
+- **Every box of the world was made again from every edit.** Once a street had burnt and fallen (tens of thousands of
+  edits) a 5 m box took up to 293 ms to gather. The solver now keeps the sectors it works in as cells (`Ground::kept`, 112
+  of them, half a megabyte each): its own rows and a blast put last change them in place. A test holds every kept sector,
+  its bits and its blocks to what the rules and all the edits make (`what_the_solver_keeps_is_the_world`). A blast's box
+  is gathered once, not twice (`blasted`), and a landing's dent no longer pushes a blast and takes it back.
+- **Fire asked `kind` of every neighbour that could burn**, and burnt in more sectors than were kept whole: 9 to 15 s for
+  one call. What burns is two more bits a cell beside the fuel bit (`Ground::fuel_stuff`; three lines of `fire.rs`).
+- **A fire's crumbs were bodies**: asked once a second where it last ate, 500 new small bodies a second for as long as the
+  street burnt. Pieces under 160 cells that nothing threw fall as rubble at once and are told as dust (`take`).
+- **The step**: each touch's turning resistance was worked out 24 times a step (half of all the solver did); it and the
+  spin a push gives are worked out once a touch. A blast's lumps meet only the world and are tried at 36 points, not up to
+  160. Looking for bodies in boxes of 6.4 m instead of against every body made no difference that could be told, and
+  was taken out again.
+- Natively, the whole thirty-charge act without fire: the steps took 23 s of CPU before these and 16 s after, for about
+  40 s of world time. `sample <pid>` on the test binary found each of these in minutes; guessing found none.
+
+Measured (M1 Pro, load average 16 to 36 from four other threads, so times are rough; counts are not):
+
+- A charge of 40 natively: 270 to 480 ms before, 157 to 214 ms after.
+- The old ruin act (ten charges at the fronts), filmed 16 s before and after: 786 and 863 frames, worst gap 367 and 50 ms,
+  a blast worked out in 626 and 283 ms in the page, the solver's longest call 392 and 263 ms, bodies in all 1,649 and
+  3,073. The handbook's "no gap over 16.7 ms" could not be seen either time on a machine this busy.
+- The count's own act (`GRID=1`: the ten front charges, then 24 through the houses every 5 m; not the row's thirty): of
+  what stood 3 m or more up behind the fronts after the front charges alone (748,000 cells), 493,000 stood after the
+  charges through the houses with only the narrow box, and 270,000 to 330,000 with the wide one.
+- The row's new act through the board's tools (load average 137 to 194, so the gaps say little): 5,700 to 6,100 bodies in
+  all, about 1,650 at once, a blast worked out in 365 to 485 ms, the solver's longest call 516 to 559 ms; filmed for 55 s,
+  813 gaps over 25 ms, the first at 13 s, the worst 500 ms. The board stamped its picture 31 frames a second at 0.30.
+- One charge that empties nothing, in 380 wide boxes over every sort of block, takes something in one: 9,232 cells of a
+  house built out over a steep slope (`one_charge_brings_down_nothing_it_did_not_reach`). The town's to mend.
+- Memory was not measured. By its sizes: a sector the solver has touched is about 172 KB of bits and blocks (64 before),
+  and up to 112 sectors are kept as cells at 512 KB (32 before): 56 MB against 16. Not run on a phone.
+- A house with both side walls charged: two thirds of what was over its ground floor comes down
+  (`a_house_with_its_walls_charged_comes_down_and_the_one_two_doors_off_stands`); the house two doors off keeps 97%.
+
+Not done, and known:
+
+- The front and back walls of a charged house stay: the neighbours' walls hold them within 3 m either side (`spans` 30).
+  Masonry reaching 16 left more standing, not less (more pieces wedge), and dropped a piece in the untouched town.
+- A thing taller than the wide box (25.6 m) is still left standing: the towers of glass.
+- In the page the solver is still behind real time at the peak of the new act (about 1,650 bodies at once), and frames
+  were late through it on a loaded machine. The row's picture waits on cells fallen (`engine.fell.cells`), not seconds.
+- A wide box's sides are ground too: a thing wider than 32 m, or cut by the box of the last charge, can stand on them.
+- When cells leave a block, what it is of is not looked for again until none are left (it may be taken for stronger).

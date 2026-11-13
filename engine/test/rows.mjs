@@ -243,11 +243,19 @@ export const ROWS = [
       return page.screenshot()
     } },
   { key: 'ruin', what: 'A whole district brought down', theirs: ['engine', 55.4], state: 'level',
-    // From over the yard, the row of houses across the street: big charges at their feet, one after another.
-    stand: [8, 17, 13, 0, -0.5 / DEG], near: [60, ...HOUSE, 14], falls: 1000,
+    // From the road, the row of houses across it: big charges at the feet of their fronts, and then at the feet of
+    // the walls between them from the fronts back. A house stands on its side walls whatever is taken out of its
+    // front, so charged at the fronts alone the row was gutted fronts with heaps at their feet (the eighth judge:
+    // "a street of low heaps"). The picture waits while the storeys come down.
+    stand: [8, 4, 14, 0, 5], near: [60, ...HOUSE, 14], falls: 1000,
     act: async (page) => {
-      // The biggest charge on the bar, ten times, along as much of the row as the picture holds.
-      for (const turn of [-0.9, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.9]) { await charge(page, turn, 32, -0.62); await page.waitForTimeout(700) }
+      // The biggest charge on the bar, thirty times.
+      for (const x of [58, 62.4, 66.8, 71.2, 75.6, 80, 84.4, 88.8, 93.2, 97.6]) { await strikeAt(page, [x, 399.4], 1.5, 32); await page.waitForTimeout(600) }
+      for (const z of [396.5, 391.5, 386.5, 381.5]) for (const x of [59.6, 67.2, 74.8, 82.4, 90]) { await strikeAt(page, [x, z], 1.5, 32); await page.waitForTimeout(450) }
+      // Until most of what comes down has come loose (2.7 million cells in one run, 3.5 in another), not for a count
+      // of seconds: under load the solver runs behind.
+      await page.waitForFunction(() => globalThis.engine.fell.cells > 2_400_000, null, { timeout: 60_000 }).catch(() => {})
+      await page.waitForTimeout(1500)
     } },
   // The same engine as the Earth.
   { key: 'sunset', what: 'A coast at sunset: a low sun, its path on the water, lit clouds', theirs: ['earth', 1.2], state: 'level',
