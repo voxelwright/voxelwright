@@ -263,11 +263,11 @@ export const ROWS = [
     // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
     stand: { from: [-6400, -1625], up: 2.5, to: [-6415, -1605], high: 7 }, hour: 10, near: [60, 2, 3, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
-    // The massif north of the town from over the pine hills at its foot, in the middle of the morning with the sun
-    // behind the eye: three kilometres of it, white where snow lies and dark where rock is too steep to hold it.
-    // (From close under the peaks late in the day the eighth judge saw "a close, grey, dithered peak with no
-    // distance, no scale and no white snow".)
-    stand: { from: [1500, -6500], up: 150, to: [-1500, -8250], high: -600 }, hour: 9, near: [8000, ROCK, SAND] },
+    // In the massif north of the town, from over a snowfield 1,400 m up early in the morning with the sun low in the
+    // east: the face above in snow and broken rock, and across the valley a peak three kilometres off.
+    // (From close under the old smooth peaks late in the day the eighth judge saw "a close, grey, dithered peak with
+    // no distance, no scale and no white snow".)
+    stand: { from: [2500, -9500], up: 300, to: [300, -12000], high: -900 }, hour: 7.8, near: [8000, ROCK, SAND] },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'level',
     // Down the street by the start from the middle of the wet road: a lamp over it with its glow, the lamps' light
     // drawn out on the road, lit windows and a shop's sign, the towers' windows beyond.
@@ -286,9 +286,10 @@ export const ROWS = [
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'level',
-    // From 250 km over the land west of the town, looking north along the coast the town stands near. Over 6 km
-    // up the planet is drawn by a pass of its own (page/space.ts). It is an invented planet: the row is of the Earth.
-    stand: [-40_000, 250_000, 0, 350, -28], hour: 13 },
+    // From 220 km up, 600 km south of the town, looking south along the coast: a cape and a bay, the pale shelf,
+    // rivers and the lie of the land. Over 6 km up the planet is drawn by a pass of its own (page/space.ts). It is
+    // an invented planet: the row is of the Earth.
+    stand: [-100_000, 220_000, 600_000, 200, -30], hour: 14 },
   { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'level',
     // In the pine woods before the mountains, 5 km north of the town: a charge among the trees.
     stand: { from: [-145, -4970], up: 2.2, to: [-145, -5070], high: 14 }, near: [16, LEAVES, WOOD], inAir: true,

@@ -1157,3 +1157,21 @@ skill). What was learned about the engine on the way:
 - **Not there**: no asking from inside the page (a browser cannot run the binary; that needs a helper on the
   asker's machine). Nothing a model writes is run: rules and mechanics made at runtime need a sandbox and are not
   begun. Things do not stand on other made things. A thin wheel or a bicycle at 10 cm is at the edge of what reads.
+
+
+## Creased mountains, and the planet's detail (#217, November 12)
+
+- **Mountains close to were dunes** until `land.rs` `high` got spurs and gullies (a creased noise 95 m across) and
+  small faces (33 m), deepest where the mountain is high, and the big ridges were bent by two slow noises, one for
+  each way, so a ridge is an arc and seldom a ring. Crests are jagged, rock shows in broken faces, and snow lies
+  in fields between. With the ground this rough, snow holds on faces up to 1.55 steep (1.3 left too little white).
+- **The snow row's stand** is in the massif, over a snowfield 1,400 m up at 7.8 with the sun low in the east: a
+  near face, a valley and a peak three kilometres off give the scale the far stand never had.
+- **The planet** (`space.ts` `land`): the coast has detail down to a few kilometres (two `wisps` added to the land
+  and sea field away from the start); relief is the difference of a creased field (`bumps`) at a place and 2.5 km
+  towards the sun, stronger where the land is high; rivers are where a bent noise crosses its middle. The ocean west
+  of the start begins at the cells' coast, not 60 km out: before, the cells' sea was a blue wedge in green land.
+  The pass holds 0.9 of full size on a busy GPU where it held 1.0.
+- **Seen from 60 to 400 km the country round the start is three wedges**: white north, red east, sea west, each
+  ending where today's rule fades at 120 km. That is the cells' own rule shown true, and the far ground is still
+  to be made the planet's.

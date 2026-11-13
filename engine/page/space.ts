@@ -110,14 +110,25 @@ fn town(p: vec2f) -> vec4f {
   let wet = select(0.0, 1.0, townGround(x, z) < 0.0) * (1.0 - open * 0.0);
   return vec4f(col, wet);
 }
+// The lie of the land as it shows from high up: ranges of hills, creased, at two sizes.
+fn bumps(p: vec2f) -> f32 {
+  let a = 1.0 - abs(wisps(p, 190.0, 93u) * 2.0 - 1.0);
+  let b = 1.0 - abs(wisps(p, 38.0, 94u) * 2.0 - 1.0);
+  return a * a * 0.62 + b * b * 0.38;
+}
 // What the ground is at a place (km east and south of the start), as colour before light: and how high, km.
 struct Land { colour: vec3f, high: f32, sea: f32 }
 fn land(p: vec2f) -> Land {
   var out: Land;
   let far = length(p);
   // Land where this is over 0: big lands and seas, with the start well inside one.
-  // West of the start, from 60 km out, is open sea: the town stands near a coast.
-  let c = folds(p, 5200.0, 61u) - 0.5 + 0.2 * exp(-far * far / (1100.0 * 1100.0)) - 0.4 * smoothstep(60.0, 260.0, -p.x + (noise(p, 90.0, 62u) - 0.5) * 120.0) * exp(-far * far / (1500.0 * 1500.0));
+  // West of the start is open sea, from the coast the cells have 6.6 km out (land.rs offshore): near the start
+  // its line is the cells' own, drawn below, and further off it wanders.
+  let c0 = folds(p, 5200.0, 61u) - 0.5 + 0.2 * exp(-far * far / (1100.0 * 1100.0)) - 0.7 * smoothstep(5.0, 45.0, -p.x + ((noise(p, 90.0, 62u) - 0.5) * 120.0 + (wisps(p, 380.0, 98u) - 0.5) * 520.0) * smoothstep(40.0, 160.0, far)) * exp(-far * far / (1500.0 * 1500.0));
+  // The coast in detail: bays, capes and islands down to a few kilometres, away from the start (whose own
+  // coast the cells have).
+  let fine = ((wisps(p, 420.0, 91u) - 0.5) * 0.1 + (wisps(p, 60.0, 92u) - 0.5) * 0.024) * smoothstep(40.0, 160.0, far);
+  let c = c0 + fine;
   let ridge = 1.0 - abs(noise(p, 520.0, 68u) * 2.0 - 1.0);
   let range = smoothstep(0.5, 0.66, folds(p, 1700.0, 64u)) * smoothstep(0.0, 0.05, c);
   out.high = max(c, 0.0) * 2.5 + range * ridge * ridge * 5.0;
@@ -129,8 +140,18 @@ fn land(p: vec2f) -> Land {
   // And finer, from lower down: a patchwork of fields a kilometre or two across, each its own shade.
   let field = vec2i(floor(vec2f(p.x * 0.8 - p.y * 0.6, p.x * 0.6 + p.y * 0.8) / 1.6));
   let patch_ = (unit(field.x, field.y, 76u) - 0.5) * (1.0 - smoothstep(150.0, 900.0, u.high)) + (wisps(p, 7.0, 79u) - 0.5) * 0.8 * (1.0 - smoothstep(300.0, 2000.0, u.high));
-  let green = mix(vec3f(0.05, 0.13, 0.04), vec3f(0.17, 0.22, 0.08), smoothstep(0.3, 0.7, grain)) * (1.0 + patch_ * 0.55);
+  let green = mix(vec3f(0.035, 0.1, 0.035), vec3f(0.2, 0.23, 0.09), smoothstep(0.3, 0.7, grain)) * (1.0 + patch_ * 0.55);
   var col = mix(green, vec3f(0.42, 0.34, 0.22) * (0.8 + 0.4 * grain), dry);
+  // Relief: slopes that face the sun are lighter and those that face away darker, more where the land is high;
+  // woods lie darker in the folds.
+  let toSun = normalize(u.sun.xz + vec2f(1e-5, 0.0));
+  let lie = bumps(p);
+  let slope = lie - bumps(p + toSun * 2.5);
+  col *= clamp(1.0 - slope * (4.5 + out.high * 2.0), 0.4, 1.6) * (0.72 + 0.56 * lie);
+  // Rivers: thin lines of water winding down to the sea, and a few lakes.
+  let wind = abs(wisps(p + vec2f(wisps(p, 90.0, 96u), wisps(p, 90.0, 97u)) * 40.0, 330.0, 95u) - 0.5);
+  let river = (1.0 - smoothstep(0.003, 0.008, wind)) * (1.0 - smoothstep(1.0, 2.2, out.high)) * (1.0 - smoothstep(300.0, 2500.0, u.high)) * smoothstep(30.0, 60.0, far);
+  col = mix(col, vec3f(0.03, 0.1, 0.16), river * 0.85);
   col = mix(col, vec3f(0.24, 0.23, 0.22), smoothstep(1.4, 2.6, out.high));
   col = mix(col, vec3f(0.62, 0.64, 0.67), max(smoothstep(2.6 - cold * 3.0, 3.4 - cold * 3.0, out.high), smoothstep(0.75, 1.0, cold)));
   // Near the start it is the land the town stands in (land.rs): mountains to the north, a dry plain to the east.
@@ -147,7 +168,7 @@ fn land(p: vec2f) -> Land {
   col = mix(col, mix(rock, vec3f(0.6, 0.62, 0.65) * clamp(1.0 + (crest - sunward) * 5.0, 0.6, 1.25), smoothstep(0.35, 0.6, crest) * smoothstep(0.2, 0.95, peaks)), peaks);
   out.sea = 1.0 - smoothstep(-0.006, 0.0, c);
   // The sea: dark and blue far out, green-blue over the shallows by the land; ice on it where it is coldest.
-  let water = mix(vec3f(0.03, 0.2, 0.24), vec3f(0.012, 0.05, 0.13), smoothstep(0.0, 0.035, -c));
+  let water = mix(vec3f(0.04, 0.3, 0.33), mix(vec3f(0.02, 0.13, 0.22), vec3f(0.012, 0.05, 0.13), smoothstep(0.02, 0.09, -c)), smoothstep(0.0, 0.022, -c));
   col = mix(col, mix(water, vec3f(0.6, 0.64, 0.68), smoothstep(0.85, 1.0, cold)), out.sea);
   // Within 30 km of the start it is the town and its country as the cells have them, where the mountains and the
   // plain have not changed them; from far up it runs together into grey.

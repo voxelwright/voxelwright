@@ -52,18 +52,24 @@ fn high(x: i32, z: i32) -> f32 {
         r * r
     };
     let (a, b, c, d) = (turned(14, 8), turned(7, -14), turned(16, 3), turned(-9, 13));
-    // Where one range's line bends: the big ridges are asked a little aside by a slow noise.
-    let bend = ((noise(x, z, 30_000, 39) - 0.5) * 16_000.0) as i32;
+    // Where one range's line bends: the big ridges are asked a little aside by two slow noises, one for each way,
+    // so a ridge is an arc and seldom a ring.
+    let (bend, twist) = (((noise(x, z, 30_000, 39) - 0.5) * 22_000.0) as i32, ((noise(x, z, 21_000, 71) - 0.5) * 16_000.0) as i32);
     // The massif north of the town stands whole whatever the slow noise says; further off there are wide valleys.
     let (nx, nz) = ((x - HOME.0) as f32, (z - HOME.1 + 105_000) as f32);
     let home = 1.0 - ease(45_000.0, 110_000.0, (nx * nx + nz * nz).sqrt());
     let mass = 0.3 + 0.7 * ease(0.3, 0.62, noise(a.0, a.1, 95_000, 38)).max(home);
-    let first = ridge((a.0 + bend, a.1 - bend), 46_000, 31);
-    let second = ridge((b.0 - bend / 2, b.1), 19_000, 32);
-    let third = ridge(c, 7200, 33);
+    let first = ridge((a.0 + bend, a.1 - twist), 46_000, 31);
+    let second = ridge((b.0 - twist / 2, b.1 + bend / 2), 19_000, 32);
+    let third = ridge((c.0 + twist / 4, c.1), 7200, 33);
     let fourth = ridge(d, 2600, 34);
     let body = first * 0.62 + second * 0.38 * (0.35 + 0.65 * first);
-    mass * (body * 0.86 + (third * 0.1 + fourth * 0.04) * (0.25 + body * 1.5).min(1.0))
+    // Spurs and gullies down the flanks, and the small faces of broken rock: creases a hundred metres and a few
+    // tens of metres across, deepest where the mountain is high. Without them a mountain close to was a dune.
+    let spur = 1.0 - (noise(a.0, a.1, 950, 72) * 2.0 - 1.0).abs();
+    let face = 1.0 - (noise(b.0, b.1, 330, 73) * 2.0 - 1.0).abs();
+    let flank = (0.25 + body * 1.5).min(1.0);
+    mass * (body * 0.84 + (third * 0.1 + fourth * 0.04) * flank + (spur * 0.016 + face * 0.005) * flank * (0.3 + body))
 }
 
 /// How far a place is out to sea, in cells: the coast lies some 6 km west of the town and wanders into coves and

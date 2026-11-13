@@ -818,7 +818,7 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         // rock breaks through in bands and not along one line.
         let south = south.clamp(-60, 60);
         let line = 4300 + (noise(x, z, 5200, 41) * 2000.0) as i32 + south * 12;
-        if g > line && noise(x, z, 330, 50) * 900.0 < (g - line) as f32 && s < 1.3 + noise(x, z, 1300, 40) * 0.3 {
+        if g > line && noise(x, z, 330, 50) * 900.0 < (g - line) as f32 && s < 1.55 + noise(x, z, 1300, 40) * 0.3 {
             // Snow is sand in white: it lies even, where rock is rough.
             return kind(SAND, WHITE);
         }
