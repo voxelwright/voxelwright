@@ -3,7 +3,9 @@
 // panel of its own (`panel`); nobody else puts elements over the canvas. How it all looks is in index.html.
 //
 // Everything shown here that someone typed (a name, a wish, what was said) is put as text, never as markup.
+import type { Ask } from './ask.ts'
 import type { Input } from './input.ts'
+import { small } from './picture.ts'
 
 /** Where a place in the world (the finest cells) is on the screen, in CSS pixels, or null if it is behind the eye. */
 export type Project = (at: readonly [number, number, number]) => [number, number] | null
@@ -13,14 +15,26 @@ export interface Hud {
   status(text: string): void
   /** The tools along the bottom: a button each, numbered from 1. `picked` shows which is on. */
   tools(names: readonly string[], pick: (i: number) => void): { picked(i: number): void }
-  /** The ask bar: one line to type on. Enter opens it (if anything takes what is typed), Enter sends, Escape puts it away. */
+  /**
+   * The ask bar: always there, one line to type on. Enter or a touch opens it, Enter sends, Escape puts it away.
+   * What is typed is a wish (`onask`), with a picture or a link if one was given: pasted, dropped anywhere on the
+   * page, picked from a phone's library or taken with its camera, or an address among the words. Where there are
+   * others to speak to (`onsubmit`), Tab turns the bar to saying and back.
+   */
   readonly line: {
+    /** What the line shows while empty and saying. */
     placeholder: string
-    /** What is done with a line that was sent. With none, Enter does not open the bar. */
+    /** What is done with words that were said. */
     onsubmit: ((text: string) => void) | null
+    /** What is done with a wish: words, a picture, a link, or any of them together. */
+    onask: ((ask: Pick<Ask, 'wish' | 'picture' | 'link'>) => void) | null
+    /** Wishes offered to start from while the line is empty. */
+    starters: readonly string[]
     readonly open: boolean
     show(): void
     hide(): void
+    /** Gives the bar a picture (a file) or a link, as if it were dropped there. */
+    give(what: Blob | string): Promise<void>
   }
   /** A line added to what was said lately (the last five are shown). */
   heard(text: string): void
@@ -39,46 +53,134 @@ export interface Hud {
 export function hud(input: Input): Hud {
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, id: string) => { const e = document.createElement(tag); e.id = id; return e }
   const layer = el('div', 'over'), status = document.querySelector<HTMLElement>('#hud')!, bar = document.querySelector<HTMLElement>('#tools')!
-  const said = el('div', 'said'), line = el('input', 'line'), notices = el('div', 'notices'), card = el('div', 'card'), cues = el('div', 'cues')
+  const said = el('div', 'said'), notices = el('div', 'notices'), card = el('div', 'card'), cues = el('div', 'cues')
+  const ask = el('div', 'ask'), starters = el('div', 'starters'), given = el('div', 'given'), row = el('div', 'ask-row'), line = el('input', 'line')
+  const button = (id: string, label: string, text: string) => { const b = el('button', id); b.type = 'button'; b.textContent = text; b.setAttribute('aria-label', label); b.title = label; return b }
+  const which = button('ask-which', 'Make a thing, or say something: Tab changes it', 'Make'), library = button('ask-picture', 'Add a picture', '\u25a3'), camera = button('ask-camera', 'Take a picture', '\u25c9'), send = button('ask-send', 'Send', '\u2191')
+  // Two ways to a picture on a phone: one asks for any (its sheet offers the library), one for the camera itself.
+  const picked = document.createElement('input'), taken = document.createElement('input')
+  for (const f of [picked, taken]) { f.type = 'file'; f.accept = 'image/*'; f.hidden = true }
+  taken.setAttribute('capture', 'environment')
+  camera.hidden = !matchMedia('(pointer: coarse)').matches
   line.maxLength = 400
   line.autocomplete = 'off'
   line.enterKeyHint = 'send'
-  line.setAttribute('aria-label', 'Type here')
-  card.hidden = said.hidden = line.hidden = true
-  layer.append(cues, said, notices, card, line)
+  line.setAttribute('aria-label', 'What to make')
+  row.append(which, line, library, camera, send)
+  ask.append(starters, given, row, picked, taken)
+  card.hidden = said.hidden = starters.hidden = true
+  layer.append(cues, said, notices, card, ask)
   document.body.append(layer)
 
   // The ask bar. While it is open the page is in a text mode: keys are letters, not steps.
-  let leave: (() => void) | null = null
+  let leave: (() => void) | null = null, wantsToSay = false
+  /** Whether what is typed is said, not made: only where there is someone to say it to, and always where nothing can be made. */
+  const isSaying = () => (self.onask ? !!self.onsubmit && wantsToSay : true)
+  let picture: { picture: NonNullable<Ask['picture']>; shown: string } | null = null, link = ''
+  const ADDRESS = /https?:\/\/[^\s<>"']+/i
+  const draw = () => {
+    const saying = isSaying()
+    const both = !!self.onask && !!self.onsubmit
+    which.hidden = !both
+    which.textContent = saying ? 'Say' : 'Make'
+    ask.dataset.which = saying ? 'say' : 'make'
+    line.placeholder = saying ? self.placeholder : leave ? 'A thing, a picture, a link' : 'Make something' + (camera.hidden ? '  (Enter)' : '')
+    library.hidden = saying
+    camera.hidden = saying || !matchMedia('(pointer: coarse)').matches
+    ask.hidden = !self.onask && !self.onsubmit
+    ask.classList.toggle('open', leave !== null)
+    // What was given with the wish, each with a way to take it back.
+    given.replaceChildren()
+    if (!saying && picture) { const chip = document.createElement('span'), img = document.createElement('img'), x = button('', 'Take the picture away', '\u00d7'); img.src = picture.shown; img.alt = 'The picture given'; x.addEventListener('click', () => { drop(); draw(); line.focus() }); chip.append(img, x); given.append(chip) }
+    if (!saying && link) { const chip = document.createElement('span'), x = button('', 'Take the link away', '\u00d7'); chip.append(link.replace(/^https?:\/\//, '').slice(0, 40), x); x.addEventListener('click', () => { link = ''; draw(); line.focus() }); given.append(chip) }
+    given.hidden = !given.childElementCount
+    // Somewhere to start from, while there is nothing yet.
+    starters.hidden = !(leave && !saying && !line.value && !picture && !link && self.starters.length)
+    if (!starters.hidden && !starters.childElementCount) starters.replaceChildren(...self.starters.map((wish) => { const b = button('', `Start from: ${wish}`, wish); b.addEventListener('click', () => { line.value = wish; draw(); line.focus() }); return b }))
+  }
+  const drop = () => { if (picture) URL.revokeObjectURL(picture.shown); picture = null }
   const self = {
     placeholder: '',
     onsubmit: null as ((text: string) => void) | null,
+    onask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link'>) => void) | null,
+    starters: [] as readonly string[],
     get open() { return leave !== null },
     show() {
-      if (leave) return
-      leave = input.push({ name: 'typing', solid: true, text: true })
-      line.placeholder = self.placeholder
-      line.hidden = false
-      line.focus()
+      if (!self.onask && !self.onsubmit) return
+      if (!leave) leave = input.push({ name: 'typing', solid: true, text: true })
+      draw()
+      if (document.activeElement !== line) line.focus()
     },
     hide() {
       if (!leave) return
       leave(); leave = null
       line.value = ''
-      line.hidden = true
+      link = ''
+      drop()
+      draw()
       line.blur()
     },
+    async give(what: Blob | string) {
+      if (!self.onask) return
+      wantsToSay = false
+      if (typeof what === 'string') { const found = ADDRESS.exec(what)?.[0]; if (!found) return; link = found }
+      else { try { const made = await small(what); drop(); picture = made } catch (e) { notice(e instanceof Error ? e.message : 'that is not a picture') ; return } }
+      self.show()
+    },
+  }
+  const submit = () => {
+    const text = line.value.trim()
+    if (isSaying()) { self.hide(); if (text) self.onsubmit?.(text); return }
+    // An address among the words is a link, and the rest is the wish.
+    const found = link || ADDRESS.exec(text)?.[0] || '', wish = (found ? text.replace(found, ' ') : text).replace(/\s+/g, ' ').trim()
+    if (!wish && !picture && !found) { self.hide(); return }
+    const asked = { ...(wish ? { wish } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}) }
+    self.hide()
+    self.onask?.(asked)
   }
   line.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) { const text = line.value.trim(); self.hide(); if (text) self.onsubmit?.(text) }
+    if (e.key === 'Enter' && !e.isComposing) submit()
     else if (e.key === 'Escape') self.hide()
+    else if (e.key === 'Tab' && self.onask && self.onsubmit) { e.preventDefault(); wantsToSay = !isSaying(); draw() }
   })
+  line.addEventListener('input', draw)
+  line.addEventListener('focus', () => self.show())
+  send.addEventListener('click', submit)
+  which.addEventListener('click', () => { wantsToSay = !isSaying(); self.show() })
+  library.addEventListener('click', () => picked.click())
+  camera.addEventListener('click', () => taken.click())
+  for (const f of [picked, taken]) f.addEventListener('change', () => { const file = f.files?.[0]; f.value = ''; if (file) void self.give(file) })
+  // A picture or an address pasted or dropped anywhere on the page is given to the bar.
+  const taking = (data: DataTransfer | null): Blob | string | null => {
+    const file = [...(data?.files ?? [])].find((f) => f.type.startsWith('image/'))
+    if (file) return file
+    const text = data?.getData('text/uri-list') || data?.getData('text/plain') || ''
+    return ADDRESS.test(text) ? text : null
+  }
+  document.addEventListener('paste', (e) => {
+    const what = taking(e.clipboardData)
+    // Words pasted into the line are words, unless they are nothing but an address.
+    if (what === null || !self.onask || (typeof what === 'string' && e.target === line && what.trim() !== ADDRESS.exec(what)?.[0])) return
+    e.preventDefault()
+    void self.give(what)
+  })
+  document.addEventListener('dragover', (e) => { if (self.onask) e.preventDefault() })
+  document.addEventListener('drop', (e) => { if (!self.onask) return; e.preventDefault(); const what = taking(e.dataTransfer); if (what !== null) void self.give(what) })
+  // A phone's keyboard covers the bottom of the page: the bar is kept over it.
+  visualViewport?.addEventListener('resize', () => { ask.style.setProperty('--lift', `${Math.max(0, innerHeight - visualViewport!.height - visualViewport!.offsetTop)}px`) })
   input.always('Enter', (e) => {
-    if (e.metaKey || e.ctrlKey || !self.onsubmit) return
+    if (e.metaKey || e.ctrlKey || (!self.onask && !self.onsubmit)) return
     e.preventDefault()
     self.show()
     return true
   })
+  const notice = (text: string, ms = 4000) => {
+    const n = document.createElement('p')
+    n.textContent = text
+    notices.append(n)
+    setTimeout(() => n.remove(), ms)
+  }
+  queueMicrotask(draw)
 
   const lines: string[] = []
   const shown = new Set<{ text: string; at: () => readonly [number, number, number] | null; el: HTMLElement }>()
@@ -102,12 +204,7 @@ export function hud(input: Input): Hud {
       said.textContent = lines.join('\n')
       said.hidden = false
     },
-    notice(text, ms = 4000) {
-      const n = document.createElement('p')
-      n.textContent = text
-      notices.append(n)
-      setTimeout(() => n.remove(), ms)
-    },
+    notice,
     card(c) {
       card.hidden = !c
       if (!c) return

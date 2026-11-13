@@ -29,6 +29,8 @@ import { input } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker } from './ask.ts'
+import { making } from './making.ts'
+import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 
 const query = new URLSearchParams(location.search)
@@ -249,6 +251,7 @@ async function main() {
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
     debris.step(dt, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+    gathering.step(dt)
     smoke.step(dt)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
@@ -443,6 +446,17 @@ async function main() {
   const wishes = asker(() => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }, () => others?.name ?? 'someone')
   /** The things made in this world, as the world tells of them (things.ts). Without a shared world there are none. */
   const made = things()
+  /** What becomes of a wish: asked, and shown at its place as it goes (making.ts). */
+  const wish = making(over, wishes)
+  /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
+  const gathering = gather(debris, smoke, wish, made)
+  over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']
+  over.line.onask = (ask) => {
+    // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
+    if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
+    if (!wishes.known) return over.notice('To make things, run node helper.mjs on your machine and open the address it prints', 9000)
+    void wish(ask)
+  }
   if (far) far.onecho = (echo, live) => {
     if (echo.blast || echo.edit) asked.push(echo.by === far.me)
     made.heard(echo, live)
@@ -604,7 +618,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

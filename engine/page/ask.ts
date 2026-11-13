@@ -23,10 +23,13 @@ export interface Ask {
 
 /** How an ask goes, as the helper says it. `place` comes before the model is asked: where the thing will stand. */
 export type Stage =
+  | { stage: 'waiting'; ahead: number }
+  | { stage: 'reading' }
   | { stage: 'place'; at: [number, number, number]; facing: string }
   | { stage: 'asking'; try: number }
+  | { stage: 'shaped'; name: string; size: [number, number, number]; facing: string }
   | { stage: 'refused'; why: string }
-  | { stage: 'sending'; name: string; at: [number, number, number]; size: [number, number, number] }
+  | { stage: 'sending'; id: string; name: string; at: [number, number, number]; size: [number, number, number]; facing: string }
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
 export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused'; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
@@ -36,8 +39,19 @@ export interface Asker {
   readonly known: boolean
   /** Asks the helper whether it is there and takes this page's secret. */
   hello(): Promise<boolean>
-  /** Sends one ask. `each` hears every stage, the last among them. Resolves to how it ended; never throws. */
+  /**
+   * Sends one ask. `each` hears every stage, the last among them. Resolves to how it ended; never throws.
+   * The helper makes one thing at a time: an ask made while another is being made waits its turn here
+   * (`each` hears `{stage: 'waiting', ahead}` at once), so the bar and the wand need not know of each other.
+   */
   ask(ask: Ask, each?: (stage: Stage) => void): Promise<Done>
+  /** How many asks are being made or waiting. */
+  readonly busy: number
+  /**
+   * What an ask with no target of its own is aimed at, if anything says (the wand's: it sets this while it aims).
+   * Null, or a function that returns undefined: what is ahead of the eye.
+   */
+  aim: (() => Target | undefined) | null
 }
 
 const KEPT = 'village.helper'
@@ -55,17 +69,32 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   }
   const headers = () => ({ 'Content-Type': 'application/json', 'X-Village-Secret': helper!.secret })
   const failed = (why: string): Done => ({ stage: 'done', state: 'refused', why })
-  return {
+  let last: Promise<unknown> = Promise.resolve(), busy = 0
+  const self: Asker = {
+    aim: null,
+    get busy() { return busy },
     get known() { return helper !== null },
     async hello() {
       if (!helper) return false
       try { return (await fetch(`${helper.url}/hello`, { headers: headers() })).ok } catch { return false }
     },
     async ask(ask, each = () => {}) {
-      const end = (done: Done) => { each(done); return done }
+      const end = (done: Done) => { busy--; each(done); return done }
+      // Where the eye is and what is aimed at are as they were when it was asked, not when its turn comes.
+      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by() })
+      if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
+      const before = last
+      let free!: () => void
+      last = new Promise<void>((r) => { free = r })
+      await before
+      try { return await send(body, each, end) } finally { free() }
+    },
+  }
+  const send = async (body: string, each: (stage: Stage) => void, end: (done: Done) => Done): Promise<Done> => {
+    {
       if (!helper) return end(failed('no helper is known to this page: run node helper.mjs on your machine and open the address it prints'))
       let res: Response
-      try { res = await fetch(`${helper.url}/ask`, { method: 'POST', headers: headers(), body: JSON.stringify({ ...ask, from: eye(), by: by() }) }) } catch { return end(failed('the helper is not answering: is node helper.mjs running on your machine?')) }
+      try { res = await fetch(`${helper.url}/ask`, { method: 'POST', headers: headers(), body }) } catch { return end(failed('the helper is not answering: is node helper.mjs running on your machine?')) }
       if (!res.ok || !res.body) { let why = `the helper said ${res.status}`; try { why = (await res.json()).why ?? why } catch { /* no reason given */ } return end(failed(why)) }
       // Lines of JSON as it goes; the last says how it ended.
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -84,6 +113,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
         }
       } catch { /* cut off: said below */ }
       return end(done ?? failed('the helper stopped before it was made'))
-    },
+    }
   }
+  return self
 }

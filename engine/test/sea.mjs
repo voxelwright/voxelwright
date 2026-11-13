@@ -63,7 +63,7 @@ try {
   check(down.every((r) => r.hit && r.hit.material === SAND), `and looks down from there meet the floor: ${down.map(said).join('; ')}`)
 
   // The look from under it: the page knows it is under, and the picture is the water's colour, not the day's.
-  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools { display: none }' })
+  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over { display: none }' })
   const from = async (y, pitch) => {
     await page.evaluate(([x, z, y, pitch]) => Object.assign(globalThis.engine.pose, { x, y, z, yaw: 0.4, pitch }), [...middle, y, pitch])
     await page.waitForTimeout(400)

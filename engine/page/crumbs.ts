@@ -51,6 +51,11 @@ export interface Crumbs {
   /** Where the light comes from and how much of the day it is. */
   light(sun: readonly number[], day: number): void
   readonly live: number
+  /**
+   * Cubes that something else moves (the gathering at a place where a thing is being made, gather.ts): each of these
+   * is asked every frame to `put` its cubes where they are now, and they are drawn with the crumbs, lit the same.
+   */
+  readonly carried: Set<(put: (x: number, y: number, z: number, edge: number, r: number, g: number, b: number) => void) => void>
 }
 
 export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promise<Crumbs> {
@@ -70,7 +75,9 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
   const packed = new Float32Array(MOST * EACH)
   let next = 0, live = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
+  const carried: Crumbs['carried'] = new Set()
   return {
+    carried,
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
     burst(at, radius, count, colour, size, lasts = 2.5, fast = 1) {
@@ -105,9 +112,16 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
       }
     },
     draw(encoder, to, view) {
-      if (!live) return
+      if (!live && !carried.size) return
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
       let n = 0
+      for (const each of carried) each((x, y, z, size, r, g, b) => {
+        if (n >= MOST) return
+        const o = n++ * EACH
+        packed[o] = x - anchor[0]; packed[o + 1] = y - anchor[1]; packed[o + 2] = z - anchor[2]; packed[o + 3] = size
+        packed[o + 4] = r; packed[o + 5] = g; packed[o + 6] = b; packed[o + 7] = 1
+      })
+      if (!n && !live) return
       for (let i = 0; i < MOST && n < MOST; i++) {
         if (life[i] <= 0) continue
         const o = n++ * EACH

@@ -17,15 +17,33 @@
   /* The layer over the picture (hud.ts). It takes no touch or click itself: only what is in it that is for pressing. */
   #over { position: fixed; inset: 0; pointer-events: none; }
   #over [hidden] { display: none; }
-  #said { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 64px; max-width: min(420px, 70vw); padding: 6px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); white-space: pre-wrap; overflow-wrap: anywhere; }
-  #line { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); width: min(520px, 80vw); box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 0; outline: 0; background: rgba(244, 244, 240, 0.96); color: #14181d; font: 500 15px -apple-system, system-ui, sans-serif; pointer-events: auto; user-select: text; -webkit-user-select: text; }
+  #said { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 132px; max-width: min(420px, 70vw); padding: 6px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* The ask bar: always there, quiet until it is opened. */
+  #ask { position: absolute; left: 50%; bottom: calc(max(64px, env(safe-area-inset-bottom) + 58px) + var(--lift, 0px)); transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  #ask-row { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 14px; background: rgba(12, 16, 22, 0.5); pointer-events: auto; transition: background 0.15s, box-shadow 0.15s; }
+  #ask.open #ask-row { background: rgba(246, 245, 240, 0.97); box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35); }
+  #line { flex: 1; min-width: 0; padding: 8px 8px; border: 0; outline: 0; background: transparent; color: #e8ecf1; font: 500 16px -apple-system, system-ui, sans-serif; user-select: text; -webkit-user-select: text; }
+  #line::placeholder { color: rgba(232, 236, 241, 0.7); }
+  #ask.open #line { color: #14181d; }
+  #ask.open #line::placeholder { color: rgba(20, 24, 29, 0.45); }
+  #ask-row button { flex: none; min-width: 36px; height: 36px; padding: 0 9px; border: 0; border-radius: 11px; background: transparent; color: #e8ecf1; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  #ask.open #ask-row button { color: #2a3038; }
+  #ask-row #ask-which { font-size: 12px; background: rgba(232, 236, 241, 0.14); }
+  #ask.open #ask-row #ask-which { background: rgba(20, 24, 29, 0.08); }
+  #ask.open #ask-row #ask-send { background: #14181d; color: #f6f5f0; }
+  #ask:not(.open) #ask-send { display: none; }
+  #starters, #given { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
+  #starters button { border: 0; border-radius: 999px; padding: 6px 12px; background: rgba(12, 16, 22, 0.66); color: #e8ecf1; font: 500 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  #given span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.72); max-width: 100%; overflow: hidden; white-space: nowrap; }
+  #given img { height: 44px; max-width: 88px; margin: 0 0 0 -6px; border-radius: 7px; object-fit: cover; display: block; }
+  #given button { width: 24px; height: 24px; border: 0; border-radius: 50%; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 14px/1 -apple-system, system-ui, sans-serif; }
   #notices { position: absolute; left: 50%; top: max(44px, calc(env(safe-area-inset-top) + 34px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(520px, 86vw); }
   #notices p { margin: 0; padding: 6px 12px; border-radius: 8px; background: rgba(12, 16, 22, 0.72); overflow-wrap: anywhere; }
   #card { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card kbd, #cues kbd { display: inline-block; min-width: 14px; margin-right: 8px; padding: 0 5px; border-radius: 4px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 11px/18px ui-monospace, monospace; text-align: center; }
-  #cues p { position: absolute; left: 0; top: 0; margin: 0; padding: 3px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.7); white-space: nowrap; will-change: transform; }
+  #cues p { position: absolute; left: 0; top: 0; margin: 0; padding: 3px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.7); width: max-content; max-width: min(320px, 70vw); will-change: transform; }
   [data-panel="wand"] { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 120px); pointer-events: auto; }
   body.wand [data-panel="wand"] { display: flex; }
   body.wand #tools { display: none; }

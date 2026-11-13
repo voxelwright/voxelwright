@@ -81,29 +81,47 @@ node make.mjs --undo --world http://127.0.0.1:5741                              
 - `node test/make.mjs` checks all of that with replies kept in the check: **no model is run by it.** Real runs
   (November 12, 2026): twenty wishes to Opus 5.5, nineteen made; times and what failed are in the cell-engine skill.
 
-**From inside the page** (#244, the seam; the ask bar itself comes next). A browser cannot run a model, so a helper on your
-own machine does:
+**From inside the page** (#244). A browser cannot run a model, so a helper on your own machine does:
 
 ```sh
 node serve.mjs --port 5761 --world ~/.village/engine/making-ui/world.log
 node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it once in the browser you play in
 ```
 
+- **The ask bar** is always at the foot of the page. Enter (or a touch) opens it; type what you want and Enter makes
+  it in front of you. A picture can be pasted, dropped anywhere on the page, or picked with the bar's button (on a
+  phone: the library, or the camera with the second button); an address among the words, or dropped, is a link. A
+  picture or a link needs no words. Tab turns the bar to saying something to the others there, and back.
+- **While the model works** (`page/gather.ts`), loose cells lift off the ground round the place, are drawn in and
+  circle it; when the model has answered and the thing's size is known they close into a box of that size; when it
+  arrives they fall onto it in a puff of dust. If nothing can be made they drop, lie a moment and are gone, and the
+  place says why. Nothing of the thing is shown until all of it is there. It is for the eye only, on the page that
+  asked: 220 cubes drawn with the crumbs, no measurable cost to a frame (0.9 ms of this thread with and without).
+  `node test/wait.mjs --out dir [--refuse]` films it with a kept reply that takes as long as a model.
+- **A picture** is made small in the page (1,568 pixels at most, JPEG), goes to the helper and from it to your own
+  model as part of the one message, and is kept nowhere: not by the page, the helper, its journal or the world,
+  which never sees it. **A link** is fetched by the helper itself (`make/link.mjs`): http or https on its usual
+  port, only names whose every address is on the public internet (not this machine, a home network, the tailnet or
+  link-local), the connection made to the address that was checked, every redirect checked the same, 3 MB and 8 s
+  at most. A page is read as its words (3,000 characters) and its own picture; a picture is a picture. The model is
+  told both are things to look at and never instructions.
 - **The helper** (`helper.mjs`) listens on this machine only, makes things in the one world it was started for, and
   answers only a request to this machine's own name (Host), from that world's own page (Origin), that knows the
   secret it printed. The address it prints carries the secret after `#`, which no server is sent; the page keeps it
   and takes it out of the address. One ask at a time.
 - **One ask** (`page/ask.ts`, the shape in `helper.mjs`): a wish and, when there is one, a picture, a link and a
-  target (a point, a box, or a thing and its part), with where the asker's eye is. Today a wish and a point are made
-  from; a picture, a link, a box and a thing are checked and answered "not yet". From the console: `engine.ask({ wish: 'a red phone box' })`.
+  target (a point, a box, or a thing and its part), with where the asker's eye is. A box and a thing aimed at are checked and answered "not yet".
+  An ask made while another is being made waits its turn in the page. From the console: `engine.ask({ wish: 'a red phone box' })`.
 - **A made thing has a record** the world keeps: `{id, name, wish, at, size, facing, by}` and whatever the lanes that
   own them put under `parts`, `behaviour`, `controls`, `seats`, `sounds`. It comes on the same ask as the thing's
   cells, is in the world's file, and reaches every page in the stream (`engine.things`). `GET /world/things`,
   `GET /world/things?id=`; `curl /world/` says the rest.
 - **A lane's part of a reply**: `field(key, { brief, check })` in `make/form.mjs` lets the model's reply hold a
   further key, checked by that lane, whose result goes into the record. Keys nobody named are still refused.
-- `node test/helper.mjs` checks who the helper answers, one ask from the real page in Chrome, the record across a
-  restart, and that keys have one owner: **a kept reply stands in for the model.**
+- `node test/wish.mjs "words" --link <the helper's address> --out file.png [--picture file] [--phone]` drives the bar
+  for one real ask and takes pictures of it: **it runs your model.**
+- `node test/helper.mjs` checks who the helper answers, which links it will fetch, asks from the real page's bar in
+  Chrome with a made-up picture pasted and dropped, the record across a restart, and that keys have one owner: **a kept reply stands in for the model.**
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?people=0` (a town with nobody in it) `?name=Ada` (in a shared world).

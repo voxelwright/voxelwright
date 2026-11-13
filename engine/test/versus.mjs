@@ -35,7 +35,7 @@ try {
     if (!row.stand) continue
     // A fresh town for each row, at the size of the owner's screen, the picture's size left to the page.
     const page = await city('', { size: [1280, 720], dpr: 2 })
-    await page.addStyleTag({ content: '#hud, #aim, #boom, #tools { display: none }' })
+    await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over { display: none }' })
     await place(page, row)
     // A row whose shot does not face its thing, or whose act did not do it, is a failure, and has no picture.
     let wrong = await aimed(page, row), early

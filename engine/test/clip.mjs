@@ -14,7 +14,7 @@ await mkdir(out, { recursive: true })
 const { city, failures, finish } = await start()
 try {
   const page = await city('', { size: [1280, 720], dpr: 2 })
-  await page.addStyleTag({ content: '#aim, #boom, #tools { display: none }' })
+  await page.addStyleTag({ content: '#aim, #boom, #tools, #over { display: none }' })
   await place(page, row)
   const wrong = await aimed(page, row)
   if (wrong) throw new Error(wrong)

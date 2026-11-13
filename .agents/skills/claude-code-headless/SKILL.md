@@ -41,6 +41,21 @@ and an environment of `HOME PATH USER LOGNAME TMPDIR LANG SHELL` plus
   go through it. The maker does not pass `NODE_OPTIONS` at all.
 - There is no timeout flag. The caller stops a slow run itself (SIGTERM; the docs give exit 143 and no result).
 
+## A picture with the prompt (#244, November 13, 2026; 2.1.322)
+
+Add `--input-format stream-json` and write one line of JSON to stdin in place of the plain prompt:
+
+```
+{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}},{"type":"text","text":"the prompt"}]}}
+```
+
+Probed with a made-up picture and Haiku, all other flags as above: `init.tools` is still `[]`, the reply named what
+only the picture showed (a yellow triangle, the word on it, the purple ground), the run ended by itself when stdin
+closed, and nothing holding the picture appeared under `~/.claude` (`find -newer`: one plugin-store file, without
+it). With no tool the model cannot open a file, so this is the only way a picture reaches it. Each retry is a new
+process and sends the picture again. Real runs through the page: a drawn wheelbarrow made on the second try in 75 s
+(Opus 5.5); a link to a public page (its words and its picture) made a pillar box in 15 s.
+
 ## The guard
 
 The reply is used only if the stream's `init` event lists no tools and no MCP servers, the process exits 0, and

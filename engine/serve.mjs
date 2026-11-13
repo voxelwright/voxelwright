@@ -111,7 +111,7 @@ A thing someone asked a model of their own for is cells like any others, and the
 GET  /world/things        every record, without cells
 GET  /world/things?id=    one record with cells: rows of five whole numbers, x0, x1 (not filled), y, z, kind
 POST /world/ask           {"by": name, "edit": [1, rows, ...], "release": [x, y, z], "thing": {id, name, wish, at, size, facing}}   a thing and its cells, together (409 if the id is taken)
-                          {"by": name, "thing": {"id": id, "sounds": ...}}   sets parts, behaviour, controls, seats or sounds of a thing that is there (each at most ${16384} bytes of JSON)
+                          {"by": name, "thing": {"id": id, "sounds": ...}}   sets parts, behaviour, controls, seats or sounds of a thing that is there (each at most ${16384} bytes of JSON), or at and facing when it has come to rest somewhere else. Every change is kept and told to every page that joins: it is not for where a moving thing is from moment to moment
                           {"by": name, "gone": id}   forgets a thing's record; its cells are left as they are (empty them with an edit)
 
 GET  /world/stream        everything that happens, as it happens (binary frames: see engine/serve.mjs)
@@ -180,7 +180,9 @@ function record(t, by, whole_) {
     if (OPEN_FIELDS.includes(key)) {
       if (JSON.stringify(t[key]).length > FIELD_MOST) return `a thing's ${key} is at most ${FIELD_MOST} bytes of JSON`
       out[key] = t[key]
-    } else if (key !== 'id' && (!whole_ || !['name', 'wish', 'at', 'size', 'facing', 'by'].includes(key))) return `"${key.slice(0, 20)}" is not ${whole_ ? 'part of a thing' : `something to change in a thing: ${OPEN_FIELDS.join(', ')} are`}`
+    } else if (!whole_ && key === 'at') { if (!place(t.at)) return 'a thing is at a place: [x, y, z]'; out.at = t.at }
+    else if (!whole_ && key === 'facing') { if (!FACINGS.includes(t.facing)) return `a thing faces ${FACINGS.join(', ')}`; out.facing = t.facing }
+    else if (key !== 'id' && (!whole_ || !['name', 'wish', 'at', 'size', 'facing', 'by'].includes(key))) return `"${key.slice(0, 20)}" is not ${whole_ ? 'part of a thing' : `something to change in a thing: at, facing, ${OPEN_FIELDS.join(', ')} are`}`
   }
   return out
 }
