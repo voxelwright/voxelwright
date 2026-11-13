@@ -361,7 +361,6 @@ impl Bodies {
 mod tests {
     use super::*;
     use crate::city::{BLOCK_X, BLOCK_Z, YARD, YARD_TOWER};
-    use std::time::Instant;
 
     /// A charge against the side of the yard's tank: the water comes out, runs over the yard and stops; none of it is
     /// made or lost unaccounted for; and a step of it is cheap.

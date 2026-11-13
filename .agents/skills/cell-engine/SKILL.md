@@ -838,3 +838,27 @@ white water running down (noise over the height, which the plan alone cannot giv
 still), with what is behind seen between them; the pool lets the ground show; mist rises where a fall lands
 (`water.landings`, `puffs.spray`). Mist at four a second from forty places cost a quarter of the picture's size;
 at one a second from two dozen it costs nothing the board's stamp shows.
+
+## The world from space (`page/space.ts`, November 12/13)
+
+- **A pass of its own.** The boxes of cells reach 13 km. Over 25 km up (`SPACE` in `main.ts`) the marcher is not
+  run at all and one full-screen pass draws the planet: a ball of the Earth's size, land and sea by noise of the
+  core's own kind (the same hash, asked in km from where the page starts), cloud, air that is a bright band at the
+  edge, the sun's patch on the sea, the dark and stars. Nothing in it costs a street anything. It draws at the
+  full 2560 x 1440 at 60 frames a second on the M1 Pro.
+- **How the flat world lies on the ball.** From under the eye: a place at an angle from straight down, on a
+  bearing, is that far along the ground on that bearing. Straight down is exact, so coming down ends where it
+  began. Far to the side it is not, and the lands shift a little as the eye moves a long way sideways.
+- **Near the start it is drawn as land.rs has it**: the town grey, mountains north, the dry plain east. West of the
+  town, from 60 km out, the planet has open sea.
+- **Not yet true**: far from the town the cells do not follow the planet. `ground()` is still mountains to the
+  north and plain to the east for ever, so a landing 500 km off does not find what space showed. The planet's rule
+  has to become land.rs's rule far out (same noise, same seeds), with the town's sum untouched.
+- **A fault found on the way**: the picture's size follows the GPU's clock, and the clock was only read round the
+  marcher's pass. In space it kept the last street's time, called every frame late and shrank the picture to 0.3.
+  The planet's pass is timed the same way now.
+- Value noise shows its squares when it is cut at a level (cloud as a maze). `wisps()` turns each fold of it from
+  the last and offsets it: no squares.
+- The eye goes faster the higher it is (`walk`): at 12 m/s space was hours away.
+- A core test's time bound (`masonry_that_stops_askew_lies_as_a_heap`, 40 ms) failed at 44.8 ms beside the page
+  checks. It is 250 now: a bound for a rule gone wrong, not for a busy machine.

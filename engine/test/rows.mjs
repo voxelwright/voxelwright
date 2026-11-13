@@ -245,7 +245,10 @@ export const ROWS = [
   { key: 'dusk', what: 'A real city from the air at dusk, its windows lit', theirs: ['earth', 34.2], state: 'level',
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
-  { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'none' },
+  { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'behind',
+    // From 250 km over the land west of the town, looking north along the coast the town stands near. Over 25 km
+    // up the planet is drawn by a pass of its own (page/space.ts). It is an invented planet: the row is of the Earth.
+    stand: [-40_000, 250_000, 0, 350, -28], hour: 13 },
   { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'level',
     // In the pine woods before the mountains, 5 km north of the town: a charge among the trees.
     stand: { from: [-145, -4970], up: 2.2, to: [-145, -5070], high: 14 }, near: [16, LEAVES, WOOD], inAir: true,

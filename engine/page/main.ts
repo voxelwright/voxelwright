@@ -12,6 +12,7 @@ import { fill } from '../probe/fill.ts'
 import { COUNT, FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
+import { space } from './space.ts'
 import { puffs } from './puffs.ts'
 import { ball, rows, stream, type Edit } from './edits.ts'
 import { pieces, type Piece } from './pieces.ts'
@@ -66,6 +67,9 @@ async function main() {
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
   const water = await flowing(device, gpu.format)
+  const planet = await space(device, gpu.format)
+  /** From this high (metres) the eye sees more than the boxes of cells hold, and the planet is drawn in their place. */
+  const SPACE = 25_000
   const falling = await pieces(device, gpu.format, march)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
@@ -134,7 +138,8 @@ async function main() {
     let ahead = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), side = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
     const rise = (keys.has('Space') ? 1 : 0) - (keys.has('KeyC') || keys.has('ControlLeft') ? 1 : 0)
     if (touch.move) { ahead -= Math.max(-1, Math.min(1, touch.move.dy)) * 2; side += Math.max(-1, Math.min(1, touch.move.dx)) * 2 }
-    const step = speed * fast * dt
+    // The higher the eye, the faster it goes: at 12 m/s the way up to space would take hours.
+    const step = speed * fast * dt * Math.max(1, pose.y / 400)
     pose.x += (v.forward[0] * ahead + v.right[0] * side) * step
     pose.y += (v.forward[1] * ahead + rise) * step
     pose.z += (v.forward[2] * ahead + v.right[2] * side) * step
@@ -254,11 +259,16 @@ async function main() {
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
     lap('tend')
-    march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
-    if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
-    if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
-    if (!off.has('crumbs')) debris.draw(encoder, to, v)
-    if (!off.has('puffs')) smoke.draw(encoder, to, v)
+    if (pose.y > SPACE) {
+      // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
+      planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+    } else {
+      march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+      if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
+      if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
+      if (!off.has('crumbs')) debris.draw(encoder, to, v)
+      if (!off.has('puffs')) smoke.draw(encoder, to, v)
+    }
     blit(encoder, to, context.getCurrentTexture().createView(), march.under ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])

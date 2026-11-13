@@ -1522,7 +1522,9 @@ mod tests {
         assert!(high < 20, "a wall three metres high lying as rubble is a heap {high} cells high");
         let steep = top.iter().filter(|&(&[x, z], &y)| [[1, 0], [-1, 0], [0, 1], [0, -1]].iter().any(|d| y - top.get(&[x + d[0], z + d[1]]).copied().unwrap_or_else(|| city::ground(x + d[0], z + d[1])) > 2)).count();
         assert_eq!(steep, 0, "{steep} of {} columns stand more than two cells over the one beside them", top.len());
-        assert!(ms < 40.0, "putting it down took {ms:.1} ms");
+        // About 10 ms by itself. Beside the page checks, which share the machine, it has taken 50: the bound is for a
+        // rule gone wrong (every cell asking the world hundreds of times), not for a busy machine.
+        assert!(ms < 250.0, "putting it down took {ms:.1} ms");
     }
 
     /// A heap is loose: a stub of wall that touches its side, with nothing under it, is not held up by it.
