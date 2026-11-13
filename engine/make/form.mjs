@@ -71,6 +71,8 @@ export function field(key, { brief, check }) {
   if (['name', 'size', 'parts'].includes(key) || !/^[a-z]{2,20}$/.test(key)) throw new Error(`"${key}" cannot be a key of a reply`)
   FIELDS.set(key, { brief, check })
 }
+/** The keys lanes have named. */
+export const fieldKeys = () => [...FIELDS.keys()]
 /** What the model is told of the keys lanes have named, to go after the brief; nothing if there are none. */
 export const fieldsBrief = () => [...FIELDS].map(([key, f]) => `\n\n"${key}" (a further key of the reply)\n${f.brief}`).join('')
 
@@ -86,7 +88,7 @@ const AXES = { x: 0, y: 1, z: 2 }
  * the form's, cells that touch nothing), and only a reply nothing can be made of is refused. Lenient or not, a reply
  * is data: nothing in it is run, and no kind is taken from it.
  */
-export function read(reply, { lenient = false } = {}) {
+export function read(reply, { lenient = false, most = SIZE_MOST } = {}) {
   let text = String(reply).trim()
   /** What was left out of a reply read leniently, in words the model can be told if it is asked again. */
   const left = []
@@ -102,7 +104,7 @@ export function read(reply, { lenient = false } = {}) {
   for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key) && !FIELDS.has(key)) if (lenient) left.push(`"${key.slice(0, 20)}" is not part of the form`); else no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', ...FIELDS.keys()].join(', ')} are`)
   if (typeof thing.name !== 'string' || !thing.name || thing.name.length > 60) { if (lenient) thing.name = typeof thing.name === 'string' && thing.name ? thing.name.slice(0, 60) : 'a thing'; else no('name is a few words') }
   const size = thing.size
-  if (!Array.isArray(size) || size.length !== 3 || !size.every((v, a) => whole(v, 1, SIZE_MOST[a]))) no(`size is [wide, high, deep] in cells, at most ${SIZE_MOST.join(' by ')}`)
+  if (!Array.isArray(size) || size.length !== 3 || !size.every((v, a) => whole(v, 1, most[a]))) no(`size is [wide, high, deep] in cells, at most ${most.join(' by ')}`)
   if (lenient && Array.isArray(thing.parts) && thing.parts.length > PARTS_MOST) { left.push(`parts after the first ${PARTS_MOST}`); thing.parts = thing.parts.slice(0, PARTS_MOST) }
   if (!Array.isArray(thing.parts) || !thing.parts.length || thing.parts.length > PARTS_MOST) no(`parts is a list of 1 to ${PARTS_MOST}`)
   const [w, h, d] = size
@@ -195,6 +197,18 @@ export function read(reply, { lenient = false } = {}) {
   return out
 }
 export const refused = (e) => e instanceof Refused
+
+/** A thing `k` times as big: every cell of it a block of k by k by k cells. What it is made of, and which part made it, stay. */
+export function scaled(thing, k) {
+  if (k === 1) return thing
+  const [w, h, d] = thing.size, W = w * k, H = h * k, D = d * k, cells = new Uint16Array(W * H * D), by = new Uint16Array(W * H * D)
+  for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) for (let x = 0; x < w; x++) {
+    const i = (y * d + z) * w + x
+    if (!thing.cells[i]) continue
+    for (let dy = 0; dy < k; dy++) for (let dz = 0; dz < k; dz++) { const at = ((y * k + dy) * D + z * k + dz) * W + x * k; cells.fill(thing.cells[i], at, at + k); by.fill(thing.by[i], at, at + k) }
+  }
+  return { ...thing, size: [W, H, D], cells, by, filled: thing.filled * k ** 3 }
+}
 
 /** Which way a thing's front may face, and where its own x and z go in the world for each (x east, z south). */
 export const FACINGS = { south: [1, 0, 0, -1], north: [-1, 0, 0, 1], east: [0, -1, -1, 0], west: [0, 1, 1, 0] }

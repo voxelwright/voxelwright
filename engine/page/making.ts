@@ -28,7 +28,7 @@ export function making(hud: Hud, asker: Asker): Making {
       else if (stage.stage === 'note') hud.notice(stage.why[0].toUpperCase() + stage.why.slice(1), 5000)
       else if (stage.stage === 'place') { at = [stage.at[0], stage.at[1] + 12, stage.at[2]]; cue.text = `Making ${name}` }
       else if (stage.stage === 'asking' && stage.try > 1) cue.text = `Making ${what}: another go`
-      else if (stage.stage === 'shaped') cue.text = name = stage.name
+      else if (stage.stage === 'shaped' || stage.stage === 'known') cue.text = name = stage.name
       else if (stage.stage === 'sending') { at = [stage.at[0], stage.at[1] + stage.size[1] + 4, stage.at[2]]; cue.text = stage.name }
     }
     let done = await asker.ask(ask, each)

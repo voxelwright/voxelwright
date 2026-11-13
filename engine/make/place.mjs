@@ -6,6 +6,8 @@ import { FACINGS, ROWS_MOST, footprint, rows } from './form.mjs'
 
 const json = async (res) => { if (!res.ok) throw new Error(`the world said ${res.status}: ${(await res.text()).slice(0, 120)}`); return res.json() }
 export const at = (world, [x, y, z]) => fetch(`${world}/world/at?x=${x}&y=${y}&z=${z}`).then(json)
+/** The first thing down every column of a rectangle, looked for from height `y`: { high, material }, a row of x for each z. */
+export const tops = (world, [x0, z0, x1, z1], y) => fetch(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`).then(json)
 export const look = (world, [x, y, z], [dx, dy, dz]) => fetch(`${world}/world/look?x=${x}&y=${y}&z=${z}&dx=${dx}&dy=${dy}&dz=${dz}`).then(json)
 
 /** Many questions, a few at a time. */
@@ -32,6 +34,8 @@ export async function site(world, thing, spot, facing, back = [0, 0], { clear = 
     if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
     return { origin: [spot[0], spot[1] + 1, spot[2]], rows: made, moved: 0 }
   }
+  // A big thing takes more of a slope under it: its feet are carried down to the ground wherever they are.
+  const steep = Math.max(STEEP, Math.ceil(Math.max(thing.size[0], thing.size[2]) / 6))
   let why = ''
   // The place itself, then a little nearer whoever asked, then to either side and behind: first within two metres,
   // then on out to eight. A thing asked for is put as near as it can stand, not given up.
@@ -40,22 +44,19 @@ export async function site(world, thing, spot, facing, back = [0, 0], { clear = 
   for (const [ox, oz] of near) {
     const x = spot[0] + ox * 4, z = spot[2] + oz * 4
     const columns = footprint(thing, [x, z], facing), top = spot[1] + thing.size[1] + CLEAR + 2
-    // A few columns first (its corners and its middle): most places that are taken are told by these.
-    if (ox || oz) {
-      const xs = columns.map((c) => c.x), zs = columns.map((c) => c.z), lo = [Math.min(...xs), Math.min(...zs)], hi = [Math.max(...xs), Math.max(...zs)]
-      const few = await all([[lo[0], lo[1]], [hi[0], lo[1]], [lo[0], hi[1]], [hi[0], hi[1]], [x, z]], (c) => look(world, [c[0], top, c[1]], [0, -1, 0]))
-      if (few.some((m) => !m.at || m.at[1] > spot[1] + CLEAR || m.at[1] < spot[1] - STEEP - CLEAR || m.material === 5)) { why ||= 'something already stands there'; continue }
-    }
-    const met = await all(columns, (c) => look(world, [c.x, top, c.z], [0, -1, 0]))
+    // What is under it: one question for the rectangle its footprint lies in.
+    const xs = columns.map((c) => c.x), zs = columns.map((c) => c.z), x0 = Math.min(...xs), z0 = Math.min(...zs), wide = Math.max(...xs) - x0 + 1
+    const under = await tops(world, [x0, z0, x0 + wide, Math.max(...zs) + 1], top)
+    const met = columns.map((c) => { const i = (c.z - z0) * wide + (c.x - x0); return { at: under.high[i] === null ? null : [c.x, under.high[i], c.z], material: under.material[i] } })
     const high = met.map((m) => (m.at ? m.at[1] : -Infinity))
-    const taken = columns.filter((c, i) => high[i] > spot[1] + CLEAR).length, gone = columns.filter((c, i) => high[i] < spot[1] - STEEP - CLEAR).length
+    const taken = columns.filter((c, i) => high[i] > spot[1] + CLEAR + steep - STEEP).length, gone = columns.filter((c, i) => high[i] < spot[1] - steep - CLEAR).length
     const wet = met.some((m) => m.material === 5)
     if (taken) { why = `something already stands there (${taken} of its ${columns.length} columns are taken)`; continue }
     if (gone || wet) { why = wet ? 'that is water' : 'the ground falls away there'; continue }
     const feet = new Map(columns.map((c, i) => [`${c.x},${c.z}`, high[i]]))
     const stood = columns.map((c, i) => (c.foot ? high[i] : null)).filter((v) => v !== null)
     const base = Math.max(...stood) + 1
-    if (base - 1 - Math.min(...stood) > STEEP) { why = 'the ground is too steep there'; continue }
+    if (base - 1 - Math.min(...stood) > steep * 2) { why = 'the ground is too steep there'; continue }
     const made = rows(thing, [x, base, z], facing, (cx, cz) => feet.get(`${cx},${cz}`) ?? base - 1)
     if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
     // `moved`: how far from the place asked for it stands, in cells.

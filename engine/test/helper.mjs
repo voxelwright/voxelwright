@@ -26,7 +26,7 @@ const CRATE = { name: 'tea crate', size: [10, 9, 8], parts: [
 ] }
 let asked = 0, last = null
 const model = async (q) => { asked++; last = q; return { text: JSON.stringify(CRATE), model: 'a kept reply', ms: 0, cost: 0 } }
-const h = await helper({ world, port: 0, model, journal: join(dir, 'made.jsonl') })
+const h = await helper({ world, port: 0, model, journal: join(dir, 'made.jsonl'), kept: join(dir, 'library') })
 const port = new URL(h.url).port
 /** A request as something that is not a browser makes it: any Host, any Origin. */
 const raw = (path, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
@@ -88,9 +88,23 @@ try {
   const seen = await page.evaluate((id) => { const t = engine.things.all.get(id); return { name: t.name, wish: t.wish, by: t.by, rows: t.cells.length / 5, mine: engine.things.at([t.cells[0], t.cells[2], t.cells[3]])?.id === id, none: engine.things.at([t.box[0] - 3, t.box[1], t.box[2]]) } }, went.done.id)
   check(seen.name === 'tea crate' && seen.wish === 'a tea crate' && seen.by === 'Ada' && seen.rows > 10 && seen.mine && seen.none === null, `the page has its record from the world's stream: ${seen.name}, asked by ${seen.by}, ${seen.rows} rows, found by a cell of it`)
 
+  // ── Made before: at once, with no model ──
+  await page.evaluate(() => { engine.pose.x += 4 })
+  const kept0 = asked, again2 = await page.evaluate(async () => { const stages = [], t0 = performance.now(); const done = await engine.ask({ wish: 'A tea crate, please' }, (s) => stages.push(s.stage)); return { done, stages, ms: Math.round(performance.now() - t0) } })
+  check(again2.done.state === 'there' && asked === kept0 && again2.stages.includes('known'), `the same wish in other words is made from what was kept, with no model asked, in ${again2.ms} ms`)
+  await page.evaluate(() => { engine.pose.x += 4 })
+  const anew = await page.evaluate(() => engine.ask({ wish: 'a tea crate', fresh: true }))
+  check(anew.state === 'there' && asked === kept0 + 1, 'asked for anew, the model is asked')
+  await page.evaluate(() => { engine.pose.x -= 8 })
+  // A box to fill: the thing stands in its middle.
+  const g1 = (await (await fetch(`${world}/world/at?x=640&y=0&z=4060`)).json()).ground
+  const boxed = await raw('/ask', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'a tea crate', from, target: { box: [630, g1 + 1, 4050, 650, g1 + 21, 4070] } }) })
+  const boxDone = JSON.parse(boxed.text.trim().split('\n').at(-1))
+  check(boxDone.state === 'there' && Math.abs(boxDone.at[0] - 640) <= 4 && Math.abs(boxDone.at[2] - 4060) <= 4, `a box aimed at is filled where it is: the thing stands at ${boxDone.at}, the box's middle is 640, 4060`)
+
   // ── The record the world keeps ──
   const list = await (await fetch(`${world}/world/things`)).json(), one = await (await fetch(`${world}/world/things?id=${went.done.id}`)).json()
-  check(list.length >= 1 && list[0].id === went.done.id && list[0].cells === undefined && one.cells.length === seen.rows * 5 && one.facing === 'south', 'the world lists it, and gives its cells when asked for the one')
+  check(list.length >= 1 && list.some((t) => t.id === went.done.id) && list[0].id === went.done.id && list[0].cells === undefined && one.cells.length === seen.rows * 5 && one.facing === 'south', 'the world lists it, and gives its cells when asked for the one')
   const post = (body) => fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify(body) })
   const again = await post({ by: 'x', edit: [1, 1, 0, 1, 900, 0, 8], release: [0, 900, 0], thing: { id: went.done.id, name: 'a second', wish: '', at: [0, 900, 0], size: [1, 1, 1], facing: 'south' } })
   check(again.status === 409, 'a second thing of the same id is refused')
@@ -116,7 +130,7 @@ try {
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => engine.asker.busy === 0 && !document.querySelector('#ask').classList.contains('open'), null, { timeout: 20_000 })
   // The link's name does not resolve. There are words and a picture beside it, so the thing is made from those, and the page says so.
-  await page.waitForFunction((n) => engine.things.all.size === n, 2, { timeout: 20_000 })
+  await page.waitForFunction((n) => engine.things.all.size === n, 5, { timeout: 20_000 })
   check(asked === before + 1 && last.pictures?.length === 1, 'a link that cannot be read does not stop a wish that has words or a picture: it is made from those')
   // A link alone that cannot be read has nothing to go on: that is said, in a few words.
   await page.evaluate(() => { engine.pose.x += 5 })
@@ -143,7 +157,7 @@ try {
   await page.waitForSelector('#given img')
   await page.keyboard.type('a stool like this')
   await page.keyboard.press('Enter')
-  await page.waitForFunction((n) => engine.things.all.size === n, 3, { timeout: 20_000 })
+  await page.waitForFunction((n) => engine.things.all.size === n, 6, { timeout: 20_000 })
   const sent = last.pictures?.[0], bytes = sent ? Buffer.from(sent.data, 'base64') : Buffer.alloc(0)
   // A JPEG says how big it is after its SOF0 or SOF2 mark.
   let wide = 0
@@ -206,7 +220,7 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   server = await serve('/dev/null', ['--world', file])
   const back = await (await fetch(`${server.url}/world/things`)).json(), cellsBack = await (await fetch(`${server.url}/world/things?id=${went.done.id}`)).json()
-  check(back.length === 3 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
+  check(back.length === 6 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
   check((await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'x', gone: went.done.id }) })).status === 202, 'it can be forgotten')
   // The world does asks in its own time: it is gone when the world says so.
   for (let i = 0; i < 50 && (await (await fetch(`${server.url}/world/things`)).json()).some((t) => t.id === went.done.id); i++) await new Promise((r) => setTimeout(r, 100))

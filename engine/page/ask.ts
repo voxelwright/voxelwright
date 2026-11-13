@@ -17,6 +17,8 @@ export interface Ask {
   picture?: { type: 'image/png' | 'image/jpeg' | 'image/webp'; data: string }
   /** An address to make it from. The helper fetches it itself, from public hosts only. */
   link?: string
+  /** Make it anew, even if one like it was made before and is kept. */
+  fresh?: boolean
   /** Where or what it is for. Without one: what is ahead of the eye. */
   target?: Target
 }
@@ -25,6 +27,7 @@ export interface Ask {
 export type Stage =
   | { stage: 'waiting'; ahead: number }
   | { stage: 'reading' }
+  | { stage: 'known'; name: string }
   | { stage: 'place'; at: [number, number, number]; facing: string }
   | { stage: 'asking'; try: number }
   | { stage: 'shaped'; name: string; size: [number, number, number]; facing: string }
@@ -48,7 +51,7 @@ export interface Asker {
    */
   ask(ask: Ask, each?: (stage: Stage) => void): Promise<Done>
   /**
-   * Stands a held thing (a `Done` whose state is `held`): where the eye looks now, or with `clear` at the place first
+   * Stands a held thing (a `Done` whose state is `held`): at what `aim` says (the wand's), else where the eye looks now; or with `clear` at the place first
    * asked for, with whatever is there emptied. No model is asked. Resolves as `ask` does.
    */
   put(held: Done, how: { clear: boolean }, each?: (stage: Stage) => void): Promise<Done>
@@ -98,7 +101,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
     },
     async put(held, how, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
-      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by() })
+      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by(), target: how.clear ? undefined : self.aim?.() })
       busy++
       const before = last
       let free!: () => void

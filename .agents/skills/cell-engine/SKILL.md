@@ -1668,3 +1668,25 @@ full speed: say it again four times a second.
 - **Not there**: no rider's
   figure, no hinged parts, no behaviour scripts. A thing's feet see the standing world only: it drives through
   nothing but does not ride up onto another body. No shadow under it (no body casts one).
+
+
+## Making from inside the page (#244, November 13)
+
+What cost time, beyond what `engine/README.md` "Making" says:
+
+- **Ask the world once, not a column at a time.** `GET /world/tops` gives the first thing down every column of a
+  rectangle. Placing a thing by a look a column was hundreds of requests (and 14,400 for a 12 m tree).
+- **Nothing put at the place for the wait.** Cells at the place would make the maker's own check say it is taken.
+  The cover is cubes drawn with the crumbs (`crumbs.ts` `carried`), on the asking page only.
+- **A thing's size is known a second or two before its cells arrive** (the `shaped` stage, before placing): that is
+  the only time there is to close anything round it. The cells arrive about 1.7 s before the helper says done.
+- **What falls is taken off from the top down.** Removing every row the core says would fall takes the post with
+  the slab; a third of the fallen height at a time, asked again, leaves the post.
+- **An edit may be 13,107 rows** (65,536 numbers) since PR 256; 13,000 one-cell rows are in the world in under a
+  quarter of a second. A house 11 m wide built whole in 10 cm cells is 10,821.
+- **Pictures of made things in a town**: ask `/world/look` from candidate eyes to the thing's middle and keep one
+  whose look gets there; guessed stands end inside a neighbour's house. A page that joins a world with several
+  10,000-row things takes 20 s to draw when the machine is quiet and minutes when four lanes share the GPU.
+- **The Write tool turns `\u2028` in a regex into the character itself** and the file no longer parses: use
+  `\p{Zl}\p{Zp}` or build the pattern from pieces.
+- **zsh does not split `$s` in `set -- $s`**: a loop over "name args" strings ran every command with no arguments.

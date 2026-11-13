@@ -261,7 +261,18 @@ setInterval(() => {
 }, 100)
 
 let nudged = false
-parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge }) => {
+/** The first thing down each column of a rectangle of the ground, looked for from a height: how high it is (or null) and what it is. One question in place of a look a column. */
+function tops([x0, z0, x1, z1], from) {
+  const high = [], kinds = []
+  for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
+    let y = from, kind = 0
+    for (; y > from - LOOK && !(kind = core.world_kind(x, y, z)); y--);
+    high.push(kind ? y : null); kinds.push(kind)
+  }
+  return { high, kinds }
+}
+parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area }) => {
+  if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive) { const a = alive.get(drive.id); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.

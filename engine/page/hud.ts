@@ -17,6 +17,7 @@ export interface Hud {
   tools(names: readonly string[], pick: (i: number) => void): { picked(i: number): void }
   /**
    * The ask bar: always there, one line to type on. Enter or a touch opens it, Enter sends, Escape puts it away.
+   * Shift with Enter asks for the thing anew, even if one like it was made before and is kept.
    * What is typed is a wish (`onask`), with a picture or a link if one was given: pasted, dropped anywhere on the
    * page, picked from a phone's library or taken with its camera, or an address among the words. Where there are
    * others to speak to (`onsubmit`), Tab turns the bar to saying and back.
@@ -27,7 +28,7 @@ export interface Hud {
     /** What is done with words that were said. */
     onsubmit: ((text: string) => void) | null
     /** What is done with a wish: words, a picture, a link, or any of them together. */
-    onask: ((ask: Pick<Ask, 'wish' | 'picture' | 'link'>) => void) | null
+    onask: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null
     /** Wishes offered to start from while the line is empty. */
     starters: readonly string[]
     readonly open: boolean
@@ -107,7 +108,7 @@ export function hud(input: Input): Hud {
   const self = {
     placeholder: '',
     onsubmit: null as ((text: string) => void) | null,
-    onask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link'>) => void) | null,
+    onask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null,
     starters: [] as readonly string[],
     get open() { return leave !== null },
     show() {
@@ -133,24 +134,25 @@ export function hud(input: Input): Hud {
       self.show()
     },
   }
-  const submit = () => {
+  /** `fresh` (Shift with Enter): make it anew, even if one like it was made before. */
+  const submit = (fresh = false) => {
     const text = line.value.trim()
     if (isSaying()) { self.hide(); if (text) self.onsubmit?.(text); return }
     // An address among the words is a link, and the rest is the wish.
     const found = link || ADDRESS.exec(text)?.[0] || '', wish = (found ? text.replace(found, ' ') : text).replace(/\s+/g, ' ').trim()
     if (!wish && !picture && !found) { self.hide(); return }
-    const asked = { ...(wish ? { wish } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}) }
+    const asked = { ...(wish ? { wish } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}), ...(fresh ? { fresh } : {}) }
     self.hide()
     self.onask?.(asked)
   }
   line.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) submit()
+    if (e.key === 'Enter' && !e.isComposing) submit(e.shiftKey)
     else if (e.key === 'Escape') self.hide()
     else if (e.key === 'Tab' && self.onask && self.onsubmit) { e.preventDefault(); wantsToSay = !isSaying(); draw() }
   })
   line.addEventListener('input', draw)
   line.addEventListener('focus', () => self.show())
-  send.addEventListener('click', submit)
+  send.addEventListener('click', () => submit())
   which.addEventListener('click', () => { wantsToSay = !isSaying(); self.show() })
   library.addEventListener('click', () => picked.click())
   camera.addEventListener('click', () => taken.click())

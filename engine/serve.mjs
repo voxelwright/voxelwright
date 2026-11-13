@@ -100,6 +100,7 @@ Nobody is asked who they are. A name belongs to whoever used it last: do not tru
 THE WORLD ITSELF
 GET  /world/at?x=&y=&z=   what one cell is: {kind, material, colour, rubble, ground}. kind is material + 256 * colour; colour is a number in the world's palette (0: the material's own colour) and has no name. material: 0 air, 1 earth, 2 rock, 3 grass, 4 sand, 5 water, 6 asphalt, 7 concrete, 8 brick, 9 plaster, 10 wood, 11 glass, 12 steel, 13 leaves, 14 roofing, 15 lamp. rubble says it fell there. ground is the height of the land's own top cell at that x and z (154 in the street at the start; a pavement is one more): feet stand on the cell above. Your own feet's height is you.at[1].
 GET  /world/look?x=&y=&z=&dx=&dy=&dz=   the first thing along a line from a place, within ${800} cells: {at: [x, y, z], kind, material, colour, rubble, far}; at is null if nothing is met. People are not cells: a look goes through them (around tells you of people).
+GET  /world/tops?x0=&z0=&x1=&z1=&y=     the first thing down every column of a rectangle of the ground (x1 and z1 not included, at most ${65536} columns), looked for down from height y: {high: [y or null, ...], material: [...]}, a row of x for each z. For standing something somewhere: one question in place of a look a column.
 POST /world/ask           JSON, one of:
        {"by": name, "blast": [x, y, z], "radius": 1 to ${40}, "spark": false}   break what is there; what it leaves unheld falls
        {"by": name, "ignite": [x, y, z], "radius": 1 to 8}                     set alight what can burn there
@@ -128,6 +129,8 @@ const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
 const BODIES_A_SECOND = 20
 /** What riders may tell living things a second, all told: each says it four times a second and when a key changes. */
 const DRIVES_A_SECOND = 240
+/** The most columns one question about tops may be of: a square 26 m a side. */
+const TOPS_MOST = 65536
 const frame = (kind, seq, payload) => { const head = Buffer.alloc(12); head.writeUInt32LE(kind, 0); head.writeUInt32LE(seq, 4); head.writeUInt32LE(payload.length, 8); return Buffer.concat([head, payload]) }
 const words = (counts, w) => Buffer.concat([Buffer.from(Uint32Array.from(counts).buffer), Buffer.from(w.buffer, w.byteOffset, w.byteLength)])
 /** The edit a kept frame made, in the core's own form (page/edits.ts), or null if it made none; and the frame as it is kept: the edit and no more. */
@@ -308,6 +311,15 @@ if (worldFile) {
       const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ look: { from: [x + 0.5, y + 0.5, z + 0.5], to: [dx, dy, dz] }, id }) })
       send(res, 200, JSON.stringify({ at: m.at, kind: m.kind, material: m.kind & 15, colour: m.kind >> 8, rubble: (m.kind & 16) !== 0, far: m.far }), TYPES['.json'])
     },
+    /** The first thing down every column of a rectangle, asked of the world itself in one go. */
+    async tops(url, res) {
+      const [x0, z0, x1, z1, y] = ['x0', 'z0', 'x1', 'z1', 'y'].map((k) => Number(url.searchParams.get(k)))
+      if (down) return send(res, 503, 'the world has stopped')
+      if (![x0, z0, x1, z1, y].every((v) => whole(v)) || !(x0 < x1 && z0 < z1) || (x1 - x0) * (z1 - z0) > TOPS_MOST) return send(res, 400, `tops are of a rectangle x0, z0 to x1, z1 (not included) of at most ${TOPS_MOST} columns, looked for down from y`)
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ tops: { box: [x0, z0, x1, z1], from: y }, id }) })
+      send(res, 200, JSON.stringify({ high: m.high, material: m.kinds.map((k) => k & 15) }), TYPES['.json'])
+    },
     /** Where a page's own body is: the world tells everyone, and keeps it for five seconds. */
     async here(req, res) {
       const b = await body(req, 1024)
@@ -408,6 +420,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && (op === 'me' || op === 'around')) return done(world.seat(op, Object.fromEntries(url.searchParams), res))
     if (req.method === 'GET' && url.pathname === '/world/at') return done(world.at(url, res))
     if (req.method === 'GET' && url.pathname === '/world/look') return done(world.look(url, res))
+    if (req.method === 'GET' && url.pathname === '/world/tops') return done(world.tops(url, res))
     if (req.method === 'GET' && url.pathname === '/world/things') return world.things(url, res)
     if (req.method === 'GET' && url.pathname === '/world/') return world.guide(res)
     return send(res, 404, 'not here')

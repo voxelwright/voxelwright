@@ -7,6 +7,7 @@
 //   --port 5762        where it listens, on this machine only
 //   --model opus       which of your models makes things
 //   --journal file     where what was made is written down (default ~/.village/engine/made.jsonl)
+//   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
 // Who may ask. It starts a model on your subscription, so it answers only: a request to this machine's own name
@@ -21,21 +22,25 @@
 //     "link": "https://...",
 //     "target": { "point": [x, y, z] } | { "box": [x0, y0, z0, x1, y1, z1] } | { "thing": id, "part": name },
 //     "from": { "eye": [x, y, z], "toward": [dx, dy, dz] },      where the asker's eye is and looks, in cells
-//     "by": "Ada" }
+//     "by": "Ada",
+//     "fresh": true }                                  make it anew even if one like it was made before
 // All of it is data for the model, never instruction to this program or to it. The answer is lines of JSON as it
 // goes: {stage: "reading"} (a link is being fetched), {stage: "place", at, facing}, {stage: "asking", try}, {stage: "shaped", name, size, facing} (a reply could be read),
 // {stage: "refused", why} (it is asked again),
 // {stage: "sending", id, name, at, size, facing}, and last {stage: "done", state, why, id, name, at, size, ms, tries}:
 // state "there" if it stands in the world. State "held": it is made and no place near would take it; `held` is a
-// token for POST /put {held, from, clear, by}, which stands it where the asker now looks, or (clear) at that very
+// token for POST /put {held, from, clear, by, target}, which stands it where the asker now looks, or (clear) at that very
 // place with what is there emptied first. A thing is held for fifteen minutes. One ask at a time.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { JOURNAL, make, put } from './make.mjs'
+import { fieldKeys } from './make/form.mjs'
+import { LIBRARY, library } from './make/library.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
+import { towards } from './make/place.mjs'
 
 /** A picture is at most this much base64: the page makes it small first (page/picture.ts). */
 const WISH_MOST = 400, LINK_MOST = 2000, PICTURE_MOST = 4 << 20, BODY_MOST = PICTURE_MOST + (1 << 16)
@@ -47,8 +52,8 @@ const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u00
 /** An ask with nothing in it but what one may hold, or (a string) why it is not one. */
 export function shaped(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'an ask is an object'
-  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
-  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone' }
+  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
+  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true }
   if (body.wish !== undefined && typeof body.wish !== 'string') return 'a wish is words'
   if (body.picture !== undefined) {
     const p = body.picture
@@ -74,6 +79,20 @@ export function shaped(body) {
   return ask
 }
 
+/**
+ * Where an ask goes, and how big it is to be. A point aimed at is looked at from the asker's eye, so the thing faces
+ * them and stands as a looked-at place does. A box is filled: the thing is as big as it, in its middle, its front
+ * to the asker. No target: what is ahead of the eye.
+ */
+function aimed(target, from) {
+  if (target?.box) {
+    const b = target.box, facing = towards([(b[0] + b[3]) / 2, b[1], (b[2] + b[5]) / 2], from.eye), across = facing === 'east' || facing === 'west'
+    return { where: { box: b, from: from.eye }, facing, fill: [across ? b[5] - b[2] : b[3] - b[0], b[4] - b[1], across ? b[3] - b[0] : b[5] - b[2]] }
+  }
+  const toward = target?.point ? target.point.map((v, a) => v - from.eye[a]) : from.toward
+  return { where: { from: from.eye, toward: Math.hypot(...toward) > 0 ? toward : from.toward } }
+}
+
 /** Whether two secrets are the same, in a time that does not say how much of one was right. */
 const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).digest(), createHash('sha256').update(String(b)).digest())
 
@@ -81,7 +100,9 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY }) {
+  /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
+  const shelf = kept ? library(kept) : null
   world = world.replace(/\/$/, '')
   const at = new URL(world), loopback = ['127.0.0.1', 'localhost'].includes(at.hostname)
   // The world's page may be open under either name of this machine.
@@ -134,7 +155,9 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', ...cors })
         const line = (o) => res.write(JSON.stringify(o) + '\n')
         try {
-          const r = await put({ hold: h.hold, world, where: { from: f.eye.map(Math.round), toward: f.toward }, clear: body.clear === true, by: text(body.by, 24) || 'someone', journal, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+          // Where it goes now: what the asker aims at (a point or a box, as in an ask), else what is ahead of the eye.
+          const t = body.target, to = t && cells(t.point, 3) ? { point: t.point } : t && cells(t.box, 6) && [0, 1, 2].every((a) => t.box[a] < t.box[a + 3]) ? { box: t.box } : undefined
+          const r = await put({ hold: h.hold, world, where: aimed(to, { eye: f.eye.map(Math.round), toward: f.toward }).where, clear: body.clear === true, by: text(body.by, 24) || 'someone', journal, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
           ended(r, line)
         } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not place it' }) } finally { busy = false; res.end() }
         return
@@ -142,15 +165,13 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
       const ask = shaped(body)
       if (typeof ask === 'string') return end(400, { why: ask })
       // Said before anything is started, and never half done: what is not built yet is refused whole.
-      if (ask.target && !ask.target.point) return end(501, { why: 'only a point can be aimed at yet' })
+      if (ask.target?.thing) return end(501, { why: 'a thing cannot be aimed at yet' })
       if (busy) return end(429, { why: 'one thing at a time: something is being made' })
       busy = true
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', ...cors })
       const line = (o) => res.write(JSON.stringify(o) + '\n')
       try {
-        // A point aimed at is looked at from the asker's eye, so the thing faces them and stands as a looked-at place does.
-        const toward = ask.target ? ask.target.point.map((v, a) => v - ask.from.eye[a]) : ask.from.toward
-        const where = { from: ask.from.eye, toward: Math.hypot(...toward) > 0 ? toward : ask.from.toward }
+        const { where, fill, facing } = aimed(ask.target, ask.from)
         say(`asked by ${ask.by}: ${ask.wish || '(no words)'}${ask.picture ? ' with a picture' : ''}${ask.link ? ' with a link' : ''}`)
         // A link is fetched here, by this program, from public hosts only (make/link.mjs). What it holds is looked
         // at by the model and kept nowhere. A picture the asker gave comes before one the page named.
@@ -165,7 +186,14 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
             line({ stage: 'note', why: 'the link could not be read: making it from the rest' })
           }
         }
-        const r = await make({ wish: ask.wish, picture, page, world, where, by: ask.by, journal, model, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+        // A wish of words alone that was made before, or one close to it, is made from the reply kept then: no model.
+        // (`fresh` asks for a new one all the same.) It is read, checked, stood and placed as any reply is.
+        const apart = fill ? `${grow} ${fill.map((v) => Math.round(v / 16)).join('x')}` : '', plain = shelf && ask.wish && !picture && !page
+        const known = plain && !ask.fresh ? await shelf.find(ask.wish, apart, fieldKeys()) : null
+        if (known) { say(`  made before as ${known.name}: no model is asked`); line({ stage: 'known', name: known.name }) }
+        const from = known ? async () => ({ text: known.reply, model: `kept (${known.model})`, ms: 0, cost: 0 }) : model
+        const r = await make({ wish: ask.wish, picture, page, world, where, fill, facing, grow, by: ask.by, journal, model: from, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+        if (plain && !known && r.reply && ['there', 'held'].includes(r.state)) await shelf.keep(ask.wish, apart, r.reply, { name: r.name, model: r.model, fields: fieldKeys() }).catch((e) => say(`  not kept: ${e.message}`))
         ended(r, line)
       } catch (e) {
         say(`  failed: ${e.message}`)
@@ -187,7 +215,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), journal: flag('journal') ?? JOURNAL, model, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', model, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)
 }

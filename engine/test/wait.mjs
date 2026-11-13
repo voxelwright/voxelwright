@@ -24,7 +24,7 @@ const BAD = { ...STALL, parts: [...STALL.parts, ['box', 'wood', 'own', 10, 15, 6
 // Held: a hall as big as a thing may be, asked for from inside a house, where no place near will take it.
 const HALL = { name: 'brick hall', size: [64, 30, 64], parts: [['box', 'brick', 'own', 0, 0, 0, 64, 30, 64], ['box', 'roofing', 'own', 0, 28, 0, 64, 30, 64]] }
 const model = async () => { await new Promise((r) => setTimeout(r, (refuse ? seconds / 3 : seconds) * 1000)); return { text: JSON.stringify(held ? HALL : refuse ? BAD : STALL), model: 'a kept reply', ms: 0, cost: 0 } }
-const h = await helper({ world: server.url, port: 0, model, journal: join(dir, 'made.jsonl') })
+const h = await helper({ world: server.url, port: 0, model, journal: join(dir, 'made.jsonl'), kept: join(dir, 'library') })
 const browser = await chromium.launch(CHROME), page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log(`page error: ${e.message}`))
 try {

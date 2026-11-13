@@ -5,6 +5,7 @@
 //   node make.mjs "a fountain" --world URL --me              in front of you, if you alone have that world open in a page (--me name if not: the name over your head)
 //   node make.mjs --undo --world URL                         takes the last one out again
 //
+//   --fill 100,120,100 --grow cap|scale   a space to fill, in cells (wide, high, deep), and how a thing past 6.4 m is come by
 //   --facing south|north|east|west   which way its front faces (default: towards --from, or south)
 //   --model opus                     which of your models makes it (sonnet is about twice as fast and plainer)
 //   --reply file                     a reply kept in a file stands in for the model (no model is run)
@@ -19,7 +20,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BRIEF, SEEN, again, asked } from './make/brief.mjs'
-import { fieldsBrief, read, refused } from './make/form.mjs'
+import { SIZE_MOST, fieldsBrief, read, refused, scaled } from './make/form.mjs'
 import { reply as ask } from './make/model.mjs'
 import { at, beside, edit, emptied, gaze, look, middle, people, outOf, send, site, stands, towards } from './make/place.mjs'
 
@@ -33,6 +34,10 @@ const note = async (journal, line) => { await mkdir(dirname(journal), { recursiv
 
 /** How much of what a reply described must be left, after what cannot be used is taken out, for it to be made without asking again. */
 const ENOUGH = 0.85
+/** The most a thing asked to fill a space may be along any side, in cells: 25.6 m, the biggest area the wand marks. */
+const FILL_MOST = 256
+/** The most a thing is built whole along a side, in cells of 10 cm, before it is built as a model and scaled. */
+const WHOLE_MOST = 128
 /** How far round a place ground is looked for, in cells, when the place itself is not ground. */
 const REACH = 64
 
@@ -46,7 +51,9 @@ async function ground(world, where) {
   const land = async (c) => c && c[1] <= (await at(world, c)).ground + ON_GROUND && (await at(world, [c[0], c[1] + 1, c[2]])).material === 0 && (await at(world, c)).material !== 5
   const down = async (x, z) => (await look(world, [x, (await at(world, [x, 0, z])).ground + 60, z], [0, -1, 0])).at
   let spot, eye = null, wall = false, aim
-  if (where.at) { aim = where.at; spot = await down(...aim) }
+  // A box to fill: its middle, on what its floor lies on.
+  if (where.box) { const b = where.box; aim = [Math.round((b[0] + b[3]) / 2), Math.round((b[2] + b[5]) / 2)]; spot = [aim[0], b[1] - 1, aim[1]]; if (await land(spot)) return { spot, eye: where.from ?? null, wall: false, centred: true }; spot = await down(...aim); if (spot && (await land(spot))) return { spot, eye: where.from ?? null, wall: false, centred: true } }
+  else if (where.at) { aim = where.at; spot = await down(...aim) }
   else {
     eye = where.from
     spot = (await look(world, where.from, where.toward)).at
@@ -76,11 +83,12 @@ async function ground(world, where) {
  * left stands. Resolves to { origin, rows, moved, share, fell }: `share` is how much of it is left (0 to 1), `fell`
  * names the parts that lost cells. Throws an error with `place` if no place near will take it.
  */
-async function settle(world, core, thing, { spot, eye, wall }, facing, clear) {
+async function settle(world, core, thing, { spot, eye, wall, centred }, facing, clear) {
   // Looked at, the place is where its front goes: it stands behind that, not round it and half on the asker's
   // toes. At the foot of a wall it is where its back goes: it stands out from the wall, towards the asker.
   const out1 = outOf(facing), deep = Math.ceil(thing.size[2] / 2) * (wall ? 1 : -1)
-  const placed = await site(world, thing, eye ? [spot[0] + out1[0] * deep, spot[1], spot[2] + out1[1] * deep] : spot, facing, eye ? out1 : [0, 0], { clear })
+  // A box to fill is filled where it is: the thing's middle at the box's.
+  const placed = await site(world, thing, eye && !centred ? [spot[0] + out1[0] * deep, spot[1], spot[2] + out1[1] * deep] : spot, facing, eye ? out1 : [0, 0], { clear })
   const count = (rows) => rows.reduce((n, r) => n + r[1] - r[0], 0), whole = count(placed.rows), parts = new Map()
   let rows = placed.rows
   // What falls is taken off from the top down, a third of its height at a time, and asked again: a top too heavy
@@ -127,7 +135,7 @@ async function deliver({ out, thing, placed, world, by, journal, wish, facing, c
  * `say(words, stage)` is told how it goes: { stage: 'place', at, facing }, { stage: 'asking', try }, { stage: 'shaped', name, size, facing }, { stage: 'refused', why }, { stage: 'sending', id, name, at, size, facing }.
  * `model` is how a reply is got ({ system, prompt } to { text, model, ms, cost }): the real binary unless another is given.
  */
-export async function make({ wish = '', picture, page, world, where, facing, by = 'maker', journal = JOURNAL, model = (q) => ask(q), dry = false, core = join(here, 'page', 'core.wasm'), say = () => {} }) {
+export async function make({ wish = '', picture, page, world, where, fill, grow = 'cap', facing, by = 'maker', journal = JOURNAL, model = (q) => ask(q), dry = false, core = join(here, 'page', 'core.wasm'), say = () => {} }) {
   wish = String(wish).trim().slice(0, 400)
   if (!wish && !picture && !page) return { state: 'refused', why: 'say what to make' }
   const found = await ground(world, where)
@@ -137,7 +145,18 @@ export async function make({ wish = '', picture, page, world, where, facing, by 
   const out = { wish, facing, tries: 0, ms: 0, cost: 0 }
   say('a place was found', { stage: 'place', at: spot, facing })
   // The wish is all the model is asked, unless a picture or a page came with it: those are set apart as things to look at.
-  const first = asked(wish, page, picture), system = BRIEF + fieldsBrief() + (picture || page ? SEEN : ''), pictures = picture ? [picture] : []
+  // A space to fill (`fill`: wide, high, deep in cells, as seen from its front). A thing bigger than the usual most
+  // is come by in one of two ways. Built whole: the model builds it at its full size in 10 cm cells, which keeps a
+  // house's boards and railings and holds to about 12 m a side (a house 11 m wide was 10,821 of an edit's 13,107 runs
+  // and took 101 s). Scaled: it builds a model and every cell becomes a block k cells a side, which always fits and
+  // is coarser. `grow: 'cap'` builds whole up to WHOLE_MOST a side and scales past that; `'scale'` scales past the usual most.
+  const whole = grow === 'scale' ? SIZE_MOST : SIZE_MOST.map((v) => Math.max(v, WHOLE_MOST))
+  const times = fill ? Math.max(1, Math.ceil(Math.max(fill[0] / whole[0], fill[1] / whole[1], fill[2] / whole[2]))) : 1
+  const most = fill ? fill.map((v, a) => Math.max(SIZE_MOST[a], Math.min(whole[a], Math.ceil(v / times)))) : SIZE_MOST
+  const sized = !fill ? '' : times > 1
+    ? `\n\nIt will be made ${times} times as big after you build it, to fill a space ${(fill[0] / 10).toFixed(1)} m wide, ${(fill[1] / 10).toFixed(1)} m high and ${(fill[2] / 10).toFixed(1)} m deep. Build a model of it at one part in ${times}: about ${Math.floor(fill[0] / times)} cells wide, ${Math.floor(fill[1] / times)} high and ${Math.floor(fill[2] / times)} deep, in its own proportions. Every cell of yours becomes a block ${times} cells a side, so the sizes of things given above are ${times} times too big for it: a person would be ${Math.round(17 / times)} cells tall beside it.`
+    : `\n\nIt is to fill a space ${Math.min(fill[0], FILL_MOST)} cells wide, ${Math.min(fill[1], FILL_MOST)} high and ${Math.min(fill[2], FILL_MOST)} deep: build it that big, in its own proportions (do not stretch it to fit).`
+  const first = asked(wish, page, picture) + sized, system = BRIEF.replace(`Size is at most ${SIZE_MOST.join(' by ')}`, `Size is at most ${most.join(' by ')}`) + fieldsBrief() + (picture || page ? SEEN : ''), pictures = picture ? [picture] : []
   /** The best of what the replies gave so far: the thing, where it stands, and how much of what was described is left. */
   let prompt = first, best = null, why = ''
   for (; out.tries < TRIES;) {
@@ -148,18 +167,18 @@ export async function make({ wish = '', picture, page, world, where, facing, by 
     out.ms += got.ms; out.cost += got.cost ?? 0; out.model = got.model; out.reply = got.text
     why = ''
     try {
-      const thing = read(got.text, { lenient: true })
+      const thing = scaled(read(got.text, { lenient: true, most }), times)
       // Its size is known from here, a second or two before it is placed and sent: what covers the wait closes round it.
       say('it has a shape', { stage: 'shaped', name: thing.name, size: thing.size, facing })
       let placed = null
       try { placed = await settle(world, core, thing, found, facing, false) } catch (e) {
         if (!e.place) throw e
         // It is made, and no place near will take it: it is held for the asker to say where, not thrown away.
-        if (!best) best = { thing, placed: null, share: thing.kept, blocked: e.message }
+        if (!best) best = { thing, placed: null, share: thing.kept, blocked: e.message, reply: got.text }
         break
       }
       const share = thing.kept * placed.share
-      if (placed.rows.length && (!best || share > best.share)) best = { thing, placed, share }
+      if (placed.rows.length && (!best || share > best.share)) best = { thing, placed, share, reply: got.text }
       if (!placed.rows.length) why = 'none of it would stand: nothing of it that reaches the ground carries the rest'
       else if (share < ENOUGH) why = [...thing.left.slice(0, 6), placed.fell.length ? `these would come loose and fall: ${placed.fell.join('; ')}. A join carries only so much: let wood or steel that reaches the ground carry what hangs or reaches out, make what carries thicker, and keep the weight over the feet` : ''].filter(Boolean).join('. ')
     } catch (e) {
@@ -173,6 +192,8 @@ export async function make({ wish = '', picture, page, world, where, facing, by 
   }
   if (!best) return { ...out, state: 'refused', why }
   const { thing, placed } = best
+  // The reply the thing was made from (the best of them), for whoever keeps a library of what was made.
+  out.reply = best.reply
   if (best.share < 1) out.left = Math.round((1 - best.share) * 100)
   if (!placed) return { ...out, state: 'held', why: best.blocked, name: thing.name, size: thing.size, hold: { thing, facing, wish, model: out.model } }
   if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.filled, crumbs: thing.crumbs, rows: placed.rows.length, origin: placed.origin, moved: placed.moved }); return { ...out, state: 'dry', made: placed.rows } }
@@ -230,7 +251,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(r.state === 'undone' ? 0 : 1)
   }
   const wish = args[0]?.startsWith('--') ? '' : args[0]
-  const spotAt = numbers('at', 2), from = numbers('from', 3), toward = numbers('toward', 3)
+  const spotAt = numbers('at', 2), from = numbers('from', 3), toward = numbers('toward', 3), fill = numbers('fill', 3)
   let where = spotAt ? { at: spotAt } : from && toward ? { from: from.map(Math.round), toward } : null
   if (wish && has('me')) {
     const name = flag('me')?.startsWith('--') ? undefined : flag('me'), there = (await people(world)).filter((p) => !p.seat)
@@ -241,7 +262,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!wish || !where) { console.error('node make.mjs "what to make" --world URL (--me | --at x,z | --from x,y,z --toward dx,dy,dz)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => ({ text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => ask({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const r = await make({ wish, world, where, facing: flag('facing'), by, journal, model, dry: has('dry'), say: (s) => console.log(`  ${s}`) })
+  const r = await make({ wish, world, where, fill, grow: flag('grow') ?? 'cap', facing: flag('facing'), by, journal, model, dry: has('dry'), say: (s) => console.log(`  ${s}`) })
   const what = r.origin ? `${r.name}: ${r.cells} cells in ${r.rows} runs, ${r.size.join(' x ')}, facing ${r.facing} at ${r.origin.join(', ')}` : ''
   if (r.left) console.log(`  about ${r.left} in a hundred of what the model described could not be used and was left out`)
   if (r.moved) console.log(`  the place itself was taken: it stands ${(r.moved / 10).toFixed(1)} m from it`)

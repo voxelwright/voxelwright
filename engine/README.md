@@ -102,6 +102,15 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
   or to let it go. A link that cannot be read does not stop a wish that has words or a picture. What is still
   refused: a model that cannot be run, three replies nothing can be made of, more runs than an edit may be, a link
   alone that cannot be read, no ground within six metres.
+- **Made before, made at once** (`make/library.mjs`): the helper keeps the reply each thing of words alone was made
+  from, in `~/.village/engine/library/` on your own machine. The same wish, or one whose words are three parts in
+  four the same, is made from it with no model: read, checked, stood and placed as a fresh reply is. Shift with
+  Enter asks for it anew. A picture or a link is never a key and never kept.
+- **A space to fill**: an ask aimed at a box (the wand's area) makes the thing that big, in the box's middle. Up to
+  12.8 m a side it is built whole in 10 cm cells; past that the model builds a model of it and every cell becomes a
+  block (`make.mjs --fill w,h,d --grow cap|scale` tries either). Real runs, November 13: an oak 10 by 12 by 10 m,
+  whole in 27 s and scaled twice in 38 s; a house 11 by 9 by 9 m, whole in 101 s (10,821 runs, boards, shutters and a
+  porch rail) and scaled twice in 72 s (the same house in 20 cm blocks). Pictures: `~/.village/engine/making-ui/big/`.
 - **While the model works** (`page/gather.ts`), loose cells lift off the ground round the place, are drawn in and
   circle it; when the model has answered and the thing's size is known they close into a box of that size; when it
   arrives they fall onto it in a puff of dust. If nothing can be made they drop, lie a moment and are gone, and the
@@ -120,7 +129,7 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
   secret it printed. The address it prints carries the secret after `#`, which no server is sent; the page keeps it
   and takes it out of the address. One ask at a time.
 - **One ask** (`page/ask.ts`, the shape in `helper.mjs`): a wish and, when there is one, a picture, a link and a
-  target (a point, a box, or a thing and its part), with where the asker's eye is. A box and a thing aimed at are checked and answered "not yet".
+  target (a point, a box, or a thing and its part), with where the asker's eye is. A thing aimed at is checked and answered "not yet".
   An ask made while another is being made waits its turn in the page. From the console: `engine.ask({ wish: 'a red phone box' })`.
 - **A made thing has a record** the world keeps: `{id, name, wish, at, size, facing, by}` and whatever the lanes that
   own them put under `parts`, `behaviour`, `controls`, `seats`, `sounds`. It comes on the same ask as the thing's
