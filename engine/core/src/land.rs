@@ -72,12 +72,17 @@ pub fn continent(x: i32, z: i32) -> f32 {
     let p = km(x, z);
     let far = (p.0 * p.0 + p.1 * p.1).sqrt();
     let out = ease(40.0, 160.0, far);
-    let mut west = -p.0 + ((noise_km(p, 90.0, 62) - 0.5) * 120.0 + (wisps(p, 380.0, 98) - 0.5) * 520.0) * out;
+    // (Past 5,000 km the sea west of the start is nothing, and its line is not asked for.)
+    let near = far < 5000.0;
+    let mut west = -p.0;
+    if near {
+        west += ((noise_km(p, 90.0, 62) - 0.5) * 120.0 + (wisps(p, 380.0, 98) - 0.5) * 520.0) * out;
+    }
     // That coast in detail, coves and points down to a kilometre or two, asked only where it can matter.
-    if (west - 25.0).abs() < 50.0 {
+    if near && (west - 15.0).abs() < 50.0 {
         west += (wisps(p, 40.0, 93) - 0.5) * 56.0 * out;
     }
-    let c0 = folds(p, 5200.0, 61) - 0.5 + 0.2 * (-far * far / (1100.0 * 1100.0)).exp() - 0.7 * ease(5.0, 45.0, west) * (-far * far / (1500.0 * 1500.0)).exp();
+    let c0 = folds(p, 5200.0, 61) - 0.5 + 0.2 * (-far * far / (1100.0 * 1100.0)).exp() - if near { 0.7 * ease(-5.0, 35.0, west) * (-far * far / (1500.0 * 1500.0)).exp() } else { 0.0 };
     let mut c = c0 + ((wisps(p, 420.0, 91) - 0.5) * 0.1 + (wisps(p, 60.0, 92) - 0.5) * 0.024) * out;
     // Close to a shore, inlets and islets a kilometre or two across.
     if c.abs() < 0.03 {
@@ -91,7 +96,8 @@ fn ranges(x: i32, z: i32) -> f32 {
     let p = km(x, z);
     // One range runs off north from the town's own massif, so that from high up the massif is the near end of
     // something and not a patch with an edge.
-    let north = 1.0 - ease(0.6, 1.2, ((p.0 - 15.0) * (p.0 - 15.0) + (p.1 + 140.0) * (p.1 + 140.0)).sqrt() / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 65) + 0.3 * noise_km(p, 31.0, 67))));
+    let off = ((p.0 - 15.0) * (p.0 - 15.0) + (p.1 + 140.0) * (p.1 + 140.0)).sqrt();
+    let north = if off < 270.0 { 1.0 - ease(0.6, 1.2, off / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 65) + 0.3 * noise_km(p, 31.0, 67)))) } else { 0.0 };
     ease(0.5, 0.66, folds(p, 1700.0, 64) + 0.8 * north)
 }
 
@@ -105,7 +111,8 @@ pub fn cold(z: i32) -> f32 {
 /// east of the town where the town's own dry plain ends.
 pub fn arid(x: i32, z: i32) -> f32 {
     let p = km(x, z);
-    let east = 1.0 - ease(0.6, 1.2, ((p.0 - 130.0) * (p.0 - 130.0) + (p.1 - 40.0) * (p.1 - 40.0)).sqrt() / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 66) + 0.3 * noise_km(p, 31.0, 68))));
+    let off = ((p.0 - 130.0) * (p.0 - 130.0) + (p.1 - 40.0) * (p.1 - 40.0)).sqrt();
+    let east = if off < 270.0 { 1.0 - ease(0.6, 1.2, off / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 66) + 0.3 * noise_km(p, 31.0, 68)))) } else { 0.0 };
     ease(0.5, 0.64, folds((p.0 + 900.0, p.1), 3100.0, 71) + 0.8 * east) * (1.0 - cold(z))
 }
 

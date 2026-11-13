@@ -1311,12 +1311,25 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 
 ## The planet's look, and far ground that is the planet's in kind (#228, November 12)
 
-- **The pass was 30 to 38 ms a frame at the full 2560 x 1440** wherever the ball filled the picture (GPU time of
-  the pass, `engine.gpuMs` with `engine.scale = 1`; 13 ms at the row's old stand, which was half sky). About 110
-  hashed noises a pixel. It is 10 to 14 ms now with far more in it: what is only looked at (woods, fields, towns,
-  cloud, currents, the lie of the low land) is asked of a 256 x 256 picture of chance numbers, four to a point,
-  between its points (`four`, `weave`): one fetch gives four noises. Only what the cells must agree with is still
-  the core's hash (`noise`, `folds`, `wisps`, `cells`). Sea pixels skip the land's work.
+- **What the pass costs, corrected.** Before #228 it was about 110 hashed noises a pixel. What is only looked at
+  (woods, fields, towns, cloud, currents, the lie of the low land) is now asked of a 256 x 256 picture of chance
+  numbers, four to a point, between its points (`four`, `weave`): one fetch gives four noises. Only what the cells
+  must agree with is still the core's hash. The first cut of this measured a third of the old cost, and PR 232
+  said so; the mountains, lobes, rivers and cloud added after it took most of that back, which I found only by
+  timing again. As it stands, with the old pass and the new timed in turn on a GPU busy with other threads
+  (`engine.gpuMs` at `engine.scale = 1`, least of 12, as a multiple of `engine.quiet()`): the row 5 to 6 against
+  11 to 12, 150 km straight down 7 to 11 against 19 to 23, 7 km down 14 to 15 against 20 to 25, mountains from
+  300 km 15 to 18 against 19 to 23. In the one quiet spell, before the last savings, the least frame was 9.4 ms
+  for the row, 10.0 at 150 km, 15.9 at 7 km and 29.8 over mountains from 300 km. **Not proven: 16.6 ms over
+  mountains.** Time it on a quiet GPU before saying it holds 60 there.
+- **A fetch is cheap only when its neighbours land near it.** Cloud was half the pass: three askings a pixel,
+  eleven fetches each, the fine folds fetched even where they were faded to their mean, and far out every pixel
+  then lands on another part of the picture of chance. `weave` does not ask for a fold it will not show; cloud is
+  asked twice and only under weather, never under 8 km; fields, streets and hedges only where a pixel is small
+  enough to show them. Hashed noises are skipped by place (the west sea's line past 5,000 km, the two lobes past
+  270 km from their middles, rivers in the town's country, the cold's wobble below 0.75).
+- **Timing two versions on a shared GPU**: one run each tells nothing (the same code read 31 ms and 65 ms ten
+  minutes apart). Alternate them, several rounds, and compare within a round.
 - **Fade detail by how much ground a pixel covers** (`px`, km: distance times the pixel's angle over the root of
   the slant), not by the eye's height: one aslant picture runs from 0.3 to 5 km a pixel. A fold of noise finer than
   a few pixels is left as its mean. Over the full slant the far land smeared into streaks.
@@ -1350,8 +1363,9 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - **`test/far.mjs`** also compares kinds of country: over mountains, a desert, the ice, the snow and green land
   the planet's picture from 7 km and the cells' own from 5.5 km must be the same kind of mean colour (red, green
   or pale). Mean colour through the haze cannot tell mountains from snow, or a river from land.
-- **Cost of asking for the ground** far out: 313 ns a column for land (232 before: the river's seven noises and
-  the two lobes), 302 for sea. The flight and phone checks pass.
+- **Cost of asking for the ground** far out: 310 ns a column for land (232 before: the river's seven noises, the
+  two lobes where they are near, the coast's fine line where it is near), 275 for sea. The flight and phone
+  checks pass.
 - **Not there**: the planet's woods, fields and towns are not in the cells (green land far out is grass); the
   chance picture would have to be made in the core too. Seen from 5.8 km the cells end at their box in grey, and
   the planet from 6.2 km goes to the horizon: the pop at the handover is now mostly that, and it is the marcher's.
@@ -1479,3 +1493,19 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
   by one fresh judge (theirs 6, ours 5.5 down to 3.5). Change one thing a variant and rank the variants together.
 - **Rough still**: the weed reads as a tree; nothing sways; a far stack's foot shows through the haze as a pale
   striped slab; the page holds 0.30 to 0.40 under water on a shared GPU; shafts ride with the eye.
+
+## The way down, one water and one coast (#228, November 12)
+
+- **The town's sea was a navy slab** in the planet's green-blue shallows from 60 and 150 km: the block that draws
+  the cells' own coast painted its own colours and was dark by 900 m out. The sea has one rule of colour
+  (`waters`, by depth), and out to 160 km the depth is taken from the cells' `offshore` (a cell of it is 1.75e-6
+  of the land's rule, which falls 0.0175 a kilometre off that coast).
+- **Where the two coast rules met the shore jumped 12 km**: the planet's line by the town lay 19 km out and the
+  cells' 6.6. The west sea begins at `ease(-5, 35, west)` (it was 5 to 45), which puts the planet's line 9.4 km
+  out, just past the cells' capes. And where the planet's rule takes the ground over, the cells mix two heights
+  and the shore is where the mix crosses the sea's level, so the pass ends the town's sea along `w` 0.3 to 0.5
+  and does not fade it: faded, there was water lying half-seen over snow.
+- **The sun's wide sheen** is for high up: from 25 km down it was the white blob again.
+- Shot at 400, 150, 60, 25, 10, 7 and 5.8 km (`~/.village/engine/land/228/descent-third.jpg`). What is left is
+  the corner of the massif and the plain (#229's `peaks` and `dry`), the pale air from 10 km down, and the cells
+  ending at their box.
