@@ -9,7 +9,7 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 - `page/`: the city, flown through. `main.ts` (the page), `world.ts` (boxes of sectors round
   the camera), `worker.ts` (makes sectors), `march.ts` (the ray marcher), `sun.ts` (the sun's shadows kept in maps), `edits.ts`,
   `mover.ts` (the worker that moves what has come loose and burns what burns), `told.ts` (what it says), `pieces.ts` (a body on its way), `crumbs.ts`, `puffs.ts` (fire, smoke and dust),
-  `flight.ts` (the flight that measures a device), `people.ts` (everyone's figure, drawn in one call), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
+  `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
   report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world.
@@ -38,7 +38,7 @@ says how: a body of its own that walks, turns, speaks and is told what is around
 world by), what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit. Nobody is asked
 who they are: whoever can reach the server can change that world, and can use any name, another's included.
 
-## Making (#220)
+## Making (#220, #244)
 
 Say what you want and where, and a model makes it in a shared world out of the world's own cells: breakable,
 burnable, seen by everyone there.
@@ -67,6 +67,30 @@ node make.mjs --undo --world http://127.0.0.1:5741                              
 - `node test/make.mjs` checks all of that with replies kept in the check: **no model is run by it.** Real runs
   (November 12, 2026): twenty wishes to Opus 5.5, nineteen made; times and what failed are in the cell-engine skill.
 
+**From inside the page** (#244, the seam; the ask bar itself comes next). A browser cannot run a model, so a helper on your
+own machine does:
+
+```sh
+node serve.mjs --port 5761 --world ~/.village/engine/making-ui/world.log
+node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it once in the browser you play in
+```
+
+- **The helper** (`helper.mjs`) listens on this machine only, makes things in the one world it was started for, and
+  answers only a request to this machine's own name (Host), from that world's own page (Origin), that knows the
+  secret it printed. The address it prints carries the secret after `#`, which no server is sent; the page keeps it
+  and takes it out of the address. One ask at a time.
+- **One ask** (`page/ask.ts`, the shape in `helper.mjs`): a wish and, when there is one, a picture, a link and a
+  target (a point, a box, or a thing and its part), with where the asker's eye is. Today a wish and a point are made
+  from; a picture, a link, a box and a thing are checked and answered "not yet". From the console: `engine.ask({ wish: 'a red phone box' })`.
+- **A made thing has a record** the world keeps: `{id, name, wish, at, size, facing, by}` and whatever the lanes that
+  own them put under `parts`, `behaviour`, `controls`, `seats`, `sounds`. It comes on the same ask as the thing's
+  cells, is in the world's file, and reaches every page in the stream (`engine.things`). `GET /world/things`,
+  `GET /world/things?id=`; `curl /world/` says the rest.
+- **A lane's part of a reply**: `field(key, { brief, check })` in `make/form.mjs` lets the model's reply hold a
+  further key, checked by that lane, whose result goes into the record. Keys nobody named are still refused.
+- `node test/helper.mjs` checks who the helper answers, one ask from the real page in Chrome, the record across a
+  restart, and that keys have one owner: **a kept reply stands in for the model.**
+
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?people=0` (a town with nobody in it) `?name=Ada` (in a shared world).
 
@@ -93,7 +117,7 @@ node test/shared.mjs --suite  # before a change to the solver or to how a shared
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
+(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.

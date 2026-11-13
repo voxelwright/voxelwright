@@ -2,8 +2,9 @@
 // one figure (people.ts), where the world says they are, facing as they face, with their name over
 // their head and what they say under it for a few seconds. This page says where its own eyes are
 // ten times a second, under the name it was given (`?name=`, else the one it used last, else a
-// guest's), and Enter opens a line to say something. Names and words are text that whoever is
+// guest's), and what is typed on the ask bar (hud.ts) is said. Names and words are text that whoever is
 // there typed: they are drawn as letters and listed, and nothing here acts on them.
+import type { Hud } from './hud.ts'
 import type { Link, Someone } from './link.ts'
 import type { People, Person } from './people.ts'
 import { STRIDE } from './people.ts'
@@ -13,7 +14,7 @@ interface Other { who: Someone; shown: [number, number, number]; yaw: number; st
 /** A number of its own for a name, so that a name always looks the same person. */
 const seedOf = (name: string) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h | 0 }
 
-export function presence(far: Link, folk: People, eye: () => { at: [number, number, number]; yaw: number }): { readonly count: number; readonly name: string; say(text: string): void } {
+export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }): { readonly count: number; readonly name: string; say(text: string): void } {
   const asked = new URLSearchParams(location.search).get('name')
   let kept = ''
   try { kept = localStorage.getItem('village.name') ?? '' } catch { /* a page that may keep nothing */ }
@@ -28,41 +29,18 @@ export function presence(far: Link, folk: People, eye: () => { at: [number, numb
   }
   setInterval(() => { const e = eye(); far.here(e.at, e.yaw, name) }, 100)
 
-  // What was said lately, listed in a corner; and the line to say something on.
-  const said = document.createElement('div'), line = document.createElement('input')
-  said.style.cssText = 'position:fixed;left:max(10px,env(safe-area-inset-left));bottom:64px;max-width:min(420px,70vw);padding:6px 10px;border-radius:8px;background:rgba(12,16,22,0.6);pointer-events:none;display:none;white-space:pre-wrap;overflow-wrap:anywhere'
-  line.style.cssText = 'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);width:min(520px,80vw);padding:9px 12px;border-radius:10px;border:0;outline:0;background:rgba(244,244,240,0.96);color:#14181d;font:500 15px -apple-system,system-ui,sans-serif;display:none;user-select:text;-webkit-user-select:text'
-  line.maxLength = 200
-  line.placeholder = `Say something as ${name}`
-  line.setAttribute('aria-label', 'Say something to everyone near you')
-  document.body.append(said, line)
-  const lines: string[] = []
+  // What was said lately is listed in a corner, and the ask bar is the line to say something on (hud.ts).
+  hud.line.placeholder = `Say something as ${name}`
   far.onsaid = (v) => {
     // A voice carries thirty metres (world.mjs EARSHOT): further off it is not heard here, whoever said it.
     const e = eye().at
     if (Math.hypot(v.at[0] - e[0], v.at[1] - e[1], v.at[2] - e[2]) > 300 + 20) return
     const o = others.get(v.by)
     if (o) { o.says = v.text; o.until = performance.now() + Math.max(5000, v.text.length * 90) }
-    lines.push(`${v.name}: ${v.text}`)
-    if (lines.length > 5) lines.shift()
-    said.textContent = lines.join('\n')
-    said.style.display = 'block'
+    hud.heard(`${v.name}: ${v.text}`)
   }
-  const say = (text: string) => { if (text.trim()) far.say(name, text.trim()) }
-  // Enter opens the line and sends it; Escape puts it away. While it is open the keys are letters, not steps.
-  addEventListener('keydown', (e) => {
-    if (e.target === line) {
-      e.stopPropagation()
-      if (e.key === 'Enter') { say(line.value); line.value = ''; line.style.display = 'none'; line.blur() }
-      else if (e.key === 'Escape') { line.value = ''; line.style.display = 'none'; line.blur() }
-    } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-      e.stopPropagation(); e.preventDefault()
-      document.exitPointerLock?.()
-      line.style.display = 'block'
-      line.focus()
-    }
-  }, true)
-  addEventListener('keyup', (e) => { if (e.target === line) e.stopPropagation() }, true)
+  const say = (text: string) => { if (text.trim()) far.say(name, text.trim().slice(0, 200)) }
+  hud.line.onsubmit = say
 
   const shown: Person[] = []
   let last = performance.now()

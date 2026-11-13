@@ -19,7 +19,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BRIEF, again } from './make/brief.mjs'
-import { read, refused } from './make/form.mjs'
+import { fieldsBrief, read, refused } from './make/form.mjs'
 import { reply as ask } from './make/model.mjs'
 import { at, gaze, look, middle, people, outOf, send, site, stands, towards } from './make/place.mjs'
 
@@ -34,6 +34,7 @@ const note = async (journal, line) => { await mkdir(dirname(journal), { recursiv
 /**
  * Makes one thing. `where` is { at: [x, z] } or { from: [x, y, z], toward: [dx, dy, dz] }. Resolves to what
  * happened: { state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'dry', why, name, rows, cells, origin, facing, ms, model, tries }.
+ * `say(words, stage)` is told how it goes: { stage: 'place', at, facing }, { stage: 'asking', try }, { stage: 'refused', why }, { stage: 'sending', name, at, size }.
  * `model` is how a reply is got ({ system, prompt } to { text, model, ms, cost }): the real binary unless another is given.
  */
 export async function make({ wish, world, where, facing, by = 'maker', journal = JOURNAL, model = (q) => ask(q), dry = false, core = join(here, 'page', 'core.wasm'), say = () => {} }) {
@@ -63,12 +64,13 @@ export async function make({ wish, world, where, facing, by = 'maker', journal =
   if (!spot) return { state: 'refused', why: 'nothing is there to stand it on' }
   facing ??= eye ? towards(spot, eye) : 'south'
   const out = { wish, facing, tries: 0, ms: 0, cost: 0 }
+  say('a place was found', { stage: 'place', at: spot, facing })
   let prompt = wish, thing, placed
   for (; out.tries < TRIES;) {
     out.tries++
-    say(`asking the model${out.tries > 1 ? ' again' : ''}`)
+    say(`asking the model${out.tries > 1 ? ' again' : ''}`, { stage: 'asking', try: out.tries })
     let got
-    try { got = await model({ system: BRIEF, prompt }) } catch (e) { return { ...out, state: 'refused', why: e.message } }
+    try { got = await model({ system: BRIEF + fieldsBrief(), prompt }) } catch (e) { return { ...out, state: 'refused', why: e.message } }
     out.ms += got.ms; out.cost += got.cost ?? 0; out.model = got.model; out.reply = got.text
     let why
     try {
@@ -90,7 +92,7 @@ export async function make({ wish, world, where, facing, by = 'maker', journal =
       why = e.message
     }
     if (!why) break
-    say(`refused: ${why}`)
+    say(`refused: ${why}`, { stage: 'refused', why })
     out.refusals = [...(out.refusals ?? []), why]
     if (out.tries === TRIES) return { ...out, state: 'refused', why }
     prompt = again(wish, got.text.slice(0, 20_000), why)
@@ -100,7 +102,9 @@ export async function make({ wish, world, where, facing, by = 'maker', journal =
   // It is written down before it is sent, and what came of it after: a send that was cut short is not made again blindly.
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   await note(journal, { id, state: 'sending', world, by, wish, name: thing.name, model: out.model, facing, origin: placed.origin, rows: placed.rows })
-  const sent = await send(world, placed.rows, by)
+  say('sending it', { stage: 'sending', name: thing.name, at: placed.origin, size: thing.size })
+  // Its record goes on the same ask as its cells (#243): the world has neither without the other, and never two of one id.
+  const sent = await send(world, placed.rows, by, { thing: { id, name: thing.name, wish, at: placed.origin, size: thing.size, facing, ...thing.record } })
   await note(journal, { id, state: sent.state, why: sent.why })
   return { ...out, id, ...sent, look: middle(placed.rows) }
 }
@@ -119,6 +123,8 @@ export async function undo({ world, id, by = 'maker', journal = JOURNAL }) {
   if (!thing) return { state: 'refused', why: 'nothing made in that world is written down' }
   const sent = await send(world, thing.rows, by, { kind: 0 })
   const state = sent.state === 'there' ? 'undone' : sent.state
+  // Its record goes with it. (A thing made before the world kept records has none: that refusal is not a failure.)
+  if (state === 'undone') await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, gone: thing.id }) }).catch(() => {})
   await note(journal, { id: thing.id, state, why: sent.why })
   return { id: thing.id, name: thing.name, state, why: sent.why }
 }

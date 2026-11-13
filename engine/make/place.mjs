@@ -99,11 +99,11 @@ export async function counted(world, cells, kind) {
  * if they were and then were not, 'not there' if they never were, and 'unknown' if the world could not be asked.
  * It never sends twice: after a send whose answer was lost it asks the world what is there, and says.
  */
-export async function send(world, made, by, { kind, wait = 5000, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
+export async function send(world, made, by, { kind, thing, wait = 5000, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
   const cells = samples(made)
   let sent = 'lost'
   try {
-    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(made, kind), release: beside(made) }) })
+    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(made, kind), release: beside(made), thing }) })
     if (res.status !== 202) return { state: 'not there', why: `the world refused it (${res.status}): ${(await res.text()).slice(0, 160)}` }
     sent = 'taken'
   } catch { /* the answer was lost: whether the ask arrived is not known, so the world is asked */ }

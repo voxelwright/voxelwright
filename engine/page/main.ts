@@ -24,13 +24,19 @@ import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
+import { input } from './input.ts'
+import { hud } from './hud.ts'
+import { things } from './things.ts'
+import { asker } from './ask.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
 const canvas = document.querySelector('canvas')!
-const hud = document.querySelector('#hud')!
 const phone = navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 600
+/** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
+const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
+const over = hud(controls)
 
 /** Cells in a metre. */
 const M = 10
@@ -91,45 +97,10 @@ async function main() {
   let speed = 12
 
   // ── Moving ──────────────────────────────────────────────────────────────
-  /** What a click does: the tool picked (set once the tools are made). */
-  let use = () => {}
-  const keys = new Set<string>()
-  addEventListener('keydown', (e) => keys.add(e.code))
-  addEventListener('keyup', (e) => keys.delete(e.code))
-  canvas.addEventListener('click', () => {
-    if (phone) return
-    if (document.pointerLockElement === canvas) use()
-    else void canvas.requestPointerLock()
-  })
-  document.querySelector('#boom')?.addEventListener('click', () => use())
-  addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement !== canvas) return
-    pose.yaw += e.movementX * 0.0022
-    pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch - e.movementY * 0.0022))
-  })
-  addEventListener('wheel', (e) => { speed = Math.max(1, Math.min(400, speed * (e.deltaY < 0 ? 1.25 : 0.8))) }, { passive: true })
-  // A phone: the left half of the screen is a stick to move by, the right half turns the head.
-  const touch = { move: null as null | { id: number; x: number; y: number; dx: number; dy: number }, turn: null as null | { id: number; x: number; y: number } }
-  canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch') return
-    // A browser may only keep the screen on once it has been touched.
-    void (navigator as Navigator & { wakeLock?: { request(kind: 'screen'): Promise<unknown> } }).wakeLock?.request('screen').catch(() => {})
-    canvas.setPointerCapture(e.pointerId)
-    if (e.clientX < innerWidth / 2) touch.move = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 }
-    else touch.turn = { id: e.pointerId, x: e.clientX, y: e.clientY }
-  })
-  canvas.addEventListener('pointermove', (e) => {
-    if (touch.move?.id === e.pointerId) { touch.move.dx = (e.clientX - touch.move.x) / 60; touch.move.dy = (e.clientY - touch.move.y) / 60 }
-    if (touch.turn?.id === e.pointerId) {
-      pose.yaw += (e.clientX - touch.turn.x) * 0.005
-      pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch - (e.clientY - touch.turn.y) * 0.005))
-      touch.turn.x = e.clientX
-      touch.turn.y = e.clientY
-    }
-  })
-  const lift = (e: PointerEvent) => { if (touch.move?.id === e.pointerId) touch.move = null; if (touch.turn?.id === e.pointerId) touch.turn = null }
-  canvas.addEventListener('pointerup', lift)
-  canvas.addEventListener('pointercancel', lift)
+  // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
+  // tool picked. `own.keys` and `own.use` are filled in below, where the things they do are made.
+  const own = { use: (): boolean | void => {}, keys: new Map<string, () => void>() }
+  controls.push({ name: 'moving', use: () => own.use(), key: (code) => { const act = own.keys.get(code); act?.(); return !!act }, wheel: (deltaY) => { speed = Math.max(1, Math.min(400, speed * (deltaY < 0 ? 1.25 : 0.8))); return true } })
 
   const view = (): View => {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
@@ -139,11 +110,23 @@ async function main() {
     march.under = pose.y < 0 && core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) < -1
     return { eye: [pose.x * M, pose.y * M, pose.z * M], forward, right, up, tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) }
   }
+  /** Where a place in the world is on the screen (CSS pixels), or null behind the eye: for what the hud keeps beside a thing. */
+  const project = (at: readonly [number, number, number]): [number, number] | null => {
+    const v = view(), d = [at[0] - v.eye[0], at[1] - v.eye[1], at[2] - v.eye[2]], dot = (a: readonly number[]) => a[0] * d[0] + a[1] * d[1] + a[2] * d[2]
+    const z = dot(v.forward)
+    if (z <= 1) return null
+    const w = canvas.clientWidth, h = canvas.clientHeight
+    return [w / 2 + (dot(v.right) / z / v.tanHalf) * (h / 2), h / 2 - (dot(v.up) / z / v.tanHalf) * (h / 2)]
+  }
   const walk = (dt: number) => {
-    const v = view(), fast = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 5 : 1
-    let ahead = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), side = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)
-    const rise = (keys.has('Space') ? 1 : 0) - (keys.has('KeyC') || keys.has('ControlLeft') ? 1 : 0)
-    if (touch.move) { ahead -= Math.max(-1, Math.min(1, touch.move.dy)) * 2; side += Math.max(-1, Math.min(1, touch.move.dx)) * 2 }
+    // Only while nothing solid is over this mode: typing, the keys are letters; mounted, they are the vehicle's.
+    if (!controls.live('moving')) return
+    const [right, up] = controls.turn(), held = controls.held, stick = controls.stick
+    pose.yaw += right
+    pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
+    const v = view(), fast = held('ShiftLeft') || held('ShiftRight') ? 5 : 1
+    const ahead = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0) - stick[1] * 2, side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0) + stick[0] * 2
+    const rise = (held('Space') ? 1 : 0) - (held('KeyC') || held('ControlLeft') ? 1 : 0)
     // The higher the eye, the faster it goes: at 12 m/s the way up to space would take hours.
     const step = speed * fast * dt * Math.max(1, (pose.y - core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) / M) / 400)
     pose.x += (v.forward[0] * ahead + v.right[0] * side) * step
@@ -213,15 +196,13 @@ async function main() {
   // `?rain=1` or the R key: rain.
   march.rain = Number(query.get('rain') ?? 0)
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
-  addEventListener('keydown', (e) => {
-    if (e.code === 'KeyH') flags ^= HEAT
-    if (e.code === 'KeyR') march.rain = march.rain > 0 ? 0 : 1
-    if (e.code === 'BracketRight') setHour((hour ?? 14) + 0.5)
-    if (e.code === 'BracketLeft') setHour((hour ?? 14) - 0.5)
-    if (e.code === 'KeyL') flags ^= SHADOWS
-    if (e.code === 'KeyM') flags ^= MIRRORS
-    if (e.code === 'KeyK') march.maps = !march.maps
-  })
+  own.keys.set('KeyH', () => { flags ^= HEAT })
+  own.keys.set('KeyR', () => { march.rain = march.rain > 0 ? 0 : 1 })
+  own.keys.set('BracketRight', () => setHour((hour ?? 14) + 0.5))
+  own.keys.set('BracketLeft', () => setHour((hour ?? 14) - 0.5))
+  own.keys.set('KeyL', () => { flags ^= SHADOWS })
+  own.keys.set('KeyM', () => { flags ^= MIRRORS })
+  own.keys.set('KeyK', () => { march.maps = !march.maps })
 
   // The GPU's own time for the march, where the device can say.
   const clock = gpu.canTime ? {
@@ -284,6 +265,7 @@ async function main() {
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')
+    over.frame(project)
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -295,7 +277,7 @@ async function main() {
     }
     if (++frames % 15 === 0) {
       const s = world.stats
-      hud.textContent = `${saying ? `${saying} · ` : ''}${(1000 / frameMs).toFixed(0)} fps · march ${gpuMs.toFixed(1)} ms at ${to.size[0]} x ${to.size[1]} · ${s.wanted ? `making ${s.wanted} sectors` : 'world made'} · ${(s.poolUsed / 262144).toFixed(0)} of ${(s.poolWords / 262144).toFixed(0)} MB${s.full ? ` · ${s.full} did not fit` : ''} · ${pose.x.toFixed(0)}, ${pose.y.toFixed(0)}, ${pose.z.toFixed(0)} m · ${speed.toFixed(0)} m/s`
+      over.status(`${saying ? `${saying} · ` : ''}${(1000 / frameMs).toFixed(0)} fps · march ${gpuMs.toFixed(1)} ms at ${to.size[0]} x ${to.size[1]} · ${s.wanted ? `making ${s.wanted} sectors` : 'world made'} · ${(s.poolUsed / 262144).toFixed(0)} of ${(s.poolWords / 262144).toFixed(0)} MB${s.full ? ` · ${s.full} did not fit` : ''} · ${pose.x.toFixed(0)}, ${pose.y.toFixed(0)}, ${pose.z.toFixed(0)} m · ${speed.toFixed(0)} m/s`)
     }
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
@@ -450,10 +432,15 @@ async function main() {
     if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }) }
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
-  const others = far ? presence(far, folk, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw })) : null
+  const others = far ? presence(far, folk, over, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw })) : null
   if (far) folkClock.now = far.clock
+  /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
+  const wishes = asker(() => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }, () => others?.name ?? 'someone')
+  /** The things made in this world, as the world tells of them (things.ts). Without a shared world there are none. */
+  const made = things()
   if (far) far.onecho = (echo, live) => {
     if (echo.blast || echo.edit) asked.push(echo.by === far.me)
+    made.heard(echo, live)
     if (echo.blast) struck(echo.blast, echo.radius ?? force, live)
     else if (echo.edit && echo.box) { put(); change({ words: Int32Array.from(echo.edit), box: echo.box }) }
   }
@@ -520,24 +507,12 @@ async function main() {
     { name: 'Brick', use: place },
   ]
   let tool = 1
-  const bar = document.querySelector('#tools')!
-  const pickTool = (i: number) => {
-    tool = i
-    bar.querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === i))
-  }
-  tools.forEach((t, i) => {
-    const b = document.createElement('button')
-    b.innerHTML = `<i>${i + 1}</i>${t.name}`
-    b.addEventListener('click', () => pickTool(i))
-    bar.append(b)
-  })
+  const bar = over.tools(tools.map((t) => t.name), (i) => pickTool(i))
+  const pickTool = (i: number) => { tool = i; bar.picked(i) }
   pickTool(tool)
-  addEventListener('keydown', (e) => {
-    const i = Number(e.code.replace('Digit', '')) - 1
-    if (e.code.startsWith('Digit') && i >= 0 && i < tools.length) pickTool(i)
-    if (e.code === 'KeyF') void ignite()
-  })
-  use = () => void tools[tool].use()
+  tools.forEach((_, i) => own.keys.set(`Digit${i + 1}`, () => pickTool(i)))
+  own.keys.set('KeyF', () => void ignite())
+  own.use = () => { void tools[tool].use(); return true }
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
   const pick = async (right = 0, up = 0, plain = false) => {
@@ -624,7 +599,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, march, folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, march, folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.
@@ -652,7 +627,7 @@ async function main() {
 
 main().catch(async (e: unknown) => {
   const text = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
-  hud.textContent = `This did not work here: ${text.split('\n')[0]}`
+  over.status(`This did not work here: ${text.split('\n')[0]}`)
   console.error(e)
   report.notes.push(`failed: ${text}`)
   await post('error')

@@ -58,6 +58,22 @@ const FONT = {
   '!': '00100 00100 00100 00100 00100 00000 00100', '&': '01100 10010 10100 01000 10101 10010 01101', '.': '00000 00000 00000 00000 00000 00000 00100',
 }
 
+/**
+ * What else a reply may hold (#243): the other lanes' parts of a thing, made by the model along with its cells.
+ * A lane names a key of the reply, says in `brief` what the model is to put there (it is added to what the model
+ * is told), and gives `check(value, thing)`: it returns what goes into the thing's record, as an object of any of
+ * RECORD_FIELDS, or throws an Error whose message the model can be told. A key nobody has named is still refused.
+ * What a check returns is data like the rest: the world's server keeps it as JSON and runs none of it.
+ */
+export const RECORD_FIELDS = ['parts', 'behaviour', 'controls', 'seats', 'sounds']
+const FIELDS = new Map()
+export function field(key, { brief, check }) {
+  if (['name', 'size', 'parts'].includes(key) || !/^[a-z]{2,20}$/.test(key)) throw new Error(`"${key}" cannot be a key of a reply`)
+  FIELDS.set(key, { brief, check })
+}
+/** What the model is told of the keys lanes have named, to go after the brief; nothing if there are none. */
+export const fieldsBrief = () => [...FIELDS].map(([key, f]) => `\n\n"${key}" (a further key of the reply)\n${f.brief}`).join('')
+
 class Refused extends Error {}
 const no = (why) => { throw new Refused(why) }
 const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
@@ -74,7 +90,7 @@ export function read(reply) {
   let thing
   try { thing = JSON.parse(text) } catch { no('the reply is not JSON alone') }
   if (!thing || typeof thing !== 'object' || Array.isArray(thing)) no('the reply is not an object')
-  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key)) no(`"${key.slice(0, 20)}" is not part of the form: only name, size and parts are`)
+  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key) && !FIELDS.has(key)) no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', ...FIELDS.keys()].join(', ')} are`)
   if (typeof thing.name !== 'string' || !thing.name || thing.name.length > 60) no('name is a few words')
   const size = thing.size
   if (!Array.isArray(size) || size.length !== 3 || !size.every((v, a) => whole(v, 1, SIZE_MOST[a]))) no(`size is [wide, high, deep] in cells, at most ${SIZE_MOST.join(' by ')}`)
@@ -153,7 +169,15 @@ export function read(reply) {
   // would only fall as crumbs. More than that is a part in the wrong place, and the model is told which.
   if (crumbs > Math.max(CRUMBS, filled / 100)) no(`it would not stand: ${[...loose].slice(0, 6).map(([n, count]) => `${count} cells of part ${n} (${JSON.stringify(thing.parts[n - 1]).slice(0, 60)})`).join('; ')} touch nothing that reaches the ground. Parts must share a face with what holds them`)
   if (crumbs) for (let i = 0; i < cells.length; i++) if (cells[i] && !seen[i]) cells[i] = 0
-  return { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts }
+  const out = { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts, record: {} }
+  // The other lanes' keys, each by its own check, last: a check may ask what the cells are.
+  for (const [key, f] of FIELDS) {
+    if (thing[key] === undefined) continue
+    let got
+    try { got = f.check(thing[key], out) } catch (e) { no(`"${key}": ${e.message}`) }
+    for (const [name, value] of Object.entries(got ?? {})) { if (!RECORD_FIELDS.includes(name)) throw new Error(`the check of "${key}" returned "${name}", which is not a field of a thing's record`); out.record[name] = value }
+  }
+  return out
 }
 export const refused = (e) => e instanceof Refused
 

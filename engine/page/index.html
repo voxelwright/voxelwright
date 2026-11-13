@@ -14,6 +14,18 @@
   #tools button i { font-style: normal; font-weight: 400; opacity: 0.55; margin-right: 6px; }
   #tools button.on { background: #e8ecf1; color: #10141a; }
   #boom { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); width: 76px; height: 76px; border-radius: 50%; border: 0; background: rgba(210, 70, 40, 0.85); color: #fff; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  /* The layer over the picture (hud.ts). It takes no touch or click itself: only what is in it that is for pressing. */
+  #over { position: fixed; inset: 0; pointer-events: none; }
+  #over [hidden] { display: none; }
+  #said { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 64px; max-width: min(420px, 70vw); padding: 6px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); white-space: pre-wrap; overflow-wrap: anywhere; }
+  #line { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); width: min(520px, 80vw); box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 0; outline: 0; background: rgba(244, 244, 240, 0.96); color: #14181d; font: 500 15px -apple-system, system-ui, sans-serif; pointer-events: auto; user-select: text; -webkit-user-select: text; }
+  #notices { position: absolute; left: 50%; top: max(44px, calc(env(safe-area-inset-top) + 34px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(520px, 86vw); }
+  #notices p { margin: 0; padding: 6px 12px; border-radius: 8px; background: rgba(12, 16, 22, 0.72); overflow-wrap: anywhere; }
+  #card { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
+  #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
+  #card p { margin: 2px 0; color: #cfd6df; }
+  #card kbd, #cues kbd { display: inline-block; min-width: 14px; margin-right: 8px; padding: 0 5px; border-radius: 4px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 11px/18px ui-monospace, monospace; text-align: center; }
+  #cues p { position: absolute; left: 0; top: 0; margin: 0; padding: 3px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.7); white-space: nowrap; will-change: transform; }
 </style>
 </head>
 <body>

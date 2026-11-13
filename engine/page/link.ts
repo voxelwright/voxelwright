@@ -4,9 +4,14 @@
 // echoes of what anyone asked, at the moment it was done, and the core's words for what came of
 // it. Nothing here is decided by the page.
 import type { Answer, Ask } from './mover.ts'
+import type { Thing } from './things.ts'
 
 /** An ask as the world did it: who asked, and what. An edit comes with the box of cells it can change, worked out by the server. */
-export interface Echo { by: string; blast?: [number, number, number]; radius?: number; spark?: boolean; ignite?: [number, number, number]; edit?: number[]; box?: [number, number, number, number, number, number]; release?: [number, number, number] }
+export interface Echo { by: string; blast?: [number, number, number]; radius?: number; spark?: boolean; ignite?: [number, number, number]; edit?: number[]; box?: [number, number, number, number, number, number]; release?: [number, number, number]
+  /** A made thing's record (things.ts): whole, with the edit that is its cells, or an id and the fields a lane changed. */
+  thing?: Partial<Omit<Thing, 'cells' | 'box'>> & { id: string }
+  /** A made thing that is no more, by its id. */
+  gone?: string }
 /** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
 export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean }
 export interface Link {
