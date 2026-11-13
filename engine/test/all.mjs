@@ -33,6 +33,7 @@ const checks = [
   ['sea', 'node', ['test/sea.mjs'], true],
   ['water', 'node', ['test/water.mjs'], true],
   ['space', 'node', ['test/space.mjs'], true],
+  ['far', 'node', ['test/far.mjs'], true],
   ['shared', 'node', ['test/shared.mjs'], true],
   ['people', 'node', ['test/people.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],

@@ -3,7 +3,7 @@
 //! gives way to open country: a range of mountains to the north, a dry plain to the east with
 //! the road out of town running across it, and between them the same rolling ground under grass.
 
-use crate::hash::noise;
+use crate::hash::{noise, unit};
 
 /// Where the page starts, in the street by the yard: the middle of the town.
 pub const HOME: (i32, i32) = (700, 4070);
@@ -26,14 +26,73 @@ pub fn open(x: i32, z: i32) -> f32 {
     ease(TOWN, EDGE, (dx * dx + dz * dz).sqrt())
 }
 
-/// How far a place is into the mountains: they rise north of the town (towards -z), from 4.5 km out.
-pub fn peaks(x: i32, z: i32) -> f32 {
-    open(x, z) * ease(45_000.0, 85_000.0, (HOME.1 - z) as f32)
+/// How much of the ground at a place is the planet's and not the town's country: none within 40 km of the start,
+/// all of it from 120 km. Seen from space the land is the planet's (page/space.ts `land`), and far from the town the
+/// cells must be the same land, so that coming down finds what was seen: sea where there was sea, mountains where
+/// there were ranges.
+pub fn far(x: i32, z: i32) -> f32 {
+    let (dx, dz) = ((x - HOME.0) as f32, (z - HOME.1) as f32);
+    if dx.abs() < 280_000.0 && dz.abs() < 280_000.0 {
+        return 0.0;
+    }
+    ease(400_000.0, 1_200_000.0, (dx * dx + dz * dz).sqrt())
 }
 
-/// How far a place is into the dry plain: east of the town (towards +x), short of the mountains.
+/// The planet's own noise, as its pass asks it (space.ts `noise`, `folds`, `wisps`): places in km east and south of
+/// the start, lumps `period` km across. The same numbers must come out there and here.
+fn noise_km(p: (f32, f32), period: f32, seed: u32) -> f32 {
+    let (qx, qz) = (p.0 / period, p.1 / period);
+    let (cx, cz) = (qx.floor(), qz.floor());
+    let (fx, fz) = (qx - cx, qz - cz);
+    let (ux, uz) = (fx * fx * (3.0 - 2.0 * fx), fz * fz * (3.0 - 2.0 * fz));
+    let (cx, cz) = (cx as i32, cz as i32);
+    let top = unit(cx, cz, seed) + (unit(cx + 1, cz, seed) - unit(cx, cz, seed)) * ux;
+    let bottom = unit(cx, cz + 1, seed) + (unit(cx + 1, cz + 1, seed) - unit(cx, cz + 1, seed)) * ux;
+    top + (bottom - top) * uz
+}
+fn folds(p: (f32, f32), period: f32, seed: u32) -> f32 {
+    noise_km(p, period, seed) * 0.5 + noise_km(p, period / 2.3, seed + 1) * 0.27 + noise_km(p, period / 5.1, seed + 2) * 0.15 + noise_km(p, period / 11.0, seed + 3) * 0.08
+}
+fn wisps(p: (f32, f32), period: f32, seed: u32) -> f32 {
+    let (mut q, mut size, mut sum, mut weight) = (p, period, 0.0, 0.5);
+    for k in 0..5u32 {
+        sum += noise_km((q.0 + k as f32 * 37.0, q.1 + k as f32 * 91.0), size, seed + k) * weight;
+        q = (q.0 * 0.8 - q.1 * 0.6, q.0 * 0.6 + q.1 * 0.8);
+        size *= 0.47;
+        weight *= 0.5;
+    }
+    sum / 0.97
+}
+fn km(x: i32, z: i32) -> (f32, f32) {
+    ((x - HOME.0) as f32 / 10_000.0, (z - HOME.1) as f32 / 10_000.0)
+}
+
+/// The planet's land and sea at a place: over 0 is land, under it sea (space.ts `land`, its `c`).
+pub fn continent(x: i32, z: i32) -> f32 {
+    let p = km(x, z);
+    let far = (p.0 * p.0 + p.1 * p.1).sqrt();
+    let out = ease(40.0, 160.0, far);
+    let west = -p.0 + ((noise_km(p, 90.0, 62) - 0.5) * 120.0 + (wisps(p, 380.0, 98) - 0.5) * 520.0) * out;
+    let c0 = folds(p, 5200.0, 61) - 0.5 + 0.2 * (-far * far / (1100.0 * 1100.0)).exp() - 0.7 * ease(5.0, 45.0, west) * (-far * far / (1500.0 * 1500.0)).exp();
+    c0 + ((wisps(p, 420.0, 91) - 0.5) * 0.1 + (wisps(p, 60.0, 92) - 0.5) * 0.024) * out
+}
+
+/// Where the planet has its ranges of mountains, 0 to 1 (space.ts `land`, its `range`, before the coast cuts it).
+fn ranges(x: i32, z: i32) -> f32 {
+    ease(0.5, 0.66, folds(km(x, z), 1700.0, 64))
+}
+
+/// How far a place is into the mountains: they rise north of the town (towards -z), from 4.5 km out; far from the
+/// town they are where the planet has its ranges.
+pub fn peaks(x: i32, z: i32) -> f32 {
+    let w = far(x, z);
+    let near = if w < 1.0 { open(x, z) * ease(45_000.0, 85_000.0, (HOME.1 - z) as f32) * (1.0 - w) } else { 0.0 };
+    if w > 0.0 { near + ranges(x, z) * w } else { near }
+}
+
+/// How far a place is into the dry plain: east of the town (towards +x), short of the mountains, and not for ever.
 pub fn dry(x: i32, z: i32) -> f32 {
-    open(x, z) * ease(38_000.0, 60_000.0, (x - HOME.0) as f32) * (1.0 - ease(25_000.0, 50_000.0, (HOME.1 - z) as f32))
+    open(x, z) * ease(38_000.0, 60_000.0, (x - HOME.0) as f32) * (1.0 - ease(25_000.0, 50_000.0, (HOME.1 - z) as f32)) * (1.0 - far(x, z))
 }
 
 /// How far a place is from the middle of the road out of town, which runs east from the start along its street.
@@ -104,8 +163,9 @@ pub fn ground(x: i32, z: i32) -> i32 {
     if p > 0.0 {
         h += p * high(x, z) * 36_000.0;
     }
-    if let Some(s) = offshore(x, z) {
-        let o = open(x, z);
+    let w = far(x, z);
+    if let Some(s) = offshore(x, z).filter(|_| w < 1.0) {
+        let o = open(x, z) * (1.0 - w);
         if s > -7000.0 && o > 0.0 {
             // Hills stand along the coast and end in cliffs where they are high, in a beach where they are low.
             let hills = noise(x, z, 8200, 54);
@@ -124,12 +184,35 @@ pub fn ground(x: i32, z: i32) -> i32 {
             }
         }
     }
+    if w > 0.0 {
+        // The planet's land: higher inland, and its sea with a shelf and then the deep.
+        let c = continent(x, z);
+        let dry_land = h.max(town) + ease(0.0, 0.02, c) * 600.0 + c.max(0.0) * 8000.0;
+        let bed = -45.0 - ease(0.0, 0.01, -c) * 150.0 - ease(0.01, 0.2, -c) * 900.0 + noise(x, z, 60, 58) * 8.0;
+        let there = dry_land + (bed - dry_land) * (1.0 - ease(-0.004, -0.001, c));
+        h += (there - h) * w;
+    }
     h.floor() as i32
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What asking for the ground costs in the town's country and far from it:
+    /// `cargo test --release ground_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn ground_cost() {
+        for (name, x0, z0) in [("town", 700, 4070), ("plain", 90_000, 4070), ("mountains", 700, -90_000), ("far land", 3_000_000, 4_000_000), ("far sea", -8_000_000, 4070)] {
+            let t = std::time::Instant::now();
+            let mut sum = 0i64;
+            for i in 0..200_000 {
+                sum += ground(x0 + (i % 450) * 7, z0 + (i / 450) * 7) as i64;
+            }
+            println!("{name}: {:.0} ns a column (mean height {})", t.elapsed().as_nanos() as f64 / 200_000.0, sum / 200_000);
+        }
+    }
 
     /// A picture of the land from over it, for looking at: `LAND_MAP=file.ppm cargo test --release land_map -- --ignored`
     /// (`LAND_AT=x,z,span` in cells; a pixel is span / 800).

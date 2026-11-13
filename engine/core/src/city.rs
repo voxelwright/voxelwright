@@ -843,6 +843,9 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     kind(GRASS, OWN)
 }
 
+/// Reefs and what grows on them keep to water this deep, in cells: the shelf. Under that the floor is bare sand.
+const SHELF: i32 = 260;
+
 /// How much of a reef a place on the sea's floor is: 0 on the open sand, 1 on the mounds (land.rs raises them by the
 /// same noise).
 fn reef(x: i32, z: i32) -> f32 {
@@ -853,7 +856,7 @@ fn reef(x: i32, z: i32) -> f32 {
 /// What the sea's floor is covered with out of town: pale sand in drifts, and on the reefs rock with what grows flat
 /// on it in patches a few metres across, rose and olive and ochre.
 fn sea_bed(x: i32, z: i32, g: i32) -> Kind {
-    if g < SEA && reef(x, z) > 0.12 {
+    if g < SEA && g > SEA - SHELF && reef(x, z) > 0.12 {
         let sort = noise(x, z, 37, 62) + (unit(x >> 2, z >> 2, 63) - 0.5) * 0.12;
         return if sort < 0.32 {
             kind(ROCK, grey(5 + (unit(x >> 2, z >> 2, 64) * 3.0) as u8))
@@ -916,7 +919,8 @@ fn stamp_kelp(s: &mut Scratch, x: i32, z: i32, g: i32, deep: i32, seed: u32) {
 /// urchins. On the sand eelgrass in meadows and a boulder now and then.
 fn stamp_reef(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
     let deep = SEA - g;
-    if deep < 14 {
+    // Nothing grows in the deep: kelp 90 m tall would stand there otherwise, through a dozen sectors.
+    if deep < 14 || deep > SHELF {
         return;
     }
     let (px, pz) = (x.div_euclid(FIELD), z.div_euclid(FIELD));

@@ -1175,3 +1175,30 @@ skill). What was learned about the engine on the way:
 - **Seen from 60 to 400 km the country round the start is three wedges**: white north, red east, sea west, each
   ending where today's rule fades at 120 km. That is the cells' own rule shown true, and the far ground is still
   to be made the planet's.
+
+## Far ground is the planet's (#217, November 12)
+
+- **From 40 to 120 km out the town's country gives way to the planet's land** (`land.rs` `far`). The core has the
+  planet's own low fields, ported as the pass asks them (`noise_km`, `folds`, `wisps`, in km from the start, f32 as
+  on the GPU): `continent` (land over 0, sea under it) and `ranges`. Far out the ground is the town's rolling
+  ground lifted inland, a shelf and the deep where the planet has sea, and `high`'s creased mountains where it has
+  ranges. The mountains north, the plain east and the coast west no longer run on for ever.
+- **`test/far.mjs`** (in `npm run check`): at twenty places from 50 to 5,000 km out, by a fixed rule, the core's
+  ground is under the sea where the planet's pass draws water from 7 km over it, and not where it does not: 20 of
+  20. From 7 km there is no cloud in the pass, and through its pale air water is bluer than red by 0.12 of full,
+  everything else by 0.03 or less. (Blue past green by a ratio told nothing: the haze is half the colour.)
+- **One rule kept in two places**: `space.ts` `land` and `land.rs` `continent` must be changed together, and
+  `far.mjs` is what says when they were not.
+- **Cost of asking for the ground** (`cargo test --release ground_cost -- --ignored --nocapture`, ns a column):
+  town 19, plain 94, mountains 107, far land 232, far sea 247. Far sectors take over twice as long to make.
+- **Not there**: far coasts are a level shore of grass with no cliffs, reefs or beaches (the near coast's rule is
+  by distance from its line, which the planet's field does not give); where the planet is dry the cells are grass;
+  the planet's cold lands have no snow in the cells below the snow line; and from space the town's plain and
+  massif still show as a red and a white patch with straight sides, as `dry` and `peaks` are.
+- **Far mountains are there and the planet does not show them as such.** The highest ground found far out (3,024 m,
+  1,160 km east and 720 km south) is snow peaks from the ground and green land with a river from 300 km over it:
+  the pass draws rock and snow by its own height, which is not the cells'. Sea and land agree; mountains do not yet.
+- North of about 3,000 km the planet draws ice on the sea and snow on all land; the cells have neither. Between 40
+  and 120 km out the west coast shifts as the planet's rule takes over, and the two can differ in that band.
+- Reefs and kelp keep to the shelf (`city.rs` `SHELF`, 26 m of water): with no limit, kelp stood 90 m tall in the deep.
+- A check that looks at the picture after moving the eye waits for the page's own frames, not for a fixed time.
