@@ -154,6 +154,21 @@ try {
   check(!things2.includes(sent.data.slice(0, 64)) && !JSON.stringify(await (await import('node:fs/promises')).readFile(join(dir, 'made.jsonl'), 'utf8')).includes(sent.data.slice(0, 64)), 'the picture is in neither the world nor what the helper writes down')
   await page.evaluate(() => { engine.pose.x += 6 })
 
+  // ── An edit as big as one may be ──
+  // A wall along z, 13,000 rows of a cell each (rows run along x, so this is the dear way): one ask, and the page draws it.
+  const g0 = (await (await fetch(`${world}/world/at?x=760&y=0&z=4070`)).json()).ground, wall = []
+  for (let y = 0; y < 100; y++) for (let z = 0; z < 130; z++) wall.push(760, 761, g0 + 1 + y, 4040 + z, 8)
+  const t1 = Date.now(), big = await post({ by: 'x', edit: [1, wall.length / 5, ...wall], release: [762, g0 + 20, 4070] })
+  let stood = 0
+  for (; Date.now() - t1 < 5000;) { if ((await (await fetch(`${world}/world/at?x=760&y=${g0 + 100}&z=4169`)).json()).material === 8) { stood = Date.now() - t1; break } }
+  const more = await post({ by: 'x', edit: [1, 13108, ...wall, 760, 761, g0 + 101, 4040, 8], release: [762, g0, 4070] })
+  check(big.status === 202 && stood > 0 && more.status === 400, `an edit of 13,000 rows is taken as one and is in the world ${stood} ms later; one of 13,108 is refused`)
+  await page.evaluate(() => Object.assign(engine.pose, { x: 82, y: 22, z: 410, yaw: -1.57, pitch: 0 }))
+  await page.waitForFunction(() => { const s = engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 60_000 })
+  const hit = await page.evaluate(() => engine.pick())
+  check(hit && hit.material === 8 && Math.abs(hit.t - 60) < 12, `and the page draws it: a look west from 6 m off meets brick ${hit ? (hit.t / 10).toFixed(1) : '?'} m away`)
+  await page.evaluate(() => Object.assign(engine.pose, { x: 70, y: 17.2, z: 406, yaw: 0, pitch: -0.197 }))
+
   // ── Keys have one owner ──
   const z0 = await page.evaluate(() => engine.pose.z)
   await page.keyboard.down('KeyW'); await page.waitForTimeout(300)

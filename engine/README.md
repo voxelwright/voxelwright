@@ -75,7 +75,7 @@ node make.mjs --undo --world http://127.0.0.1:5741                              
   into cells here, checked to be joined to the ground, stood in a core of the maker's own to see that nothing of it
   would fall, and only then sent. A reply that cannot be used is asked for again, told why, up to three times.
 - **Where**: on the ground only, facing whoever asked, its feet carried down to a sloping street, near the place
-  if the place itself is taken. A thing is at most 64 by 80 by 64 cells and 3,276 runs (one edit).
+  if the place itself is taken. A thing is at most 64 by 80 by 64 cells and 13,107 runs (one edit: 65,536 numbers, raised from 16,384 on November 13 so that a house wall along z can change in one go).
 - What was made is written in `~/.village/engine/made.jsonl` before it is sent and after, so `--undo` can take it
   out, and a send whose answer was lost is looked for in the world, never sent twice.
 - `node test/make.mjs` checks all of that with replies kept in the check: **no model is run by it.** Real runs

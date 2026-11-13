@@ -119,7 +119,8 @@ GET  /world/stream        everything that happens, as it happens (binary frames:
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
 `
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
-const RADIUS_MOST = 40, EDIT_MOST = 16384, ASKS_A_SECOND = 60
+/** An edit is at most this many whole numbers: 13,107 rows. It was 16,384 until one part of a house wall that runs along z (6,473 rows, #246) had to be refused; at 65,536 a wall of 13,000 rows is in the world a quarter of a second after it is asked (test/helper.mjs). */
+const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
 /** What bodies may ask a second, all told: around takes the world's one thread 30 ms (measured), so this is at most six tenths of it. */
 const BODIES_A_SECOND = 20
 const frame = (kind, seq, payload) => { const head = Buffer.alloc(12); head.writeUInt32LE(kind, 0); head.writeUInt32LE(seq, 4); head.writeUInt32LE(payload.length, 8); return Buffer.concat([head, payload]) }
@@ -345,7 +346,7 @@ if (worldFile) {
       if (++asked > ASKS_A_SECOND) return send(res, 429, 'too many asks')
       const parts = []
       let size = 0
-      for await (const chunk of req) { size += chunk.length; if (size > 1 << 18) return send(res, 413, 'too much'); parts.push(chunk) }
+      for await (const chunk of req) { size += chunk.length; if (size > 1 << 20) return send(res, 413, 'too much'); parts.push(chunk) }
       let body
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
       const ask = allowed(body)

@@ -23,10 +23,10 @@
 export const MATERIALS = { air: 0, earth: 1, rock: 2, grass: 3, sand: 4, asphalt: 6, concrete: 7, brick: 8, plaster: 9, wood: 10, glass: 11, steel: 12, leaves: 13, roofing: 14, lamp: 15 }
 /** The most a thing may be, in cells, and in parts. */
 export const SIZE_MOST = [64, 80, 64], PARTS_MOST = 240
-/** An edit is at most 16,384 whole numbers (serve.mjs `EDIT_MOST`): two to say rows follow and how many, five a row. */
+/** An edit is at most 65,536 whole numbers (serve.mjs `EDIT_MOST`): two to say rows follow and how many, five a row. */
 /** How many cells that touch nothing may be left out of a thing without asking for it again. */
 const CRUMBS = 12
-export const ROWS_MOST = Math.floor((16384 - 2) / 5)
+export const ROWS_MOST = Math.floor((65536 - 2) / 5)
 
 /** A colour of the palette by name: "own", "white", "black", "grey:0" to "grey:14" (white to black), or "hue:tone" (24 hues, ten tones). */
 function colour(name) {
