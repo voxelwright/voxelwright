@@ -13,6 +13,8 @@ struct U {
   right: vec3f, aspect: f32, up: vec3f, tanHalf: f32, forward: vec3f, high: f32, sun: vec3f, time: f32,
   // Where the eye is over the ground, km from where the page starts (east, south), and the size of the picture.
   over: vec2f, res: vec2f,
+  // How much of the day it is where the eye is (1 day, 0 night).
+  day: f32, pad0: f32, pad1: f32, pad2: f32,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -55,6 +57,54 @@ fn wisps(p: vec2f, period: f32, seed: u32) -> f32 {
   }
   return sum / 0.97;
 }
+// The core's noise as it asks it: whole cells, whole-cell periods (hash.rs noise).
+fn cells(x: f32, z: f32, period: f32, seed: u32) -> f32 {
+  let c = vec2i(floor(vec2f(x, z) / period));
+  let f = fract(vec2f(x, z) / period);
+  let e = f * f * (3.0 - 2.0 * f);
+  return mix(mix(unit(c.x, c.y, seed), unit(c.x + 1, c.y, seed), e.x), mix(unit(c.x, c.y + 1, seed), unit(c.x + 1, c.y + 1, seed), e.x), e.y);
+}
+// How high the town's own ground is at a column, in cells (land.rs ground, where the land is the town's).
+fn townGround(x: f32, z: f32) -> f32 {
+  return cells(x, z, 9000.0, 11u) * 1200.0 + cells(x, z, 2600.0, 12u) * 300.0 + cells(x, z, 700.0, 13u) * 50.0 - 560.0;
+}
+// The town and the country round it as the cells have them, seen from over it: its lakes where its ground is under
+// the sea's level, its blocks 128 m by 80 m with a street along two sides, and each block what city.rs block says
+// it is. p is km east and south of the start; the answer is colour before light, and in a how much of it is water.
+fn town(p: vec2f) -> vec4f {
+  let x = 700.0 + p.x * 10000.0;
+  let z = 4070.0 + p.y * 10000.0;
+  let far = length(p) * 10000.0;
+  let open = select(smoothstep(30000.0, 40000.0, far), 0.0, abs(p.x) < 2.1 && abs(p.y) < 2.1);
+  let grass = vec3f(0.11, 0.25, 0.045) * (0.8 + 0.4 * cells(x, z, 160.0, 14u));
+  var col = grass;
+  let b = vec2i(floor(vec2f(x / 1280.0, z / 800.0)));
+  let mid = (vec2f(b) + 0.5) * vec2f(1280.0, 800.0);
+  let out = length(mid - vec2f(700.0, 4070.0));
+  let country = smoothstep(30000.0, 40000.0, out) > 0.5 && !(abs(mid.x - 700.0) < 21000.0 && abs(mid.y - 4070.0) < 21000.0);
+  if (!country) {
+    let within = vec2f(x, z) - vec2f(b) * vec2f(1280.0, 800.0);
+    let lot = hash2(i32(floor(within.x / 76.0)) + b.x * 31, i32(floor(within.y / 160.0)) + b.y * 57, 15u);
+    if (townGround(mid.x, mid.y) < 15.0) {
+      // The shore: sand and grass.
+      col = mix(grass, vec3f(0.55, 0.47, 0.3), 0.5);
+    } else if (all(b == vec2i(0, 5)) || hash2(b.x, b.y, 23u) % 17u == 0u) {
+      col = vec3f(0.07, 0.07, 0.075);
+    } else if (cells(f32(b.x), f32(b.y), 7.0, 21u) > 0.64) {
+      // Towers of glass on paving.
+      col = mix(vec3f(0.3, 0.3, 0.28), vec3f(0.2, 0.27, 0.34), f32(lot & 1u));
+    } else if (hash2(b.x, b.y, 22u) % 14u == 0u) {
+      col = grass * mix(0.55, 1.0, f32(lot & 1u));
+    } else {
+      // Homes: roofs, each its own dark shade, and the gardens behind them.
+      col = mix(vec3f(0.075, 0.07, 0.065) * (0.7 + 0.6 * f32(lot >> 24u) / 255.0), grass * 0.8, select(0.0, 1.0, abs(within.y - 470.0) < 60.0));
+    }
+    // Its streets: one along each low side of every block.
+    if (within.x < 140.0 || within.y < 140.0) { col = vec3f(0.1, 0.103, 0.115); }
+  }
+  let wet = select(0.0, 1.0, townGround(x, z) < 0.0) * (1.0 - open * 0.0);
+  return vec4f(col, wet);
+}
 // What the ground is at a place (km east and south of the start), as colour before light: and how high, km.
 struct Land { colour: vec3f, high: f32, sea: f32 }
 fn land(p: vec2f) -> Land {
@@ -89,12 +139,21 @@ fn land(p: vec2f) -> Land {
   let sunward = 1.0 - abs(wisps(p + normalize(u.sun.xz + vec2f(1e-5, 0.0)) * 0.8, 26.0, 31u) * 2.0 - 1.0);
   let rock = vec3f(0.2, 0.19, 0.18) * clamp(1.0 + (crest - sunward) * 9.0, 0.45, 1.6);
   col = mix(col, mix(rock, vec3f(0.6, 0.62, 0.65), smoothstep(0.8, 0.93, crest)), peaks);
-  // The town: grey, three kilometres out from the start.
-  col = mix(col, vec3f(0.26, 0.255, 0.25) * (0.85 + 0.3 * noise(p, 0.5, 77u)), 1.0 - smoothstep(2.6, 3.4, far));
   out.sea = 1.0 - smoothstep(-0.006, 0.0, c);
   // The sea: dark and blue far out, green-blue over the shallows by the land; ice on it where it is coldest.
   let water = mix(vec3f(0.03, 0.2, 0.24), vec3f(0.012, 0.05, 0.13), smoothstep(0.0, 0.035, -c));
   col = mix(col, mix(water, vec3f(0.6, 0.64, 0.68), smoothstep(0.85, 1.0, cold)), out.sea);
+  // Within 30 km of the start it is the town and its country as the cells have them, where the mountains and the
+  // plain have not changed them; from far up it runs together into grey.
+  let close = 1.0 - smoothstep(22.0, 30.0, far);
+  if (close > 0.0) {
+    let t = town(p);
+    let lake = t.a * (1.0 - max(peaks, plain));
+    let made = mix(t.rgb, vec3f(0.03, 0.16, 0.24), lake);
+    let keep = close * (1.0 - smoothstep(0.2, 0.6, max(peaks, plain)) * (1.0 - lake));
+    col = mix(col, made, keep);
+    out.sea = mix(out.sea, lake, keep);
+  }
   out.colour = col;
   return out;
 }
@@ -120,7 +179,8 @@ fn tone(c: vec3f) -> vec3f {
     let p = u.over + normalize(rd.xz + vec2f(1e-9, 0.0)) * (arc * R);
     let l = land(p);
     let day = dot(out, u.sun);
-    let lit = smoothstep(-0.08, 0.25, day);
+    // At night the light the page keeps is the moon's: the ball under the eye is dark then, but for its towns.
+    let lit = smoothstep(-0.08, 0.25, day) * u.day;
     // Cloud: sheets and broken fields, drifting, and its shadow is not drawn.
     let drift = vec2f(u.time * 0.02, 0.0);
     let cover = smoothstep(0.54, 0.74, wisps(p + drift, 1400.0, 81u) * 0.6 + wisps(p * 1.0 + drift * 3.0, 130.0, 85u) * 0.4) * smoothstep(8.0, 60.0, u.high);
@@ -136,6 +196,8 @@ fn tone(c: vec3f) -> vec3f {
     let thick = 1.0 - exp(-0.13 / slant);
     // Blue through a little air, pale through a lot: the planet's edge is a bright band.
     col = mix(ground, mix(air, vec3f(0.75, 0.86, 1.0), thick * thick) * (0.02 + 1.9 * lit), thick * 0.85);
+    // Just over where the cells are drawn, the same pale air that lies between the eye and the town from 6 km up.
+    col = mix(col, vec3f(0.6, 0.68, 0.76) * (0.03 + 1.25 * lit), 0.5 * exp(-(u.high - 6.0) / 18.0));
   } else {
     // Past the ball's edge: the thin bright line of its air, then the dark, and stars.
     let miss = sqrt(max((R + u.high) * (R + u.high) - b * b, 0.0)) - R;
@@ -152,8 +214,8 @@ fn tone(c: vec3f) -> vec3f {
 `
 
 export interface Space {
-  /** Draws the planet as seen from `high` km over a place `over` km east and south of where the page starts. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, high: number, over: readonly [number, number], sun: readonly number[], time: number, timing?: GPURenderPassTimestampWrites): void
+  /** Draws the planet as seen from `high` km over a place `over` km east and south of where the page starts. `day` is how much of the day it is there. */
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, high: number, over: readonly [number, number], sun: readonly number[], day: number, time: number, timing?: GPURenderPassTimestampWrites): void
 }
 
 export async function space(device: GPUDevice, format: GPUTextureFormat): Promise<Space> {
@@ -162,14 +224,14 @@ export async function space(device: GPUDevice, format: GPUTextureFormat): Promis
     label: 'space', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
   })
-  const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const uniforms = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
   return {
-    draw(encoder, to, view, high, over, sun, time, timing) {
+    draw(encoder, to, view, high, over, sun, day, time, timing) {
       const length = Math.hypot(sun[0], sun[1], sun[2])
       device.queue.writeBuffer(uniforms, 0, new Float32Array([
         ...view.right, to.size[0] / to.size[1], ...view.up, view.tanHalf, ...view.forward, high, sun[0] / length, sun[1] / length, sun[2] / length, time,
-        over[0], over[1], to.size[0], to.size[1],
+        over[0], over[1], to.size[0], to.size[1], day, 0, 0, 0,
       ]))
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],

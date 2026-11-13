@@ -134,16 +134,27 @@ impl Water {
         }
         let (x0, x1) = (((lo[0] - self.low[0]).div_euclid(COL)).clamp(0, N as i32) as usize, ((hi[0] - self.low[0]).div_euclid(COL) + 1).clamp(0, N as i32) as usize);
         let (z0, z1) = (((lo[2] - self.low[1]).div_euclid(COL)).clamp(0, N as i32) as usize, ((hi[2] - self.low[1]).div_euclid(COL) + 1).clamp(0, N as i32) as usize);
+        // Water lying where the world changed runs again; a tank is looked over again only when the change reaches it.
+        // (Asked of every tank on every edit anywhere, a street coming down was thousands of looks at a tank nobody
+        // had touched, and water that had come to rest was woken by each.)
+        let mut woke = false;
         for cz in z0..z1 {
             for cx in x0..x1 {
                 self.known[cx + N * cz] = false;
+                woke |= self.listed[cx + N * cz];
             }
         }
         for k in 0..self.tanks.len() {
-            self.holes(ground, k);
+            let at = self.tanks[k].at;
+            if lo[0] <= at[0] + 24 && hi[0] >= at[0] - 24 && lo[2] <= at[2] + 24 && hi[2] >= at[2] - 24 && hi[1] >= at[1] - 4 && lo[1] <= at[1] + TANK_HIGH + 4 {
+                self.holes(ground, k);
+                woke = true;
+            }
         }
-        self.awake = !self.tanks.is_empty();
-        self.still = 0.0;
+        if woke {
+            self.awake = true;
+            self.still = 0.0;
+        }
     }
 
     /// Looks a tank over for holes: its wall at sixty-four places round, each cell of its height, and its floor.

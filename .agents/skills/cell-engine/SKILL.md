@@ -862,3 +862,22 @@ at one a second from two dozen it costs nothing the board's stamp shows.
 - The eye goes faster the higher it is (`walk`): at 12 m/s space was hours away.
 - A core test's time bound (`masonry_that_stops_askew_lies_as_a_heap`, 40 ms) failed at 44.8 ms beside the page
   checks. It is 250 now: a bound for a rule gone wrong, not for a busy machine.
+
+## The way down from space had a gap (November 13)
+
+The first space change drew the planet from 25 km and checked only 300 km, 20,000 km and 1 km. Shot at 3, 6, 10, 15,
+20 and 24 km, the band from 8 to 25 km was a blue square in haze: the widest box of cells is 13 km tall with the
+eye at its middle, so the ground is out of it 6.5 km up.
+
+- The planet is drawn from 6 km (`SPACE`), where the cells still hold the ground. `test/space.mjs` asks for the
+  ground from 5.8 km, straight down and aslant, and for the planet from 6.5 km.
+- So the handover is not a pop, the planet near the start is the town as the cells have it (`town()` in space.ts):
+  lakes where the town's ground noise is under the sea's level (the core's noise asked in whole cells, exact),
+  blocks 128 m by 80 m with their streets, each block what `city::block` says. Under it the same pale air.
+- Still a pop: looking aslant at the mountains, crisp peaks of cells become a soft mass.
+- At night the page's light is the moon's: the planet took it for the sun and was lit as by day. It is dark at
+  night now, but for the town's lights. No rain streaks are drawn up there.
+- The eye's speed goes by its height over the ground, not over the sea: on a peak it flew nine times too fast.
+- `water.rs` `changed()` looked every tank over on every edit anywhere and woke the water each time. A tank is
+  looked over only when an edit's box reaches it, and water wakes only where the world changed under it.
+- WGSL in a template string: no backticks in comments (again).

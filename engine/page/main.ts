@@ -68,8 +68,9 @@ async function main() {
   const smoke = await puffs(device, gpu.format)
   const water = await flowing(device, gpu.format)
   const planet = await space(device, gpu.format)
-  /** From this high (metres) the eye sees more than the boxes of cells hold, and the planet is drawn in their place. */
-  const SPACE = 25_000
+  /** From this high (metres) the planet is drawn in place of the boxes of cells. The widest box is 13 km tall with the
+   * eye at its middle, so the ground is out of it when the eye is 6.5 km up: from 8 km there was a blue square in haze. */
+  const SPACE = 6_000
   const falling = await pieces(device, gpu.format, march)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
@@ -139,7 +140,7 @@ async function main() {
     const rise = (keys.has('Space') ? 1 : 0) - (keys.has('KeyC') || keys.has('ControlLeft') ? 1 : 0)
     if (touch.move) { ahead -= Math.max(-1, Math.min(1, touch.move.dy)) * 2; side += Math.max(-1, Math.min(1, touch.move.dx)) * 2 }
     // The higher the eye, the faster it goes: at 12 m/s the way up to space would take hours.
-    const step = speed * fast * dt * Math.max(1, pose.y / 400)
+    const step = speed * fast * dt * Math.max(1, (pose.y - core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) / M) / 400)
     pose.x += (v.forward[0] * ahead + v.right[0] * side) * step
     pose.y += (v.forward[1] * ahead + rise) * step
     pose.z += (v.forward[2] * ahead + v.right[2] * side) * step
@@ -261,7 +262,7 @@ async function main() {
     lap('tend')
     if (pose.y > SPACE) {
       // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
-      planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+      planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
@@ -269,7 +270,7 @@ async function main() {
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
     }
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')
