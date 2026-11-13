@@ -41,6 +41,7 @@ const checks = [
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['sound', 'node', ['test/sound.mjs'], false],
+  ['music', 'node', ['test/music.mjs'], false],
   ['heard', 'node', ['test/heard.mjs'], true],
   ['flight', 'node', ['test/flight.mjs'], true],
   ['phone', 'node', ['test/flight.mjs', '--phone'], true],

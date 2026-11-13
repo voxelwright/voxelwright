@@ -28,6 +28,12 @@ export interface Play {
   dur?: number
   /** Seconds from now. */
   after?: number
+  /** Or the moment itself, on the context's clock (music keeps time by it). */
+  when?: number
+  /** How loud against its own loudness (1), for what is heard in the head. */
+  gain?: number
+  /** How much of it goes to the room, for what is heard in the head. */
+  room?: number
   /** Metres at which it is half as loud as close to: a hammer blow 4, a charge 40. */
   reach?: number
   bus?: number
@@ -109,7 +115,7 @@ export async function sound(): Promise<Sound> {
     play(patch, how = {}) {
       if (context.state !== 'running') return false
       const t0 = performance.now()
-      let gain = 1, pan = how.pan ?? 0, lp = 0, late = 0, send = 0
+      let gain = how.gain ?? 1, pan = how.pan ?? 0, lp = 0, late = 0, send = how.room ?? 0
       if (how.at) {
         const h = hear(how.at, how.reach)
         if (h.gain < 0.002) return false
@@ -117,7 +123,7 @@ export async function sound(): Promise<Sound> {
         // What is far is heard more off the town than straight.
         send = Math.min(0.5, 0.08 + h.far / 120)
       }
-      const when = (context.currentTime + (how.after ?? 0) + late) * context.sampleRate
+      const when = ((how.when ?? context.currentTime + (how.after ?? 0)) + late) * context.sampleRate
       notes.push(when, id(patch), how.pitch ?? 0, how.size ?? 1, how.force ?? 0.7, how.dur ?? 0, gain * Math.sqrt(0.5 * (1 - pan)) * 1.25, gain * Math.sqrt(0.5 * (1 + pan)) * 1.25, lp, send, how.bus ?? BUS.world, 0)
       if (notes.length !== NOTE * Math.round(notes.length / NOTE)) throw new Error('a note is twelve numbers')
       // What is played by hand does not wait for the frame.

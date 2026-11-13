@@ -10,7 +10,7 @@ import * as ears from './ears.mjs'
 
 const { city, check, finish } = await start()
 try {
-  const page = await city('scale=0.5&fire=0&people=0')
+  const page = await city('scale=0.5&fire=0&people=0&music=0')
   await still(page)
   const state = () => page.evaluate(() => globalThis.engine.ears?.voice.context.state)
   check(await state() === 'suspended' || await state() === 'running', `the page has sound, waiting for a touch (${await state()})`)
@@ -111,7 +111,25 @@ try {
   const deep = await take(t0, t0 + 1.2)
   check(ears.band(deep.l, deep.sr, 3000, 20000) < 0.02, `under the sea a blast near by has no top left (${(ears.band(deep.l, deep.sr, 3000, 20000) * 100).toFixed(1)}% of it over 3 kHz)`)
 
+  // The music follows the place: the town's own in the street, and danger's at once when a charge goes off near by.
+  const sr = fall.sr
+  await page.close()
+  const tuned = await city('scale=0.5&fire=0&people=0')
+  await still(tuned)
+  await tuned.mouse.click(640, 360)
+  await tuned.evaluate(() => { const q = globalThis.engine.pose; q.y -= 9; q.yaw = 0; q.pitch = 0.2 })
+  const playing = () => tuned.evaluate(() => { const e = globalThis.engine.ears; return { place: e.place, mood: e.music.state.mood, composed: e.music.state.composed, ms: e.music.state.ms } })
+  await tuned.waitForFunction(() => globalThis.engine.ears.music.state.mood === 'town', null, { timeout: 20_000 }).catch(() => {})
+  const street = await playing()
+  check(street.place === 'town' && street.mood === 'town', `in the street the town's music plays (${street.composed} sections composed, the last in ${street.ms.toFixed(0)} ms on a thread of its own)`)
+  const from = Date.now()
+  await tuned.evaluate(() => { globalThis.engine.pickTool(1); globalThis.engine.input.use() })
+  await tuned.waitForFunction(() => globalThis.engine.ears.music.state.mood === 'danger', null, { timeout: 10_000 }).catch(() => {})
+  const alarm = await playing()
+  check(alarm.mood === 'danger', `a charge near by and the music is danger's ${((Date.now() - from) / 1000).toFixed(1)} s later (it hands over on a beat)`)
+  await tuned.close()
+
   const clip = arg('wav', '')
-  if (clip) { ears.wav(clip, fall.l, fall.r, fall.sr); ears.spectrogram(clip.replace(/\.wav$/, '.png'), fm, fall.sr, { tick: 1 }); console.log(`  kept ${clip} and its picture`) }
+  if (clip) { ears.wav(clip, fall.l, fall.r, sr); ears.spectrogram(clip.replace(/\.wav$/, '.png'), fm, sr, { tick: 1 }); console.log(`  kept ${clip} and its picture`) }
 } catch (e) { check(false, `the check itself failed: ${e.stack ?? e}`) }
 await finish('heard')

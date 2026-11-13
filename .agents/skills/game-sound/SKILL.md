@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 1, November 13, 2026. Scope: `engine/page/sound/` and `engine/test/{sound,heard,listen,ears}.mjs`.
+Version 2, November 13, 2026 (music). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -22,7 +22,7 @@ not fetch; what is from memory is said to be.
 | STK `Shakers.cpp` (Cook's PhISEM), github.com/thestk/stk | Many small collisions as random events through resonators: gravel, drops |
 | J. O. Smith, "Physical Audio Signal Processing", ccrma.stanford.edu/~jos/pasp | Karplus-Strong, the one-zero loop filter and its half sample of delay, piano stretch |
 | WebKit bugs 237322, 226240, 258864, 232728; MDN `AudioContext.state`, `AudioWorkletGlobalScope`, `AudioSession`; caniuse | iOS: see below |
-| Toussaint 2005 (BRIDGES), Witek et al. 2014 (PLOS ONE), Marshall's review of Butler 2006, the iMUSE patent US5315057 | Music: for the music step, not yet used |
+| Toussaint 2005 (BRIDGES), Witek et al. 2014 (PLOS ONE), Marshall's review of Butler 2006, the iMUSE patent US5315057 | Music: see below |
 | Sony ASWG-R001 through a Sony audio director's slides; ITU-R BT.1359 through summaries | -24 (or -23) LUFS for home, -18 for portable, true peak -1 dB; sound may lag picture by 100 ms unnoticed but lead it by only 35 to 45 |
 
 From memory, not fetched (Farnell's and Cook's own pages did not resolve, Audiokinetic and FMOD refused): Farnell's
@@ -68,6 +68,39 @@ output, not by the source.
   `hear(at)`. `kinds.ts`: the world's own patches, by the core's materials. `world.ts`: what the page tells
   (tools, blasts, the solver's words, a frame) turned into plays and bed levels. `tap.ts`: a worklet that
   copies what passes it, for checks and clips. `lab.html`: every sound, played by hand.
+
+## Music (`page/sound/music/`)
+
+After the owner's reference (Deedy Das, November 12, 2026). Its own page could not be read (it needs the owner's
+yes in the thread that asks), so this is built from the post's description and from the sources it cites.
+
+- **Rule and search.** `rules.ts`: 27 rules, each a measurement from 0 to 1 with what it is for, its source and
+  whether that source was read (11), is from memory (13) or is ours (3). `compose.ts`: the harmony first, then
+  each voice: 3,000 random candidates, the weighted mean of its rules, the best kept with each rule's score. A
+  section takes 20 to 80 ms in Node; in the page it is found on a worker.
+- **What was read**: Toussaint 2005 whole (Euclidean rhythms; `euclid(k, n)` gives his own forms: tresillo
+  `x..x..x.`, and turns of the cinquillo, the Venda clap, the samba); Witek 2014 (medium syncopation is liked
+  best, so `pushes` peaks in the middle); Butler 2006 only through Marshall's review (four on the floor; layers);
+  Krumhansl and Kessler's profiles (values from rnhart.net). The syncopation measure is after Longuet-Higgins and
+  Lee as commonly given, not read. Huron and Narmour's melody rules are from memory.
+- **The place chooses the idiom** (`MOODS`): town a house groove at 116, coast a lilt in six, sea no pulse with
+  three lines 3, 5 and 7 bars long that line up again only after 105 bars (Eno's incommensurable loops), snow
+  bells, night a piano, danger Phrygian at 138, making a marimba. **All are in D**, so a handover is a change of
+  mode. `world.ts` picks: danger (a charge near by, many bodies, much fire), then making (`wishes.busy`), then
+  under the sea or above 2.5 km, snow, night, coast or open country, town.
+- **It does not repeat.** A piece is composed from a new number each time. Within a piece the drums and chords
+  hold (a groove seed that changes every two sections) and melodies are found again each section, scored on
+  coming back to the piece's first figure. Calm places are silent for 25 to 140 s between pieces (Minecraft
+  waits 10 to 20 minutes; Breath of the Wild leaves the field mostly silent). Forty seeds gave forty melodies
+  and thirteen hats: the rules leave a hat little room, which is the idiom.
+- **No seam** (`conductor.ts`): notes are given 0.35 s ahead on the audio clock. When the place changes and has
+  held 4 s, the old piece stops being struck at its next bar line (danger: next beat) and rings out; the new
+  starts there with two layers. Measured: the quietest quarter second after a town-to-coast handover is 8 dB
+  under the town before it, and no sample step is bigger than the music's own.
+- **Instruments are patches** (15 of them), played on the music bus at half level: each place measures -33 to
+  -28 LUFS, and the world ducks it.
+- Not built: no tempo-matched crossfade (the old pulse just stops), no stingers, one arrangement arc for every
+  piece, nothing follows what the player does beyond the place. Whether any of it is pleasant is unheard.
 
 ## Rules that hold
 

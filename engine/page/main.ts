@@ -92,7 +92,7 @@ async function main() {
   const staff = await wand(device, gpu.format, march, core, controls, over)
   const colours = palette(), stuff = materials()
   // What is heard (#247): `?sound=0` leaves it out, and a page that cannot make sound goes on without it.
-  const ears = query.get('sound') === '0' ? null : await sound().then((voice) => hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies })).catch(() => null)
+  const ears = query.get('sound') === '0' ? null : await sound().then((voice) => hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind }, { music: query.get('music') !== '0' })).catch(() => null)
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 

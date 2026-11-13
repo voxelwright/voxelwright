@@ -8,6 +8,7 @@
 import { SET, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
 import type { Told } from '../told.ts'
+import { conductor } from './music/conductor.ts'
 
 /** What the page gives once: how to ask the land, and what is so now. */
 export interface Scene {
@@ -21,6 +22,12 @@ export interface Scene {
   flames(): Float32Array
   /** Bodies still moving. */
   bodies(): number
+  /** The hour of the day, 0 to 24. */
+  hour(): number
+  /** Whether something is being made for whoever is at this page. */
+  making(): boolean
+  /** What a cell is (the core's `world_kind`). */
+  kind(x: number, y: number, z: number): number
 }
 /** A body as the page keeps it: how many cells, and a face of it (whose kind says what it is made of). */
 interface Body { born: { cells: number; faces: Uint32Array } }
@@ -31,7 +38,10 @@ const BLOW = 30
 const BLOWS = 5
 const M = 10, G = 98
 
-export function hearing(voice: Sound, scene: Scene) {
+export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } = {}) {
+  const music = withMusic ? conductor(voice) : null
+  /** How much is going wrong near by, 0 to 1: blasts, things coming down, fire. It dies away over some seconds. */
+  let threat = 0, snow = false, snowLooked = -9, place = ''
   const seen = new Map<number, { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; quiet: number }>()
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
@@ -47,10 +57,14 @@ export function hearing(voice: Sound, scene: Scene) {
     voice.play(WORLD.crack, { at, force: 1, size: 0.6 + radius / 20, reach: reach * 0.35 })
     voice.play(WORLD.boom, { at, force: 1, size: 0.7 + radius / 16, reach })
     grind = Math.max(grind, Math.min(0.5, radius / 50)); grindPan = voice.hear(at).pan
+    // A charge near by is danger; a hammer blow is not, nor a blast a long way off.
+    if (radius >= 10) threat = Math.max(threat, Math.min(1, voice.hear(at, reach).gain * 3))
   }
 
   return {
-    voice, blast, count,
+    voice, blast, count, music,
+    /** Which place's music is wanted now. */
+    get place() { return place },
     /** A tool was used and this is what it met (what the page's tools return): the stuff struck answers. */
     used(tool: string, hit: { at: readonly [number, number, number]; material: number } | null | undefined) {
       if (tool === 'Cannon') { voice.play(WORLD.shot, { force: 0.9, reach: 20 }); return }
@@ -150,6 +164,20 @@ export function hearing(voice: Sound, scene: Scene) {
         }
       } else walked = 0
       last = [eye[0], eye[1], eye[2]]
+      // The music follows the place. Danger first and at once; then making; then where the ears are.
+      if (music) {
+        threat = Math.max(threat * Math.exp(-dt / 7), Math.min(1, scene.bodies() / 150), fire > 6 ? 0.6 : 0)
+        if (clock - snowLooked > 2) {
+          snowLooked = clock
+          // Snow is white sand lying high up (the core paints surf the same, at the sea's edge).
+          const k = ground > 300 ? scene.kind(Math.round(eye[0]), ground, Math.round(eye[2])) : 0
+          snow = (k & 15) === 4 && k >> 8 === 1
+        }
+        const hour = scene.hour(), sort = scene.paving(Math.round(eye[0]), Math.round(eye[2])) & 7
+        place = threat > 0.4 ? 'danger' : scene.making() ? 'making' : under || high > 2500 ? 'sea' : snow ? 'snow' : hour < 5.5 || hour > 20.5 ? 'night' : shore.level > 0.3 || sort < 2 ? 'coast' : 'town'
+        music.want(place, place === 'danger')
+        music.tick()
+      }
       voice.listen(eye, yaw)
     },
   }

@@ -3,6 +3,8 @@
 import { sound, SET } from './sound.ts'
 import { BREAK, HIT, WORLD } from './kinds.ts'
 import { patch, type Patch } from './patch.ts'
+import { conductor } from './music/conductor.ts'
+import { MOODS, TRIES } from './music/compose.ts'
 
 const voice = await sound()
 const sections = document.querySelector('#sections')!, state = document.querySelector('#state')!
@@ -77,6 +79,32 @@ slider(beds, 'surf', 0, (v) => voice.set(SET.surf, v))
 slider(beds, 'under the sea', 0, (v) => { voice.set(SET.under, v); voice.set(SET.muffle, 20000 * (700 / 20000) ** v); voice.set(SET.cover, v) })
 slider(beds, 'rubble', 0, (v) => voice.set(SET.rumble, v))
 
+// Music: the place picks it. Each voice was found among thousands of random patterns by its rules.
+const tunes = section('Music that follows the place', `Composed here as it plays: for each voice ${TRIES} random patterns are scored against named rules and the best is kept. Pick a place; picking another hands over at the next bar.`)
+const music = conductor(voice)
+const moodButtons = new Map<string, HTMLButtonElement>()
+const pickMood = (name: string | null) => { music.want(name, true); for (const [k, b] of moodButtons) b.classList.toggle('on', k === name) }
+for (const name of Object.keys(MOODS)) moodButtons.set(name, button(tunes, name, () => pickMood(name)))
+button(tunes, 'none', () => pickMood(null))
+const sheet = document.createElement('div')
+sheet.className = 'sheet'
+tunes.after(sheet)
+music.state.onsection = (s, index, layers) => {
+  const cell = (text: string, tag = 'td') => { const c = document.createElement(tag); c.textContent = text; return c }
+  sheet.textContent = ''
+  const head = document.createElement('p')
+  head.textContent = `${s.mood}: ${s.idiom}, ${s.bpm} beats a minute, section ${index + 1}, ${layers} layer${layers === 1 ? '' : 's'} in, found in ${s.ms.toFixed(0)} ms`
+  sheet.append(head)
+  for (const p of s.parts) {
+    if (!p.tried) continue
+    const box = document.createElement('details'), sum = document.createElement('summary'), table = document.createElement('table')
+    sum.textContent = `${p.voice}${p.layer > layers ? ' (not in yet)' : ''}: ${(p.total * 100).toFixed(0)}% (a random pattern: ${(p.mean * 100).toFixed(0)}%)`
+    for (const r of p.rules) { const row = document.createElement('tr'); row.append(cell(`${(r.score * 100).toFixed(0)}%`), cell(r.name), cell(r.why), cell(`${r.source}${r.read === 'read' ? '' : r.read === 'ours' ? ' (ours)' : ' (from memory)'}`)); table.append(row) }
+    box.append(sum, table); sheet.append(box)
+  }
+}
+setInterval(() => music.tick(), 50)
+
 const own = section('A patch of your own', 'This is what a model writes beside a thing it makes. It is checked as data and refused with the reason if it is not exactly the form.')
 const text = document.createElement('textarea'), said = document.createElement('div')
 text.value = JSON.stringify({ how: 'struck', hard: 0.9, rough: 0.1, shape: 'bell', pitch: 620, ring: 3, damp: 0.15, gain: 0.7 }, null, 1)
@@ -110,4 +138,4 @@ const draw = () => {
   requestAnimationFrame(draw)
 }
 requestAnimationFrame(draw)
-Object.assign(globalThis, { lab: { voice, hit, blast, HIT, BREAK, WORLD, SET, meter } })
+Object.assign(globalThis, { lab: { voice, music, pickMood, hit, blast, HIT, BREAK, WORLD, SET, meter } })
