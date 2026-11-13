@@ -8,7 +8,7 @@
 //   none    we have nothing to show        behind  we show it, theirs is better
 //   level   as good to look at             ahead   ours is better
 // The judge's scores are out of ten: two or more apart is ahead or behind, one apart is level.
-// Judged November 13 (dispatch log): fire 7 v 4, glass 5 v 4, tools 6 v 5 to us. Tumble's 7 v 5 was void: their
+// Judged November 12 (dispatch log): fire 7 v 4, glass 5 v 4, tools 6 v 5 to us. Tumble's 7 v 5 was void: their
 // frame was not the film's best wall, and is now.
 // Shown live and measured counts for nothing until a row is level to look at.
 import { still } from './kit.mjs'

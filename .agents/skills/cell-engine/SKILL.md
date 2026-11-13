@@ -839,7 +839,7 @@ still), with what is behind seen between them; the pool lets the ground show; mi
 (`water.landings`, `puffs.spray`). Mist at four a second from forty places cost a quarter of the picture's size;
 at one a second from two dozen it costs nothing the board's stamp shows.
 
-## The world from space (`page/space.ts`, November 12/13)
+## The world from space (`page/space.ts`, November 12)
 
 - **A pass of its own.** The boxes of cells reach 13 km. Over 25 km up (`SPACE` in `main.ts`) the marcher is not
   run at all and one full-screen pass draws the planet: a ball of the Earth's size, land and sea by noise of the
@@ -863,7 +863,7 @@ at one a second from two dozen it costs nothing the board's stamp shows.
 - A core test's time bound (`masonry_that_stops_askew_lies_as_a_heap`, 40 ms) failed at 44.8 ms beside the page
   checks. It is 250 now: a bound for a rule gone wrong, not for a busy machine.
 
-## The way down from space had a gap (November 13)
+## The way down from space had a gap (November 12)
 
 The first space change drew the planet from 25 km and checked only 300 km, 20,000 km and 1 km. Shot at 3, 6, 10, 15,
 20 and 24 km, the band from 8 to 25 km was a blue square in haze: the widest box of cells is 13 km tall with the
