@@ -116,6 +116,21 @@ const charge = async (page, turn, radius, pitch) => {
 // point either way from pass to pass (tumble's six passes: ours 6, 6.5, 6, 5, 5, 5 to theirs 5, 5.5, 5, 7, 6, 7).
 // Water's lack: the falling water is "an opaque white pillar", with no foam and nothing seen through it. The grade
 // by day was softened after this pass (glow.ts) and no judge has seen that yet.
+// The eighth full judge (logged, main df0c203f, 22 rows: the first to see the new stands and hours, the night's
+// glow, the stronger shafts under water and the land without terraces): town 6 v 7.5, light 6 v 7, tumble 7 v 4.5,
+// topple 6.5 v 6, blast 6 v 6.5, fire 6.5 v 4, water 6.5 v 5.5, rubble 7 v 6, glass 5.5 v 4.5, frame 6 v 6.5,
+// tools 5.5 v 5, ruin 6 v 6.5, sunset 6.5 v 8, under 6 v 8, snow 4.5 v 7.5, rain 6 v 7.5, road 6.5 v 7, whole 5.5 v 7.5,
+// signs 5 v 8.5, dusk 6 v 7, space 6.5 v 7, there 6.5 v 5. The states below are that judge's: behind 5 (shared by
+// our own account), level 17, ahead 3. Town, frame and rain moved up to level; the town seen whole moved down to
+// behind. Tumble is kept level, not ahead, until their film has been looked through for a better wall than the
+// frame given (the judge called it "a reddish blur"). Snow fell: its new stand, close under the peaks, was
+// judged worse than the old one, and the row is back on the far stand at the new hour, unjudged. What the rows
+// behind lack, in the judge's words: under ("bare vertical sticks with no leafy kelp form and no seabed detail"),
+// snow (see its row), whole ("a grid of grey boxes in fog that doesn't read as a real place"), signs ("no square
+// and no people, and only three neon signs on a plain street"). Of the level rows: town ("no fuel station, and its
+// buildings look like flat boxes"), road ("a bare, featureless brown plain, with no scrub or landforms"), sunset
+// ("no real coastline, just a flat skyline strip"), space ("a smooth blur, without the terrain and coastline
+// detail"), rain ("coarse" beside richer reflections and lit fronts).
 // The seventh full judge (logged, main bb9e9226, 22 rows: the softer day grade, water's streaked fall and the planet
 // from space for the first time): town 5 v 7, light 6 v 7, tumble 6 v 7, topple 6 v 7, blast 7 v 6, fire 6 v 4,
 // water 5 v 6, rubble 7 v 6, glass 5 v 4, frame 5 v 7, tools 5 v 4, ruin 6 v 7, sunset 7 v 8, under 6 v 8, snow 5 v 7,
@@ -131,7 +146,7 @@ const charge = async (page, turn, radius, pitch) => {
 // from a compressed film. At the film's own size the bar reads plainly, twelve named tools to our seven.
 export const ROWS = [
   // The town of cells being broken.
-  { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
+  { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'level',
     // From in the works yard in the middle of the morning, when the sun is on it and on the fronts across the street
     // (at noon the towers south of the yard shade both): its water tower on its legs close by, five shops with their
     // names over the doors, cars at the kerb.
@@ -200,7 +215,7 @@ export const ROWS = [
       await page.waitForTimeout(250)
       return page.screenshot()
     } },
-  { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 41.6], state: 'behind',
+  { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 41.6], state: 'level',
     // The yard's office, six storeys of glass: charges along its near side and inside it take the glass and leave
     // the steel and the floors.
     // Seen from the south-west in the afternoon, with the sun on the two sides that face the eye and the town behind:
@@ -244,17 +259,18 @@ export const ROWS = [
     // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
     stand: { from: [-1300, 380], up: 3, to: [-1280, 395], high: 8 }, hour: 10, near: [60, 2, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
-    // The range north of the town from over its foothills late in the afternoon, the sun low in the west: peaks
-    // with one side lit and one in shadow, rock where it is steep.
-    stand: { from: [-800, -6000], up: 300, to: [200, -9400], high: 2200 }, hour: 16.3, near: [8000, ROCK] },
-  { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'behind',
+    // The range north of the town from the hills before it, late in the afternoon with the sun low in the west:
+    // white slopes with one side of each peak in shadow, pines below. (From close under the peaks at the same hour
+    // the eighth judge saw "a close, grey, dithered peak with no distance, no scale and no white snow".)
+    stand: { from: [300, -5200], up: 60, to: [-300, -9000], high: 1700 }, hour: 16.3, near: [8000, ROCK] },
+  { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'level',
     // Down the street by the start from the middle of the wet road: a lamp over it with its glow, the lamps' light
     // drawn out on the road, lit windows and a shop's sign, the towers' windows beyond.
     stand: [-14, 1.6, 1.5, 84, 6], hour: 21, rain: 1, near: [80, LAMP], aim: [0.28, 0.29] },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'level',
     // The road out of town across the dry plain, 6 km east of the start, at sunrise: poles down one side of it.
     stand: { from: [6100, 407], up: 1.8, to: [9000, 407], high: 25 }, hour: 6.45, near: [300, SAND, ASPHALT] },
-  { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'level',
+  { key: 'whole', what: 'A real city seen whole from far off', theirs: ['earth', 21.8], state: 'behind',
     // The town across its lake, from over the land west of it. It is an invented town: the row is of a real one.
     stand: [-1500, 160, -300, 80, -7], near: [3000, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] },
   { key: 'signs', what: 'A square of lit signs at night, people and cars in it', theirs: ['earth', 27.2], state: 'behind',
