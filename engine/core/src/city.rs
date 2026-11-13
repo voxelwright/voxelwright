@@ -4,9 +4,9 @@
 //! with the slope, blocks of towers where the town is busiest, parks, trees and lamps.
 //! Synthetic: no real place's data is in here. All lengths are in the finest cells (10 cm).
 
-use crate::hash::{hash, noise, unit};
+use crate::hash::{hash, hash3, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, REFUGE, arid, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, way};
+use crate::land::{HOME, REFUGE, arid, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, reef_column, reef_form, way};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -933,60 +933,185 @@ fn reef(x: i32, z: i32) -> f32 {
 /// on it in patches a few metres across, rose and olive and ochre.
 fn sea_bed(x: i32, z: i32, g: i32) -> Kind {
     if g < SEA && g > SEA - SHELF && reef(x, z) > 0.12 {
-        let sort = noise(x, z, 37, 62) + (unit(x >> 2, z >> 2, 63) - 0.5) * 0.12;
-        return if sort < 0.32 {
-            kind(ROCK, grey(5 + (unit(x >> 2, z >> 2, 64) * 3.0) as u8))
-        } else if sort < 0.45 {
-            kind(ROCK, colour(22, 7))
-        } else if sort < 0.6 {
-            kind(GRASS, colour(6, 7))
-        } else if sort < 0.72 {
-            kind(ROCK, colour(4, 1))
+        // A reef is grown over column by column (land.rs `reef_column`). The mounds are pale heads and gold and olive
+        // weed, paler the taller a column stands and the higher on its mound; the hollows between are dark; a
+        // patch of violet now and then. What sort grows changes from mound to mound, not from column to column: at
+        // random it was camouflage. (Red and orange are black at this depth.)
+        let (cx, cz) = (x.div_euclid(3), z.div_euclid(3));
+        // A stack's foot is bare dark rock, banded.
+        if noise(x, z, 310, 59) > 0.8 {
+            return kind(ROCK, if noise(x, z + g * 3, 260, 47) > 0.5 { colour(2, 9) } else { grey(9 + (noise(x, z, 900, 48) * 3.0) as u8) });
+        }
+        let smooth = reef_form(x, z).0 / 64.0;
+        let high = smooth + reef_column(x, z) * 0.3;
+        let sort = noise(x, z, 150, 62) + (unit(cx, cz, 63) - 0.5) * 0.1;
+        let pick = hash(cx, cz, 64);
+        // Tone by height: 0 the hollows, 3 the crowns.
+        let tone = ((high - 0.12) * 5.5).clamp(1.0, 3.0) as usize;
+        return if smooth < 0.1 {
+            kind(ROCK, [colour(9, 9), colour(6, 9), colour(10, 9)][pick as usize % 3])
+        } else if sort < 0.42 {
+            kind(ROCK, [[colour(4, 7), colour(3, 7)], [colour(3, 0), colour(4, 7)], [colour(3, 0), colour(4, 0)]][tone - 1][pick as usize % 2])
+        } else if sort < 0.47 && pick % 2 == 0 {
+            kind(ROCK, [colour(19, 1), colour(21, 1), colour(18, 2)][(pick >> 4) as usize % 3])
+        } else if sort < 0.62 {
+            kind(ROCK, [[colour(5, 8), colour(5, 9)], [colour(5, 7), colour(4, 8)], [colour(5, 1), colour(4, 1)]][tone - 1][pick as usize % 2])
         } else {
-            kind(GRASS, colour(7, 2))
+            kind(ROCK, [[colour(3, 8), colour(4, 8)], [colour(3, 7), colour(4, 2)], [colour(4, 1), colour(4, 0)]][tone - 1][pick as usize % 2])
         };
     }
     // Ripples in the sand: a paler line every few cells, bent by a slow noise; darker sand in drifts.
     let ripple = (x + (noise(x, z, 90, 65) * 60.0) as i32).rem_euclid(6);
-    kind(SAND, if ripple == 0 { colour(3, 0) } else if noise(x, z, 300, 66) > 0.6 { colour(3, 7) } else { OWN })
+    kind(SAND, if ripple == 0 { WHITE } else if noise(x, z, 300, 66) > 0.6 { colour(4, 7) } else { colour(4, 0) })
 }
 
-/// Kelp: a holdfast on the rock, a stipe that wanders as it climbs to just under the top of the water, and blades
-/// off it to every side all the way up, each out from a float and up, then hanging over at its end.
+/// The eight ways the sea may be drifting at a place, and so the way everything that grows in it streams.
+const DRIFT: [(i32, i32); 8] = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
+
+/// One blade of kelp from a float at a stipe's side: a ribbon two cells thick that streams `way`, lifted by its
+/// float and hanging over towards its end, wide in its middle and ragged along its edges. `spare` is how much
+/// further from the ground the support rule lets leaves reach from here (a cell sideways is 1, a cell down 2, up
+/// is free): a blade is cut to it, and one with nothing to spare is not grown.
+fn stamp_blade(s: &mut Scratch, at: [i32; 3], way: usize, long: i32, lift: i32, hang: i32, spare: i32, shade: Kind, pale: Kind, seed: u32) {
+    let dark = kind(LEAVES, colour(5, 9));
+    let (dx, dz) = DRIFT[way % 8];
+    // A step along a slanting way is two cells sideways, and the wide middle one or two more.
+    let reach = if dx != 0 && dz != 0 { 2 } else { 1 };
+    // (Kept back: the float's own step out, the wide middle, and the cells of a box that lean on the one that hangs.)
+    let kept = 4 + 2 * reach;
+    let long = long.min((spare - kept) / reach);
+    if long < 4 {
+        return;
+    }
+    let most = (spare - kept - long * reach) / 2;
+    s.fill([at[0] + dx, at[1], at[2] + dz], [at[0] + dx + 2, at[1] + 3, at[2] + dz + 2], pale, Meet::Middle);
+    let mut drop = 0;
+    for out in 2..=long {
+        // It hangs over more and more steeply, never by more than its own thickness in a step: it would part.
+        drop = ((out - 2) * (out - 2) / hang).min(most).min(drop + 2);
+        let y = at[1] + out.min(4) / 2 + out / lift - drop;
+        let ragged = hash(out, way as i32, seed);
+        let wide = if out < 3 || out > long - 1 { 0 } else { 1 } + if long > 9 && out > 3 && out < long - 2 && ragged % 3 != 0 { 1 } else { 0 };
+        // Wider to one side than the other, by turns: an edge that is not a ruled line.
+        let (l, r) = (wide - (ragged >> 3) as i32 % 2 * wide.min(1), wide - (ragged >> 4) as i32 % 2 * wide.min(1));
+        let (cx, cz) = (at[0] + dx * out, at[2] + dz * out);
+        // Dark by the stipe, its own colour along it, pale at its end.
+        let tone = if out * 3 < long { dark } else if out >= long - 1 { pale } else { shade };
+        s.fill([cx - dz.abs() * l, y, cz - dx.abs() * l], [cx + 2 + dz.abs() * r, y + 2, cz + 2 + dx.abs() * r], tone, Meet::Middle);
+    }
+}
+
+/// A frond of kelp that hangs: out from its float a step or two, then down along the stipe as a ragged ribbon,
+/// drawn a little the way the sea drifts. Tiers of blades held out level were the branches of a pine; what hangs
+/// is weed. A cell down is 2 by the support rule, so a frond is as long as `spare` lets it be.
+fn stamp_frond(s: &mut Scratch, at: [i32; 3], way: usize, long: i32, spare: i32, shade: Kind, pale: Kind, seed: u32) {
+    let dark = kind(LEAVES, colour(5, 9));
+    let (dx, dz) = DRIFT[way % 8];
+    let reach = if dx != 0 && dz != 0 { 2 } else { 1 };
+    let long = long.min((spare - 4 - 5 * reach) / 2);
+    if long < 3 {
+        return;
+    }
+    s.fill([at[0] + dx, at[1], at[2] + dz], [at[0] + dx + 2, at[1] + 3, at[2] + dz + 2], pale, Meet::Middle);
+    let (mut cx, mut cz) = (at[0] + dx * 2, at[2] + dz * 2);
+    let mut outs = 2;
+    for down in 0..long {
+        let ragged = hash(down, way as i32, seed);
+        // A step further out now and then, three at most: it hangs away from the stipe as it goes down.
+        if outs < 5 && down > 0 && ragged % 4 == 0 {
+            cx += dx;
+            cz += dz;
+            outs += 1;
+        }
+        let wide = if down == 0 || down >= long - 1 { 0 } else { 1 };
+        let (l, r) = (wide - (ragged >> 3) as i32 % 2 * wide, wide - (ragged >> 4) as i32 % 3 / 2 * wide);
+        let y = at[1] + 1 - down;
+        let tone = if down < 2 { dark } else if down >= long - 2 { pale } else { shade };
+        s.fill([cx - dz.abs() * l, y, cz - dx.abs() * l], [cx + 2 + dz.abs() * r, y + 2, cz + 2 + dx.abs() * r], tone, Meet::Middle);
+    }
+}
+
+/// Giant kelp: from a holdfast on the rock a few stipes climb towards the top of the water and fan apart, each
+/// leaning its own way round the sea's drift. Fronds grow in clumps with bare stipe between: in a clump blades of
+/// every length stream from floats, some held up, some level, most hanging over, gold and olive; and a stipe that
+/// reaches the top lies along under it, its blades hanging. (Pairs of blades at every step, turned a quarter each
+/// time, were a fir tree; a blade at every step all the way up, a cypress.) Leaves reach 40 from the ground by the
+/// support rule: what a stipe leans is taken off what its blades may reach.
 fn stamp_kelp(s: &mut Scratch, x: i32, z: i32, g: i32, deep: i32, seed: u32) {
-    let hue = 4 + (seed >> 3) as u8 % 2;
-    let (stem, dark, mid, pale) = (kind(LEAVES, colour(4, 9)), kind(LEAVES, colour(hue + 1, 5)), kind(LEAVES, colour(hue, 4)), kind(LEAVES, colour(hue, 2)));
-    s.ball([x, g, z], 4, stem, 0, seed, None);
-    let tall = deep * (74 + (seed >> 8) as i32 % 22) / 100;
-    let (mut wx, mut wz, mut y, mut step) = (x - 1, z - 1, g, 0);
-    while y < g + tall {
-        let turn = hash(wx * 8 + step, wz * 8 + (seed & 7) as i32, 77);
-        s.fill([wx, y, wz], [wx + 3, y + 5, wz + 3], stem, Meet::Touch);
-        // Two blades at a step, to opposite sides, the pair turned a quarter from the pair below: long low down
-        // and shorter towards the top, three or five cells wide, two thick.
-        if step >= 2 {
-            for side in 0..2 {
-                let t = turn >> (8 + side * 9);
-                let (dx, dz): (i32, i32) = [(1, 0), (0, 1), (-1, 0), (0, -1)][(step as usize + side as usize * 2) % 4];
-                if t % 5 == 0 {
-                    continue;
+    let drift = (noise(x, z, 5000, 87) * 24.0) as usize % 8;
+    let stem = kind(LEAVES, colour(5, 9));
+    let golds = [colour(4, 3), colour(4, 4), colour(5, 3), colour(4, 5), colour(4, 8), colour(5, 4), colour(3, 3), colour(4, 4)];
+    let pale = kind(LEAVES, colour(4, 2));
+    s.ball([x, g, z], 4, kind(LEAVES, colour(5, 6)), 0, seed, None);
+    // No two alike: one plant is young and half the height, one leans hard with shorter blades, one stands nearly
+    // straight with long ones.
+    let grown = [100, 100, 85, 100, 60, 100, 45, 90][(seed >> 9) as usize % 8];
+    let leans = 3 + (seed >> 14) as i32 % 7;
+    for n in 0..3 + (seed >> 6) % 3 {
+        let h = hash(x + n as i32 * 7, z, seed ^ 77);
+        // Each stipe its own way: down the drift, or a turn or two to either side of it.
+        let way = (drift + [0, 1, 7, 2, 6][n as usize % 5]) % 8;
+        let (dx, dz) = DRIFT[way];
+        let slant = if dx != 0 && dz != 0 { 2 } else { 1 };
+        // Most stop short of the top; some reach it and lie along it.
+        let tall = (deep - 3).min(deep * (58 + (h % 50) as i32) / 100 * grown / 100);
+        let (mut wx, mut wz, mut y) = (x - 2 + (h >> 8) as i32 % 4, z - 2 + (h >> 11) as i32 % 4, g);
+        // How far from the ground the stipe is here, as the support rule counts it.
+        let mut far = 3;
+        // A clump of fronds is this many steps more; then bare stipe until the next begins. None in the first two
+        // metres over the rock, and none hangs down into them: what stands on the reef round it (tubes, heads of
+        // rock) is put after and would cut a blade through, and its end would be loose.
+        let (mut clump, mut bare) = (0, 5 + (h >> 20) as i32 % 4);
+        while y < g + tall {
+            let t = hash3(wx, y, wz, h);
+            s.fill([wx, y, wz], [wx + 2, y + 4, wz + 2], stem, Meet::Touch);
+            if clump == 0 && bare == 0 {
+                clump = 2 + (t % 4) as i32;
+                bare = 1 + ((t >> 3) % 4) as i32;
+            }
+            if clump > 0 && y + 6 < SEA {
+                clump -= 1;
+                for b in 0..2 + (t >> 6) % 2 {
+                    let t = hash3(wx, y + b as i32, wz, h ^ 9);
+                    // Mostly the stipe's own way, some a turn or two to either side, a short one against it.
+                    let turn = [0, 0, 1, 7, 0, 2, 6, 4][(t >> 4) as usize % 8];
+                    let long = if turn == 4 { 4 + (t >> 8) as i32 % 3 } else { 5 + (t >> 8) as i32 % 7 + (y - g) * 4 / tall.max(1) };
+                    // Two in three hang down along the stipe; the rest stream out from it, held up by the float or
+                    // hanging over.
+                    if (t >> 1) % 3 != 0 {
+                        stamp_frond(s, [wx, y + b as i32, wz], way + [0, 1, 7, 2, 6, 4, 3, 5][(t >> 4) as usize % 8], 5 + (t >> 8) as i32 % 9, (40 - far).min(8 + (y - g - 20) * 2), kind(LEAVES, golds[(t >> 18) as usize % 8]), pale, t);
+                        continue;
+                    }
+                    stamp_blade(s, [wx, y + b as i32, wz], way + turn, long, [2, 99, 99, 99, 99, 99][(t >> 26) as usize % 6], [1, 1, 2, 2, 3, 5, 8, 30][(t >> 13) as usize % 8], (40 - far).min(8 + (y - g - 20) * 2), kind(LEAVES, golds[(t >> 18) as usize % 8]), pale, t);
                 }
-                let long = (6 + (t % 9) as i32).min(6 + (g + tall - y) / 4);
-                let shade = [dark, mid, mid, pale][(t >> 3) as usize % 4];
-                // The float it grows from.
-                s.fill([wx + dx * 2, y + 1, wz + dz * 2], [wx + 3 + dx * 2, y + 4, wz + 3 + dz * 2], pale, Meet::Middle);
-                for out in 3..=long {
-                    let rise = (out.min(long * 2 / 3) - (out - long * 2 / 3).max(0) * 2) / 2;
-                    let wide = if out > long - 2 || out < 4 { 1 } else { 2 };
-                    let (bx, bz) = (wx + 1 + dx * out, wz + 1 + dz * out);
-                    s.fill([bx - dz.abs() * wide, y + 1 + rise, bz - dx.abs() * wide], [bx + 1 + dz.abs() * wide, y + 3 + rise, bz + 1 + dx.abs() * wide], shade, Meet::Middle);
+            } else if bare > 0 {
+                bare -= 1;
+            }
+            // It leans its way, more the higher it is, and wanders a little.
+            if far < leans && ((t >> 22) % 100) as i32 * tall < leans * 400 / slant * (50 + (y - g) * 100 / tall.max(1)) / 100 {
+                wx += dx;
+                wz += dz;
+                far += slant;
+            } else if far < leans && (t >> 29) == 0 {
+                wx += dz;
+                wz -= dx;
+                far += slant;
+            }
+            y += 4;
+        }
+        if tall == deep - 3 {
+            // Along under the top of the water, its blades hanging from it.
+            for along in 0..(6 + (h >> 16) as i32 % 8) / slant {
+                wx += dx;
+                wz += dz;
+                far += slant;
+                s.fill([wx, y - 2, wz], [wx + 2, y, wz + 2], stem, Meet::Touch);
+                let t = hash3(wx, along, wz, h);
+                if t % 2 == 0 {
+                    stamp_blade(s, [wx, y - 5, wz], way + [0, 1, 7][(t >> 4) as usize % 3], 5 + (t >> 8) as i32 % 7, 99, 3 + (t >> 13) as i32 % 4, 40 - far - 6, kind(LEAVES, golds[(t >> 18) as usize % 8]), pale, t);
                 }
             }
         }
-        wx += [-1, 0, 0, 1, 0, 0][turn as usize % 6];
-        wz += [0, -1, 1, 0, 0, 0][(turn >> 2) as usize % 6];
-        y += 5;
-        step += 1;
     }
 }
 
@@ -1003,18 +1128,18 @@ fn stamp_reef(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
     let sort = (seed >> 12) % 24;
     let on = reef(x, z);
     if on > 0.12 {
-        if deep > 45 && sort < 7 && noise(px, pz, 5, 78) > 0.42 {
+        if deep > 45 && sort < 5 && noise(px, pz, 5, 78) > 0.42 {
             stamp_kelp(s, x, z, g, deep, seed);
-            if sort < 3 {
-                let (ox, oz) = (x + 9 - (seed >> 20) as i32 % 19, z + 9 - (seed >> 25) as i32 % 19);
-                let og = ground(ox, oz);
-                stamp_kelp(s, ox, oz, og, SEA - og, seed ^ 0x5bd1);
-            }
             return;
         }
-        // Small things, a few to a patch, each on its own ground.
-        for n in 0..4u32 {
+        // Small things, a few to a patch, each on its own ground. The round heads of rock are put last: a blade of
+        // weed put through the edge of one left a cell of it hanging in the water.
+        for n in (0..8u32).map(|n| n % 4 + (n / 4) * 16) {
+            let (heads, n) = (n >= 16, n % 16);
             let h = hash(px * 8 + n as i32, pz, 79);
+            if heads != ((h >> 12) % 9 == 2 || (h >> 12) % 9 == 5) {
+                continue;
+            }
             let (tx, tz) = (px * FIELD + 3 + (h % 42) as i32, pz * FIELD + 3 + ((h >> 6) % 42) as i32);
             let tg = ground(tx, tz);
             if SEA - tg < 14 {
@@ -1023,12 +1148,12 @@ fn stamp_reef(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
             match (h >> 12) % 9 {
                 0 | 1 => {
                     // Tubes in a bunch, pale at their mouths.
-                    let hue = [4u8, 18, 21, 6][(h >> 16) as usize % 4];
+                    let hue = [4u8, 19, 21, 5][(h >> 16) as usize % 4];
                     for tube in 0..3 + (h >> 18) % 4 {
                         let t = hash(tx + tube as i32, tz, 80);
                         let (ux, uz, high) = (tx - 3 + (t % 7) as i32, tz - 3 + ((t >> 3) % 7) as i32, 4 + ((t >> 6) % 9) as i32);
                         let ug = ground(ux, uz);
-                        s.fill([ux, ug - 2, uz], [ux + 2, ug + high, uz + 2], kind(ROCK, colour(hue, 3)), Meet::Touch);
+                        s.fill([ux, ug - 2, uz], [ux + 2, ug + high, uz + 2], kind(ROCK, colour(hue, 1)), Meet::Touch);
                         s.fill([ux, ug + high, uz], [ux + 2, ug + high + 1, uz + 2], kind(ROCK, colour(hue, 0)), Meet::Middle);
                     }
                 }
@@ -1052,13 +1177,24 @@ fn stamp_reef(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
         return;
     }
     if noise(px, pz, 9, 83) > 0.6 && sort < 14 {
-        // Eelgrass on the sand, a tuft of blades.
-        for blade in 0..12u32 {
-            let h = hash(px * 16 + blade as i32, pz, 84);
-            let (bx, bz) = (x - 11 + (h % 23) as i32, z - 11 + ((h >> 5) % 23) as i32);
+        // Eelgrass on the sand: a tuft of blades that bend over the way the sea drifts. (Straight up they were
+        // sticks.)
+        let (dx, dz) = DRIFT[(noise(x, z, 5000, 87) * 24.0) as usize % 8];
+        for blade in 0..18u32 {
+            let h = hash(px * 32 + blade as i32, pz, 84);
+            let (bx, bz) = (x - 9 + (h % 19) as i32, z - 9 + ((h >> 5) % 19) as i32);
             let bg = ground(bx, bz);
-            let tall = (5 + ((h >> 8) % 14) as i32).min(SEA - bg - 3);
-            s.fill([bx, bg, bz], [bx + 1 + (h >> 16) as i32 % 2, bg + 1 + tall, bz + 1], kind(LEAVES, colour(7 + (h >> 12) as u8 % 2, [3, 4, 5, 2][(h >> 14) as usize % 4])), Meet::Touch);
+            let tall = (4 + ((h >> 8) % 10) as i32).min(SEA - bg - 3);
+            let leaf = kind(LEAVES, colour(5 + (h >> 12) as u8 % 3, [2, 3, 1, 2][(h >> 14) as usize % 4]));
+            let (wide_x, wide_z) = (1 + (h >> 16) as i32 % 2, 1 + (h >> 17) as i32 % 2);
+            // Three lengths of it, each a cell further down the drift than the one under it.
+            // (Each a step across one face: on a slanting drift first along x, then along z.)
+            let steps = [(0, 0), if dx != 0 { (dx, 0) } else { (0, dz) }, if dx != 0 && dz != 0 { (dx, dz) } else { (dx * 2, dz * 2) }];
+            for (part, (ox, oz)) in steps.into_iter().enumerate() {
+                let part = part as i32;
+                let (lo, hi) = (bg + (tall * part / 3 - 1).max(0), bg + 1 + tall * (part + 1) / 3);
+                s.fill([bx + ox, lo, bz + oz], [bx + ox + wide_x, hi, bz + oz + wide_z], leaf, Meet::Touch);
+            }
         }
     } else if sort == 23 {
         let r = 4 + ((seed >> 17) % 8) as i32;
@@ -1116,6 +1252,10 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         return stamp_reef(s, x, z, g, seed);
     }
     if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) || cleared(x, z) {
+        return;
+    }
+    // Nothing is planted on rock that stands in the sea: a tree on a stack's steep top was not held by it.
+    if offshore(x, z).is_some_and(|s| s > 0.0) {
         return;
     }
     let sort = (seed >> 12) % 24;

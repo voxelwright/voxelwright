@@ -1431,3 +1431,51 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - **Still rough**: the sun is a white blob and the sky is pale beside the film's (the engine thread's); the tables'
   walls are smooth, with no fallen blocks at their feet; nothing moves or stands on the road; the pale crusts are
   bright and square-edged close to.
+
+## The kelp forest, the grown-over reef and the sun's shafts (#227, November 12)
+
+- **Kelp read as a tree five times over.** Even pairs of blades turned a quarter each step: a fir. A blade at every
+  step: a cypress. Blades in clumps held out level: a pine. What reads as weed is what hangs: `city.rs` `stamp_frond`
+  goes out from its float a step or two and then down along the stipe as a ragged ribbon, dark by the stipe and pale
+  at its end, and two fronds in three are that. A fresh judge still calls it a land plant, and calls the film's the
+  same: a straight pole 10 m tall is the part no blade changes.
+- **The support rule prices a kelp plant.** Leaves reach 40 from the ground: a cell sideways is 1, a cell down 2, up
+  is free, and leaves hold only to leaves. So a stipe leans a metre at most whatever its height, what it leans is
+  taken off what its blades may reach (`spare`), and a blade may drop no more than its own thickness in a step or it
+  parts. A blade stepping along a slanting way moves two cells a step and must cross one face at a time (eelgrass
+  bent on the diagonal touched only at corners and fell).
+- **What is put later cuts what was put before.** A tube of the reef stamped after the kelp cut a low blade through
+  and its end hung loose; a blade of red weed through the edge of a round head of rock left one cell of rock in the
+  water. No blade starts in the first two metres over the rock or hangs into them, and the heads are put last.
+- **`what_grows_on_the_reefs_is_at_rest` looked at 30 boxes between 5 and 14 m.** Asked every 23 m from 4 to 17 m of
+  water it found those faults and one of main's: a town tree on a sea stack's steep top, its crown held by nothing.
+  Nothing is planted on rock that stands in the sea now. The box is 22 m high, so in deeper water it cuts kelp off
+  under the top of the sea and a blade hanging from above the cut reads as loose: deeper than 17 m is not asked. A
+  blast beside kelp in 18 to 26 m of water may so drop blades that hang from above its box: not looked at.
+- **A reef is grown over column by column** (`land.rs` `reef_form`, `reef_column`, `overgrown`): mounds a dozen metres
+  across, round heads of a few metres, and columns three cells square each to its own height, capped two metres
+  under the top of the sea. `city.rs` `sea_bed` colours a column by how high it stands on its mound (dark hollows,
+  pale crowns) and by a sort that changes from mound to mound. Colour picked at random column by column was
+  camouflage; cells of `GRASS` read as a meadow under a blue filter (the paint draws grass), so the reef is `ROCK`;
+  grey turns blue under water, so pale things are cream.
+- **`deep()`: one colour from top to bottom is a veil.** The water's own light now runs from dark below to bright
+  above, what is met is lit a little harder and loses less red (0.075 for 0.2 a metre: gold reads as gold at 10 m),
+  the net of light lies only on what faces up (on a wall it was a mesh), and the top has bright faces along its wave
+  lines.
+- **Shafts, three ways thrown out and one kept.** Fourteen samples along the look add every beam the look crosses
+  into even faint streaks, and their grain is a screen of dots at the 0.30 of full size the page holds under water.
+  Sheets of beams at set distances are round blots. Beams with hard sides all the way down are slabs (the one read
+  that fell, 5 v 7). Kept: beams that stand out from where the sun is overhead, lit by the way round the sun's own
+  line that the look lies, soft at their sides, fading downward, more of them the more water the look goes through:
+  three noise lookups for twenty-eight. They go by direction, so they do not pass the eye as real beams would; where
+  the eye is shifts which are lit.
+- **Cost.** Steps a pixel at the new stand 23.1 (the old reef stand 28.0, the lake 25.3). The shader at the lake
+  stand, paced at 2560 x 1440, one server at a time, each with the GPU's own idle figure beside it: ours 39.3 ms at
+  1.4, 44.4 at 2.0, 50.4 at 3.7; main 47.8 at 2.6, 51.3 at 2.9. Not dearer; about 3% cheaper at equal load, which is
+  inside the noise of a GPU seven threads share.
+- **One read a round cannot tell a change from noise.** Five blind reads of the row came back 6, 6, 6, 6, 5 against
+  7 while the picture changed a great deal, and the judge's words for the film's light went from "hard, clear rays"
+  to "fan out softly". What worked: one sheet of the film's frame and five of ours, unlabeled and shuffled, ranked
+  by one fresh judge (theirs 6, ours 5.5 down to 3.5). Change one thing a variant and rank the variants together.
+- **Rough still**: the weed reads as a tree; nothing sways; a far stack's foot shows through the haze as a pale
+  striped slab; the page holds 0.30 to 0.40 under water on a shared GPU; shafts ride with the eye.

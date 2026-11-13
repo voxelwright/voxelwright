@@ -226,6 +226,26 @@ pub fn offshore(x: i32, z: i32) -> Option<f32> {
     Some(west - 66_000.0 + (noise(x, z, 23_000, 51) - 0.5) * 20_000.0 + (0.5 - cape) * 10_000.0 + (noise(x, z, 1500, 53) - 0.5) * 1800.0)
 }
 
+/// One of the columns a reef is grown over with, 0 to 1: they are three cells square, and each stands to a height
+/// of its own (city.rs colours a column by the same number, pale where it stands tall).
+pub fn reef_column(x: i32, z: i32) -> f32 {
+    unit(x.div_euclid(3), z.div_euclid(3), 75)
+}
+
+/// The form of what a reef's rock is grown over with, in cells over the rock where the reef is whole, and how far
+/// up its mound a place is (0 to 1): mounds a dozen metres across with round heads of a few metres on them.
+pub fn reef_form(x: i32, z: i32) -> (f32, f32) {
+    let (mound, head) = (ease(0.25, 0.8, noise(x, z, 105, 74)), noise(x, z, 29, 76));
+    (mound * 46.0 + ease(0.3, 0.75, head) * 26.0 * (0.3 + mound), mound)
+}
+
+/// A reef's form and, on it, the ragged tops of what grows there column by column. Without it a reef was a smooth
+/// slope in patches of colour.
+fn overgrown(x: i32, z: i32) -> f32 {
+    let (form, mound) = reef_form(x, z);
+    form + reef_column(x, z) * (2.0 + 6.0 * mound)
+}
+
 /// How high the ground is at a column: its top cell.
 pub fn ground(x: i32, z: i32) -> i32 {
     let town = noise(x, z, 9000, 11) * 1200.0 + noise(x, z, 2600, 12) * 300.0 + noise(x, z, 700, 13) * 50.0 - 560.0;
@@ -267,6 +287,10 @@ pub fn ground(x: i32, z: i32) -> i32 {
                 let shelf = ease(100.0, 700.0, s);
                 let reef = ease(0.5, 0.8, noise(x, z, 900, 56));
                 let mut bed = -45.0 - ease(0.0, 2600.0, s) * 150.0 - ease(2600.0, 40_000.0, s) * 900.0 + (reef * (25.0 + noise(x, z, 230, 57) * 70.0) + noise(x, z, 60, 58) * 8.0) * shelf;
+                if reef * shelf > 0.0 {
+                    // What grows stops short of the top of the water: two metres under it, or where the rock was.
+                    bed = (bed + overgrown(x, z) * reef * shelf).min(bed.max(-20.0));
+                }
                 // Stacks of rock stand out of the water off the headlands.
                 let stack = noise(x, z, 310, 59);
                 if stack > 0.8 && s < 5000.0 {

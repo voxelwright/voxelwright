@@ -264,12 +264,16 @@ export const ROWS = [
     // coastline, just a flat skyline strip".)
     stand: { from: [-6000, 400], up: 60, to: [-6800, -100], high: 20 }, hour: 17.35, near: [1500, WATER, ROCK, 3] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
-    // On a reef off that coast, seven metres down in the middle of the morning: kelp standing to the top of the
-    // water, the reef's small things round its foot, sand between, the shafts the waves send down and the waves
-    // themselves seen from under. (The town's lake has only ribbon weed on flat sand, and may not change: the eighth
-    // judge saw there "bare vertical sticks with no leafy kelp form and no seabed detail".)
+    // In a kelp forest on a reef off that coast, six metres down in the morning, the sun behind the eye: giant kelp
+    // in gold and olive with its fronds hanging, the reef's pale mounds and small things in front, sand with
+    // eelgrass beside it, the sun's shafts in dark water and the waves' bright faces overhead. (The town's lake has
+    // only ribbon weed on flat sand, and may not change: the eighth judge saw there "bare vertical sticks with no
+    // leafy kelp form and no seabed detail". The first kelp off this coast had even pairs of blades, and was a wood
+    // of firs.) Own blind reads, November 12 (dispatch log, #227): 6 v 7 four times and 5 v 7 once on the way, then
+    // 5.5 v 6 in a ranking of six; what is still said of both is that the weed reads as a tree. No judge of the
+    // board has seen it, so the state stands.
     // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
-    stand: { from: [-6400, -1625], up: 2.5, to: [-6415, -1605], high: 7 }, hour: 10, near: [60, 2, 3, 4, LEAVES] },
+    stand: { from: [-6370, -1516], up: 3, to: [-6404, -1486], high: 9 }, hour: 9.5, near: [60, 2, 3, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
     // In a high valley of the massif north of the town, soon after sunrise: the refuge below the pass with its red
     // roof under snow and its lit windows, its mast, the stakes of the way going up the valley, the last pines of

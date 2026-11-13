@@ -1007,10 +1007,13 @@ mod tests {
     fn what_grows_on_the_reefs_is_at_rest() {
         // The sea off the coast west of the town, over its reefs with their kelp: nothing may be loose or drop.
         let (mut weed, mut fell) = (0, Vec::new());
-        for z in (-17_000..-12_000).step_by(330) {
-            for x in (-64_600..-63_000).step_by(270) {
+        // Every 23 m, from four metres of water to seventeen, where no corner of the box is land (a cliff's trees
+        // are cut from their ground by the box, as open_country_is_at_rest says): the box is 22 m high from 5 m under its middle's floor, and in deeper water it cuts the kelp
+        // off under the top of the sea, so that a blade hanging from a stipe above the cut is held by nothing in it.
+        for z in (-17_000..-12_000).step_by(230) {
+            for x in (-66_400..-63_000).step_by(230) {
                 let g = ground(x, z);
-                if g > -50 || g < -140 {
+                if g > -40 || g < -170 || [(-80, -80), (80, -80), (-80, 80), (80, 80)].iter().any(|&(dx, dz)| ground(x + dx, z + dz) >= crate::city::SEA) {
                     continue;
                 }
                 let mut r = city_at(x, z);
