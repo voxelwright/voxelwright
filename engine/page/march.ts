@@ -638,7 +638,9 @@ fn sky(rd: vec3f) -> vec3f {
     // Stars: one in some of the small squares the sky is cut into, the brighter the fewer.
     let square = vec3i(floor(rd * 220.0));
     let star = hash3i(square, 19u);
-    col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9;
+    // Fewer the brighter the sky overhead is, and none under a sky of rain (which is told by that brightness: the
+    // weather itself is not read here, see the globals).
+    col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);
   }
   if (rd.y > 0.015) {
     let far = (15000.0 - g.eye.y) / rd.y;
@@ -814,6 +816,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     let dark = g.weather.z;
     // Its light is its colour made strong: a pale tint by day is a coloured tube by night.
     if (sign) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
+    // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow.
+    if (stuff == 15u && !sign) { col += vec3f(1.0, 0.76, 0.46) * 4.6 * dark; }
     let fine = hit.cell * i32(1u << hit.level);
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
@@ -832,6 +836,11 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     let out = (floor(vec2f(fine.xz) / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
     let lamps = stuff != 5u && fine.y >= 0 && dot(out, out) < 35000.0 * 35000.0;
     var pool = 0.0;
+    // On wet road and paving each lamp also shows as itself, thrown back: a warm streak drawn out towards the eye.
+    let wet = select(0.0, g.weather.y, (stuff == 6u || stuff == 7u) && n.y > 0.5);
+    let back = reflect(rd, vec3f(0.0, 1.0, 0.0));
+    let side = normalize(vec2f(-rd.z, rd.x) + vec2f(0.00001, 0.0));
+    var streak = 0.0;
     for (var k = 0; k < 9 && lamps; k++) {
       // Each lamp's light, by where it hangs in its block: four at the crossing, three down the street along x,
       // two down the one along z.
@@ -840,6 +849,19 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       var d = abs(block - lamp);
       d = min(d, vec2f(1280.0, 800.0) - d);
       pool += 1.0 / (1.0 + dot(d, d) / 6400.0);
+      if (wet > 0.0) {
+        // Which way the nearest of them is, and how far the look thrown back passes from it: narrow across, long along.
+        var to = lamp - block;
+        to -= round(to / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
+        let off = back - normalize(vec3f(to.x, 68.0, to.y));
+        let across = dot(off.xz, side);
+        streak += exp(-across * across * 700.0 - max(dot(off, off) - across * across, 0.0) * 9.0) / (1.0 + dot(d, d) / 90000.0);
+      }
+    }
+    if (streak > 0.0) {
+      // Broken by the ripples of the film of water it lies on.
+      let rough = 0.45 + 1.1 * noise2(vec2f(fine.xz) * 0.31) * noise2(vec2f(fine.zx) * 0.07);
+      col += vec3f(1.0, 0.72, 0.4) * streak * rough * wet * dark * 2.6;
     }
     col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;
   }
@@ -896,12 +918,12 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
     if (under > 0.0) {
       let at = s.xz + sun.xz * (under / sun.y);
       let gathered = noise2(at * 0.021 + vec2f(g.time * 0.06, g.time * 0.045)) * noise2(at * 0.057 - vec2f(g.time * 0.05, g.time * 0.08));
-      shafts += smoothstep(0.22, 0.6, gathered) * exp(-under * M * 0.09);
+      shafts += smoothstep(0.24, 0.44, gathered) * exp(-under * M * 0.07);
     }
   }
   // They show most looking towards where the light comes from.
   let facing = 0.6 + 0.4 * pow(max(dot(rd, sun), 0.0), 3.0);
-  col += g.lightSun.rgb * vec3f(0.45, 0.95, 0.85) * shafts * 0.1 * (reach / 450.0) * facing * 3.6;
+  col += g.lightSun.rgb * vec3f(0.5, 0.95, 0.82) * shafts * 0.1 * (reach / 450.0) * facing * 4.4;
   return col;
 }
 
@@ -1039,7 +1061,9 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     return Drawn(vec4f(h, h * h, pow(h, 4.0), 1.0), depth);
   }
   if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), depth); }
-  return Drawn(vec4f(tone(col), 1.0), depth);
+  // Beside the colour, how far brighter than any lit surface the pixel is (a lamp, a sign, a fire), as one less
+  // that: the last pass spreads those into a glow at night, which the colour alone, cut off at white, cannot say.
+  return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)), depth);
 }
 `
 

@@ -19,20 +19,31 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   return out;
 }
 // What is bright enough to glow: over 0.8 of full, and the more the brighter. Four looks, each the mean of four texels.
+// At night (u.strength here is how far it is night) a lamp, a sign or a fire glows by how far brighter than a lit
+// surface it is, which the marcher left in the picture's alpha as one less that.
 @fragment fn bright(in: Out) -> @location(0) vec4f {
   var sum = vec3f(0.0);
   for (var k = 0; k < 4; k++) {
-    let c = textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0).rgb;
+    let c = textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0);
     let most = max(c.r, max(c.g, c.b));
-    sum += c * smoothstep(0.8, 1.0, most);
+    sum += c.rgb * (smoothstep(0.8, 1.0, most) + (1.0 - c.a) * u.strength * 10.0);
   }
   return vec4f(sum * 0.25, 1.0);
 }
-// Spread along one way: nine texels' worth in five looks.
+// A quarter of the size again: four looks, each the mean of four texels, so no texel is passed over.
+@fragment fn down(in: Out) -> @location(0) vec4f {
+  var sum = vec3f(0.0);
+  for (var k = 0; k < 4; k++) { sum += textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0).rgb; }
+  return vec4f(sum * 0.25, 1.0);
+}
+// As it is, times a strength: for adding the wide spread onto the near one.
+@fragment fn plain(in: Out) -> @location(0) vec4f { return vec4f(textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb * u.strength, 1.0); }
+// Spread along one way: nine texels' worth in five looks, each between two texels so that none is passed over (a
+// lamp is a few texels far brighter than white: with looks further apart it came out as a grid of its own ghosts).
 @fragment fn blur(in: Out) -> @location(0) vec4f {
   var sum = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb * 0.227;
   for (var k = 1; k < 3; k++) {
-    let off = u.step * (f32(k) * 2.0 - 0.6);
+    let off = u.step * select(3.2308, 1.3846, k == 1);
     let w = select(0.07, 0.316, k == 1);
     sum += (textureSampleLevel(picture, smooth_, in.uv + off, 0.0).rgb + textureSampleLevel(picture, smooth_, in.uv - off, 0.0).rgb) * w;
   }
@@ -87,7 +98,7 @@ fn chance(c: vec2i) -> f32 {
 `
 
 /** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for. Returns the pass to call each frame. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number]) => void> {
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -99,8 +110,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     ],
   })
   const make = (entryPoint: string, format: GPUTextureFormat) => device.createRenderPipelineAsync({ label: `glow ${entryPoint}`, layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint, targets: [{ format }] } })
-  const small: GPUTextureFormat = 'rgba8unorm'
-  const [bright, blur, last] = await Promise.all([make('bright', small), make('blur', small), make('last', gpu.format)])
+  // Kept as floats: a lamp is a few texels many times brighter than white, and spread wide it must still show.
+  const small: GPUTextureFormat = 'rgba16float'
+  const [bright, blur, last, down] = await Promise.all([make('bright', small), make('blur', small), make('last', gpu.format), make('down', small)])
+  const add = await device.createRenderPipelineAsync({ label: 'glow add', layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'plain', targets: [{ format: small, blend: { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'zero', dstFactor: 'one' } } }] }, primitive: { topology: 'triangle-list' } })
   const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
   // The rain has a pipeline of its own, added onto the picture; its module is the same code with only its own binding used.
   const wet = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {} }] })
@@ -123,27 +136,40 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     if (kept?.from === from) return kept
     for (const t of kept?.textures ?? []) t.destroy()
     for (const b of kept?.blocks ?? []) b.destroy()
-    const quarter = [Math.max(1, from.size[0] >> 2), Math.max(1, from.size[1] >> 2)]
-    const texture = () => device.createTexture({ size: quarter, format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
-    const textures = [texture(), texture()], views = textures.map((t) => t.createView())
-    const blocks = [block([1 / from.size[0], 1 / from.size[1]]), block([1.8 / quarter[0], 0]), block([0, 1.8 / quarter[1]]), block([0, 0], 1.0)]
+    const quarter = [Math.max(1, from.size[0] >> 2), Math.max(1, from.size[1] >> 2)], sixteenth = [Math.max(1, quarter[0] >> 2), Math.max(1, quarter[1] >> 2)]
+    const texture = (size: number[]) => device.createTexture({ size, format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+    // Two at a quarter of the picture's size for the near glow; two at a sixteenth for the night's wide one: a lamp
+    // in wet air has a halo many times its own size.
+    const textures = [texture(quarter), texture(quarter), texture(sixteenth), texture(sixteenth)], views = textures.map((t) => t.createView())
+    const blocks = [block([1 / from.size[0], 1 / from.size[1]]), block([1 / quarter[0], 0]), block([0, 1 / quarter[1]]), block([0, 0], 1.0), block([1 / quarter[0], 1 / quarter[1]]), block([1 / sixteenth[0], 0]), block([0, 1 / sixteenth[1]]), block([0, 0], 0.8)]
     const bind = (picture: GPUTextureView, spread: GPUTextureView, uniforms: GPUBuffer) => device.createBindGroup({ layout, entries: [{ binding: 0, resource: picture }, { binding: 1, resource: sampler }, { binding: 2, resource: spread }, { binding: 3, resource: { buffer: uniforms } }] })
-    kept = { from, textures, blocks, views, binds: [bind(from.color, views[1], blocks[0]), bind(views[0], views[0], blocks[1]), bind(views[1], views[1], blocks[2]), bind(from.color, views[0], blocks[3])] }
+    kept = { from, textures, blocks, views, binds: [bind(from.color, views[1], blocks[0]), bind(views[0], views[0], blocks[1]), bind(views[1], views[1], blocks[2]), bind(from.color, views[0], blocks[3]), bind(views[0], views[0], blocks[4]), bind(views[2], views[2], blocks[5]), bind(views[3], views[3], blocks[6]), bind(views[2], views[2], blocks[7])] }
     return kept
   }
-  const pass = (encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, bind: GPUBindGroup, to: GPUTextureView) => {
-    const p = encoder.beginRenderPass({ colorAttachments: [{ view: to, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] })
+  const pass = (encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, bind: GPUBindGroup, to: GPUTextureView, onto = false) => {
+    const p = encoder.beginRenderPass({ colorAttachments: [{ view: to, loadOp: onto ? 'load' : 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] })
     p.setPipeline(pipeline)
     p.setBindGroup(0, bind)
     p.draw(3)
     p.end()
   }
-  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35]) => {
+  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0) => {
     const k = keep(from)
+    device.queue.writeBuffer(k.blocks[0], 0, new Float32Array([1 / from.size[0], 1 / from.size[1], night, 0]))
     device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, 0]))
     pass(encoder, bright, k.binds[0], k.views[0])
-    pass(encoder, blur, k.binds[1], k.views[1])
-    pass(encoder, blur, k.binds[2], k.views[0])
+    // Twice over: the looks are close together, and once is too narrow a glow.
+    for (let twice = 0; twice < 2; twice++) {
+      pass(encoder, blur, k.binds[1], k.views[1])
+      pass(encoder, blur, k.binds[2], k.views[0])
+    }
+    if (night > 0) {
+      // The wide glow: the near one made a quarter of its size again, spread there, and added back onto it.
+      pass(encoder, down, k.binds[4], k.views[2])
+      pass(encoder, blur, k.binds[5], k.views[3])
+      pass(encoder, blur, k.binds[6], k.views[2])
+      pass(encoder, add, k.binds[7], k.views[0], true)
+    }
     pass(encoder, last, k.binds[3], to)
     if (rain > 0) {
       device.queue.writeBuffer(rainBlock, 0, new Float32Array([from.size[0], from.size[1], time, rain * 0.4]))

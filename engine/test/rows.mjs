@@ -132,9 +132,10 @@ const charge = async (page, turn, radius, pitch) => {
 export const ROWS = [
   // The town of cells being broken.
   { key: 'town', what: 'A town of things worth breaking: towers on legs, a fuel station, shops with signs', theirs: ['engine', 0.6], state: 'behind',
-    // From in the works yard: its water tower on its legs close by, and across the street five shops with their
+    // From in the works yard in the middle of the morning, when the sun is on it and on the fronts across the street
+    // (at noon the towers south of the yard shade both): its water tower on its legs close by, five shops with their
     // names over the doors, cars at the kerb.
-    stand: { from: [54, 437], up: 1.8, to: [33, 400], high: 7 }, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
+    stand: { from: [58, 426], up: 1.5, to: [38, 404], high: 10 }, hour: 10.5, near: [200, STEEL, WOOD, BRICK, GLASS, PLASTER] },
   { key: 'light', what: 'Daylight: clouds, soft shadows, darker corners, haze with distance', theirs: ['engine', 13.2], state: 'level',
     stand: [-9, 1.8, 2.2, 62, 5] },
   { key: 'tumble', what: 'A wall that is hit comes apart in pieces that turn as they fall', theirs: ['engine', 43.6], state: 'level',
@@ -202,13 +203,20 @@ export const ROWS = [
   { key: 'frame', what: 'A building stripped to its frame', theirs: ['engine', 41.6], state: 'behind',
     // The yard's office, six storeys of glass: charges along its near side and inside it take the glass and leave
     // the steel and the floors.
-    stand: { from: [YARD.office[0] - 21, YARD.office[1] - 20], up: 7, to: YARD.office, high: 9 }, near: [40, GLASS, STEEL, CONCRETE], falls: 100,
+    // Seen from the south-west in the afternoon, with the sun on the two sides that face the eye and the town behind:
+    // from the north it stood in its own shadow and that of the towers. The smoke of the charges that stripped it is
+    // let clear, and the picture is taken as one more goes off on its ground floor.
+    stand: { from: [YARD.office[0] - 21, YARD.office[1] + 20], up: 7, to: YARD.office, high: 9 }, hour: 15.5, near: [40, GLASS, STEEL, CONCRETE], falls: 100,
     act: async (page) => {
       const [x, z] = YARD.office
-      for (const [dx, dz, high] of [[-5, -4, 2], [0, -4, 6], [4, -3, 3], [-2, 2, 5], [3, 3, 8], [-4, -3, 11], [2, -4, 14], [4, 2, 12], [-3, 3, 16], [0, 0, 9]]) {
+      for (const [dx, dz, high] of [[-5, 4, 2], [0, 4, 6], [4, 3, 3], [-2, -2, 5], [3, -3, 8], [-4, 3, 11], [2, 4, 14], [4, -2, 12], [-3, -3, 16], [0, 0, 9]]) {
         await strikeAt(page, [x + dx, z + dz], high, 26, false)
         await page.waitForTimeout(500)
       }
+      await page.waitForTimeout(12_000)
+      await strikeAt(page, [x - 4, z + 4], 2, 18, true)
+      await page.waitForTimeout(260)
+      return page.screenshot()
     } },
   { key: 'tools', what: 'A bar of tools to pick from', theirs: ['engine', 26.4], state: 'level',
     stand: FRONT, near: [16, ...HOUSE],
@@ -231,15 +239,18 @@ export const ROWS = [
     // From the town's shore over its lake to where the sun goes down over the mountains beyond it, towers either side.
     stand: { from: [-1200, 407], up: 4, to: [-2000, -193], high: 30 }, hour: 17.35, near: [400, WATER] },
   { key: 'under', what: 'Under water: shafts of light, weed', theirs: ['earth', 5.6], state: 'behind',
-    // On the floor of the town's lake, 11 m down, at a clearing in a grove of ribbon weed, looking up the slope to
-    // where the light comes in. (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
-    stand: { from: [-1276, 398], up: 2.5, to: [-1262, 412], high: 5.5 }, near: [60, 2, 4, LEAVES] },
+    // On the floor of the town's lake where the weed is short, in the middle of the morning, looking up and towards
+    // the sun: the shafts the waves send down, the top of the water, a grove of ribbon weed to one side.
+    // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
+    stand: { from: [-1300, 380], up: 3, to: [-1280, 395], high: 8 }, hour: 10, near: [60, 2, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
-    // The range north of the town from the hills before it: pines below, rock, snow on the tops and in the gullies.
-    stand: { from: [300, -5200], up: 60, to: [-300, -9000], high: 1700 }, near: [8000, ROCK] },
+    // The range north of the town from over its foothills late in the afternoon, the sun low in the west: peaks
+    // with one side lit and one in shadow, rock where it is steep.
+    stand: { from: [-800, -6000], up: 300, to: [200, -9400], high: 2200 }, hour: 16.3, near: [8000, ROCK] },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'behind',
-    // Down the street by the start from low over the wet road: a record shop's sign and the lit windows in it.
-    stand: [30, 1.5, 2.2, 300, 5], hour: 21, rain: 1, near: [80, LAMP] },
+    // Down the street by the start from the middle of the wet road: a lamp over it with its glow, the lamps' light
+    // drawn out on the road, lit windows and a shop's sign, the towers' windows beyond.
+    stand: [-14, 1.6, 1.5, 84, 6], hour: 21, rain: 1, near: [80, LAMP], aim: [0.28, 0.29] },
   { key: 'road', what: 'Open land to the horizon', theirs: ['earth', 17.6], state: 'level',
     // The road out of town across the dry plain, 6 km east of the start, at sunrise: poles down one side of it.
     stand: { from: [6100, 407], up: 1.8, to: [9000, 407], high: 25 }, hour: 6.45, near: [300, SAND, ASPHALT] },

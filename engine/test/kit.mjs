@@ -23,7 +23,8 @@ export async function serve(reports = '/dev/null', more = []) {
 
 /**
  * A server and a browser, a list of failures and how to finish. `check` prints and keeps what failed;
- * `finish(name)` closes what this script started and ends the process, failed if anything did.
+ * `finish(name)` closes what this script started and ends the process, failed if anything did (or with a code and
+ * a word of its own, if nothing failed).
  */
 export async function start() {
   // ENGINE_SHARED: the check is run in a shared world (world.mjs), on a server of its own that keeps one in a file
@@ -59,12 +60,12 @@ export async function start() {
     return p
   }
   const url = shared ? shared.url : server.url
-  const finish = async (name) => {
+  const finish = async (name, code = 0, word = 'ok') => {
     if (shared) await browser.close().catch(() => {})   // a connection: closing it leaves the shared browser running
     else { await browser.close(); server.stop() }
     if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
-    console.log(`${name}: ok`)
-    process.exit(0)
+    console.log(`${name}: ${word}`)
+    process.exit(code)
   }
   return { url, browser, page, city, check, failures, finish }
 }

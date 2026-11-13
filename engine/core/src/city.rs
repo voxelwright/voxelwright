@@ -966,18 +966,36 @@ pub fn make(s: &mut Scratch) {
     let side = SIDE as i32;
     let (lo, hi) = s.bounds();
     let near = k <= SHAPES_TO;
+    // The ground under every column, and under one beyond each edge.
+    let wide = side + 2;
+    let mut tops = vec![0i32; (wide * wide) as usize];
+    for cz in -1..=side {
+        for cx in -1..=side {
+            tops[((cz + 1) * wide + cx + 1) as usize] = ground(((s.low[0] + cx) << k) + half, ((s.low[2] + cz) << k) + half);
+        }
+    }
     // The ground, a column at a time: earth up to its top cell, then what the surface is.
     for cz in 0..side {
         for cx in 0..side {
             let (x, z) = (((s.low[0] + cx) << k) + half, ((s.low[2] + cz) << k) + half);
-            let g = ground(x, z);
+            let here = ((cz + 1) * wide + cx + 1) as usize;
+            let g = tops[here];
             let (top, raise) = surface(x, z, g);
             // Under the sea a coarse column's ground stays a cell under the sea's top, however shallow the water: far
             // water stays water.
             let gy = if g < SEA { (g >> k).min((SEA >> k) - 1) } else { g >> k } - s.low[1];
             let (ux, uz) = (cx as usize, cz as usize);
+            // Out of town, what covers the land goes down the side of every step in it, as far as
+            // the lowest column beside this one: with earth there, a slope of snow or grass or sand was banded with
+            // brown, a line for every step, and a mountain was terraces.
+            let covered = if is_open(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z)) {
+                let lowest = tops[here - 1].min(tops[here + 1]).min(tops[here - wide as usize]).min(tops[here + wide as usize]);
+                (gy - ((g - lowest.min(g)) >> k) - 1).max(0)
+            } else {
+                gy
+            };
             for y in 0..gy.clamp(0, side) {
-                s.cells[at(ux, y as usize, uz)] = EARTH_KIND;
+                s.cells[at(ux, y as usize, uz)] = if y >= covered { top } else { EARTH_KIND };
             }
             let lifted = if k == 0 { raise } else { 0 };
             for y in gy..=gy + lifted {

@@ -271,7 +271,7 @@ async function main() {
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
     }
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade, march.under || pose.y > SPACE ? 0 : 1 - march.day)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')

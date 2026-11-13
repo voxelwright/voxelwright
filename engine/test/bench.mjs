@@ -54,5 +54,6 @@ try {
 } catch (e) {
   failures.push(String(e))
 }
-if (busy && !failures.length) { console.log('bench: busy'); process.exit(3) }
+// Through finish, so that the server and the browser this started are stopped: ending here left the server running.
+if (busy && !failures.length) await finish('bench', 3, 'busy')
 await finish('bench')

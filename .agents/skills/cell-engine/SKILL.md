@@ -493,8 +493,9 @@ front coming down, staying down and losing no cell.
 - After a fast flight (90 m in a second and a half) the shadows are wrong for under a second: measured November
   12 on a busy Mac, 14% of pixels differ at the stop with 416 parts of the town still to make, 7% when the town is
   whole 0.4 s later, 2% (the standing figure) from 0.75 s. `test/shadows.mjs` used to fail on the figure at the stop,
-  which is how far behind the machine is and not a fault of the maps (it failed alone, on main, through the runner
-  and outside it). It now checks that the two agree again within five seconds and says how long it took.
+  which is mostly how far behind the machine is (it failed alone, on main, through the runner and outside it). Part
+  is the maps' own: 7% with the town whole and no tile undrawn, until the tiles of the boxes that moved are drawn
+  again. It now checks that the two agree again within five seconds and says how long it took.
 - Mapped shadows have edges in steps a cell wide and differ from traced ones in about 1.4%
   of a street view's pixels. Crumbs and anything else that moves cast none. A map's texel
   holds a distance as a 32-bit float from the world's zero: fine across a city, too coarse
@@ -917,3 +918,46 @@ stands where the page's own mover worker stood: the same messages in, the same w
 - **Not there**: no agent lives in it (one came, acted and left). A person is three cubes, with no name shown.
   Nothing is said or heard. Sixty-four people in one street has not been tried: two pages and a script have.
   The world's clock is one thread: a big blast holds everything else for most of a second.
+
+## Stands, hours and the night's light (November 12, for the six rows behind)
+
+Looked at beside the films' frames, four of the six rows behind were lost before any shading: the picture was taken
+in shadow. Shoot a row from several sides at several hours before building anything for it (a scratch script that
+takes `{name, stand, hour, rain}` shots and a contact sheet: about a minute for twenty).
+
+- **The yard and the lot of the glass office lie in the shadow of the towers south of them from late morning.** The
+  town row is shot at 10.5, the frame row from the south-west at 15.5. A frame's charges go on the sides the eye sees.
+  Ten charges leave dark smoke for 3.5 to 7.5 s each: the frame's picture waits twelve seconds and is taken as one
+  more charge goes off on the ground floor.
+- **Mountains were terraces because the land was earth under one top cell.** A slope is steps, and each step's riser
+  showed brown: a line for every step, rings round every hill. Out of town what covers a column now goes down its
+  side as far as the lowest column beside it (`city::make`, one more `ground()` for a ring of columns round the
+  sector, not four a column). The town is as it was (its sum holds); in town a street's risers are the paint's
+  business (`slope`).
+- **Far slopes do take the sun's shadow.** With the sun low (16.3) a range has a lit side and a dark one. At noon it
+  is a white sheet.
+- **Shafts under water were already there and too faint to be seen** (`deep()`): the threshold is narrower
+  (0.24 to 0.44) and they are 2.4 times as strong. At 7 times they washed the picture out. Where the weed is short
+  and the look goes up towards the sun they read; in the tall grove they never did.
+- **Night glow** (`glow.ts`): the picture's alpha is one less how far a pixel is over the light of any lit surface
+  (over 1.2 before the tone curve: a lamp, a sign, a fire). At night (`1 - day`) the last pass's bright part takes
+  those in at ten times their weight, in float textures (`rgba16float`: in 8 bits a lamp is a few texels of white
+  and spread wide it is nothing). The wide glow is the near one made a quarter of its size again (four looks of
+  four texels each, none passed over), spread there and added back. By day the weight is 0 and the picture is as it
+  was, but for the blur: its looks were 1.8 texels apart for reach and left gaps, which a point far brighter than
+  white shows as a grid of ghosts; they are now the proper 1.38 and 3.23 texels, twice over.
+- The other passes blend premultiplied (`one`, `one-minus-src-alpha` for colour and alpha alike), so smoke in front of
+  a lamp takes its glow down by its own cover, and pieces and crumbs write alpha 1 (no glow).
+- **A street lamp's head** is lit warm at 4.6 times at night (it was the palette's pale glow: a white square).
+- **Lamp streaks on a wet road** (`lit()`, in the lamps' loop): for road and paving under rain, the look thrown back
+  off level ground is set against the way to each lamp's head (68 cells over the ground at the rule's places),
+  narrow across the look (700) and long along it (9), broken by two noises. No reflection is traced for it.
+- **Stars under rain**: the weather may not be read in `sky()` (three tries cost the dry day 8 to 10%). The stars
+  are dimmed by how bright the sky overhead is (`skyZenith.g`, read there already), which rain raises. Measured turn
+  about against main on a busy GPU, the least of twelve paced frames a turn, four turns: street 32.7 ms against
+  34.9, from high 52.1 against 50.4. No dearer that can be told.
+- **`test/bench.mjs` cannot tell on a busy GPU** (its fixed work took 4.8 to 7.2 ms against 1.44 when the baseline
+  was kept), and when it ended busy it left its server running: it ends through `finish` now. For an A/B on a busy
+  machine: two servers (the live checkout is main), pages turn about, the least of many paced frames.
+- A row's self-check looks 0.04 radians round its aim: a lamp's head 12 m off is narrower than that. Scan with
+  `engine.pick(right, up)` for where the thing is and give the row that `aim`.
