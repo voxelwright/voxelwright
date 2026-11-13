@@ -32,6 +32,8 @@ import { asker } from './ask.ts'
 import { making } from './making.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
+import { sound } from './sound/sound.ts'
+import { hearing } from './sound/world.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -89,6 +91,8 @@ async function main() {
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
   const colours = palette(), stuff = materials()
+  // What is heard (#247): `?sound=0` leaves it out, and a page that cannot make sound goes on without it.
+  const ears = query.get('sound') === '0' ? null : await sound().then((voice) => hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies })).catch(() => null)
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -241,6 +245,7 @@ async function main() {
     steer(Math.max(1000 / 60, screenMs))
     const v = view(), to = fit()
     staff.frame(v)
+    ears?.frame(v.eye, pose.yaw, dt)
     lap('steer')
     fallOn(dt)
     lap('fallOn')
@@ -359,6 +364,7 @@ async function main() {
     }
     // Born first: a shard may be born and break again within the one answer.
     for (const born of told.born) { moving.set(born.id, falling.add(born)); fell.pieces++; fell.cells += born.cells }
+    if (!far || far.live) ears?.told(told, moving)
     for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
     // Something went up of itself: the cells it emptied came as edits, and this is its fire, smoke and shock.
     if (!far || far.live) for (const b of told.bursts) { smoke.blast(b.at, b.radius); shocks.push({ at: b.at, radius: b.radius, t: folkClock.now() }); fell.bursts++ }
@@ -437,7 +443,7 @@ async function main() {
   const struck = (at: readonly [number, number, number], radius: number, seen = true) => {
     put()
     change(ball(at[0], at[1], at[2], radius, 0))
-    if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }) }
+    if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }); ears?.blast(at, radius) }
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
   const others = far ? presence(far, folk, over, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw })) : null
@@ -531,7 +537,7 @@ async function main() {
   pickTool(tool)
   tools.forEach((_, i) => own.keys.set(`Digit${i + 1}`, () => pickTool(i)))
   own.keys.set('KeyF', () => void ignite())
-  own.use = () => { void tools[tool].use(); return true }
+  own.use = () => { const { name, use } = tools[tool]; void Promise.resolve(use()).then((hit) => ears?.used(name, hit as Parameters<NonNullable<typeof ears>['used']>[1])); return true }
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
   const pick = async (right = 0, up = 0, plain = false) => {
@@ -619,6 +625,7 @@ async function main() {
 
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { ears })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.
