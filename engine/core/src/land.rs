@@ -135,9 +135,41 @@ pub fn dry(x: i32, z: i32) -> f32 {
     open(x, z) * ease(38_000.0, 60_000.0, (x - HOME.0) as f32) * (1.0 - ease(25_000.0, 50_000.0, (HOME.1 - z) as f32)) * (1.0 - far(x, z))
 }
 
+/// The refuge below the pass, in a high valley of the massif north of the town under a wall of rock: its yard's
+/// middle and how high it lies. The ground is levelled for it, as a builder would, and eases back into the valley
+/// round it.
+pub const REFUGE: (i32, i32, i32) = (47_300, -126_620, 7220);
+
+/// The marked way from the refuge up the valley to the pass: how far along it a place is and how far to its right,
+/// in cells; `None` away from it. It wanders as a trodden way does. It runs a little east of north (5 east for
+/// every 12 north).
+pub fn way(x: i32, z: i32) -> Option<(i32, i32)> {
+    let (dx, dz) = (x - REFUGE.0, z - REFUGE.1);
+    if dx < -900 || dx > 3400 || dz > 500 || dz < -6200 {
+        return None;
+    }
+    let (along, aside) = ((dx * 5 - dz * 12) / 13, (dx * 12 + dz * 5) / 13);
+    (along > 150 && along < 6000).then(|| (along, aside - ((noise(along, 0, 1100, 77) - 0.5) * 700.0 + (noise(along, 0, 320, 78) - 0.5) * 120.0) as i32 * (along - 150).min(600) / 600))
+}
+
+/// Where a place `along` the way and `aside` to its right is.
+pub fn on_way(along: i32, aside: i32) -> (i32, i32) {
+    (REFUGE.0 + (along * 5 + aside * 12) / 13, REFUGE.1 + (-along * 12 + aside * 5) / 13)
+}
+
 /// How far a place is from the middle of the road out of town, which runs east from the start along its street.
 pub fn off_road(x: i32, z: i32) -> Option<i32> {
     (x > HOME.0).then(|| (z - HOME.1).abs())
+}
+
+/// `noise` for places too big for its whole numbers: the mountains ask theirs sixteen times finer than a cell.
+fn fine(x: i64, z: i64, period: i64, seed: u32) -> f32 {
+    let (cx, cz) = (x.div_euclid(period) as i32, z.div_euclid(period) as i32);
+    let (fx, fz) = (x.rem_euclid(period) as f32 / period as f32, z.rem_euclid(period) as f32 / period as f32);
+    let (ux, uz) = (fx * fx * (3.0 - 2.0 * fx), fz * fz * (3.0 - 2.0 * fz));
+    let top = unit(cx, cz, seed) + (unit(cx + 1, cz, seed) - unit(cx, cz, seed)) * ux;
+    let bottom = unit(cx, cz + 1, seed) + (unit(cx + 1, cz + 1, seed) - unit(cx, cz + 1, seed)) * ux;
+    top + (bottom - top) * uz
 }
 
 /// How high the mountains stand at a place, 0 to 1. Ridges of several sizes, each highest along the lines where its
@@ -145,19 +177,22 @@ pub fn off_road(x: i32, z: i32) -> Option<i32> {
 /// noise's own squares, north to south and east to west, a maze seen from over it. The finer ridges stand on the
 /// flanks of the bigger and die out in the valleys between, and the valleys between whole massifs are wide.
 fn high(x: i32, z: i32) -> f32 {
-    let turned = |c: i64, s: i64| (((x as i64 * c - z as i64 * s) / 16) as i32, ((x as i64 * s + z as i64 * c) / 16) as i32);
-    let ridge = |(u, v): (i32, i32), period: i32, seed: u32| {
-        let r = 1.0 - (noise(u, v, period, seed) * 2.0 - 1.0).abs();
+    // Turned places are kept sixteen times finer than a cell (and the sizes asked are sixteen times as big): rounded
+    // to whole cells a turned place stood still or jumped two from one column to the next, and on a steep face the
+    // ground did too, a stubble of single cells standing out of every slope.
+    let turned = |c: i64, s: i64| (x as i64 * c - z as i64 * s, x as i64 * s + z as i64 * c);
+    let ridge = |(u, v): (i64, i64), period: i64, seed: u32| {
+        let r = 1.0 - (fine(u, v, period * 16, seed) * 2.0 - 1.0).abs();
         r * r
     };
     let (a, b, c, d) = (turned(14, 8), turned(7, -14), turned(16, 3), turned(-9, 13));
     // Where one range's line bends: the big ridges are asked a little aside by two slow noises, one for each way,
     // so a ridge is an arc and seldom a ring.
-    let (bend, twist) = (((noise(x, z, 30_000, 39) - 0.5) * 22_000.0) as i32, ((noise(x, z, 21_000, 71) - 0.5) * 16_000.0) as i32);
+    let (bend, twist) = (((noise(x, z, 30_000, 39) - 0.5) * 22_000.0 * 16.0) as i64, ((noise(x, z, 21_000, 71) - 0.5) * 16_000.0 * 16.0) as i64);
     // The massif north of the town stands whole whatever the slow noise says; further off there are wide valleys.
     let (nx, nz) = ((x - HOME.0) as f32, (z - HOME.1 + 105_000) as f32);
     let home = 1.0 - ease(45_000.0, 110_000.0, (nx * nx + nz * nz).sqrt());
-    let mass = 0.3 + 0.7 * ease(0.3, 0.62, noise(a.0, a.1, 95_000, 38)).max(home);
+    let mass = 0.3 + 0.7 * ease(0.3, 0.62, fine(a.0, a.1, 95_000 * 16, 38)).max(home);
     let first = ridge((a.0 + bend, a.1 - twist), 46_000, 31);
     let second = ridge((b.0 - twist / 2, b.1 + bend / 2), 19_000, 32);
     let third = ridge((c.0 + twist / 4, c.1), 7200, 33);
@@ -165,8 +200,8 @@ fn high(x: i32, z: i32) -> f32 {
     let body = first * 0.62 + second * 0.38 * (0.35 + 0.65 * first);
     // Spurs and gullies down the flanks, and the small faces of broken rock: creases a hundred metres and a few
     // tens of metres across, deepest where the mountain is high. Without them a mountain close to was a dune.
-    let spur = 1.0 - (noise(a.0, a.1, 950, 72) * 2.0 - 1.0).abs();
-    let face = 1.0 - (noise(b.0, b.1, 330, 73) * 2.0 - 1.0).abs();
+    let spur = 1.0 - (fine(a.0, a.1, 950 * 16, 72) * 2.0 - 1.0).abs();
+    let face = 1.0 - (fine(b.0, b.1, 330 * 16, 73) * 2.0 - 1.0).abs();
     let flank = (0.25 + body * 1.5).min(1.0);
     mass * (body * 0.84 + (third * 0.1 + fourth * 0.04) * flank + (spur * 0.016 + face * 0.005) * flank * (0.3 + body))
 }
@@ -202,6 +237,10 @@ pub fn ground(x: i32, z: i32) -> i32 {
     }
     if p > 0.0 {
         h += p * high(x, z) * 36_000.0;
+        let (dx, dz) = ((x - REFUGE.0) as f32, (z - REFUGE.1) as f32);
+        if dx.abs() < 420.0 && dz.abs() < 420.0 {
+            h += (REFUGE.2 as f32 - h) * (1.0 - ease(170.0, 420.0, (dx * dx + dz * dz).sqrt()));
+        }
     }
     let w = far(x, z);
     if let Some(s) = offshore(x, z).filter(|_| w < 1.0) {

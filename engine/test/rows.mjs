@@ -271,11 +271,14 @@ export const ROWS = [
     // (`up` is over the floor: where there is sea, `engine.ground` is its floor.)
     stand: { from: [-6400, -1625], up: 2.5, to: [-6415, -1605], high: 7 }, hour: 10, near: [60, 2, 3, 4, LEAVES] },
   { key: 'snow', what: 'Mountains under snow, seen from far', theirs: ['earth', 8.2], state: 'behind',
-    // In the massif north of the town, from over a snowfield 1,400 m up early in the morning with the sun low in the
-    // east: the face above in snow and broken rock, and across the valley a peak three kilometres off.
+    // In a high valley of the massif north of the town, soon after sunrise: the refuge below the pass with its red
+    // roof under snow and its lit windows, its mast, the stakes of the way going up the valley, the last pines of
+    // the woods standing in the snow with long shadows, and over it all a wall of bedded rock and snow two
+    // kilometres off and a kilometre higher.
     // (From close under the old smooth peaks late in the day the eighth judge saw "a close, grey, dithered peak with
-    // no distance, no scale and no white snow".)
-    stand: { from: [2500, -9500], up: 300, to: [300, -12000], high: -900 }, hour: 7.8, near: [8000, ROCK, SAND] },
+    // no distance, no scale and no white snow"; the stand after that, over a snowfield at 1,400 m, had nothing in it
+    // to give scale.)
+    stand: { from: [4760, -12600], up: 14, to: [4760, -12700], high: 4 }, hour: 7.3, near: [8000, ROCK, SAND, WOOD, LEAVES, 14] },
   { key: 'rain', what: 'A street at night in rain: lamps, lit windows, wet stone', theirs: ['earth', 11.6], state: 'level',
     // Down the street by the start from the middle of the wet road: a lamp over it with its glow, the lamps' light
     // drawn out on the road, lit windows and a shop's sign, the towers' windows beyond.

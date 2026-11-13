@@ -6,7 +6,7 @@
 
 use crate::hash::{hash, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, arid, cold, dry, ease, far, off_road, offshore, open, peaks, red};
+use crate::land::{HOME, REFUGE, arid, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, way};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -802,11 +802,11 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     // How steep: the most the ground changes over 4.8 m to either side, in cells a cell. Taken over that much so
     // that snow and rock lie in sheets and faces, not cell by cell.
     // Also how far the ground falls to the south over that much (cells): a face that looks south.
-    let lie = || {
-        let (a, b, c, e) = (ground(x - 48, z), ground(x + 48, z), ground(x, z - 48), ground(x, z + 48));
-        (((a - b).abs().max((c - e).abs())) as f32 / 96.0, c - e)
+    let lie = |far: i32| {
+        let (a, b, c, e) = (ground(x - far, z), ground(x + far, z), ground(x, z - far), ground(x, z + far));
+        (((a - b).abs().max((c - e).abs())) as f32 / (far * 2) as f32, (c - e) * 48 / far, (a + b + c + e) as f32 / 4.0 - g as f32)
     };
-    let steep = || lie().0;
+    let steep = || lie(48).0;
     // By the sea: dark rock where the land falls to it in cliffs and where stacks stand out of it, a beach where it
     // comes down gently.
     if offshore(x, z).is_some_and(|s| s > -1400.0) {
@@ -819,19 +819,24 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         }
     }
     if p > 0.0 {
-        let (s, south) = lie();
+        // The way down from the refuge: snow trodden hard and grey, earth where it has left the snow.
+        if let Some((_, aside)) = way(x, z).filter(|w| w.1.abs() < 7) {
+            let line = 4300 + (noise(x, z, 5200, 41) * 2000.0) as i32;
+            return if g > line { kind(SAND, grey(if aside.abs() < 4 { 4 } else { 2 })) } else { kind(EARTH, OWN) };
+        }
+        // In the mountains how steep is taken over 16 m to either side: over less, the small broken faces made every
+        // high flank steep, and from far a mountain was a grey speckle of rock and snow.
+        let (s, south, hollow) = lie(160);
         // The snow lies from about 430 m up, lower on faces that look north than on those that look south, and in
-        // patches for the first 90 m; on all but the steep faces, and how steep a face holds it wanders too, so
-        // rock breaks through in bands and not along one line.
+        // patches for the first 90 m. It holds on all but the steep faces, deeper in the gullies and hollows and
+        // blown off the ribs and crests between them: rock shows in streaks down a face, not in blots.
         let south = south.clamp(-60, 60);
         let line = 4300 + (noise(x, z, 5200, 41) * 2000.0) as i32 + south * 12;
-        if g > line && noise(x, z, 330, 50) * 900.0 < (g - line) as f32 && s < 1.55 + noise(x, z, 1300, 40) * 0.3 {
-            // Snow is sand in white: it lies even, where rock is rough.
-            return kind(SAND, WHITE);
+        if g > line && noise(x, z, 330, 50) * 900.0 < (g - line) as f32 && s - hollow.clamp(-10.0, 40.0) * 0.006 < 1.2 + noise(x, z, 1300, 40) * 0.25 {
+            return snow(x, z, s);
         }
-        if s > 0.85 || g > 5000 {
-            // Rock, dark beside the snow, in bands a few hundred metres across.
-            return kind(ROCK, grey(8 + (noise(x, z + g * 2, 2100, 42) * 4.0) as u8));
+        if s > 0.7 || g > 5000 {
+            return crag(x, z, g);
         }
         if wooded(x, z, g) {
             return kind(GRASS, colour(8, 6));
@@ -863,6 +868,25 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         }
     }
     kind(GRASS, OWN)
+}
+
+/// Snow at a place, `steep` cells a cell. It is sand in white (it lies even, where rock is rough), and not one
+/// white: the wind lays it in long drifts and scours it to pale blue ice between them, and on steep faces it has
+/// slid and is greyer.
+fn snow(x: i32, z: i32, steep: f32) -> Kind {
+    // Along the wind and across it: the drifts are some ten times longer than they are wide.
+    let (along, across) = ((x * 3 + z) / 4, (z * 3 - x) * 2);
+    let drift = noise(along, across, 700, 74) * 0.45 + noise(along * 2, across * 3, 260, 75) * 0.55;
+    kind(SAND, if drift > 0.64 { colour(15, 0) } else if steep > 1.05 || drift < 0.34 { grey(2) } else if drift < 0.52 { grey(1) } else { WHITE })
+}
+
+/// Bare rock in the mountains: dark beside the snow, in beds some metres thick that dip across the range, a thick
+/// bed and thin ones, a few of them brown.
+fn crag(x: i32, z: i32, g: i32) -> Kind {
+    let lie = g + x / 5 - z / 9 + (noise(x, z, 3100, 42) * 420.0) as i32;
+    let (thick, thin) = (lie.div_euclid(260), lie.div_euclid(34));
+    let tone = 9 + (hash(thick, 0, 76) % 3) as u8 + (hash(thin, 1, 76) % 2) as u8;
+    kind(ROCK, if hash(thick, 2, 76) % 5 == 0 && hash(thin, 3, 76) % 2 == 0 { colour(2, 9) } else { grey(tone) })
 }
 
 /// Reefs and what grows on them keep to water this deep, in cells: the shelf. Under that the floor is bare sand.
@@ -1018,27 +1042,52 @@ fn wooded(x: i32, z: i32, g: i32) -> bool {
     g > 300 && g < 4800 && peaks(x, z) > 0.02 && noise(x, z, 2600, 45) > 0.42
 }
 
+/// How many patches of every 24 hold a pine at a place: most in the woods, fewer and fewer above them to where
+/// the last stand in the snow at about 900 m, in the same stands and clearings as below.
+fn pines(x: i32, z: i32, g: i32) -> u32 {
+    if g <= 300 || g >= 9000 || peaks(x, z) <= 0.02 || noise(x, z, 2600, 45) <= 0.42 {
+        0
+    } else if g < 4300 {
+        17
+    } else {
+        1 + (9000 - g) as u32 * 16 / 4700
+    }
+}
+
+/// Whether a place is kept clear of trees: the refuge's yard, and its way.
+fn cleared(x: i32, z: i32) -> bool {
+    ((x - REFUGE.0).abs() < 300 && (z - REFUGE.1).abs() < 300) || way(x, z).is_some_and(|w| w.1.abs() < 22)
+}
+
 /// Open country is cut into patches this many cells square, and each may hold one thing.
 const FIELD: i32 = 48;
 
 /// What stands in one patch of open country: a pine in the woods, a bush or a stone on the dry plain, now and
 /// then a tree in the grass.
 fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
-    if s.lod > 2 {
+    // Far off only the pines are stood, as their shapes: a wood seen from a few hundred metres is still trees.
+    if s.lod > 4 {
         return;
     }
     let seed = hash(px, pz, 81);
     let (x, z) = (px * FIELD + 6 + (seed % 36) as i32, pz * FIELD + 6 + ((seed >> 6) % 36) as i32);
+    if s.lod > 2 {
+        let g = ground(x, z);
+        if (seed >> 12) % 24 < pines(x, z, g) && !cleared(x, z) {
+            stamp_pine(s, x, z, g, seed);
+        }
+        return;
+    }
     let g = ground(x, z);
     if g < SEA {
         return stamp_reef(s, x, z, g, seed);
     }
-    if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) {
+    if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) || cleared(x, z) {
         return;
     }
     let sort = (seed >> 12) % 24;
-    if wooded(x, z, g) {
-        if sort < 17 {
+    if pines(x, z, g) > 0 {
+        if sort < pines(x, z, g) {
             stamp_pine(s, x, z, g, seed);
         }
     } else if dry(x, z) > 0.5 {
@@ -1074,8 +1123,16 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
 /// A pine: a trunk and tiers of needles that narrow to a point, the upper ones white where it stands near the snow.
 /// A tier is eight-sided (two oblongs crossed) and no wider than leaves hold from a trunk.
 fn stamp_pine(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
-    let tiers = 5 + ((seed >> 17) % 4) as i32;
+    // High up they are small.
+    let tiers = (5 + ((seed >> 17) % 4) as i32).min(3 + (9300 - g) / 700);
     let green = kind(LEAVES, colour(8 + (seed >> 20) as u8 % 2, [6, 6, 9][(seed >> 22) as usize % 3]));
+    if s.lod > 2 {
+        // Far off: a wide part under a narrow one.
+        let white = if g > 3800 { kind(LEAVES, WHITE) } else { green };
+        s.fill([x - 8, g + 8, z - 8], [x + 9, g + 14 + tiers * 4, z + 9], green, Meet::Middle);
+        s.fill([x - 4, g + 8, z - 4], [x + 5, g + 18 + tiers * 8, z + 5], white, if s.lod > 3 { Meet::Touch } else { Meet::Middle });
+        return;
+    }
     s.fill([x - 1, g + 1, z - 1], [x + 2, g + 14 + tiers * 8, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
     for tier in 0..tiers {
         let (r, y) = ((3 + (tiers - 1 - tier) * 2).min(13), g + 12 + tier * 8);
@@ -1086,6 +1143,145 @@ fn stamp_pine(s: &mut Scratch, x: i32, z: i32, g: i32, seed: u32) {
     }
     // The point.
     s.fill([x - 1, g + 14 + tiers * 8, z - 1], [x + 2, g + 20 + tiers * 8, z + 2], if g > 3800 { kind(LEAVES, WHITE) } else { green }, Meet::Middle);
+}
+
+/// A scratch with x and z changed over: a thing written to face east is stood to face south.
+struct Turned<'a>(&'a mut Scratch);
+impl Turned<'_> {
+    fn fill(&mut self, lo: [i32; 3], hi: [i32; 3], kind: Kind, meet: Meet) {
+        self.0.fill([lo[2], lo[1], lo[0]], [hi[2], hi[1], hi[0]], kind, meet);
+    }
+    fn ball(&mut self, c: [i32; 3], r: i32, kind: Kind) {
+        self.0.ball([c[2], c[1], c[0]], r, kind, 0, 0, None);
+    }
+}
+
+/// How far the refuge's things stand from its yard's middle, and how high over it: what a sector must reach to hold any.
+const REFUGE_REACH: (i32, i32) = (230, 128);
+
+/// The refuge below the pass: a house of stone and dark timber under a steep red roof with snow on it, its windows
+/// lit, a chimney, a store of logs under a lean-to, a hut of stone beside it and a mast with a lamp for bad
+/// weather. It faces east, where the way comes over the pass. Far off it is its walls and roofs and no more.
+fn stamp_refuge(s: &mut Scratch) {
+    // Written as if it faced east, and stood turned a quarter: what is x here is the world's z, so the door
+    // and the long front look south, down the valley and into the sun.
+    let (x, g, z) = (REFUGE.1, REFUGE.2, REFUGE.0);
+    let mut s = Turned(s);
+    let (near, lod) = (s.0.lod <= 1, s.0.lod);
+    // Snow on a roof is roofing in white: sand holds to nothing a few cells from the ground.
+    let (stone, timber, roof, snow) = (kind(ROCK, grey(5)), kind(WOOD, colour(1, 9)), kind(ROOFING, colour(0, 5)), kind(ROOFING, WHITE));
+    // The house: 7 m across (x) and 12 m long (z), on a foot of stone carried down into the ground.
+    let (x0, x1, z0, z1) = (x - 35, x + 35, z - 60, z + 60);
+    s.fill([x0 - 4, g - 12, z0 - 4], [x1 + 4, g + 5, z1 + 4], kind(ROCK, grey(7)), Meet::Touch);
+    s.fill([x0, g + 5, z0], [x1, g + 17, z1], stone, Meet::Touch);
+    s.fill([x0, g + 17, z0], [x1, g + 33, z1], timber, Meet::Touch);
+    if near {
+        s.fill([x0 + 3, g + 5, z0 + 3], [x1 - 3, g + 33, z1 - 3], 0, Meet::Within);
+        s.fill([x0 + 3, g + 4, z0 + 3], [x1 - 3, g + 6, z1 - 3], kind(WOOD, colour(2, 8)), Meet::Touch);
+        for pz in [z - 21, z + 18] {
+            s.fill([x0 + 3, g + 6, pz], [x1 - 3, g + 33, pz + 3], timber, Meet::Touch);
+            s.fill([x - 4, g + 6, pz], [x + 4, g + 25, pz + 3], 0, Meet::Touch);
+        }
+    }
+    // The roof: its ridge along the house, a step up for each step in, over eaves that stand out; the gables are
+    // timber to the ridge. Snow lies on it but for the edge of every step and the lowest two.
+    for step in 0..20 {
+        let (in_by, y) = (step * 2 - 5, g + 33 + step * 2);
+        s.fill([x0 + in_by, y, z0 - 5], [x1 - in_by, y + 2, z1 + 5], roof, Meet::Touch);
+        if step == 19 {
+            s.fill([x0 + in_by, y + 2, z0 - 3], [x1 - in_by, y + 3, z1 + 3], snow, Meet::Middle);
+        }
+        // Snow on each step of it, all along the upper part and in lengths lower down, where some has slid.
+        for part in 0..13 {
+            if step > 1 && (step > 9 || hash(part, step / 3, 79) % 3 != 0) {
+                let (pz0, pz1) = (z0 - 3 + part * 10, (z0 + 7 + part * 10).min(z1 + 3));
+                s.fill([x0 + in_by, y + 2, pz0], [x0 + in_by + 2, y + 3, pz1], snow, Meet::Middle);
+                s.fill([x1 - in_by - 2, y + 2, pz0], [x1 - in_by, y + 3, pz1], snow, Meet::Middle);
+            }
+        }
+        // Under it the roof is open to the room, but for the half of each step that the next one stands on.
+        let open = (in_by + 4).max(3);
+        if near && open + 1 < 35 {
+            s.fill([x0 + open, y, z0 + 3], [x1 - open, y + 2, z1 - 3], 0, Meet::Within);
+            // The gables, and the two walls that part the house into three rooms, go up to the roof and carry it.
+            for gz in [z0, z - 21, z + 18, z1 - 3] {
+                s.fill([x0 + open, y, gz], [x1 - open, y + 2, gz + 3], timber, Meet::Touch);
+            }
+        }
+    }
+    // The chimney, of stone, through the roof near its north end, with a cap.
+    s.fill([x - 16, g + 5, z0 + 14], [x - 8, g + 86, z0 + 22], stone, Meet::Touch);
+    s.fill([x - 17, g + 86, z0 + 13], [x - 7, g + 88, z0 + 23], kind(ROCK, grey(9)), Meet::Touch);
+    // Windows with the lamps lit behind them, a shutter to each side, and the door in the east wall.
+    let (lit, shutter) = (kind(LAMP, colour(3, 1)), kind(WOOD, colour(0, 5)));
+    for wz in [z - 44, z - 22, z + 22, z + 44] {
+        for (wx0, wx1) in [(x1 - 1, x1), (x0, x0 + 1)] {
+            s.fill([wx0, g + 19, wz - 4], [wx1, g + 28, wz + 4], lit, if near { Meet::Touch } else { Meet::Middle });
+            if near {
+                s.fill([wx0, g + 19, wz - 7], [wx1, g + 28, wz - 4], shutter, Meet::Touch);
+                s.fill([wx0, g + 19, wz + 4], [wx1, g + 28, wz + 7], shutter, Meet::Touch);
+            }
+        }
+    }
+    if near {
+        s.fill([x1 - 3, g + 6, z - 5], [x1, g + 26, z + 5], kind(WOOD, colour(0, 5)), Meet::Touch);
+        s.fill([x1 + 4, g + 1, z - 8], [x1 + 10, g + 4, z + 8], kind(ROCK, grey(6)), Meet::Touch);
+        // Logs stacked under a lean-to against the south gable.
+        for row in 0..7 {
+            s.fill([x0 + 6, g + 5 + row * 2, z1 + 4], [x1 - 8, g + 7 + row * 2, z1 + 11], kind(WOOD, colour(2, [8, 9, 3][row as usize % 3])), Meet::Touch);
+        }
+    }
+    s.fill([x0 - 4, g - 12, z1 + 4], [x1 + 4, g + 5, z1 + 16], kind(ROCK, grey(7)), Meet::Touch);
+    for step in 0..7 {
+        s.fill([x0 + 2, g + 30 - step, z1 + step * 2], [x1 - 4, g + 31 - step, z1 + step * 2 + 3], roof, Meet::Touch);
+    }
+    s.fill([x0 + 2, g + 5, z1 + 12], [x0 + 5, g + 24, z1 + 15], timber, Meet::Touch);
+    s.fill([x1 - 7, g + 5, z1 + 12], [x1 - 4, g + 24, z1 + 15], timber, Meet::Touch);
+    // The hut of stone north of the house, its roof one slope under snow.
+    let (hx, hz) = (x - 20, z - 130);
+    s.fill([hx - 2, g - 12, hz - 2], [hx + 42, g + 4, hz + 34], kind(ROCK, grey(7)), Meet::Touch);
+    s.fill([hx, g + 4, hz], [hx + 40, g + 24, hz + 32], kind(ROCK, grey(6)), Meet::Touch);
+    for step in 0..8 {
+        s.fill([hx - 3 + step * 6, g + 24 + step, hz - 3], [hx + 3 + step * 6, g + 26 + step, hz + 35], roof, Meet::Touch);
+        s.fill([hx + step * 6, g + 26 + step, hz - 1], [hx + 3 + step * 6, g + 27 + step, hz + 33], snow, Meet::Middle);
+        s.fill([hx + step * 6, g + 20, hz], [hx + 6 + step * 6, g + 24 + step, hz + 32], kind(ROCK, grey(6)), Meet::Touch);
+    }
+    if near {
+        s.fill([hx + 39, g + 5, hz + 11], [hx + 40, g + 22, hz + 21], kind(WOOD, colour(2, 9)), Meet::Touch);
+    }
+    // The mast south-east of the house: steel on a block of stone, a bar across it, a lamp at its head.
+    let (mx, mz) = (x + 90, z + 110);
+    s.fill([mx - 5, g - 8, mz - 5], [mx + 7, g + 8, mz + 7], stone, Meet::Touch);
+    s.fill([mx, g + 8, mz], [mx + 2, g + 120, mz + 2], kind(STEEL, grey(9)), Meet::Touch);
+    s.fill([mx, g + 100, mz - 8], [mx + 2, g + 102, mz + 10], kind(STEEL, grey(9)), Meet::Touch);
+    s.fill([mx - 1, g + 120, mz - 1], [mx + 3, g + 125, mz + 3], kind(LAMP, colour(2, 4)), Meet::Touch);
+    // A low wall of dry stone along the yard's west side, with a gap where the way goes out.
+    for n in 0..34 {
+        let (wz, h) = (z - 170 + n * 10, hash(n, 0, 80));
+        if !(22..=24).contains(&n) {
+            s.fill([x - 172 - (h % 3) as i32, g - 6, wz], [x - 164, g + 6 + (h >> 3) as i32 % 4, wz + 10], kind(ROCK, grey(5 + (h >> 6) as u8 % 4)), Meet::Touch);
+        }
+    }
+    // A pennant under the mast's lamp, red with a white band.
+    if lod <= 2 {
+        for band in 0..3 {
+            s.fill([mx - 14, g + 106 + band * 3, mz], [mx, g + 109 + band * 3, mz + 1], kind(PLASTER, if band == 1 { WHITE } else { colour(0, 4) }), Meet::Touch);
+        }
+    }
+    // A cairn where the way leaves the yard.
+    for (r, up) in [(9, 0), (6, 8), (4, 14)] {
+        s.ball([x - 150, g + up, z + 120], r, kind(ROCK, grey(7 + up as u8 % 3)));
+    }
+}
+
+/// A stake by the way down from the refuge: a post taller than the snow lies deep, its head painted to be seen.
+fn stamp_stake(s: &mut Scratch, x: i32, z: i32) {
+    let g = ground(x, z);
+    s.fill([x, g - 4, z], [x + 2, g + 36, z + 2], kind(WOOD, colour(2, 9)), Meet::Touch);
+    s.fill([x, g + 36, z], [x + 2, g + 46, z + 2], kind(WOOD, colour(1, 4)), Meet::Touch);
+    if s.lod <= 2 {
+        s.fill([x - 3, g + 40, z], [x + 5, g + 43, z + 2], kind(WOOD, colour(1, 4)), Meet::Touch);
+    }
 }
 
 /// A pole by the road: a post and a bar across its top.
@@ -1176,6 +1372,10 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
                 }
             }
         }
+    }
+    // The refuge is seen from far: its roofs are over the ground in the coarse copies too.
+    if lod > SHAPES_TO && (sx + 1) * size > REFUGE.0 - REFUGE_REACH.0 && sx * size < REFUGE.0 + REFUGE_REACH.0 && (sz + 1) * size > REFUGE.1 - REFUGE_REACH.0 && sz * size < REFUGE.1 + REFUGE_REACH.0 {
+        top = top.max(REFUGE.2 + REFUGE_REACH.1);
     }
     ((lo - DEEP).div_euclid(size), top.div_euclid(size))
 }
@@ -1319,6 +1519,23 @@ pub fn make(s: &mut Scratch) {
             for pz in (lo[2] - 40).max(z0).div_euclid(FIELD)..=(hi[2] + 40).min(z0 + BLOCK_Z - 1).div_euclid(FIELD) {
                 for px in (lo[0] - 40).max(x0).div_euclid(FIELD)..=(hi[0] + 40).min(x0 + BLOCK_X - 1).div_euclid(FIELD) {
                     stamp_country(s, px, pz);
+                }
+            }
+            // The refuge and the stakes down its way, one every 18 m, on one side and the other.
+            if reaches(REFUGE.0 - REFUGE_REACH.0, REFUGE.0 + REFUGE_REACH.0, REFUGE.1 - REFUGE_REACH.0, REFUGE.1 + REFUGE_REACH.0) {
+                stamp_refuge(s);
+            }
+            if s.lod <= 4 && reaches(REFUGE.0 - 900, REFUGE.0 + 3400, REFUGE.1 - 6200, REFUGE.1 + 500) {
+                for n in 1..33 {
+                    // Where the stake stands: along the way, to one side of it and the other by turns.
+                    let at = on_way(n * 180, 0);
+                    if let Some((_, aside)) = way(at.0, at.1) {
+                        // `aside` is how far this place is to the right of the way's middle.
+                        let (sx, sz) = on_way(n * 180, -aside + if n % 2 == 0 { 12 } else { -12 });
+                        if reaches(sx, sx + 2, sz, sz + 2) && sx >= x0 && sx < x0 + BLOCK_X && sz >= z0 && sz < z0 + BLOCK_Z {
+                            stamp_stake(s, sx, sz);
+                        }
+                    }
                 }
             }
             // Poles along the north side of the road, one every 40 m.

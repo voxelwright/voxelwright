@@ -1355,3 +1355,39 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - **Not there**: the planet's woods, fields and towns are not in the cells (green land far out is grass); the
   chance picture would have to be made in the core too. Seen from 5.8 km the cells end at their box in grey, and
   the planet from 6.2 km goes to the horizon: the pop at the handover is now mostly that, and it is the marcher's.
+
+## The snow row: a refuge under a wall (#229, November 12)
+
+- **A stubble of single cells stood out of every mountain slope.** `land.rs` `high` turned its places and divided
+  by 16 to whole cells, so a turned place stood still or jumped two from one column to the next, and where the
+  ground is steep the ground did too. Turned places are kept sixteen times finer now (`fine`, i64) and the sizes
+  asked are sixteen times as big: the same mountains, smooth. Ground costs 112 ns a column there (was 107).
+- **From far a mountain was a grey speckle** because how steep was taken over 4.8 m and the 33 m faces made every
+  high flank steep. In the mountains `country()` takes it over 16 m (`lie(160)`): rock gathers into whole faces and
+  walls, snow into fields. Snow holds up to 1.2 steep at that span, and a little more in a hollow. Leaning hard on
+  hollows and crests (0.09 a cell) drew rock as thin rings along every crease: keep it small (0.006).
+- **Snow is not one white** (`snow`): drifts ten times longer than wide, by a noise asked along the wind, in white,
+  two greys and a pale blue. **Rock is in beds** (`crag`): by height, dipping across the range, a thick bed and thin
+  ones, a few brown. Both are surface only and cost nothing in ground.
+- **Midday sun burns level snow out to flat white** whatever its tone; a low sun (7.3 or 15.5) gives it form, long
+  shadows and colour. The row is taken at 7.3.
+- **A stand needs a wall close.** The massif seen across a valley from 6 km was small and pale in the picture. A
+  search of the height field (a shelf no steeper than 0.14 with ground rising 0.4 or more within 1.2 to 9 km, the
+  same to either side) found a high valley under a wall 2 km off and 1.2 km higher: `REFUGE`.
+- **The refuge** (`city.rs` `stamp_refuge`, `land.rs` `REFUGE`, `way`): a house of stone and timber under a red
+  roof with snow, lit windows, a chimney, a lean-to with logs, a stone hut, a mast with a lamp and a pennant, a
+  dry-stone wall, a cairn, and stakes every 18 m up a trodden way to the pass. The ground is levelled for it in
+  `ground()`. It is written facing east and stood facing south (`Turned`). It is stamped at every coarseness, and
+  `span` gives its sectors room above the ground past `SHAPES_TO`, or it would vanish at 400 m.
+- **What the support rule asked of a house with a room in it**: a roof of steps must stand on the wall (the first
+  steps were hollowed to outside the wall and the whole roof hung from the gables); each step is four cells wide so
+  that the next stands on its inner half; two inner walls go up to the roof, or the load of the upper steps ran
+  along the roof to the gables and tore. Snow on a roof is roofing in white: sand reaches six cells from the ground
+  and no further. A cord of wood from the mast to the eave did not hold; the pennant hangs on the mast.
+- **Pines thin out with height** (`pines`): 17 patches of 24 in the woods, down to one at 900 m, small ones high
+  up. From 205 m to 820 m (coarseness 3 and 4) a pine is two boxes, so a wood is still trees from across a valley
+  and the forest has no hard upper line. Past that it is the dark floor only.
+- **Still rough**: the picture holds 0.30 of full size in the mountains with seven threads on the GPU, so it is
+  soft; thin dark lines show here and there on snow at the joins between coarse boxes; shade on snow is grey-blue,
+  not the deep blue of the film (both are the engine thread's, asked on #140). The far pines in shade are black
+  blobs. No drift against the house, no tracks, no smoke from the chimney.
