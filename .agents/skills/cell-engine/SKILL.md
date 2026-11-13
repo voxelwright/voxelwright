@@ -1391,3 +1391,15 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
   soft; thin dark lines show here and there on snow at the joins between coarse boxes; shade on snow is grey-blue,
   not the deep blue of the film (both are the engine thread's, asked on #140). The far pines in shade are black
   blobs. No drift against the house, no tracks, no smoke from the chimney.
+
+## The space row after two blind looks (#228, November 12)
+
+- **After two blind looks at the row (ours 6, theirs 7 both times; "a coast like a paint stroke", "soft land",
+  "a flat sea")**: the coast west of the start has coves and points (a fine wobble inside its own line, asked only
+  within 50 km of it) and every coast has inlets a kilometre or two across (asked only where the land's rule is
+  within 0.03 of the sea's level): `continent` and `space.ts` `land` together, far land 321 ns a column. The
+  shallows are `exp(-deep / shelf)` over a bottom of banks and channels, not a band cut at a depth; the sea has
+  wind streaks. Fields are 3.4 km by 2.1 with hedges (at 1.9 by 1.1 they were under a pixel at the judge's size),
+  towns are quarters, streams run in dark gullies. Folds of noise are kept down to 0.6 of a pixel (at 1 to 3 the
+  far land smeared), and the air takes more than its share when the look is nearly level.
+- Roads drawn where a noise crosses its middle are white worms. A road wants two ends.

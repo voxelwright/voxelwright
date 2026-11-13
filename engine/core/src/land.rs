@@ -72,9 +72,18 @@ pub fn continent(x: i32, z: i32) -> f32 {
     let p = km(x, z);
     let far = (p.0 * p.0 + p.1 * p.1).sqrt();
     let out = ease(40.0, 160.0, far);
-    let west = -p.0 + ((noise_km(p, 90.0, 62) - 0.5) * 120.0 + (wisps(p, 380.0, 98) - 0.5) * 520.0) * out;
+    let mut west = -p.0 + ((noise_km(p, 90.0, 62) - 0.5) * 120.0 + (wisps(p, 380.0, 98) - 0.5) * 520.0) * out;
+    // That coast in detail, coves and points down to a kilometre or two, asked only where it can matter.
+    if (west - 25.0).abs() < 50.0 {
+        west += (wisps(p, 40.0, 93) - 0.5) * 56.0 * out;
+    }
     let c0 = folds(p, 5200.0, 61) - 0.5 + 0.2 * (-far * far / (1100.0 * 1100.0)).exp() - 0.7 * ease(5.0, 45.0, west) * (-far * far / (1500.0 * 1500.0)).exp();
-    c0 + ((wisps(p, 420.0, 91) - 0.5) * 0.1 + (wisps(p, 60.0, 92) - 0.5) * 0.024) * out
+    let mut c = c0 + ((wisps(p, 420.0, 91) - 0.5) * 0.1 + (wisps(p, 60.0, 92) - 0.5) * 0.024) * out;
+    // Close to a shore, inlets and islets a kilometre or two across.
+    if c.abs() < 0.03 {
+        c += (wisps(p, 14.0, 94) - 0.5) * 0.008 * out * (1.0 - ease(0.012, 0.03, c.abs()));
+    }
+    c
 }
 
 /// Where the planet has its ranges of mountains, 0 to 1 (space.ts `land`, its `range`, before the coast cuts it).

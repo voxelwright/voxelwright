@@ -132,7 +132,7 @@ fn weave(p: vec2f, period: f32, count: u32, px: f32) -> vec4f {
   var weight = 0.5;
   var all = 0.0;
   for (var k = 0u; k < count; k++) {
-    let see = smoothstep(1.0, 3.0, size / px);
+    let see = smoothstep(0.6, 1.8, size / px);
     sum += mix(vec4f(0.5), four(q + vec2f(f32(k) * 37.3, f32(k) * 91.7), size), see) * weight;
     all += weight;
     q = turn(q);
@@ -183,6 +183,13 @@ fn fields(p: vec2f, size: vec2f) -> vec4f {
   let jog = lot(vec2f(row, 113.0)).x;
   return lot(vec2f(floor(p.x / size.x + jog * 3.0), row));
 }
+// How near a place is to the edge of its field, 1 on the hedge and 0 inside: px is km a pixel.
+fn hedge(p: vec2f, size: vec2f, px: f32) -> f32 {
+  let jog = lot(vec2f(floor(p.y / size.y), 113.0)).x;
+  let f = fract(vec2f(p.x / size.x + jog * 3.0, p.y / size.y));
+  let d = min(min(f.x, 1.0 - f.x) * size.x, min(f.y, 1.0 - f.y) * size.y);
+  return (1.0 - smoothstep(0.06, 0.06 + px, d)) * min(1.0, 0.25 / px);
+}
 // How much cloud is over a place, 0 to 1: weather hundreds of kilometres across, broken into banks and small heaps.
 fn cloud(p: vec2f, px: f32) -> f32 {
   let drift = vec2f(u.time * 0.02, 0.0);
@@ -190,7 +197,7 @@ fn cloud(p: vec2f, px: f32) -> f32 {
   let fine = weave(p + drift * 3.0, 120.0, 5u, px);
   // Broken finer still at its edges, so a bank ends in heaps and not in a line.
   let heaps = weave(p + drift * 3.0, 14.0, 3u, px).z;
-  return smoothstep(0.62, 0.7, slow.x * 0.45 + fine.x * 0.43 + heaps * 0.12 + 0.015) * smoothstep(8.0, 60.0, u.high);
+  return smoothstep(0.62, 0.7, slow.x * 0.45 + fine.x * 0.43 + heaps * 0.12 + 0.015) * smoothstep(0.52, 0.6, slow.x) * smoothstep(8.0, 60.0, u.high);
 }
 // What the ground is at a place (km east and south of the start), as colour before light: and how much of it is
 // sea. px is how many km a pixel covers there.
@@ -201,11 +208,15 @@ fn land(p: vec2f, px: f32) -> Land {
   // Land where this is over 0: big lands and seas, with the start well inside one.
   // West of the start is open sea, from the coast the cells have 6.6 km out (land.rs offshore): near the start
   // its line is the cells' own, drawn below, and further off it wanders.
-  let c0 = folds(p, 5200.0, 61u) - 0.5 + 0.2 * exp(-far * far / (1100.0 * 1100.0)) - 0.7 * smoothstep(5.0, 45.0, -p.x + ((noise(p, 90.0, 62u) - 0.5) * 120.0 + (wisps(p, 380.0, 98u) - 0.5) * 520.0) * smoothstep(40.0, 160.0, far)) * exp(-far * far / (1500.0 * 1500.0));
-  // The coast in detail: bays, capes and islands down to a few kilometres, away from the start (whose own
-  // coast the cells have).
-  let fine = ((wisps(p, 420.0, 91u) - 0.5) * 0.1 + (wisps(p, 60.0, 92u) - 0.5) * 0.024) * smoothstep(40.0, 160.0, far);
-  let c = c0 + fine;
+  let out_ = smoothstep(40.0, 160.0, far);
+  var west = -p.x + ((noise(p, 90.0, 62u) - 0.5) * 120.0 + (wisps(p, 380.0, 98u) - 0.5) * 520.0) * out_;
+  // That coast in detail, coves and points down to a kilometre or two, asked only where it can matter.
+  if (abs(west - 25.0) < 50.0) { west += (wisps(p, 40.0, 93u) - 0.5) * 56.0 * out_; }
+  let c0 = folds(p, 5200.0, 61u) - 0.5 + 0.2 * exp(-far * far / (1100.0 * 1100.0)) - 0.7 * smoothstep(5.0, 45.0, west) * exp(-far * far / (1500.0 * 1500.0));
+  // Every coast in detail: bays, capes and islands down to a few kilometres, away from the start (whose own
+  // coast the cells have); and close to a shore, inlets and islets a kilometre or two across.
+  var c = c0 + ((wisps(p, 420.0, 91u) - 0.5) * 0.1 + (wisps(p, 60.0, 92u) - 0.5) * 0.024) * out_;
+  if (abs(c) < 0.03) { c += (wisps(p, 14.0, 94u) - 0.5) * 0.008 * out_ * (1.0 - smoothstep(0.012, 0.03, abs(c))); }
   out.sea = 1.0 - smoothstep(-0.006, 0.0, c);
   let lat = NORTH - p.y / R;
   let cold = smoothstep(0.95, 1.25, abs(lat));
@@ -220,7 +231,7 @@ fn land(p: vec2f, px: f32) -> Land {
   var stream = 0.0;
   if (out.sea < 1.0) {
     let slow = weave(p, 420.0, 3u, px);
-    let mid = weave(p, 55.0, 5u, px);
+    let mid = weave(p, 30.0, 5u, px);
     // Dry lands (land.rs arid): one begins east of the town, where the town's own dry plain ends.
     let east = 1.0 - smoothstep(0.6, 1.2, length(p - vec2f(130.0, 40.0)) / (150.0 * (0.6 + 0.55 * noise(p, 120.0, 66u) + 0.3 * noise(p, 31.0, 68u))));
     let dry = smoothstep(0.5, 0.64, folds(p + vec2f(900.0, 0.0), 3100.0, 71u) + 0.8 * east) * (1.0 - cold);
@@ -242,26 +253,32 @@ fn land(p: vec2f, px: f32) -> Land {
     // Their edges are the edges of fields; there are copses among the fields and clearings in the woods.
     let near = weave(p, 9.0, 3u, px);
     let way = select(turn(p), vec2f(p.x * 0.96 + p.y * 0.28, p.y * 0.96 - p.x * 0.28), slow.z > 0.5);
-    let small = fields(way, vec2f(1.9, 1.1));
+    let small = fields(way, vec2f(3.4, 2.1));
     let cut = (small.z - 0.5) * 0.07 * (1.0 - smoothstep(0.35, 1.1, px));
-    let wooded = mid.x - 0.56 + (slow.x - 0.5) * 0.45 + (lie - 0.5) * 0.12 - valley * 0.06 + cut;
+    let wooded = mid.x - 0.56 + (slow.x - 0.5) * 0.4 + (lie - 0.5) * 0.3 - valley * 0.06 + cut;
     let wood = smoothstep(-edge, edge, wooded + (near.x - 0.5) * 0.5 * (1.0 - smoothstep(0.0, 0.12, abs(wooded) - 0.02)) + (near.x - 0.5) * 0.16);
     let trees = mix(vec3f(0.035, 0.085, 0.035), vec3f(0.07, 0.125, 0.035), smoothstep(0.35, 0.65, mid.y + (near.y - 0.5) * 0.4)) * (0.8 + 0.4 * near.z) * (0.72 + 0.56 * weave(p, 2.2, 3u, px).x);
     // Farmland: fields a kilometre or so across in rows, in districts of their own shade, lying one way in one
     // country and another way in the next.
-    let large = fields(way + vec2f(31.0, 17.0), vec2f(7.3, 4.6));
-    let lush = (slow.y - 0.5) * 0.9 + valley * 0.25;
+    let large = fields(way + vec2f(31.0, 17.0), vec2f(13.0, 8.0));
+    let lush = (slow.y - 0.5) * 0.9 + valley * 0.25 + 0.15;
     let mean = mix(vec3f(0.33, 0.31, 0.14), vec3f(0.17, 0.27, 0.085), clamp(0.5 + lush, 0.0, 1.0));
-    var farm = mix(mean, mix(mean, crop(clamp(small.x - lush * 0.5, 0.0, 1.0)), 0.6) * (0.85 + 0.3 * small.y), 1.0 - smoothstep(0.35, 1.1, px));
-    farm = mix(mean, farm * (0.8 + 0.4 * large.y) + (crop(large.x) - mean) * 0.18, 1.0 - smoothstep(2.0, 5.0, px)) * (0.9 + 0.2 * mid.w);
+    var farm = mix(mean, mix(mean, crop(clamp(small.x - lush * 0.5, 0.0, 1.0)), 0.8) * (0.85 + 0.3 * small.y) * (1.0 - 0.45 * hedge(way, vec2f(3.4, 2.1), px)), 1.0 - smoothstep(0.7, 2.2, px));
+    farm = mix(mean, farm * (0.8 + 0.4 * large.y) + (crop(large.x) - mean) * 0.4, 1.0 - smoothstep(3.0, 8.0, px)) * (0.9 + 0.2 * mid.w);
     // Between the two, rough pasture and heath with trees scattered on it.
     let heath = mix(vec3f(0.13, 0.2, 0.07), vec3f(0.2, 0.21, 0.1), mid.w) * (0.8 + 0.4 * near.y);
     let rough = smoothstep(-0.16, -0.1, wooded + (near.w - 0.5) * 0.12) * (1.0 - wood);
     col = mix(mix(farm, heath, rough), trees, wood * (0.55 + 0.45 * smoothstep(0.0, 0.07, wooded + (near.z - 0.5) * 0.1)));
     // Towns: pale, on low ground, bigger by the rivers; their streets show from low down.
-    let built = smoothstep(0.74, 0.77, mid.z + (slow.y - 0.5) * 0.2 + valley * 0.06);
+    // Their edges are ragged with the fields; inside they are quarters, some pale, some dark with trees.
+    let built = smoothstep(0.775, 0.79, mid.z + (slow.y - 0.5) * 0.2 + valley * 0.06 + (small.w - 0.5) * 0.03);
     let streets = lot(floor(way / 0.22));
-    let towns = vec3f(0.38, 0.36, 0.33) * mix(1.0, 0.7 + 0.6 * streets.x, 1.0 - smoothstep(0.1, 0.4, px));
+    let quarter = lot(floor(way / 1.3) + vec2f(57.0, 9.0));
+    let towns = mix(vec3f(0.5, 0.47, 0.42), mix(vec3f(0.3, 0.29, 0.28), vec3f(0.12, 0.17, 0.08), step(0.8, quarter.y)), smoothstep(0.35, 0.65, quarter.x) * (1.0 - smoothstep(1.0, 3.0, px)) * 0.8) * mix(1.0, 0.7 + 0.6 * streets.x, 1.0 - smoothstep(0.1, 0.4, px));
+    // Streams in wooded gullies, dark and winding.
+    let gully = 1.0 - smoothstep(0.004, 0.004 + px * 0.02, abs(near.w - 0.5));
+    col = mix(col, trees * 0.8, gully * 0.75);
+
     col = mix(col, towns, built * 0.85);
     // Dry lands: sand and bare earth, red in some country, with dark rock standing out of it and pale pans.
     let sand = mix(vec3f(0.5, 0.4, 0.24), vec3f(0.4, 0.2, 0.115), smoothstep(0.49, 0.51, noise(p, 420.0, 77u) + 0.4 * exp(-far * far / (600.0 * 600.0)))) * (0.8 + 0.4 * mid.y);
@@ -274,7 +291,7 @@ fn land(p: vec2f, px: f32) -> Land {
     col = mix(col, vec3f(0.17, 0.16, 0.1) * (0.8 + 0.4 * mid.y), smoothstep(0.1, 0.6, cold) * (1.0 - dry));
     // Lit from the sun's side, and from low down the smaller folds of it too.
     let fold = weave(p, 5.0, 3u, px).y - weave(p + toSun * max(px, 0.3), 5.0, 3u, px).y;
-    col *= clamp(1.0 - ((sunward - lie) * 2.6 - fold * 1.6) / max(u.sun.y, 0.3), 0.5, 1.5) * (0.82 + 0.36 * lie);
+    col *= clamp(1.0 - ((sunward - lie) * 3.8 - fold * 1.6) / max(u.sun.y, 0.3), 0.45, 1.5) * (0.78 + 0.44 * lie);
     let river = (1.0 - smoothstep(broad - soft, broad + soft, wind)) * min(1.0, broad * 1100.0 / max(px, 0.01)) * smoothstep(0.8, 0.95, w);
     col = mix(col, vec3f(0.03, 0.11, 0.17), river * 0.9);
     stream = river * 0.9;
@@ -331,12 +348,18 @@ fn land(p: vec2f, px: f32) -> Land {
     let deep = max(-c, 0.0);
     // (Off the start's own coast the land's rule falls away steeply: the shallows there are as broad as elsewhere.)
     let shelf = (0.02 + 0.22 * lay.x * lay.x) * (1.0 + 5.0 * exp(-far * far / (1300.0 * 1300.0)));
-    let shallow = 1.0 - smoothstep(0.0, shelf, deep + (lay.y - 0.5) * 0.01);
+    // Banks and channels: the bottom is not even, and the green-blue breaks up over it.
+    let banks = weave(p, 22.0, 4u, px);
+    let shallow = exp(-max(deep * (0.35 + 1.5 * banks.x) + (lay.y - 0.5) * 0.01, 0.0) / (shelf * 0.6));
     var water = mix(vec3f(0.03, 0.2, 0.31), vec3f(0.015, 0.075, 0.17), smoothstep(0.05, 0.3, deep));
     water = mix(water, vec3f(0.04, 0.36, 0.4), shallow);
+    // Pale over the sand by the shore, and a line of surf on it.
     water = mix(water, vec3f(0.16, 0.46, 0.42), (1.0 - smoothstep(0.0, 0.004, deep)) * 0.7);
+    water = mix(water, vec3f(0.6, 0.66, 0.6), (1.0 - smoothstep(0.0003, 0.0009, deep)) * min(1.0, 0.5 / px) * 0.8);
     // Currents: paler and darker in long turns.
     water *= 0.8 + 0.25 * lay.z + 0.15 * weave(p + vec2f(lay.w, lay.z) * 60.0, 70.0, 3u, px).x;
+    // Wind on the water: long streaks of rougher and smoother sea.
+    water *= 0.9 + 0.22 * weave(turn(p) * vec2f(1.0, 3.5), 30.0, 4u, px).y * (0.5 + banks.z);
     // (land.rs: floes at the edge of the ice, then a sheet.)
     col = mix(col, mix(water, vec3f(0.62, 0.66, 0.7), smoothstep(0.895, 0.905, cold + (cells(700.0 + p.x * 10000.0, 4070.0 + p.y * 10000.0, 30000.0, 75u) - 0.5) * 0.06)), out.sea);
   }
@@ -370,7 +393,7 @@ fn tone(c: vec3f) -> vec3f {
   return pow(clamp(y, vec3f(0.0), vec3f(1.0)), vec3f(0.4545));
 }
 // What the air does to light that crosses it: blue is thrown about most, red least.
-const AIR = vec3f(0.03, 0.065, 0.16);
+const AIR = vec3f(0.02, 0.045, 0.105);
 const BLUE = vec3f(0.3, 0.52, 1.0);
 @fragment fn fs(@builtin(position) at: vec4f) -> @location(0) vec4f {
   let uv = (at.xy / u.res) * 2.0 - 1.0;
@@ -402,13 +425,14 @@ const BLUE = vec3f(0.3, 0.52, 1.0);
     var ground = l.colour * sunlight * (1.0 - 0.62 * shadow * (1.0 - cover));
     // The sun on the sea: a small bright patch where the water throws it at the eye, and a wide dull one round it.
     let thrown = max(dot(reflect(rd, out), u.sun), 0.0);
-    ground += vec3f(1.0, 0.93, 0.82) * (pow(thrown, 1500.0) * 1.6 + pow(thrown, 90.0) * 0.07) * l.sea * lit * (1.0 - shadow);
+    ground += vec3f(1.0, 0.93, 0.82) * (pow(thrown, 1500.0) * 1.6 + pow(thrown, 90.0) * 0.07 + pow(thrown, 12.0) * 0.035) * l.sea * lit * (1.0 - shadow);
     // Lights where the town is, on the night side.
     ground += vec3f(1.0, 0.75, 0.4) * (1.0 - smoothstep(2.0, 3.4, length(p))) * (1.0 - lit) * 0.6 * noise(p, 0.12, 78u);
     ground = mix(ground, vec3f(0.84, 0.86, 0.9) * sunlight * clamp(0.72 + (cover - lee) * 0.9, 0.5, 1.1), smoothstep(0.0, 0.5, cover) * 0.95);
     // The air between: the more aslant the look goes through it the more of the ground's light it takes and the
     // more of its own it gives, blue first: a blue veil, and pale at the planet's edge.
-    let through = exp(-AIR / slant);
+    // (More than its share when the look is nearly level: the far land goes pale into the edge.)
+    let through = exp(-AIR / slant * (1.0 + 0.1 / slant));
     col = ground * through + mix(BLUE, vec3f(0.75, 0.88, 1.0), 1.0 - through.r) * (0.02 + 1.5 * lit) * (1.0 - through);
     // Just over where the cells are drawn, the same pale air that lies between the eye and the town from 6 km up.
     col = mix(col, vec3f(0.62, 0.65, 0.68) * (0.03 + 1.25 * lit), 0.4 * exp(-(u.high - 6.0) / 14.0));
