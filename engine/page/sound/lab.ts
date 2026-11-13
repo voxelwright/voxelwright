@@ -4,6 +4,8 @@ import { sound, SET } from './sound.ts'
 import { BREAK, HIT, WORLD } from './kinds.ts'
 import { patch, type Patch } from './patch.ts'
 import { conductor } from './music/conductor.ts'
+import { playable, surface } from './instrument.ts'
+import { INSTRUMENTS, type Instrument } from './instruments.ts'
 import { MOODS, TRIES } from './music/compose.ts'
 
 const voice = await sound()
@@ -105,6 +107,25 @@ music.state.onsection = (s, index, layers) => {
 }
 setInterval(() => music.tick(), 50)
 
+// Instruments: a voice and a surface to play it by, both data.
+const played = section('Instruments', 'Each is a patch and a surface, written as data: touch it, or use the keys shown on it. The music steps back while one is out.')
+const stage = document.createElement('div')
+stage.className = 'stage'
+let out: ReturnType<typeof playable> | null = null
+const take = (it: Instrument | null) => {
+  out?.close(); out = null
+  stage.style.display = it ? 'block' : 'none'
+  if (!it) return
+  stage.style.aspectRatio = `${it.sounds.surface.size[0]} / ${it.sounds.surface.size[1]}`
+  out = playable(stage, voice, it.sounds.play, it.sounds.surface)
+}
+for (const it of INSTRUMENTS) button(played, it.name, () => take(it))
+button(played, 'put away', () => take(null))
+played.after(stage)
+take(null)
+addEventListener('keydown', (e) => { if (!e.repeat && !(e.target instanceof HTMLTextAreaElement) && out?.key(e.code, true)) e.preventDefault() })
+addEventListener('keyup', (e) => { out?.key(e.code, false) })
+
 const own = section('A patch of your own', 'This is what a model writes beside a thing it makes. It is checked as data and refused with the reason if it is not exactly the form.')
 const text = document.createElement('textarea'), said = document.createElement('div')
 text.value = JSON.stringify({ how: 'struck', hard: 0.9, rough: 0.1, shape: 'bell', pitch: 620, ring: 3, damp: 0.15, gain: 0.7 }, null, 1)
@@ -138,4 +159,4 @@ const draw = () => {
   requestAnimationFrame(draw)
 }
 requestAnimationFrame(draw)
-Object.assign(globalThis, { lab: { voice, music, pickMood, hit, blast, HIT, BREAK, WORLD, SET, meter } })
+Object.assign(globalThis, { lab: { voice, music, pickMood, take, INSTRUMENTS, surface, get out() { return out }, hit, blast, HIT, BREAK, WORLD, SET, meter } })

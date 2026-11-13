@@ -91,8 +91,10 @@ async function main() {
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
   const colours = palette(), stuff = materials()
-  // What is heard (#247): `?sound=0` leaves it out, and a page that cannot make sound goes on without it.
-  const ears = query.get('sound') === '0' ? null : await sound().then((voice) => hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind }, { music: query.get('music') !== '0' })).catch(() => null)
+  // What is heard (#247): `?sound=0` leaves it out. The picture never waits for it: it is there when it is ready, and a
+  // page that cannot make sound goes on without it.
+  let ears: ReturnType<typeof hearing> | null = null
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, seam: () => ({ things: made, hud: over, input: controls }) }, { music: query.get('music') !== '0' }); }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -625,7 +627,7 @@ async function main() {
 
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
-  Object.assign((globalThis as unknown as { engine: object }).engine, { ears })
+  Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

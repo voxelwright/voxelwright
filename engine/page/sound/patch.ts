@@ -24,8 +24,11 @@
 // has a range. How loud it can ever be is not the patch's to say: the synthesiser's own ceiling is after everything
 // (dsp.ts), so a patch that passes here and is as loud as it can be is still under it.
 //
-// A thing's `sounds` is at most six of these under the names of what happens to it:
-//   { "hit": patch, "break": patch, "step": patch, "use": patch, "hum": patch, "play": patch }
+// A thing's `sounds` is at most six of these under the names of what happens to it, and for a thing that is played
+// the surface it is played by (surface.ts), which sounds its "play":
+//   { "hit": patch, "break": patch, "step": patch, "use": patch, "hum": patch, "play": patch, "surface": surface }
+
+import { surface, type Surface } from './surface.ts'
 
 export type How = 'struck' | 'plucked' | 'blown' | 'rubbed'
 export interface Patch {
@@ -102,16 +105,25 @@ export function patch(v: unknown): { patch: Patch } | { refused: string } {
   return { patch: v as unknown as Patch }
 }
 
-/** A thing's sounds read from data: each under a known name, at most one a name; or why they are refused. */
-export function sounds(v: unknown): { sounds: Partial<Record<(typeof ROLES)[number], Patch>> } | { refused: string } {
+/** A thing's sounds as they are kept in its record. */
+export type Sounds = Partial<Record<(typeof ROLES)[number], Patch>> & { surface?: Surface }
+/** A thing's sounds read from data: each under a known name, at most one a name, and its surface if it is played; or why they are refused. */
+export function sounds(v: unknown): { sounds: Sounds } | { refused: string } {
   if (!plain(v)) return { refused: 'sounds is an object' }
-  const out: Partial<Record<(typeof ROLES)[number], Patch>> = {}
+  const out: Sounds = {}
   for (const [name, each] of Object.entries(v)) {
-    if (!(ROLES as readonly string[]).includes(name)) return { refused: `a thing has no sound called "${name}": ${ROLES.join(', ')}` }
+    if (name === 'surface') {
+      const read = surface(each)
+      if ('refused' in read) return { refused: `surface: ${read.refused}` }
+      out.surface = read.surface
+      continue
+    }
+    if (!(ROLES as readonly string[]).includes(name)) return { refused: `a thing has no sound called "${name}": ${ROLES.join(', ')}, surface` }
     const read = patch(each)
     if ('refused' in read) return { refused: `${name}: ${read.refused}` }
     out[name as (typeof ROLES)[number]] = read.patch
   }
+  if (out.surface && !out.play) return { refused: 'a surface plays the "play" sound: there is none' }
   return { sounds: out }
 }
 

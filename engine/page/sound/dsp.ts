@@ -21,7 +21,7 @@ import type { Compiled } from './patch.ts'
 const TAU = Math.PI * 2
 /** Nothing leaves louder than this (-1 dBFS); the limiter starts to hold at KNEE (-4.4 dBFS). */
 export const CEILING = 0.89, KNEE = 0.6
-/** Numbers in a note: when (frames), which patch, pitch (Hz, or 0 for the patch's own over size), size (1 is the patch's own), force 0 to 1, how long held (s), left and right gain, low-pass (Hz), how much goes to the room, bus, 1 for a piece of something breaking. */
+/** Numbers in a note: when (frames), which patch, pitch (Hz, or 0 for the patch's own over size), size (1 is the patch's own), force 0 to 1, how long held (s), left and right gain, low-pass (Hz), how much goes to the room, bus, and last: 0, or 1 for a piece of something breaking, or from 2 up a name for a note that is held until it is let go (`release`) and can be bent meanwhile (`glide`). */
 export const NOTE = 12
 /** Things set from outside and eased to: the beds' levels and where they are, the room, the buses. */
 export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17 } as const
@@ -53,18 +53,18 @@ export class Synth {
   private mY1 = new Float64Array(MV * MM); private mY2 = new Float64Array(MV * MM); private mA1 = new Float64Array(MV * MM); private mA2 = new Float64Array(MV * MM); private mB = new Float64Array(MV * MM); private mF = new Float32Array(MV * MM); private mR = new Float64Array(MV * MM)
   private mPulse = new Int32Array(MV); private mAt = new Int32Array(MV); private mAmp = new Float32Array(MV); private mRough = new Float32Array(MV); private mRub = new Int32Array(MV); private mRubAmp = new Float32Array(MV); private mRubEnv = new Float32Array(MV); private mRubLp = new Float32Array(MV); private mRubZ = new Float32Array(MV)
   private mBend = new Float32Array(MV); private mSettle = new Float32Array(MV); private mLoud = new Float32Array(MV)
-  private mGl = new Float32Array(MV); private mGr = new Float32Array(MV); private mLp = new Float32Array(MV); private mZ = new Float32Array(MV); private mSend = new Float32Array(MV); private mBus = new Uint8Array(MV)
+  private mId = new Int32Array(MV); private mDamp = new Uint8Array(MV); private mGl = new Float32Array(MV); private mGr = new Float32Array(MV); private mLp = new Float32Array(MV); private mZ = new Float32Array(MV); private mSend = new Float32Array(MV); private mBus = new Uint8Array(MV)
   // Plucked strings.
   private sLen: number
   private sBuf: Float32Array
   private sOn = new Uint8Array(SV); private sWait = new Int32Array(SV); private sAge = new Int32Array(SV); private sLife = new Int32Array(SV); private sOff = new Int32Array(SV); private sN = new Int32Array(SV); private sRd = new Int32Array(SV)
   private sC = new Float32Array(SV); private sX1 = new Float32Array(SV); private sY1 = new Float32Array(SV); private sPrev = new Float32Array(SV); private sRho = new Float32Array(SV); private sRhoOff = new Float32Array(SV); private sS = new Float32Array(SV); private sLoud = new Float32Array(SV)
-  private sGl = new Float32Array(SV); private sGr = new Float32Array(SV); private sLp = new Float32Array(SV); private sZ = new Float32Array(SV); private sSend = new Float32Array(SV); private sBus = new Uint8Array(SV)
+  private sId = new Int32Array(SV); private sGl = new Float32Array(SV); private sGr = new Float32Array(SV); private sLp = new Float32Array(SV); private sZ = new Float32Array(SV); private sSend = new Float32Array(SV); private sBus = new Uint8Array(SV)
   // Held tones.
   private tOn = new Uint8Array(TV); private tWait = new Int32Array(TV); private tAge = new Int32Array(TV); private tHold = new Int32Array(TV); private tStage = new Uint8Array(TV)
   private tPh = new Float64Array(TV); private tF = new Float32Array(TV); private tEnv = new Float32Array(TV); private tAtt = new Float32Array(TV); private tRel = new Float32Array(TV); private tAmp = new Float32Array(TV); private tTilt = new Float32Array(TV); private tRough = new Float32Array(TV); private tWaver = new Float32Array(TV)
   private tG = new Float32Array(TV); private t1 = new Float32Array(TV); private t2 = new Float32Array(TV); private tBg = new Float32Array(TV); private tB1 = new Float32Array(TV); private tB2 = new Float32Array(TV); private tChiff = new Float32Array(TV)
-  private tGl = new Float32Array(TV); private tGr = new Float32Array(TV); private tLp = new Float32Array(TV); private tZ = new Float32Array(TV); private tSend = new Float32Array(TV); private tBus = new Uint8Array(TV)
+  private tId = new Int32Array(TV); private tTo = new Float32Array(TV); private tAmpTo = new Float32Array(TV); private tBright = new Float32Array(TV); private tGl = new Float32Array(TV); private tGr = new Float32Array(TV); private tLp = new Float32Array(TV); private tZ = new Float32Array(TV); private tSend = new Float32Array(TV); private tBus = new Uint8Array(TV)
   // Air.
   private aOn = new Uint8Array(AV); private aWait = new Int32Array(AV); private aAge = new Int32Array(AV); private aLife = new Int32Array(AV)
   private aFrom = new Float32Array(AV); private aTo = new Float32Array(AV); private aK = new Float32Array(AV); private aAmp = new Float32Array(AV); private a1 = new Float32Array(AV); private a2 = new Float32Array(AV)
@@ -110,6 +110,23 @@ export class Synth {
     for (let i = this.waiting - 1; i >= 0; i--) if (this.pending[i * NOTE + 10] === bus) this.pending.copyWithin(i * NOTE, --this.waiting * NOTE, this.waiting * NOTE + NOTE)
   }
 
+  /** Lets go of a held note: a tone dies away by its patch, a string or a struck thing is damped as by a hand. One not yet begun is played short. */
+  release(id: number) {
+    if (!(id >= 2)) return
+    for (let v = 0; v < TV; v++) if (this.tOn[v] && this.tId[v] === id) { this.tStage[v] = 2; this.tId[v] = 0 }
+    for (let v = 0; v < SV; v++) if (this.sOn[v] && this.sId[v] === id) { this.sOff[v] = this.sAge[v]; this.sLife[v] = Math.min(this.sLife[v], this.sAge[v] + Math.round(0.3 * this.sr)); this.sId[v] = 0 }
+    for (let v = 0; v < MV; v++) if (this.mOn[v] && this.mId[v] === id) { this.mDamp[v] = 1; this.mId[v] = 0 }
+    for (let i = 0; i < this.waiting; i++) if (this.pending[i * NOTE + 11] === id) { this.pending[i * NOTE + 11] = 0; this.pending[i * NOTE + 5] = 0.08 }
+  }
+  /** Bends a held tone to a pitch (Hz) and a loudness (0 to 1 of its own), eased over a few milliseconds. */
+  glide(id: number, hz: number, level: number) {
+    if (!(id >= 2)) return
+    for (let v = 0; v < TV; v++) if (this.tOn[v] && this.tId[v] === id) {
+      if (hz > 0) this.tTo[v] = Math.min(0.45 * this.sr, Math.max(16, hz))
+      if (level >= 0) this.tAmpTo[v] = Math.min(1, level)
+    }
+  }
+
   private rand() { let s = this.seed; s ^= s << 13; s ^= s >>> 17; s ^= s << 5; this.seed = s; return (s >>> 0) / 4294967296 }
   private lpCoef(hz: number) { return hz >= 18000 ? 1 : 1 - Math.exp((-TAU * Math.max(40, hz)) / this.sr) }
 
@@ -145,13 +162,13 @@ export class Synth {
   private start(i: number) {
     const q = this.pending, p = this.patches[q[i + 1]]
     if (!p) return
-    const wait = Math.max(0, Math.round(q[i] - this.frame)), size = Math.min(8, Math.max(0.125, q[i + 3] || 1)), force = Math.min(1, Math.max(0.02, q[i + 4])), piece = q[i + 11] === 1
+    const wait = Math.max(0, Math.round(q[i] - this.frame)), size = Math.min(8, Math.max(0.125, q[i + 3] || 1)), force = Math.min(1, Math.max(0.02, q[i + 4])), piece = q[i + 11] === 1, id = q[i + 11] >= 2 ? q[i + 11] | 0 : 0
     const pitch = Math.min(0.45 * this.sr, Math.max(16, q[i + 2] > 0 ? q[i + 2] : p.pitch / size))
     const gl = Math.min(1, Math.max(0, q[i + 6])), gr = Math.min(1, Math.max(0, q[i + 7])), lp = q[i + 8] > 0 ? q[i + 8] : 20000, send = Math.min(1, Math.max(0, q[i + 9])), bus = q[i + 10] === 1 ? 1 : q[i + 10] === 2 ? 2 : 0
     const gain = Math.min(1, Math.max(0, p.gain)) * force ** 1.2 * (piece ? 0.5 : 1)
-    if (p.how === 1) this.pluck(p, wait, pitch, force, gain, q[i + 5], gl, gr, lp, send, bus)
-    else if (p.tone) this.hold(p, wait, pitch, force, gain, q[i + 5], gl, gr, lp, send, bus)
-    else this.strike(p, wait, pitch, force, gain, p.how === 3 ? Math.max(0.02, q[i + 5] || 0.3) : 0, piece, gl, gr, lp, send, bus)
+    const v = p.how === 1 ? this.pluck(p, wait, pitch, force, gain, id ? 0 : q[i + 5], gl, gr, lp, send, bus) : p.tone ? this.hold(p, wait, pitch, force, gain, id ? 1e6 : q[i + 5], gl, gr, lp, send, bus) : this.strike(p, wait, pitch, force, gain, p.how === 3 ? Math.max(0.02, id ? 30 : q[i + 5] || 0.3) : 0, piece, gl, gr, lp, send, bus)
+    if (v < 0) { this.stats.dropped++; return }
+    if (id) (p.how === 1 ? this.sId : p.tone ? this.tId : this.mId)[v] = id
     if (piece) return
     if (p.airGain > 0 && p.airFor > 0) this.puff(wait, p.airFrom / size, p.airTo / size, p.airFor * Math.sqrt(size), p.airQ, p.airGain * gain, gl, gr, lp, send, bus)
     // What breaks goes on in pieces: each a small one of the same stuff, sooner rather than later, the small ones higher.
@@ -168,15 +185,22 @@ export class Synth {
   }
 
   /** The quietest voice of a pool, or a free one. */
-  private free(on: Uint8Array, loud: Float32Array | null, n: number) {
-    let best = 0, least = Infinity
-    for (let v = 0; v < n; v++) { if (!on[v]) return v; const l = loud ? loud[v] : v; if (l < least) { least = l; best = v } }
-    this.stats.stolen++
+  private free(on: Uint8Array, loud: Float32Array | null, n: number, buses: Uint8Array, bus: number) {
+    let best = -1, least = Infinity
+    for (let v = 0; v < n; v++) {
+      if (!on[v]) return v
+      // What is played by hand is never cut short for the world or the music.
+      if (buses[v] === 2 && bus !== 2) continue
+      const l = loud ? loud[v] : v
+      if (l < least) { least = l; best = v }
+    }
+    if (best >= 0) this.stats.stolen++
     return best
   }
 
   private strike(p: Compiled, wait: number, pitch: number, force: number, gain: number, rub: number, piece: boolean, gl: number, gr: number, lp: number, send: number, bus: number) {
-    const v = this.free(this.mOn, this.mLoud, MV), sr = this.sr, at = v * MM
+    const v = this.free(this.mOn, this.mLoud, MV, this.mBus, bus), sr = this.sr, at = v * MM
+    if (v < 0) return -1
     let n = 0, longest = 0
     const most = piece ? 4 : MM
     for (let k = 0; k < p.ratios.length && n < most; k++) {
@@ -195,7 +219,8 @@ export class Synth {
       longest = Math.max(longest, t60)
       n++
     }
-    if (!n) return
+    if (!n) return -1
+    this.mId[v] = 0; this.mDamp[v] = 0
     this.mOn[v] = 1; this.mN[v] = n; this.mWait[v] = wait; this.mAge[v] = 0
     // How long they touch falls a little as they meet faster (Hertz: with speed to the power of minus a fifth).
     this.mPulse[v] = rub ? 0 : Math.max(1, Math.round(Math.min(0.02, Math.max(0.00002, p.tau)) * force ** -0.2 * sr))
@@ -206,13 +231,15 @@ export class Synth {
     this.mBend[v] = Math.min(2, Math.max(-2, p.bend)); this.mSettle[v] = (0.03 + 0.1 * Math.abs(p.bend)) * sr
     this.mLoud[v] = gain
     this.mGl[v] = gl; this.mGr[v] = gr; this.mLp[v] = this.lpCoef(lp); this.mZ[v] = 0; this.mSend[v] = send; this.mBus[v] = bus
+    return v
   }
 
   private pluck(p: Compiled, wait: number, pitch: number, force: number, gain: number, dur: number, gl: number, gr: number, lp: number, send: number, bus: number) {
-    const v = this.free(this.sOn, this.sLoud, SV), sr = this.sr, base = v * this.sLen
+    const v = this.free(this.sOn, this.sLoud, SV, this.sBus, bus), sr = this.sr, base = v * this.sLen
+    if (v < 0) return -1
     const f = Math.max(27, pitch), S = 0.15 + 0.85 * Math.min(1, Math.max(0, p.damp))
     const whole = sr / f - S * 0.5, N = Math.min(this.sLen - 2, Math.floor(whole - 0.1)), d = whole - N
-    if (N < 2) return
+    if (N < 2) return -1
     const t60 = Math.min(20, Math.max(0.02, p.ring * (p.pitch / f) ** (0.3 + 0.5 * p.damp)))
     // The string as it is let go: noise, duller for a soft pick and a light touch, with what a pluck at that place leaves out.
     const c = Math.min(1, 0.04 + 0.96 * p.hard ** 1.5 * (0.3 + 0.7 * force)), gap = Math.max(1, Math.round(N * Math.min(0.5, Math.max(0.03, p.where))))
@@ -231,29 +258,35 @@ export class Synth {
     this.sOff[v] = dur > 0 ? Math.round(dur * sr) : 0x7fffffff
     this.sLife[v] = Math.round((dur > 0 ? Math.min(dur + 0.25, t60 * 1.2) : t60 * 1.2) * sr)
     this.sLoud[v] = gain
-    this.sGl[v] = gl; this.sGr[v] = gr; this.sLp[v] = this.lpCoef(lp); this.sZ[v] = 0; this.sSend[v] = send; this.sBus[v] = bus
+    this.sGl[v] = gl; this.sGr[v] = gr; this.sLp[v] = this.lpCoef(lp); this.sZ[v] = 0; this.sSend[v] = send; this.sBus[v] = bus; this.sId[v] = 0
+    return v
   }
 
   private hold(p: Compiled, wait: number, pitch: number, force: number, gain: number, dur: number, gl: number, gr: number, lp: number, send: number, bus: number) {
-    let v = 0, oldest = -1
-    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
+    let v = -1, oldest = -1
+    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if (this.tBus[k] === 2 && bus !== 2) continue; if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
+    if (v < 0) return -1
     if (oldest >= 0) this.stats.stolen++
     const sr = this.sr
     this.tOn[v] = 1; this.tWait[v] = wait; this.tAge[v] = 0; this.tStage[v] = 0; this.tPh[v] = 0; this.tF[v] = pitch; this.tEnv[v] = 0
-    this.tHold[v] = Math.round(Math.max(0.03, dur || 0.3) * sr)
+    this.tHold[v] = Math.round(Math.min(40000, Math.max(0.03, dur || 0.3)) * sr)
+    this.tId[v] = 0; this.tTo[v] = pitch; this.tAmpTo[v] = 0.5 * gain
     this.tAtt[v] = 1 / ((0.003 + 0.3 * (1 - p.hard) ** 2) * sr)
     this.tRel[v] = Math.exp(-6.908 / (Math.min(12, Math.max(0.02, p.ring)) * sr))
     this.tAmp[v] = 0.5 * gain; this.tTilt[v] = Math.min(1, Math.max(0, p.tilt)); this.tRough[v] = Math.min(1, Math.max(0, p.rough)); this.tWaver[v] = Math.min(1, Math.max(0, p.waver))
     // How bright: a tone little damped keeps its upper part, more so blown hard.
-    this.tG[v] = Math.tan(Math.PI * Math.min(0.45, (pitch * (1.5 + 14 * (1 - p.damp) * (0.4 + 0.6 * force))) / sr))
+    this.tBright[v] = 1.5 + 14 * (1 - Math.min(1, Math.max(0, p.damp))) * (0.4 + 0.6 * force)
+    this.tG[v] = Math.tan(Math.PI * Math.min(0.45, (pitch * this.tBright[v]) / sr))
     this.tBg[v] = Math.tan(Math.PI * Math.min(0.45, (pitch * 2) / sr))
     this.t1[v] = 0; this.t2[v] = 0; this.tB1[v] = 0; this.tB2[v] = 0; this.tChiff[v] = 1
     this.tGl[v] = gl; this.tGr[v] = gr; this.tLp[v] = this.lpCoef(lp); this.tZ[v] = 0; this.tSend[v] = send; this.tBus[v] = bus
+    return v
   }
 
   /** A rush of noise through a band that sweeps from one pitch to another: where a note starts in frames from now, for how long, how narrow, how loud. */
   private puff(wait: number, from: number, to: number, time: number, q: number, amp: number, gl: number, gr: number, lp: number, send: number, bus: number) {
-    const v = this.free(this.aOn, null, AV), top = 0.42 * this.sr
+    const v = this.free(this.aOn, null, AV, this.aBus, bus), top = 0.42 * this.sr
+    if (v < 0) return
     this.aOn[v] = 1; this.aWait[v] = wait; this.aAge[v] = 0; this.aLife[v] = Math.round(Math.min(8, Math.max(0.01, time)) * this.sr)
     this.aFrom[v] = Math.min(top, Math.max(20, from)); this.aTo[v] = Math.min(top, Math.max(20, to)); this.aK[v] = 1 / Math.min(12, Math.max(0.3, q)); this.aAmp[v] = Math.min(1, amp)
     this.a1[v] = 0; this.a2[v] = 0; this.aLp[v] = this.lpCoef(lp); this.aZ[v] = 0
@@ -305,6 +338,13 @@ export class Synth {
       }
       this.mRubEnv[v] = env; this.mRubZ[v] = z
       this.mRub[v] = env > 0 || left > 0 ? Math.max(left, 1) : 0
+    }
+    // Let go: a hand on it. Every mode now dies in a seventh of a second at most.
+    if (this.mDamp[v]) {
+      this.mDamp[v] = 0
+      const stop = Math.exp(-6.908 / (0.15 * sr))
+      for (let k = 0; k < n; k++) { const r = Math.min(this.mR[at + k], stop); this.mR[at + k] = r; this.mA1[at + k] = 2 * r * Math.cos((TAU * this.mF[at + k]) / sr); this.mA2[at + k] = -r * r }
+      this.mLife[v] = Math.min(this.mLife[v], this.mAge[v] + Math.round(0.3 * sr)); this.mRub[v] = Math.min(this.mRub[v], 1)
     }
     // It starts off its pitch and settles: the modes are tuned again each block until it has.
     const bend = this.mBend[v]
@@ -359,7 +399,11 @@ export class Synth {
     const s = Math.min(this.tWait[v], len)
     this.tWait[v] -= s
     if (s === len) return
-    const sr = this.sr, t = this.tmp, tilt = this.tTilt[v], rough = this.tRough[v], amp = this.tAmp[v], g = this.tG[v], bg = this.tBg[v]
+    const sr = this.sr, t = this.tmp, tilt = this.tTilt[v], rough = this.tRough[v]
+    // Bent by hand: pitch and loudness go a third of the way to where they are wanted each block (about 8 ms to arrive).
+    if (this.tTo[v] !== this.tF[v]) { this.tF[v] = Math.abs(this.tTo[v] / this.tF[v] - 1) < 0.0005 ? this.tTo[v] : this.tF[v] * (this.tTo[v] / this.tF[v]) ** 0.35; this.tG[v] = Math.tan(Math.PI * Math.min(0.45, (this.tF[v] * this.tBright[v]) / sr)); this.tBg[v] = Math.tan(Math.PI * Math.min(0.45, (this.tF[v] * 2) / sr)) }
+    this.tAmp[v] += (this.tAmpTo[v] - this.tAmp[v]) * 0.35
+    const amp = this.tAmp[v], g = this.tG[v], bg = this.tBg[v]
     const age = this.tAge[v] / sr, waver = this.tWaver[v]
     // It trembles once it has been held a little.
     const dt = (this.tF[v] * (1 + waver * 0.012 * Math.sin(TAU * 5.2 * age) * Math.min(1, age * 4))) / sr
@@ -591,7 +635,7 @@ export class Synth {
 }
 
 // ── In the page: the audio thread's end of it ─────────────────────────────
-// Messages in: {define: [id, compiled]}, {notes: Float64Array}, {set: [which, value, ...]}, {hush: bus}. Once a second
+// Messages in: {define: [id, compiled]}, {notes: Float64Array}, {set: [which, value, ...]}, {hush: bus}, {release: id}, {glide: [id, hz, level]}. Once a second
 // it says what it has done and what a block cost it.
 declare const AudioWorkletProcessor: { new (): { port: MessagePort } } | undefined
 declare const registerProcessor: (name: string, ctor: unknown) => void
@@ -610,6 +654,8 @@ if (typeof AudioWorkletProcessor !== 'undefined') {
         if (m.notes) this.synth.notes(m.notes)
         if (m.set) for (let i = 0; i + 1 < m.set.length; i += 2) this.synth.set(m.set[i], m.set[i + 1])
         if (m.hush !== undefined) this.synth.hush(m.hush)
+        if (m.release !== undefined) this.synth.release(m.release)
+        if (m.glide) this.synth.glide(m.glide[0], m.glide[1], m.glide[2])
       }
     }
     process(_: Float32Array[][], outputs: Float32Array[][]) {

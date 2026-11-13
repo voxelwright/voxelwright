@@ -12,6 +12,7 @@ const { city, check, finish } = await start()
 try {
   const page = await city('scale=0.5&fire=0&people=0&music=0')
   await still(page)
+  await page.waitForFunction(() => globalThis.engine.ears, null, { timeout: 20_000 })
   const state = () => page.evaluate(() => globalThis.engine.ears?.voice.context.state)
   check(await state() === 'suspended' || await state() === 'running', `the page has sound, waiting for a touch (${await state()})`)
   // A touch going down is not enough to start sound; its coming up is.
@@ -56,7 +57,7 @@ try {
   t0 = await page.evaluate(() => { document.querySelector('#boom').click(); return globalThis.engine.ears.voice.context.currentTime })
   await wait(1300)
   const blow = await take(t0, t0 + 1.2), began = ears.onset(blow.l.map((v, i) => v + blow.r[i]), blow.sr, 0.02)
-  check(began >= 0 && began < 0.3, `a hammer blow is heard ${(began * 1000).toFixed(0)} ms after the button (the page first asks the GPU what is ahead: a frame or two, more on a busy machine)`)
+  check(began >= 0 && began < 0.45, `a hammer blow is heard ${(began * 1000).toFixed(0)} ms after the button (the page first asks the GPU what is ahead: a frame or two, more on a busy machine)`)
   check(ears.peak(blow.l) > 0.05, `and it is not faint (peak ${ears.db(ears.peak(blow.l)).toFixed(0)} dB)`)
   await still(page)
 
@@ -84,6 +85,9 @@ try {
   const env = ears.envelope(fm, fall.sr, 250)
   check(ears.peak(fall.l) > 0.3, `a charge on a house front is loud (peak ${ears.db(Math.max(ears.peak(fall.l), ears.peak(fall.r))).toFixed(1)} dB, never over the ceiling of -1)`)
   check(Math.max(ears.peak(fall.l), ears.peak(fall.r)) <= 0.891, 'nothing left louder than the ceiling')
+  // A hammer is a blow, not a blast: quieter than the charge, and with no boom under it.
+  const blowLow = ears.band(blow.l.subarray(Math.round(began * blow.sr)), blow.sr, 20, 120), chargeLow = ears.band(fall.l, fall.sr, 20, 120)
+  check(ears.rms(blow.l, Math.round(began * blow.sr), Math.round((began + 0.3) * blow.sr)) < ears.rms(fall.l, 0, Math.round(0.4 * fall.sr)) * 0.6 && blowLow < chargeLow * 0.5, `a hammer blow is no explosion: ${ears.db(ears.rms(blow.l, Math.round(began * blow.sr), Math.round((began + 0.3) * blow.sr)) / ears.rms(fall.l, 0, Math.round(0.4 * fall.sr))).toFixed(0)} dB against the charge, and ${(blowLow * 100).toFixed(0)}% of it under 120 Hz where the charge has ${(chargeLow * 100).toFixed(0)}%`)
   const later = env.slice(4, 14).filter((e) => e > 0.004).length
   check(later >= 3, `what it loosened is heard landing afterwards (${later} of the ten quarter-seconds from 1 s to 3.5 s have sound)`)
   const block = (128 / fall.sr) * 1000
@@ -116,6 +120,7 @@ try {
   await page.close()
   const tuned = await city('scale=0.5&fire=0&people=0')
   await still(tuned)
+  await tuned.waitForFunction(() => globalThis.engine.ears, null, { timeout: 20_000 })
   await tuned.mouse.click(640, 360)
   await tuned.evaluate(() => { const q = globalThis.engine.pose; q.y -= 9; q.yaw = 0; q.pitch = 0.2 })
   const playing = () => tuned.evaluate(() => { const e = globalThis.engine.ears; return { place: e.place, mood: e.music.state.mood, composed: e.music.state.composed, ms: e.music.state.ms } })

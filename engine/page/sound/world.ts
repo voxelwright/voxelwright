@@ -9,6 +9,10 @@ import { SET, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
 import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
+import { played } from './things.ts'
+import type { Things } from '../things.ts'
+import type { Hud } from '../hud.ts'
+import type { Input } from '../input.ts'
 
 /** What the page gives once: how to ask the land, and what is so now. */
 export interface Scene {
@@ -28,6 +32,8 @@ export interface Scene {
   making(): boolean
   /** What a cell is (the core's `world_kind`). */
   kind(x: number, y: number, z: number): number
+  /** The made things, the layer over the picture and the keys, once the page has them: for things that sound and are played. */
+  seam?(): { things: Things; hud: Hud; input: Input }
 }
 /** A body as the page keeps it: how many cells, and a face of it (whose kind says what it is made of). */
 interface Body { born: { cells: number; faces: Uint32Array } }
@@ -42,6 +48,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   const music = withMusic ? conductor(voice) : null
   /** How much is going wrong near by, 0 to 1: blasts, things coming down, fire. It dies away over some seconds. */
   let threat = 0, snow = false, snowLooked = -9, place = ''
+  /** Made things that sound and are played: there once the page's own parts are (asked each frame until they are). */
+  let things: ReturnType<typeof played> | null = null
   const seen = new Map<number, { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; quiet: number }>()
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
@@ -53,6 +61,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
 
   /** A blast: its crack, for those near, and its boom, which carries. Heard as late as it is far. */
   const blast = (at: readonly [number, number, number], radius: number) => {
+    // The hammer is a small blast to the engine and a blow to the ear: what it struck answers (`used`), nothing explodes.
+    if (radius < 8) return
     const reach = 6 * radius
     voice.play(WORLD.crack, { at, force: 1, size: 0.6 + radius / 20, reach: reach * 0.35 })
     voice.play(WORLD.boom, { at, force: 1, size: 0.7 + radius / 16, reach })
@@ -63,15 +73,17 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
 
   return {
     voice, blast, count, music,
+    get things() { return things },
     /** Which place's music is wanted now. */
     get place() { return place },
     /** A tool was used and this is what it met (what the page's tools return): the stuff struck answers. */
     used(tool: string, hit: { at: readonly [number, number, number]; material: number } | null | undefined) {
       if (tool === 'Cannon') { voice.play(WORLD.shot, { force: 0.9, reach: 20 }); return }
       if (!hit) return
+      const own = things?.hit(hit.at), ownBreak = things?.breaks(hit.at)
       const name = MATERIALS[hit.material] ?? 'brick', vary = { size: 0.9 + 0.2 * Math.random(), force: 0.75 + 0.2 * Math.random() }
-      if (tool === 'Hammer') { voice.play(HIT[name] ?? HIT.brick, { at: hit.at, ...vary, reach: 5, travels: false }); voice.play(BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.55, size: vary.size, reach: 6, travels: false }) }
-      else if (tool === 'Charge' || tool === 'Big charge') voice.play(BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.9, size: tool === 'Charge' ? 2 : 3.5, reach: tool === 'Charge' ? 20 : 45 })
+      if (tool === 'Hammer') { voice.play(own ?? HIT[name] ?? HIT.brick, { at: hit.at, ...vary, reach: 5, travels: false }); voice.play(ownBreak ?? BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.55, size: vary.size, reach: 6, travels: false }) }
+      else if (tool === 'Charge' || tool === 'Big charge') voice.play(ownBreak ?? BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.9, size: tool === 'Charge' ? 2 : 3.5, reach: tool === 'Charge' ? 20 : 45 })
       else if (tool === 'Torch') voice.play(WORLD.catch, { at: hit.at, force: 0.7, reach: 4 })
       else if (tool === 'Cutter') voice.play(WORLD.cut, { at: hit.at, force: 0.8, dur: 0.6, reach: 8 })
       else if (tool === 'Brick') voice.play(WORLD.place, { at: hit.at, force: 0.6, reach: 4 })
@@ -114,6 +126,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     /** Once a frame: where the ears are, and the beds brought to what is so there. */
     frame(at: readonly [number, number, number], facing: number, dt: number) {
       eye[0] = at[0]; eye[1] = at[1]; eye[2] = at[2]; yaw = facing
+      if (!things && scene.seam) try { const s = scene.seam(); things = played(voice, s.things, s.hud, s.input) } catch { /* the page has not made them yet */ }
+      things?.frame(eye)
       clock += dt
       const under = scene.under(), ground = scene.ground(Math.round(eye[0]), Math.round(eye[2])), high = Math.max(0, (eye[1] - Math.max(ground, 0)) / M)
       const speed = Math.hypot(eye[0] - last[0], eye[1] - last[1], eye[2] - last[2]) / M / Math.max(dt, 1e-3)

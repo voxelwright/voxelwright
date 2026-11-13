@@ -106,6 +106,41 @@ console.log('In tune, and on time')
   check(Math.abs(f1 / f2 - 1) < 0.005 && Math.abs(ears.decay(o441.l, 44100, 40) / ears.decay(o48.l, 48000, 40) - 1) < 0.1, `the same at 44,100 and 48,000 frames a second (${f1.toFixed(1)} and ${f2.toFixed(1)} Hz)`)
 }
 
+console.log('Played by hand')
+{
+  const sr = 48000, s = new Synth(sr), pipe = { how: 'blown', hard: 0.7, rough: 0.1, shape: 'hollow', pitch: 587, ring: 0.1, damp: 0.6, gain: 0.8 }, string = { how: 'plucked', hard: 0.6, rough: 0.1, shape: 'string', pitch: 196, ring: 5, damp: 0.4, gain: 0.8 }, key = { how: 'struck', hard: 0.5, rough: 0.03, shape: 'string', pitch: 262, ring: 5, damp: 0.4, gain: 0.8 }
+  s.define(1, compile(pipe)); s.define(2, compile(string)); s.define(3, compile(key)); s.set(SET.roomGain, 0)
+  const l = new Float32Array(sr * 3), r = new Float32Array(sr * 3), part = (from, to) => s.render(l.subarray(Math.round(from * sr), Math.round(to * sr)), r.subarray(Math.round(from * sr), Math.round(to * sr)))
+  // A tone held from the start, bent up a fifth at one second, let go at two.
+  s.notes([0, 1, 440, 1, 0.8, 0, 0.7, 0.7, 0, 0, 2, 7])
+  part(0, 1); s.glide(7, 660, -1); part(1, 2); s.release(7); part(2, 3)
+  const at = (t) => ears.peaks(l, sr, { from: Math.round(t * sr), size: 16384, most: 1 })[0].hz
+  check(Math.abs(at(0.5) - 440) < 2 && Math.abs(at(1.5) - 660) < 3, `a held tone stays until it is let go and goes where it is bent (${at(0.5).toFixed(0)} Hz, then ${at(1.5).toFixed(0)})`)
+  const moved = ears.peaks(l, sr, { from: Math.round(1.02 * sr), size: 1024, most: 1 })[0].hz
+  check(ears.rms(l, 1.9 * sr, 2 * sr) > 0.05 && ears.rms(l, 2.5 * sr, 3 * sr) < 1e-4 && moved > 600, `the bend arrives within 20 ms (${moved.toFixed(0)} Hz by then) and letting go ends it (${ears.db(ears.rms(l, 2.5 * sr, 3 * sr)).toFixed(0)} dB half a second after)`)
+  for (const [id, name] of [[2, 'a plucked string'], [3, 'a struck string']]) {
+    const t = new Synth(sr); t.define(id, compile(id === 2 ? string : key)); t.set(SET.roomGain, 0)
+    const a = new Float32Array(sr * 2), b = new Float32Array(sr * 2)
+    t.notes([0, id, 0, 1, 0.8, 0, 0.7, 0.7, 0, 0, 2, 9])
+    t.render(a.subarray(0, sr), b.subarray(0, sr)); t.release(9); t.render(a.subarray(sr), b.subarray(sr))
+    check(ears.rms(a, 0.9 * sr, sr) > 0.01 && ears.rms(a, 1.4 * sr, 1.5 * sr) < ears.rms(a, 0.9 * sr, sr) * 0.02, `${name} rings while held and is damped when let go (${ears.db(ears.rms(a, 1.4 * sr, 1.5 * sr) / ears.rms(a, 0.9 * sr, sr)).toFixed(0)} dB 0.4 s after)`)
+  }
+  // Sixteen tones held by hand, then the music asks for sixteen more: none of the held is cut for them.
+  const u = new Synth(sr); u.define(1, compile(pipe))
+  const held = [], more = []
+  for (let i = 0; i < 16; i++) held.push(0, 1, 300 + i * 40, 1, 0.5, 0, 0.1, 0.1, 0, 0, 2, 10 + i)
+  for (let i = 0; i < 16; i++) more.push(4800, 1, 200 + i * 30, 1, 0.5, 2, 0.1, 0.1, 0, 0, 1, 0)
+  u.notes(held); u.notes(more)
+  const x = new Float32Array(sr), y = new Float32Array(sr); u.render(x, y)
+  check(u.stats.voices === 16 && u.stats.stolen === 0 && u.stats.dropped === 16, `what is played by hand is never cut short for the music (${u.stats.voices} still held, ${u.stats.dropped} of the music's notes went unplayed)`)
+  // A note asked for now is on its way out 3 ms later: the ceiling's look ahead, and nothing else.
+  const n = new Synth(sr); n.define(3, compile(key)); n.frame = 99999
+  n.notes([99990, 3, 0, 1, 1, 0, 0.7, 0.7, 0, 0, 2, 5])
+  const p = new Float32Array(1024), q = new Float32Array(1024); n.render(p, q)
+  const first = p.findIndex((v) => v !== 0)
+  check(first === Math.round(0.003 * sr), `a note played by hand leaves the synthesiser ${((first / sr) * 1000).toFixed(1)} ms after it arrives`)
+}
+
 console.log('Never loud enough to hurt')
 {
   // Patches made at random inside the form, all as loud and as hard as the form lets them be, many at once with every bed full up.
@@ -149,6 +184,8 @@ console.log('Never loud enough to hurt')
   s.define(1, rot); s.define(2, { ...rot, how: 1 }); s.define(3, { ...rot, tone: 1 })
   s.notes([0, 1, 0, 1, 1e9, 0, 1e9, 1e9, 0, 9, 0, 0, 0, 2, 1e9, 0, 1, 1e9, 9, 9, -1, 9, 7, 0, 0, 3, 0.001, 1e9, 1, 1e9, 9, 9, 1e9, 9, 2, 0, NaN, 1, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN])
   for (let i = 0; i < 18; i++) s.set(i, 1e9)
+  for (const id of [NaN, -1, 0, 1, 2, 1e9]) { s.release(id); s.glide(id, NaN, NaN); s.glide(id, 1e12, 1e12); s.glide(id, -5, -5) }
+  s.notes([0, 3, 440, 1, 1, 0, 1, 1, 0, 1, 2, 2]); s.glide(2, 1e12, 1e12)
   const l = new Float32Array(96000), r = new Float32Array(96000)
   s.render(l, r)
   let top = 0, nan = 0

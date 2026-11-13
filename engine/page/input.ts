@@ -20,6 +20,8 @@ export interface Mode {
   readonly solid?: boolean
   /** Keys are letters here: none is held, and the pointer is let go as it starts. */
   readonly text?: boolean
+  /** Every key is this mode's while it is on top, those that mean the same everywhere too (#247: an instrument's keys are notes, and Q is one). */
+  readonly every?: boolean
   /** A key going down (its `code`). True if this mode took it. */
   key?(code: string, e: KeyboardEvent): boolean | void
   /** A click with the pointer held, or a tap on the use button. True if this mode took it. */
@@ -66,7 +68,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   addEventListener('keydown', (e) => {
     if (written(e.target) || top()?.text) return
     down.add(e.code)
-    if (everywhere.get(e.code)?.(e) === true) return
+    if (!top()?.every && everywhere.get(e.code)?.(e) === true) return
     each((m) => m.key?.(e.code, e))
   })
   addEventListener('keyup', (e) => down.delete(e.code))

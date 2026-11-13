@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 2, November 13, 2026 (music). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,listen,ears}.mjs`.
+Version 3, November 13, 2026 (music, instruments). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -51,8 +51,8 @@ output, not by the source.
 6. **A budget of voices.** 64 struck, 16 strings, 16 tones, 24 airs, 40 grains. When a pool is full the
    quietest gives way. Of the blows in one telling of the solver, five are played and the rest feed the
    rubble's bed.
-7. **Feedback is fast.** A hammer blow by the page's button is heard 9 to 140 ms later; all of that is the
-   page asking the GPU what is ahead. A note itself leaves 3 ms (the ceiling's look-ahead) after it is asked.
+7. **Feedback is fast, except where the page waits for the GPU.** A hammer blow by the page's button is heard
+   125 to 290 ms later on a busy machine; all of that is the page asking the GPU what is ahead, and it is too long. A note itself leaves 3 ms (the ceiling's look-ahead) after it is asked.
 
 ## The pieces
 
@@ -101,6 +101,42 @@ yes in the thread that asks), so this is built from the post's description and f
   -28 LUFS, and the world ducks it.
 - Not built: no tempo-matched crossfade (the old pulse just stops), no stingers, one arrangement arc for every
   piece, nothing follows what the player does beyond the place. Whether any of it is pleasant is unheard.
+
+## Instruments (`instrument.ts`, `surface.ts`, `instruments.ts`, `things.ts`)
+
+- **What the named games do** (a Haiku lookup, November 13): no Spider-Man game was found with a playable guitar;
+  the well-known one is The Last of Us Part II's (the left stick picks one of six chords from a wheel, the touchpad
+  is six string regions to strum across or pluck; Naughty Dog's article on gamedeveloper.com). Ocarina of Time: five
+  notes on five buttons, low to high; a bend by the stick is reported, not confirmed. Genshin Impact's lyre lays
+  three rows of seven notes on three rows of keys. No source gives a latency target.
+- **The form.** A thing's `sounds` may hold `surface` beside `play`: `{size, release?, parts}`. A part is a `rect`,
+  `round` or `poly` with a named colour, a label of up to six plain characters and a key, and at most one of
+  `note` (with `slide` to a second pitch along x or y, and `level` along x or y), `chord`, `strum`; `string` marks a
+  part as a string that chords retune. A part with none of those is drawing. `surface()` refuses anything else
+  (markup in a label, a key that is not a letter, digit or Space, a colour that is not a name, a part off the edge).
+  It is drawn as SVG built here from the numbers; nothing a model wrote is ever markup or code.
+- **This is the free-layout form, not model-written code.** The owner asked that the bold form be tried first
+  (November 13). What decided it: a note must be asked for inside the input event. Anything that looks up the GPU
+  per touch (9 to 290 ms measured for the page's pick) or calls a sandbox per note cannot feel played. Code in a
+  sandbox that only lays a surface out, and playing by touching the thing's own cells (which needs each part's box
+  projected to the screen every frame, not a pick), were not tried.
+- **Held notes.** A note's last number, from 2 up, names it: it sounds until `release(id)`, and a tone can be
+  bent with `glide(id, hz, level)` (it arrives in about 8 ms). Let go, a tone dies by its patch; a string or a
+  struck thing is damped in a seventh of a second where the surface says `"release": "stops"` (a piano), and rings
+  otherwise (a guitar). Voices on the play bus are never stolen for the world or the music.
+- **Delay, measured** (`test/played.mjs`, real key events in Chrome): 3.1 ms from the audio clock's reading at the
+  key press to the first sample leaving the synthesiser (all of it the ceiling's look-ahead), the page getting the
+  key 0.5 ms after it was pressed. Beyond that is the device: this Mac reports 5.8 ms held by the browser and 32 ms
+  of output headless. A Bluetooth speaker adds its own (commonly 100 ms or more: from memory) and nothing here can
+  shorten it.
+- **In the world** (`things.ts`): a made thing with a surface within 4 m shows a button ("Play the piano (E)");
+  E or the button opens its surface in a hud panel and pushes an input mode that takes every key (`every`, added to
+  `input.ts` for this: Q is a string, not the wand); keys coming up are read from `input.held`; Escape or E puts it
+  away, and so does walking 10 m off. The place's music drops to a fifth while it is out. A thing struck with the
+  hammer answers with its own `hit`.
+- `node instrument.mjs piano --world url` stands a kept one in a shared world (cells and record, no model).
+- Not built: velocity from how fast a key is struck (a key is always 0.75; a touch uses pressure where the device
+  gives it); sustain pedal; other players do not hear what you play; strings cannot be bent.
 
 ## Rules that hold
 
@@ -172,6 +208,10 @@ whether the mix is right. The owner chose recorded foley over synthesised wood a
   all unproved.
 - A body's blow is read from its change of speed between two tellings (late by one, misses a glance) until
   the core reports impacts (#245).
+- A hammer was first heard as an explosion too (the engine calls it a small blast): blasts under 8 cells are
+  now blows only, and a check compares the two.
+- The picture never waits for sound: `main.ts` starts it and goes on; a worklet that never loads leaves a silent
+  page, not a black one.
 - Nothing is occluded: a wall between does not dull a sound. No Doppler. The room is one small reverb for
   everywhere.
 - Residents' steps, vehicles, doors and water that flows make no sound yet.

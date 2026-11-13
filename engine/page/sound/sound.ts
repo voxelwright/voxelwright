@@ -58,6 +58,12 @@ export interface Sound {
   hear(at: readonly [number, number, number], reach?: number): { gain: number; pan: number; lp: number; late: number; far: number }
   /** Stops what is held on a bus. */
   hush(bus: number): void
+  /** Starts a note that sounds until it is let go, played by hand (it does not wait for the frame). Returns its name, or 0 if sound is not running. */
+  hold(patch: Patch, how?: Play): number
+  /** Lets a held note go. */
+  release(id: number): void
+  /** Bends a held tone to a pitch (Hz) and a loudness (0 to 1 of its own; -1 leaves it). */
+  glide(id: number, hz: number, level?: number): void
   /** What the audio thread last said of itself, once a second. */
   readonly told: Told | null
   /** What this thread has spent on sound, ms a frame, smoothed. */
@@ -91,7 +97,7 @@ export async function sound(): Promise<Sound> {
     return n
   }
   const ear = { at: [0, 0, 0] as [number, number, number], right: [1, 0] as [number, number], ahead: [0, -1] as [number, number] }
-  let notes: number[] = [], sets: number[] = [], spent = 0
+  let notes: number[] = [], sets: number[] = [], spent = 0, held = 1
 
   const hear = (at: readonly [number, number, number], reach = 4) => {
     const dx = (at[0] - ear.at[0]) / M, dy = (at[1] - ear.at[1]) / M, dz = (at[2] - ear.at[2]) / M, far = Math.hypot(dx, dy, dz), flat = Math.hypot(dx, dz) || 1
@@ -106,31 +112,34 @@ export async function sound(): Promise<Sound> {
     if (notes.length) { node.port.postMessage({ notes: Float64Array.from(notes) }); notes = [] }
     if (sets.length) { node.port.postMessage({ set: sets }); sets = [] }
   }
+  const play = (patch: Patch, how: Play = {}, name = 0) => {
+    if (context.state !== 'running') return false
+    const t0 = performance.now()
+    let gain = how.gain ?? 1, pan = how.pan ?? 0, lp = 0, late = 0, send = how.room ?? 0
+    if (how.at) {
+      const h = hear(how.at, how.reach)
+      if (h.gain < 0.002) return false
+      gain = h.gain; pan = h.pan; lp = h.lp; late = how.travels === false ? 0 : h.late
+      // What is far is heard more off the town than straight.
+      send = Math.min(0.5, 0.08 + h.far / 120)
+    }
+    const when = ((how.when ?? context.currentTime + (how.after ?? 0)) + late) * context.sampleRate
+    notes.push(when, id(patch), how.pitch ?? 0, how.size ?? 1, how.force ?? 0.7, how.dur ?? 0, gain * Math.sqrt(0.5 * (1 - pan)) * 1.25, gain * Math.sqrt(0.5 * (1 + pan)) * 1.25, lp, send, how.bus ?? BUS.world, name)
+    // What is played by hand does not wait for the frame.
+    if (how.bus === BUS.play) flush()
+    spent += (performance.now() - t0 - spent) * 0.05
+    return true
+  }
   return {
     context, out: node,
     get running() { return context.state === 'running' },
     get told() { return told },
     get spent() { return spent },
     hear, flush,
-    play(patch, how = {}) {
-      if (context.state !== 'running') return false
-      const t0 = performance.now()
-      let gain = how.gain ?? 1, pan = how.pan ?? 0, lp = 0, late = 0, send = how.room ?? 0
-      if (how.at) {
-        const h = hear(how.at, how.reach)
-        if (h.gain < 0.002) return false
-        gain = h.gain; pan = h.pan; lp = h.lp; late = how.travels === false ? 0 : h.late
-        // What is far is heard more off the town than straight.
-        send = Math.min(0.5, 0.08 + h.far / 120)
-      }
-      const when = ((how.when ?? context.currentTime + (how.after ?? 0)) + late) * context.sampleRate
-      notes.push(when, id(patch), how.pitch ?? 0, how.size ?? 1, how.force ?? 0.7, how.dur ?? 0, gain * Math.sqrt(0.5 * (1 - pan)) * 1.25, gain * Math.sqrt(0.5 * (1 + pan)) * 1.25, lp, send, how.bus ?? BUS.world, 0)
-      if (notes.length !== NOTE * Math.round(notes.length / NOTE)) throw new Error('a note is twelve numbers')
-      // What is played by hand does not wait for the frame.
-      if (how.bus === BUS.play) flush()
-      spent += (performance.now() - t0 - spent) * 0.05
-      return true
-    },
+    play,
+    hold(patch, how = {}) { const name = ++held + 1; return play(patch, { bus: BUS.play, ...how }, name) ? name : 0 },
+    release(id) { if (id) node.port.postMessage({ release: id }) },
+    glide(id, hz, level = -1) { if (id) node.port.postMessage({ glide: [id, hz, level] }) },
     listen(eye, yaw) {
       ear.at = [eye[0], eye[1], eye[2]]
       ear.right = [Math.cos(yaw), Math.sin(yaw)]
