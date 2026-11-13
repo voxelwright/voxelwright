@@ -386,6 +386,7 @@ async function main() {
     if ((bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
+    if (running) for (const at of water.landings) smoke.spray(at, dt)
     // A body that is cells again is drawn until those cells are in the picture.
     const made = world.stats.stale === 0 && world.stats.wanted === 0
     lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })

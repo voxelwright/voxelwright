@@ -78,6 +78,8 @@ export interface Puffs {
   dust(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number]): void
   /** A burning cell, for one frame of `dt` seconds: flames, and now and then smoke. */
   flame(at: readonly [number, number, number], dt: number): void
+  /** A place where falling water lands, for one frame of `dt` seconds: now and then mist. */
+  spray(at: readonly [number, number, number], dt: number): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -169,6 +171,9 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
       // And its light on what is near: a dull glow round it, added to the picture.
       if (Math.random() < dt * 0.1) puff(at, 1, 0, 0, { size: rnd(14, 22), grow: 0, life: rnd(0.6, 1.0), heat: 0.11, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+    },
+    spray(at, dt) {
+      if (Math.random() < dt * 0.9) puff(at, 3, rnd(8, 22), rnd(6, 16), { size: rnd(6, 11), grow: rnd(6, 10), life: rnd(0.9, 1.8), heat: 0, cool: 0, rise: 3, drag: 1.6, colour: [0.86, 0.9, 0.94], cover: 0.3 })
     },
     step(dt) {
       live = 0

@@ -832,3 +832,9 @@ at 0.35). The sunset gained by it. Every judge after called the day pictures bri
 pictures from the board, regraded in Python with the grade undone and beside the films' frames, sat far closer to
 them. The grade is now two numbers the page hands the last pass: the evening's (1.25, 0.35) with the sun low and at
 night, and (0.9, 0.1) at full day. Under the sea it stays the full one: with the day's the water lost its colour and the sea check failed. No judge has seen the day pictures since.
+
+Water's look after the judge called its fall "an opaque white pillar": on a steep part the surface is streaks of
+white water running down (noise over the height, which the plan alone cannot give: over plan every streak stood
+still), with what is behind seen between them; the pool lets the ground show; mist rises where a fall lands
+(`water.landings`, `puffs.spray`). Mist at four a second from forty places cost a quarter of the picture's size;
+at one a second from two dozen it costs nothing the board's stamp shows.

@@ -22,6 +22,8 @@ struct Out {
   @location(1) plan: vec2f,
   // How deep, how fast.
   @location(2) more: vec2f,
+  // How high its top is over the base.
+  @location(3) high: f32,
 }
 const NEAR = 1.0;
 const FAR = 100000.0;
@@ -60,6 +62,7 @@ fn word(c: vec2i) -> u32 {
   out.seen = world;
   out.plan = at;
   out.more = vec2f(deep, fast / n);
+  out.high = top;
   return out;
 }
 fn lump(c: vec2i) -> f32 {
@@ -92,12 +95,18 @@ fn noise1(p: vec2f) -> f32 {
   col = mix(col, u.sky, fresnel * 0.75);
   col += vec3f(1.0, 0.95, 0.85) * pow(max(dot(reflect(-look, n), u.sun), 0.0), 90.0) * 1.2;
   // Foam: where it runs fast, where it falls, and along its thin edge, broken up as foam is.
-  let churn = clamp((fast - 3.0) / 9.0, 0.0, 1.4) + clamp(steep * 2.2 - 0.15, 0.0, 1.0) + 0.6 * (1.0 - smoothstep(0.1, 0.7, deep));
+  let churn = clamp((fast - 2.0) / 6.0, 0.0, 1.6) + 0.6 * (1.0 - smoothstep(0.1, 0.7, deep));
   let broken = noise1(in.plan * 0.9 - vec2f(run * 2.0, run * 1.3)) * 0.6 + noise1(in.plan * 2.3 + vec2f(run * 1.7, 0.0)) * 0.4;
   let foam = clamp(churn, 0.0, 1.0) * smoothstep(0.62 - 0.4 * clamp(churn, 0.0, 1.0), 0.75, broken + 0.25 * clamp(churn - 1.0, 0.0, 1.0));
   col = mix(col, vec3f(0.9, 0.94, 0.96) * (0.55 + 0.45 * lit), foam);
+  var cover = max(clamp(0.2 + deep * 0.13 + fresnel * 0.5, 0.0, 0.85), foam * 0.95) * smoothstep(0.0, 0.12, deep);
+  // Where it falls it is not a sheet: streaks of white water running down, and between them what is behind shows.
+  let fall = clamp(steep * 2.4 - 0.3, 0.0, 1.0);
+  let streak = noise1(vec2f((in.plan.x + in.plan.y) * 1.1, in.high * 0.16 + u.time * 9.0)) * 0.6 + noise1(vec2f((in.plan.x - in.plan.y) * 2.7, in.high * 0.45 + u.time * 15.0)) * 0.4;
+  let white = smoothstep(0.32, 0.7, streak);
+  col = mix(col, mix(vec3f(0.5, 0.68, 0.76), vec3f(0.93, 0.96, 0.98), white) * (0.6 + 0.4 * lit), fall);
+  cover = mix(cover, 0.3 + 0.62 * white, fall);
   col *= mix(0.1, 1.0, u.day);
-  let cover = max(clamp(0.2 + deep * 0.16 + fresnel * 0.45, 0.0, 0.92), foam * 0.95) * smoothstep(0.0, 0.12, deep);
   return vec4f(col * cover, cover);
 }
 `
@@ -110,6 +119,8 @@ export interface Flowing {
   light(sun: readonly number[], day: number): void
   /** How many columns the last word of it covered: for the checks. */
   readonly columns: number
+  /** Places where it lands after a fall (the world's finest cells), a few of them: mist rises there. */
+  readonly landings: readonly [number, number, number][]
 }
 
 export async function flowing(device: GPUDevice, format: GPUTextureFormat): Promise<Flowing> {
@@ -126,9 +137,11 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat): Prom
   let texture: GPUTexture | null = null, bind: GPUBindGroup | null = null, cells = new Uint32Array(0), side = 0
   // The window as last told: its low corner in the world, the base its tops are over, a column's width, the box of wet ones.
   let low = [0, 0], base = 0, col = 2, box = [0, 0, 0, 0], wet = 0
+  let landings: [number, number, number][] = []
   let sun: readonly number[] = [0.52, 0.62, 0.59], day = 1
   return {
     get columns() { return wet },
+    get landings() { return landings },
     light(from, isDay) { sun = from; day = isDay },
     set(words) {
       const i32 = new Int32Array(words.buffer, words.byteOffset, words.length), n = words[3]
@@ -150,6 +163,14 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat): Prom
         for (const w of row) if (w) wet++
       }
       device.queue.writeTexture({ texture: texture! }, cells, { bytesPerRow: side * 4 }, [side, side])
+      // Where it lands: a wet column three metres or more under a wet one beside it. Every seventh, two dozen at most.
+      landings = []
+      for (let z = box[1] + 1, k = 0; z < box[1] + box[3] - 1 && landings.length < 40; z++) for (let x = box[0] + 1; x < box[0] + box[2] - 1; x++) {
+        const w = cells[x + side * z]
+        if (!w) continue
+        const top = (w & 0x3ffff) / 8, over = Math.max(...[cells[x + 1 + side * z], cells[x - 1 + side * z], cells[x + side * (z + 1)], cells[x + side * (z - 1)]].map((n) => (n ? (n & 0x3ffff) / 8 : 0)))
+        if (over - top > 30 && k++ % 7 === 0 && landings.length < 24) landings.push([low[0] + x * col, base + top, low[1] + z * col])
+      }
     },
     draw(encoder, to, view, time) {
       if (!wet || !bind) return
