@@ -20,13 +20,15 @@ export interface Told {
   moves: Placed[]
   /** Water that flows, if it moved: the window and the height of its top over each column (the core's water.rs `tell`). */
   water: Uint32Array<ArrayBuffer> | null
+  /** Blasts the solver set off itself (something that goes up when hit went up): where, and how big, for their fire and smoke. The cells they emptied come as edits. */
+  bursts: { at: [number, number, number]; radius: number }[]
 }
 
-const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8
+const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8, BURST = 9
 
 export function read(words: Uint32Array<ArrayBuffer>): Told {
   const f = new Float32Array(words.buffer, words.byteOffset, words.length), i32 = new Int32Array(words.buffer, words.byteOffset, words.length)
-  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [], water: null }
+  const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [], water: null, bursts: [] }
   const placed = (at: number): Placed => ({ id: words[at], pos: [f[at + 1], f[at + 2], f[at + 3]], rot: [f[at + 4], f[at + 5], f[at + 6], f[at + 7]] })
   for (let i = 0; i < words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
@@ -37,6 +39,7 @@ export function read(words: Uint32Array<ArrayBuffer>): Told {
     else if (tag === BROKE) told.broke.push(words[at])
     else if (tag === FIRE) told.fire = f.slice(at + 1, at + n)
     else if (tag === FLOW) told.water = words.slice(at, at + n)
+    else if (tag === BURST) told.bursts.push({ at: [f[at], f[at + 1], f[at + 2]], radius: words[at + 3] })
     else if (tag === MOVES) for (let k = at; k < at + n; k += 8) told.moves.push(placed(k))
     i = at + n
   }

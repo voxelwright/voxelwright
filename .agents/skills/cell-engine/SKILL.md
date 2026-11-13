@@ -1283,3 +1283,28 @@ Not done, and known:
   were late through it on a loaded machine. The row's picture waits on cells fallen (`engine.fell.cells`), not seconds.
 - A wide box's sides are ground too: a thing wider than 32 m, or cut by the box of the last charge, can stand on them.
 - When cells leave a block, what it is of is not looked for again until none are left (it may be taken for stronger).
+
+## What goes up when hit (`kinds.rs` `CHARGED`, bit 5; `bodies.rs` `go_up`; #160, November 12)
+
+Bit 5 of a kind (32) says the cell goes up when hit. Bits 6 and 7 are still free; bit 4 is rubble, the material the low
+four, the colour the high byte. Nothing in the town is made of it: placing such things changes the town's sum and is the
+engine thread's. A model or an edit puts them there (`engine.set(at, radius, kind)` on the page, for checks).
+
+- **Caught** is every such cell within a blast's radius, whether or not the blast emptied it: steel gives only a quarter
+  of a radius, so a steel drum beside a charge was never emptied. A fire beside one catches it too (asked five times a
+  second, and only once a sector holding any such cell has been made: `Ground::charged`).
+- **The whole thing** (cells of the kind that touch, up to 20,000) leaves the world at once, and a blast of its own goes
+  off where its middle was 0.2 to 0.4 s later: radius four times the cube root of its cells, 10 to 40 (25 for a drum
+  80 cm across). It lights what burns, asks the wide box, and catches the next.
+- **A blast of the solver's own** (`burst`, which a landing's dent uses too) does not go into the world as a blast: what it
+  empties goes in as rows. The page hears of its fire by a record, `BURST` (9: where, how big). `told.ts` reads it.
+  `world.mjs` sends any tag it does not know as one that must not be missed, and `serve.mjs` keeps only edits, so neither
+  needed changing; the check passes in a shared world (`ENGINE_SHARED=1 node test/chain.mjs`).
+- **What a blast throws, and is of this kind, goes up where it comes to rest.** Found by the page's check: the first
+  drum's blast threw the third across the street as a body before the second could catch it, and it lay there whole. Only
+  what a blast threw: a drum that rolls over when it is set down must not (it did, at first: all three went up on being
+  placed).
+- Checks: `what_goes_up_when_hit_sets_off_the_next` in the core (three drums 2.5 m apart, each a tenth of a second or more
+  after the last, none in the same breath as the charge), `test/chain.mjs` in the page (486, 718 and 6,156 ms in one run:
+  the third had been thrown and rolled).
+- A check's `check(ok, what)` takes the condition first. Given the words first it prints "ok" for anything.

@@ -12,7 +12,7 @@
 //! process decides is what everyone sees.
 
 use crate::hash::hash3;
-use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, material, weighs};
+use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, charged, material, weighs};
 use crate::scratch::{Run, Scratch};
 use crate::support::{self, Region};
 use crate::tree::{CELLS, Kind, SIDE, at, at as at_cell};
@@ -159,6 +159,9 @@ pub struct Ground {
     /// took up to 293 ms once a street had burnt and fallen (tens of thousands of edits).
     kept: Map<[i32; 3], (Kept, u32)>,
     asked: u32,
+    /// Whether any cell that goes up when hit (kinds.rs `CHARGED`) has been seen in the world: a fire need not look
+    /// for one beside it until then.
+    pub(crate) charged: bool,
     /// The boxes of the edits made since the water last asked (water.rs): what flows goes by what stands.
     pub(crate) latest: Vec<([i32; 3], [i32; 3])>,
 }
@@ -183,7 +186,7 @@ fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
 
 impl Ground {
     pub fn new() -> Self {
-        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), slots: Vec::new(), spare: Vec::new(), last: ([i32::MIN; 3], 0), scratch: Scratch::new(), kept: Map::default(), asked: 0, latest: Vec::new() }
+        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), slots: Vec::new(), spare: Vec::new(), last: ([i32::MIN; 3], 0), scratch: Scratch::new(), kept: Map::default(), asked: 0, charged: false, latest: Vec::new() }
     }
 
     /// How many edits of this solver's own are in the world.
@@ -332,6 +335,7 @@ impl Ground {
     /// Keeps what the scratch holds as a sector's cells. The longest unasked for of those kept as cells make room.
     fn store(&mut self, key: [i32; 3]) {
         let first = self.scratch.cells[0];
+        self.charged |= self.scratch.cells.iter().any(|&k| charged(k));
         let kept = if self.scratch.cells.iter().all(|&k| k == first) { Kept::Same(first) } else { Kept::Cells(self.scratch.cells.clone().into_boxed_slice()) };
         self.kept.insert(key, (kept, self.asked));
         while self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count() > KEEPS {
@@ -639,6 +643,8 @@ pub struct Body {
     stuff: u8,
     /// Whether it is a lump a blast threw out: these are many, and are not tried against each other however big.
     lump: bool,
+    /// Whether a blast threw it (and not merely let it go).
+    thrown: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
 }
@@ -656,7 +662,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, born: low,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, born: low,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -831,6 +837,7 @@ pub const MOVES: u32 = 5; // for each body: id, place (3 floats), turn (4 floats
 pub const FIRE: u32 = 7; // how many cells are alight, then where some of them are (3 floats each)
 pub const BROKE: u32 = 6; // id: the body is no more, and the pieces it broke into have been born
 pub const FLOW: u32 = 8; // water that flows, as heights over a window of columns (water.rs `tell`)
+pub const BURST: u32 = 9; // where (3, as floats), radius: a blast the solver set off itself (something went up), for its fire and smoke
 
 pub struct Bodies {
     pub ground: Ground,
@@ -857,6 +864,10 @@ pub struct Bodies {
     far: Vec<Far>,
     /// The last charges, each a place and a radius: a wide box lets go only of what one of them reached.
     scars: Vec<([i32; 3], i32)>,
+    /// Blasts that are to go off of themselves: where, how big, and in how many seconds (`go_up`).
+    fuses: Vec<([i32; 3], i32, f32)>,
+    /// Seconds since the fire was last asked whether it has reached something that goes up.
+    since_lit: f32,
 }
 
 /// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
@@ -879,13 +890,13 @@ struct Found {
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new() }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0 }
     }
 
     /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
     /// called on, for what a charge left standing may yet come loose.
     pub fn busy(&self) -> usize {
-        self.list.len() + self.far.len()
+        self.list.len() + self.far.len() + self.fuses.len()
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -1092,6 +1103,7 @@ impl Bodies {
         let t1 = std::time::Instant::now();
         #[cfg(test)]
         let t2 = std::time::Instant::now();
+        self.caught(&before, at, radius);
         let made = self.lumps(&before, &left, at, radius);
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    blast of {radius}: before {:.0} ms, push and left {:.0} ms, lumps {:.0} ms", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
@@ -1122,7 +1134,8 @@ impl Bodies {
                 for x in 0..size[0] {
                     let i = before.at(x, y, z);
                     let kind = before.cells[i];
-                    if kind == 0 || left.cells[i] != 0 || material(kind) == GLASS {
+                    // Glass is dust, and what goes up when hit is gone in its own blast.
+                    if kind == 0 || left.cells[i] != 0 || material(kind) == GLASS || charged(kind) {
                         continue;
                     }
                     let c = [low[0] + x as i32, low[1] + y as i32, low[2] + z as i32];
@@ -1188,10 +1201,17 @@ impl Bodies {
     /// `push` is how hard it struck: its weight times the speed it lost.
     fn crush(&mut self, at: [i32; 3], push: f32) {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
+        if self.burst(at, radius) {
+            self.release_box(at, radius, [48, 96, 48]);
+        }
+    }
+
+    /// A blast of the solver's own making. It does not go into the world as a blast: what it empties goes in as rows
+    /// of the solver's own, which is how the page hears of it, and comes out as lumps and rubble. Whether it emptied
+    /// anything.
+    fn burst(&mut self, at: [i32; 3], radius: i32) -> bool {
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
-        // What a blast there would leave is asked without the blast going into the world: what it emptied goes in as
-        // rows of the solver's own, which is how the page hears of it.
         let (before, left) = self.ground.blasted(at, radius, low, size, false);
         let mut gone: Vec<Run> = Vec::new();
         for y in 0..size[1] {
@@ -1209,11 +1229,73 @@ impl Bodies {
             }
         }
         if gone.is_empty() {
-            return;
+            return false;
         }
         self.change(gone);
+        self.caught(&before, at, radius);
         self.lumps(&before, &left, at, radius);
-        self.release_box(at, radius, [48, 96, 48]);
+        true
+    }
+
+    /// What a blast caught that goes up when hit (kinds.rs `CHARGED`): every such cell within the blast's radius,
+    /// whether or not the blast emptied it (steel barely gives).
+    fn caught(&mut self, before: &Region, at: [i32; 3], radius: i32) {
+        let mut seeds: Vec<[i32; 3]> = Vec::new();
+        for (i, _) in before.cells.iter().enumerate().filter(|(_, k)| charged(**k)) {
+            let (x, y, z) = before.place(i);
+            let c = [before.low[0] + x as i32, before.low[1] + y as i32, before.low[2] + z as i32];
+            if (0..3).map(|a| (c[a] - at[a]).pow(2)).sum::<i32>() <= radius * radius {
+                seeds.push(c);
+            }
+        }
+        self.go_up(&seeds);
+    }
+
+    /// Things that go up when hit, hit at these cells. Each thing (cells of the kind that touch, the world over) is
+    /// gone from the world at once, and a blast of its own, bigger the more of it there was, goes off where its
+    /// middle was a moment later: so a row of them goes off one after another, each caught by the last.
+    fn go_up(&mut self, seeds: &[[i32; 3]]) {
+        let mut seen: std::collections::HashSet<[i32; 3], BuildHasherDefault<Mix>> = Default::default();
+        for &seed in seeds {
+            if seen.contains(&seed) || !charged(self.ground.kind(seed[0], seed[1], seed[2])) {
+                continue;
+            }
+            let (mut cells, mut stack) = (Vec::new(), vec![seed]);
+            seen.insert(seed);
+            while let Some(c) = stack.pop() {
+                cells.push(c);
+                if cells.len() >= 20_000 {
+                    break;
+                }
+                for d in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                    let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                    if !seen.contains(&n) && charged(self.ground.kind(n[0], n[1], n[2])) {
+                        seen.insert(n);
+                        stack.push(n);
+                    }
+                }
+            }
+            let n = cells.len() as i64;
+            let middle = [0, 1, 2].map(|a| (cells.iter().map(|c| c[a] as i64).sum::<i64>() / n) as i32);
+            cells.sort_unstable_by_key(|c| (c[1], c[2], c[0]));
+            self.change(cells.iter().map(|c| Run { x0: c[0], x1: c[0] + 1, y: c[1], z: c[2], kind: 0 }).collect());
+            // A drum 80 cm across empties 2.5 m round it; a tank as far as the biggest charge there is.
+            let radius = (((n as f32).cbrt() * 4.0) as i32).clamp(10, 40);
+            let wait = 0.2 + (hash3(middle[0], middle[1], middle[2], 53) % 100) as f32 * 0.002;
+            self.fuses.push((middle, radius, wait));
+        }
+    }
+
+    /// A fuse that has run out: the blast goes off. It sets alight what burns, is told (`BURST`) for its fire and
+    /// smoke, and what it leaves unheld comes loose as after any charge.
+    fn went_off(&mut self, at: [i32; 3], radius: i32) {
+        self.record(BURST, &[(at[0] as f32).to_bits(), (at[1] as f32).to_bits(), (at[2] as f32).to_bits(), radius as u32]);
+        self.burst(at, radius);
+        self.ignite(at, radius + radius / 2, true);
+        if radius >= FAR_FROM {
+            self.ask_far(at, radius);
+        }
+        self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]));
     }
 
     /// A ball of one kind, `radius` cells across its half, sent from a place at a speed: a cannon's shot. What it
@@ -1247,6 +1329,7 @@ impl Bodies {
         // there was no heap at its foot.
         let push = (30.0 * r * r / (far + r) / (body.count as f32).cbrt()).min(160.0) * if body.lump { 0.45 } else { 1.0 };
         let h = |seed: u32| hash3(body.born[0], body.born[1], body.born[2], seed) as f32 / u32::MAX as f32 - 0.5;
+        body.thrown = radius > 0;
         body.vel = add(body.vel, scale(add(unit(away), [h(4) * 0.5, 0.35 + h(5) * 0.3, h(6) * 0.5]), push));
         body.spin = add(body.spin, scale([h(1), h(2), h(3)], (push * 0.12).min(9.0)));
     }
@@ -1312,6 +1395,14 @@ impl Bodies {
             waiting.wait -= dt;
         }
         self.far(if self.list.len() > 200 { 3 } else { 6 });
+        // Fuses run down, and the first that has run out goes off.
+        for fuse in &mut self.fuses {
+            fuse.2 -= dt;
+        }
+        if let Some(due) = self.fuses.iter().position(|f| f.2 <= 0.0) {
+            let (at, radius, _) = self.fuses.remove(due);
+            self.went_off(at, radius);
+        }
         while self.owed >= STEP && !self.list.is_empty() {
             self.owed -= STEP;
             self.step(STEP);
@@ -1321,6 +1412,23 @@ impl Bodies {
             self.owed = 0.0;
         }
         self.burn(dt);
+        // A fire beside something that goes up sets it off: asked five times a second, of some of what burns, and only
+        // once a sector has been made that holds any such thing.
+        self.since_lit += dt;
+        if self.ground.charged && self.since_lit >= 0.2 && !self.fire.alight.is_empty() {
+            self.since_lit = 0.0;
+            let lit: Vec<[i32; 3]> = self.fire.alight.keys().take(600).copied().collect();
+            let mut seeds = Vec::new();
+            for c in lit {
+                for d in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                    let n = [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+                    if self.ground.solid(n[0], n[1], n[2]) && !self.ground.fuel(n[0], n[1], n[2]) && charged(self.ground.kind(n[0], n[1], n[2])) {
+                        seeds.push(n);
+                    }
+                }
+            }
+            self.go_up(&seeds);
+        }
         self.flow(dt);
         let mut words: Vec<u32> = Vec::with_capacity(self.list.len() * 8);
         for b in &self.list {
@@ -1636,7 +1744,12 @@ impl Bodies {
                 }
             }
         }
+        // What goes up when hit, thrown and come to rest, goes up where it lies: a drum blown across the street by the
+        // one beside it was otherwise a drum lying in the street, and the row of them stopped there.
+        // Only what a blast threw: a drum that rolls over when it is set down does not.
+        let lit: Vec<[i32; 3]> = runs.iter().filter(|r| body.thrown && charged(r.kind)).take(1).map(|r| [r.x0, r.y, r.z]).collect();
         self.change(runs);
+        self.go_up(&lit);
         // Where it lies is told once more, so that it is drawn there until the cells are in the picture.
         let mut words = vec![body.id];
         words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
@@ -2228,6 +2341,46 @@ mod tests {
         // Its front and back walls stay: the neighbours' walls hold them, within three metres either side.
         assert!(after[0] * 2 < before[0], "of {} cells built over the charged house's ground floor {} still are", before[0], after[0]);
         assert!(after[1] * 100 > before[1] * 97, "of {} cells built over the ground floor two doors off {} still are", before[1], after[1]);
+    }
+
+    #[test]
+    fn what_goes_up_when_hit_sets_off_the_next() {
+        // Three drums of the kind that goes up, put on the street by an edit, 2.5 m apart along a house front. A
+        // charge catches the first and no other. Each goes off a moment after it is caught, and catches the next.
+        use crate::city::{BLOCK_X, BLOCK_Z, Block, block as what};
+        use crate::kinds::{CHARGED, STEEL, colour, kind};
+        let (bx, bz) = (-12..12).flat_map(|bz| (-12..12).map(move |bx| (bx, bz))).find(|&(bx, bz)| what(bx, bz) == Block::Homes && city::ground(bx * BLOCK_X + 500, bz * BLOCK_Z + 150) > 80).unwrap();
+        let (x, z) = (bx * BLOCK_X + 140 + 76 * 4 + 38, bz * BLOCK_Z + 150 - 30);
+        let y = (0..3).map(|k| city::ground(x + 25 * k, z)).max().unwrap() + 6;
+        let mut bodies = Bodies::new();
+        let drums: Vec<[i32; 3]> = (0..3).map(|k| [x + 25 * k, y, z]).collect();
+        for at in &drums {
+            bodies.ground.push(Edit::Ball { centre: *at, radius: 4, kind: kind(STEEL, colour(0, 4)) | CHARGED }, false, None);
+        }
+        let left = |bodies: &mut Bodies, at: [i32; 3]| bodies.ground.region(at.map(|c| c - 4), [9; 3]).cells.iter().filter(|&&k| charged(k)).count();
+        assert!(drums.iter().all(|at| left(&mut bodies, *at) > 200), "the drums are there");
+        let wall = |bodies: &mut Bodies| bodies.ground.region([x - 20, y, z + 20], [110, 30, 30]).cells.iter().filter(|&&k| k != 0 && !crate::kinds::rubble(k)).count();
+        let wall_before = wall(&mut bodies);
+        // A charge of 12, 10 cells short of the first drum: the second is 35 off.
+        let bursts = |bodies: &Bodies| { let (mut n, mut i) = (0, 0); while i < bodies.out.len() { n += (bodies.out[i] == BURST) as usize; i += 2 + bodies.out[i + 1] as usize } n };
+        bodies.blast([x - 10, y, z], 12, None, false);
+        assert_eq!(bursts(&bodies), 0, "nothing goes off in the same breath as the charge");
+        assert_eq!([left(&mut bodies, drums[0]) > 0, left(&mut bodies, drums[1]) > 200, left(&mut bodies, drums[2]) > 200], [false, true, true], "the first drum is gone and the others stand");
+        // When each went off, in sixtieths of a second.
+        let mut went: Vec<i32> = Vec::new();
+        for tick in 0..150 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            for _ in 0..bursts(&bodies) { went.push(tick) }
+        }
+        assert_eq!(went.len(), 3, "three drums went off, at {went:?}");
+        assert!(went[0] >= 6 && went.windows(2).all(|w| w[1] - w[0] >= 6), "each a moment after the last: {went:?}");
+        assert!(drums.iter().all(|at| left(&mut bodies, *at) == 0), "no drum is left");
+        let wall_after = wall(&mut bodies);
+        assert!(wall_after + 500 < wall_before, "the house front beside them is broken into: {wall_before} cells before, {wall_after} after");
+        let mut t = 0.0;
+        while bodies.busy() > 0 && t < 40.0 { bodies.out.clear(); bodies.advance(1.0 / 60.0); t += 1.0 / 60.0 }
+        assert_eq!(bodies.busy(), 0, "all is at rest");
     }
 
     /// Not a check: how long the solver's calls take when big charges go off along a row of houses. `cargo test --release big_charges -- --ignored --nocapture`

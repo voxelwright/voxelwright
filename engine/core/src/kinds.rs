@@ -50,6 +50,15 @@ pub const fn rubble(kind: Kind) -> bool {
     kind & RUBBLE != 0
 }
 
+/// A cell that goes up when it is hit: caught in a blast, or beside a fire, the thing it is part of is gone a moment
+/// later in a blast of its own (bodies.rs `go_up`), which may catch the next. It is still its material, to draw and
+/// to weigh. Nothing in the town is made of it yet: a model or an edit puts it there.
+pub const CHARGED: Kind = 32;
+#[inline]
+pub const fn charged(kind: Kind) -> bool {
+    kind & CHARGED != 0
+}
+
 /// How far a blast reaches into each material, in sixteenths of its own radius: what a thing
 /// is made of decides how it breaks. Glass is brittle and goes far beyond the hole, masonry
 /// crumbles to about the blast's size, steel and rock barely give, leaves and water are thrown aside.
