@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 import { helper } from '../helper.mjs'
 import { arg, CHROME, has, serve } from './kit.mjs'
 
-const out = arg('out', 'wait'), seconds = Number(arg('seconds', '14')), refuse = has('refuse')
+const out = arg('out', 'wait'), seconds = Number(arg('seconds', '14')), refuse = has('refuse'), held = has('held')
 mkdirSync(out, { recursive: true })
 const dir = mkdtempSync(join(tmpdir(), 'engine-wait-')), server = await serve('/dev/null', ['--world', join(dir, 'world.log')])
 const STALL = { name: 'fruit stall', size: [34, 25, 18], parts: [
@@ -21,12 +21,14 @@ const STALL = { name: 'fruit stall', size: [34, 25, 18], parts: [
 ] }
 // Refused: a part that floats, every time, so it is asked three times and nothing is made.
 const BAD = { ...STALL, parts: [...STALL.parts, ['box', 'wood', 'own', 10, 15, 6, 14, 19, 10]] }
-const model = async () => { await new Promise((r) => setTimeout(r, (refuse ? seconds / 3 : seconds) * 1000)); return { text: JSON.stringify(refuse ? BAD : STALL), model: 'a kept reply', ms: 0, cost: 0 } }
+// Held: a hall as big as a thing may be, asked for from inside a house, where no place near will take it.
+const HALL = { name: 'brick hall', size: [64, 30, 64], parts: [['box', 'brick', 'own', 0, 0, 0, 64, 30, 64], ['box', 'roofing', 'own', 0, 28, 0, 64, 30, 64]] }
+const model = async () => { await new Promise((r) => setTimeout(r, (refuse ? seconds / 3 : seconds) * 1000)); return { text: JSON.stringify(held ? HALL : refuse ? BAD : STALL), model: 'a kept reply', ms: 0, cost: 0 } }
 const h = await helper({ world: server.url, port: 0, model, journal: join(dir, 'made.jsonl') })
 const browser = await chromium.launch(CHROME), page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log(`page error: ${e.message}`))
 try {
-  await page.goto(`${server.url}/city?fly=0&shared=1&name=Ada&at=${arg('at', '70,17.6,407')}&look=${arg('look', '0,-14')}${new URL(h.link).hash}`)
+  await page.goto(`${server.url}/city?fly=0&shared=1&name=Ada&at=${arg('at', held ? '70,17.2,399' : '70,17.6,407')}&look=${arg('look', held ? '0,-80' : '0,-14')}${new URL(h.link).hash}`)
   await page.waitForFunction(() => { const s = globalThis.engine?.world.stats; return s && s.ready > 0 && s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000 })
   await page.addStyleTag({ content: '#tools, #boom { display: none }' })
   await page.waitForTimeout(3000)
@@ -35,11 +37,19 @@ try {
   await page.keyboard.press('Enter')
   await page.keyboard.type(refuse ? 'a thing that cannot be made' : 'a fruit stall')
   await page.keyboard.press('Enter')
-  const t0 = Date.now(), shot = async (name) => { await page.screenshot({ path: join(out, `${refuse ? 'refuse' : 'make'}-${name}.png`) }); console.log(`  ${((Date.now() - t0) / 1000).toFixed(1)} s ${name}`) }
+  const t0 = Date.now(), shot = async (name) => { await page.screenshot({ path: join(out, `${held ? 'held' : refuse ? 'refuse' : 'make'}-${name}.png`) }); console.log(`  ${((Date.now() - t0) / 1000).toFixed(1)} s ${name}`) }
   for (const at of [0.6, 1.8, 3.5]) { await page.waitForTimeout(Math.max(0, at * 1000 - (Date.now() - t0))); await shot(`${at}s`) }
   const during = await cost()
   await shot('circling')
-  if (refuse) {
+  if (held) {
+    await page.waitForSelector('#choice button', { timeout: 120_000 }); await shot('asked')
+    // Outside, looking at the house: put it there with the place cleared.
+    await page.evaluate(() => Object.assign(engine.pose, { x: 70, y: 21, z: 412, yaw: 0, pitch: -0.25 }))
+    await page.waitForTimeout(2500); await shot('asked-from-outside')
+    await page.keyboard.press('Digit1')
+    await page.waitForFunction(() => engine.asker.busy === 0, null, { timeout: 120_000 })
+    await page.waitForTimeout(600); await shot('cleared-0'); await page.waitForTimeout(2500); await shot('cleared-1'); await page.waitForTimeout(6000); await shot('cleared-2')
+  } else if (refuse) {
     await page.waitForTimeout(Math.max(0, (seconds / 3) * 1000 + 600 - (Date.now() - t0))); await shot('another-go')
     await page.waitForFunction(() => engine.asker.busy === 0, null, { timeout: 120_000 })
     for (const name of ['let-go', 'falling', 'lying']) { await page.waitForTimeout(350); await shot(name) }

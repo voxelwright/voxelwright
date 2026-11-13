@@ -26,12 +26,14 @@
 // goes: {stage: "reading"} (a link is being fetched), {stage: "place", at, facing}, {stage: "asking", try}, {stage: "shaped", name, size, facing} (a reply could be read),
 // {stage: "refused", why} (it is asked again),
 // {stage: "sending", id, name, at, size, facing}, and last {stage: "done", state, why, id, name, at, size, ms, tries}:
-// state "there" if it stands in the world, else why not. One ask at a time.
+// state "there" if it stands in the world. State "held": it is made and no place near would take it; `held` is a
+// token for POST /put {held, from, clear, by}, which stands it where the asker now looks, or (clear) at that very
+// place with what is there emptied first. A thing is held for fifteen minutes. One ask at a time.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { JOURNAL, make } from './make.mjs'
+import { JOURNAL, make, put } from './make.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
 
@@ -85,6 +87,19 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
   // The world's page may be open under either name of this machine.
   const allowed = new Set([at.origin, ...(loopback ? [`${at.protocol}//127.0.0.1:${at.port}`, `${at.protocol}//localhost:${at.port}`] : []), ...origins])
   let busy = false
+  /** Things made that no place would take, kept a while for the asker to say where: by a token only this helper and that page know. */
+  const holds = new Map()
+  /** Says how an ask ended. What the model said is not passed on: the page gets what was made of it, and the world its cells. */
+  const ended = (r, line) => {
+    say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
+    let held
+    if (r.state === 'held') {
+      held = randomBytes(9).toString('base64url')
+      holds.set(held, { hold: r.hold, since: Date.now() })
+      for (const [token, h] of holds) if (Date.now() - h.since > 15 * 60_000 || holds.size > 8) { holds.delete(token); if (holds.size <= 8) break }
+    }
+    line({ stage: 'done', state: r.state, why: r.why, id: r.id, name: r.name, at: r.origin, size: r.size, ms: r.ms, tries: r.tries, moved: r.moved, left: r.left, held })
+  }
   const server = createServer((req, res) => {
     const origin = req.headers.origin, cors = origin && allowed.has(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin', 'Cross-Origin-Resource-Policy': 'cross-origin' } : {}
     const end = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...cors }); res.end(JSON.stringify(body)) }
@@ -101,13 +116,29 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
     if (!same(req.headers['x-village-secret'] ?? '', secret)) return end(401, { why: 'the secret is not right: open the address the helper printed' })
     const url = new URL(req.url ?? '/', 'http://x')
     if (req.method === 'GET' && url.pathname === '/hello') return end(200, { helper: 1, world, busy })
-    if (req.method !== 'POST' || url.pathname !== '/ask') return end(404, { why: 'not here' })
+    if (req.method !== 'POST' || (url.pathname !== '/ask' && url.pathname !== '/put')) return end(404, { why: 'not here' })
     void (async () => {
       const parts = []
       let size = 0
       for await (const chunk of req) { size += chunk.length; if (size > BODY_MOST) return end(413, { why: 'too much' }); parts.push(chunk) }
       let body
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return end(400, { why: 'not JSON' }) }
+      if (url.pathname === '/put') {
+        // A held thing, stood where the asker now says: no model is asked. {held, from, clear, by}
+        const f = body?.from, h = typeof body?.held === 'string' ? holds.get(body.held) : null
+        if (!h) return end(404, { why: 'that is not held any more: ask for it again' })
+        if (!f || !three(f.eye) || !three(f.toward, 1e6) || !(Math.hypot(...f.toward) > 0)) return end(400, { why: 'from is {eye: [x, y, z], toward: [dx, dy, dz]}' })
+        if (busy) return end(429, { why: 'one thing at a time: something is being made' })
+        busy = true
+        holds.delete(body.held)
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', ...cors })
+        const line = (o) => res.write(JSON.stringify(o) + '\n')
+        try {
+          const r = await put({ hold: h.hold, world, where: { from: f.eye.map(Math.round), toward: f.toward }, clear: body.clear === true, by: text(body.by, 24) || 'someone', journal, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+          ended(r, line)
+        } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not place it' }) } finally { busy = false; res.end() }
+        return
+      }
       const ask = shaped(body)
       if (typeof ask === 'string') return end(400, { why: ask })
       // Said before anything is started, and never half done: what is not built yet is refused whole.
@@ -129,13 +160,13 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
           try { const got = await fetched(ask.link, { resolve }); page = got.text ? { from: got.from, text: got.text } : undefined; picture ??= got.picture } catch (e) {
             if (!notFetched(e)) throw e
             say(`  the link was not read: ${e.message}`)
-            return line({ stage: 'done', state: 'refused', why: `the link was not read: ${e.message}` })
+            // With words or a picture beside it, the thing is made from those: only a link alone has nothing to go on.
+            if (!ask.wish && !picture) return line({ stage: 'done', state: 'refused', why: `the link could not be read: ${e.message}` })
+            line({ stage: 'note', why: 'the link could not be read: making it from the rest' })
           }
         }
         const r = await make({ wish: ask.wish, picture, page, world, where, by: ask.by, journal, model, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
-        say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
-        // What the model said is not passed on: the page gets what was made of it, and the world its cells.
-        line({ stage: 'done', state: r.state, why: r.why, id: r.id, name: r.name, at: r.origin, size: r.size, ms: r.ms, tries: r.tries })
+        ended(r, line)
       } catch (e) {
         say(`  failed: ${e.message}`)
         line({ stage: 'done', state: 'refused', why: 'the helper could not make it' })

@@ -38,6 +38,11 @@ export interface Hud {
   }
   /** A line added to what was said lately (the last five are shown). */
   heard(text: string): void
+  /**
+   * A question with a few answers, shown over the ask bar until one is picked: by its number key, a click or a touch.
+   * Resolves to which (from 0), or -1 if it was put away with Escape. One question at a time: a second waits.
+   */
+  choose(text: string, options: readonly string[]): Promise<number>
   /** A short notice that goes by itself. */
   notice(text: string, ms?: number): void
   /** The card of controls (while mounted): a title and pairs of key and what it does. Null takes it away. */
@@ -183,6 +188,24 @@ export function hud(input: Input): Hud {
   queueMicrotask(draw)
 
   const lines: string[] = []
+  const choice = el('div', 'choice')
+  choice.hidden = true
+  ask.prepend(choice)
+  let choosing: Promise<unknown> = Promise.resolve()
+  const choose = (text: string, options: readonly string[]) => {
+    const mine = choosing.then(() => new Promise<number>((done) => {
+      const said = document.createElement('p'), row = document.createElement('div')
+      said.textContent = text
+      const pick = (i: number) => { leave(); choice.hidden = true; choice.replaceChildren(); done(i) }
+      // Its keys are its own while it is up; everything else still moves the player.
+      const leave = input.push({ name: 'choosing', key: (code) => { const i = code === 'Escape' ? -1 : code.startsWith('Digit') ? Number(code.slice(5)) - 1 : -2; if (i < -1 || i >= options.length) return false; pick(i); return true } })
+      options.forEach((label, i) => { const b = document.createElement('button'), n = document.createElement('i'); b.type = 'button'; n.textContent = String(i + 1); b.append(n, label); b.addEventListener('click', () => pick(i)); row.append(b) })
+      choice.replaceChildren(said, row)
+      choice.hidden = false
+    }))
+    choosing = mine
+    return mine
+  }
   const shown = new Set<{ text: string; at: () => readonly [number, number, number] | null; el: HTMLElement }>()
   const panels = new Map<string, HTMLElement>()
   return {
@@ -205,6 +228,7 @@ export function hud(input: Input): Hud {
       said.hidden = false
     },
     notice,
+    choose,
     card(c) {
       card.hidden = !c
       if (!c) return

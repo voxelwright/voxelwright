@@ -22,16 +22,30 @@ const STEEP = 8, CLEAR = 6
 /**
  * Finds where a thing can stand near a place, or says why it cannot. `spot` is the cell looked at ([x, y, z], its
  * top is where the thing stands) and `back` a step ([dx, dz]) towards whoever asked: if the place is taken, places
- * near it are tried, that way first. Returns { origin: [x, base, z], rows } with the thing's rows there, feet carried down to the ground.
+ * near it are tried, that way first, out to eight metres. Returns { origin: [x, base, z], rows, moved } with the thing's rows there, feet carried down to the ground.
+ * `clear`: it stands at the place itself whatever is there.
  */
-export async function site(world, thing, spot, facing, back = [0, 0]) {
+export async function site(world, thing, spot, facing, back = [0, 0], { clear = false } = {}) {
+  // Asked to clear the place: it stands where it was put, level, whatever is there now (the caller empties its box first).
+  if (clear) {
+    const made = rows(thing, [spot[0], spot[1] + 1, spot[2]], facing)
+    if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
+    return { origin: [spot[0], spot[1] + 1, spot[2]], rows: made, moved: 0 }
+  }
   let why = ''
-  // The place itself, then a little nearer whoever asked, then a little to either side: up to two metres off.
+  // The place itself, then a little nearer whoever asked, then to either side and behind: first within two metres,
+  // then on out to eight. A thing asked for is put as near as it can stand, not given up.
   const [bx, bz] = back[0] || back[1] ? back : [0, 1], near = [[0, 0]]
-  for (let n = 1; n <= 5; n++) near.push([bx * n, bz * n], [bz * n, -bx * n], [-bz * n, bx * n])
+  for (let n = 1; n <= 20; n++) { near.push([bx * n, bz * n], [bz * n, -bx * n], [-bz * n, bx * n]); if (n > 5) near.push([-bx * n, -bz * n], [bx * n + bz * n, bz * n - bx * n], [bx * n - bz * n, bz * n + bx * n]) }
   for (const [ox, oz] of near) {
     const x = spot[0] + ox * 4, z = spot[2] + oz * 4
     const columns = footprint(thing, [x, z], facing), top = spot[1] + thing.size[1] + CLEAR + 2
+    // A few columns first (its corners and its middle): most places that are taken are told by these.
+    if (ox || oz) {
+      const xs = columns.map((c) => c.x), zs = columns.map((c) => c.z), lo = [Math.min(...xs), Math.min(...zs)], hi = [Math.max(...xs), Math.max(...zs)]
+      const few = await all([[lo[0], lo[1]], [hi[0], lo[1]], [lo[0], hi[1]], [hi[0], hi[1]], [x, z]], (c) => look(world, [c[0], top, c[1]], [0, -1, 0]))
+      if (few.some((m) => !m.at || m.at[1] > spot[1] + CLEAR || m.at[1] < spot[1] - STEEP - CLEAR || m.material === 5)) { why ||= 'something already stands there'; continue }
+    }
     const met = await all(columns, (c) => look(world, [c.x, top, c.z], [0, -1, 0]))
     const high = met.map((m) => (m.at ? m.at[1] : -Infinity))
     const taken = columns.filter((c, i) => high[i] > spot[1] + CLEAR).length, gone = columns.filter((c, i) => high[i] < spot[1] - STEEP - CLEAR).length
@@ -44,9 +58,19 @@ export async function site(world, thing, spot, facing, back = [0, 0]) {
     if (base - 1 - Math.min(...stood) > STEEP) { why = 'the ground is too steep there'; continue }
     const made = rows(thing, [x, base, z], facing, (cx, cz) => feet.get(`${cx},${cz}`) ?? base - 1)
     if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
-    return { origin: [x, base, z], rows: made }
+    // `moved`: how far from the place asked for it stands, in cells.
+    return { origin: [x, base, z], rows: made, moved: Math.round(Math.hypot(ox, oz) * 4) }
   }
   throw Object.assign(new Error(why), { place: true })
+}
+
+/** The cells of a thing's box at its place, emptied: edits of rows of air, each small enough to be one ask. What stood there is gone; what stood on it falls by the world's own rule. */
+export function emptied(made) {
+  const [lo, hi] = bounds(made), out = []
+  let now = []
+  for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) { now.push([lo[0], hi[0] + 1, y, z, 0]); if (now.length === 3000) { out.push(now); now = [] } }
+  if (now.length) out.push(now)
+  return out
 }
 
 /** Which way a thing at a place faces to face an eye. */

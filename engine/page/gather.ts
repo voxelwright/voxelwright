@@ -44,7 +44,11 @@ export function gather(debris: Crumbs, smoke: Puffs, wish: Making, things: Thing
   const phase = (s: Site, to: Site['phase']) => { s.phase = to; s.since = 0 }
   wish.on((stage: Stage, ask: Ask) => {
     let s = sites.get(ask)
-    if (stage.stage === 'place') {
+    if (stage.stage === 'place' && s) {
+      // A held thing being put somewhere else: the same cubes go there.
+      s.centre = [stage.at[0] + 0.5, stage.at[1] + 1, stage.at[2] + 0.5]; s.floor = s.centre[1]
+      phase(s, 'gather')
+    } else if (stage.stage === 'place') {
       // The looked-at place: its top is where the thing will stand.
       const centre: [number, number, number] = [stage.at[0] + 0.5, stage.at[1] + 1, stage.at[2] + 0.5]
       s = { phase: 'gather', t: 0, since: 0, centre, half: [8, 11, 8], floor: centre[1], cubes: [] }
@@ -80,6 +84,8 @@ export function gather(debris: Crumbs, smoke: Puffs, wish: Making, things: Thing
       s.id = stage.id
     } else if (stage.stage === 'done') {
       if (stage.state === 'there') { if (s.phase !== 'land') land(s) }
+      // Held: it is made and waits for the asker to say where. The cubes keep circling.
+      else if (stage.state === 'held') phase(s, 'gather')
       else {
         // Nothing was made: they are let go where they are, and fall.
         for (const c of s.cubes) c.speed = [(Math.random() - 0.5) * 14, Math.random() * 10, (Math.random() - 0.5) * 14]

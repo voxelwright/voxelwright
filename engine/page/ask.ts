@@ -29,10 +29,12 @@ export type Stage =
   | { stage: 'asking'; try: number }
   | { stage: 'shaped'; name: string; size: [number, number, number]; facing: string }
   | { stage: 'refused'; why: string }
+  | { stage: 'note'; why: string }
   | { stage: 'sending'; id: string; name: string; at: [number, number, number]; size: [number, number, number]; facing: string }
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
-export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused'; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
+/** `held`: it is made and no place near would take it. `held` is what `put` takes to stand it where the asker says next. */
+export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
 
 export interface Asker {
   /** Whether this page knows of a helper (it may not be running: `hello` asks it). */
@@ -45,6 +47,11 @@ export interface Asker {
    * (`each` hears `{stage: 'waiting', ahead}` at once), so the bar and the wand need not know of each other.
    */
   ask(ask: Ask, each?: (stage: Stage) => void): Promise<Done>
+  /**
+   * Stands a held thing (a `Done` whose state is `held`): where the eye looks now, or with `clear` at the place first
+   * asked for, with whatever is there emptied. No model is asked. Resolves as `ask` does.
+   */
+  put(held: Done, how: { clear: boolean }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made or waiting. */
   readonly busy: number
   /**
@@ -87,14 +94,26 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       let free!: () => void
       last = new Promise<void>((r) => { free = r })
       await before
-      try { return await send(body, each, end) } finally { free() }
+      try { return await send('/ask', body, each, end, JSON.parse(body).from) } finally { free() }
+    },
+    async put(held, how, each = () => {}) {
+      const end = (done: Done) => { busy--; each(done); return done }
+      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by() })
+      busy++
+      const before = last
+      let free!: () => void
+      last = new Promise<void>((r) => { free = r })
+      await before
+      try { return await send('/put', body, each, end, from) } finally { free() }
     },
   }
-  const send = async (body: string, each: (stage: Stage) => void, end: (done: Done) => Done): Promise<Done> => {
+  /** Where the eye was and looked when each held thing was asked for: to clear a place is to mean that one. */
+  const asked = new WeakMap<Done, { eye: [number, number, number]; toward: [number, number, number] }>()
+  const send = async (path: string, body: string, each: (stage: Stage) => void, end: (done: Done) => Done, from: { eye: [number, number, number]; toward: [number, number, number] }): Promise<Done> => {
     {
       if (!helper) return end(failed('no helper is known to this page: run node helper.mjs on your machine and open the address it prints'))
       let res: Response
-      try { res = await fetch(`${helper.url}/ask`, { method: 'POST', headers: headers(), body }) } catch { return end(failed('the helper is not answering: is node helper.mjs running on your machine?')) }
+      try { res = await fetch(`${helper.url}${path}`, { method: 'POST', headers: headers(), body }) } catch { return end(failed('the helper is not answering: is node helper.mjs running on your machine?')) }
       if (!res.ok || !res.body) { let why = `the helper said ${res.status}`; try { why = (await res.json()).why ?? why } catch { /* no reason given */ } return end(failed(why)) }
       // Lines of JSON as it goes; the last says how it ended.
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -112,6 +131,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
           }
         }
       } catch { /* cut off: said below */ }
+      if (done?.state === 'held') asked.set(done, from)
       return end(done ?? failed('the helper stopped before it was made'))
     }
   }

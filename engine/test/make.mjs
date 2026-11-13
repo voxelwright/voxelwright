@@ -9,7 +9,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { make, undo } from '../make.mjs'
+import { make, put, undo } from '../make.mjs'
 import { BRIEF } from '../make/brief.mjs'
 import { ROWS_MOST, read } from '../make/form.mjs'
 import { reply } from '../make/model.mjs'
@@ -81,22 +81,32 @@ try {
   const lines = readFileSync(journal, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   check(lines.length === 2 && lines[0].state === 'sending' && lines[1].state === 'there' && lines[0].id === lines[1].id, 'it was written down before it was sent, and what came of it after')
 
-  // The same place again: taken.
-  const mark = await done()
+  // The same place again: taken, so it stands beside the first. A wish is not turned down for where it was aimed.
+  const mark0 = await done()
   const second = await make({ wish: 'a fruit stall', world, where, journal, model: kept(STALL) })
-  check(second.state === 'refused' && /already stands/.test(second.why) && (await done()) === mark, `the same place again is refused and nothing is sent (${say(second)})`)
+  check(second.state === 'there' && second.moved > 0 && second.moved <= 80 && (await done()) === mark0 + 1, `the same place again: it is made beside the first, ${second.moved} cells off (${say(second)})`)
+  const roof = await make({ wish: 'a fruit stall', world, where: { from: [700, 400, 4060], toward: [0, 1, 0] }, journal, model: kept(STALL), dry: true })
+  check(roof.state === 'dry' && roof.origin, `aimed at the sky, it goes on the ground ahead (${say(roof)})`)
+  const mark = await done()
 
-  // Replies that cannot be used: asked three times, told why, then given up, and the world is as it was.
+  // A reply nothing can be made of: asked three times, told why, then given up, and the world is as it was.
   const free = { at: [760, 4070] }
-  for (const [what, text] of [['never JSON', 'I would rather not.'], ['always a floating part', bad['a part that floats']], ['always a field of its own', bad['a field that is not the form\'s']]]) {
+  for (const [what, text] of [['never JSON', 'I would rather not.'], ['nothing that reaches the ground', bad['nothing on the ground']]]) {
     const prompts = []
     const r = await make({ wish: 'a fruit stall', world, where: free, journal, model: async (q) => { prompts.push(q.prompt); return { text, model: 'a kept reply', ms: 0, cost: 0 } } })
     check(r.state === 'refused' && r.tries === 3 && prompts[1].includes('could not be used') && (await done()) === mark, `a reply that is ${what} is asked for three times, told why, and nothing is sent (${say(r)})`)
   }
-  // Joined face to face, but more than its joins carry: the core's own rule, asked before it is sent.
+  // A reply that is mostly right is made, without what could not be used and without asking again.
+  for (const [what, text] of [['with a floating part', bad['a part that floats']], ['with a field of its own', bad['a field that is not the form\'s']], ['with words round it', bad['words round the JSON']], ['with a part of water', JSON.stringify({ ...STALL, parts: [...STALL.parts, ['box', 'water', 'own', 0, 0, 0, 2, 2, 2]] })]]) {
+    const r = await make({ wish: 'a fruit stall', world, where: free, journal, model: async () => ({ text, model: 'a kept reply', ms: 0, cost: 0 }), dry: true })
+    check(r.state === 'dry' && r.tries === 1 && r.made.every((row) => (row[4] & 15) !== 5 && (row[4] & 0xf0) === 0), `a reply ${what} is made without it, asked once (${say(r)}${r.left ? `, ${r.left} in a hundred left out` : ''})`)
+  }
+  // Joined face to face, but more than its joins carry: the core's own rule, asked before it is sent. The slab
+  // would fall, so the model is asked again; when it never does better, what stands of the best reply is made.
   const heavy = { name: 'a slab on a stick', size: [60, 30, 40], parts: [['box', 'plaster', 'own', 0, 0, 0, 1, 28, 1], ['box', 'plaster', 'own', 0, 28, 0, 60, 30, 40]] }
-  const fell = await make({ wish: 'a slab on a stick', world, where: free, journal, model: kept(heavy) })
-  check(fell.state === 'refused' && /come loose/.test(fell.why) && /part 2/.test(fell.why) && (await done()) === mark, `a thing whose joins would not carry it is refused, with the part that would fall named (${say(fell)})`)
+  const told = []
+  const fell = await make({ wish: 'a slab on a stick', world, where: free, journal, model: async (q) => { told.push(q.prompt); return kept(heavy)() }, dry: true })
+  check(fell.state === 'dry' && fell.tries === 3 && /come loose/.test(told[1]) && /part 2/.test(told[1]) && fell.left > 50 && fell.made.every((row) => row[2] < fell.origin[1] + 28), `a thing whose joins would not carry it: the model is told which part would fall, and in the end what stands is made without it (${say(fell)}, ${fell.left} in a hundred left out)`)
   // More runs than an edit may be.
   const fine = { name: 'pinstripes', size: [40, 40, 40], parts: [['stripes', 'plaster', 'white', 0, 0, 0, 40, 40, 40, 'x', 1, 'black']] }
   const many = await make({ wish: 'pinstripes', world, where: free, journal, model: kept(fine) })
@@ -146,6 +156,18 @@ try {
   const out = await undo({ world, journal, id: first.id })
   const gone = await at(world, [first.origin[0], first.origin[1] + 8, first.origin[2]])
   check(out.state === 'undone' && gone.material === 0, `undo takes the first stall out again (${say(out)})`)
+
+  // (Last: what falls when a place is cleared goes on being told for a while.)
+  // No place near will take it: it is held, and put where the asker says next, or there with the place cleared.
+  const markHall = await done()
+  const big = { name: 'a hall', size: [64, 30, 64], parts: [['box', 'brick', 'own', 0, 0, 0, 64, 30, 64]] }
+  const shut = await make({ wish: 'a hall', world, where: { from: [700, 172, 3990], toward: [0, -1, -0.01] }, journal, model: kept(big) })
+  if (shut.state === 'held') {
+    check((await done()) === markHall, `a thing no place near will take is held, not thrown away (${say(shut)})`)
+    const here2 = await put({ hold: shut.hold, world, where: { from: [700, 172, 3990], toward: [0, -1, -0.01] }, clear: true, journal })
+    const inside = here2.origin ? await at(world, [here2.origin[0], here2.origin[1] + 29, here2.origin[2]]) : {}
+    check(here2.state === 'there' && inside.material === 8 && (await done()) > markHall + 1, `put there with the place cleared, it stands where the house was (${say(here2)})`)
+  } else check(false, `a hall aimed into a house should have been held (${say(shut)})`)
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }

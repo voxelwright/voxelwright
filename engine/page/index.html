@@ -32,6 +32,12 @@
   #ask.open #ask-row #ask-which { background: rgba(20, 24, 29, 0.08); }
   #ask.open #ask-row #ask-send { background: #14181d; color: #f6f5f0; }
   #ask:not(.open) #ask-send { display: none; }
+  #choice { align-self: center; max-width: 100%; padding: 8px 10px 9px; border-radius: 14px; background: rgba(12, 16, 22, 0.78); pointer-events: auto; }
+  #choice p { margin: 0 2px 7px; font-size: 14px; }
+  #choice div { display: flex; flex-wrap: wrap; gap: 6px; }
+  #choice button { border: 0; border-radius: 9px; padding: 7px 12px 7px 9px; background: rgba(232, 236, 241, 0.14); color: #e8ecf1; font: 600 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  #choice button:first-child { background: #e8ecf1; color: #10141a; }
+  #choice button i { font-style: normal; font-weight: 400; opacity: 0.6; margin-right: 7px; }
   #starters, #given { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
   #starters button { border: 0; border-radius: 999px; padding: 6px 12px; background: rgba(12, 16, 22, 0.66); color: #e8ecf1; font: 500 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   #given span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.72); max-width: 100%; overflow: hidden; white-space: nowrap; }

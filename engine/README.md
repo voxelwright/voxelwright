@@ -92,6 +92,16 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
   it in front of you. A picture can be pasted, dropped anywhere on the page, or picked with the bar's button (on a
   phone: the library, or the camera with the second button); an address among the words, or dropped, is a link. A
   picture or a link needs no words. Tab turns the bar to saying something to the others there, and back.
+- **A wish is kept to.** What of a reply cannot be used is left out and the rest made: words round the JSON, a part
+  that is not the form's, cells that touch nothing, and whatever the core's rule says would fall (taken off from the
+  top down until what is left stands). The model is asked again only when more than fifteen in a hundred would be
+  lost, and after the third asking the best of its replies is made. A place that is not ground (a roof, a car, the
+  sky) means the ground nearest it; a place that is taken means the nearest that is not, out to eight metres, and
+  the page says how far. When no place near will take it, the thing is **held**, not dropped: the page asks whether
+  to clear the space for it (its box is emptied first; what stood on that falls), to put it where you look next,
+  or to let it go. A link that cannot be read does not stop a wish that has words or a picture. What is still
+  refused: a model that cannot be run, three replies nothing can be made of, more runs than an edit may be, a link
+  alone that cannot be read, no ground within six metres.
 - **While the model works** (`page/gather.ts`), loose cells lift off the ground round the place, are drawn in and
   circle it; when the model has answered and the thing's size is known they close into a box of that size; when it
   arrives they fall onto it in a puff of dust. If nothing can be made they drop, lie a moment and are gone, and the

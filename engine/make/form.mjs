@@ -82,22 +82,33 @@ const AXES = { x: 0, y: 1, z: 2 }
 /**
  * Reads a reply: the cells of the thing as kinds in a grid of its own size, and which part put each.
  * Throws `Refused` with the reason, in words the model can be told, if the reply is anything but the form.
+ * `lenient`: what can be left out is left out and said in `left` (words round the JSON, a key or a part that is not
+ * the form's, cells that touch nothing), and only a reply nothing can be made of is refused. Lenient or not, a reply
+ * is data: nothing in it is run, and no kind is taken from it.
  */
-export function read(reply) {
+export function read(reply, { lenient = false } = {}) {
   let text = String(reply).trim()
+  /** What was left out of a reply read leniently, in words the model can be told if it is asked again. */
+  const left = []
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(text)
   if (fenced) text = fenced[1]
   let thing
-  try { thing = JSON.parse(text) } catch { no('the reply is not JSON alone') }
+  try { thing = JSON.parse(text) } catch {
+    // Words round it: read leniently, the object among them is taken.
+    const a = text.indexOf('{'), b = text.lastIndexOf('}')
+    try { if (!lenient || a < 0 || b <= a) throw 0; thing = JSON.parse(text.slice(a, b + 1)); left.push('there were words round the JSON') } catch { no('the reply is not JSON alone') }
+  }
   if (!thing || typeof thing !== 'object' || Array.isArray(thing)) no('the reply is not an object')
-  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key) && !FIELDS.has(key)) no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', ...FIELDS.keys()].join(', ')} are`)
-  if (typeof thing.name !== 'string' || !thing.name || thing.name.length > 60) no('name is a few words')
+  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key) && !FIELDS.has(key)) if (lenient) left.push(`"${key.slice(0, 20)}" is not part of the form`); else no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', ...FIELDS.keys()].join(', ')} are`)
+  if (typeof thing.name !== 'string' || !thing.name || thing.name.length > 60) { if (lenient) thing.name = typeof thing.name === 'string' && thing.name ? thing.name.slice(0, 60) : 'a thing'; else no('name is a few words') }
   const size = thing.size
   if (!Array.isArray(size) || size.length !== 3 || !size.every((v, a) => whole(v, 1, SIZE_MOST[a]))) no(`size is [wide, high, deep] in cells, at most ${SIZE_MOST.join(' by ')}`)
+  if (lenient && Array.isArray(thing.parts) && thing.parts.length > PARTS_MOST) { left.push(`parts after the first ${PARTS_MOST}`); thing.parts = thing.parts.slice(0, PARTS_MOST) }
   if (!Array.isArray(thing.parts) || !thing.parts.length || thing.parts.length > PARTS_MOST) no(`parts is a list of 1 to ${PARTS_MOST}`)
   const [w, h, d] = size
   const cells = new Uint16Array(w * h * d), by = new Uint16Array(w * h * d)
-  thing.parts.forEach((part, n) => {
+  let skipped = 0
+  const lay = (part, n) => {
     const bad = (why) => no(`part ${n + 1} (${JSON.stringify(part).slice(0, 70)}): ${why}`)
     if (!Array.isArray(part) || part.length < 7 || part.length > 12) bad('a part is a list: shape, material, colour, then its numbers')
     const [shape, material, tint] = part
@@ -144,7 +155,9 @@ export function read(reply) {
         return y < top(step) && y >= under
       })
     } else bad(`"${String(shape).slice(0, 20)}" is not a shape: box, stripes, cyl, ball, wedge, text`)
-  })
+  }
+  // Read leniently, a part that is not one is left out and the rest is laid.
+  thing.parts.forEach((part, n) => { try { lay(part, n) } catch (e) { if (!lenient || !(e instanceof Refused)) throw e; skipped++; left.push(e.message) } })
   const filled = cells.reduce((n, k) => n + (k ? 1 : 0), 0)
   if (!filled) no('nothing is left of it: every cell is air')
   // It must stand: every cell joined, face to face, to a cell on the ground. (Whether the joins carry it is the
@@ -167,14 +180,16 @@ export function read(reply) {
   for (let i = 0; i < cells.length; i++) if (cells[i] && !seen[i]) { loose.set(by[i], (loose.get(by[i]) ?? 0) + 1); crumbs++ }
   // A few stray cells (the rim of a round thing one cell thick, a knob a cell off) are left out, and said so: they
   // would only fall as crumbs. More than that is a part in the wrong place, and the model is told which.
-  if (crumbs > Math.max(CRUMBS, filled / 100)) no(`it would not stand: ${[...loose].slice(0, 6).map(([n, count]) => `${count} cells of part ${n} (${JSON.stringify(thing.parts[n - 1]).slice(0, 60)})`).join('; ')} touch nothing that reaches the ground. Parts must share a face with what holds them`)
+  if (crumbs > Math.max(CRUMBS, filled / 100)) (lenient ? (why) => left.push(why) : no)(`it would not stand: ${[...loose].slice(0, 6).map(([n, count]) => `${count} cells of part ${n} (${JSON.stringify(thing.parts[n - 1]).slice(0, 60)})`).join('; ')} touch nothing that reaches the ground. Parts must share a face with what holds them`)
   if (crumbs) for (let i = 0; i < cells.length; i++) if (cells[i] && !seen[i]) cells[i] = 0
-  const out = { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts, record: {} }
+  if (lenient && filled - crumbs <= 0) no('nothing of it reaches the ground')
+  // `left` says what a lenient reading left out; `kept` how much of what the reply described is still there, 0 to 1.
+  const out = { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts, record: {}, left, kept: (1 - skipped / thing.parts.length) * ((filled - crumbs) / filled) }
   // The other lanes' keys, each by its own check, last: a check may ask what the cells are.
   for (const [key, f] of FIELDS) {
     if (thing[key] === undefined) continue
     let got
-    try { got = f.check(thing[key], out) } catch (e) { no(`"${key}": ${e.message}`) }
+    try { got = f.check(thing[key], out) } catch (e) { if (lenient) { left.push(`"${key}": ${e.message}`); continue } no(`"${key}": ${e.message}`) }
     for (const [name, value] of Object.entries(got ?? {})) { if (!RECORD_FIELDS.includes(name)) throw new Error(`the check of "${key}" returned "${name}", which is not a field of a thing's record`); out.record[name] = value }
   }
   return out
