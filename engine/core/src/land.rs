@@ -138,6 +138,104 @@ pub fn valley(x: i32, z: i32) -> f32 {
     ease(broad, broad + 0.012, wind)
 }
 
+/// The picture of chance numbers that the planet's pass asks between its points for what is only looked at
+/// (space.ts `chance`): 256 by 256 points of four numbers, the same every time. The core makes the same one, so
+/// that woods and fields seen from space are where the cells have them.
+fn chance() -> &'static [f32] {
+    static TABLE: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut state: u32 = 0x2f6e2b1;
+        (0..256 * 256 * 4)
+            .map(|_| {
+                state = state.wrapping_add(0x6d2b79f5);
+                let mut t = (state ^ (state >> 15)).wrapping_mul(1 | state);
+                t = t.wrapping_add((t ^ (t >> 7)).wrapping_mul(61 | t)) ^ t;
+                ((t ^ (t >> 14)) as f64 / 4294967296.0) as f32
+            })
+            .collect()
+    })
+}
+/// Four chance numbers for a square (space.ts `lot`).
+fn lot(cx: f32, cz: f32) -> [f32; 4] {
+    let at = ((cz as i32).rem_euclid(256) * 256 + (cx as i32).rem_euclid(256)) as usize * 4;
+    let t = chance();
+    [t[at], t[at + 1], t[at + 2], t[at + 3]]
+}
+/// Four smooth noises at once (space.ts `four`).
+fn four(p: (f32, f32), period: f32) -> [f32; 4] {
+    let (qx, qz) = (p.0 / period, p.1 / period);
+    let (cx, cz) = (qx.floor(), qz.floor());
+    let (fx, fz) = (qx - cx, qz - cz);
+    let (ux, uz) = (fx * fx * (3.0 - 2.0 * fx), fz * fz * (3.0 - 2.0 * fz));
+    let (a, b, c, d) = (lot(cx, cz), lot(cx + 1.0, cz), lot(cx, cz + 1.0), lot(cx + 1.0, cz + 1.0));
+    std::array::from_fn(|i| {
+        let (top, bottom) = (a[i] + (b[i] - a[i]) * ux, c[i] + (d[i] - c[i]) * ux);
+        top + (bottom - top) * uz
+    })
+}
+fn turn(q: (f32, f32)) -> (f32, f32) {
+    (q.0 * 0.8 - q.1 * 0.6, q.0 * 0.6 + q.1 * 0.8)
+}
+/// Folds of it (space.ts `weave`, with every fold shown: the cells are always near).
+fn weave(p: (f32, f32), period: f32, count: u32) -> [f32; 4] {
+    let (mut q, mut size, mut sum, mut weight, mut all) = (p, period, [0.0f32; 4], 0.5, 0.0);
+    for k in 0..count {
+        let n = four((q.0 + k as f32 * 37.3, q.1 + k as f32 * 91.7), size);
+        for i in 0..4 {
+            sum[i] += n[i] * weight;
+        }
+        all += weight;
+        q = turn(q);
+        size *= 0.47;
+        weight *= 0.5;
+    }
+    sum.map(|v| v / all)
+}
+
+/// What the planet's green land is at a place: a wood, rough heath, a hedge between two fields, or a field and
+/// what it grows (0 straw, 1 young green, 2 deep green, 3 turned earth).
+pub enum Cover {
+    Wood,
+    Heath,
+    Hedge,
+    Crop(u8),
+}
+
+/// The planet's woods and fields (space.ts `land`, its `wooded`, `rough`, `fields`, `hedge` and `crop`): fields
+/// 3.4 km by 2.1 in rows, lying one way in one country and another way in the next, woods whose edges are the
+/// edges of fields, heath between, streams in dark gullies.
+pub fn cover(x: i32, z: i32) -> Cover {
+    let p = km(x, z);
+    let (slow, mid, near) = (weave(p, 420.0, 3), weave(p, 30.0, 5), weave(p, 9.0, 3));
+    let lie = 1.0 - (weave(p, 38.0, 4)[0] * 2.0 - 1.0).abs();
+    let valley = 1.0 - ease(0.0, 0.03, river(x, z).0);
+    let way = if slow[2] > 0.5 { (p.0 * 0.96 + p.1 * 0.28, p.1 * 0.96 - p.0 * 0.28) } else { turn(p) };
+    let (wide, long) = (3.4, 2.1);
+    let row = (way.1 / long).floor();
+    let along = way.0 / wide + lot(row, 113.0)[0] * 3.0;
+    let small = lot(along.floor(), row);
+    let wooded = mid[0] - 0.56 + (slow[0] - 0.5) * 0.4 + (lie - 0.5) * 0.3 - valley * 0.06 + (small[2] - 0.5) * 0.07;
+    if (near[3] - 0.5).abs() < 0.004 {
+        return Cover::Wood;
+    }
+    // At a wood's edge the trees stand thin and the fields show between them: some of it is wood and the rest
+    // field, column by column, as much as the pass mixes them.
+    let wood = wooded + (near[0] - 0.5) * 0.5 * (1.0 - ease(0.0, 0.12, wooded.abs() - 0.02)) + (near[0] - 0.5) * 0.16 > 0.0;
+    if wood && unit(x >> 4, z >> 4, 79) < 0.55 + 0.45 * ease(0.0, 0.07, wooded + (near[2] - 0.5) * 0.1) {
+        return Cover::Wood;
+    }
+    if !wood && wooded + (near[3] - 0.5) * 0.12 > -0.13 {
+        return Cover::Heath;
+    }
+    let (fx, fz) = (along - along.floor(), way.1 / long - row);
+    if (fx.min(1.0 - fx) * wide).min(fz.min(1.0 - fz) * long) < 0.012 {
+        return Cover::Hedge;
+    }
+    let lush = (slow[1] - 0.5) * 0.9 + valley * 0.25 + 0.15;
+    let v = small[0] - lush * 0.5;
+    Cover::Crop(if v < 0.3 { 0 } else if v < 0.58 { 1 } else if v < 0.82 { 2 } else { 3 })
+}
+
 /// How far a place is into the mountains: they rise north of the town (towards -z), from 4.5 km out; far from the
 /// town they are where the planet has its ranges.
 pub fn peaks(x: i32, z: i32) -> f32 {
@@ -373,6 +471,13 @@ mod tests {
         }
     }
 
+    /// The picture of chance and its folds, to hold against the page's own: `cargo test --release chance_says -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn chance_says() {
+        println!("table {:?} near {:?} slow {:?}", &chance()[..4], weave((300.0, -900.0), 9.0, 3), weave((300.0, -900.0), 420.0, 3));
+    }
+
     /// A picture of the land from over it, for looking at: `LAND_MAP=file.ppm cargo test --release land_map -- --ignored`
     /// (`LAND_AT=x,z,span` in cells; a pixel is span / 800).
     #[test]
@@ -387,6 +492,8 @@ mod tests {
                 let (g, e) = (ground(x, z), ground(x + step, z + step));
                 let shade = (1.0 + (g - e) as f32 / step as f32 * 0.6).clamp(0.4, 1.6);
                 let c = if g < 0 { [20.0, (110 + g / 4).max(40) as f32, (160 + g / 4).max(70) as f32] } else if g < 4600 { [90.0 + g as f32 / 40.0, 140.0, 70.0] } else { let v = 120.0 + (g as f32 / 36_000.0) * 135.0; [v, v, v + 10.0] };
+                // LAND_COVER=1: the planet's woods and fields where the land is green, for looking at.
+                let c = if g >= 0 && std::env::var("LAND_COVER").is_ok() { match cover(x, z) { Cover::Wood => [30.0, 70.0, 30.0], Cover::Heath => [110.0, 140.0, 70.0], Cover::Hedge => [10.0, 30.0, 10.0], Cover::Crop(0) => [200.0, 180.0, 100.0], Cover::Crop(1) => [130.0, 190.0, 70.0], Cover::Crop(2) => [70.0, 130.0, 50.0], Cover::Crop(_) => [140.0, 100.0, 70.0] } } else { c };
                 let s = if g < 0 { 1.0 } else { shade };
                 out.extend(c.map(|v| (v * s).clamp(0.0, 255.0) as u8));
             }

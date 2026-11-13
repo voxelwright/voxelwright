@@ -6,7 +6,7 @@
 
 use crate::hash::{hash, hash3, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, REFUGE, SURF, arid, coast_fold, cold, dry, ease, far, off_road, offshore, on_way, open, peaks, red, reef_column, reef_form, way};
+use crate::land::{Cover, HOME, REFUGE, SURF, arid, coast_fold, cold, cover, dry, ease, far, off_road, offshore, on_way, open, peaks, red, reef_column, reef_form, way};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -915,6 +915,19 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         }
         if chance < ease(0.1, 0.6, frost) * w * 1.4 {
             return kind(GRASS, colour(4, 9));
+        }
+        // Its green land: woods (their floor; the trees are stamp_country's), heath, and fields with hedges, each
+        // field what it grows.
+        if chance < w * 1.4 {
+            return match cover(x, z) {
+                Cover::Wood => kind(GRASS, colour(8, 6)),
+                Cover::Heath => kind(GRASS, colour(6, 8)),
+                Cover::Hedge => kind(GRASS, colour(8, 9)),
+                Cover::Crop(0) => kind(GRASS, colour(4, 2)),
+                Cover::Crop(1) => kind(GRASS, colour(7, 3)),
+                Cover::Crop(2) => kind(GRASS, colour(8, 5)),
+                Cover::Crop(_) => kind(EARTH, OWN),
+            };
         }
     }
     if grove(x, z, g).is_some() { meadow(x, z, g) } else { kind(GRASS, OWN) }
