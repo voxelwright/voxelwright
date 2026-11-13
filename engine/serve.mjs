@@ -70,8 +70,9 @@ async function report(req, res) {
 //   5 here    where someone in the world is, as JSON: {by, name, at (their feet, the finest cells), yaw, walking,
 //             down, flinch, seat (a body the world moves for someone outside a page), gone}.
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
+//   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -114,6 +115,8 @@ POST /world/ask           {"by": name, "edit": [1, rows, ...], "release": [x, y,
                           {"by": name, "thing": {"id": id, "sounds": ...}}   sets parts, behaviour, controls, seats or sounds of a thing that is there (each at most ${16384} bytes of JSON), or at and facing when it has come to rest somewhere else. Every change is kept and told to every page that joins: it is not for where a moving thing is from moment to moment
                           {"by": name, "gone": id}   forgets a thing's record; its cells are left as they are (empty them with an edit)
 
+A thing lives once its controls have a motor (engine/page/living.ts \`Controls\`: {scheme: "drive" | "fly" | "hover" | "ride", motor: {...}}): its cells leave the world and it is a body that the world's own process moves, stood on its feet, asleep until told something. Set them as any field of a thing is set. It breaks what it hits; a hard enough hit or a blast breaks it, and then its record is gone and its pieces are cells where they lie.
+POST /world/drive         {"by": name, "id": id, "go": -1 to 1, "turn": -1 to 1, "rise": -1 to 1, "roll": false, "jump": false}   what a living thing is to do, held for one second: say it again four times a second while it is wanted. Never kept. 409 if nothing of that id lives.
 GET  /world/stream        everything that happens, as it happens (binary frames: see engine/serve.mjs)
 
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
@@ -123,6 +126,8 @@ Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20}
 const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
 /** What bodies may ask a second, all told: around takes the world's one thread 30 ms (measured), so this is at most six tenths of it. */
 const BODIES_A_SECOND = 20
+/** What riders may tell living things a second, all told: each says it four times a second and when a key changes. */
+const DRIVES_A_SECOND = 240
 const frame = (kind, seq, payload) => { const head = Buffer.alloc(12); head.writeUInt32LE(kind, 0); head.writeUInt32LE(seq, 4); head.writeUInt32LE(payload.length, 8); return Buffer.concat([head, payload]) }
 const words = (counts, w) => Buffer.concat([Buffer.from(Uint32Array.from(counts).buffer), Buffer.from(w.buffer, w.byteOffset, w.byteLength)])
 /** The edit a kept frame made, in the core's own form (page/edits.ts), or null if it made none; and the frame as it is kept: the edit and no more. */
@@ -253,6 +258,13 @@ if (worldFile) {
     }
   }
   writeFileSync(worldFile, Buffer.concat(log))
+  /** The rows of a thing's cells: the edit it came with, kept once, in the log. */
+  const rowsOf = (t) => JSON.parse(log[t.at].subarray(12).toString('utf8')).edit.slice(2)
+  // Things that lived (#245: a record whose controls have a motor) get up again where they last slept: bodies are
+  // not kept, and the edit that took their cells out is.
+  for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, controls: t.record.controls, rows: rowsOf(t) } })
+  /** Which body of the core each living thing is now, by the thing's id: told to every page as it joins. */
+  const living = new Map()
   const readers = new Set()
   let down = ''
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
@@ -262,6 +274,8 @@ if (worldFile) {
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
+    // Which body a living thing is: for whoever reads now, and kept here for whoever joins.
+    if (m.living) { if (m.living.body) living.set(m.living.thing, m.living.body); else living.delete(m.living.thing); const f = frame(LIVING, 0, Buffer.from(JSON.stringify(m.living))); for (const r of readers) r.write(f); return }
     // Where people are and what they say goes to whoever is reading now, and is not kept.
     if (m.here || m.said) { const f = frame(m.here ? HERE : SAID, 0, Buffer.from(JSON.stringify(m.here ?? m.said))); for (const r of readers) if (m.said || r.writableLength < 1 << 20) r.write(f); return }
     if (!m.counts) return
@@ -271,7 +285,7 @@ if (worldFile) {
     for (const r of readers) if (r.writableLength < 1 << 20) r.write(now)
   })
   thread.on('error', (e) => { down = String(e); console.error(`the world stopped: ${down}`) })
-  let asked = 0, since = Date.now(), seated = 0, seatedSince = Date.now()
+  let asked = 0, since = Date.now(), seated = 0, seatedSince = Date.now(), driven = 0, drivenSince = Date.now()
   const body = async (req, most) => { const parts = []; let size = 0; for await (const chunk of req) { size += chunk.length; if (size > most) return null; parts.push(chunk) } try { return JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return undefined } }
   world = {
     body,
@@ -336,6 +350,9 @@ if (worldFile) {
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
       for (let i = Math.max(0, from); i < log.length; i++) res.write(log[i])
       res.write(frame(NOW, log.length, Buffer.from(Float64Array.of(Date.now()).buffer)))
+      for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
+      // What sleeps says nothing: the world says once more where everything is.
+      if (living.size) thread.postMessage({ nudge: true })
       readers.add(res)
       res.on('close', () => readers.delete(res))
     },
@@ -354,8 +371,21 @@ if (worldFile) {
       // A thing is made once: an id the world has is refused, so a send that is tried again cannot make two.
       if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.add(ask.thing.id) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
-      thread.postMessage({ ask })
+      // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
+      thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
       send(res, 202, '{"asked":true}', TYPES['.json'])
+    },
+    /** What a living thing's rider asks of it (#245): held by the core for a second, never kept. */
+    async drive(req, res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const now = Date.now()
+      if (now - drivenSince > 1000) { drivenSince = now; driven = 0 }
+      if (++driven > DRIVES_A_SECOND) return send(res, 429, 'too many: say what a thing is to do four times a second, not more')
+      const b = await body(req, 1024), axis = (v) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0)
+      if (!b || typeof b.id !== 'string' || !ID.test(b.id)) return send(res, 400, 'what a thing is told is {by, id, go, turn, rise, roll, jump}')
+      if (!living.has(b.id)) return send(res, 409, 'no living thing of that id is in the world')
+      thread.postMessage({ drive: { id: b.id, go: axis(b.go), turn: axis(b.turn), rise: axis(b.rise), roll: b.roll === true, jump: b.jump === true } })
+      send(res, 202, '{}', TYPES['.json'])
     },
   }
   console.log(`a shared world is kept in ${worldFile} (${log.length} things done to it so far)`)
@@ -372,6 +402,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && url.pathname === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
     if (req.method === 'POST' && url.pathname === '/world/ask') return done(world.ask(req, res))
     if (req.method === 'POST' && url.pathname === '/world/here') return done(world.here(req, res))
+    if (req.method === 'POST' && url.pathname === '/world/drive') return done(world.drive(req, res))
     const op = url.pathname.slice(7)
     if (req.method === 'POST' && ['join', 'walk', 'turn', 'say', 'leave'].includes(op)) return done(world.body(req, 2048).then((b) => world.seat(op, b, res)))
     if (req.method === 'GET' && (op === 'me' || op === 'around')) return done(world.seat(op, Object.fromEntries(url.searchParams), res))

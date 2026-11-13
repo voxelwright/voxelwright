@@ -39,6 +39,7 @@ const checks = [
   ['shared', 'node', ['test/shared.mjs'], true],
   ['people', 'node', ['test/people.mjs'], true],
   ['living', 'node', ['test/living.mjs'], true],
+  ['driven', 'node', ['test/driven.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['sound', 'node', ['test/sound.mjs'], false],

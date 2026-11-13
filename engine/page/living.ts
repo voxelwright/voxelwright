@@ -8,6 +8,8 @@ import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
 import type { Struck, Told } from './told.ts'
+import type { Link } from './link.ts'
+import type { Things } from './things.ts'
 
 /** A foot: where its ray starts (cells from the thing's own low corner), how far down it reaches, whether it steers and drives. */
 export interface Foot { at: [number, number, number]; reach: number; steers?: boolean; drives?: boolean }
@@ -37,9 +39,33 @@ export const SCHEMES: Record<'drive' | 'fly' | 'hover' | 'ride', Scheme> = {
   ride: { name: 'ride', verb: 'ride', lines: [GO, { ...TURN, does: 'turn' }, { keys: ['Space'], shown: 'Space', does: 'jump', once: 'jump' }, LEAVE] },
 }
 
+/**
+ * A thing's `controls` as a shared world keeps it in the thing's record (the living lane's field): which scheme it
+ * is driven by, how it moves, and where it last slept (its middle of mass in cells, and its turn), which the world's
+ * own process writes so that a world started again can stand it up there. Data from a page or a model: checked by
+ * `controlsOf` before anything uses it.
+ */
+export interface Controls { scheme: keyof typeof SCHEMES; motor: Motor; rest?: { at: [number, number, number]; rot: [number, number, number, number] } }
+const finite = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x))
+/** A record's `controls`, if it is one that can be used; else null. The core clamps every number of the motor. */
+export function controlsOf(value: unknown): Controls | null {
+  const c = value as Partial<Controls> | null, m = c?.motor as Partial<Motor> | undefined
+  if (!c || typeof c !== 'object' || typeof c.scheme !== 'string' || !Object.hasOwn(SCHEMES, c.scheme) || !m || typeof m !== 'object') return null
+  const plain = ['front', 'grip', 'power', 'top', 'steer', 'hover', 'lift', 'upright', 'turns', 'jump', 'tough'] as const
+  if (!plain.every((k) => typeof m[k] === 'number' && Number.isFinite(m[k])) || !Array.isArray(m.feet) || m.feet.length > 16) return null
+  const feet: Foot[] = []
+  for (const f of m.feet as Partial<Foot>[]) {
+    if (!f || !finite(f.at, 3) || typeof f.reach !== 'number' || !Number.isFinite(f.reach)) return null
+    feet.push({ at: [f.at[0], f.at[1], f.at[2]], reach: f.reach, steers: f.steers === true, drives: f.drives === true })
+  }
+  const motor = { ...Object.fromEntries(plain.map((k) => [k, m[k]])), feet } as unknown as Motor
+  const rest = c.rest && finite(c.rest.at, 3) && finite(c.rest.rot, 4) ? { at: [...c.rest.at] as [number, number, number], rot: [...c.rest.rot] as [number, number, number, number] } : undefined
+  return { scheme: c.scheme, motor, ...(rest ? { rest } : {}) }
+}
+
 /** A thing to bring to life: its cells (one kind each, laid out x, then z, then y), size and low corner in the world's cells, how it moves and how it is driven. */
 export interface Making { name: string; cells: Int32Array; size: [number, number, number]; low: [number, number, number]; motor: Motor; controls?: keyof typeof SCHEMES; take?: boolean }
-export interface Thing extends Making { id: number; alive: boolean; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number] }
+export interface Thing extends Making { id: number; alive: boolean; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number] }
 
 export interface Living {
   /** Brings a thing to life. Resolves when the solver has made it; its id is 0 if it could not. */
@@ -81,6 +107,9 @@ export function living(o: {
   pose: { x: number; y: number; z: number; yaw: number; pitch: number }
   /** How high the ground is at a place (metres). */
   ground(x: number, z: number): number
+  /** In a shared world: the page's line to it, and the made things it knows. The world's own process moves every living thing; this page only says what a rider asks. */
+  world?: Link | null
+  made?: () => Things
 }): Living {
   const M = 10
   const things: Thing[] = [], waiting: { making: Making; done: (thing: Thing) => void }[] = [], struck: Struck[] = []
@@ -102,8 +131,34 @@ export function living(o: {
     return { at: piece.pos, rot: piece.rot, front: [f[0] / flat, 0, f[2] / flat] }
   }
   const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump') => {
+    if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once); return }
     o.send({ drive: { id: thing.id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' } })
     o.wake()
+  }
+  // In a shared world a thing lives when the world says which body it is: what it is comes from its record.
+  const hoped = new Map<string, (thing: Thing) => void>()
+  if (o.world) o.world.onliving = ({ thing: ref, body }) => {
+    const was = things.findIndex((t) => t.ref === ref)
+    if (was >= 0) { const old = things[was]; old.alive = false; things.splice(was, 1); if (riding === old) mount(null) }
+    const record = o.made?.().all.get(ref), controls = controlsOf(record?.controls)
+    if (!body || !record || !controls) return
+    const b = record.box, thing: Thing = { id: body, ref, alive: true, name: record.name, cells: new Int32Array(0), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]], low: [b[0], b[1], b[2]], motor: controls.motor, controls: controls.scheme }
+    things.push(thing)
+    hoped.get(ref)?.(thing)
+    hoped.delete(ref)
+  }
+  /** A thing's cells as rows of the world (x0, x1, y, z, kind), for an ask. */
+  const rows = (m: Making) => {
+    const out: number[] = []
+    for (let y = 0; y < m.size[1]; y++) for (let z = 0; z < m.size[2]; z++) for (let x = 0; x < m.size[0]; x++) {
+      const kind = m.cells[x + m.size[0] * (z + m.size[2] * y)]
+      if (!kind) continue
+      let x1 = x + 1
+      while (x1 < m.size[0] && m.cells[x1 + m.size[0] * (z + m.size[2] * y)] === kind) x1++
+      out.push(m.low[0] + x, m.low[0] + x1, m.low[1] + y, m.low[2] + z, kind)
+      x = x1 - 1
+    }
+    return out
   }
   const mount = (thing: Thing | null) => {
     if (riding && riding !== thing) {
@@ -134,7 +189,19 @@ export function living(o: {
     things, struck, where, mount,
     get riding() { return riding },
     get near() { return near },
-    spawn: (making) => new Promise((done) => { waiting.push({ making, done }); o.send({ spawn: { cells: making.cells, size: making.size, low: making.low, take: making.take, motor: numbers(making.motor) } }) }),
+    spawn: (making) => new Promise((done) => {
+      if (o.world) {
+        // In a shared world it is made as any thing is, its record and its cells together, and its controls with them: the world brings it to life.
+        const ref = `${making.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'thing'}-${Math.random().toString(36).slice(2, 8)}`, r = rows(making)
+        hoped.set(ref, done)
+        const none = () => { hoped.delete(ref); done({ ...making, id: 0, alive: false }) }
+        void o.world.ask({ edit: [1, r.length / 5, ...r], release: [making.low[0] - 2, making.low[1] + 1, making.low[2]], thing: { id: ref, name: making.name, wish: '', at: [making.low[0] + (making.size[0] >> 1), making.low[1], making.low[2] + (making.size[2] >> 1)], size: making.size, facing: 'east', controls: { scheme: making.controls ?? 'drive', motor: making.motor } satisfies Controls } }).then((taken) => { if (!taken) none() })
+        setTimeout(() => { if (hoped.has(ref)) none() }, 10_000)
+        return
+      }
+      waiting.push({ making, done })
+      o.send({ spawn: { cells: making.cells, size: making.size, low: making.low, take: making.take, motor: numbers(making.motor) } })
+    }),
     drive: tell,
     heard(answer, told) {
       if (answer.spawned !== undefined) {

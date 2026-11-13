@@ -1653,7 +1653,18 @@ full speed: say it again four times a second.
   a phone's left stick drives. Schemes (drive, fly, hover, ride) are data in `living.ts`.
 - **A key tapped by a script** goes down and up inside one frame: read from a held set once a frame it is missed.
   Keys pressed once (E, Q, Space) are taken in the mode's `key`, which hears every keydown.
-- **Not there**: living things in a shared world (the page sends nothing to a world process yet; that process must
-  be the one to move them, and a restart loses bodies while the edit that took their cells is kept). No rider's
+- **In a shared world the world's own process moves every living thing** (`world.mjs` `live`, `heed`); a page only
+  says what a rider asks. A thing lives when its record's `controls` has a motor (`living.ts` `controlsOf` checks
+  it, in the page and in the world process alike). Its cells are taken out as it is born, only those the world
+  still has. A thing that comes with its controls lives before the world is asked what its edit left unheld: asked
+  first, a car set down on the sloping street was let fall as loose cells. What a rider asks goes by
+  `POST /world/drive`, never kept (240 a second all told); which body a thing is goes in an unkept frame (7), said
+  again to each page that joins, with one nudge of the clock, for a sleeper sends no moves. When a thing falls
+  asleep the world writes where into its record (`controls.rest`); a server started again stands each one up there
+  (`living_place`), because bodies are not kept and the edit that took their cells is. One that breaks has its
+  record forgotten. `test/driven.mjs`.
+- **`still()` in the checks waited for no body to be moving**, and a living thing is a body for good: the page's
+  count of what is falling leaves the living out (`main.ts` `loose`).
+- **Not there**: no rider's
   figure, no hinged parts, no behaviour scripts. A thing's feet see the standing world only: it drives through
   nothing but does not ride up onto another body. No shadow under it (no body casts one).

@@ -20,6 +20,12 @@ export interface Link {
   onerror: ((e: { message: string }) => void) | null
   /** An ask of anyone's, as the world does it. `live` is false for what was done before this page joined. */
   onecho: ((echo: Echo, live: boolean) => void) | null
+  /** Which body a living thing is now (#245), by its thing's id; body 0 when it lives no more. Said as it changes and to each page as it joins. */
+  onliving: ((living: { thing: string; body: number }) => void) | null
+  /** Says what a living thing is to do (go, turn and rise from -1 to 1), held by the world for a second. */
+  drive(id: string, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
+  /** An ask in the world's own words (`GET /world/` says which): a thing with its cells, a change to a thing's fields. Resolves to whether it was taken. */
+  ask(body: Record<string, unknown>): Promise<boolean>
   /** Says where this page's eye is (the world's finest cells) and which way it faces, under a name others see. */
   here(at: readonly [number, number, number], yaw: number, name?: string): void
   /** Where someone else in the world is, when the world says. */
@@ -36,7 +42,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7
 
 export function link(): Link {
   let live = false
@@ -44,7 +50,9 @@ export function link(): Link {
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
-    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null,
+    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null,
+    drive(id, go, turn, rise, once) { void fetch('/world/drive', { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
+    ask: (body) => fetch('/world/ask', { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
     here(at, yaw, name) { void fetch('/world/here', { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw }) }).catch(() => {}) },
     // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.
     say(name, text) { void fetch('/world/say', { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
@@ -78,6 +86,7 @@ export function link(): Link {
         if (kind === NOW) { live = true; if (size >= 8) behind = new Float64Array(payload.buffer, 0, 1)[0] - Date.now() }
         else if (kind === SAID) self.onsaid?.(JSON.parse(new TextDecoder().decode(payload)))
         else if (kind === ECHO) self.onecho?.(JSON.parse(new TextDecoder().decode(payload)) as Echo, live)
+        else if (kind === LIVING) self.onliving?.(JSON.parse(new TextDecoder().decode(payload)))
         else if (kind === HERE) { const who = JSON.parse(new TextDecoder().decode(payload)); if (who.by !== self.me) self.onhere?.(who) }
         else if (kind === LOG || kind === STATE) {
           const words = new Uint32Array(payload.buffer, 0, payload.length / 4)

@@ -347,3 +347,10 @@ pub extern "C" fn living_drive(id: u32, go: f32, turn: f32, rise: f32, roll: i32
 pub extern "C" fn living_end(id: u32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).end(id) as u32)
 }
+
+/// Puts a living thing at a place (its middle of mass, in cells) with a turn (a quaternion), still: where it last
+/// slept, for a world that is started again. Returns 1 if there is such a thing.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_place(id: u32, x: f32, y: f32, z: f32, qx: f32, qy: f32, qz: f32, qw: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).place(id, [x, y, z], [qx, qy, qz, qw]) as u32)
+}

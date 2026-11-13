@@ -469,6 +469,20 @@ impl Bodies {
         true
     }
 
+    /// Puts a living thing where it was: its middle of mass at a place, turned so, still. For a world that is
+    /// started again, whose bodies are lost: each thing gets up where it last slept.
+    pub fn place(&mut self, id: u32, pos: V, rot: Q) -> bool {
+        let long = (rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2] + rot[3] * rot[3]).sqrt();
+        if !(long > 0.5 && long < 2.0) || pos.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        let Some(b) = self.living(id) else { return false };
+        (b.pos, b.rot, b.vel, b.spin, b.asleep) = (pos, rot.map(|v| v / long), [0.0; 3], [0.0; 3], false);
+        let front = turn(b.rot, FRONTS[b.live.as_ref().unwrap().front as usize]);
+        b.live.as_mut().unwrap().heading = front[2].atan2(front[0]);
+        true
+    }
+
     /// A living thing lives no more: it is a body like any other, and lies down as cells when it is still.
     pub fn end(&mut self, id: u32) -> bool {
         let Some(b) = self.living(id) else { return false };

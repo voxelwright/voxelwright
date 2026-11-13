@@ -3,7 +3,7 @@
 // a plain request from outside the browser does the same; it is kept across a reload and across
 // a restart of the server; and an ask too big to do is refused without stopping it.
 //
-//   node test/shared.mjs [--suite]     --suite also runs blast, falls, tools and water in a shared world
+//   node test/shared.mjs [--suite]     --suite also runs blast, falls, tools, water and living in a shared world
 import { spawnSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -152,7 +152,7 @@ server.stop()
 rmSync(file, { force: true })
 if (has('suite')) {
   // What holds for the worker in a page must hold for the world behind the server: the same checks, shared.
-  for (const name of ['blast', 'falls', 'tools', 'water']) {
+  for (const name of ['blast', 'falls', 'tools', 'water', 'living']) {
     const run = spawnSync('node', [`test/${name}.mjs`], { cwd: here, env: { ...process.env, ENGINE_SHARED: '1', ENGINE_KIT: '' }, encoding: 'utf8' })
     check(run.status === 0, `${name}, run in a shared world, passes`)
     if (run.status !== 0) console.log(run.stdout.split('\n').filter((l) => /FAIL|Error/.test(l)).map((l) => `      ${l.trim()}`).join('\n'))
