@@ -1,0 +1,290 @@
+{
+ "wish": "a steel pan drum",
+ "tries": [
+  {
+   "n": 1,
+   "ms": 23915,
+   "cost": 0.0302863,
+   "model": "claude-sonnet-5-5",
+   "refused": null
+  }
+ ],
+ "sounds": {
+  "play": {
+   "how": "struck",
+   "hard": 0.3,
+   "rough": 0.08,
+   "modes": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     0.6
+    ],
+    [
+     3,
+     0.25
+    ],
+    [
+     4.1,
+     0.1
+    ]
+   ],
+   "pitch": 440,
+   "ring": 1.8,
+   "damp": 0.5,
+   "where": 0.3,
+   "bend": 0.03,
+   "gain": 0.8
+  },
+  "hit": {
+   "how": "struck",
+   "hard": 0.45,
+   "rough": 0.25,
+   "shape": "plate",
+   "pitch": 260,
+   "ring": 0.7,
+   "damp": 0.5,
+   "gain": 0.7
+  },
+  "surface": {
+   "size": [
+    32,
+    32
+   ],
+   "release": "rings",
+   "parts": [
+    {
+     "shape": "round",
+     "at": [
+      0,
+      0,
+      32,
+      32
+     ],
+     "colour": "ebony"
+    },
+    {
+     "shape": "round",
+     "at": [
+      1,
+      1,
+      30,
+      30
+     ],
+     "colour": "steel"
+    },
+    {
+     "shape": "round",
+     "at": [
+      12.5,
+      2,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "D4",
+     "key": "Digit1",
+     "note": 62
+    },
+    {
+     "shape": "round",
+     "at": [
+      19,
+      4.1,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "G4",
+     "key": "Digit2",
+     "note": 67
+    },
+    {
+     "shape": "round",
+     "at": [
+      23,
+      9.6,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "C4",
+     "key": "Digit3",
+     "note": 60
+    },
+    {
+     "shape": "round",
+     "at": [
+      23,
+      16.4,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "F4",
+     "key": "Digit4",
+     "note": 65
+    },
+    {
+     "shape": "round",
+     "at": [
+      19,
+      21.9,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "A#4",
+     "key": "Digit5",
+     "note": 70
+    },
+    {
+     "shape": "round",
+     "at": [
+      12.5,
+      24,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "D#4",
+     "key": "Digit6",
+     "note": 63
+    },
+    {
+     "shape": "round",
+     "at": [
+      6,
+      21.9,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "G#4",
+     "key": "Digit7",
+     "note": 68
+    },
+    {
+     "shape": "round",
+     "at": [
+      2,
+      16.4,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "C#4",
+     "key": "Digit8",
+     "note": 61
+    },
+    {
+     "shape": "round",
+     "at": [
+      2,
+      9.6,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "F#4",
+     "key": "Digit9",
+     "note": 66
+    },
+    {
+     "shape": "round",
+     "at": [
+      6,
+      4.1,
+      7,
+      6
+     ],
+     "colour": "grey",
+     "label": "B4",
+     "key": "Digit0",
+     "note": 71
+    },
+    {
+     "shape": "round",
+     "at": [
+      13.5,
+      7.8,
+      5,
+      4.4
+     ],
+     "colour": "sky",
+     "label": "D5",
+     "key": "KeyQ",
+     "note": 74
+    },
+    {
+     "shape": "round",
+     "at": [
+      19.2,
+      11.9,
+      5,
+      4.4
+     ],
+     "colour": "sky",
+     "label": "E5",
+     "key": "KeyW",
+     "note": 76
+    },
+    {
+     "shape": "round",
+     "at": [
+      17,
+      18.7,
+      5,
+      4.4
+     ],
+     "colour": "sky",
+     "label": "G5",
+     "key": "KeyE",
+     "note": 79
+    },
+    {
+     "shape": "round",
+     "at": [
+      10,
+      18.7,
+      5,
+      4.4
+     ],
+     "colour": "sky",
+     "label": "C5",
+     "key": "KeyR",
+     "note": 72
+    },
+    {
+     "shape": "round",
+     "at": [
+      7.8,
+      11.9,
+      5,
+      4.4
+     ],
+     "colour": "sky",
+     "label": "F5",
+     "key": "KeyT",
+     "note": 77
+    },
+    {
+     "shape": "round",
+     "at": [
+      13.5,
+      13.3,
+      5,
+      4.4
+     ],
+     "colour": "white",
+     "label": "C6",
+     "key": "KeyG",
+     "note": 84
+    }
+   ]
+  }
+ }
+}

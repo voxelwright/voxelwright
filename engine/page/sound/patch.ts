@@ -40,7 +40,7 @@ export interface Patch {
 }
 /** A patch as the synthesiser takes it: numbers only. */
 export interface Compiled {
-  how: number; tau: number; rough: number; ratios: number[]; gains: number[]; pitch: number; ring: number; damp: number; bend: number; waver: number; tilt: number; hard: number; /** 1 if blown or bowed: a held tone, not modes. */ tone: number; where: number
+  how: number; tau: number; rough: number; ratios: number[]; gains: number[]; pitch: number; ring: number; damp: number; bend: number; waver: number; tilt: number; hard: number; /** 1 if blown or bowed: a held tone, not modes. */ tone: number; /** 1 if it is a string plucked: a string's own model. Anything else plucked (a tine, a tongue of steel) is modes set going by a soft touch. */ strung: number; where: number
   pieces: number; over: number; spread: number; airFrom: number; airTo: number; airFor: number; airQ: number; airGain: number; gain: number
 }
 
@@ -140,7 +140,7 @@ export function compile(p: Patch): Compiled {
   const tau = 0.008 * (0.0001 / 0.008) ** p.hard
   return {
     how: HOWS.indexOf(p.how), tau, rough: p.rough, ratios, gains, pitch: p.pitch, ring: p.ring, damp: p.damp, bend: p.bend ?? 0, waver: p.waver ?? 0, hard: p.hard,
-    tilt: p.modes ? 0.3 : TILT[p.shape!] ?? 0.3, where,
+    tilt: p.modes ? 0.3 : TILT[p.shape!] ?? 0.3, where, strung: p.how === 'plucked' && p.shape === 'string' ? 1 : 0,
     tone: p.how === 'blown' || (p.how === 'rubbed' && ['string', 'tube', 'pipe', 'hollow'].includes(p.shape ?? '')) ? 1 : 0,
     pieces: p.pieces?.count ?? 0, over: p.pieces?.over ?? 0, spread: p.pieces?.spread ?? 0,
     airFrom: p.air?.from ?? 0, airTo: p.air?.to ?? 0, airFor: p.air?.for ?? 0, airQ: p.air?.q ?? 1, airGain: p.air?.gain ?? 0, gain: p.gain,

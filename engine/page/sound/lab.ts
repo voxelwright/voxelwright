@@ -2,7 +2,7 @@
 // sounding. It is for ears: the checks (test/sound.mjs) measure, and cannot say whether a hammer on brick is one.
 import { sound, SET } from './sound.ts'
 import { BREAK, HIT, WORLD } from './kinds.ts'
-import { patch, type Patch } from './patch.ts'
+import { patch, sounds, type Patch } from './patch.ts'
 import { conductor } from './music/conductor.ts'
 import { playable, surface } from './instrument.ts'
 import { INSTRUMENTS, type Instrument } from './instruments.ts'
@@ -125,6 +125,18 @@ played.after(stage)
 take(null)
 addEventListener('keydown', (e) => { if (!e.repeat && !(e.target instanceof HTMLTextAreaElement) && out?.key(e.code, true)) e.preventDefault() })
 addEventListener('keyup', (e) => { out?.key(e.code, false) })
+
+// Written by a model: kept replies of one run each (voice.mjs), read through the same check as anything else.
+const written = section('Written by a model', 'Each of these was written by a model in one reply to the thing\u2019s name and nothing else, and is played as it was written. The instruments open above; the rest play by their buttons.')
+for (const name of ['kalimba', 'theremin', 'steel-drum', 'church-bell', 'wind-chime', 'vase', 'duck']) {
+  void fetch(`/page/sound/kept/${name}.json`).then((r) => r.json()).then((kept: { wish: string; sounds: unknown }) => {
+    const read = sounds(kept.sounds)
+    if ('refused' in read) { button(written, `${name}: refused`, () => { said.textContent = read.refused }); return }
+    const s = read.sounds
+    if (s.play && s.surface) button(written, `play ${kept.wish}`, () => { take({ name, sounds: { play: s.play!, surface: s.surface! } }); stage.scrollIntoView({ block: 'center' }) })
+    for (const role of ['hit', 'use', 'break', 'step', 'hum'] as const) if (s[role]) button(written, `${name}: ${role}`, () => hit(s[role]!, { dur: 1.2, reach: 6 }))
+  })
+}
 
 const own = section('A patch of your own', 'This is what a model writes beside a thing it makes. It is checked as data and refused with the reason if it is not exactly the form.')
 const text = document.createElement('textarea'), said = document.createElement('div')

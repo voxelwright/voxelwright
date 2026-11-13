@@ -1,0 +1,70 @@
+{
+ "wish": "a rubber duck",
+ "tries": [
+  {
+   "n": 1,
+   "ms": 6346,
+   "cost": 0.0061623,
+   "model": "claude-sonnet-5-5",
+   "refused": null
+  }
+ ],
+ "sounds": {
+  "hit": {
+   "how": "struck",
+   "hard": 0.2,
+   "rough": 0.1,
+   "shape": "hollow",
+   "pitch": 380,
+   "ring": 0.08,
+   "damp": 0.9,
+   "bend": -0.2,
+   "gain": 0.5
+  },
+  "break": {
+   "how": "struck",
+   "hard": 0.3,
+   "rough": 0.4,
+   "shape": "lump",
+   "pitch": 300,
+   "ring": 0.05,
+   "damp": 0.9,
+   "pieces": {
+    "count": 5,
+    "over": 0.3,
+    "spread": 0.5
+   },
+   "gain": 0.5
+  },
+  "step": {
+   "how": "struck",
+   "hard": 0.15,
+   "rough": 0.2,
+   "shape": "hollow",
+   "pitch": 320,
+   "ring": 0.06,
+   "damp": 0.9,
+   "bend": -0.3,
+   "gain": 0.5
+  },
+  "use": {
+   "how": "blown",
+   "hard": 0.6,
+   "rough": 0.15,
+   "shape": "hollow",
+   "pitch": 1400,
+   "ring": 0.12,
+   "damp": 0.5,
+   "bend": 0.5,
+   "waver": 0.1,
+   "air": {
+    "from": 1800,
+    "to": 2600,
+    "for": 0.1,
+    "gain": 0.15,
+    "q": 2
+   },
+   "gain": 0.6
+  }
+ }
+}

@@ -8,7 +8,7 @@
 // What they cannot say: whether any of it sounds like the thing, or is pleasant. That takes ears.
 //
 //   node test/sound.mjs [--out dir]    with --out, a WAV and a picture of each sound are kept there
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { CEILING, NOTE, SET, Synth } from '../page/sound/dsp.ts'
 import { compile, patch, sounds } from '../page/sound/patch.ts'
@@ -68,6 +68,8 @@ console.log('True to what it says')
   check(Math.abs(1200 * Math.log2(hz / 440)) < 3 && Math.abs(t60 / 1.5 - 1) < 0.1, `one mode at 440 Hz said to ring 1.5 s is at ${hz.toFixed(1)} Hz and rings ${t60.toFixed(2)} s`)
   const bar = ears.peaks(play({ ...HIT.steel, shape: 'bar', pitch: 400 }).l, 48000, { most: 3, size: 32768 }).map((p) => p.hz).sort((a, b) => a - b)
   check(Math.abs(bar[1] / bar[0] - 2.756) < 0.03, `a bar's second mode is 2.756 times its first (${(bar[1] / bar[0]).toFixed(3)})`)
+  const tine = ears.peaks(play({ how: 'plucked', hard: 0.7, rough: 0.05, shape: 'bar', pitch: 300, ring: 2, damp: 0.3, gain: 0.7 }).l, 48000, { most: 3, size: 32768 }).map((p) => p.hz).sort((a, b) => a - b)
+  check(Math.abs(tine[1] / tine[0] - 2.756) < 0.03, `a bar that is plucked (a kalimba's tine) rings as a bar, not as a string (its second mode is ${(tine[1] / tine[0]).toFixed(3)} times its first)`)
   const shatter = play(BREAK.glass, { secs: 2 }), knock = play(HIT.glass, { secs: 2 })
   keep('break-glass', shatter); keep('break-brick', play(BREAK.brick)); keep('boom', play(WORLD.boom, { secs: 4 })); keep('crack', play(WORLD.crack))
   const events = (x) => { const e = ears.envelope(x, 48000, 5); let n = 0; for (let i = 2; i < e.length; i++) if (e[i] > e[i - 1] * 1.8 && e[i] > 0.004) n++; return n }
@@ -141,6 +143,31 @@ console.log('Played by hand')
   check(first === Math.round(0.003 * sr), `a note played by hand leaves the synthesiser ${((first / sr) * 1000).toFixed(1)} ms after it arrives`)
 }
 
+console.log('Written by a model (kept replies of November 13, 2026; no model is run here)')
+{
+  const dir = new URL('../page/sound/kept/', import.meta.url), kept = Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => [f.replace('.json', ''), JSON.parse(readFileSync(new URL(f, dir), 'utf8'))]))
+  const read = Object.fromEntries(Object.entries(kept).map(([name, k]) => [name, sounds(k.sounds)]))
+  const names = Object.keys(kept)
+  check(names.length >= 7 && names.every((n) => 'sounds' in read[n]), `${names.length} things a model gave sounds to, each in one reply to its name alone, are all in the form (${names.map((n) => `${n}: ${Object.keys(kept[n].sounds).join(' ')}`).join('; ')})`)
+  check(names.every((n) => kept[n].tries.length === 1), `every one was taken on its first try (${names.map((n) => `${(kept[n].tries[0].ms / 1000).toFixed(0)} s`).join(', ')}; ${[...new Set(names.map((n) => kept[n].tries[0].model))].join(' and ')})`)
+  const of = (name, role) => read[name].sounds[role]
+  const bell = play(of('church-bell', 'use'), { secs: 12 }), chime = play(of('wind-chime', 'hit'), { secs: 6 }), duck = play(of('duck', 'hit')), vase = play(of('vase', 'break'), { secs: 2 }), knock = play(of('vase', 'hit'), { secs: 2 })
+  keep('model-church-bell', bell); keep('model-vase-break', vase); keep('model-wind-chime', chime); keep('model-duck', play(of('duck', 'use'), { dur: 0.3 }))
+  const low = (o) => Math.min(...ears.peaks(o.l, o.sr, { most: 6, size: 32768, floor: 0.01 }).map((p) => p.hz))
+  check(ears.decay(bell.l, 48000, 40) > 4 && low(bell) < 420 && low(chime) > 800, `the model's church bell rings long and low, its wind chime high (the bell ${ears.decay(bell.l, 48000, 40).toFixed(1)} s to 40 dB down from ${low(bell).toFixed(0)} Hz; the chime from ${low(chime).toFixed(0)} Hz)`)
+  check(ears.decay(duck.l, 48000, 40) < 0.2, `its rubber duck does not ring (${ears.decay(duck.l, 48000, 40).toFixed(2)} s)`)
+  const rises = (x) => { const e = ears.envelope(x, 48000, 5); let n = 0; for (let i = 2; i < e.length; i++) if (e[i] > e[i - 1] * 1.8 && e[i] > 0.004) n++; return n }
+  check(rises(vase.l) > rises(knock.l) + 3, `its vase breaking goes on in pieces (${rises(vase.l)} rises in loudness against ${rises(knock.l)} for a knock on it)`)
+  const tines = read.kalimba.sounds.surface.parts.filter((p) => p.note !== undefined), keys = new Set(tines.map((p) => p.key))
+  const longest = tines.reduce((a, b) => (b.at[3] > a.at[3] ? b : a)), lowest = tines.reduce((a, b) => (b.note < a.note ? b : a))
+  check(tines.length >= 8 && keys.size === tines.length && longest === lowest, `its kalimba has ${tines.length} tines, each with a key of its own, and the longest is the lowest (${lowest.label})`)
+  const wand = read.theremin.sounds.surface.parts.find((p) => p.slide)
+  check(wand && wand.level && Math.abs(wand.slide.to - wand.note) >= 12, `its theremin is one part that slides: ${Math.abs(wand.slide.to - wand.note)} semitones along ${wand.slide.along}, loudness along ${wand.level}`)
+  let top = 0
+  for (const n of names) for (const [role, p] of Object.entries(read[n].sounds)) if (role !== 'surface') { const o = play(p, { force: 1, dur: 1 }); top = Math.max(top, ears.peak(o.l)) }
+  check(top <= CEILING, `all of them at full force stay under the ceiling (${ears.db(top).toFixed(1)} dB)`)
+}
+
 console.log('Never loud enough to hurt')
 {
   // Patches made at random inside the form, all as loud and as hard as the form lets them be, many at once with every bed full up.
@@ -180,8 +207,8 @@ console.log('Never loud enough to hurt')
   check(bad === 0 && worst <= CEILING + 1e-6, `${n} patches at the edges of the form, sixty notes at once at full force with every bed full: the loudest sample is ${ears.db(worst).toFixed(2)} dB (the ceiling is ${ears.db(CEILING).toFixed(2)}), and every sample is a number`)
   check(resets === 0, `none of them made a number that is not one (${stolen} voices were cut short for newer ones)`)
   // And what the check would never pass, given to the synthesiser anyway: it must still hold.
-  const s = new Synth(48000), rot = { how: 0, tau: -1, rough: 9, ratios: [1, NaN, 1e9, -3], gains: [1e9, 1, 1, 1], pitch: 1e9, ring: 1e9, damp: -50, bend: 99, waver: 99, tilt: 99, hard: 99, tone: 0, where: 9, pieces: 1e9, over: -1, spread: 1e9, airFrom: -5, airTo: 1e12, airFor: 1e9, airQ: 0, airGain: 1e9, gain: 1e9 }
-  s.define(1, rot); s.define(2, { ...rot, how: 1 }); s.define(3, { ...rot, tone: 1 })
+  const s = new Synth(48000), rot = { how: 0, tau: -1, rough: 9, ratios: [1, NaN, 1e9, -3], gains: [1e9, 1, 1, 1], pitch: 1e9, ring: 1e9, damp: -50, bend: 99, waver: 99, tilt: 99, hard: 99, tone: 0, strung: 0, where: 9, pieces: 1e9, over: -1, spread: 1e9, airFrom: -5, airTo: 1e12, airFor: 1e9, airQ: 0, airGain: 1e9, gain: 1e9 }
+  s.define(1, rot); s.define(2, { ...rot, how: 1, strung: 1 }); s.define(3, { ...rot, tone: 1 })
   s.notes([0, 1, 0, 1, 1e9, 0, 1e9, 1e9, 0, 9, 0, 0, 0, 2, 1e9, 0, 1, 1e9, 9, 9, -1, 9, 7, 0, 0, 3, 0.001, 1e9, 1, 1e9, 9, 9, 1e9, 9, 2, 0, NaN, 1, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN])
   for (let i = 0; i < 18; i++) s.set(i, 1e9)
   for (const id of [NaN, -1, 0, 1, 2, 1e9]) { s.release(id); s.glide(id, NaN, NaN); s.glide(id, 1e12, 1e12); s.glide(id, -5, -5) }

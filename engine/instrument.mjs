@@ -14,7 +14,9 @@ const post = async (body) => { const r = await fetch(`${world}/world/ask`, { met
 if (which === '--gone') { console.log(await post({ gone: process.argv[3] })); process.exit(0) }
 
 const kept = INSTRUMENTS.find((i) => i.name === which)
-const given = arg('sounds', '') ? JSON.parse(readFileSync(arg('sounds'), 'utf8')) : kept?.sounds
+// A file of sounds, or a kept reply of voice.mjs ({wish, tries, sounds}).
+const file = arg('sounds', '') ? JSON.parse(readFileSync(arg('sounds'), 'utf8')) : null
+const given = file ? ('wish' in file && 'sounds' in file ? file.sounds : file) : kept?.sounds
 const read = sounds(given)
 if ('refused' in read) { console.error(`not sounds: ${read.refused}`); process.exit(1) }
 // What it stands as: a body of wood, with a pale top where it is played. Material and colour as the core has them.

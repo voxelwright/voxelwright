@@ -166,9 +166,9 @@ export class Synth {
     const pitch = Math.min(0.45 * this.sr, Math.max(16, q[i + 2] > 0 ? q[i + 2] : p.pitch / size))
     const gl = Math.min(1, Math.max(0, q[i + 6])), gr = Math.min(1, Math.max(0, q[i + 7])), lp = q[i + 8] > 0 ? q[i + 8] : 20000, send = Math.min(1, Math.max(0, q[i + 9])), bus = q[i + 10] === 1 ? 1 : q[i + 10] === 2 ? 2 : 0
     const gain = Math.min(1, Math.max(0, p.gain)) * force ** 1.2 * (piece ? 0.5 : 1)
-    const v = p.how === 1 ? this.pluck(p, wait, pitch, force, gain, id ? 0 : q[i + 5], gl, gr, lp, send, bus) : p.tone ? this.hold(p, wait, pitch, force, gain, id ? 1e6 : q[i + 5], gl, gr, lp, send, bus) : this.strike(p, wait, pitch, force, gain, p.how === 3 ? Math.max(0.02, id ? 30 : q[i + 5] || 0.3) : 0, piece, gl, gr, lp, send, bus)
+    const v = p.strung ? this.pluck(p, wait, pitch, force, gain, id ? 0 : q[i + 5], gl, gr, lp, send, bus) : p.tone ? this.hold(p, wait, pitch, force, gain, id ? 1e6 : q[i + 5], gl, gr, lp, send, bus) : this.strike(p, wait, pitch, force, gain, p.how === 3 ? Math.max(0.02, id ? 30 : q[i + 5] || 0.3) : 0, piece, gl, gr, lp, send, bus)
     if (v < 0) { this.stats.dropped++; return }
-    if (id) (p.how === 1 ? this.sId : p.tone ? this.tId : this.mId)[v] = id
+    if (id) (p.strung ? this.sId : p.tone ? this.tId : this.mId)[v] = id
     if (piece) return
     if (p.airGain > 0 && p.airFor > 0) this.puff(wait, p.airFrom / size, p.airTo / size, p.airFor * Math.sqrt(size), p.airQ, p.airGain * gain, gl, gr, lp, send, bus)
     // What breaks goes on in pieces: each a small one of the same stuff, sooner rather than later, the small ones higher.

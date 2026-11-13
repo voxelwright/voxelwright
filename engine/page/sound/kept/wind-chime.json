@@ -1,0 +1,41 @@
+{
+ "wish": "a wind chime of five aluminium tubes",
+ "tries": [
+  {
+   "n": 1,
+   "ms": 7496,
+   "cost": 0.0081003,
+   "model": "claude-sonnet-5-5",
+   "refused": null
+  }
+ ],
+ "sounds": {
+  "hit": {
+   "how": "struck",
+   "hard": 0.8,
+   "rough": 0.05,
+   "shape": "bar",
+   "pitch": 1200,
+   "ring": 4,
+   "damp": 0.15,
+   "where": 0.22,
+   "gain": 0.7
+  },
+  "use": {
+   "how": "struck",
+   "hard": 0.75,
+   "rough": 0.08,
+   "shape": "bar",
+   "pitch": 900,
+   "ring": 3.5,
+   "damp": 0.15,
+   "where": 0.22,
+   "pieces": {
+    "count": 5,
+    "over": 1.4,
+    "spread": 0.3
+   },
+   "gain": 0.65
+  }
+ }
+}

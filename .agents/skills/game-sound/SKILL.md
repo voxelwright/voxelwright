@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 3, November 13, 2026 (music, instruments). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
+Version 4, November 13, 2026 (music, instruments, model-written sounds). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -137,6 +137,25 @@ yes in the thread that asks), so this is built from the post's description and f
 - `node instrument.mjs piano --world url` stands a kept one in a shared world (cells and record, no model).
 - Not built: velocity from how fast a key is struck (a key is always 0.75; a touch uses pressure where the device
   gives it); sustain pedal; other players do not hear what you play; strings cannot be bent.
+
+## Sounds written by a model (`brief.ts`, `voice.mjs`, `kept/`)
+
+- `brief.ts` is what a model is told: both forms in words, with the numbers that are true to stuff (brick rings
+  0.06 s, a bell 5; felt is hard 0.1, steel 1). About 1,400 tokens. It is written to go beside the maker's brief
+  so that a thing comes with its sounds in one reply; the making lane (#244) owns that ask.
+- `voice.mjs` runs it alone: `make/model.mjs`'s `reply()` unchanged (the asker's own Claude Code, no tools: see
+  `claude-code-headless`), `sounds()` on the reply, the reason sent back on a refusal, three tries.
+- **One run each, November 13, 2026, kept in `page/sound/kept/`**: a kalimba, a steel pan, a wind chime, a vase
+  and a rubber duck from Sonnet 5.5 (6 to 24 s, $0.006 to $0.04 as the binary reports usage), a theremin and a
+  church bell from Opus 5.5 (15 and 12 s, $0.04 to $0.05). **All seven were in the form on the first try.**
+  The bell came with its own modes (hum, prime, tierce, quint, nominal); the vase breaks in 24 pieces; the
+  kalimba has 17 tines with the longest and lowest in the middle; the steel pan's notes are laid in rings; the
+  theremin is one part that slides three octaves along x with loudness along y. Seven is a small sample: the
+  refusal path is tested with made-up bad data, not with a model's own mistakes.
+- What a model's reply showed up: a plucked bar was being played as a string. `compile()` now marks only a
+  plucked `string` as strung; anything else plucked is modes set going by a touch.
+- The checks read the kept replies as data and measure them (the bell rings 6 s from 185 Hz, the duck 0.06 s).
+  No check runs a model, and none proves a model integration beyond these seven runs.
 
 ## Rules that hold
 

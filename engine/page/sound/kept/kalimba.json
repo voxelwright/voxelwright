@@ -1,0 +1,295 @@
+{
+ "wish": "a kalimba",
+ "tries": [
+  {
+   "n": 1,
+   "ms": 24412,
+   "cost": 0.040528,
+   "model": "claude-sonnet-5-5",
+   "refused": null
+  }
+ ],
+ "sounds": {
+  "hit": {
+   "how": "struck",
+   "hard": 0.5,
+   "rough": 0.2,
+   "shape": "hollow",
+   "pitch": 220,
+   "ring": 0.15,
+   "damp": 0.7,
+   "gain": 0.4
+  },
+  "play": {
+   "how": "plucked",
+   "hard": 0.7,
+   "rough": 0.08,
+   "shape": "bar",
+   "pitch": 262,
+   "ring": 2.2,
+   "damp": 0.3,
+   "where": 0.15,
+   "gain": 0.7
+  },
+  "surface": {
+   "size": [
+    34,
+    22
+   ],
+   "release": "rings",
+   "parts": [
+    {
+     "shape": "rect",
+     "at": [
+      0,
+      0,
+      34,
+      22
+     ],
+     "colour": "wood"
+    },
+    {
+     "shape": "rect",
+     "at": [
+      0,
+      1,
+      34,
+      1.5
+     ],
+     "colour": "brass"
+    },
+    {
+     "shape": "round",
+     "at": [
+      14,
+      19,
+      6,
+      2.5
+     ],
+     "colour": "ebony"
+    },
+    {
+     "shape": "rect",
+     "at": [
+      0.1,
+      2.5,
+      1.8,
+      8
+     ],
+     "colour": "steel",
+     "label": "D6",
+     "key": "KeyQ",
+     "note": 86
+    },
+    {
+     "shape": "rect",
+     "at": [
+      2.1,
+      2.5,
+      1.8,
+      9
+     ],
+     "colour": "steel",
+     "label": "B5",
+     "key": "KeyW",
+     "note": 83
+    },
+    {
+     "shape": "rect",
+     "at": [
+      4.1,
+      2.5,
+      1.8,
+      10
+     ],
+     "colour": "steel",
+     "label": "G5",
+     "key": "KeyE",
+     "note": 79
+    },
+    {
+     "shape": "rect",
+     "at": [
+      6.1,
+      2.5,
+      1.8,
+      11
+     ],
+     "colour": "steel",
+     "label": "E5",
+     "key": "KeyR",
+     "note": 76
+    },
+    {
+     "shape": "rect",
+     "at": [
+      8.1,
+      2.5,
+      1.8,
+      12
+     ],
+     "colour": "steel",
+     "label": "C5",
+     "key": "KeyA",
+     "note": 72
+    },
+    {
+     "shape": "rect",
+     "at": [
+      10.1,
+      2.5,
+      1.8,
+      13
+     ],
+     "colour": "steel",
+     "label": "A4",
+     "key": "KeyS",
+     "note": 69
+    },
+    {
+     "shape": "rect",
+     "at": [
+      12.1,
+      2.5,
+      1.8,
+      14
+     ],
+     "colour": "steel",
+     "label": "F4",
+     "key": "KeyD",
+     "note": 65
+    },
+    {
+     "shape": "rect",
+     "at": [
+      14.1,
+      2.5,
+      1.8,
+      15
+     ],
+     "colour": "steel",
+     "label": "D4",
+     "key": "KeyF",
+     "note": 62
+    },
+    {
+     "shape": "rect",
+     "at": [
+      16.1,
+      2.5,
+      1.8,
+      16
+     ],
+     "colour": "steel",
+     "label": "C4",
+     "key": "KeyG",
+     "note": 60
+    },
+    {
+     "shape": "rect",
+     "at": [
+      18.1,
+      2.5,
+      1.8,
+      15
+     ],
+     "colour": "steel",
+     "label": "E4",
+     "key": "KeyH",
+     "note": 64
+    },
+    {
+     "shape": "rect",
+     "at": [
+      20.1,
+      2.5,
+      1.8,
+      14
+     ],
+     "colour": "steel",
+     "label": "G4",
+     "key": "KeyJ",
+     "note": 67
+    },
+    {
+     "shape": "rect",
+     "at": [
+      22.1,
+      2.5,
+      1.8,
+      13
+     ],
+     "colour": "steel",
+     "label": "B4",
+     "key": "KeyK",
+     "note": 71
+    },
+    {
+     "shape": "rect",
+     "at": [
+      24.1,
+      2.5,
+      1.8,
+      12
+     ],
+     "colour": "steel",
+     "label": "D5",
+     "key": "KeyL",
+     "note": 74
+    },
+    {
+     "shape": "rect",
+     "at": [
+      26.1,
+      2.5,
+      1.8,
+      11
+     ],
+     "colour": "steel",
+     "label": "F5",
+     "key": "KeyU",
+     "note": 77
+    },
+    {
+     "shape": "rect",
+     "at": [
+      28.1,
+      2.5,
+      1.8,
+      10
+     ],
+     "colour": "steel",
+     "label": "A5",
+     "key": "KeyI",
+     "note": 81
+    },
+    {
+     "shape": "rect",
+     "at": [
+      30.1,
+      2.5,
+      1.8,
+      9
+     ],
+     "colour": "steel",
+     "label": "C6",
+     "key": "KeyO",
+     "note": 84
+    },
+    {
+     "shape": "rect",
+     "at": [
+      32.1,
+      2.5,
+      1.8,
+      8
+     ],
+     "colour": "steel",
+     "label": "E6",
+     "key": "KeyP",
+     "note": 88
+    }
+   ]
+  }
+ }
+}

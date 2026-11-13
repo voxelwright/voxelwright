@@ -1,0 +1,78 @@
+{
+ "wish": "a tall ceramic vase",
+ "tries": [
+  {
+   "n": 1,
+   "ms": 6444,
+   "cost": 0.0066243,
+   "model": "claude-sonnet-5-5",
+   "refused": null
+  }
+ ],
+ "sounds": {
+  "hit": {
+   "how": "struck",
+   "hard": 0.6,
+   "rough": 0.1,
+   "shape": "cup",
+   "pitch": 380,
+   "ring": 0.9,
+   "damp": 0.35,
+   "where": 0.2,
+   "gain": 0.8
+  },
+  "break": {
+   "how": "struck",
+   "hard": 0.8,
+   "rough": 0.5,
+   "shape": "plate",
+   "pitch": 900,
+   "ring": 0.3,
+   "damp": 0.4,
+   "pieces": {
+    "count": 24,
+    "over": 0.6,
+    "spread": 0.8
+   },
+   "air": {
+    "from": 5000,
+    "to": 1500,
+    "for": 0.25,
+    "gain": 0.2,
+    "q": 1
+   },
+   "gain": 0.9
+  },
+  "step": {
+   "how": "struck",
+   "hard": 0.5,
+   "rough": 0.4,
+   "shape": "cup",
+   "pitch": 420,
+   "ring": 0.25,
+   "damp": 0.5,
+   "gain": 0.5
+  },
+  "use": {
+   "how": "rubbed",
+   "hard": 0.3,
+   "rough": 0.5,
+   "shape": "cup",
+   "pitch": 380,
+   "ring": 0.2,
+   "damp": 0.5,
+   "gain": 0.3
+  },
+  "hum": {
+   "how": "blown",
+   "hard": 0.2,
+   "rough": 0.6,
+   "shape": "hollow",
+   "pitch": 110,
+   "ring": 0.5,
+   "damp": 0.5,
+   "waver": 0.1,
+   "gain": 0.1
+  }
+ }
+}

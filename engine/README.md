@@ -155,6 +155,13 @@ runs on the audio thread (`page/sound/dsp.ts`) and nothing a patch says gets pas
   it) and a piano are kept. `node instrument.mjs piano --world http://127.0.0.1:5764` stands one in a shared world:
   walk up to it, press E (or tap "Play the piano"), play by keys or touch, Escape puts it away. A key is heard 3 ms
   after it is pressed, before the device's own delay.
+- **Sounds written by a model**: `node voice.mjs "a kalimba" --model sonnet --out kalimba.json` runs your own Claude
+  Code once with no tools (the maker's runner) on the brief in `page/sound/brief.ts` and the thing's name, and reads
+  the reply as data (`sounds()`); a reply that is refused goes back with the reason, up to three times. Add
+  `--world url --id thing-id` to give the sounds to a thing that is there, or
+  `node instrument.mjs kalimba --sounds kalimba.json --world url` to stand it as an instrument. Seven kept replies
+  of November 13 are in `page/sound/kept/` (a kalimba, a theremin, a steel pan, a church bell, a wind chime, a vase,
+  a rubber duck): all taken on the first try, in 6 to 24 s. The checks read them and run no model.
 - `/page/sound/lab.html` plays every sound by hand, with a picture of what is sounding and what the audio thread
   costs, and takes a patch of your own. It is the place to listen: the checks cannot.
 - `node test/sound.mjs` measures the synthesiser in Node (no browser); `node test/music.mjs` measures the rules, the search and the handover between places; `node test/heard.mjs` taps the real page; `node test/played.mjs` plays the instruments with real keys and touches;
