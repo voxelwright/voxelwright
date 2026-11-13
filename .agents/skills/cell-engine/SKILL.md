@@ -1529,3 +1529,20 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
 - **Not there**: streams (water is one level: a lake is ground under the sea's height, so nothing runs downhill),
   tracks, a farm or a ruin. Crowns are still balls. The far land past 40 km and the kilometre by the coast keep
   their plain grass (other lanes).
+
+## What three private blind reads named, and what was done (#229, November 12)
+
+- One Sonnet judge a sheet, `versus --blind --only <row>`, the rows' states untouched, all logged. Snow on two
+  stands: ours 7, the film's 5 both times (the official passes have given that frame of theirs 7 to 7.5, so read
+  it as about level). Road: ours 8, the film's 6.
+- **Snow, what held ours back**: "a nearby valley, not mountains seen from far"; trees "scattered evenly with
+  little depth"; contour rings on the slopes; a flat white slope face. The high pines now stand in clumps with
+  open snow between (`pines`: two noises, 52 m and 17 m, none where they are under their middle, up to 20 patches
+  of 24 where over it). The woods under 430 m are as they were: the row "there" stands in them. Not far, the
+  rings and the white face are still so.
+- **Road, what held ours back**: the scrub in the middle distance was "repeated lumpy green blobs", the near road
+  and verge "a plain flat sweep". A bush is now one of a low mat, a ball or a tall thin one, some grey and some
+  in yellow flower, and the far lump varies in width, height and colour the same way; tufts and stones stand on
+  the shoulder from 4.2 m off the road's middle.
+- Steps a pixel: snow 27.1, road 21.5. `flight` fails beside four other checks on a busy GPU ("a break was not
+  over in 15 s") and passes alone: 0.59 ms a sector.

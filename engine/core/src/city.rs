@@ -1216,7 +1216,10 @@ fn pines(x: i32, z: i32, g: i32) -> u32 {
     } else if g < 4300 {
         17
     } else {
-        1 + (9000 - g) as u32 * 16 / 4700
+        // Above the woods they stand in clumps with open snow between, thick in a clump: spread evenly they were
+        // an orchard.
+        let clump = noise(x, z, 520, 110) * 0.65 + noise(x, z, 170, 111) * 0.35;
+        if clump < 0.5 { 0 } else { (2 + (9000 - g) as u32 * 30 / 4700).min(20) }
     }
 }
 
@@ -1303,7 +1306,9 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
             }
         } else if (seed >> 12) % 24 < 11 && s.lod == 3 && g > SEA + 10 && dry(x, z) > 0.5 && !off_road(x, z).is_some_and(|off| off < 60) {
             // A clump of scrub as one low lump.
-            s.fill([x - 5, g - 2, z - 5], [x + 6, g + 7, z + 6], kind(LEAVES, colour(6 + (seed % 3) as u8, [8, 9, 7, 8][(seed >> 2) as usize % 4])), Meet::Middle);
+            let (wide, tall) = (3 + ((seed >> 17) % 6) as i32, 3 + ((seed >> 21) % 8) as i32);
+            let leaf = match (seed >> 25) % 7 { 0 => colour(4, 8), 1 => colour(10, 7), _ => colour(6 + (seed % 3) as u8, [8, 9, 7, 8][(seed >> 2) as usize % 4]) };
+            s.fill([x - wide, g - 2, z - wide], [x + wide + 1, g + tall, z + wide + 1], kind(LEAVES, leaf), Meet::Middle);
         }
         return;
     }
@@ -1311,14 +1316,16 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
     if g < SEA {
         return stamp_reef(s, x, z, g, seed);
     }
-    if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 60) || cleared(x, z) {
+    // By the road nothing stands on the tarmac; on its shoulder only what is low.
+    let verge = off_road(x, z).is_some_and(|off| off < 60);
+    if g < SEA + 10 || off_road(x, z).is_some_and(|off| off < 42) || cleared(x, z) {
         return;
     }
     // Nothing is planted on rock that stands in the sea: a tree on a stack's steep top was not held by it.
     if offshore(x, z).is_some_and(|s| s > 0.0) {
         return;
     }
-    let sort = (seed >> 12) % 24;
+    let sort = if verge { 11 + (seed >> 12) % 13 } else { (seed >> 12) % 24 };
     if pines(x, z, g) > 0 {
         if sort < pines(x, z, g) {
             stamp_pine(s, x, z, g, seed);
@@ -1327,10 +1334,20 @@ fn stamp_country(s: &mut Scratch, px: i32, pz: i32) {
         // Scrub: grey-green bushes in clumps, tufts of dry grass, a spiked plant on a stem now and then, stones.
         let dusty = |n: u32| kind(LEAVES, colour(6 + (n % 3) as u8, [8, 9, 7, 8][(n >> 2) as usize % 4]));
         if sort < 11 {
+            // No two alike: a low wide mat, a round bush, a tall thin one, some grey and some in yellow flower.
             for n in 0..2 + (seed >> 17) % 3 {
                 let h = hash(px * 4 + n as i32, pz, 85);
                 let (bx, bz, r) = (x - 12 + (h % 25) as i32, z - 12 + ((h >> 5) % 25) as i32, 3 + ((h >> 10) % 5) as i32);
-                s.ball([bx, ground(bx, bz) + r - 2, bz], r, dusty(h >> 13), 0, h, None);
+                let bg = ground(bx, bz);
+                let leaf = match (h >> 20) % 7 { 0 => kind(LEAVES, colour(4, 8)), 1 => kind(LEAVES, colour(10, 7)), _ => dusty(h >> 13) };
+                match (h >> 24) % 4 {
+                    0 => s.fill([bx - r - 2, bg - 1, bz - r], [bx + r + 3, bg + 2 + r / 3, bz + r + 1], leaf, Meet::Touch),
+                    1 => {
+                        s.fill([bx - 1, bg - 2, bz - 1], [bx + 2, bg + r * 2, bz + 2], leaf, Meet::Touch);
+                        s.ball([bx, bg + r * 2, bz], (r - 1).max(2), leaf, 0, h, None);
+                    }
+                    _ => s.ball([bx, bg + r - 2, bz], r, leaf, 0, h, None),
+                }
             }
         } else if sort < 17 {
             for blade in 0..14u32 {
