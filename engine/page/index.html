@@ -26,6 +26,18 @@
   #card p { margin: 2px 0; color: #cfd6df; }
   #card kbd, #cues kbd { display: inline-block; min-width: 14px; margin-right: 8px; padding: 0 5px; border-radius: 4px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 11px/18px ui-monospace, monospace; text-align: center; }
   #cues p { position: absolute; left: 0; top: 0; margin: 0; padding: 3px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.7); white-space: nowrap; will-change: transform; }
+  [data-panel="wand"] { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 120px); pointer-events: auto; }
+  body.wand [data-panel="wand"] { display: flex; }
+  body.wand #tools { display: none; }
+  body.wand #aim { background: #bfe9ff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 10px 2px rgba(150, 220, 255, 0.7); }
+  [data-panel="wand"] .says { padding: 5px 11px; border-radius: 9px; background: rgba(12, 16, 22, 0.62); font-variant-numeric: tabular-nums; text-align: center; }
+  [data-panel="wand"] .row { display: flex; gap: 4px; padding: 5px; border-radius: 12px; background: rgba(12, 16, 22, 0.62); }
+  [data-panel^="wand"] button { border: 0; border-radius: 8px; padding: 6px 10px 6px 8px; background: transparent; color: #cfd6df; font: 600 12px -apple-system, system-ui, sans-serif; white-space: nowrap; touch-action: manipulation; }
+  [data-panel^="wand"] button i { font-style: normal; font-weight: 400; opacity: 0.55; margin-right: 6px; }
+  [data-panel^="wand"] button.on { background: #bfe9ff; color: #10141a; }
+  [data-panel="wand"] .gap { width: 1px; margin: 4px 3px; background: rgba(255, 255, 255, 0.16); }
+  [data-panel="wand-take"] { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); pointer-events: auto; }
+  [data-panel="wand-take"] button { padding: 9px 12px; border-radius: 12px; background: rgba(12, 16, 22, 0.62); }
 </style>
 </head>
 <body>

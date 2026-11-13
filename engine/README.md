@@ -38,6 +38,20 @@ says how: a body of its own that walks, turns, speaks and is told what is around
 world by), what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit. Nobody is asked
 who they are: whoever can reach the server can change that world, and can use any name, another's included.
 
+## The wand (#246)
+
+Q, or the Wand button, takes the wand in hand; its bar stands where the tools were. It aims at what is at the middle
+of the picture, three ways (keys 1 to 3 or the bar), each drawn in the world:
+
+- **Point**: a ring lying on whatever is there.
+- **Area**: a box on the ground, its foot lit with a mark at each metre. The wheel sizes it (Shift its height alone,
+  Alt its depth alone); on a phone, Smaller and Bigger.
+- **Thing**: the thing's own cells lit and outlined. Whole, Part (cells of one kind that touch the one pointed at) or
+  Side (its faces that look the way the pointed face does): X, the wheel or the bar. One thing is the cells that
+  touch, down to where someone would stand; a house is joined to its terrace and is taken a part at a time.
+
+A click (the round button on a phone) casts at what is aimed at. `engine.wand.target` is what is aimed at.
+
 ## Making (#220, #244)
 
 Say what you want and where, and a model makes it in a shared world out of the world's own cells: breakable,
@@ -116,7 +130,7 @@ node test/shared.mjs --suite  # before a change to the solver or to how a shared
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
-further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
+further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
 (a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run

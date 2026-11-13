@@ -51,7 +51,7 @@ export interface Offscreen extends Target {
   destroy(): void
 }
 
-export const depthFor = (device: GPUDevice, size: readonly [number, number]) => device.createTexture({ size: [size[0], size[1]], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT })
+export const depthFor = (device: GPUDevice, size: readonly [number, number]) => device.createTexture({ size: [size[0], size[1]], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
 
 export function offscreen(gpu: Gpu, size: readonly [number, number]): Offscreen {
   const texture = gpu.device.createTexture({ size: [size[0], size[1]], format: gpu.format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING })

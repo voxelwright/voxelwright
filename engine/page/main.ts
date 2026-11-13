@@ -22,6 +22,7 @@ import { presence } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
+import { wand } from './wand.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
@@ -52,7 +53,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number }
+  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number }
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
@@ -83,6 +84,8 @@ async function main() {
   const SPACE = 6_000
   const falling = await pieces(device, gpu.format, march)
   const folk = await people(device, gpu.format, march)
+  // The wand (#246): how a spell is aimed.
+  const staff = await wand(device, gpu.format, march, core, controls, over)
   const colours = palette(), stuff = materials()
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
@@ -235,6 +238,7 @@ async function main() {
     walk(dt)
     steer(Math.max(1000 / 60, screenMs))
     const v = view(), to = fit()
+    staff.frame(v)
     lap('steer')
     fallOn(dt)
     lap('fallOn')
@@ -260,6 +264,7 @@ async function main() {
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
+      staff.draw(encoder, to, v, (now - started) / 1000)
     }
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade, march.under || pose.y > SPACE ? 0 : 1 - march.day)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
@@ -312,7 +317,7 @@ async function main() {
   let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
   let flames = new Float32Array(0)
-  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit) }
+  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit); staff.changed(edit) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -574,11 +579,11 @@ async function main() {
   }
 
   /** The march from here at the device's own pace, ms a frame at the canvas's full size: for comparing two settings fairly. */
-  const paced = async (withFlags = flags, withPeople = false) => {
+  const paced = async (withFlags = flags, withPeople = false, withWand = false) => {
     const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
     paused = true
     // With the people in sight drawn over it too, if asked: what they cost the GPU is the difference.
-    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0) }, 100)
+    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0) }, 100)
     paused = false
     to.destroy()
     return p.ms
@@ -599,7 +604,7 @@ async function main() {
   }
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, march, folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return moving.size + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

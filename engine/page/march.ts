@@ -1218,6 +1218,20 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
   const point: Target = { color: pointTexture.createView(), depth: device.createTexture({ size: [1, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }).createView(), size: [1, 1] }
   const pointRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+  const once = async (view: View, plain: boolean) => {
+    const encoder = device.createCommandEncoder()
+    self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | (plain ? PLAIN : 0), 0)
+    encoder.copyTextureToBuffer({ texture: pointTexture }, { buffer: pointRead }, [1, 1])
+    device.queue.submit([encoder.finish()])
+    await pointRead.mapAsync(GPUMapMode.READ)
+    const b = new Uint8Array(pointRead.getMappedRange().slice(0, 4))
+    pointRead.unmap()
+    // The canvas's format may keep blue first.
+    const v = (format.startsWith('bgra') ? b[2] | (b[1] << 8) | (b[0] << 16) : b[0] | (b[1] << 8) | (b[2] << 16)) | (b[3] << 24)
+    const material = (v >>> 20) & 15
+    return material ? { t: (v & 0xfffff) / 8, material, colour: v >>> 24 } : null
+  }
+  let picking: Promise<unknown> = Promise.resolve()
   const self: Marcher = {
     get rain() { return rain },
     set rain(v: number) { rain = Math.max(0, Math.min(1, v)); colours() },
@@ -1227,18 +1241,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     set detail(v: number) { detail = v },
     get day() { return day },
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
-    async pick(view, plain = false) {
-      const encoder = device.createCommandEncoder()
-      self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | (plain ? PLAIN : 0), 0)
-      encoder.copyTextureToBuffer({ texture: pointTexture }, { buffer: pointRead }, [1, 1])
-      device.queue.submit([encoder.finish()])
-      await pointRead.mapAsync(GPUMapMode.READ)
-      const b = new Uint8Array(pointRead.getMappedRange().slice(0, 4))
-      pointRead.unmap()
-      // The canvas's format may keep blue first.
-      const v = (format.startsWith('bgra') ? b[2] | (b[1] << 8) | (b[0] << 16) : b[0] | (b[1] << 8) | (b[2] << 16)) | (b[3] << 24)
-      const material = (v >>> 20) & 15
-      return material ? { t: (v & 0xfffff) / 8, material, colour: v >>> 24 } : null
+    pick(view, plain = false) {
+      // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
+      const next = picking.then(() => once(view, plain))
+      picking = next.catch(() => {})
+      return next
     },
     get sun() { return sunMaps },
     get looks() { return looks },
