@@ -1,6 +1,8 @@
 // Far from the town the cells are the planet's land (#217): at twenty places from 50 to 5,000 km out, what the
 // core says the ground is (under the sea's level or over it) and what the planet's pass draws from 7 km straight
 // over the same place (water or not) must agree. Coming down from space must find what was seen.
+// And the kind of country must agree (#228): over mountains, a desert, the ice, the snow and green land, the
+// planet's picture from 7 km and the cells' own from 5.5 km are the same kind of colour.
 //
 //   node test/far.mjs
 import { seen, start, still } from './kit.mjs'
@@ -39,6 +41,21 @@ try {
   check(agreed >= 19, `the cells and the planet agree on sea or land at ${agreed} of ${places.length} places from 50 to 5,000 km out`)
   const seas = said.filter((l) => l.includes('cells sea')).length
   check(seas >= 4 && seas <= 16, `some of those places are sea and some land (${seas} sea)`)
+  // The kind of country, by the picture's mean colour through the haze: red where red is past green, green where
+  // green is past both others, else pale (snow, ice, and rock under snow).
+  const sort = ([r, g, b]) => (r - g > 0.02 ? 'red' : g - r > 0.02 && g - b > 0.02 ? 'green' : 'pale')
+  for (const [name, east, south, want] of [['mountains', 1160, 720, 'pale'], ['a desert', 130, 40, 'red'], ['the ice on the sea', 300, -3900, 'pale'], ['the snow', 1500, -3600, 'pale'], ['green land', 300, -900, 'green']]) {
+    const found = []
+    for (const up of [7000, 5500]) {
+      await page.evaluate(([east, south, up]) => { const e = globalThis.engine; Object.assign(e.pose, { x: e.home.x + east * 1000, z: e.home.z + south * 1000, y: up, yaw: 0, pitch: -Math.PI / 2 }) }, [east, south, up])
+      await page.waitForTimeout(500)
+      if (up < 6000) await still(page, { sun: true, limit: 90_000 })
+      await page.waitForTimeout(300)
+      found.push((await seen(page)).rgb)
+    }
+    const [planet, cells] = found.map(sort)
+    check(planet === want && cells === want, `over ${name} (${east} km east, ${south} km south) the planet shows ${planet} country and the cells are ${cells} (${found.map((c) => c.map((v) => v.toFixed(2)).join(' ')).join(' and ')})`)
+  }
 } catch (e) {
   failures.push(String(e))
 }

@@ -11,7 +11,7 @@ pub const HOME: (i32, i32) = (700, 4070);
 const TOWN: f32 = 30_000.0;
 const EDGE: f32 = 40_000.0;
 
-fn ease(lo: f32, hi: f32, v: f32) -> f32 {
+pub fn ease(lo: f32, hi: f32, v: f32) -> f32 {
     let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -26,16 +26,16 @@ pub fn open(x: i32, z: i32) -> f32 {
     ease(TOWN, EDGE, (dx * dx + dz * dz).sqrt())
 }
 
-/// How much of the ground at a place is the planet's and not the town's country: none within 40 km of the start,
-/// all of it from 120 km. Seen from space the land is the planet's (page/space.ts `land`), and far from the town the
+/// How much of the ground at a place is the planet's and not the town's country: none within some 22 km of the
+/// start, all of it from some 60 km, along a line that wanders (from high up a ring round the town showed). Seen from space the land is the planet's (page/space.ts `land`), and far from the town the
 /// cells must be the same land, so that coming down finds what was seen: sea where there was sea, mountains where
 /// there were ranges.
 pub fn far(x: i32, z: i32) -> f32 {
     let (dx, dz) = ((x - HOME.0) as f32, (z - HOME.1) as f32);
-    if dx.abs() < 280_000.0 && dz.abs() < 280_000.0 {
+    if dx.abs() < 120_000.0 && dz.abs() < 120_000.0 {
         return 0.0;
     }
-    ease(400_000.0, 1_200_000.0, (dx * dx + dz * dz).sqrt())
+    ease(220_000.0, 600_000.0, (dx * dx + dz * dz).sqrt() + (noise(x, z, 150_000, 76) - 0.5) * 100_000.0)
 }
 
 /// The planet's own noise, as its pass asks it (space.ts `noise`, `folds`, `wisps`): places in km east and south of
@@ -79,7 +79,47 @@ pub fn continent(x: i32, z: i32) -> f32 {
 
 /// Where the planet has its ranges of mountains, 0 to 1 (space.ts `land`, its `range`, before the coast cuts it).
 fn ranges(x: i32, z: i32) -> f32 {
-    ease(0.5, 0.66, folds(km(x, z), 1700.0, 64))
+    let p = km(x, z);
+    // One range runs off north from the town's own massif, so that from high up the massif is the near end of
+    // something and not a patch with an edge.
+    let north = 1.0 - ease(0.6, 1.2, ((p.0 - 15.0) * (p.0 - 15.0) + (p.1 + 140.0) * (p.1 + 140.0)).sqrt() / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 65) + 0.3 * noise_km(p, 31.0, 67))));
+    ease(0.5, 0.66, folds(p, 1700.0, 64) + 0.8 * north)
+}
+
+/// How cold the planet is at a place, 0 to 1: by how far it is from the planet's middle line (space.ts `cold`).
+/// The page starts 0.66 of a radian north of that line.
+pub fn cold(z: i32) -> f32 {
+    ease(0.95, 1.25, (0.66 - km(0, z).1 / 6371.0).abs())
+}
+
+/// How dry the planet's land is at a place, 0 to 1 (space.ts `land`, its `dry`): its deserts, one of which begins
+/// east of the town where the town's own dry plain ends.
+pub fn arid(x: i32, z: i32) -> f32 {
+    let p = km(x, z);
+    let east = 1.0 - ease(0.6, 1.2, ((p.0 - 130.0) * (p.0 - 130.0) + (p.1 - 40.0) * (p.1 - 40.0)).sqrt() / (150.0 * (0.6 + 0.55 * noise_km(p, 120.0, 66) + 0.3 * noise_km(p, 31.0, 68))));
+    ease(0.5, 0.64, folds((p.0 + 900.0, p.1), 3100.0, 71) + 0.8 * east) * (1.0 - cold(z))
+}
+
+/// Whether the planet's dry land at a place is red earth (or pale sand): in countries a few hundred km across, and
+/// red round the town, whose own plain is.
+pub fn red(x: i32, z: i32) -> bool {
+    let p = km(x, z);
+    noise_km(p, 420.0, 77) + 0.4 * (-(p.0 * p.0 + p.1 * p.1) / (600.0 * 600.0)).exp() > 0.5
+}
+
+/// The planet's rivers (space.ts `land`, its `wind` and `broad`): how far a place is from the middle of one, in the
+/// noise's own measure (a thousandth is about a kilometre), and how far the water reaches from that middle.
+pub fn river(x: i32, z: i32) -> (f32, f32) {
+    let p = km(x, z);
+    let (a, b) = (noise_km(p, 90.0, 96), noise_km(p, 90.0, 97));
+    ((wisps((p.0 + a * 40.0, p.1 + b * 40.0), 330.0, 95) - 0.5).abs(), 0.0004 + 0.0012 * a)
+}
+
+/// How much of a far land's height is left at a place by a river: none in its water, all of it from some six
+/// kilometres off. Every river runs in a broad valley down to the sea's level, so that its water is the sea's.
+pub fn valley(x: i32, z: i32) -> f32 {
+    let (wind, broad) = river(x, z);
+    ease(broad, broad + 0.012, wind)
 }
 
 /// How far a place is into the mountains: they rise north of the town (towards -z), from 4.5 km out; far from the
@@ -187,9 +227,17 @@ pub fn ground(x: i32, z: i32) -> i32 {
     if w > 0.0 {
         // The planet's land: higher inland, and its sea with a shelf and then the deep.
         let c = continent(x, z);
-        let dry_land = h.max(town) + ease(0.0, 0.02, c) * 600.0 + c.max(0.0) * 8000.0;
+        let mut dry_land = h.max(town) + ease(0.0, 0.02, c) * 600.0 + c.max(0.0) * 8000.0;
+        if c > -0.004 {
+            // Rivers: the land comes down to each in a valley, and its bed is three metres under the sea's level.
+            dry_land = -30.0 + (dry_land + 30.0) * valley(x, z);
+        }
         let bed = -45.0 - ease(0.0, 0.01, -c) * 150.0 - ease(0.01, 0.2, -c) * 900.0 + noise(x, z, 60, 58) * 8.0;
-        let there = dry_land + (bed - dry_land) * (1.0 - ease(-0.004, -0.001, c));
+        let mut there = dry_land + (bed - dry_land) * (1.0 - ease(-0.004, -0.001, c));
+        // Where the planet is coldest the sea is under ice: floes at its edge, then a sheet, a little over the water.
+        if there < 3.0 && cold(z) + (noise(x, z, 30_000, 75) - 0.5) * 0.06 > 0.9 {
+            there = 3.0;
+        }
         h += (there - h) * w;
     }
     h.floor() as i32

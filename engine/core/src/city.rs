@@ -6,7 +6,7 @@
 
 use crate::hash::{hash, noise, unit};
 use crate::kinds::*;
-use crate::land::{HOME, dry, off_road, offshore, open, peaks};
+use crate::land::{HOME, arid, cold, dry, ease, far, off_road, offshore, open, peaks, red};
 use crate::scratch::{Meet, Scratch};
 use crate::tree::{Kind, SIDE, at};
 
@@ -792,6 +792,13 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         }
     }
     let (p, d) = (peaks(x, z), dry(x, z));
+    // Far from the town the land is the planet's (#228), and is covered as the planet shows it from space: snow
+    // and ice where it is coldest, whatever the land is.
+    let w = far(x, z);
+    let frost = if w > 0.0 { cold(z) } else { 0.0 };
+    if frost > 0.0 && frost + (noise(x, z, 30_000, 75) - 0.5) * 0.06 > 0.87 {
+        return kind(SAND, WHITE);
+    }
     // How steep: the most the ground changes over 4.8 m to either side, in cells a cell. Taken over that much so
     // that snow and rock lie in sheets and faces, not cell by cell.
     // Also how far the ground falls to the south over that much (cells): a face that looks south.
@@ -839,6 +846,21 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
         // Red earth, paler and darker in drifts a few hundred metres across, speckled; pale in the washes.
         let tone = noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2;
         return kind(SAND, colour(if noise(x, z, 5300, 69) > 0.5 { 1 } else { 2 }, [8, 8, 9, 5][(tone as usize).min(3)]));
+    }
+    if w > 0.0 {
+        // The planet's dry lands: thin dry grass at their edges, then bare ground, red earth in some countries
+        // and pale sand in others, in drifts. Its cold lands short of the snow: brown moor.
+        let (a, chance) = (arid(x, z), unit(x >> 3, z >> 3, 43));
+        if chance < ease(0.35, 0.9, a) * w * 1.4 {
+            let tone = (noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2) as usize;
+            return kind(SAND, if red(x, z) { colour(1, [8, 8, 9, 5][tone.min(3)]) } else { colour(3, [7, 7, 8, 2][tone.min(3)]) });
+        }
+        if chance < ease(0.0, 0.5, a) * w * 1.4 {
+            return kind(GRASS, colour(5, 8));
+        }
+        if chance < ease(0.1, 0.6, frost) * w * 1.4 {
+            return kind(GRASS, colour(4, 9));
+        }
     }
     kind(GRASS, OWN)
 }

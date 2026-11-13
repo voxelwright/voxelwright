@@ -294,10 +294,10 @@ export const ROWS = [
     // The towers from 200 m up as the sun goes. It is an invented town: the row is of a real one.
     stand: [300, 200, 0, 250, -18], hour: 17.95, near: [3000, CONCRETE, BRICK, PLASTER, WOOD, GLASS, STEEL] },
   { key: 'space', what: 'From space down to the ground', theirs: ['earth', 39.2], state: 'level',
-    // From 220 km up, 600 km south of the town, looking south along the coast: a cape and a bay, the pale shelf,
-    // rivers and the lie of the land. Over 6 km up the planet is drawn by a pass of its own (page/space.ts). It is
-    // an invented planet: the row is of the Earth.
-    stand: [-100_000, 220_000, 600_000, 200, -30], hour: 14 },
+    // From 260 km up, 900 km north of the town and out over the sea, looking north along the coast: the shallows
+    // green-blue off it, woods and fields, towns and rivers, a bay at the far end. Over 6 km up the planet is drawn
+    // by a pass of its own (page/space.ts). It is an invented planet: the row is of the Earth.
+    stand: [-80_000, 260_000, -900_000, 15, -30], hour: 14 },
   { key: 'there', what: 'Anything broken there too', theirs: ['earth', 43.6], state: 'level',
     // In the pine woods before the mountains, 5 km north of the town: a charge among the trees.
     stand: { from: [-145, -4970], up: 2.2, to: [-145, -5070], high: 14 }, near: [16, LEAVES, WOOD], inAir: true,

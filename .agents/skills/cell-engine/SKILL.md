@@ -1308,3 +1308,50 @@ engine thread's. A model or an edit puts them there (`engine.set(at, radius, kin
   after the last, none in the same breath as the charge), `test/chain.mjs` in the page (486, 718 and 6,156 ms in one run:
   the third had been thrown and rolled).
 - A check's `check(ok, what)` takes the condition first. Given the words first it prints "ok" for anything.
+
+## The planet's look, and far ground that is the planet's in kind (#228, November 12)
+
+- **The pass was 30 to 38 ms a frame at the full 2560 x 1440** wherever the ball filled the picture (GPU time of
+  the pass, `engine.gpuMs` with `engine.scale = 1`; 13 ms at the row's old stand, which was half sky). About 110
+  hashed noises a pixel. It is 10 to 14 ms now with far more in it: what is only looked at (woods, fields, towns,
+  cloud, currents, the lie of the low land) is asked of a 256 x 256 picture of chance numbers, four to a point,
+  between its points (`four`, `weave`): one fetch gives four noises. Only what the cells must agree with is still
+  the core's hash (`noise`, `folds`, `wisps`, `cells`). Sea pixels skip the land's work.
+- **Fade detail by how much ground a pixel covers** (`px`, km: distance times the pixel's angle over the root of
+  the slant), not by the eye's height: one aslant picture runs from 0.3 to 5 km a pixel. A fold of noise finer than
+  a few pixels is left as its mean. Over the full slant the far land smeared into streaks.
+- **What reads from 250 km, at the judge's 954 pixels, is structure 5 to 40 km across**: woods with edges that are
+  the edges of fields, heath between, districts of fields, pale towns, a river in its valley. Fields of a
+  kilometre are speckle at that size and were the old "smooth blur".
+- **Air**: light crossing it loses blue first and red last (`exp(-AIR / slant)`), and the air gives its own back the
+  same way. One law makes the veil over near ground, the pale band at the horizon and, past the edge, pale then
+  blue then dark. The old edge was a white band because the haze went to 1.9 times pale.
+- **The sun's patch on the sea** was `pow(.., 60)`: a white blob a third of the picture wide in every frame of the
+  descent. It is a small bright one (1500) in a wide dull one (90).
+- **Mountains are drawn from the cells' own rule** (`mountain` is `land.rs` `high`: massifs, the two big ridges,
+  and the finer ridges, spurs and faces from where a pixel is small enough to show each). Snow lies from the
+  cells' line; rock shows where the rise towards the sun is steep. Far ranges and the town's massif are one code
+  path, so a peak seen from 300 km is there on landing, and the massif from 6.2 km has the cells' own ridges.
+  Under a pixel a ridge is salt: from over 1.2 km a pixel rock and snow run together.
+- **The town's country ended in a ring** 40 to 120 km out, and its massif and plain were a white and a red patch
+  with straight sides from 60 to 400 km up. `far()` now takes the planet's rule from some 22 km (all of it by 60),
+  along a line that wanders by 5 km; nothing a stand on the ground can see is past 22 km (the widest box of cells
+  shows 6.5 km). And the planet has a range whose near end is the massif and a desert whose near end is the
+  plain (`ranges`, `arid`: a lobe each, its outline bent by two noises). A lobe cut by a straight line
+  (`ease(8, 30, -p.y)`) was the same straight side again, 300 km long: bend the outline, never cut it.
+- **Still straight**: inside 22 to 60 km the massif's south side and the plain's west and north sides are
+  `peaks` and `dry` (#229's), and show as a corner from 25 to 150 km up.
+- **Far cover** (`city.rs` `country`, where `far()` is over 0): snow where the planet is coldest and ice on its
+  sea there (the ground stands three cells over the water: floes at the edge, then a sheet), brown moor short of
+  it, dry grass then red earth or pale sand in the dry lands (`red` says which, in countries 400 km across).
+- **Rivers are in the cells.** Water here is whatever lies under the sea's level, so a river far inland has to be
+  at that level: every river runs in a valley 12 km across in which the land (mountains too) comes down to a
+  bed three metres under the sea (`land.rs` `river`, `valley`). The pass draws the same line and the same valley.
+- **`test/far.mjs`** also compares kinds of country: over mountains, a desert, the ice, the snow and green land
+  the planet's picture from 7 km and the cells' own from 5.5 km must be the same kind of mean colour (red, green
+  or pale). Mean colour through the haze cannot tell mountains from snow, or a river from land.
+- **Cost of asking for the ground** far out: 313 ns a column for land (232 before: the river's seven noises and
+  the two lobes), 302 for sea. The flight and phone checks pass.
+- **Not there**: the planet's woods, fields and towns are not in the cells (green land far out is grass); the
+  chance picture would have to be made in the core too. Seen from 5.8 km the cells end at their box in grey, and
+  the planet from 6.2 km goes to the horizon: the pop at the handover is now mostly that, and it is the marcher's.
