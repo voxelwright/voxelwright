@@ -213,7 +213,7 @@ POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source"
                           {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ..., "director": true or false}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error} (the world's own; ?given=1 lists the engine's rule for talk too)
 GET  /world/rules?id=     one rule, with its source
-GET  /world/realm         {name, about, arrive, look, director, rules: [ids]}
+GET  /world/realm         {name, about, arrive, look, director, rule (the id of the realm's own rule, the one written for its idea, if it says), rules: [ids]}
 A realm's hour (look.hour) is the hour of the day in it for everyone: the town's residents are out by it in the world's own process and on every page there, whatever hour a page shows. A realm that says none has them out as at eleven.
 
 REALMS
@@ -381,7 +381,9 @@ function recorded(r) {
     out.look = look
   }
   if (r.director !== undefined) { if (typeof r.director !== 'boolean') return 'whether a realm has a director is director: true or false'; out.director = r.director }
-  return Object.keys(out).length ? out : 'a realm is any of name, about, arrive, look, director'
+  // Which of its rules is the realm's own: the one written for the idea when the realm was made (make/realm.mjs), that a change asked for is a change to. Others beside it (its place, its director) are not guessed at.
+  if (r.rule !== undefined) { if (typeof r.rule !== 'string' || !RULE_ID.test(r.rule)) return 'a realm\'s own rule is rule: its id'; out.rule = r.rule }
+  return Object.keys(out).length ? out : 'a realm is any of name, about, arrive, look, director, rule'
 }
 /** A realm's record after a change to it: what is given replaces what was there, and of how it looks, each part given. */
 const changed = (record, change) => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })

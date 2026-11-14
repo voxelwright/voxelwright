@@ -135,6 +135,8 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
   // director takes minutes in the writing. Each lane does one at a time, and neither waits on the other (seen November
   // 14: a pistol reached the hand after 95 s, 80 of them behind a rule being changed). `busy` is the things' lane.
   let busy = false, writing = false
+  /** Rules whose fuller version is still being written, by world and id: what resolves when it has landed or been let go. */
+  const fuller = new Map()
   /** Places being planned for realms that were imagined and not yet asked for, by a number the page carries back: {at (when), plan (a promise)}. */
   const plans = new Map()
   /** The workshop's door (workshop/route.mjs): reads the same list of what could not be done that the rules' maker writes. */
@@ -221,10 +223,19 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
             return line({ stage: 'done', state: r.state, why: r.why, rule: r.id, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries, more: !!r.better })
           }
           say(`asked by ${text(body.by, 24) || 'someone'} for a rule: ${wish}`)
-          // In a realm with one rule (the realm's own, written when it was made), what is asked for is a change to
-          // that rule: a power, a new habit of its people. It is put again under its id, so nothing starts over.
+          // In a realm, what is asked for is a change to the realm's own rule (the one written for its idea when it was
+          // made): a power, a new habit of its people. It is put again under its id, so nothing starts over. The
+          // realm's record says which that is; one made before records did has it guessed at, if it has one rule beside its director.
           let changing = change
-          if (!changing && typeof body.realm === 'string') { const there = await (await fetch(`${here}/world/rules`)).json().catch(() => []); const own = Array.isArray(there) ? there.filter((r) => r.id !== DIRECTOR) : []; if (own.length === 1) changing = own[0].id }
+          if (!changing && typeof body.realm === 'string') {
+            const there = await (await fetch(`${here}/world/rules`)).json().catch(() => []), ids = Array.isArray(there) ? there.map((r) => r.id) : []
+            const own = (await fetch(`${here}/world/realm`).then((r) => r.json()).catch(() => null))?.rule
+            const rest = ids.filter((id) => id !== DIRECTOR)
+            changing = typeof own === 'string' && ids.includes(own) ? own : rest.length === 1 ? rest[0] : undefined
+          }
+          // Its fuller version may still be in the writing (rules.mjs, quick first): a change made now would be built on the quick one and lost when the fuller lands, or would turn the fuller away. So it waits for that.
+          const held = changing ? fuller.get(`${here}#${changing}`) : undefined
+          if (held) { tell('waiting for the fuller rule that is being written', { stage: 'note', why: 'its fuller version is still being written: this follows it' }); await held }
           const r = await writeRule({ wish, world: here, where, change: changing, by: text(body.by, 24) || 'someone', model, cannot, say: tell })
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           line({ stage: 'done', state: r.state, why: r.why, rule: r.id, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries })
@@ -253,6 +264,7 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
           // Its place, planned while the idea was fleshed out; asked for now if this helper did not plan it (it was started again, or the realm was asked for by itself). A realm that is there already keeps the place it has.
           const plan = body.into ? undefined : plans.get(body.place?.plan)?.plan ?? planPlace({ idea: `${text(body.name, 40)}: ${text(body.about, 3000)}`, model: quick ?? model }).catch((e) => ({ why: e.message }))
           const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, plan, into: body.into, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+          if (r.better && r.realm && r.rule) { const key = `${server}/realm/${r.realm}#${r.rule}`; fuller.set(key, r.better); void r.better.finally(() => fuller.delete(key)) }
           void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           // With a director (asked for in the new realm's flow): written once the realm's first rules are in (rough or not: a first rule the trial sent back is still the realm's rule), for it to read them, and behind the realm's being ready, so nobody waits on it to step in.

@@ -293,11 +293,25 @@ try {
   check(await page.evaluate(() => [...engine.things.all.values()].at(-1).by === 'Ada') && asked <= askedBefore + 1, 'a rule that hears a word asks for a thing, and the page of the one who said it has it made by its own helper')
   await page.waitForFunction(() => engine.asker.busy === 0)
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'giver' }) })
+  // A rule that asks for a rule to be changed (world.write): said aloud to it, and this page's own helper writes the
+  // change for the one who said it, by the same writer and trial, and puts it under the rule's id.
+  const writtenBefore = rulesAsked
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'steward', name: 'steward', source: `on('said', (world, e) => { if (/more waving/i.test(e.text)) world.write({ ask: 'everyone waves with both arms', for: e.by, rule: '${ruled[0].id}' }) })` } }) })
+  for (let i = 0; i < 50 && !(await (await fetch(`${world}/world/rules`)).json()).find((r) => r.id === 'steward')?.running; i++) await new Promise((r) => setTimeout(r, 100))
+  await page.keyboard.press('Enter'); await page.keyboard.type('say: more waving'); await page.keyboard.press('Enter')
+  await page.waitForFunction(() => [...document.querySelectorAll('#notices p')].some((p) => p.textContent === 'Something here has changed'), null, { timeout: 90_000 })
+  check(rulesAsked === writtenBefore + 1 && last.prompt.includes('everyone waves with both arms') && last.prompt.includes('The rule as it stands'), 'a rule that hears a word asks for another rule to be changed, and the page of the one who said it has its own helper write the change, tried and put under that rule\'s id')
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'steward' }) })
+  await page.waitForFunction(() => engine.asker.busy === 0)
   await page.evaluate(() => { engine.pose.x -= 10 })
   // In a realm with one rule of its own (its director is not counted), what is asked for changes that rule: put again under its id.
+  // Other rules stand beside it (its director; here one more, as a realm's place has): the realm's record says which is its own.
+  await fetch(`${dusk}/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'place', name: 'its place', source: "on('start', () => {})" } }) })
+  const none = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id, change: 'nobody-here' }) })
+  check(JSON.parse(none.text.trim().split('\n').at(-1)).state === 'refused' && /no rule "nobody-here"/.test(JSON.parse(none.text.trim().split('\n').at(-1)).why ?? ''), 'a change to a rule that is not there is refused and said: no rule is made under that id')
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
-  check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && afterChange.length === 2 && afterChange.some((r) => r.id === 'director') && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s own rule is changed and put again under its id, with a director there beside it')
+  check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && (await (await fetch(`${dusk}/realm`)).json()).rule === inRealm[0].id && afterChange.length === 3 && afterChange.some((r) => r.id === 'director') && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s own rule (its record says which) is changed and put again under its id, with a director and another rule there beside it')
   // Two lanes: while a rule is being written and tried (seconds here, minutes with a model), a thing is still made at once; a second thing to write is turned away.
   let writingStill = true
   const slow = raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me walk on walls', from, realm: realms[0].id }) }).then((r) => { writingStill = false; return r })

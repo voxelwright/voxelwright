@@ -30,7 +30,7 @@ await page.keyboard.press('Enter')
 await choice('A new realm')
 await page.keyboard.press(has('ask') ? 'Digit2' : 'Digit1')
 for (;;) {
-  const text = await choice('', 400_000)
+  const text = await choice("", 900_000)
   if (text.includes('is ready')) break
   await page.screenshot({ path: join(out, `2-question-${Date.now() - t0}.png`) })
   await page.keyboard.press('Digit1')

@@ -256,7 +256,8 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
   if (wish.length > WISH_MOST) { say(`the ask is ${wish.length} characters: only the first ${WISH_MOST} are read`, { stage: 'note', why: `that was long: only its first ${WISH_MOST} characters were read` }); wish = wish.slice(0, WISH_MOST) }
   const guide = guideFor(await (await fetch(`${world}/world/`)).text())
   let existing
-  if (change) { const r = await fetch(`${world}/world/rules?id=${encodeURIComponent(change)}`); if (r.ok) existing = (await r.json()).source }
+  // A rule to change is one that is there: a wrong id is said, not made into a new rule under that id.
+  if (change) { const r = await fetch(`${world}/world/rules?id=${encodeURIComponent(change)}`); if (!r.ok) return { state: 'refused', why: `there is no rule "${change}" here to change` }; existing = (await r.json()).source }
   const out = { tries: 0, ms: 0, cost: 0 }
   const own = trial ? null : await scratch()
   try {

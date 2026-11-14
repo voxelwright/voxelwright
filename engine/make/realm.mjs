@@ -157,5 +157,7 @@ export async function realm({ server, name, about, look, place, plan, into, answ
   // The world the rules were tried in is kept until the fuller rule has been tried in it too.
   if (own) void Promise.resolve(r.better).finally(() => own.stop())
   if (r.state !== 'there') return { ...r, state: 'there', realm: record.id, name, ...(ground ? { site: ground } : {}), rough: `its rules could not be written: ${r.why}`, cannot: r.cannot ?? [] }
+  // The realm's record says which rule is its own, so that a change asked for later is a change to this one, whatever other rules stand beside it.
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, realm: { rule: r.id } }) }).catch(() => {})
   return { ...r, realm: record.id, rule: r.id, name, at, ...(ground ? { site: ground } : {}), ...(fit ? { place: { builds: fit.builds.map((b) => b.id), cells: fit.cells, left: fit.left } } : {}) }
 }

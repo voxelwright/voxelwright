@@ -440,6 +440,12 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   In the page: the new-realm flow asks "With a director?"; "director on", "director off" or the Director button
   turn it at any time (no model); "director: fewer strangers, more trouble" changes it. `node test/director.mjs`
   checks the rest and the waking with a stand-in voice (no model).
+- **A rule that asks for a rule** (`plugins/write`): `world.write({ask, for, rule})`. A rule says in words how
+  another rule of its world should change, or what new one there should be, for someone at a page; that person's
+  page asks their own helper as if they had typed it, so the same writer writes it and the same trial tries it. It
+  is how a director makes the game itself grow. Once in five minutes for one person and for one rule.
+  `node plugins/write/check.mjs`. Real run, November 14: a rule heard a word, the player was told after 1.1 s, and
+  the realm's own rule was rewritten by Opus 5.5 in 133 s on the first asking.
 - **From the ask bar** (`page/making.ts`, the helper's `/rule`, `/imagine`, `/realm`). Words decide what is asked
   for. "Create a realm called harbour. You are the pilot. ..." is a realm: the asker chooses to be asked a few things first
   or not, the idea is fleshed out by their model (`make/realm.mjs`: what it is about, how it looks, at most three
