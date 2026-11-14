@@ -50,6 +50,10 @@ export interface Me {
   readonly feet: { at: [number, number, number]; yaw: number; speed: number } | null
   /** What the body can do; set (any of the numbers) to change it. */
   can: Partial<Can>
+  /** A blow: so much speed given to the body at once (cells a second). Nothing if it is not on its feet. */
+  push(speed: readonly [number, number, number]): void
+  /** Puts the body on the ground for so many seconds: it does not walk meanwhile. None gets it up. */
+  down(seconds: number): void
   /** How fast time goes for this body: 1, or the world's clock when a rule has slowed it and has not spared this person. */
   clock: number
 }
@@ -77,11 +81,12 @@ export function person(o: {
   let at: [number, number, number] | null = null, com = [2, 7, 1.5], eyeY = 0
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
+  let downUntil = 0, lying = 0
   let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
   const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed, name: o.name }
   o.folk.from.push((_view, seconds) => {
     if (!on || !at || view === 'head') return []
-    Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, time: seconds })
+    Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, down: lying, time: seconds })
     return [shown]
   })
   const feet = () => (at ? { at: [at[0], at[1] - com[1] - LEG, at[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed } : null)
@@ -115,6 +120,8 @@ export function person(o: {
     get feet() { return on ? feet() : null },
     get can() { return can },
     set can(c) { const next = { ...AS_IT_IS, ...c }; if (JSON.stringify(next) === JSON.stringify(can)) return; can = next; tellCan() },
+    push(speed) { if (id) { o.send({ kick: { id, speed: [speed[0], speed[1], speed[2]] } }); o.wake(); awake = true } },
+    down(seconds) { downUntil = seconds > 0 ? performance.now() + seconds * 1000 : 0 },
     get clock() { return clock },
     set clock(rate) { clock = rate },
     edit(words) { if (o.own) o.send({ edit: words }) },
@@ -138,6 +145,10 @@ export function person(o: {
       const pace = held('ShiftLeft') || held('ShiftRight') ? 1 : WALK
       go = go * pace - stick[1]
       side = side * pace + stick[0]
+      // On the ground it goes nowhere until it is up.
+      const isDown = performance.now() < downUntil
+      lying += ((isDown ? 1 : 0) - lying) * Math.min(1, dt * (isDown ? 7 : 2.2))
+      if (isDown) { go = 0; side = 0; jump = false }
       const long = Math.hypot(go, side)
       // Behind it, the body turns to face the way it goes; in its head it faces where the eye looks and steps aside.
       const looks = o.pose.yaw - Math.PI / 2

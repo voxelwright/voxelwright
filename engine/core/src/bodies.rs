@@ -871,6 +871,7 @@ pub const FLOW: u32 = 8; // water that flows, as heights over a window of column
 pub const STRUCK: u32 = 10; // what struck what (living.rs `Struck`): a, b or 0 for the world, where (3 floats), closing speed, push, a's kind, b's kind, flags
 pub const LIVE: u32 = 11; // for each living thing awake: id, speed along its front (float), feet on the ground, how many touches it had in the last step, what it is told (go, turn, rise as floats), flags (1 aloft)
 pub const FIGURE: u32 = 12; // someone's body is born (living.rs `figure`): id, size (3), middle of mass (3 floats). It is in MOVES as every body is, and is drawn by whoever draws people
+pub const TOOK: u32 = 13; // a ghost was struck (living.rs `ghost`): id, the speed the blow would have given it (3 floats, cells a second)
 pub const BURST: u32 = 9; // where (3, as floats), radius: a blast the solver set off itself (something went up), for its fire and smoke
 
 pub struct Bodies {
@@ -1473,6 +1474,10 @@ impl Bodies {
         self.flow(dt);
         let mut words: Vec<u32> = Vec::with_capacity(self.list.len() * 8);
         for b in &self.list {
+            // A ghost is where whoever it stands for is: nobody need be told.
+            if b.live.as_ref().is_some_and(|live| live.ghost) {
+                continue;
+            }
             words.push(b.id);
             words.extend(b.pos.iter().chain(b.rot.iter()).map(|v| v.to_bits()));
         }
@@ -1492,7 +1497,8 @@ impl Bodies {
         let mut ploughed: Vec<[i32; 3]> = Vec::new();
         for i in 0..self.list.len() {
             let b = &mut self.list[i];
-            if b.asleep {
+            // What sleeps is not stepped; and a ghost (living.rs) is where it is put, and meets bodies only.
+            if b.asleep || b.live.as_ref().is_some_and(|live| live.ghost) {
                 continue;
             }
             b.vel[1] -= G * h;
@@ -1675,7 +1681,12 @@ impl Bodies {
             if t.b == NONE {
                 self.list[t.a].pos = add(self.list[t.a].pos, scale(t.n, ease));
             } else {
-                let (ma, mb) = (self.list[t.a].inv_mass, self.list[t.b].inv_mass);
+                // A ghost stays where it is put: the other body is eased out of it all the way.
+                let still = |b: &Body| b.live.as_ref().is_some_and(|live| live.ghost);
+                let (ma, mb) = (if still(&self.list[t.a]) { 0.0 } else { self.list[t.a].inv_mass }, if still(&self.list[t.b]) { 0.0 } else { self.list[t.b].inv_mass });
+                if ma + mb == 0.0 {
+                    continue;
+                }
                 self.list[t.a].pos = add(self.list[t.a].pos, scale(t.n, ease * ma / (ma + mb)));
                 self.list[t.b].pos = sub(self.list[t.b].pos, scale(t.n, ease * mb / (ma + mb)));
             }
@@ -1736,6 +1747,17 @@ impl Bodies {
         while i < self.list.len() {
             let b = &mut self.list[i];
             if b.asleep {
+                i += 1;
+                continue;
+            }
+            // A ghost that was struck does not go anywhere: what the blow would have done to it is told, for whoever
+            // moves the body it stands for, and it waits where it was put.
+            if b.live.as_ref().is_some_and(|live| live.ghost) {
+                let (id, took) = (b.id, b.vel);
+                (b.vel, b.spin, b.asleep) = ([0.0; 3], [0.0; 3], true);
+                if dot(took, took) > 0.01 {
+                    self.record(TOOK, &[id, took[0].to_bits(), took[1].to_bits(), took[2].to_bits()]);
+                }
                 i += 1;
                 continue;
             }

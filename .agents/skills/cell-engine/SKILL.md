@@ -2131,6 +2131,17 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
 - **Not there**: bodies still pass through each other and through people. Nobody opens a door, takes a lift or
   jumps a gap. Marks are not kept over a restart (a rule marks again in `start`). A follower does not guess where
   someone is going.
+- **Blows** (`rules/blows.mjs`, `Live::ghost`): the solver never saw a figure. Everyone with a body gets a ghost in
+  the world's core, put where they stand whenever they are told of (`tell`): it sleeps, meets bodies and never the
+  world, is eased out of nothing (the other body is), is in nobody's moves, and when struck says the speed the blow
+  would have given it (`TOOK`, record 13) and stays put. A ball of half 1 at 70 m/s still meets it; a single cell at
+  that speed passes through (5.8 cells a step through a body 3 deep), so a throw's size starts at 1.
+- **A blow on someone at a page** goes to their page as a speed (frame 13) and their own core gives the body that
+  (`living_kick`). Legs that took the body straight back to standing made a blow a twitch of 0.24 m: a kicked walker
+  reels for 0.35 s (1.8 m from a 20 kg ball at 23 m/s).
+- **What was thrown strikes each person once**, and its pieces are the same throw: a wooden ball broke on her and
+  its two halves were told as two more blows by "loose wood".
+- **Weights**: a cell is a litre. A steel ball of half 1 is 210 kg, a wooden one 16: say so to whoever writes rules.
 
 ## People who answer through a model (#264, `engine/mind/`; November 13)
 

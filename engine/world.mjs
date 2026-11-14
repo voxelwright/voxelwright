@@ -21,6 +21,7 @@ import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
 import { lookOf, ownLook } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
+import { blows } from './rules/blows.mjs'
 import { bodies } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
 import { sounding } from './rules/sound.mjs'
@@ -47,6 +48,7 @@ function told(n, released) {
   const counts = [core.bodies_count(), core.bodies_burning(), core.bodies_flowing(), released ? 1 : 0]
   parentPort.postMessage({ log: join(log), state: join(state), counts })
   if (alive.size) heed(words)
+  blow.heed(words, Date.now())
 }
 
 // ── Living things (#245) ─────────────────────────────────────────────────
@@ -196,7 +198,7 @@ const doing = (p, now) => {
   if (whole) { p.move.told = p.move.n; p.move.toldAt = now }
   return { move: { n: p.move.n, since: p.move.since, ...(p.move.name ? { name: p.move.name } : whole ? { keys: p.move.data } : {}), ...(p.move.aim ? { aim: p.move.aim } : {}) } }
 }
-const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } })
+const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -358,6 +360,7 @@ setInterval(() => {
   const now = Date.now()
   ticks++
   rests(now)
+  if (ticks % 10 === 0) blow.sweep(now)
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
     if (!p.seat) continue
@@ -490,6 +493,11 @@ const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postM
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
 const body = bodies({ folk, tell: (m) => parentPort.postMessage(m) })
 does.set('person', body.person)
+// Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
+const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id } })
+does.set('throw', blow.throw)
+does.set('push', blow.push)
+does.set('down', blow.down)
 does.set('clock', body.clock)
 does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */

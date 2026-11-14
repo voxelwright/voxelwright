@@ -48,6 +48,7 @@ const checks = [
   ['driven', 'node', ['test/driven.mjs'], true],
   ['person', 'node', ['test/person.mjs'], true],
   ['powers', 'node', ['test/powers.mjs'], true],
+  ['blows', 'node', ['test/blows.mjs'], true],
   ['rules', 'node', ['test/rules.mjs'], true],
   ['realms', 'node', ['test/realms.mjs'], false],
   ['plugged', 'node', ['test/plugged.mjs'], false],

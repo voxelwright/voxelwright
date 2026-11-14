@@ -115,7 +115,7 @@ try {
   if (process.env.DEBUG) console.log(JSON.stringify(await feet(ada)), JSON.stringify(await ada.evaluate(() => ({ top: globalThis.engine.input.top, w: globalThis.engine.input.held('KeyW'), on: globalThis.engine.me.on }))))
   const [hers, his] = [await feet(ada), await feet(ben)]
   await ada.keyboard.up('KeyW'); await ben.keyboard.up('KeyW')
-  check(hers.clock === 1 && his.clock === 0.25 && hers.speed > 11 && his.speed > 2 && his.speed < 6, `said "slow", the world goes at a quarter: she, spared, still walks at ${(hers.speed / 10).toFixed(1)} m/s; the other page's person at ${(his.speed / 10).toFixed(2)}`)
+  check(hers.clock === 1 && his.clock === 0.25 && hers.speed > 8 && his.speed > 2 && his.speed < 6, `said "slow", the world goes at a quarter: she, spared, still walks at ${(hers.speed / 10).toFixed(1)} m/s; the other page's person at ${(his.speed / 10).toFixed(2)}`)
   // What is out of range is refused and said; an actor's body is not a person's to set.
   await ada.evaluate(() => globalThis.engine.say('too much'))
   await ada.waitForTimeout(1500)

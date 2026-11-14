@@ -64,6 +64,10 @@ pub struct Live {
     /// Whether it is a figure: someone's body. It is drawn by whoever draws people, not as cells; nothing breaks
     /// it into pieces, and it breaks nothing by landing.
     pub figure: bool,
+    /// Whether it is a ghost: it stands where it is put for a body that is moved elsewhere (someone at a page,
+    /// an actor), so that what is thrown and what falls meets them. It meets bodies and not the world, goes
+    /// nowhere, and what a blow would have done to it is told (`TOOK`).
+    pub ghost: bool,
     /// A jump still to take, and how much of a roll is still to turn (radians).
     hop: bool,
     rolling: f32,
@@ -85,6 +89,8 @@ pub struct Live {
     /// and kerbs only, a few for a ledge, any height for one who walks up walls. And where it began to climb.
     pub climb: f32,
     climbing: Option<f32>,
+    /// Seconds for which what goes on legs is carried by a blow it took, before its legs take it up again.
+    reel: f32,
     /// How fast it was going when the step's touches had yet to push it, and the most a step has changed that: a
     /// thing that lives is broken by how much of its speed one step takes, however many touches share the blow.
     pub(super) was: V,
@@ -95,7 +101,7 @@ impl Live {
     pub fn new() -> Live {
         Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
-            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, was: [0.0; 3], jolt: 0.0,
+            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, was: [0.0; 3], jolt: 0.0,
         }
     }
 
@@ -224,6 +230,9 @@ impl Live {
             // middle: pushed at the road itself, a car at 12 m/s went onto two wheels in a turn.
             let foot_at = add(r, scale(down, far));
             let at = sub(foot_at, scale(down, dot(foot_at, down) * 0.7));
+            if legs && self.reel > 0.0 {
+                continue;
+            }
             if legs {
                 // At the height of its middle: a person who stops does not pitch over their own feet.
                 let at = sub(foot_at, scale(down, dot(foot_at, down)));
@@ -259,6 +268,7 @@ impl Live {
             };
             kick(b, at, scale(wheel, push.clamp(-most, most)));
         }
+        self.reel = (self.reel - h).max(0.0);
         let touching = self.on > 0 || b.apart < 0.05;
         if flies {
             // What only flies (a helicopter) sits on the ground until told to rise, and sits again when it is set down.
@@ -440,7 +450,7 @@ impl Bodies {
         for b in &mut self.list {
             let away = sub(b.pos, centre);
             let far = dot(away, away).sqrt();
-            if b.live.is_none() || far > r * 3.0 + b.radius {
+            if b.live.as_ref().is_none_or(|live| live.ghost) || far > r * 3.0 + b.radius {
                 continue;
             }
             b.asleep = false;
@@ -544,6 +554,13 @@ impl Bodies {
         }
         let Some(b) = self.living(id) else { return false };
         (b.pos, b.rot, b.vel, b.spin, b.asleep) = (pos, rot.map(|v| v / long), [0.0; 3], [0.0; 3], false);
+        if b.live.as_ref().unwrap().ghost {
+            // A ghost sleeps where it is put, its points turned as it now stands for whatever comes at it.
+            let rot = b.rot;
+            b.turned = b.points.iter().map(|&p| turn(rot, p)).collect();
+            b.asleep = true;
+            return true;
+        }
         let front = turn(b.rot, FRONTS[b.live.as_ref().unwrap().front as usize]);
         b.live.as_mut().unwrap().heading = front[2].atan2(front[0]);
         true
@@ -568,6 +585,41 @@ impl Bodies {
         self.list.push(body);
         self.spawned = self.next - 1;
         self.spawned
+    }
+
+    /// A ghost (`Live::ghost`): a box so wide, tall and deep with its low corner at a place, for a body that is
+    /// moved elsewhere. Put it where that body is with `place`. Nothing is told of its birth. Returns its id.
+    pub fn ghost(&mut self, size: [usize; 3], low: [i32; 3]) -> u32 {
+        self.spawned = 0;
+        if size.iter().any(|&s| s == 0 || s > 32) {
+            return 0;
+        }
+        let mut body = Body::new(self.next, vec![crate::kinds::kind(crate::kinds::WOOD, crate::kinds::OWN); size[0] * size[1] * size[2]], size, low);
+        self.next += 1;
+        let mut live = Live::new();
+        (live.figure, live.ghost) = (true, true);
+        body.live = Some(Box::new(live));
+        body.turned = body.points.clone();
+        body.asleep = true;
+        self.list.push(body);
+        self.spawned = self.next - 1;
+        self.spawned
+    }
+
+    /// A push on a living thing: so much speed added to it at once (cells a second), as a blow gives.
+    pub fn kick(&mut self, id: u32, speed: V) -> bool {
+        let Some(b) = self.living(id) else { return false };
+        if speed.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        b.vel = add(b.vel, speed.map(|v| v.clamp(-2000.0, 2000.0)));
+        b.asleep = false;
+        if let Some(live) = &mut b.live {
+            live.quiet = 0.0;
+            // Carried by it for a third of a second: legs that stopped it at once made a blow a twitch.
+            live.reel = 0.35;
+        }
+        true
     }
 
     /// Tells what goes on legs where to face and how to go: `heading` is the way it faces (its front at cos, 0,
@@ -1089,6 +1141,53 @@ pub mod tests {
             bodies.advance(1.0 / 60.0);
         }
         assert!((the(&bodies, id).pos[1] - was[1] - up[1]).abs() < 12.0, "told nothing it hangs where it is");
+    }
+
+    #[test]
+    fn a_ghost_is_struck_where_it_is_put_and_says_what_the_blow_would_do() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let id = bodies.ghost(PERSON, [X, ground + 4, Z + 9]);
+        assert!(id > 0 && bodies.busy() == 0, "a ghost asks for no steps");
+        let at = the(&bodies, id).pos;
+        let tick = |bodies: &mut Bodies, seconds: f32| {
+            let mut out = Vec::new();
+            for _ in 0..(seconds * 60.0) as usize {
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                out.extend_from_slice(&bodies.out);
+            }
+            out
+        };
+        // Balls thrown at it, slow and fast and small: each is told as a blow, and as the speed it would give.
+        for (speed, radius) in [(150.0f32, 2), (400.0, 1), (700.0, 1)] {
+            bodies.throw_ball([at[0], at[1] + 2.0, at[2] + 60.0], [0.0, 0.0, -speed], radius, kind(STEEL, OWN));
+            let ball = bodies.list.last().unwrap().id;
+            let out = tick(&mut bodies, 0.6);
+            let struck = records(&out, STRUCK);
+            let took = records(&out, TOOK);
+            eprintln!("a ball of {radius} at {speed}: {} blows on the ghost, took {:?}", struck.iter().filter(|s| s[0] == id || s[1] == id).count(), took.first().map(|t| [f32::from_bits(t[1]), f32::from_bits(t[2]), f32::from_bits(t[3])]));
+            assert!(struck.iter().any(|s| (s[0] == ball && s[1] == id) || (s[0] == id && s[1] == ball)), "a ball of {radius} at {speed} cells a second meets the ghost, and that is told");
+            assert!(took.iter().any(|t| t[0] == id && f32::from_bits(t[3]) < -0.5), "and the speed it would give is told, the way the ball went");
+            assert_eq!(the(&bodies, id).pos, at, "the ghost has not moved");
+            assert!(records(&out, MOVES).iter().all(|m| m.chunks(8).all(|b| b[0] != id)), "and is in nobody's moves");
+            tick(&mut bodies, 3.0);
+        }
+        // Put somewhere else, it is met there and no longer where it was.
+        assert!(bodies.place(id, [at[0] + 100.0, at[1], at[2]], [0.0, 0.0, 0.0, 1.0]));
+        bodies.throw_ball([at[0], at[1] + 2.0, at[2] + 60.0], [0.0, 0.0, -150.0], 2, kind(STEEL, OWN));
+        let out = tick(&mut bodies, 0.6);
+        assert!(!records(&out, STRUCK).iter().any(|s| s[0] == id || s[1] == id), "where it was, a ball meets nothing");
+        bodies.throw_ball([at[0] + 100.0, at[1] + 2.0, at[2] + 60.0], [0.0, 0.0, -150.0], 2, kind(STEEL, OWN));
+        let out = tick(&mut bodies, 0.6);
+        assert!(records(&out, STRUCK).iter().any(|s| s[0] == id || s[1] == id), "where it is, one does");
+        // A kick is speed, at once.
+        let p = person(&mut bodies, [X + 300, ground + 5, Z + 9], 45.0);
+        run(&mut bodies, 1.5, p, [0.0; 3]);
+        let was = the(&bodies, p).pos;
+        assert!(bodies.kick(p, [0.0, 30.0, 60.0]));
+        tick(&mut bodies, 0.4);
+        assert!(the(&bodies, p).pos[2] - was[2] > 6.0, "a kicked body goes the way it was kicked");
     }
 
     #[test]

@@ -466,6 +466,19 @@ pub extern "C" fn living_ways(id: u32, fall: f32, climb: f32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).ways(id, fall, climb) as u32)
 }
 
+/// Makes a ghost (bodies/living.rs `ghost`): a box for a body that is moved elsewhere, so that what flies and falls
+/// meets it. Returns its id, 0 if it could not be made. Put it where that body is with `living_place`.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_ghost(x: i32, y: i32, z: i32, wide: u32, tall: u32, deep: u32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ghost([wide as usize, tall as usize, deep as usize], [x, y, z]))
+}
+
+/// A push on a living thing: so much speed added to it at once (cells a second). Returns 1 if it is there.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_kick(id: u32, vx: f32, vy: f32, vz: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).kick(id, [vx, vy, vz]) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
