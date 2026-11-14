@@ -338,6 +338,33 @@ try {
   check(!mounted.live && await page.evaluate(() => engine.tool === 'Big charge' && engine.fell.asks === 0), 'under a solid mode the page\'s own keys and click do nothing')
   await context.close()
 
+  // ── A make cut off: the helper is closed while a realm's rules are being written, and started again ──
+  {
+    const TIDE = DUSK.replace('"name":"dusk"', '"name":"tide"')
+    let slowAsked = 0
+    const slow = async (q) => { if (q.system.startsWith('You write rules')) { slowAsked++; await new Promise((r) => setTimeout(r, 120_000)); return { text: WAVER, model: 'a kept reply', ms: 0, cost: 0 } } return { text: TIDE, model: 'a kept reply', ms: 0, cost: 0 } }
+    const h2 = await helper({ world, port: 0, model: slow, journal: join(dir, 'made2.jsonl'), kept: join(dir, 'library2') })
+    const context2 = await browser.newContext({ viewport: { width: 1280, height: 720 } }), page2 = await context2.newPage()
+    await page2.goto(`${world}/city?fly=0&shared=1&name=Bea&at=70,17.2,406&look=0,-11.3${new URL(h2.link).hash}`)
+    await page2.waitForFunction(() => { const s = globalThis.engine?.world.stats; return s && s.ready > 0 && s.wanted === 0 }, null, { timeout: 120_000 })
+    await page2.keyboard.press('Enter'); await page2.keyboard.type('Create a realm called tide. Someone waves at you.'); await page2.keyboard.press('Enter')
+    await page2.waitForSelector('#choice button'); await page2.keyboard.press('Digit1')
+    await page2.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('With a director?'), null, { timeout: 20_000 }); await page2.keyboard.press('Digit2')
+    // The server has made the realm and the model is at its rules: the helper goes.
+    for (let i = 0; i < 200 && !slowAsked; i++) await new Promise((r) => setTimeout(r, 100))
+    await h2.close()
+    await page2.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('The helper stopped while tide was being made: the realm is there, with no rules yet'), null, { timeout: 30_000 })
+    const tides = async () => (await (await fetch(`${world}/realms`)).json()).realms.filter((r) => r.name === 'tide')
+    check((await tides()).length === 1 && (await (await fetch(`${world}/realm/${(await tides())[0].id}/world/rules`)).json()).length === 0, 'a helper closed while a realm\'s rules are being written: the asker is told, and that the realm is there with no rules, with the choice to go on')
+    // Started again where it was (in life: its new address opened), and gone on with: the rules are written into the realm that is there, and no second one is made.
+    const h3 = await helper({ world, port: Number(new URL(h2.url).port), secret: h2.secret, model, journal: join(dir, 'made2.jsonl'), kept: join(dir, 'library2') })
+    await page2.keyboard.press('Digit1')
+    await page2.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('tide is ready'), null, { timeout: 90_000 })
+    const after = await tides(), rulesIn = await (await fetch(`${world}/realm/${after[0].id}/world/rules`)).json()
+    check(after.length === 1 && rulesIn.length === 1, 'gone on with, its rules are written into the realm that was made: there is still one realm of that name')
+    await context2.close(); await h3.close()
+  }
+
   // ── After a restart ──
   server.stop()
   await new Promise((r) => setTimeout(r, 300))

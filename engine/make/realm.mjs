@@ -109,15 +109,16 @@ const idOf = (name) => `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace
  * could not be written is still there, empty of rules, and said so (`state: 'there'`, `rough`).
  * `say(words, stage)`: { stage: 'realm', id, name } once it is made, then a rule's own stages.
  */
-export async function realm({ server, name, about, look, place, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
+export async function realm({ server, name, about, look, place, into, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
   name = words(name, 40); about = words(about, WISH_MOST)
   if (!name) return { state: 'refused', why: 'a realm has a name' }
   const chosen = answers.map((a) => `${words(a.ask, 80)} ${words(a.answer, 60)}.`).join(' ')
   // Its place on the planet (#264, the BUILD lane): found before the realm is made, so that one arrives there.
-  place = placeOf(place)
+  // `into`: a realm that is there already (its making was cut off after the server made it): its rules are written into it, where it is.
+  place = into ? null : placeOf(place)
   const began = Date.now(), ground = place ? await site(place).catch(() => null) : null
   if (ground) say(`its place: ${ground.of} ${(Math.hypot(ground.at[0] - HOME[0], ground.at[2] - HOME[1]) / 10000).toFixed(1)} km from the town, at ${ground.at[0]}, ${ground.at[2]} (found in ${Date.now() - began} ms)`, { stage: 'ground', at: ground.at, land: place.land })
-  const res = await fetch(`${server}/realms`, { method: 'POST', body: JSON.stringify({ by, id: idOf(name), name, about: `${about}${chosen ? ` ${chosen}` : ''}`.slice(0, 2000), ...(look ? { look } : {}), ...(ground ? { arrive: ground.arrive } : {}) }) })
+  const res = into ? await fetch(`${server}/realm/${into}/world/realm`).then(async (r) => (r.ok ? new Response(JSON.stringify({ ...(await r.json()), id: into })) : r)) : await fetch(`${server}/realms`, { method: 'POST', body: JSON.stringify({ by, id: idOf(name), name, about: `${about}${chosen ? ` ${chosen}` : ''}`.slice(0, 2000), ...(look ? { look } : {}), ...(ground ? { arrive: ground.arrive } : {}) }) })
   if (!res.ok) return { state: 'refused', why: `the realm could not be made: ${(await res.text()).slice(0, 200)}` }
   const record = await res.json(), world = `${server}/realm/${record.id}`
   say(`the realm ${record.id} is made`, { stage: 'realm', id: record.id, name })

@@ -41,7 +41,7 @@ export type Stage =
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
 /** `held`: it is made and no place near would take it. `held` is what `put` takes to stand it where the asker says next. */
-export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; /** Its rules were written quickly to be played at once: fuller ones are being written and will take their place. */ more?: boolean; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
+export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; /** The helper stopped answering while it was being made (it was closed or started again): nothing more will come of this ask, and what was begun may be gone on with. */ cut?: boolean; /** Its rules were written quickly to be played at once: fuller ones are being written and will take their place. */ more?: boolean; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
 
 export interface Asker {
   /** Whether this page knows of a helper (it may not be running: `hello` asks it). */
@@ -68,7 +68,7 @@ export interface Asker {
   /** An idea for a realm, fleshed out by the asker's own model before anything is built: what it is about, how it looks, and a few questions where the idea leaves a choice open. Null if it could not be. */
   imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
-  realm(spec: { name: string; about: string; look?: unknown; place?: unknown; answers?: { ask: string; answer: string }[]; /** With a director, written for it once its first rules are in. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
+  realm(spec: { name: string; about: string; look?: unknown; place?: unknown; /** A realm that is there already and has no rules yet (its making was cut off): they are written into it, and no new realm is made. */ into?: string; answers?: { ask: string; answer: string }[]; /** With a director, written for it once its first rules are in. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made, written or waiting. */
   readonly busy: number
   /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */
@@ -81,6 +81,8 @@ export interface Asker {
 }
 
 const KEPT = 'village.helper'
+/** How long an ask may go with nothing said before the helper is asked whether it is still there (ms). */
+const QUIET = 15_000
 /** Whether an address is this machine's own (plain, as a browser allows of loopback) or, over TLS, the host this page was served by. */
 const ours = (address: string) => { const u = URL.parse(address); return !!u && ((u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname)) || (u.protocol === 'https:' && u.hostname === location.hostname)) }
 
@@ -168,10 +170,20 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       if (!res.ok || !res.body) { let why = `the helper said ${res.status}`; try { why = (await res.json()).why ?? why } catch { /* no reason given */ } return end(failed(why)) }
       // Lines of JSON as it goes; the last says how it ended.
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
-      let held = '', done: Done | null = null
+      let held = '', done: Done | null = null, cut = false, heard = performance.now()
+      // A rule takes minutes with nothing said meanwhile, and a helper that was closed or started again may leave
+      // this end open and silent (seen November 14: a page on "writing its rules" for 500 s). So while nothing
+      // comes the helper is asked now and then whether it is there, with this page's secret: one that does not
+      // answer, or no longer knows the secret, is another helper than the one that was asked, and the wait ends.
+      const watch = setInterval(() => {
+        if (performance.now() - heard < QUIET) return
+        heard = performance.now()
+        void fetch(`${helper!.url}/hello`, { headers: headers() }).then((r) => r.ok, () => false).then((there) => { if (!there) { cut = true; void reader.cancel().catch(() => {}) } })
+      }, 2000)
       try {
         for (;;) {
           const { value, done: ended } = await reader.read()
+          heard = performance.now()
           if (ended) break
           held += value
           for (let at = held.indexOf('\n'); at >= 0; at = held.indexOf('\n')) {
@@ -181,9 +193,9 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
             else each(stage)
           }
         }
-      } catch { /* cut off: said below */ }
+      } catch { /* cut off: said below */ } finally { clearInterval(watch) }
       if (done?.state === 'held') asked.set(done, from)
-      return end(done ?? failed('the helper stopped before it was made'))
+      return end(done ?? { ...failed(cut ? 'the helper stopped answering while this was being made: it was closed or started again' : 'the helper stopped before it was made'), cut: true })
     }
   }
   return self

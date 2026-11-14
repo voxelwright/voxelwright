@@ -239,10 +239,11 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         // A realm made on the world's server and its rules written into it. {name, about, look, place, answers, by}
         const answers = Array.isArray(body?.answers) ? body.answers.slice(0, 3).map((a) => ({ ask: text(a?.ask, 80), answer: text(a?.answer, 60) })).filter((a) => a.ask && a.answer) : []
         if (!text(body?.name, 40)) return end(400, { why: 'a realm has a name: {name, about}' })
+        if (body.into !== undefined && (typeof body.into !== 'string' || !REALM.test(body.into))) return end(400, { why: 'the realm to go on with is named by its id' })
         return stream(async (line, tell) => {
           say(`asked by ${text(body.by, 24) || 'someone'} for a realm: ${text(body.name, 40)}`)
           // Its rules are written quickly first, so the realm can be stepped into; the fuller ones follow and are put under the same id.
-          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, into: body.into, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
           void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           // With a director (asked for in the new realm's flow): written once the realm's first rules are in, for it to read them, and behind the realm's being ready, so nobody waits on it to step in.

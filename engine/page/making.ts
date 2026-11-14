@@ -95,7 +95,18 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const cue = hud.cue(`${plan.name}: making the realm`, () => [at[0], at[1] + 22, at[2]])
     const each = (stage: Stage) => { for (const one of told) one(stage, ask); if (stage.stage === 'realm') cue.text = `${plan.name}: writing its rules`; else if (stage.stage === 'trying') cue.text = `${plan.name}: trying them out` }
     each({ stage: 'place', at, facing: 'south' })
-    const done = await asker.realm({ name: plan.name, about: plan.about, look: plan.look, place: plan.place, answers, director: directed }, each)
+    // The realm's id, once the server has made it: if the helper stops after that, the realm is there with no rules, and going on writes them into it.
+    let begun: string | undefined
+    const spec = { name: plan.name, about: plan.about, look: plan.look, place: plan.place, answers, director: directed }
+    let done = await asker.realm(spec, (stage) => { if (stage.stage === 'realm') begun = stage.id; each(stage) })
+    // Cut off (the helper was closed or started again while it wrote): said, with the choice to go on. A helper started again has a new address: it must be opened first.
+    while (done.cut) {
+      cue.text = `${plan.name}: the helper stopped`
+      const on = await hud.choose(`The helper stopped while ${plan.name} was being made${begun ? ': the realm is there, with no rules yet' : ''}. If it was started again, open the address it printed, then go on.`, ['Go on', 'Leave it'])
+      if (on !== 0) break
+      cue.text = `${plan.name}: writing its rules`
+      done = await asker.realm({ ...spec, into: begun }, (stage) => { if (stage.stage === 'realm') begun = stage.id; each(stage) })
+    }
     cue.remove()
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)
