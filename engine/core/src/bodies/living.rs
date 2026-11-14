@@ -1215,6 +1215,15 @@ pub mod tests {
         let b = the(&bodies, id);
         assert!(b.pos[0] < wall as f32 && b.pos[0] > wall as f32 - 6.0, "the wall stops it: at {} before {wall}", b.pos[0]);
         assert_eq!(bodies.crushes, 0, "and it breaks nothing");
+        // Met at a slant, a wall is gone along (#367): turned 30 degrees off square to it (it stopped dead at that, its
+        // body rubbing on the brick), it goes along the wall at its pace's share that way, and no nearer.
+        let from = the(&bodies, id).pos;
+        walk(&mut bodies, 1.0, 30f32.to_radians(), 1.0, 0.0);
+        let b = the(&bodies, id);
+        let went = sub(b.pos, from);
+        eprintln!("along the wall {went:?}");
+        assert!(went[2] > 15.0 && b.pos[0] < wall as f32, "it goes along a wall met at a slant: {went:?} in a second (22 would be all of it)");
+        assert!(tipped(b) < 6.0 && bodies.crushes == 0, "upright, and breaking nothing");
         // Off a drop it falls, and lands on its feet.
         assert!(bodies.vanish(id) && !bodies.list.iter().any(|b| b.id == id), "and it can be taken out of the world");
     }

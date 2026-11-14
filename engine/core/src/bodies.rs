@@ -1614,6 +1614,11 @@ impl Bodies {
         // are shared out, and worked out at every push it was half of all the solver did.
         // For each touch: the three ways, how hard each is to push, and the spin a push of one along each gives its
         // two bodies.
+        // What a touch rubs with: 0.7 of its push, but a person's body hardly at all (#367). Someone goes by their legs,
+        // which hold them to the ground; their body rubbing on a wall as stone rubs on stone, they stopped dead
+        // against any wall met within 35 degrees of square and crept along one met at more. Now they go along it.
+        let person = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.figure);
+        let rubs: Vec<f32> = self.touches.iter().map(|t| if person(t.a) || person(t.b) { 0.03 } else { 0.7 }).collect();
         let ways: Vec<([V; 3], [f32; 3], [V; 3], [V; 3])> = self.touches.iter().map(|t| {
             let across = if t.n[1].abs() < 0.9 { unit(cross(t.n, [0.0, 1.0, 0.0])) } else { unit(cross(t.n, [1.0, 0.0, 0.0])) };
             let ds = [t.n, across, cross(t.n, across)];
@@ -1665,7 +1670,7 @@ impl Bodies {
                 for k in 0..2 {
                     let d = ds[k + 1];
                     let sliding = dot(rel(&self.list), d);
-                    let most = 0.7 * self.touches[t].pushed;
+                    let most = rubs[t] * self.touches[t].pushed;
                     let was = self.touches[t].rubbed[k];
                     let now = (was - sliding / weights[k + 1]).clamp(-most, most);
                     self.touches[t].rubbed[k] = now;

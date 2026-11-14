@@ -245,7 +245,7 @@ B gets the eye down onto its feet where it is, and back up to fly; `/city?walk=1
 way the eye looks, Shift runs (4.5 m/s; a walk is 1.4), Space jumps, V puts the eye in the head or behind the
 shoulder. On a phone the left thumb walks, and runs when pushed right over. The body is a living thing of the core's
 (`bodies/living.rs` `figure`, `page/person.ts`): a box on a leg that is a spring, so it takes the road's steps and
-kerbs, is stopped by what is built, stands on rubble, falls, and is thrown by what hits it. Tools and the wand work
+kerbs, is stopped by what is built and goes along a wall it meets at a slant (its body hardly rubs: it stopped dead at any wall met within 35 degrees of square), stands on rubble, falls, and is thrown by what hits it. Tools and the wand work
 on foot as they do flying.
 
 - **Who moves it: the page**, in a core of its own. Told through the world's process, a living thing is seen to move
@@ -1049,6 +1049,7 @@ node test/core-time.mjs --rows 45000                             # what a sector
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
+node test/sitting.mjs --parts street,turns,far,body   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
 ```
 
 Checks from different threads share one GPU, so whatever opens a browser takes a turn first (`test/kit.mjs` `turn`): two at a time on this machine (`ENGINE_TURNS`), the rest wait and say so. A check that is killed gives its turn back.
