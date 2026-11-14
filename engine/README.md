@@ -262,8 +262,14 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
 - **Changed while it runs.** Put again under the same id, a rule keeps its actors where they stand and what it
   kept. A rule that fails too often (five times running, or four times in five) is stopped, and says why in
   `/world/rules`; put again, it starts afresh.
-- **Kept with the world**, as the asks that put it in and took it out. A world started again has its rules; their
-  actors and what each kept are not kept yet, so `start` places them again.
+- **Kept with the world**, as the asks that put it in and took it out. A world started again has its rules, each
+  with its actors where they stood and what it kept (`<world file>.people.json`, written when it changes, two
+  seconds behind at most): `start` is told `why: "restart"` and need place nobody who is there.
+- **A rule can take a resident of the town as its own** (#218). `world.residents` is who of the town's own people
+  is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
+  rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
+  back to their round. So "the one you spoke to changes, and then the ones you pass" is a rule taking residents.
+  The world's rules hold at most 128 between them. `node test/taken.mjs` checks it with two pages.
 - **What a person types is something heard.** `e.text` and names reach a rule as text to match or to pass on.
 - Measured (M1 Pro): 0.4 ms a call for a rule with one actor; 1.5 ms for one that compares every pair of 66
   people; sixteen rules are running 0.2 s after they are asked for and take 18 MB each; with rules that never
@@ -282,7 +288,7 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   as the wave is held, offered to one person. Residents are not met by an aim yet (they are not bodies of the world's).
 - **Not there**: a rule hears nothing of blows, of someone coming near or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything, show anything on the screen or slow the
-  clock. Residents (the town's own rule) are not actors. #264 says which of these come next.
+  clock. #264 says which of these come next.
 
 ## Realms (#264)
 

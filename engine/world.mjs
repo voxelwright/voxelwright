@@ -16,7 +16,7 @@
 import { readFile } from 'node:fs/promises'
 import { parentPort, workerData } from 'node:worker_threads'
 import { controlsOf, numbers } from './page/living.ts'
-import { residents } from './page/residents.ts'
+import { residents, whereabouts } from './page/residents.ts'
 import { hands } from './rules/hands.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -182,7 +182,7 @@ function footing(x, y, z) {
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
 /** Which way something lies from a place, as a word: north is -z, east is +x. */
 const bearing = (dx, dz) => COMPASS[((Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) % 8) + 8) % 8]
-const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}) } })
+const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}) } })
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -247,7 +247,7 @@ function seat(m) {
       if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.goal ? 'walking' : 'standing' })
     }
     // The town's residents, by the same rule the pages draw them from. This process has no hour: it is noon to it.
-    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, 12, found, shocks)
+    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, 12, found, shocks, taken)
     const town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
     const heard = voices.filter((v) => v.n > (m.since || 0) && v.by !== p.by && Math.hypot(v.at[0] - p.at[0], v.at[1] - p.at[1], v.at[2] - p.at[2]) <= EARSHOT).map((v) => ({ n: v.n, name: v.name, text: v.text, far: Math.round(Math.hypot(v.at[0] - p.at[0], v.at[2] - p.at[2])), seconds_ago: Math.round((now - v.t) / 1000) }))
     // What the eyes meet, level, the eight ways round.
@@ -259,6 +259,78 @@ function seat(m) {
   }
   return { error: 'not something a body does' }
 }
+// ── Residents a rule takes as its own (#218, for #264) ──────────────────────
+// The town's residents are a rule of place and time (page/residents.ts): nobody moves them and nobody can tell one
+// anything. A rule of the world is told of those near people, each by an id that is the same from one telling to
+// the next, and may take one: from then on that resident is the rule's actor, standing where they stood, facing
+// as they faced, in the same clothes and the same step, and every page leaves them out of the town's rule (the
+// actor's `here` says who it was). Let go, the body walks back to where its round has got to and is a resident again.
+/** The most residents the world's rules may hold at once, the most a rule is told of, and how near a person one must be to be told of (cells). */
+const TAKEN_MOST = 128, TOLD_MOST = 64, TOLD_WITHIN = 320
+/** How long one let go has to walk back to its round before it is simply back on it (ms), and how fast it goes (cells a second). */
+const BACK_WITHIN = 45_000, BACK_PACE = 22
+/** Who is off their round, by the rule's own number for them: the body that is them meanwhile. */
+const taken = new Map()
+const residentId = (seed) => `r${(seed >>> 0).toString(36)}`
+let town = { at: 0, list: [], by: new Map() }
+/** The residents near people now (nearest first), found again four times a second at most. */
+function townNear(now) {
+  if (now - town.at < 250) return town
+  const by = new Map(), found = []
+  let persons = 0
+  for (const p of folk.values()) {
+    if (p.rule || persons++ >= 8) continue
+    const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, 12, found, shocks, taken)
+    for (let i = 0; i < n; i++) {
+      const r = found[i], far = Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2]), id = residentId(r.seed), old = by.get(id)
+      if (far <= TOLD_WITHIN && (!old || far < old.far)) by.set(id, { id, seed: r.seed, home: [...r.home], at: [...r.at], yaw: r.yaw, stride: r.stride, walking: r.walking > 0.5, far })
+    }
+  }
+  const list = [...by.values()].sort((a, b) => a.far - b.far).slice(0, TOLD_MOST)
+  return (town = { at: now, list, by: new Map(list.map((r) => [r.id, r])) })
+}
+/** The residents a rule is told of: who, where, how they face, whether they walk, and how far the nearest person is. */
+const townTold = () => townNear(Date.now()).list.map((r) => ({ id: r.id, at: r.at.map(Math.round), yaw: Number(r.yaw.toFixed(2)), walking: r.walking, near: Math.round(r.far) }))
+/** A resident becomes a body of a rule's, where they are this moment; or why not. */
+function take(rule, short, id, now, wrong) {
+  const r = typeof id === 'string' ? townNear(now).by.get(id) : undefined
+  if (!r) { wrong(`no resident "${String(id).slice(0, 16)}" is near anyone now: world.residents says who is`); return null }
+  if (taken.has(r.seed)) { wrong(`resident "${r.id}" is somebody's actor already`); return null }
+  if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
+  // Where they are now, not a quarter of a second ago: nobody should see them jump.
+  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, 12, fresh, shocks, taken), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
+  const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: short, seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
+  folk.set(p.by, p); taken.set(r.seed, p); town.at = 0
+  return p
+}
+/** A taken resident is let go: nobody's any more, it walks back to its round. */
+function release(p) {
+  p.rule = '~'; p.name = ''; p.look = undefined; p.stopped = ''; p.pace = BACK_PACE; p.back = Date.now() + BACK_WITHIN
+  tell(p)
+}
+/** A body on its way back: towards where its round has got to; there (or out of time), it is a resident again. Says whether it has gone. */
+function goingBack(p, now) {
+  const w = whereabouts(core, p.home, now / 1000), far = w ? Math.hypot(w.at[0] - p.at[0], w.at[2] - p.at[2]) : 0
+  if (!w || far < 2 || now > p.back) { folk.delete(p.by); taken.delete(p.was); town.at = 0; p.gone = true; tell(p); return true }
+  p.goal = [w.at[0], w.at[2]]
+  return false
+}
+/** What is to be kept of the rules' people over a restart (the server writes it beside the world's file): each rule's actors as they stand. */
+const actorsKept = () => { const out = {}; for (const p of folk.values()) if (p.rule && p.rule !== '~') (out[p.rule] ??= []).push({ id: p.short, name: p.name, at: p.at, yaw: p.yaw, pace: p.pace, look: p.look, goal: p.goal, was: p.was, home: p.home }); return out }
+/** A rule's actors as they were kept, put back before the rule starts again. What was kept is read as anything from outside is. */
+function actorsBack(ruleId, actors, now) {
+  const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
+  for (const a of Array.isArray(actors) ? actors.slice(0, 64) : []) {
+    if (!a || typeof a.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(a.id) || !three(a.at) || !Number.isFinite(a.yaw)) continue
+    const was = Number.isInteger(a.was) && three(a.home) && !taken.has(a.was) ? a.was : undefined
+    const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: text(a.name, 24) || a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(140, a.pace)) } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
+    if (a.look && typeof a.look === 'object') p.look = lookOf(a.look)
+    folk.set(p.by, p)
+    if (was !== undefined) taken.set(was, p)
+    tell(p)
+  }
+}
+
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
 setInterval(() => {
   const now = Date.now()
@@ -266,6 +338,7 @@ setInterval(() => {
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
     if (!p.seat) continue
+    if (p.back && goingBack(p, now)) continue
     if (p.goal && p.down <= now) {
       // A tenth of a second of its pace, taken a walker's step at a time: one that runs still meets a thin wall.
       for (let left = (p.pace ?? PACE) / 10; left > 0 && p.goal;) {
@@ -303,23 +376,33 @@ const PACE_MOST = 140, SAYS_A_SECOND = 8
 /** What of a figure a rule may choose (page/people.ts `figure`): colours as #rrggbb, and how tall and how broad against the usual. */
 const LOOK_COLOURS = ['coat', 'legs', 'hair', 'skin', 'shoes'], LOOK_BUILD = ['tall', 'broad']
 const pair = (a) => Array.isArray(a) && (a.length === 2 || a.length === 3) && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
+/** What of how a figure looks may be chosen, from what someone sent: or nothing. */
+function lookOf(from) {
+  const look = {}
+  if (from && typeof from === 'object') {
+    for (const k of LOOK_COLOURS) if (typeof from[k] === 'string' && COLOUR.test(from[k].toLowerCase())) look[k] = from[k].toLowerCase()
+    for (const k of LOOK_BUILD) if (Number.isFinite(from[k])) look[k] = Math.max(0.8, Math.min(1.2, from[k]))
+  }
+  return Object.keys(look).length ? look : undefined
+}
 /** Who is there, as a rule is told it: its own actors by the names it gave them, anyone else by the name the world knows them by. */
 function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}) })
   }
   return out
 }
-const ruled = ruling({ people, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()) })
+const ruled = ruling({ people, residents: townTold, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()) })
 /** Something happened that rules may listen for. */
 const happen = (event, e) => ruled.happen(event, e)
 /** A rule is taken out, and its actors go with it. */
 function drop(id) {
   ruled.drop(id)
   hand.dropped(id)
-  for (const p of [...folk.values()]) if (p.rule === id) { folk.delete(p.by); p.gone = true; tell(p) }
+  // Its actors go with it; those who were residents go back to their rounds.
+  for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
 /**
  * What a rule may ask for, by name: `world.<name>(id, fields)` in a rule comes here as `{do: name, id, ...fields}`.
@@ -335,7 +418,12 @@ does.set('actor', (rule, w, now, wrong) => {
   const by = `${rule.id}/${id}`
   let p = folk.get(by)
   // Someone outside may have joined under that very name first: they are not the rule's to move.
-  if (p && p.rule !== rule.id) { wrong(`the name "${id}" is taken by someone who is not this rule's actor`); return }
+  if (p && p.rule !== rule.id) { wrong(p.rule === '~' ? `"${id}" was let go and is still walking back to its round: use another name, or wait` : `the name "${id}" is taken by someone who is not this rule's actor`); return }
+  // A resident of the town, taken as this rule's own: it stands where it stood.
+  if (!p && w.take !== undefined) {
+    if (actorsOf(rule.id) >= ACTORS_MOST) { wrong(`a rule may have ${ACTORS_MOST} actors`); return }
+    if (!(p = take(rule, id, w.take, now, wrong))) return
+  }
   if (w.at !== undefined || !p) {
     if (!pair(w.at)) { wrong(`actor "${id}" is not in the world yet: it needs a place, at: [x, z]`); return }
     const x = Math.round(w.at[0]), z = Math.round(w.at[w.at.length - 1]), feet = stand(x, z)
@@ -352,14 +440,7 @@ does.set('actor', (rule, w, now, wrong) => {
   if (w.pace !== undefined) { if (Number.isFinite(w.pace)) p.pace = Math.max(0, Math.min(PACE_MOST, w.pace)); else wrong('a pace is a number of cells a second') }
   if (w.to !== undefined) { if (w.to === null) p.goal = null; else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.stopped = '' } else wrong('where to go is to: [x, z], or null to stop') }
   if (w.face !== undefined) { if (pair(w.face)) { const dx = w.face[0] - p.at[0], dz = w.face[w.face.length - 1] - p.at[2]; if (dx || dz) p.yaw = Math.atan2(dx, -dz) } else wrong('what to face is face: [x, z]') }
-  if (w.look !== undefined) {
-    const look = {}
-    if (w.look && typeof w.look === 'object') {
-      for (const k of LOOK_COLOURS) if (typeof w.look[k] === 'string' && COLOUR.test(w.look[k].toLowerCase())) look[k] = w.look[k].toLowerCase()
-      for (const k of LOOK_BUILD) if (Number.isFinite(w.look[k])) look[k] = Math.max(0.8, Math.min(1.2, w.look[k]))
-    }
-    p.look = Object.keys(look).length ? look : undefined
-  }
+  if (w.look !== undefined) p.look = lookOf(w.look)
   if (w.say !== undefined) {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
@@ -369,7 +450,7 @@ does.set('actor', (rule, w, now, wrong) => {
   tell(p); p.told = now
 })
 /** An actor of the rule's leaves. */
-does.set('gone', (rule, w) => { const p = folk.get(`${rule.id}/${w.id}`); if (p?.rule === rule.id) { folk.delete(p.by); p.gone = true; tell(p) } })
+does.set('gone', (rule, w) => { const p = folk.get(`${rule.id}/${w.id}`); if (p?.rule !== rule.id) return; if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } })
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 does.set('offer', hand.offer)
@@ -384,6 +465,9 @@ function obey(rule, wants, now) {
     try { fn(rule, w, now, wrong) } catch (e) { wrong(`${w.do} failed: ${String(e?.message ?? e).slice(0, 120)}`) }
   }
 }
+// What is to be kept of the rules over a restart: said to the server when it has changed, every two seconds at most.
+let keptLast = ''
+setInterval(() => { const actors = actorsKept(), out = {}; for (const [id, keep] of ruled.keeps()) out[id] = { keep, actors: actors[id] ?? [] }; const json = JSON.stringify(out); if (json !== keptLast) { keptLast = json; parentPort.postMessage({ kept: json }) } }, 2000)
 /** How many actors a rule has. */
 const actorsOf = (id) => { let n = 0; for (const p of folk.values()) if (p.rule === id) n++; return n }
 // Twice a second, while anyone is there to see: a world with nobody in it asks nothing of its rules.
@@ -401,19 +485,19 @@ function tops([x0, z0, x1, z1], from) {
   }
   return { high, kinds }
 }
-parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act }) => {
+parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept }) => {
   // Someone did something a rule offers: the rule hears it, with what their aim met.
   if (act) return parentPort.postMessage({ id, error: hand.act(act) })
   // How the rules are doing; and a rule the world had when it last stopped, put in again as it starts.
   if (how) return parentPort.postMessage({ id, rules: ruled.doing(actorsOf) })
-  if (rule) return ruled.put(rule, 'restart')
+  if (rule) { actorsBack(rule.id, kept?.actors, Date.now()); return ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) }
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive) { const a = alive.get(drive.id); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false)
   // Someone has joined: where everything is is said once more, for what sleeps says nothing by itself.
-  if (nudge) { nudged = true; return }
+  if (nudge) { nudged = true; for (const p of folk.values()) if (p.rule) tell(p); return }
   if (asks) return parentPort.postMessage({ id, ...seat(asks) })
   // A page's own body: its eyes are where its view is.
   if (here) {

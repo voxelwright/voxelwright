@@ -90,7 +90,7 @@ WHERE THINGS ARE
 Places are whole numbers of cells (10 cm): x east, y up, z south. North is -z. A turn (yaw) is radians from north towards east: 0 north, 1.571 east, 3.142 south, 4.712 west.
 The town starts near x 700, z 4070, in the middle of a street that runs east and west. Houses front it on the north side (their walls near z 3995), a works yard lies south of it. Each side of the street has a pavement a cell higher than the road: the north one is z 4000 to 4024, the south one z 4115 to 4139. Blocks repeat every 1280 cells east and 800 south, a street along each block's north and west sides. The land slopes: ask, do not assume, how high the ground is.
 Cars are parked along both kerbs of every street, lamps and trees stand on the pavements' outer half, and shops have boards with letters on them; nothing reads the letters out, and no place has a name you can ask for.
-Residents of the town walk the pavements. They are part of the world's rule, not anyone's body: you see them, they do not speak.
+Residents of the town walk the pavements. They are part of the world's rule, not anyone's body: you see them, they do not speak, unless a rule of the world has taken one as its actor (RULES, below).
 
 A BODY (to be in the world as a person is: others see a figure with your name over it)
 POST /world/join    {"by": name}                      get a body on the north pavement near the start, or {"by": name, "at": [x, z]} to choose where. Reply: {you}. Joining again moves you.
@@ -132,23 +132,25 @@ GET  /world/stream        everything that happens, as it happens (binary frames:
 
 RULES
 A rule is a script (JavaScript) that says what the people of this world do and what a game in it is. It is kept with the world and run by the world's own process, in an interpreter that can reach nothing: no timers, no network, no files, no import. It listens for what happens and answers with what it wants done.
-  on('start', (world, e) => {})   the rule was put in, put again changed, or the world started again: e = {why: "put" | "changed" | "restart"}
+  on('start', (world, e) => {})   the rule was put in, put again changed, or the world started again: e = {why: "put" | "changed" | "restart"}. After a restart its actors and world.keep are as they were
   on('said',  (world, e) => {})   someone at a page or in a seat spoke: e = {by, name, text, at: [x, y, z]}
   on('tick',  (world, e) => {})   twice a second while anyone is in the world: e = {dt}
 world.now      seconds
 world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", mine, at: [x, y, z], yaw, walking, down}. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it
 world.near(at, cells)   those of world.people within so many cells of [x, z] or [x, y, z], along the ground
-world.keep     the rule's own memory: an object, carried from call to call and when the rule is put again changed, not when the world starts again. At most 64 KB as JSON
+world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near}. id is the same from one call to the next; near is how far the nearest person is. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
+world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON
 world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. to: [x, z] is where it walks, straight, over the world's own cells (null stops it). face: [x, z] turns it. pace is cells a second (13 is a walk, at most 140). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2}. say is heard by everyone within 30 m
 world.gone(id)   the actor leaves
 world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
   on('act',   (world, e) => {})   someone did something this rule offers: e = {by, name, action (the offer's id), phase: "tap" | "down" | "up", at (their feet), from (their eyes), to (the way they look), met}. met is what was straight ahead of them, aimed or not: null for the sky, {kind: "cells", at, far, material} or someone's body {kind: "page" | "seat" | "actor", id, name, mine, at, far, up (0 at the feet to 1 at the head)}. Only the rule that offered it hears it
 POST /world/act           {"by": name, "rule": id, "id": id, "phase": "down" | "up", "from": [x, y, z], "to": [dx, dy, dz]}   do something a rule offers, from outside a page
-An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
+world.actor(id, {take: residentId, ...})   takes a resident as this rule's own actor: it stands where the resident stood, looking as it looked, and from then it is an actor like any other (name it, walk it, change its look, have it speak; world.people shows it with was: residentId). world.gone(id) lets it go: it walks back to its round and is a resident again. The world's rules may hold ${128} residents between them, and a resident is one rule's at a time
+An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
 What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says.
 A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
-                          {"by": name, "unrule": id}   takes a rule out, and its actors with it
+                          {"by": name, "unrule": id}   takes a rule out, and its actors with it (those that were residents go back to their rounds)
                           {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ...}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error}
 GET  /world/rules?id=     one rule, with its source
@@ -325,6 +327,8 @@ function allowed(body) {
 /** Starts a realm's world from its file (`of` is the realm: {id, file, record}), and answers for it until it is closed. */
 function open(of) {
   const worldFile = of.file
+  /** What the rules' people are and what each rule keeps, beside this world's file (#218). */
+  const peopleFile = `${worldFile}.people.json`
   let world = null
   mkdirSync(dirname(worldFile), { recursive: true })
   const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm') } })
@@ -367,7 +371,9 @@ function open(of) {
   // not kept, and the edit that took their cells out is.
   for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, controls: t.record.controls, rows: rowsOf(t) } })
   // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
-  for (const rule of rules.values()) thread.postMessage({ rule })
+  let peopleKept = {}
+  try { const read = JSON.parse(readFileSync(peopleFile, 'utf8')); if (read && typeof read === 'object' && !Array.isArray(read)) peopleKept = read } catch { /* none kept, or not readable: the rules start with nothing */ }
+  for (const rule of rules.values()) thread.postMessage({ rule, kept: peopleKept[rule.id] })
   /** Which body of the core each living thing is now, by the thing's id: told to every page as it joins. */
   const living = new Map()
   const readers = new Set()
@@ -381,6 +387,9 @@ function open(of) {
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
+    // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
+    // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
+    if (m.kept !== undefined) { try { writeFileSync(`${peopleFile}.part`, m.kept); renameSync(`${peopleFile}.part`, peopleFile) } catch (e) { console.error(`the rules' people were not kept: ${e}`) } return }
     // Which body a living thing is: for whoever reads now, and kept here for whoever joins.
     if (m.living) { if (m.living.body) living.set(m.living.thing, m.living.body); else living.delete(m.living.thing); const f = frame(LIVING, 0, Buffer.from(JSON.stringify(m.living))); for (const r of readers) r.write(f); return }
     // What rules offer people to do: for whoever reads now, and kept here for whoever joins.
@@ -506,7 +515,7 @@ function open(of) {
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
       // What sleeps says nothing: the world says once more where everything is.
-      if (living.size) thread.postMessage({ nudge: true })
+      thread.postMessage({ nudge: true })
       readers.add(res)
       res.on('close', () => readers.delete(res))
     },

@@ -20,10 +20,11 @@ const WAITING_MOST = 16, KEEP_MOST = 64 << 10
 
 /**
  * @param people  who is there, as a rule is to be told it: asked when a call is sent, so it is as fresh as the call
+ * @param residents  the town's residents near people, as a rule is to be told them (#218)
  * @param does    the names of what a rule may ask for here: told to it with every call
  * @param obey    what a rule wants done (the `out` of its answer), for the world to check and do
  */
-export function rules({ people, does, obey }) {
+export function rules({ people, residents = () => [], does, obey }) {
   /** By id: the thread, what it listens for, what waits for it, what it keeps, and how it has been doing. */
   const all = new Map()
   const stop = (rule, why) => {
@@ -40,7 +41,7 @@ export function rules({ people, does, obey }) {
     const { event, e } = rule.waiting.shift(), now = Date.now()
     rule.at = { n: ++rule.sent, event }
     rule.timer = setTimeout(() => stop(rule, `stopped: a call (${event}) took over ${CALL_MOST} ms`), CALL_MOST)
-    rule.thread.postMessage({ n: rule.at.n, json: JSON.stringify({ event, e, now: now / 1000, people: people(rule.id), keep: rule.keep, does: does() }) })
+    rule.thread.postMessage({ n: rule.at.n, json: JSON.stringify({ event, e, now: now / 1000, people: people(rule.id), residents: residents(), keep: rule.keep, does: does() }) })
   }
   const answered = (rule, m) => {
     if (m.failed !== undefined) return stop(rule, String(m.failed).slice(0, 300))
@@ -67,12 +68,12 @@ export function rules({ people, does, obey }) {
   return {
     get size() { return all.size },
     has: (id) => all.has(id),
-    /** A rule is put in, or put again changed: its old thread is ended, what it kept stays. `why` is what its `start` is told. */
-    put(r, why) {
+    /** A rule is put in, or put again changed: its old thread is ended, what it kept stays. `why` is what its `start` is told; `kept` is what it kept when the world last stopped. */
+    put(r, why, kept) {
       const old = all.get(r.id)
       if (!old && all.size >= RULES_MOST) return
       if (old) { old.replaced = true; clearTimeout(old.timer); void old.thread?.terminate() }
-      const rule = { id: r.id, name: r.name, by: r.by, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, timer: null, keep: old?.keep ?? {}, error: '', strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
+      const rule = { id: r.id, name: r.name, by: r.by, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, timer: null, keep: old?.keep ?? kept ?? {}, error: '', strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
       all.set(r.id, rule)
       // A thread that cannot even be started (the machine has no more to give) is a rule that is stopped, and no more.
       let thread
@@ -96,6 +97,8 @@ export function rules({ people, does, obey }) {
         send(rule)
       }
     },
+    /** What each rule keeps, by id: for whoever keeps it over a restart. */
+    keeps: () => [...all.values()].map((r) => [r.id, r.keep]),
     /** How each rule is doing, for whoever asks. */
     doing: (actors) => [...all.values()].map((r) => ({ id: r.id, name: r.name, by: r.by, running: !r.stopped && !!r.listens, listens: [...(r.listens ?? [])], actors: actors(r.id), calls: r.calls, ms: r.calls ? Number((r.ms / r.calls).toFixed(3)) : 0, worst: Number(r.worst.toFixed(3)), error: r.error })),
   }

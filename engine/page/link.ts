@@ -15,7 +15,7 @@ export interface Echo { by: string; blast?: [number, number, number]; radius?: n
 /** What of a figure may be chosen (people.ts `figure`); whatever is left out comes of who they are. */
 export interface Look { coat?: string; legs?: string; hair?: string; skin?: string; shoes?: string; tall?: number; broad?: number }
 /** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
-export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look }
+export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number }
 /** Something a rule offers people to do (rules/hands.mjs): a word to show, held or tapped, aimed or not, the key it would like, and who it is for (null: everyone). */
 export interface Offer { rule: string; id: string; word: string; hold: boolean; aim: boolean; key: string; to: string[] | null }
 export interface Link {

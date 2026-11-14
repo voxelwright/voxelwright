@@ -1935,3 +1935,31 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
   (taken-out files go to `gone/`); the cap on `tops` is still one for the whole server; a realm whose thread fails
   stays down until the server restarts.
 
+
+## Residents a rule can take (#218 for #264, November 13)
+
+- **A resident has an id a rule can hold**: `r` and the rule's own number for them in base 36. A rule is told of
+  those within 32 m of someone at a page or in a seat (`world.residents`, 64 at most, found again four times a
+  second at most in `world.mjs` `townNear`), never of the whole town: nobody can take whom nobody is near.
+- **Taking is a hand-over, not a spawn.** The world process works the resident out afresh at the moment of the
+  take and makes a body there with the same place, facing and step; its `here` frame says who it was (`was`, the
+  seed, and `stride`). A page adds that seed to a set the town's rule leaves out (`presence.ts`, `townsfolk`) and
+  draws the body from the same seed, so it is the same clothes and build. Both happen on the frame the `here`
+  arrives: nobody is drawn twice and nobody jumps (checked from the page in `test/taken.mjs`).
+- **A page that joins later** is told every actor at once (the stream's start now always nudges the world), so it
+  never sees the resident and the actor both.
+- **Let go, the body walks back** to where its round has got to (`whereabouts`, one resident asked of the rule
+  alone) at a hurry, and within two cells of it becomes the resident again. A walk is a straight line still: one
+  stopped by a parked car is simply back on its round after 45 s, which is a jump. A rule taken out lets its
+  residents go the same way.
+- **How many**: 128 between a world's rules, a resident one rule's at a time, and they count among a rule's 64 actors.
+- **Kept over a restart**: the world process says what each rule keeps and where its actors stand whenever that
+  changes (looked at every two seconds), and the server writes it whole beside the world's file
+  (`<file>.people.json`, to one side and moved into place). On a start the actors are put back before the rule's
+  `start`, which is told `restart`. It is read back as anything from outside is. Up to two seconds can be lost.
+- **The world process has no hour** (it is noon to it) and a page has its own: a page at half past ten draws three
+  quarters of the people the world thinks are out, so a rule can take someone a page was not showing. They appear
+  as the actor. One hour for a world is the realms lane's to give.
+- **Not there**: a resident's phone or umbrella is not carried over to the actor; a taken resident who was mid
+  stride stops dead (an actor stands until told to walk); residents that stand on paved lots can be taken only
+  where the world process has already found their places.

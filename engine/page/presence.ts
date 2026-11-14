@@ -1,6 +1,7 @@
 // Everyone else in a shared world (#218): each person at a page and each agent in a seat is the
 // one figure (people.ts), where the world says they are, facing as they face, with their name over
-// their head and what they say under it for a few seconds. This page says where its own eyes are
+// their head and what they say under it for a few seconds. A resident of the town that a rule took
+// as its actor is that same figure still (`was`): the same clothes, the same step, where it stood. This page says where its own eyes are
 // ten times a second, under the name it was given (`?name=`, else the one it used last, else a
 // guest's), and what is typed on the ask bar (hud.ts) is said. Names and words are text that whoever is
 // there typed: they are drawn as letters and listed, and nothing here acts on them.
@@ -14,7 +15,7 @@ interface Other { who: Someone; shown: [number, number, number]; yaw: number; st
 /** A number of its own for a name, so that a name always looks the same person. */
 const seedOf = (name: string) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h | 0 }
 
-export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }): { readonly count: number; readonly name: string; say(text: string): void } {
+export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void } {
   const asked = new URLSearchParams(location.search).get('name')
   let kept = ''
   try { kept = localStorage.getItem('village.name') ?? '' } catch { /* a page that may keep nothing */ }
@@ -22,10 +23,12 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
   try { if (asked) localStorage.setItem('village.name', name) } catch { /* the same */ }
   const others = new Map<string, Other>()
   far.onhere = (who) => {
-    if (who.gone) { others.delete(who.by); return }
+    // A resident a rule took is this body now: the town's rule leaves them out until the body goes.
+    if (who.gone) { const was = others.get(who.by)?.who.was; if (was !== undefined) taken.delete(was); others.delete(who.by); return }
+    if (typeof who.was === 'number') taken.add(who.was)
     const o = others.get(who.by)
     if (o) { o.who = who; o.heard = performance.now() }
-    else others.set(who.by, { who, shown: [...who.at], yaw: who.yaw, stride: 0, walking: 0, down: 0, flinch: 0, heard: performance.now(), says: '', until: 0 })
+    else others.set(who.by, { who, shown: [...who.at], yaw: who.yaw, stride: who.stride ?? 0, walking: 0, down: 0, flinch: 0, heard: performance.now(), says: '', until: 0 })
   }
   setInterval(() => { const e = eye(); far.here(e.at, e.yaw, name) }, 100)
 
@@ -50,7 +53,7 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
     shown.length = 0
     for (const [by, o] of others) {
       // A page says where it is ten times a second and a seat at least once: unheard of for five, they have gone.
-      if (now - o.heard > 5000) { others.delete(by); continue }
+      if (now - o.heard > 5000) { if (o.who.was !== undefined) taken.delete(o.who.was); others.delete(by); continue }
       // Between one telling and the next the figure goes smoothly to where it was last said to be.
       let moved = 0
       for (let a = 0; a < 3; a++) { const step = (o.who.at[a] - o.shown[a]) * ease; o.shown[a] += step; if (a !== 1) moved = Math.hypot(moved, step) }
@@ -63,7 +66,7 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       o.walking += ((pace > 3 && pace < (o.who.seat ? 160 : 60) ? 1 : 0) - o.walking) * Math.min(1, dt * 8)
       o.down += ((o.who.down ? 1 : 0) - o.down) * Math.min(1, dt * (o.who.down ? 7 : 2.2))
       o.flinch += ((o.who.flinch ? 1 : 0) - o.flinch) * Math.min(1, dt * (o.who.flinch ? 14 : 3))
-      shown.push({ at: o.shown, yaw: o.yaw, seed: seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: now < o.until ? o.says : '', look: o.who.look })
+      shown.push({ at: o.shown, yaw: o.yaw, seed: o.who.was ?? seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: now < o.until ? o.says : '', look: o.who.look })
     }
     return shown
   })

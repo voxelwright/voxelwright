@@ -28,6 +28,8 @@ export interface Resident {
   /** 0 to 1: shrunk from a blast near them; and 0 to 1: knocked off their feet by one, lying. */
   flinch: number
   down: number
+  /** Which block they live round and which of its people they are: enough to ask the rule about this one alone (`whereabouts`). */
+  home: [number, number, number]
 }
 
 /** Something that broke with a bang: where, how big (a blast's radius in cells), and when on the shared clock. */
@@ -180,9 +182,10 @@ function standing(land: Land, bx: number, bz: number): [number, number, number][
 
 /**
  * The residents out within `reach` cells of a place at second `t`, at an hour of the day, written over `into`
- * (which is kept and grown, not made again). `shocks` is what has gone off lately. Returns how many.
+ * (which is kept and grown, not made again). `shocks` is what has gone off lately. `taken` is who is off their
+ * round because a rule of the world has taken them as its own (they are somebody's actor meanwhile): left out. Returns how many.
  */
-export function residents(land: Land, eye: readonly [number, number], reach: number, t: number, hour: number, into: Resident[], shocks: readonly Shock[] = []): number {
+export function residents(land: Land, eye: readonly [number, number], reach: number, t: number, hour: number, into: Resident[], shocks: readonly Shock[] = [], taken?: { has(seed: number): boolean }): number {
   let n = 0
   const share = out(hour)
   tries = 1
@@ -193,14 +196,14 @@ export function residents(land: Land, eye: readonly [number, number], reach: num
       const live = LIVE[land.paving_at(x0 + BLOCK_X / 2, z0 + (BLOCK_Z + STREET) / 2) & 7]
       for (let i = 0; i < live; i++) {
         const seed = mix(bx, bz, i)
-        if (chance(seed, 20) >= share) continue
+        if (chance(seed, 20) >= share || taken?.has(seed)) continue
         if (shocks.length) startle(land, seed, t, shocks, (at) => walk(x0, z0, seed, at))
         else { S.when = t; S.down = 0; S.flinch = 0; S.turned = 0; S.frozen = false }
         const when = S.when, down = S.down, flinch = S.flinch, towards = S.towards, turned = S.turned, frozen = S.frozen
         walk(x0, z0, seed, when)
         if (Math.abs(W.x - eye[0]) > reach || Math.abs(W.z - eye[1]) > reach) continue
-        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0 })
-        r.seed = seed
+        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0] })
+        r.seed = seed; r.home[0] = bx; r.home[1] = bz; r.home[2] = i
         const x = W.x, z = W.z, long = Math.hypot(W.hx, W.hz) || 1, hx = W.hx / long, hz = W.hz / long
         r.at[0] = x; r.at[2] = z
         // A kerb is stepped over two steps, not jumped.
@@ -221,11 +224,11 @@ export function residents(land: Land, eye: readonly [number, number], reach: num
       const spots = standing(land, bx, bz)
       for (let j = 0; j < spots.length; j++) {
         const seed = mix(bx, bz, 9000 + j), [x, feet, z] = spots[j]
-        if (chance(seed, 20) >= share || Math.abs(x - eye[0]) > reach || Math.abs(z - eye[1]) > reach) continue
+        if (chance(seed, 20) >= share || taken?.has(seed) || Math.abs(x - eye[0]) > reach || Math.abs(z - eye[1]) > reach) continue
         if (shocks.length) startle(land, seed, t, shocks, () => { W.x = x; W.z = z })
         else { S.down = 0; S.flinch = 0; S.turned = 0 }
-        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0 })
-        r.seed = seed
+        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0] })
+        r.seed = seed; r.home[0] = bx; r.home[1] = bz; r.home[2] = 9000 + j
         r.at[0] = x; r.at[1] = feet; r.at[2] = z
         // Turned to whoever stands nearest, if they are near enough to be talking; else as they happen to stand.
         let yaw = chance(seed, 32) * Math.PI * 2, nearest = 60
@@ -240,4 +243,15 @@ export function residents(land: Land, eye: readonly [number, number], reach: num
     }
   }
   return n
+}
+
+/**
+ * Where one resident would be on their round at second `t`, whoever has them meanwhile: the place and the way they
+ * face, or null if their place is not known here (someone who stands on a lot the rule has not looked over yet).
+ */
+export function whereabouts(land: Land, home: readonly [number, number, number], t: number): { at: [number, number, number]; yaw: number } | null {
+  const [bx, bz, i] = home
+  if (i >= 9000) { const spot = STOOD.get(`${bx},${bz}`)?.spots[i - 9000]; return spot ? { at: [spot[0], spot[1], spot[2]], yaw: 0 } : null }
+  walk(bx * BLOCK_X, bz * BLOCK_Z, mix(bx, bz, i), t)
+  return { at: [W.x, land.feet_at(Math.round(W.x), Math.round(W.z)), W.z], yaw: Math.atan2(W.hx, -W.hz) }
 }

@@ -44,6 +44,7 @@ const checks = [
   ['driven', 'node', ['test/driven.mjs'], true],
   ['rules', 'node', ['test/rules.mjs'], true],
   ['realms', 'node', ['test/realms.mjs'], false],
+  ['taken', 'node', ['test/taken.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['sound', 'node', ['test/sound.mjs'], false],

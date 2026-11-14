@@ -599,15 +599,16 @@ export const REACH = 1400
 /**
  * The town's residents as people to draw: the rule's (residents.ts), with what is this page's own: whether it
  * rains here, so umbrellas are up. `clock` is seconds on the clock every page of a world shares;
- * `shocks` is what has gone off lately, for whoever makes a blast to add to.
+ * `shocks` is what has gone off lately, for whoever makes a blast to add to; `taken` is who a rule of the world
+ * has taken off their round (presence.ts keeps it).
  */
-export function townsfolk(land: Land, hour: () => number, rain: () => number, clock: () => number, shocks: Shock[]): (view: View, seconds: number) => readonly Person[] {
+export function townsfolk(land: Land, hour: () => number, rain: () => number, clock: () => number, shocks: Shock[], taken?: ReadonlySet<number>): (view: View, seconds: number) => readonly Person[] {
   const found: Resident[] = [], shown: Person[] = []
   return (view, seconds) => {
     const now = clock()
     // A bang is forgotten once everyone it moved is back where they would have been.
     while (shocks.length && now - shocks[0].t > 60) shocks.shift()
-    const n = residents(land, [view.eye[0], view.eye[2]], REACH, now, hour(), found, shocks), wet = rain() > 0.3
+    const n = residents(land, [view.eye[0], view.eye[2]], REACH, now, hour(), found, shocks, taken), wet = rain() > 0.3
     shown.length = n
     for (let i = 0; i < n; i++) {
       const r = found[i], p = (shown[i] ??= { at: r.at, yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }

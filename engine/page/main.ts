@@ -189,7 +189,9 @@ async function main() {
   // The town's residents (#218): by rule from place and from the clock every page of a world shares. `?people=0` leaves them out.
   const folkClock = { now: () => Date.now() / 1000 }
   const shocks: Shock[] = []
-  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => hour ?? 11, () => march.rain, () => folkClock.now(), shocks))
+  /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
+  const takenOff = new Set<number>()
+  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => hour ?? 11, () => march.rain, () => folkClock.now(), shocks, takenOff))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   const setHour = (h: number | null) => {
@@ -467,7 +469,7 @@ async function main() {
     if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }); ears?.blast(at, radius) }
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
-  const others = far ? presence(far, folk, over, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw })) : null
+  const others = far ? presence(far, folk, over, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw }), takenOff) : null
   if (far) folkClock.now = far.clock
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
   const wishes = asker(() => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }, () => others?.name ?? 'someone')
@@ -712,6 +714,8 @@ async function main() {
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
+  // People (#218): which residents a rule of the world has taken off their rounds.
+  Object.assign((globalThis as unknown as { engine: object }).engine, { takenOff })
   // The wand's spells, on a line of their own (#246).
   Object.assign((globalThis as unknown as { engine: object }).engine, { hands: grip, magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
 

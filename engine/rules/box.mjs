@@ -43,7 +43,7 @@ const GUEST = `(() => {
     const m = JSON.parse(json), out = []
     const flat = (a, b) => Math.hypot(a.at[0] - b[0], a.at[2] - b[b.length - 1])
     const world = {
-      now: m.now, people: m.people, keep: m.keep,
+      now: m.now, people: m.people, residents: m.residents || [], keep: m.keep,
       near: (at, within) => m.people.filter((p) => flat(p, at) <= within),
     }
     // What may be asked for here, by name (the world says which): world.actor('guide', {...}), world.gone('guide').
