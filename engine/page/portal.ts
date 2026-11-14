@@ -294,6 +294,12 @@ export async function portal(o: {
         if (s.wanted === 0 && s.stale === 0 && performance.now() - began > 100) return stats.opened = { to, ready, built: first ? built : 0, shown: shown || performance.now() - began, clear: clear || performance.now() - began, made: performance.now() - began, sectors: s.made - before, poolMb: s.poolUsed / 262144 }
       }
     },
+    /** A window to a realm, whatever is open now: one that leads there already is left as it is, another is closed first. */
+    async lead(to: string) {
+      if (gate && !closing && id === to) return null
+      if (gate) { gate = null; closing = false; if (rode !== null) { o.riding(rode); rode = null } }
+      return self.toggle(to)
+    },
     /** Closes the window: it goes in on itself. The other world stays held, so opened again it is there at once. */
     close() { if (gate) closing = true; if (rode !== null) { o.riding(rode); rode = null } },
     /** A frame: the other world is kept made round where this eye would be in it, and drawn into the window's pixels with whoever is there. Called after the page's own march into `to`. */

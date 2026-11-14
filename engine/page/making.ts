@@ -19,7 +19,7 @@ export interface Making {
   on(each: (stage: Stage, ask: Ask) => void): () => void
 }
 
-export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number, number]; toward: [number, number, number] }): Making {
+export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number, number]; toward: [number, number, number] }, /** How one steps into a realm that was made (#264, the REALMS lane: a portal opens to it). Without it, the page is opened in that realm. */ into?: (realm: string) => void): Making {
   const told = new Set<(stage: Stage, ask: Ask) => void>()
   const make = async (ask: Ask) => {
     const what = called(ask)
@@ -95,9 +95,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     cue.remove()
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)
-    // Until there is a portal to step through (the REALMS lane), stepping in opens the realm in place of this world.
     const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : done.more ? '. It will grow fuller as you play' : ''}.`, ['Step in', 'Stay here'])
-    if (step === 0) { const to = new URLSearchParams(location.search); to.set('realm', done.realm); to.delete('shared'); location.assign(`${location.pathname}?${to}`) }
+    if (step === 0) { if (into) into(done.realm); else { const to = new URLSearchParams(location.search); to.set('realm', done.realm); to.delete('shared'); location.assign(`${location.pathname}?${to}`) } }
     return done
   }
   /** Whether the world this page is in has rules: people who may hear what is said and act on it. Asked of the world, and remembered a few seconds. */

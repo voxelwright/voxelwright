@@ -103,8 +103,8 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   const headers = () => ({ 'Content-Type': 'application/json', 'X-Village-Secret': helper!.secret })
   const failed = (why: string): Done => ({ stage: 'done', state: 'refused', why })
   let last: Promise<unknown> = Promise.resolve(), busy = 0
-  /** The realm this page is in, if it is not home (`?realm=id`): what is asked for is made there. */
-  const realm = new URLSearchParams(location.search).get('realm') ?? undefined
+  /** The realm this page is in now, if it is not home (the address says, and is kept true as the page steps between realms, #264): what is asked for is made there. */
+  const realmNow = () => new URLSearchParams(location.search).get('realm') ?? undefined
   /** One thing asked of the helper, in its turn after whatever was asked before. */
   const turn = async (path: string, what: { from?: { eye: [number, number, number]; toward: [number, number, number] } } & Record<string, unknown>, each: (stage: Stage) => void): Promise<Done> => {
     const end = (done: Done) => { busy--; each(done); return done }
@@ -131,7 +131,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
     async ask(ask, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
       // Where the eye is and what is aimed at are as they were when it was asked, not when its turn comes.
-      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by(), realm })
+      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by(), realm: realmNow() })
       if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
       const before = last
       let free!: () => void
@@ -139,7 +139,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       await before
       try { return await send('/ask', body, each, end, JSON.parse(body).from) } finally { free() }
     },
-    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, from: eye(), by: by(), realm }, each),
+    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, from: eye(), by: by(), realm: realmNow() }, each),
     realm: (spec, each = () => {}) => turn('/realm', { ...spec, by: by() }, each),
     async imagine(idea) {
       if (!helper) return null
@@ -147,7 +147,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
     },
     async put(held, how, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
-      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by(), target: how.clear ? undefined : self.aim?.(), realm })
+      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by(), target: how.clear ? undefined : self.aim?.(), realm: realmNow() })
       busy++
       const before = last
       let free!: () => void

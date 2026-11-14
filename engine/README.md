@@ -497,7 +497,15 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
   picture, three quarters up to 30%, half beyond. 300 MB more of the GPU's memory while one has been opened.
 - `node test/portal.mjs --out dir --clip` checks all of it in the real page with real keys, and keeps pictures and
   a film; `--bench` prints the GPU's time for a window of each size.
-- **Not there yet**: the wheel that picks a realm (next); only the other realm's cells and people are seen through
+- **The wheel** (`page/wheel.ts`): **Tab** (or the Realms button) shows the realms the server keeps round a ring,
+  home first, each by its name and the last picture this browser had of it (kept small every five seconds while
+  the page is there; a realm never seen has a colour from its look). The one the portal's key leads to is marked,
+  and where you are says "here". A number, a click, or the arrows and Enter pick one: it becomes the selected realm
+  and a window opens to it at once, in place of any that is open. The last entry (0) is a new realm: it opens the
+  ask bar with "Create a realm called " begun, which is the making lane's flow; when the realm is ready, "Step in"
+  opens a window to it (`engine.portal.lead(id)`), where it used to load the page again. Things asked for are made
+  in the realm the page is in now. `node test/wheel.mjs` checks it with real keys.
+- **Not there yet**: only the other realm's cells and people are seen through
   the window (no living things, water or fire), unturned, unheard; others do not see your window (to show them its
   view would take a second world on each of their pages; a plain lit frame would be cheap and is not built); a
   phone has the button but its 128 MB pool may not fit twice, so it would need a smaller world behind the window

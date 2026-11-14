@@ -2441,3 +2441,23 @@ shared with other lanes' checks).
   spot; residents the rule did not take are not in `folk` and do not block or give way; a person who
   walks into a standing actor is not stopped by this (the bodies lane's side); nobody steps aside for anybody.
   `node test/apart.mjs`.
+
+## The wheel of realms (#264, `page/wheel.ts`; November 13)
+
+- **Tab**, because every letter a hand can reach is taken or in the pool `hands.ts` gives to rules' offers (P was
+  taken out of that pool for the portal). The wheel is a solid mode of its own that takes every key while it is up.
+- **A last-seen picture, not a live one.** Live would be a second world a realm (300 MB each). The page draws its
+  own canvas into a 192 x 108 one every five seconds, right after a frame (a WebGPU canvas can be read then), and
+  keeps it in `localStorage` under the realm's id as a JPEG of about 7 KB. A picture that is all dark is not kept.
+- **A name is text.** A realm's name and what it is about come from whoever made it or their model; the wheel sets
+  them with `textContent`, and its check has a realm called `<img src=x onerror=...>`.
+- **The key that picks "new" was typed into the ask bar** that the pick opened (focus moved while the key was
+  still going down). The handover waits 40 ms.
+- **Picking opens the window at once**: selecting and then pressing P felt like one step too many. `portal.lead`
+  leaves a window that already leads there, and replaces one that leads elsewhere.
+- **The maker's flow steps in by a window**: `making(hud, asker, eye, into)` takes how to step in; the page gives
+  it `engine.portal.lead`. And `ask.ts` reads which realm the page is in when each ask is made, not once when the
+  page loads, so things asked for after a step are made where one is.
+- **Not built**: more than nine realms round the ring (the first nine are shown); a wheel held and let go to pick;
+  a live picture for the realm behind an open window.
+

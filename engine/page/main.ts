@@ -16,6 +16,7 @@ import { space } from './space.ts'
 import { link } from './link.ts'
 import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
+import { wheel } from './wheel.ts'
 import { car, living } from './living.ts'
 import { person } from './person.ts'
 import { shots } from './shots.ts'
@@ -523,7 +524,9 @@ async function main() {
   /** The things made in this world, as the world tells of them (things.ts). Without a shared world there are none. */
   const made = things()
   /** What becomes of a wish: asked, and shown at its place as it goes (making.ts). */
-  const wish = making(over, wishes, gaze)
+  /** How one steps into a realm that was just made: a portal to it, once there is one (set below); until then the page is opened there. */
+  let enterRealm = (id: string) => { const to = new URLSearchParams(location.search); to.set('realm', id); to.delete('shared'); location.assign(`${location.pathname}?${to}`) }
+  const wish = making(over, wishes, gaze, (id) => enterRealm(id))
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
   over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']
@@ -531,8 +534,6 @@ async function main() {
     // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
     if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
     if (!wishes.known) return over.notice('To make things, run node helper.mjs on your machine and open the address it prints', 9000)
-    // The helper makes things in the one world it was started for (#264): the realm this page was loaded in.
-    if (realm && realm.here !== realm.first) return over.notice('Things are made in the realm this page was opened in: the helper was started for that one', 9000)
     void wish(ask)
   }
   // ── Realms (#264) ───────────────────────────────────────────────────────
@@ -906,8 +907,20 @@ async function main() {
     button.type = 'button'; button.textContent = 'Portal'; button.title = 'Open or close a portal (P)'
     button.style.cssText = 'font:600 14px system-ui;padding:10px 14px;border-radius:999px;border:0;background:rgba(20,22,28,.72);color:#fff'
     button.onclick = () => void gate.toggle()
-    buttons.append(button)
-    buttons.hidden = !phone
+    // Tab shows the wheel of realms: picking one selects it and opens a window to it; its last entry makes a new realm from words.
+    const ring = wheel({
+      hud: over, input: controls, realms: realm!, canvas,
+      lead: (id) => void gate.lead(id),
+      create: () => { over.line.show(); const line = document.querySelector<HTMLInputElement>('#line'); if (line) { line.value = 'Create a realm called '; line.dispatchEvent(new Event('input', { bubbles: true })); line.setSelectionRange(line.value.length, line.value.length) } },
+    })
+    enterRealm = (id) => { realm!.selected = id; void gate.lead(id) }
+    controls.always('Tab', (e) => { e.preventDefault(); void ring.toggle(); return true })
+    const realmsButton = button.cloneNode() as HTMLButtonElement
+    realmsButton.textContent = 'Realms'; realmsButton.title = 'Pick or make a realm (Tab)'
+    realmsButton.onclick = () => void ring.toggle()
+    // Shown on a desktop too, small in the corner: they say that there are keys for these.
+    buttons.append(button, realmsButton)
+    Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring })
   }
   portalDraw = gate ? (encoder, to, v, time) => { gate.walk(); gate.draw(encoder, to, v, flags, time) } : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })

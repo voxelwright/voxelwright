@@ -63,6 +63,7 @@ const checks = [
   ['apart', 'node', ['test/apart.mjs'], false],
   ['mind', 'node', ['test/mind.mjs'], true],
   ['portal', 'node', ['test/portal.mjs'], true],
+  ['wheel', 'node', ['test/wheel.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['rulewrite', 'node', ['test/rulewrite.mjs'], false],
