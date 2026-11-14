@@ -25,6 +25,12 @@
 // `tough` breaks (and its rule hears `broke`); one tough enough stops or glances off. With `for: seconds` the
 // numbers go back by themselves: something picked up that makes a kart faster, or slippery, for a while.
 //
+// And a thing is given somewhere to go (`world.drive(id, {to})`): a place, or a course of places, once or round
+// and round. The world's process steers it there ten times a second, as it walks an actor to its `to`: it turns
+// towards the next place, eases off for a sharp turn, goes round a living thing that is in its way ahead and
+// slows behind one it is closing on, and stops for a person on foot. The rule sets the course and the pace; it
+// does not steer. What a person rides is the person's: a course waits while they drive.
+//
 // Other racers, a landing craft, a getaway car are a rule driving living things: nothing here knows those words.
 
 import { KEPT } from './kept.mjs'
@@ -33,6 +39,8 @@ import { KEPT } from './kept.mjs'
 const MADE_MOST = 16
 /** How many lines and places a rule may have, and the longest a line and the widest a place (cells). */
 const LINES_MOST = 32, LINE_LONG = 4000
+/** The most places a course has, how near a place counts as reached (cells), how far ahead a thing looks for what is in its way and how wide (cells). */
+const COURSE_MOST = 64, REACHED = 22, AHEAD = 90, ABREAST = 17
 /** The motor's numbers a rule may set on a thing it brought, each a least and a most (cells and seconds; `tough` is the speed lost in one step that breaks it), and the longest a change may be for (seconds). */
 const TUNE = { tough: [10, 2000], top: [0, 400], power: [0, 400], grip: [0.05, 3], steer: [0, 1.5], jump: [0, 300] }, FOR_MOST = 600
 /** How near someone a living thing must be for a rule to be told of it (cells), how many it is told of, and how many one rule drives. */
@@ -129,7 +137,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         const mine = held.get(id)?.rule === rule
         if (far > NEAR && !mine) continue
         const f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), up = turned(a.pose.rot, [0, 1, 0])
-        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(stilled.has(id) ? { held: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1), ...Object.fromEntries(Object.keys(TUNE).map((k) => [k, motorOf(id)[k]])) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
+        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(stilled.has(id) ? { held: true } : {}), ...(mine && held.get(id).course ? { to: held.get(id).course.points[held.get(id).course.n] } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1), ...Object.fromEntries(Object.keys(TUNE).map((k) => [k, motorOf(id)[k]])) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
       }
       return out.sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0) || (a.near ?? Infinity) - (b.near ?? Infinity)).slice(0, TOLD_MOST)
     },
@@ -147,10 +155,19 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         if (w.hold === true) { if (!s && a.pose) stilled.set(id, { rule: rule.id, at: [...a.pose.at], rot: [...a.pose.rot] }); else if (!s) stilled.set(id, { rule: rule.id, at: null, rot: null }) }
         else if (w.hold === false) stilled.delete(id)
         else return wrong('whether a thing is held still is hold: true or false')
-        if (w.go === undefined && w.turn === undefined && w.rise === undefined && w.jump === undefined) return
+        if (w.go === undefined && w.turn === undefined && w.rise === undefined && w.jump === undefined && w.to === undefined) return
       }
       if (!was && [...held.values()].filter((h) => h.rule === rule.id).length >= DRIVEN_MOST) return wrong(`a rule drives at most ${DRIVEN_MOST} living things at once`)
-      const h = { rule: rule.id, go: axis(w.go ?? was?.go), turn: axis(w.turn ?? was?.turn), rise: axis(w.rise ?? was?.rise), jump: w.jump === true, said: 0 }
+      const h = { rule: rule.id, go: axis(w.go ?? was?.go), turn: axis(w.turn ?? was?.turn), rise: axis(w.rise ?? was?.rise), jump: w.jump === true, said: 0, course: was?.course }
+      // Somewhere to go: a place or a course of them; to: null ends it. Told go or turn outright, the rule steers again.
+      if (w.to === null || ((w.go !== undefined || w.turn !== undefined) && w.to === undefined)) h.course = undefined
+      else if (w.to !== undefined) {
+        const points = pair(w.to) ? [flat(w.to)] : Array.isArray(w.to) && w.to.length >= 1 && w.to.length <= COURSE_MOST && w.to.every(pair) ? w.to.map(flat) : null
+        if (!points) return wrong(`where a thing is to go is to: [x, z], or a course of up to ${COURSE_MOST} of them: [[x, z], ...]`)
+        h.course = { points, n: 0, loop: w.loop === true, pace: Number.isFinite(w.pace) ? Math.max(0.1, Math.min(1, w.pace)) : 1 }
+        h.go = 0; h.turn = 0
+      }
+      if (h.course && Number.isFinite(w.pace)) h.course.pace = Math.max(0.1, Math.min(1, w.pace))
       held.set(id, h)
     },
     /** Four times a second: what each rule asked of its things is said to the core again, as a rider's hands would. */
@@ -159,7 +176,59 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
       for (const [id, h] of held) {
         const a = alive.get(id)
         if (!a) { held.delete(id); continue }
-        if (now - h.said < 250 || now - (a.ridden ?? -Infinity) < 1000 || stilled.has(id)) continue
+        if (now - (a.ridden ?? -Infinity) < 1000 || stilled.has(id)) continue
+        // On a course the world steers, every time it looks: where the next place is from where the thing faces.
+        if (h.course && a.pose) {
+          const c = h.course, f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), long = Math.hypot(f[0], f[2]) || 1, ahead = [f[0] / long, f[2] / long], right = [-ahead[1], ahead[0]]
+          let to = c.points[c.n], dx = to[0] - a.pose.at[0], dz = to[1] - a.pose.at[2]
+          // Reached, or passed: a place close by that is now behind it is not turned back for (it circled one for ever).
+          if (Math.hypot(dx, dz) < REACHED || (Math.hypot(dx, dz) < REACHED * 3 && dx * ahead[0] + dz * ahead[1] < 0)) {
+            c.n++
+            if (c.n >= c.points.length) {
+              if (c.loop) c.n = 0
+              else { h.course = undefined; h.go = 0; h.turn = 0; drive(a, 0, 0, 0, false); hear(h.rule, 'arrived', { thing: id, ...(made.get(id) === h.rule ? { own: id.slice(h.rule.length + 1) } : {}), at: a.pose.at.map(Math.round) }); any = true; continue }
+            }
+            to = c.points[c.n]; dx = to[0] - a.pose.at[0]; dz = to[1] - a.pose.at[2]
+          }
+          const far = Math.hypot(dx, dz) || 1, along = (dx * ahead[0] + dz * ahead[1]) / far, across = (dx * right[0] + dz * right[1]) / far
+          let turn = Math.max(-1, Math.min(1, Math.atan2(across, along) * 1.6)), go = c.pace * (1 - 0.6 * Math.abs(turn))
+          const speed = Math.abs(a.speed ?? 0), top = motorOf(id)?.top || 100
+          // No faster than the turn can be made: into a sharp turn, or coming up to a place where the course turns sharply, it brakes first (it ran wide off the street at a hairpin).
+          let fast = top * c.pace * (1 - 0.75 * Math.abs(turn))
+          const next = c.points[c.n + 1] ?? (c.loop ? c.points[0] : null)
+          if (next && far < 30 + speed * 0.5) { const nx = next[0] - to[0], nz = next[1] - to[1], nl = Math.hypot(nx, nz) || 1, bend = (nx * ahead[0] + nz * ahead[1]) / nl; if (bend < 0.6) fast = Math.min(fast, 22 + 30 * Math.max(0, bend)) }
+          if (speed > fast + 8) go = speed > fast + 25 ? -1 : 0
+          // What is in its way ahead: a living thing is gone round on the side with more room, and not run into from behind; a person on foot is stopped for.
+          let nearest = Infinity
+          for (const [other, b] of alive) {
+            if (b === a || !b.pose) continue
+            const rx = b.pose.at[0] - a.pose.at[0], rz = b.pose.at[2] - a.pose.at[2], on = rx * ahead[0] + rz * ahead[1], off = rx * right[0] + rz * right[1]
+            // It looks further the faster it goes: a kart at its top speed is on what is 9 m ahead in two thirds of a second.
+            const reach = AHEAD + speed * 1.2, closing = speed - Math.max(0, b.speed ?? 0)
+            // How wide the other is, whichever way it stands: half its longer side, and half of this one's width beside it.
+            const wide = (b.controls.size ? Math.max(b.controls.size[0], b.controls.size[2]) / 2 : 14) + 10
+            if (on < 4 || on > reach || Math.abs(off) > Math.max(ABREAST, wide)) continue
+            // It makes for a place beside what is in its way, a body's width clear, on the side it is already nearer; pulled only a little off its line it came back and clipped it.
+            if (on < nearest) { nearest = on; turn = Math.max(-1, Math.min(1, Math.atan2(off + (off >= 0 ? -1 : 1) * (wide + 6), on) * 2.4)) }
+            // Too near to get round at this speed: it brakes, and goes round slowly.
+            // Coming up on what is dead ahead it slows to a speed it can still steer round at, braking only while it is faster than that (told to back off outright, it went to and fro a long way short).
+            if (Math.abs(off) < 12 && on < 30 + closing * 0.9) { const safe = Math.max(18, (on - 20) * 0.9); go = closing > safe + 8 ? -1 : Math.min(go, 0.3) }
+            // Right behind what it cannot get round, it waits: it does not push.
+            if (Math.abs(off) < 12 && on < 26) go = Math.min(go, 0)
+          }
+          for (const p of folk.values()) {
+            if (p.riding || p.rule === '~') continue
+            const rx = p.at[0] - a.pose.at[0], rz = p.at[2] - a.pose.at[2], on = rx * ahead[0] + rz * ahead[1], off = rx * right[0] + rz * right[1]
+            if (on > 4 && on < 20 + speed * 0.6 && Math.abs(off) < 10) go = speed > 15 ? -1 : 0
+          }
+          // Asked to go and making no way (against a kerb, a parked car, another kart): it backs out for a second, turned the other way, and tries again.
+          if (go > 0.1 && speed < 4) { c.still = (c.still ?? now); if (now - c.still > 900) { c.back = now + 1100; c.still = undefined } } else c.still = undefined
+          if (c.back > now) { go = -0.8; turn = -turn } else c.back = undefined
+          drive(a, go, turn, 0, false)
+          any = true
+          continue
+        }
+        if (now - h.said < 250) continue
         h.said = now
         // One that sleeps and is asked nothing is left asleep.
         if (!h.go && !h.turn && !h.rise && !h.jump && !a.awake) continue

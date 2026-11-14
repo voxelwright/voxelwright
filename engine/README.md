@@ -314,6 +314,13 @@ on foot as they do flying.
   middle, and stays level when driven if it has no lift (it dipped its nose as a broom does and dug in). The kept
   `craft` is that: an open hull, six seats, over water and up a beach. It hovers; it does not displace water: a
   hull that sits in the sea and rocks would be buoyancy for every body, which the core does not have.
+- **A thing given somewhere to go**: `world.drive(id, {to, loop, pace})` gives a living thing a place or a course of
+  places, and the world's process steers it ten times a second (`rules/things.mjs` `step`): towards the next
+  place, braking before a sharp turn, aiming a body's width beside a living thing ahead (by the other's own size)
+  and waiting behind it where it cannot pass, stopping for a person on foot, backing out for a second when it is
+  asked to go and makes no way. The rule hears `arrived`. What a person drives is theirs: a course waits. The
+  world knows other things and people, not the street: kerbs and parked cars are met and backed out of. Checked
+  by `test/course.mjs` (no page).
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is
