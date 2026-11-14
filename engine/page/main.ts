@@ -483,11 +483,13 @@ async function main() {
   if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
-  const wishes = asker(() => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }, () => others?.name ?? 'someone')
+  /** Where this page's eye is and looks, in whole cells: what an ask is asked from. */
+  const gaze = (): { eye: [number, number, number]; toward: [number, number, number] } => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }
+  const wishes = asker(gaze, () => others?.name ?? 'someone')
   /** The things made in this world, as the world tells of them (things.ts). Without a shared world there are none. */
   const made = things()
   /** What becomes of a wish: asked, and shown at its place as it goes (making.ts). */
-  const wish = making(over, wishes)
+  const wish = making(over, wishes, gaze)
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
   over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']

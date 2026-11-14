@@ -24,7 +24,15 @@ const CRATE = { name: 'tea crate', size: [10, 9, 8], parts: [
   ['box', 'wood', 'own', 0, 0, 0, 10, 8, 8], ['box', 'wood', '2:6', 0, 3, 0, 10, 4, 8], ['box', 'steel', 'own', 0, 8, 0, 10, 9, 8],
 ] }
 let asked = 0, last = null
-const model = async (q) => { asked++; last = q; return { text: JSON.stringify(CRATE), model: 'a kept reply', ms: 0, cost: 0 } }
+// A kept rule (someone who waves when greeted) and a kept idea for a realm, for when rules and realms are asked for.
+const WAVER = "NAME: Someone who waves\nCANNOT:\n- Wave: an actor has no moves, so it says it waves.\nRULE:\n```js\non('start', (world) => { if (!world.people.some((p) => p.mine && p.id === 'waver')) world.actor('waver', { name: 'Pim', at: [700, 4010] }) })\non('said', (world, e) => { if (/hello|wave/i.test(e.text)) world.actor('waver', { face: e.at, say: '*waves* hello, ' + e.name }) })\n```"
+const DUSK = JSON.stringify({ name: 'dusk', about: 'A quiet street at dusk. Someone called Pim stands on the pavement and waves at whoever greets them.', look: { hour: 18.5, tint: [1.1, 0.95, 0.85] }, questions: [{ ask: 'Does Pim follow you?', options: ['Yes', 'No'] }] })
+let rulesAsked = 0, imagined = 0
+const model = async (q) => {
+  if (q.system.startsWith('You write rules')) { rulesAsked++; last = q; return { text: WAVER, model: 'a kept reply', ms: 0, cost: 0 } }
+  if (q.system.startsWith('Someone in a world made of small cubes')) { imagined++; return { text: DUSK, model: 'a kept reply', ms: 0, cost: 0 } }
+  asked++; last = q; return { text: JSON.stringify(CRATE), model: 'a kept reply', ms: 0, cost: 0 }
+}
 const h = await helper({ world, port: 0, model, journal: join(dir, 'made.jsonl'), kept: join(dir, 'library') })
 const port = new URL(h.url).port
 /** A request as something that is not a browser makes it: any Host, any Origin. */
@@ -166,7 +174,7 @@ try {
   const picked = page.evaluate(() => engine.hud.choose('Which?', ['One', 'Two', 'Three']))
   await page.waitForSelector('#choice button')
   await page.keyboard.press('Digit2')
-  check(await picked === 1 && await page.evaluate(() => document.querySelector('#choice').hidden && engine.input.top === 'moving' && engine.tool === 'Charge'), 'a question is answered by its number key, which is not the tools\' while it is up')
+  check(await picked === 1 && await page.evaluate(() => document.querySelector('#choice').hidden && engine.input.live('moving') && engine.tool === 'Charge'), 'a question is answered by its number key, which is not the tools\' while it is up')
   await page.evaluate(() => { engine.pose.x += 5 })
   await page.keyboard.press('Enter')
   await page.evaluate(async () => {
@@ -205,11 +213,50 @@ try {
   check(hit && hit.material === 8 && Math.abs(hit.t - 60) < 12, `and the page draws it: a look west from 6 m off meets brick ${hit ? (hit.t / 10).toFixed(1) : '?'} m away`)
   await page.evaluate(() => Object.assign(engine.pose, { x: 70, y: 17.2, z: 406, yaw: 0, pitch: -0.197 }))
 
+  // ── Something that happens, asked for from the bar: a rule is written, tried and put in ──
+  await page.evaluate(() => Object.assign(engine.pose, { x: 70, y: 17.2, z: 406, yaw: 0, pitch: -0.197 }))
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('someone who waves when I say hello')
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => engine.asker.busy === 0 && [...document.querySelectorAll('#notices p')].some((p) => p.textContent === 'Someone who waves'), null, { timeout: 60_000 })
+  // A rule put in starts in a moment: it is running when the world says so.
+  let ruled = []
+  for (let i = 0; i < 50 && !ruled[0]?.running; i++) { ruled = await (await fetch(`${world}/world/rules`)).json(); if (!ruled[0]?.running) await new Promise((r) => setTimeout(r, 100)) }
+  check(rulesAsked === 1 && ruled.length === 1 && ruled[0].running && ruled[0].actors === 1 && last.prompt.includes('someone who waves when I say hello'), `words that say what happens become a rule, tried and put into this world: ${ruled[0]?.name}, running, with its actor`)
+  check(await page.evaluate(() => [...document.querySelectorAll('#notices p')].some((p) => p.textContent === 'One thing it could not do yet')), 'and the asker is told there was something it could not do yet')
+
+  // ── A realm asked for from the bar: fleshed out, a question, made, its rules written into it ──
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Create a realm called dusk. Someone waves at you.')
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('#choice button')
+  check(await page.evaluate(() => [...document.querySelectorAll('#choice button')].map((b) => b.textContent.replace(/^\d/, '')).join('|') === 'Make it now|Ask me first|Never mind'), 'asked for a realm, the asker chooses: made now, or asked a few things first')
+  await page.keyboard.press('Digit2')
+  await page.waitForFunction(() => document.querySelector('#choice p')?.textContent === 'Does Pim follow you?', null, { timeout: 20_000 })
+  await page.keyboard.press('Digit1')
+  await page.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('dusk is ready'), null, { timeout: 90_000 })
+  const realms = (await (await fetch(`${world}/realms`)).json()).realms.filter((r) => !r.home)
+  let inRealm = []
+  for (let i = 0; i < 50 && realms[0] && !inRealm[0]?.running; i++) { inRealm = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json(); if (!inRealm[0]?.running) await new Promise((r) => setTimeout(r, 100)) }
+  check(imagined === 1 && realms.length === 1 && realms[0].name === 'dusk' && /Does Pim follow you\? Yes\./.test(realms[0].about) && realms[0].look?.hour === 18.5, `the realm is made on the server, with what it is about, the answer given and its look (${realms[0]?.id})`)
+  check(rulesAsked === 2 && inRealm.length === 1 && inRealm[0].running && (await (await fetch(`${world}/world/rules`)).json()).length === 1, 'its rules are written into the realm, not into home')
+  await page.keyboard.press('Digit2')
+  await page.waitForFunction(() => document.querySelector('#choice').hidden)
+  // Words that are talk are said, though the bar is set to make: a question, and "I am ...".
+  const thingsBefore = await page.evaluate(() => engine.things.all.size)
+  for (const words of ['what is this place?', 'I am in the Matrix']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter') }
+  await page.waitForFunction(() => document.querySelector('#said')?.textContent.includes('Ada: I am in the Matrix'), null, { timeout: 5000 })
+  check(await page.evaluate((n) => document.querySelector('#said').textContent.includes('Ada: what is this place?') && engine.things.all.size === n && engine.asker.busy === 0, thingsBefore), 'a question and "I am ..." typed in the bar are said to whoever is there, not made into things')
+  // In a realm with one rule, what is asked for changes that rule: put again under its id.
+  const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
+  const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
+  check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && afterChange.length === 1 && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s one rule is changed and put again under its id')
+
   // ── Keys have one owner ──
   const z0 = await page.evaluate(() => engine.pose.z)
   await page.keyboard.down('KeyW'); await page.waitForTimeout(300)
   const z1 = await page.evaluate(() => engine.pose.z)
-  check(z1 < z0 - 0.5 && await page.evaluate(() => engine.input.top === 'moving'), `W moves the eye (${(z0 - z1).toFixed(1)} m north)`)
+  check(z1 < z0 - 0.5 && await page.evaluate(() => engine.input.live('moving')), `W moves the eye (${(z0 - z1).toFixed(1)} m north)`)
   // Enter opens the ask bar with W still down: its keyup goes to the line, and the eye must not walk on for ever after.
   await page.keyboard.press('Enter')
   check(await page.evaluate(() => engine.input.top === 'typing' && document.activeElement?.id === 'line' && !engine.input.held('KeyW')), 'Enter opens the ask bar: the page is typing, and no key is held')
@@ -224,7 +271,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#said')?.textContent.includes('Ada: hello 1 w'), null, { timeout: 5000 })
   const z3 = await page.evaluate(() => engine.pose.z)
   await page.waitForTimeout(200)
-  check(await page.evaluate((z) => engine.input.top === 'moving' && engine.pose.z === z, z3), 'sent, it is said, the bar is away and the eye does not walk on')
+  check(await page.evaluate((z) => engine.input.live('moving') && engine.pose.z === z, z3), 'sent, it is said, the bar is away and the eye does not walk on')
   await page.keyboard.press('Digit3')
   check(await page.evaluate(() => engine.tool === 'Big charge'), 'and keys are the page\'s again')
   // A mode a lane adds: solid, it has the keys and the click, and the page's own stand still until it is taken off.

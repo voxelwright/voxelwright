@@ -5,7 +5,7 @@
 //   node helper.mjs --world http://127.0.0.1:5761            then open the address it prints
 //
 //   --port 5762        where it listens, on this machine only
-//   --model opus       which of your models makes things
+//   --model opus       which of your models makes things and writes rules; --quick sonnet which fleshes an idea out (a short reply, wanted soon)
 //   --journal file     where what was made is written down (default ~/.village/engine/made.jsonl)
 //   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see "From a phone" in engine/README.md
 //   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
@@ -41,11 +41,15 @@ import { fieldKeys } from './make/form.mjs'
 import { LIBRARY, library } from './make/library.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
+import { imagine, realm as makeRealm } from './make/realm.mjs'
+import { write as writeRule } from './make/rules.mjs'
 import { towards } from './make/place.mjs'
 
 /** A picture is at most this much base64: the page makes it small first (page/picture.ts). */
 const WISH_MOST = 400, LINK_MOST = 2000, PICTURE_MOST = 4 << 20, BODY_MOST = PICTURE_MOST + (1 << 16)
 const PICTURES = ['image/png', 'image/jpeg', 'image/webp']
+/** A realm's id, as the world's server gives them. */
+const REALM = /^[a-z0-9][a-z0-9-]{0,39}$/
 const three = (a, most = 2 ** 30) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) <= most)
 const cells = (a, n) => Array.isArray(a) && a.length === n && a.every((v) => Number.isInteger(v) && Math.abs(v) <= 2 ** 30)
 const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').trim().slice(0, most) : '')
@@ -53,8 +57,9 @@ const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u00
 /** An ask with nothing in it but what one may hold, or (a string) why it is not one. */
 export function shaped(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'an ask is an object'
-  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
+  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh', 'realm'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
   const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true }
+  if (body.realm !== undefined) { if (typeof body.realm !== 'string' || !REALM.test(body.realm)) return 'a realm is named by its id'; ask.realm = body.realm }
   if (body.wish !== undefined && typeof body.wish !== 'string') return 'a wish is words'
   if (body.picture !== undefined) {
     const p = body.picture
@@ -101,7 +106,7 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, cannot }) {
   /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
   const shelf = kept ? library(kept) : null
   world = world.replace(/\/$/, '')
@@ -150,13 +155,59 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
     if (!same(req.headers['x-village-secret'] ?? '', secret)) return end(401, { why: 'the secret is not right: open the address the helper printed' })
     const url = new URL(req.url ?? '/', 'http://x')
     if (req.method === 'GET' && url.pathname === '/hello') return end(200, { helper: 1, world, busy })
-    if (req.method !== 'POST' || (url.pathname !== '/ask' && url.pathname !== '/put')) return end(404, { why: 'not here' })
+    if (req.method !== 'POST' || !['/ask', '/put', '/rule', '/imagine', '/realm'].includes(url.pathname)) return end(404, { why: 'not here' })
     void (async () => {
       const parts = []
       let size = 0
       for await (const chunk of req) { size += chunk.length; if (size > BODY_MOST) return end(413, { why: 'too much' }); parts.push(chunk) }
       let body
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return end(400, { why: 'not JSON' }) }
+      // Which of the server's worlds this is for: home, or the realm the asking page is in. Never another server.
+      if (body?.realm !== undefined && (typeof body.realm !== 'string' || !REALM.test(body.realm))) return end(400, { why: 'a realm is named by its id' })
+      const server = world, here = url.pathname !== '/realm' && typeof body?.realm === 'string' ? `${world}/realm/${body.realm}` : world
+      const stream = async (work) => {
+        if (busy) return end(429, { why: 'one thing at a time: something is being made' })
+        busy = true
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', ...cors })
+        const line = (o) => res.write(JSON.stringify(o) + '\n')
+        try { await work(line, (words, stage) => { say(`  ${words}`); if (stage) line(stage) }) } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not do it' }) } finally { busy = false; res.end() }
+      }
+      const place = (f) => (f && three(f.eye) && three(f.toward, 1e6) ? { at: [Math.round(f.eye[0]), Math.round(f.eye[1]) - 16, Math.round(f.eye[2])], facing: Math.abs(f.toward[0]) > Math.abs(f.toward[2]) ? (f.toward[0] > 0 ? 'east' : 'west') : f.toward[2] > 0 ? 'south' : 'north' } : null)
+      if (url.pathname === '/rule') {
+        // A rule for the world the asker is in: what its people do, a game, a power. {wish, from, by, change, realm}
+        const wish = text(body?.wish, 20_000), where = place(body?.from), change = body?.change
+        if (!wish || !where) return end(400, { why: 'a rule is asked for with a wish and where the asker stands: {wish, from: {eye, toward}}' })
+        if (change !== undefined && (typeof change !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(change))) return end(400, { why: 'the rule to change is named by its id' })
+        return stream(async (line, tell) => {
+          say(`asked by ${text(body.by, 24) || 'someone'} for a rule: ${wish}`)
+          // In a realm with one rule (the realm's own, written when it was made), what is asked for is a change to
+          // that rule: a power, a new habit of its people. It is put again under its id, so nothing starts over.
+          let changing = change
+          if (!changing && typeof body.realm === 'string') { const there = await (await fetch(`${here}/world/rules`)).json().catch(() => []); if (Array.isArray(there) && there.length === 1) changing = there[0].id }
+          const r = await writeRule({ wish, world: here, where, change: changing, by: text(body.by, 24) || 'someone', model, cannot, say: tell })
+          say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
+          line({ stage: 'done', state: r.state, why: r.why, rule: r.id, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries })
+        })
+      }
+      if (url.pathname === '/imagine') {
+        // An idea for a realm, fleshed out before anything is built. {idea}
+        const idea = text(body?.idea, 4000)
+        if (!idea) return end(400, { why: 'say what the realm is: {idea}' })
+        if (busy) return end(429, { why: 'one thing at a time: something is being made' })
+        busy = true
+        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, questions: r.questions }) } finally { busy = false }
+      }
+      if (url.pathname === '/realm') {
+        // A realm made on the world's server and its rules written into it. {name, about, look, answers, by}
+        const answers = Array.isArray(body?.answers) ? body.answers.slice(0, 3).map((a) => ({ ask: text(a?.ask, 80), answer: text(a?.answer, 60) })).filter((a) => a.ask && a.answer) : []
+        if (!text(body?.name, 40)) return end(400, { why: 'a realm has a name: {name, about}' })
+        return stream(async (line, tell) => {
+          say(`asked by ${text(body.by, 24) || 'someone'} for a realm: ${text(body.name, 40)}`)
+          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, answers, by: text(body.by, 24) || 'someone', model, cannot, say: tell })
+          say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
+          line({ stage: 'done', state: r.state, why: r.why, realm: r.realm, rule: r.rule, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries })
+        })
+      }
       if (url.pathname === '/put') {
         // A held thing, stood where the asker now says: no model is asked. {held, from, clear, by}
         const f = body?.from, h = typeof body?.held === 'string' ? holds.get(body.held) : null
@@ -170,7 +221,7 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         try {
           // Where it goes now: what the asker aims at (a point or a box, as in an ask), else what is ahead of the eye.
           const t = body.target, to = t && cells(t.point, 3) ? { point: t.point } : t && cells(t.box, 6) && [0, 1, 2].every((a) => t.box[a] < t.box[a + 3]) ? { box: t.box } : undefined
-          const r = await put({ hold: h.hold, world, where: aimed(to, { eye: f.eye.map(Math.round), toward: f.toward }).where, clear: body.clear === true, by: text(body.by, 24) || 'someone', journal, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+          const r = await put({ hold: h.hold, world: here, where: aimed(to, { eye: f.eye.map(Math.round), toward: f.toward }).where, clear: body.clear === true, by: text(body.by, 24) || 'someone', journal, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
           ended(r, line)
         } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not place it' }) } finally { busy = false; res.end() }
         return
@@ -205,7 +256,7 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         const known = plain && !ask.fresh ? await shelf.find(ask.wish, apart, fieldKeys()) : null
         if (known) { say(`  made before as ${known.name}: no model is asked`); line({ stage: 'known', name: known.name }) }
         const from = known ? async () => ({ text: known.reply, model: `kept (${known.model})`, ms: 0, cost: 0 }) : model
-        const run = (how) => make({ wish: ask.wish, picture, page, world, where, fill, facing, grow, by: ask.by, journal, model: how, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+        const run = (how) => make({ wish: ask.wish, picture, page, world: here, where, fill, facing, grow, by: ask.by, journal, model: how, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
         let r = await run(from)
         // What was kept could not be used after all (the form has moved on since): the model is asked, as if nothing had been kept.
         if (known && r.state === 'refused') { say('  what was kept could not be used: asking the model'); r = await run(model) }
@@ -235,7 +286,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)
 }

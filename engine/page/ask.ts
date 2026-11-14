@@ -33,11 +33,15 @@ export type Stage =
   | { stage: 'shaped'; name: string; size: [number, number, number]; facing: string }
   | { stage: 'refused'; why: string }
   | { stage: 'note'; why: string }
+  | { stage: 'writing'; try: number }
+  | { stage: 'trying'; name: string }
+  | { stage: 'putting'; name: string }
+  | { stage: 'realm'; id: string; name: string }
   | { stage: 'sending'; id: string; name: string; at: [number, number, number]; size: [number, number, number]; facing: string }
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
 /** `held`: it is made and no place near would take it. `held` is what `put` takes to stand it where the asker says next. */
-export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
+export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
 
 export interface Asker {
   /** Whether this page knows of a helper (it may not be running: `hello` asks it). */
@@ -55,6 +59,16 @@ export interface Asker {
    * asked for, with whatever is there emptied. No model is asked. Resolves as `ask` does.
    */
   put(held: Done, how: { clear: boolean }, each?: (stage: Stage) => void): Promise<Done>
+  /**
+   * Asks for a rule: what the people of this world do, a game in it, a power (#264). The asker's own model writes
+   * it, it is tried in a world of its own, and put into this one. `change` is the id of a rule that is here, to be
+   * changed as asked: it keeps its actors and what it kept. Resolves as `ask` does, with `rule`, `cannot`, `rough`.
+   */
+  rule(wish: string, how?: { change?: string }, each?: (stage: Stage) => void): Promise<Done>
+  /** An idea for a realm, fleshed out by the asker's own model before anything is built: what it is about, how it looks, and a few questions where the idea leaves a choice open. Null if it could not be. */
+  imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; questions: { ask: string; options: string[] }[] } | null>
+  /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
+  realm(spec: { name: string; about: string; look?: unknown; answers?: { ask: string; answer: string }[] }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made or waiting. */
   readonly busy: number
   /**
@@ -87,6 +101,19 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   const headers = () => ({ 'Content-Type': 'application/json', 'X-Village-Secret': helper!.secret })
   const failed = (why: string): Done => ({ stage: 'done', state: 'refused', why })
   let last: Promise<unknown> = Promise.resolve(), busy = 0
+  /** The realm this page is in, if it is not home (`?realm=id`): what is asked for is made there. */
+  const realm = new URLSearchParams(location.search).get('realm') ?? undefined
+  /** One thing asked of the helper, in its turn after whatever was asked before. */
+  const turn = async (path: string, what: { from?: { eye: [number, number, number]; toward: [number, number, number] } } & Record<string, unknown>, each: (stage: Stage) => void): Promise<Done> => {
+    const end = (done: Done) => { busy--; each(done); return done }
+    const body = JSON.stringify(what)
+    if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
+    const before = last
+    let free!: () => void
+    last = new Promise<void>((r) => { free = r })
+    await before
+    try { return await send(path, body, each, end, what.from ?? eye()) } finally { free() }
+  }
   const self: Asker = {
     aim: null,
     get busy() { return busy },
@@ -98,7 +125,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
     async ask(ask, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
       // Where the eye is and what is aimed at are as they were when it was asked, not when its turn comes.
-      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by() })
+      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by(), realm })
       if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
       const before = last
       let free!: () => void
@@ -106,9 +133,15 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       await before
       try { return await send('/ask', body, each, end, JSON.parse(body).from) } finally { free() }
     },
+    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, from: eye(), by: by(), realm }, each),
+    realm: (spec, each = () => {}) => turn('/realm', { ...spec, by: by() }, each),
+    async imagine(idea) {
+      if (!helper) return null
+      try { const r = await fetch(`${helper.url}/imagine`, { method: 'POST', headers: headers(), body: JSON.stringify({ idea }) }); const v = await r.json(); return r.ok && v.name ? v : null } catch { return null }
+    },
     async put(held, how, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
-      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by(), target: how.clear ? undefined : self.aim?.() })
+      const from = how.clear ? asked.get(held) ?? eye() : eye(), body = JSON.stringify({ held: held.held, clear: how.clear, from, by: by(), target: how.clear ? undefined : self.aim?.(), realm })
       busy++
       const before = last
       let free!: () => void

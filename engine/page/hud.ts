@@ -70,7 +70,8 @@ export function hud(input: Input): Hud {
   for (const f of [picked, taken]) { f.type = 'file'; f.accept = 'image/*'; f.hidden = true }
   taken.setAttribute('capture', 'environment')
   camera.hidden = !matchMedia('(pointer: coarse)').matches
-  line.maxLength = 400
+  // A realm is described at length: the line takes as much as a rule's ask reads.
+  line.maxLength = 4000
   line.autocomplete = 'off'
   line.enterKeyHint = 'send'
   line.setAttribute('aria-label', 'What to make')
