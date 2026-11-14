@@ -25,7 +25,7 @@ export interface WorldOptions {
   bricks?: boolean
   /** With `bricks`, unless `finesun=0`: the sun's maps say where a cell of finer cells is, so that its shadow is asked of the world at its own grain (march.ts `sunlitText`). */
   fineSun?: boolean
-  /** Edits of rows, one after another, as one edit that leaves the column from x0, z0 to x1, z1 the same in the copy `lod` times coarser (the core's `merge_rows`). */
+  /** Edits, one after another, as one edit of rows that leaves the column from x0, z0 to x1, z1 the same in the copy `lod` times coarser when put after their balls and blasts (the core's `merge_rows`). */
   merge(edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit
 }
 
@@ -358,15 +358,22 @@ export class World {
   }
 
   /**
-   * A column's edits made fewer: each run of edits of rows, one after another, becomes one. A column that burns is
-   * edited ten times a second, and every sector of it made again is told all of them.
+   * A column's edits made fewer: once eight of them are rows, all its rows become one edit, put after every ball
+   * and blast (the core tells each of those to the rows before it, so nothing is lost by the order). A column that
+   * burns is edited ten times a second, and every sector of it made again is told all of them; a far column holds
+   * every row of what is built in it, and one edit of rows already merged is taken as it is.
+   * With an edit of finer cells among them the order is kept: each run of edits of rows becomes one.
    */
   private tidy(reach: Edit[], level: number, sx: number, sz: number) {
-    const size = SIDE << level, out: Edit[] = []
-    for (let i = 0; i < reach.length;) {
+    const size = SIDE << level, out: Edit[] = [], rows = (e: Edit) => e.words[0] !== 0 && e.words[0] < 3
+    const merge = (edits: Edit[]) => this.options.merge(edits, level, sx * size, (sx + 1) * size, sz * size, (sz + 1) * size)
+    if (!reach.some((e) => e.words[0] >= 3)) {
+      if (reach.filter(rows).length < 8) return
+      out.push(...reach.filter((e) => e.words[0] === 0), merge(reach))
+    } else for (let i = 0; i < reach.length;) {
       let j = i
-      while (j < reach.length && reach[j].words[0] !== 0 && reach[j].words[0] < 3) j++
-      if (j - i >= 2) out.push(this.options.merge(reach.slice(i, j), level, sx * size, (sx + 1) * size, sz * size, (sz + 1) * size))
+      while (j < reach.length && rows(reach[j])) j++
+      if (j - i >= 2) out.push(merge(reach.slice(i, j)))
       else if (j > i) out.push(reach[i])
       if (j < reach.length) out.push(reach[j])
       i = j + 1

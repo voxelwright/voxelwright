@@ -79,7 +79,7 @@ async function main() {
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
-  /** Edits of rows, one after another, as one edit of rows a column of sectors reads the same (the core's `merge_rows`). */
+  /** Edits, one after another, as one edit of rows a column of sectors reads the same after their balls and blasts (the core's `merge_rows`). */
   const merge = (edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit => {
     const words = stream(edits), room = core.edits_room(words.length)
     new Int32Array(core.memory.buffer, room, words.length).set(words)

@@ -44,17 +44,39 @@ pub fn fill(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: &[Edit]
 pub fn fill_of<'a>(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: impl Iterator<Item = &'a Edit>) {
     s.start(sx, sy, sz, lod);
     city::make(s);
+    let lumps = scratch::lumps;
+    if lod == 0 {
+        for e in edits {
+            match e {
+                Edit::Ball { centre, radius, kind: 0 } => s.blast(*centre, *radius, lumps(centre)),
+                Edit::Ball { centre, radius, kind } => s.ball(*centre, *radius, scratch::plain(*kind), 0, 0, None),
+                Edit::Runs(runs) | Edit::Rows(runs) => s.runs(runs),
+                // A sector that does not take them says so itself (`Scratch::refused`).
+                Edit::Fine(runs, shift) => drop(s.fine_runs(runs, *shift)),
+            }
+        }
+        return;
+    }
+    // A coarser copy: balls and blasts meet its own cells in order, and the rows are laid in the finest cells, a
+    // later over an earlier, each ball and blast told to them as it comes; what they came to is put in last
+    // (`Scratch::rows`). So a coarse cell shows what the finest copy holds wherever a row has been.
+    let mut laid = scratch::Laid::of(s);
     for e in edits {
         match e {
-            // The edge's lumps are the blast's own: the same wherever it is worked out.
-            Edit::Ball { centre, radius, kind: 0 } => s.blast(*centre, *radius, hash::hash(centre[0], centre[2], centre[1] as u32)),
-            Edit::Ball { centre, radius, kind } => s.ball(*centre, *radius, scratch::plain(*kind), 0, 0, None),
-            Edit::Runs(runs) => s.runs(runs, true),
-            Edit::Rows(runs) => s.runs(runs, false),
-            // A sector that does not take them says so itself (`Scratch::refused`).
+            Edit::Ball { centre, radius, kind: 0 } => {
+                s.blast(*centre, *radius, lumps(centre));
+                laid.blast(*centre, *radius, lumps(centre));
+            }
+            Edit::Ball { centre, radius, kind } => {
+                s.ball(*centre, *radius, scratch::plain(*kind), 0, 0, None);
+                laid.ball(*centre, *radius);
+            }
+            Edit::Runs(runs) => laid.take(runs, lod >= 2),
+            Edit::Rows(runs) => laid.take(runs, false),
             Edit::Fine(runs, shift) => drop(s.fine_runs(runs, *shift)),
         }
     }
+    s.rows(&laid.rows());
 }
 
 /// One sector of the world as it stands, as a tree.
@@ -128,9 +150,9 @@ pub extern "C" fn edits_room(words: usize) -> *mut i32 {
     })
 }
 
-/// The edits in the room, all of rows, as one edit of rows that leaves a column of sectors the same in the copy
-/// `lod` times coarser: the column from `x0`, `z0` up to `x1`, `z1` in the finest cells. Returns how many words it
-/// is; they are at `merged_words`.
+/// The edits in the room as one edit of rows that leaves a column of sectors the same in the copy `lod` times
+/// coarser when it is put after every ball and blast among them (`scratch::merged`): the column from `x0`, `z0` up
+/// to `x1`, `z1` in the finest cells. Returns how many words it is; they are at `merged_words`.
 #[unsafe(no_mangle)]
 pub extern "C" fn merge_rows(lod: u32, x0: i32, x1: i32, z0: i32, z1: i32) -> usize {
     INSTANCE.with_borrow_mut(|i| {

@@ -998,6 +998,8 @@ node test/versus.mjs --out dir --blind   # the same, and sheets for a judge with
 node test/aims.mjs            # every shot of the board still faces its thing
 node test/clip.mjs --row rubble --out dir   # a row of the board filmed as the page shows it, with the gaps between frames
 node test/look.mjs --out file.png --at x,y,z --look yaw,pitch   # one look, with settings
+node test/far-edits.mjs --name after                             # a road and thin walls laid as edits, seen from on foot, 100 m and 400 m (~/.village/engine/far)
+node test/core-time.mjs --rows 45000                             # what a sector with that many rows of edits costs at each level
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world

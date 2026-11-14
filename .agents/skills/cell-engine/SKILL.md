@@ -1797,7 +1797,8 @@ borrow stays taken), so there must be none.
   sets or empties it, a later row over an earlier, one fill a row. Counting how much of the cell the rows filled
   could not take anything away again (a thing deleted stayed in the far copies) and made a hash-map update for each
   fine cell a row covered (131,072 for one row across a sector 256 times coarser). A fine thing thinner than a
-  coarse cell is now in a far copy only where a row of it passes through that cell's middle.
+  coarse cell is now in a far copy only where a row of it passes through that cell's middle. (Still so for finer
+  cells; rows of the world's own cells no longer: "What edits come to far away", below.)
 - **An edit cut short is not read**, nor anything after it (where the next begins is not known); a count below zero
   or past the numbers there are is the same. Places at the ends of the numbers are worked out in 64 bits.
 - **The march's text is 597cd71a's**, and with nothing fine the switch reads the same on both, timed turn about on
@@ -2713,7 +2714,7 @@ rule out puts back what they replaced. What cost time, and what to keep:
   A layer one cell thick on sloping ground therefore shows as stripes along the contours from 30 m off, and one
   four or eight thick still does from high above, because the coarse cell that holds the ground's top is not
   always the one sampled. Roads are told to be four thick. The mend is in the core, not done: show a coarse cell
-  that holds the ground's top as the top is after edits.
+  that holds the ground's top as the top is after edits. (Mended since: "What edits come to far away", below.)
 - **A model writes shapes, not rows.** Given boxes alone it built a ring well (boxes are a ring's own form) but
   needed three askings; for a track on a slope it took 417 s, spent 325 looks finding the ground, and asked for a
   line that follows it. Given `line`, `loop`, `posts`, `steps` it built both on the first asking in 37 and 44 s.
@@ -2781,3 +2782,69 @@ rule out puts back what they replaced. What cost time, and what to keep:
   the day too), and in the middle beside what it is about; the newest stand first after home and the selected
   one. The server says it (`made`: the file's birth, asked once). Made in the same minute they still read alike.
 
+## What edits come to far away (#140, `scratch.rs` `Laid`, `Scratch::rows`; November 14)
+
+A coarser copy used to take a row of an edit only where it ran through a coarse cell's middle (one line in 4, 16,
+64): a path one cell wide was in 30 of the 64 cells it crossed at twice the size and in none of them from four
+times up; a wall one cell thick the same. Built roads striped, thin things were not there.
+
+- **No rule put to coarse cells edit by edit can be right.** Fill a cell because a thin row touches it, and the same
+  rows emptied later cannot know the cell was solid only for them: a ghost. So the rows are kept as the finest
+  cells hold them (`Laid`: every row, a later over an earlier, line by line), and a coarse cell is decided once,
+  last, from what they came to.
+- **The town's own rule, followed**: a wall touches (`Meet::Touch`), and the coarse cell that holds the ground's
+  top is solid and is the surface's kind. So a cell any row fills is solid, and its kind is that of the highest row
+  that fills it. A cell no row fills is air once rows have emptied half of it or more. Not "all of it": the town's
+  cells are solid by touch, so a house's edge cell is mostly air already, and a house taken away would leave a
+  crust. Not "through the middle" either: a ditch then comes and goes along the contours as the path did. Half
+  leaves a nick or a thin ditch out of far copies and takes a wall two cells thick out of both cells it straddles.
+- **Taking away what stood on the ground empties air, and must not dig.** A coarse cell the ground's top passes
+  through is mostly air: with "half of the cell", a box built and taken away left a pit under it wherever the
+  ground's top lay in the lower half of its cell (213 cells at twice the size in the test, some at every level).
+  In such a cell (anywhere between the lowest and highest of its column's ground and its four neighbours', each at
+  the column's middle as the town's far copies take it) only what is emptied under the lowest of those tops
+  counts, against that much of the cell; or the cell emptied whole. The ground's top at one column's middle alone
+  was not enough: 11 cells still changed, where the ground under a row was lower than at the middle. What it
+  costs: the ground is asked once for each coarse column an emptying row is in, and its neighbours.
+- **A ball or a blast after the rows is told to them** (`Laid::blast`, `Laid::ball`): each filled cell of a row is
+  asked what the finest copy asks (`blown`: the material's reach and the same lumps), a filled ball takes the rows
+  inside it away. Without it a wall built and then blasted stood whole from far off, and what fell from it after
+  left a ghost. The blast asks cell by cell only between the least and the most a material gives; nearer and
+  further are settled a row at a time.
+- **A piece taken out of what far copies hold solid** (a house, from four times coarser: `whole`) still empties each
+  of its lines from first cell to last, but no longer where an earlier edit filled: a ring taken away used to take
+  what stood inside it.
+- **`merged` keeps every row** for a column at every level; it used to keep one line in 4^k. A far column therefore
+  holds all the rows of what is built in it. What that costs (M1 Pro, one sector, the town's own 2.0 to 2.5 ms
+  included; `node test/core-time.mjs --rows N`): 45,000 rows (the most one build may have), 256 times coarser:
+  7.4 ms told the edits one after another (2.2 before), 5.2 ms to merge them once (0.3), 2.8 ms from the merged
+  rows, and 2.7 ms with one more edit after them. Up to 64 times coarser nothing is over 0.7 ms dearer. 800,000
+  rows: 78 ms to merge once at 256 times coarser (4.2), 7.5 ms a sector after. Rows that come already laid are
+  kept as they came (`Laid::base`) and only the lines an edit touches are taken out: with a tree map a line for
+  all of them, one small edit beside a built place cost every far sector 5 ms.
+- **The page folds blasts into the merge** (`world.ts` `tidy`, `merged`): once eight of a column's edits are rows,
+  all its rows become one edit put after every ball and blast, each of which the core has told to the rows before
+  it. It is the same sector at every level, the finest too (a test holds it, and tidying again after more edits).
+  Merging only the runs of rows between two blasts, as before, left a street coming down (400 edits, 100 blasts,
+  45,000 rows; `core-time.mjs --ruin`) at 9 to 17 ms a far sector against 2 on main, because rows after a blast
+  could never be taken as they came. Folded: 2.3 to 3.9 ms a far sector (main 1.7 to 2.7), 3 to 4 ms with eight
+  edits more, and 2 to 4 ms to merge those in on the page's own thread (main 2.6). What is still dear is the first
+  merge of a long history told all at once (a page joining a ruined world): 13 to 23 ms a far column and level,
+  once (main 2.6).
+- **The page pays too**: a far column's ask to a worker carries every row (20 bytes each: 0.9 MB for 45,000), and
+  the page keeps a merged copy for each level a column of it is made at.
+- **Not done**: rows of finer cells (`fine_runs`, tags 3 and 4) are still taken by a coarse cell's middle, in
+  order, before the rows of cells. Emptying is counted only in cells up to 2^10 across. A thin thing is as thick
+  as a coarse cell far off (a fence at 400 m is a line 1.6 m wide), and a road laid on the ground stands a coarse
+  cell proud where its cells are in the cell over the ground's top: the same step the land has there. What stands
+  on the ground and is taken away (a tree's foot, a wall's) leaves its kind on the ground's cell far off, and a
+  dig into a steep slope is not seen in the cells the slope's top passes through. Two thick posts on one line of
+  rows, taken away from four times coarser up, still empty the line between them (`whole`), through a rise in the
+  ground if one is there. A ditch one cell wide shows at twice the size where the ground is one sheet of its cell.
+- **`shared` fails one line in four runs on main too** (November 14): "the world says what a page's looks meet (4 of
+  5)", a look that meets wood 7.5 m off at 687, 195, 4010 where the world has air, in the finest copy. It is not
+  from this change (the same cell on a checkout of main); `all.mjs` runs it again alone and it passes.
+- `node test/far-edits.mjs --name x` lays a road, a path one cell wide and two thin walls on the plain in a world
+  of its own and keeps pictures from on foot, 100 m, 400 m and aslant in `~/.village/engine/far/` (`--ruin`: blasts what stands by the street and looks from above);
+  `node test/core-time.mjs --rows 45000 [--wasm other.wasm]` times a sector with that many rows at each level,
+  `--ruin` a street coming down.
