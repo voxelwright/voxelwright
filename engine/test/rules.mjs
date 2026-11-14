@@ -5,7 +5,9 @@
 //   node test/rules.mjs [--out picture.png]
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { MessageChannel } from 'node:worker_threads'
 import { join } from 'node:path'
+import { rules as keep } from '../rules/run.mjs'
 import { arg, chrome, serve } from './kit.mjs'
 
 const file = join(mkdtempSync(join(tmpdir(), 'engine-rules-')), 'world.log')
@@ -38,6 +40,28 @@ on('said', (world, e) => {
   if (/how many/i.test(e.text)) world.actor('guide', { face: e.at, say: 'I have heard ' + world.keep.heard + ' things.' })
 })`
 try {
+  // The clock on a rule is kept by the world's process, and that process can be busy with its own work (a big
+  // blast, hundreds of edits). Found by the realms lane: a healthy rule put in then was stopped as slow. So here
+  // the keeper is held up exactly as the world would hold it: inside the handling of a message (as an ask is),
+  // this thread does nothing for a second and a half while a rule's answer waits to be read.
+  {
+    const keeper = keep({ people: () => [], residents: () => [], does: () => ['actor', 'gone'], obey: () => {} })
+    const { port1, port2 } = new MessageChannel()
+    /** Does something and then nothing for so long, inside the handling of a message. */
+    const held = (first, ms) => new Promise((done) => { port1.once('message', () => { first(); for (const until = performance.now() + ms; performance.now() < until;); done() }); port2.postMessage(0) })
+    keeper.put({ id: 'steady', name: 'steady', by: 'tester', source: `on('tick', () => {})` }, 'put')
+    await until('it starts', async () => keeper.doing(() => 0)[0].running || keeper.doing(() => 0)[0].error, 15000)
+    for (let i = 0; i < 3; i++) { await held(() => keeper.happen('tick', { dt: 0.5 }), 1500); await wait(200) }
+    port1.close()
+    const steady = keeper.doing(() => 0)[0]
+    check(steady.running && steady.error === '' && steady.calls === 3, `a rule is not stopped for the time the world itself was busy (${steady.error || `${steady.calls} calls, running`})`)
+    keeper.put({ id: 'stuck', name: 'stuck', by: 'tester', source: `on('tick', () => { const big = 'x'.repeat(200000); for (let i = 0; i < 100000; i++) big.split('x').join('y') })` }, 'put')
+    await until('it starts', async () => keeper.doing(() => 0)[1].running, 15000)
+    keeper.happen('tick', { dt: 0.5 })
+    await until('the clock ends it', async () => !keeper.doing(() => 0)[1].running, 8000)
+    check(/took over 1000 ms/.test(keeper.doing(() => 0)[1].error), 'and one that is truly at work for over a second is still ended by the clock')
+    keeper.drop('steady'); keeper.drop('stuck')
+  }
   await post('join', { by: 'wren', at: [700, 4060] })
   check((await rule('greeter', GREETER, 'Someone who comes when called')).asked, 'a rule is taken')
   await until('the rule runs', async () => (await how('greeter'))?.actors === 1)

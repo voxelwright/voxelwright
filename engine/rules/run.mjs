@@ -10,7 +10,15 @@ import { Worker } from 'node:worker_threads'
 /** The most rules a world may have: each is a thread and an interpreter (about 40 MB at most). */
 export const RULES_MOST = 16
 /** How long a rule's thread may take to start and run the rule's own text, and how long one call may take, by the clock (ms). Generous: a busy machine is slow, and nothing waits on a rule but the rule. */
-const START_MOST = 10_000, CALL_MOST = 1000
+const START_MOST = 30_000, CALL_MOST = 1000
+/**
+ * The clock is this process's own, and this process can be busy with the world's work (a big blast, hundreds of
+ * edits that fall) or held up with the whole machine. Time it could not have read an answer in is not time the rule
+ * took: so the clock goes by beats, and a beat that comes late counts as one beat and a half at most. A healthy
+ * rule put into a busy world was stopped as slow to start (the realms lane, November 13) when one deadline was set
+ * for each call.
+ */
+const BEAT = 100, BEAT_MOST = 150
 /** A call that took the rule's own thread longer than this (ms) counts against it, though it answered. */
 const SLOW = 100
 /** Failures count one each and a good call takes a quarter off: at five the rule is stopped. One that fails four times in five is stopped as surely as one that always fails. */
@@ -30,24 +38,31 @@ export function rules({ people, residents = () => [], does, obey }) {
   const stop = (rule, why) => {
     if (rule.stopped) return
     rule.stopped = true; rule.error = why
-    clearTimeout(rule.timer)
+    rule.owed = null
     rule.waiting.length = 0; rule.at = null
     void rule.thread?.terminate()
   }
+  // What each rule's thread owes (its start, an answer) runs down by beats; one that runs out is ended.
+  let last = performance.now()
+  setInterval(() => {
+    const now = performance.now(), passed = Math.min(now - last, BEAT_MOST)
+    last = now
+    for (const rule of all.values()) if (rule.owed && !rule.stopped && !rule.replaced && (rule.owed.left -= passed) <= 0) stop(rule, rule.owed.why)
+  }, BEAT).unref()
   const fault = (rule, why) => { rule.error = why; if ((rule.strikes += 1) >= STRIKES) stop(rule, `stopped after failing too often: ${why}`) }
   /** The next thing that waits is sent, if the rule is free. */
   const send = (rule) => {
     if (rule.stopped || !rule.listens || rule.at || !rule.waiting.length) return
     const { event, e } = rule.waiting.shift(), now = Date.now()
     rule.at = { n: ++rule.sent, event }
-    rule.timer = setTimeout(() => stop(rule, `stopped: a call (${event}) took over ${CALL_MOST} ms`), CALL_MOST)
+    rule.owed = { left: CALL_MOST, why: `stopped: a call (${event}) took over ${CALL_MOST} ms` }
     rule.thread.postMessage({ n: rule.at.n, json: JSON.stringify({ event, e, now: now / 1000, people: people(rule.id), residents: residents(), keep: rule.keep, does: does() }) })
   }
   const answered = (rule, m) => {
     if (m.failed !== undefined) return stop(rule, String(m.failed).slice(0, 300))
-    if (m.listens) { clearTimeout(rule.timer); rule.listens = new Set(Array.isArray(m.listens) ? m.listens.filter((n) => typeof n === 'string').slice(0, 32) : []); rule.waiting = rule.waiting.filter((w) => rule.listens.has(w.event)); return send(rule) }
+    if (m.listens) { rule.owed = null; rule.listens = new Set(Array.isArray(m.listens) ? m.listens.filter((n) => typeof n === 'string').slice(0, 32) : []); rule.waiting = rule.waiting.filter((w) => rule.listens.has(w.event)); return send(rule) }
     if (!rule.at || m.n !== rule.at.n) return
-    clearTimeout(rule.timer)
+    rule.owed = null
     const took = Number.isFinite(m.ms) ? m.ms : 0, event = rule.at.event
     rule.at = null
     rule.calls++; rule.ms += took; rule.worst = Math.max(rule.worst, took)
@@ -72,20 +87,20 @@ export function rules({ people, residents = () => [], does, obey }) {
     put(r, why, kept) {
       const old = all.get(r.id)
       if (!old && all.size >= RULES_MOST) return
-      if (old) { old.replaced = true; clearTimeout(old.timer); void old.thread?.terminate() }
-      const rule = { id: r.id, name: r.name, by: r.by, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, timer: null, keep: old?.keep ?? kept ?? {}, error: '', strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
+      if (old) { old.replaced = true; old.owed = null; void old.thread?.terminate() }
+      const rule = { id: r.id, name: r.name, by: r.by, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, owed: null, keep: old?.keep ?? kept ?? {}, error: '', strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
       all.set(r.id, rule)
       // A thread that cannot even be started (the machine has no more to give) is a rule that is stopped, and no more.
       let thread
       try { thread = rule.thread = new Worker(new URL('./thread.mjs', import.meta.url), { workerData: { source: r.source }, resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16 } }) } catch (e) { return stop(rule, `stopped: no thread could be started for it (${String(e?.message ?? e).slice(0, 200)})`) }
-      rule.timer = setTimeout(() => stop(rule, `stopped: the rule took over ${START_MOST / 1000} s to start`), START_MOST)
+      rule.owed = { left: START_MOST, why: `stopped: the rule took over ${START_MOST / 1000} s to start` }
       // Whatever a thread does, here it is a message or an ending: nothing of a rule's is thrown into the world's process.
       thread.on('message', (m) => { try { if (!rule.replaced && m && typeof m === 'object') answered(rule, m) } catch (e) { stop(rule, `stopped: ${String(e).slice(0, 200)}`) } })
       thread.on('error', (e) => { if (!rule.replaced) stop(rule, `stopped: its thread failed (${String(e?.message ?? e).slice(0, 200)})`) })
       thread.on('exit', () => { if (!rule.replaced) stop(rule, 'stopped: its thread ended') })
     },
     /** A rule is taken out. */
-    drop(id) { const rule = all.get(id); if (!rule) return; rule.replaced = true; clearTimeout(rule.timer); void rule.thread?.terminate(); all.delete(id) },
+    drop(id) { const rule = all.get(id); if (!rule) return; rule.replaced = true; rule.owed = null; void rule.thread?.terminate(); all.delete(id) },
     /** Something happened: every rule that listens for it (or the one rule `only`, if it does) is sent it, when it is free. A tick is not kept for a rule still at work on the last one. */
     happen(event, e, only) {
       for (const rule of all.values()) {
