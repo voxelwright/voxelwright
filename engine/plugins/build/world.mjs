@@ -36,6 +36,8 @@ export const CELLS_MOST = 1_000_000, ROWS_MOST = 60_000, WORK_MOST = 1_600_000
 export const BUILDS_A_MINUTE = 12, CELLS_A_MINUTE = 3_000_000
 /** How far down a level part that starts on the ground is carried to meet ground that falls away under it. */
 const FOOT = 60
+/** How often a build that waits for someone to step out of its way is tried again (ms), and the most that wait in a world. */
+const WAIT = 2000, WAITING_MOST = 32
 const FALLS = { '+x': [1, 0], '-x': [-1, 0], '+z': [0, 1], '-z': [0, -1] }
 const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
 /** What models write for materials that are not the engine's, and the nearest that is (make/brief.mjs says the same to whoever makes a thing). */
@@ -220,6 +222,22 @@ export default ({ builds, core, hear }) => {
   /** By rule: when its minute began, and how many builds and cells it has changed in it. */
   const spent = new Map()
   const told = (rule, e) => hear(rule.id, 'built', e)
+  /**
+   * Builds that wait for someone to step out of the way, by `rule/id`: {rule, id, sum, rows, at}. A build is whole
+   * or not at all and never into or from under a person, so one asked for where someone stands used to be refused
+   * and stay refused: a realm's place put again changed while a player stood in it never came (#264, November
+   * 14). It is kept, with its cells already worked out, and put in when they have gone; the rule hears `built` then.
+   */
+  const waiting = new Map()
+  const done = (rule, id, at, made, use) => { if (use) { use.builds++; use.cells += made.cells } told(rule, { build: id, cells: made.cells, at, low: made.box.slice(0, 3), high: made.box.slice(3) }) }
+  const clock = setInterval(() => {
+    for (const [key, w] of waiting) {
+      const made = builds.put(w.rule.id, w.id, w.sum, w.rows)
+      if (made.error && made.way) continue
+      waiting.delete(key)
+      if (made.error) { w.rule.error = `build "${w.id}": ${made.error}`; told(w.rule, { build: w.id, failed: made.error.slice(0, 300) }) } else done(w.rule, w.id, w.at, made, spent.get(w.rule.id))
+    }
+  }, WAIT)
   return {
     does: {
       build(rule, w, now, wrong) {
@@ -228,15 +246,17 @@ export default ({ builds, core, hear }) => {
         if (odd) return fail(`build has no "${String(odd).slice(0, 24)}": ${FIELDS.slice(2).join(', ')}`)
         if (typeof w.id !== 'string' || !ID.test(w.id)) return wrong('a build has an id of the rule\'s own: lower-case letters, digits and dashes, up to 24')
         if (!builds) return fail('this world cannot be built in yet: its server is older than its plugins and must be started again')
-        const mine = builds.of(rule.id), old = mine.find((b) => b.id === w.id)
-        if (w.clear === true) { const gone = builds.clear(rule.id, w.id); if (gone) told(rule, { build: w.id, cleared: true, back: gone.put, left: gone.left }); return }
+        const mine = builds.of(rule.id), old = mine.find((b) => b.id === w.id), key = `${rule.id}/${w.id}`
+        if (w.clear === true) { waiting.delete(key); const gone = builds.clear(rule.id, w.id); if (gone) told(rule, { build: w.id, cleared: true, back: gone.put, left: gone.left }); return }
         if (w.clear !== undefined) return fail('clear is true, to take the build away, or left out')
         const at = w.at
         if (!Array.isArray(at) || (at.length !== 2 && at.length !== 3) || !at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 28)) return fail(`build "${w.id}" needs at: [x, z], the place its parts are measured from (or [x, y, z] to say the height too)`)
         if (!Array.isArray(w.parts) || !w.parts.length || w.parts.length > PARTS_MOST) return fail(`parts is a list of 1 to ${PARTS_MOST}`)
         const sum = sumOf(JSON.stringify([at, w.parts]))
-        // Asked again as it is (every start, every tick): nothing to do.
-        if (old?.sum === sum) return
+        // Asked again as it is (every start, every tick): nothing to do. So too when it is waiting for someone to step aside.
+        if (old?.sum === sum) { waiting.delete(key); return }
+        if (waiting.get(key)?.sum === sum) return
+        waiting.delete(key)
         if (!old && mine.length >= BUILDS_A_RULE) return fail(`a rule has at most ${BUILDS_A_RULE} builds: clear one first`)
         if (!old && builds.count() >= BUILDS_A_WORLD) return fail(`a world has at most ${BUILDS_A_WORLD} builds, of all its rules`)
         let use = spent.get(rule.id)
@@ -246,12 +266,14 @@ export default ({ builds, core, hear }) => {
         let rows
         try { rows = rowsOf(w.parts, [ox, base, oz], (x, z) => c.feet_at(x, z)) } catch (e) { if (e instanceof Refused) return fail(`build "${w.id}": ${e.message}`); throw e }
         if (!rows.length) return fail(`build "${w.id}" came to no cells`)
-        const done = builds.put(rule.id, w.id, sum, rows)
-        if (done.error) return fail(`build "${w.id}": ${done.error}`)
-        use.builds++; use.cells += done.cells
-        told(rule, { build: w.id, cells: done.cells, at: [ox, base, oz], low: done.box.slice(0, 3), high: done.box.slice(3) })
+        const made = builds.put(rule.id, w.id, sum, rows)
+        // Someone stands there: it waits for them, and the rule is told it does.
+        if (made.error && made.way && waiting.size < WAITING_MOST) { waiting.set(key, { rule, id: w.id, sum, rows, at: [ox, base, oz] }); return told(rule, { build: w.id, waits: made.error.slice(0, 200) }) }
+        if (made.error) return fail(`build "${w.id}": ${made.error}`)
+        done(rule, w.id, [ox, base, oz], made, use)
       },
     },
-    dropped: (ruleId) => { spent.delete(ruleId) },
+    dropped: (ruleId) => { spent.delete(ruleId); for (const [key, w] of waiting) if (w.rule.id === ruleId) waiting.delete(key) },
+    close: () => clearInterval(clock),
   }
 }

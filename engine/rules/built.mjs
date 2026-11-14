@@ -197,7 +197,8 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
     count: () => builds.size,
     /**
      * Puts a build in, whole or not at all: `rows` are the cells it is to be (x0, x1, y, z, kind each, flat). One of
-     * the same rule and id is taken away first. Answers {cells, rows, box, edits} or {error} in words for the rule.
+     * the same rule and id is taken away first. Answers {cells, rows, box, edits} or {error} in words for the rule
+     * (with `way: true` when the only thing wrong is that someone stands there: asked again later, it may be built).
      */
     put(rule, id, sum, rows) {
       if (busy()) return { error: 'the world is being put together again this moment: build again on the next call' }
@@ -206,7 +207,7 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
       const stood = bodies().filter((b) => meet(b.box, box))
       for (let i = 0; i < rows.length && stood.length; i += 5) {
         const who = reaches(stood, rows[i], rows[i + 1], rows[i + 2], rows[i + 3])
-        if (who) return { error: `${who.who} is in the way at ${who.box[0] + ROUND}, ${who.box[2] + ROUND}: nothing is built into or from under someone. Build beside them, or when they have moved (world.people says where everyone is)` }
+        if (who) return { way: true, error: `${who.who} is in the way at ${who.box[0] + ROUND}, ${who.box[2] + ROUND}: nothing is built into or from under someone` }
       }
       // Not over cells another rule's build holds: what one rule built is not another's to change.
       for (const o of builds.values()) {

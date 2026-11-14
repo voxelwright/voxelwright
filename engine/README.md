@@ -546,8 +546,7 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   history (each kept edit says whose build it is, and is read just before it goes in). Put back: every cell that is
   still what the build made it. Left: what was broken since, what another build holds, and the columns someone at a
   page stands in. A build is whole or not at all: refused in words (and heard as `built` with `failed`) if a part
-  is not the form's, if it is over 1,000,000 cells, 60,000 rows or 3,000 cells from `at`, if someone at a page or
-  something that lives is in or right over a cell it changes, or if it would change another rule's build (laid over the rule's own earlier build, the cells pass to the later one, with what was there before either). A rule has 16
+  is not the form's, if it is over 1,000,000 cells, 60,000 rows or 3,000 cells from `at`, if something that lives is in or right over a cell it changes (for someone at a page it waits until they step away), or if it would change another rule's build (laid over the rule's own earlier build, the cells pass to the later one, with what was there before either). A rule has 16
   builds and a world 64. Asked for again as it is, nothing is done, so a rule builds on every `start`; with other
   parts, the old is taken away first (a gate opens). Actors and seats standing there are stood again on what is
   there. Form decided by trial (November 14, Opus 5.5, four real runs): shapes against boxes alone (the nearest a
@@ -614,6 +613,15 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   building it under a second. The people then arrive 131 to 266 s after Enter (they were the same wait as the
   place). Haiku 5.5 planned no faster (21 to 26 s) and thinner (6 to 18 parts against 17 to 37). Pictures:
   `~/.village/engine/build/unit4-the-place-first.png`.
+- **The fuller rule landing while someone stands there** (played November 14: a boxing realm, a person on foot in
+  its ring at a real page; the fuller rule, Opus 5.5, landed 762 s after Enter). Nothing happens to the person: not
+  dropped, buried or moved. What holds it: the place is a rule of its own, so the game's rule put again changed has
+  none of it to rebuild (`test/place.mjs`: the place's rule is not even called); a build asked for again as it is
+  does nothing; and nothing is ever built into or from under someone at a page. What was wrong: a build that was
+  refused because someone stood there stayed refused, so a place put again changed with a player in it never came.
+  Now it waits (`built` says `{build, waits}`) with its cells already worked out, is tried again every two seconds,
+  and goes in whole when they have stepped away: in the same play, the ring's floor put a metre higher waited
+  while the person stood on it and was there nine seconds after they left.
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.

@@ -99,7 +99,7 @@ try {
   await w.send('/world/here', { method: 'POST', body: JSON.stringify({ by: 'pat', name: 'Pat', at: [P[0] + 2, g + 17.5, P[1] + 203], yaw: 0 }) })
   await say('build me a hut')
   const hut = await told('mender', 'of the hut', (e) => e.build === 'hut')
-  check(/Pat is in the way/.test(hut.failed ?? '') && (await at(P[0] - 8, g + 5, P[1] + 192)).material === 0, `nothing is built where someone at a page stands, not even the part clear of them: "${(hut.failed ?? '').slice(0, 60)}"`)
+  check(/Pat is in the way/.test(hut.waits ?? '') && (await at(P[0] - 8, g + 5, P[1] + 192)).material === 0, `nothing is built where someone at a page stands, not even the part clear of them, and the rule is told it waits: "${(hut.waits ?? '').slice(0, 60)}"`)
   // A rule's later build laid over its earlier one takes those cells as its own; another rule's build may not.
   await say('a slab over the path')
   const slab = await told('mender', 'of the slab', (e) => e.build === 'slab')
@@ -113,8 +113,11 @@ try {
     const how = await until(`refused: ${word}`, async () => { const r = await w.how('mender'); return why.test(r.error) && r })
     check(how.running, `"${word}" is refused in words and the rule goes on: ${how.error.slice(0, 80)}`)
   }
-  const slabbed = (await edits()).filter((e) => e.built.id !== 'slab').length
+  const slabbed = (await edits()).filter((e) => e.built.id !== 'slab' && e.built.id !== 'hut').length
   check(slabbed === first.length, 'none of what was refused changed a cell')
+  // Pat has gone (a page that says nothing for five seconds has left): the hut that waited is built, and the rule hears of it without asking again.
+  const came = await told('mender', 'that the hut is up', (e) => e.build === 'hut' && e.cells > 0)
+  check(came.cells > 1000 && (await at(P[0] - 8, g + 5, P[1] + 192)).material === 10, `when they have stepped away what waited is built, whole (${came.cells} cells), and the rule hears of it`)
   await say('a slab beside it')
   const beside = await told('mender', 'of the slab beside', (e) => e.build === 'slab' && !e.failed && e.at[2] !== P[1])
   check(beside.cells > 300, `the same build asked for where it may be is built (${beside.cells} cells)`)

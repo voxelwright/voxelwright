@@ -71,6 +71,13 @@ try {
   const away = (post[0] * (mx - g.arrive.at[0]) + post[1] * (mz - g.arrive.at[1])) > 0, steel = await (await fetch(`${server.url}/realm/${early.realm}/world/at?x=${mx + post[0]}&y=${core.feet_at(mx + post[0], mz + post[1]) + 12}&z=${mz + post[1]}`)).json()
   check(away && steel.material === 12 && early.place?.builds.join() === 'jetty,stand', `the plan is turned to lie as the ground does: what it put to its north stands beyond the middle from where one arrives (a steel post at ${mx + post[0]}, ${mz + post[1]})`)
   check(asked.length === 1 && asked[0].includes('THE PLACE IS ALREADY BUILT') && asked[0].includes('"jetty"') && asked[0].includes('do not build it again') && !asked[0].includes('THE PLACE. This realm has ground'), 'whoever writes the people and the game is told what stands there and not to build it again')
+  // The rule of the people and the game put again changed (the fuller rule landing): the place is another rule's, and nothing of it is built again.
+  const rulesOf = async () => (await fetch(`${server.url}/realm/${early.realm}/world/rules`)).json(), placeBefore = (await rulesOf()).find((x) => x.id === 'place')
+  const game = await (await fetch(`${server.url}/realm/${early.realm}/world/rules?id=${early.rule}`)).json()
+  await fetch(`${server.url}/realm/${early.realm}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'check', rule: { id: early.rule, name: game.name, source: `${game.source}\n// fuller\n` } }) })
+  await new Promise((res) => setTimeout(res, 1500))
+  const placeAfter = (await rulesOf()).find((x) => x.id === 'place'), still = await (await fetch(`${server.url}/realm/${early.realm}/world/at?x=${mx + post[0]}&y=${core.feet_at(mx + post[0], mz + post[1]) + 12}&z=${mz + post[1]}`)).json()
+  check(placeAfter.calls === placeBefore.calls && !placeAfter.error && still.material === 12 && (await rulesOf()).find((x) => x.id === early.rule)?.running, 'the game\'s rule put again changed leaves the place as it stands: its rule is not called and nothing is built again')
   const fit = fitted(design, g, core)
   check(fit.builds.length === 2 && fit.cells > 1000 && fit.left === 2, `the same plan fits its ground again the same: ${fit.cells} cells`)
 

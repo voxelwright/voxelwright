@@ -2869,3 +2869,17 @@ times up; a wall one cell thick the same. Built roads striped, thin things were 
 - **Try the people's rule where the place stands**: `realm` starts the trial world itself and puts the place rule
   in it, so an actor "in the stands" is tried standing on the stands.
 
+## A rule put again changed, with someone standing there (#264, November 14)
+
+- **To see what a person at a page really does, the page must be on foot**: `?walk=1`. Without it `fly=0` is an
+  eye that hangs where it was put, and a floor taken from under it shows nothing.
+- **Played**: the fuller rule landing is a rule put again changed. With the place a rule of its own it rebuilds
+  nothing, and the person in the ring did not move. Another rule building through them, and the place itself put
+  again changed under them, were both refused whole.
+- **Refused once was refused for good**: a rule builds on `start`, so a build refused because someone stood there
+  never came. `plugins/build` keeps such a build with its rows worked out (`waiting`), tries it every two seconds
+  (the check of who stands there is a few box tests) and tells the rule `{build, waits}`, then `built` as usual.
+  It tells the rule through `built`, not through `wrong`: a waiting build is not a fault.
+- **A page script that reads a world's stream to its end never ends** if anything in that world moves: read for a
+  fixed time, or count what was asked for.
+
