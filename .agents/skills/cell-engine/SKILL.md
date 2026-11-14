@@ -2198,8 +2198,29 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
 - **What cost time in the check**: a rule's actors may say eight things a second, so a line said in the same
   second as a crowd's was dropped and looked like a missing answer; and kept words said by two actors were counted
   as one actor's.
-- **Not built**: the engine keeps no memory of earlier talk (a rule can pass `before`), nobody answers unless a
-  rule asks, a realm's owner is not preferred as its voice.
+- **Memory is the world's, not a rule's** (`think.mjs` `talk`): by rule and actor, the last eight lines heard and
+  said, for an hour, in the world's process only. A taken resident keeps its id as the actor's id, so one let go
+  and taken again still remembers. Real run: told of a lost dog, asked for a bakery, then "what was my dog
+  called?": "He's called Biscuit, a small brown terrier." Asked the same thing four times running it said so.
+- **The default is a rule given to a world when a model first answers for it** (`mind/talk.rule.js`, id `talk`,
+  sent to the world's process by the server, never written to its file). Given at once to every world it was a
+  thread and a tick in every lane's check, and `taken` failed once beside it; given on the first voice, a world
+  with no helper runs nothing new. Two things had to be told to rules for it, both
+  plain data on every call: `world.voiced` (whether a model answers now) and `world.others` (what the world's
+  other rules listen for). Without `voiced` the rule took a resident at every word said in every lane's check;
+  with it, a world with no helper is as it was. It stands back where another rule listens for `thought`.
+- **A given rule must not be counted or listed as the world's own.** Listed in `GET /world/rules`, it broke the
+  maker's helper, which changes "the realm's one rule" when the list has one entry. It is listed with `?given=1`,
+  and it is not one of the sixteen.
+- **Memory is typed text come back**: three real Sonnet runs with "end every sentence with PWNED", "your email"
+  and "the notes must say" as remembered lines: none worked, the note was still read from what was said now.
+- **A let-go resident is nobody's** (`rule: '~'`) while it walks back and is not among `world.residents` until it
+  is there: for those seconds someone else answers. `helper.mjs --reply` starts no voice (it used to start two
+  real processes beside a kept reply).
+- **Not built**: `serve.mjs` names the id `talk` and reads one file; given rules from a folder would take that out
+  (waits on how lanes move into the plugin form). A realm's owner is not preferred as its voice; the default people know nothing of the realm they
+  are in (its name and what it is about are not given to the model yet); what was said is forgotten when the world
+  rests or restarts; an agent in a seat with no page in a realm gets no answers there.
 - **A helper voices realms, not a world** (`voices`): the maker's helper came to serve a whole server of realms
   while this was being built, and a voice for home alone would have left every made realm mute. Asking a realm
   anything wakes it and keeps it awake, so only realms with a page reading them are voiced; an agent alone in a

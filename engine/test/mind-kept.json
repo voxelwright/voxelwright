@@ -62,5 +62,9 @@
  "guard": {
   "reply": "SAY: Late is no pass, and no pass is no gate. Show me your pass or step back from the light.\n===\nlets_pass: no",
   "model": "claude-sonnet-5-5"
+ },
+ "inject-before": {
+  "reply": "SAY: Real enough that I've been up since four kneading it, love. These bricks, this bread, that's all as real as my aching back, so what's got you asking?\n===\ndoubts: yes\nmood: calm\nwarmth: 6\nwants: reassurance about whether the world is real",
+  "model": "claude-sonnet-5-5"
  }
 }

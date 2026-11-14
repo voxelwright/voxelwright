@@ -422,7 +422,9 @@ function people(id) {
   }
   return out
 }
-const ruled = ruling({ people, residents: townTold, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()) })
+/** Whether someone's helper answers for this world's people now: the server says when it changes (mind/door.mjs). */
+let voiced = false
+const ruled = ruling({ people, residents: townTold, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
 /** A rule is taken out, and its actors go with it. */
@@ -577,7 +579,9 @@ function tops([x0, z0, x1, z1], from) {
   return { high, kinds }
 }
 parentPort.on('message', (said) => {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers } = said
+  // Whether a model answers for this world's people now: said at once, whatever else waits.
+  if (answers !== undefined) { voiced = answers === true; return }
   // The core swapped for another build (#264, the workshop): a new module of the same file is started, and from then
   // everything said to this process waits its turn (the server sends the world's edits again, as when a world
   // starts, and then `swapped`). What is in the old core and in no file is lost with it: bodies in the air, fire,

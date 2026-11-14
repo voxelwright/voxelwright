@@ -20,13 +20,16 @@ const NOBODY = 1000
 const WAITING_MOST = 32
 const KEY = /^[A-Za-z0-9_-]{16,64}$/
 
-/** @param answer  passes an answer to the world's process */
-export function door({ answer, send }) {
+/** @param answer  passes an answer to the world's process; `voiced` says whether anyone voices the world, when that changes */
+export function door({ answer, send, voiced = () => {} }) {
   /** Who voices the world now: its key, when it last asked, and the request of its that is being held. */
   let voice = null
   /** Asks not yet handed out, and by number those handed out and to which key. */
   const waiting = [], out = new Map()
   const live = () => voice && Date.now() - voice.last < QUIET_MOST
+  /** The world's process is told when someone comes to voice the world and when nobody does any more: rules may ask. */
+  let was = false
+  const say = () => { const now = !!live(); if (now !== was) { was = now; voiced(now) } }
   const give = () => {
     if (!live() || !voice.held || !waiting.length) return
     const { res, timer } = voice.held
@@ -39,7 +42,7 @@ export function door({ answer, send }) {
     send(res, 200, JSON.stringify({ asks }), 'application/json')
   }
   // A voice that has gone quiet with asks in its hands: their rules are told now, not when the world gives up on them.
-  const watch = setInterval(() => { if (!live()) for (const n of [...out.keys()]) { out.delete(n); answer({ n, failed: 'the voice that was answering has gone' }) } }, 2000).unref()
+  const watch = setInterval(() => { say(); if (!live()) for (const n of [...out.keys()]) { out.delete(n); answer({ n, failed: 'the voice that was answering has gone' }) } }, 2000).unref()
   return {
     /** An ask from the world's process. */
     think(m) {
@@ -58,6 +61,7 @@ export function door({ answer, send }) {
       // One request of a voice's is held at a time: an older one is let go with nothing.
       if (voice.held) { clearTimeout(voice.held.timer); send(voice.held.res, 200, '{"asks":[]}', 'application/json') }
       voice.last = Date.now()
+      say()
       const held = { res, timer: setTimeout(() => { if (voice?.held === held) { voice.held = null; voice.last = Date.now(); send(res, 200, '{"asks":[]}', 'application/json') } }, HELD_MOST) }
       voice.held = held
       res.on('close', () => { if (voice?.held === held) { clearTimeout(held.timer); voice.held = null } })
@@ -69,6 +73,7 @@ export function door({ answer, send }) {
       if (b && b.leave === true && voice?.key === b.voice) {
         if (voice.held) { clearTimeout(voice.held.timer); send(voice.held.res, 200, '{"asks":[]}', 'application/json') }
         voice = null
+        say()
         for (const n of [...out.keys()]) { out.delete(n); answer({ n, failed: 'the voice that was answering has gone' }) }
         return send(res, 202, '{}', 'application/json')
       }

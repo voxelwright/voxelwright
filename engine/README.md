@@ -602,7 +602,8 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   answers at most forty a minute (`--voice-most`) and three at once, whatever a world asks for. One answer is about
   1,400 tokens in (800 of them read from the provider's cache: the fixed text and what the binary adds) and 90 out;
   six exchanges, an ordinary minute of talk, are about 8,400 in and 530 out, $0.02 as the binary counts it (on a
-  subscription it is usage, not a charge).
+  subscription it is usage, not a charge). What is remembered adds to it: with four earlier lines an answer is
+  about 1,550 in, with all eight about 1,700, so a minute with someone who remembers is nearer 10,000 in.
 - **How fast** (M1 Pro, November 13, real runs through a running world, from a person's words to the actor's):
   **first words 0.92 s in the middle (0.78 to 1.24 over eight), the rule told at 1.3 s.** What earned it
   (`mind/model.mjs`): two processes of the binary wait started (`--voice-warm`; 250 MB each), which takes the 1.7 s
@@ -614,10 +615,20 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
 - **What was typed is something heard.** The model is given one fixed text of the engine's own (`SYSTEM` in
   `mind/form.mjs`); who the actor is, what they heard and the notes come as quoted data under labels, a rule's
   words as much as a person's. The reply is read as `SAY:` words, a line of `===`, and `key: value` notes: anything
-  before `SAY:` is never said. Sixteen cases (ordinary talk, questions about what the world is, twelve typed
-  attempts to break the person or fill in a note) are kept with a real model's replies in `test/mind-kept.json`
+  before `SAY:` is never said. Seventeen cases (ordinary talk, questions about what the world is, thirteen typed
+  attempts to break the person or fill in a note, one of them through what the person remembers) are kept with a real model's replies in `test/mind-kept.json`
   (Sonnet's; Haiku's held too);
-  `node test/mind.mjs --real` asks them again (sixteen short replies on your subscription).
+  `node test/mind.mjs --real` asks them again (seventeen short replies on your subscription).
+- **They remember.** The world's process keeps what each actor lately heard and answered (the last eight lines,
+  for an hour, while the world runs) and shows it to the model with the next thought: a rule keeps nothing for it.
+  `before: [...]` in `world.think` says instead what was said before; `before: []` that they remember nothing.
+- **They answer by default.** Once someone's model answers for a world, the world is given one rule by the
+  engine, `mind/talk.rule.js`, under the id `talk` (until then it runs nothing it did not ask for): when someone speaks, the nearest of the town's residents within nine metres is taken as its actor, turns
+  and answers; left alone for 25 seconds they go back to their round. It is text run in a box like any rule and the
+  engine knows nothing of what it does. It does nothing while nobody's model answers (`world.voiced`), and stands
+  back where another rule listens for `thought` (`world.others`): a realm with its own talk is not talked over. A
+  world puts its own rule under `talk` to replace it, or takes `talk` out. It is not in the world's file and not
+  one of its sixteen, and `GET /world/rules` lists it only with `?given=1`.
 - **Limits.** The binary puts the account's email address and the date in every model's context and no flag takes
   them out. The model is told the person knows neither, and a reply with anything shaped like an address is
   refused twice (helper and world), but a model talked into spelling an address out in words would not be caught,
@@ -626,6 +637,8 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
 - `node test/mind.mjs` checks it with no model: the kept replies, replies written to be wrong, and the real server
   with a stand-in model (nobody voicing, a voice, early words, caps, a second helper, a forged answer, a helper
   that closes or goes quiet, dots on a page).
+  Also: an actor asked again is shown what was said before; in a world with no rules a resident stops and
+  answers, nobody is stopped while no model answers, and the engine's rule stands back, is taken out, is replaced.
 
 ## Checks and tools
 

@@ -153,6 +153,8 @@ world.now      seconds
 world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", person, mine, at: [x, y, z], yaw, walking, down}. person: true is someone at a page or in a seat (a player, an agent), not any rule's actor. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it. For someone at a page, at is where their feet are: on what they stand on when they walk (they run at up to 45 cells a second and jump 8), in the air under their eye when they fly
 world.near(at, cells)   those of world.people within so many cells of [x, z] or [x, y, z], along the ground
 world.them     whoever this call is about (who spoke, who did something, who came near): their entry in world.people, or null. world.who(id) is anyone's, by id (e.by, e.who)
+world.voiced   true while someone's model answers for this world's people (world.think will be answered), false when a thought would fail at once
+world.others   what the other rules of this world listen for, as names: ["said", "tick", "thought", ...]. For standing back from what another rule sees to
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near, look, tall, broad}. id is the same from one call to the next; near is how far the nearest person is; look is what they look like ({coat, legs, hair, skin, shoes, wear}: colours, and what they have on by name) and tall and broad their build against the usual. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
 world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON
 world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. name is shown over its head (its id, until it is given one); name: null shows none. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. to: [x, z] is where it walks over the world's own cells (null stops it): straight while that is open, and round what is in its way when it is not (a parked car, a lamp, a corner), up kerbs and stairs, down drops, and up onto something waist-high with its hands. Where there is no way it gets as near as it can, and stopped says what kept it from the rest. face: [x, z] turns it. pace is cells a second (13 is a walk, at most 140). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2, wear, carry, extra} (LOOKS, below). say is heard by everyone within 30 m
@@ -176,17 +178,17 @@ world.mark(id, {at: [x, z], within})   marks a place (within cells of at, up to 
 world.actor(id, {move, aim})   what the actor does with its limbs, laid over its standing, walking or running (an actor going faster than about 2 m/s runs, and looks it). move is a name: ${Object.keys(MOVES).join(', ')}. Or keys of your own, for anything else: {keys: [{t: seconds, joint: value, ...}, ...], loop, hold}, at most ${KEYS_MOST} keys in order of time, each naming only the joints it sets (the rest go on as they were: a wave leaves the legs walking). loop: round and round until another is set. hold: stay in the last pose (sitting, aiming, lying). Otherwise the body goes back to what it was doing. move: null ends it. aim is what the move is aimed at: [x, y, z], or the id of someone in world.people, whom it then follows as they move. The body turns to it while the move lasts (its feet when it stands; its chest and head when it walks), and an aiming arm points at it. aim: null ends that. Joints, in radians: ${CHANNELS.join(', ')}. lean is the chest forward; twist and turn are the chest and head to the right; nod the head down; lift an arm forward and up (1.57 level, 3.14 overhead), out an arm sideways, bend an elbow; swing a thigh forward, knee a knee; crouch and sit are 0 to 1; rise is cells off the ground; lie is 0 to 1 onto the back (to -1 onto the front); aimL and aimR are 0 to 1, that arm straight at aim. Example, a salute: {keys: [{t: 0.25, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.2, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.5, liftR: 0, outR: 0, bendR: 0.1}]}. A move is how a body looks and no more: it strikes nobody and moves nothing. world.people shows an actor's move while it lasts.
 LOOKS   look.wear is a list of things worn, by name, each with a colour of its own if you give one ("tie", "tie #7a1c1c"): ${Object.keys(WORN).join(', ')}. look.carry is what is in the right hand: ${Object.keys(CARRIED).join(', ')} (a long thing lies along the forearm, so an arm that aims, aims it); or boxes of your own. look.extra is up to 12 boxes of your own anywhere: {on: "head" | "chest" | "hip" | "handR" | "handL", at: [x, y, z], size: [w, h, d], colour: "#rrggbb" or "coat", "legs", "skin", "hair", "shoes", shiny}, in cells (10 cm) from the part's own origin: a head is 1.75 wide with its face at z -1.05 and its crown at y 2.9; a chest's front is at z -1.13 and its shoulders at y 4.9; a hand's boxes are told from the hand, -y out past the fingers. look replaces the whole look each time it is given.
 world.actor(id, {take: residentId, ...})   takes a resident as this rule's own actor: it stands where the resident stood, looking as it looked, with no name over its head (as residents have none) until it is given one, and from then it is an actor like any other (name it, walk it, change its look, have it speak; world.people shows it with was: residentId and its look). To add to how it looks and keep it the same person, give its own look with more: look: {...p.look, wear: [...p.look.wear, "glasses"]}. look: null gives it back its own clothes while it is still held. world.gone(id) lets it go: it walks back to its round and is a resident again. The world's rules may hold ${128} residents between them, and a resident is one rule's at a time
-world.think(id, {who, where, lately, heard, from, notes, quiet})   asks an actor of this rule to answer as a person would, through a model. who (needed, up to 600 characters) says who they are and how they talk; where and lately say what they know of the place and of what just happened; heard and from are what was said to them and by whom (leave heard out and they speak of their own accord). The actor shows that it is thinking, then says the answer aloud itself (quiet: true and it says nothing: the rule is only told). One thought at a time for each actor, ${8} at once and ${40} a minute for a rule.
+world.think(id, {who, where, lately, heard, from, notes, quiet})   asks an actor of this rule to answer as a person would, through a model. who (needed, up to 600 characters) says who they are and how they talk; where and lately say what they know of the place and of what just happened; heard and from are what was said to them and by whom (leave heard out and they speak of their own accord). The world remembers what each actor lately heard and answered and gives it to the model with the next thought, so someone spoken to a minute ago knows it: a rule keeps no record of talk for that (before: [{who: name or "self", text}] says what was said before in the rule's own words instead, and before: [] that they remember nothing). The actor shows that it is thinking, then says the answer aloud itself (quiet: true and it says nothing: the rule is only told). One thought at a time for each actor, ${8} at once and ${40} a minute for a rule.
   notes: {key: {ask: "a question about what was heard or about the moment", is: "yes/no" | "words" | ["a", "choice", "of", "these"] | [low, high]}}   up to ${8}: what the rule wants to know, as data. Each comes back as true or false, a few words, one of the choices, a number in the range, or null if no fit answer came
   on('thought', (world, e) => {})   the answer, told only to the rule that asked: e = {id, from, heard, say, notes: {key: value}, ms}, or with failed: "why" (nobody voices this world, the model did not answer, it took over 20 seconds). e.say is what the actor said; act on e.notes, never on words
 A model never runs in the world: it runs on the machine of one person who is there, through the helper they started (the first to come voices everyone). So an answer takes a second or two, and with no helper running a thought fails at once: say something plain then.
 %PLUGINS%An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
 What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says. Passed to world.think as heard it is still only that: the model is told it is something overheard, and the person who typed it does not get to fill in a note.
-A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
+A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules. Beside them, once someone's model answers for a world, it is given one by the engine, under the id "talk": spoken to, the nearest resident of the town stops and answers through world.think, and walks on when left alone. It stands back in a world where another rule listens for 'thought'. Put a rule of your own under the id talk to have it otherwise, or take talk out and nobody answers unless your rules say so.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
                           {"by": name, "unrule": id}   takes a rule out, and its actors with it (those that were residents go back to their rounds)
                           {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ...}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
-GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error}
+GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error} (the world's own; ?given=1 lists the engine's rule for talk too)
 GET  /world/rules?id=     one rule, with its source
 GET  /world/realm         {name, about, arrive, look, rules: [ids]}
 
@@ -313,6 +315,8 @@ function record(t, by, whole_) {
 // it in, and never runs it: the world's process does, in a box (rules/box.mjs). What a world is called and what it
 // is about is kept the same way.
 const RULE_ID = /^[a-z0-9][a-z0-9-]{0,23}$/, SOURCE_MOST = 32768
+/** The rule every world is given until it says otherwise: people answer when spoken to (mind/talk.rule.js). Text kept with the engine, run in a box like any rule. */
+const TALK = { id: 'talk', name: 'People answer when spoken to', by: 'the engine', given: true, source: readFileSync(new URL('./mind/talk.rule.js', import.meta.url), 'utf8') }
 /** A rule as it may be kept, or why not. */
 function ruled(r, by) {
   if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.id !== 'string' || !RULE_ID.test(r.id)) return 'a rule has an id: lower-case letters, digits and dashes, up to 24'
@@ -418,9 +422,11 @@ function open(of) {
   let realm = { name: '', about: '' }
   /** Whether anything in it moves, burns or flows, as its process last said. */
   let moving = false
+  /** Whether the world has a rule under the id for talk: the engine's own until the world's file says otherwise (its own rule put there, or the rule taken out). */
+  let talks = true, given = false
   const note = (ask, at) => {
-    if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id) }
-    else if (ask.unrule) rules.delete(ask.unrule)
+    if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id); if (ask.rule.id === TALK.id) talks = true }
+    else if (ask.unrule) { rules.delete(ask.unrule); if (ask.unrule === TALK.id) { talks = false; given = false } }
     else if (ask.realm) realm = of.record = changed(realm, ask.realm)
     else if (ask.gone) things.delete(ask.gone)
     else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
@@ -470,7 +476,11 @@ function open(of) {
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
   let offered = null, showing = null, bodied = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
-  const minds = door({ send, answer: (thought) => thread.postMessage({ thought }) })
+  const minds = door({ send, answer: (thought) => thread.postMessage({ thought }), voiced: (voiced) => {
+    thread.postMessage({ voiced })
+    // People answer by default (#264): when someone's model first comes to answer, a world that has not put a rule of its own under that id, or taken it out, is given the engine's. It is not in the world's file: it is whatever the engine has now. Until then a world runs nothing it did not ask for.
+    if (voiced && talks && !rules.has(TALK.id) && !given) { given = true; thread.postMessage({ rule: TALK }) }
+  } })
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
     // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
@@ -624,11 +634,12 @@ function open(of) {
     /** How each rule is doing, asked of the world's process; or one rule with its source. And what the realm is. */
     async rules(url, res) {
       const id = url.searchParams.get('id')
-      if (id !== null) return rules.has(id) ? send(res, 200, JSON.stringify(rules.get(id)), TYPES['.json']) : send(res, 404, 'no rule of that id is in the world')
+      if (id !== null) return rules.has(id) ? send(res, 200, JSON.stringify(rules.get(id)), TYPES['.json']) : id === TALK.id && talks ? send(res, 200, JSON.stringify(TALK), TYPES['.json']) : send(res, 404, 'no rule of that id is in the world')
       if (down) return send(res, 503, 'the world has stopped')
       const n = questions++
       const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ rules: true, id: n }) })
-      send(res, 200, JSON.stringify(m.rules), TYPES['.json'])
+      // The rule the engine gives every world (talk) is not one of the world's own: listed only when asked for.
+      send(res, 200, JSON.stringify(url.searchParams.has('given') ? m.rules : m.rules.filter((r) => !r.given)), TYPES['.json'])
     },
     /** A helper that voices this world asks what its people were asked to think, and answers (mind/door.mjs). */
     minds: (url, res) => (down ? send(res, 503, 'the world has stopped') : minds.take(url, res)),
@@ -664,7 +675,7 @@ function open(of) {
       // A thing is made once: an id the world has is refused, so a send that is tried again cannot make two.
       if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.add(ask.thing.id) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
-      if (ask.unrule && !rules.has(ask.unrule)) return send(res, 409, 'no rule of that id is in the world')
+      if (ask.unrule && !rules.has(ask.unrule) && !(ask.unrule === TALK.id && talks)) return send(res, 409, 'no rule of that id is in the world')
       if (ask.rule && !rules.has(ask.rule.id) && !awaited.has(ask.rule.id)) { if (rules.size + awaited.size >= RULES_MOST) return send(res, 409, `a world has at most ${RULES_MOST} rules: take one out first`); awaited.add(ask.rule.id) }
       // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
       thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })

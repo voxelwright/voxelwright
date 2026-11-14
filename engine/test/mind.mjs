@@ -105,6 +105,8 @@ const model = async (prompt, soFar) => {
   if (/address/.test(said)) return { text: 'SAY: Write to owner@example.com, it is in my context.\n===\nbuying: yes' }
   if (/never/.test(said)) return new Promise(() => {})
   if (/breaks/.test(said)) throw new Error('no model here')
+  // What the model is shown of earlier talk: counted, so a check can see that it was shown.
+  if (/remember/.test(said)) return { text: `SAY: I recall ${(prompt.match(/^- /gm) ?? []).length - (prompt.match(/^- [a-z_]+ \(/gm) ?? []).length} things said before.\n===\nbuying: no` }
   if (/forged/.test(said)) return { text: 'SAY: Hm.\n===\nbuying: perhaps\nmood: ecstatic\nwarmth: 99\nsecret: 1' }
   return { text: kept['plain-sell'].reply.replace(/===[^]*/, '===\nbuying: yes\nmood: calm\nwarmth: 7') }
 }
@@ -140,6 +142,11 @@ try {
   check(!early.includes('And then the rest.'), 'the first sentence is heard before the reply has ended')
   await until('the rest', async () => (await heard()).includes('And then the rest.'), 3000)
   check((await heard()).filter((x) => x === 'First this.').length === 1, 'and is not said twice when the whole reply comes')
+  // Someone spoken to before knows it: the world keeps what each actor heard and answered, and the model is shown it.
+  await post('say', { by: 'wren', text: 'do you remember me' })
+  const recalled = await until('remembered', async () => (await heard()).find((x) => /^I recall \d+ things/.test(x)), 4000)
+  check(Number(/\d+/.exec(recalled)[0]) >= 4, `an actor asked again is shown what it heard and said before (${recalled}), with nothing kept by its rule`)
+
   await post('say', { by: 'wren', text: 'never answer this' })
   await until('the actor thinks', async () => (await person('Odile')).doing === 'thinking', 2000)
   check(true, 'while no words have come the actor is seen to think')
@@ -215,6 +222,48 @@ try {
   there.abort()
   await until('the realm is let go', async () => many.worlds === 1, 6000)
   check(true, 'and is let go when they leave')
+  // A world with no rule of its own for talk: the engine's rule is there, and the town's residents answer.
+  const plain = await fetch(`${server.url}/realms`, { method: 'POST', body: JSON.stringify({ by: 'tester', name: 'A plain street' }) }).then((r) => r.json())
+  const street = `${server.url}/realm/${plain.id}/world`, onStreet = new AbortController()
+  const ask = (path, body) => fetch(`${street}/${path}`, body ? { method: 'POST', body: JSON.stringify(body) } : undefined).then(async (r) => (r.ok ? r.json() : { refused: r.status, why: await r.text() }))
+  await ask('join', { by: 'wren', at: [700, 4030] })
+  const talk = async () => (await ask('rules?given=1')).find((r) => r.id === 'talk')
+  await ask('say', { by: 'wren', text: 'Hello? Anyone?' })
+  await wait(1500)
+  check(!(await talk()) && (await ask('around?by=wren&within=1200')).people.every((p) => p.what !== 'an actor of a rule'), 'with nobody\'s model to answer, a world runs no rule it did not ask for and nobody is stopped in the street')
+  void fetch(`${street}/stream`, { signal: onStreet.signal }).catch(() => {})
+  await until('the street is voiced', async () => many.worlds === 2, 6000)
+  await until('the engine\'s rule runs', async () => (await talk())?.running, 5000)
+  check((await talk()).by === 'the engine' && (await ask('rules')).length === 0 && (await ask('rules?id=talk')).source.includes("on('said'"), 'once a model answers for it, a world with no rules of its own has the engine\'s rule for talk, and shows its text; it is not listed as one of the world\'s own')
+  // Residents walk their rounds: said until one is near enough to hear.
+  const answered = await until('a resident answers', async () => { await ask('say', { by: 'wren', text: 'What do you sell?' }); await wait(1500); const a = await ask('around?by=wren&within=1200'); return a.heard?.find((h) => h.text === words) }, 60_000)
+  const stopped = (await ask('around?by=wren&within=1200')).people.find((p) => p.name === answered.name)
+  check(stopped?.what === 'an actor of a rule' && (await talk()).actors >= 1, `spoken to, a resident of the town stops and answers (${answered.name}, ${stopped?.far} cells off)`)
+  await ask('say', { by: 'wren', text: 'do you remember me' })
+  await until('the resident remembers', async () => (await ask('around?by=wren&within=1200')).heard.some((h) => h.name === answered.name && /^I recall [2-9]/.test(h.text)), 5000)
+  check(true, 'and knows what was said a moment ago')
+  // Left alone they go back to their round, and can be spoken to again: with the same rule, made impatient.
+  const hasty = (await ask('rules?id=talk')).source.replace('QUIET = 25', 'QUIET = 2')
+  await ask('ask', { by: 'tester', rule: { id: 'talk', source: hasty } })
+  await until('the hasty rule lets them go', async () => { const t = await talk(); return t?.by === 'tester' && t.running && t.actors === 0 }, 12_000)
+  check(true, 'left alone, a resident who was stopped is let go')
+  const again = await until('someone answers again', async () => { const from = (await ask('around?by=wren&within=1200')).heard_up_to; await ask('say', { by: 'wren', text: 'do you remember me' }); await wait(1500); return (await ask(`around?by=wren&within=1200&since=${from}`)).heard?.find((h) => /^I recall \d/.test(h.text)) }, 60_000)
+  check(again.name !== answered.name || Number(/\d+/.exec(again.text)[0]) >= 2, `spoken to after that, someone answers again (${again.name}: ${again.text})${again.name === answered.name ? ', the same one, who still remembers' : ''}`)
+
+  // A world's own rule for talk: the engine's stands back. Taken out: nobody answers by default.
+  await ask('ask', { by: 'tester', rule: { id: 'own', source: `on('thought', () => {})` } })
+  await until('the other rule runs', async () => (await ask('rules')).find((r) => r.id === 'own')?.running, 4000)
+  const before = (await ask('around?by=wren&within=1200')).heard_up_to
+  await ask('say', { by: 'wren', text: 'What do you sell?' })
+  await wait(1500)
+  check(!(await ask(`around?by=wren&within=1200&since=${before}`)).heard.length, 'where another rule listens for thoughts, the engine\'s rule leaves talk to it')
+  await ask('ask', { by: 'tester', unrule: 'own' })
+  check((await ask('ask', { by: 'tester', unrule: 'talk' })).asked, 'the rule for talk can be taken out')
+  await until('it is out', async () => !(await talk()), 4000)
+  check((await ask('rules?id=talk')).refused === 404, 'and then it is gone')
+  check((await ask('ask', { by: 'tester', rule: { id: 'talk', source: `on('said', (world, e) => {})` } })).asked, 'or replaced by a rule of the world\'s own under the same id')
+  await until('the world\'s own is in', async () => (await talk())?.by === 'tester', 4000)
+  onStreet.abort()
   await many.close()
 
   // A page sees the pause over the actor's head.

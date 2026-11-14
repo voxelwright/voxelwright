@@ -10,7 +10,7 @@
 //   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see "From a phone" in engine/README.md
 //   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
 //   --voice sonnet     which of your models answers for the people of the world when a rule asks one to think (#264, mind/voice.mjs);
-//                      --no-voice and nobody is voiced from this machine; --voice-most 40 is the most answers a minute;
+//                      --no-voice and nobody is voiced from this machine (nor with --reply: no model is run then); --voice-most 40 is the most answers a minute;
 //                      --voice-warm 2 is how many of its processes wait started, so that an answer does not wait for one to start
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
@@ -292,7 +292,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') || canned ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
   if (h.voiced) console.log(`it also answers for the people of that world when a rule asks one to think, with your own Claude Code (${flag('voice') ?? 'sonnet'}), at most ${Number(flag('voice-most') ?? 40)} answers a minute: --no-voice turns that off`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)

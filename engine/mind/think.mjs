@@ -13,6 +13,8 @@ import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, l
 const THOUGHT_MOST = 20_000
 /** The most thoughts of one rule in flight at once, and the most it may ask for in a minute. */
 const TOGETHER_MOST = 8, A_MINUTE_MOST = 40
+/** How long what was said is remembered (ms), and of how many actors. */
+const REMEMBERED = 60 * 60_000, PEOPLE_MOST = 512
 
 /**
  * @param actor   an actor of a rule's, by the rule's id and the actor's own: the body, or undefined
@@ -25,6 +27,21 @@ export function thinking({ actor, say, show, hand, happen }) {
   /** Asks in flight, by number: whose, for which actor, what notes were wanted, and what has been said of the answer so far. */
   const asks = new Map()
   let n = 0
+  /**
+   * What each actor has lately heard and said, by rule and actor: so that someone spoken to a minute ago knows it.
+   * Kept here and not by rules, so every rule's people remember with nothing written for it; kept while the world
+   * runs and no longer, a few turns each, and what is older than an hour is forgotten.
+   */
+  const talk = new Map()
+  const recalled = (key, now) => { const t = (talk.get(key) ?? []).filter((b) => now - b.t < REMEMBERED); if (t.length) talk.set(key, t); else talk.delete(key); return t.map(({ who, text }) => ({ who, text })) }
+  const remember = (ask, now) => {
+    const key = `${ask.rule}/${ask.id}`, t = talk.get(key) ?? []
+    if (ask.heard) t.push({ who: ask.from || 'someone', text: ask.heard, t: now })
+    t.push({ who: 'self', text: ask.said, t: now })
+    talk.set(key, t.slice(-BEFORE_MOST))
+    // Only so many people are remembered: the one who spoke longest ago is forgotten first.
+    if (talk.size > PEOPLE_MOST) talk.delete(talk.keys().next().value)
+  }
   const end = (ask, e) => {
     asks.delete(ask.n)
     const p = actor(ask.rule, ask.id)
@@ -59,7 +76,8 @@ export function thinking({ actor, say, show, hand, happen }) {
       const ask = { n: ++n, rule: rule.id, id: w.id, want, from: text(w.from, 24), heard: text(w.heard, HEARD_MOST), quiet: w.quiet === true, since: now, said: '' }
       asks.set(ask.n, ask)
       p.asked = ask.n; p.thinking = true; show(p)
-      const before = Array.isArray(w.before) ? w.before.slice(-BEFORE_MOST).map((b) => ({ who: b?.who === 'self' ? 'self' : text(b?.who, 24), text: text(b?.text, SAY_MOST) })).filter((b) => b.who && b.text) : []
+      // What was said before: what the world remembers of this actor's talk, unless the rule says what it was (before: [] and they remember nothing).
+      const before = Array.isArray(w.before) ? w.before.slice(-BEFORE_MOST).map((b) => ({ who: b?.who === 'self' ? 'self' : text(b?.who, 24), text: text(b?.text, SAY_MOST) })).filter((b) => b.who && b.text) : recalled(`${rule.id}/${w.id}`, now)
       hand({ n: ask.n, ask: { name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), before, from: ask.from, heard: ask.heard, notes: want } })
     },
     /** What came back for an ask, from the server: `{n, say, more}` while it is still coming (the words so far), `{n, say, notes}` at its end (all of them), or `{n, failed}`. */
@@ -70,11 +88,12 @@ export function thinking({ actor, say, show, hand, happen }) {
       if (typeof m.say === 'string') speak(ask, m.say)
       if (m.more === true) return
       if (!ask.said) return end(ask, { say: '', notes: noted(ask.want, null), failed: 'the answer held nothing a person of the world would say' })
+      remember(ask, Date.now())
       end(ask, { say: ask.said, notes: noted(ask.want, m.notes) })
     },
     /** Called now and then: a thought that has taken too long has failed, and its actor stops thinking. */
     tidy(now) { for (const ask of [...asks.values()]) if (now - ask.since > THOUGHT_MOST) end(ask, { say: ask.said, notes: noted(ask.want, null), failed: 'no answer came in time' }) },
     /** A rule was taken out: what it asked for is forgotten. */
-    drop(rule) { for (const ask of [...asks.values()]) if (ask.rule === rule) asks.delete(ask.n) },
+    drop(rule) { for (const ask of [...asks.values()]) if (ask.rule === rule) asks.delete(ask.n); for (const key of [...talk.keys()]) if (key.startsWith(`${rule}/`)) talk.delete(key) },
   }
 }
