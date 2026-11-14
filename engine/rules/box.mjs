@@ -45,6 +45,9 @@ const GUEST = `(() => {
     const world = {
       now: m.now, people: m.people, residents: m.residents || [], keep: m.keep,
       near: (at, within) => m.people.filter((p) => flat(p, at) <= within),
+      // Anyone by their id; and whoever this is about (who spoke, who did something, who came near): theirs, or null.
+      who: (id) => m.people.find((p) => p.id === id) || null,
+      them: m.e && typeof (m.e.by || m.e.who) === 'string' ? m.people.find((p) => p.id === (m.e.by || m.e.who)) || null : null,
     }
     // What may be asked for here, by name (the world says which): world.actor('guide', {...}), world.gone('guide').
     // With one argument that is an object, there is no id: world.something({...}).

@@ -2243,3 +2243,18 @@ lanes' checks on the one GPU, so GPU times are within a millisecond or two).
   where a second 128 MB pool may not fit (a smaller second world cannot be traded: it would be made on stepping).
   Two streams are held at once, of the six connections a browser gives a server over HTTP/1.1.
 
+
+## What the first model-written rules could not do with people (#218 for #264, November 14)
+
+- **A resident's look is readable.** `world.residents[].look` and a taken actor's `look` in `world.people` are
+  what the figure's own number picks (`page/wear.ts` `ownLook`, from the same palettes `figure` uses: they moved
+  there as `OWN`): colours, and what is on by name. A taken actor keeps its number, so its own look given back with
+  something added is the same person with that added; `look: null` is its own clothes again while still held.
+  `tall` and `broad` are told beside the look, not in it: in a look they multiply the figure's own.
+- **No name is a name.** `name: null` shows nothing over the head, and a taken resident has none until it is given
+  one (it showed the rule's own id). What a nameless body says is heard as "Someone".
+- **Who an event is about**: `world.them` (the entry in `world.people` of whoever spoke, acted or came near),
+  `world.who(id)`, and `person: true` on people at pages and in seats.
+- **A helper on `world` must not share a name with something a rule can do.** The interpreter lays every `does`
+  name over `world` after the helpers: `world.person(id)` was silently the bodies lane's `person` and returned
+  nothing. It is `world.who`.

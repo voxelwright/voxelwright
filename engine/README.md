@@ -324,7 +324,9 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
   back to their round. So "the one you spoke to changes, and then the ones you pass" is a rule taking residents.
-  The world's rules hold at most 128 between them. `node test/taken.mjs` checks it with two pages.
+  The world's rules hold at most 128 between them. A rule reads what a resident looks like (`look`), adds to it or
+  gives it back (`look: null`), and shows no name over a head (`name: null`; a taken resident has none until given
+  one). `world.them` is whoever a call is about. `node test/taken.mjs` checks it with two pages.
 - **A model writes one** (`make/rules.mjs`, the asker's own Claude Code on their own machine):
   `node make/rules.mjs "a busker who plays when someone stops to listen" --world http://127.0.0.1:5741 --at 700,155,4060`.
   The model is told what a rule can hear and do in the guide's own words, taken from the server each time, and

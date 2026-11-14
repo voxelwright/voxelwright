@@ -8,7 +8,7 @@
 import { shader, type Target } from '../probe/gpu.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
 import { CHANNELS, play, type Channel, type Move } from './moves.ts'
-import { CARRIED, WORN, named, type Extra, type Look, type Part } from './wear.ts'
+import { CARRIED, OWN, WORN, named, type Extra, type Look, type Part } from './wear.ts'
 import { chance, residents, type Land, type Resident, type Shock } from './residents.ts'
 
 /** One person, as whoever draws them is told. Lengths are the world's finest cells (10 cm). */
@@ -244,15 +244,10 @@ type Frame = Float64Array
 
 /** Colours as light, not as a screen shows them. */
 const tint = (hex: string): V3 => [0, 1, 2].map((c) => (parseInt(hex.slice(1 + c * 2, 3 + c * 2), 16) / 255) ** 2.2) as unknown as V3
-// What real people wear in a town in autumn: dark and muted, with now and then a colour.
-const COATS = ['#2b2d33', '#1f2a3d', '#3b3f45', '#5a4632', '#8a6a44', '#4a5240', '#6b2f2c', '#56585c', '#23262b', '#3a4a5c', '#7a7468', '#2f4a44', '#b9b2a2', '#a8452f', '#c9a23a', '#8fa3b5', '#d8d4c8'].map(tint)
-const LEGS = ['#22242a', '#2c3444', '#1b1c20', '#4b4a44', '#3a3128', '#59605f', '#8a8272', '#3f5878'].map(tint)
-// Skin is given darker than it is: in full sun a pale face came out as white paper.
-const SKINS = ['#c9a084', '#bd8f6e', '#a87552', '#8a5a3a', '#684228', '#4a2e1e'].map(tint)
-const HAIRS = ['#17130f', '#2e2016', '#4a3222', '#7a5a34', '#b0926a', '#8a8a88', '#c8c6c0', '#5c2a18'].map(tint)
-const BRIGHT = ['#b8862a', '#a03a2e', '#2a6f78', '#c2bfb4', '#44608c', '#7c8a3a'].map(tint)
+// The colours a figure's own number picks from are in wear.ts (OWN), where a rule can be told them.
+const COATS = OWN.coats.map(tint), LEGS = OWN.legs.map(tint), SKINS = OWN.skins.map(tint), HAIRS = OWN.hairs.map(tint), BRIGHT = OWN.bright.map(tint)
 const EYE: V3 = [0.012, 0.01, 0.01]
-const SHOES = ['#141416', '#2a1d14', '#3c3c3e', '#d8d6d0'].map(tint)
+const SHOES = OWN.shoes.map(tint)
 
 const pick = <T>(from: readonly T[], seed: number, ask: number): T => from[Math.floor(chance(seed, ask) * from.length)]
 

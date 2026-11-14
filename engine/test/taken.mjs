@@ -38,9 +38,13 @@ on('said', (world, e) => {
     const r = world.residents.slice().sort((a, b) => Math.hypot(a.at[0] - e.at[0], a.at[2] - e.at[2]) - Math.hypot(b.at[0] - e.at[0], b.at[2] - e.at[2]))[0]
     if (!r) return
     k.stopped = (k.stopped || 0) + 1
+    k.look = r.look
     world.actor('passer-' + k.stopped, { take: r.id, name: 'Someone passing', face: e.at, say: 'Yes? I was at ' + r.at[0] + ',' + r.at[2] + '; ' + k.same + ' of ' + k.of + ' round here are who they were.' })
   }
   if (/thank/i.test(e.text)) for (const p of mine) world.gone(p.id)
+  // What they look like is theirs to read: the same person with glasses on, with no name, and in their own clothes again.
+  if (/glasses/i.test(e.text) && mine[0]) world.actor(mine[0].id, { name: null, look: { ...mine[0].look, wear: [...mine[0].look.wear, 'glasses'] }, say: 'coat ' + mine[0].look.coat + ' as it was: ' + (mine[0].look.coat === k.look.coat) + '; asked by ' + (world.them && world.them.id === e.by && world.them.person) + ' ' + world.who(e.by).name })
+  if (/as you were/i.test(e.text) && mine[0]) world.actor(mine[0].id, { look: null, name: 'Someone passing' })
   if (/how many/i.test(e.text) && mine[0]) world.actor(mine[0].id, { say: 'I am number ' + k.stopped + '.' })
   if (/twice/i.test(e.text) && mine[0]) { world.actor('second', { take: mine[0].was }); world.actor('third', { take: 'r0' }) }
 })`
@@ -83,6 +87,17 @@ try {
   check(taken.all.filter((p) => p.seed === seed).length === 1 && (await a.evaluate(() => globalThis.engine.takenOff.size)) === 1, 'a page draws them once: the actor, and not the resident they were as well')
   check(wasThere && Math.hypot(taken.them[0].at[0] - x, taken.them[0].at[2] - z) < 12, `it is the same figure the page was drawing (the same number for its looks), where the resident was`)
   if (out) { await a.waitForTimeout(600); await a.screenshot({ path: join(out, 'taken-1-stopped.png') }) }
+
+  // A rule reads what a resident looks like, adds to it, shows no name, and gives the clothes back.
+  await post('say', { by: 'wren', text: 'put your glasses on' })
+  const read = await until('it says what it read', () => heard(/^coat #/)).catch(async (e) => { throw new Error(`${e.message}: ${(await how('passing')).error}; heard ${(await around()).heard.map((h) => h.text).join(' | ')}`) })
+  check(/^coat #[0-9a-f]{6} as it was: true; asked by true wren$/.test(read), `a rule reads what a resident looks like, taken or not, and knows who asked (${read})`)
+  const worn = await until('the page has the glasses', async () => (await a.evaluate((seed) => { const e = globalThis.engine, p = e.folk.from.flatMap((f) => f(e.view(), 0)).find((p) => p.seed === seed); return p?.look?.wear?.includes('glasses') ? { name: p.name, coat: p.look.coat } : null }, seed)))
+  check(worn.name === '' && read.includes(worn.coat), 'the page draws the same person with glasses on, and no name over their head')
+  if (out) { await a.waitForTimeout(500); await a.screenshot({ path: join(out, 'taken-1b-glasses-no-name.png') }) }
+  await post('say', { by: 'wren', text: 'as you were' })
+  await until('its own clothes again', async () => a.evaluate((seed) => { const e = globalThis.engine, p = e.folk.from.flatMap((f) => f(e.view(), 0)).find((p) => p.seed === seed); return p && !p.look && p.name === 'Someone passing' }, seed))
+  check(true, 'told to, it is in its own clothes again while still held, with its name back')
 
   // A page that joins later sees the same.
   const b = await open('june')

@@ -4,6 +4,7 @@
 // anyone's own on any part of the body, for what nobody foresaw. The things with names below are
 // no more than boxes written down. Read by the page, and by the world's process, which checks
 // what a rule sends.
+import { chance } from './residents.ts'
 
 /** The parts of a body a box can be on: it turns with that part. The hands' boxes are told from the hand, with -y along the forearm and out past the fingers. */
 export const PARTS = ['head', 'chest', 'hip', 'handR', 'handL'] as const
@@ -22,6 +23,31 @@ export interface Look {
   carry?: string | Extra[]
   /** Boxes of one's own, anywhere on the body. */
   extra?: Extra[]
+}
+
+/** The colours a figure's own number picks from. What real people wear in a town in autumn: dark and muted, with now and then a colour. Skin is given darker than it is: in full sun a pale face came out as white paper. */
+export const OWN = {
+  coats: ['#2b2d33', '#1f2a3d', '#3b3f45', '#5a4632', '#8a6a44', '#4a5240', '#6b2f2c', '#56585c', '#23262b', '#3a4a5c', '#7a7468', '#2f4a44', '#b9b2a2', '#a8452f', '#c9a23a', '#8fa3b5', '#d8d4c8'],
+  legs: ['#22242a', '#2c3444', '#1b1c20', '#4b4a44', '#3a3128', '#59605f', '#8a8272', '#3f5878'],
+  skins: ['#c9a084', '#bd8f6e', '#a87552', '#8a5a3a', '#684228', '#4a2e1e'],
+  hairs: ['#17130f', '#2e2016', '#4a3222', '#7a5a34', '#b0926a', '#8a8a88', '#c8c6c0', '#5c2a18'],
+  bright: ['#b8862a', '#a03a2e', '#2a6f78', '#c2bfb4', '#44608c', '#7c8a3a'],
+  shoes: ['#141416', '#2a1d14', '#3c3c3e', '#d8d6d0'],
+}
+const own = (from: readonly string[], seed: number, ask: number) => from[Math.floor(chance(seed, ask) * from.length)]
+
+/**
+ * What a figure looks like by its own number alone (people.ts `figure` picks the same): its colours, what it has on
+ * by the names things have, and its build against the usual. For telling a rule what a resident looks like: a look
+ * made of these, with something added, is the same person with that added.
+ */
+export function ownLook(seed: number): { look: Look; tall: number; broad: number } {
+  const bright = own(OWN.bright, seed, 8), hair = Math.floor(chance(seed, 10) * 5), bag = Math.floor(chance(seed, 12) * 4)
+  const wear = [chance(seed, 9) < 0.45 ? 'coat' : 'jacket', hair === 0 ? `beanie ${bright}` : hair >= 3 ? 'long-hair' : 'short-hair']
+  if (chance(seed, 11) < 0.3) wear.push(`scarf ${bright}`)
+  if (bag === 1) wear.push(`pack ${own(OWN.legs, seed, 13)}`)
+  else if (bag === 2) wear.push(`satchel ${own(OWN.bright, seed, 14)}`)
+  return { look: { coat: own(OWN.coats, seed, 3), legs: own(OWN.legs, seed, 4), skin: own(OWN.skins, seed, 5), hair: own(OWN.hairs, seed, 6), shoes: own(OWN.shoes, seed, 7), wear }, tall: Number((0.93 + 0.12 * chance(seed, 1)).toFixed(3)), broad: Number((0.9 + 0.22 * chance(seed, 2)).toFixed(3)) }
 }
 
 const box = (on: Part, at: [number, number, number], size: [number, number, number], colour = 'own', shiny = false): Extra => ({ on, at, size, colour, shiny })
@@ -43,6 +69,7 @@ export const WORN: Record<string, Thing> = {
   gloves: { own: '#141416', set: { hands: 'own' }, boxes: [] },
   scarf: { own: '#b8862a', boxes: [box('chest', [0, 5.1, -0.1], [2.5, 1, 2.6])] },
   pack: { own: '#3a3128', boxes: [box('chest', [0, 2.6, 1.8], [2.75, 3.75, 1.4])] },
+  satchel: { own: '#b8862a', boxes: [box('hip', [2.1, 0.2, 0.1], [0.9, 2.5, 3], 'own', true)] },
   apron: { own: '#e2dfd6', boxes: [box('chest', [0, 2.0, -1.2], [3.0, 3.7, 0.12]), box('hip', [0, -0.7, -1.12], [3.0, 2.7, 0.12])] },
   vest: { own: '#c8d42a', boxes: [box('chest', [0, 2.5, 0], [3.95, 3.7, 2.45]), box('chest', [0, 2.2, 0], [4.0, 0.4, 2.5], '#c8ccd0')] },
   badge: { own: '#c9a23a', boxes: [box('chest', [1.0, 3.9, -1.18], [0.6, 0.7, 0.1], 'own', true)] },

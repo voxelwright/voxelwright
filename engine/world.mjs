@@ -19,7 +19,7 @@ import { controlsOf, numbers } from './page/living.ts'
 import { about, REACH_MOST } from './about.mjs'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
-import { lookOf } from './page/wear.ts'
+import { lookOf, ownLook } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
 import { bodies } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
@@ -304,7 +304,10 @@ function townNear(now) {
   return (town = { at: now, list, by: new Map(list.map((r) => [r.id, r])) })
 }
 /** The residents a rule is told of: who, where, how they face, whether they walk, and how far the nearest person is. */
-const townTold = () => townNear(Date.now()).list.map((r) => ({ id: r.id, at: r.at.map(Math.round), yaw: Number(r.yaw.toFixed(2)), walking: r.walking, near: Math.round(r.far) }))
+const townTold = () => townNear(Date.now()).list.map((r) => ({ id: r.id, at: r.at.map(Math.round), yaw: Number(r.yaw.toFixed(2)), walking: r.walking, near: Math.round(r.far), ...looksOf(r.seed) }))
+/** What a resident looks like by their own number (page/wear.ts `ownLook`), kept for those lately asked about. */
+const looked = new Map()
+const looksOf = (seed) => { let l = looked.get(seed); if (!l) { if (looked.size > 512) looked.clear(); looked.set(seed, l = ownLook(seed)) } return l }
 /** A resident becomes a body of a rule's, where they are this moment; or why not. */
 function take(rule, short, id, now, wrong) {
   const r = typeof id === 'string' ? townNear(now).by.get(id) : undefined
@@ -313,7 +316,7 @@ function take(rule, short, id, now, wrong) {
   if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
   // Where they are now, not a quarter of a second ago: nobody should see them jump.
   const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, 12, fresh, shocks, taken), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
-  const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: short, seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
+  const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: '', seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
   folk.set(p.by, p); taken.set(r.seed, p); town.at = 0
   return p
 }
@@ -337,7 +340,7 @@ function actorsBack(ruleId, actors, now) {
   for (const a of Array.isArray(actors) ? actors.slice(0, 64) : []) {
     if (!a || typeof a.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(a.id) || !three(a.at) || !Number.isFinite(a.yaw)) continue
     const was = Number.isInteger(a.was) && three(a.home) && !taken.has(a.was) ? a.was : undefined
-    const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: text(a.name, 24) || a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(140, a.pace)) } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
+    const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: typeof a.name === 'string' ? text(a.name, 24) : a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(140, a.pace)) } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
     if (a.look && typeof a.look === 'object') p.look = lookOf(a.look)
     folk.set(p.by, p)
     if (was !== undefined) taken.set(was, p)
@@ -387,7 +390,7 @@ function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
@@ -414,7 +417,7 @@ function drop(id) {
  */
 const does = new Map()
 /** A body says words: everyone near hears, and it is not told to rules (one rule's actors cannot set another's talking for ever). */
-const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name, text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
+const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name || 'Someone', text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
 const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen })
 setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */
@@ -442,7 +445,8 @@ does.set('actor', (rule, w, now, wrong) => {
       folk.set(by, p)
     } else { p.at = [x, feet, z]; p.goal = null; p.path = undefined; p.stopped = '' }
   }
-  if (w.name !== undefined) p.name = text(w.name, 24) || id
+  // A name is shown over the head; null (or nothing) is no name shown, as a resident has none.
+  if (w.name !== undefined) p.name = w.name === null ? '' : text(w.name, 24)
   if (w.pace !== undefined) { if (Number.isFinite(w.pace)) p.pace = Math.max(0, Math.min(PACE_MOST, w.pace)); else wrong('a pace is a number of cells a second') }
   if (w.to !== undefined) {
     p.follow = undefined
