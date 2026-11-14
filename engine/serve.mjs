@@ -79,10 +79,11 @@ async function report(req, res) {
 //   5 here    where someone in the world is, as JSON: {by, name, at (their feet, the finest cells), yaw, walking,
 //             down, flinch, seat (a body the world moves for someone outside a page), gone}.
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
+//   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -144,6 +145,9 @@ world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this 
 world.gone(id)   the actor leaves
 world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
   on('act',   (world, e) => {})   someone did something this rule offers: e = {by, name, action (the offer's id), phase: "tap" | "down" | "up", at (their feet), from (their eyes), to (the way they look), met}. met is what was straight ahead of them, aimed or not: null for the sky, {kind: "cells", at, far, material} or someone's body {kind: "page" | "seat" | "actor", id, name, mine, at, far, up (0 at the feet to 1 at the head)}. Only the rule that offered it hears it
+world.show(id, {line, meters, score, choice, to})   shows people something on their screen, or changes it: only the fields given change, a field given as null is taken away, and hide: true takes all of it away. line is a line of words (up to 80 characters). meters is up to 4 of {label, value, of, colour: "#rrggbb"}: how full each is, value out of of (1 unless said). score is a number, a few characters ("2:41", "3rd"), or {label, value}. choice is up to 6 picks, each a word or {id, word}. to is who sees it: an id of world.people, a list, or null for everyone. A rule shows at most 8 things. These are the rule's own words and numbers: the engine has no word for health, alarm, laps or rounds
+  on('pick',  (world, e) => {})   someone picked from a choice this rule shows them: e = {by, name, show (its id), pick (the pick's id), at}. Only the rule that shows it hears it; the choice stays until the rule changes or hides it
+POST /world/pick          {"by": name, "rule": id, "id": id, "pick": id}   pick from a choice a rule shows, from outside a page
 POST /world/act           {"by": name, "rule": id, "id": id, "phase": "down" | "up", "from": [x, y, z], "to": [dx, dy, dz]}   do something a rule offers, from outside a page
 world.actor(id, {take: residentId, ...})   takes a resident as this rule's own actor: it stands where the resident stood, looking as it looked, and from then it is an actor like any other (name it, walk it, change its look, have it speak; world.people shows it with was: residentId). world.gone(id) lets it go: it walks back to its round and is a resident again. The world's rules may hold ${128} residents between them, and a resident is one rule's at a time
 An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
@@ -379,7 +383,7 @@ function open(of) {
   const readers = new Set()
   let down = ''
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
-  let offered = null
+  let offered = null, showing = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
@@ -394,6 +398,7 @@ function open(of) {
     if (m.living) { if (m.living.body) living.set(m.living.thing, m.living.body); else living.delete(m.living.thing); const f = frame(LIVING, 0, Buffer.from(JSON.stringify(m.living))); for (const r of readers) r.write(f); return }
     // What rules offer people to do: for whoever reads now, and kept here for whoever joins.
     if (m.offers) { offered = frame(OFFERS, 0, Buffer.from(JSON.stringify(m.offers))); for (const r of readers) r.write(offered); return }
+    if (m.shown) { showing = frame(SHOWN, 0, Buffer.from(JSON.stringify(m.shown))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(showing); return }
     // Where people are and what they say goes to whoever is reading now, and is not kept.
     if (m.here || m.said) { const f = frame(m.here ? HERE : SAID, 0, Buffer.from(JSON.stringify(m.here ?? m.said))); for (const r of readers) if (m.said || r.writableLength < 1 << 20) r.write(f); return }
     if (!m.counts) return
@@ -467,6 +472,17 @@ function open(of) {
       if (error) return send(res, 409, error)
       send(res, 202, '{"done":true}', TYPES['.json'])
     },
+    /** Someone picks from a choice a rule shows them (rules/hands.mjs): the rule hears which. */
+    async pick(req, res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const b = await body(req, 1024), by = text(b?.by, 24)
+      if (!b || !by || by.includes('/')) return send(res, 400, 'say who you are: "by"')
+      if (![b.rule, b.id, b.pick].every((v) => typeof v === 'string' && v.length <= 24)) return send(res, 400, 'a pick is "rule" and "id" (what is shown) and "pick" (which of its picks)')
+      const id = questions++
+      const { error } = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ pick: { by, rule: b.rule, id: b.id, pick: b.pick }, id }) })
+      if (error) return send(res, 409, error)
+      send(res, 202, '{"done":true}', TYPES['.json'])
+    },
     /** Something a body does or asks (world.mjs `seat`): the world answers. */
     async seat(op, from, res) {
       if (down) return send(res, 503, 'the world has stopped')
@@ -514,6 +530,7 @@ function open(of) {
       res.write(frame(NOW, log.length, Buffer.from(Float64Array.of(Date.now()).buffer)))
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
+      if (showing) res.write(showing)
       // What sleeps says nothing: the world says once more where everything is.
       thread.postMessage({ nudge: true })
       readers.add(res)
@@ -678,6 +695,7 @@ const server = createServer((req, res) => {
     if (req.method === 'POST' && route === '/world/ask') return done(world.ask(req, res))
     if (req.method === 'POST' && route === '/world/here') return done(world.here(req, res))
     if (req.method === 'POST' && route === '/world/act') return done(world.act(req, res))
+    if (req.method === 'POST' && route === '/world/pick') return done(world.pick(req, res))
     if (req.method === 'POST' && route === '/world/drive') return done(world.drive(req, res))
     const op = route.slice(7)
     if (req.method === 'POST' && ['join', 'walk', 'turn', 'say', 'leave'].includes(op)) return done(world.body(req, 2048).then((b) => world.seat(op, b, res)))

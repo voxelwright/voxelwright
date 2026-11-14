@@ -4,11 +4,14 @@
 // is done (tapped or held), and doing one tells the world who did it and which way their eyes looked. What the
 // aim met is the world's to find, not the page's: it knows where everyone stands.
 //
-// The word of an offer is text a rule wrote (and a rule is text someone or their model wrote): it is shown as
+// What a realm shows (a line, meters, a score, a choice) is drawn here too, in a panel of the page's one layer:
+// a rule's own words and numbers, with nothing here that knows a health bar from a lap count.
+//
+// The word of an offer, and every word shown, is text a rule wrote (and a rule is text someone or their model wrote): it is shown as
 // text, never as markup.
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
-import type { Link, Offer } from './link.ts'
+import type { Link, Offer, Shown } from './link.ts'
 
 /** An offer as this page has it: with the key it is on. */
 export interface Offered extends Offer { code: string }
@@ -19,6 +22,8 @@ export interface Hands {
   do(offer: Offer, phase?: 'down' | 'up'): void
   /** Once a frame: a held key that has come up is let go. */
   frame(): void
+  /** What is shown to this page. */
+  readonly shown: readonly Shown[]
   /** Told whenever what is offered changes. */
   onchange: (() => void) | null
 }
@@ -53,6 +58,7 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
   }
   const self: Hands = {
     get offered() { return offered },
+    get shown() { return shown },
     onchange: null,
     do(o, phase) { if (phase === 'up') lift(o); else if (o.hold) { const mine = offered.find((x) => name(x) === name(o)); if (mine) press(mine, false) } else send(o, 'down') },
     frame() { for (const { offer, key } of [...down.values()]) if (key && !keys.held(offer.code)) lift(offer) },
@@ -68,6 +74,39 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
     offered = next.filter((o) => o.code)
     draw()
     self.onchange?.()
+  }
+  // What a realm shows: each a card of a line, a score, meters and picks, in the order the rules gave them.
+  let shown: Shown[] = []
+  const cards = over.panel('shown')
+  cards.hidden = true
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = '') => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e }
+  if (far) far.onshown = (all) => {
+    shown = all.filter((s) => s.to === null || s.to.includes(far.me))
+    cards.replaceChildren(...shown.map((s) => {
+      const card = el('div', 'card')
+      card.dataset.show = `${s.rule}/${s.id}`
+      if (s.score) { const score = el('div', 'score'); score.append(el('b', '', s.score.value), el('span', '', s.score.label)); card.append(score) }
+      const body = el('div', 'body')
+      if (s.line) body.append(el('p', 'line', s.line))
+      for (const m of s.meters) {
+        const meter = el('div', 'meter'), bar = el('i', ''), fill = el('i', '')
+        // How full is a number the world checked, and the colour a pattern it checked: nothing else of a rule's reaches a style.
+        fill.style.width = `${Math.round(Math.max(0, Math.min(1, m.full)) * 100)}%`
+        if (/^#[0-9a-f]{6}$/.test(m.colour)) fill.style.background = m.colour
+        bar.append(fill)
+        meter.setAttribute('role', 'meter'); meter.setAttribute('aria-label', m.label); meter.setAttribute('aria-valuenow', String(m.full))
+        meter.append(el('span', '', m.label), bar)
+        body.append(meter)
+      }
+      if (s.choice) {
+        const picks = el('div', 'picks')
+        for (const c of s.choice) { const b = el('button', '', c.word); b.addEventListener('click', () => { far.pick(s.rule, s.id, c.id); b.blur() }); picks.append(b) }
+        body.append(picks)
+      }
+      card.append(body)
+      return card
+    }))
+    cards.hidden = shown.length === 0
   }
   // A key that is offered is the realm's while it is: under the wand's keys, over the page's own.
   keys.push({

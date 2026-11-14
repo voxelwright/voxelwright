@@ -18,6 +18,8 @@ export interface Look { coat?: string; legs?: string; hair?: string; skin?: stri
 export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number }
 /** Something a rule offers people to do (rules/hands.mjs): a word to show, held or tapped, aimed or not, the key it would like, and who it is for (null: everyone). */
 export interface Offer { rule: string; id: string; word: string; hold: boolean; aim: boolean; key: string; to: string[] | null }
+/** Something a rule shows people (rules/hands.mjs): a line, meters (how full, 0 to 1), a score, picks to choose from, and who it is for (null: everyone). All of it is text a rule wrote: to be put as text. */
+export interface Shown { rule: string; id: string; line: string; meters: { label: string; full: number; colour: string }[]; score: { label: string; value: string } | null; choice: { id: string; word: string }[] | null; to: string[] | null }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null
@@ -28,6 +30,10 @@ export interface Link {
   onliving: ((living: { thing: string; body: number }) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
+  /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */
+  onshown: ((shown: Shown[]) => void) | null
+  /** Picks from a choice a rule shows. */
+  pick(rule: string, id: string, pick: string): void
   /** Does something a rule offers: which, whether it goes down or comes up, where the eyes are and which way they look. */
   act(rule: string, id: string, phase: 'down' | 'up', from: readonly [number, number, number], to: readonly [number, number, number]): void
   /** Says what a living thing is to do (go, turn and rise from -1 to 1), held by the world for a second. */
@@ -50,18 +56,22 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
   let live = false
   /** What is offered, as last said, and who hears it. */
   let offers: Offer[] = [], hears: ((offers: Offer[]) => void) | null = null
+  let shown: Shown[] = [], sees: ((shown: Shown[]) => void) | null = null
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null,
+    get onshown() { return sees },
+    set onshown(f: ((shown: Shown[]) => void) | null) { sees = f; f?.(shown) },
+    pick(rule, id, pick) { void fetch(`${base}/pick`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, pick }) }).catch(() => {}) },
     get onoffers() { return hears },
     set onoffers(f: ((offers: Offer[]) => void) | null) { hears = f; f?.(offers) },
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
@@ -100,6 +110,7 @@ export function link(base = '/world'): Link {
         if (kind === NOW) { live = true; if (size >= 8) behind = new Float64Array(payload.buffer, 0, 1)[0] - Date.now() }
         else if (kind === SAID) self.onsaid?.(JSON.parse(new TextDecoder().decode(payload)))
         else if (kind === ECHO) self.onecho?.(JSON.parse(new TextDecoder().decode(payload)) as Echo, live)
+        else if (kind === SHOWN) { shown = JSON.parse(new TextDecoder().decode(payload)) as Shown[]; self.onshown?.(shown) }
         else if (kind === OFFERS) { offers = JSON.parse(new TextDecoder().decode(payload)) as Offer[]; self.onoffers?.(offers) }
         else if (kind === LIVING) self.onliving?.(JSON.parse(new TextDecoder().decode(payload)))
         else if (kind === HERE) { const who = JSON.parse(new TextDecoder().decode(payload)); if (who.by !== self.me) self.onhere?.(who) }

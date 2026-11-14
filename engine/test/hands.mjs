@@ -22,8 +22,8 @@ const until = async (what, ask, ms = 6000) => { for (const began = Date.now(); D
 const rule = (id, source, name = id) => post('ask', { by: 'tester', rule: { id, name, source } })
 const how = async (id) => (await get('rules')).find((r) => r.id === id)
 const heard = async (by) => (await get(`around?by=${by}&within=1200`)).heard.map((h) => h.text)
-/** What the stream last said is offered. */
-const offered = async () => {
+/** What the stream last said of a kind: 8 what is offered, 9 what is shown. */
+const last = async (want) => {
   const r = await fetch(`${server.url}/world/stream?from=0`), reader = r.body.getReader()
   let held = Buffer.alloc(0), found = null
   const until = Date.now() + 1500
@@ -31,11 +31,12 @@ const offered = async () => {
     const got = await Promise.race([reader.read(), wait(300).then(() => null)])
     if (!got) { if (found) break; continue }
     held = Buffer.concat([held, got.value])
-    for (let at = 0; held.length - at >= 12;) { const kind = held.readUInt32LE(at), size = held.readUInt32LE(at + 8); if (held.length - at < 12 + size) break; if (kind === 8) found = JSON.parse(held.subarray(at + 12, at + 12 + size).toString()); at += 12 + size; if (held.length === at) held = Buffer.alloc(0) }
+    for (let at = 0; held.length - at >= 12;) { const kind = held.readUInt32LE(at), size = held.readUInt32LE(at + 8); if (held.length - at < 12 + size) break; if (kind === want) found = JSON.parse(held.subarray(at + 12, at + 12 + size).toString()); at += 12 + size; if (held.length === at) held = Buffer.alloc(0) }
   }
   void reader.cancel()
   return found ?? []
 }
+const offered = () => last(8), shown = () => last(9)
 
 // A stall: its keeper sells to whoever does "buy" while looking at them, and counts what each has had.
 const STALL = `
@@ -48,6 +49,24 @@ on('act', (world, e) => {
   if (!e.met || !e.met.mine || e.met.id !== 'keeper') { world.actor('keeper', { say: 'Over here, ' + e.name + ': ' + (e.met ? e.met.kind : 'nothing') }); return }
   const had = world.keep[e.by] = (world.keep[e.by] || 0) + 1
   world.actor('keeper', { face: e.at, say: 'Pretzel ' + had + ' for ' + e.name + ', ' + e.met.far + ' cells off.' })
+})`
+// A kettle: nothing of a game. It shows everyone how near the boil it is and how many cups it has poured, and
+// whoever asks for tea is shown a choice that is theirs alone.
+const KETTLE = `
+on('start', (world) => { world.keep.heat = 0; world.keep.cups = 0; world.show('kettle', { line: 'The kettle is on', meters: [{ label: 'Kettle', value: 0, of: 100, colour: '#e0803a' }], score: { label: 'cups', value: 0 } }) })
+on('tick', (world) => {
+  if (world.keep.heat >= 100) return
+  world.keep.heat = Math.min(100, world.keep.heat + 20)
+  world.show('kettle', { meters: [{ label: 'Kettle', value: world.keep.heat, of: 100, colour: '#e0803a' }], ...(world.keep.heat >= 100 ? { line: 'The kettle has boiled' } : {}) })
+})
+on('said', (world, e) => {
+  if (/tea/i.test(e.text)) world.show('how-' + e.by.toLowerCase().replace(/[^a-z0-9]/g, ''), { line: 'How do you take it, ' + e.name + '?', choice: [{ id: 'milk', word: 'With milk' }, { id: 'lemon', word: 'With lemon' }], to: e.by })
+  if (/markup/i.test(e.text)) world.show('odd', { line: '<img src=x onerror=globalThis.pwned=1><b>bold</b>', meters: [{ label: '<i>x</i>', value: 5, of: 2, colour: 'red;position:fixed' }, 'nonsense'], score: { label: 'n', value: 12.3456 }, choice: ['plain', { id: 'Bad Id', word: 'no' }] })
+})
+on('pick', (world, e) => {
+  world.keep.cups += 1
+  world.show(e.show, { hide: true })
+  world.show('kettle', { score: { label: 'cups', value: world.keep.cups }, line: 'Tea ' + (e.pick === 'lemon' ? 'with lemon' : 'with milk') + ' for ' + e.name })
 })`
 // Someone to wave at: held, not aimed, and offered to one person alone.
 const WAVER = `
@@ -118,6 +137,26 @@ try {
   await until('a rule that is gone offers nothing', async () => (await offered()).length === 0)
   check(true, 'taken back, or its rule taken out, an offer is gone')
 
+  // What a realm shows: a line, a meter, a score, to everyone; a choice, to the one who asked.
+  check((await rule('kettle', KETTLE, 'A kettle')).asked, 'a third rule is taken')
+  const first9 = await until('the kettle is shown', async () => { const s = await shown(); return s.length ? s : null })
+  check(first9.length === 1 && first9[0].rule === 'kettle' && first9[0].line === 'The kettle is on' && first9[0].meters[0].label === 'Kettle' && first9[0].meters[0].colour === '#e0803a' && first9[0].score.value === '0' && first9[0].to === null, `what is shown is told to whoever joins the stream (${JSON.stringify(first9[0])})`)
+  const boiled = await until('the kettle boils by the rule\'s own count', async () => { const s = (await shown())[0]; return s.meters[0].full === 1 && s.line === 'The kettle has boiled' ? s : null }, 12_000)
+  check(boiled.meters[0].full === 1, 'a meter is the rule\'s own number, moved by its ticks')
+  await post('say', { by: 'wren', text: 'tea, please' })
+  const asked = await until('a choice is shown to the one who asked', async () => (await shown()).find((s) => s.choice))
+  check(asked.to.length === 1 && asked.to[0] === 'wren' && asked.choice.map((c) => c.id).join() === 'milk,lemon' && asked.line === 'How do you take it, wren?', `a choice is shown to the one who asked (${JSON.stringify(asked)})`)
+  check((await post('pick', { by: 'robin', rule: 'kettle', id: asked.id, pick: 'lemon' })).refused === 409, 'someone it is not shown to cannot pick')
+  check((await post('pick', { by: 'wren', rule: 'kettle', id: asked.id, pick: 'whisky' })).refused === 409, 'nor can anyone pick what is not among the picks')
+  check((await post('pick', { by: 'wren', rule: 'kettle', id: asked.id, pick: 'lemon' })).done, 'a pick is taken')
+  const poured = await until('the rule hears the pick', async () => { const all = await shown(); return all.length === 1 && all[0].score.value === '1' ? all[0] : null })
+  check(poured.line === 'Tea with lemon for wren', `the rule hears who picked what, and the choice is gone (${poured.line})`)
+  // What is not as it should be is cleaned or left out, and the rule is told.
+  await post('say', { by: 'wren', text: 'markup' })
+  const odd = await until('the odd one is shown', async () => (await shown()).find((s) => s.id === 'odd'))
+  check(odd.meters.length === 1 && odd.meters[0].full === 1 && odd.meters[0].colour === '' && odd.score.value === '12.35' && odd.choice.length === 1 && odd.choice[0].id === 'plain', `a meter over full is full, a colour that is no colour is none, a pick with a bad id is left out (${JSON.stringify(odd)})`)
+  check(/a pick of "odd"|a meter of "odd"/.test((await how('kettle')).error), `and the rule is told what was wrong (${(await how('kettle')).error})`)
+
   // The page: keys and buttons made of what is offered, by code that knows nothing of pretzels.
   await rule('stall', STALL)
   await until('the stall is back', async () => (await offered()).length === 1)
@@ -130,8 +169,8 @@ try {
     await page.goto(`${server.url}/city?fly=0&shared=1&name=Ada&scale=0.5&people=0&at=70.05,${(me.at[1] + 16.5) / 10},402.6&look=0,-8`)
     await page.waitForFunction(() => globalThis.engine?.hands, null, { timeout: 90_000 })
     await page.waitForFunction(() => globalThis.engine.hands.offered.length === 1, null, { timeout: 20_000 })
-    const shown = await page.evaluate(() => [...document.querySelectorAll('[data-panel="offers"] button')].map((b) => b.textContent))
-    check(shown.length === 1 && /E\s*Buy a pretzel/.test(shown[0]), `the page shows what is offered, with its key (${shown.join(' | ')})`)
+    const buttons = await page.evaluate(() => [...document.querySelectorAll('[data-panel="offers"] button')].map((b) => b.textContent))
+    check(buttons.length === 1 && /E\s*Buy a pretzel/.test(buttons[0]), `the page shows what is offered, with its key (${buttons.join(' | ')})`)
     await page.waitForFunction(() => globalThis.engine.others >= 1)
     await page.keyboard.press('KeyE')
     await until('the key sells', async () => (await heard('wren')).some((t) => /^Pretzel 1 for Ada/.test(t)), 8000)
@@ -139,6 +178,20 @@ try {
     await page.click('[data-panel="offers"] button')
     await until('the button sells', async () => (await heard('wren')).some((t) => /^Pretzel 2 for Ada/.test(t)), 8000)
     check(true, 'so does its button')
+    // What the realm shows is on the screen: the rule's words as text, never as markup; its meter as wide as it is full.
+    await page.waitForFunction(() => globalThis.engine.hands.shown.length === 2, null, { timeout: 10_000 })
+    const cards = await page.evaluate(() => { const k = document.querySelector('[data-show="kettle/kettle"]'), o = document.querySelector('[data-show="kettle/odd"]'), fill = k.querySelector('.meter i i'), bar = k.querySelector('.meter > i'); return { line: k.querySelector('.line').textContent, score: k.querySelector('.score b').textContent, full: fill.getBoundingClientRect().width / bar.getBoundingClientRect().width, colour: getComputedStyle(fill).backgroundColor, odd: o.querySelector('.line').textContent, tags: o.querySelectorAll('img, b:not(.score b)').length - o.querySelectorAll('.score b').length, pwned: globalThis.pwned === 1, oddFill: o.querySelector('.meter i i').getAttribute('style') } })
+    check(/^Tea with lemon for wren$/.test(cards.line) && cards.score === '1' && cards.full > 0.98 && cards.colour === 'rgb(224, 128, 58)', `the page shows the line, the score and the meter as full and in the colour the rule gave (${cards.line}; ${cards.score}; ${cards.full.toFixed(2)}; ${cards.colour})`)
+    check(cards.odd.startsWith('<img src=x') && !cards.pwned && !/position|red/.test(cards.oddFill), `markup a rule shows is words on the screen and runs nothing (${cards.odd.slice(0, 24)}…)`)
+    await page.evaluate(() => globalThis.engine.say('tea for me'))
+    await page.waitForSelector('[data-panel="shown"] .picks button', { timeout: 10_000 })
+    const mine = await page.evaluate(() => globalThis.engine.hands.shown.filter((s) => s.choice && s.line.includes('Ada')).length)
+    check(mine === 1, 'a choice asked for from the page is shown on that page')
+    if (arg('out')) { await page.waitForFunction(() => { const st = globalThis.engine.world.stats; return st.wanted === 0 && st.stale === 0 && st.ready > 0 }, null, { timeout: 120_000 }).catch(() => {}); await page.waitForTimeout(500); await page.screenshot({ path: arg('out').replace(/\.png$/, '-shown.png') }) }
+    await page.click('[data-panel="shown"] .picks button:has-text("With milk")')
+    await until('the page\'s pick is heard', async () => (await shown()).some((s) => s.line === 'Tea with milk for Ada'), 8000)
+    const went = await page.waitForFunction(() => globalThis.engine.hands.shown.every((s) => !s.line.includes('How do you take it, Ada')) && [...document.querySelectorAll('[data-panel="shown"] .line')].every((l) => !l.textContent.includes('How do you take it, Ada')), null, { timeout: 8000 }).then(() => true, () => false)
+    check(went, 'picked on the page, the rule hears it and the choice is gone from the screen')
     // With the wand in hand, what is aimed is an entry of the wand's wheel, and a cast does it.
     const entries = await page.evaluate(() => { const w = globalThis.engine.wand; w.held = true; return w.powers.map((p) => p.name) })
     check(entries.includes('Buy a pretzel') && entries.length === 2, `the wand's wheel has it beside the spell in hand (${entries.join(', ')})`)

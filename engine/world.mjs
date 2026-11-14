@@ -454,6 +454,7 @@ does.set('gone', (rule, w) => { const p = folk.get(`${rule.id}/${w.id}`); if (p?
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 does.set('offer', hand.offer)
+does.set('show', hand.show)
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
   const wrong = (what) => { rule.error = what }
@@ -485,7 +486,8 @@ function tops([x0, z0, x1, z1], from) {
   }
   return { high, kinds }
 }
-parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept }) => {
+parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick }) => {
+  if (pick) return parentPort.postMessage({ id, error: hand.pick(pick) })
   // Someone did something a rule offers: the rule hears it, with what their aim met.
   if (act) return parentPort.postMessage({ id, error: hand.act(act) })
   // How the rules are doing; and a rule the world had when it last stopped, put in again as it starts.

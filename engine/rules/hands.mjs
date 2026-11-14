@@ -5,6 +5,10 @@
 // figures are in no cell, so they are looked for here, where everyone's feet are known.
 //
 // Nothing here knows what an action is for. A punch, a purchase and a wave are an id and a word.
+//
+// And what a realm shows a person (`world.show`): a line, meters, a score, a choice to pick from, to one person or
+// to all. They are a rule's own numbers and words, shown: an alarm, a health bar, a lap count, a round's clock are
+// none of them words the engine has. Every word is cleaned and cut as a name is, and pages put it as text.
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/, KEY = /^Key[A-Z]$/
 /** Keys that move the body or belong to the page whatever a realm offers. */
@@ -13,6 +17,9 @@ const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC'])
 const OFFERS_MOST = 16, FOR_MOST = 64, ACTS_A_SECOND = 30
 /** How far round its middle a body is met by an aim, cells. */
 const GIRTH = 4
+/** The most a rule may show at once, the most meters and picks in one of them, and how long a line, a label and a pick's word may be. */
+const SHOWS_MOST = 8, METERS_MOST = 4, PICKS_MOST = 6, LINE_MOST = 80, LABEL_MOST = 24
+const COLOUR = /^#[0-9a-f]{6}$/
 
 /**
  * @param folk    everyone with a body, by the name the world knows them by: {by, name, at (feet), rule?, short?, seat, down}
@@ -27,6 +34,53 @@ export function hands({ folk, tall, look, text, tell, hear }) {
   const offers = new Map()
   const acted = new Map()
   const said = () => tell({ offers: [...offers.values()] })
+  /** By rule and id: what is shown. */
+  const shows = new Map()
+  const shown = () => tell({ shown: [...shows.values()] })
+  /** Who something is for, as a rule says it: null for everyone, a list of ids, or undefined if it is not said rightly. */
+  const forWhom = (to) => { if (to === null) return null; const who = (Array.isArray(to) ? to : [to]).filter((v) => typeof v === 'string' && v.length <= 24).slice(0, FOR_MOST); return who.length ? who : undefined }
+  /**
+   * `world.show(id, {line, meters, score, choice, to})`: shows something, or changes it (only the fields given change;
+   * a field given as null is taken away); `hide: true` takes all of it away.
+   */
+  const show = (rule, w, _now, wrong) => {
+    const id = w.id
+    if (typeof id !== 'string' || !ID.test(id)) return wrong('what is shown has an id of its rule\'s own: lower-case letters, digits and dashes, up to 24')
+    const at = `${rule.id}/${id}`, old = shows.get(at)
+    if (w.hide === true) { if (shows.delete(at)) shown(); return }
+    if (!old) { let mine = 0; for (const o of shows.values()) if (o.rule === rule.id) mine++; if (mine >= SHOWS_MOST) return wrong(`a rule may show ${SHOWS_MOST} things at once`) }
+    const next = { rule: rule.id, id, line: old?.line ?? '', meters: old?.meters ?? [], score: old?.score ?? null, choice: old?.choice ?? null, to: old?.to ?? null }
+    if (w.line !== undefined) next.line = w.line === null ? '' : text(w.line, LINE_MOST)
+    if (w.meters !== undefined) {
+      // A meter is how full, of how much: {label, value, of (1 unless said), colour}.
+      next.meters = []
+      for (const m of Array.isArray(w.meters) ? w.meters.slice(0, METERS_MOST) : []) {
+        if (!m || typeof m !== 'object' || !Number.isFinite(m.value)) { wrong(`a meter of "${id}" is {label, value, of, colour}: value a number`); continue }
+        const of = Number.isFinite(m.of) && m.of > 0 ? m.of : 1
+        next.meters.push({ label: text(m.label, LABEL_MOST), full: Number(Math.max(0, Math.min(1, m.value / of)).toFixed(3)), colour: typeof m.colour === 'string' && COLOUR.test(m.colour.toLowerCase()) ? m.colour.toLowerCase() : '' })
+      }
+    }
+    if (w.score !== undefined) {
+      // A score is a number or a few characters, with a label: a count, a place, a clock.
+      const v = w.score && typeof w.score === 'object' ? w.score.value : w.score
+      next.score = w.score === null ? null : { label: text(w.score?.label, LABEL_MOST), value: Number.isFinite(v) ? String(Math.round(v * 100) / 100) : text(v, 12) }
+      if (next.score && !next.score.value) { next.score = null; wrong(`the score of "${id}" is a number, a few characters, or {label, value}`) }
+    }
+    if (w.choice !== undefined) {
+      // A choice is words to pick from: the rule hears which was picked, and by whom.
+      const picks = []
+      for (const c of Array.isArray(w.choice) ? w.choice.slice(0, PICKS_MOST) : []) {
+        const pick = typeof c === 'string' ? { id: c, word: c } : c
+        if (!pick || typeof pick.id !== 'string' || !ID.test(pick.id) || !text(pick.word, LABEL_MOST)) { wrong(`a pick of "${id}" is {id, word}: the id lower-case letters, digits and dashes`); continue }
+        picks.push({ id: pick.id, word: text(pick.word, LABEL_MOST) })
+      }
+      next.choice = picks.length ? picks : null
+    }
+    if (w.to !== undefined) { const who = forWhom(w.to); if (who === undefined) wrong('who it is shown to is to: an id of world.people, a list of them, or null for everyone'); else next.to = who }
+    if (!next.line && !next.meters.length && !next.score && !next.choice) { if (shows.delete(at)) shown(); return }
+    shows.set(at, next)
+    shown()
+  }
   /** `world.offer(id, {word, hold, aim, key, to})`: offers something to do, changes it, or (word: null) takes it back. */
   const offer = (rule, w, _now, wrong) => {
     const id = w.id
@@ -72,7 +126,28 @@ export function hands({ folk, tall, look, text, tell, hear }) {
   return {
     offer,
     /** A rule is gone: so is what it offered. */
-    dropped(ruleId) { let any = false; for (const [at, o] of offers) if (o.rule === ruleId) { offers.delete(at); any = true } if (any) said() },
+    dropped(ruleId) {
+      let any = false
+      for (const [at, o] of offers) if (o.rule === ruleId) { offers.delete(at); any = true }
+      if (any) said()
+      any = false
+      for (const [at, o] of shows) if (o.rule === ruleId) { shows.delete(at); any = true }
+      if (any) shown()
+    },
+    show,
+    /** Someone picked from a choice a rule shows them: {by, rule, id, pick}. Says why not, or nothing. */
+    pick(m) {
+      const o = shows.get(`${m.rule}/${m.id}`), p = folk.get(m.by), now = Date.now()
+      if (!o?.choice) return 'no choice of that name is shown'
+      if (!p || p.rule) return 'nobody of that name has a body here'
+      if (o.to && !o.to.includes(m.by)) return 'that is not shown to you'
+      if (!o.choice.some((c) => c.id === m.pick)) return 'that is not one of the picks'
+      const count = acted.get(m.by)
+      if (!count || now - count.since > 1000) acted.set(m.by, { since: now, n: 1 })
+      else if (++count.n > ACTS_A_SECOND) return 'too many things done in a second'
+      hear(o.rule, 'pick', { by: m.by, name: p.name, show: o.id, pick: m.pick, at: p.at.map(Math.round) })
+      return ''
+    },
     meets,
     /** Someone did something that was offered: {by, rule, id, phase, from, to}. Says why not, or nothing. */
     act(m) {

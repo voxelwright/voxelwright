@@ -69,6 +69,20 @@
   [data-panel="offers"] button kbd { display: inline-block; min-width: 18px; margin-right: 8px; padding: 1px 4px; border-radius: 5px; background: rgba(255, 255, 255, 0.16); font: 600 11px ui-monospace, monospace; text-align: center; }
   [data-panel="offers"] button.on, [data-panel="offers"] button:active { background: #e8ecf1; color: #10141a; }
   @media (pointer: coarse) { [data-panel="offers"] button { min-height: 48px; padding: 0 16px; border-radius: 24px; font-size: 15px; } [data-panel="offers"] button kbd { display: none; } }
+  [data-panel="shown"] { position: absolute; left: 50%; top: max(44px, calc(env(safe-area-inset-top) + 34px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(560px, calc(100vw - 24px)); pointer-events: none; }
+  [data-panel="shown"] .card { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 12px; background: rgba(12, 16, 22, 0.66); color: #e8ecf1; }
+  [data-panel="shown"] .score { display: flex; flex-direction: column; align-items: center; min-width: 44px; }
+  [data-panel="shown"] .score b { font: 700 24px/1 -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  [data-panel="shown"] .score span { margin-top: 3px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
+  [data-panel="shown"] .body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  [data-panel="shown"] .line { margin: 0; font: 500 14px/1.35 -apple-system, system-ui, sans-serif; overflow-wrap: anywhere; }
+  [data-panel="shown"] .meter { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  [data-panel="shown"] .meter span { min-width: 64px; opacity: 0.8; white-space: nowrap; }
+  [data-panel="shown"] .meter > i { display: block; width: 180px; max-width: 46vw; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
+  [data-panel="shown"] .meter > i > i { display: block; height: 100%; border-radius: 4px; background: #e8ecf1; transition: width 0.25s ease-out; }
+  [data-panel="shown"] .picks { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
+  [data-panel="shown"] .picks button { border: 0; border-radius: 9px; padding: 7px 12px; background: #e8ecf1; color: #10141a; font: 600 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  @media (pointer: coarse) { [data-panel="shown"] .picks button { min-height: 44px; padding: 0 16px; font-size: 15px; } }
 </style>
 </head>
 <body>
