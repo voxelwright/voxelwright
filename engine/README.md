@@ -598,6 +598,22 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   still could not build: a hollow room that is safe to walk into (a bunker to storm); water where there is none;
   a part of a build that can be driven through or hidden at once (item boxes); a build that says when it is
   touched; lights. And around the place: nothing moves someone at a page to a spot in it.
+- **The place before its rule** (`make/plan.mjs`, `test/place.mjs`, `test/placed.mjs`). The wait for a realm was
+  the model writing its rules: 170 to 377 s from Enter before there was anything to stand in. A place needs no
+  script, so it is asked for by itself, as data, from the quick model, beside the idea: what land, how far it
+  reaches, and its parts in the shapes `world.build` takes, in a frame of its own (people arrive from the south
+  looking north; on a shore the sea is north). The engine finds the ground, turns the plan by quarter turns to lie
+  as the ground does, reads every part as a stranger's (a part that is no shape is left out and said; a colour
+  written "hue:0:4" and a material called rubber are read; a road too big to lay four cells thick is laid one
+  thick) and puts it into the realm as a rule of its own, id `place`, written by the engine with the parts in it
+  as JSON. The page is told (`placed`) and offers "Step in" then; the people and the game arrive after, in a rule
+  of their own that is told what stands and not to build it again, and is tried in a world that has the place in
+  it. Real runs, November 14 (Sonnet 5.5 for idea, plan and first rules; the same four realms, 12 replies), from
+  Enter to standing in the place, before and after: a boxing match 170 s, now 18 s; a kart racer 256 s, now 22 s;
+  Normandy 377 s, now 23 s; Sonoma 376 s, now 22 s. The plan takes the model 17 to 22 s; finding the ground and
+  building it under a second. The people then arrive 131 to 266 s after Enter (they were the same wait as the
+  place). Haiku 5.5 planned no faster (21 to 26 s) and thinner (6 to 18 parts against 17 to 37). Pictures:
+  `~/.village/engine/build/unit4-the-place-first.png`.
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.

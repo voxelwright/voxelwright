@@ -30,6 +30,8 @@ const DUSK = JSON.stringify({ name: 'dusk', about: 'A quiet street at dusk. Some
 let rulesAsked = 0, imagined = 0
 const model = async (q) => {
   if (q.system.startsWith('You write rules')) { rulesAsked++; last = q; return { text: WAVER, model: 'a kept reply', ms: 0, cost: 0 } }
+  // A realm's place is planned beside its idea (make/plan.mjs): here a plan nothing can be made of, so the realm is made as it was before there were places.
+  if (q.system.startsWith('You design the PLACE')) return { text: '{}', model: 'a kept reply', ms: 0, cost: 0 }
   if (q.system.startsWith('Someone in a world made of small cubes')) { imagined++; return { text: DUSK, model: 'a kept reply', ms: 0, cost: 0 } }
   asked++; last = q; return { text: JSON.stringify(CRATE), model: 'a kept reply', ms: 0, cost: 0 }
 }

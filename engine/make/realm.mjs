@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { find, LANDS, ROOM } from '../plugins/ground/world.mjs'
 import { reply as ask } from './model.mjs'
-import { WISH_MOST, write } from './rules.mjs'
+import { fitted, PLACE, source, standing } from './plan.mjs'
+import { scratch, WISH_MOST, write } from './rules.mjs'
 
 export const IMAGINE = `Someone in a world made of small cubes, a town with streets, houses, parked cars and people walking, asks for a new realm: a world of their own with its own people and its own game. You flesh the idea out before it is built. Reply with JSON and nothing else:
 
@@ -41,7 +42,7 @@ const core = () => (planet ??= readFile(fileURLToPath(new URL('../page/core.wasm
  * middle), room, rise, of, water, arrive: {at: [x, z], yaw}} or null. One arrives on dry clear ground at its edge,
  * away from the water if it has any, looking at its middle.
  */
-export async function site(place, c) {
+export async function site(place, c, { square = false } = {}) {
   c ??= await core()
   const { land, room } = place
   // A shore of sand before any other: a beach is what is nearly always meant.
@@ -49,10 +50,12 @@ export async function site(place, c) {
   if (!found) return null
   const [x, , z] = found.at, far = Math.round(Math.max(80, Math.min(320, room * 0.6)))
   // Where one arrives: the first of the eight ways out from the middle that is dry, starting away from the water (or to the south).
-  const from = found.water ? Object.keys(WAYS).indexOf(found.water.to) + 4 : 4
+  // `square`: only north, east, south or west of it, for a place planned in a frame of its own (plan.mjs turns the plan by quarter turns).
+  const from = found.water ? (square ? Math.round(Object.keys(WAYS).indexOf(found.water.to) / 2) * 2 : Object.keys(WAYS).indexOf(found.water.to)) + 4 : 4
   let arrive = [x, z + far]
   for (let k = 0; k < 8; k++) {
-    const [dx, dz] = Object.values(WAYS)[(from + (k % 2 ? (k + 1) / 2 : -k / 2) + 8) % 8], long = Math.hypot(dx, dz), ax = Math.round(x + (dx / long) * far), az = Math.round(z + (dz / long) * far)
+    if (square && k % 4 === 1) continue
+    const [dx, dz] = Object.values(WAYS)[(from + (square ? [0, 0, 2, -2, 4, 0, 0, 0][k] : k % 2 ? (k + 1) / 2 : -k / 2) + 16) % 8], long = Math.hypot(dx, dz), ax = Math.round(x + (dx / long) * far), az = Math.round(z + (dz / long) * far)
     // Dry: over where the sea's edge washes (ground under 30 cm is awash, and a first Normandy had its people arrive standing in the surf).
     if (c.ground_at(ax, az) >= 3) { arrive = [ax, az]; break }
   }
@@ -109,14 +112,20 @@ const idOf = (name) => `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace
  * could not be written is still there, empty of rules, and said so (`state: 'there'`, `rough`).
  * `say(words, stage)`: { stage: 'realm', id, name } once it is made, then a rule's own stages.
  */
-export async function realm({ server, name, about, look, place, into, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
+/**
+ * `plan`: the realm's place as data (plan.mjs), or a promise of it: asked for beside the idea, so that it is ready
+ * about when the idea is. With one, the place is built before any rule is written and the realm can be stepped
+ * into then (`say` is told { stage: 'placed', id, name, seconds }); the rules are written for a place that stands.
+ */
+export async function realm({ server, name, about, look, place, plan, into, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
   name = words(name, 40); about = words(about, WISH_MOST)
   if (!name) return { state: 'refused', why: 'a realm has a name' }
   const chosen = answers.map((a) => `${words(a.ask, 80)} ${words(a.answer, 60)}.`).join(' ')
   // Its place on the planet (#264, the BUILD lane): found before the realm is made, so that one arrives there.
   // `into`: a realm that is there already (its making was cut off after the server made it): its rules are written into it, where it is.
-  place = into ? null : placeOf(place)
-  const began = Date.now(), ground = place ? await site(place).catch(() => null) : null
+  const design = into ? null : await Promise.resolve(plan).catch(() => null), planned = Array.isArray(design?.builds) && design.builds.length > 0
+  place = into ? null : planned ? placeOf(design) : placeOf(place)
+  const began = Date.now(), ground = place ? await site(place, undefined, { square: planned }).catch(() => null) : null
   if (ground) say(`its place: ${ground.of} ${(Math.hypot(ground.at[0] - HOME[0], ground.at[2] - HOME[1]) / 10000).toFixed(1)} km from the town, at ${ground.at[0]}, ${ground.at[2]} (found in ${Date.now() - began} ms)`, { stage: 'ground', at: ground.at, land: place.land })
   const res = into ? await fetch(`${server}/realm/${into}/world/realm`).then(async (r) => (r.ok ? new Response(JSON.stringify({ ...(await r.json()), id: into })) : r)) : await fetch(`${server}/realms`, { method: 'POST', body: JSON.stringify({ by, id: idOf(name), name, about: `${about}${chosen ? ` ${chosen}` : ''}`.slice(0, 2000), ...(look ? { look } : {}), ...(ground ? { arrive: ground.arrive } : {}) }) })
   if (!res.ok) return { state: 'refused', why: `the realm could not be made: ${(await res.text()).slice(0, 200)}` }
@@ -124,8 +133,23 @@ export async function realm({ server, name, about, look, place, into, answers = 
   say(`the realm ${record.id} is made`, { stage: 'realm', id: record.id, name })
   // Where one arrives is where the realm's people are to be: the rules are written for someone standing there.
   const to = record.arrive?.at ?? [700, 4060], at = to.length === 3 ? to : [to[0], (await (await fetch(`${world}/world/at?x=${to[0]}&y=0&z=${to[1]}`)).json()).ground + 1, to[1]]
-  const wish = `The whole of a realm called "${name}": ${about}${chosen ? ` ${chosen}` : ''}${ground ? `\n\n${placed(ground)}` : ''}`
-  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial, cannot, say })
+  // The place first (plan.mjs): its parts turned to lie as the ground does, checked, and put in as a rule of its own that builds them. The realm can be stepped into as soon as it stands.
+  let fit = null, own = null
+  if (planned && ground) {
+    fit = fitted(design, ground, await core())
+    const put = fit.builds.length ? await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, rule: { id: PLACE, name: 'The place', source: source(fit.builds, ground.at) } }) }).catch(() => null) : null
+    if (put?.ok) {
+      // Built when its rule has heard of every build (a start and a `built` each), or after three seconds whatever it has heard.
+      for (const since = Date.now(); Date.now() - since < 3000;) { const how = await fetch(`${world}/world/rules`).then((x) => x.json()).then((l) => l.find((x) => x.id === PLACE)).catch(() => null); if (how && how.calls > fit.builds.length) break; await new Promise((x) => setTimeout(x, 100)) }
+      say(`its place stands: ${fit.builds.map((b) => b.id).join(', ')} (${fit.cells} cells${fit.left ? `, ${fit.left} parts left out` : ''})`, { stage: 'placed', id: record.id, name })
+      // The rules are tried in a world that has the place in it too.
+      if (!trial) { own = await scratch().catch(() => null); if (own) await fetch(`${own.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by, rule: { id: PLACE, name: 'The place', source: source(fit.builds, ground.at) } }) }).catch(() => {}) }
+    } else fit = null
+  }
+  const wish = `The whole of a realm called "${name}": ${about}${chosen ? ` ${chosen}` : ''}${fit ? '' : ground ? `\n\n${placed(ground)}` : ''}`
+  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial: trial ?? own?.url, cannot, say, ...(fit ? { beside: standing(ground, fit, design.stands) } : {}) })
+  // The world the rules were tried in is kept until the fuller rule has been tried in it too.
+  if (own) void Promise.resolve(r.better).finally(() => own.stop())
   if (r.state !== 'there') return { ...r, state: 'there', realm: record.id, name, ...(ground ? { site: ground } : {}), rough: `its rules could not be written: ${r.why}`, cannot: r.cannot ?? [] }
-  return { ...r, realm: record.id, rule: r.id, name, at, ...(ground ? { site: ground } : {}) }
+  return { ...r, realm: record.id, rule: r.id, name, at, ...(ground ? { site: ground } : {}), ...(fit ? { place: { builds: fit.builds.map((b) => b.id), cells: fit.cells, left: fit.left } } : {}) }
 }

@@ -38,6 +38,10 @@ export const BUILDS_A_MINUTE = 12, CELLS_A_MINUTE = 3_000_000
 const FOOT = 60
 const FALLS = { '+x': [1, 0], '-x': [-1, 0], '+z': [0, 1], '-z': [0, -1] }
 const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
+/** What models write for materials that are not the engine's, and the nearest that is (make/brief.mjs says the same to whoever makes a thing). */
+const NEAREST = { metal: 'steel', iron: 'steel', rubber: 'steel', plastic: 'plaster', canvas: 'plaster', cloth: 'plaster', paper: 'plaster', stone: 'rock', gravel: 'rock', dirt: 'earth', soil: 'earth', mud: 'earth', tarmac: 'asphalt', road: 'asphalt', cement: 'concrete', timber: 'wood', planks: 'wood', light: 'lamp', tile: 'roofing', tiles: 'roofing', foliage: 'leaves', turf: 'grass', water: 'glass' }
+/** A colour as models write it when told "hue:tone": "hue:16:6" and "hue:4" were a third of one plan's parts (November 14). Read as "16:6" and "4:4". */
+const shade = (tint) => (typeof tint !== 'string' ? tint : tint.replace(/^hue:/, '').replace(/^(\d{1,2})$/, '$1:4'))
 const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi
 
 class Refused extends Error {}
@@ -133,7 +137,7 @@ export function rowsOf(parts, [ox, base, oz], feet) {
   parts.forEach((part, n) => {
     const bad = (why) => no(`part ${n + 1} (${JSON.stringify(part).slice(0, 60)}): ${why}`)
     if (!Array.isArray(part) || part.length < 6 || part.length > 12) bad('a part is a list: shape, material, colour, then its numbers')
-    const [shape, material, tint] = part
+    const [shape] = part, material = NEAREST[part[1]] ?? part[1], tint = shade(part[2])
     if (typeof material !== 'string' || !Object.hasOwn(MATERIALS, material)) bad(`"${String(material).slice(0, 20)}" is not a material: ${Object.keys(MATERIALS).join(', ')}`)
     const c = material === 'air' ? 0 : colour(tint)
     if (c < 0) bad(`"${String(tint).slice(0, 20)}" is not a colour: "own", "white", "black", "grey:0" to "grey:14", or "hue:tone" with hue 0 to 23 and tone 0 to 9`)

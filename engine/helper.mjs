@@ -48,6 +48,7 @@ import { LIBRARY, library } from './make/library.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
 import { ID as DIRECTOR, direct } from './make/director.mjs'
+import { plan as planPlace } from './make/plan.mjs'
 import { imagine, realm as makeRealm } from './make/realm.mjs'
 import { write as writeRule } from './make/rules.mjs'
 import { workshop } from './workshop/route.mjs'
@@ -134,6 +135,8 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
   // director takes minutes in the writing. Each lane does one at a time, and neither waits on the other (seen November
   // 14: a pistol reached the hand after 95 s, 80 of them behind a rule being changed). `busy` is the things' lane.
   let busy = false, writing = false
+  /** Places being planned for realms that were imagined and not yet asked for, by a number the page carries back: {at (when), plan (a promise)}. */
+  const plans = new Map()
   /** The workshop's door (workshop/route.mjs): reads the same list of what could not be done that the rules' maker writes. */
   const shop = workshop({
     journal: cannot, world, say,
@@ -233,7 +236,11 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         if (!idea) return end(400, { why: 'say what the realm is: {idea}' })
         if (writing) return end(429, { why: 'one at a time: something is being written' })
         writing = true
-        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, place: r.place, questions: r.questions }) } finally { writing = false }
+        // The realm's place is planned beside the idea (#264, make/plan.mjs), by the same quick model: it is ready about when the idea is, and is kept here until the realm is asked for (the page carries its number back in `place`).
+        const planned = `p${Math.random().toString(36).slice(2, 10)}`
+        for (const [k, p] of plans) if (Date.now() - p.at > 20 * 60_000) plans.delete(k)
+        plans.set(planned, { at: Date.now(), plan: planPlace({ idea, model: quick }).catch((e) => ({ why: e.message })) })
+        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, place: { ...(r.place ?? {}), plan: planned }, questions: r.questions }) } finally { writing = false }
       }
       if (url.pathname === '/realm') {
         // A realm made on the world's server and its rules written into it. {name, about, look, place, answers, by}
@@ -243,7 +250,9 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         return stream(async (line, tell) => {
           say(`asked by ${text(body.by, 24) || 'someone'} for a realm: ${text(body.name, 40)}`)
           // Its rules are written quickly first, so the realm can be stepped into; the fuller ones follow and are put under the same id.
-          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, into: body.into, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+          // Its place, planned while the idea was fleshed out; asked for now if this helper did not plan it (it was started again, or the realm was asked for by itself). A realm that is there already keeps the place it has.
+          const plan = body.into ? undefined : plans.get(body.place?.plan)?.plan ?? planPlace({ idea: `${text(body.name, 40)}: ${text(body.about, 3000)}`, model: quick ?? model }).catch((e) => ({ why: e.message }))
+          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, plan, into: body.into, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
           void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           // With a director (asked for in the new realm's flow): written once the realm's first rules are in, for it to read them, and behind the realm's being ready, so nobody waits on it to step in.

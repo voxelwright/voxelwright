@@ -37,6 +37,7 @@ export type Stage =
   | { stage: 'trying'; name: string }
   | { stage: 'putting'; name: string }
   | { stage: 'realm'; id: string; name: string }
+  | { stage: 'placed'; id: string; name: string }
   | { stage: 'sending'; id: string; name: string; at: [number, number, number]; size: [number, number, number]; facing: string }
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */

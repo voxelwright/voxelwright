@@ -2848,3 +2848,24 @@ times up; a wall one cell thick the same. Built roads striped, thin things were 
   of its own and keeps pictures from on foot, 100 m, 400 m and aslant in `~/.village/engine/far/` (`--ruin`: blasts what stands by the street and looks from above);
   `node test/core-time.mjs --rows 45000 [--wasm other.wasm]` times a sector with that many rows at each level,
   `--ruin` a street coming down.
+
+## The place before its rule (#264, `make/plan.mjs`; November 14)
+
+- **What needs no script should not wait for one.** A realm's place is data; asked for alone it is a 17 to 22 s
+  reply where the rule that also built it was 100 to 395 s. Asked beside the idea (two replies at once), one stands
+  in the place 18 to 23 s after Enter. The people's rule then also comes sooner, having no place to write.
+- **Give the model a frame it can hold without knowing the planet**: people arrive from the south looking north,
+  on a shore the sea is north. The engine turns the plan by quarter turns to lie as the found ground does
+  (`turned`: a box's cells turn, not its corners; a slope's way turns with it), and has one arrive square to it.
+- **A third of one plan's parts were lost to one habit**: told a colour is "hue:tone", Sonnet wrote "hue:16:6".
+  The build plugin now reads that, "hue:4", and the materials models reach for (rubber, metal, stone, canvas).
+  Keep why each part was left out (`why`): the count alone hid this for four runs.
+- **The centrepiece is the part most likely to be over a cap** (a track 120 wide laid four thick is over a
+  million cells): thin it, do not drop it.
+- **What the next model must read goes through the writer's `beside`, not the wish**: the wish is cut at 4,000
+  characters, and the first two runs had the place's parts cut off mid-list.
+- **A stand-in model in a check that tells briefs apart by their first words** will answer a new brief that
+  begins the same way (`test/helper.mjs`): the plan's brief begins with words of its own.
+- **Try the people's rule where the place stands**: `realm` starts the trial world itself and puts the place rule
+  in it, so an actor "in the stands" is tried standing on the stands.
+

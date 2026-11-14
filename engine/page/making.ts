@@ -93,7 +93,15 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const directed = (await hud.choose('With a director? It watches how you play and stirs things up for you.', ['With a director', 'Without'])) === 0
     const ask: Ask = { wish: idea }, at = ahead()
     const cue = hud.cue(`${plan.name}: making the realm`, () => [at[0], at[1] + 22, at[2]])
-    const each = (stage: Stage) => { for (const one of told) one(stage, ask); if (stage.stage === 'realm') cue.text = `${plan.name}: writing its rules`; else if (stage.stage === 'trying') cue.text = `${plan.name}: trying them out` }
+    const enter = (id: string) => { if (into) into(id); else { const to = new URLSearchParams(location.search); to.set('realm', id); to.delete('shared'); location.assign(`${location.pathname}?${to}`) } }
+    // Its place stands before its rules are written (#264): one may step in then, and the people and the game arrive after.
+    let offered = false
+    const each = (stage: Stage) => {
+      for (const one of told) one(stage, ask)
+      if (stage.stage === 'realm') cue.text = `${plan.name}: building its place`
+      else if (stage.stage === 'trying') cue.text = `${plan.name}: trying its rules out`
+      else if (stage.stage === 'placed') { offered = true; cue.text = `${plan.name}: writing its people`; const id = stage.id; void hud.choose(`${plan.name}: its place stands. Its people and its game are on their way.`, ['Step in', 'Stay here']).then((step) => { if (step === 0) enter(id) }) }
+    }
     each({ stage: 'place', at, facing: 'south' })
     // The realm's id, once the server has made it: if the helper stops after that, the realm is there with no rules, and going on writes them into it.
     let begun: string | undefined
@@ -110,8 +118,9 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     cue.remove()
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)
+    if (offered) { hud.notice(done.rough ? `${plan.name}: its rules could not be written yet` : `${plan.name}: its people have arrived`, 6000); return done }
     const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : done.more ? '. It will grow fuller as you play' : ''}${directed && !done.rough ? '. Its director is being written and will join you' : ''}.`, ['Step in', 'Stay here'])
-    if (step === 0) { if (into) into(done.realm); else { const to = new URLSearchParams(location.search); to.set('realm', done.realm); to.delete('shared'); location.assign(`${location.pathname}?${to}`) } }
+    if (step === 0) enter(done.realm)
     return done
   }
   /** The world this page is in, as its server names it. */
