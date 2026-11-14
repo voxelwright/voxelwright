@@ -54,7 +54,7 @@ try {
   const me = (await get('me?by=wren')).you, feet = me.at[1]
   // A lantern of cells beside wren: a steel post two cells square and ten high, a lamp on top.
   const rows = []
-  for (let y = 0; y < 12; y++) for (let z = 0; z < 2; z++) rows.push(705, 707, feet + y, 4039 + z, y < 10 ? 12 | (5 << 8) : 15)
+  for (let y = 0; y < 12; y++) for (let z = 0; z < 2; z++) rows.push(705, 707, feet + y, 4039 + z, y < 10 ? 12 | (220 << 8) : 15)
   check((await post('ask', { by: 'tester', edit: [1, rows.length / 5, ...rows], release: [706, feet + 14, 4040], thing: { id: 'lantern', name: 'a lantern', wish: 'a lantern', at: [706, feet, 4040], size: [2, 12, 2], facing: 'south' } })).asked, 'a thing is made')
   await until('the lantern stands', async () => (await cell(705, feet + 5, 4039)) !== 0)
   await post('ask', { by: 'tester', rule: { id: 'minder', name: 'Someone who minds a lantern', source: MINDER } })
@@ -205,6 +205,20 @@ try {
     await page.waitForFunction(() => { const st = globalThis.engine.world.stats; return st.wanted === 0 && st.stale === 0 && st.ready > 0 }, null, { timeout: 120_000 }).catch(() => {})
     await page.waitForTimeout(1200)
     if (arg('out')) await page.screenshot({ path: arg('out') })
+    // A person throws what they hold themselves, with no rule offering it: a key and a button whenever the hand is full.
+    await post('ask', { by: 'robin', put: true })
+    await until('robin has put it down', async () => !(await thing()).held)
+    await page.evaluate(() => { const p = globalThis.engine.pose; p.yaw = 0.4; p.pitch = 0.1; globalThis.engine.hands.take('lantern') })
+    await page.waitForFunction(() => globalThis.engine.hands.holding?.id === 'lantern', null, { timeout: 10_000 })
+    const offered = await page.evaluate(() => [...document.querySelectorAll('[data-panel="offers"] button[data-own]')].map((b) => b.textContent))
+    check(offered.some((t) => /T\s*Throw a lantern/.test(t)), `a full hand can always throw: the page offers it itself (${offered.join(' | ')})`)
+    await page.keyboard.press('KeyT')
+    const flung = await until('the thrown thing is a made thing no more', async () => { const t = await thing(); return t.refused ? t : null })
+    await page.waitForFunction(() => !globalThis.engine.hands.holding && !globalThis.engine.held.shown, null, { timeout: 10_000 })
+    check(flung.refused >= 400, 'the key throws it: the hand is empty and it is before the eye no more')
+    await until('every rule hears it thrown', async () => (await heard('robin')).some((t) => /^[A-Z][a-z]+ threw a lantern\.$/.test(t)))
+    const fell = await until('and where it landed', async () => (await heard('robin')).find((t) => /^It came down at \d+ \d+ \d+ on \w+ \(own\)\.$/.test(t)), 20_000)
+    check(true, `rules hear thrown and landed though none of them threw it (${fell})`)
     await context.close()
   } finally { await browser.close() }
 } catch (e) {

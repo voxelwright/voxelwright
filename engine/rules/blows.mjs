@@ -14,6 +14,8 @@ const BOX = [4, 17, 3], CHEST = 12, AHEAD = 6
 const MATERIALS = ['air', 'earth', 'rock', 'grass', 'sand', 'water', 'asphalt', 'concrete', 'brick', 'plaster', 'wood', 'glass', 'steel', 'leaves', 'roofing', 'lamp']
 /** What may be thrown: how fast (cells a second), how big (the ball's half, cells), how many a second a rule, and how long a thrown thing is remembered (ms). */
 const SPEED = [10, 700], SIZE = [1, 4], THROWS_A_SECOND = 20, REMEMBERED = 15_000
+/** How fast a person throws what they hold themselves, cells a second. */
+const OWN_THROW = 130
 /** The fastest a push, the longest on the ground (seconds), and how soon the same two may be told of again (ms). */
 const PUSH_MOST = 400, DOWN_MOST = 60, AGAIN = 400
 /** What a rule may break and burn: the widest blast and fire (cells: as an ask from anyone), and how many of each a second. */
@@ -45,6 +47,21 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
   /** When each pair was last told of. */
   const lately = new Map()
   const who = (p) => ({ id: p.rule ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page' })
+  /** What someone holds leaves their hand as a body of its own cells, going a way at a speed. `rule` is the rule that threw it, if one did. Says why not, or nothing. */
+  const fling = (thrower, from, dir, speed, rule, tag, now) => {
+    const g = letGo(thrower.by)
+    if (!g) return 'there is nothing in that hand to throw'
+    const low = from.map((v, a) => Math.round(v - g.size[a] / 2 + dir[a] * Math.max(...g.size) / 2))
+    const room = core.edits_room(g.cells.length)
+    new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
+    const born = core.living_spawn(g.size[0], g.size[1], g.size[2], low[0], low[1], low[2], 0), body = core.living_last()
+    if (!body) return 'there was no room to throw it'
+    told(born)
+    core.living_kick(body, dir[0] * speed, dir[1] * speed, dir[2] * speed)
+    core.living_end(body)
+    thrown.set(body, { rule, from: thrower.by, t: now, hit: new Set(), tag })
+    return ''
+  }
   /** A person as a rule names them: an actor of its own by the id it gave, anyone else by their name in the world. */
   const find = (rule, id) => (typeof id === 'string' ? folk.get(`${rule.id}/${id}`) ?? folk.get(id) : undefined)
 
@@ -106,7 +123,9 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
         if (t && !t.landed && !pieces) {
           t.landed = true
           const kind = words[at + (words[at] ? 8 : 7)], thrower = t.from && folk.get(t.from)
-          hear(t.rule, 'landed', { at: [f[at + 2], f[at + 3], f[at + 4]].map((v) => Math.round(v)), speed: Math.round(f[at + 5]), met: MATERIALS[kind & 15] ?? 'ground', ...(thrower ? { from: who(thrower) } : {}), ...(t.tag ? { tag: t.tag } : {}) })
+          // The rule that threw it hears; thrown by a person themselves, with no rule asking, every rule does.
+          const landed = { at: [f[at + 2], f[at + 3], f[at + 4]].map((v) => Math.round(v)), speed: Math.round(f[at + 5]), met: MATERIALS[kind & 15] ?? 'ground', ...(thrower ? { from: who(thrower) } : {}), ...(t.tag ? { tag: t.tag } : {}) }
+          if (t.rule) hear(t.rule, 'landed', landed); else happen('landed', landed)
         }
       } else if (tag === 10) {
         const a = words[at], b = words[at + 1], hit = whose.has(a) ? a : whose.has(b) ? b : 0, other = hit === a ? b : a
@@ -133,6 +152,18 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
   }
   return {
     seen, sweep, heed, track,
+    /**
+     * Someone throws what they hold themselves, with no rule asking (#246): the way their eyes look, a little up, at
+     * a throw's pace. Every rule hears thrown, and landed (there is no rule that threw it). Says why not, or nothing.
+     */
+    toss(by, way, now = Date.now()) {
+      const thrower = folk.get(by), long = Array.isArray(way) ? Math.hypot(...way) : 0
+      if (!thrower || thrower.rule) return 'nobody of that name has a body here'
+      if (!(long > 0)) return 'a throw goes somewhere'
+      const lifted = [way[0] / long, way[1] / long + 0.18, way[2] / long], l = Math.hypot(...lifted), dir = lifted.map((v) => v / l)
+      const from = [thrower.at[0] + dir[0] * AHEAD, thrower.at[1] + CHEST + 3, thrower.at[2] + dir[2] * AHEAD]
+      return fling(thrower, from, dir, OWN_THROW, undefined, 'own', now)
+    },
     /** `world.throw({from, at, to, speed, size, material})`: something thrown from a body or a place, at someone or a place, or along a way. */
     throw(rule, w, now, wrong) {
       const n = (threw.get(rule.id) ?? 0) + 1
@@ -161,17 +192,8 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
       // cells, and lies as those cells where it stops. A living thing is made of them, pushed, and let go of at once.
       if (w.held !== undefined && typeof w.held !== 'boolean') return wrong('held is true to throw what the thrower holds')
       if (w.held === true) {
-        const g = thrower ? letGo(thrower.by) : null
-        if (!g) return wrong('held: true throws what someone holds: from is someone who holds a thing (world.people shows holds)')
-        const low = from.map((v, a) => Math.round(v - g.size[a] / 2 + dir[a] * Math.max(...g.size) / 2))
-        const room = core.edits_room(g.cells.length)
-        new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
-        const born = core.living_spawn(g.size[0], g.size[1], g.size[2], low[0], low[1], low[2], 0), body = core.living_last()
-        if (!body) return wrong('there was no room to throw it')
-        told(born)
-        core.living_kick(body, dir[0] * speed, dir[1] * speed, dir[2] * speed)
-        core.living_end(body)
-        thrown.set(body, { rule: rule.id, from: thrower.by, t: now, hit: new Set(), tag: w.tag })
+        const why = thrower ? fling(thrower, from, dir, speed, rule.id, w.tag, now) : 'held: true throws what someone holds: from is someone who holds a thing (world.people shows holds)'
+        if (why) wrong(why)
         return
       }
       const words = core.bodies_throw(from[0], from[1], from[2], dir[0] * speed, dir[1] * speed, dir[2] * speed, size, material)

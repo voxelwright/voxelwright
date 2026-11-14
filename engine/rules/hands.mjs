@@ -12,7 +12,7 @@
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/, KEY = /^Key[A-Z]$/
 /** Keys that move the body or belong to the page whatever a realm offers. */
-const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG'])
+const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG', 'KeyT'])
 /** The most a rule may offer, the most people one offer may be for, and the most a person may do a second. */
 const OFFERS_MOST = 16, FOR_MOST = 64, ACTS_A_SECOND = 30
 /** How far round its middle a body is met by an aim, cells. */

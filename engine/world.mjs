@@ -784,6 +784,8 @@ parentPort.on('message', (said) => {
   if (replay) { if (said.built) builds.replayed(said.built, replay); return edit(replay) }
   // A thing picked up or put down: the ask is made whole here (its edit, what the hand carries), or said why not.
   // A hand that is full puts down what it holds, at its owner's feet, before it takes another: nobody is told no.
+  // Someone throws what they hold, themselves: nothing of the ask is kept (the thing's going is, when it leaves the hand).
+  if (ask.throw !== undefined) { blow.toss(ask.by, ask.to); return }
   if (ask.hold !== undefined && grasp.of(ask.by)) lay({ by: ask.by, put: true })
   if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why } }) }
   parentPort.postMessage({ echo: ask })

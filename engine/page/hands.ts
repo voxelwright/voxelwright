@@ -34,6 +34,8 @@ export interface Hands {
   readonly reach: Thing | null
   /** Picks a made thing up (by its id), wherever it is. */
   take(id: string): void
+  /** Throws what is held the way the eye looks. */
+  toss(): void
   /** Puts down what is held: where the eye looks, or at a place. */
   put(at?: readonly [number, number, number]): void
   /** Told whenever what is offered changes. */
@@ -41,7 +43,7 @@ export interface Hands {
 }
 
 /** Keys the page gives to offers that asked for none, in order. */
-const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
+const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyV', 'KeyB', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
 
 /** How near (cells) a thing must be to be picked up, and to put one down. */
 const REACH = 60
@@ -62,7 +64,7 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
   // Holding: what this page's person holds, and the thing in reach of the eye.
   let reach: Thing | null = null, looking = false, since = 0
   const holding = () => { if (far && made) for (const t of made.all.values()) if (t.held === far.me) return t; return null }
-  const HOLD = 'KeyG'
+  const HOLD = 'KeyG', THROW = 'KeyT'
   const grasp = () => { const h = holding(); if (h) self.put(); else if (reach) self.take(reach.id) }
   const draw = () => {
     const h = holding(), own: HTMLElement[] = []
@@ -72,6 +74,15 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
       b.append(k, h ? `Put down ${h.name}` : `Pick up ${reach!.name}`)
       b.dataset.own = h ? 'put' : 'hold'
       b.addEventListener('click', () => { grasp(); b.blur() })
+      own.push(b)
+    }
+    // A full hand can always throw: whether or not a realm offers a throw of its own.
+    if (h) {
+      const b = document.createElement('button'), k = document.createElement('kbd')
+      k.textContent = THROW.slice(3)
+      b.append(k, `Throw ${h.name}`)
+      b.dataset.own = 'throw'
+      b.addEventListener('click', () => { self.toss(); b.blur() })
       own.push(b)
     }
     panel.replaceChildren(...own, ...offered.map((o) => {
@@ -94,6 +105,7 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
     get holding() { return holding() },
     get reach() { return reach },
     take(id) { void far?.ask({ hold: id }) },
+    toss() { if (holding()) void far?.ask({ throw: true, to: [...aim().to] }) },
     put(at) {
       if (at) { void far?.ask({ put: true, at: at.map(Math.round) }); return }
       // Where the eye looks, if that is near; else at the feet.
@@ -163,6 +175,7 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
     name: 'offered',
     key(code, e) {
       if (code === HOLD && !e.repeat && (holding() || reach)) { grasp(); return true }
+      if (code === THROW && !e.repeat && holding()) { self.toss(); return true }
       const o = offered.find((x) => x.code === code)
       if (!o) return false
       if (e.repeat) return true

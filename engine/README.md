@@ -503,6 +503,11 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   of at once), strikes and may break as anything thrown does, and lies as cells where it stops. Every rule hears
   `thrown`; the rule that threw it hears `landed` with its tag. Thrown, it is no longer a made thing: its record
   goes, because it lies turned and maybe broken wherever it came down, and nobody can pick it up again.
+- **A person throws what they hold, with no rule offering it.** Whenever a hand is full the page offers `T Throw
+  <name>` beside `G Put down`: the thing goes where the eye looks, a little above it, as fast as a good throw by hand.
+  The ask is `{throw: true, to}` to the world, which answers it as it does a rule's `throw` with `held: true`. No
+  rule threw it, so every rule hears both `thrown` and `landed` (tag `own`). A rule may still offer a throw of its
+  own; no rule's offer is given G or T.
 - **A conjured thing arrives in the hand.** `world.make({wish, for, hold: true})`: the page of the one it is for has
   it made by their own helper and model, and picks it up as soon as it stands; the rule hears `held` with the
   thing's id. A hand that is full puts down what it held, at its owner's feet, before it takes another: nobody is
