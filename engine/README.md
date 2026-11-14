@@ -450,6 +450,11 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   and `world.take(person)`. Whoever leaves puts theirs down where they stood; a world started again stands a held
   thing where it was taken from. From a page of your own: `engine.hands.take(id)`, `engine.hands.put(at?)`.
   `node test/hold.mjs` checks all of it with a lantern and someone who minds it.
+- **Throwing what is held.** `world.throw({from, to or at, speed, tag, held: true})` throws what `from` holds in place
+  of a ball: the thing leaves the hand as a body of its own cells (a living thing made of them, pushed and let go
+  of at once), strikes and may break as anything thrown does, and lies as cells where it stops. Every rule hears
+  `thrown`; the rule that threw it hears `landed` with its tag. Thrown, it is no longer a made thing: its record
+  goes, because it lies turned and maybe broken wherever it came down, and nobody can pick it up again.
 - **A conjured thing arrives in the hand.** `world.make({wish, for, hold: true})`: the page of the one it is for has
   it made by their own helper and model, and picks it up as soon as it stands; the rule hears `held` with the
   thing's id. A hand that is full puts down what it held, at its owner's feet, before it takes another: nobody is

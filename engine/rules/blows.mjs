@@ -33,8 +33,9 @@ const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number
  * @param thing   which living thing a body of the core is, by its thing's id, or undefined
  * @param blast   breaks the world at a place, as an ask does: (at, radius, spark)
  * @param ignite  lights what burns at a place, as an ask does: (at, radius)
+ * @param letGo   what someone holds leaves their hand to be thrown (rules/holding.mjs): (by) => its cells as the core takes a living thing's ({cells, size}), or nothing
  */
-export function blows({ core, folk, tell, post, told, happen, hear, thing, blast, ignite }) {
+export function blows({ core, folk, tell, post, told, happen, hear, thing, blast, ignite, letGo = () => null }) {
   /** How many blasts and fires each rule asked for this second. */
   const blasted = new Map(), lit = new Map()
   /** Ghosts by who they stand for, and who by ghost. */
@@ -156,6 +157,23 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
       const long = Math.hypot(...way), dir = way.map((v) => v / long)
       // From a body it starts clear of it, the way it goes.
       const from = thrower ? start.map((v, a) => v + dir[a] * (AHEAD + size)) : start
+      // What the thrower holds, if that is what is thrown (#246): the thing itself leaves the hand as a body of its own
+      // cells, and lies as those cells where it stops. A living thing is made of them, pushed, and let go of at once.
+      if (w.held !== undefined && typeof w.held !== 'boolean') return wrong('held is true to throw what the thrower holds')
+      if (w.held === true) {
+        const g = thrower ? letGo(thrower.by) : null
+        if (!g) return wrong('held: true throws what someone holds: from is someone who holds a thing (world.people shows holds)')
+        const low = from.map((v, a) => Math.round(v - g.size[a] / 2 + dir[a] * Math.max(...g.size) / 2))
+        const room = core.edits_room(g.cells.length)
+        new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
+        const born = core.living_spawn(g.size[0], g.size[1], g.size[2], low[0], low[1], low[2], 0), body = core.living_last()
+        if (!body) return wrong('there was no room to throw it')
+        told(born)
+        core.living_kick(body, dir[0] * speed, dir[1] * speed, dir[2] * speed)
+        core.living_end(body)
+        thrown.set(body, { rule: rule.id, from: thrower.by, t: now, hit: new Set(), tag: w.tag })
+        return
+      }
       const words = core.bodies_throw(from[0], from[1], from[2], dir[0] * speed, dir[1] * speed, dir[2] * speed, size, material)
       const said = new Uint32Array(core.memory.buffer, core.bodies_words(), words)
       for (let i = 0; i < said.length; i += 2 + said[i + 1]) if (said[i] === 2) {

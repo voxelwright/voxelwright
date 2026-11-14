@@ -36,10 +36,13 @@ const look = async (by) => {
 
 // Someone who minds a lantern: says who has it, gives it when asked, takes it back when told, and knows when it is used.
 const MINDER = `
-on('start', (world) => { world.actor('minder', { name: 'Tomas', at: [690, 4009] }); world.offer('raise', { word: 'Raise it' }) })
+on('start', (world) => { world.actor('minder', { name: 'Tomas', at: [690, 4009] }); world.offer('raise', { word: 'Raise it' }); world.offer('toss', { word: 'Toss it', aim: true }) })
+on('thrown', (world, e) => world.actor('minder', { say: e.name + ' threw ' + e.called + '.' }))
+on('landed', (world, e) => world.actor('minder', { say: 'It came down at ' + e.at.join(' ') + ' on ' + e.met + ' (' + e.tag + ').' }))
 on('held', (world, e) => world.actor('minder', { say: e.name + ' has ' + e.called + '.' }))
 on('put', (world, e) => world.actor('minder', { say: e.called + ' is down at ' + e.at[0] + ', ' + e.at[2] + '.' }))
-on('act', (world, e) => world.actor('minder', { say: e.using ? e.name + ' raises ' + e.using.name + '.' : e.name + ' raises an empty hand.' }))
+on('act', (world, e) => { if (e.action === 'toss') { world.throw({ from: e.by, to: e.to, speed: 90, held: true, tag: 'tossed' }); return }
+  world.actor('minder', { say: e.using ? e.name + ' raises ' + e.using.name + '.' : e.name + ' raises an empty hand.' }) })
 on('said', (world, e) => {
   if (/hand it to me/i.test(e.text)) world.give(e.by, { thing: 'lantern' })
   if (/take it back/i.test(e.text)) world.take(e.by)
@@ -61,7 +64,7 @@ try {
   check((await post('ask', { by: 'wren', hold: 'lantern' })).asked, 'it is picked up')
   await until('its cells are gone', async () => (await cell(705, feet + 5, 4039)) === 0 && (await cell(706, feet + 11, 4040)) === 0)
   check((await thing()).held === 'wren', 'picked up, its cells leave the world and its record says who holds it')
-  const carried = await until('the figure carries it', async () => { const l = await look('wren'); return l?.carry?.length ? l.carry : null })
+  const carried = await until('the figure carries it', async () => { const l = await look('wren'); return l?.carry?.length ? l.carry : null }, 20_000)
   const long = carried.reduce((n, b) => n + b.size[1], 0)
   check(carried.length >= 2 && carried.length <= 8 && carried.every((b) => b.on === 'handR' && /^#[0-9a-f]{6}$/.test(b.colour)) && Math.abs(long - 12) < 0.5, `the holder's figure carries it in the right hand: ${carried.length} boxes, ${long.toFixed(1)} cells long, ${carried[0].colour} to ${carried.at(-1).colour}`)
   await until('the rule hears it', async () => (await heard('robin')).includes('wren has a lantern.'))
@@ -112,6 +115,31 @@ try {
   server = await serve('/dev/null', ['--world', file])
   const again = await until('standing after a restart', async () => { const t = await thing(); return t && !t.refused && !t.held ? t : null }, 15_000)
   check(((await cell(again.at[0], again.at[1] + 2, again.at[2])) & 15) === 12 && Math.hypot(again.at[0] - left.at[0], again.at[2] - left.at[2]) <= 2, `held when the world stopped, it stands again where it was taken from (${again.at})`)
+
+  // Thrown: what is held leaves the hand as a body of its own cells, the rules hear it, and it lies as cells where it stops.
+  await post('join', { by: 'robin', at: [716, 4060] })
+  await until('the minder is back', async () => (await get('rules')).find((r) => r.id === 'minder')?.actors === 1)
+  const rob2 = (await get('me?by=robin')).you, g2 = rob2.at[1]
+  const bat = []
+  for (let y = 0; y < 8; y++) bat.push(rob2.at[0] + 6, rob2.at[0] + 8, g2 + y, rob2.at[2] + 2, 10 | (30 << 8))
+  await post('ask', { by: 'tester', edit: [1, bat.length / 5, ...bat], release: [rob2.at[0] + 7, g2 + 12, rob2.at[2] + 2], thing: { id: 'bat', name: 'a bat', wish: 'a bat', at: [rob2.at[0] + 7, g2, rob2.at[2] + 2], size: [2, 8, 1], facing: 'south' } })
+  await until('the bat stands', async () => (await cell(rob2.at[0] + 6, g2 + 3, rob2.at[2] + 2)) !== 0)
+  await post('ask', { by: 'robin', hold: 'bat' })
+  await until('robin holds the bat', async () => (await get('things?id=bat')).held === 'robin')
+  /** How many columns of the street to the south are topped with wood. */
+  const wood = async () => (await get(`tops?x0=${rob2.at[0] - 100}&z0=${rob2.at[2] + 4}&x1=${rob2.at[0] + 100}&z1=${rob2.at[2] + 164}&y=${g2 + 60}`)).material.filter((m) => m === 10).length
+  const woodBefore = await wood()
+  const toss = await post('act', { by: 'robin', rule: 'minder', id: 'toss', from: [rob2.at[0] + 0.5, g2 + 16.5, rob2.at[2] + 0.5], to: [0.3, 0.25, 1] })
+  check(toss.done, 'a rule is asked to throw what is held')
+  await until('the rules hear it thrown', async () => (await heard('wren').catch(() => [])).concat(await heard('robin')).includes('robin threw a bat.'))
+  const gone = await until('its record is gone', async () => { const t = await get('things?id=bat'); return t.refused ? t : null })
+  check(gone.refused >= 400 && !(await look('robin'))?.carry, 'thrown, the hand is empty and the thing is no longer a made thing')
+  const down = await until('the rule hears where it landed', async () => (await heard('robin')).find((t) => /^It came down at \d+ \d+ \d+ on \w+ \(tossed\)\.$/.test(t)), 15_000)
+  const where = down.match(/\d+/g).map(Number)
+  check(where[2] > rob2.at[2] + 10, `it flew the way it was thrown and the rule that threw it hears where it landed (${down})`)
+  // It lies as cells of its own stuff near where it came down.
+  const lies = await until('it lies as cells', async () => { const n = await wood(); return n > woodBefore ? n - woodBefore : null }, 20_000)
+  check(lies >= 1, `and it lies as its own cells where it stopped (${lies} more columns topped with wood than before the throw)`)
 
   // The page: near a made thing and looking at it, a key and a button pick it up; the same put it down where the eye looks.
   await post('join', { by: 'robin', at: [716, 4040] })

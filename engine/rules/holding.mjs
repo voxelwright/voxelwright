@@ -113,6 +113,15 @@ export function holding({ folk, kind, hear, seen, want }) {
       const box = boxOf(placedRows)
       return { by: 'the world', put: id, at: (at ?? over(box)).map(Math.round), edit: rowsEdit(placedRows), box, release: over(box), thing: { id, held: null, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1] } }
     },
+    /** What someone holds leaves their hand to be thrown: the hand is empty, and its cells (as rows, where they last stood) are the thrower's to make a body of. Or nothing. */
+    letGo(by) {
+      const h = held.get(by), p = folk.get(by)
+      if (!h) return null
+      held.delete(by)
+      if (p) seen(p)
+      hear('thrown', { by, name: p?.name ?? by, thing: h.thing, called: h.name, at: (p?.at ?? [0, 0, 0]).map(Math.round) })
+      return { thing: h.thing, rows: h.rows }
+    },
     /** Someone is gone: what they held is to be put down where they stood. Returns the ask for it, or nothing. */
     left: (p) => (held.has(p.by) ? { by: p.by, put: held.get(p.by).thing, at: p.at.map(Math.round) } : null),
     /** `world.give(person, {thing})`: a rule puts a made thing in someone's hand. The server has its cells, so it is asked. */
