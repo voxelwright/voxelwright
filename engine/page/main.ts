@@ -18,6 +18,7 @@ import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { car, living } from './living.ts'
 import { person } from './person.ts'
+import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk } from './people.ts'
@@ -398,6 +399,8 @@ async function main() {
     if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
     const told = read(answer.words)
     alive.heard(answer, told)
+    // What goes fast is seen in flight (shots.ts), once this page is up to date with its world.
+    if (!far || far.live) streaks.heard(told)
     if (!far) me.heard(answer, told)
     for (const { runs, box } of told.edits) {
       heard++
@@ -452,6 +455,7 @@ async function main() {
   mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`) }
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
+  const streaks = shots(smoke, debris)
   const alive = living({ send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made })
   /** How many bodies are on their way down: every body but the living, which are bodies for as long as they live. */
   const loose = () => moving.size - alive.things.reduce((n, t) => n + (moving.has(t.id) ? 1 : 0), 0)
@@ -873,7 +877,7 @@ async function main() {
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo, shots: streaks })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({ gpu, far, realms: realm, world, march, pose, make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }), marcher: (w) => marcher(device, gpu.format, w), light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) }, pause: (on) => { paused = on } }).catch((e: unknown) => { console.warn(`no portal: ${e instanceof Error ? e.message : String(e)}`); return null }) : null

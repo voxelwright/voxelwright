@@ -486,6 +486,13 @@ pub extern "C" fn living_kick(id: u32, vx: f32, vy: f32, vz: f32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).kick(id, [vx, vy, vz]) as u32)
 }
 
+/// Marks a loose body as one that passes: come to rest it is gone and leaves no cells (a shot, not litter). Its
+/// pieces pass too. Returns 1 if there is such a body.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_passing(id: u32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).list.iter_mut().find(|b| b.id == id).map(|b| b.passing = true).is_some() as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

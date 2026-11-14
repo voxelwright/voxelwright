@@ -2141,6 +2141,15 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
   reels for 0.35 s (1.8 m from a 20 kg ball at 23 m/s).
 - **What was thrown strikes each person once**, and its pieces are the same throw: a wooden ball broke on her and
   its two halves were told as two more blows by "loose wood".
+- **A ghost is carried on between tellings** (`blows.mjs` `track`, called before every advance): a page says where
+  its person is ten times a second, 45 cm apart at a run. From the last two tellings' speed, for at most a fifth of
+  a second, never for a jump from place to place. Measured with a core that only writes down where things are put
+  (`test/ghost.mjs`): 45 cm behind left, 0 carried on straight, 7 cm round a ring 6 m across.
+- **What passes** (`Body.passing`, `bodies_passing`): come to rest it is told gone with a little dust and puts no
+  cells; its pieces pass too. A rule's throw passes unless `stays`. Seen in flight by `page/shots.ts`: any body that
+  moves over 2.5 cells between tellings gets glints along the way it came and one at each end.
+- **A name that shadows**: `main.ts` has a module-level `flying` (the measuring flight); a `const flying` inside
+  `main()` type-checks and would have run the flight on every page.
 - **Weights**: a cell is a litre. A steel ball of half 1 is 210 kg, a wooden one 16: say so to whoever writes rules.
 
 ## People who answer through a model (#264, `engine/mind/`; November 13)

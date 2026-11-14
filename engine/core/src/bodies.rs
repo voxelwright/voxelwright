@@ -670,6 +670,8 @@ pub struct Body {
     lump: bool,
     /// Whether a blast threw it (and not merely let it go).
     thrown: bool,
+    /// Whether it passes: come to rest it is gone, and is cells of nothing. A shot is not litter in the street.
+    pub passing: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
     /// What makes it a living thing (living.rs), if it is one: it is then never put down as cells for lying still.
@@ -691,7 +693,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, born: low, live: None, asleep: false,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, passing: false, born: low, live: None, asleep: false,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -1420,6 +1422,7 @@ impl Bodies {
             body.vel = add(whole.speed_at(own), scale(unit(r), 6.0));
             body.spin = whole.spin;
             body.broken = whole.broken + 1;
+            body.passing = whole.passing;
             self.born(&body);
             self.list.push(body);
         }
@@ -1801,6 +1804,14 @@ impl Bodies {
     /// A body that has come to rest is cells of the world again, as it lies. One lying nearly square to the world is
     /// put down square, cell for cell; one lying askew is cut along the world's cells, which changes how many it is.
     fn rest(&mut self, mut body: Body) {
+        // What passes leaves nothing where it stops but a little dust.
+        if body.passing {
+            let mut words = vec![body.id];
+            words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
+            self.record(DUST, &[body.pos[0].to_bits(), body.pos[1].to_bits(), body.pos[2].to_bits(), body.stuff as u32, (body.count as u32).min(6)]);
+            self.record(GONE, &words);
+            return;
+        }
         let (rot, square) = squared(body.rot);
         body.rot = rot;
         if square {

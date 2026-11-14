@@ -656,7 +656,8 @@ setInterval(() => {
   last = now
   if (!nudged && !core.bodies_count() && !core.bodies_burning() && !core.bodies_flowing()) return
   nudged = false
-  // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
+  // Ghosts are carried on as their people were going (rules/blows.mjs), and all moves by the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
+  blow.track()
   told(core.bodies_advance(dt * body.rate), false)
 }, 16)
 parentPort.postMessage({ ready: true })

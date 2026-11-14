@@ -1191,6 +1191,25 @@ pub mod tests {
     }
 
     #[test]
+    fn what_passes_leaves_no_cells_where_it_stops() {
+        let ground = city::ground(X, Z);
+        for passing in [false, true] {
+            let mut bodies = Bodies::new();
+            bodies.throw_ball([X as f32, ground as f32 + 20.0, Z as f32 + 9.0], [120.0, 20.0, 0.0], 1, kind(STEEL, OWN));
+            bodies.list[0].passing = passing;
+            let mut out = Vec::new();
+            for _ in 0..600 {
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                out.extend_from_slice(&bodies.out);
+            }
+            assert!(bodies.list.is_empty() && !records(&out, GONE).is_empty(), "it came to rest and is told as gone");
+            let put: usize = records(&out, EDIT).iter().map(|e| (e.len() - 6) / 5).sum();
+            assert_eq!(put > 0, !passing, "a thrown ball lies as cells where it stops; one that passes leaves none ({put} rows)");
+        }
+    }
+
+    #[test]
     fn a_frog_hops_where_it_faces() {
         let ground = city::ground(X, Z);
         let mut bodies = Bodies::new();

@@ -11,8 +11,8 @@ import { join } from 'node:path'
 import { serve } from './kit.mjs'
 
 /** What a rule can do, as `world.<name>`; what it can hear, as `on('<name>'`; and what else the guide must still say. */
-const DOES = ['actor', 'gone', 'offer', 'show', 'sound', 'music', 'think', 'person', 'clock', 'mark', 'look', 'matter', 'ask', 'answer']
-const HEARS = ['start', 'said', 'tick', 'act', 'pick', 'thought', 'near']
+const DOES = ['actor', 'gone', 'offer', 'show', 'sound', 'music', 'think', 'person', 'clock', 'throw', 'push', 'down', 'mark', 'look', 'matter', 'ask', 'answer']
+const HEARS = ['start', 'said', 'tick', 'act', 'pick', 'thought', 'near', 'struck']
 const SAYS = ['world.residents', 'world.people', 'world.keep', 'take:', 'follow', 'move', 'look.wear', '/realms', '/realm/<id>', '/world/rules']
 
 const server = await serve('/dev/null', ['--world', join(mkdtempSync(join(tmpdir(), 'engine-whole-')), 'world.log')])

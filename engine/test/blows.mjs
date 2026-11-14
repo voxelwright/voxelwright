@@ -61,6 +61,11 @@ try {
   const thrown = async () => { await ada.evaluate(() => globalThis.engine.say('throw at me')); return until('a blow on Ada', (t) => /^struck Ada by thrown wood from pitcher/.test(t)) }
   let told
   if (out) { const took = await film(ben, 4, async () => { told = await thrown() }); writeFileSync(join(out, 'struck.webm'), took.webm); spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', join(out, 'struck.webm'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '22', '-vf', 'scale=1280:-2', join(out, 'struck.mp4')]); spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', join(out, 'struck.webm'), '-vf', `fps=${(12 / took.seconds).toFixed(3)},scale=480:-1,tile=4x3`, '-frames:v', '1', join(out, 'struck-strip.jpg')]) } else told = await thrown()
+  // Seen in flight on the watching page, and nothing of it lies in the street afterwards.
+  await ben.waitForTimeout(3500)
+  const drawn = await ben.evaluate(() => ({ shots: globalThis.engine.shots.seen, loose: globalThis.engine.dropping }))
+  const litter = await (async () => { let wood = 0; for (let x = 740; x <= 830; x += 2) for (const dy of [1, 2, 3]) { const c = await (await fetch(`${server.url}/world/at?x=${x}&y=${Math.round(stood[1]) + dy - 1}&z=${Math.round(stood[2])}`)).json(); if (c.material === 10) wood++ } return wood })()
+  check(drawn.shots >= 1 && litter === 0, `the watching page drew it as a shot (a streak, a flash at each end), and where it stopped it is gone: no wood lies along its way (${litter} cells)`)
   check(!!told, `a ball thrown at someone at a page strikes them, and the rule hears whom, by what and from whom ("${told}")`)
   await ada.waitForTimeout(800)
   const after = await feet(ada)

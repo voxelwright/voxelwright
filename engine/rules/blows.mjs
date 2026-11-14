@@ -16,6 +16,8 @@ const MATERIALS = ['air', 'earth', 'rock', 'grass', 'sand', 'water', 'asphalt', 
 const SPEED = [10, 700], SIZE = [1, 4], THROWS_A_SECOND = 20, REMEMBERED = 15_000
 /** The fastest a push, the longest on the ground (seconds), and how soon the same two may be told of again (ms). */
 const PUSH_MOST = 400, DOWN_MOST = 60, AGAIN = 400
+/** How long a ghost is carried on after its person was last told of, seconds. */
+const CARRIED = 0.2
 const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
 
 /**
@@ -39,22 +41,43 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
   /** A person as a rule names them: an actor of its own by the id it gave, anyone else by their name in the world. */
   const find = (rule, id) => (typeof id === 'string' ? folk.get(`${rule.id}/${id}`) ?? folk.get(id) : undefined)
 
+  /** Where each was last told to be, when, and how fast they were going then (cells a second): a ghost is carried on between tellings. */
+  const going = new Map()
+  const put = (ghost, at, yaw) => {
+    // Its front the way they face: a figure's yaw is 0 to the north (-z) and a quarter turn to the east.
+    const turn = (Math.PI / 2 - yaw) / 2
+    core.living_place(ghost, at[0], at[1] + BOX[1] / 2, at[2], 0, Math.sin(turn), 0, Math.cos(turn))
+  }
+  /**
+   * Between tellings a ghost goes on as its person was going. Someone at a page says where they are ten times a
+   * second: at a run that is 45 cm a telling, and a shot that would have hit them passed behind. Carried on for at
+   * most a fifth of a second, and only those who were moving.
+   */
+  function track(now = Date.now()) {
+    for (const [by, g] of going) {
+      const ghost = ghosts.get(by), dt = (now - g.t) / 1000
+      if (!ghost || !g.moving || dt <= 0 || dt > CARRIED) continue
+      put(ghost, [g.at[0] + g.v[0] * dt, g.at[1] + g.v[1] * dt, g.at[2] + g.v[2] * dt], g.yaw)
+    }
+  }
   /** Someone was told of: their ghost is put where they stand, or goes with them. */
-  function seen(p) {
+  function seen(p, now = Date.now()) {
     let ghost = ghosts.get(p.by)
-    if (p.gone) { if (ghost) { core.living_vanish(ghost); ghosts.delete(p.by); whose.delete(ghost) } return }
+    if (p.gone) { if (ghost) { core.living_vanish(ghost); ghosts.delete(p.by); whose.delete(ghost); going.delete(p.by) } return }
+    // How fast they are going, from the last telling to this: no faster than anything goes here, and nothing for a jump from place to place.
+    const was = going.get(p.by), dt = was ? (now - was.t) / 1000 : 0
+    const v = was && dt > 0.02 && dt < 0.5 ? p.at.map((c, a) => (c - was.at[a]) / dt) : [0, 0, 0], fast = Math.hypot(...v)
+    going.set(p.by, dt > 0 && dt <= 0.02 ? { ...was, at: [...p.at], yaw: p.yaw } : { at: [...p.at], yaw: p.yaw, t: now, v: fast > 500 ? [0, 0, 0] : v, moving: fast > 2 && fast <= 500 })
     if (!ghost) {
       ghost = core.living_ghost(Math.round(p.at[0]) - 2, Math.round(p.at[1]), Math.round(p.at[2]) - 1, BOX[0], BOX[1], BOX[2])
       if (!ghost) return
       ghosts.set(p.by, ghost); whose.set(ghost, p.by)
     }
-    // Its front the way they face: a figure's yaw is 0 to the north (-z) and a quarter turn to the east.
-    const turn = (Math.PI / 2 - p.yaw) / 2
-    core.living_place(ghost, p.at[0], p.at[1] + BOX[1] / 2, p.at[2], 0, Math.sin(turn), 0, Math.cos(turn))
+    put(ghost, p.at, p.yaw)
   }
   /** Ghosts of those who are no longer there go; what was thrown long ago is forgotten. */
   function sweep(now) {
-    for (const [by, ghost] of ghosts) if (!folk.has(by)) { core.living_vanish(ghost); ghosts.delete(by); whose.delete(ghost) }
+    for (const [by, ghost] of ghosts) if (!folk.has(by)) { core.living_vanish(ghost); ghosts.delete(by); whose.delete(ghost); going.delete(by) }
     for (const [body, t] of thrown) if (now - t.t > REMEMBERED) thrown.delete(body)
     for (const [pair, t] of lately) if (now - t > AGAIN) lately.delete(pair)
     threw.clear()
@@ -93,7 +116,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
     }
   }
   return {
-    seen, sweep, heed,
+    seen, sweep, heed, track,
     /** `world.throw({from, at, to, speed, size, material})`: something thrown from a body or a place, at someone or a place, or along a way. */
     throw(rule, w, now, wrong) {
       const n = (threw.get(rule.id) ?? 0) + 1
@@ -107,6 +130,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
       if (typeof speed !== 'number' || !(speed >= SPEED[0] && speed <= SPEED[1])) return wrong(`a throw's speed is ${SPEED[0]} to ${SPEED[1]} cells a second`)
       if (!Number.isInteger(size) || size < SIZE[0] || size > SIZE[1]) return wrong(`a thrown thing's size is ${SIZE[0]} to ${SIZE[1]}: the half of a ball, in cells`)
       if (material < 1 || material === 5) return wrong(`a thrown thing is made of one of: ${MATERIALS.filter((m, i) => i > 0 && i !== 5).join(', ')}`)
+      if (w.stays !== undefined && typeof w.stays !== 'boolean') return wrong('whether a thrown thing stays where it stops is true or false')
       const start = thrower ? [thrower.at[0], thrower.at[1] + CHEST, thrower.at[2]] : w.from
       let way = target ? [target.at[0] - start[0], target.at[1] + CHEST - start[1], target.at[2] - start[2]] : three(w.at) ? w.at.map((v, a) => v - start[a]) : w.to
       const far = Math.hypot(...way)
@@ -118,7 +142,11 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
       const from = thrower ? start.map((v, a) => v + dir[a] * (AHEAD + size)) : start
       const words = core.bodies_throw(from[0], from[1], from[2], dir[0] * speed, dir[1] * speed, dir[2] * speed, size, material)
       const said = new Uint32Array(core.memory.buffer, core.bodies_words(), words)
-      for (let i = 0; i < said.length; i += 2 + said[i + 1]) if (said[i] === 2) thrown.set(said[i + 2], { rule: rule.id, from: thrower?.by, t: now, hit: new Set() })
+      for (let i = 0; i < said.length; i += 2 + said[i + 1]) if (said[i] === 2) {
+        thrown.set(said[i + 2], { rule: rule.id, from: thrower?.by, t: now, hit: new Set() })
+        // Unless it is to stay, it passes: where it stops it is gone, and no street fills with shot.
+        if (!w.stays) core.bodies_passing(said[i + 2])
+      }
       told(words)
     },
     /** `world.push(id, {to, speed})`: someone is pushed along a way. */
