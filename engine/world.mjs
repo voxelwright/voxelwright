@@ -543,6 +543,8 @@ does.set('actor', (rule, w, now, wrong) => {
 // `world.gone(id)`, an actor of the rule's leaving, is a plugin (plugins/gone): the first of these moved into that form.
 /** An actor is asked to think (mind/think.mjs): what a model on someone's own machine makes of it comes back to the rule as `thought`. */
 does.set('think', (rule, w, now, wrong) => minds.ask(rule, w, now, wrong))
+/** A model reads what someone said for the notes a rule wants (mind/think.mjs): nobody answers; the rule hears `read`. */
+does.set('read', (rule, w, now, wrong) => minds.read(rule, w, now, wrong))
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).

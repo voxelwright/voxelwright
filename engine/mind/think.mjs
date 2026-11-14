@@ -7,7 +7,7 @@
 //
 // Nothing here knows what a note means, or what any world is about.
 import { text } from '../text.mjs'
-import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, REALM_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, wanted } from './form.mjs'
+import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, LISTENING_MOST, REALM_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, wanted } from './form.mjs'
 
 /** How long a thought may take before its rule is told it failed (ms). */
 const THOUGHT_MOST = 20_000
@@ -17,6 +17,7 @@ const TOGETHER_MOST = 8, A_MINUTE_MOST = 40
 const REMEMBERED = 60 * 60_000, PEOPLE_MOST = 512
 /** Whose talk a kept line is: a rule's id, a stroke, its actor's id. */
 const KEY = /^[a-z0-9][a-z0-9-]{0,23}\/[a-z0-9][a-z0-9-]{0,23}$/
+const READ_ID = /^[a-z0-9][a-z0-9-]{0,23}$/
 
 /**
  * @param actor   an actor of a rule's, by the rule's id and the actor's own: the body, or undefined
@@ -48,6 +49,8 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
   }
   const end = (ask, e) => {
     asks.delete(ask.n)
+    // A reading has no actor: the rule that asked is told what was read, and nobody else anything.
+    if (ask.reads) return happen('read', { id: ask.id, from: ask.from, said: ask.heard, ms: Date.now() - ask.since, notes: e.notes, ...(e.failed ? { failed: e.failed } : {}) }, ask.rule)
     const p = actor(ask.rule, ask.id)
     if (p?.asked === ask.n) { p.asked = 0; if (p.thinking) { p.thinking = false; show(p) } }
     // An actor that has gone, or a rule taken out, is told nothing.
@@ -86,11 +89,32 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
       const r = w.realm === false ? null : realm(), here = r && (r.name || r.about) ? { name: text(r.name, 40), about: text(r.about, REALM_MOST) } : undefined
       hand({ n: ask.n, ask: { realm: here, name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), before, from: ask.from, heard: ask.heard, notes: want } })
     },
+    /**
+     * `world.read(id, {said, from, listening, notes})`: the `does` entry. The model reads what a person said for
+     * the notes the rule wants; no actor answers, nothing is said and nothing shows. Counted with a rule's thoughts.
+     */
+    read(rule, w, now, wrong) {
+      if (typeof w.id !== 'string' || !READ_ID.test(w.id)) return wrong('a reading has an id of the rule\'s own, to know its answer by: lower-case letters, digits and dashes, up to 24')
+      const said = text(w.said, HEARD_MOST), want = wanted(w.notes)
+      if (!said) return wrong(`reading "${w.id}" needs what was said: said, in words`)
+      if (typeof want === 'string') return wrong(want)
+      if (!Object.keys(want).length) return wrong(`reading "${w.id}" needs notes: what is to be read in what was said`)
+      if (now - (rule.thinks?.since ?? 0) > 60_000) rule.thinks = { since: now, count: 0 }
+      let together = 0
+      for (const a of asks.values()) { if (a.rule !== rule.id) continue; together++; if (a.reads && a.id === w.id) return wrong(`reading "${w.id}" is still being read: wait for it, or give this one another id`) }
+      if (together >= TOGETHER_MOST || ++rule.thinks.count > A_MINUTE_MOST) return wrong(`a rule may have ${TOGETHER_MOST} thoughts and readings under way at once and ask for ${A_MINUTE_MOST} a minute`)
+      const ask = { n: ++n, reads: true, rule: rule.id, id: w.id, want, from: text(w.from, 24), heard: said, since: now, said: '' }
+      asks.set(ask.n, ask)
+      const r = w.realm === false ? null : realm(), here = r && (r.name || r.about) ? { name: text(r.name, 40), about: text(r.about, REALM_MOST) } : undefined
+      hand({ n: ask.n, ask: { reads: true, realm: here, listening: text(w.listening, LISTENING_MOST), from: ask.from, said, notes: want } })
+    },
     /** What came back for an ask, from the server: `{n, say, more}` while it is still coming (the words so far), `{n, say, notes}` at its end (all of them), or `{n, failed}`. */
     answer(m) {
       const ask = m && asks.get(m.n)
       if (!ask) return
       if (typeof m.failed === 'string') return end(ask, { say: ask.said, notes: noted(ask.want, null), failed: text(m.failed, 200) || 'it failed' })
+      // What was read is notes and no more: whatever words came with it are nobody's to say.
+      if (ask.reads) return m.more === true ? undefined : end(ask, { notes: noted(ask.want, m.notes) })
       if (typeof m.say === 'string') speak(ask, m.say)
       if (m.more === true) return
       if (!ask.said) return end(ask, { say: '', notes: noted(ask.want, null), failed: 'the answer held nothing a person of the world would say' })

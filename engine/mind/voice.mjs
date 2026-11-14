@@ -10,7 +10,7 @@
 // It spends the subscription of whoever started it on what any rule in the world asks for, so it keeps its own
 // count: so many answers a minute and so many at once, whatever the world sends.
 import { key as newKey } from './door.mjs'
-import { SYSTEM, asked, read, sofar } from './form.mjs'
+import { READING, SYSTEM, asked, read, readNotes, reading, sofar } from './form.mjs'
 import { mind } from './model.mjs'
 
 /**
@@ -24,6 +24,9 @@ import { mind } from './model.mjs'
 export function voice({ world, model, name = 'sonnet', binary = 'claude', warm = 2, most = 40, together = 3, say = () => {}, shared }) {
   const own = model || shared ? null : mind({ system: SYSTEM, model: name, binary, warm })
   const reply = shared?.reply ?? model ?? own.reply
+  // What only reads (world.read) is told something else first, so it is a run of its own kind: one waits started.
+  const reader = model || shared ? null : mind({ system: READING, model: name, binary, warm: Math.min(1, warm) })
+  const readIt = shared?.read ?? model ?? reader.reply
   // What is spent is counted once for everything a helper voices: `shared` is that count, when there is more than one world.
   const spent = shared ?? { counts: { answered: 0, failed: 0, refused: 0, tokens: { in: 0, cached: 0, out: 0 } }, busy: 0, since: Date.now(), count: 0, queue: [] }
   const key = newKey(), { counts, queue } = spent
@@ -32,6 +35,16 @@ export function voice({ world, model, name = 'sonnet', binary = 'claude', warm =
   const post = (body) => fetch(`${world}/world/mind`, { method: 'POST', body: JSON.stringify({ voice: key, ...body }) }).then(() => {}, () => {})
   async function one({ n, ask }) {
     const began = Date.now()
+    if (ask.reads) {
+      try {
+        const r = await readIt(reading(ask)), got = readNotes(r.text, ask.notes)
+        if (r.tokens) for (const k of ['in', 'cached', 'out']) counts.tokens[k] += r.tokens[k] ?? 0
+        if (got.failed) { counts.failed++; say(`  a reading: ${got.failed}`); return post({ n, failed: got.failed }) }
+        counts.answered++
+        say(`  read (${Date.now() - began} ms): ${JSON.stringify(got.notes)}`)
+        return await post({ n, notes: got.notes })
+      } catch (e) { counts.failed++; say(`  a reading: ${e.message}`); return post({ n, failed: 'the model did not answer' }) }
+    }
     let sent = ''
     try {
       const r = await reply(asked(ask), (text) => {
@@ -66,7 +79,7 @@ export function voice({ world, model, name = 'sonnet', binary = 'claude', warm =
       } catch { if (!closed) await new Promise((r) => setTimeout(r, 1000)) }
     }
   })()
-  return { counts, close() { closed = true; stop.abort(); own?.close(); return post({ leave: true }) } }
+  return { counts, close() { closed = true; stop.abort(); own?.close(); reader?.close(); return post({ leave: true }) } }
 }
 
 /**
@@ -76,7 +89,8 @@ export function voice({ world, model, name = 'sonnet', binary = 'claude', warm =
  */
 export function voices({ server, model, name = 'sonnet', binary = 'claude', warm = 2, most = 40, together = 3, say = () => {} }) {
   const own = model ? null : mind({ system: SYSTEM, model: name, binary, warm })
-  const shared = { reply: model ?? own.reply, counts: { answered: 0, failed: 0, refused: 0, tokens: { in: 0, cached: 0, out: 0 } }, busy: 0, since: Date.now(), count: 0, queue: [] }
+  const reader = model ? null : mind({ system: READING, model: name, binary, warm: Math.min(1, warm) })
+  const shared = { reply: model ?? own.reply, read: model ?? reader.reply, counts: { answered: 0, failed: 0, refused: 0, tokens: { in: 0, cached: 0, out: 0 } }, busy: 0, since: Date.now(), count: 0, queue: [] }
   const all = new Map([['', voice({ world: server, most, together, say, shared })]])
   const look = async () => {
     let list
@@ -88,5 +102,5 @@ export function voices({ server, model, name = 'sonnet', binary = 'claude', warm
   }
   const watch = setInterval(look, 2000)
   void look()
-  return { counts: shared.counts, get worlds() { return all.size }, close() { clearInterval(watch); own?.close(); return Promise.all([...all.values()].map((v) => v.close())) } }
+  return { counts: shared.counts, get worlds() { return all.size }, close() { clearInterval(watch); own?.close(); reader?.close(); return Promise.all([...all.values()].map((v) => v.close())) } }
 }

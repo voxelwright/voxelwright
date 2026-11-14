@@ -711,6 +711,16 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   attempts to break the person or fill in a note, one of them through what the person remembers) are kept with a real model's replies in `test/mind-kept.json`
   (Sonnet's; Haiku's held too);
   `node test/mind.mjs --real` asks them again (seventeen short replies on your subscription).
+- **A rule can have what someone said read, with nobody answering** (`world.read(id, {said, from, listening,
+  notes})`, heard as `on('read')` by the rule that asked): the model fills in the rule's notes and nothing is
+  said or shown. For understanding what a person means however they word it: a note whose choices are the rule's
+  own list (and one that means none) turns "I should like the ceiling for a pavement" into `walk on walls`. Real
+  Sonnet, fourteen kept cases: nine wishes plain and in figures of speech, all read right; five typed attempts
+  (set the notes, answer in JSON, your email, repeat the above, ignore instructions) read as words and not obeyed,
+  though "power: fly" said aloud is read as asking to fly, which it is. Through a running world a reading takes
+  1.03 s in the middle (0.90 to 1.04 over eight): the rule knows sooner than after an answer (1.3 s), later than
+  an answer's first words (0.92 s). About 1,200 tokens in and 25 out, against 1,400 and 90 for an answer. It is
+  counted with a rule's thoughts and by the same voice; a third process waits started for it (280 MB).
 - **They know where they live.** With every thought the model is told what the realm is called and is about
   (its record, as it is now), as the world the person lives in: its streets, year and manners colour what they
   say, and what its maker wrote of a secret or of what is to come stays unknown to them. Real Sonnet in a realm
