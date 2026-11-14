@@ -58,12 +58,12 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2
       o.yaw += turn * ease
       o.stride += moved / STRIDE
-      // It walks when it is moving along the ground at about a walk, whoever moves it.
+      // It walks when it is moving along the ground at about a walk, whoever moves it. A body the world moves may run (a rule's actor, to 14 m/s); a page faster than a walk is flying.
       const pace = dt > 0 ? moved / dt : 0
-      o.walking += ((pace > 3 && pace < 60 ? 1 : 0) - o.walking) * Math.min(1, dt * 8)
+      o.walking += ((pace > 3 && pace < (o.who.seat ? 160 : 60) ? 1 : 0) - o.walking) * Math.min(1, dt * 8)
       o.down += ((o.who.down ? 1 : 0) - o.down) * Math.min(1, dt * (o.who.down ? 7 : 2.2))
       o.flinch += ((o.who.flinch ? 1 : 0) - o.flinch) * Math.min(1, dt * (o.who.flinch ? 14 : 3))
-      shown.push({ at: o.shown, yaw: o.yaw, seed: seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: now < o.until ? o.says : '' })
+      shown.push({ at: o.shown, yaw: o.yaw, seed: seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: now < o.until ? o.says : '', look: o.who.look })
     }
     return shown
   })

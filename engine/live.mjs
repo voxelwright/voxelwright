@@ -19,6 +19,8 @@ run('git', ['fetch', '-q', 'origin', 'main'], repo)
 if (!existsSync(live)) run('git', ['worktree', 'add', '--detach', live, 'origin/main'], repo)
 else run('git', ['checkout', '-q', '--detach', 'origin/main'], live)
 const at = run('git', ['log', '--oneline', '-1'], live)
+// What the server itself needs to run (the interpreter rules run in, #264): installed as the lock file has it.
+run('npm', ['ci', '--omit=dev', '--silent'], join(live, 'engine'))
 run('npm', ['run', '-s', 'core'], join(live, 'engine'))
 
 // Whatever of ours is listening there now makes way. Anything else on the port is left alone and said.

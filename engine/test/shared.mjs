@@ -8,15 +8,14 @@ import { spawnSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
-import { CHROME, has, here, serve, still } from './kit.mjs'
+import { chrome, has, here, serve, still } from './kit.mjs'
 import { from } from './rows.mjs'
 
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
 const file = join(tmpdir(), `engine-shared-${process.pid}.log`)
 let server = await serve('/dev/null', ['--world', file])
-const browser = await chromium.launch(CHROME)
+const browser = await chrome()
 const open = async () => {
   const context = await browser.newContext({ viewport: { width: 640, height: 360 }, deviceScaleFactor: 1 })
   const page = await context.newPage()

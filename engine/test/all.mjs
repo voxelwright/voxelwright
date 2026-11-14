@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
-import { arg, CHROME, here, serve } from './kit.mjs'
+import { arg, CHROME, here, serve, turn } from './kit.mjs'
 
 const only = arg('only', '').split(',').filter(Boolean), jobs = Number(arg('jobs', '2'))
 const t0 = Date.now()
@@ -41,6 +41,7 @@ const checks = [
   ['people', 'node', ['test/people.mjs'], true],
   ['living', 'node', ['test/living.mjs'], true],
   ['driven', 'node', ['test/driven.mjs'], true],
+  ['rules', 'node', ['test/rules.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['sound', 'node', ['test/sound.mjs'], false],
@@ -52,8 +53,11 @@ const checks = [
   ['probe', 'node', ['test/probe.mjs', '--heat', '2'], true],
 ].filter((c) => !only.length || only.includes(c[0]))
 
-const run = ([name, command, args, , cwd = here]) => new Promise((resolve) => {
-  const began = Date.now(), child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+const run = async ([name, command, args, draws, cwd = here]) => {
+  // What draws waits its turn on the GPU with every other thread's checks (kit.mjs `turn`), and is told it has one.
+  const back = draws ? await turn({ mine: false }) : () => {}
+  return new Promise((resolve) => {
+  const began = Date.now(), child = spawn(command, args, { cwd, env: draws ? { ...env, ENGINE_TURN: '1' } : env, stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
   child.stdout.on('data', (d) => { out += d })
   child.stderr.on('data', (d) => { out += d })
@@ -67,9 +71,11 @@ const run = ([name, command, args, , cwd = here]) => new Promise((resolve) => {
       writeFileSync(kept, out)
       console.log(`    all of it: ${kept}`)
     }
+    back()
     resolve(ok)
   })
-})
+  })
+}
 // What does not draw runs beside what does; what draws takes turns, a few at a time.
 const drawing = checks.filter((c) => c[3]), results = checks.filter((c) => !c[3]).map(run)
 let next = 0

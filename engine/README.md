@@ -233,6 +233,47 @@ Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z
 To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
 `node live.mjs` run after each merge so that the link serves main and not a working tree.
 
+## Rules (#264)
+
+What the people of a world do, and what a game in it is, is text: a script that someone or their model wrote, put
+into a world while it runs. Nothing is built again and no page is loaded again.
+
+```sh
+node serve.mjs --port 5741 --world ~/.village/engine/world/try.log    # a world of your own; then open /city?shared=1
+curl -s -X POST http://127.0.0.1:5741/world/ask -d '{"by": "me", "rule": {"id": "greeter", "name": "Someone who comes when called", "source": "on(\"start\", (world) => world.actor(\"guide\", {name: \"Odile\", at: [700, 4009]}))\non(\"said\", (world, e) => { if (/come here/i.test(e.text)) world.actor(\"guide\", {to: [e.at[0], e.at[2] - 28], pace: 30, say: \"Coming, \" + e.name + \".\"}) })"}}'
+curl -s http://127.0.0.1:5741/world/rules      # how each rule is doing: running, calls, ms, what it got wrong
+curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule hears and may do
+```
+
+- **A rule hears and answers.** It says what it listens for with `on(name, fn)`: `start` (put in, put again
+  changed, or the world started again), `said` (someone at a page or in a seat spoke), `tick` (twice a second while
+  anyone is there). The handler is given a copy of who is there (`world.people`, `world.near`), its own memory
+  (`world.keep`), and two things to ask for: `world.actor(id, {name, at, to, face, pace, look, say})` and
+  `world.gone(id)`.
+- **An actor is a body the world moves for a rule**, as a seat is one it moves for an agent: everyone sees the
+  figure, a walk meets the world's own cells, what it says is heard within 30 m. A rule has at most 64.
+- **Each rule has a thread and an interpreter of its own** (`rules/run.mjs`, `thread.mjs`, `box.mjs`): QuickJS as
+  wasm with nothing bound into it (no timers, network, files or imports), in a memory the platform will not grow
+  past 32 MB. The world's process never runs a line of a rule: it posts what happened and goes on with its clock,
+  and what the rule answers comes back as a message, every field of which is checked (`world.mjs` `obey`) as an ask
+  from anyone is. A call is stopped after about ten milliseconds of counted work; a call the clock says took over a
+  second ends the rule's thread. A world has at most 16 rules. The server never runs a rule and never runs a model.
+- **Changed while it runs.** Put again under the same id, a rule keeps its actors where they stand and what it
+  kept. A rule that fails too often (five times running, or four times in five) is stopped, and says why in
+  `/world/rules`; put again, it starts afresh.
+- **Kept with the world**, as the asks that put it in and took it out. A world started again has its rules; their
+  actors and what each kept are not kept yet, so `start` places them again.
+- **What a person types is something heard.** `e.text` and names reach a rule as text to match or to pass on.
+- Measured (M1 Pro): 0.4 ms a call for a rule with one actor; 1.5 ms for one that compares every pair of 66
+  people; sixteen rules are running 0.2 s after they are asked for and take 18 MB each; with rules that never
+  return, fill their memory or stall inside the interpreter, the world answers a question within 7 ms.
+- `node test/rules.mjs` checks all of it against the real server: a rule that is no game, changed while it runs,
+  kept over a restart; rules that never return, take all the memory they can, stall where no count reaches, flood,
+  or reach for bodies that are not theirs.
+- **Not there**: a rule hears nothing of blows, of keys, of someone coming near or of what a model made of what was
+  said; it cannot change what a person's own body can do, throw anything, show anything on the screen or slow the
+  clock. Residents (the town's own rule) are not actors. #264 says which of these come next.
+
 ## Checks and tools
 
 ```sh
@@ -249,6 +290,8 @@ node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
 ```
+
+Checks from different threads share one GPU, so whatever opens a browser takes a turn first (`test/kit.mjs` `turn`): two at a time on this machine (`ENGINE_TURNS`), the rest wait and say so. A check that is killed gives its turn back.
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks

@@ -86,6 +86,30 @@ frame and worker is that hooks answer one step late.
   not interrupted). The shipped limit is 8 MB (`LIMITS.memory`) and was not timed. It is off the main thread, and the page's watchdog closes a box that takes
   longer than `LIMITS.late`.
 
+## In Node, for the engine's rules (#264, November 13, 2026)
+
+The engine's rules run in the same package (`engine/rules/box.mjs`), each in a `Worker` of its own started by the
+world's process (`rules/run.mjs`), with no frame. Node 25.1, M1 Pro:
+
+- **`runtime.setMemoryLimit` did not hold** (quickjs-emscripten 0.32.0): with 16 MB set, a guest that pushed
+  `new Array(1000).fill(1)` for ever inside `try/catch` grew the wasm memory to its built-in maximum, 2 GB, in
+  three seconds, and only then was told "out of memory". Do not rely on it. What holds: give the module a memory of
+  its own with a maximum, `newVariant(variant, { wasmMemory: new WebAssembly.Memory({ initial: 256, maximum: 512 }) })`
+  (pages of 64 KB; `initial` must be the 256 the module is built with). The platform refuses to grow it: "out of
+  memory" after 29 ms at 31 MB, and the interpreter is usable afterwards. A module made this way takes 5 ms.
+- **One module to each guest.** Modules share nothing; runtimes of one module share its memory, so one guest's
+  growth or corruption reached the next (`newContext` threw "null function or function signature mismatch").
+- **The interrupt handler counts jumps and calls, not time.** `for (;;) {}` is stopped in 3 to 10 ms at 200 asks,
+  and a backtracking regex is interrupted (117 ms), but collecting garbage near the limit, `sort`, `split` and
+  `join` on big values run uncounted. Behind the count there has to be a clock kept by someone else: here the
+  world ends the guest's thread (`worker.terminate()`) when a call takes over a second.
+- `s += s` for ever ends at once with `string too long`.
+- A call with a view of 16 people is 0.13 ms, of 100 people comparing every pair 1.9 ms, of 400 people 26 ms.
+- A thread with its module and a small rule is 18 MB; sixteen start in 0.2 s.
+- The wall is thinner than the home's: an interpreter bug here is in a thread of the world's own process, which
+  holds the world's file and can reach the network. No second wall (a child process with no rights) has been
+  built. What stands in its place: nothing is bound in, and what comes out is checked as data.
+
 ## Refresh when
 
 The package version changes, the frame's policy changes, a browser other than Chrome is

@@ -10,10 +10,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
 import { helper, shaped } from '../helper.mjs'
 import { fetched, isPublic, words } from '../make/link.mjs'
-import { CHROME, serve } from './kit.mjs'
+import { chrome, serve } from './kit.mjs'
 
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
@@ -38,7 +37,7 @@ const from = { eye: [700, 172, 4060], toward: [0, -0.2, -1] }
 const secret = { 'x-village-secret': h.secret }
 
 const shared = process.env.ENGINE_KIT ? JSON.parse(process.env.ENGINE_KIT) : null
-const browser = shared ? await chromium.connect(shared.ws) : await chromium.launch(CHROME)
+const browser = await chrome()
 try {
   // ── Who the helper answers ──
   check((await raw('/hello', { headers: secret })).status === 200, 'with the secret, by this machine\'s own name: answered')

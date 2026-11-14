@@ -16,6 +16,8 @@ import { stripTypeScriptTypes } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, extname, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { RULES_MOST } from './rules/run.mjs'
+import { text } from './text.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -123,6 +125,27 @@ A thing lives once its controls have a motor (engine/page/living.ts \`Controls\`
 POST /world/drive         {"by": name, "id": id, "go": -1 to 1, "turn": -1 to 1, "rise": -1 to 1, "roll": false, "jump": false}   what a living thing is to do, held for one second: say it again four times a second while it is wanted. Never kept. 409 if nothing of that id lives.
 GET  /world/stream        everything that happens, as it happens (binary frames: see engine/serve.mjs)
 
+RULES
+A rule is a script (JavaScript) that says what the people of this world do and what a game in it is. It is kept with the world and run by the world's own process, in an interpreter that can reach nothing: no timers, no network, no files, no import. It listens for what happens and answers with what it wants done.
+  on('start', (world, e) => {})   the rule was put in, put again changed, or the world started again: e = {why: "put" | "changed" | "restart"}
+  on('said',  (world, e) => {})   someone at a page or in a seat spoke: e = {by, name, text, at: [x, y, z]}
+  on('tick',  (world, e) => {})   twice a second while anyone is in the world: e = {dt}
+world.now      seconds
+world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", mine, at: [x, y, z], yaw, walking, down}. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it
+world.near(at, cells)   those of world.people within so many cells of [x, z] or [x, y, z], along the ground
+world.keep     the rule's own memory: an object, carried from call to call and when the rule is put again changed, not when the world starts again. At most 64 KB as JSON
+world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. to: [x, z] is where it walks, straight, over the world's own cells (null stops it). face: [x, z] turns it. pace is cells a second (13 is a walk, at most 140). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2}. say is heard by everyone within 30 m
+world.gone(id)   the actor leaves
+An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
+What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says.
+A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
+POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
+                          {"by": name, "unrule": id}   takes a rule out, and its actors with it
+                          {"by": name, "realm": {"name": name, "about": text}}   what this world is called, and what it is about, in the words of whoever asked for it
+GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error}
+GET  /world/rules?id=     one rule, with its source
+GET  /world/realm         {name, about, rules: [ids]}
+
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
 `
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
@@ -144,6 +167,8 @@ function kept(kind, payload) {
     if (ask.edit) return { edit: Int32Array.from(ask.edit), payload, ask }
     // A change to a made thing's record, or its going: no cells, and still not to be lost.
     if (ask.thing || ask.gone) return { edit: null, payload, ask }
+    // A rule put in or taken out, and what the realm is called (#264): the same.
+    if (ask.rule || ask.unrule || ask.realm) return { edit: null, payload, ask }
     return null
   }
   const w = new Uint32Array(payload.buffer.slice(payload.byteOffset + 16, payload.byteOffset + payload.length))
@@ -163,8 +188,6 @@ function kept(kind, payload) {
   for (const r of records) { only.set(r, at); at += r.length }
   return { edit: Int32Array.from(edits), payload: words([0, 0, 0, 0], only) }
 }
-/** Text someone typed, as it may be shown and told: no control characters, no more than so long. */
-const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').trim().slice(0, most) : '')
 const whole = (v, most = 2 ** 30) => Number.isInteger(v) && Math.abs(v) <= most
 const place = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => whole(v))
 // ── Made things (#243, #244) ─────────────────────────────────────────────
@@ -197,6 +220,17 @@ function record(t, by, whole_) {
     else if (key !== 'id' && (!whole_ || !['name', 'wish', 'at', 'size', 'facing', 'by'].includes(key))) return `"${key.slice(0, 20)}" is not ${whole_ ? 'part of a thing' : `something to change in a thing: at, facing, ${OPEN_FIELDS.join(', ')} are`}`
   }
   return out
+}
+// ── Rules and the realm (#264) ───────────────────────────────────────────
+// A rule is text: what the people of a world do, what a game in it is. This server keeps it, as the ask that put
+// it in, and never runs it: the world's process does, in a box (rules/box.mjs). What a world is called and what it
+// is about is kept the same way.
+const RULE_ID = /^[a-z0-9][a-z0-9-]{0,23}$/, SOURCE_MOST = 32768
+/** A rule as it may be kept, or why not. */
+function ruled(r, by) {
+  if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.id !== 'string' || !RULE_ID.test(r.id)) return 'a rule has an id: lower-case letters, digits and dashes, up to 24'
+  if (typeof r.source !== 'string' || !r.source.trim() || r.source.length > SOURCE_MOST) return `a rule has a source: text, at most ${SOURCE_MOST} characters`
+  return { id: r.id, name: text(r.name, 60) || r.id, source: r.source, by }
 }
 /** An ask as the world will do it, with nothing in it but what it may hold; or why it may not be done. */
 function allowed(body) {
@@ -235,7 +269,10 @@ function allowed(body) {
   }
   if (body.thing !== undefined) { const thing = record(body.thing, by, false); return typeof thing === 'string' ? thing : { by, thing } }
   if (body.gone !== undefined) return typeof body.gone === 'string' && ID.test(body.gone) ? { by, gone: body.gone } : 'what is gone is a thing, by its id'
-  return 'an ask is a blast, a fire, a ball, an edit, or a change to a made thing'
+  if (body.rule !== undefined) { const rule = ruled(body.rule, by); return typeof rule === 'string' ? rule : { by, rule } }
+  if (body.unrule !== undefined) return typeof body.unrule === 'string' && RULE_ID.test(body.unrule) ? { by, unrule: body.unrule } : 'what is taken out is a rule, by its id'
+  if (body.realm !== undefined) return body.realm && typeof body.realm === 'object' && text(body.realm.name, 40) ? { by, realm: { name: text(body.realm.name, 40), about: text(body.realm.about, 2000) } } : 'a realm has a name, and may say what it is about'
+  return 'an ask is a blast, a fire, a ball, an edit, a change to a made thing, a rule, or what the realm is called'
 }
 let world = null
 if (worldFile) {
@@ -248,8 +285,16 @@ if (worldFile) {
   const things = new Map()
   /** Ids taken by asks the world has not yet done: two asks may not make the same thing. */
   const coming = new Set()
+  /** The rules, by id, as last put; and what the realm is called. */
+  const rules = new Map()
+  /** Ids of rules asked for that the world has not yet put in: they count towards the most a world may have. */
+  const awaited = new Set()
+  let realm = { name: '', about: '' }
   const note = (ask, at) => {
-    if (ask.gone) things.delete(ask.gone)
+    if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id) }
+    else if (ask.unrule) rules.delete(ask.unrule)
+    else if (ask.realm) realm = ask.realm
+    else if (ask.gone) things.delete(ask.gone)
     else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
     else if (ask.thing && things.has(ask.thing.id)) Object.assign(things.get(ask.thing.id).record, ask.thing)
   }
@@ -269,6 +314,8 @@ if (worldFile) {
   // Things that lived (#245: a record whose controls have a motor) get up again where they last slept: bodies are
   // not kept, and the edit that took their cells out is.
   for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, controls: t.record.controls, rows: rowsOf(t) } })
+  // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
+  for (const rule of rules.values()) thread.postMessage({ rule })
   /** Which body of the core each living thing is now, by the thing's id: told to every page as it joins. */
   const living = new Map()
   const readers = new Set()
@@ -327,6 +374,7 @@ if (worldFile) {
     async here(req, res) {
       const b = await body(req, 1024)
       const by = text(b?.by, 24)
+      if (by.includes('/')) return send(res, 400, 'a name with "/" in it is an actor of a rule: use another')
       if (!b || !by || !Array.isArray(b.at) || b.at.length !== 3 || !b.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) || !Number.isFinite(b.yaw ?? 0)) return send(res, 400, 'where you are is {by, at: [x, y, z], yaw}')
       thread.postMessage({ here: { by, name: text(b.name, 24) || by, at: b.at, yaw: b.yaw ?? 0 } })
       send(res, 202, '{}', TYPES['.json'])
@@ -340,6 +388,7 @@ if (worldFile) {
       if (++seated > BODIES_A_SECOND) return send(res, 429, 'too many requests: wait a second')
       const by = text(from?.by, 24)
       if (!by) return send(res, 400, 'say who you are: "by" is your name, up to 24 characters')
+      if (by.includes('/')) return send(res, 400, 'a name with "/" in it is an actor of a rule: use another')
       const m = { op, by }
       if (op === 'join' && from.at !== undefined) { if (!Array.isArray(from.at) || from.at.length !== 2 || !from.at.every((v) => whole(v))) return send(res, 400, 'a place to join at is [x, z], whole cells'); m.at = from.at }
       if (op === 'walk') { if (!Array.isArray(from.to) || from.to.length !== 2 || !from.to.every((v) => whole(v))) return send(res, 400, 'where to walk is "to": [x, z], whole cells'); m.to = from.to }
@@ -361,6 +410,16 @@ if (worldFile) {
       const echo = JSON.parse(log[t.at].subarray(12).toString('utf8'))
       send(res, 200, JSON.stringify({ ...t.record, cells: echo.edit.slice(2) }), TYPES['.json'])
     },
+    /** How each rule is doing, asked of the world's process; or one rule with its source. And what the realm is. */
+    async rules(url, res) {
+      const id = url.searchParams.get('id')
+      if (id !== null) return rules.has(id) ? send(res, 200, JSON.stringify(rules.get(id)), TYPES['.json']) : send(res, 404, 'no rule of that id is in the world')
+      if (down) return send(res, 503, 'the world has stopped')
+      const n = questions++
+      const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ rules: true, id: n }) })
+      send(res, 200, JSON.stringify(m.rules), TYPES['.json'])
+    },
+    realm: (res) => send(res, 200, JSON.stringify({ ...realm, rules: [...rules.keys()] }), TYPES['.json']),
     stream(res, from) {
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
       for (let i = Math.max(0, from); i < log.length; i++) res.write(log[i])
@@ -386,6 +445,8 @@ if (worldFile) {
       // A thing is made once: an id the world has is refused, so a send that is tried again cannot make two.
       if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.add(ask.thing.id) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
+      if (ask.unrule && !rules.has(ask.unrule)) return send(res, 409, 'no rule of that id is in the world')
+      if (ask.rule && !rules.has(ask.rule.id) && !awaited.has(ask.rule.id)) { if (rules.size + awaited.size >= RULES_MOST) return send(res, 409, `a world has at most ${RULES_MOST} rules: take one out first`); awaited.add(ask.rule.id) }
       // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
       thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
       send(res, 202, '{"asked":true}', TYPES['.json'])
@@ -436,6 +497,8 @@ const server = createServer((req, res) => {
       return done(world.tops(url, res))
     }
     if (req.method === 'GET' && url.pathname === '/world/things') return world.things(url, res)
+    if (req.method === 'GET' && url.pathname === '/world/rules') return done(world.rules(url, res))
+    if (req.method === 'GET' && url.pathname === '/world/realm') return world.realm(res)
     if (req.method === 'GET' && url.pathname === '/world/') return world.guide(res)
     return send(res, 404, 'not here')
   }

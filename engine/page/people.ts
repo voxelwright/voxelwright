@@ -7,6 +7,7 @@
 // looks like and how one moves.
 import { shader, type Target } from '../probe/gpu.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
+import type { Look } from './link.ts'
 import { chance, residents, type Land, type Resident, type Shock } from './residents.ts'
 
 /** One person, as whoever draws them is told. Lengths are the world's finest cells (10 cm). */
@@ -17,6 +18,8 @@ export interface Person {
   yaw: number
   /** Who they are to look at: build, clothes and colours all come of this number. */
   seed: number
+  /** What was chosen for them in place of what the number gives (a rule's actor, #264). */
+  look?: Look
   /** How far through a pair of steps they are, in turns. Left alone they stand. */
   stride?: number
   /** How much of a walk it is, 0 standing to 1 walking: the legs and arms swing by it. */
@@ -279,8 +282,9 @@ const THIGH = 4.5, CALF = 4, SOLE = 0.5
 export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far = false): number {
   const s = p.seed
   // Build: how tall, how broad.
-  const tall = 0.93 + 0.12 * chance(s, 1), broad = 0.9 + 0.22 * chance(s, 2)
-  const coat = pick(COATS, s, 3), legs = pick(LEGS, s, 4), skin = pick(SKINS, s, 5), hair = pick(HAIRS, s, 6), shoe = pick(SHOES, s, 7)
+  const chosen = p.look, tinted = (hex: string | undefined, or: V3): V3 => (hex ? tint(hex) : or)
+  const tall = (0.93 + 0.12 * chance(s, 1)) * (chosen?.tall ?? 1), broad = (0.9 + 0.22 * chance(s, 2)) * (chosen?.broad ?? 1)
+  const coat = tinted(chosen?.coat, pick(COATS, s, 3)), legs = tinted(chosen?.legs, pick(LEGS, s, 4)), skin = tinted(chosen?.skin, pick(SKINS, s, 5)), hair = tinted(chosen?.hair, pick(HAIRS, s, 6)), shoe = tinted(chosen?.shoes, pick(SHOES, s, 7))
   const bright = pick(BRIGHT, s, 8)
   const long = chance(s, 9) < 0.45, hairstyle = Math.floor(chance(s, 10) * 5), scarf = chance(s, 11) < 0.3, bag = Math.floor(chance(s, 12) * 4)
   const walking = p.walking ?? 0, flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, time = p.time ?? 0

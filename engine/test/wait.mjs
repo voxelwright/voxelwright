@@ -5,9 +5,8 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
 import { helper } from '../helper.mjs'
-import { arg, CHROME, has, serve } from './kit.mjs'
+import { arg, chrome, has, serve } from './kit.mjs'
 
 const out = arg('out', 'wait'), seconds = Number(arg('seconds', '14')), refuse = has('refuse'), held = has('held')
 mkdirSync(out, { recursive: true })
@@ -25,7 +24,7 @@ const BAD = { ...STALL, parts: [...STALL.parts, ['box', 'wood', 'own', 10, 15, 6
 const HALL = { name: 'brick hall', size: [64, 30, 64], parts: [['box', 'brick', 'own', 0, 0, 0, 64, 30, 64], ['box', 'roofing', 'own', 0, 28, 0, 64, 30, 64]] }
 const model = async () => { await new Promise((r) => setTimeout(r, (refuse ? seconds / 3 : seconds) * 1000)); return { text: JSON.stringify(held ? HALL : refuse ? BAD : STALL), model: 'a kept reply', ms: 0, cost: 0 } }
 const h = await helper({ world: server.url, port: 0, model, journal: join(dir, 'made.jsonl'), kept: join(dir, 'library') })
-const browser = await chromium.launch(CHROME), page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
+const browser = await chrome(), page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log(`page error: ${e.message}`))
 try {
   await page.goto(`${server.url}/city?fly=0&shared=1&name=Ada&at=${arg('at', held ? '70,17.2,399' : '70,17.6,407')}&look=${arg('look', held ? '0,-80' : '0,-14')}${new URL(h.link).hash}`)

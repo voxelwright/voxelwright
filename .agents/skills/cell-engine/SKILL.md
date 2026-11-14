@@ -1723,3 +1723,48 @@ What cost time, beyond what `engine/README.md` "Making" says:
 - **A fireball's flight is the caster's page only**; the blast and fire it ends in are the world's. 361 frames in
   6 s with none over 17 ms.
 
+## Rules run by the world's process (#264, `rules/box.mjs`, `world.mjs` "Rules"; November 13)
+
+How to use it is in `engine/README.md` "Rules" and in the guide (`GET /world/`). What decided its shape, and what
+cost time:
+
+- **Measured before it was built.** In Node, the interpreter loads in 7 ms and a rule opens in 10 ms; a call with
+  16 people in the view is 0.13 ms and with 100, comparing every pair, 1.9 ms; with 400 it is 26 ms, so the view is
+  capped (256) and a rule should ask `world.near`, not compare everyone. `for (;;) {}` is stopped in 3 ms at 50
+  asks of the interrupt handler; the limit is 200 (10 ms measured).
+- **A thread to each rule, not the world's own thread.** It was first built in the world's thread (a call is under
+  a millisecond, and what it wants is done in the same turn). A security pass (Sentinel, Opus) broke that twice with
+  one request each: (1) QuickJS's `setMemoryLimit` did not hold: a rule that pushed arrays for ever, catching the
+  refusal, grew the one shared wasm module to 2 GB in three seconds, the next rule's `newContext` threw out of the
+  message handler, the world's process died, and since the ask was already kept it died again at every start; (2)
+  work inside the interpreter's own functions (collecting garbage near the limit, a backtracking regex, a big
+  sort or split) is not counted by the interrupt handler, so "12 ms" calls took 2 to 8 s of the world's only
+  thread and counted as successes. Now: a `Worker` and a QuickJS module to each rule; the module's memory is a
+  `WebAssembly.Memory` with `maximum` (32 MB), which the platform enforces ("out of memory" after 29 ms, and the
+  rule runs on); the world keeps a clock on every call and start and ends the thread (`terminate`) at a second;
+  answers come back as messages. Sixteen rules: running 0.2 s after asked, 18 MB each, and with every hostile rule
+  of the check at work the world answers within 7 ms.
+- **Failures are a leaky count**, one each, a quarter off for a good call, stopped at five: a rule that failed four
+  times in five never reached "five running". A call that answers but took over 100 ms of its own thread counts.
+- **A world has at most 16 rules** (a thread and up to 40 MB each); ids asked for and not yet put in count.
+- **A name with `/` is an actor's**: seats and pages are refused one, so nobody outside can take the name a rule's
+  actor will want.
+- **No host function is bound.** Everything a rule can do is a field of the string it answers with, and `obey`
+  checks each: an id of the rule's own, a place that is finite, a pace capped at 140 cells a second, a look that is
+  `#rrggbb` and two numbers, text cut and cleaned by `text.mjs` (the one cleaner, used by the server too).
+- **An actor is a seat with a `rule`**: the same map (`folk`), the same walk, the same `here` frames, so pages and
+  agents in seats see actors with no new code. Its key is `<rule id>/<actor id>`. A person may have joined under
+  that very name first (a name may hold `/`): the rule is refused that body, and nobody outside may use a name
+  that is an actor's.
+- **A walk is taken a walker's step at a time** whatever the pace: at 140 cells a second a tenth of a second is
+  fourteen cells, and one check at the far end went through a thin wall.
+- **What an actor says is not told to rules**: two rules that each answer what they hear would talk for ever.
+- **A check of mine was wrong three ways before the engine was**: it asked `around` ten times a second and met
+  the cap on bodies' requests (429), it made the same sixty names every call so never reached the cap of 64, and
+  its changed rule had no `at`, so nothing stood after a restart. Actors are not kept: a rule's `start` asks
+  whether its actor is there (`world.people.some((p) => p.mine)`) and places it if not.
+- **What a person in the world takes to answer through a model** (the asker's own Claude Code, a fresh process a
+  reply, `make/model.mjs`; six replies): Haiku 2.0 to 2.7 s, Sonnet 2.0 to 3.4 s. One reply remarked on the
+  binary's own added context. A warm process is the next thing to measure before people answer by model.
+- **Not there**: see the README. The list of what a rule must come to hear and do, checked against five realms
+  that are not alike, is on #264.

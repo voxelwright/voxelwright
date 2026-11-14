@@ -7,12 +7,11 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
-import { CHROME, serve, still } from './kit.mjs'
+import { chrome, serve, still } from './kit.mjs'
 
 const file = join(mkdtempSync(join(tmpdir(), 'engine-driven-')), 'world.log')
 const shared = process.env.ENGINE_KIT ? JSON.parse(process.env.ENGINE_KIT) : null
-const browser = shared ? await chromium.connect(shared.ws) : await chromium.launch(CHROME)
+const browser = await chrome()
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
 let server = await serve('/dev/null', ['--world', file])

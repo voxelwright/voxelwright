@@ -4,11 +4,10 @@
 //   node test/wish.mjs "a red telephone box" --link "$(grep -o 'http.*#helper.*' helper.log)" --out file.png
 //       [--picture made-up.png] [--at x,y,z --look yaw,pitch] [--phone]
 // The words may hold an address (a link). A picture is given through the bar's own file input.
-import { chromium } from 'playwright'
-import { arg, CHROME, has } from './kit.mjs'
+import { arg, chrome, has } from './kit.mjs'
 
 const wish = process.argv[2], link = new URL(arg('link', '')), out = arg('out', 'wish.png'), picture = arg('picture', '')
-const browser = await chromium.launch(CHROME)
+const browser = await chrome()
 const context = await browser.newContext(has('phone') ? { viewport: { width: 393, height: 760 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true, screen: { width: 393, height: 852 } } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
 const page = await context.newPage()
 page.on('pageerror', (e) => console.log(`page error: ${e.message}`))

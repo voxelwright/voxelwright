@@ -12,8 +12,10 @@ export interface Echo { by: string; blast?: [number, number, number]; radius?: n
   thing?: Partial<Omit<Thing, 'cells' | 'box'>> & { id: string }
   /** A made thing that is no more, by its id. */
   gone?: string }
+/** What of a figure may be chosen (people.ts `figure`); whatever is left out comes of who they are. */
+export interface Look { coat?: string; legs?: string; hair?: string; skin?: string; shoes?: string; tall?: number; broad?: number }
 /** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
-export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean }
+export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null

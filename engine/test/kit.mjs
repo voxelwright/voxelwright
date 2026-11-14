@@ -2,7 +2,8 @@
 // WebGPU. Run by itself a script starts its own; under `node test/all.mjs` they all share the
 // one server and the one browser that it started (ENGINE_KIT says where).
 import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
@@ -10,6 +11,45 @@ export const here = new URL('..', import.meta.url).pathname
 export const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 export const has = (name) => process.argv.includes(`--${name}`)
 export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] }
+
+// One GPU, and every thread's checks draw on it. Whatever opens a browser to draw takes a turn first: one of a few
+// places, for this whole machine, held until the process ends. Without it four lanes' checks at once took 90 s to
+// bring a page up and failed for that alone (November 13). A place is a folder (made or not, at once) holding the
+// number of the process that has it; one whose process is gone is free. Whoever holds a turn says so to what it
+// starts (ENGINE_TURN), so a check that runs other checks does not wait on itself.
+const TURNS = Number(process.env.ENGINE_TURNS ?? 2), PLACES = join(homedir(), '.village', 'engine', 'turns')
+const running = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
+/** Waits for a turn on the GPU and takes it. Returns how to give it back (done anyway when the process ends). `mine: false` takes it for a process about to be started, which is then told it has one. */
+export async function turn({ mine = true } = {}) {
+  if (process.env.ENGINE_TURN) return () => {}
+  mkdirSync(PLACES, { recursive: true })
+  for (let waited = 0; ; waited++) {
+    for (let n = 0; n < TURNS; n++) {
+      const place = join(PLACES, String(n)), holder = join(place, 'pid')
+      try { mkdirSync(place) } catch {
+        // Taken: unless whoever took it is gone (or was stopped before it could say who it was).
+        let pid = NaN
+        try { pid = Number(readFileSync(holder, 'utf8')) } catch { /* not said yet */ }
+        if (Number.isInteger(pid) ? !running(pid) : waited > 20) rmSync(place, { recursive: true, force: true })
+        continue
+      }
+      writeFileSync(holder, String(process.pid))
+      let held = true
+      const back = () => { if (held) { held = false; rmSync(place, { recursive: true, force: true }); if (mine) delete process.env.ENGINE_TURN } }
+      process.on('exit', back)
+      if (mine) process.env.ENGINE_TURN = '1'
+      return back
+    }
+    if (waited === 4) console.log('  waiting for a turn on the GPU: other checks are drawing')
+    await new Promise((r) => setTimeout(r, 500))
+  }
+}
+/** A browser to draw with: the one a run of all the checks shares, or one of its own. Either way after a turn. */
+export async function chrome() {
+  await turn()
+  const shared = process.env.ENGINE_KIT ? JSON.parse(process.env.ENGINE_KIT) : null
+  return shared ? chromium.connect(shared.ws) : chromium.launch(CHROME)
+}
 
 /** Starts the page server on a port of its own; reports it is sent are thrown away unless a file is named. */
 export async function serve(reports = '/dev/null', more = []) {
@@ -33,7 +73,7 @@ export async function start() {
   const world = process.env.ENGINE_SHARED ? join(tmpdir(), `engine-world-${process.pid}-${Date.now()}.log`) : null
   const shared = process.env.ENGINE_KIT && !world ? JSON.parse(process.env.ENGINE_KIT) : null
   const server = shared ? null : await serve('/dev/null', world ? ['--world', world] : [])
-  const browser = shared ? await chromium.connect(shared.ws) : await chromium.launch(CHROME)
+  const browser = await chrome()
   const failures = []
   const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
   /** A page that says what goes wrong on it: its errors fail the check, its warnings are printed. */

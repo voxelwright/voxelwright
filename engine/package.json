@@ -15,5 +15,9 @@
     "@webgpu/types": "0.1.74",
     "playwright": "1.65.0",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "quickjs-emscripten-core": "0.32.0"
   }
 }
