@@ -35,10 +35,14 @@ interface Core {
   living_kick(id: number, vx: number, vy: number, vz: number): number
   living_down(id: number, dx: number, dy: number, dz: number, cling: number): number
 }
-const ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
+let ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
 const post = (answer: Answer) => (self as unknown as Worker).postMessage(answer, [answer.words.buffer])
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
+  // The core built again (#264, main.ts `recore`): what is asked from here on is done by the new one, which knows
+  // nothing yet: whoever sent this tells it the world's edits again and makes its bodies again.
+  const anew = (e.data as unknown as { core?: string }).core
+  if (anew) { ready = WebAssembly.instantiateStreaming(fetch(anew), {}).then((r) => r.instance.exports as unknown as Core); return }
   const ask = e.data, t0 = performance.now(), released = !!ask.blast || !!ask.release
   try {
     const core = await ready

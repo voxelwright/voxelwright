@@ -2564,3 +2564,21 @@ named what the checks had not looked at. What was wrong, and what it taught:
   what it is sent); a page in a realm at three in the morning draws 3 residents where home draws 115, and still
   3 when the page's own keys show noon.
 
+## The core swap made whole (#264, November 14)
+
+- **The gap was real and had three parts.** The old core went on stepping while the new one started; the server
+  took its copy of the history before the world had stopped; and what was held in the world's process was done
+  before the history arrived, on an empty core. Now: `swap` stops the clocks at once (`if (swapping) return`),
+  the world answers `ready` when the new core is up, the server sends the history then, and everything else waits
+  for `swapped` and is done after, in order. Messages keep their order, so what the old core logged before it
+  stopped reaches the server before `ready` does.
+- **How to check that no edit was missed**: send edits with the look, then swap once more with nothing going on.
+  The second world is made from the file alone; if a row of cells reads the same in both, the file and the core
+  agreed. A direct "is edit N there" check cannot tell a miss from an edit done twice.
+- **`let` used by a clock must be declared before the first top-level `await` that follows the clock**, or the
+  clock can fire in the gap and throw. `swapping` sits beside `core` at the top for that reason.
+- **Fire costs ten lines to carry** because the core already names some cells alight in record 7; the world's
+  process keeps the last one and lights those cells in the new core. Bodies in the air cost a change to the core.
+- **A body that has just been set down is still settling for a few seconds**: the check read its feet 3 cells low
+  after 1.5 s. Wait 4 s before comparing heights.
+

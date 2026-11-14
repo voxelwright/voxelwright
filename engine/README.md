@@ -589,10 +589,19 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   comes in. Measured (M1 Pro, `node test/swap.mjs`, and once with a real change to the Rust, built): the world's
   side 2 to 4 ms with 409 edits sent again; the page's own thread 3 to 5 ms; all 18,432 sectors made again in 3.3
   to 4.1 s with the old ones shown meanwhile and no frame over 17 ms. The build itself (11 to 16 s) is whoever
-  built it's wait, not the player's. **Lost at a swap**, as at a restart: bodies in the air, fire, water on the
-  move. Living things get up where they last slept. **Not swapped**: the core a person's own body walks in
-  (`shadow` in `main.ts`) and, in a world that is not shared, the mover's: they go on with the old build until the
-  page is loaded again.
+  built it's wait, not the player's. **Nothing asked for meanwhile is lost or done twice**: the world's process
+  stops its core and says so before the server sends its history, so the history is whole; what is asked in the
+  gap waits in the world's process and is done once, after (`test/swap.mjs` sends thirty edits with the look, then
+  makes the world again from its file alone and reads the two the same). Two looks at once are one swap.
+  **Carried across**: living things get up where they last slept; fire is lit again where the old core said it was
+  (it names some of its cells alight, three numbers each: 183 of 365 in the check, and it spreads from those); a
+  person on foot is taken up, the core their body walks in takes the build and the world's edits, and they are set
+  down where they stood. **Lost**: bodies in the air (a thrown ball, a wall still falling). Carrying those needs
+  the core to say what each is made of and how fast it goes, and to take one back with a speed: its records give
+  where a body is, not its cells or its speed, and nothing makes a body moving. That is a change to `bodies.rs`
+  (a record on asking, and `bodies_put`), not a small one. **Water on the move** is cells the core finds again
+  when it is next stepped (the world's process nudges it): believed to go on, not checked. **Not swapped**: in a
+  world that is not shared, the mover's core.
 - **The marcher's shader is made again while it draws**: `engine.march.reshade((wgsl) => changed)`. The new
   pipelines are built in the background and take over between two frames; one that does not compile throws and
   the old one goes on. Measured: the text compiles in 8 to 9 ms; a changed shader is drawing 1.3 s after it was

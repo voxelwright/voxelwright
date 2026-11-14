@@ -216,11 +216,15 @@ const pluginsNow = () => plugins.map((p) => ({ name: p.name, world: p.world, pag
 let coreIs = ''
 const coreOnDisk = () => createHash('sha256').update(readFileSync(join(root, 'page', 'core.wasm'))).digest('hex').slice(0, 12)
 /** Has every world that is awake take the core as it is on disk now, if it has changed (a realm that wakes later starts with it anyway). */
-async function coreLook() {
+let coreLooking = Promise.resolve()
+/** One look at a time: a second waits for the first, and then finds nothing changed. */
+const coreLook = () => (coreLooking = coreLooking.then(coreLookNow, coreLookNow))
+async function coreLookNow() {
   const now = coreOnDisk()
   if (now === coreIs) return { core: now, changed: false, worlds: [] }
   const worlds = []
-  for (const r of realms.values()) if (r.world) { worlds.push({ realm: r.id, ...(await r.world.swap()) }); r.world.plugged({ core: now }) }
+  for (const r of realms.values()) if (r.world) { const went = await r.world.swap(); worlds.push({ realm: r.id, ...went }); if (!went.error) r.world.plugged({ core: now }) }
+  if (worlds.some((w) => w.error)) return { core: coreIs, changed: false, worlds }
   coreIs = now
   // A plugin that needed something the old core did not have is tried again.
   const plugs = await pluginsLook()
@@ -536,8 +540,12 @@ function open(of) {
     plugged: (m) => { const f = frame(PLUGGED, 0, Buffer.from(JSON.stringify(m))); for (const r of readers) r.write(f) },
     /** Has the world's process take the core as it now is on disk, while it runs (world.mjs `swap`): the edits kept are sent again, living things get up where they slept. Answers how long each part took. */
     async swap() {
-      const began = performance.now(), n = questions++
-      thread.postMessage({ swap: join(root, 'page', 'core.wasm') })
+      const began = performance.now(), first = questions++, n = questions++
+      // The world's process stops its core and starts the new one, and says when it has: everything the old core
+      // logged has reached this process by then (it was said first), so the history sent back is whole. Anything
+      // asked meanwhile waits in the world's process until its history is in, and is done once, after.
+      const ready = await new Promise((resolve) => { waiting.set(first, resolve); thread.postMessage({ swap: join(root, 'page', 'core.wasm'), id: first }) })
+      if (ready.ready.error) return { edits: 0, error: ready.ready.error, all: Number((performance.now() - began).toFixed(1)) }
       let edits = 0
       for (const f of log) { const k = kept(f.readUInt32LE(0), f.subarray(12)); if (k?.edit) { thread.postMessage({ replay: k.edit }); edits++ } }
       for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, controls: t.record.controls, rows: rowsOf(t) } })

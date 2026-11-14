@@ -32,6 +32,10 @@ const { instance } = await WebAssembly.instantiate(await readFile(workerData.cor
 // The core may be swapped for a newer build while this process runs (`swap`, below): everything here asks `core` for
 // what it needs at the moment it needs it, and keeps nothing of the core's memory from one call to the next.
 let core = instance.exports
+/** While the core is being swapped: what was said meanwhile, to be done in order when the new one is whole; when it began; where the fire was. */
+let swapping = null
+/** Where the core last said some of its fire was (three numbers a cell), or null when nothing burns: to light it again in another core. */
+let fireSeen = null
 /** The core's records (bodies.rs): which are log and which are state. */
 const STATE = new Set([5, 7, 8, 10, 11])   // 10 what struck what and 11 how living things are doing (#245): heard as they happen, never kept
 
@@ -43,6 +47,8 @@ function told(n, released) {
   for (let i = 0; i < words.length;) {
     const size = 2 + words[i + 1]
     ;(STATE.has(words[i]) ? state : log).push(words.subarray(i, i + size))
+    // Where some of the fire is (record 7: how many cells are alight, then three floats a cell): kept for a swap of the core.
+    if (words[i] === 7) fireSeen = words[i + 2] ? new Float32Array(words.buffer.slice(words.byteOffset + (i + 3) * 4, words.byteOffset + (i + size) * 4)) : null
     i += size
   }
   const join = (parts) => { const out = new Uint32Array(parts.reduce((sum, p) => sum + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length } return out }
@@ -380,6 +386,8 @@ const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, 
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
 let ticks = 0
 setInterval(() => {
+  // Bodies stand still for the moment a core is swapped: the world under their feet is being put together again.
+  if (swapping) return
   const now = Date.now()
   ticks++
   rests(now)
@@ -568,8 +576,6 @@ const actorsOf = (id) => { let n = 0; for (const p of folk.values()) if (p.rule 
 setInterval(() => { for (const p of folk.values()) if (!p.rule) return happen('tick', { dt: 0.5 }) }, 500)
 
 let nudged = false
-/** While the core is being swapped: what was said meanwhile, to be done in order when the new one is in. And the swap just done, until the server is told of it. */
-let swapping = null, resumed = null
 /** The first thing down each column of a rectangle of the ground, looked for from a height: how high it is (or null) and what it is. One question in place of a look a column. */
 function tops([x0, z0, x1, z1], from) {
   const high = [], kinds = []
@@ -594,18 +600,31 @@ parentPort.on('message', (said) => {
   // water on the move. Living things get up where they last slept (the server sends `revive`). People, actors, rules
   // and what they keep are this process's own and are untouched.
   if (swap) {
+    // One at a time: a second asked for while one is under way is answered as not done.
+    if (swapping) return parentPort.postMessage({ id, ready: { error: 'a swap is already under way' } })
     const began = performance.now()
-    swapping = { held: [], began }
+    // From this line the old core is not stepped (the clocks below look at `swapping`), so it logs nothing more:
+    // what it had logged is on its way to the server ahead of the answer to this, and is in what the server sends back.
+    swapping = { held: [], began, fire: fireSeen }
     alive.clear()
-    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => {
-      const { held } = swapping, was = swapping
-      swapping = null; resumed = was
-      for (const m of held) parentPort.emit('message', m)
-    })
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
     return
   }
-  if (swapping) { swapping.held.push(said); return }
-  if (swapped) { const was = resumed; resumed = null; nudged = true; plug.recored(); return parentPort.postMessage({ id, swapped: { instantiate: Number((was?.ms ?? 0).toFixed(1)), ms: Number((performance.now() - (was?.began ?? performance.now())).toFixed(1)), error: was?.error ?? '' } }) }
+  // While the swap is under way: the world's own history is taken as it comes (the server sends it once the new
+  // core is ready), and everything else waits for it to be whole, to be done in the order it came.
+  if (swapping && !replay && !revive && !swapped) { swapping.held.push(said); return }
+  if (swapped) {
+    const was = swapping
+    swapping = null
+    // Fire is carried across as far as the old core said where it was: those cells are lit again, and it spreads from them.
+    let lit = 0
+    if (was?.fire && !was.error) for (let f = 0; f + 2 < was.fire.length && lit < 256; f += 3, lit++) core.bodies_ignite(Math.floor(was.fire[f]), Math.floor(was.fire[f + 1]), Math.floor(was.fire[f + 2]), 1)
+    nudged = true
+    plug.recored()
+    parentPort.postMessage({ id, swapped: { instantiate: Number((was?.ms ?? 0).toFixed(1)), ms: Number((performance.now() - (was?.began ?? performance.now())).toFixed(1)), held: was?.held.length ?? 0, relit: lit, error: was?.error ?? '' } })
+    for (const m of was?.held ?? []) parentPort.emit('message', m)
+    return
+  }
   if (plugins) { plugging = plugging.then(() => plug.load(plugins)).then((plugged) => parentPort.postMessage({ id, plugged }), (e) => parentPort.postMessage({ id, plugged: [], error: String(e) })); return }
   // What a helper answered for an actor that was asked to think.
   if (thought) return minds.answer(thought)
@@ -664,7 +683,9 @@ let last = performance.now()
 setInterval(() => {
   const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000)
   last = now
-  if (!nudged && !core.bodies_count() && !core.bodies_burning() && !core.bodies_flowing()) return
+  // Not while the core is being swapped: the old one must say nothing more, and the new one is not whole yet.
+  if (swapping) { last = performance.now(); return }
+  if (!nudged && !core.bodies_count() && !core.bodies_burning() && !core.bodies_flowing()) { if (fireSeen && !core.bodies_burning()) fireSeen = null; return }
   nudged = false
   // Ghosts are carried on as their people were going (rules/blows.mjs), and all moves by the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
   blow.track()

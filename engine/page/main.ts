@@ -812,12 +812,20 @@ async function main() {
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
   // The core built again and taken while the page runs (#264): this thread's own, then the workers', and every
-  // sector is made again behind the picture. Answers how long this thread's part took. Not carried across: a
-  // body on foot in a shared world (its own core, `shadow`) and, alone, whatever is loose (the mover's core).
+  // sector is made again behind the picture. A person on foot is taken up, the core their body walks in (`shadow`)
+  // takes the new build and is told the world's edits again, and they are set down where they stood, keys held
+  // still held. Answers how long this thread's part took. Not carried across, alone: whatever is loose (the mover's core).
   const recore = async (url: string) => {
     const began = performance.now()
     inner = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
     world.recore(url)
+    if (shadow) {
+      const on = me.on, held = on ? ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].filter((code) => controls.held(code)) : []
+      if (on) me.walk(false)
+      shadow.postMessage({ core: url } as never)
+      for (const e of world.done()) me.edit(e.words)
+      if (on) { me.walk(true); for (const code of held) dispatchEvent(new KeyboardEvent('keydown', { code })) }
+    }
     return performance.now() - began
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { recore })
