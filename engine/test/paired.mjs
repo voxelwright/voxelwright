@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, still, turn } from './kit.mjs'
+import { arg, CHROME, has, here, quiet, still } from './kit.mjs'
 import { from } from './rows.mjs'
 
 const PLACES = [['street', 0, 1.8, 0, 90, -2], ['fronts', 0, 1.8, 0, 60, 5], ['roofs', 0, 12, 0, 20, -8], ['high', 0, 130, 0, 30, -22], ['far', 0, 730, 0, 200, -30]]
@@ -29,8 +29,7 @@ const serveFrom = async (dir) => {
   })
   return { url: `http://127.0.0.1:${port}`, stop: () => server.kill() }
 }
-// The second turn is asked for first: once this process holds one of its own, asking again answers at once with none.
-const both = await turn({ mine: false }), done = await turn()
+const done = await quiet(), both = () => {}
 const mine = await serveFrom(here), other = arg('other', '') ? await serveFrom(arg('other', '')) : null
 const browser = await chromium.launch(CHROME)
 const ways = { A: { url: (other ?? mine).url, query: arg('a', '') }, B: { url: mine.url, query: arg('b', '') } }

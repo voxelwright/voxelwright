@@ -2,7 +2,7 @@
 // WebGPU. Run by itself a script starts its own; under `node test/all.mjs` they all share the
 // one server and the one browser that it started (ENGINE_KIT says where).
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -42,6 +42,27 @@ export async function turn({ mine = true } = {}) {
     }
     if (waited === 4) console.log('  waiting for a turn on the GPU: other checks are drawing')
     await new Promise((r) => setTimeout(r, 500))
+  }
+}
+/**
+ * Every turn on the GPU at once (#367), for a timing that no other thread's check may draw beside. One turn is never
+ * held while waiting for the rest: whoever holds the others may be at a long check, and everyone else would wait
+ * behind both. So it takes one, looks whether the rest are free, and if not gives it back and tries again in a while.
+ * Returns how to give them all back.
+ */
+export async function quiet() {
+  for (let tries = 0; ; tries++) {
+    const first = await turn({ mine: false })
+    const taken = () => { try { return readdirSync(PLACES).length } catch { return 0 } }
+    if (taken() <= 1) {
+      const rest = []
+      for (let n = 1; n < TURNS; n++) rest.push(await turn({ mine: false }))
+      process.env.ENGINE_TURN = '1'
+      return () => { first(); for (const back of rest) back(); delete process.env.ENGINE_TURN }
+    }
+    first()
+    if (tries === 0) console.log('  waiting for the GPU to be quiet: other checks are drawing')
+    await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000))
   }
 }
 /** A browser to draw with: the one a run of all the checks shares, or one of its own. Either way after a turn. */

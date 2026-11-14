@@ -225,7 +225,7 @@ async function main() {
     return { sun, day, low }
   }
   /** What the portal draws each frame, once there is one (#264, portal.ts). */
-  let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number, timing?: GPURenderPassTimestampWrites) => void) | null = null
+  let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number, timing?: GPURenderPassTimestampWrites) => boolean) | null = null
   /** The passes the engine's plugins add to a frame (plugins.ts). */
   const pluginDraws = pluginPasses()
   const setHour = (h: number | null) => {
@@ -309,6 +309,9 @@ async function main() {
     lap('spoil')
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
+    // Whether a window's world was marched this frame: a query nothing wrote keeps what it last read, so the window's
+    // time is counted only then (counted always, a window long closed went on costing the picture its size).
+    let windowed = false
     debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
     gathering.step(dt)
     smoke.step(dt * tempo.rate)
@@ -321,7 +324,7 @@ async function main() {
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
-      portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined)
+      windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
@@ -339,11 +342,10 @@ async function main() {
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
-        // A query nothing wrote this frame (no window drawn) reads as nothing.
         const [a, b, c, d] = new BigUint64Array(clock.read.getMappedRange().slice(0))
         clock.read.unmap()
         clock.busy = false
-        const through = d > c ? Number(d - c) / 1e6 : 0
+        const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
         if (b > a) gpuMs += (Number(b - a) / 1e6 + through - gpuMs) * 0.1
       })
@@ -998,7 +1000,7 @@ async function main() {
     buttons.append(button, realmsButton)
     Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring, enterRealm: (id: string) => enterRealm(id) })
   }
-  portalDraw = gate ? (encoder, to, v, time, timing) => { gate.walk(); gate.draw(encoder, to, v, flags, time, timing) } : null
+  portalDraw = gate ? (encoder, to, v, time, timing) => { gate.walk(); return gate.draw(encoder, to, v, flags, time, timing) } : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })
 
   if (flying) {

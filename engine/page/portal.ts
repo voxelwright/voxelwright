@@ -343,14 +343,14 @@ export async function portal(o: {
       const mine = asked
       setTimeout(() => { if (mine === asked && !gate) { o.far.release(); o.far.onheld = null; theirs.clear(); taken.clear(); stats.released = true } }, LET_GO)
     },
-    /** A frame: the other world is kept made round where this eye would be in it, and drawn into the window's pixels with whoever is there. Called after the page's own march into `to`. */
-    draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites) {
+    /** A frame: the other world is kept made round where this eye would be in it, and drawn into the window's pixels with whoever is there. Called after the page's own march into `to`. True if the other world was marched this frame (and so timed, if `timing` was given). */
+    draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites): boolean {
       const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000)
       lastFrame = now
-      if (!gate || !other || !march2) return
+      if (!gate || !other || !march2) return false
       // It grows as the place behind it arrives, and no faster than a third of a second for all of it; made, it clears.
       const arrived = made()
-      if (closing) { open -= dt / 0.25; if (open <= 0.02) { gate = null; closing = false; return } }
+      if (closing) { open -= dt / 0.25; if (open <= 0.02) { gate = null; closing = false; return false } }
       else open = Math.min(1, open + dt / 0.35, Math.max(open, 0.12 + 0.88 * arrived))
       veil = Math.max(0, Math.min(1, veil + (arrived >= 1 ? -dt / 0.3 : dt / 0.2)))
       const v2 = through(view)
@@ -358,14 +358,15 @@ export async function portal(o: {
       for (const level of other.moved) march2.sun.age(level)
       march2.tend(encoder, v2, other.nearlyWhole())
       const r = rect(gate, view, to.size, open)
-      if (!r) return
+      if (!r) return false
       stats.rect = r
       // The more of the picture the window covers, the fewer pixels of the other world are marched for each of its own
       // (measured: over half the picture at full size it costs 12.9 ms, at half size 5.1).
       const share = stats.share = (r[2] * r[3]) / (to.size[0] * to.size[1]), scale = stats.scale = fixed || (share <= 0.12 ? 1 : share <= 0.3 ? 0.75 : 0.5)
       const picture = fit(to.size, scale), target = picture.to
       // While it is all light there is nothing of the other world to draw.
-      if (veil < 1) {
+      const marched = veil < 1
+      if (marched) {
         const only: [number, number, number, number] = [Math.floor(r[0] * scale), Math.floor(r[1] * scale), Math.max(1, Math.min(target.size[0] - Math.floor(r[0] * scale), Math.ceil(r[2] * scale))), Math.max(1, Math.min(target.size[1] - Math.floor(r[1] * scale), Math.ceil(r[3] * scale)))]
         // The other world's looks begin at the window, where it stands there: its land may rise between that eye and the window.
         const a = across(gate), away = Math.sign((view.eye[0] - gate.at[0]) * -a[2] + (view.eye[2] - gate.at[2]) * a[0]) || 1, n: [number, number, number] = [a[2] * away, 0, -a[0] * away]
@@ -374,6 +375,7 @@ export async function portal(o: {
         folk2?.draw(encoder, target, v2, time)
       }
       pane(encoder, to, view, picture.bind, open, veil, time)
+      return marched
     },
     /** Each frame, before drawing: whether the person has gone through the window since the last. Through it, the page is in the other realm, the worlds having changed places, and the window leads back. */
     walk() {
