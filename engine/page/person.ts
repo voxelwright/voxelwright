@@ -158,15 +158,15 @@ export function person(o: {
         const rise = can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0
         if (view === 'head') { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise, jump } }
         else { if (long > 0.01) heading = looks + Math.atan2(side, go); ask = { id, heading, go: Math.min(1, long), side: 0, rise, jump } }
-        jump = false
       }
       since += dt
       const moving = long > 0.01 || (ask?.jump ?? false) || (ask?.rise ?? 0) !== 0
       if (ask && o.own) {
         // Its own core: asked for a step each frame while anything of it moves, and not again before it has answered.
-        if (!waiting && (moving || awake || since < 1)) { waiting = true; o.send({ walk: ask, tick: Math.min(dt, 0.05) * clock }) }
+        // A jump asked while the last step is still out waits for the next: taken as sent, it was lost.
+        if (!waiting && (moving || awake || since < 1)) { waiting = true; o.send({ walk: ask, tick: Math.min(dt, 0.05) * clock }); jump = false }
         if (moving) since = 0
-      } else if (ask && (moving || since > 0.25)) { o.send({ walk: ask }); if (moving) o.wake(); since = 0 }
+      } else if (ask && (moving || since > 0.25)) { o.send({ walk: ask }); if (moving) o.wake(); since = 0; jump = false }
       if (at) {
         const f = feet()!, was = shown.at
         const step = Math.hypot(f.at[0] - was[0], f.at[2] - was[2])
