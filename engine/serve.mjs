@@ -135,6 +135,8 @@ A thing someone asked a model of their own for is cells like any others, and the
 GET  /world/things        every record, without cells
 GET  /world/things?id=    one record with cells: rows of five whole numbers, x0, x1 (not filled), y, z, kind
 POST /world/ask           {"by": name, "edit": [1, rows, ...], "release": [x, y, z], "thing": {id, name, wish, at, size, facing}}   a thing and its cells, together (409 if the id is taken)
+                          {"by": name, "hold": id}   pick up a made thing: its cells leave the world and it is in your right hand (one thing at a time; not a thing that lives)
+                          {"by": name, "put": true, "at": [x, y, z]}   put down what you hold, there (or at your feet with no at): it stands on what is there, and nothing of the world is written over
                           {"by": name, "thing": {"id": id, "sounds": ...}}   sets parts, behaviour, controls, seats or sounds of a thing that is there (each at most ${16384} bytes of JSON), or at and facing when it has come to rest somewhere else. Every change is kept and told to every page that joins: it is not for where a moving thing is from moment to moment
                           {"by": name, "gone": id}   forgets a thing's record; its cells are left as they are (empty them with an edit)
 
@@ -164,7 +166,11 @@ world.push(id, {to, speed})   pushes someone along a way to: [dx, dy, dz] at up 
 world.down(id, {for})   puts someone on the ground for so many seconds (3; up to 60): they cannot walk meanwhile. 0 gets them up
 world.drive(id, {go, turn, rise, jump})   drives a living thing of world.things as a rider does: go -1 to 1 (forward, back), turn -1 to 1 (right is 1), rise -1 to 1 (what flies or hovers), jump: true once. Only the fields given change, and what is asked is held until the rule asks otherwise: world.drive(id, {go: 0, turn: 0}) stops it, world.drive(id, null) lets it go. Steer by its yaw and where it is to go, a little each tick. Someone riding it from a page has it while they ride. At most ${32} things a rule; let go when the rule is taken out
 world.clock({rate, spare})   how fast the world goes: 1 as it does, 0.05 to 4. Everything the world moves goes by it (what is loose and falls, living things, actors, seats, fire, water) and so does everyone at a page, but those in spare (ids of world.people), who move as they always did. A rule's tick still comes twice a real second. It goes back to 1 when the rule is taken out
-world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
+world.give(id, {thing})   puts a made thing (its id, as GET /world/things lists them) in someone's right hand: id is of world.people, someone at a page or in a seat. Its cells leave the world and their figure carries it. world.take(id) has them put it down at their feet. A person holds one thing; anyone may pick up a made thing near them and put it down where they look
+  on('held',  (world, e) => {})   someone picked a thing up, or was given it: e = {by, name, thing (its id), called (its name), at}
+  on('put',   (world, e) => {})   someone put a thing down: e = {by, name, thing, called, at (where it now stands)}
+  world.people entries have holds: {thing, name} while they hold something, and e.using on act is the same: what was in the hand when the thing was done
+world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C, or G, which picks up and puts down); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
   on('act',   (world, e) => {})   someone did something this rule offers: e = {by, name, action (the offer's id), phase: "tap" | "down" | "up", at (their feet), from (their eyes), to (the way they look), met}. met is what was straight ahead of them, aimed or not: null for the sky, {kind: "cells", at, far, material} or someone's body {kind: "page" | "seat" | "actor", id, name, mine, at, far, up (0 at the feet to 1 at the head)}. Only the rule that offered it hears it
 world.show(id, {line, meters, score, choice, to})   shows people something on their screen, or changes it: only the fields given change, a field given as null is taken away, and hide: true takes all of it away. line is a line of words (up to 80 characters). meters is up to 4 of {label, value, of, colour: "#rrggbb"}: how full each is, value out of of (1 unless said). score is a number, a few characters ("2:41", "3rd"), or {label, value}. choice is up to 6 picks, each a word or {id, word}. to is who sees it: an id of world.people, a list, or null for everyone. A rule shows at most 8 things. These are the rule's own words and numbers: the engine has no word for health, alarm, laps or rounds
   on('pick',  (world, e) => {})   someone picked from a choice this rule shows them: e = {by, name, show (its id), pick (the pick's id), at}. Only the rule that shows it hears it; the choice stays until the rule changes or hides it
@@ -366,6 +372,9 @@ function allowed(body) {
   if (!body || typeof body !== 'object') return 'an ask is an object'
   const by = typeof body.by === 'string' ? body.by.slice(0, 24) : ''
   if (body.blast) return place(body.blast) && whole(body.radius) && body.radius >= 1 && body.radius <= RADIUS_MOST ? { by, blast: body.blast, radius: body.radius, spark: !!body.spark } : `a blast is at a place and at most ${RADIUS_MOST} cells in radius`
+  // A thing picked up, or what is held put down (rules/holding.mjs): the world's process makes the ask whole.
+  if (body.hold !== undefined) return typeof body.hold === 'string' && body.hold.length <= 64 && by ? { by, hold: body.hold } : 'what is picked up is "hold": the id of a made thing, and "by" who'
+  if (body.put !== undefined) return by && (body.at === undefined || place(body.at)) ? { by, put: true, ...(body.at ? { at: body.at } : {}) } : 'what is held is put down with "put": true and, to say where, "at": [x, y, z]'
   if (body.ignite) return place(body.ignite) && whole(body.radius) && body.radius >= 1 && body.radius <= 8 ? { by, ignite: body.ignite, radius: body.radius } : 'a fire is lit at a place, within 8 cells'
   if (body.ball) {
     const b = body.ball, three = (a, most) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) <= most)
@@ -437,6 +446,9 @@ function open(of) {
     if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id); if (ask.rule.id === TALK.id) talks = true }
     else if (ask.unrule) { rules.delete(ask.unrule); if (ask.unrule === TALK.id) { talks = false; given = false } }
     else if (ask.realm) { realm = of.record = changed(realm, ask.realm); called() }
+    // Picked up, a thing's record says who holds it; put down, where it now stands, and its cells are the rows of that ask.
+    else if (ask.hold !== undefined) { const t = things.get(ask.hold); if (t) t.record.held = ask.by }
+    else if (ask.put !== undefined) { const t = things.get(ask.put); if (t) { delete t.record.held; if (ask.thing?.at) t.record.at = ask.thing.at; t.at = at } }
     else if (ask.gone) things.delete(ask.gone)
     else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
     else if (ask.thing && things.has(ask.thing.id)) Object.assign(things.get(ask.thing.id).record, ask.thing)
@@ -456,6 +468,8 @@ function open(of) {
   const rowsOf = (t) => JSON.parse(log[t.at].subarray(12).toString('utf8')).edit.slice(2)
   // Things that lived (#245: a record whose controls have a motor) get up again where they last slept: bodies are
   // not kept, and the edit that took their cells out is.
+  // A thing that was in someone's hand when the world stopped is in nobody's now: it is put down where it was taken from.
+  for (const t of things.values()) if (t.record.held) thread.postMessage({ settle: { id: t.record.id, rows: rowsOf(t), at: t.record.at } })
   for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, name: t.record.name, controls: t.record.controls, rows: rowsOf(t) } })
   // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
   let peopleKept = {}
@@ -499,6 +513,9 @@ function open(of) {
     // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
     if (m.think) return minds.think(m.think)
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
+    // A rule gives someone a thing or takes it from them: the cells are here, so the ask starts here.
+    if (m.want) { const t = m.want.hold && things.get(m.want.hold.id); if (t && !t.record.held && !t.record.controls?.motor) thread.postMessage({ ask: { by: m.want.hold.by, hold: m.want.hold.id, name: t.record.name }, rows: rowsOf(t) }); else if (m.want.put) thread.postMessage({ ask: { by: m.want.put.by, put: true } }); return }
+    if (m.refused) return
     // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
     // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
     if (m.kept !== undefined) { try { writeFileSync(`${peopleFile}.part`, m.kept); renameSync(`${peopleFile}.part`, peopleFile) } catch (e) { console.error(`the rules' people were not kept: ${e}`) } return }
@@ -694,6 +711,15 @@ function open(of) {
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
       if (ask.unrule && !rules.has(ask.unrule) && !(ask.unrule === TALK.id && talks)) return send(res, 409, 'no rule of that id is in the world')
       if (ask.rule && !rules.has(ask.rule.id) && !awaited.has(ask.rule.id)) { if (rules.size + awaited.size >= RULES_MOST) return send(res, 409, `a world has at most ${RULES_MOST} rules: take one out first`); awaited.add(ask.rule.id) }
+      // A thing picked up: it must be there, in nobody's hand and not alive; the world's process is sent its cells.
+      if (ask.hold !== undefined) {
+        const t = things.get(ask.hold)
+        if (!t) return send(res, 409, 'no thing of that id is in the world')
+        if (t.record.held) return send(res, 409, 'someone holds that already')
+        if (t.record.controls?.motor) return send(res, 409, 'that thing is alive: it is not picked up')
+        thread.postMessage({ ask: { ...ask, name: t.record.name }, rows: rowsOf(t) })
+        return send(res, 202, '{"asked":true}', TYPES['.json'])
+      }
       // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
       thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
       send(res, 202, '{"asked":true}', TYPES['.json'])

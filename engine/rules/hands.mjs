@@ -12,7 +12,7 @@
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/, KEY = /^Key[A-Z]$/
 /** Keys that move the body or belong to the page whatever a realm offers. */
-const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC'])
+const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG'])
 /** The most a rule may offer, the most people one offer may be for, and the most a person may do a second. */
 const OFFERS_MOST = 16, FOR_MOST = 64, ACTS_A_SECOND = 30
 /** How far round its middle a body is met by an aim, cells. */
@@ -28,8 +28,9 @@ const COLOUR = /^#[0-9a-f]{6}$/
  * @param text    what cleans text someone wrote, to a length
  * @param tell    says something to the server (the offers as they stand, for pages)
  * @param hear    tells one rule something happened: (rule id, event, e)
+ * @param using   what someone holds (rules/holding.mjs): {thing, name}, or nothing
  */
-export function hands({ folk, tall, look, text, tell, hear }) {
+export function hands({ folk, tall, look, text, tell, hear, using = () => undefined }) {
   /** By rule and id: what is offered. */
   const offers = new Map()
   const acted = new Map()
@@ -163,6 +164,9 @@ export function hands({ folk, tall, look, text, tell, hear }) {
       const e = { by: m.by, name: p.name, action: o.id, phase, at: p.at.map(Math.round), from: m.from.map((v) => Number(v.toFixed(1))), to: m.to.map((v) => Number(v.toFixed(3))) }
       // Aimed or not, the rule is told what was ahead: a wave has someone it was at.
       e.met = meets(m.from, m.to, p, o.rule)
+      // What was in the hand when it was done: the thing used.
+      const inHand = using(m.by)
+      if (inHand) e.using = inHand
       hear(o.rule, 'act', e)
       return ''
     },

@@ -30,6 +30,8 @@ export interface Thing {
   cells: Int32Array
   /** The box that holds its cells: [x0, y0, z0, x1, y1, z1], the high corner not filled. */
   box: [number, number, number, number, number, number]
+  /** Who holds it, while someone does (rules/holding.mjs): its cells are then in nobody's world, and it is not found by a place. */
+  held?: string | null
   parts?: unknown
   behaviour?: unknown
   controls?: unknown
@@ -56,6 +58,7 @@ export function things(): Things {
     all,
     at([x, y, z]) {
       for (const t of all.values()) {
+        if (t.held) continue
         const b = t.box
         if (x < b[0] || y < b[1] || z < b[2] || x >= b[3] || y >= b[4] || z >= b[5]) continue
         for (let i = 0; i < t.cells.length; i += 5) if (t.cells[i + 2] === y && t.cells[i + 3] === z && x >= t.cells[i] && x < t.cells[i + 1]) return t
@@ -66,7 +69,13 @@ export function things(): Things {
       if (echo.gone) { const t = all.get(echo.gone); if (t) { all.delete(t.id); tell('gone', t, live) } return }
       if (!echo.thing) return
       const known = all.get(echo.thing.id)
-      if (known) { Object.assign(known, echo.thing); tell('changed', known, live); return }
+      if (known) {
+        Object.assign(known, echo.thing)
+        // Put down, its cells are the rows it was put down as (rules/holding.mjs).
+        if ((echo as { put?: unknown }).put !== undefined && echo.edit && echo.box && echo.edit[0] === 1) { known.cells = Int32Array.from(echo.edit.slice(2)); known.box = echo.box }
+        tell('changed', known, live)
+        return
+      }
       // A new thing comes with the edit that is its cells: rows, after the two numbers that say so.
       if (!echo.edit || !echo.box || echo.edit[0] !== 1) return
       const thing = { ...echo.thing, cells: Int32Array.from(echo.edit.slice(2)), box: echo.box } as Thing

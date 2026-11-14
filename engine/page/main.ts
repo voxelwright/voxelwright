@@ -789,7 +789,11 @@ async function main() {
   let inHand: Spell = LIBRARY[0]
   // What a realm's rules offer to do (hands.ts): keys and buttons, and the aimed ones entries of the wand's wheel
   // beside the spell in hand.
-  const grip = hands(far, controls, over, () => { const v = view(); return { from: v.eye, to: v.forward } })
+  const grip = hands(far, controls, over, () => { const v = view(); return { from: v.eye, to: v.forward } }, made, async () => {
+    // The first cell the eye meets: the marcher says how far, and the cell is a little past that along the look.
+    const v = view(), hit = await march.pick(v)
+    return hit ? { cell: v.eye.map((e, a) => Math.floor(e + v.forward[a] * (hit.t + 0.3))) as [number, number, number], far: hit.t } : null
+  })
   const casts = () => { staff.powers = [{ name: inHand.name }, ...grip.offered.filter((o) => o.aim).map((o) => ({ name: o.word, offer: o }))] }
   grip.onchange = casts
   casts()

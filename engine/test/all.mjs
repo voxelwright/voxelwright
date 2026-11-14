@@ -32,6 +32,7 @@ const checks = [
   ['wand', 'node', ['test/wand.mjs'], true],
   ['spells', 'node', ['test/spells.mjs'], true],
   ['hands', 'node', ['test/hands.mjs'], true],
+  ['hold', 'node', ['test/hold.mjs'], true],
   ['sounded', 'node', ['test/sounded.mjs'], true],
   ['tuned', 'node', ['test/tuned.mjs'], true],
   ['inrealm', 'node', ['test/inrealm.mjs'], true],

@@ -7,11 +7,15 @@
 // What a realm shows (a line, meters, a score, a choice) is drawn here too, in a panel of the page's one layer:
 // a rule's own words and numbers, with nothing here that knows a health bar from a lap count.
 //
+// And holding a thing: a made thing looked at from near enough can be picked up, and what is held put down where
+// the eye looks, on a key and a button of the page's own beside the realm's.
+//
 // The word of an offer, and every word shown, is text a rule wrote (and a rule is text someone or their model wrote): it is shown as
 // text, never as markup.
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Link, Offer, Shown } from './link.ts'
+import type { Thing, Things } from './things.ts'
 
 /** An offer as this page has it: with the key it is on. */
 export interface Offered extends Offer { code: string }
@@ -24,14 +28,29 @@ export interface Hands {
   frame(): void
   /** What is shown to this page. */
   readonly shown: readonly Shown[]
+  /** What this page's person holds, or null. */
+  readonly holding: Thing | null
+  /** The made thing the eye is on, near enough to pick up, or null. */
+  readonly reach: Thing | null
+  /** Picks a made thing up (by its id), wherever it is. */
+  take(id: string): void
+  /** Puts down what is held: where the eye looks, or at a place. */
+  put(at?: readonly [number, number, number]): void
   /** Told whenever what is offered changes. */
   onchange: (() => void) | null
 }
 
 /** Keys the page gives to offers that asked for none, in order. */
-const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyG', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
+const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
 
-export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { from: readonly [number, number, number]; to: readonly [number, number, number] }): Hands {
+/** How near (cells) a thing must be to be picked up, and to put one down. */
+const REACH = 60
+
+/**
+ * @param made   the made things of this world
+ * @param ahead  the first cell the eye meets, and how far off; null for the sky
+ */
+export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { from: readonly [number, number, number]; to: readonly [number, number, number] }, made: Things | null = null, ahead: () => Promise<{ cell: [number, number, number]; far: number } | null> = async () => null): Hands {
   let offered: Offered[] = []
   /** Holds that are down, by rule and id: a key's, or a finger's. */
   const down = new Map<string, { offer: Offered; key: boolean }>()
@@ -40,8 +59,22 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
   const send = (o: Offer, phase: 'down' | 'up') => { const a = aim(); far?.act(o.rule, o.id, phase, a.from, a.to) }
   const press = (o: Offered, key: boolean) => { if (down.has(name(o))) return; down.set(name(o), { offer: o, key }); send(o, 'down'); draw() }
   const lift = (o: Offer) => { if (!down.delete(name(o))) return; send(o, 'up'); draw() }
+  // Holding: what this page's person holds, and the thing in reach of the eye.
+  let reach: Thing | null = null, looking = false, since = 0
+  const holding = () => { if (far && made) for (const t of made.all.values()) if (t.held === far.me) return t; return null }
+  const HOLD = 'KeyG'
+  const grasp = () => { const h = holding(); if (h) self.put(); else if (reach) self.take(reach.id) }
   const draw = () => {
-    panel.replaceChildren(...offered.map((o) => {
+    const h = holding(), own: HTMLElement[] = []
+    if (h || reach) {
+      const b = document.createElement('button'), k = document.createElement('kbd')
+      k.textContent = HOLD.slice(3)
+      b.append(k, h ? `Put down ${h.name}` : `Pick up ${reach!.name}`)
+      b.dataset.own = h ? 'put' : 'hold'
+      b.addEventListener('click', () => { grasp(); b.blur() })
+      own.push(b)
+    }
+    panel.replaceChildren(...own, ...offered.map((o) => {
       const b = document.createElement('button'), k = document.createElement('kbd')
       k.textContent = o.code.slice(3)
       b.append(k, o.word)
@@ -54,14 +87,31 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
       } else b.addEventListener('click', () => { send(o, 'down'); b.blur() })
       return b
     }))
-    panel.hidden = offered.length === 0
+    panel.hidden = offered.length === 0 && own.length === 0
   }
   const self: Hands = {
     get offered() { return offered },
+    get holding() { return holding() },
+    get reach() { return reach },
+    take(id) { void far?.ask({ hold: id }) },
+    put(at) {
+      if (at) { void far?.ask({ put: true, at: at.map(Math.round) }); return }
+      // Where the eye looks, if that is near; else at the feet.
+      void ahead().then((met) => far?.ask(met && met.far <= REACH ? { put: true, at: [met.cell[0], met.cell[1] + 1, met.cell[2]] } : { put: true }))
+    },
     get shown() { return shown },
     onchange: null,
     do(o, phase) { if (phase === 'up') lift(o); else if (o.hold) { const mine = offered.find((x) => name(x) === name(o)); if (mine) press(mine, false) } else send(o, 'down') },
-    frame() { for (const { offer, key } of [...down.values()]) if (key && !keys.held(offer.code)) lift(offer) },
+    frame() {
+      for (const { offer, key } of [...down.values()]) if (key && !keys.held(offer.code)) lift(offer)
+      // A few times a second, with things in the world and an empty hand: what made thing the eye is on.
+      const now = performance.now()
+      if (!made || !far || looking || now - since < 250 || !made.all.size) return
+      since = now
+      if (holding()) { if (reach) { reach = null; draw() } return }
+      looking = true
+      void ahead().then((met) => { const t = met && met.far <= REACH ? made.at(met.cell) : null; if (t !== reach) { reach = t; draw() } }).finally(() => { looking = false })
+    },
   }
   if (far) far.onoffers = (all) => {
     // Those for everyone or for this page; each on the key it asked for if that is free, or the next of the page's own.
@@ -112,6 +162,7 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
   keys.push({
     name: 'offered',
     key(code, e) {
+      if (code === HOLD && !e.repeat && (holding() || reach)) { grasp(); return true }
       const o = offered.find((x) => x.code === code)
       if (!o) return false
       if (e.repeat) return true
@@ -119,6 +170,8 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
       return true
     },
   })
+  // A thing picked up or put down by anyone changes what the key says.
+  made?.on(() => draw())
   draw()
   return self
 }

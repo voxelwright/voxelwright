@@ -25,6 +25,7 @@ import { plugger } from './plugins.mjs'
 import { blows } from './rules/blows.mjs'
 import { bodies } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
+import { holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -206,7 +207,9 @@ const doing = (p, now) => {
   if (whole) { p.move.told = p.move.n; p.move.toldAt = now }
   return { move: { n: p.move.n, since: p.move.since, ...(p.move.name ? { name: p.move.name } : whole ? { keys: p.move.data } : {}), ...(p.move.aim ? { aim: p.move.aim } : {}) } }
 }
-const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
+/** Who holds what (rules/holding.mjs): set where the rules are, below. What a hand carries is part of how its figure looks. */
+let grasp = null
+const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(grasp?.carried(p.by) ? { look: { ...(p.look ?? {}), carry: grasp.carried(p.by) } } : p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -245,7 +248,7 @@ function seat(m) {
   // A page's body may speak; everything else a body does here is a seat's.
   if (!p || (!p.seat && m.op !== 'say')) return { error: 'nobody of that name has a body here: POST /world/join first' }
   p.last = now
-  if (m.op === 'leave') { folk.delete(m.by); p.gone = true; tell(p); return { left: true } }
+  if (m.op === 'leave') { folk.delete(m.by); p.gone = true; tell(p); lay(grasp.left(p)); return { left: true } }
   if (m.op === 'walk') {
     if (p.down > now) return { error: 'you are on the ground: wait a few seconds' }
     p.goal = [m.to[0], m.to[1]]; p.stopped = ''; p.path = undefined
@@ -395,7 +398,7 @@ setInterval(() => {
   if (ticks % 10 === 0) blow.sweep(now)
   if (driven.step(now)) nudged = true
   for (const p of folk.values()) {
-    if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
+    if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); lay(grasp.left(p)); continue }
     if (!p.seat) continue
     if (p.back && goingBack(p, now)) continue
     // A tenth of a second of its going: straight, or round what is in its way, or after whoever it follows (about.mjs).
@@ -445,7 +448,7 @@ function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(grasp?.of(p.by) ? { holds: grasp.of(p.by) } : {}), ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
@@ -546,7 +549,13 @@ does.set('think', (rule, w, now, wrong) => minds.ask(rule, w, now, wrong))
 /** A model reads what someone said for the notes a rule wants (mind/think.mjs): nobody answers; the rule hears `read`. */
 does.set('read', (rule, w, now, wrong) => minds.read(rule, w, now, wrong))
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
-const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
+const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule), using: (by) => grasp.of(by) })
+// Holding a thing (rules/holding.mjs): picked up its cells leave the world, put down they go back where it is said.
+grasp = holding({ folk, kind: (x, y, z) => core.world_kind(x, y, z), hear: (event, e) => happen(event, e), seen: (p) => tell(p), want: (m) => parentPort.postMessage({ want: m }) })
+does.set('give', grasp.give)
+does.set('take', grasp.take)
+/** An ask the world's process made itself (what someone who left held is put down): done as any ask is, and told. */
+const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessage({ echo: ask }); edit(ask.edit); told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true); nudged = true }
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
 const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell })
 does.set('person', body.person)
@@ -601,7 +610,9 @@ function tops([x0, z0, x1, z1], from) {
   return { high, kinds }
 }
 parentPort.on('message', (said) => {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle } = said
+  // A thing a world started again finds still held by nobody: put down where it was taken from.
+  if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
   // What the world's people remembered of talk when it last stopped.
   if (talked !== undefined) return minds.back(talked)
   if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; return }
@@ -669,6 +680,8 @@ parentPort.on('message', (said) => {
   if (at) return parentPort.postMessage({ id, kind: core.world_kind(at[0], at[1], at[2]), ground: core.ground_at(at[0], at[2]) })
   // What was done before this process began: the edits only, with nothing thrown and nothing let fall.
   if (replay) return edit(replay)
+  // A thing picked up or put down: the ask is made whole here (its edit, what the hand carries), or said why not.
+  if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why } }) }
   parentPort.postMessage({ echo: ask })
   // A rule put in or taken out, or what the realm is called: kept as every ask is, and nothing of the cells' to do.
   if (ask.rule) return void plugging.then(() => ruled.put(ask.rule, ruled.has(ask.rule.id) ? 'changed' : 'put'))
