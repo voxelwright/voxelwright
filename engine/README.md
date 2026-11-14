@@ -469,6 +469,10 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
   sectors that either world's edits reach are made again and no others (`world.ts` `swap`: both are one planet),
   one arrives where the realm says, and the address then says `?realm=`. `/city?realm=id` loaded straight
   arrives there too.
+- **A realm has one hour.** Its `look.hour` is the hour of the day there for the world's process and for every
+  page: the town's residents are out by it in both (few at three in the morning, many at noon), whatever hour a
+  page shows with its own keys. A realm that says none has them out as at eleven. So a rule takes only residents
+  that every page there draws.
 - **A realm's look is shown on arrival and whenever it is changed**: its hour and rain as the keys would set them,
   its `grade` in place of the hour's own, its `tint` multiplying the finished picture (`page/glow.ts`). A realm
   that says nothing of its look is shown as the page was opened.

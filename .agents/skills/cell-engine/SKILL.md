@@ -2465,3 +2465,14 @@ shared with other lanes' checks).
 - **Not built**: more than nine realms round the ring (the first nine are shown); a wheel held and let go to pick;
   a live picture for the realm behind an open window.
 
+## One hour for a realm (#264, `world.mjs` `hourNow`; November 13)
+
+The world's process had no hour ("it is noon to it") while pages had the town's residents out by whatever hour
+each showed, so a rule could take a resident that a page at another hour was not drawing (the people lane found
+it). Now the realm's `look.hour` is the hour for both: the server tells the world's process with the realm's name
+(`called`), and a page in a shared world counts residents by `far.realm.look.hour`, not by the hour its own keys
+set. With no hour said, both use eleven (the page's old default; the world's was twelve, so even the defaults
+disagreed). Checked with plain requests (`test/realms.mjs`): a seat at the same spot is told of few residents at
+three in the morning and many at noon, and of noon's once an ask sets the hour. Not done: rain, which a page also
+gives the residents' rule and the world's process does not have.
+

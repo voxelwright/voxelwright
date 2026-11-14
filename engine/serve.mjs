@@ -187,6 +187,7 @@ POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source"
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error} (the world's own; ?given=1 lists the engine's rule for talk too)
 GET  /world/rules?id=     one rule, with its source
 GET  /world/realm         {name, about, arrive, look, rules: [ids]}
+A realm's hour (look.hour) is the hour of the day in it for everyone: the town's residents are out by it in the world's own process and on every page there, whatever hour a page shows. A realm that says none has them out as at eleven.
 
 REALMS
 This server keeps more than one world. Each is a realm: the same planet, with its own file of what was done there, its own rules and people, a place where one arrives and a look of its own. Everything above is of home. The same is asked of any other realm under its own address: /realm/<id>/world/at, /realm/<id>/world/ask and so on. A realm's process starts when someone asks it something and stops when nobody has for a while: nothing done to it is lost by that, but bodies in seats, actors and what rules kept are.
@@ -421,7 +422,8 @@ function open(of) {
   /** Whether the world has a rule under the id for talk: the engine's own until the world's file says otherwise (its own rule put there, or the rule taken out). */
   let talks = true, given = false
   /** The world's process is told what the realm is called and is about (#264): its people, asked to think, are told where they live. Said when the world starts and when it changes. */
-  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '' } })
+  // And its hour, if it says one: the world's process has the town's residents out by it, as every page there does.
+  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '', hour: typeof realm.look?.hour === 'number' ? realm.look.hour : null } })
   const note = (ask, at) => {
     if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id); if (ask.rule.id === TALK.id) talks = true }
     else if (ask.unrule) { rules.delete(ask.unrule); if (ask.unrule === TALK.id) { talks = false; given = false } }

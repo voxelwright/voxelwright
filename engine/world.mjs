@@ -263,8 +263,8 @@ function seat(m) {
       const dx = o.at[0] - p.at[0], dz = o.at[2] - p.at[2], far = Math.hypot(dx, dz, o.at[1] - p.at[1])
       if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.thinking ? 'thinking' : o.goal ? 'walking' : 'standing' })
     }
-    // The town's residents, by the same rule the pages draw them from. This process has no hour: it is noon to it.
-    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, 12, found, shocks, taken)
+    // The town's residents, by the same rule the pages draw them from, at the realm's own hour (`hourNow`).
+    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken)
     const town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
     const heard = voices.filter((v) => v.n > (m.since || 0) && v.by !== p.by && Math.hypot(v.at[0] - p.at[0], v.at[1] - p.at[1], v.at[2] - p.at[2]) <= EARSHOT).map((v) => ({ n: v.n, name: v.name, text: v.text, far: Math.round(Math.hypot(v.at[0] - p.at[0], v.at[2] - p.at[2])), seconds_ago: Math.round((now - v.t) / 1000) }))
     // What the eyes meet, level, the eight ways round.
@@ -297,7 +297,7 @@ function townNear(now) {
   let persons = 0
   for (const p of folk.values()) {
     if (p.rule || persons++ >= 8) continue
-    const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, 12, found, shocks, taken)
+    const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, hourNow(), found, shocks, taken)
     for (let i = 0; i < n; i++) {
       const r = found[i], far = Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2]), id = residentId(r.seed), old = by.get(id)
       if (far <= TOLD_WITHIN && (!old || far < old.far)) by.set(id, { id, seed: r.seed, home: [...r.home], at: [...r.at], yaw: r.yaw, stride: r.stride, walking: r.walking > 0.5, far })
@@ -318,7 +318,7 @@ function take(rule, short, id, now, wrong) {
   if (taken.has(r.seed)) { wrong(`resident "${r.id}" is somebody's actor already`); return null }
   if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
   // Where they are now, not a quarter of a second ago: nobody should see them jump.
-  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, 12, fresh, shocks, taken), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
+  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, hourNow(), fresh, shocks, taken), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
   const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: '', seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
   folk.set(p.by, p); taken.set(r.seed, p); town.at = 0
   return p
@@ -448,6 +448,8 @@ const does = new Map()
 const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name || 'Someone', text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
 /** What this world is called and is about, as the server last said (it keeps the realm's record): for the people of it who are asked to think. */
 let realmIs = null
+/** The hour of the day here (#264): the realm's own, if it says one; else eleven, which is what a page has the town's residents out by when nothing says. A page in this world goes by the same, so a rule takes only residents that every page draws. */
+const HOUR = 11, hourNow = () => (typeof realmIs?.hour === 'number' ? realmIs.hour : HOUR)
 const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen, realm: () => realmIs })
 setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */

@@ -202,7 +202,7 @@ async function main() {
   const shocks: Shock[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
-  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => hour ?? 11, () => march.rain, () => folkClock.now(), shocks, takenOff))
+  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
@@ -240,6 +240,8 @@ async function main() {
   // place of the hour's and its tint multiplies the finished picture (glow.ts), until the page is in another realm.
   const ownLook = { hour, rain: march.rain }
   const realmLook: { grade: [number, number] | null; tint: [number, number, number] } = { grade: null, tint: [1, 1, 1] }
+  /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
+  let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
   own.keys.set('KeyH', () => { flags ^= HEAT })
   own.keys.set('KeyR', () => { march.rain = march.rain > 0 ? 0 : 1 })
@@ -517,6 +519,7 @@ async function main() {
   if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {} }
   if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
+  if (far) worldHour = () => far.realm.look?.hour ?? 11
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
   /** Where this page's eye is and looks, in whole cells: what an ask is asked from. */
   const gaze = (): { eye: [number, number, number]; toward: [number, number, number] } => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }
@@ -889,7 +892,7 @@ async function main() {
     make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
     marcher: (w) => marcher(device, gpu.format, w),
     people: (m) => people(device, gpu.format, m),
-    residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? ownLook.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
+    residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
     light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) },
     pause: (on) => { paused = on },
     feet: () => me.feet,
