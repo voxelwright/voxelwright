@@ -20,6 +20,7 @@ import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
 import { lookOf } from './page/wear.ts'
 import { hands } from './rules/hands.mjs'
+import { sounding } from './rules/sound.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
 
@@ -399,6 +400,7 @@ const happen = (event, e) => ruled.happen(event, e)
 function drop(id) {
   ruled.drop(id)
   hand.dropped(id)
+  noise.dropped(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
@@ -459,6 +461,9 @@ does.set('gone', (rule, w) => { const p = folk.get(`${rule.id}/${w.id}`); if (p?
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 does.set('offer', hand.offer)
 does.set('show', hand.show)
+// What a realm sounds like (rules/sound.mjs): a sound at a place or on someone, for everyone near.
+const noise = sounding({ folk, tall: TALL, stand, tell: (m) => parentPort.postMessage(m) })
+does.set('sound', noise.sound)
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
   const wrong = (what) => { rule.error = what }

@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 4, November 13, 2026 (music, instruments, model-written sounds). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
+Version 5, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -156,6 +156,28 @@ yes in the thread that asks), so this is built from the post's description and f
   plucked `string` as strung; anything else plucked is modes set going by a touch.
 - The checks read the kept replies as data and measure them (the bell rings 6 s from 185 Hz, the duck 0.06 s).
   No check runs a model, and none proves a model integration beyond these seven runs.
+
+## A realm's rule makes a sound (`engine/rules/sound.mjs`, `page/sound/likes.ts`; #264)
+
+- `world.sound({like | patch, at | on, force, size, note | notes | pitch, gap, for, reach})` is an entry in the
+  world process's `does`. It checks every field as a stranger's (a stray field, a like that is not kept, a patch
+  that `patch()` refuses or that is over 1,200 characters, nobody to sound on: each is left and said to the rule),
+  caps a rule at twelve sounds a second, and tells pages in a frame of its own (kind 10, not kept, only to readers
+  who are live). The page reads it again as a stranger's (`world.ts` `sounded`) and plays it through `voice.play`
+  like anything else: distance, delay, side.
+- A patch a rule wrote is kept by its JSON, the last 96; an older one gives its place in the synthesiser back
+  (`voice.forget`). Before this a stranger could have used up the worklet's 4,096 patch places and silenced the
+  page for good.
+- **The guide is the interface.** `serve.mjs` `GUIDE` lists every kept sound with what it is like (made from
+  `LIKES`, so the two cannot drift) and the patch form in six lines. Asked for a busker and a night watchman
+  (`make/rules.mjs`, Opus 5.5, November 14), a model used it at once: chords as `notes` with `gap: 25`, a melody
+  with `gap: 250`, a hand bell as `bell` at `size: 0.6` struck n times, a `whistle` held 0.8 s. Neither used
+  `patch`: with a word that fits, a model takes the word. Two runs; no model has yet written a patch in a rule.
+- Measured (`test/sounded.mjs`): an anvil of the rule's own at 940 Hz is heard at 941 Hz and 9 dB louder on the
+  side the smith stands; a bell 84 m off arrives 0.25 s after the rule strikes it (0.24 by distance); a bell of
+  size 2 sounds at 260 Hz.
+- Not built: a sound that follows a moving actor after it starts (it is placed once); a held sound a rule can stop
+  early or bend; anything heard by rules.
 
 ## Rules that hold
 

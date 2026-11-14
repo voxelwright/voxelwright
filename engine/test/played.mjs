@@ -125,6 +125,35 @@ try {
     await p.keyboard.press('Escape'); await p.waitForTimeout(200)
     const put = await p.evaluate(() => ({ playing: globalThis.engine.ears.things.playing, top: globalThis.engine.input.top }))
     check(put.playing === null && put.top !== 'playing', `Escape puts it away and the keys are the world's again (${put.top})`)
+    await p.close()
+
+    // As a phone, by touch alone: a tap starts sound, a tap takes the piano up, two fingers sound two notes, a tap
+    // puts it away. This is Chrome's touch path. Safari's on an iPhone is not proved by it.
+    const phone = await page({ size: [844, 390], dpr: 2, phone: true })
+    await phone.goto(`${own.url}/city?fly=0&shared=1&scale=0.5&people=0&music=0&at=70.6,17.7,404.2&look=0,-10`)
+    await phone.waitForFunction(() => globalThis.engine?.ears?.things, null, { timeout: 90_000 })
+    // This browser has already let the address play, so the context is stopped by hand to stand for one that waits.
+    const before = await phone.evaluate(async () => { const c = globalThis.engine.ears.voice.context; await c.suspend(); return c.state })
+    await phone.touchscreen.tap(600, 120)
+    await phone.waitForFunction(() => globalThis.engine.ears.voice.running, null, { timeout: 5000 }).catch(() => {})
+    check(before === 'suspended' && await phone.evaluate(() => globalThis.engine.ears.voice.running), `on a phone a stopped context (${before}) is started by one tap on the picture: the finger lifting is what does it`)
+    await phone.waitForFunction(() => globalThis.engine.ears.things.near, null, { timeout: 30_000 }).catch(() => {})
+    const offer = await phone.evaluate(() => document.querySelector('[data-panel="play-take"] button')?.textContent)
+    await phone.tap('[data-panel="play-take"] button')
+    await phone.waitForTimeout(300)
+    const keys = await phone.evaluate(() => [...document.querySelectorAll('[data-panel="play"] rect')].slice(1, 15).filter((_, i) => i === 0 || i === 4).map((r) => { const b = r.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height * 0.85 } }))
+    const cdp = await phone.context().newCDPSession(phone)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: keys.map((k, id) => ({ x: k.x, y: k.y, id })) })
+    await phone.waitForTimeout(250)
+    const two = await phone.evaluate(() => ({ sounding: globalThis.engine.ears.things.instrument?.sounding, voices: globalThis.engine.ears.voice.told?.voices, playing: globalThis.engine.ears.things.playing }))
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await phone.waitForTimeout(200)
+    const none = await phone.evaluate(() => globalThis.engine.ears.things.instrument?.sounding)
+    check(two.playing === id && two.sounding === 2 && none === 0 && !/\(E\)/.test(offer ?? ''), `a tap on "${offer}" takes it up; two fingers on two keys sound two notes, and none when they lift`)
+    await phone.tap('[data-panel="play"] [data-away]')
+    await phone.waitForTimeout(200)
+    const gone = await phone.evaluate(() => ({ playing: globalThis.engine.ears.things.playing, top: globalThis.engine.input.top }))
+    check(gone.playing === null && gone.top !== 'playing', 'a tap on its round button puts it away: no key is needed')
   } finally { own.stop() }
 } catch (e) { check(false, `the check itself failed: ${e.stack ?? e}`) }
 await finish('played')

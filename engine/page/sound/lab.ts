@@ -2,6 +2,7 @@
 // sounding. It is for ears: the checks (test/sound.mjs) measure, and cannot say whether a hammer on brick is one.
 import { sound, SET } from './sound.ts'
 import { BREAK, HIT, WORLD } from './kinds.ts'
+import { LIKES } from './likes.ts'
 import { patch, sounds, type Patch } from './patch.ts'
 import { conductor } from './music/conductor.ts'
 import { playable, surface } from './instrument.ts'
@@ -62,6 +63,8 @@ button(blasts, 'house coming down', () => {
 const rumble = (level: number, seconds: number) => { voice.set(SET.rumble, level); voice.flush(); setTimeout(() => { voice.set(SET.rumble, 0); voice.flush() }, seconds * 1000) }
 const flash = () => { document.body.style.background = '#fff3d0'; setTimeout(() => { document.body.style.background = '' }, 60) }
 
+const kept = section('What a rule can ask for by a word', 'The kept sounds a realm\u2019s rule may make by saying what it is like (world.sound). Held ones last a second here.')
+for (const [name, like] of Object.entries(LIKES)) button(kept, name, () => { for (const p of like.patches) hit(p, { reach: like.reach, dur: like.held ? 1 : 0 }) })
 const tools = section('Tools and steps')
 button(tools, 'torch catches', () => hit(WORLD.catch))
 button(tools, 'cutter', () => hit(WORLD.cut, { dur: 0.7 }))

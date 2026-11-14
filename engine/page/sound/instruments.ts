@@ -1,8 +1,9 @@
 // Three instruments kept with the engine (#247): each a voice (a patch) and a surface to play it by, in the same
 // form a model writes one in. They are data: the checks read them back from JSON.
 //
-// The guitar is after The Last of Us Part II's (which the owner remembered as Spider-Man's: no Spider-Man game was
-// found to have one): a chord is picked, and the strings are strummed or plucked one at a time. The ocarina is after
+// The guitar is after The Last of Us Part II's: a chord is picked, and the strings are strummed or plucked one at a
+// time. (The owner named Spider-Man's guitar. One lookup of Spider-Man 2's control guides found none, and Miles
+// Morales was not looked at: which game he meant is still to be asked.) The ocarina is after
 // Ocarina of Time's: five notes, low to high, on five holes; here a finger drawn up or down a hole bends its note.
 // The piano's two octaves lie on two rows of keys, as the lyre of Genshin Impact lays its notes.
 import type { Patch } from './patch.ts'

@@ -7,6 +7,8 @@
 // not that way, has hit. It is late by one telling and misses a glancing blow.
 import { SET, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
+import { LIKES } from './likes.ts'
+import { patch as readPatch, type Patch } from './patch.ts'
 import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
 import { played } from './things.ts'
@@ -54,7 +56,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
   /** What it has played: blows heard as themselves, blows folded into the heap's grinding. */
-  const count = { blows: 0, folded: 0, tellings: 0, moved: 0 }
+  const count = { blows: 0, folded: 0, tellings: 0, moved: 0, rules: 0 }
   const stuff = (kind: number) => MATERIALS[kind & 15] ?? 'brick'
   /** How big a piece of so many cells is against a patch's own size (30 cm). */
   const sized = (cells: number) => Math.min(8, Math.max(0.4, (Math.cbrt(cells) / M) / 0.3))
@@ -71,8 +73,41 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     if (radius >= 10) threat = Math.max(threat, Math.min(1, voice.hear(at, reach).gain * 3))
   }
 
+  /** Patches rules wrote, by their JSON: the last 96 that were played. A rule can write without end; these places cannot grow. */
+  const written = new Map<string, Patch>()
+  const num = (v: unknown, lo: number, hi: number, or: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : or)
+  /**
+   * A sound a rule made (rules/sound.mjs), as the world told it: {at, like | patch, force, size, hz, gap, for, reach}.
+   * The world's process checked it; it is read again here as a stranger's, because this is where it is played.
+   */
+  const sounded = (v: unknown) => {
+    if (!v || typeof v !== 'object') return
+    const s = v as Record<string, unknown>, at = s.at
+    if (!Array.isArray(at) || at.length !== 3 || !at.every((n) => typeof n === 'number' && Number.isFinite(n))) return
+    let patches: Patch[], held = false
+    if (typeof s.like === 'string' && Object.hasOwn(LIKES, s.like)) { patches = LIKES[s.like].patches; held = !!LIKES[s.like].held }
+    else {
+      let key: string
+      try { key = JSON.stringify(s.patch) } catch { return }
+      if (!key || key.length > 1500) return
+      let p = written.get(key)
+      if (!p) {
+        const read = readPatch(s.patch)
+        if ('refused' in read) return
+        p = read.patch
+        if (written.size >= 96) { const [oldest, gone] = written.entries().next().value!; written.delete(oldest); voice.forget(gone) }
+      } else written.delete(key)
+      written.set(key, p)
+      patches = [p]; held = p.how === 'blown' || p.how === 'rubbed'
+    }
+    const hz = Array.isArray(s.hz) ? s.hz.slice(0, 8).map((n) => num(n, 16, 12000, 0)).filter((n) => n > 0) : []
+    const force = num(s.force, 0.02, 1, 0.7), size = num(s.size, 0.25, 4, 1), gap = num(s.gap, 0, 1000, 0) / 1000, reach = num(s.reach, 2, 300, 10), dur = num(s.for, 0.05, 4, held ? 0.4 : 0)
+    count.rules++
+    const where = at as [number, number, number]
+    for (let i = 0; i < Math.max(1, hz.length); i++) for (const p of patches) voice.play(p, { at: where, force: force * (0.94 + 0.12 * Math.random()), size, pitch: hz[i] ?? 0, dur, after: i * gap, reach })
+  }
   return {
-    voice, blast, count, music,
+    voice, blast, count, music, sounded,
     get things() { return things },
     /** Which place's music is wanted now. */
     get place() { return place },

@@ -1,7 +1,7 @@
 // Made things heard and played (#247): a thing's record carries its `sounds` (patch.ts), the sound lane's own field.
 // Struck, a thing answers with its own `hit` in place of its material's; and one that has a surface can be taken up
 // and played where it stands: a button by it (and the E key) opens its surface over the picture, its keys are the
-// instrument's until it is put away (E again, or Escape).
+// instrument's until it is put away (its own round button, E again, or Escape).
 //
 // What a record holds was written by someone's model: it is read through the check every time it changes, and a
 // record that does not pass makes no sound and offers nothing.
@@ -45,6 +45,12 @@ export function played(voice: Sound, made: Things, hud: Hud, input: Input) {
     stage.style.display = 'block'
     stage.style.aspectRatio = `${s.surface.size[0]} / ${s.surface.size[1]}`
     const it = playable(stage, voice, s.play, s.surface), downs = new Set<string>()
+    // A way to put it away that needs no key: a phone has none.
+    const away = document.createElement('button')
+    away.type = 'button'; away.textContent = '\u00d7'; away.setAttribute('aria-label', 'Put it away'); away.dataset.away = ''
+    away.style.cssText = 'position:absolute;right:6px;top:6px;width:38px;height:38px;border:0;border-radius:50%;background:rgba(232,236,241,0.92);color:#10141a;font:600 20px -apple-system,system-ui,sans-serif;touch-action:manipulation'
+    away.addEventListener('click', put)
+    stage.append(away)
     // While it is out, the keys are its own; every other key is kept from the world under it.
     const pop = input.push({ name: 'playing', solid: true, every: true, key: (code, e) => { if (code === 'Escape' || code === 'KeyE') put(); else if (!e.repeat && it.key(code, true)) downs.add(code); return true }, use: () => true })
     out = { thing: t, it, pop, downs }
@@ -75,7 +81,7 @@ export function played(voice: Sound, made: Things, hud: Hud, input: Input) {
         near = best
         offer.style.display = near ? 'block' : 'none'
         // A name is text someone's model wrote: shown as text.
-        if (near) button.textContent = `Play the ${near.name.slice(0, 40)} (E)`
+        if (near) button.textContent = `Play the ${near.name.slice(0, 40)}${navigator.maxTouchPoints > 0 ? '' : ' (E)'}`
       }
     },
     get playing() { return out?.thing.id ?? null },

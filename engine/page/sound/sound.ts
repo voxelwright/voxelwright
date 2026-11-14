@@ -58,6 +58,8 @@ export interface Sound {
   hear(at: readonly [number, number, number], reach?: number): { gain: number; pan: number; lp: number; late: number; far: number }
   /** Stops what is held on a bus. */
   hush(bus: number): void
+  /** A patch that will not be played again gives its place in the synthesiser back (what a stranger sends is endless; the places are not). */
+  forget(patch: Patch): void
   /** Starts a note that sounds until it is let go, played by hand (it does not wait for the frame). Returns its name, or 0 if sound is not running. */
   hold(patch: Patch, how?: Play): number
   /** Lets a held note go. */
@@ -90,10 +92,11 @@ export async function sound(): Promise<Sound> {
   for (const type of ['pointerup', 'touchend', 'click', 'keydown']) addEventListener(type, wake, { capture: true, passive: true })
   document.addEventListener('visibilitychange', () => { hidden = document.hidden; if (hidden) void context.suspend().catch(() => {}); else if (navigator.userActivation?.hasBeenActive ?? true) wake() })
 
-  const ids = new Map<Patch, number>()
+  const ids = new Map<Patch, number>(), spare: number[] = []
+  let last = 0
   const id = (p: Patch) => {
     let n = ids.get(p)
-    if (n === undefined) { n = ids.size + 1; ids.set(p, n); node.port.postMessage({ define: [n, compile(p)] }) }
+    if (n === undefined) { n = spare.pop() ?? ++last; ids.set(p, n); node.port.postMessage({ define: [n, compile(p)] }) }
     return n
   }
   const ear = { at: [0, 0, 0] as [number, number, number], right: [1, 0] as [number, number], ahead: [0, -1] as [number, number] }
@@ -137,6 +140,7 @@ export async function sound(): Promise<Sound> {
     get spent() { return spent },
     hear, flush,
     play,
+    forget(patch) { const n = ids.get(patch); if (n !== undefined) { ids.delete(patch); spare.push(n) } },
     hold(patch, how = {}) { const name = ++held + 1; return play(patch, { bus: BUS.play, ...how }, name) ? name : 0 },
     release(id) { if (id) node.port.postMessage({ release: id }) },
     glide(id, hz, level = -1) { if (id) node.port.postMessage({ glide: [id, hz, level] }) },

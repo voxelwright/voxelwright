@@ -30,6 +30,8 @@ export interface Link {
   onecho: ((echo: Echo, live: boolean) => void) | null
   /** Which body a living thing is now (#245), by its thing's id; body 0 when it lives no more. Said as it changes and to each page as it joins. */
   onliving: ((living: { thing: string; body: number }) => void) | null
+  /** A sound a rule made (rules/sound.mjs): what it holds came through a rule, and is read again by whoever plays it. */
+  onsound: ((sound: unknown) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */
@@ -58,7 +60,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
@@ -70,7 +72,7 @@ export function link(base = '/world'): Link {
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
-    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null,
+    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null,
     get onshown() { return sees },
     set onshown(f: ((shown: Shown[]) => void) | null) { sees = f; f?.(shown) },
     pick(rule, id, pick) { void fetch(`${base}/pick`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, pick }) }).catch(() => {}) },
@@ -115,6 +117,7 @@ export function link(base = '/world'): Link {
         else if (kind === SHOWN) { shown = JSON.parse(new TextDecoder().decode(payload)) as Shown[]; self.onshown?.(shown) }
         else if (kind === OFFERS) { offers = JSON.parse(new TextDecoder().decode(payload)) as Offer[]; self.onoffers?.(offers) }
         else if (kind === LIVING) self.onliving?.(JSON.parse(new TextDecoder().decode(payload)))
+        else if (kind === SOUND) { if (live) self.onsound?.(JSON.parse(new TextDecoder().decode(payload))) }
         else if (kind === HERE) { const who = JSON.parse(new TextDecoder().decode(payload)); if (who.by !== self.me) self.onhere?.(who) }
         else if (kind === LOG || kind === STATE) {
           const words = new Uint32Array(payload.buffer, 0, payload.length / 4)
