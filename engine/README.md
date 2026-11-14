@@ -332,7 +332,8 @@ on foot as they do flying.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is
-  not drawn in its way. For this the page's own thread's core is told of every edit (`tellCore` in `main.ts`), so
+  not drawn in its way. The eye that rides is kept out the same way (`page/eye.ts`, #367): driven beside house
+  fronts it was inside them for 70 frames of 166, and a frame drawn from inside a wall took 50 ms. For this the page's own thread's core is told of every edit (`tellCore` in `main.ts`), so
   `world_kind` there answers for what was built and broken too. `engine.me.back` says how far back the eye is.
 - **A slowed world, tried**: with the clock at a quarter and the one who asked spared, she walks at 1.4 m/s as she
   did while the other page's person walks at 0.33, and what falls, drives, burns and flows goes at a quarter with its
@@ -358,7 +359,7 @@ on foot as they do flying.
   built since, a seat told where the feet are, a rule whose actor follows them).
 - **Not there**: the body meets the world's cells and, alone, the page's other bodies; in a shared world what
   falls, flies and drives meets its ghost in the world's process, so a blow reaches it a moment late and it does not
-  block a car. The eye behind goes through walls. Running and jumping
+  block a car. Running and jumping
   are a walk's pose, quicker (the people lane's to draw). It cannot get on a living thing while on foot other than
   by E as before.
 
@@ -1062,7 +1063,7 @@ node test/core-time.mjs --rows 45000                             # what a sector
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
-node test/sitting.mjs --parts street,turns,far,body,portal,ride [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
+node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march (#367): A and B measured turn about, seconds apart, only while the GPU is quiet; `--other dir` for A from another checkout; alone it is A against A
 ```
 

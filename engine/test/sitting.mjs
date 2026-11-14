@@ -23,9 +23,12 @@ const alone = has('alone')
 
 /** In the page before anything of its own runs: every frame's gap and the time spent inside it, kept with where the body and the eye were. */
 const recorder = () => {
-  const N = 120_000, F = 12
+  const N = 120_000, F = 13
   const rows = new Float32Array(N * F), long = [], names = ['start']
   let n = 0, label = 0, last = 0, turning = 0
+  // Whether the eye is in something that stands (all but water and leaves), or within a cell of it sideways: the picture's near edge then cuts into it.
+  const solid = (e, x, y, z) => { const k = e.kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
+  const inside = (e) => { const x = e.pose.x * 10, y = e.pose.y * 10, z = e.pose.z * 10; return solid(e, x, y, z) ? 2 : solid(e, x + 1, y, z) || solid(e, x - 1, y, z) || solid(e, x, y, z + 1) || solid(e, x, y, z - 1) || solid(e, x, y - 1, z) ? 1 : 0 }
   const raf = globalThis.requestAnimationFrame.bind(globalThis)
   globalThis.requestAnimationFrame = (f) => raf((now) => {
     const t0 = performance.now()
@@ -37,13 +40,13 @@ const recorder = () => {
     last = now
     if (turning) e.pose.yaw += turning * Math.min(0.05, gap / 1000)
     const feet = e.me.feet, s = e.world.stats
-    if (n < N) rows.set([now, gap, cpu, label, feet ? feet.at[0] : NaN, feet ? feet.at[1] : NaN, feet ? feet.at[2] : NaN, e.pose.x * 10, e.pose.y * 10, e.pose.z * 10, e.pose.yaw, e.scale], n++ * F)
+    if (n < N) rows.set([now, gap, cpu, label, feet ? feet.at[0] : NaN, feet ? feet.at[1] : NaN, feet ? feet.at[2] : NaN, e.pose.x * 10, e.pose.y * 10, e.pose.z * 10, e.pose.yaw, e.scale, inside(e)], n++ * F)
     if (gap > 25) long.push({ at: now, label: names[label], gap, cpu, laps: { ...e.laps }, wanted: s.wanted, stale: s.stale, scale: e.scale, gpu: e.gpuMs, through: e.windowMs, portal: e.portal?.state ? { ...e.portal.state } : undefined, realm: e.realms?.here })
   })
   globalThis.sitting = {
     mark(name) { label = names.push(name) - 1 },
     turn(rate) { turning = rate },
-    peek(name) { const at = names.lastIndexOf(name), got = []; for (let i = 0; i < n; i++) if (rows[i * F + 3] === at) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9]]); return got },
+    peek(name) { const at = names.lastIndexOf(name), got = []; for (let i = 0; i < n; i++) if (rows[i * F + 3] === at) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9], rows[i * F + 12]]); return got },
     take() { const got = { rows: Array.from(rows.subarray(0, n * F)), long: long.splice(0), names: [...names], F }; n = 0; return got },
   }
 }
@@ -183,7 +186,31 @@ parts.ride = async () => {
   await shot('ride-off')
 }
 
-const all = { rows: [], long: [], names: null, F: 12 }
+// The eye: with one's back to a house front and the head turned all the way round, on foot and then in a kart.
+parts.eye = async () => {
+  const said = async (name) => { const t = await traced(name), eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0); line(`${name}: the eye was in something that stands for ${t.filter((r) => r[7] === 2).length} of ${t.length} frames and within a cell of it for ${t.filter((r) => r[7] === 1).length}; its biggest move in one frame ${Math.max(...eye).toFixed(1)} cells`) }
+  await down(90, 408.3, 0)
+  await keys(['KeyW'], 7000)
+  await mark('eye-afoot-round'); await turnBy(1.6, 4200)
+  await said('eye-afoot-round')
+  await shot('eye-afoot')
+  await mark('eye-afoot-along'); await page.evaluate(() => { globalThis.engine.pose.yaw = Math.PI / 2 }); await keys(['ShiftLeft', 'KeyW'], 5000)
+  await said('eye-afoot-along')
+  await post('/world/ask', { by: 'sitting', rule: { id: 'karts', name: 'A kart for whoever asks', source: `on('said', (world, e) => { if (/a kart for me/.test(e.text)) { world.thing('k', {like: 'kart', at: [e.at[0] + 30, e.at[2]], yaw: Math.PI / 2, colour: 2}); world.seat(e.by, {on: 'k'}) } })` } })
+  await wait(1000)
+  await page.evaluate(() => globalThis.engine.say('a kart for me'))
+  await page.waitForFunction(() => globalThis.engine.alive.riding, null, { timeout: 10_000 }).catch(() => line('never got on the kart'))
+  await wait(1500)
+  await mark('eye-riding-round'); await turnBy(1.6, 4200)
+  await said('eye-riding-round')
+  await page.evaluate(() => { globalThis.engine.pose.yaw += Math.PI / 2 }); await wait(400)
+  await shot('eye-riding')
+  await mark('eye-riding-go'); await keys(['KeyW'], 4000)
+  await said('eye-riding-go')
+  await page.keyboard.press('KeyE'); await wait(1000)
+}
+
+const all = { rows: [], long: [], names: null, F: 13 }
 for (const name of wanted) {
   if (!parts[name]) { console.log(`no part called ${name}`); continue }
   console.log(`part: ${name}`)
@@ -194,7 +221,7 @@ for (const name of wanted) {
 await browser.close(); server.stop(); done(); both()
 
 // What it was like, by what was being done.
-const F = all.F, by = new Map()
+const F = 13, by = new Map()
 for (let i = 0; i < all.rows.length; i += F) {
   const name = all.names[all.rows[i + 3]]
   if (!by.has(name)) by.set(name, [])

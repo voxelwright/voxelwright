@@ -12,6 +12,7 @@
 import type { Extra } from './wear.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
+import { clearWay, standsBy } from './eye.ts'
 import { numbers, type Motor } from './living.ts'
 import type { Answer, Ask } from './mover.ts'
 import { runningAt, strideAt, type Doing, type People, type Person } from './people.ts'
@@ -39,8 +40,8 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
 const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
-/** How near what stands the eye behind comes (cells), and how near its own head before its figure is in its way and is not drawn. */
-const CLEAR = 3, NEAR = 9
+/** How near its own head the eye behind comes before its figure is in its way and is not drawn (cells). */
+const NEAR = 9
 
 /** No move at all: what a body comes to rest in. */
 const REST: Move = { keys: [{ t: 0 }], hold: true }
@@ -110,8 +111,7 @@ export function person(o: {
   // The eye behind: how far back it is of what it would be (0 to 1). Something in the way brings it in at once; it
   // goes out again slowly, so that passing a lamp post is not a lurch there and back.
   let room = 1, backNow = 0
-  /** What the eye cannot be in or see through: all that stands but water and leaves. */
-  const stands = (x: number, y: number, z: number) => { const k = (o.kind?.(Math.floor(x), Math.floor(y), Math.floor(z)) ?? 0) & 15; return k !== 0 && k !== 5 && k !== 13 }
+  const stands = standsBy(o.kind)
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
   let downUntil = 0, lying = 0
@@ -250,14 +250,8 @@ export function person(o: {
         // On a wall the eye is in the head: behind and above, it would be inside the wall or the ground as often as not (nothing keeps the eye out of what is solid).
         const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
         const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
-        // Not through a wall: from the head out to where the eye would be (and a little past, for the picture's near
-        // edge), the first thing that stands is as far as it goes, less that little. With no room at all it is in the head.
-        let free = 1
-        if (far > 0) for (let s = 1; s <= far + CLEAR; s += 0.5) if (stands(head[0] + off[0] / far * s, head[1] + off[1] / far * s, head[2] + off[2] / far * s)) { free = Math.max(0, s - CLEAR) / far; break }
-        // And nothing stands close beside where that leaves it: a wall met at a slant was a cell from the eye, and the
-        // picture's near edge cut into it.
-        const tight = (r: number) => { const x = head[0] + off[0] * r, y = head[1] + off[1] * r, z = head[2] + off[2] * r; return stands(x + 2, y, z) || stands(x - 2, y, z) || stands(x, y + 2, z) || stands(x, y - 2, z) || stands(x, y, z + 2) || stands(x, y, z - 2) }
-        while (free > 0 && far > 0 && tight(free)) free = Math.max(0, free - 1 / far)
+        // Not through a wall (`clearWay`): it comes in at once and goes out again slowly.
+        const free = clearWay(stands, head, off)
         room = free < room ? free : Math.min(free, room + dt * 1.5)
         backNow = inHead ? 0 : far * room
         o.pose.x = (head[0] + off[0] * room) / M

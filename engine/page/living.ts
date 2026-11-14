@@ -3,6 +3,7 @@
 // moves: it says what the keys ask (go, turn, rise, roll, jump) again and again, and the solver's
 // motor does the rest. A thing's motor and its control scheme are data, so a model can write
 // them with the thing; nothing here is run.
+import { clearWay, standsBy } from './eye.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -110,6 +111,8 @@ export function living(o: {
   pose: { x: number; y: number; z: number; yaw: number; pitch: number }
   /** How high the ground is at a place (metres). */
   ground(x: number, z: number): number
+  /** What a cell of the world is made of (0: nothing), as this page has it: for keeping the eye that rides out of what stands. */
+  kind?: (x: number, y: number, z: number) => number
   /** In a shared world: the page's line to it, and the made things it knows. The world's own process moves every living thing; this page only says what a rider asks. */
   world?: Link | null
   /** The page's person gets on a thing (true) or is set down off it (false): a body on foot is taken up and put down. */
@@ -119,6 +122,9 @@ export function living(o: {
   const M = 10
   const things: Thing[] = [], waiting: { making: Making; done: (thing: Thing) => void }[] = [], struck: Struck[] = []
   let riding: Thing | null = null, near: Thing | null = null
+  // The eye that rides: how much of the way back it is (0 to 1), and what it is kept out of.
+  let room = 1
+  const stands = standsBy(o.kind)
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
@@ -309,9 +315,15 @@ export function living(o: {
         facing = yaw
         const cp = Math.cos(o.pose.pitch), look = [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]
         const back = (Math.max(...riding.size) * 1.5 + 25) / M, high = (riding.size[1] * 0.6 + 6) / M
-        o.pose.x = at.at[0] / M - look[0] * back
-        o.pose.z = at.at[2] / M - look[2] * back
-        o.pose.y = Math.max(at.at[1] / M + high - look[1] * back, o.ground(o.pose.x, o.pose.z) + 0.4)
+        // Not through a wall (#367), as the eye on foot (person.ts `clearWay`): from over the thing's middle out to where
+        // the eye would ride, as far as the way is clear; in at once, out again slowly. Driven beside house fronts the
+        // eye was inside them for 70 frames of 166, and a frame drawn from inside a wall took 50 ms.
+        const head = [at.at[0], at.at[1] + riding.size[1] / 2 + 6, at.at[2]], wantY = Math.max(at.at[1] + (high - look[1] * back) * M, o.ground(at.at[0] / M - look[0] * back, at.at[2] / M - look[2] * back) * M + 4)
+        const off = [-look[0] * back * M, wantY - head[1], -look[2] * back * M], free = clearWay(stands, head, off)
+        room = free < room ? free : Math.min(free, room + dt * 1.5)
+        o.pose.x = (head[0] + off[0] * room) / M
+        o.pose.y = (head[1] + off[1] * room) / M
+        o.pose.z = (head[2] + off[2] * room) / M
       }
       return true
     },
