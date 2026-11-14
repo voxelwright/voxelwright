@@ -31,7 +31,7 @@ import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
-import { plugins } from './plugins.ts'
+import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
@@ -224,6 +224,8 @@ async function main() {
   }
   /** What the portal draws each frame, once there is one (#264, portal.ts). */
   let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number) => void) | null = null
+  /** The passes the engine's plugins add to a frame (plugins.ts). */
+  const pluginDraws = pluginPasses()
   const setHour = (h: number | null) => {
     hour = h === null ? null : ((h % 24) + 24) % 24
     const { sun, day, low } = sunOf(hour)
@@ -318,6 +320,8 @@ async function main() {
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
+      // What the engine's plugins draw (plugins.ts `passes`): after the world and whoever is in it, before the wand's marker.
+      pluginDraws.draw(encoder, to, v, (now - started) / 1000)
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
@@ -717,11 +721,11 @@ async function main() {
   }
 
   /** The march from here at the device's own pace, ms a frame at the canvas's full size: for comparing two settings fairly. */
-  const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false) => {
+  const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false, withPasses = false) => {
     const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
     paused = true
     // With the people in sight drawn over it too, if asked: what they cost the GPU is the difference.
-    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withPieces) falling.draw(encoder, target, v, march.sun.s) }, 100)
+    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withPieces) falling.draw(encoder, target, v, march.sun.s); if (withPasses) pluginDraws.draw(encoder, target, v, 0) }, 100)
     paused = false
     to.destroy()
     return p.ms
@@ -831,7 +835,8 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { recore })
   // The workshop (#264, workshop.ts): what the engine could not do yet, and sending it to a development session.
   Object.assign((globalThis as unknown as { engine: object }).engine, { workshop: workshop(over, wishes) })
-  // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so.
+  // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so; and what they draw with.
+  Object.assign((globalThis as unknown as { engine: object }).engine, { draws: pluginDraws })
   if (far) Object.assign((globalThis as unknown as { engine: object }).engine, { plugins: plugins(far) })
   // People (#218): which residents a rule of the world has taken off their rounds.
   Object.assign((globalThis as unknown as { engine: object }).engine, { takenOff })

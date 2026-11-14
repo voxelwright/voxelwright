@@ -4,13 +4,13 @@
 // the ground under a mark takes the mark's colour. So a mark lies on the road and the pavement, goes under a parked
 // car and behind a house, and is never drawn over a wall or a person.
 //
-// The page has no door for a plugin to draw with: this pass is put in the wand's `draw` (main.ts calls it every
-// frame, after people, puffs and crumbs) and taken out again on `close`. One that fails is switched off and says so.
+// It draws through the door the page gives its plugins (`engine.draws`, page/plugins.ts): a pass every frame after
+// people, puffs and crumbs, taken out again on `close`. One that fails is taken out by the page, which says so.
 
 interface View { eye: readonly number[]; forward: readonly number[]; right: readonly number[]; up: readonly number[]; tanHalf: number }
 interface Target { color: GPUTextureView; depth: GPUTextureView; size: readonly [number, number] }
 type Draw = (encoder: GPUCommandEncoder, to: Target, view: View, time: number) => void
-interface Engine { gpu: { device: GPUDevice; format: GPUTextureFormat }; wand: { draw: Draw }; feet(x: number, z: number): number; march: { day: number } }
+interface Engine { gpu: { device: GPUDevice; format: GPUTextureFormat }; draws: { add(name: string, draw: Draw): void; remove(name: string): void; names: string[] }; feet(x: number, z: number): number; march: { day: number } }
 interface Mark { id: string; colour: string; wide: number; fill: number; at?: [number, number]; within?: number; line?: [number, number][]; closed?: boolean }
 
 /** The most marks drawn, and points of lines between them (world.mjs keeps a world to 64 marks of 32 points). */
@@ -99,7 +99,7 @@ const read = (v: unknown): Mark[] => (Array.isArray(v) ? v : []).filter((m): m i
   && ((spot(m.at) && num(m.within, 1, 2000)) || (Array.isArray(m.line) && m.line.length >= 2 && m.line.length <= 32 && m.line.every(spot)))).slice(0, MOST)
 
 export default ({ engine }: { engine: Engine }) => {
-  const { device, format } = engine.gpu, wand = engine.wand
+  const { device, format } = engine.gpu
   // ?fine=n: the page's cells are 2^n to the world's (main.ts FINE).
   const fine = 2 ** Number(new URLSearchParams(location.search).get('fine') ?? 0)
   const block = new Float32Array(20), uniforms = device.createBuffer({ size: block.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -149,17 +149,12 @@ export default ({ engine }: { engine: Engine }) => {
     pass.end()
     frames++
   }
-  const own = wand.draw
-  const drawn: Draw = (encoder, to, view, time) => {
-    if (!failed) try { paint(encoder, to, view) } catch (e) { failed = String(e); console.warn(`paint: switched off: ${e}`) }
-    own.call(wand, encoder, to, view, time)
-  }
-  wand.draw = drawn
+  engine.draws.add('paint', (encoder, to, view) => paint(encoder, to, view))
 
   return {
     state(v: unknown) { put(read(v)) },
-    close() { if (wand.draw === drawn) wand.draw = own; count = 0; uniforms.destroy(); markBuffer.destroy(); pointBuffer.destroy() },
+    close() { engine.draws.remove('paint'); count = 0; uniforms.destroy(); markBuffer.destroy(); pointBuffer.destroy() },
     /** For a check: what is drawn, how many frames it has been drawn in, and what went wrong if it was switched off. */
-    get shown() { return { marks: shown, frames, failed } },
+    get shown() { return { marks: shown, frames, failed: failed || (engine.draws.names.includes('paint') ? '' : 'its pass failed and was taken out') } },
   }
 }

@@ -5,11 +5,14 @@
 //
 //   export default (page) => ({ state(v) {}, once(v) {}, close() {} })
 //
-// `page.engine` is what the page's own modules share (`globalThis.engine`: the hud, the sound, the picture);
+// `page.engine` is what the page's own modules share (`globalThis.engine`: the hud, the sound, the picture, and
+// `engine.draws`, below, to draw with);
 // `state` is given what the plugin's world side last said is so (and again to a page that joins later, and to a
 // new version of the module), or null when that is so no longer (the page stepped to another realm); `once` is given something that happens now; `close` is called when the module is
 // replaced or the plugin is gone, and must take away whatever it put on the page.
 import type { Link, Plugged } from './link.ts'
+import type { Target } from '../probe/gpu.ts'
+import type { View } from './march.ts'
 
 export interface PagePlugin { state?(v: unknown): void; once?(v: unknown): void; close?(): void }
 export interface Plugins {
@@ -21,6 +24,30 @@ export interface Plugins {
   readonly errors: Record<string, string>
   /** What a plugin's module answered with, if it is in: for the checks. */
   of(name: string): PagePlugin | null
+}
+
+/**
+ * A door for a page plugin to draw with (#264; on the page it is `engine.draws`): a pass of its own in every frame, after the world, its people,
+ * crumbs and smoke are drawn and before the wand's marker. `draw` is given the frame's commands, what is being
+ * drawn to (its colour and its depth, to read what is in front) and the view. A plugin adds its pass when its
+ * module is made and removes it on `close`. A pass that throws is taken out and said: the frame goes on.
+ */
+export type Pass = (encoder: GPUCommandEncoder, to: Target, view: View, time: number) => void
+export interface Passes {
+  add(name: string, draw: Pass): void
+  remove(name: string): void
+  /** Once a frame, from the page's own loop. */
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, time: number): void
+  readonly names: string[]
+}
+export function passes(): Passes {
+  const all = new Map<string, Pass>()
+  return {
+    add(name, draw) { all.set(name, draw) },
+    remove(name) { all.delete(name) },
+    draw(encoder, to, view, time) { for (const [name, draw] of all) try { draw(encoder, to, view, time) } catch (e) { all.delete(name); console.warn(`the pass "${name}" failed and was taken out: ${e}`) } },
+    get names() { return [...all.keys()] },
+  }
 }
 
 export function plugins(far: Link): Plugins {

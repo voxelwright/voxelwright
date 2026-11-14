@@ -73,6 +73,12 @@ try {
   check(saw.text !== 'I see undefined.', `a real one too (plugins/look): asked what the wall behind it is, the rule looks and says "${saw.text}"`)
   if (arg('out', '')) await page.screenshot({ path: arg('out', '') })
 
+  // What a page plugin draws with: a pass of its own in every frame; one that throws is taken out and the page goes on.
+  await page.evaluate(() => { globalThis.passed = 0; globalThis.engine.draws.add('counts', () => { globalThis.passed++ }); globalThis.engine.draws.add('breaks', () => { throw new Error('a pass that breaks') }) })
+  await page.waitForFunction(() => globalThis.passed > 5, null, { timeout: 10_000 })
+  check((await page.evaluate(() => globalThis.engine.draws.names.join())) === 'counts', 'a page plugin is given a pass in every frame to draw with; one that throws is taken out, and the frames go on')
+  await page.evaluate(() => globalThis.engine.draws.remove('counts'))
+
   // Changed while it runs: both sides are new, and what it had is handed on.
   put(WORLD(10), PAGE('v2'))
   const t1 = performance.now(), again = await w.look()

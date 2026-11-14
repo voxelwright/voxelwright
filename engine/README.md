@@ -561,7 +561,10 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
     handed on through `state()`).
   - `page.ts`, if a page needs anything: `export default ({ engine, link }) => ({ state(v) {}, once(v) {}, close() {} })`.
     `state` is what is so (given again to a page that joins later and to a new version; `null` when the page steps to
-    another realm), `once` is something that happens now, `close` takes away whatever it put on the page.
+    another realm), `once` is something that happens now, `close` takes away whatever it put on the page. To draw in
+    the picture it adds a pass, `engine.draws.add(name, (encoder, to, view, time) => {})`: called every frame after
+    the world, its people, crumbs and smoke and before the wand's marker, with the frame's commands, what is drawn
+    to (colour and depth) and the view; `engine.draws.remove(name)` on `close`. A pass that throws is taken out.
   - `guide.txt`: its lines of the guide. The guide (`GET /world/`) is put together from the plugins that loaded, each
     time it is asked for, so a model writing rules is told of exactly what is there.
   - `check.mjs`: its check, against the real server (`test/plugkit.mjs`). `node test/plugged.mjs` runs every
@@ -793,7 +796,7 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
   on the GPU, the 99th frame in a hundred was 33 ms: that was the GPU being shared.
 - **What the run showed is still rough**: asked again, the maker named two new gaps (words on the ground; a ring
   that stays under a runner): the list feeds itself. The session hooked its pass into the wand's `draw` because a
-  page plugin has no door to draw with: that door is the next thing the form needs.
+  page plugin had no door to draw with: it has one now (`engine.draws`), and paint uses it.
 - `node test/workshop.mjs` checks all of it with something standing in for T3 Code, and the command itself with a
   script that writes down how it was run.
 - **Not there**: merging a session's pull request is still someone's own act (the lane's lead or the owner), by
