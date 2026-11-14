@@ -46,29 +46,30 @@ export interface Link {
 
 const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7
 
-export function link(): Link {
+/** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
+export function link(base = '/world'): Link {
   let live = false
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null,
-    drive(id, go, turn, rise, once) { void fetch('/world/drive', { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
-    ask: (body) => fetch('/world/ask', { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
-    here(at, yaw, name) { void fetch('/world/here', { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw }) }).catch(() => {}) },
+    drive(id, go, turn, rise, once) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
+    ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
+    here(at, yaw, name) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw }) }).catch(() => {}) },
     // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.
-    say(name, text) { void fetch('/world/say', { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
+    say(name, text) { void fetch(`${base}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
     clock: () => (Date.now() + behind) / 1000,
     get live() { return live },
     postMessage(ask) {
       // The world has its own clock: a page never asks it for time.
       if (!ask.blast && !ask.ignite && !ask.ball && !ask.edit) return
       const body = { by: self.me, blast: ask.blast, radius: ask.radius, spark: ask.spark, ignite: ask.ignite, ball: ask.ball, edit: ask.edit && Array.from(ask.edit), release: ask.release }
-      void fetch('/world/ask', { method: 'POST', body: JSON.stringify(body) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }) }, (e) => self.onerror?.({ message: String(e) }))
+      void fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify(body) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }) }, (e) => self.onerror?.({ message: String(e) }))
     },
   }
   void (async () => {
-    const response = await fetch('/world/stream?from=0')
+    const response = await fetch(`${base}/stream?from=0`)
     if (!response.ok || !response.body) throw new Error(`no shared world here (${response.status})`)
     const reader = response.body.getReader()
     let held = new Uint8Array(0)

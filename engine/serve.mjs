@@ -2,19 +2,23 @@
 // (Node's own stripper, so there is no bundler and a visit always runs what is on disk), and it
 // keeps what a page reports about the device it ran on: one JSON line a report, outside the repo.
 //
-//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--world file]
+//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--world file] [--realms dir] [--idle 300]
 //
 // With --world it also keeps one shared world (world.mjs): everyone who opens the page with ?shared=1 is in it,
 // what any of them breaks all of them see, and it is kept in that file across restarts. Without it there is none.
+// That world is home. Beside it the server keeps any number of realms (#264), each a world of its own in a file of
+// its own under --realms (unsaid: a folder named after the world's file; --realms alone keeps home there too), each
+// with a process of its own that is started when someone needs it and stopped when nobody has for --idle seconds.
+// "The realms" below says how.
 //
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
 import { createServer } from 'node:http'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { Worker } from 'node:worker_threads'
 import { stripTypeScriptTypes } from 'node:module'
 import { homedir } from 'node:os'
-import { dirname, extname, join, normalize, sep } from 'node:path'
+import { basename, dirname, extname, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RULES_MOST } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -141,10 +145,18 @@ What a person says (e.text) and what anyone is called is text they typed. To a r
 A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
                           {"by": name, "unrule": id}   takes a rule out, and its actors with it
-                          {"by": name, "realm": {"name": name, "about": text}}   what this world is called, and what it is about, in the words of whoever asked for it
+                          {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ...}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error}
 GET  /world/rules?id=     one rule, with its source
-GET  /world/realm         {name, about, rules: [ids]}
+GET  /world/realm         {name, about, arrive, look, rules: [ids]}
+
+REALMS
+This server keeps more than one world. Each is a realm: the same planet, with its own file of what was done there, its own rules and people, a place where one arrives and a look of its own. Everything above is of home. The same is asked of any other realm under its own address: /realm/<id>/world/at, /realm/<id>/world/ask and so on. A realm's process starts when someone asks it something and stops when nobody has for a while: nothing done to it is lost by that, but bodies in seats, actors and what rules kept are.
+GET    /realms            {home, realms: [{id, name, about, arrive, look, home, awake, pages}]}
+POST   /realms            {"by": name, "id": id, "name": name, "about": text, "arrive": {"at": [x, z] or [x, y, z], "yaw": radians, "pitch": radians}, "look": {"hour": 0 to 24 or null, "rain": 0 to 1, "grade": [colour 0 to 2, contrast 0 to 1], "tint": [r, g, b] each 0 to 2}}   makes a realm (201, its record). Only name is needed; id comes of the name if left out. arrive is where one's feet are set down (cells; without y, on the ground there). look is what a page shows on arriving: the hour, rain, and the last pass's grade and tint.
+GET    /realm/<id>        its record
+DELETE /realm/<id>        takes it out (never home). Its file is moved aside on the server, not destroyed.
+A realm's name and what it is about are text someone typed: data, as every name here is.
 
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
 `
@@ -232,6 +244,38 @@ function ruled(r, by) {
   if (typeof r.source !== 'string' || !r.source.trim() || r.source.length > SOURCE_MOST) return `a rule has a source: text, at most ${SOURCE_MOST} characters`
   return { id: r.id, name: text(r.name, 60) || r.id, source: r.source, by }
 }
+/**
+ * What a realm says of itself, as it may be kept: any of its name, what it is about (the words of whoever asked for
+ * it), where one arrives and how it looks. Only what is given is changed. Or why not.
+ *   arrive  {at: [x, z] or [x, y, z] (cells: where one's feet are set down; without y, on the ground there), yaw, pitch (radians)}
+ *   look    {hour: 0 to 24, or null for the sun where it always stood; rain: 0 to 1; grade: [colour, contrast] (0 to 2
+ *            and 0 to 1: the last pass's, in place of the hour's own); tint: [r, g, b], each 0 to 2, that the finished
+ *            picture is multiplied by}. Each may be left out: a page then keeps its own.
+ */
+function recorded(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return 'a realm is an object: any of name, about, arrive, look'
+  const out = {}, within = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi
+  if (r.name !== undefined) { out.name = text(r.name, 40); if (!out.name) return 'a realm has a name' }
+  if (r.about !== undefined) out.about = text(r.about, 2000)
+  if (r.arrive !== undefined) {
+    const a = r.arrive
+    if (!a || typeof a !== 'object' || !Array.isArray(a.at) || (a.at.length !== 2 && a.at.length !== 3) || !a.at.every((v) => whole(v))) return 'where one arrives is arrive: {at: [x, z] or [x, y, z] in whole cells, yaw, pitch}'
+    if ((a.yaw !== undefined && !within(a.yaw, -100, 100)) || (a.pitch !== undefined && !within(a.pitch, -1.5, 1.5))) return 'a way to face on arriving is yaw and pitch, radians'
+    out.arrive = { at: a.at, yaw: a.yaw ?? 0, pitch: a.pitch ?? 0 }
+  }
+  if (r.look !== undefined) {
+    const l = r.look, look = {}
+    if (!l || typeof l !== 'object' || Array.isArray(l)) return 'how a realm looks is look: any of hour, rain, grade, tint'
+    if (l.hour !== undefined) { if (l.hour !== null && !within(l.hour, 0, 24)) return 'an hour is 0 to 24, or null'; look.hour = l.hour }
+    if (l.rain !== undefined) { if (!within(l.rain, 0, 1)) return 'rain is 0 to 1'; look.rain = l.rain }
+    if (l.grade !== undefined) { if (!Array.isArray(l.grade) || l.grade.length !== 2 || !within(l.grade[0], 0, 2) || !within(l.grade[1], 0, 1)) return 'a grade is [colour 0 to 2, contrast 0 to 1]'; look.grade = l.grade }
+    if (l.tint !== undefined) { if (!Array.isArray(l.tint) || l.tint.length !== 3 || !l.tint.every((v) => within(v, 0, 2))) return 'a tint is [r, g, b], each 0 to 2'; look.tint = l.tint }
+    out.look = look
+  }
+  return Object.keys(out).length ? out : 'a realm is any of name, about, arrive, look'
+}
+/** A realm's record after a change to it: what is given replaces what was there, and of how it looks, each part given. */
+const changed = (record, change) => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })
 /** An ask as the world will do it, with nothing in it but what it may hold; or why it may not be done. */
 function allowed(body) {
   if (!body || typeof body !== 'object') return 'an ask is an object'
@@ -271,11 +315,13 @@ function allowed(body) {
   if (body.gone !== undefined) return typeof body.gone === 'string' && ID.test(body.gone) ? { by, gone: body.gone } : 'what is gone is a thing, by its id'
   if (body.rule !== undefined) { const rule = ruled(body.rule, by); return typeof rule === 'string' ? rule : { by, rule } }
   if (body.unrule !== undefined) return typeof body.unrule === 'string' && RULE_ID.test(body.unrule) ? { by, unrule: body.unrule } : 'what is taken out is a rule, by its id'
-  if (body.realm !== undefined) return body.realm && typeof body.realm === 'object' && text(body.realm.name, 40) ? { by, realm: { name: text(body.realm.name, 40), about: text(body.realm.about, 2000) } } : 'a realm has a name, and may say what it is about'
+  if (body.realm !== undefined) { const realm = recorded(body.realm); return typeof realm === 'string' ? realm : { by, realm } }
   return 'an ask is a blast, a fire, a ball, an edit, a change to a made thing, a rule, or what the realm is called'
 }
-let world = null
-if (worldFile) {
+/** Starts a realm's world from its file (`of` is the realm: {id, file, record}), and answers for it until it is closed. */
+function open(of) {
+  const worldFile = of.file
+  let world = null
   mkdirSync(dirname(worldFile), { recursive: true })
   const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm') } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
@@ -290,10 +336,12 @@ if (worldFile) {
   /** Ids of rules asked for that the world has not yet put in: they count towards the most a world may have. */
   const awaited = new Set()
   let realm = { name: '', about: '' }
+  /** Whether anything in it moves, burns or flows, as its process last said. */
+  let moving = false
   const note = (ask, at) => {
     if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id) }
     else if (ask.unrule) rules.delete(ask.unrule)
-    else if (ask.realm) realm = ask.realm
+    else if (ask.realm) realm = of.record = changed(realm, ask.realm)
     else if (ask.gone) things.delete(ask.gone)
     else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
     else if (ask.thing && things.has(ask.thing.id)) Object.assign(things.get(ask.thing.id).record, ask.thing)
@@ -332,6 +380,7 @@ if (worldFile) {
     // Where people are and what they say goes to whoever is reading now, and is not kept.
     if (m.here || m.said) { const f = frame(m.here ? HERE : SAID, 0, Buffer.from(JSON.stringify(m.here ?? m.said))); for (const r of readers) if (m.said || r.writableLength < 1 << 20) r.write(f); return }
     if (!m.counts) return
+    moving = m.counts[0] + m.counts[1] + m.counts[2] > 0
     if (m.log.length) keep(LOG, words(m.counts, m.log))
     const now = frame(STATE, 0, words(m.counts, m.state))
     // A reader a megabyte behind is not sent where things are: by the time it read that, they would be elsewhere.
@@ -342,6 +391,16 @@ if (worldFile) {
   const body = async (req, most) => { const parts = []; let size = 0; for await (const chunk of req) { size += chunk.length; if (size > most) return null; parts.push(chunk) } try { return JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return undefined } }
   world = {
     body,
+    /** Whether nobody reads it, nothing waits for its answer and nothing in it moves: it may then be stopped. */
+    get idle() { return readers.size === 0 && waiting.size === 0 && !moving },
+    get readers() { return readers.size },
+    /** Stops it: what waits is answered first, whoever reads is hung up on, and the process ends. What was done to it is in its file. */
+    async close() {
+      down = 'this realm has been stopped'
+      for (let i = 0; i < 40 && waiting.size; i++) await new Promise((r) => setTimeout(r, 50))
+      for (const r of readers) r.end()
+      await thread.terminate()
+    },
     guide: (res) => send(res, 200, GUIDE),
     /** What a cell is, asked of the world itself. */
     async at(url, res) {
@@ -464,7 +523,99 @@ if (worldFile) {
       send(res, 202, '{}', TYPES['.json'])
     },
   }
-  console.log(`a shared world is kept in ${worldFile} (${log.length} things done to it so far)`)
+  console.log(`${of.id === HOME ? 'a shared world' : `the realm ${of.id}`} is kept in ${worldFile} (${log.length} things done to it so far)`)
+  return world
+}
+
+// ── The realms (#264) ────────────────────────────────────────────────────
+// A realm is a world of its own: a file of what was done to it, which also says what the realm is (the last `realm`
+// ask in it: its name, what it is about, where one arrives, how it looks), and a process that is started when
+// someone needs it and stopped when nobody has for a while. Every realm is the same planet by the same rule: they
+// differ in what has been done there, in who lives there (its rules), in where one arrives and in how it looks.
+// One of them is home: the world of --world, which `/world/…` has always meant and still does.
+//   GET    /realms                    {home, realms: [{id, name, about, arrive, look, home, awake, pages}]}
+//   POST   /realms                    {by, id, name, about, arrive, look} makes one (id may be left out: it comes of the name)
+//   DELETE /realm/<id>                takes one out (never home): its file is moved aside, not destroyed
+//   *      /realm/<id>/world/<what>   everything `/world/<what>` is, of that realm
+const HOME = 'home'
+const realmsDir = arg('realms', worldFile ? `${worldFile.replace(/\.log$/, '')}.realms` : '')
+/** Seconds a realm's process is kept with nobody in it: longer than a seat's body stays (world.mjs SEAT_STAYS). */
+const IDLE = Number(arg('idle', '300'))
+/** The most realms a server keeps, and the most awake at once: each awake is a thread with a core of its own (measured: the cell-engine skill, "Realms"). */
+const REALMS_MOST = 64, AWAKE_MOST = 16
+/** The realms, by id: {id, file, record, world (while its process runs), used (when it was last asked anything)}. */
+const realms = new Map()
+/** What a realm's file says the realm is, without starting it: the `realm` asks in it, in order. */
+function recordOf(file) {
+  let record = { name: '', about: '' }
+  if (!existsSync(file)) return record
+  const all = readFileSync(file)
+  for (let at = 0; at + 12 <= all.length;) {
+    const kind = all.readUInt32LE(at), size = all.readUInt32LE(at + 8), payload = all.subarray(at + 12, at + 12 + size)
+    if (at + 12 + size > all.length) break
+    if (kind === ECHO && payload.includes('"realm"')) { try { const ask = JSON.parse(payload.toString('utf8')); if (ask.realm) record = changed(record, ask.realm) } catch { /* not an ask: nothing of the realm's */ } }
+    at += 12 + size
+  }
+  return record
+}
+if (worldFile || realmsDir) {
+  const home = worldFile || join(realmsDir, `${HOME}.log`)
+  realms.set(HOME, { id: HOME, file: home, record: recordOf(home), world: null, used: Date.now() })
+  if (existsSync(realmsDir)) for (const name of readdirSync(realmsDir).sort()) {
+    const id = name.replace(/\.log$/, '')
+    if (name.endsWith('.log') && ID.test(id) && !realms.has(id) && realms.size < REALMS_MOST) realms.set(id, { id, file: join(realmsDir, name), record: recordOf(join(realmsDir, name)), world: null, used: 0 })
+  }
+  // Home is awake from the start, as the one shared world always was.
+  realms.get(HOME).world = open(realms.get(HOME))
+  // A realm nobody has needed for a while is stopped: what was done to it is in its file, and it starts again when needed.
+  setInterval(() => { for (const r of realms.values()) if (r.world?.idle && Date.now() - r.used > IDLE * 1000) rest(r) }, Math.min(10_000, IDLE * 250)).unref()
+}
+const rest = (r) => { const was = r.world; r.world = null; console.log(`the realm ${r.id} rests`); return was?.close() }
+/** A realm's world, started if it was not running; or null when too many are awake and none of them can be stopped. */
+function awake(r) {
+  r.used = Date.now()
+  if (r.world) return r.world
+  const up = [...realms.values()].filter((o) => o.world)
+  if (up.length >= AWAKE_MOST) {
+    const idlest = up.filter((o) => o.world.idle && o.id !== HOME).sort((a, b) => a.used - b.used)[0]
+    if (!idlest) return null
+    void rest(idlest)
+  }
+  return r.world = open(r)
+}
+const listed = (r) => ({ id: r.id, ...r.record, home: r.id === HOME, awake: !!r.world, pages: r.world?.readers ?? 0 })
+/** Makes a realm: a file whose first line says what it is. Its process starts when someone goes there. */
+async function found(req, res) {
+  const parts = []
+  let size = 0
+  for await (const chunk of req) { size += chunk.length; if (size > 1 << 16) return send(res, 413, 'too much'); parts.push(chunk) }
+  let b
+  try { b = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return send(res, 400, 'a realm is {by, id, name, about, arrive, look}')
+  const record = recorded({ name: b.name, about: b.about, arrive: b.arrive, look: b.look })
+  if (typeof record === 'string') return send(res, 400, record)
+  if (!record.name) return send(res, 400, 'a realm has a name')
+  // Its id is given, or comes of its name: what is left of it in lower-case letters, digits and dashes.
+  const id = b.id ?? record.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+  if (typeof id !== 'string' || !ID.test(id)) return send(res, 400, 'a realm has an id: lower-case letters, digits and dashes, up to 40')
+  if (realms.has(id)) return send(res, 409, 'a realm of that id is already here')
+  if (realms.size >= REALMS_MOST) return send(res, 409, `this server keeps at most ${REALMS_MOST} realms: take one out first`)
+  const file = join(realmsDir, `${id}.log`)
+  if (existsSync(file)) return send(res, 409, 'a file of that name is already there')
+  mkdirSync(realmsDir, { recursive: true })
+  writeFileSync(file, frame(ECHO, 0, Buffer.from(JSON.stringify({ by: text(b.by, 24), realm: { about: '', ...record } }))))
+  realms.set(id, { id, file, record: recordOf(file), world: null, used: 0 })
+  console.log(`the realm ${id} was made`)
+  send(res, 201, JSON.stringify(listed(realms.get(id))), TYPES['.json'])
+}
+/** Takes a realm out: its process is stopped and its file moved aside (gone/, beside the others), where a mistake can be undone by hand. */
+async function remove(r, res) {
+  if (r.id === HOME) return send(res, 409, 'home is not taken out')
+  realms.delete(r.id)
+  await rest(r)
+  if (existsSync(r.file)) { mkdirSync(join(dirname(r.file), 'gone'), { recursive: true }); renameSync(r.file, join(dirname(r.file), 'gone', `${basename(r.file, '.log')}-${Date.now()}.log`)) }
+  console.log(`the realm ${r.id} was taken out`)
+  send(res, 200, '{"gone":true}', TYPES['.json'])
 }
 
 /** Whether a request names this server as this machine or as a machine of a tailnet (`tailscale serve`): a name someone else points at 127.0.0.1 is neither. */
@@ -477,29 +628,42 @@ const server = createServer((req, res) => {
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
-  if (url.pathname.startsWith('/world/')) {
-    if (!world) return send(res, 404, 'no shared world is kept here')
+  if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
+    if (!realms.size) return send(res, 404, 'no realms are kept here')
     if (foreign(req)) return send(res, 403, 'not from another site')
-    if (req.method === 'GET' && url.pathname === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
-    if (req.method === 'POST' && url.pathname === '/world/ask') return done(world.ask(req, res))
-    if (req.method === 'POST' && url.pathname === '/world/here') return done(world.here(req, res))
-    if (req.method === 'POST' && url.pathname === '/world/drive') return done(world.drive(req, res))
-    const op = url.pathname.slice(7)
+    if (url.pathname === '/realms') return req.method === 'GET' ? send(res, 200, JSON.stringify({ home: HOME, realms: [...realms.values()].map(listed) }), TYPES['.json']) : req.method === 'POST' ? done(found(req, res)) : send(res, 405, 'GET or POST')
+  }
+  // A realm's world is asked as home's is, under the realm's own address.
+  const [, id, rest_] = /^\/realm\/([^/]+)(\/.*)?$/.exec(url.pathname) ?? []
+  const route = id === undefined ? url.pathname : rest_ ?? ''
+  if (id !== undefined || route.startsWith('/world/')) {
+    const realm = realms.get(id ?? HOME)
+    if (!realm) return send(res, 404, id === undefined ? 'no shared world is kept here' : 'no realm of that id is here')
+    if (foreign(req)) return send(res, 403, 'not from another site')
+    if (id !== undefined && route === '') return req.method === 'DELETE' ? done(remove(realm, res)) : req.method === 'GET' ? send(res, 200, JSON.stringify(listed(realm)), TYPES['.json']) : send(res, 405, 'GET or DELETE')
+    if (!route.startsWith('/world/')) return send(res, 404, 'not here')
+    const world = awake(realm)
+    if (!world) return send(res, 503, 'too many realms are awake: try again in a while')
+    if (req.method === 'GET' && route === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
+    if (req.method === 'POST' && route === '/world/ask') return done(world.ask(req, res))
+    if (req.method === 'POST' && route === '/world/here') return done(world.here(req, res))
+    if (req.method === 'POST' && route === '/world/drive') return done(world.drive(req, res))
+    const op = route.slice(7)
     if (req.method === 'POST' && ['join', 'walk', 'turn', 'say', 'leave'].includes(op)) return done(world.body(req, 2048).then((b) => world.seat(op, b, res)))
     if (req.method === 'GET' && (op === 'me' || op === 'around')) return done(world.seat(op, Object.fromEntries(url.searchParams), res))
-    if (req.method === 'GET' && url.pathname === '/world/at') return done(world.at(url, res))
-    if (req.method === 'GET' && url.pathname === '/world/look') return done(world.look(url, res))
-    if (req.method === 'GET' && url.pathname === '/world/tops') {
+    if (req.method === 'GET' && route === '/world/at') return done(world.at(url, res))
+    if (req.method === 'GET' && route === '/world/look') return done(world.look(url, res))
+    if (req.method === 'GET' && route === '/world/tops') {
       // The world answers one thing at a time: so many columns a second for everyone together, and no more.
       const now = Date.now(), columns = Math.max(0, (Number(url.searchParams.get('x1')) - Number(url.searchParams.get('x0'))) * (Number(url.searchParams.get('z1')) - Number(url.searchParams.get('z0')))) || 0
       if (now - topsSince > 1000) { topsSince = now; topsAsked = 0 }
       if (columns <= TOPS_MOST && (topsAsked += columns) > TOPS_MOST * 2) return send(res, 429, 'too many columns asked after: wait a second')
       return done(world.tops(url, res))
     }
-    if (req.method === 'GET' && url.pathname === '/world/things') return world.things(url, res)
-    if (req.method === 'GET' && url.pathname === '/world/rules') return done(world.rules(url, res))
-    if (req.method === 'GET' && url.pathname === '/world/realm') return world.realm(res)
-    if (req.method === 'GET' && url.pathname === '/world/') return world.guide(res)
+    if (req.method === 'GET' && route === '/world/things') return world.things(url, res)
+    if (req.method === 'GET' && route === '/world/rules') return done(world.rules(url, res))
+    if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
+    if (req.method === 'GET' && route === '/world/') return world.guide(res)
     return send(res, 404, 'not here')
   }
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')

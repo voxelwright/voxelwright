@@ -12,7 +12,8 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
   `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
-  report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world.
+  report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world, home, and any
+  number of realms beside it, each a world of its own ("Realms" below).
 - `world.mjs`: the shared world's own process, a thread behind the server that runs the core: it does what it is
   asked in order and says what happened. `page/link.ts` is a page's line to it.
 
@@ -273,6 +274,48 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
 - **Not there**: a rule hears nothing of blows, of keys, of someone coming near or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything, show anything on the screen or slow the
   clock. Residents (the town's own rule) are not actors. #264 says which of these come next.
+
+## Realms (#264)
+
+One server keeps many worlds. Each is a realm: the same planet by the same rule, with its own file of what was done
+there, its own rules and people, a place where one arrives and a look of its own. One of them is home: the world of
+`--world`, which `/world/…` and `?shared=1` have always meant and still do.
+
+```sh
+node serve.mjs --port 5770 --world ~/.village/engine/realms/try/home.log    # realms are kept in ~/.village/engine/realms/try/home.realms/ (or --realms dir)
+curl -s -X POST http://127.0.0.1:5770/realms -d '{"by": "me", "name": "A grey dawn", "about": "a quiet street before anyone is up", "arrive": {"at": [9000, 4070], "yaw": 1.57}, "look": {"hour": 6.2, "rain": 0.3, "tint": [0.9, 1, 0.95]}}'
+curl -s http://127.0.0.1:5770/realms                               # every realm: {id, name, about, arrive, look, home, awake, pages}
+curl -s "http://127.0.0.1:5770/realm/a-grey-dawn/world/at?x=700&y=154&z=4070"   # everything /world/… is, of that realm
+curl -s -X DELETE http://127.0.0.1:5770/realm/a-grey-dawn          # takes it out: the file is moved to gone/, not destroyed
+```
+
+Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a page at home.
+
+- **A realm is its file.** The file is the asks done to that world, and the `realm` asks among them say what the
+  realm is: `name`, `about` (the asker's own words), `arrive` (`{at: [x, z] or [x, y, z], yaw, pitch}`, cells and
+  radians) and `look` (`{hour, rain, grade: [colour, contrast], tint: [r, g, b]}`). A file put into the realms folder
+  is a realm when the server next starts; the server reads what each is without starting it. `POST
+  /realm/<id>/world/ask {"realm": {"look": {"hour": 7}}}` changes only what is given, and every page there is told.
+- **A process each, only while needed.** A realm starts when it is first asked anything and is stopped when nobody
+  has read its stream or asked it anything for `--idle` seconds (300) and nothing in it moves, burns or flows. At
+  most 16 are awake at once (an idle one gives way) and a server keeps at most 64. What was done to a realm is in
+  its file; bodies in seats, actors and what rules kept are lost when it rests, as they are when a server restarts.
+  `GET /realms` and `GET /realm/<id>` never wake one.
+- **What one costs** (M1 Pro, `node test/realms.mjs --measure`, the middle of three runs): 15 to 21 MB of the
+  server's memory a realm awake with no rules (home alone 208 MB, with ten more 359 to 382 MB); with one rule in
+  each, whose thread is the realm's too, 33 MB for the second and 19 MB each over ten. From asking a sleeping realm
+  to its first answer: 45 to 185 ms, with or without a thousand edits or a rule in its file. A realm that rests
+  ends its rules' threads with its own (the server's threads counted: 13, 15 with a realm of one rule, 12 at rest).
+- **The helper is given a realm's address** to make things there: `node helper.mjs --world
+  http://127.0.0.1:5770/realm/a-grey-dawn` (it builds `…/world/ask` from what it is given).
+- Every new address refuses a request whose `Origin` is another site's, as `/world/…` does. Nobody is asked who
+  they are: whoever can reach the server can make a realm and take one out.
+- `node test/realms.mjs` checks it with plain requests against the real server: what is done in one realm is not
+  done in another, start on need, rest when idle, kept over a restart, taken out, refusals.
+- **Making a realm from words** is the maker lane's: its seam on the server is `POST /realms` (a name is enough;
+  then rules and things go in through `/realm/<id>/world/ask`).
+- **Not there yet**: a page steps between realms only by loading again with another `?realm=` (next), and `arrive`
+  and `look` are kept and told but no page applies them yet (next).
 
 ## Checks and tools
 

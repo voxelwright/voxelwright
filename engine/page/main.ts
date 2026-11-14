@@ -319,7 +319,8 @@ async function main() {
   // `?shared=1`: the world is the one the page server keeps for everyone (world.mjs), and this page is a view of
   // it. It applies nothing of its own: what it asks comes back in the world's stream, in the world's order, with
   // what everyone else asked.
-  const far = query.has('shared') ? link() : null
+  // `?realm=id`: another realm that the server keeps (#264), in place of home.
+  const far = query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
   const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker('/page/mover.ts', { type: 'module' })
   /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
   const asked: boolean[] = []

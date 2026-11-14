@@ -42,6 +42,7 @@ const checks = [
   ['living', 'node', ['test/living.mjs'], true],
   ['driven', 'node', ['test/driven.mjs'], true],
   ['rules', 'node', ['test/rules.mjs'], true],
+  ['realms', 'node', ['test/realms.mjs'], false],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['sound', 'node', ['test/sound.mjs'], false],

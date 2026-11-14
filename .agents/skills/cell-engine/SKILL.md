@@ -1768,3 +1768,39 @@ cost time:
   binary's own added context. A warm process is the next thing to measure before people answer by model.
 - **Not there**: see the README. The list of what a rule must come to hear and do, checked against five realms
   that are not alike, is on #264.
+
+## Realms: many worlds on one server (#264, `serve.mjs` "The realms"; November 13)
+
+How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`, "REALMS"). What decided its shape:
+
+- **Every realm is the same planet.** The land is one rule and the town must stay cell for cell what it is, so a
+  realm is not a different map: it is another file of edits, other rules, another place to arrive and another look.
+  That is also why two realms' sectors are the same wherever neither has been edited, which the step between them
+  and the portal lean on.
+- **The file owns the record.** What a realm is (name, about, arrive, look) is the `realm` asks in its own file,
+  merged in order (`changed`: only what is given, and of `look` each part). There is no index beside the files to
+  go stale: the server reads each file once as it starts (`recordOf`: only frames that hold `"realm"` are parsed)
+  and hears every later change as the echo. A world file copied into the folder is a realm.
+- **`open(of)` is the old `if (worldFile)` block as a function**, a closure a realm: its log, things, rules,
+  readers, caps on asks. `/realm/<id>/world/<what>` strips its prefix and falls into the dispatch `/world/<what>`
+  always had, so nothing that speaks to a world changed: `make/place.mjs` and the helper build `${world}/world/…`
+  and take a realm's address as they took a server's.
+- **Measured** (M1 Pro, Node 25, `node test/realms.mjs --measure`, middle of three, on main after rules moved to
+  threads of their own): the server with home alone is 208 MB; a realm awake with no rules adds 15 to 21 MB (a
+  thread, a core as wasm with its own memory). With one rule each the second realm adds 33 MB and ten add 19 MB
+  each: a rule's thread and interpreter are the realm's cost too. From asking a sleeping realm to its first answer
+  is 45 to 185 ms, the same with a thousand edits in its file (edits are only appended on replay; sectors are worked
+  out when asked for) or a rule. Each thread compiles `core.wasm` again; handing over a compiled module was not
+  needed at these times.
+- **A rule's thread ends with its realm.** Ending a world's thread ends the threads it started: the server's
+  threads counted with `ps -M` were 13 with home alone, 15 with a realm of one rule awake, 12 with both at rest.
+- **Resting.** A realm is stopped after `--idle` seconds (300, longer than a seat's body stays) with no reader, no
+  request, nothing waiting and nothing moving, burning or flowing (the counts its process last said). `close`
+  answers what waits before it ends the thread. Home rests too and wakes on the next request. Rules' `keep`,
+  actors and seats are lost by a rest exactly as by a restart.
+- **A check of mine was wrong before the server was**: it looked for air where a blast had been after a restart,
+  and rubble had come to rest there (the same trap "A shared world" names). It builds a ball of brick instead.
+- **Not there**: nobody is asked who they are, so anyone who can reach the server can make and take out realms
+  (taken-out files go to `gone/`); the cap on `tops` is still one for the whole server; a realm whose thread fails
+  stays down until the server restarts.
+
