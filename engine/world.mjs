@@ -446,7 +446,9 @@ function drop(id) {
 const does = new Map()
 /** A body says words: everyone near hears, and it is not told to rules (one rule's actors cannot set another's talking for ever). */
 const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name || 'Someone', text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
-const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen })
+/** What this world is called and is about, as the server last said (it keeps the realm's record): for the people of it who are asked to think. */
+let realmIs = null
+const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen, realm: () => realmIs })
 setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */
 does.set('actor', (rule, w, now, wrong) => {
@@ -575,7 +577,8 @@ function tops([x0, z0, x1, z1], from) {
   return { high, kinds }
 }
 parentPort.on('message', (said) => {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called } = said
+  if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; return }
   // Whether a model answers for this world's people now: said at once, whatever else waits.
   if (answers !== undefined) { voiced = answers === true; return }
   // The core swapped for another build (#264, the workshop): a new module of the same file is started, and from then

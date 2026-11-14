@@ -649,6 +649,12 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   attempts to break the person or fill in a note, one of them through what the person remembers) are kept with a real model's replies in `test/mind-kept.json`
   (Sonnet's; Haiku's held too);
   `node test/mind.mjs --real` asks them again (seventeen short replies on your subscription).
+- **They know where they live.** With every thought the model is told what the realm is called and is about
+  (its record, as it is now), as the world the person lives in: its streets, year and manners colour what they
+  say, and what its maker wrote of a secret or of what is to come stays unknown to them. Real Sonnet in a realm
+  called "Manhattan, 1999" whose description gives the game away: asked the way downtown, "grab the 1 train at
+  the corner"; asked what turns people into agents, "you're asking the wrong courier". `realm: false` in
+  `world.think` leaves it out. About 150 tokens more an answer.
 - **They remember.** The world's process keeps what each actor lately heard and answered (the last eight lines,
   for an hour, while the world runs) and shows it to the model with the next thought: a rule keeps nothing for it.
   `before: [...]` in `world.think` says instead what was said before; `before: []` that they remember nothing.

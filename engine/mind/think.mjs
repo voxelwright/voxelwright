@@ -7,7 +7,7 @@
 //
 // Nothing here knows what a note means, or what any world is about.
 import { text } from '../text.mjs'
-import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, wanted } from './form.mjs'
+import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, REALM_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, wanted } from './form.mjs'
 
 /** How long a thought may take before its rule is told it failed (ms). */
 const THOUGHT_MOST = 20_000
@@ -22,8 +22,9 @@ const REMEMBERED = 60 * 60_000, PEOPLE_MOST = 512
  * @param show    tells pages how a body is (it thinks, it has stopped thinking)
  * @param hand    hands an ask to the server, for whoever voices the world
  * @param happen  tells one rule that something happened
+ * @param realm   what this world is called and is about, in its maker's words: {name, about}, or null
  */
-export function thinking({ actor, say, show, hand, happen }) {
+export function thinking({ actor, say, show, hand, happen, realm = () => null }) {
   /** Asks in flight, by number: whose, for which actor, what notes were wanted, and what has been said of the answer so far. */
   const asks = new Map()
   let n = 0
@@ -78,7 +79,9 @@ export function thinking({ actor, say, show, hand, happen }) {
       p.asked = ask.n; p.thinking = true; show(p)
       // What was said before: what the world remembers of this actor's talk, unless the rule says what it was (before: [] and they remember nothing).
       const before = Array.isArray(w.before) ? w.before.slice(-BEFORE_MOST).map((b) => ({ who: b?.who === 'self' ? 'self' : text(b?.who, 24), text: text(b?.text, SAY_MOST) })).filter((b) => b.who && b.text) : recalled(`${rule.id}/${w.id}`, now)
-      hand({ n: ask.n, ask: { name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), before, from: ask.from, heard: ask.heard, notes: want } })
+      // Where they live: what the realm is called and is about, unless the rule says they are not to be told (realm: false).
+      const r = w.realm === false ? null : realm(), here = r && (r.name || r.about) ? { name: text(r.name, 40), about: text(r.about, REALM_MOST) } : undefined
+      hand({ n: ask.n, ask: { realm: here, name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), before, from: ask.from, heard: ask.heard, notes: want } })
     },
     /** What came back for an ask, from the server: `{n, say, more}` while it is still coming (the words so far), `{n, say, notes}` at its end (all of them), or `{n, failed}`. */
     answer(m) {

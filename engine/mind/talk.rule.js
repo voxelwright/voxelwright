@@ -32,7 +32,7 @@ on('said', (world, e) => {
   if (!id) return
   held[id] = world.now
   world.actor(id, { to: null, face: e.at })
-  world.think(id, { who: 'Someone who lives in this town: ' + pick(TRADES, id, 3) + ', ' + pick(MANNERS, id, 5) + '. Their name is ' + pick(NAMES, id, 7) + '. They were walking somewhere when they were spoken to, and answer as people do in the street: briefly.', where: 'out on a street of the town they live in', heard: e.text, from: e.name })
+  world.think(id, { who: 'Someone who lives here: ' + pick(TRADES, id, 3) + ', ' + pick(MANNERS, id, 5) + '. Their name is ' + pick(NAMES, id, 7) + '. They were walking somewhere when they were spoken to, and answer as people do in the street: briefly.', where: 'out in the street, on the way somewhere', heard: e.text, from: e.name })
 })
 on('thought', (world, e) => {
   const held = world.keep.held || {}
