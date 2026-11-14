@@ -71,7 +71,9 @@ on('said', (world, e) => {
 let browser
 try {
   console.log('Said by rules')
-  const guide = await (await fetch(`${server.url}/world/`)).text()
+  // A server's guide is without its plugins' lines for its first moments: asked again until they are in.
+  let guide = ''
+  for (const began = Date.now(); Date.now() - began < 8000; await wait(100)) { guide = await (await fetch(`${server.url}/world/`)).text(); if (guide.includes('world.music(')) break }
   check(/world\.music\(/.test(guide) && ['town', 'coast', 'sea', 'snow', 'night', 'danger', 'making', 'phrygian', 'drive'].every((w) => guide.includes(w)), 'the guide names world.music, every mood it can be like, the modes and drive')
   await post('join', { by: 'ada', at: [700, 4012] })
   check(await playing() === undefined, 'a realm with no word about music says nothing of it: it keeps the place’s')

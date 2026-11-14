@@ -25,7 +25,7 @@ const post = (path, body) => send(path, { method: 'POST', body: JSON.stringify(b
 const rule = (id, source) => post('ask', { by: 'tester', rule: { id, name: id, source } })
 const how = async (id) => (await send('rules')).find((r) => r.id === id)
 const until = async (what, ask, ms = 8000) => { for (const began = Date.now(); Date.now() - began < ms; await wait(100)) { const v = await ask(); if (v) return v } throw new Error(`never: ${what}`) }
-/** Every sound the world tells of from now for so long: frames of kind 10. */
+/** Every sound the world tells of from now for so long: what the sound plugin says once (frames of kind 11). */
 const listen = async (ms) => {
   const r = await fetch(`${server.url}/world/stream?from=0`), reader = r.body.getReader(), found = []
   let held = Buffer.alloc(0)
@@ -39,7 +39,7 @@ const listen = async (ms) => {
     if (!got.value) break
     held = Buffer.concat([held, got.value])
     let at = 0
-    for (; held.length - at >= 12;) { const kind = held.readUInt32LE(at), size = held.readUInt32LE(at + 8); if (held.length - at < 12 + size) break; if (kind === 10) found.push(JSON.parse(held.subarray(at + 12, at + 12 + size).toString())); at += 12 + size }
+    for (; held.length - at >= 12;) { const kind = held.readUInt32LE(at), size = held.readUInt32LE(at + 8); if (held.length - at < 12 + size) break; if (kind === 11) { const m = JSON.parse(held.subarray(at + 12, at + 12 + size).toString()); if (m.plugin === 'sound' && m.once) found.push(m.once) } at += 12 + size }
     held = held.subarray(at)
   }
   void reader.cancel()
@@ -88,7 +88,9 @@ let browser
 try {
   console.log('The form')
   check(Object.values(LIKES).every((l) => l.patches.every((p) => 'patch' in patch(JSON.parse(JSON.stringify(p)))) && l.says && l.reach >= 2 && l.reach <= 300), `the ${Object.keys(LIKES).length} kept sounds are patches in the form, each with what it is like and how far it carries`)
-  const guide = await (await fetch(`${server.url}/world/`)).text()
+  // A server's guide is without its plugins' lines for its first moments: asked again until they are in.
+  let guide = ''
+  for (const began = Date.now(); Date.now() - began < 8000; await wait(100)) { guide = await (await fetch(`${server.url}/world/`)).text(); if (guide.includes('world.sound(')) break }
   check(/world\.sound\(/.test(guide) && Object.keys(LIKES).every((k) => guide.includes(`${k} (`)) && guide.includes('patch: a sound of your own'), 'the guide a model writes rules from names world.sound, every kept sound and the patch’s form')
 
   console.log('Two rules that are not alike')

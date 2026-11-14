@@ -1,14 +1,15 @@
-// What a realm sounds like (#264, the sound lane #247): for the world's process. A rule makes a sound at a place,
-// on one of its actors or on a person (`world.sound`), and everyone near hears it as the world's own sounds are
+// What a realm sounds like (#264, the sound lane #247), as an engine plugin. A rule makes a sound at a place, on
+// one of its actors or on a person (`world.sound`), and everyone near hears it as the world's own sounds are
 // heard: placed, later by its distance, duller far off. The sound is a word from a small kept set (page/sound/
 // likes.ts) or a patch the rule wrote itself, which is data in the synthesiser's own form (page/sound/patch.ts)
 // and is read here by the same check a page reads it by. Nothing here makes a sample, and nothing knows what a
 // sound is for: a bell at the end of a round and a bell on a bicycle are the same bell.
 //
 // Every field is a stranger's. What is wrong is said to the rule and left; what is right is cut to what a page can
-// be sent: so many a second from one rule, so many notes, held so long.
-import { LIKES } from '../page/sound/likes.ts'
-import { patch } from '../page/sound/patch.ts'
+// be sent: so many a second from one rule, so many notes, held so long. A sound is told to the pages there now
+// (`pages.once`): it is heard when it is made or not at all.
+import { LIKES } from '../../page/sound/likes.ts'
+import { patch } from '../../page/sound/patch.ts'
 
 /** The most sounds a rule may make a second, the most notes in one, how long one may be held (s), and the most a patch of a rule's own may be as JSON. */
 export const SOUNDS_A_SECOND = 12, NOTES_MOST = 8, HELD_MOST = 4, PATCH_MOST = 1200
@@ -17,13 +18,7 @@ const REACH = [2, 300]
 const FIELDS = ['do', 'id', 'like', 'patch', 'at', 'on', 'force', 'size', 'note', 'notes', 'pitch', 'gap', 'for', 'reach']
 const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi
 
-/**
- * @param folk    everyone with a body, by the name the world knows them by: {at (feet), rule?}
- * @param tall    how tall a body is, cells
- * @param stand   where feet stand at a column, or null: (x, z) => y
- * @param tell    says something to the server (a sound, for whoever is reading now)
- */
-export function sounding({ folk, tall, stand, tell }) {
+export default ({ folk, tall, stand, pages }) => {
   /** By rule: when its second began and how many it has made in it. */
   const made = new Map()
   /**
@@ -70,7 +65,7 @@ export function sounding({ folk, tall, stand, tell }) {
     let m = made.get(rule.id)
     if (!m || now - m.since >= 1000) made.set(rule.id, m = { since: now, n: 0 })
     if (++m.n > SOUNDS_A_SECOND) { if (m.n === SOUNDS_A_SECOND + 1) wrong(`a rule may make ${SOUNDS_A_SECOND} sounds a second: the rest were left`); return }
-    tell({ sound: out })
+    pages.once(out)
   }
-  return { sound, dropped: (id) => { made.delete(id) } }
+  return { does: { sound }, dropped: (id) => { made.delete(id) } }
 }

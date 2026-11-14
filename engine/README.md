@@ -385,7 +385,7 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   every word put as text (markup a rule shows is words on the screen), and a pick reaches the rule that shows it as
   `pick`: who, which. Checked in `test/hands.mjs` with a kettle that shows how near the boil it is and asks whoever
   wants tea how they take it.
-- **What a realm sounds like** (`rules/sound.mjs`, `page/sound/likes.ts`). `world.sound({like, at, on, force, size,
+- **What a realm sounds like** (`plugins/sound`, `page/sound/likes.ts`). `world.sound({like, at, on, force, size,
   note, notes, gap, for, reach, patch})`: a rule makes a sound at a place, on one of its actors or on a person, and
   everyone near hears it as the world's own sounds are heard (placed, later by its distance, duller far off).
   `like` is one of 23 kept sounds by what they are like (a blow, a shot, a bell, a cheer, a strum, a whistle...);
@@ -516,11 +516,11 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/sound` (`world.sound`: a rule's sound, told to pages once), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns
-  today under `does` (the doors are the ones `rules/hands.mjs` and `rules/sound.mjs` are given); move its guide
+  today under `does` (the doors are the ones `rules/hands.mjs` is given); move its guide
   lines to `guide.txt`; take its `does.set` and its lines out of `world.mjs` and `GUIDE`; if it tells pages
   something, send it with `pages.state` or `pages.once` and read it in `page.ts` in place of a frame kind of its
   own. If it needs a door that is not there, add it to `doors` in `world.mjs` and to the list above.

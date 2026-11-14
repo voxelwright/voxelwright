@@ -79,7 +79,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   const written = new Map<string, Patch>()
   const num = (v: unknown, lo: number, hi: number, or: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : or)
   /**
-   * A sound a rule made (rules/sound.mjs), as the world told it: {at, like | patch, force, size, hz, gap, for, reach}.
+   * A sound a rule made (plugins/sound), as the world told it: {at, like | patch, force, size, hz, gap, for, reach}.
    * The world's process checked it; it is read again here as a stranger's, because this is where it is played.
    */
   const sounded = (v: unknown) => {
@@ -110,7 +110,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   }
   /** What the realm's music is like, if a rule has said: the mood's name and how much of it is in. */
   let realm: { key: string; pace: number; drive: number | null; now: boolean } | null = null
-  /** What a rule said the realm's music is like (rules/sound.mjs), or null for the place's own: read again as a stranger's. */
+  /** What a rule said the realm's music is like (plugins/music), or null for the place's own: read again as a stranger's. */
   const tuned = (v: unknown) => {
     const m = v as Record<string, unknown> | null
     if (!m || typeof m !== 'object' || typeof m.like !== 'string' || !Object.hasOwn(MOODS, m.like)) { realm = null; return }

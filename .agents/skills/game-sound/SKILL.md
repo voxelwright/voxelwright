@@ -157,12 +157,12 @@ yes in the thread that asks), so this is built from the post's description and f
 - The checks read the kept replies as data and measure them (the bell rings 6 s from 185 Hz, the duck 0.06 s).
   No check runs a model, and none proves a model integration beyond these seven runs.
 
-## A realm's rule makes a sound (`engine/rules/sound.mjs`, `page/sound/likes.ts`; #264)
+## A realm's rule makes a sound (`engine/plugins/sound`, `page/sound/likes.ts`; #264)
 
 - `world.sound({like | patch, at | on, force, size, note | notes | pitch, gap, for, reach})` is an entry in the
   world process's `does`. It checks every field as a stranger's (a stray field, a like that is not kept, a patch
   that `patch()` refuses or that is over 1,200 characters, nobody to sound on: each is left and said to the rule),
-  caps a rule at twelve sounds a second, and tells pages in a frame of its own (kind 10, not kept, only to readers
+  caps a rule at twelve sounds a second, and tells pages once through the plugin (`pages.once`, not kept, only to readers
   who are live). The page reads it again as a stranger's (`world.ts` `sounded`) and plays it through `voice.play`
   like anything else: distance, delay, side.
 - A patch a rule wrote is kept by its JSON, the last 96; an older one gives its place in the synthesiser back

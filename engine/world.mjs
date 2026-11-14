@@ -24,7 +24,6 @@ import { plugger } from './plugins.mjs'
 import { blows } from './rules/blows.mjs'
 import { bodies } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
-import { sounding } from './rules/sound.mjs'
 import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -431,7 +430,6 @@ const happen = (event, e, only) => ruled.happen(event, e, only)
 function drop(id) {
   ruled.drop(id)
   hand.dropped(id)
-  noise.dropped(id)
   plug.dropped(id)
   getting.dropped(id)
   body.dropped(id)
@@ -537,9 +535,7 @@ does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
 does.set('show', hand.show)
-// What a realm sounds like (rules/sound.mjs): a sound at a place or on someone, for everyone near.
-const noise = sounding({ folk, tall: TALL, stand, tell: (m) => parentPort.postMessage(m) })
-does.set('sound', noise.sound)
+// What a realm sounds like, `world.sound`, is a plugin (plugins/sound), as its music is (plugins/music).
 // Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
