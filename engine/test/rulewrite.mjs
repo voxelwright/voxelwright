@@ -52,7 +52,9 @@ try {
   const THROWS = "on('start', (world) => { world.actor('a', { name: 'A', at: [700, 4010] }) })\non('tick', (world) => { world.people.find((p) => p.id === 'nobody').at[0] })"
   const FAR = "on('start', (world) => { world.actor('a', { name: 'A', at: [9000, 9000] }) })"
   const SLOW = "on('start', (world) => { world.actor('a', { name: 'A', at: [700, 4010] }) })\non('tick', () => { for (;;) {} })"
-  for (const [what, source, told] of [['does not parse', SYNTAX, /did not start/], ['throws when the clock runs', THROWS, /world said|stopped/], ['puts its actor far from the asker', FAR, /from the asker/], ['never returns from a call', SLOW, /stopped|world said|interrupted/]]) {
+  // The fault of November 14: people with names who stand there, a rule that listens, and nobody ever answers whoever walks up and speaks.
+  const DEAD = "on('start', (world) => { for (const [n, name] of ['Joe', 'Kate', 'Maria'].entries()) world.actor('p' + n, { name, at: [694 + n * 6, 4012] }) })\non('said', (world, e) => { if (/the password is swordfish/.test(e.text)) world.actor('p0', { say: 'Come in.' }) })"
+  for (const [what, source, told] of [['has people who never answer when spoken to from beside them', DEAD, /nobody said a word/], ['does not parse', SYNTAX, /did not start/], ['throws when the clock runs', THROWS, /world said|stopped/], ['puts its actor far from the asker', FAR, /from the asker/], ['never returns from a call', SLOW, /stopped|world said|interrupted/]]) {
     const model = kept(reply(source), reply(WAVER))
     const fixed = await write({ wish: 'someone who waves', world, where, model, trial: trial.url, cannot })
     check(fixed.state === 'there' && fixed.tries === 2 && told.test(model.seen[1].prompt) && !fixed.rough, `a rule that ${what} is not put in: the model is told (${(/did not work: (.{0,70})/.exec(model.seen[1].prompt) ?? [])[1]}...) and its second is`)

@@ -174,6 +174,33 @@ export async function tried(trial, source, { wish, at, seconds = 4 }) {
     if (!end.running) return { ok: false, why: `it was stopped while it ran: ${end.error}`, did }
     if (end.error) return { ok: false, why: `while it ran the world said: ${end.error}`, did }
     if (end.worst > 60) return { ok: false, why: `one call took ${Math.round(end.worst)} ms: a handler must be quick (do less each time, or spread the work over ticks)`, did }
+    // Does anyone answer? A rule that hears what is said and has people of its own is met as a player meets it:
+    // the trial's person goes and stands two metres from the nearest of them and speaks, twice. If for twenty seconds
+    // nobody says a word back and none of them so much as stirs, the world is one where nothing happens, however
+    // well the rule runs (seen November 14: a realm put in four times with seventeen named people who never
+    // answered, because the rule forgot each one in the call that took them). What is said back comes of the
+    // trial's stand-in voice, so a rule that asks its people to think is answered at once.
+    if (end.actors > 0 && end.listens.includes('said') && did.near) {
+      const theirs = (a) => (a.people ?? []).filter((p) => p.what === 'an actor of a rule')
+      const first = theirs(around).sort((a, b) => a.far - b.far)[0]
+      await post('join', { by: 'someone', at: [first.at[0], first.at[2] + 20] })
+      await wait(400)
+      const was = await send('around?by=someone&within=1200'), since = was.heard_up_to ?? 0
+      // Those who stood within six metres when the words were said: one of them is to say something, or do something else than it was doing. Others turning up meanwhile is not an answer.
+      const close = theirs(was).filter((p) => p.far < 60)
+      const moved = (a) => close.some((c) => { const same = theirs(a).filter((p) => p.name === c.name).sort((x, y) => Math.hypot(x.at[0] - c.at[0], x.at[2] - c.at[2]) - Math.hypot(y.at[0] - c.at[0], y.at[2] - c.at[2]))[0]; return !same || same.doing !== c.doing || Math.hypot(same.at[0] - c.at[0], same.at[2] - c.at[2]) > 5 })
+      let stirred = false
+      for (const text of ['hello', 'excuse me, can you help me?']) {
+        await post('say', { by: 'someone', text })
+        for (const began = Date.now(); Date.now() - began < 10_000 && !stirred; await wait(500)) {
+          const now = await send(`around?by=someone&within=1200&since=${since}`)
+          stirred = (now.heard ?? []).some((h) => h.name !== 'someone') || moved(now)
+        }
+        if (stirred) break
+      }
+      did.answered = stirred
+      if (!stirred) return { ok: false, why: `someone walked up to ${first.name || 'one of its people'}, stood two metres away and said "hello", then "excuse me, can you help me?", and for twenty seconds nobody said a word, turned or stirred, though the rule has ${end.actors} actor${end.actors > 1 ? 's' : ''} and listens for what is said. To whoever plays, nothing happens here. Look at how the rule keeps track of its people: an actor asked for in a call (made, or taken from the residents) may not be in world.people or world.who until the next call, so do not forget one because it is not there yet; and have whoever is spoken to from near answer (world.think, or a line of their own) or do something that can be seen`, did }
+    }
     if (end.actors > 0 && !did.near) return { ok: false, why: `its ${end.actors} actor${end.actors > 1 ? 's are' : ' is'} more than 40 m from the asker, who stands at [${at[0]}, ${at[2]}]: put them within 30 to 80 cells of there`, did }
     return { ok: true, why: '', did }
   } finally {
