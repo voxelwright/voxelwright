@@ -20,3 +20,17 @@ export function clearWay(stands: (x: number, y: number, z: number) => boolean, h
   while (free > 0 && far > 0 && tight(free)) free = Math.max(0, free - 1 / far)
   return free
 }
+
+/**
+ * How much of the way back the eye is this frame, from how much it was: `free` is what is clear now and `ahead` what
+ * will be clear where the head is going to be in a third of a second. What is in the way now brings it in at once;
+ * what is about to be brings it in over that third of a second, so that walking in at a doorway the eye is already
+ * near the head as the lintel passes over (it came in 2.2 m in one frame); and it goes out again over most of a second.
+ */
+export function roomAfter(room: number, free: number, ahead: number, dt: number): number {
+  if (free < room) room = free
+  const to = Math.min(free, ahead)
+  return to < room ? room + (to - room) * (1 - Math.exp(-dt * 10)) : Math.min(to, room + dt * 1.5)
+}
+/** How far ahead the eye looks for what will be in its way (seconds). */
+export const AHEAD = 0.33

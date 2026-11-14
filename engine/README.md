@@ -336,7 +336,9 @@ on foot as they do flying.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is
-  not drawn in its way. The eye that rides is kept out the same way (`page/eye.ts`, #367): driven beside house
+  not drawn in its way. What will be in the way where the body is going in a third of a second brings the eye in before
+  it gets there (`roomAfter`): walking in at a doorway it came in 2.2 m in one frame as the lintel passed over, now 0.36 m.
+  The eye that rides is kept out the same way (`page/eye.ts`, #367): driven beside house
   fronts it was inside them for 70 frames of 166, and a frame drawn from inside a wall took 50 ms. For this the page's own thread's core is told of every edit (`tellCore` in `main.ts`), so
   `world_kind` there answers for what was built and broken too. `engine.me.back` says how far back the eye is.
 - **A slowed world, tried**: with the clock at a quarter and the one who asked spared, she walks at 1.4 m/s as she
@@ -1067,7 +1069,7 @@ node test/core-time.mjs --rows 45000                             # what a sector
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
-node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
+node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow,room,fight,air [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march (#367): A and B measured turn about, seconds apart, only while the GPU is quiet; `--other dir` for A from another checkout; alone it is A against A
 ```
 

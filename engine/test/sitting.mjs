@@ -49,7 +49,7 @@ const recorder = () => {
     mark(name) { label = names.push(name) - 1 },
     turn(rate) { turning = rate },
     slow(ms) { burn = ms },
-    peek(name) { const at = names.lastIndexOf(name), got = []; for (let i = 0; i < n; i++) if (rows[i * F + 3] === at) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9], rows[i * F + 12]]); return got },
+    peek(name) { const got = []; for (let i = 0; i < n; i++) if (names[rows[i * F + 3]] === name) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9], rows[i * F + 12]]); return got },
     take() { const got = { rows: Array.from(rows.subarray(0, n * F)), long: long.splice(0), names: [...names], F }; n = 0; return got },
   }
 }
@@ -189,6 +189,58 @@ parts.ride = async () => {
   await shot('ride-off')
 }
 
+// A room a rule builds, with steps and a deck beside it: in by the doorway, the head turned all the way round inside, out again, up the steps, off the deck's end.
+parts.room = async () => {
+  const said = async (name) => { const t = await traced(name), eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0), feet = t.map((r, i) => i ? Math.abs(r[2] - t[i - 1][2]) : 0); line(`${name}: feet went ${((t.at(-1)[1] - t[0][1]) / 10).toFixed(1)} m east, ${((t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m south, ${((t.at(-1)[2] - t[0][2]) / 10).toFixed(2)} m up; the eye in something ${t.filter((r) => r[7] === 2).length} of ${t.length} frames, beside it ${t.filter((r) => r[7] === 1).length}; biggest move in a frame: eye ${Math.max(...eye).toFixed(1)}, feet up or down ${Math.max(...feet).toFixed(1)} cells`); return t }
+  await post('/world/ask', { by: 'sitting', rule: { id: 'builder', name: 'A room for whoever asks', source: `on('said', (world, e) => { if (/a room/.test(e.text)) world.build('room', { at: [e.at[0] + 60, e.at[2]], parts: [['room', 'wood', '2:6', 0, 0, -25, 50, 28, 25, '-x'], ['steps', 'wood', '2:8', 0, 0, 34, 40, 20, 50, '-x', 2], ['box', 'wood', '2:8', 40, 0, 34, 80, 20, 50]] }) })` } })
+  await down(74, 408.3)
+  await wait(800)
+  await mark('room-built'); await page.evaluate(() => globalThis.engine.say('a room')); await wait(3000)
+  await shot('room-built')
+  await mark('room-in'); await keys(['KeyW'], 5500)
+  await said('room-in')
+  await mark('room-round'); await turnBy(1.6, 4200)
+  await said('room-round')
+  await shot('room-inside')
+  await page.evaluate(() => { globalThis.engine.pose.yaw = -Math.PI / 2 })
+  await mark('room-out'); await keys(['KeyW'], 6500)
+  await said('room-out')
+  // Round to the foot of the steps (south of the room), and up them.
+  await page.evaluate(() => { globalThis.engine.pose.yaw = Math.PI }); await keys(['KeyW'], 3200)
+  await page.evaluate(() => { globalThis.engine.pose.yaw = Math.PI / 2 })
+  await mark('steps-up'); await keys(['KeyW'], 7000)
+  await said('steps-up')
+  await shot('steps-top')
+  await mark('deck-off'); await keys(['ShiftLeft', 'KeyW'], 2500); await wait(1200)
+  await said('deck-off')
+}
+// Thrown at, pushed and put on the ground by a rule: what the eye does.
+parts.fight = async () => {
+  await post('/world/ask', { by: 'sitting', rule: { id: 'pitcher', name: 'A pitcher', source: `on('start', (world) => world.actor('pitcher', {name: 'Bea', at: [800, 4083]}))\non('said', (world, e) => { if (/throw at me/.test(e.text)) world.throw({from: 'pitcher', at: e.by, speed: 250, size: 2, material: 'wood'}); if (/push me/.test(e.text)) world.push(e.by, {to: [0, 0.4, 1], speed: 90}); if (/down/.test(e.text)) world.down(e.by, {for: 2.5}) })` } })
+  await down(76, 408.3)
+  await wait(1500)
+  for (const [name, words, ms] of [['fight-thrown-at', 'throw at me', 2500], ['fight-thrown-at', 'throw at me', 2500], ['fight-pushed', 'push me', 3000], ['fight-down', 'down', 4000]]) {
+    await mark(name); await page.evaluate((w) => globalThis.engine.say(w), words); await wait(ms)
+    const t = await traced(name), eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0)
+    line(`${name}: the feet were moved ${(Math.hypot(t.at(-1)[1] - t[0][1], t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m; the eye's biggest move in a frame ${Math.max(...eye).toFixed(1)} cells; in something ${t.filter((r) => r[7] === 2).length} of ${t.length} frames`)
+  }
+  await shot('fight-end')
+}
+// Falling from 30 m, and flying: up, along, and down again.
+parts.air = async () => {
+  await page.evaluate(() => { const e = globalThis.engine; if (e.me.on) e.me.walk(false); e.pose.x = 76; e.pose.z = 408.3; e.pose.y = e.ground(76, 408.3) + 30; e.pose.yaw = Math.PI / 2; e.pose.pitch = -0.3 })
+  await mark('fall'); await page.evaluate(() => globalThis.engine.me.walk(true)); await wait(4500)
+  let t = await traced('fall'), eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0)
+  const landed = t.findIndex((r, i) => i > 5 && Math.abs(r[2] - t.at(-1)[2]) < 1)
+  line(`a fall of ${((t[0][5] - t.at(-1)[5]) / 10).toFixed(1)} m takes ${(t[landed][0] - t[0][0]).toFixed(2)} s; the eye's biggest move in a frame ${Math.max(...eye).toFixed(1)} cells (${(Math.max(...eye) * 6).toFixed(0)} m/s at 60 frames a second)`)
+  await page.evaluate(() => { globalThis.engine.me.can = { fly: 60 } })
+  await mark('fly-up'); await keys(['Space'], 3000)
+  await mark('fly-along'); await keys(['KeyW', 'ShiftLeft'], 4000)
+  await shot('flying')
+  await mark('fly-down'); await keys(['KeyC'], 5000)
+  for (const name of ['fly-up', 'fly-along', 'fly-down']) { t = await traced(name); eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0); line(`${name}: feet went ${(Math.hypot(t.at(-1)[1] - t[0][1], t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m along, ${((t.at(-1)[2] - t[0][2]) / 10).toFixed(1)} m up; the eye's biggest move in a frame ${Math.max(...eye).toFixed(1)} cells; in something ${t.filter((r) => r[7] === 2).length} of ${t.length} frames`) }
+  await page.evaluate(() => { globalThis.engine.me.can = {} })
+}
 // Slow frames: the same run with the page's thread kept busy 30 and 60 ms a frame. The body should get as far.
 parts.slow = async () => {
   for (const ms of [0, 30, 60]) {

@@ -3,7 +3,7 @@
 // moves: it says what the keys ask (go, turn, rise, roll, jump) again and again, and the solver's
 // motor does the rest. A thing's motor and its control scheme are data, so a model can write
 // them with the thing; nothing here is run.
-import { clearWay, standsBy } from './eye.ts'
+import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -123,7 +123,7 @@ export function living(o: {
   const things: Thing[] = [], waiting: { making: Making; done: (thing: Thing) => void }[] = [], struck: Struck[] = []
   let riding: Thing | null = null, near: Thing | null = null
   // The eye that rides: how much of the way back it is (0 to 1), and what it is kept out of.
-  let room = 1
+  let room = 1, was: number[] | null = null
   const stands = standsBy(o.kind)
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
@@ -320,7 +320,10 @@ export function living(o: {
         // eye was inside them for 70 frames of 166, and a frame drawn from inside a wall took 50 ms.
         const head = [at.at[0], at.at[1] + riding.size[1] / 2 + 6, at.at[2]], wantY = Math.max(at.at[1] + (high - look[1] * back) * M, o.ground(at.at[0] / M - look[0] * back, at.at[2] / M - look[2] * back) * M + 4)
         const off = [-look[0] * back * M, wantY - head[1], -look[2] * back * M], free = clearWay(stands, head, off)
-        room = free < room ? free : Math.min(free, room + dt * 1.5)
+        // Where the thing will be in a third of a second, by how it moved since the last frame.
+        const going = was && dt > 0 ? [(head[0] - was[0]) / dt * AHEAD, (head[2] - was[2]) / dt * AHEAD] : [0, 0], far = Math.hypot(going[0], going[1])
+        was = [head[0], head[1], head[2]]
+        room = roomAfter(room, free, far > 0.5 && far < 60 ? clearWay(stands, [head[0] + going[0], head[1], head[2] + going[1]], off) : 1, dt)
         o.pose.x = (head[0] + off[0] * room) / M
         o.pose.y = (head[1] + off[1] * room) / M
         o.pose.z = (head[2] + off[2] * room) / M

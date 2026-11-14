@@ -12,7 +12,7 @@
 import type { Extra } from './wear.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
-import { clearWay, standsBy } from './eye.ts'
+import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { numbers, type Motor } from './living.ts'
 import type { Answer, Ask } from './mover.ts'
 import { runningAt, strideAt, type Doing, type People, type Person } from './people.ts'
@@ -254,8 +254,9 @@ export function person(o: {
         const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
         const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
         // Not through a wall (`clearWay`): it comes in at once and goes out again slowly.
-        const free = clearWay(stands, head, off)
-        room = free < room ? free : Math.min(free, room + dt * 1.5)
+        // And what will be in the way where the body is going brings it in before it gets there (`roomAfter`).
+        const going = [Math.cos(heading) * speed * AHEAD, 0, Math.sin(heading) * speed * AHEAD]
+        room = roomAfter(room, clearWay(stands, head, off), level && speed > 1 ? clearWay(stands, [head[0] + going[0], head[1], head[2] + going[2]], off) : 1, dt)
         backNow = inHead ? 0 : far * room
         o.pose.x = (head[0] + off[0] * room) / M
         o.pose.y = (head[1] + off[1] * room) / M
