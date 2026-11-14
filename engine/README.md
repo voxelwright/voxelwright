@@ -296,6 +296,13 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   rule's own on any part of the body. A body going faster than about 2 m/s runs and is drawn running.
   `page/moves.ts` and `page/wear.ts` hold the names, which are no more than data written down, and check what a
   rule sends. `node test/moves.mjs` checks it with a rule that is no game.
+- **Getting about** (#218, `about.mjs`). A body the world moves walks straight while that is open and looks for
+  a way round when it is stopped: a search over standing places 40 cm apart on the world's own cells, each step
+  one a person could take (along, up a kerb, down a drop, up onto something waist-high with the hands). An actor
+  follows someone (`follow: id, keep: cells`), keeps away (`flee`), and its rule hears `near` when a person comes
+  within its `reach` or into a place the rule marked (`world.mark`), once in and once out. Seats get about the
+  same way. Measured: round a parked car 30 places looked at in 15 ms the first time and 1 ms after; into a
+  house (no way) 900 places in 27 ms, and not looked for again for three seconds. `node test/about.mjs`.
 - **A rule can take a resident of the town as its own** (#218). `world.residents` is who of the town's own people
   is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
@@ -359,7 +366,16 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   four seconds; what is wrong is left and said to the rule. `node test/sounded.mjs` checks it with a tower clock, a
   smith and his anvil, and a rule that sends what none should; a real page's sound is tapped and measured. Asked for
   a busker and a night watchman, a model wrote rules that play (November 14, both on the first asking).
-- **Not there**: a rule hears nothing of blows, of someone coming near or of what a model made of what was
+- **A realm's music** (the same files, and `page/sound/music/`). `world.music({like, pace, mode, drive, now})`: a
+  rule says what the realm's music is like and changes it as its own numbers change. It is a mood, not a track:
+  `like` is one of the seven kept moods, `pace` and `mode` put it at another speed and in another scale, `drive` is
+  how much of it is playing (at once), and the page composes it as it plays. A new mood comes in at the next bar, or
+  the next beat with `now`. `like: null` gives the music back to the place; so does taking the rule out. A realm
+  that says nothing keeps the place's own. `node test/tuned.mjs` checks it with a lighthouse whose music fills as the
+  rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
+  was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
+  follows how far her story is (November 14).
+- **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.
 

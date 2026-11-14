@@ -16,6 +16,7 @@
 import { readFile } from 'node:fs/promises'
 import { parentPort, workerData } from 'node:worker_threads'
 import { controlsOf, numbers } from './page/living.ts'
+import { about, REACH_MOST } from './about.mjs'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
 import { lookOf } from './page/wear.ts'
@@ -235,7 +236,7 @@ function seat(m) {
   if (m.op === 'leave') { folk.delete(m.by); p.gone = true; tell(p); return { left: true } }
   if (m.op === 'walk') {
     if (p.down > now) return { error: 'you are on the ground: wait a few seconds' }
-    p.goal = [m.to[0], m.to[1]]; p.stopped = ''
+    p.goal = [m.to[0], m.to[1]]; p.stopped = ''; p.path = undefined
     const far = Math.hypot(m.to[0] - p.at[0], m.to[1] - p.at[2])
     p.yaw = Math.atan2(m.to[0] - p.at[0], -(m.to[1] - p.at[2]))
     return { you: state(p), far: Math.round(far), seconds: Math.round(far / PACE) }
@@ -342,32 +343,26 @@ function actorsBack(ruleId, actors, now) {
   }
 }
 
+/** What is in a body's way at a place, for the telling: the first thing from the knees up, or a drop. */
+const inTheWay = (x, y, z) => { for (let k = 0; k < TALL; k++) { const kind = core.world_kind(Math.round(x), Math.round(y) + CLIMB + k, Math.round(z)); if (kind) return `${MATERIALS[kind & 15]} in the way` } return 'a drop too far to step down' }
+/** How bodies get about: round what is in the way, after or away from someone, and who is near whom (about.mjs). */
+const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule) })
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
+let ticks = 0
 setInterval(() => {
   const now = Date.now()
+  ticks++
   rests(now)
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
     if (!p.seat) continue
     if (p.back && goingBack(p, now)) continue
-    if (p.goal && p.down <= now) {
-      // A tenth of a second of its pace, taken a walker's step at a time: one that runs still meets a thin wall.
-      for (let left = (p.pace ?? PACE) / 10; left > 0 && p.goal;) {
-        const dx = p.goal[0] - p.at[0], dz = p.goal[1] - p.at[2], far = Math.hypot(dx, dz), step = Math.min(far, left, PACE / 10)
-        left -= step
-        if (far < 0.5) { p.goal = null; break }
-        const x = p.at[0] + (dx / far) * step, z = p.at[2] + (dz / far) * step, feet = footing(x, p.at[1], z)
-        if (feet === null) {
-          // What is in the way, for the telling: the first thing from the knees up, or a drop.
-          let what = 'a drop too far to step down'
-          for (let k = 0; k < TALL; k++) { const kind = core.world_kind(Math.round(x), Math.round(p.at[1]) + CLIMB + k, Math.round(z)); if (kind) { what = `${MATERIALS[kind & 15]} in the way`; break } }
-          p.stopped = `${what}, ${Math.round(far)} cells short of where you were going`
-          p.goal = null
-        } else { p.at = [x, feet, z]; p.yaw = Math.atan2(dx, -dz) }
-      }
-      tell(p); p.told = now
+    // A tenth of a second of its going: straight, or round what is in its way, or after whoever it follows (about.mjs).
+    if (getting.step(p, now, ticks)) { tell(p); p.told = now
     } else if (now - p.told > 1000) { if (p.stopped.startsWith('knocked') && p.down <= now) p.stopped = ''; tell(p); p.told = now }
   }
+  // Who has come near whom, and into what: the rules that asked are told.
+  getting.nearness()
 }, 100)
 
 // ── Rules (#264) ─────────────────────────────────────────────────────────
@@ -390,7 +385,7 @@ function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
@@ -403,6 +398,7 @@ function drop(id) {
   hand.dropped(id)
   noise.dropped(id)
   plug.dropped(id)
+  getting.dropped(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
@@ -436,11 +432,28 @@ does.set('actor', (rule, w, now, wrong) => {
       if (mine >= ACTORS_MOST) { wrong(`a rule may have ${ACTORS_MOST} actors`); return }
       p = { by, short: id, rule: rule.id, name: id, seat: true, at: [x, feet, z], yaw: Math.PI, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0 }
       folk.set(by, p)
-    } else { p.at = [x, feet, z]; p.goal = null; p.stopped = '' }
+    } else { p.at = [x, feet, z]; p.goal = null; p.path = undefined; p.stopped = '' }
   }
   if (w.name !== undefined) p.name = text(w.name, 24) || id
   if (w.pace !== undefined) { if (Number.isFinite(w.pace)) p.pace = Math.max(0, Math.min(PACE_MOST, w.pace)); else wrong('a pace is a number of cells a second') }
-  if (w.to !== undefined) { if (w.to === null) p.goal = null; else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.stopped = '' } else wrong('where to go is to: [x, z], or null to stop') }
+  if (w.to !== undefined) {
+    p.follow = undefined
+    if (w.to === null) { p.goal = null; p.path = undefined }
+    else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.stopped = ''; if (p.pathTo && Math.hypot(p.goal[0] - p.pathTo[0], p.goal[1] - p.pathTo[1]) > 8) p.path = undefined } else wrong('where to go is to: [x, z], or null to stop')
+  }
+  // After someone, or away from them, until told otherwise: whoever world.people names (this rule's own actors by the names it gave them).
+  for (const flee of [false, true]) {
+    const who = flee ? w.flee : w.follow
+    if (who === undefined) continue
+    if (who === null) { if (p.follow && p.follow.flee === flee) { p.follow = undefined; p.goal = null; p.path = undefined } continue }
+    const them = typeof who === 'string' ? folk.get(`${rule.id}/${who}`) ?? folk.get(who) : undefined
+    if (!them || them === p) { wrong(`${flee ? 'flee' : 'follow'}: nobody called "${String(who).slice(0, 24)}" has a body here (world.people says who has)`); continue }
+    p.follow = { by: them.by, flee, keep: Number.isFinite(w.keep) ? Math.max(4, Math.min(2000, w.keep)) : flee ? 150 : 15 }
+    p.path = undefined; p.stopped = ''
+  }
+  if (w.keep !== undefined && p.follow && Number.isFinite(w.keep)) p.follow.keep = Math.max(4, Math.min(2000, w.keep))
+  // How near a person must come for the rule to hear of it (`near`); 0 or null: it does not.
+  if (w.reach !== undefined) p.reach = Number.isFinite(w.reach) && w.reach > 0 ? Math.min(REACH_MOST, w.reach) : undefined
   if (w.face !== undefined) { if (pair(w.face)) { const dx = w.face[0] - p.at[0], dz = w.face[w.face.length - 1] - p.at[2]; if (dx || dz) p.yaw = Math.atan2(dx, -dz) } else wrong('what to face is face: [x, z]') }
   if (w.look !== undefined) p.look = lookOf(w.look)
   // What it does with its limbs: a move that has a name, or keys of the rule's own; null ends it. And what it is aimed at.
@@ -461,6 +474,8 @@ does.set('actor', (rule, w, now, wrong) => {
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 does.set('offer', hand.offer)
+/** A place the rule marks: it hears `near` when a person comes into it or goes out. */
+does.set('mark', getting.mark)
 does.set('show', hand.show)
 // What a realm sounds like (rules/sound.mjs): a sound at a place or on someone, for everyone near.
 const noise = sounding({ folk, tall: TALL, stand, tell: (m) => parentPort.postMessage(m) })

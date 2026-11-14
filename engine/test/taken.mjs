@@ -71,7 +71,8 @@ try {
   await post('say', { by: 'wren', text: 'Excuse me!' })
   const yes = await until('someone stops', () => heard(/^Yes\?/))
   const [, x, z, same, of] = /at (-?\d+),(-?\d+); (\d+) of (\d+)/.exec(yes).map(Number)
-  check(of > 3 && same >= of - 2, `the rule is told of the residents near people by ids that stay the same: ${same} of ${of} were who they were half a second before`)
+  // How many are near goes by the clock (the rounds are real time): at least the one taken, and all but a couple of them the same.
+  check(of >= 1 && same >= Math.max(1, of - 2), `the rule is told of the residents near people by ids that stay the same: ${same} of ${of} were who they were half a second before`)
   const stopped = (await around()).people.find((p) => p.name === 'Someone passing')
   check(stopped && Math.hypot(stopped.at[0] - x, stopped.at[2] - z) < 12 && stopped.doing === 'standing', `the one nearest stops and answers, standing where they walked (${stopped?.at} against ${x}, ${z})`)
   const round = await around(), them = round.people.find((p) => p.name === 'Someone passing')

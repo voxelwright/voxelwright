@@ -59,6 +59,8 @@ export const NAMED: Record<string, Move> = {
   'get-up': { keys: [{ t: 0, lie: 1, crouch: 0.08 }, { t: 0.5, lie: 0.55, crouch: 0.9, lean: 0.7, liftL: 0.6, liftR: 0.6 }, { t: 0.95, lie: 0, crouch: 0.6, lean: 0.5 }, { t: 1.3, crouch: 0, lean: 0, liftL: 0, liftR: 0 }] },
   sit: { hold: true, keys: [{ t: 0.5, sit: 1, lean: 0.08, liftL: 0.55, bendL: 0.75, liftR: 0.55, bendR: 0.75 }] },
   jump: { keys: [{ t: 0.14, crouch: 0.55, liftL: -0.5, liftR: -0.5, lean: 0.25 }, { t: 0.34, rise: 6, crouch: 0, liftL: 2.3, liftR: 2.3, lean: 0 }, { t: 0.58, rise: 0, crouch: 0.45, liftL: 0.6, liftR: 0.6 }, { t: 0.8, crouch: 0, liftL: 0, liftR: 0 }] },
+  // Up onto something with the hands.
+  climb: { keys: [{ t: 0.12, liftL: 2.7, liftR: 2.7, bendL: 0.5, bendR: 0.5, crouch: 0.35, lean: 0.2 }, { t: 0.36, liftL: 1.3, liftR: 1.3, bendL: 1.2, bendR: 1.2, swingR: 1.25, kneeR: 1.5, lean: 0.55, crouch: 0.2 }, { t: 0.62, liftL: 0.3, liftR: 0.3, bendL: 0.3, bendR: 0.3, swingR: 0.2, kneeR: 0.3, lean: 0.15, crouch: 0.1 }] },
   shrug: { keys: [{ t: 0.2, liftL: 0.5, outL: 0.5, bendL: 1.3, liftR: 0.5, outR: 0.5, bendR: 1.3, tilt: 0.06, nod: -0.1 }, { t: 0.7, liftL: 0.5, outL: 0.5, bendL: 1.3, liftR: 0.5, outR: 0.5, bendR: 1.3 }, { t: 1.0, liftL: 0, outL: 0, bendL: 0.12, liftR: 0, outR: 0, bendR: 0.12, tilt: 0, nod: 0 }] },
   'hands-up': { hold: true, keys: [{ t: 0.25, liftL: 2.9, liftR: 2.9, outL: 0.45, outR: 0.45, bendL: 0.25, bendR: 0.25 }] },
 }

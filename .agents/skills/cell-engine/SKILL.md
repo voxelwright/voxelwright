@@ -2092,3 +2092,28 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
 - **Cost of a check with no browser**: a plugin's own check reads frame 11 off the stream (`test/plugkit.mjs`) and
   has a rule say aloud what it heard; 1 to 3 s each. Only `test/plugins.mjs` opens a page.
 
+## Getting about (#218 for #264, `engine/about.mjs`, November 13)
+
+- **Straight first, a search only when stopped.** A walk is a line while the feet can take it. Stopped, the body
+  looks for a way: A* over standing places four cells apart, anchored where it stands, eight ways from each, every
+  edge walked a cell at a time through `footing` (up two, down thirty) and, where the feet are stopped, with the
+  hands (up to ten cells onto something with room over it, at a cost). A little greedy (1.3). It walks the way,
+  cutting out each next place it can reach straight, so it does not zigzag the grid.
+- **What it costs** (M1 Pro, the world's one thread): round a parked car, 30 places looked at, 15 ms the first
+  time (the sectors' first cells) and 1.1 ms after; two blocks along a pavement, 386 places, 44 ms; into a house,
+  where there is no way, all 900 places it may look at, 27 ms. One search a tick for everyone together, and a way
+  not found is not looked for again for three seconds: a rule that sends a body at a wall every tick costs 27 ms
+  every three seconds. In `test/about.mjs` the world answered a question within 23 ms throughout.
+- **No way is not nothing.** The search keeps the place nearest the end: the body walks there and `stopped` says
+  what kept it from the rest. A model that reads `stopped` learns what a person would.
+- **Follow and flee are a goal moved each tick** (`towards`), not a search each tick: the way a follower is on is
+  kept while whoever it follows stays within 16 cells of where it led, and looked for again at most every 0.7 s.
+- **Near is edges, not levels.** Each tick the people at pages and in seats are set against every actor with a
+  `reach` and every marked place; a rule is told on the way in and on the way out (with a little further to go
+  out than to come in, or someone on the edge is told of ten times a second). Walking beside someone for a
+  street, a rule heard `near` once.
+- **A body let go walks back by the same means**, so the 45 s jump of unit 1 is now only for a round that cannot
+  be reached at all.
+- **Not there**: bodies still pass through each other and through people. Nobody opens a door, takes a lift or
+  jumps a gap. Marks are not kept over a restart (a rule marks again in `start`). A follower does not guess where
+  someone is going.
