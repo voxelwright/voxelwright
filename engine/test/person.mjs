@@ -159,7 +159,9 @@ try {
   const open_ = await walled.evaluate(() => globalThis.engine.me.back)
   // A ball of brick 2.8 m across, 1.4 m behind her head (she looks east; the eye behind is to her west).
   const face = await walled.evaluate(() => { const e = globalThis.engine, f = e.me.feet.at; e.set([Math.round(f[0]) - 28, Math.round(f[1]) + 14, Math.round(f[2])], 14, 8); return Math.round(f[0]) - 28 + 14 })
-  await walled.waitForTimeout(700)
+  // The eye comes in when the page has the ball: under load that took longer than a fixed wait.
+  await walled.waitForFunction(() => globalThis.engine.me.back < 30, null, { timeout: 10_000 }).catch(() => {})
+  await walled.waitForTimeout(300)
   const eyeNow = () => walled.evaluate(() => { const e = globalThis.engine, p = e.pose, at = [p.x * 10, p.y * 10, p.z * 10]; return { at, back: e.me.back, kind: e.kind ? 0 : 0, feet: e.me.feet.at, drawn: e.folk.from.flatMap((f) => f(e.view(), 0)).some((q) => q === e.me.figure) } })
   const shut = await eyeNow()
   if (out) await walled.screenshot({ path: join(out, 'eye-wall.png') })

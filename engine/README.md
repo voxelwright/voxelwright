@@ -277,6 +277,11 @@ on foot as they do flying.
   hands do, held until the rule asks otherwise (`rules/things.mjs`; the world's process says it to the core again
   four times a second). Someone riding from a page has it while they ride. Checked by `test/drives.mjs` with a
   valet's rule.
+- **Who rides**: `world.seat(id, {on: thing})` puts one of a rule's actors on a living thing (they sit and go where
+  it goes) or someone at a page (their page gets them on; on foot, their body is taken up and set down again when
+  they get off). A page that gets on or off by itself says so (`POST /world/drive {by, id, on}`). Rules hear `ride`,
+  `world.things` says `riders`, and everyone sees a rider sitting where the thing is: the world's process carries
+  them ten times a second, so at speed a rider is drawn up to half a metre behind.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

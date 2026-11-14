@@ -399,6 +399,7 @@ setInterval(() => {
   rests(now)
   if (ticks % 10 === 0) blow.sweep(now)
   if (driven.step(now)) nudged = true
+  driven.carry(now)
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); lay(grasp.left(p)); continue }
     if (!p.seat) continue
@@ -457,7 +458,7 @@ function people(id) {
 /** Whether someone's helper answers for this world's people now: the server says when it changes (mind/door.mjs). */
 let voiced = false
 /** Living things as rules have them (rules/things.mjs): told of, and driven. */
-const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0) })
+const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0), tell: (p) => tell(p), happen: (event, e) => ruled.happen(event, e), stand: (x, z) => stand(x, z), changed: () => body.say() })
 const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
@@ -567,7 +568,7 @@ does.set('take', grasp.take)
 /** An ask the world's process made itself (what someone who left held is put down): done as any ask is, and told. */
 const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessage({ echo: ask }); edit(ask.edit); told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true); nudged = true }
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
-const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell })
+const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated() })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
 const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id } })
@@ -576,6 +577,7 @@ does.set('push', blow.push)
 does.set('down', blow.down)
 does.set('clock', body.clock)
 does.set('drive', driven.drive)
+does.set('seat', driven.seat)
 does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
@@ -670,6 +672,7 @@ parentPort.on('message', (said) => {
   if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); getting.back(rule.id, kept?.marks); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
+  if (drive?.on !== undefined) return driven.rides(drive.by, drive.id, drive.on, Date.now())
   if (drive) { const a = alive.get(drive.id); if (a) a.ridden = Date.now(); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false, text(revive.name ?? '', 40))
@@ -681,7 +684,9 @@ parentPort.on('message', (said) => {
     const old = folk.get(here.by)
     if (old?.seat) return
     const p = old ?? { by: here.by, seat: false, goal: null, down: 0, flinch: 0 }
-    Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, frame: here.frame, last: Date.now() })
+    // One who rides is where their thing is (rules/things.mjs), not where their page's eye is.
+    if (driven.seatOf(here.by)) Object.assign(p, { name: here.name, last: Date.now() })
+    else Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, frame: here.frame, last: Date.now() })
     folk.set(here.by, p)
     return tell(p)
   }

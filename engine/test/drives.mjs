@@ -3,11 +3,14 @@
 // the street when someone says so, stops it, turns it; someone who gets on from a page has it while they ride; and
 // the rule taken out, it is let go. Real Chrome, the real server and world process, nothing stubbed.
 //
-//   node test/drives.mjs
-import { mkdtempSync } from 'node:fs'
+//   node test/drives.mjs [--out directory]
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chrome, serve, still } from './kit.mjs'
+import { arg, chrome, serve, still } from './kit.mjs'
+
+const shots = arg('out', '')
+if (shots) mkdirSync(shots, { recursive: true })
 
 const file = join(mkdtempSync(join(tmpdir(), 'engine-drives-')), 'world.log')
 const browser = await chrome()
@@ -29,14 +32,18 @@ const car = (page) => page.evaluate(() => { const e = globalThis.engine, t = e.a
 const asleep = (page) => page.waitForFunction(() => globalThis.engine.bodies === 0 && globalThis.engine.alive.things.length === 1 && globalThis.engine.alive.where(globalThis.engine.alive.things[0]), null, { timeout: 30_000 })
 // The valet: says what it is told of (as the name over someone standing by), and drives the first thing as it is asked.
 const RULE = `on('start', (world) => world.actor('valet', {name: 'Valet', at: [700, 4009]}))
-on('tick', (world) => { const t = world.things[0]; world.actor('valet', {say: t ? [t.id, t.name, t.scheme, t.at.join(' '), t.speed, t.mine ? 'mine' : 'free', t.upright ? 'up' : 'over'].join('|') : 'nothing'}) })
+on('tick', (world) => { const t = world.things[0]; world.actor('valet', {say: t ? [t.id, t.name, t.scheme, t.at.join(' '), t.speed, t.mine ? 'mine' : 'free', t.upright ? 'up' : 'over', (t.riders || []).join(','), world.keep.rode || ''].join('|') : 'nothing'}) })
+on('ride', (world, e) => { world.keep.rode = e.name + (e.on ? ' on ' : ' off ') + e.thing })
 on('said', (world, e) => {
   const t = world.things[0]
   if (!t) return
   if (/bring it/.test(e.text)) world.drive(t.id, {go: 1})
   if (/round/.test(e.text)) world.drive(t.id, {turn: 1})
   if (/hold/.test(e.text)) world.drive(t.id, {go: 0, turn: 0})
-  if (/leave it/.test(e.text)) world.drive(t.id, null)
+  if (/leave it/.test(e.text)) world.drive(t.id, {free: true})
+  if (/get in/.test(e.text)) world.seat(e.by, {on: t.id})
+  if (/get out/.test(e.text)) world.seat(e.by, {on: null})
+  if (/you drive/.test(e.text)) world.seat('valet', {on: t.id})
   if (/ghost/.test(e.text)) world.drive('no-such-thing', {go: 1})
 })`
 try {
@@ -82,6 +89,47 @@ try {
   const again = await car(ada)
   const on = (again.at[0] - left.at[0]) * left.front[0] + (again.at[2] - left.at[2]) * left.front[2]
   check(on > 20, `off again, the rule's word holds once more: it goes forward ${(on / 10).toFixed(1)} m`)
+  await ada.evaluate(() => globalThis.engine.say('hold'))
+  await ada.evaluate(() => globalThis.engine.say('hold'))
+  await ada.waitForTimeout(800)
+  // Riders. Ada gets down on foot beside the car; the rule seats her: her page has her on it, her body taken up,
+  // and Ben's page sees her sitting where the car is.
+  await asleep(ada)
+  const ben = await open('Ben')
+  await asleep(ben)
+  await ada.evaluate(() => { const e = globalThis.engine, w = e.alive.where(e.alive.things[0]); e.pose.x = w.at[0] / 10 - 2.5; e.pose.y = e.ground(w.at[0] / 10 - 2.5, w.at[2] / 10 + 3) + 1.7; e.pose.z = w.at[2] / 10 + 3; e.me.walk(true) })
+  await ada.waitForFunction(() => globalThis.engine.me.feet, null, { timeout: 10_000 })
+  await ada.waitForTimeout(1200)
+  await ada.evaluate(() => globalThis.engine.say('get in'))
+  await ada.waitForFunction(() => globalThis.engine.alive.riding, null, { timeout: 5000 }).catch(() => {})
+  const sat = await ada.evaluate(() => ({ riding: !!globalThis.engine.alive.riding, afoot: globalThis.engine.me.on }))
+  const seen = async (name) => { for (let i = 0; i < 30; i++) { const p = await ben.evaluate((name) => { const e = globalThis.engine, p = e.folk.from.flatMap((f) => f(e.view(), 0)).find((p) => p.name === name), t = e.alive.things[0], w = t && e.alive.where(t); return p && w ? { off: Math.hypot(p.at[0] - w.at[0], p.at[2] - w.at[2]), sits: p.move?.move.keys?.[0]?.sit === 1 } : null }, name); if (p?.sits && p.off < 6) return p; await ben.waitForTimeout(150) } return null }
+  const hers = await seen('Ada')
+  if (shots) { await ben.evaluate(() => { const e = globalThis.engine, w = e.alive.where(e.alive.things[0]); Object.assign(e.pose, { x: w.at[0] / 10 + 2.2, y: w.at[1] / 10 + 1.6, z: w.at[2] / 10 + 3.2, yaw: -0.6, pitch: -0.35 }) }); await ben.waitForTimeout(700); await ben.screenshot({ path: join(shots, 'seated.png') }) }
+  const told = await valet((t) => !!t[7] && /Ada on/.test(t[8]))
+  check(sat.riding && !sat.afoot && !!hers && !!told, `said "get in" on foot, the rule seats her: her page has her on the car and her body is taken up, the other page sees her sitting in it (${hers ? (hers.off / 10).toFixed(2) : '?'} m from its middle), and rules hear of it ("${told?.[8]}", riders ${told?.[7]})`)
+  // She drives it herself, seated by the rule; then the rule gets her out: she is on foot beside it.
+  await ada.keyboard.down('KeyW'); await ada.waitForTimeout(1000); await ada.keyboard.up('KeyW')
+  const rode = await seen('Ada')
+  await ada.evaluate(() => globalThis.engine.say('get out'))
+  await ada.waitForFunction(() => !globalThis.engine.alive.riding && globalThis.engine.me.on, null, { timeout: 5000 }).catch(() => {})
+  const out = await ada.evaluate(() => ({ riding: !!globalThis.engine.alive.riding, afoot: globalThis.engine.me.on }))
+  const off = await valet((t) => /Ada off/.test(t[8]) && !t[7])
+  check(!!rode && !out.riding && out.afoot && !!off, 'she drives it and is still seen sitting in it; said "get out", the rule sets her down: on foot again, and rules hear she is off')
+  // An actor rides: seated by its rule, it goes where the car goes when the rule drives.
+  await asleep(ada)
+  await ada.evaluate(() => globalThis.engine.say('you drive'))
+  const valetOn = await seen('Valet')
+  await ada.evaluate(() => globalThis.engine.say('bring it'))
+  await ada.waitForTimeout(1500)
+  await ada.evaluate(() => globalThis.engine.say('hold'))
+  await ada.waitForTimeout(700)
+  const valetWent = await seen('Valet')
+  // Whoever listens goes to where the car now is: the valet speaks from its seat.
+  const there = await car(ada)
+  await post('walk', { by: 'watcher', to: [Math.round(there.at[0]), Math.round(there.at[2]) + 30] }); await post('leave', { by: 'watcher' }); await post('join', { by: 'watcher', at: [Math.round(there.at[0]), Math.round(there.at[2]) + 30] })
+  const riders = await valet((t) => t[7] === 'valet' && /Valet on/.test(t[8]))
+  check(!!valetOn && !!valetWent && !!riders, `said "you drive", the rule's own actor sits in the car and goes with it as the rule drives (${valetWent ? (valetWent.off / 10).toFixed(2) : '?'} m from its middle after a drive; world.things says riders: ${riders?.[7]})`)
   await ada.evaluate(() => globalThis.engine.say('hold'))
   // What is not a living thing is refused, and the rule is told.
   await ada.evaluate(() => globalThis.engine.say('ghost'))

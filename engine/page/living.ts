@@ -109,6 +109,8 @@ export function living(o: {
   ground(x: number, z: number): number
   /** In a shared world: the page's line to it, and the made things it knows. The world's own process moves every living thing; this page only says what a rider asks. */
   world?: Link | null
+  /** The page's person gets on a thing (true) or is set down off it (false): a body on foot is taken up and put down. */
+  ridden?: (on: boolean) => void
   made?: () => Things
 }): Living {
   const M = 10
@@ -187,8 +189,15 @@ export function living(o: {
       const at = where(riding)
       if (at) { o.pose.x = at.at[0] / M - at.front[2] * (riding.size[2] / M / 2 + 1.2); o.pose.z = at.at[2] / M + at.front[0] * (riding.size[2] / M / 2 + 1.2); o.pose.y = Math.max(o.pose.y, o.ground(o.pose.x, o.pose.z) + 1.7) }
     }
+    const was = riding
     riding = thing?.alive ? thing : null
     said = ''
+    // The world is told who rides what, and a body on foot is taken up or set down.
+    if (was !== riding) {
+      if (was?.ref) o.world?.ride(was.ref, false)
+      if (riding?.ref) o.world?.ride(riding.ref, true)
+      if (!was !== !riding) o.ridden?.(!!riding)
+    }
     const at = riding && where(riding)
     if (riding && at) {
       // The eye goes behind it, looking the way it faces and a little down.

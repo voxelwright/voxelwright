@@ -53,7 +53,7 @@ export interface Link {
   /** A blow on this page's own person (#264, rules/blows.mjs): the speed it gives them (cells a second), or how long they are put on the ground (seconds). */
   onblow: ((blow: { by: string; push?: [number, number, number]; down?: number }) => void) | null
   /** What people's bodies can do, by whom (their name in the world), and how fast the world goes and who is spared that (#264, rules/bodies.mjs). Said as it changes and to each page as it joins. */
-  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>> & { down?: [number, number, number]; cling?: boolean }>; /** By person: the look and the move a rule gave their figure (people.ts, moves.ts). */ figure?: Record<string, Limbs> }) => void) | null
+  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>> & { down?: [number, number, number]; cling?: boolean }>; /** By person: the look and the move a rule gave their figure (people.ts, moves.ts). */ figure?: Record<string, Limbs>; /** By person: the living thing a rule has seated them on (its record's id). */ seat?: Record<string, string> }) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */
@@ -66,6 +66,8 @@ export interface Link {
   act(rule: string, id: string, phase: 'down' | 'up', from: readonly [number, number, number], to: readonly [number, number, number]): void
   /** Says what a living thing is to do (go, turn and rise from -1 to 1), held by the world for a second. */
   drive(id: string, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
+  /** This page's person has got on a living thing, or off it. */
+  ride(id: string, on: boolean): void
   /** An ask in the world's own words (`GET /world/` says which): a thing with its cells, a change to a thing's fields. Resolves to whether it was taken. */
   ask(body: Record<string, unknown>): Promise<boolean>
   /** Says where this page's eye is (the world's finest cells) and which way it faces, under a name others see. */
@@ -144,6 +146,7 @@ export function link(base = '/world'): Link {
     get onoffers() { return hears },
     set onoffers(f: ((offers: Offer[]) => void) | null) { hears = f; f?.(offers) },
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
+    ride(id, on) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, on }) }).catch(() => {}) },
     drive(id, go, turn, rise, once) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
     here(at, yaw, name, frame) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw, frame }) }).catch(() => {}) },

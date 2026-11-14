@@ -468,7 +468,9 @@ async function main() {
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
-  const alive = living({ send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made })
+  const alive = living({ send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  /** Whether the person was on foot when they got on what they ride: they are set down on foot again. */
+  let wasAfoot = false
   /** How many bodies are on their way down: every body but the living, which are bodies for as long as they live. */
   const loose = () => moving.size - alive.things.reduce((n, t) => n + (moving.has(t.id) ? 1 : 0), 0)
   /** Moves what is loose on by `dt` seconds: the worker is asked once a frame, and not again until it has answered. */
@@ -525,7 +527,9 @@ async function main() {
   // everyone's but those a rule spares, who move as they always did while all else slows.
   // A blow on this page's own person (rules/blows.mjs): thrown the way it went, or put on the ground.
   if (far) far.onblow = (b) => { if (b.push) me.push(b.push); if (b.down !== undefined) me.down(b.down) }
-  if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {}; me.limbs = b.figure?.[far.me] ?? {} }
+  if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {}; me.limbs = b.figure?.[far.me] ?? {}; const to = b.seat?.[far.me] ?? null; if (to !== seatedOn) { seatedOn = to; const thing = to ? alive.things.find((t) => t.ref === to) : null; if (thing) alive.mount(thing); else if (alive.riding) alive.mount(null) } }
+  /** The living thing a rule has seated this page's person on (its record's id), as last told. */
+  let seatedOn: string | null = null
   if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
   if (far) worldHour = () => far.realm.look?.hour ?? 11
