@@ -48,8 +48,8 @@ export interface Hud {
   notice(text: string, ms?: number): void
   /** The card of controls (while mounted): a title and pairs of key and what it does. Null takes it away. */
   card(card: { title: string; rows: readonly (readonly [string, string])[] } | null): void
-  /** A cue beside a place in the world, kept there as the eye moves until it is removed. `at` is asked every frame. */
-  cue(text: string, at: () => readonly [number, number, number] | null): { text: string; remove(): void }
+  /** A cue beside a place in the world, kept there as the eye moves until it is removed. `at` is asked every frame. With `tap` it can be touched or clicked, and does that: on a phone there is no E. */
+  cue(text: string, at: () => readonly [number, number, number] | null, tap?: () => void): { text: string; remove(): void }
   /** An empty element of a lane's own in the layer, by name (the same name gives the same element). Style it by `[data-panel="name"]`. */
   panel(name: string): HTMLElement
   /** Once a frame: puts the cues where their places are now. Costs nothing with no cue. */
@@ -242,9 +242,10 @@ export function hud(input: Input): Hud {
       title.textContent = c.title
       card.replaceChildren(title, ...c.rows.map(([key, what]) => { const p = document.createElement('p'), k = document.createElement('kbd'); k.textContent = key; p.append(k, what); return p }))
     },
-    cue(text, at) {
+    cue(text, at, tap) {
       const e = document.createElement('p'), cue = { text, at, el: e }
       e.textContent = text
+      if (tap) { e.style.pointerEvents = 'auto'; e.addEventListener('click', tap) }
       e.hidden = true
       cues.append(e)
       shown.add(cue)

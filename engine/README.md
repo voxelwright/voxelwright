@@ -199,13 +199,14 @@ A thing can be a body for as long as it lives: it stands on feet, sleeps when le
 is told (go, turn, rise, roll, jump). The first is a car written by hand:
 
 ```sh
-node serve.mjs --port 5762                 # then open /city?fly=0
-engine.alive.spawn(engine.car([760, Math.round(engine.ground(76, 407.4) * 10) + 5, 4074]))   # in the console: a car in the street
+node serve.mjs --port 5765                 # then open /city?fly=0&living=car: a car stands in the street ahead
+engine.alive.spawn(engine.car([760, Math.round(engine.ground(76, 407.4) * 10) + 5, 4074]))   # or in the console: a car where you say
 ```
 
 Walk up to it: a cue says `E  drive the car`. E gets on, the card shows the scheme (W S drive and reverse, A D steer,
 E get off), the eye rides behind. It has weight, breaks what it hits (and tells what it struck: `engine.alive.struck`),
-and is broken by a hit that takes 12 m/s from it at once, or by a blast. On a phone the left thumb drives.
+and is broken by a hit that takes 12 m/s from it at once, or by a blast. On a phone the cue is touched to get on, the
+left thumb drives and a button gets off.
 In a shared world (`?shared=1`) the same call makes it a made thing with a record, and the world's own process moves
 it: every page sees it, whoever gets on drives it, and `POST /world/drive` drives it from anything that can send a
 request (`GET /world/` says how). Where it sleeps is written into its record (`controls.rest`), so a server started

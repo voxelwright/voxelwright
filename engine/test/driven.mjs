@@ -66,10 +66,20 @@ try {
   const none = await fetch(`${server.url}/world/drive`, { method: 'POST', body: JSON.stringify({ by: 'a script', id: 'no-such-thing', go: 1 }) })
   check(none.status === 409, `telling a thing that is not there is refused (${none.status})`)
   // Where it sleeps is in its record; what struck what never reaches the file.
-  await ada.waitForTimeout(300)
-  const record = (await (await fetch(`${server.url}/world/things`)).json()).find((t) => t.id === made.ref)
-  const rest = record?.controls?.rest
+  // Written at most every twenty seconds, and only when it has moved: the file must not fill with a thing's naps.
+  const resting = async () => (await (await fetch(`${server.url}/world/things`)).json()).find((t) => t.id === made.ref)?.controls?.rest
+  let rest = null
+  for (let i = 0; i < 60 && !(rest && Math.hypot(rest.at[0] - c.at[0], rest.at[1] - c.at[1], rest.at[2] - c.at[2]) < 0.5); i++) { await ada.waitForTimeout(500); rest = await resting() }
   check(rest && Math.hypot(rest.at[0] - c.at[0], rest.at[1] - c.at[1], rest.at[2] - c.at[2]) < 0.5, `its record says where it sleeps (${rest && rest.at.map((v) => v.toFixed(0))})`)
+  // A blast across the street and one beside it: neither moves it far enough to matter here, and a sleeper that
+  // is woken and sleeps again where it was writes nothing.
+  const changes = () => { const all = readFileSync(file).toString('latin1'); return all.split('"controls"').length - 1 }
+  const before = changes()
+  await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'a script', blast: [Math.round(c.at[0]) + 600, Math.round(c.at[1]), Math.round(c.at[2])], radius: 6 }) })
+  await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'a script', edit: [0, Math.round(c.at[0]), Math.round(c.at[1]) + 40, Math.round(c.at[2]), 1, 8], release: [Math.round(c.at[0]), Math.round(c.at[1]) + 44, Math.round(c.at[2])] }) })
+  await ada.waitForTimeout(3000)
+  await asleep(ada)
+  check(changes() === before, `woken by what changes near it and asleep again, it writes nothing more to the world's file (${before} changes of its controls kept)`)
   const kept = readFileSync(file)
   let impacts = 0
   for (let at = 0; at + 12 <= kept.length;) {

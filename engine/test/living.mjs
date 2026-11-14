@@ -109,6 +109,19 @@ try {
   await page.waitForTimeout(300)
   const off = await page.evaluate(() => ({ riding: !!globalThis.engine.alive.riding, card: document.querySelector('#card').hidden }))
   check(!off.riding && off.card === true, 'E gets off, and the scheme is put away')
+  // On a phone, with no keys: `?living=car` stands a car in the street, the cue is touched to get on, and a button gets off.
+  const phone = await city('fire=0&people=0&living=car', { size: [844, 390], dpr: 1, phone: true })
+  await phone.waitForFunction(() => globalThis.engine.alive.things.length === 1 && globalThis.engine.alive.where(globalThis.engine.alive.things[0]), null, { timeout: 30_000 })
+  await phone.evaluate(() => { const e = globalThis.engine, w = e.alive.where(e.alive.things[0]); e.pose.x = w.at[0] / 10 - 3; e.pose.y = w.at[1] / 10 + 1.2; e.pose.z = w.at[2] / 10 + 3.5; e.pose.yaw = 0.7; e.pose.pitch = -0.2 })
+  await phone.waitForFunction(() => { const c = document.querySelector('#cues p'); return c && !c.hidden }, null, { timeout: 5000 })
+  const words = await phone.evaluate(() => document.querySelector('#cues p').textContent)
+  await phone.tap('#cues p')
+  await phone.waitForFunction(() => globalThis.engine.alive.riding, null, { timeout: 5000 }).catch(() => {})
+  const on = await phone.evaluate(() => ({ riding: !!globalThis.engine.alive.riding, buttons: [...document.querySelectorAll('[data-panel="living"] button')].map((b) => b.textContent) }))
+  check(on.riding && on.buttons.includes('get off'), `on a phone, a car asked for in the address is got on by touching its cue ("${words}"), and there is a button to get off (${on.buttons.join(', ')})`)
+  await phone.tap('[data-panel="living"] button')
+  await phone.waitForTimeout(300)
+  check(!(await phone.evaluate(() => !!globalThis.engine.alive.riding)), 'touched, it gets off')
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }

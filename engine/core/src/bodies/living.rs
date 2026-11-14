@@ -360,11 +360,10 @@ impl Bodies {
         }
     }
 
-    /// Wakes every sleeper: something outside the solver changed the world, and it does not say where.
-    pub fn stir_all(&mut self) {
-        for b in &mut self.list {
-            b.asleep = false;
-        }
+    /// Wakes the sleepers an edit from outside the solver reaches: a blast across town leaves a parked car asleep.
+    pub fn stir_edit(&mut self, e: &Edit) {
+        let (lo, hi) = reach(e);
+        self.stir(lo, hi);
     }
 
     /// A blast's push on the living things near it: thrown as what it loosens is, and one that it reaches is broken.
@@ -667,7 +666,6 @@ pub mod tests {
         assert!(went[2].abs() < 20.0 && tipped(b) < 12.0, "straight, and upright");
         assert_eq!(bodies.crushes, 0, "and broke nothing on the way");
         // Round to the right.
-        let was = the(&bodies, id).live.as_ref().unwrap().heading;
         run(&mut bodies, 3.0, id, [0.0; 3]);
         let was = { let f = turn(the(&bodies, id).rot, [1.0, 0.0, 0.0]); f[2].atan2(f[0]) };
         run(&mut bodies, 2.0, id, [0.5, 1.0, 0.0]);

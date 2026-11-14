@@ -82,6 +82,21 @@ function live(id, value, rows, fresh) {
   parentPort.postMessage({ living: { thing: id, body } })
   nudged = true
 }
+/**
+ * Writes where a sleeper sleeps into its record, if it has moved since that was last written and it is twenty seconds
+ * since: every such change is kept in the world's file, and a frog that hops and stops all day must not fill it.
+ */
+function rests(now) {
+  for (const [id, a] of alive) {
+    if (!a.rested || a.awake || !a.pose || now - (a.wrote ?? -Infinity) < 20_000) continue
+    a.rested = false
+    const was = a.controls.rest, at = a.pose.at.map((v) => Math.round(v * 100) / 100), rot = a.pose.rot.map((v) => Math.round(v * 10000) / 10000)
+    if (was && Math.hypot(at[0] - was.at[0], at[1] - was.at[1], at[2] - was.at[2]) < 0.05 && Math.abs(rot[0] * was.rot[0] + rot[1] * was.rot[1] + rot[2] * was.rot[2] + rot[3] * was.rot[3]) > 0.9999) continue
+    a.wrote = now
+    a.controls = { ...a.controls, rest: { at, rot } }
+    parentPort.postMessage({ echo: { by: 'the world', thing: { id, controls: a.controls } } })
+  }
+}
 /** What the core said, for the living: where each is, which broke (it lives no more, and its record goes), which fell asleep (where is written in its record). */
 function heed(words) {
   const f = new Float32Array(words.buffer, words.byteOffset, words.length), awake = new Set(), broke = new Set()
@@ -100,10 +115,8 @@ function heed(words) {
       parentPort.postMessage({ living: { thing: id, body: 0 } })
       parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     } else if (moved) {
-      if (a.awake && !awake.has(a.body) && a.pose) {
-        a.controls = { ...a.controls, rest: { at: a.pose.at.map((v) => Math.round(v * 100) / 100), rot: a.pose.rot.map((v) => Math.round(v * 10000) / 10000) } }
-        parentPort.postMessage({ echo: { by: 'the world', thing: { id, controls: a.controls } } })
-      }
+      // Asleep now: where is to be written, if it is somewhere else than was last written.
+      if (a.awake && !awake.has(a.body) && a.pose) a.rested = true
       a.awake = awake.has(a.body)
     }
   }
@@ -239,6 +252,7 @@ function seat(m) {
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
 setInterval(() => {
   const now = Date.now()
+  rests(now)
   for (const p of folk.values()) {
     if (now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
     if (!p.seat) continue

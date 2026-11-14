@@ -117,6 +117,26 @@ export function living(o: {
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
+  // A phone has no keys: the cue is touched to get on, the left thumb's stick drives, and what a scheme's other
+  // keys do is a row of buttons while riding (held ones for up and down, touched ones for what is done once).
+  const touch = navigator.maxTouchPoints > 0
+  const held = { rise: 0 }
+  const buttons = o.hud.panel('living')
+  buttons.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(110px,env(safe-area-inset-bottom));display:none;flex-direction:column;gap:8px;pointer-events:auto'
+  const button = (words: string, press: () => void, release?: () => void) => {
+    const b = document.createElement('button')
+    b.textContent = words
+    b.style.cssText = 'min-width:84px;padding:12px 14px;border:0;border-radius:12px;background:rgba(12,16,22,0.72);color:#e8ecf1;font:600 14px -apple-system,system-ui,sans-serif;touch-action:manipulation'
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); press() })
+    if (release) for (const up of ['pointerup', 'pointercancel', 'pointerleave'] as const) b.addEventListener(up, release)
+    return b
+  }
+  const showButtons = (scheme: Scheme | null) => {
+    held.rise = 0
+    buttons.style.display = scheme && touch ? 'flex' : 'none'
+    if (!scheme) return
+    buttons.replaceChildren(...scheme.lines.flatMap((line) => line.once ? [button(line.does, () => { once = line.once })] : line.rise ? [button('up', () => { held.rise = 1 }, () => { held.rise = 0 }), button('down', () => { held.rise = -1 }, () => { held.rise = 0 })] : []))
+  }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
   const reach = (on: boolean) => {
@@ -183,6 +203,7 @@ export function living(o: {
     reach(false)
     leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
+    showButtons(scheme || null)
   }
 
   return {
@@ -233,7 +254,7 @@ export function living(o: {
         }
         reach(near !== null)
         if (cue && cue.thing !== near) { cue.remove(); cue = null }
-        if (near && !cue) { const thing = near; cue = { thing, remove: o.hud.cue(`E  ${SCHEMES[thing.controls ?? 'drive'].verb} the ${thing.name}`, () => { const at = where(thing); return at && [at.at[0], at.at[1] + thing.size[1] / 2 + 4, at.at[2]] }).remove } }
+        if (near && !cue) { const thing = near; cue = { thing, remove: o.hud.cue(`${touch ? '' : 'E  '}${SCHEMES[thing.controls ?? 'drive'].verb} the ${thing.name}`, () => { const at = where(thing); return at && [at.at[0], at.at[1] + thing.size[1] / 2 + 4, at.at[2]] }, () => { if (!riding && thing.alive) mount(thing) }).remove } }
         return false
       }
       if (cue) { cue.remove(); cue = null }
@@ -247,6 +268,7 @@ export function living(o: {
       const stick = o.input.stick
       axes.go = Math.max(-1, Math.min(1, axes.go - stick[1]))
       axes.turn = Math.max(-1, Math.min(1, axes.turn + stick[0]))
+      axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise))
       const asked = once
       once = undefined
       if (asked === 'leave') { mount(null); return false }

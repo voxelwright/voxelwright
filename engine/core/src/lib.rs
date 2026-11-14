@@ -201,10 +201,10 @@ pub extern "C" fn world_edit(after: i32) {
         let edits = read_edits(&i.edits);
         let b = moving(i);
         for e in edits {
+            // Whatever sleeps where the world has changed is stepped again, and sleeps again if nothing reached it.
+            b.stir_edit(&e);
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
-        // The world has changed somewhere: whatever sleeps is stepped again, and sleeps again if nothing reached it.
-        b.stir_all();
     })
 }
 

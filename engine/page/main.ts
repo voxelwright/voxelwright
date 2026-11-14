@@ -637,6 +637,14 @@ async function main() {
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
 
+  // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
+  if (query.get('living') === 'car') void (async () => {
+    if (far) while (!far.live) await new Promise((done) => setTimeout(done, 100))
+    // In a shared world one is enough: whoever comes later finds the one that is there.
+    if (far && [...made.all.values()].some((t) => t.name === 'car')) return
+    const x = Math.round(pose.x * M) + 60, z = Math.round(pose.z * M) + 4
+    await alive.spawn(car([x, core.ground_at(x, z) + 5, z]))
+  })()
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car })
 

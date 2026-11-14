@@ -1663,6 +1663,13 @@ full speed: say it again four times a second.
   asleep the world writes where into its record (`controls.rest`); a server started again stands each one up there
   (`living_place`), because bodies are not kept and the edit that took their cells is. One that breaks has its
   record forgotten. `test/driven.mjs`.
+- **A sleeper's place is written only when it has moved, and at most every twenty seconds** (`world.mjs` `rests`).
+  Written at every falling asleep, any edit anywhere woke every sleeper (`world_edit` woke all) and each wrote its
+  whole controls into the world's file again. Edits now wake only the sleepers their box reaches (`stir_edit`). A
+  server stopped inside those twenty seconds stands the thing up where it slept before.
+- **A phone**: the cue is touched to get on (`hud.cue`'s `tap`), the left stick drives, and a scheme's other lines
+  are buttons in a panel (held for up and down, touched for what is done once). `?living=car` stands a car in the
+  street ahead with no console.
 - **`still()` in the checks waited for no body to be moving**, and a living thing is a body for good: the page's
   count of what is falling leaves the living out (`main.ts` `loose`).
 - **Not there**: no rider's
