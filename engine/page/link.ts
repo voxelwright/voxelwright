@@ -113,6 +113,17 @@ export interface Link {
 
 const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13
 
+/**
+ * Who this page is to the world: made up once for this tab and kept while the tab lives, so a page loaded again is
+ * the same person (what a rule gave them and what they hold are theirs still, #366). Another tab is someone else.
+ * Where nothing can be kept (a private window) it is made up each time, as it always was.
+ */
+function mine(): string {
+  const fresh = Math.random().toString(36).slice(2, 10)
+  try { const kept = sessionStorage.getItem('village.me'); if (kept && /^[a-z0-9]{6,10}$/.test(kept)) return kept; sessionStorage.setItem('village.me', fresh) } catch { /* nothing can be kept here */ }
+  return fresh
+}
+
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
   let live = false
@@ -133,7 +144,7 @@ export function link(base = '/world'): Link {
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
-    me: Math.random().toString(36).slice(2, 10),
+    me: mine(),
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onbodies: null, onblow: null, onrealm: null,
     get base() { return base },
     ready: () => Promise.reject(new Error('not yet')), go: () => false, held: () => [], onheld: null, release: () => {},

@@ -182,6 +182,15 @@ const TALL = 18, EYES = 16, PACE = 13, CLIMB = 2, DROP = 30
 const NEAR = 400, EARSHOT = 300
 /** Seconds after its last request that a seat's body is gone, and a page's after it last said where it was. */
 const SEAT_STAYS = 180, PAGE_STAYS = 5
+/**
+ * Seconds a page that has gone is still kept a place: a page loaded again is the same person (page/link.ts keeps its
+ * id), but it is silent for longer than PAGE_STAYS while it loads, and what a rule gave them (flight, a coat) and
+ * the thing in their hand went with them (#366). So for this long what they held is nobody else's and stays out of
+ * the world, and what their body can do and how it looks are kept; then the thing is put down where they stood.
+ */
+const AWAY_KEPT = 600
+/** Pages that have gone, by id: when, where they stood, and how a rule had them look. */
+const away = new Map()
 const folk = new Map()
 const voices = []
 /** What has gone off lately: the town's residents are moved by it, by their rule (residents.ts). */
@@ -405,8 +414,14 @@ setInterval(() => {
   if (driven.step(now)) nudged = true
   driven.watch(now)
   driven.carry(now)
+  for (const [by, a] of away) if (now - a.t > AWAY_KEPT * 1000) { away.delete(by); lay(grasp.left({ by, at: a.at })); body.say() }
   for (const p of folk.values()) {
-    if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); lay(grasp.left(p)); continue }
+    if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) {
+      folk.delete(p.by); p.gone = true
+      // A seat is gone at once; a page is kept its place for a while (AWAY_KEPT).
+      if (p.seat) { tell(p); lay(grasp.left(p)) } else away.set(p.by, { t: now, at: p.at, look: p.look })
+      continue
+    }
     if (!p.seat) continue
     if (p.back && goingBack(p, now)) continue
     // A tenth of a second of its going: straight, or round what is in its way, or after whoever it follows (about.mjs).
@@ -624,7 +639,7 @@ does.set('take', grasp.take)
 /** An ask the world's process made itself (what someone who left held is put down): done as any ask is, and told. */
 const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessage({ echo: ask }); edit(ask.edit); told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true); nudged = true }
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
-const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated() })
+const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated(), kept: (by) => away.has(by) })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
 // Thrown, what a hand held is a body of its own cells; its record goes, for it lies wherever it lands (rules/holding.mjs `letGo`).
@@ -771,6 +786,9 @@ parentPort.on('message', (said) => {
     const old = folk.get(here.by)
     if (old?.seat) return
     const p = old ?? { by: here.by, seat: false, goal: null, down: 0, flinch: 0 }
+    // Someone back after their page loaded again: how a rule had them look is theirs still (if that rule is still here), and their page is told what their body can do.
+    const back = old ? undefined : away.get(here.by)
+    if (back) { away.delete(here.by); if (back.look && body.shapes(here.by)) p.look = back.look; setTimeout(() => body.say(), 0) }
     // One who rides is where their thing is (rules/things.mjs), not where their page's eye is.
     if (driven.seatOf(here.by)) Object.assign(p, { name: here.name, last: Date.now() })
     else Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, frame: here.frame, last: Date.now() })

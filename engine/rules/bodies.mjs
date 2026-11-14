@@ -23,8 +23,9 @@ const SLOWEST = 0.05, FASTEST = 4, SPARED_MOST = 64
  * @param limbs  takes a look, a move and an aim for a body as a rule gave them (the world's own, as for an actor)
  * @param shown  says a body again to every page, as it now is
  * @param seated  who a rule has seated on what living thing, by person at a page (rules/things.mjs)
+ * @param kept  whether someone who is not here is kept their place: a page that is loading again (world.mjs `away`)
  */
-export function bodies({ folk, tell, limbs, shown, seated = () => ({}) }) {
+export function bodies({ folk, tell, limbs, shown, seated = () => ({}), kept = () => false }) {
   /** By person: the rule that set them and the numbers it set. */
   const can = new Map()
   /** By person: the rule that gave their figure a look or a move. */
@@ -33,13 +34,15 @@ export function bodies({ folk, tell, limbs, shown, seated = () => ({}) }) {
   const figure = (p) => ({ ...(p.look ? { look: p.look } : {}), ...(p.move ? { move: { n: p.move.n, ...(p.move.name ? { name: p.move.name } : { keys: p.move.data }), ...(p.move.aim ? { aim: p.move.aim } : {}) } } : {}) })
   let clock = { rate: 1, spare: [], rule: null }
   const said = () => {
-    for (const by of can.keys()) if (!folk.has(by)) can.delete(by)
-    for (const by of shaped.keys()) if (!folk.has(by)) shaped.delete(by)
-    tell({ bodies: { clock: { rate: clock.rate, spare: clock.spare }, can: Object.fromEntries([...can].map(([by, c]) => [by, c.numbers])), figure: Object.fromEntries([...shaped.keys()].map((by) => [by, figure(folk.get(by))])), seat: seated() } })
+    for (const by of can.keys()) if (!folk.has(by) && !kept(by)) can.delete(by)
+    for (const by of shaped.keys()) if (!folk.has(by) && !kept(by)) shaped.delete(by)
+    tell({ bodies: { clock: { rate: clock.rate, spare: clock.spare }, can: Object.fromEntries([...can].map(([by, c]) => [by, c.numbers])), figure: Object.fromEntries([...shaped.keys()].filter((by) => folk.has(by)).map((by) => [by, figure(folk.get(by))])), seat: seated() } })
   }
   return {
     /** Says the bodies' numbers again: something that goes with them has changed (who a rule has seated). */
     say: () => said(),
+    /** Whether a rule shapes this person's figure still (one who was away is given their look back only then). */
+    shapes: (by) => shaped.has(by),
     /** How fast the world goes now. */
     get rate() { return clock.rate },
     /** `world.person(id, {pace, jump, climb, fly, fall, down, cling, look, move, aim})`: only the fields given change; null puts one back as it was. */
