@@ -795,10 +795,15 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
   word; the owner has not yet used it himself. The game's server was main's; the helper and `plug.mjs` ran from the
   branch that fixed what the run found. It spent one twelve-minute Opus session and two rule asks of the owner's
   subscription.
-- **What the paint pass costs**: on a held GPU turn, the same view, four marks drawn and then hidden, 1280 x 720
-  and 1440 x 900 at 2x: every frame 16.7 ms either way (358 of 358). So it misses no frame on the M1 Pro; what it
-  costs in milliseconds, and on a phone, is not measured (#314). During the run itself, with other lanes' checks
-  on the GPU, the 99th frame in a hundred was 33 ms: that was the GPU being shared.
+- **What the paint pass costs** (#314; `node plugins/paint/bench.mjs`: the page's own `paced`, the march at the
+  GPU's own pace with the plugins' passes and without, turn about, nine rounds; M1 Pro, November 14; each number
+  from a run of its rounds with nobody else drawing, the spread in brackets). At 1280 x 720: four marks 0.13 ms
+  a frame over a march of 6.9 ms, 2% (-0.06 to 0.21); sixteen marks of 32 points each, the most one rule may have,
+  0.42 to 0.57 ms, 6 to 8% (0.36 to 0.62). At 2880 x 1800: four marks 0.87 ms over 28.5 ms, 3% (0.62 to 1.30);
+  sixteen of 32 points 2.28 ms over 27.6 ms, 8% (1.69 to 2.55). With no mark there is no pass. So what rules
+  ordinarily draw costs 2 to 3%, and the most a rule can ask for costs what one addition to the march has cost
+  before. It was let in on that. Not measured: a phone. Three runs were needed to get each row once with the GPU
+  quiet: with another lane's check drawing, a round varied by 8 to 30 ms and said nothing.
 - **What the run showed is still rough**: asked again, the maker named two new gaps (words on the ground; a ring
   that stays under a runner): the list feeds itself. The session hooked its pass into the wand's `draw` because a
   page plugin had no door to draw with: it has one now (`engine.draws`), and paint uses it.

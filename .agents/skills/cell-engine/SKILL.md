@@ -2606,3 +2606,18 @@ named what the checks had not looked at. What was wrong, and what it taught:
   frame snaps for others (ten times a second), it is not eased. A glance and an aim are still worked out in the
   world's axes. Seen on the way: a person standing still sleeps, and a rule that turns their down does nothing
   until they take a step.
+
+## Costing a plugin's pass (#314, `plugins/paint/bench.mjs`; November 14)
+
+- **`engine.paced(flags, people, wand, pieces, passes)`** draws the march to a texture the canvas's size as fast as
+  the GPU goes, so it is not capped at 60 a second: with the plugins' passes and without, turn about, the
+  difference is the pass. A frame's gap on the page only says whether a frame was missed.
+- **Paint**: 2 to 3% of the march for a few marks, 6 to 8% for sixteen marks of 32 points (a rule's most), at
+  1280 x 720 and at 2880 x 1800. The cost goes with marks times points times pixels: every pixel walks every
+  mark's points. A box test before the walk (each mark carries its box) is the first thing to try if it must be cheaper.
+- **One GPU, many lanes**: a round with another check drawing varied by 8 to 30 ms. The bench waits up to five
+  minutes for the other place to be free and says if it never was; read the spread of a row, not just its middle,
+  and keep the rows whose spread is tight. It took three runs to have each row once.
+- **A plugin's page side that draws uses `engine.draws`** (`page/plugins.ts` `passes`), not a wrap of someone
+  else's draw: the name `engine.passes` was already taken on the page, which a plugin finds out only when it loads.
+
