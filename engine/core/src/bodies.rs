@@ -356,7 +356,9 @@ impl Ground {
             self.kept.remove(&oldest);
         }
         if self.kept.len() > 4096 {
-            self.kept.retain(|_, k| matches!(k.0, Kept::Cells(_)));
+            // The one just stored stays, whatever it is: whoever asked for it reads it next (a sector all of one
+            // kind, asked for after 4,096 others, was dropped here and the read then failed: #264, a survey).
+            self.kept.retain(|k, kept| *k == key || matches!(kept.0, Kept::Cells(_)));
         }
     }
 
@@ -2188,6 +2190,16 @@ mod tests {
 
     fn block(size: [usize; 3], k: Kind) -> Vec<Kind> {
         vec![k; size[0] * size[1] * size[2]]
+    }
+
+    /// A sector all of one kind is still there to read when 4,096 others have been asked about since the last
+    /// clearing out: the clearing out dropped the very sector that was being read (#264).
+    #[test]
+    fn a_sector_asked_for_after_thousands_is_read() {
+        let mut b = Bodies::new();
+        for i in 0..4200 {
+            assert_eq!(b.ground.kind(X + i * 64, 60_000, Z), 0);
+        }
     }
 
     fn run(bodies: &mut Bodies, seconds: f32) -> Vec<Run> {

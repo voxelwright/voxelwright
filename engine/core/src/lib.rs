@@ -252,6 +252,13 @@ pub extern "C" fn paving_at(x: i32, z: i32) -> i32 {
     sort + if paved { 8 } else { 0 }
 }
 
+/// What the ground's top is made of at a column by the land's own rule, before anything was done to it: its kind.
+/// A question of the rule alone, so it costs what `ground_at` does and makes no sector (`world_kind` makes one).
+#[unsafe(no_mangle)]
+pub extern "C" fn top_at(x: i32, z: i32) -> u32 {
+    city::top(x, z) as u32
+}
+
 /// How big a box round a change is asked what still holds: 16 m across and deep, 22 m tall.
 pub const SETTLE: [usize; 3] = [160, 224, 160];
 /// The box a charge is asked about in again, in blocks (support.rs `release_far`): 32 m across, 25.6 m tall, whole sectors.

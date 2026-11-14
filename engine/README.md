@@ -538,6 +538,25 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   game. **Known**: a road thinner than four cells shows in stripes from far off, and any road does from high above
   (coarser copies of the world take one cell in 2, 4, 8 of an edit, and the ground's top is not always the one
   taken); a build stops the world's clock for up to a quarter of a second.
+- **A rule knows the ground** (`plugins/ground`). `world.ground(id, {at, within, grid})` asks for the lie of the
+  land over an area and hears `ground`: a grid (9 a side unless said) of how high someone stands at each column
+  (under water, the bed: the water's surface is at 0), what the ground's top is made of, and how high what stands
+  there reaches, with what it comes to (lowest and highest, how much is water and how much clear, which part of the
+  town). `world.ground(id, {find, near, room, flat, within})` asks where the nearest ground of a kind is with room
+  to build: `open`, `grass`, `sand`, `rock`, `shore` (low open country with 300 m of open water beside it, and
+  which way the water lies), `street`, `high`, `water`. Every realm is the same planet, so a track belongs on the
+  plain and a beach on a shore, kilometres from the town. What the land's own rule says is asked first (quick),
+  what stands there is read from the world's cells (so what was built or dug shows), and both are worked a little at
+  a time between the world's other work. Measured (M1 Pro): a find that succeeds 30 to 210 ms of work, none that
+  held the world over 5 ms; a survey of 81 columns about 80 ms of work (a column read from the cells makes its
+  sector, 0.3 to 1 ms). Real runs (November 14, Opus 5.5, five; each rule ran on the first asking): a pier and
+  huts on a shore 3.6 km off, a kart track on the plain 4.3 km east, a stone hut 527 m up in the mountains 7.9 km
+  north, four stalls in the home street set between its cars. The first track rule read "20 km" and asked within
+  20,000 cells, so found nothing: the guide now gives every distance in cells. `node plugins/ground/check.mjs`: a
+  surveyor and a lighthouse keeper. `survey` and `find` are plain functions of a core's exports (the maker uses
+  them to say where a realm is). The core gained `top_at` (the ground's top by the land's rule, no sector made) and
+  lost a fault: a sector all of one kind, asked for after 4,096 others, was dropped as it was stored and the read
+  of it failed (`bodies.rs` `store`; a core test holds it).
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.
@@ -682,7 +701,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/build` (`world.build`: a rule puts a place into the world's cells and takes it out again; "Rules" above), `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once; and with `as`, a sound that stays on someone and is heard moving, kept as what is so), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/ground` (`world.ground`: the lie of the land over an area, and where there is room of a kind; "Rules" above), `plugins/build` (`world.build`: a rule puts a place into the world's cells and takes it out again; "Rules" above), `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once; and with `as`, a sound that stays on someone and is heard moving, kept as what is so), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns

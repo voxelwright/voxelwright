@@ -2718,3 +2718,28 @@ rule out puts back what they replaced. What cost time, and what to keep:
   never sees "someone is in the way". A rule that builds on top of the asker passes the trial and is refused in
   the realm. The guide says to build 40 cells off; the first two rules did (16 m south, in the yard).
 
+## A rule knows the ground (#264, `plugins/ground`; November 14)
+
+- **`world_kind` makes a whole sector for every cell asked about that is not in one of the 112 it keeps**: 0.3 to
+  0.45 ms in the town and on the plain, more in the mountains. Measured high in the air it looks like 0.3
+  microseconds (a sector of nothing is cheap), which is how a first search came to take 10 to 45 s. `ground_at`,
+  `feet_at`, `paving_at` and the new `top_at` ask the land's rule alone: 0.1 to 0.8 microseconds. So: ask the rule
+  for everything it can say (height, water, what the top is made of, which part of the town) and read cells only
+  for what stands there, last, on the few places that passed.
+- **The core dropped the sector it had just stored** when more than 4,096 were kept and that one was all of one
+  kind (`bodies.rs` `store`: `retain` kept only sectors with cells), and the read that followed failed inside the
+  core. Anything that asks about many places far apart meets it. Mended, with a test.
+- **The sea is not cells.** It lies wherever the ground is under the sea's level (`city.rs` `SEA`, -1): a rule is
+  told the bed's height there, and that the surface is at 0. Rivers and lakes are the same water, so "shore" asks
+  for 300 m of it one way with land behind, or it finds a river bank.
+- **Work that may be long is a generator** the plugin steps for 4 ms at a time with the world's other work between
+  (`finding`, `surveying`): a search that fails looks at 40,000 places and nobody waits on it.
+- **Ground is never flat**: asked for sand rising under 6 cm across 600 m, there is none within 40 km. The default
+  is a sixth of the room, and the answer says how much it rises.
+- **Say every distance in one unit.** The guide said the plain was "4 km east" and that a search looks "20 km
+  unless said"; a model wrote `within: 20000` (2 km in cells) and found nothing, twice. In cells throughout, it
+  left `within` out and found the plain.
+- **Models asked for** (kept in `~/.village/engine/build/trial2/cannot.jsonl`): where the waterline is and how
+  deep the sea (now told: the bed's height); a way to take someone to a far place (a realm's `arrive` does it for
+  a realm; inside one, nothing does); a build that can be driven through.
+

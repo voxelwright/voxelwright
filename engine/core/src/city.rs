@@ -748,6 +748,11 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     (g + 1 + kerb, material(top) == CONCRETE, sort)
 }
 
+/// What the ground's top is made of at a column by the land's own rule, before anything was done to it: its kind.
+pub fn top(x: i32, z: i32) -> Kind {
+    surface(x, z, ground(x, z)).0
+}
+
 /// What the ground's top cell is at a column, and how many cells stand on it (a pavement is a kerb above the road).
 fn surface(x: i32, z: i32, g: i32) -> (Kind, i32) {
     let country_here = is_open(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z));
