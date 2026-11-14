@@ -21,6 +21,7 @@ import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
 import { lookOf } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
+import { bodies } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
 import { sounding } from './rules/sound.mjs'
 import { rules as ruling } from './rules/run.mjs'
@@ -346,7 +347,7 @@ function actorsBack(ruleId, actors, now) {
 /** What is in a body's way at a place, for the telling: the first thing from the knees up, or a drop. */
 const inTheWay = (x, y, z) => { for (let k = 0; k < TALL; k++) { const kind = core.world_kind(Math.round(x), Math.round(y) + CLIMB + k, Math.round(z)); if (kind) return `${MATERIALS[kind & 15]} in the way` } return 'a drop too far to step down' }
 /** How bodies get about: round what is in the way, after or away from someone, and who is near whom (about.mjs). */
-const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule) })
+const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule), rate: () => body.rate })
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
 let ticks = 0
 setInterval(() => {
@@ -399,6 +400,7 @@ function drop(id) {
   noise.dropped(id)
   plug.dropped(id)
   getting.dropped(id)
+  body.dropped(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
@@ -473,6 +475,10 @@ does.set('actor', (rule, w, now, wrong) => {
 // `world.gone(id)`, an actor of the rule's leaving, is a plugin (plugins/gone): the first of these moved into that form.
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
+// What a person's body can do, and how fast the world goes (rules/bodies.mjs).
+const body = bodies({ folk, tell: (m) => parentPort.postMessage(m) })
+does.set('person', body.person)
+does.set('clock', body.clock)
 does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
@@ -575,6 +581,7 @@ setInterval(() => {
   last = now
   if (!nudged && !core.bodies_count() && !core.bodies_burning() && !core.bodies_flowing()) return
   nudged = false
-  told(core.bodies_advance(dt), false)
+  // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
+  told(core.bodies_advance(dt * body.rate), false)
 }, 16)
 parentPort.postMessage({ ready: true })

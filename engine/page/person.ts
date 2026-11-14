@@ -20,6 +20,14 @@ import type { Told } from './told.ts'
 export const BODY: [number, number, number] = [4, 14, 3]
 /** How a person moves until a rule says otherwise: runs at 4.5 m/s (walks at a third of it), jumps 0.75 m. */
 export const ON_FOOT: Motor = { front: 0, grip: 1.5, power: 300, top: 45, steer: 0, hover: 0, lift: 0, upright: 30, turns: 8, jump: 38, tough: 2000, feet: [{ at: [2, 0.5, 1.5], reach: 6 }] }
+/**
+ * What a body can do, as a rule sets it (`world.person`, rules/bodies.mjs): how fast it runs (cells a second), how
+ * high it jumps (cells), how high a wall it climbs (cells), how fast it flies, how much of the world's pull it feels.
+ */
+export interface Can { pace: number; jump: number; climb: number; fly: number; fall: number }
+export const AS_IT_IS: Can = { pace: 45, jump: 7.4, climb: 0, fly: 0, fall: 1 }
+/** The motor that does it: the jump's speed is what takes it that high under the pull it feels. */
+const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
 /** How high the eyes are over the feet, and what share of a run a walk is. */
@@ -40,8 +48,10 @@ export interface Me {
   edit(words: Int32Array): void
   /** Where the feet are (cells) and which way the body faces (0 north, a quarter turn east), or null in the air as an eye. */
   readonly feet: { at: [number, number, number]; yaw: number; speed: number } | null
-  /** The motor's numbers now; set to change what the body can do. */
-  motor: Motor
+  /** What the body can do; set (any of the numbers) to change it. */
+  can: Partial<Can>
+  /** How fast time goes for this body: 1, or the world's clock when a rule has slowed it and has not spared this person. */
+  clock: number
 }
 
 export function person(o: {
@@ -61,12 +71,13 @@ export function person(o: {
   name?: string
 }): Me {
   const M = 10
-  let on = false, id = 0, asked = false, view: Me['view'] = 'behind', motor = ON_FOOT
+  let on = false, id = 0, asked = false, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
+  const tellCan = () => { if (id) o.send({ motor: { id, numbers: numbers(motorOf(can)) }, ways: { id, fall: can.fall, climb: can.climb } }) }
   // Where the body is as the core last said (its middle of mass), and where the eye's height has got to.
   let at: [number, number, number] | null = null, com = [2, 7, 1.5], eyeY = 0
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
-  let waiting = false, since = 0, leave: (() => void) | null = null
+  let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
   const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed, name: o.name }
   o.folk.from.push((_view, seconds) => {
     if (!on || !at || view === 'head') return []
@@ -91,7 +102,7 @@ export function person(o: {
     heading = o.pose.yaw - Math.PI / 2
     eyeY = o.pose.y * M
     asked = true
-    o.send({ figure: { low, size: BODY, motor: numbers(motor) } })
+    o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can)) } })
     o.wake()
     // On foot the page's own keys still do what they did (tools, the wand); Space jumps and V changes where the eye rides.
     leave = o.input.push({ name: 'afoot', key: (code) => { if (code === 'Space') { jump = true; return true } if (code === 'KeyV') { view = view === 'behind' ? 'head' : 'behind'; return true } return false } })
@@ -102,12 +113,16 @@ export function person(o: {
     get view() { return view },
     set view(v) { view = v },
     get feet() { return on ? feet() : null },
-    get motor() { return motor },
-    set motor(m) { motor = m; if (id) o.send({ motor: { id, numbers: numbers(m) } }) },
+    get can() { return can },
+    set can(c) { const next = { ...AS_IT_IS, ...c }; if (JSON.stringify(next) === JSON.stringify(can)) return; can = next; tellCan() },
+    get clock() { return clock },
+    set clock(rate) { clock = rate },
     edit(words) { if (o.own) o.send({ edit: words }) },
     heard(answer, told) {
       waiting = false
-      if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } }
+      // While the core says a body of its own is awake it is asked on: one in the air told nothing must still come down.
+      awake = answer.bodies > 0
+      if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
       if (!id) return
       for (const m of told.moves) if (m.id === id) at = m.pos
     },
@@ -128,15 +143,17 @@ export function person(o: {
       const looks = o.pose.yaw - Math.PI / 2
       let ask: NonNullable<Ask['walk']> | null = null
       if (id) {
-        if (view === 'head') { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise: 0, jump } }
-        else { if (long > 0.01) heading = looks + Math.atan2(side, go); ask = { id, heading, go: Math.min(1, long), side: 0, rise: 0, jump } }
+        // One who flies rises with Space and sinks with C.
+        const rise = can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0
+        if (view === 'head') { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise, jump } }
+        else { if (long > 0.01) heading = looks + Math.atan2(side, go); ask = { id, heading, go: Math.min(1, long), side: 0, rise, jump } }
         jump = false
       }
       since += dt
-      const moving = long > 0.01 || (ask?.jump ?? false)
+      const moving = long > 0.01 || (ask?.jump ?? false) || (ask?.rise ?? 0) !== 0
       if (ask && o.own) {
         // Its own core: asked for a step each frame while anything of it moves, and not again before it has answered.
-        if (!waiting && (moving || since < 3)) { waiting = true; o.send({ walk: ask, tick: Math.min(dt, 0.05) }) }
+        if (!waiting && (moving || awake || since < 1)) { waiting = true; o.send({ walk: ask, tick: Math.min(dt, 0.05) * clock }) }
         if (moving) since = 0
       } else if (ask && (moving || since > 0.25)) { o.send({ walk: ask }); if (moving) o.wake(); since = 0 }
       if (at) {

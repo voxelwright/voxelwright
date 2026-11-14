@@ -459,6 +459,13 @@ pub extern "C" fn living_vanish(id: u32) -> usize {
     })
 }
 
+/// How a living thing falls (1 as everything does, less slowly, 0 not at all) and how high a wall it climbs when
+/// told to go on against it (cells; none for steps only). Returns 1 if it is there.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_ways(id: u32, fall: f32, climb: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ways(id, fall, climb) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -248,6 +248,8 @@ async function main() {
   let paused = false, saying = ''
   /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
   const off = new Set<string>()
+  /** How fast the world goes (#264): 1 as it does. What this page moves and its dust and smoke go by it; in a shared world the world's process says it. */
+  const tempo = { rate: 1 }
   /** What a frame costs this thread, smoothed, in ms; and what each part of it costs, by name. `heard` is the mover's answers, summed. */
   let cpuMs = 0, mark = 0
   const spent: Record<string, number> = { heard: 0 }
@@ -278,9 +280,9 @@ async function main() {
     lap('spoil')
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
-    debris.step(dt, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+    debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
     gathering.step(dt)
-    smoke.step(dt)
+    smoke.step(dt * tempo.rate)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
@@ -440,7 +442,7 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed } satisfies Ask); owed = 0 }
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
@@ -486,6 +488,9 @@ async function main() {
   const me = person({ send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
   controls.always('KeyB', () => { me.walk(!me.on); return true })
+  // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is
+  // everyone's but those a rule spares, who move as they always did while all else slows.
+  if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {} }
   if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
@@ -836,7 +841,7 @@ async function main() {
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

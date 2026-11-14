@@ -1,0 +1,61 @@
+// What a body can do, and how fast the world goes (#264, the BODIES lane): for the world's process.
+//
+// A rule sets numbers for a person at a page (`world.person`): how fast they run, how high they jump, how high a
+// wall they climb, how fast they fly, how much of the world's pull they feel. The page that moves that body takes
+// them as its motor's numbers. "Walk up walls", "fly", "leap a street" are a rule setting numbers: nothing here or
+// in the core knows those words. And a rule sets the world's clock (`world.clock`): everything the world moves goes
+// that much slower or faster, and so does everyone in it but those the rule spares.
+//
+// What a rule set goes back to how it was when the rule is taken out.
+
+/** What a body can do, each a least and a most: cells and seconds. */
+const CAN = { pace: [0, 400], jump: [0, 300], climb: [0, 100000], fly: [0, 400], fall: [0, 3] }
+/** The slowest and the fastest the world's clock goes, and the most people a rule may spare from it. */
+const SLOWEST = 0.05, FASTEST = 4, SPARED_MOST = 64
+
+/**
+ * @param folk  everyone with a body, by the name the world knows them by: {by, rule?, seat}
+ * @param tell  says something to the server (the bodies' numbers and the clock as they stand, for pages)
+ */
+export function bodies({ folk, tell }) {
+  /** By person: the rule that set them and the numbers it set. */
+  const can = new Map()
+  let clock = { rate: 1, spare: [], rule: null }
+  const said = () => {
+    for (const by of can.keys()) if (!folk.has(by)) can.delete(by)
+    tell({ bodies: { clock: { rate: clock.rate, spare: clock.spare }, can: Object.fromEntries([...can].map(([by, c]) => [by, c.numbers])) } })
+  }
+  return {
+    /** How fast the world goes now. */
+    get rate() { return clock.rate },
+    /** `world.person(id, {pace, jump, climb, fly, fall})`: only the fields given change; null puts one back as it was. */
+    person(rule, w, now, wrong) {
+      const p = typeof w.id === 'string' ? folk.get(w.id) : null
+      if (!p || p.rule || p.seat) return wrong('world.person is for someone at a page: an id of world.people whose kind is "page"')
+      const numbers = { ...(can.get(p.by)?.numbers ?? {}) }
+      for (const [key, [least, most]] of Object.entries(CAN)) {
+        if (w[key] === undefined) continue
+        if (w[key] === null) { delete numbers[key]; continue }
+        if (typeof w[key] !== 'number' || !Number.isFinite(w[key]) || w[key] < least || w[key] > most) return wrong(`a person's ${key} is a number from ${least} to ${most}`)
+        numbers[key] = w[key]
+      }
+      if (Object.keys(numbers).length) can.set(p.by, { rule: rule.id, numbers }); else can.delete(p.by)
+      said()
+    },
+    /** `world.clock({rate, spare})`: how fast the world goes (1 as it does), and who is spared the change. */
+    clock(rule, w, now, wrong) {
+      if (typeof w.rate !== 'number' || !Number.isFinite(w.rate) || w.rate < SLOWEST || w.rate > FASTEST) return wrong(`the clock's rate is a number from ${SLOWEST} to ${FASTEST}: 1 is how the world goes by itself`)
+      const spare = w.spare ?? []
+      if (!Array.isArray(spare) || spare.length > SPARED_MOST || !spare.every((id) => typeof id === 'string' && id.length <= 64)) return wrong(`who the clock spares is a list of at most ${SPARED_MOST} ids of world.people`)
+      clock = { rate: w.rate, spare: [...spare], rule: w.rate === 1 ? null : rule.id }
+      said()
+    },
+    /** A rule is taken out: what it set goes back. */
+    dropped(id) {
+      let changed = false
+      for (const [by, c] of can) if (c.rule === id) { can.delete(by); changed = true }
+      if (clock.rule === id) { clock = { rate: 1, spare: [], rule: null }; changed = true }
+      if (changed) said()
+    },
+  }
+}

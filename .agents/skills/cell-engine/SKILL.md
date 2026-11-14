@@ -1984,6 +1984,20 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
   one's own head; in the head the body faces where the eye looks and steps aside. The height is eased (a kerb is no
   jolt). Behind, the eye passes through walls: not built.
 - **The check's street**: cars are parked a metre to the right of the lane at x 760 to 900; step left, not right.
+- **What it can do is numbers** (`rules/bodies.mjs`, `person.ts` `Can`): pace, jump (a height: the speed is worked
+  out under the pull it feels), climb, fly, fall. `Live::fall` gives back that share of the world's pull and scales
+  the leg's spring with it, or one who falls slowly stands 2 cells high on a leg made for its whole weight.
+  `Live::climb`: told to go on against a wall (a ray ahead at its middle and at its feet) it rises at half its pace,
+  no slower than 0.6 of that, until its feet are over the top or it has climbed its number. The speed is set, not
+  eased towards: eased, one who walked into the wall rose a cell and stopped, held by the rub of its own push.
+- **A body in the air told nothing was not asked on**: the page asked its own core for steps only while a key was
+  down or for 3 s after, so a jump of four metres under a quarter of the pull hung in the air for ever. It is asked
+  on while the core says a body of its own is awake.
+- **The clock** (`world.clock`): the world's process multiplies the time it gives the core and its walkers; a page
+  multiplies the time of what it moves itself and of its dust and smoke, and of its own body unless it is spared.
+  A rule's tick is not slowed. Residents go by the wall clock still.
+- **A check that builds a wall must wait until its builder stands**: one read her feet while she hung 2 m up, built
+  the wall from there, and it fell into a heap before she reached it.
 
 
 ## Moves and looks as data (#218 for #264, November 13)

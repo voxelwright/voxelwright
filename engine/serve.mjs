@@ -86,12 +86,13 @@ async function report(req, res) {
 //             down, flinch, seat (a body the world moves for someone outside a page), gone}.
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
 //   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
+//  12 bodies  what people's bodies can do and how fast the world goes, as JSON: {clock: {rate, spare}, can: {by: {pace, jump, climb, fly, fall}}}. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
 //  10 sound   a sound a rule made (rules/sound.mjs), as JSON: {at, like | patch, force, size, hz, gap, for, reach}. For whoever reads now; not kept.
 //  11 plugged what of the engine's plugins a page is to have (plugins.mjs), as JSON: {list: [{name, v}]} (the page sides there are: a page imports /plugins/<name>/page.ts?v=<v> for each that is new to it), {plugin, state} (given to that plugin's page side; the latest is said to each reader as it joins), {plugin, once} (the same, kept for nobody) or {plugin, gone}.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11, BODIES = 12
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -150,6 +151,8 @@ world.near(at, cells)   those of world.people within so many cells of [x, z] or 
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near}. id is the same from one call to the next; near is how far the nearest person is. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
 world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON
 world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. to: [x, z] is where it walks over the world's own cells (null stops it): straight while that is open, and round what is in its way when it is not (a parked car, a lamp, a corner), up kerbs and stairs, down drops, and up onto something waist-high with its hands. Where there is no way it gets as near as it can, and stopped says what kept it from the rest. face: [x, z] turns it. pace is cells a second (13 is a walk, at most 140). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2, wear, carry, extra} (LOOKS, below). say is heard by everyone within 30 m
+world.person(id, {pace, jump, climb, fly, fall})   what the body of someone at a page can do: only the fields given change, and null puts one back as it was. id is theirs in world.people (kind "page"). pace: how fast they run, cells a second (45 as they are; a walk is a third of it; up to 400). jump: how high, cells (7; up to 300). climb: how high a wall they get up when they go on against it, cells (0: steps and kerbs only; 100000: any wall). fly: how fast they fly, cells a second (0: they do not; then Space rises, C sinks). fall: how much of the world's pull they feel (1; 0.2 comes down slowly; 0 hangs). Their own page moves their body by these. What a rule set goes back when the rule is taken out
+world.clock({rate, spare})   how fast the world goes: 1 as it does, 0.05 to 4. Everything the world moves goes by it (what is loose and falls, living things, actors, seats, fire, water) and so does everyone at a page, but those in spare (ids of world.people), who move as they always did. A rule's tick still comes twice a real second. It goes back to 1 when the rule is taken out
 world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
   on('act',   (world, e) => {})   someone did something this rule offers: e = {by, name, action (the offer's id), phase: "tap" | "down" | "up", at (their feet), from (their eyes), to (the way they look), met}. met is what was straight ahead of them, aimed or not: null for the sky, {kind: "cells", at, far, material} or someone's body {kind: "page" | "seat" | "actor", id, name, mine, at, far, up (0 at the feet to 1 at the head)}. Only the rule that offered it hears it
 world.show(id, {line, meters, score, choice, to})   shows people something on their screen, or changes it: only the fields given change, a field given as null is taken away, and hide: true takes all of it away. line is a line of words (up to 80 characters). meters is up to 4 of {label, value, of, colour: "#rrggbb"}: how full each is, value out of of (1 unless said). score is a number, a few characters ("2:41", "3rd"), or {label, value}. choice is up to 6 picks, each a word or {id, word}. to is who sees it: an id of world.people, a list, or null for everyone. A rule shows at most 8 things. These are the rule's own words and numbers: the engine has no word for health, alarm, laps or rounds
@@ -438,7 +441,7 @@ function open(of) {
   const readers = new Set()
   let down = ''
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
-  let offered = null, showing = null
+  let offered = null, showing = null, bodied = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
@@ -451,6 +454,8 @@ function open(of) {
     // What a plugin says to its page side: for whoever reads now, and its state kept here for whoever joins.
     if (m.page) { const f = frame(PLUGGED, 0, Buffer.from(JSON.stringify(m.page))); if (m.page.state !== undefined) pluginStates.set(m.page.plugin, f); else if (m.page.gone) pluginStates.delete(m.page.plugin); for (const r of readers) r.write(f); return }
     // What rules offer people to do: for whoever reads now, and kept here for whoever joins.
+    // What bodies can do and how fast the world goes (rules/bodies.mjs): for whoever reads now, and kept for whoever joins.
+    if (m.bodies) { bodied = frame(BODIES, 0, Buffer.from(JSON.stringify(m.bodies))); for (const r of readers) r.write(bodied); return }
     if (m.offers) { offered = frame(OFFERS, 0, Buffer.from(JSON.stringify(m.offers))); for (const r of readers) r.write(offered); return }
     if (m.shown) { showing = frame(SHOWN, 0, Buffer.from(JSON.stringify(m.shown))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(showing); return }
     // A sound a rule made: for whoever reads now and is not far behind.
@@ -588,6 +593,7 @@ function open(of) {
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
       if (showing) res.write(showing)
+      if (bodied) res.write(bodied)
       res.write(pluggedList())
       for (const f of pluginStates.values()) res.write(f)
       // What sleeps says nothing: the world says once more where everything is.

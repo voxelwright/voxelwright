@@ -79,6 +79,12 @@ pub struct Live {
     /// Seconds it has been quiet, and whether a blast has reached it.
     quiet: f32,
     pub(super) hurt: bool,
+    /// How much of the world's pull it feels: 1 as everything, less to fall slowly, none to hang where it is.
+    pub fall: f32,
+    /// How high a wall what goes on legs gets up when it is told to go on against it (cells): none for steps
+    /// and kerbs only, a few for a ledge, any height for one who walks up walls. And where it began to climb.
+    pub climb: f32,
+    climbing: Option<f32>,
     /// How fast it was going when the step's touches had yet to push it, and the most a step has changed that: a
     /// thing that lives is broken by how much of its speed one step takes, however many touches share the blow.
     pub(super) was: V,
@@ -89,7 +95,7 @@ impl Live {
     pub fn new() -> Live {
         Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
-            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, was: [0.0; 3], jolt: 0.0,
+            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, was: [0.0; 3], jolt: 0.0,
         }
     }
 
@@ -208,9 +214,11 @@ impl Live {
             foot.pressed += (want - foot.pressed) * (h * 30.0).min(1.0);
             let Some(far) = far else { continue };
             self.on += 1;
-            let spring = mass * G / (n * SAG * foot.reach);
+            // By the pull it feels: one who falls slowly stands as low on its legs as anyone.
+            let weight = mass * G * self.fall.max(0.05);
+            let spring = weight / (n * SAG * foot.reach);
             let damp = 2.0 * DAMP * (spring * mass / n).sqrt();
-            let press = (spring * foot.pressed - damp * dot(b.speed_at(r), up)).clamp(0.0, mass * G * 4.0 / n);
+            let press = (spring * foot.pressed - damp * dot(b.speed_at(r), up)).clamp(0.0, weight * 4.0 / n);
             kick(b, r, scale(up, press * h));
             // Grip and drive act most of the way up from where the foot meets the ground to the height of the thing's
             // middle: pushed at the road itself, a car at 12 m/s went onto two wheels in a turn.
@@ -302,13 +310,34 @@ impl Live {
                 }
             }
             b.vel[1] += (climb - b.vel[1]) * (h * 6.0).min(1.0);
-            let want = scale(ahead, go * self.top);
+            let want = add(scale(ahead, go * self.top), scale([-ahead[2], 0.0, ahead[0]], side * self.top));
             let mut more = [want[0] - b.vel[0], 0.0, want[2] - b.vel[2]];
             let (long, most) = (dot(more, more).sqrt(), self.power * h);
             if long > most {
                 more = scale(more, most / long);
             }
             b.vel = add(b.vel, more);
+        }
+        // What falls slowly, or not at all, is given back that much of the world's pull.
+        if self.fall != 1.0 && !(flies && self.aloft) {
+            b.vel[1] += G * h * (1.0 - self.fall);
+        }
+        // Told to go on against a wall, what can climb goes up it: as high as it climbs, from where its feet left the
+        // ground, until its feet are over the top. Looked for ahead at its middle and at its feet.
+        if legs && self.climb > 0.0 && go > 0.0 && !(flies && self.aloft) {
+            let reach = b.radius.min(4.0) + 2.5;
+            let low = add(b.pos, scale(down, b.com[1] + 2.0));
+            let wall = ray(ground, b.pos, ahead, reach).is_some() || ray(ground, low, ahead, reach).is_some();
+            if self.on > 0 && self.climbing.is_none_or(|from| b.pos[1] < from) {
+                self.climbing = Some(b.pos[1]);
+            }
+            if wall && self.climbing.is_some_and(|from| b.pos[1] - from < self.climb) {
+                // No slower than half its pace, whatever rubs: eased towards that speed, one who walked into the
+                // wall (and so pressed on it less than one who ran, but rubbed all the same) rose a cell and stopped.
+                b.vel[1] = (b.vel[1] + G * h * self.fall).max(self.top * 0.5 * go.max(0.6));
+            }
+        } else if self.on > 0 {
+            self.climbing = None;
         }
         // In the air what goes on legs can still be steered a little.
         if legs && self.on == 0 && !(flies && self.aloft) && (go != 0.0 || side != 0.0) {
@@ -568,6 +597,18 @@ impl Bodies {
         let body = self.list.swap_remove(at);
         // Told as a body that is no more, with nothing born of it.
         self.record(BROKE, &[body.id]);
+        true
+    }
+
+    /// How a living thing falls and climbs (`Live::fall`, `Live::climb`): numbers beside its motor's.
+    pub fn ways(&mut self, id: u32, fall: f32, climb: f32) -> bool {
+        let Some(b) = self.living(id) else { return false };
+        if !fall.is_finite() || !climb.is_finite() {
+            return false;
+        }
+        let live = b.live.as_mut().unwrap();
+        (live.fall, live.climb) = (fall.clamp(0.0, 3.0), climb.clamp(0.0, 100_000.0));
+        b.asleep = false;
         true
     }
 
@@ -964,6 +1005,90 @@ pub mod tests {
         let out = run(&mut bodies, 3.0, c, [1.0, 0.0, 0.0]);
         assert!(records(&out, STRUCK).iter().any(|s| (s[0] == c && s[1] == other) || (s[0] == other && s[1] == c)), "a car that hits a person is told too");
         assert!(bodies.list.iter().any(|b| b.id == other && b.live.is_some()), "and the person is still one body");
+    }
+
+    #[test]
+    fn what_a_body_can_do_is_numbers() {
+        let ground = city::ground(X, Z);
+        let wall_of = |bodies: &mut Bodies, x: i32, high: i32| {
+            let runs: Vec<Run> = (ground - 2..ground + high).flat_map(|y| (Z - 20..Z + 40).map(move |z| Run { x0: x, x1: x + 30, y, z, kind: kind(BRICK, OWN) })).collect();
+            bodies.ground.push(Edit::Runs(runs), false, None);
+        };
+        let pace = std::cell::Cell::new(1.0f32);
+        let go = |bodies: &mut Bodies, id: u32, seconds: f32, jump: bool| {
+            let mut high = f32::MIN;
+            for k in 0..(seconds * 60.0) as usize {
+                bodies.walk(id, 0.0, pace.get(), 0.0, 0.0, jump && k == 0);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                high = high.max(the(bodies, id).pos[1]);
+            }
+            high
+        };
+        // A wall 4 m high and 3 m thick across the street, 4 m on: as it is, a person is stopped by it.
+        let mut bodies = Bodies::new();
+        wall_of(&mut bodies, X + 40, 40);
+        let id = person(&mut bodies, [X, ground + 5, Z + 9], 45.0);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        let stood = the(&bodies, id).pos[1];
+        go(&mut bodies, id, 4.0, false);
+        assert!(the(&bodies, id).pos[0] < X as f32 + 40.0 && the(&bodies, id).pos[1] - stood < 3.0, "a wall stops one who cannot climb");
+        // Told it climbs two metres, it gets up no wall of four; told it climbs any, it goes up and stands on top.
+        assert!(bodies.ways(id, 1.0, 20.0));
+        let high = go(&mut bodies, id, 4.0, false);
+        assert!(high - stood > 12.0 && high - stood < 30.0 && the(&bodies, id).pos[0] < X as f32 + 40.0, "one who climbs two metres gets that far up and no further: {}", high - stood);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        assert!(bodies.ways(id, 1.0, 1000.0));
+        // At a walk, a third of its pace: it climbs as it walks.
+        pace.set(0.32);
+        let high = go(&mut bodies, id, 12.0, false);
+        pace.set(1.0);
+        let b = the(&bodies, id);
+        eprintln!("climbed {} to {:?}", high - stood, b.pos);
+        assert!(high - stood > 38.0 && b.pos[0] > X as f32 + 72.0 && tipped(b) < 8.0, "one who climbs any wall goes up it, over it and down the far side: {} up, at {:?}", high - stood, b.pos);
+        // How it falls: off the far side as everything falls, and again feeling a fifth of the pull.
+        let mut times = Vec::new();
+        for fall in [1.0f32, 0.2] {
+            let mut bodies = Bodies::new();
+            let id = person(&mut bodies, [X, ground + 60, Z + 9], 45.0);
+            assert!(bodies.ways(id, fall, 0.0));
+            let mut t = 0.0;
+            while the(&bodies, id).pos[1] > ground as f32 + 14.0 && t < 10.0 {
+                bodies.walk(id, 0.0, 0.0, 0.0, 0.0, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                t += 1.0 / 60.0;
+            }
+            times.push(t);
+        }
+        eprintln!("a fall of 5 m takes {times:?} s");
+        assert!(times[1] > times[0] * 1.8 && times[1] < 9.0, "feeling a fifth of the pull it takes over twice as long to come down: {times:?}");
+        // A jump is as high as its number says; faster, it goes further.
+        let mut bodies = Bodies::new();
+        let id = bodies.figure(PERSON, [X, ground + 5, Z + 9]);
+        assert!(bodies.motor(id, &[0.0, 1.5, 600.0, 120.0, 0.0, 0.0, 0.0, 30.0, 8.0, 100.0, 2000.0, 2.0, 0.5, 1.5, 6.0, 0.0, 1.0]));
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        let (from, stood) = (the(&bodies, id).pos[0], the(&bodies, id).pos[1]);
+        go(&mut bodies, id, 0.6, false);
+        let high = go(&mut bodies, id, 2.2, true);
+        eprintln!("a jump at 100: {} cells up, {} cells on", high - stood, the(&bodies, id).pos[0] - from);
+        assert!(high - stood > 40.0 && the(&bodies, id).pos[0] - from > 250.0, "a jump of 5 m at 12 m/s crosses a street");
+        // It flies when its motor lifts: up, on, and down again to its feet.
+        assert!(bodies.motor(id, &[0.0, 1.5, 300.0, 45.0, 0.0, 0.0, 80.0, 30.0, 8.0, 38.0, 2000.0, 2.0, 0.5, 1.5, 6.0, 0.0, 1.0]));
+        let was = the(&bodies, id).pos;
+        for _ in 0..120 {
+            bodies.walk(id, 0.0, 1.0, 0.0, 1.0, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        let up = sub(the(&bodies, id).pos, was);
+        assert!(up[1] > 100.0 && up[0] > 50.0, "told to rise and go, one who flies does: {up:?}");
+        for _ in 0..60 {
+            bodies.walk(id, 0.0, 0.0, 0.0, 0.0, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        assert!((the(&bodies, id).pos[1] - was[1] - up[1]).abs() < 12.0, "told nothing it hangs where it is");
     }
 
     #[test]

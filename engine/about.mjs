@@ -26,7 +26,7 @@ export const REACH_MOST = 600, MARK_WITHIN_MOST = 2000, MARKS_MOST = 32
  * @param say      what stopped a body, as a sentence: (x, y, z) => string
  * @param hear     (ruleId, event, e) => a rule is told something
  */
-export function about({ folk, footing, kind, tall, pace: PACE, say, hear }) {
+export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }) {
   /** Where feet come to rest in a column, as `footing` says; or, with the hands, on top of something up to waist-high there. `[feet, climbed]` or null. */
   const stand = (x, y, z) => {
     const feet = footing(x, y, z)
@@ -125,7 +125,8 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear }) {
   function step(p, now, tick) {
     if (p.follow) towards(p, now)
     if (!p.goal || p.down > now || (p.climbs ?? 0) > now) return false
-    for (let left = (p.pace ?? PACE) / 10; left > 0 && p.goal;) {
+    // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
+    for (let left = (p.pace ?? PACE) / 10 * (rate?.() ?? 1); left > 0 && p.goal;) {
       // A way's next place is cut out when the one after can be walked to straight: the body does not zigzag a grid.
       if (p.path?.length > 1 && straight(p.at, p.path[1], 48) !== null) p.path.shift()
       const to = p.path?.length ? p.path[0] : p.goal

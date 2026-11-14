@@ -47,6 +47,8 @@ export interface Link {
   onliving: ((living: { thing: string; body: number }) => void) | null
   /** A sound a rule made (rules/sound.mjs): what it holds came through a rule, and is read again by whoever plays it. */
   onsound: ((sound: unknown) => void) | null
+  /** What people's bodies can do, by whom (their name in the world), and how fast the world goes and who is spared that (#264, rules/bodies.mjs). Said as it changes and to each page as it joins. */
+  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>>> }) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */
@@ -96,7 +98,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11, BODIES = 12
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
@@ -117,7 +119,7 @@ export function link(base = '/world'): Link {
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
-    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null, onrealm: null,
+    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null, onbodies: null, onrealm: null,
     get base() { return base },
     ready: () => Promise.reject(new Error('not yet')), go: () => false,
     get realm() { return realm },
@@ -157,6 +159,7 @@ export function link(base = '/world'): Link {
     }
     else if (kind === SHOWN) { shown = data as Shown[]; self.onshown?.(shown) }
     else if (kind === OFFERS) { offers = data as Offer[]; self.onoffers?.(offers) }
+    else if (kind === BODIES) self.onbodies?.(data as Parameters<NonNullable<Link['onbodies']>>[0])
     else if (kind === SOUND) { if (live) self.onsound?.(data as Parameters<NonNullable<Link['onsound']>>[0]) }
     else if (kind === PLUGGED) { const m = data as Plugged; if ('list' in m) plugs.set('', m); else if ('state' in m) plugs.set(m.plugin, m); else if ('gone' in m) plugs.delete(m.plugin); else if (!live) return; plugged?.(m) }
     else if (kind === LIVING) { const l = data as { thing: string; body: number }; if (l.body) alive.add(l.thing); else alive.delete(l.thing); self.onliving?.(l) }
