@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 5, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
+Version 6, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds and a realm's music). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -178,6 +178,35 @@ yes in the thread that asks), so this is built from the post's description and f
   size 2 sounds at 260 Hz.
 - Not built: a sound that follows a moving actor after it starts (it is placed once); a held sound a rule can stop
   early or bend; anything heard by rules.
+
+## A realm's music, set by a rule (`engine/plugins/music/`, `music/compose.ts` `resolve`; #264)
+
+- `world.music({like, pace, mode, drive, now})`: `like` one of `MOODS`, `pace` 40 to 180, `mode` one of `MODES`
+  (major, lydian, mixolydian, dorian, minor, phrygian, pentatonic; all on D), `drive` 0 to 1, `now` for the next
+  beat. Only the fields given change. The world's process keeps one music a realm (who changed it last owns it; a
+  call that changes nothing does not take it, which the check found the hard way), tells its page side through the plugin's `pages.state` (given again to a page that joins later), and forgets it
+  when the owning rule is taken out. Not kept over a restart.
+- **It is an engine plugin** (`world.mjs`, `page.ts`, `guide.txt`, `check.mjs`): it first landed as lines in
+  `world.mjs`, `serve.mjs` and `link.ts` (#281) and another lane's change took those lines out again within the
+  hour without meaning to. In a folder of its own nothing of it is in a file others edit. `guide.txt` is written by
+  hand and the check holds it to the code (every mood, its pace, every mode).
+- A mood asked for is a name, `like|0|mode`; `resolve()` makes it from the kept mood (same voices and rules,
+  another scale) in the page and in the composing worker alike. A new name is a new piece at the next bar.
+- **Pace is not part of the name.** The first real rule (a storyteller) raised the pace a beat at a time, and with
+  pace in the name every nudge was a new piece: the music started again every few seconds and never got past two
+  layers. The conductor now gives notes a step at a time, each step as long as the pace asked for makes it, so a
+  piece changes speed from one step to the next and nothing is composed again.
+- `drive` is not a new piece: the conductor takes `1 + drive x (layers - 1)` layers from the next notes on, and
+  pieces follow with no quiet between while a rule has the music.
+- In the page the rule's music stands in for the place's whatever else is so (the engine's own danger too).
+- Measured (`test/tuned.mjs`): a page that joins later plays `town|130|minor`, every note in the minor scale;
+  drive to 1 brings all four layers in 0.2 s; the low end comes round every 460 ms where a beat at 130 is 462;
+  asked to go faster the same piece is at 160 with its layers still in; a rule's gale is alarm at 150 within a
+  beat of the rule saying so.
+- A model's use (one real run, a storyteller): `night` in Dorian, drive and pace from how far the story is,
+  Phrygian for the last lines, `like: null` at the end.
+- Not built: a mood whose instruments or rhythm a rule writes (it picks from seven and bends them); music for one
+  person and not another; a stinger; anything the rule hears back (which bar it is).
 
 ## Rules that hold
 

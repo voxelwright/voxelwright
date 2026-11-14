@@ -68,6 +68,17 @@ const sections = {}
   check([...patches].every((p) => 'patch' in patch(JSON.parse(JSON.stringify(p)))), `the ${patches.size} instruments are patches in the same form as any other sound`)
 }
 
+console.log('A mood as data')
+{
+  const { MODES, resolve, moodKey } = await import('../page/sound/music/compose.ts')
+  const m = resolve(moodKey('town', 140, 'phrygian')), s = compose(m, 3, { tries: 600 })
+  const notes = s.parts.flatMap((p) => p.notes).filter((x) => x.midi)
+  check(s.bpm === 140 && notes.length > 20 && notes.every((x) => MODES.phrygian.scale.includes((((x.midi - m.tonic) % 12) + 12) % 12)) && m.voices === MOODS.town.voices, `the town's music asked for at 140 beats a minute in the Phrygian mode is its own voices, at that pace, every one of ${notes.length} notes in that scale`)
+  check(resolve('town') === MOODS.town && resolve(moodKey('town', 0, '')) === MOODS.town, 'with nothing asked of it a mood is itself')
+  const odd = [resolve('polka|9999|jazz'), resolve('__proto__'), resolve('town|-5|constructor'), resolve('sea|NaN|')]
+  check(odd[0].bpm === 180 && odd[0].voices === MOODS.town.voices && odd[1] === MOODS.town && odd[2] === MOODS.town && odd[3] === MOODS.sea, 'a name no rule should send still stands for a mood: an unknown one is the town\u2019s, a pace is kept to 40 to 180, an unknown mode is the mood\u2019s own')
+}
+
 /** Plays sections of a mood one after another from `at` seconds on, as the conductor would. */
 const sr = 48000
 function play(synth, ids, mood, at, count, seed = 7, stopAt = Infinity, takingOver = false) {

@@ -143,6 +143,32 @@ export const MOODS: Record<string, Mood> = {
   ] },
 }
 
+/** The modes a mood may be put in, all on D: the scale, whether its third is minor, and the degree that makes it itself. */
+export const MODES: Record<string, { scale: number[]; minor: boolean; colour: number }> = {
+  major: { scale: [0, 2, 4, 5, 7, 9, 11], minor: false, colour: 6 }, lydian: { scale: LYDIAN, minor: false, colour: 3 }, mixolydian: { scale: [0, 2, 4, 5, 7, 9, 10], minor: false, colour: 6 },
+  dorian: { scale: DORIAN, minor: true, colour: 5 }, minor: { scale: AEOLIAN, minor: true, colour: 5 }, phrygian: { scale: PHRYGIAN, minor: true, colour: 1 }, pentatonic: { scale: PENTA, minor: false, colour: 2 },
+}
+/** How slow and how fast music may be asked to go, beats a minute. */
+export const PACE = [40, 180] as const
+const made = new Map<string, Mood>()
+/** The name of a mood as it is asked for: a kept one, at a pace of its own (0 for the mood's) and in a mode of its own ('' for the mood's). */
+export const moodKey = (like: string, pace = 0, mode = '') => (pace || mode ? `${like}|${pace}|${mode}` : like)
+/**
+ * The mood a name stands for: a kept one, or one made of a kept one at another pace and in another mode. What a
+ * name holds may have come from a stranger: an unknown mood is the town's, a pace is kept within PACE, an unknown
+ * mode is the mood's own.
+ */
+export function resolve(key: string): Mood {
+  const known = made.get(key)
+  if (known) return known
+  const [like, pace, mode] = String(key).split('|'), base = Object.hasOwn(MOODS, like) ? MOODS[like] : MOODS.town
+  const bpm = Number(pace) > 0 ? Math.min(PACE[1], Math.max(PACE[0], Number(pace))) : base.bpm, m = mode && Object.hasOwn(MODES, mode) ? MODES[mode] : null
+  const mood: Mood = bpm === base.bpm && !m ? base : { ...base, name: key, bpm, ...(m ?? {}) }
+  if (made.size > 64) made.clear()
+  made.set(key, mood)
+  return mood
+}
+
 /** Numbers from a seed: the same seed, the same music. */
 export function dice(seed: number) {
   let s = seed >>> 0

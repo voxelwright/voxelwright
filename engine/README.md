@@ -381,8 +381,8 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
 - **A realm's music** (the same files, and `page/sound/music/`). `world.music({like, pace, mode, drive, now})`: a
   rule says what the realm's music is like and changes it as its own numbers change. It is a mood, not a track:
   `like` is one of the seven kept moods, `pace` and `mode` put it at another speed and in another scale, `drive` is
-  how much of it is playing (at once), and the page composes it as it plays. A new mood comes in at the next bar, or
-  the next beat with `now`. `like: null` gives the music back to the place; so does taking the rule out. A realm
+  how much of it is playing; both change at once in the piece that is playing. A new mood or mode comes in at the
+  next bar, or the next beat with `now`. `like: null` gives the music back to the place; so does taking the rule out. A realm
   that says nothing keeps the place's own. `node test/tuned.mjs` checks it with a lighthouse whose music fills as the
   rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
   was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
@@ -495,7 +495,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns
