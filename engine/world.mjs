@@ -555,9 +555,11 @@ function obey(rule, wants, now) {
     try { fn(rule, w, now, wrong) } catch (e) { wrong(`${w.do} failed: ${String(e?.message ?? e).slice(0, 120)}`) }
   }
 }
+/** Under this name, beside the rules' own (no rule's id has a ~ in it): what the world's people remember of talk (mind/think.mjs). */
+const TALKED = '~talk'
 // What is to be kept of the rules over a restart: said to the server when it has changed, every two seconds at most.
 let keptLast = ''
-setInterval(() => { const actors = actorsKept(), out = {}; for (const [id, keep] of ruled.keeps()) out[id] = { keep, actors: actors[id] ?? [], marks: getting.kept(id) }; const json = JSON.stringify(out); if (json !== keptLast) { keptLast = json; parentPort.postMessage({ kept: json }) } }, 2000)
+setInterval(() => { const actors = actorsKept(), out = {}; for (const [id, keep] of ruled.keeps()) out[id] = { keep, actors: actors[id] ?? [], marks: getting.kept(id) }; const talk = minds.kept(); if (Object.keys(talk).length) out[TALKED] = talk; const json = JSON.stringify(out); if (json !== keptLast) { keptLast = json; parentPort.postMessage({ kept: json }) } }, 2000)
 /** How many actors a rule has. */
 const actorsOf = (id) => { let n = 0; for (const p of folk.values()) if (p.rule === id) n++; return n }
 // Twice a second, while anyone is there to see: a world with nobody in it asks nothing of its rules.
@@ -578,7 +580,9 @@ function tops([x0, z0, x1, z1], from) {
   return { high, kinds }
 }
 parentPort.on('message', (said) => {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked } = said
+  // What the world's people remembered of talk when it last stopped.
+  if (talked !== undefined) return minds.back(talked)
   if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; return }
   // Whether a model answers for this world's people now: said at once, whatever else waits.
   if (answers !== undefined) { voiced = answers === true; return }

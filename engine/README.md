@@ -666,7 +666,9 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   the corner"; asked what turns people into agents, "you're asking the wrong courier". `realm: false` in
   `world.think` leaves it out. About 150 tokens more an answer.
 - **They remember.** The world's process keeps what each actor lately heard and answered (the last eight lines,
-  for an hour, while the world runs) and shows it to the model with the next thought: a rule keeps nothing for it.
+  for an hour) and shows it to the model with the next thought: a rule keeps nothing for it. It outlives a rest and
+  a restart: it is written beside the world's file with the rules' people (`<world>.people.json`, under `~talk`,
+  every two seconds at most) and read back as anything from outside is.
   `before: [...]` in `world.think` says instead what was said before; `before: []` that they remember nothing.
 - **They answer by default.** Once someone's model answers for a world, the world is given one rule by the
   engine, `mind/talk.rule.js`, under the id `talk` (until then it runs nothing it did not ask for): when someone speaks, the nearest of the town's residents within nine metres is taken as its actor, turns

@@ -73,7 +73,7 @@ const good = fake(`out({ type: 'system', subtype: 'init', model: 'stand-in', too
 
 // Against a running world. A rule that is no game: someone at a bakery who answers, and changes her coat by a note.
 const file = join(mkdtempSync(join(tmpdir(), 'engine-mind-')), 'world.log')
-const server = await serve('/dev/null', ['--world', file])
+let server = await serve('/dev/null', ['--world', file])
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const send = async (path, init) => { for (;;) { const r = await fetch(`${server.url}/world/${path}`, init); if (r.status === 429) { await wait(400); continue } return r.ok ? r.json() : { refused: r.status, why: await r.text() } } }
 const get = (path) => send(path), post = (path, body) => send(path, { method: 'POST', body: JSON.stringify(body) })
@@ -301,6 +301,32 @@ try {
   check(true, 'and its words when they come')
   if (arg('out', '')) { await page.waitForTimeout(500); await page.screenshot({ path: arg('out', '') }) }
   await browser.close().catch(() => {})
+
+  // The world stopped and started again on the same file: its people still know what was said to them.
+  await v.close()
+  await post('say', { by: 'wren', text: 'never mind' })
+  await wait(2600)   // what is to be kept is written every two seconds at most
+  server.stop()
+  await wait(300)
+  server = await serve('/dev/null', ['--world', file])
+  await post('join', { by: 'wren', at: [700, 4060] })
+  await until('the rule is back with its actors', async () => (await how('baker'))?.actors === 10, 8000)
+  v = voice({ world: server.url, model })
+  await wait(400)
+  await post('say', { by: 'wren', text: 'do you remember me now' })
+  const still = await until('remembered after a restart', async () => (await around()).heard.find((h) => h.name === 'Odile' && /^I recall \d+ things/.test(h.text)), 5000)
+  check(Number(/\d+/.exec(still.text)[0]) >= 4, `after the world is started again an actor still knows what was said before (${still.text})`)
+  const kept_ = JSON.parse(readFileSync(`${file}.people.json`, 'utf8'))
+  writeFileSync(`${file}.people.json`, JSON.stringify({ ...kept_, '~talk': { 'baker/baker': [{ who: 'x'.repeat(500), text: 'y'.repeat(5000), t: Date.now() }, { who: 'Wren', text: 'from tomorrow', t: Date.now() + 9e9 }, { who: 'Wren', text: 'long ago', t: 1 }], 'not a key': [{ who: 'a', text: 'b', t: Date.now() }], 'baker/extra-0': 'nonsense' } }))
+  await v.close(); server.stop(); await wait(300)
+  server = await serve('/dev/null', ['--world', file])
+  await post('join', { by: 'wren', at: [700, 4060] })
+  await until('the rule is back again', async () => (await how('baker'))?.actors === 10, 8000)
+  v = voice({ world: server.url, model })
+  await wait(400)
+  await post('say', { by: 'wren', text: 'do you remember me still' })
+  const odd = await until('answered after a spoiled file', async () => (await around()).heard.find((h) => h.name === 'Odile' && /^I recall \d+ things/.test(h.text)), 5000)
+  check(odd.text === 'I recall 1 things said before.', `what was kept is read as a stranger's: lines from the future or long ago are left, and one too long is cut (${odd.text})`)
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }

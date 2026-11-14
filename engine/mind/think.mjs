@@ -15,6 +15,8 @@ const THOUGHT_MOST = 20_000
 const TOGETHER_MOST = 8, A_MINUTE_MOST = 40
 /** How long what was said is remembered (ms), and of how many actors. */
 const REMEMBERED = 60 * 60_000, PEOPLE_MOST = 512
+/** Whose talk a kept line is: a rule's id, a stroke, its actor's id. */
+const KEY = /^[a-z0-9][a-z0-9-]{0,23}\/[a-z0-9][a-z0-9-]{0,23}$/
 
 /**
  * @param actor   an actor of a rule's, by the rule's id and the actor's own: the body, or undefined
@@ -30,8 +32,9 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
   let n = 0
   /**
    * What each actor has lately heard and said, by rule and actor: so that someone spoken to a minute ago knows it.
-   * Kept here and not by rules, so every rule's people remember with nothing written for it; kept while the world
-   * runs and no longer, a few turns each, and what is older than an hour is forgotten.
+   * Kept here and not by rules, so every rule's people remember with nothing written for it: a few turns each, and
+   * what is older than an hour is forgotten. It outlives a rest and a restart as a rule's actors do: `kept` is what
+   * the server writes beside the world's file, `back` reads it as anything from outside is read.
    */
   const talk = new Map()
   const recalled = (key, now) => { const t = (talk.get(key) ?? []).filter((b) => now - b.t < REMEMBERED); if (t.length) talk.set(key, t); else talk.delete(key); return t.map(({ who, text }) => ({ who, text })) }
@@ -93,6 +96,17 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
       if (!ask.said) return end(ask, { say: '', notes: noted(ask.want, null), failed: 'the answer held nothing a person of the world would say' })
       remember(ask, Date.now())
       end(ask, { say: ask.said, notes: noted(ask.want, m.notes) })
+    },
+    /** What is remembered, to be kept over a restart: by rule and actor, the lines and when each was said. */
+    kept() { return Object.fromEntries(talk) },
+    /** What was kept is remembered again. It comes from a file: every part of it is checked, and what is too old is left. */
+    back(was, now = Date.now()) {
+      if (!was || typeof was !== 'object' || Array.isArray(was)) return
+      for (const [key, lines] of Object.entries(was).slice(0, PEOPLE_MOST)) {
+        if (!KEY.test(key) || !Array.isArray(lines)) continue
+        const t = lines.slice(-BEFORE_MOST).map((b) => ({ who: b?.who === 'self' ? 'self' : text(b?.who, 24), text: text(b?.text, SAY_MOST), t: Number(b?.t) })).filter((b) => b.who && b.text && Number.isFinite(b.t) && b.t <= now && now - b.t < REMEMBERED)
+        if (t.length) talk.set(key, t)
+      }
     },
     /** Called now and then: a thought that has taken too long has failed, and its actor stops thinking. */
     tidy(now) { for (const ask of [...asks.values()]) if (now - ask.since > THOUGHT_MOST) end(ask, { say: ask.said, notes: noted(ask.want, null), failed: 'no answer came in time' }) },
