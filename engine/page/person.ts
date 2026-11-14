@@ -24,8 +24,14 @@ export const ON_FOOT: Motor = { front: 0, grip: 1.5, power: 300, top: 45, steer:
  * What a body can do, as a rule sets it (`world.person`, rules/bodies.mjs): how fast it runs (cells a second), how
  * high it jumps (cells), how high a wall it climbs (cells), how fast it flies, how much of the world's pull it feels.
  */
-export interface Can { pace: number; jump: number; climb: number; fly: number; fall: number }
-export const AS_IT_IS: Can = { pace: 45, jump: 7.4, climb: 0, fly: 0, fall: 1 }
+export interface Can { pace: number; jump: number; climb: number; fly: number; fall: number; /** Which way is down for it, a way in the world's axes; null for the world's own. */ down: [number, number, number] | null; /** Whether it clings: its down turns to whatever face it walks onto. */ cling: boolean }
+export const AS_IT_IS: Can = { pace: 45, jump: 7.4, climb: 0, fly: 0, fall: 1, down: null, cling: false }
+type Q = [number, number, number, number]
+/** A vector turned by a quaternion (x, y, z, w). */
+const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
+  const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
+  return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
+}
 /** The motor that does it: the jump's speed is what takes it that high under the pull it feels. */
 const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
@@ -68,7 +74,7 @@ export function person(o: {
   input: Input
   hud: Hud
   /** The eye: metres, and which way it looks. */
-  pose: { x: number; y: number; z: number; yaw: number; pitch: number }
+  pose: { x: number; y: number; z: number; yaw: number; pitch: number; /** A turn of the eye's whole frame (x, y, z, w): for someone whose down is not the world's, so that what they stand on is the floor they see. */ tilt?: [number, number, number, number] }
   folk: People
   /** Who they are to look at, and what they are called. */
   seed: number
@@ -76,7 +82,10 @@ export function person(o: {
 }): Me {
   const M = 10
   let on = false, id = 0, asked = false, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
-  const tellCan = () => { if (id) o.send({ motor: { id, numbers: numbers(motorOf(can)) }, ways: { id, fall: can.fall, climb: can.climb } }) }
+  const tellCan = () => { if (id) o.send({ motor: { id, numbers: numbers(motorOf(can)) }, ways: { id, fall: can.fall, climb: can.climb }, down: { id, way: can.down ?? [0, 0, 0], cling: can.cling } }) }
+  // Which way is up for the body as the core last said (the turn from its own upright to the world's), and the eye's, which follows it over a fifth of a second.
+  let frame: Q = [0, 0, 0, 1], tilt: Q = [0, 0, 0, 1]
+  const tilted = () => Math.abs(frame[3]) < 0.9999
   // Where the body is as the core last said (its middle of mass), and where the eye's height has got to.
   let at: [number, number, number] | null = null, com = [2, 7, 1.5], eyeY = 0
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
@@ -85,11 +94,12 @@ export function person(o: {
   let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
   const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed, name: o.name }
   o.folk.from.push((_view, seconds) => {
-    if (!on || !at || view === 'head') return []
+    // In the head nobody sees their own figure; and on a wall the figure cannot yet be drawn leaning (the people lane's to give).
+    if (!on || !at || view === 'head' || tilted()) return []
     Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, down: lying, time: seconds })
     return [shown]
   })
-  const feet = () => (at ? { at: [at[0], at[1] - com[1] - LEG, at[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed } : null)
+  const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed } }
   const walk = (to: boolean) => {
     if (to === on) return
     on = to
@@ -99,7 +109,7 @@ export function person(o: {
       if (id) o.send({ vanish: id })
       // Up from where the body stood, the eye where the head was.
       if (at) { o.pose.x = at[0] / M; o.pose.z = at[2] / M; o.pose.y = (at[1] - com[1] - LEG + EYES) / M }
-      id = 0; at = null; asked = false
+      id = 0; at = null; asked = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
       return
     }
     // The body is made where the eye is, the eye in its head: from the air it falls to whatever is under it.
@@ -132,6 +142,7 @@ export function person(o: {
       if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
       if (!id) return
       for (const m of told.moves) if (m.id === id) at = m.pos
+      for (const l of told.live) if (l.id === id) frame = l.frame
     },
     frame(dt) {
       if (!on) return false
@@ -156,7 +167,7 @@ export function person(o: {
       if (id) {
         // One who flies rises with Space and sinks with C.
         const rise = can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0
-        if (view === 'head') { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise, jump } }
+        if (view === 'head' || tilted()) { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise, jump } }
         else { if (long > 0.01) heading = looks + Math.atan2(side, go); ask = { id, heading, go: Math.min(1, long), side: 0, rise, jump } }
       }
       since += dt
@@ -169,19 +180,31 @@ export function person(o: {
       } else if (ask && (moving || since > 0.25)) { o.send({ walk: ask }); if (moving) o.wake(); since = 0; jump = false }
       if (at) {
         const f = feet()!, was = shown.at
-        const step = Math.hypot(f.at[0] - was[0], f.at[2] - was[2])
+        // How far along its own floor: a fall is not a walk, whichever way down is for it.
+        const mine = turned(frame, [0, 1, 0]), d = [f.at[0] - was[0], f.at[1] - was[1], f.at[2] - was[2]], rise = d[0] * mine[0] + d[1] * mine[1] + d[2] * mine[2]
+        const step = Math.hypot(d[0] - mine[0] * rise, d[1] - mine[1] * rise, d[2] - mine[2] * rise)
         if (step < 20) { stride += step / STRIDE; speed += ((dt > 0 ? step / dt : 0) - speed) * Math.min(1, dt * 10) }
         walking += ((speed > 3 ? 1 : 0) - walking) * Math.min(1, dt * 8)
         shown.at = f.at
         // The eye: in the head, or behind and above it, the height eased so that a kerb is not a jolt.
+        // The eye's frame comes round to the body's over a fifth of a second: at once, the world snapped a quarter turn.
+        const same = tilt[0] * frame[0] + tilt[1] * frame[1] + tilt[2] * frame[2] + tilt[3] * frame[3] < 0 ? -1 : 1, ease = 1 - Math.exp(-dt * 9)
+        const next = tilt.map((v, i) => v + (frame[i] * same - v) * ease), long = Math.hypot(...next)
+        tilt = next.map((v) => v / long) as Q
+        const level = Math.abs(tilt[3]) > 0.99999
+        o.pose.tilt = level ? undefined : tilt
+        const up = turned(tilt, [0, 1, 0]), cp = Math.cos(o.pose.pitch)
+        const look = turned(tilt, [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]), right = turned(tilt, [Math.cos(o.pose.yaw), 0, Math.sin(o.pose.yaw)])
+        // The eye: in the head, or behind and above it. Level, its height is eased so that a kerb is not a jolt.
         const want = f.at[1] + EYES
-        eyeY += (want - eyeY) * (Math.abs(want - eyeY) > 30 ? 1 : 1 - Math.exp(-dt * 14))
-        const cp = Math.cos(o.pose.pitch), look = [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]
+        eyeY += (want - eyeY) * (Math.abs(want - eyeY) > 30 || !level ? 1 : 1 - Math.exp(-dt * 14))
+        const head = level ? [f.at[0], eyeY, f.at[2]] : [f.at[0] + up[0] * EYES, f.at[1] + up[1] * EYES, f.at[2] + up[2] * EYES]
         // Behind: back from the head, over it, and a little to the right, so that what is aimed at is not behind one's own head.
-        const back = view === 'head' ? 0 : 32, over = view === 'head' ? 0 : 6, aside = view === 'head' ? 0 : 5
-        o.pose.x = (f.at[0] - look[0] * back + Math.cos(o.pose.yaw) * aside) / M
-        o.pose.z = (f.at[2] - look[2] * back + Math.sin(o.pose.yaw) * aside) / M
-        o.pose.y = (eyeY + over - look[1] * back) / M
+        // On a wall the eye is in the head: the figure cannot yet be drawn leaning.
+        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
+        o.pose.x = (head[0] + up[0] * over - look[0] * back + right[0] * aside) / M
+        o.pose.y = (head[1] + up[1] * over - look[1] * back + right[1] * aside) / M
+        o.pose.z = (head[2] + up[2] * over - look[2] * back + right[2] * aside) / M
       }
       return true
     },

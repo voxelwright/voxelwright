@@ -2000,6 +2000,18 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
   the wall from there, and it fell into a heap before she reached it.
 
 
+
+### Which way is down (`Live::frame`, `cling`; November 13)
+
+- Down for a body is a turn of its frame, not a new motor: the step turns speed, spin and turn into the frame, takes
+  the world's pull off and gives its own, runs the same motor, and turns them back. Rays go out through the frame.
+- A leg spring finds a newly turned floor nearer than it stands and throws the body off it (3.8 m/s). It looked like
+  climbing: the body rose at its pace a body's length off the wall, feet on nothing, and the first checks passed on
+  that. Check `on > 0` on the face, not only where the body is.
+- Round an edge the body needs up-speed and way on given to it: carried speed alone works at a run and fails at a
+  walk (rose one cell, fell, climbed again, for ever). The page check walks; the native test ran. Test both paces.
+- A ray that starts inside the standing world says 0: a look for the next face must want `far > 0`.
+
 ## Moves and looks as data (#218 for #264, November 13)
 
 - **A pose is twenty-one numbers** (`page/moves.ts` `CHANNELS`: lean, twist, tilt, nod, turn, lift/out/bend for

@@ -50,7 +50,7 @@ export interface Link {
   /** A blow on this page's own person (#264, rules/blows.mjs): the speed it gives them (cells a second), or how long they are put on the ground (seconds). */
   onblow: ((blow: { by: string; push?: [number, number, number]; down?: number }) => void) | null
   /** What people's bodies can do, by whom (their name in the world), and how fast the world goes and who is spared that (#264, rules/bodies.mjs). Said as it changes and to each page as it joins. */
-  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>>> }) => void) | null
+  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>> & { down?: [number, number, number]; cling?: boolean }> }) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */

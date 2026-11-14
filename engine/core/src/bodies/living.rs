@@ -91,6 +91,19 @@ pub struct Live {
     climbing: Option<f32>,
     /// Seconds for which what goes on legs is carried by a blow it took, before its legs take it up again.
     reel: f32,
+    /// Which way is down for it, when that is not the world's way: a turn that takes its own upright frame (y up)
+    /// to the world's. The motor works in that frame, so everything it does (legs, a jump, falling) is along it.
+    /// `base` is what it was set to; `frame` is what it is now, which clinging turns as it goes from face to face.
+    pub base: Option<Q>,
+    pub frame: Option<Q>,
+    /// Whether it clings: walked at a wall its down turns into the wall, and over an edge it turns again, so that
+    /// whatever it walks on is its floor. And what it found last step: a face ahead (1) or its floor gone round an
+    /// edge (-1); and how long it has had no floor.
+    pub cling: bool,
+    turning: i8,
+    lost: f32,
+    /// Seconds since its floor turned in which it is not thrown off the new one.
+    fresh: f32,
     /// How fast it was going when the step's touches had yet to push it, and the most a step has changed that: a
     /// thing that lives is broken by how much of its speed one step takes, however many touches share the blow.
     pub(super) was: V,
@@ -101,7 +114,7 @@ impl Live {
     pub fn new() -> Live {
         Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
-            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, was: [0.0; 3], jolt: 0.0,
+            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, base: None, frame: None, cling: false, turning: 0, lost: 0.0, fresh: 0.0, was: [0.0; 3], jolt: 0.0,
         }
     }
 
@@ -185,6 +198,43 @@ impl Live {
     /// One step of the motor on its body: the feet carry and grip, it is driven as it was told, kept upright if it
     /// is that sort of thing, and held in the air if it flies.
     fn step(&mut self, b: &mut Body, ground: &mut Ground, h: f32) {
+        // What it found last step turns its frame a quarter turn about its own right: a face ahead becomes its
+        // floor, or the face round the edge it walked over does. Long with no floor, it is as it was set again.
+        let round = self.turning < 0;
+        if self.turning != 0 {
+            let right = [-self.heading.sin(), 0.0, self.heading.cos()];
+            let half = self.turning as f32 * std::f32::consts::FRAC_PI_4;
+            let quarter = [right[0] * half.sin(), right[1] * half.sin(), right[2] * half.sin(), half.cos()];
+            self.frame = Some(qmul(self.frame.unwrap_or([0.0, 0.0, 0.0, 1.0]), quarter));
+            // Onto a face ahead, its legs must not throw it off; round an edge it is in the air a while (its way on
+            // carries it up over the edge and its new down brings it to the face), and is not yet lost.
+            (self.lost, self.fresh) = if self.turning > 0 { (0.0, 0.4) } else { (-0.7, 0.0) };
+            self.turning = 0;
+        } else if self.cling && self.lost > 0.6 && self.frame != self.base {
+            self.frame = self.base;
+        }
+        let Some(q) = self.frame else { return self.inner(b, ground, h, None) };
+        // The world's pull (which the solver gives everything after this) is taken off, and its own is given in its
+        // own frame: there the body's speed, spin and turn are as if its down were the world's.
+        let back = [-q[0], -q[1], -q[2], q[3]];
+        b.vel[1] += G * h;
+        (b.vel, b.spin, b.rot) = (turn(back, b.vel), turn(back, b.spin), qmul(back, b.rot));
+        b.vel[1] -= G * h;
+        if round {
+            // Round an edge: up over it as high as it stands and on over the new face, however slowly it came
+            // (at a walk it rose a cell, fell back down the face it had left and went up it again, for ever).
+            let ahead = [self.heading.cos(), 0.0, self.heading.sin()];
+            b.vel[1] = b.vel[1].max((2.0 * G * self.fall.max(0.2) * (b.com[1] + 8.0)).sqrt());
+            let on = dot(b.vel, ahead);
+            b.vel = add(b.vel, scale(ahead, (self.top * 0.4 - on).max(0.0)));
+        }
+        self.inner(b, ground, h, Some(q));
+        (b.vel, b.spin, b.rot) = (turn(q, b.vel), turn(q, b.spin), qmul(q, b.rot));
+    }
+
+    fn inner(&mut self, b: &mut Body, ground: &mut Ground, h: f32, frame: Option<Q>) {
+        // Out of its own frame into the world's: for where a ray starts and which way it goes.
+        let w = |v: V| frame.map_or(v, |q| turn(q, v));
         self.heard += h;
         let told = self.heard < HOLD;
         let (go, turning, rise) = if told { (self.go, self.turn, self.rise) } else { (0.0, 0.0, 0.0) };
@@ -207,14 +257,16 @@ impl Live {
         let flies = self.lift > 0.0 || self.hover > 0.0;
         let n = self.feet.len().max(1) as f32;
         let drivers = self.feet.iter().filter(|f| f.drives).count().max(1) as f32;
-        let down = turn(b.rot, [0.0, -1.0, 0.0]);
+        // What goes on legs reaches down along its frame's down, not its body's: turning to a new floor, the body
+        // takes a moment to come round, and its legs must find the floor meanwhile.
+        let down = if self.steer == 0.0 && self.upright > 0.0 { [0.0, -1.0, 0.0] } else { turn(b.rot, [0.0, -1.0, 0.0]) };
         let rolls = dot(b.vel, flat);
         // Feet steer less the faster it goes.
         let (sin, cos) = (self.steer * turning / (1.0 + rolls.abs() / self.top.max(1.0))).sin_cos();
         self.on = 0;
         for foot in &mut self.feet {
             let r = turn(b.rot, sub(foot.at, b.com));
-            let far = ray(ground, add(b.pos, r), down, foot.reach);
+            let far = ray(ground, add(b.pos, w(r)), w(down), foot.reach);
             let want = far.map_or(0.0, |t| foot.reach - t);
             // The road rises a cell at a time: a foot takes a step up over a thirtieth of a second, not at once.
             foot.pressed += (want - foot.pressed) * (h * 30.0).min(1.0);
@@ -315,7 +367,7 @@ impl Live {
             if self.hover > 0.0 && rise == 0.0 {
                 // Told nothing, near the ground, it settles at its height over it; far above, it stays where it is.
                 let under = b.com[1];
-                if let Some(far) = ray(ground, b.pos, [0.0, -1.0, 0.0], under + self.hover * 3.0) {
+                if let Some(far) = ray(ground, b.pos, w([0.0, -1.0, 0.0]), under + self.hover * 3.0) {
                     climb = ((self.hover + under - far) * 4.0).clamp(-fastest, fastest);
                 }
             }
@@ -336,8 +388,8 @@ impl Live {
         // ground, until its feet are over the top. Looked for ahead at its middle and at its feet.
         if legs && self.climb > 0.0 && go > 0.0 && !(flies && self.aloft) {
             let reach = b.radius.min(4.0) + 2.5;
-            let low = add(b.pos, scale(down, b.com[1] + 2.0));
-            let wall = ray(ground, b.pos, ahead, reach).is_some() || ray(ground, low, ahead, reach).is_some();
+            let low = add(b.pos, w(scale(down, b.com[1] + 2.0)));
+            let wall = ray(ground, b.pos, w(ahead), reach).is_some() || ray(ground, low, w(ahead), reach).is_some();
             if self.on > 0 && self.climbing.is_none_or(|from| b.pos[1] < from) {
                 self.climbing = Some(b.pos[1]);
             }
@@ -348,6 +400,34 @@ impl Live {
             }
         } else if self.on > 0 {
             self.climbing = None;
+        }
+        // What clings looks for its next floor: a face ahead of its middle as it goes, or, its floor just lost, the
+        // face round the edge (looked for from ahead of and under its feet, back the way it came).
+        self.lost = if self.on > 0 { 0.0 } else { self.lost + h };
+        // Its floor just turned, its legs find the new one nearer than they stand and push: it is not thrown off it
+        // (it was, at 3.8 m/s, and up a low wall reached the top before it came back).
+        if self.fresh > 0.0 {
+            self.fresh -= h;
+            b.vel[1] = b.vel[1].min(4.0);
+        }
+        if legs && self.cling && go > 0.0 && !(flies && self.aloft) {
+            let under = b.com[1] + 4.0;
+            let reach = b.radius.min(4.0) + 1.5;
+            if self.on > 0 && ray(ground, b.pos, w(ahead), reach).is_some() {
+                self.turning = 1;
+            } else if ray(ground, b.pos, w(ahead), reach + 4.0).is_none() && ray(ground, add(b.pos, w([0.0, -under + 3.0, 0.0])), w(ahead), reach + 1.0).is_some() {
+                // Something in its way that is lower than its middle (a sill, a lintel, a kerb too high to step):
+                // it goes over it, as one who climbs goes up a wall, and its floor stays its floor.
+                // Up no faster than it needs and on at its pace: thrown up off a wall it lost the wall and fell.
+                b.vel[1] = (b.vel[1] + G * h * self.fall).max(self.top * 0.3 * go.max(0.6));
+                (b.vel[0], b.vel[2]) = (stride[0], stride[2]);
+                self.lost = 0.0;
+            } else if self.on == 0 && (0.0..0.25).contains(&self.lost) {
+                let from = add(b.pos, w(add(scale(ahead, 5.0), [0.0, -under - 2.0, 0.0])));
+                if ray(ground, from, w(scale(ahead, -1.0)), 9.0).is_some_and(|far| far > 0.0) {
+                    self.turning = -1;
+                }
+            }
         }
         // In the air what goes on legs can still be steered a little.
         if legs && self.on == 0 && !(flies && self.aloft) && (go != 0.0 || side != 0.0) {
@@ -664,6 +744,31 @@ impl Bodies {
         true
     }
 
+    /// Which way is down for a living thing: a way (it need not be a unit; nothing puts it back as the world's), and
+    /// whether it clings, turning its down to whatever face it walks onto.
+    pub fn down(&mut self, id: u32, way: V, cling: bool) -> bool {
+        let Some(b) = self.living(id) else { return false };
+        if way.iter().any(|v| !v.is_finite()) {
+            return false;
+        }
+        let long = dot(way, way).sqrt();
+        // The turn that takes the world's down to that way, the short way round; straight up is half a turn about x.
+        let base = if long < 1e-3 || (way[1] / long) < -0.9999 {
+            None
+        } else {
+            let d = scale(way, 1.0 / long);
+            let (axis, cos) = (cross([0.0, -1.0, 0.0], d), -d[1]);
+            if cos < -0.9999 { Some([1.0, 0.0, 0.0, 0.0]) } else {
+                let s = ((1.0 + cos) * 2.0).sqrt();
+                Some([axis[0] / s, axis[1] / s, axis[2] / s, s * 0.5])
+            }
+        };
+        let live = b.live.as_mut().unwrap();
+        (live.base, live.frame, live.cling, live.turning) = (base, base, cling, 0);
+        b.asleep = false;
+        true
+    }
+
     /// A living thing lives no more: it is a body like any other, and lies down as cells when it is still.
     pub fn end(&mut self, id: u32) -> bool {
         let Some(b) = self.living(id) else { return false };
@@ -743,7 +848,8 @@ impl Bodies {
             let front = turn(b.rot, FRONTS[live.front as usize]);
             let touches = self.touches.iter().filter(|t| t.a == i || t.b == i).count() as u32;
             let told = if live.heard < HOLD { [live.go, live.turn, live.rise] } else { [0.0; 3] };
-            words.extend([b.id, dot(b.vel, front).to_bits(), live.on, touches, told[0].to_bits(), told[1].to_bits(), told[2].to_bits(), live.aloft as u32]);
+            let q = live.frame.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            words.extend([b.id, dot(b.vel, front).to_bits(), live.on, touches, told[0].to_bits(), told[1].to_bits(), told[2].to_bits(), live.aloft as u32, q[0].to_bits(), q[1].to_bits(), q[2].to_bits(), q[3].to_bits()]);
         }
         if !words.is_empty() {
             self.record(LIVE, &words);
@@ -1207,6 +1313,99 @@ pub mod tests {
             let put: usize = records(&out, EDIT).iter().map(|e| (e.len() - 6) / 5).sum();
             assert_eq!(put > 0, !passing, "a thrown ball lies as cells where it stops; one that passes leaves none ({put} rows)");
         }
+    }
+
+    #[test]
+    fn which_way_is_down_for_a_body() {
+        let ground = city::ground(X, Z);
+        // A wall 15 m high and 3 m thick across the street, its west face at X + 40.
+        let wall_of = |bodies: &mut Bodies| {
+            let runs: Vec<Run> = (ground - 2..ground + 150).flat_map(|y| (Z - 40..Z + 60).map(move |z| Run { x0: X + 40, x1: X + 70, y, z, kind: kind(BRICK, OWN) })).collect();
+            bodies.ground.push(Edit::Runs(runs), false, None);
+        };
+        let walk = |bodies: &mut Bodies, id: u32, seconds: f32, heading: f32, go: f32| {
+            for _ in 0..(seconds * 60.0) as usize {
+                bodies.walk(id, heading, go, 0.0, 0.0, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+            }
+        };
+        let up_of = |b: &Body| turn(b.rot, [0.0, 1.0, 0.0]);
+        // Down set to the east: it falls onto the wall's face and stands on it, its head to the west.
+        let mut bodies = Bodies::new();
+        wall_of(&mut bodies);
+        let id = person(&mut bodies, [X + 10, ground + 20, Z + 9], 45.0);
+        assert!(bodies.down(id, [1.0, 0.0, 0.0], false));
+        walk(&mut bodies, id, 2.0, 0.0, 0.0);
+        let b = the(&bodies, id);
+        eprintln!("down to the east: at {:?}, its up {:?}", b.pos, up_of(b));
+        assert!((X as f32 + 40.0 - b.pos[0] - 10.1).abs() < 1.5 && up_of(b)[0] < -0.95, "it stands on the wall's face, a body's length out from it, head to the west");
+        let stood = b.pos;
+        // Forward for it is up the wall; a quarter turn is along it.
+        walk(&mut bodies, id, 1.0, 0.0, 1.0);
+        let up = sub(the(&bodies, id).pos, stood);
+        assert!(up[1] > 30.0 && up[0].abs() < 2.0, "told to go, it runs up the wall: {up:?}");
+        let from = the(&bodies, id).pos;
+        walk(&mut bodies, id, 1.0, std::f32::consts::FRAC_PI_2, 1.0);
+        let along = sub(the(&bodies, id).pos, from);
+        eprintln!("ran up {up:?}, then along {along:?}");
+        assert!(along[2] > 30.0 && along[1].abs() < 6.0 && along[0].abs() < 2.0, "turned a quarter, it runs sideways along the wall, no higher and no lower: {along:?}");
+        // And a jump is away from the wall, and it comes back to it.
+        walk(&mut bodies, id, 1.5, std::f32::consts::FRAC_PI_2, 0.0);
+        let on = the(&bodies, id).pos[0];
+        bodies.walk(id, std::f32::consts::FRAC_PI_2, 0.0, 0.0, 0.0, true);
+        let mut out = f32::MAX;
+        for _ in 0..90 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            out = out.min(the(&bodies, id).pos[0]);
+        }
+        assert!(on - out > 5.0 && (the(&bodies, id).pos[0] - on).abs() < 1.0, "a jump takes it off the wall, to the west, and it lands on the wall again");
+        // Down put back, it falls to the street and stands as anyone.
+        assert!(bodies.down(id, [0.0, 0.0, 0.0], false));
+        walk(&mut bodies, id, 3.0, 0.0, 0.0);
+        let b = the(&bodies, id);
+        assert!(up_of(b)[1] > 0.97 && b.pos[1] < ground as f32 + 16.0, "its down the world's again, it is on the street, upright: {:?}", b.pos);
+
+        // One who clings: walked at the wall, up it, over the top and on along the roof.
+        let mut bodies = Bodies::new();
+        wall_of(&mut bodies);
+        let id = person(&mut bodies, [X + 10, ground + 5, Z + 9], 45.0);
+        assert!(bodies.down(id, [0.0, 0.0, 0.0], true));
+        walk(&mut bodies, id, 1.0, 0.0, 0.0);
+        // Seen on its way: on the west face with its head out to the west, upright on the roof, and on the far face
+        // with its head out to the east, going down.
+        let mut seen = [false; 3];
+        for _ in 0..(9 * 60) {
+            bodies.walk(id, 0.0, 1.0, 0.0, 0.0, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let b = the(&bodies, id);
+            let (up, high) = (up_of(b), b.pos[1] - ground as f32);
+            seen[0] |= up[0] < -0.9 && high > 60.0 && b.pos[0] < X as f32 + 40.0;
+            seen[1] |= seen[0] && up[1] > 0.95 && high > 150.0;
+            seen[2] |= seen[1] && up[0] > 0.9 && high < 120.0 && b.pos[0] > X as f32 + 70.0;
+        }
+        assert!(seen[0], "walked at the wall, it goes up its face with its head out from the wall");
+        assert!(seen[1], "over the top, it stands upright on the roof and goes on");
+        assert!(seen[2], "and over the far edge it goes down the far face, its head out the other way");
+        // A low, thin wall (4 m by 2 m): the same, and down the far face to the street.
+        let mut bodies = Bodies::new();
+        let runs: Vec<Run> = (ground - 2..ground + 42).flat_map(|y| (Z - 16..Z + 16).map(move |z| Run { x0: X + 40, x1: X + 60, y, z, kind: kind(BRICK, OWN) })).collect();
+        bodies.ground.push(Edit::Runs(runs), false, None);
+        let id = person(&mut bodies, [X + 10, ground + 5, Z], 45.0);
+        assert!(bodies.down(id, [0.0, 0.0, 0.0], true));
+        walk(&mut bodies, id, 1.0, 0.0, 0.0);
+        let mut past = false;
+        for _ in 0..(10 * 60) {
+            bodies.walk(id, 0.0, 1.0, 0.0, 0.0, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let b = the(&bodies, id);
+            let up = up_of(b);
+            past |= up[1] > 0.95 && b.pos[0] > X as f32 + 75.0 && b.pos[1] < ground as f32 + 16.0;
+        }
+        assert!(past, "a low thin wall is gone up, over and down to the street beyond");
     }
 
     #[test]

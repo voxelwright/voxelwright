@@ -260,6 +260,12 @@ on foot as they do flying.
   in it but those spared. "Walk up walls", "fly", "leap a street", "slow time" are a rule setting numbers; neither
   the core nor the page has those words. The guide (`GET /world/`) says the ranges. In the console, alone:
   `engine.me.can = {climb: 100000, fall: 0.3}`, `engine.tempo.rate = 0.25`.
+- **Which way is down for a body** is two more of those numbers: `world.person(id, {down: [1, 0, 0]})` turns a
+  person's own down to any way in the world's axes (they fall that way, stand on what they meet, run along it, and
+  a jump is away from it), and `{cling: true}` turns it for them to whatever face they walk onto: at a wall, up it;
+  over its top edge, onto the roof; over the far edge, down. The eye turns with them, in the head (what they stand
+  on is the floor they see). `null` puts either back. Others still see the figure drawn upright (PEOPLE's to lean).
+  In the console: `engine.me.can = {cling: true}`.
 - **A slowed world, tried**: with the clock at a quarter and the one who asked spared, she walks at 1.4 m/s as she
   did while the other page's person walks at 0.33, and what falls, drives, burns and flows goes at a quarter with its
   dust. The eye still turns freely for everyone. Not slowed: the town's residents (they go by the wall clock, the

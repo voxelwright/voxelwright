@@ -44,8 +44,10 @@ const RULE = `on('said', (world, e) => {
   if (/climb/.test(e.text)) world.person(e.by, {climb: 100000})
   if (/wings/.test(e.text)) world.person(e.by, {fly: 80})
   if (/slow/.test(e.text)) world.clock({rate: 0.25, spare: [e.by]})
+  if (/hold fast/.test(e.text)) world.person(e.by, {cling: true})
+  if (/westward/.test(e.text)) world.person(e.by, {down: [-1, 0, 0]})
   if (/too much/.test(e.text)) world.person(e.by, {pace: 9999})
-  if (/as it was/.test(e.text)) { world.person(e.by, {pace: null, fall: null, jump: null, climb: null, fly: null}); world.clock({rate: 1}) }
+  if (/as it was/.test(e.text)) { world.person(e.by, {pace: null, fall: null, jump: null, climb: null, fly: null, cling: null, down: null}); world.clock({rate: 1}) }
 })
 on('start', (world) => world.actor('post', {name: 'Someone standing', at: [700, 4009]}))
 on('tick', (world) => { if (!world.keep.tried) { world.keep.tried = true; world.person('post', {pace: 100}) } })`
@@ -107,6 +109,29 @@ try {
   await say(ada, 'as it was', () => globalThis.engine.me.can.fly === 0)
   await ada.waitForTimeout(1500)
   await settled(ada)
+  // Which way is down. A second wall, four metres high and two thick, four metres on.
+  const from = (await feet(ada)).at, w0 = Math.round(from[0]) + 40, wy = Math.round(from[1]) - 2, more = []
+  for (let y = wy; y < wy + 42; y++) for (let z = Math.round(from[2]) - 16; z < Math.round(from[2]) + 16; z++) more.push(w0, w0 + 20, y, z, 8)
+  await post('ask', { by: 'tester', edit: [1, more.length / 5, ...more], release: [w0 - 3, wy + 50, Math.round(from[2])] })
+  await ada.waitForTimeout(800)
+  // Holding fast: walked at it, the wall becomes her floor and her eye turns with her; over the top and down the far side.
+  await say(ada, 'hold fast', () => globalThis.engine.me.can.cling === true)
+  await ada.keyboard.down('KeyW')
+  let onWall = false, rose = 0, past = false
+  for (let i = 0; i < 150 && !past; i++) { await ada.waitForTimeout(100); const f = await ada.evaluate(() => ({ at: globalThis.engine.me.feet.at, tilt: globalThis.engine.pose.tilt })); if (f.tilt && f.at[1] - from[1] > 12) onWall = true; rose = Math.max(rose, f.at[1] - from[1]); past = onWall && !f.tilt && f.at[0] > w0 + 24 && f.at[1] - from[1] < 6 }
+  await ada.keyboard.up('KeyW')
+  check(onWall && rose > 36 && past, `said "hold fast", she walks up the wall with it as her floor and her eye turned with her (${(rose / 10).toFixed(1)} m up), over the top and down the far side to the street`)
+  await settled(ada)
+  await say(ada, 'as it was', () => globalThis.engine.me.can.cling === false)
+  // Down to the west: she falls onto the wall's east face and stands on it.
+  await say(ada, 'westward', () => !!globalThis.engine.me.can.down)
+  let stoodOn = null
+  for (let i = 0; i < 60 && !stoodOn; i++) { await ada.waitForTimeout(100); const f = await ada.evaluate(() => ({ at: globalThis.engine.me.feet.at, speed: globalThis.engine.me.feet.speed, tilt: globalThis.engine.pose.tilt })); if (f.tilt && Math.abs(f.at[0] - (w0 + 20)) < 2.5 && f.speed < 1) stoodOn = f }
+  check(!!stoodOn, `said "westward", a rule turns her down to the west: she falls onto the wall's east face and stands on it (feet at x ${stoodOn ? stoodOn.at[0].toFixed(0) : '?'}, the face at ${w0 + 20})`)
+  await say(ada, 'as it was', () => !globalThis.engine.me.can.down)
+  await ada.waitForTimeout(1500)
+  await settled(ada)
+  check(!(await ada.evaluate(() => globalThis.engine.pose.tilt)) && (await feet(ada)).at[1] - from[1] < 6, 'her down the world\'s again, she is on the street and her eye is level')
   // Slow: the world's clock at a quarter, and she is spared.
   await say(ada, 'slow', () => globalThis.engine.tempo.rate === 0.25)
   await ben.waitForFunction(() => globalThis.engine.tempo.rate === 0.25, null, { timeout: 5000 })

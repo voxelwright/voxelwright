@@ -118,7 +118,7 @@ function heed(words) {
   for (let i = 0; i < words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
     if (tag === 5) { moved = true; for (let k = at; k < at + n; k += 8) { const a = alive.get(bodies.get(words[k])); if (a) a.pose = { at: [f[k + 1], f[k + 2], f[k + 3]], rot: [f[k + 4], f[k + 5], f[k + 6], f[k + 7]] } } }
-    else if (tag === 11) for (let k = at; k < at + n; k += 8) awake.add(words[k])
+    else if (tag === 11) for (let k = at; k < at + n; k += 12) awake.add(words[k])
     else if (tag === 6) broke.add(words[at])
     i = at + n
   }

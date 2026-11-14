@@ -39,6 +39,18 @@ export function bodies({ folk, tell }) {
         if (typeof w[key] !== 'number' || !Number.isFinite(w[key]) || w[key] < least || w[key] > most) return wrong(`a person's ${key} is a number from ${least} to ${most}`)
         numbers[key] = w[key]
       }
+      // Which way is down for them: a way in the world's axes (it need not be a unit), or null for the world's own.
+      if (w.down === null) delete numbers.down
+      else if (w.down !== undefined) {
+        if (!Array.isArray(w.down) || w.down.length !== 3 || !w.down.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 1000) || !w.down.some((v) => v !== 0)) return wrong("a person's down is a way: [dx, dy, dz] (the world's own is [0, -1, 0]), or null to put it back")
+        numbers.down = [...w.down]
+      }
+      // Whether they cling: their down turns to whatever face they walk onto.
+      if (w.cling === null || w.cling === false) delete numbers.cling
+      else if (w.cling !== undefined) {
+        if (w.cling !== true) return wrong("a person's cling is true or false")
+        numbers.cling = true
+      }
       if (Object.keys(numbers).length) can.set(p.by, { rule: rule.id, numbers }); else can.delete(p.by)
       said()
     },

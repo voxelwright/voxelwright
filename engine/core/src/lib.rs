@@ -493,6 +493,13 @@ pub extern "C" fn bodies_passing(id: u32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).list.iter_mut().find(|b| b.id == id).map(|b| b.passing = true).is_some() as u32)
 }
 
+/// Which way is down for a living thing (a way; all zero for the world's own), and whether it clings: walked at a
+/// wall its down turns into the wall, and over an edge it turns again. Returns 1 if it is there.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_down(id: u32, dx: f32, dy: f32, dz: f32, cling: i32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).down(id, [dx, dy, dz], cling != 0) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
