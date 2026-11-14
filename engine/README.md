@@ -537,7 +537,7 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   follows how far her story is (November 14).
 - **A rule builds** (`plugins/build`, `rules/built.mjs`). `world.build(id, {at, parts})` puts a place into the
   world's own cells: parts are shapes as data, in the engine's materials and colours (a made thing's: `make/form.mjs`).
-  `box`, `wedge` and `steps` are level, measured from the ground at `at`; `line`, `loop`, `ring`, `disc` and `posts`
+  `box`, `room`, `wedge` and `steps` are level, measured from the ground at `at`; `line`, `loop`, `ring`, `disc` and `posts`
   lie on the ground under each column, so a road follows rolling land and a rail hung over it stays one piece. Later
   parts replace earlier ones and `air` cuts, into the ground too. What is built is the world's like any edit: echoed
   as an ask is, so it is kept in the world's file and applied by every page, and it breaks, burns and falls.
@@ -622,6 +622,17 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   Now it waits (`built` says `{build, waits}`) with its cells already worked out, is tried again every two seconds,
   and goes in whole when they have stepped away: in the same play, the ring's floor put a metre higher waited
   while the person stood on it and was there nine seconds after they left.
+- **Rooms** (`plugins/build`, the shape `room`). `["room", material, colour, x0, y0, z0, x1, y1, z1, door, wall?]`
+  is a hollow box to walk into: walls and a roof `wall` cells thick (3 unless said), a level floor carried down to
+  the ground, the ground that stood inside taken out, and a doorway 12 cells wide and 21 high in the side named
+  (`"none"` for none); windows and slits are cut after it with boxes of air. The roof holds: built of each of
+  wood, concrete, brick and steel at 4 by 4 m, 8 by 6 m and 16 by 12 m on sloping ground, every roof stood; where a
+  roof is wider than its material reaches from a wall, posts are put inside in rows. `node plugins/build/check.mjs`
+  builds a lodge and has someone walk in through its doorway and stand on its floor. A place's plan uses it at
+  once: asked for Normandy the quick model built four concrete bunkers and two houses as rooms, and for Sonoma two
+  pit garages. A shore's place is now measured from up the beach (its middle moved inland to stand 80 cm clear of
+  the sea): the first bunkers were built at the water's edge and stood flooded to the door. Also read: a cut
+  written as a shape of its own (`["air", ...]`). Pictures: `~/.village/engine/build/unit6-rooms.png`.
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.

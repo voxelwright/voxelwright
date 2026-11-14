@@ -2883,3 +2883,17 @@ times up; a wall one cell thick the same. Built roads striped, thin things were 
 - **A page script that reads a world's stream to its end never ends** if anything in that world moves: read for a
   fixed time, or count what was asked for.
 
+## Rooms (#264, `plugins/build` `room`; November 14)
+
+- **Lay it whole and then empty it.** A room is a solid box, the inside painted air, the doorway painted air: three
+  loops, and the ground that stood inside goes with the second. Its floor is the cell under `y0`, footed down to
+  the ground as a box is, so the inside is level on a slope.
+- **Roofs held at every size tried** (wood, concrete, brick, steel, to 16 by 12 m) with walls 3 thick: a roof joined
+  along all four edges is well held (the roof that fell in unit 1 stood on four posts). Posts inside are added
+  only past 1.4 times what the material reaches (`kinds.rs` `spans`, taken a little under).
+- **Twelve builds a minute is one rule's allowance**: an experiment that builds fifteen rooms from one rule has
+  its last three refused, and reads as "plaster roofs fall" if the refusals are not looked at.
+- **A shore is found where the ground is awash.** What a plan puts "up the beach" then stands in the water. The
+  place's middle is moved inland until the ground is 80 cm over the sea (40 m at most).
+- **A model given the shape used it in its first plan**, with the doorway towards where people come from, as told.
+

@@ -8,6 +8,7 @@
 //
 // A part is a list, as a made thing's parts are (make/form.mjs, whose materials and colours these are):
 //   ["box",   material, colour, x0, y0, z0, x1, y1, z1]                 level; the high corner is not filled
+//   ["room",  material, colour, x0, y0, z0, x1, y1, z1, door, wall?]    hollow: walls, a roof that holds, a level floor, a doorway in one side
 //   ["wedge", material, colour, x0, y0, z0, x1, y1, z1, falls, thick?]  a slope down towards "+x" "-x" "+z" "-z"
 //   ["steps", material, colour, x0, y0, z0, x1, y1, z1, falls, rise, thick?]   the same in steps `rise` cells high
 //   ["line",  material, colour, [[x, z], ...], wide, high, lift?]       along points, on the ground under each column
@@ -39,6 +40,10 @@ const FOOT = 60
 /** How often a build that waits for someone to step out of its way is tried again (ms), and the most that wait in a world. */
 const WAIT = 2000, WAITING_MOST = 32
 const FALLS = { '+x': [1, 0], '-x': [-1, 0], '+z': [0, 1], '-z': [0, -1] }
+/** A room's doorway: how wide and how high, in cells (a person is 18 tall and some 5 across). */
+const DOOR = [12, 21]
+/** How far a roof of each material holds out from what bears it, in cells (core/src/kinds.rs `spans`, a little under): past it a room is given posts inside. */
+const REACHES = { steel: 120, concrete: 70, wood: 40, roofing: 40, rock: 30, lamp: 30, brick: 24, plaster: 24, glass: 16 }
 const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
 /** What models write for materials that are not the engine's, and the nearest that is (make/brief.mjs says the same to whoever makes a thing). */
 const NEAREST = { metal: 'steel', iron: 'steel', rubber: 'steel', plastic: 'plaster', canvas: 'plaster', cloth: 'plaster', paper: 'plaster', stone: 'rock', gravel: 'rock', dirt: 'earth', soil: 'earth', mud: 'earth', tarmac: 'asphalt', road: 'asphalt', cement: 'concrete', timber: 'wood', planks: 'wood', light: 'lamp', tile: 'roofing', tiles: 'roofing', foliage: 'leaves', turf: 'grass', water: 'glass' }
@@ -139,16 +144,38 @@ export function rowsOf(parts, [ox, base, oz], feet) {
   parts.forEach((part, n) => {
     const bad = (why) => no(`part ${n + 1} (${JSON.stringify(part).slice(0, 60)}): ${why}`)
     if (!Array.isArray(part) || part.length < 6 || part.length > 12) bad('a part is a list: shape, material, colour, then its numbers')
+    // A cut written as a shape of its own, ["air", ..., x0, y0, z0, x1, y1, z1], is a box of air (one plan in three had one).
+    if (part[0] === 'air' && part.length === 9) part = ['box', 'air', 'own', ...part.slice(3)]
     const [shape] = part, material = NEAREST[part[1]] ?? part[1], tint = shade(part[2])
     if (typeof material !== 'string' || !Object.hasOwn(MATERIALS, material)) bad(`"${String(material).slice(0, 20)}" is not a material: ${Object.keys(MATERIALS).join(', ')}`)
     const c = material === 'air' ? 0 : colour(tint)
     if (c < 0) bad(`"${String(tint).slice(0, 20)}" is not a colour: "own", "white", "black", "grey:0" to "grey:14", or "hue:tone" with hue 0 to 23 and tone 0 to 9`)
     const kind = MATERIALS[material] | (c << 8)
-    if (shape === 'box' || shape === 'wedge' || shape === 'steps') {
+    if (shape === 'box' || shape === 'wedge' || shape === 'steps' || shape === 'room') {
       const [x0, y0, z0, x1, y1, z1] = part.slice(3, 9), more = part.slice(9)
       if (![x0, z0, x1, z1].every((v) => whole(v, -REACH, REACH)) || !whole(y0, -DEEP, HIGH) || !whole(y1, -DEEP, HIGH) || !(x0 < x1 && y0 < y1 && z0 < z1)) bad(`its box is x0, y0, z0, x1, y1, z1: whole numbers from a low corner to a higher one, x and z within ${REACH} of at, y from ${-DEEP} to ${HIGH} over the ground at at`)
       // What starts on the ground is carried down to it where the ground falls away, so nothing stands on air.
       const foot = (keep) => { if (y0 !== 0 || !kind) return; for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) { worked(); const g = feetAt(ox + x, oz + z); if (g < base && base - g <= FOOT && keep(x, z)) for (let y = g; y < base; y++) paint(ox + x, ox + x + 1, y, oz + z, kind) } }
+      if (shape === 'room') {
+        // A hollow box to walk into: walls, a roof, a level floor, and a doorway in one side. Laid whole and then emptied, so the ground that stood inside goes too.
+        const [door, wall = 3] = more, [dx, dz] = FALLS[door] ?? [0, 0]
+        if (more.length > 2 || (door !== 'none' && !Object.hasOwn(FALLS, door)) || !whole(wall, 1, 20) || !kind) bad('a room ends with the side its doorway is in ("+x", "-x", "+z", "-z", or "none"), and if you like how thick its walls and roof are in cells (3 unless said); it is not made of air')
+        if (x1 - x0 < wall * 2 + DOOR[0] || z1 - z0 < wall * 2 + DOOR[0] || y1 - y0 < wall + 12) bad(`a room is at least ${wall * 2 + DOOR[0]} cells across each way and ${wall + 12} high, to have room inside for a door and a person`)
+        foot(() => true)
+        for (let y = y0 - 1; y < y1; y++) for (let z = z0; z < z1; z++) paint(ox + x0, ox + x1, base + y, oz + z, kind)
+        for (let y = y0; y < y1 - wall; y++) for (let z = z0 + wall; z < z1 - wall; z++) paint(ox + x0 + wall, ox + x1 - wall, base + y, oz + z, 0)
+        // What holds the roof up where it is wider than its material reaches from a wall: posts inside, in rows.
+        const reach = REACHES[material] ?? 6, wide = Math.min(x1 - x0, z1 - z0) - wall * 2
+        if (wide > reach * 1.4) for (let z = z0 + wall + reach; z < z1 - wall - 4; z += reach) for (let x = x0 + wall + reach; x < x1 - wall - 4; x += reach) for (let y = y0; y < y1 - wall; y++) paint(ox + x, ox + x + 3, base + y, oz + z, kind), paint(ox + x, ox + x + 3, base + y, oz + z + 1, kind), paint(ox + x, ox + x + 3, base + y, oz + z + 2, kind)
+        if (door !== 'none') {
+          const high = Math.min(DOOR[1], y1 - wall - y0), mid = dx ? Math.floor((z0 + z1) / 2) : Math.floor((x0 + x1) / 2), a = mid - DOOR[0] / 2, b = mid + DOOR[0] / 2
+          for (let y = y0; y < y0 + high; y++) {
+            if (dx) for (let z = a; z < b; z++) paint(ox + (dx > 0 ? x1 - wall : x0), ox + (dx > 0 ? x1 : x0 + wall), base + y, oz + z, 0)
+            else for (let z = dz > 0 ? z1 - wall : z0; z < (dz > 0 ? z1 : z0 + wall); z++) paint(ox + a, ox + b, base + y, oz + z, 0)
+          }
+        }
+        return
+      }
       if (shape === 'box') {
         if (more.length) bad('a box has nothing after its numbers')
         foot(() => true)
@@ -196,7 +223,7 @@ export function rowsOf(parts, [ox, base, oz], feet) {
       }
       return
     }
-    bad(`"${String(shape).slice(0, 20)}" is not a shape: box, wedge, steps, line, loop, ring, disc, posts`)
+    bad(`"${String(shape).slice(0, 20)}" is not a shape: box, room, wedge, steps, line, loop, ring, disc, posts`)
   })
   const out = []
   let cells = 0

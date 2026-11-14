@@ -26,10 +26,12 @@ on('said', (world, e) => {
   if (/again/.test(e.text)) path(world)
   if (/take it up/.test(e.text)) world.build('path', { clear: true })
   if (/hut/.test(e.text)) world.build('hut', { at: [P[0], P[1] + 200], parts: [['box', 'wood', 'own', -10, 0, -10, 10, 20, 10]] })
+  if (/lodge/.test(e.text)) world.build('lodge', { at: [P[0] + 300, P[1]], parts: [['room', 'wood', '2:6', -25, 0, -20, 25, 28, 20, '+z'], ['box', 'air', 'own', -25, 10, -6, -22, 18, 6]] })
+  if (/go in/.test(e.text)) { world.actor('lodger', { name: 'Lodger', at: [P[0] + 300, P[1] + 45] }); world.actor('lodger', { to: [P[0] + 300, P[1]] }) }
   if (/over the path/.test(e.text)) world.build('slab', { at: P, parts: [['box', 'concrete', 'own', -5, -3, 20, 5, 3, 40]] })
   if (/beside/.test(e.text)) world.build('slab', { at: [P[0], P[1] - 120], parts: [['disc', 'concrete', 'own', 0, 0, 12, 1, -1]] })
   const bad = { material: [['box', 'cheese', 'own', 0, 0, 0, 4, 4, 4]], colour: [['box', 'wood', 'puce', 0, 0, 0, 4, 4, 4]], shape: [['dome', 'wood', 'own', 0, 0, 0, 4, 4, 4]], far: [['box', 'wood', 'own', 0, 0, 0, 5000, 4, 4]],
-    cells: [['box', 'rock', 'own', -600, 0, -600, 600, 10, 600]], rows: [['box', 'brick', 'own', 0, 0, -2000, 2, 30, 2000]], kind: [['box', 5, 'own', 0, 0, 0, 4, 4, 4]], points: [['line', 'wood', 'own', [[0, 0]], 2, 2]] }
+    cells: [['box', 'rock', 'own', -600, 0, -600, 600, 10, 600]], rows: [['box', 'brick', 'own', 0, 0, -2000, 2, 30, 2000]], kind: [['box', 5, 'own', 0, 0, 0, 4, 4, 4]], door: [['room', 'wood', 'own', 0, 0, 0, 40, 28, 40, 'up']], small: [['room', 'wood', 'own', 0, 0, 0, 10, 28, 10, '+z']], points: [['line', 'wood', 'own', [[0, 0]], 2, 2]] }
   const m = /^wrong (\\w+)/.exec(e.text)
   if (m && bad[m[1]]) world.build('wrong-' + m[1], { at: [P[0] + 400, P[1]], parts: bad[m[1]] })
   if (/no parts/.test(e.text)) world.build('wrong-none', { at: P, parts: 'a hut' })
@@ -108,7 +110,7 @@ try {
   const rival = await told('rival', 'of its build', (e) => e.build === 'mine')
   check(/another rule's/.test(rival.failed ?? ''), `another rule may not: "${(rival.failed ?? '').slice(0, 70)}"`)
   await w.post('ask', { by: 'wren', unrule: 'rival' })
-  for (const [word, why] of [['wrong material', /"cheese" is not a material/], ['wrong colour', /"puce" is not a colour/], ['wrong shape', /"dome" is not a shape/], ['wrong far', /within 3000 of at/], ['wrong cells', /cells and may be|too much to lay at once/], ['wrong rows', /rows of cells and may be/], ['wrong kind', /is not a material/], ['wrong points', /two points or more/], ['no parts', /parts is a list/], ['nowhere', /needs at/]]) {
+  for (const [word, why] of [['wrong material', /"cheese" is not a material/], ['wrong colour', /"puce" is not a colour/], ['wrong shape', /"dome" is not a shape/], ['wrong far', /within 3000 of at/], ['wrong cells', /cells and may be|too much to lay at once/], ['wrong rows', /rows of cells and may be/], ['wrong kind', /is not a material/], ['wrong door', /a room ends with the side its doorway is in/], ['wrong small', /a room is at least/], ['wrong points', /two points or more/], ['no parts', /parts is a list/], ['nowhere', /needs at/]]) {
     await say(word)
     const how = await until(`refused: ${word}`, async () => { const r = await w.how('mender'); return why.test(r.error) && r })
     check(how.running, `"${word}" is refused in words and the rule goes on: ${how.error.slice(0, 80)}`)
@@ -121,6 +123,19 @@ try {
   await say('a slab beside it')
   const beside = await told('mender', 'of the slab beside', (e) => e.build === 'slab' && !e.failed && e.at[2] !== P[1])
   check(beside.cells > 300, `the same build asked for where it may be is built (${beside.cells} cells)`)
+
+  // ── A room: walls, a roof that holds, a level floor and a doorway someone walks in through.
+  await w.post('join', { by: 'wren', at: [P[0] + 300, P[1] + 70] })
+  await say('build a lodge')
+  const lodge = await told('mender', 'of the lodge', (e) => e.build === 'lodge')
+  await wait(2500)
+  const lb = lodge.at[1], [lx, lz] = [P[0] + 300, P[1]], cell = async (dx, dy, dz) => (await at(lx + dx, lb + dy, lz + dz)).material
+  check(lodge.cells > 5000 && await cell(0, 26, 0) === 10 && await cell(12, 26, -10) === 10 && await cell(0, 8, 0) === 0 && await cell(10, 20, 8) === 0 && await cell(0, -1, 0) === 10 && await cell(-24, 5, 0) === 10, `a room is hollow: a roof that has not fallen, air inside, a floor under it, walls round it (${lodge.cells} cells)`)
+  check(await cell(0, 5, 19) === 0 && await cell(0, 20, 19) === 0 && await cell(0, 22, 19) === 10 && await cell(9, 5, 19) === 10 && await cell(-24, 14, 0) === 0, 'its doorway is open in the side asked for, 21 cells high, with the wall over and beside it; a window cut after it is open')
+  await say('go in')
+  const inside = await until('the lodger walks in', async () => { const p = (await w.get('around?by=wren&within=400')).people.find((x) => x.name === 'Lodger'); return p && Math.hypot(p.at[0] - lx, p.at[2] - lz) < 8 && p }, 20_000)
+  check(inside.at[1] === lb, `someone walks in through the doorway and stands on its floor (feet at ${inside.at[1]}, the floor's top at ${lb})`)
+  await w.post('join', { by: 'wren', at: [P[0], P[1] - 60] })
 
   // ── The carpenter: a platform people stand on, rails that hang, and a gate that opens by building it again.
   await w.post('join', { by: 'ada', at: [S[0] - 60, S[1]] })

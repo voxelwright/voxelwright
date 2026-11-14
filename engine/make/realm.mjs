@@ -48,6 +48,12 @@ export async function site(place, c, { square = false } = {}) {
   // A shore of sand before any other: a beach is what is nearly always meant.
   const found = (land === 'shore' ? find(c, { land, near: HOME, room, of: 'sand', flat: Math.round(room / 2) }) : null) ?? find(c, { land, near: HOME, room }) ?? find(c, { land, near: HOME, room, flat: room }) ?? (land === 'open' ? null : find(c, { land: 'open', near: HOME, room, flat: room }))
   if (!found) return null
+  // A shore is found at the water's edge, where the ground is awash: the place's middle is moved up the beach to where it stands 80 cm clear of the sea (or 40 m inland if the beach is flatter than that), so that what is built behind the waterline is not built in it (the first bunkers stood flooded to the door).
+  if (found.water) {
+    const way = Object.keys(WAYS)[(Object.keys(WAYS).indexOf(found.water.to) + 4) % 8], [wx, wz] = WAYS[square ? Object.keys(WAYS)[(Math.round(Object.keys(WAYS).indexOf(way) / 2) * 2) % 8] : way], long = Math.hypot(wx, wz)
+    const [ex, , ez] = found.at, off = found.water.far
+    for (let d = 20; d <= 400; d += 20) { const mx = Math.round(ex + (wx / long) * d), mz = Math.round(ez + (wz / long) * d), g = c.ground_at(mx, mz); if (g < -1) break; found.at = [mx, c.feet_at(mx, mz), mz]; found.water = { ...found.water, far: off + d }; if (g >= 8) break }
+  }
   const [x, , z] = found.at, far = Math.round(Math.max(80, Math.min(320, room * 0.6)))
   // Where one arrives: the first of the eight ways out from the middle that is dry, starting away from the water (or to the south).
   // `square`: only north, east, south or west of it, for a place planned in a frame of its own (plan.mjs turns the plan by quarter turns).
