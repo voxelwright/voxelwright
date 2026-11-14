@@ -24,6 +24,7 @@ const checks = [
   ['types', 'npx', ['tsc', '--noEmit'], false],
   ['whole', 'node', ['test/whole.mjs'], false],
   ['place', 'node', ['test/place.mjs'], false],
+  ['director', 'node', ['test/director.mjs'], false],
   ['city', 'node', ['test/city.mjs'], true],
   ['blast', 'node', ['test/blast.mjs'], true],
   ['shadows', 'node', ['test/shadows.mjs'], true],

@@ -234,14 +234,37 @@ try {
   await page.keyboard.press('Digit2')
   await page.waitForFunction(() => document.querySelector('#choice p')?.textContent === 'Does Pim follow you?', null, { timeout: 20_000 })
   await page.keyboard.press('Digit1')
+  // Whether it is to have a director is asked in the same flow (#264), and kept in its record.
+  await page.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('With a director?'), null, { timeout: 20_000 })
+  await page.keyboard.press('Digit1')
   await page.waitForFunction(() => document.querySelector('#choice p')?.textContent.startsWith('dusk is ready'), null, { timeout: 90_000 })
   const realms = (await (await fetch(`${world}/realms`)).json()).realms.filter((r) => !r.home)
   let inRealm = []
   for (let i = 0; i < 50 && realms[0] && !inRealm[0]?.running; i++) { inRealm = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json(); if (!inRealm[0]?.running) await new Promise((r) => setTimeout(r, 100)) }
   check(imagined === 1 && realms.length === 1 && realms[0].name === 'dusk' && /Does Pim follow you\? Yes\./.test(realms[0].about) && realms[0].look?.hour === 18.5, `the realm is made on the server, with what it is about, the answer given and its look (${realms[0]?.id})`)
-  check(rulesAsked === 2 && inRealm.length === 1 && inRealm[0].running && (await (await fetch(`${world}/world/rules`)).json()).length === 1, 'its rules are written into the realm, not into home')
+  check(rulesAsked >= 2 && inRealm.filter((r) => r.id !== 'director').length === 1 && inRealm[0].running && (await (await fetch(`${world}/world/rules`)).json()).length === 1, 'its rules are written into the realm, not into home')
   await page.keyboard.press('Digit2')
   await page.waitForFunction(() => document.querySelector('#choice').hidden)
+  // Its director is written behind that, by the same writer, with the realm's own rule in front of the model; put under its own id, and the record then says the realm has one.
+  const dusk = `${world}/realm/${realms[0].id}/world`
+  let directed = null
+  for (let i = 0; i < 600 && !directed?.director; i++) { directed = await (await fetch(`${dusk}/realm`)).json(); if (!directed.director) await new Promise((r) => setTimeout(r, 100)) }
+  check(directed?.director === true && directed.rules.includes('director') && rulesAsked === 3 && last.prompt.includes("Write this realm's director") && last.prompt.includes('The realm is called "dusk"') && last.prompt.includes('Its other rules:') && last.prompt.includes(`id ${inRealm[0].id}`), 'asked for with a director, the realm gets one: written with the realm and its own rule in front of the model, tried, put under the id director, and the record says so')
+  // Turned off and on from the bar, at any time: the record changes, and no model is asked. (This page is at home: so is what it turns.)
+  const askedSoFar = rulesAsked
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'director', name: 'a director', source: "on('start', () => {})" } }) })
+  for (const [words, on, told] of [['director on', true, 'The director is watching'], ['director off', false, 'The director rests']]) {
+    await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter')
+    await page.waitForFunction((t) => [...document.querySelectorAll('#notices p')].some((p) => p.textContent === t), told, { timeout: 5000 })
+    check((await (await fetch(`${world}/world/realm`)).json()).director === on && rulesAsked === askedSoFar && await page.evaluate((on) => document.querySelector('[data-panel=director] button')?.textContent === (on ? 'Director on' : 'Director off'), on), `"${words}" typed in the bar turns it ${on ? 'on' : 'off'} with no model asked, and the button says so`)
+  }
+  await page.click('[data-panel=director] button')
+  await page.waitForFunction(() => document.querySelector('[data-panel=director] button')?.textContent === 'Director on', null, { timeout: 5000 })
+  check((await (await fetch(`${world}/world/realm`)).json()).director === true, 'and the button turns it on again')
+  await page.click('[data-panel=director] button')
+  await page.waitForFunction(() => document.querySelector('[data-panel=director] button')?.textContent === 'Director off', null, { timeout: 5000 })
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'director' }) })
+  await page.waitForFunction(() => engine.asker.busy === 0)
   // Words that are talk are said, though the bar is set to make: a question, and "I am ...".
   const thingsBefore = await page.evaluate(() => engine.things.all.size)
   for (const words of ['what is this place?', 'I am the harbour pilot']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter') }
@@ -269,10 +292,10 @@ try {
   await page.waitForFunction(() => engine.asker.busy === 0)
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'giver' }) })
   await page.evaluate(() => { engine.pose.x -= 10 })
-  // In a realm with one rule, what is asked for changes that rule: put again under its id.
+  // In a realm with one rule of its own (its director is not counted), what is asked for changes that rule: put again under its id.
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
-  check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && afterChange.length === 1 && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s one rule is changed and put again under its id')
+  check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && afterChange.length === 2 && afterChange.some((r) => r.id === 'director') && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s own rule is changed and put again under its id, with a director there beside it')
 
   // ── Keys have one owner ──
   const z0 = await page.evaluate(() => engine.pose.z)

@@ -431,6 +431,15 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   actors and what it kept. `node test/rulewrite.mjs` checks this with kept replies (no model). Real runs, November
   13, Opus 5.5: seven asks that are not alike (a busker, a game of tag, and the five realms of #264), seven rules
   that ran on the first asking, 41 to 121 s each.
+- **A director** (`make/director.mjs`; the world's side is in `world.mjs`, "The director"). A realm may keep a rule
+  under the id `director`: it watches how each person at a page plays and stirs things up for them. The world lets
+  it work only while the realm's record says `director: true` and someone's model answers for the world; otherwise
+  it rests (told nothing, what it put into the world gone, the rule and what it keeps still there), so a realm with
+  no helper running is the realm as its other rules make it. It is written by the asker's own model with the
+  realm's record and its other rules in front of it: `node make/director.mjs --world http://127.0.0.1:5741/realm/<id> --first sonnet`.
+  In the page: the new-realm flow asks "With a director?"; "director on", "director off" or the Director button
+  turn it at any time (no model); "director: fewer strangers, more trouble" changes it. `node test/director.mjs`
+  checks the rest and the waking with a stand-in voice (no model).
 - **From the ask bar** (`page/making.ts`, the helper's `/rule`, `/imagine`, `/realm`). Words decide what is asked
   for. "Create a realm called harbour. You are the pilot. ..." is a realm: the asker chooses to be asked a few things first
   or not, the idea is fleshed out by their model (`make/realm.mjs`: what it is about, how it looks, at most three

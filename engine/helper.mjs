@@ -47,6 +47,7 @@ import { fieldKeys } from './make/form.mjs'
 import { LIBRARY, library } from './make/library.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
+import { ID as DIRECTOR, direct } from './make/director.mjs'
 import { imagine, realm as makeRealm } from './make/realm.mjs'
 import { write as writeRule } from './make/rules.mjs'
 import { workshop } from './workshop/route.mjs'
@@ -201,14 +202,23 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
       if (url.pathname === '/rule') {
         // A rule for the world the asker is in: what its people do, a game, a power. {wish, from, by, change, realm}
         const wish = text(body?.wish, 20_000), where = place(body?.from), change = body?.change
-        if (!wish || !where) return end(400, { why: 'a rule is asked for with a wish and where the asker stands: {wish, from: {eye, toward}}' })
+        const directs = body?.director === true
+        if ((!wish && !directs) || !where) return end(400, { why: 'a rule is asked for with a wish and where the asker stands: {wish, from: {eye, toward}}' })
         if (change !== undefined && (typeof change !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(change))) return end(400, { why: 'the rule to change is named by its id' })
         return stream(async (line, tell) => {
+          // The realm's director (make/director.mjs): written with the realm's own rules in front of the model if there is none, changed as the wish says if there is, and turned on. A quick one first, the fuller behind it.
+          if (directs) {
+            say(`asked by ${text(body.by, 24) || 'someone'} for a director${wish ? `: ${wish}` : ''}`)
+            const r = await direct({ world: here, where, more: wish || undefined, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+            void r.better?.then((b) => say(`  the fuller director: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
+            say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
+            return line({ stage: 'done', state: r.state, why: r.why, rule: r.id, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries, more: !!r.better })
+          }
           say(`asked by ${text(body.by, 24) || 'someone'} for a rule: ${wish}`)
           // In a realm with one rule (the realm's own, written when it was made), what is asked for is a change to
           // that rule: a power, a new habit of its people. It is put again under its id, so nothing starts over.
           let changing = change
-          if (!changing && typeof body.realm === 'string') { const there = await (await fetch(`${here}/world/rules`)).json().catch(() => []); if (Array.isArray(there) && there.length === 1) changing = there[0].id }
+          if (!changing && typeof body.realm === 'string') { const there = await (await fetch(`${here}/world/rules`)).json().catch(() => []); const own = Array.isArray(there) ? there.filter((r) => r.id !== DIRECTOR) : []; if (own.length === 1) changing = own[0].id }
           const r = await writeRule({ wish, world: here, where, change: changing, by: text(body.by, 24) || 'someone', model, cannot, say: tell })
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           line({ stage: 'done', state: r.state, why: r.why, rule: r.id, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries })
@@ -232,6 +242,8 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
           const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
           void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
+          // With a director (asked for in the new realm's flow): written once the realm's first rules are in, for it to read them, and behind the realm's being ready, so nobody waits on it to step in.
+          if (body.director === true && r.realm && !r.rough) void direct({ world: `${server}/realm/${r.realm}`, where: { at: r.at, facing: 'north' }, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot }).then((d) => say(`  the director of ${r.name}: ${d.state}${d.why ? ` (${d.why})` : ''}${d.ms ? ` in ${(d.ms / 1000).toFixed(0)} s` : ''}`), (e) => say(`  the director of ${r.name} failed: ${e.message}`))
           line({ stage: 'done', state: r.state, why: r.why, realm: r.realm, rule: r.rule, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries, more: !!r.better })
         })
       }

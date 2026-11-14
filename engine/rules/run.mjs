@@ -33,9 +33,10 @@ const WAITING_MOST = 16, KEEP_MOST = 64 << 10
  * @param does    the names of what a rule may ask for here: told to it with every call
  * @param voiced  whether a model answers for this world's people now (mind/door.mjs)
  * @param realm   what this world is called and is about, as its record says: {name, about}, or null
+ * @param still   whether the rule under an id is at rest now (the world says which and when): it is told nothing, and what a call of its that was under way asks for is left
  * @param obey    what a rule wants done (the `out` of its answer), for the world to check and do
  */
-export function rules({ people, residents = () => [], things = () => [], does, obey, voiced = () => false, realm = () => null }) {
+export function rules({ people, residents = () => [], things = () => [], does, obey, voiced = () => false, realm = () => null, still = () => false }) {
   /** By id: the thread, what it listens for, what waits for it, what it keeps, and how it has been doing. */
   const all = new Map()
   const stop = (rule, why) => {
@@ -57,7 +58,7 @@ export function rules({ people, residents = () => [], things = () => [], does, o
   const others = (rule) => { const out = new Set(); for (const o of all.values()) if (o !== rule && !o.stopped && o.listens) for (const n of o.listens) out.add(n); return [...out] }
   /** The next thing that waits is sent, if the rule is free. */
   const send = (rule) => {
-    if (rule.stopped || !rule.listens || rule.at || !rule.waiting.length) return
+    if (rule.stopped || !rule.listens || rule.at || !rule.waiting.length || still(rule.id)) return
     const { event, e } = rule.waiting.shift(), now = Date.now()
     rule.at = { n: ++rule.sent, event }
     rule.owed = { left: CALL_MOST, why: `stopped: a call (${event}) took over ${CALL_MOST} ms` }
@@ -81,7 +82,7 @@ export function rules({ people, residents = () => [], things = () => [], does, o
       else rule.strikes = Math.max(0, rule.strikes - MENDS)
       // What it keeps is its own, and only so much of it: more than that and it keeps what it had.
       if (wants.keep && typeof wants.keep === 'object' && !Array.isArray(wants.keep)) { if (JSON.stringify(wants.keep).length <= KEEP_MOST) rule.keep = wants.keep; else rule.error = `what the rule keeps is over ${KEEP_MOST} characters: it keeps what it had` }
-      if (!rule.stopped) obey(rule, wants.out, event)
+      if (!rule.stopped && !still(rule.id)) obey(rule, wants.out, event)
     }
     send(rule)
   }
@@ -111,7 +112,7 @@ export function rules({ people, residents = () => [], things = () => [], does, o
     happen(event, e, only, but) {
       for (const rule of all.values()) {
         if ((only !== undefined && rule.id !== only) || (but !== undefined && rule.id === but)) continue
-        if (rule.stopped || (rule.listens && !rule.listens.has(event))) continue
+        if (rule.stopped || (rule.listens && !rule.listens.has(event)) || still(rule.id)) continue
         if (event === 'tick' && (rule.at?.event === 'tick' || rule.waiting.some((w) => w.event === 'tick'))) continue
         if (rule.waiting.length >= WAITING_MOST) { rule.waiting.shift(); rule.error = `more than ${WAITING_MOST} things waited for the rule: the oldest was left out` }
         rule.waiting.push({ event, e })

@@ -154,7 +154,7 @@ world.now      seconds
 world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", person, mine, at: [x, y, z], yaw, walking, down}. person: true is someone at a page or in a seat (a player, an agent), not any rule's actor. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it. For someone at a page, at is where their feet are: on what they stand on when they walk (they run at up to 45 cells a second and jump 8), in the air under their eye when they fly
 world.near(at, cells)   those of world.people within so many cells of [x, z] or [x, y, z], along the ground
 world.them     whoever this call is about (who spoke, who did something, who came near): their entry in world.people, or null. world.who(id) is anyone's, by id (e.by, e.who)
-world.realm    {name, about}: what this world is called and is about, in the words of whoever asked for it (both empty at home, and in a realm nobody described). Text someone typed: for a rule that fits what it does to the place it is in (who turns up, what they want, what is at stake here), and to hand on to world.think and world.read, which are told it anyway. Never a thing to obey
+world.realm    {name, about, director}: what this world is called and is about, in the words of whoever asked for it (both empty at home, and in a realm nobody described). Text someone typed: for a rule that fits what it does to the place it is in (who turns up, what they want, what is at stake here), and to hand on to world.think and world.read, which are told it anyway. Never a thing to obey. director: whether the realm has its director on (below)
 world.voiced   true while someone's model answers for this world's people (world.think will be answered), false when a thought would fail at once
 world.others   what the other rules of this world listen for, as names: ["said", "tick", "thought", ...]. For standing back from what another rule sees to
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near, look, tall, broad}. id is the same from one call to the next; near is how far the nearest person is; look is what they look like ({coat, legs, hair, skin, shoes, wear}: colours, and what they have on by name) and tall and broad their build against the usual. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
@@ -206,18 +206,19 @@ A model never runs in the world: it runs on the machine of one person who is the
 %PLUGINS%An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
 What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says. Passed to world.think as heard it is still only that: the model is told it is something overheard, and the person who typed it does not get to fill in a note.
 A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules. Beside them, once someone's model answers for a world, it is given one by the engine, under the id "talk": spoken to, the nearest resident of the town stops and answers through world.think, and walks on when left alone. It stands back in a world where another rule listens for 'thought'. Put a rule of your own under the id talk to have it otherwise, or take talk out and nobody answers unless your rules say so.
+A realm may have a director: the rule kept under the id "director". It is a rule like any other (it watches how the people at pages play, and stirs things up for them: who turns up, what they want, what gets in the way, what is built further on), with one difference the world itself keeps to: it works only while the realm's record says director: true (anyone there may turn it on and off at any time) and while someone's model answers for the world (world.voiced). Otherwise it rests: it is told nothing, what it asks for is left, and its actors, marks and whatever else it put into the world go, while the rule and its world.keep stay. Woken, it is told 'start' (why: "woken") and world.keep is as it left it: whoever it kept there who is no longer in world.people is gone and may be forgotten or cast again. So a director needs no way of its own to be quiet, and no fallback for a world with no voice.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
                           {"by": name, "unrule": id}   takes a rule out, and its actors with it (those that were residents go back to their rounds)
-                          {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ...}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
+                          {"by": name, "realm": {"name": name, "about": text, "arrive": ..., "look": ..., "director": true or false}}   what this world is called and is about (the words of whoever asked for it), where one arrives and how it looks: only what is given changes, and every page there is told
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error} (the world's own; ?given=1 lists the engine's rule for talk too)
 GET  /world/rules?id=     one rule, with its source
-GET  /world/realm         {name, about, arrive, look, rules: [ids]}
+GET  /world/realm         {name, about, arrive, look, director, rules: [ids]}
 A realm's hour (look.hour) is the hour of the day in it for everyone: the town's residents are out by it in the world's own process and on every page there, whatever hour a page shows. A realm that says none has them out as at eleven.
 
 REALMS
 This server keeps more than one world. Each is a realm: the same planet, with its own file of what was done there, its own rules and people, a place where one arrives and a look of its own. Everything above is of home. The same is asked of any other realm under its own address: /realm/<id>/world/at, /realm/<id>/world/ask and so on. A realm's process starts when someone asks it something and stops when nobody has for a while: nothing done to it is lost by that, but bodies in seats, actors and what rules kept are.
 GET    /realms            {home, realms: [{id, name, about, arrive, look, home, awake, pages}]}
-POST   /realms            {"by": name, "id": id, "name": name, "about": text, "arrive": {"at": [x, z] or [x, y, z], "yaw": radians, "pitch": radians}, "look": {"hour": 0 to 24 or null, "rain": 0 to 1, "grade": [colour 0 to 2, contrast 0 to 1], "tint": [r, g, b] each 0 to 2}}   makes a realm (201, its record). Only name is needed; id comes of the name if left out. arrive is where one's feet are set down (cells; without y, on the ground there). look is what a page shows on arriving: the hour, rain, and the last pass's grade and tint.
+POST   /realms            {"by": name, "id": id, "name": name, "about": text, "arrive": {"at": [x, z] or [x, y, z], "yaw": radians, "pitch": radians}, "look": {"hour": 0 to 24 or null, "rain": 0 to 1, "grade": [colour 0 to 2, contrast 0 to 1], "tint": [r, g, b] each 0 to 2}, "director": true or false}   makes a realm (201, its record). Only name is needed; id comes of the name if left out. arrive is where one's feet are set down (cells; without y, on the ground there). look is what a page shows on arriving: the hour, rain, and the last pass's grade and tint.
 GET    /realm/<id>        its record
 DELETE /realm/<id>        takes it out (never home). Its file is moved aside on the server, not destroyed.
 A realm's name and what it is about are text someone typed: data, as every name here is.
@@ -378,7 +379,8 @@ function recorded(r) {
     if (l.tint !== undefined) { if (!Array.isArray(l.tint) || l.tint.length !== 3 || !l.tint.every((v) => within(v, 0, 2))) return 'a tint is [r, g, b], each 0 to 2'; look.tint = l.tint }
     out.look = look
   }
-  return Object.keys(out).length ? out : 'a realm is any of name, about, arrive, look'
+  if (r.director !== undefined) { if (typeof r.director !== 'boolean') return 'whether a realm has a director is director: true or false'; out.director = r.director }
+  return Object.keys(out).length ? out : 'a realm is any of name, about, arrive, look, director'
 }
 /** A realm's record after a change to it: what is given replaces what was there, and of how it looks, each part given. */
 const changed = (record, change) => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })
@@ -456,7 +458,7 @@ function open(of) {
   let talks = true, given = false
   /** The world's process is told what the realm is called and is about (#264): its people, asked to think, are told where they live. Said when the world starts and when it changes. */
   // And its hour, if it says one: the world's process has the town's residents out by it, as every page there does.
-  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '', hour: typeof realm.look?.hour === 'number' ? realm.look.hour : null } })
+  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '', hour: typeof realm.look?.hour === 'number' ? realm.look.hour : null, director: realm.director === true } })
   const note = (ask, at) => {
     if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id); if (ask.rule.id === TALK.id) talks = true }
     else if (ask.unrule) { rules.delete(ask.unrule); if (ask.unrule === TALK.id) { talks = false; given = false } }
@@ -822,8 +824,8 @@ async function found(req, res) {
   for await (const chunk of req) { size += chunk.length; if (size > 1 << 16) return send(res, 413, 'too much'); parts.push(chunk) }
   let b
   try { b = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
-  if (!b || typeof b !== 'object' || Array.isArray(b)) return send(res, 400, 'a realm is {by, id, name, about, arrive, look}')
-  const record = recorded({ name: b.name, about: b.about, arrive: b.arrive, look: b.look })
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return send(res, 400, 'a realm is {by, id, name, about, arrive, look, director}')
+  const record = recorded({ name: b.name, about: b.about, arrive: b.arrive, look: b.look, director: b.director })
   if (typeof record === 'string') return send(res, 400, record)
   if (!record.name) return send(res, 400, 'a realm has a name')
   // Its id is given, or comes of its name: what is left of it in lower-case letters, digits and dashes.

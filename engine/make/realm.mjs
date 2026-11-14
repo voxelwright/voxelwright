@@ -126,5 +126,5 @@ export async function realm({ server, name, about, look, place, answers = [], by
   const wish = `The whole of a realm called "${name}": ${about}${chosen ? ` ${chosen}` : ''}${ground ? `\n\n${placed(ground)}` : ''}`
   const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial, cannot, say })
   if (r.state !== 'there') return { ...r, state: 'there', realm: record.id, name, ...(ground ? { site: ground } : {}), rough: `its rules could not be written: ${r.why}`, cannot: r.cannot ?? [] }
-  return { ...r, realm: record.id, rule: r.id, name, ...(ground ? { site: ground } : {}) }
+  return { ...r, realm: record.id, rule: r.id, name, at, ...(ground ? { site: ground } : {}) }
 }

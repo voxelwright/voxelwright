@@ -488,12 +488,23 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => c
     parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     nudged = true
   } })
-const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants, event) => { during = event; try { obey(rule, wants, Date.now()) } finally { during = '' } }, voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? '') } : null) })
+/**
+ * The director (#264): the rule a realm keeps under this id watches how its people play and stirs things up. It
+ * works only while the realm's record says it has one (`director`, changed at any time) and someone's model answers
+ * for the world. Otherwise it rests: it is told nothing, and what it had put into the world goes. So a realm with
+ * its director turned off, or with no helper running, is the realm as its other rules make it, and nothing of it is broken.
+ */
+const DIRECTOR = 'director'
+const directing = () => realmIs?.director === true && voiced
+let directed = false
+/** Said whenever the record or the voice changes: the director is woken (told 'start', as any rule put back is) or put to rest. */
+const direct = () => { const now = directing(); if (now === directed) return; directed = now; if (now) happen('start', { why: 'woken' }, DIRECTOR); else if (ruled.has(DIRECTOR)) drop(DIRECTOR, true) }
+const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants, event) => { during = event; try { obey(rule, wants, Date.now()) } finally { during = '' } }, voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? ''), director: realmIs.director === true } : null), still: (id) => id === DIRECTOR && !directing() })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
-/** A rule is taken out, and its actors go with it. */
-function drop(id) {
-  ruled.drop(id)
+/** A rule is taken out, and its actors go with it. `rests`: the rule itself stays, with what it keeps, and only what it put into the world goes. */
+function drop(id, rests = false) {
+  if (!rests) ruled.drop(id)
   hand.dropped(id)
   plug.dropped(id)
   getting.dropped(id)
@@ -679,9 +690,9 @@ parentPort.on('message', (said) => {
   if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
   // What the world's people remembered of talk when it last stopped.
   if (talked !== undefined) return minds.back(talked)
-  if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; return }
+  if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; direct(); return }
   // Whether a model answers for this world's people now: said at once, whatever else waits.
-  if (answers !== undefined) { voiced = answers === true; return }
+  if (answers !== undefined) { voiced = answers === true; direct(); return }
   // The core swapped for another build (#264, the workshop): a new module of the same file is started, and from then
   // everything said to this process waits its turn (the server sends the world's edits again, as when a world
   // starts, and then `swapped`). What is in the old core and in no file is lost with it: bodies in the air, fire,

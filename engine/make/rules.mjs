@@ -66,9 +66,9 @@ the whole rule
 \`\`\``
 
 /** What the model is asked: the ask, where the asker is, and (changing a rule) the rule as it stands. */
-export const asked = ({ wish, at, facing, existing }) => `${existing ? 'Change this rule as asked. Reply with the whole rule, changed; keep its actors\' ids and what it keeps in world.keep, so nothing starts over.\n\nAsked: ' : 'Asked: '}${wish}
+export const asked = ({ wish, at, facing, existing, beside }) => `${existing ? 'Change this rule as asked. Reply with the whole rule, changed; keep its actors\' ids and what it keeps in world.keep, so nothing starts over.\n\nAsked: ' : 'Asked: '}${wish}
 
-The asker stands at [${at[0]}, ${at[2]}] (x, z; their feet are at height ${at[1]}) and looks ${facing}.${existing ? `\n\nThe rule as it stands:\n\`\`\`js\n${existing}\n\`\`\`` : ''}`
+The asker stands at [${at[0]}, ${at[2]}] (x, z; their feet are at height ${at[1]}) and looks ${facing}.${existing ? `\n\nThe rule as it stands:\n\`\`\`js\n${existing}\n\`\`\`` : ''}${beside ? `\n\n${beside}` : ''}`
 export const again = (first, reply, why) => `${first}\n\nYour last reply was:\n${reply}\n\nIt was tried in a world and did not work: ${why}\nReply again in the same form with the whole rule, corrected.`
 
 /** Reads a reply: { name, cannot: [lines], source } or throws an Error with what is wrong, in words the model can be told. */
@@ -190,24 +190,26 @@ export async function tried(trial, source, { wish, at, seconds = 4 }) {
  * { state: 'there' | 'refused', id, name, why, cannot, did, tries, ms }.
  * `say(words, stage)`: { stage: 'writing', try }, { stage: 'trying' }, { stage: 'refused', why }, { stage: 'putting', name }.
  * `first`: a quicker model that writes a first rule to play on while `model` writes the fuller one (see below).
+ * `id`: the id a new rule is put under, when it is to have one of its own (a realm's director). `beside`: more for the
+ * model to read with the ask, which is not the asker's words and is not cut as they are (the realm's other rules). `seconds`: how long it is tried.
  */
-export async function write({ wish, world, where, change, unless, by = 'maker', model = (q) => ask(q), first, trial, cannot = CANNOT, say = () => {} }) {
+export async function write({ wish, world, where, change, unless, by = 'maker', model = (q) => ask(q), first, trial, cannot = CANNOT, say = () => {}, id, beside, seconds }) {
   // A quick model first, if one is given: its rule is put in and can be played while the fuller one is written
   // (a long rule took the full model 200 s and the quick one 54 s, November 13). The fuller one is asked for as a
   // change of the quick one, so it keeps its actors and what it kept, and is put under the same id when it has been
   // tried. `better` on what is returned resolves when that has happened, to what came of it.
   if (first && !change) {
-    const quick = await write({ wish, world, where, by, model: first, trial, cannot, say })
-    if (quick.state !== 'there') return write({ wish, world, where, by, model, trial, cannot, say })
+    const quick = await write({ wish, world, where, by, model: first, trial, cannot, say, id, beside, seconds })
+    if (quick.state !== 'there') return write({ wish, world, where, by, model, trial, cannot, say, id, beside, seconds })
     const better = (async () => {
-      const full = await write({ wish: `${wish}\n\n(The rule as it stands was written in a hurry so that there was something to play. Make it everything that was asked for, fuller and better.)`, world, where, change: quick.id, unless: quick.source, by, model, trial, cannot })
+      const full = await write({ wish: `${wish}\n\n(The rule as it stands was written in a hurry so that there was something to play. Make it everything that was asked for, fuller and better.)`, world, where, change: quick.id, unless: quick.source, by, model, trial, cannot, beside, seconds })
       return { state: full.state, why: full.why, name: full.name, ms: full.ms, tries: full.tries, cannot: full.cannot }
     })().catch((e) => ({ state: 'refused', why: e.message }))
     return { ...quick, better }
   }
-  return writeOne({ wish, world, where, change, by, model, trial, cannot, say, unless })
+  return writeOne({ wish, world, where, change, by, model, trial, cannot, say, unless, id, beside, seconds })
 }
-async function writeOne({ wish, world, where, change, unless, by, model, trial, cannot, say }) {
+async function writeOne({ wish, world, where, change, unless, by, model, trial, cannot, say, id: named, beside, seconds }) {
   wish = String(wish).trim()
   if (!wish) return { state: 'refused', why: 'say what the rule is to do' }
   if (wish.length > WISH_MOST) { say(`the ask is ${wish.length} characters: only the first ${WISH_MOST} are read`, { stage: 'note', why: `that was long: only its first ${WISH_MOST} characters were read` }); wish = wish.slice(0, WISH_MOST) }
@@ -217,7 +219,7 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
   const out = { tries: 0, ms: 0, cost: 0 }
   const own = trial ? null : await scratch()
   try {
-    const first = asked({ wish, at: where.at, facing: where.facing ?? 'north', existing }), system = BRIEF(guide)
+    const first = asked({ wish, at: where.at, facing: where.facing ?? 'north', existing, beside }), system = BRIEF(guide)
     let prompt = first, best = null, why = ''
     for (; out.tries < TRIES;) {
       out.tries++
@@ -229,7 +231,7 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
       try {
         const rule = read(got.text)
         say('trying it in a world of its own', { stage: 'trying', name: rule.name })
-        const t = await tried(trial ?? own.url, rule.source, { wish, at: where.at })
+        const t = await tried(trial ?? own.url, rule.source, { wish, at: where.at, seconds })
         why = t.why
         // The best so far: one that worked, else the one the world saw do most before it went wrong.
         const worth = (t.ok ? 1000 : 0) + (t.did.calls ?? 0) + (t.did.actors ?? 0) * 5
@@ -243,7 +245,7 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
     if (!best) return { ...out, state: 'refused', why }
     const { rule } = best
     // What it could not do is kept, whatever comes of the rule: it is the engine's to-do list.
-    const id = change ?? `${rule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'rule'}-${Math.random().toString(36).slice(2, 6)}`
+    const id = change ?? named ?? `${rule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'rule'}-${Math.random().toString(36).slice(2, 6)}`
     if (rule.cannot.length) {
       await mkdir(dirname(cannot), { recursive: true }); await appendFile(cannot, JSON.stringify({ at: new Date().toISOString(), by, wish, name: rule.name, rule: id, world, where, model: out.model, cannot: rule.cannot }) + '\n')
       // And told to the world it was for (#264, the workshop): whoever keeps that server sees what everyone there ran into, with who asked.

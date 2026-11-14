@@ -89,18 +89,61 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     if (!plan) { hud.notice('The helper could not imagine it: is it running?', 7000); return none('not imagined') }
     const answers: { ask: string; answer: string }[] = []
     if (how === 1) for (const q of plan.questions) { const pick = await hud.choose(q.ask, [...q.options, 'You decide']); if (pick >= 0 && pick < q.options.length) answers.push({ ask: q.ask, answer: q.options[pick] }) }
+    // A director (#264): whether the realm is to have one is asked here, kept in its record, and changed at any time after (the button, or "director off").
+    const directed = (await hud.choose('With a director? It watches how you play and stirs things up for you.', ['With a director', 'Without'])) === 0
     const ask: Ask = { wish: idea }, at = ahead()
     const cue = hud.cue(`${plan.name}: making the realm`, () => [at[0], at[1] + 22, at[2]])
     const each = (stage: Stage) => { for (const one of told) one(stage, ask); if (stage.stage === 'realm') cue.text = `${plan.name}: writing its rules`; else if (stage.stage === 'trying') cue.text = `${plan.name}: trying them out` }
     each({ stage: 'place', at, facing: 'south' })
-    const done = await asker.realm({ name: plan.name, about: plan.about, look: plan.look, place: plan.place, answers }, each)
+    const done = await asker.realm({ name: plan.name, about: plan.about, look: plan.look, place: plan.place, answers, director: directed }, each)
     cue.remove()
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)
-    const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : done.more ? '. It will grow fuller as you play' : ''}.`, ['Step in', 'Stay here'])
+    const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : done.more ? '. It will grow fuller as you play' : ''}${directed && !done.rough ? '. Its director is being written and will join you' : ''}.`, ['Step in', 'Stay here'])
     if (step === 0) { if (into) into(done.realm); else { const to = new URLSearchParams(location.search); to.set('realm', done.realm); to.delete('shared'); location.assign(`${location.pathname}?${to}`) } }
     return done
   }
+  /** The world this page is in, as its server names it. */
+  const base = () => { const r = new URLSearchParams(location.search).get('realm'); return r ? `/realm/${encodeURIComponent(r)}/world` : '/world' }
+  /**
+   * The realm's director (#264): turned on and off here at any time (the realm's record keeps it, and the world
+   * puts its director to rest or wakes it: no model is asked), written by the asker's own model when there is
+   * none yet, and changed by what is said after the word ("director: more trouble, fewer strangers").
+   */
+  const director = async (words: string): Promise<Done> => {
+    const more = words.replace(/^\s*(the\s+)?director\b[:,]?\s*/i, '').trim()
+    const set = async (on: boolean): Promise<Done> => {
+      let ok = false
+      try { ok = (await fetch(`${base()}/ask`, { method: 'POST', body: JSON.stringify({ by: 'someone', realm: { director: on } }) })).ok } catch { /* said below */ }
+      hud.notice(!ok ? 'The director could not be told' : on ? 'The director is watching' : 'The director rests', 5000)
+      void shown()
+      return { stage: 'done', state: ok ? 'there' : 'refused' }
+    }
+    if (/^(off|rest|stop|quiet|no|none|away)\b/i.test(more)) return set(false)
+    const plain = !more || /^(on|start|wake|yes|back)\b/i.test(more)
+    let there = false
+    try { there = (await fetch(`${base()}/rules?id=director`)).ok } catch { /* none, as far as can be told */ }
+    if (there && plain) return set(true)
+    const ask: Ask = { wish: words }, at = ahead()
+    const cue = hud.cue(there ? 'The director is taking that in' : 'A director is being written for this place', () => [at[0], at[1] + 22, at[2]])
+    const each = (stage: Stage) => { for (const one of told) one(stage, ask); if (stage.stage === 'trying') cue.text = 'The director: trying it out' }
+    const done = await asker.rule(plain ? '' : more, { director: true }, each)
+    if (done.state === 'there') { cue.remove(); hud.notice(done.rough ? 'The director is here, a little rough' : 'The director is watching', 5000); lacked(done) } else { cue.text = `Not this time: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`; setTimeout(() => cue.remove(), 7000) }
+    void shown()
+    return done
+  }
+  /** A button that says whether this place has its director on, and turns it on and off. Asked of the world every few seconds: the page steps between realms, and anyone there may change it. */
+  const button = document.createElement('button'), holder = hud.panel('director')
+  holder.style.cssText = 'position:absolute;right:16px;top:160px;pointer-events:auto'
+  button.type = 'button'; button.hidden = true; button.title = 'The director watches how you play and stirs things up: turn it on or off'
+  button.style.cssText = 'font:600 14px system-ui;padding:10px 14px;border-radius:999px;border:0;background:rgba(20,22,28,.72);color:#fff'
+  let directing = false
+  const shown = async () => {
+    try { const r = await fetch(`${base()}/realm`); if (!r.ok) return; directing = (await r.json()).director === true; button.hidden = false; button.textContent = directing ? 'Director on' : 'Director off'; button.style.opacity = directing ? '1' : '0.6' } catch { /* a page with no shared world has no button */ }
+  }
+  button.onclick = () => void director(directing ? 'director off' : 'director on')
+  holder.append(button)
+  if (new URLSearchParams(location.search).has('shared') || new URLSearchParams(location.search).has('realm')) { void shown(); setInterval(() => void shown(), 5000) }
   /** Whether the world this page is in has rules: people who may hear what is said and act on it. Asked of the world, and remembered a few seconds. */
   let ruledAt = 0, ruledSo = false
   const ruled = async (): Promise<boolean> => {
@@ -117,7 +160,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
    * "a red door"), or a change to how the world goes ("add ...", "change ...", "from now on ...", "let me ...").
    * In a world with no rules there is nobody to hear a power asked for, so those words ask for a rule.
    */
-  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' => {
+  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' | 'director' => {
+    if (/^\s*(the\s+)?director\b\s*(:|,|$|(on|off|rest|stop|quiet|start|wake|back|away)\b)/i.test(text)) return 'director'
     if (/^thing:/i.test(text)) return 'thing'
     if (/^(rule|play):/i.test(text)) return 'rule'
     if (/^(say|said):/i.test(text)) return 'said'
@@ -142,8 +186,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const what = kind(ask.wish, await ruled()), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
     // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
     if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words }) }
-    return what === 'realm' ? realm(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
+    return what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
   }
 
-  return Object.assign(asked, { thing, on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
+  return Object.assign(asked, { thing, director, on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
 }

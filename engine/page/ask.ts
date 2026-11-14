@@ -64,11 +64,11 @@ export interface Asker {
    * it, it is tried in a world of its own, and put into this one. `change` is the id of a rule that is here, to be
    * changed as asked: it keeps its actors and what it kept. Resolves as `ask` does, with `rule`, `cannot`, `rough`.
    */
-  rule(wish: string, how?: { change?: string }, each?: (stage: Stage) => void): Promise<Done>
+  rule(wish: string, how?: { change?: string; /** It is the realm's director that is asked for (make/director.mjs): written if there is none, changed as `wish` says if there is, and turned on. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
   /** An idea for a realm, fleshed out by the asker's own model before anything is built: what it is about, how it looks, and a few questions where the idea leaves a choice open. Null if it could not be. */
   imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
-  realm(spec: { name: string; about: string; look?: unknown; place?: unknown; answers?: { ask: string; answer: string }[] }, each?: (stage: Stage) => void): Promise<Done>
+  realm(spec: { name: string; about: string; look?: unknown; place?: unknown; answers?: { ask: string; answer: string }[]; /** With a director, written for it once its first rules are in. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made or waiting. */
   readonly busy: number
   /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */
@@ -139,7 +139,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       await before
       try { return await send('/ask', body, each, end, JSON.parse(body).from) } finally { free() }
     },
-    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, from: eye(), by: by(), realm: realmNow() }, each),
+    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, director: how.director, from: eye(), by: by(), realm: realmNow() }, each),
     realm: (spec, each = () => {}) => turn('/realm', { ...spec, by: by() }, each),
     async imagine(idea) {
       if (!helper) return null
