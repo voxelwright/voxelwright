@@ -15,6 +15,8 @@ const HANDS = 10, CLIMB_MS = 550
 /** How long a way that was not found is not looked for again (ms), and how often a body following someone looks again. */
 const NO_WAY_FOR = 3000, AGAIN_AFTER = 700
 /** The furthest an actor's reach and a marked place may go (cells), and the most places a rule may mark. */
+/** How far apart two bodies' middles are kept (cells): a body is about four and a half across the shoulders. */
+export const APART = 6
 export const REACH_MOST = 600, MARK_WITHIN_MOST = 2000, MARKS_MOST = 32
 
 /**
@@ -27,6 +29,26 @@ export const REACH_MOST = 600, MARK_WITHIN_MOST = 2000, MARKS_MOST = 32
  * @param hear     (ruleId, event, e) => a rule is told something
  */
 export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }) {
+  // ── Bodies do not pass through each other ──
+  // A body the world moves does not step to within a body's width of anyone else with a body: a person, a seat,
+  // another actor. Going away from someone is always allowed (two put on one spot can part). Whoever is near the
+  // one being moved is gathered once a step (`crowd`); a way round treats them as it treats a lamp, and keeps a
+  // cell further off than a step must, so that a way found is a way that can be walked.
+  let crowd = []
+  const gather = (p, within) => { crowd = []; for (const o of folk.values()) if (o !== p && !o.gone && Math.abs(o.at[1] - p.at[1]) < tall && Math.hypot(o.at[0] - p.at[0], o.at[2] - p.at[2]) < within) crowd.push(o) }
+  /** Who a step from one place to another would press into: someone within a body's width of where it ends, and nearer than where it began. */
+  const pressed = (fx, fz, x, z, by = APART) => { for (const o of crowd) { const d = Math.hypot(o.at[0] - x, o.at[2] - z); if (d < by && d < Math.hypot(o.at[0] - fx, o.at[2] - fz) - 1e-6) return o } return null }
+  /** Whether a place is clear of everyone but one body (its own): for whoever puts a body somewhere. */
+  const blocked = (x, z, but, y) => { for (const o of folk.values()) if (o !== but && !o.gone && (y === undefined || Math.abs(o.at[1] - y) < tall) && Math.hypot(o.at[0] - x, o.at[2] - z) < APART) return o; return null }
+  /** The place nearest a place where a body would stand in nobody, and can stand (`can`): itself, or as few steps to one side as there is room. */
+  const room = (x, z, but, can = () => true) => {
+    if (!blocked(x, z, but)) return [x, z]
+    for (let ring = 1; ring <= 6; ring++) {
+      const r = APART * ring + 1, n = Math.floor(2 * Math.PI * r / (APART + 1))
+      for (let k = 0; k < n; k++) { const a = k * 2 * Math.PI / n + 0.4, at = [Math.round(x + Math.sin(a) * r), Math.round(z - Math.cos(a) * r)]; if (!blocked(at[0], at[1], but) && can(at[0], at[1])) return at }
+    }
+    return [x, z]
+  }
   /** Where feet come to rest in a column, as `footing` says; or, with the hands, on top of something up to waist-high there. `[feet, climbed]` or null. */
   const stand = (x, y, z) => {
     const feet = footing(x, y, z)
@@ -45,7 +67,7 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     const dx = to[0] - from[0], dz = to[1] - from[2], far = Math.hypot(dx, dz)
     if (far > most) return null
     let y = from[1]
-    for (let d = 1; d <= far; d++) { const feet = footing(from[0] + dx / far * d, y, from[2] + dz / far * d); if (feet === null) return null; y = feet }
+    for (let d = 1; d <= far; d++) { const x = from[0] + dx / far * d, z = from[2] + dz / far * d, feet = footing(x, y, z); if (feet === null || pressed(from[0] + dx / far * (d - 1), from[2] + dz / far * (d - 1), x, z, APART + 1)) return null; y = feet }
     return y
   }
   /**
@@ -64,7 +86,7 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     const edge = (n, di, dj) => {
       let y = n.y, cost = 0
       const steps = di && dj ? Math.round(GRID * 1.414) : GRID
-      for (let s = 1; s <= steps; s++) { const at = stand(x0 + (n.i + di * s / steps) * GRID, y, z0 + (n.j + dj * s / steps) * GRID); if (!at) return null; y = at[0]; cost += at[1] ? 30 : 0 }
+      for (let s = 1; s <= steps; s++) { const x = x0 + (n.i + di * s / steps) * GRID, z = z0 + (n.j + dj * s / steps) * GRID, at = stand(x, y, z); if (!at || pressed(x0 + (n.i + di * (s - 1) / steps) * GRID, z0 + (n.j + dj * (s - 1) / steps) * GRID, x, z, APART + 1)) return null; y = at[0]; cost += at[1] ? 30 : 0 }
       return { y, cost: cost + (di && dj ? GRID * 1.414 : GRID) }
     }
     while (open.length && looked < LOOKED_MOST) {
@@ -110,7 +132,9 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     const dx = them.at[0] - p.at[0], dz = them.at[2] - p.at[2], far = Math.hypot(dx, dz) || 1
     let goal = null
     // Following: up to `keep` cells of them, and no nearer. Keeping away: off along the line from them until `keep` cells lie between.
-    if (!f.flee && far > f.keep + 3) goal = [them.at[0] - dx / far * f.keep, them.at[2] - dz / far * f.keep]
+    // (Never nearer than two bodies can stand.)
+    const keep = Math.max(f.keep, APART + 2)
+    if (!f.flee && far > keep + 3) goal = [them.at[0] - dx / far * keep, them.at[2] - dz / far * keep]
     else if (f.flee && far < f.keep) goal = [p.at[0] - dx / far * (f.keep - far + 20), p.at[2] - dz / far * (f.keep - far + 20)]
     if (!goal) { if (p.goal) { p.goal = null; p.path = undefined } if (!f.flee) p.yaw = Math.atan2(dx, -dz); return }
     // The way it was on is good while they have not gone far from where it led.
@@ -125,6 +149,7 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
   function step(p, now, tick) {
     if (p.follow) towards(p, now)
     if (!p.goal || p.down > now || (p.climbs ?? 0) > now) return false
+    gather(p, 90 + (p.pace ?? PACE))
     // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
     for (let left = (p.pace ?? PACE) / 10 * (rate?.() ?? 1); left > 0 && p.goal;) {
       // A way's next place is cut out when the one after can be walked to straight: the body does not zigzag a grid.
@@ -143,15 +168,20 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
       }
       const x = p.at[0] + dx / far * stride, z = p.at[2] + dz / far * stride
       // On a way it may use its hands; walking straight it does not, and looks for a way when its feet are stopped.
-      const feet = p.path ? null : footing(x, p.at[1], z), at = p.path ? stand(x, p.at[1], z) : feet === null ? null : [feet, false]
+      const who = crowd.length ? pressed(p.at[0], p.at[2], x, z) : null
+      const feet = p.path || who ? null : footing(x, p.at[1], z), at = who ? null : p.path ? stand(x, p.at[1], z) : feet === null ? null : [feet, false]
+      // Someone stands where it was going: it stops short of them, and says who.
+      if (who && Math.hypot(p.goal[0] - who.at[0], p.goal[1] - who.at[2]) < APART + 2) { p.stopped = `${who.name || 'someone'} is standing where you were going: stopped beside them`; p.goal = null; p.path = undefined; break }
       if (at) {
-        p.at = [x, at[0], z]; p.yaw = Math.atan2(dx, -dz)
+        p.at = [x, at[0], z]; p.yaw = Math.atan2(dx, -dz); p.pressed = 0
         // Up onto something with the hands: a moment's climb, and it looks like one.
         if (at[1]) { p.climbs = now + CLIMB_MS; p.move = { n: (p.move?.n ?? 0) + 1, since: now, name: 'climb', long: 0.7, stays: false }; break }
         continue
       }
       // Stopped. A way round is looked for: one search a tick for everyone, and not again at once for one not found.
       const goal = p.goal
+      // Kept standing by someone for two seconds, way or no way: it says so and stops, and does not look for ever.
+      if (who && (p.pressed = (p.pressed ?? 0) + 1) > 20) { p.pressed = 0; p.stopped = `${who.name || 'someone'} in the way, ${Math.round(Math.hypot(goal[0] - p.at[0], goal[1] - p.at[2]))} cells short of where you were going`; p.goal = null; p.path = undefined; break }
       if (p.noWay && now < p.noWay.until && Math.hypot(goal[0] - p.noWay.to[0], goal[1] - p.noWay.to[1]) < 12) { p.stopped = p.noWay.why; p.goal = null; p.path = undefined; break }
       if (searched === tick) break
       searched = tick
@@ -162,10 +192,10 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
         p.path = found; p.pathTo = goal; p.pathAt = now
         const end = found[found.length - 1], short = Math.hypot(goal[0] - end[0], goal[1] - end[1])
         // As near as it can get, if it cannot get there: it walks that far and says what kept it from the rest.
-        p.short_of = short > GRID * 1.5 ? `${say(x, p.at[1], z)}, and no way round was found: ${Math.round(short)} cells short of where it was going` : undefined
+        p.short_of = short > GRID * 1.5 ? `${who ? `${who.name || 'someone'} in the way` : say(x, p.at[1], z)}, and no way round was found: ${Math.round(short)} cells short of where it was going` : undefined
       } else {
         stats.none++
-        const why = `${say(x, p.at[1], z)}, ${Math.round(Math.hypot(goal[0] - p.at[0], goal[1] - p.at[2]))} cells short of where you were going`
+        const why = `${who ? `${who.name || 'someone'} in the way` : say(x, p.at[1], z)}, ${Math.round(Math.hypot(goal[0] - p.at[0], goal[1] - p.at[2]))} cells short of where you were going`
         p.noWay = { to: goal, until: now + NO_WAY_FOR, why }
         p.stopped = why; p.goal = null; p.path = undefined
       }
@@ -213,5 +243,5 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     for (const [name, m] of Object.entries(from).slice(0, MARKS_MOST)) if (/^[a-z0-9][a-z0-9-]{0,23}$/.test(name) && Array.isArray(m?.at) && m.at.length === 2 && m.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) && Number.isFinite(m.within) && m.within > 0) mine.set(name, { at: [m.at[0], m.at[1]], within: Math.min(MARK_WITHIN_MOST, m.within) })
     if (mine.size) marks.set(id, mine)
   }
-  return { step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way, kept, back }
+  return { blocked, room, step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way, kept, back }
 }

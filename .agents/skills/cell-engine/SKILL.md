@@ -2418,3 +2418,26 @@ shared with other lanes' checks).
   a phone (128 MB of pool does not fit twice: a smaller world behind the window, and the place made on arriving,
   1 to 3 s that the window would have to hide some other way).
 
+## Bodies do not pass through each other (#218, November 13)
+
+- **Who keeps them apart**: the world's process, for every body it moves (an actor, a seat), in `about.mjs`, on
+  the places of everyone in `folk`. A person at a page moves by their own page: the bodies lane keeps them out of
+  others. Two middles are never nearer than `APART` (6 cells: a figure is 5 across the shoulders).
+- **One rule, three uses**: a step is refused when it brings a body within `APART` of someone *and nearer than it
+  was* (`pressed`), so a body that is already too near can always step away. The straight walk, the search for a
+  way and the step itself all ask it, so a body goes round someone as it goes round a car.
+- **Somebody standing at the goal is not a way that failed**: it stops beside them and `stopped` says who
+  ("wren is standing where you were going: stopped beside them"). Two sent to one spot: one has it, the other
+  stops beside.
+- **Placing**: `world.actor(id, {at})` and a seat's `join` put a body at the nearest free place (`room`), a step
+  to one side when the place is taken. `follow` keeps no nearer than 8 cells whatever `keep` says.
+- **A way is planned a cell wider than a step needs** (`APART + 1` in the search and the straight line, `APART`
+  in the step). With one number for both, a way found along the very edge of someone could not be walked from a
+  place a fraction of a cell off the grid: the body looked for the same way ten times a second for ever. And a
+  body kept standing by someone for two seconds says who is in the way and stops, way or no way.
+- **Checked with a person at a real page** as well as a seat: a page's person is in `folk` at their feet (their
+  eyes less `EYES`), so one who flies is over everybody's head and in nobody's way.
+- **Not done**: when 130 places round a spot are all taken or cannot be stood on, a body is still put on the
+  spot; residents the rule did not take are not in `folk` and do not block or give way; a person who
+  walks into a standing actor is not stopped by this (the bodies lane's side); nobody steps aside for anybody.
+  `node test/apart.mjs`.

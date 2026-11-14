@@ -227,7 +227,7 @@ function seat(m) {
   if (p?.rule) return { error: 'that name is an actor of one of the world\'s rules: use another' }
   if (m.op === 'join') {
     // On the pavement north of where the town starts, unless a place is given; at the height the world has ground there.
-    const x = m.at ? m.at[0] : 690 + (spoken + folk.size * 7) % 40, z = m.at ? m.at[1] : 4009
+    const [x, z] = getting.room(m.at ? m.at[0] : 690 + (spoken + folk.size * 7) % 40, m.at ? m.at[1] : 4009, p, (x, z) => stand(x, z) !== null)
     const feet = stand(x, z)
     if (feet === null) return { error: 'there is no room to stand there' }
     p = { by: m.by, name: m.by, seat: true, at: [x, feet, z], yaw: m.yaw ?? Math.PI, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0 }
@@ -465,7 +465,8 @@ does.set('actor', (rule, w, now, wrong) => {
   }
   if (w.at !== undefined || !p) {
     if (!pair(w.at)) { wrong(`actor "${id}" is not in the world yet: it needs a place, at: [x, z]`); return }
-    const x = Math.round(w.at[0]), z = Math.round(w.at[w.at.length - 1]), feet = stand(x, z)
+    // Where it was asked for, or a step to one side if someone stands there: nobody is put inside anybody.
+    const [x, z] = getting.room(Math.round(w.at[0]), Math.round(w.at[w.at.length - 1]), p, (x, z) => stand(x, z) !== null), feet = stand(x, z)
     if (feet === null) { wrong(`there is no room for actor "${id}" to stand at ${x}, ${z}`); return }
     if (!p) {
       let mine = 0

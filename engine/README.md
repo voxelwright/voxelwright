@@ -333,7 +333,9 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   follows someone (`follow: id, keep: cells`), keeps away (`flee`), and its rule hears `near` when a person comes
   within its `reach` or into a place the rule marked (`world.mark`), once in and once out. Seats get about the
   same way. Measured: round a parked car 30 places looked at in 15 ms the first time and 1 ms after; into a
-  house (no way) 900 places in 27 ms, and not looked for again for three seconds. `node test/about.mjs`.
+  house (no way) 900 places in 27 ms, and not looked for again for three seconds. `node test/about.mjs`. Bodies the world moves do not
+  pass through a person or each other: they go round, stop beside whoever stands at the goal and say who
+  (`stopped`), and are placed a step aside when a place is taken. `node test/apart.mjs`.
 - **A rule can take a resident of the town as its own** (#218). `world.residents` is who of the town's own people
   is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
