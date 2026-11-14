@@ -13,6 +13,7 @@ import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
 import { MODES, MOODS, PACE, moodKey } from './music/compose.ts'
 import { played } from './things.ts'
+import { speak, type Way } from './voice.ts'
 import type { Things } from '../things.ts'
 import type { Hud } from '../hud.ts'
 import type { Input } from '../input.ts'
@@ -57,7 +58,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
   /** What it has played: blows heard as themselves, blows folded into the heap's grinding. */
-  const count = { blows: 0, folded: 0, tellings: 0, moved: 0, rules: 0 }
+  const count = { blows: 0, folded: 0, tellings: 0, moved: 0, rules: 0, spoken: 0 }
   const stuff = (kind: number) => MATERIALS[kind & 15] ?? 'brick'
   /** How big a piece of so many cells is against a patch's own size (30 cm). */
   const sized = (cells: number) => Math.min(8, Math.max(0.4, (Math.cbrt(cells) / M) / 0.3))
@@ -117,6 +118,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   }
   return {
     voice, blast, count, music, sounded, tuned,
+    /** Someone said something (text, where): given a voice one of two ways, if the page asked for one (`?voices=babble` or `speech`). A direction being tried. */
+    spoke(said: { name: string; text: string; at?: readonly [number, number, number] }, way: string | null) { if (way === 'babble' || way === 'speech') count.spoken += speak(voice, way as Way, said) },
     get things() { return things },
     /** Which place's music is wanted now. */
     get place() { return place },

@@ -168,6 +168,31 @@ console.log('Written by a model (kept replies of November 13, 2026; no model is 
   check(top <= CEILING, `all of them at full force stay under the ceiling (${ears.db(top).toFixed(1)} dB)`)
 }
 
+console.log('A voice for what is said (a direction being tried: babble)')
+{
+  const { babble, pitchOf, TONE, WHISPER } = await import('../page/sound/voice.ts')
+  const asks = babble('Have you seen the lighthouse keeper?', 'Odo'), tells = babble('Good morning to you all.', 'Odo')
+  check(asks.length === 10 && tells.length === 6, `a syllable is sounded for each syllable of the words (${asks.length} for "Have you seen the lighthouse keeper?", ${tells.length} for "Good morning to you all.")`)
+  const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length
+  check(asks.at(-1).hz > mean(asks.slice(0, 5).map((x) => x.hz)) * 1.1 && mean(tells.slice(-2).map((x) => x.hz)) < mean(tells.slice(0, 2).map((x) => x.hz)), `a question ends higher than it began (${asks[0].hz.toFixed(0)} to ${asks.at(-1).hz.toFixed(0)} Hz) and a statement lower (${tells[0].hz.toFixed(0)} to ${tells.at(-1).hz.toFixed(0)} Hz)`)
+  const names = ['Odo', 'Marta', 'Ines', 'Bram', 'Wren', 'Ada'].map(pitchOf)
+  check(Math.max(...names) / Math.min(...names) > 1.4 && names.every((hz) => hz >= 95 && hz <= 230), `each speaker has a pitch of their own, from a low voice to a high one (${names.map((h) => h.toFixed(0)).join(', ')} Hz)`)
+  check(JSON.stringify(babble('la la lo li '.repeat(400), 'Odo').length) === '60' && babble('', 'Odo').length === 0 && babble('<script>alert(1)</script> !!! ???', 'Odo').length > 0, 'a long speech is cut at sixty syllables, an empty one is silence, and markup is only letters to sound')
+  // Sounded through the synthesiser: the vowels differ as vowels do, and the whole is speech-paced and not loud.
+  const sr = 48000, s = new Synth(sr), ids = new Map(), id = (p) => { if (!ids.has(p)) { ids.set(p, ids.size + 1); s.define(ids.get(p), compile(p)) } return ids.get(p) }
+  s.set(SET.roomGain, 0)
+  const notes = []
+  for (const y of asks) notes.push(Math.round(y.at * sr), id(TONE[y.vowel]), y.hz, 1, y.force, y.dur, 0.5, 0.5, 0, 0, 0, 0, Math.round(y.at * sr), id(WHISPER[y.vowel]), 0, 1, y.force * 0.8, y.dur, 0.5, 0.5, 0, 0, 0, 0)
+  s.notes(notes)
+  const secs = asks.at(-1).at + 0.6, l = new Float32Array(Math.round(secs * sr)), r = new Float32Array(l.length)
+  s.render(l, r)
+  keep('voice-babble-question', { l, r, sr })
+  const vowel = (v) => { const t = new Synth(sr); t.define(1, compile(WHISPER[v])); t.define(2, compile(TONE[v])); t.set(SET.roomGain, 0); t.notes([0, 1, 0, 1, 0.7, 0.3, 0.5, 0.5, 0, 0, 0, 0, 0, 2, 140, 1, 0.7, 0.3, 0.5, 0.5, 0, 0, 0, 0]); const a = new Float32Array(sr / 2), b = new Float32Array(sr / 2); t.render(a, b); return ears.centroid(a, sr, 2400, 8192) }
+  check(vowel('i') > vowel('u') * 1.3 && vowel('e') > vowel('o'), `the vowels are told apart by where their weight lies: i ${vowel('i').toFixed(0)} Hz, e ${vowel('e').toFixed(0)}, a ${vowel('a').toFixed(0)}, o ${vowel('o').toFixed(0)}, u ${vowel('u').toFixed(0)}`)
+  const rate = asks.length / asks.at(-1).at, loud = ears.lufs(l, r, sr)
+  check(rate > 3.5 && rate < 8 && loud > -40 && loud < -14 && ears.peak(l) < CEILING, `it goes at the pace of speech (${rate.toFixed(1)} syllables a second) and is not loud (${loud.toFixed(0)} LUFS beside the speaker, peak ${ears.db(ears.peak(l)).toFixed(0)} dB)`)
+}
+
 console.log('Never loud enough to hurt')
 {
   // Patches made at random inside the form, all as loud and as hard as the form lets them be, many at once with every bed full up.

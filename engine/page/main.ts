@@ -769,6 +769,8 @@ async function main() {
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   // What rules sound (#264): heard like anything else in the world.
   if (far) far.onsound = (s) => ears?.sounded(s)
+  // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
+  if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
   // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so.
   if (far) Object.assign((globalThis as unknown as { engine: object }).engine, { plugins: plugins(far) })
   // People (#218): which residents a rule of the world has taken off their rounds.

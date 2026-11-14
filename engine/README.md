@@ -201,6 +201,11 @@ runs on the audio thread (`page/sound/dsp.ts`) and nothing a patch says gets pas
   `node instrument.mjs kalimba --sounds kalimba.json --world url` to stand it as an instrument. Seven kept replies
   of November 13 are in `page/sound/kept/` (a kalimba, a theremin, a steel pan, a church bell, a wind chime, a vase,
   a rubber duck): all taken on the first try, in 6 to 24 s. The checks read them and run no model.
+- **A voice for what people say** (`page/sound/voice.ts`): being tried, two ways, off unless asked for.
+  `?voices=babble` sounds what others say in the synthesiser: a syllable for each syllable, at the speaker's own
+  pitch, falling through a statement and rising at a question, each vowel with its own colour, placed where they
+  stand; it says no words. `?voices=speech` is the browser's own speech: real words, a pitch and pace by the
+  speaker, louder when near, but not placed in the world and not measured by anything here. The lab has both.
 - `/page/sound/lab.html` plays every sound by hand, with a picture of what is sounding and what the audio thread
   costs, and takes a patch of your own. It is the place to listen: the checks cannot.
 - `node test/sound.mjs` measures the synthesiser in Node (no browser); `node test/music.mjs` measures the rules, the search and the handover between places; `node test/heard.mjs` taps the real page; `node test/played.mjs` plays the instruments with real keys and touches;

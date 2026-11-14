@@ -5,6 +5,7 @@ import { BREAK, HIT, WORLD } from './kinds.ts'
 import { LIKES } from './likes.ts'
 import { patch, sounds, type Patch } from './patch.ts'
 import { conductor } from './music/conductor.ts'
+import { speak } from './voice.ts'
 import { playable, surface } from './instrument.ts'
 import { INSTRUMENTS, type Instrument } from './instruments.ts'
 import { MODES, MOODS, TRIES, moodKey } from './music/compose.ts'
@@ -146,6 +147,17 @@ for (const name of ['kalimba', 'theremin', 'steel-drum', 'church-bell', 'wind-ch
     if (s.play && s.surface) button(written, `play ${kept.wish}`, () => { take({ name, sounds: { play: s.play!, surface: s.surface! } }); stage.scrollIntoView({ block: 'center' }) })
     for (const role of ['hit', 'use', 'break', 'step', 'hum'] as const) if (s[role]) button(written, `${name}: ${role}`, () => hit(s[role]!, { dur: 1.2, reach: 6 }))
   })
+}
+
+// A voice for what people say: two ways, side by side.
+const talk = section('What someone sounds like when they speak', 'Two ways being tried. Babble is made here like every other sound and is placed in the world, but says no words. Speech is the browser\u2019s own voice: real words, but it cannot be placed and nothing here measures it.')
+const line = document.createElement('textarea')
+line.style.height = '56px'
+line.value = 'Good morning. Have you seen the lighthouse keeper? Watch out!'
+talk.append(line)
+for (const who of ['Odo', 'Marta', 'Ines']) {
+  button(talk, `${who}: babble`, () => speak(voice, 'babble', { name: who, text: line.value, at: where() }))
+  button(talk, `${who}: speech`, () => speak(voice, 'speech', { name: who, text: line.value, at: where() }))
 }
 
 const own = section('A patch of your own', 'This is what a model writes beside a thing it makes. It is checked as data and refused with the reason if it is not exactly the form.')

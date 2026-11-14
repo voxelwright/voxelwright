@@ -5,7 +5,7 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
-Version 6, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds and a realm's music). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
+Version 7, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds, a realm's music, a voice being tried). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -207,6 +207,27 @@ yes in the thread that asks), so this is built from the post's description and f
   Phrygian for the last lines, `like: null` at the end.
 - Not built: a mood whose instruments or rhythm a rule writes (it picks from seven and bends them); music for one
   person and not another; a stinger; anything the rule hears back (which bar it is).
+
+## A voice for what people say (`page/sound/voice.ts`; #264, a direction being tried)
+
+Two ways, side by side, behind `?voices=babble` or `?voices=speech`; off by default; nobody has chosen.
+
+- **Babble**, in the synthesiser. `babble(text, name)`: a syllable for each run of vowels (sixty at most), at a
+  pitch that is the speaker's by their name (95 to 226 Hz), down three semitones through a statement, up five over
+  the last third of a question, higher and harder when shouted. Each syllable is two patches: a tone, and a
+  whisper (noise through the vowel's three formants, Peterson and Barney's averages as the old home had them, with
+  the weight in the second formant for i and e and in the first for o and u). Measured: a question goes 96 to
+  126 Hz, a statement 96 to 79; the vowels' weight lies at i 1,529, e 1,265, a 900, o 638, u 378 Hz; 5.3
+  syllables a second; -23 LUFS beside the speaker. It is placed like any sound. It says no words.
+- **Speech**, the browser's `SpeechSynthesis`: real words, a voice, pitch and rate chosen by the speaker's name,
+  volume by distance. It cannot be routed through Web Audio, so it is not placed (it is in the middle of the head
+  whichever side they stand), is not under the synthesiser's ceiling, and cannot be tapped or measured. **Not run
+  by any check**: headless Chrome here has no voices (`getVoices()` is empty). On an iPhone it needs a gesture
+  first, as sound does; not tried.
+- What decides between them is ears and the TALK lane's replies (2 to 3.4 s each): babble can start the moment
+  the words arrive and is cheap for a crowd; speech is understood without reading. A third way, a model that speaks
+  (a speech model on the asker's machine), was not looked at.
+- The owner once turned down "cartoons for 3-year-olds" as personas (memory): wordless babble may read that way.
 
 ## Rules that hold
 
