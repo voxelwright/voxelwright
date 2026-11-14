@@ -97,6 +97,9 @@ struct Globals {
   // Not to be read in sky(): each of three tries at it there (the clouds' cover, the stars twice) made the dry day
   // 8 to 10% dearer, though none of them runs by day.
   weather: vec4f,
+  // Where a look begins (#264, a window into another world): a plane, its normal and how far along it, measured as
+  // the eye is. Nothing nearer the eye than that plane is met. All zero: a look begins at the eye.
+  starts: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
@@ -1158,7 +1161,9 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
   let shadows = g.flags & 1u;
-  var hit = trace(g.eye, rd, 0.0, 0u, g.most, 0.0, g.pixel * g.detail, false, false, true);
+  let toward = dot(rd, g.starts.xyz);
+  let begins = select(0.0, max(0.0, (g.starts.w - dot(g.eye, g.starts.xyz)) / toward), toward != 0.0);
+  var hit = trace(g.eye, rd, begins, 0u, g.most, 0.0, g.pixel * g.detail, false, false, true);
   // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
   if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
   var depth = 1.0;
@@ -1272,7 +1277,7 @@ const SUN_TILES_A_FRAME = 8
 
 export interface Marcher {
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number]): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
   /**
@@ -1316,7 +1321,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const marching = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
   let pipeline = await marching(module)
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1333,7 +1338,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 128), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 144), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -1360,7 +1365,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     ], 36 + MAX_LEVELS * 32)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
-  const tell = (view: View, size: readonly [number, number], flags: number, time: number) => {
+  const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
@@ -1397,6 +1402,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         f[at + 7] = level.roof - anchor[1]
         for (let q = 0; q < 4; q++) f[at + 16 + q] = level.roofs[q] - anchor[1]
       })
+      // Where looks begin: the plane's normal, and how far along it the plane is from the corner everything is measured from.
+      const s = (144 + MAX_LEVELS * 128 + 128) / 4
+      if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
@@ -1466,8 +1474,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       for (const t of sunTiles) t.bind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: t.buffer } }] })
       return { compiled, ms: performance.now() - began }
     },
-    draw(encoder, to, view, flags, time, timing, only) {
-      tell(view, to.size, flags, time)
+    draw(encoder, to, view, flags, time, timing, only, starts) {
+      tell(view, to.size, flags, time, starts)
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },

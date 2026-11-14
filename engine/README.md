@@ -479,12 +479,28 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
 - `node test/step.mjs` checks it in the real page: no navigation, the stream, edits, made things, a living thing
   ridden as the step is taken, people and a rule's actor, the look, the arrival, asks landing only where the page
   is, a body on foot standing on the cells of the realm it is in, and back.
-- **The portal, as an experiment** (`page/portal.ts`, from the console; no key yet): `await engine.portal.open(id,
-  {at: [x, y, z], yaw, size: [wide, high], to: [x, y, z]})` stands a window in this world that shows the other
-  realm live, from an eye as far from `to` as this eye is from the window. Walk through it (or `engine.portal
-  .step()`) and the page is in the other realm, the window leading back. `node test/portal.mjs --out dir` measures
-  it and keeps pictures; the numbers are in the cell-engine skill, "The portal".
-- **Not there yet**: a key that opens and closes the portal, and the wheel that picks a realm (next). The helper makes things only in the realm the page
+- **The portal** (`page/portal.ts`): **P** (on a phone, the Portal button) opens a window before you to the
+  selected realm (`engine.realms.selected`; from a realm, to home) and closes it. It stands on the ground where
+  there is room, facing you, three metres wide and four high, and leads to where one enters that realm: where you
+  last left it, else its `arrive`. It opens as the other place is made behind it: light until every box of that
+  world is whole over half its width, growing meanwhile, then clear. Through it the other realm is seen live, with
+  the people who are there. Walk through and you are there, on your feet, the window leading back; turn round and
+  walk back through the same window. Near the window a person on foot sees with their own eyes (the eye that rides
+  behind them would be in one world and their body in the other).
+- **What it costs** (M1 Pro, 1280 x 720, `node test/portal.mjs`, the GPU shared with other lanes' checks): the
+  window is clear 1.7 to 2.0 s after the key and all of the place made after 3.6 to 4.2 s, the page's longest frame
+  meanwhile 17 to 33 ms; opened again to a place still held, 0.35 s. Walking through: 20 ms to go over, everything
+  made 35 to 75 ms after, the longest frame 17 to 33 ms, and 60 frames a second after (the sun's maps go with the
+  worlds). The window is drawn at fewer pixels the more of the picture it covers: all of them up to 12% of the
+  picture, three quarters up to 30%, half beyond. 300 MB more of the GPU's memory while one has been opened.
+- `node test/portal.mjs --out dir --clip` checks all of it in the real page with real keys, and keeps pictures and
+  a film; `--bench` prints the GPU's time for a window of each size.
+- **Not there yet**: the wheel that picks a realm (next); only the other realm's cells and people are seen through
+  the window (no living things, water or fire), unturned, unheard; others do not see your window (to show them its
+  view would take a second world on each of their pages; a plain lit frame would be cheap and is not built); a
+  phone has the button but its 128 MB pool may not fit twice, so it would need a smaller world behind the window
+  and a step that makes the place on arriving.
+- The helper makes things only in the realm the page
   was opened in (it is started for one world), and the ask bar says so elsewhere. The realm left behind shows the
   page's figure for five seconds more. Sound follows the stream but its change is not checked by itself.
 

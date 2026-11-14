@@ -540,12 +540,14 @@ async function main() {
   // is everything this file holds of a world: bodies on their way and lying, cells waiting to be put, fire and
   // water, the made things' records, the edits the sectors and this thread's core were told of.
   const began: Pose = { ...pose }
-  let afoot = false
+  let afoot = false, heldKeys: string[] = []
   const realm = far ? realms({
     far, began,
     leave: (trade) => {
       // On foot, the body is taken up first: its own core is about to forget the world it stands on, and it is set down again on arriving.
       afoot = me.on
+      // Taking the body up lets go of every key (input.ts `push`): those held to move are held still when it is set down.
+      heldKeys = afoot ? ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].filter((code) => controls.held(code)) : []
       if (afoot) me.walk(false)
       shadow?.postMessage({ forget: true })
       for (const piece of moving.values()) piece.destroy()
@@ -558,7 +560,8 @@ async function main() {
       core.world_forget()
     },
     came: () => { adopted = false },
-    place: (to) => { Object.assign(pose, to); if (afoot) { afoot = false; me.walk(true) } },
+    // On foot the body is set down where it is to be, and the eye put back where it rides: it stays there until the body is made.
+    place: (to, body) => { Object.assign(pose, body ?? to); if (afoot) { afoot = false; me.walk(true); for (const code of heldKeys) dispatchEvent(new KeyboardEvent('keydown', { code })) } Object.assign(pose, to) },
     arrival: (a) => ({ x: a.at[0] / M, y: (a.at.length === 3 ? a.at[1] : core.feet_at(a.at[0], a.at[a.at.length - 1])) / M + 1.65, z: a.at[a.at.length - 1] / M, yaw: a.yaw, pitch: a.pitch }),
     look: (l) => { setHour(l?.hour !== undefined ? l.hour : ownLook.hour); march.rain = l?.rain ?? ownLook.rain; realmLook.grade = l?.grade ?? null; realmLook.tint = l?.tint ?? [1, 1, 1] },
     made: () => ({ shown: far.live && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2)), near: far.live && world.levels.slice(0, 3).every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] === l.grid[a])) && world.stats.stale === 0, whole: far.live && world.stats.wanted === 0 && world.stats.stale === 0, sectors: world.stats.made, edits: world.done().length }),
@@ -880,7 +883,32 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo, shots: streaks })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
-  const gate = far && realm ? await portal({ gpu, far, realms: realm, world, march, pose, make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }), marcher: (w) => marcher(device, gpu.format, w), light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) }, pause: (on) => { paused = on } }).catch((e: unknown) => { console.warn(`no portal: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  const gate = far && realm ? await portal({
+    gpu, far, realms: realm, world, march, pose, began,
+    make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
+    marcher: (w) => marcher(device, gpu.format, w),
+    people: (m) => people(device, gpu.format, m),
+    residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? ownLook.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
+    light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) },
+    pause: (on) => { paused = on },
+    feet: () => me.feet,
+    riding: (to) => { if (to) me.view = to; return me.view },
+    kind: (x, y, z) => core.world_kind(x, y, z),
+    ground: (x, z) => core.feet_at(x, z),
+    notice: (text) => over.notice(text, 5000),
+  }).catch((e: unknown) => { console.warn(`no portal: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  // P opens a window to the selected realm (from a realm: to home) and closes it; on a phone, a button.
+  if (gate) {
+    controls.always('KeyP', () => { void gate.toggle(); return true })
+    const buttons = over.panel('realms')
+    buttons.style.cssText = 'position:absolute;right:16px;top:64px;display:flex;flex-direction:column;gap:10px;pointer-events:auto'
+    const button = document.createElement('button')
+    button.type = 'button'; button.textContent = 'Portal'; button.title = 'Open or close a portal (P)'
+    button.style.cssText = 'font:600 14px system-ui;padding:10px 14px;border-radius:999px;border:0;background:rgba(20,22,28,.72);color:#fff'
+    button.onclick = () => void gate.toggle()
+    buttons.append(button)
+    buttons.hidden = !phone
+  }
   portalDraw = gate ? (encoder, to, v, time) => { gate.walk(); gate.draw(encoder, to, v, flags, time) } : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })
 

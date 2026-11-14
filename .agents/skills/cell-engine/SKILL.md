@@ -2370,3 +2370,46 @@ How it is used is in `engine/README.md` "The workshop". What was learned:
 - **The server's guide waited on nothing**: for a quarter of a second after a world started it lacked its plugins'
   lines. `GET /world/` now waits for the first load.
 
+## The portal in play (#264, `page/portal.ts`; November 13)
+
+What the experiment above became, and what cost time. Numbers: `node test/portal.mjs` (M1 Pro, 1280 x 720, the GPU
+shared with other lanes' checks).
+
+- **The opening is the wait, and shows nothing half made.** How much of the other place is made is one number
+  (`made`: each box's whole part against half its width, averaged). The window grows with it and is all light
+  until it is 1, then clears in 0.3 s; it cannot be walked through before. Clear 1.7 to 2.0 s after the key with six
+  workers, all made after 3.6 to 4.2 s; the page's longest frame meanwhile 17 to 33 ms. The second world stays held
+  after the window closes, so the next opening is the 0.35 s the window takes to grow.
+- **The eye "behind" the window can be inside the other world's ground**: the land slopes differently there, and
+  the march began at that eye and went through earth (dark bands filled the window). The other world's looks now
+  begin at the window's plane: `Globals.starts` (a plane) and `trace`'s own `t0`, two dots and a divide a pixel
+  with a `select` so that no plane means the eye. This is the one change to the marcher's shader. Bench, with the
+  GPU never quiet (fixed work 1.4 to 7.3 ms in one run): the rows taken in its quiet stretch were within 3% of the
+  kept baseline before and after (roofs 18.3 / 22.7 / 28.4 ms after, 17.7 / 22.0 / 27.9 before); the rest moved
+  20 to 60% both ways with the other lanes' load. Worth one run on a quiet machine.
+- **Who goes through, the body or the eye?** Tried with the eye riding behind the body: the body went through
+  first and walked on in this world's cells while the picture showed it in the other's, and met a parked car that
+  was not in the picture. Trading when the body crosses instead leaves the eye before a window that now shows the
+  world it came from. So within 4.5 m of the window a person on foot sees from their head (`me.view`), and body
+  and eye cross together; the step is taken two cells before the plane (nearer, the window is inside the near
+  plane and the world behind it shows for a frame) and sets the eye two cells past it.
+- **Taking the body up and setting it down lets go of every key** (`input.ts` `push` empties what is held): W
+  stopped at the window. The page hands the held movement keys back by the events a key makes. A way to carry a
+  body to another place without ending it would be cleaner (BODIES).
+- **The sun's maps go with the worlds** (`SunMaps.trade`: three texture copies through a spare, 36 MB each, and the
+  tiles' state; `turn` does nothing when the light already comes from there). After walking through: 0 tiles to
+  draw and 60 frames a second, where the experiment had 35 to 52 for some seconds.
+- **People behind the window**: the held stream's `here` frames (`link.held`, `onheld`) give who is there; a second
+  `people` bound to the second marcher draws them, and the town's residents by the other realm's hour, into the
+  window's picture after its march. 125 figures in sight cost nothing that showed in the frames.
+- **How many pixels**: the window's share of the picture decides (all up to 12%, three quarters to 30%, half
+  beyond), from the experiment's table: over half the picture it adds 12.9 ms at full size and 5.1 at half. Sampled
+  with a linear sampler, so half size is soft and not blocky. Six metres off, the window is 4% of the picture.
+- **Where it stands**: 6 m ahead, then nearer, further and to each side, the first place with ground under it and
+  air for the whole window and a little each way through it; else the first with ground. Where it leads: where one
+  last left that realm, else its `arrive`, else where the page began.
+- **Not built**: others seeing the window (its view needs a second world on each of their pages; a lit frame
+  alone would ride the `here` frames cheaply); living things, water, fire and sound through it; a turned window;
+  a phone (128 MB of pool does not fit twice: a smaller world behind the window, and the place made on arriving,
+  1 to 3 s that the window would have to hide some other way).
+

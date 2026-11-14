@@ -29,7 +29,7 @@ export interface Hands {
 }
 
 /** Keys the page gives to offers that asked for none, in order. */
-const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyG', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'KeyJ', 'KeyN']
+const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyG', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
 
 export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { from: readonly [number, number, number]; to: readonly [number, number, number] }): Hands {
   let offered: Offered[] = []

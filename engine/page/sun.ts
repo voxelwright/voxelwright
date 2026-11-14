@@ -44,7 +44,7 @@ export class SunMaps {
 
   constructor(device: GPUDevice, levels: number, sun: V3) {
     this.levels = levels
-    this.texture = device.createTexture({ label: 'sun maps', size: [SUN_SIDE, SUN_SIDE, levels], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+    this.texture = device.createTexture({ label: 'sun maps', size: [SUN_SIDE, SUN_SIDE, levels], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST })
     this.all = this.texture.createView({ dimension: '2d-array' })
     this.layers = Array.from({ length: levels }, (_, i) => this.texture.createView({ dimension: '2d', baseArrayLayer: i, arrayLayerCount: 1 }))
     this.held = Array.from({ length: levels }, () => new Int32Array(TILES * TILES * 2).fill(0x7fffffff))
@@ -57,6 +57,8 @@ export class SunMaps {
   /** The light comes from somewhere else: the maps' two ways are set to it, and every tile is to be drawn again. */
   turn(sun: V3) {
     const length = Math.hypot(sun[0], sun[1], sun[2])
+    // From where it already comes: the maps stand as they are (the hour set again, or maps taken over with their light, #264).
+    if (Math.hypot(sun[0] / length - this.s[0], sun[1] / length - this.s[1], sun[2] / length - this.s[2]) < 1e-6) return
     this.s = [sun[0] / length, sun[1] / length, sun[2] / length]
     // Across: level, square to the sun. Up: square to both.
     const across = Math.max(1e-4, Math.hypot(this.s[2], this.s[0]))
@@ -64,6 +66,23 @@ export class SunMaps {
     this.v = [this.s[1] * this.u[2] - this.s[2] * this.u[1], this.s[2] * this.u[0] - this.s[0] * this.u[2], this.s[0] * this.u[1] - this.s[1] * this.u[0]]
     for (const h of this.held) h.fill(0x7fffffff)
     this.spoilAll()
+  }
+
+  /**
+   * These maps and another's change places (#264, the portal: the two worlds they are of have changed places,
+   * world.ts `trade`): the texels by way of a third texture, and what each knows of its tiles and its light.
+   * Whoever binds either texture goes on reading the one it bound.
+   */
+  trade(other: SunMaps, device: GPUDevice) {
+    const size = [SUN_SIDE, SUN_SIDE, this.levels], spare = device.createTexture({ size, format: 'r32float', usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST })
+    const encoder = device.createCommandEncoder()
+    encoder.copyTextureToTexture({ texture: this.texture }, { texture: spare }, size)
+    encoder.copyTextureToTexture({ texture: other.texture }, { texture: this.texture }, size)
+    encoder.copyTextureToTexture({ texture: spare }, { texture: other.texture }, size)
+    device.queue.submit([encoder.finish()])
+    spare.destroy()
+    const a = this as unknown as Record<string, unknown>, b = other as unknown as Record<string, unknown>
+    for (const key of ['s', 'u', 'v', 'held', 'drawn', 'wrong', 'when', 'clock', 'undrawn', 'spoiled']) { const mine = a[key]; a[key] = b[key]; b[key] = mine }
   }
 
   private clear(level: number, slot: number) { this.drawn[level][slot >> 5] &= ~(1 << (slot & 31)); this.wrong[level][slot >> 5] &= ~(1 << (slot & 31)) }

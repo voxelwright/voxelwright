@@ -17,10 +17,12 @@ export interface Realms {
   readonly here: string
   /** The realm it was loaded in: where the helper that makes things was started for, if one was. */
   readonly first: string
+  /** The realm the portal's key leads to from home: picked on the wheel, kept by this browser. Empty when none is. */
+  selected: string
   /** Every realm the server keeps. */
   list(): Promise<Listed[]>
-  /** Steps into a realm, by its id, with no loading of the page: to `at` if given, else where the realm says one arrives, else where this page began. `trade` is for a world that already holds the other realm's sectors (the portal): it is called to put them in place of this world's, and then none are made. Resolves when everything there is made, with how long it took. */
-  step(id: string, at?: Pose, trade?: () => void): Promise<Stepped>
+  /** Steps into a realm, by its id, with no loading of the page: to `at` if given, else where the realm says one arrives, else where this page began. `trade` is for a world that already holds the other realm's sectors (the portal): it is called to put them in place of this world's, and then none are made. `body` is where a person on foot is set down, when that is not where the eye is (the eye rides behind them). Resolves when everything there is made, with how long it took. */
+  step(id: string, at?: Pose, trade?: () => void, body?: Pose): Promise<Stepped>
 }
 
 const HOME = 'home'
@@ -33,7 +35,7 @@ export function realms(o: {
   /** Called when everything held of the other world has been said. */
   came(): void
   /** Puts the eye somewhere. */
-  place(at: Pose): void
+  place(at: Pose, body?: Pose): void
   /** Where a realm's arrival is, as a pose: its feet on the ground there, its eyes over them. */
   arrival(arrive: NonNullable<Realm['arrive']>): Pose
   /** Where this page began. */
@@ -45,7 +47,8 @@ export function realms(o: {
 }): Realms {
   const at = /^\/realm\/([^/]+)\/world$/.exec(o.far.base)
   const first = at ? decodeURIComponent(at[1]) : HOME
-  let here = first, arrived = false
+  let here = first, arrived = false, selected = ''
+  try { selected = localStorage.getItem('village.realm') ?? '' } catch { /* a page that may keep nothing */ }
   // What a realm says of how it looks is shown when it is first read and whenever someone changes it. A page loaded
   // straight into a realm arrives where the realm says, unless its address said where.
   o.far.onrealm = (realm) => {
@@ -56,9 +59,11 @@ export function realms(o: {
   const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))
   return {
     get here() { return here },
+    get selected() { return selected },
+    set selected(id: string) { selected = id; try { localStorage.setItem('village.realm', id) } catch { /* the same */ } },
     first,
     list: () => fetch('/realms').then((r) => r.json()).then((all: { realms: Listed[] }) => all.realms),
-    async step(id, to, trade) {
+    async step(id, to, trade, body) {
       const began = performance.now(), before = o.made().sectors
       const realm = await o.far.ready(baseOf(id))
       const ready = performance.now() - began
@@ -67,7 +72,7 @@ export function realms(o: {
       o.far.go(() => o.leave(trade))
       o.came()
       here = id
-      o.place(to ?? (realm.arrive ? o.arrival(realm.arrive) : o.began))
+      o.place(to ?? (realm.arrive ? o.arrival(realm.arrive) : o.began), body)
       // The address says where the page is, so that loaded again it is there.
       const url = new URL(location.href)
       url.searchParams.delete('shared'); url.searchParams.delete('realm'); url.searchParams.delete('at'); url.searchParams.delete('look')

@@ -37,6 +37,8 @@ export interface Offer { rule: string; id: string; word: string; hold: boolean; 
 export interface Shown { rule: string; id: string; line: string; meters: { label: string; full: number; colour: string }[]; score: { label: string; value: string } | null; choice: { id: string; word: string }[] | null; to: string[] | null }
 /** What the world says of the engine's plugins (serve.mjs, frame 11): the page sides there are, or something for one of them. */
 export type Plugged = { list: { name: string; v: string }[] } | { plugin: string; state: unknown } | { plugin: string; once: unknown } | { plugin: string; gone: true } | { core: string }
+/** Something a world made ready has said: an ask as it was done, the core's words, or where someone there is. */
+export interface Held { echo?: Echo; words?: Uint32Array<ArrayBuffer>; here?: Someone }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null
@@ -95,9 +97,9 @@ export interface Link {
    */
   go(between: () => void): boolean
   /** What the world made ready has said so far, in order: its asks as echoes and the core's words (for whoever shows that world before the page is in it). Empty when none is ready. */
-  held(): { echo?: Echo; words?: Uint32Array<ArrayBuffer> }[]
+  held(): Held[]
   /** Each thing the world made ready says after all that was kept, as it says it. */
-  onheld: ((frame: { echo?: Echo; words?: Uint32Array<ArrayBuffer> }) => void) | null
+  onheld: ((frame: Held) => void) | null
   /** Whether all that was kept before this page joined has been read. */
   readonly live: boolean
 }
@@ -204,15 +206,15 @@ export function link(base = '/world'): Link {
           if (kind === ECHO && (data as Echo).realm) l.realm = changed(l.realm, (data as Echo).realm!)
           l.held.push({ kind, data })
           if (kind === NOW) { l.whole = true; whole?.(l) }
-          else if (l.whole && l === next && (kind === ECHO || kind === LOG)) self.onheld?.(framed(kind, data))
+          else if (l.whole && l === next && (kind === ECHO || kind === LOG || kind === HERE)) self.onheld?.(framed(kind, data))
         }
         held = held.slice(from)
       }
     })().catch((e) => { if (!l.stop.signal.aborted) self.onerror?.({ message: String(e) }) })
     return l
   }
-  const framed = (kind: number, data: unknown) => (kind === ECHO ? { echo: data as Echo } : { words: (data as Uint32Array<ArrayBuffer>).slice(4) })
-  self.held = () => (next?.held ?? []).filter((h) => h.kind === ECHO || h.kind === LOG).map((h) => framed(h.kind, h.data))
+  const framed = (kind: number, data: unknown): Held => (kind === ECHO ? { echo: data as Echo } : kind === HERE ? { here: data as Someone } : { words: (data as Uint32Array<ArrayBuffer>).slice(4) })
+  self.held = () => (next?.held ?? []).filter((h) => h.kind === ECHO || h.kind === LOG || h.kind === HERE).map((h) => framed(h.kind, h.data))
   line = open(base)
   self.ready = (at) => {
     // Asked again for the one already held, it is the one held: nothing it has said since is lost.
