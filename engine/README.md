@@ -272,6 +272,11 @@ on foot as they do flying.
   (`here`); the person's own page, which draws its own figure, is told with the numbers (frame 12, `figure`) and
   starts the move when it hears. A move is how a body looks: it strikes nobody. Taken out, the rule's look and
   move go. In the console, alone: `engine.me.limbs = {move: {n: 1, name: 'kick'}, look: {wear: ['coat']}}`.
+- **A rule drives a living thing**: `world.things` tells a rule the living things near anyone (by their record's
+  id, with name, scheme, place, yaw, speed) and `world.drive(id, {go, turn, rise, jump})` drives one as a rider's
+  hands do, held until the rule asks otherwise (`rules/things.mjs`; the world's process says it to the core again
+  four times a second). Someone riding from a page has it while they ride. Checked by `test/drives.mjs` with a
+  valet's rule.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

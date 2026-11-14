@@ -16,6 +16,7 @@
 import { readFile } from 'node:fs/promises'
 import { parentPort, workerData } from 'node:worker_threads'
 import { controlsOf, numbers } from './page/living.ts'
+import { things as livingThings } from './rules/things.mjs'
 import { about, REACH_MOST } from './about.mjs'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
@@ -81,12 +82,12 @@ function grid(rows, there) {
   return any ? { cells, size, low: lo } : null
 }
 /** Brings a thing to life, or gives one that lives a new motor. `fresh` is false for a world started again: its cells were taken when it first lived. */
-function live(id, value, rows, fresh) {
+function live(id, value, rows, fresh, name = '') {
   const controls = controlsOf(value)
   if (!controls) return
   const motor = numbers(controls.motor), known = alive.get(id)
   const set = (body) => { const room = core.edits_room(motor.length); new Float32Array(core.memory.buffer, room, motor.length).set(motor); return core.living_motor(body, motor.length) }
-  if (known) { known.controls = controls; set(known.body); return }
+  if (known) { known.controls = controls; if (name) known.name = name; set(known.body); return }
   const g = rows && grid(rows, fresh)
   if (!g) return
   // The room first, then the memory: making room may grow it.
@@ -94,7 +95,7 @@ function live(id, value, rows, fresh) {
   new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
   const n = core.living_spawn(g.size[0], g.size[1], g.size[2], g.low[0], g.low[1], g.low[2], fresh ? 1 : 0), body = core.living_last()
   if (!body) return
-  alive.set(id, { body, controls, pose: null, awake: true })
+  alive.set(id, { body, controls, name, pose: null, awake: true })
   set(body)
   if (!fresh && controls.rest) core.living_place(body, ...controls.rest.at, ...controls.rest.rot)
   told(n, false)
@@ -124,7 +125,7 @@ function heed(words) {
   for (let i = 0; i < words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
     if (tag === 5) { moved = true; for (let k = at; k < at + n; k += 8) { const a = alive.get(bodies.get(words[k])); if (a) a.pose = { at: [f[k + 1], f[k + 2], f[k + 3]], rot: [f[k + 4], f[k + 5], f[k + 6], f[k + 7]] } } }
-    else if (tag === 11) for (let k = at; k < at + n; k += 12) awake.add(words[k])
+    else if (tag === 11) for (let k = at; k < at + n; k += 12) { awake.add(words[k]); const a = alive.get(bodies.get(words[k])); if (a) a.speed = f[k + 1] }
     else if (tag === 6) broke.add(words[at])
     i = at + n
   }
@@ -392,6 +393,7 @@ setInterval(() => {
   ticks++
   rests(now)
   if (ticks % 10 === 0) blow.sweep(now)
+  if (driven.step(now)) nudged = true
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); continue }
     if (!p.seat) continue
@@ -449,7 +451,9 @@ function people(id) {
 }
 /** Whether someone's helper answers for this world's people now: the server says when it changes (mind/door.mjs). */
 let voiced = false
-const ruled = ruling({ people, residents: townTold, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced })
+/** Living things as rules have them (rules/things.mjs): told of, and driven. */
+const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0) })
+const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
 /** A rule is taken out, and its actors go with it. */
@@ -459,6 +463,7 @@ function drop(id) {
   plug.dropped(id)
   getting.dropped(id)
   body.dropped(id)
+  driven.dropped(id)
   minds.drop(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
@@ -549,6 +554,7 @@ does.set('throw', blow.throw)
 does.set('push', blow.push)
 does.set('down', blow.down)
 does.set('clock', body.clock)
+does.set('drive', driven.drive)
 does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
@@ -641,9 +647,9 @@ parentPort.on('message', (said) => {
   if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); getting.back(rule.id, kept?.marks); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
-  if (drive) { const a = alive.get(drive.id); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
+  if (drive) { const a = alive.get(drive.id); if (a) a.ridden = Date.now(); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
-  if (revive) return live(revive.id, revive.controls, revive.rows, false)
+  if (revive) return live(revive.id, revive.controls, revive.rows, false, text(revive.name ?? '', 40))
   // Someone has joined: where everything is is said once more, for what sleeps says nothing by itself.
   if (nudge) { nudged = true; for (const p of folk.values()) if (p.rule) { if (p.move) p.move.told = -1; tell(p) } return }
   if (asks) return parentPort.postMessage({ id, ...seat(asks) })
@@ -674,11 +680,11 @@ parentPort.on('message', (said) => {
     edit(ask.edit)
     // A thing that comes with its controls lives at once: before the world is asked what the edit left unheld, or a
     // car set down on a sloping street would be let fall as loose cells first.
-    if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, ask.edit.slice(2), true)
+    if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, ask.edit.slice(2), true, text(ask.thing.name ?? '', 40))
     told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true)
   }
   // A thing that is there, given controls with a motor, lives from now on (the server sent its cells with the ask).
-  else if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true)
+  else if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true, text(ask.thing.name ?? '', 40))
   // Water may have been let out: it is found when the world is next moved on.
   nudged = true
 })

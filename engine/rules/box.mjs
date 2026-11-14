@@ -43,7 +43,7 @@ const GUEST = `(() => {
     const m = JSON.parse(json), out = []
     const flat = (a, b) => Math.hypot(a.at[0] - b[0], a.at[2] - b[b.length - 1])
     const world = {
-      now: m.now, people: m.people, residents: m.residents || [], others: m.others || [], voiced: m.voiced === true, keep: m.keep,
+      now: m.now, people: m.people, residents: m.residents || [], things: m.things || [], others: m.others || [], voiced: m.voiced === true, keep: m.keep,
       near: (at, within) => m.people.filter((p) => flat(p, at) <= within),
       // Anyone by their id; and whoever this is about (who spoke, who did something, who came near): theirs, or null.
       who: (id) => m.people.find((p) => p.id === id) || null,
