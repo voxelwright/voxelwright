@@ -653,15 +653,38 @@ const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.po
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
-  const wrong = (what) => { rule.error = what }
+  // What is refused is said to whoever asks how the rule is doing (`error`, and the few before it), and to the rule
+  // itself on its next call ('refused'). It used to be said to nobody the rule could hear: a rule that asked for a
+  // reading with one choice too many waited for an answer that was never coming, every time (a realm's powers by
+  // asking, November 14). `still` is true where what was asked before still stands (an actor still thinking):
+  // then nothing is answered as failed, because the answer is on its way.
+  const refused = []
+  let doing = null
+  const wrong = (what, still) => {
+    rule.error = what
+    const id = typeof doing?.id === 'string' ? doing.id.slice(0, 24) : undefined
+    if (refused.length < REFUSED_MOST) refused.push({ do: String(doing?.do ?? '').slice(0, 24), ...(id !== undefined ? { id } : {}), why: String(what).slice(0, 200) })
+    // An ask whose answer comes later as an event is answered at once, as failed: the rule hears it where it listens.
+    const by = still === true || id === undefined ? undefined : ANSWERED_BY.get(doing.do)
+    if (by && mayHear(rule, now)) ruled.happen(by, { id, failed: String(what).slice(0, 200), refused: true }, rule.id)
+  }
   if (wants.length > WANTS_MOST) wrong(`a rule may want ${WANTS_MOST} things done in one answer: the rest were left`)
   for (const w of wants.slice(0, WANTS_MOST)) {
     const fn = w && typeof w === 'object' ? does.get(w.do) : undefined
+    doing = w
     if (!fn) { wrong(`"${String(w?.do).slice(0, 24)}" is not something a rule can do here: ${[...does.keys()].join(', ')} are`); continue }
     // Whatever one of these does with what a rule sent, it is not thrown into the world's process.
     try { fn(rule, w, now, wrong) } catch (e) { wrong(`${w.do} failed: ${String(e?.message ?? e).slice(0, 120)}`) }
   }
+  // One deep: what a rule gets wrong while it answers 'refused' is not told to it again.
+  if (refused.length && during !== 'refused' && mayHear(rule, now)) ruled.happen('refused', { what: refused }, rule.id)
 }
+/** The most refusals of one answer a rule is told of, and how often a second a rule is told of any: one that asks again each time it is refused goes round only so fast. */
+const REFUSED_MOST = 8, REFUSALS_A_SECOND = 4
+/** What answers an ask when its answer comes later, by what was asked: a refused one is answered at once, with failed. */
+const ANSWERED_BY = new Map([['think', 'thought'], ['read', 'read']])
+/** Whether a rule may be told of one more refusal now. */
+const mayHear = (rule, now) => { if (now - (rule.refusals?.since ?? 0) >= 1000) rule.refusals = { since: now, count: 0 }; return ++rule.refusals.count <= REFUSALS_A_SECOND }
 /** Under this name, beside the rules' own (no rule's id has a ~ in it): what the world's people remember of talk (mind/think.mjs). */
 const TALKED = '~talk'
 // What is to be kept of the rules over a restart: said to the server when it has changed, every two seconds at most.

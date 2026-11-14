@@ -54,6 +54,23 @@ const GUEST = `(() => {
     // What may be asked for here, by name (the world says which): world.actor('guide', {...}), world.gone('guide').
     // With one argument that is an object, there is no id: world.something({...}).
     for (const name of m.does) world[name] = (id, fields) => { out.push(id !== null && typeof id === 'object' ? Object.assign({}, id, { do: name }) : Object.assign({}, fields, { do: name, id: String(id) })) }
+    // An actor asked for is there at once, to the rule that asked: world.who(id) and world.near find it in this
+    // same call, where it was asked to stand or where the resident it takes stands, marked fresh. (A rule that took
+    // people and, in the same call, forgot everyone world.who did not know forgot them all, for good: a realm of
+    // people standing still, November 14.) The world may yet refuse it: then 'refused' says so, and it is not there
+    // on the next call. One sent away is gone from the copy at once too.
+    const ask = world.actor, send = world.gone, own = (id) => m.people.findIndex((p) => p.id === id && p.mine)
+    const place = (at) => Array.isArray(at) && (at.length === 2 || at.length === 3) && at.every((v) => typeof v === 'number' && isFinite(v)) ? [Math.round(at[0]), at.length === 3 ? Math.round(at[1]) : null, Math.round(at[at.length - 1])] : null
+    if (ask) world.actor = (id, fields) => {
+      ask(id, fields)
+      if (typeof id !== 'string' || !fields || typeof fields !== 'object') return
+      const i = own(id), took = fields.take !== undefined && (m.residents || []).find((r) => r.id === fields.take)
+      const at = place(fields.at) || (i < 0 && took ? place(took.at) : null)
+      if (at && at[1] === null) { let best = null, far = Infinity; for (const p of m.people) { const d = Math.hypot(p.at[0] - at[0], p.at[2] - at[2]); if (d < far) { far = d; best = p } } at[1] = best ? best.at[1] : 0 }
+      if (i >= 0) { if (at) m.people[i].at = at; if (typeof fields.name === 'string') m.people[i].name = fields.name; return }
+      if (at) m.people.push({ id, name: typeof fields.name === 'string' && fields.name ? fields.name : took ? '' : id, kind: 'actor', mine: true, at, yaw: 0, walking: false, down: false, fresh: true })
+    }
+    if (send) world.gone = (id) => { send(id); const i = own(id); if (i >= 0) m.people.splice(i, 1) }
     const fn = handlers[m.event]
     if (fn) fn(world, m.e)
     return JSON.stringify({ out, keep: world.keep })

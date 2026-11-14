@@ -75,7 +75,7 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null, s
     ask(rule, w, now, wrong) {
       const p = typeof w.id === 'string' ? actor(rule.id, w.id) : undefined
       if (!p) return wrong(`"${String(w.id).slice(0, 24)}" is not an actor of this rule: only an actor can be asked to think`)
-      if (p.asked) return wrong(`actor "${w.id}" is still thinking: wait for its thought`)
+      if (p.asked) return wrong(`actor "${w.id}" is still thinking: wait for its thought`, true)
       const who = text(w.who, WHO_MOST), want = wanted(w.notes)
       if (!who) return wrong('a thought needs who the actor is: who, in words')
       if (typeof want === 'string') return wrong(want)
@@ -104,7 +104,7 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null, s
       if (!Object.keys(want).length) return wrong(`reading "${w.id}" needs notes: what is to be read in what was said`)
       if (now - (rule.thinks?.since ?? 0) > 60_000) rule.thinks = { since: now, count: 0 }
       let together = 0
-      for (const a of asks.values()) { if (a.rule !== rule.id) continue; together++; if (a.reads && a.id === w.id) return wrong(`reading "${w.id}" is still being read: wait for it, or give this one another id`) }
+      for (const a of asks.values()) { if (a.rule !== rule.id) continue; together++; if (a.reads && a.id === w.id) return wrong(`reading "${w.id}" is still being read: wait for it, or give this one another id`, true) }
       if (together >= TOGETHER_MOST || ++rule.thinks.count > A_MINUTE_MOST) return wrong(`a rule may have ${TOGETHER_MOST} thoughts and readings under way at once and ask for ${A_MINUTE_MOST} a minute`)
       const ask = { n: ++n, reads: true, rule: rule.id, id: w.id, want, from: text(w.from, 24), heard: said, since: now, said: '' }
       asks.set(ask.n, ask)

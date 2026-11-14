@@ -25,6 +25,8 @@ const SLOW = 100
 const STRIKES = 5, MENDS = 0.25
 /** The most that may wait for a rule that is still at work, and the most it may keep (as JSON). */
 const WAITING_MOST = 16, KEEP_MOST = 64 << 10
+/** How many of the last things a rule got wrong are kept for whoever asks how it is doing. */
+const ERRORS_KEPT = 8
 
 /**
  * @param people  who is there, as a rule is to be told it: asked when a call is sent, so it is as fresh as the call
@@ -95,7 +97,16 @@ export function rules({ people, residents = () => [], things = () => [], does, o
       // The rule the engine itself gives a world (`given`: the one for talk, mind/talk.rule.js) is not one of the world's sixteen.
       if (!old && !r.given && [...all.values()].filter((o) => !o.given).length >= RULES_MOST) return
       if (old) { old.replaced = true; old.owed = null; void old.thread?.terminate() }
-      const rule = { id: r.id, name: r.name, by: r.by, given: r.given === true, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, owed: null, keep: old?.keep ?? kept ?? {}, error: '', strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
+      const rule = { id: r.id, name: r.name, by: r.by, given: r.given === true, thread: null, listens: null, waiting: [{ event: 'start', e: { why } }], at: null, sent: 0, owed: null, keep: old?.keep ?? kept ?? {}, errors: [], strikes: 0, calls: 0, ms: 0, worst: 0, stopped: false, replaced: false, says: 0, since: 0 }
+      // What a rule last got wrong is `error`, as it was; the few before it are kept too (`errors`), each with when and how
+      // often, because the next one used to take its place before anyone had read it.
+      let last = ''
+      Object.defineProperty(rule, 'error', { get: () => last, set(why) {
+        last = why
+        if (!why) return
+        const was = rule.errors.at(-1)
+        if (was && was.why === why) { was.n++; was.at = Date.now() } else { rule.errors.push({ why, at: Date.now(), n: 1 }); if (rule.errors.length > ERRORS_KEPT) rule.errors.shift() }
+      } })
       all.set(r.id, rule)
       // A thread that cannot even be started (the machine has no more to give) is a rule that is stopped, and no more.
       let thread
@@ -122,6 +133,6 @@ export function rules({ people, residents = () => [], things = () => [], does, o
     /** What each rule keeps, by id: for whoever keeps it over a restart. */
     keeps: () => [...all.values()].map((r) => [r.id, r.keep]),
     /** How each rule is doing, for whoever asks. */
-    doing: (actors) => [...all.values()].map((r) => ({ id: r.id, name: r.name, by: r.by, ...(r.given ? { given: true } : {}), running: !r.stopped && !!r.listens, listens: [...(r.listens ?? [])], actors: actors(r.id), calls: r.calls, ms: r.calls ? Number((r.ms / r.calls).toFixed(3)) : 0, worst: Number(r.worst.toFixed(3)), error: r.error })),
+    doing: (actors) => [...all.values()].map((r) => ({ id: r.id, name: r.name, by: r.by, ...(r.given ? { given: true } : {}), running: !r.stopped && !!r.listens, listens: [...(r.listens ?? [])], actors: actors(r.id), calls: r.calls, ms: r.calls ? Number((r.ms / r.calls).toFixed(3)) : 0, worst: Number(r.worst.toFixed(3)), error: r.error, errors: r.errors.map((e) => ({ why: e.why, n: e.n, ago: Math.round((Date.now() - e.at) / 1000) })) })),
   }
 }

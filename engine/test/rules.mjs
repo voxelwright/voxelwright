@@ -88,6 +88,34 @@ try {
   check((await how('greeter')).actors === 1 && stayed.at[2] === walked.at[2], 'put again changed, the rule keeps its actor where it stood and what it had counted, and says it the new way')
 
   // What a rule may not do.
+  // An actor asked for is there, to its rule, in the very call that asked: a rule that looks for who it just made
+  // (and forgets whoever it cannot find) finds them. And what the world refuses comes back to the rule: as 'refused',
+  // and for a reading or a thought as its own answer, failed, so nothing waits for what is not coming.
+  await rule('prompt', `
+on('start', (world) => {
+  world.actor('usher', { name: 'Usher', at: [690, 4009] })
+  const p = world.who('usher')
+  world.actor('usher', { say: p && p.fresh && p.mine && p.at[0] === 690 && world.near([690, 4009], 5).some((q) => q.id === 'usher') ? 'Here at once.' : 'Not here yet.' })
+  world.actor('ghost', { at: [692, 4009] }); world.gone('ghost')
+  if (!world.who('ghost')) world.actor('usher', { say: 'And gone at once.' })
+})
+on('said', (world, e) => {
+  if (/which power/i.test(e.text)) world.read('pick', { said: e.text, notes: { power: { ask: 'which', is: 'abcdefghijklmn'.split('') } } })
+  if (/nonsense/i.test(e.text)) { world.actor('Bad Name', { at: [1, 1] }); world.nothing }
+})
+on('read', (world, e) => world.actor('usher', { say: e.failed && e.refused ? 'Not read: ' + e.failed.slice(0, 40) : 'Read.' }))
+on('refused', (world, e) => world.actor('usher', { say: 'Refused ' + e.what.length + ': ' + e.what[0].do + ' ' + (e.what[0].id || '') }))`)
+  await until('the usher speaks', async () => (await around()).heard.some((h) => h.text === 'And gone at once.'))
+  check((await around()).heard.some((h) => h.text === 'Here at once.'), 'an actor asked for is there to its rule in the same call, and one sent away is gone in it')
+  await post('say', { by: 'wren', text: 'which power is mine?' })
+  await until('the reading is refused aloud', async () => (await around()).heard.some((h) => h.text.startsWith('Not read: ')))
+  await until('the refusal is told', async () => (await around()).heard.some((h) => h.text === 'Refused 1: read pick'))
+  check(true, `a reading that is refused is answered at once as failed, and the rule is told what was refused (${(await around()).heard.find((h) => h.text.startsWith('Not read: ')).text})`)
+  await post('say', { by: 'wren', text: 'nonsense' })
+  await until('a refused actor is told', async () => (await around()).heard.some((h) => h.text === 'Refused 1: actor Bad Name'))
+  const prompt = await how('prompt')
+  check(prompt.running && prompt.errors.length >= 2 && prompt.errors.every((e) => typeof e.why === 'string' && e.n >= 1 && e.ago >= 0), `and whoever asks is told the last few things it got wrong, not only the last (${prompt.errors.length})`)
+  await post('ask', { by: 'tester', unrule: 'prompt' })
   await rule('hog', `on('said', () => { for (;;) {} })`)
   await rule('glut', `on('said', () => { let s = 'x'; for (;;) s += s })`)
   await rule('hoard', `on('said', (world) => { world.keep.all = 'x'.repeat(100000) })`)

@@ -33,7 +33,7 @@ export function wanted(notes) {
     if (is === 'yes/no' || is === 'words') out[key] = { ask, is }
     else if (Array.isArray(is) && is.length === 2 && is.every(Number.isFinite) && is[0] < is[1] && Math.abs(is[0]) <= 1e6 && Math.abs(is[1]) <= 1e6) out[key] = { ask, is: [is[0], is[1]] }
     else if (Array.isArray(is) && is.length >= 2 && is.length <= CHOICES_MOST && is.every((c) => typeof c === 'string' && text(c, CHOICE_MOST) === c && c && !c.includes('|'))) out[key] = { ask, is: [...is] }
-    else return `note "${key}" is "yes/no", "words", a list of choices, or [low, high]`
+    else return Array.isArray(is) && is.length > CHOICES_MOST && is.every((c) => typeof c === 'string') ? `note "${key}" has ${is.length} choices: a note takes at most ${CHOICES_MOST}, each up to ${CHOICE_MOST} characters (split the list over two notes)` : `note "${key}" is "yes/no", "words", a list of 2 to ${CHOICES_MOST} choices of up to ${CHOICE_MOST} characters each, or [low, high]`
   }
   return out
 }
