@@ -42,7 +42,7 @@ export type Stage =
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
 /** `held`: it is made and no place near would take it. `held` is what `put` takes to stand it where the asker says next. */
-export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; /** The helper stopped answering while it was being made (it was closed or started again): nothing more will come of this ask, and what was begun may be gone on with. */ cut?: boolean; /** Its rules were written quickly to be played at once: fuller ones are being written and will take their place. */ more?: boolean; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
+export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; /** A rule that was here and was changed: what is different now, in a sentence for whoever plays. `undone`: the last change was taken back. */ changed?: string; undone?: boolean; /** The helper stopped answering while it was being made (it was closed or started again): nothing more will come of this ask, and what was begun may be gone on with. */ cut?: boolean; /** Its rules were written quickly to be played at once: fuller ones are being written and will take their place. */ more?: boolean; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
 
 export interface Asker {
   /** Whether this page knows of a helper (it may not be running: `hello` asks it). */
@@ -65,7 +65,7 @@ export interface Asker {
    * it, it is tried in a world of its own, and put into this one. `change` is the id of a rule that is here, to be
    * changed as asked: it keeps its actors and what it kept. Resolves as `ask` does, with `rule`, `cannot`, `rough`.
    */
-  rule(wish: string, how?: { change?: string; /** It is the realm's director that is asked for (make/director.mjs): written if there is none, changed as `wish` says if there is, and turned on. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
+  rule(wish: string, how?: { change?: string; /** The last change to this world's game is taken back: the rule as it was before, from the world's own record. No model is asked. */ undo?: boolean; /** It is the realm's director that is asked for (make/director.mjs): written if there is none, changed as `wish` says if there is, and turned on. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
   /** An idea for a realm, fleshed out by the asker's own model before anything is built: what it is about, how it looks, and a few questions where the idea leaves a choice open. Null if it could not be. */
   imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
@@ -144,7 +144,7 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
       await before
       try { return await send('/ask', body, each, end, JSON.parse(body).from) } finally { free() }
     },
-    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, director: how.director, from: eye(), by: by(), realm: realmNow() }, each),
+    rule: (wish, how = {}, each = () => {}) => turn('/rule', { wish, change: how.change, director: how.director, undo: how.undo, from: eye(), by: by(), realm: realmNow() }, each),
     realm: (spec, each = () => {}) => turn('/realm', { ...spec, by: by() }, each),
     async imagine(idea) {
       if (!helper) return null

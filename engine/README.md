@@ -446,6 +446,18 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   is how a director makes the game itself grow. Once in five minutes for one person and for one rule.
   `node plugins/write/check.mjs`. Real run, November 14: a rule heard a word, the player was told after 1.1 s, and
   the realm's own rule was rewritten by Opus 5.5 in 133 s on the first asking.
+- **A change to a game that is being played** (#365; `make/rules.mjs`, the helper's `/rule`). In a realm, "from
+  now on ...", "add ...", "let me ..." change the realm's own rule: the one its record names, or, in a realm whose
+  record names none, the one rule that is neither `place` nor `director` (then written into the record). The
+  writer has that rule's text and the realm's other rules by name, and answers with a few exact edits (`EDITS:`,
+  old lines and new) and a sentence for the player (`CHANGED:`); everything outside the edits stays word for word.
+  The changed rule is tried over the rule as it stood (the old one is put into the trial's world first), and one
+  that does not hold is not put in: the game stays as it was. The player is shown what changed. "undo" in the bar
+  puts the rule back as it was before (the world's own record keeps every version, read from `/world/stream`; no
+  model), and "undo" again brings the change back. Real run, November 14, on a copy of a 32,156 character game
+  with a place and a director beside it: the same change that had become a fourth rule that morning was 56 changed
+  lines of the game's rule, in 117 s (Opus 5.5 asked twice, 82 s; two trials, 34 s). Written again whole it took
+  400 s and three askings. A rule may now be 65,536 characters.
 - **From the ask bar** (`page/making.ts`, the helper's `/rule`, `/imagine`, `/realm`). Words decide what is asked
   for. "Create a realm called harbour. You are the pilot. ..." is a realm: the asker chooses to be asked a few things first
   or not, the idea is fleshed out by their model (`make/realm.mjs`: what it is about, how it looks, at most three

@@ -9,6 +9,6 @@ export default ({ engine, link }: { engine: { asker: { known: boolean; rule(wish
     const w = v as { for?: unknown; ask?: unknown; rule?: unknown }
     if (!link || !w || w.for !== link.me || typeof w.ask !== 'string' || !w.ask || !engine.asker.known) return
     engine.hud.notice('This world is changing as you play: something new is being written', 6000)
-    void engine.asker.rule(w.ask.slice(0, 600), typeof w.rule === 'string' ? { change: w.rule } : {}).then((done) => { if (done.state === 'there') engine.hud.notice('Something here has changed', 5000) })
+    void engine.asker.rule(w.ask.slice(0, 600), typeof w.rule === 'string' ? { change: w.rule } : {}).then((done) => { if (done.state === 'there') engine.hud.notice(done.changed ? `Changed: ${done.changed} Type "undo" to take it back.` : 'Something here has changed', done.changed ? 14000 : 5000) })
   },
 })

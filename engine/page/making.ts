@@ -74,7 +74,15 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     // The same gathering as for a thing covers the wait, at the place ahead.
     each({ stage: 'place', at, facing: 'south' })
     const done = await asker.rule(wish, {}, each)
-    if (done.state === 'there') { cue.remove(); hud.notice(done.rough ? `${done.name}: here, a little rough` : `${done.name}`, 5000); lacked(done) } else { cue.text = `Not this time: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`; setTimeout(() => cue.remove(), 7000) }
+    // A game that was here and was changed: said in the writer's own sentence for the player, with how to take it back.
+    if (done.state === 'there' && done.changed) { cue.remove(); hud.notice(`Changed: ${done.changed}${done.rough ? ' (a little rough)' : ''} Type "undo" to take it back.`, 14000); lacked(done) }
+    else if (done.state === 'there') { cue.remove(); hud.notice(done.rough ? `${done.name}: here, a little rough` : `${done.name}`, 5000); lacked(done) } else { cue.text = `Not this time: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`; setTimeout(() => cue.remove(), 7000) }
+    return done
+  }
+  /** The last change to the game here is taken back (#365): the helper puts the rule again as the world's record has it from before. No model, a second or so. */
+  const undo = async (): Promise<Done> => {
+    const done = await asker.rule('', { undo: true })
+    hud.notice(done.state === 'there' ? 'The last change is taken back: the game is as it was before it. "undo" again brings the change back.' : `Not taken back: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 90)}`, 8000)
     return done
   }
   /** A realm (#264): fleshed out first, with a few questions if the asker wants them; then made, its rules written; then stepped into. */
@@ -180,7 +188,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
    * "a red door"), or a change to how the world goes ("add ...", "change ...", "from now on ...", "let me ...").
    * In a world with no rules there is nobody to hear a power asked for, so those words ask for a rule.
    */
-  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' | 'director' => {
+  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' | 'director' | 'undo' => {
+    if (rules && /^\s*(please\s+)?(undo|take (that|it|the( last)? change) back|change it back|put it back( as it was)?)( (that|it|the( last)? change))?\s*[.!]?\s*$/i.test(text)) return 'undo'
     if (/^\s*(the\s+)?director\b\s*(:|,|$|(on|off|rest|stop|quiet|start|wake|back|away)\b)/i.test(text)) return 'director'
     if (/^thing:/i.test(text)) return 'thing'
     if (/^(rule|play):/i.test(text)) return 'rule'
@@ -208,7 +217,7 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const what = kind(ask.wish, await ruled()), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
     // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
     if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words }) }
-    return what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
+    return what === 'undo' ? undo() : what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
   }
 
   return Object.assign(asked, { thing, director, on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })

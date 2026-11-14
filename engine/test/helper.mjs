@@ -29,6 +29,8 @@ const WAVER = "NAME: Someone who waves\nCANNOT:\n- Wave: an actor has no moves, 
 const DUSK = JSON.stringify({ name: 'dusk', about: 'A quiet street at dusk. Someone called Pim stands on the pavement and waves at whoever greets them.', look: { hour: 18.5, tint: [1.1, 0.95, 0.85] }, questions: [{ ask: 'Does Pim follow you?', options: ['Yes', 'No'] }] })
 let rulesAsked = 0, imagined = 0
 const model = async (q) => {
+  // A change answered as a change is: a few exact edits to the rule as it stands, and a sentence for the player.
+  if (q.system.startsWith('You write rules') && q.prompt.includes('is called Pip')) { rulesAsked++; last = q; return { text: "NAME: Someone who waves\nCHANGED: The one who waves is called Pip now.\nCANNOT:\n- nothing\nEDITS:\n<<<<<<< OLD\nname: 'Pim'\n=======\nname: 'Pip'\n>>>>>>> NEW\n", model: 'a kept reply', ms: 0, cost: 0 } }
   if (q.system.startsWith('You write rules')) { rulesAsked++; last = q; return { text: WAVER, model: 'a kept reply', ms: 0, cost: 0 } }
   // A realm's place is planned beside its idea (make/plan.mjs): here a plan nothing can be made of, so the realm is made as it was before there were places.
   if (q.system.startsWith('You design the PLACE')) return { text: '{}', model: 'a kept reply', ms: 0, cost: 0 }
@@ -299,7 +301,7 @@ try {
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'steward', name: 'steward', source: `on('said', (world, e) => { if (/more waving/i.test(e.text)) world.write({ ask: 'everyone waves with both arms', for: e.by, rule: '${ruled[0].id}' }) })` } }) })
   for (let i = 0; i < 50 && !(await (await fetch(`${world}/world/rules`)).json()).find((r) => r.id === 'steward')?.running; i++) await new Promise((r) => setTimeout(r, 100))
   await page.keyboard.press('Enter'); await page.keyboard.type('say: more waving'); await page.keyboard.press('Enter')
-  await page.waitForFunction(() => [...document.querySelectorAll('#notices p')].some((p) => p.textContent === 'Something here has changed'), null, { timeout: 90_000 })
+  await page.waitForFunction(() => [...document.querySelectorAll('#notices p')].some((p) => p.textContent.startsWith('Changed: ')), null, { timeout: 90_000 })
   check(rulesAsked === writtenBefore + 1 && last.prompt.includes('everyone waves with both arms') && last.prompt.includes('The rule as it stands'), 'a rule that hears a word asks for another rule to be changed, and the page of the one who said it has its own helper write the change, tried and put under that rule\'s id')
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'steward' }) })
   await page.waitForFunction(() => engine.asker.busy === 0)
@@ -312,6 +314,13 @@ try {
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
   check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && (await (await fetch(`${dusk}/realm`)).json()).rule === inRealm[0].id && afterChange.length === 3 && afterChange.some((r) => r.id === 'director') && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s own rule (its record says which) is changed and put again under its id, with a director and another rule there beside it')
+  // A change is a few edits to the game's rule, tried over the rule as it stood; the player is told what changed; "undo" puts back what the world's record has from before, with no model.
+  const own = async () => (await (await fetch(`${dusk}/rules?id=${inRealm[0].id}`)).json()).source
+  const wasSource = await own(), editsBefore = rulesAsked
+  const edited = JSON.parse((await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'From now on the one who waves is called Pip', from, realm: realms[0].id }) })).text.trim().split('\n').at(-1))
+  check(edited.state === 'there' && edited.rule === inRealm[0].id && edited.changed === 'The one who waves is called Pip now.' && (await own()) === wasSource.replace("name: 'Pim'", "name: 'Pip'") && (await own()) !== wasSource && last.prompt.includes('THE FORM FOR A CHANGE') && last.prompt.includes('builds the place itself') && last.prompt.includes('the director') && (await (await fetch(`${dusk}/rules`)).json()).length === 3, 'a change asked in a realm is written as edits to its own rule, with the realm\'s other rules named beside it: the rest of the rule stays word for word, no rule is added, and the asker is told what changed')
+  const undone = JSON.parse((await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ undo: true, from, realm: realms[0].id }) })).text.trim().split('\n').at(-1))
+  check(undone.state === 'there' && undone.undone === true && (await own()) === wasSource && rulesAsked === editsBefore + 1, '"undo" puts the rule back as it was before the change, from the world\'s own record, with no model asked')
   // Two lanes: while a rule is being written and tried (seconds here, minutes with a model), a thing is still made at once; a second thing to write is turned away.
   let writingStill = true
   const slow = raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me walk on walls', from, realm: realms[0].id }) }).then((r) => { writingStill = false; return r })
