@@ -42,7 +42,7 @@ export interface Play {
   /** Whether it waits for sound to cross the distance (a blast does; default yes). */
   travels?: boolean
 }
-export interface Told { voices: number; stolen: number; peak: number; held: number; dropped: number; reset: number; ms: number; worst: number; blocks: number; frame: number }
+export interface Told { voices: number; stolen: number; peak: number; held: number; dropped: number; reset: number; ms: number; worst: number; blocks: number; frame: number; /** The names of the held tones that sound now. */ named?: number[] }
 
 export interface Sound {
   readonly context: AudioContext
@@ -66,6 +66,8 @@ export interface Sound {
   release(id: number): void
   /** Bends a held tone to a pitch (Hz) and a loudness (0 to 1 of its own; -1 leaves it). */
   glide(id: number, hz: number, level?: number): void
+  /** Moves a held tone to a place while it sounds, and sets how loud it is against how it began (0 to 2; -1 leaves it). Says how loud the place is heard (0 if too far to hear). */
+  place(id: number, at: readonly [number, number, number], reach?: number, level?: number): number
   /** What the audio thread last said of itself, once a second. */
   readonly told: Told | null
   /** What this thread has spent on sound, ms a frame, smoothed. */
@@ -144,6 +146,11 @@ export async function sound(): Promise<Sound> {
     hold(patch, how = {}) { const name = ++held + 1; return play(patch, { bus: BUS.play, ...how }, name) ? name : 0 },
     release(id) { if (id) node.port.postMessage({ release: id }) },
     glide(id, hz, level = -1) { if (id) node.port.postMessage({ glide: [id, hz, level] }) },
+    place(id, at, reach, level = -1) {
+      const h = hear(at, reach)
+      if (id) node.port.postMessage({ place: [id, h.gain * Math.sqrt(0.5 * (1 - h.pan)) * 1.25, h.gain * Math.sqrt(0.5 * (1 + h.pan)) * 1.25, h.lp, Math.min(0.5, 0.08 + h.far / 120), level] })
+      return h.gain
+    },
     listen(eye, yaw) {
       ear.at = [eye[0], eye[1], eye[2]]
       ear.right = [Math.cos(yaw), Math.sin(yaw)]

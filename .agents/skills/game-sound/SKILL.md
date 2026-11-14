@@ -320,3 +320,18 @@ Refresh when a phone has played it, when the core reports impacts, or when a che
   and the world took them first ask. Kept in `~/.village/engine/sound/rules/glass-harmonica.js`. Not measured, not heard.
 - A sound stays where it began and a held one cannot be changed while it lasts; the guide now says so. A motor on a
   moving thing is a short held sound made again each tick: it steps. A sound that follows its actor is not built.
+
+## A sound that follows who makes it (November 14; `plugins/sound`, `as`)
+
+- `world.sound` is an engine plugin now (`plugins/sound/`: world side, page side, guide, check); frame 10 is retired.
+- With `as` a rule names a sound and puts it on an actor, a person or a living thing. It is plugin state (every one
+  of them, each time one changes), so a page that joins later has them. The page places each every frame where it
+  shows its maker (`presence.where`, the ear for oneself, `alive.where` for a living thing).
+- A held one (pipe, horn, whistle, engine, a blown or rubbed patch) is one named tone on the world's bus, moved by
+  `place` in the synthesiser (left, right, dullness, room, loudness against how it began; eased a fifth a block). A
+  rule's new pitch or force is reached over a third of a second, because a rule speaks twice a second.
+- A struck one is made again every `every` ms on the page, with a little unevenness.
+- Named tones are not taken by other buses' notes. The page also begins one again if the audio thread no longer
+  lists it (`told.named`, once a second). Only the six nearest are sounded.
+- Not built: pitch bent by approach speed (velocity from shown positions is noisy; not tried), a held sound at a
+  fixed place, occlusion. Measured in `test/follows.mjs` at the motor's own tone: the street's wind hides a wide band.

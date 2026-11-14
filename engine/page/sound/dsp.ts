@@ -64,6 +64,7 @@ export class Synth {
   private tOn = new Uint8Array(TV); private tWait = new Int32Array(TV); private tAge = new Int32Array(TV); private tHold = new Int32Array(TV); private tStage = new Uint8Array(TV)
   private tPh = new Float64Array(TV); private tF = new Float32Array(TV); private tEnv = new Float32Array(TV); private tAtt = new Float32Array(TV); private tRel = new Float32Array(TV); private tAmp = new Float32Array(TV); private tTilt = new Float32Array(TV); private tRough = new Float32Array(TV); private tWaver = new Float32Array(TV)
   private tG = new Float32Array(TV); private t1 = new Float32Array(TV); private t2 = new Float32Array(TV); private tBg = new Float32Array(TV); private tB1 = new Float32Array(TV); private tB2 = new Float32Array(TV); private tChiff = new Float32Array(TV)
+  private tGlTo = new Float32Array(TV); private tGrTo = new Float32Array(TV); private tAmp0 = new Float32Array(TV)
   private tId = new Int32Array(TV); private tTo = new Float32Array(TV); private tAmpTo = new Float32Array(TV); private tBright = new Float32Array(TV); private tGl = new Float32Array(TV); private tGr = new Float32Array(TV); private tLp = new Float32Array(TV); private tZ = new Float32Array(TV); private tSend = new Float32Array(TV); private tBus = new Uint8Array(TV)
   // Air.
   private aOn = new Uint8Array(AV); private aWait = new Int32Array(AV); private aAge = new Int32Array(AV); private aLife = new Int32Array(AV)
@@ -126,6 +127,21 @@ export class Synth {
       if (level >= 0) this.tAmpTo[v] = Math.min(1, level)
     }
   }
+
+  /**
+   * Moves a held tone while it sounds: its left and right, how dull it is (Hz), how much goes to the room, and how
+   * loud against how it began (0 to 2). For a sound that stays on something that moves.
+   */
+  place(id: number, gl: number, gr: number, lp: number, send: number, level: number) {
+    if (!(id >= 2)) return
+    const ok = (v: number, hi: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(0, v)) : 0)
+    for (let v = 0; v < TV; v++) if (this.tOn[v] && this.tId[v] === id) {
+      this.tGlTo[v] = ok(gl, 1); this.tGrTo[v] = ok(gr, 1); this.tLp[v] = this.lpCoef(lp > 0 ? lp : 20000); this.tSend[v] = ok(send, 1)
+      if (level >= 0) this.tAmpTo[v] = Math.min(1, this.tAmp0[v] * ok(level, 2))
+    }
+  }
+  /** The names of the held tones that are sounding now: whoever holds one can tell that it is still there. */
+  named(): number[] { const out: number[] = []; for (let v = 0; v < TV; v++) if (this.tOn[v] && this.tId[v] && this.tStage[v] < 2) out.push(this.tId[v]); return out }
 
   private rand() { let s = this.seed; s ^= s << 13; s ^= s >>> 17; s ^= s << 5; this.seed = s; return (s >>> 0) / 4294967296 }
   private lpCoef(hz: number) { return hz >= 18000 ? 1 : 1 - Math.exp((-TAU * Math.max(40, hz)) / this.sr) }
@@ -264,13 +280,13 @@ export class Synth {
 
   private hold(p: Compiled, wait: number, pitch: number, force: number, gain: number, dur: number, gl: number, gr: number, lp: number, send: number, bus: number) {
     let v = -1, oldest = -1
-    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if (this.tBus[k] === 2 && bus !== 2) continue; if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
+    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if ((this.tBus[k] === 2 || this.tId[k]) && bus !== 2) continue; if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
     if (v < 0) return -1
     if (oldest >= 0) this.stats.stolen++
     const sr = this.sr
     this.tOn[v] = 1; this.tWait[v] = wait; this.tAge[v] = 0; this.tStage[v] = 0; this.tPh[v] = 0; this.tF[v] = pitch; this.tEnv[v] = 0
     this.tHold[v] = Math.round(Math.min(40000, Math.max(0.03, dur || 0.3)) * sr)
-    this.tId[v] = 0; this.tTo[v] = pitch; this.tAmpTo[v] = 0.5 * gain
+    this.tId[v] = 0; this.tTo[v] = pitch; this.tAmpTo[v] = 0.5 * gain; this.tAmp0[v] = 0.5 * gain
     this.tAtt[v] = 1 / ((0.003 + 0.3 * (1 - p.hard) ** 2) * sr)
     this.tRel[v] = Math.exp(-6.908 / (Math.min(12, Math.max(0.02, p.ring)) * sr))
     this.tAmp[v] = 0.5 * gain; this.tTilt[v] = Math.min(1, Math.max(0, p.tilt)); this.tRough[v] = Math.min(1, Math.max(0, p.rough)); this.tWaver[v] = Math.min(1, Math.max(0, p.waver))
@@ -279,7 +295,7 @@ export class Synth {
     this.tG[v] = Math.tan(Math.PI * Math.min(0.45, (pitch * this.tBright[v]) / sr))
     this.tBg[v] = Math.tan(Math.PI * Math.min(0.45, (pitch * 2) / sr))
     this.t1[v] = 0; this.t2[v] = 0; this.tB1[v] = 0; this.tB2[v] = 0; this.tChiff[v] = 1
-    this.tGl[v] = gl; this.tGr[v] = gr; this.tLp[v] = this.lpCoef(lp); this.tZ[v] = 0; this.tSend[v] = send; this.tBus[v] = bus
+    this.tGl[v] = gl; this.tGr[v] = gr; this.tGlTo[v] = gl; this.tGrTo[v] = gr; this.tLp[v] = this.lpCoef(lp); this.tZ[v] = 0; this.tSend[v] = send; this.tBus[v] = bus
     return v
   }
 
@@ -403,6 +419,8 @@ export class Synth {
     // Bent by hand: pitch and loudness go a third of the way to where they are wanted each block (about 8 ms to arrive).
     if (this.tTo[v] !== this.tF[v]) { this.tF[v] = Math.abs(this.tTo[v] / this.tF[v] - 1) < 0.0005 ? this.tTo[v] : this.tF[v] * (this.tTo[v] / this.tF[v]) ** 0.35; this.tG[v] = Math.tan(Math.PI * Math.min(0.45, (this.tF[v] * this.tBright[v]) / sr)); this.tBg[v] = Math.tan(Math.PI * Math.min(0.45, (this.tF[v] * 2) / sr)) }
     this.tAmp[v] += (this.tAmpTo[v] - this.tAmp[v]) * 0.35
+    // Moved while it sounds (`place`): each side goes a fifth of the way to where it is wanted each block, so nothing steps.
+    this.tGl[v] += (this.tGlTo[v] - this.tGl[v]) * 0.2; this.tGr[v] += (this.tGrTo[v] - this.tGr[v]) * 0.2
     const amp = this.tAmp[v], g = this.tG[v], bg = this.tBg[v]
     const age = this.tAge[v] / sr, waver = this.tWaver[v]
     // It trembles once it has been held a little.
@@ -635,7 +653,7 @@ export class Synth {
 }
 
 // ── In the page: the audio thread's end of it ─────────────────────────────
-// Messages in: {define: [id, compiled]}, {notes: Float64Array}, {set: [which, value, ...]}, {hush: bus}, {release: id}, {glide: [id, hz, level]}. Once a second
+// Messages in: {define: [id, compiled]}, {notes: Float64Array}, {set: [which, value, ...]}, {hush: bus}, {release: id}, {glide: [id, hz, level]}, {place: [id, left, right, dull, room, level]}. Once a second
 // it says what it has done and what a block cost it.
 declare const AudioWorkletProcessor: { new (): { port: MessagePort } } | undefined
 declare const registerProcessor: (name: string, ctor: unknown) => void
@@ -656,6 +674,7 @@ if (typeof AudioWorkletProcessor !== 'undefined') {
         if (m.hush !== undefined) this.synth.hush(m.hush)
         if (m.release !== undefined) this.synth.release(m.release)
         if (m.glide) this.synth.glide(m.glide[0], m.glide[1], m.glide[2])
+        if (m.place) this.synth.place(m.place[0], m.place[1], m.place[2], m.place[3], m.place[4], m.place[5])
       }
     }
     process(_: Float32Array[][], outputs: Float32Array[][]) {
@@ -666,7 +685,7 @@ if (typeof AudioWorkletProcessor !== 'undefined') {
       this.spent += ms; this.blocks++
       if (ms > this.worst) this.worst = ms
       if (currentFrame - this.told >= sampleRate) {
-        this.port.postMessage({ ...this.synth.stats, frame: currentFrame, ms: this.spent / this.blocks, worst: this.worst, blocks: this.blocks })
+        this.port.postMessage({ ...this.synth.stats, named: this.synth.named(), frame: currentFrame, ms: this.spent / this.blocks, worst: this.worst, blocks: this.blocks })
         this.told = currentFrame; this.spent = 0; this.worst = 0; this.blocks = 0
         this.synth.stats.peak = 0; this.synth.stats.held = 1
       }

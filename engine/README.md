@@ -410,6 +410,13 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   four seconds; what is wrong is left and said to the rule. `node test/sounded.mjs` checks it with a tower clock, a
   smith and his anvil, and a rule that sends what none should; a real page's sound is tapped and measured. Asked for
   a busker and a night watchman, a model wrote rules that play (November 14, both on the first asking).
+  **A sound that follows** (`as`): `world.sound({as: 'motor', on: who, like: 'engine', note})` is said once and stays
+  on an actor, a person or a thing that lives, heard moving with them; said again by the same name its pitch and
+  loudness glide in the note that is sounding; `{as, stop: true}` ends it, and it goes when its maker or the rule
+  does. What is struck follows by being made again (`every`, ms). Six a rule, 24 a realm, the six nearest sounded on
+  each page. `node test/follows.mjs`: a milk float drives past a still listener (begun once, one side then the
+  other, loudest as it passes, nothing stepping), a postman's feet, a hum on oneself, a living car's motor, and
+  each ending. A held tone moved while it sounds is `place` in the synthesiser (`test/sound.mjs`).
 - **A realm's music** (the same files, and `page/sound/music/`). `world.music({like, pace, mode, drive, now})`: a
   rule says what the realm's music is like and changes it as its own numbers change. It is a mood, not a track:
   `like` is one of the seven kept moods, `pace` and `mode` put it at another speed and in another scale, `drive` is
@@ -536,7 +543,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   - `world.mjs`, one file: `export default (world) => ({ does: { name(rule, want, now, wrong) {} }, dropped(ruleId) {}, state() {}, close() {} })`.
     `does` is what a rule may ask for (`world.<name>({...})` in a rule arrives as `want`: check every field as a
     stranger's). `world` is the doors it is given: `folk` (everyone with a body), `text`, `tell` (a body, to pages),
-    `release`, `look`, `stand`, `tall`, `core()` (the core's exports as they are now: ask each time), `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
+    `release`, `look`, `stand`, `tall`, `living(id)` (where a thing that lives is, or null), `core()` (the core's exports as they are now: ask each time), `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
     (one rule hears it), `pages.state(v)` and `pages.once(v)` (to its page side), and `was` (what the version before
     handed on through `state()`).
   - `page.ts`, if a page needs anything: `export default ({ engine, link }) => ({ state(v) {}, once(v) {}, close() {} })`.
@@ -560,7 +567,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once; and with `as`, a sound that stays on someone and is heard moving, kept as what is so), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns

@@ -108,6 +108,32 @@ console.log('In tune, and on time')
   check(Math.abs(f1 / f2 - 1) < 0.005 && Math.abs(ears.decay(o441.l, 44100, 40) / ears.decay(o48.l, 48000, 40) - 1) < 0.1, `the same at 44,100 and 48,000 frames a second (${f1.toFixed(1)} and ${f2.toFixed(1)} Hz)`)
 }
 
+console.log('Moved while it sounds')
+{
+  // A tone held on the world's bus is moved from the left to the right at one second, and made half as loud at two.
+  const sr = 48000, s = new Synth(sr), pipe = { how: 'blown', hard: 0.7, rough: 0, shape: 'hollow', pitch: 440, ring: 0.1, damp: 0.6, gain: 0.8 }
+  s.define(1, compile(pipe)); s.set(SET.roomGain, 0)
+  const l = new Float32Array(sr * 3), r = new Float32Array(sr * 3), part = (from, to) => s.render(l.subarray(Math.round(from * sr), Math.round(to * sr)), r.subarray(Math.round(from * sr), Math.round(to * sr)))
+  s.notes([0, 1, 440, 1, 0.8, 0, 0.8, 0.1, 0, 0, 0, 9])
+  part(0, 1); s.place(9, 0.1, 0.8, 0, 0, -1); part(1, 2); s.place(9, 0.1, 0.8, 0, 0, 0.5); part(2, 3)
+  const side = (x, t) => ears.rms(x, t * sr, (t + 0.3) * sr)
+  check(side(l, 0.6) > side(r, 0.6) * 6 && side(r, 1.6) > side(l, 1.6) * 6, `a held tone goes from one side to the other while it sounds (left over right ${(side(l, 0.6) / side(r, 0.6)).toFixed(1)}, then ${(side(l, 1.6) / side(r, 1.6)).toFixed(2)})`)
+  // It eases over rather than switching: an eightfold move is not there 5 ms after it is asked for and is there by 40 ms.
+  const lvl = (t) => ears.rms(r, t * sr, (t + 0.005) * sr), full = lvl(1.5)
+  check(lvl(1.0) < full * 0.5 && lvl(1.04) > full * 0.9, `it eases over: ${(lvl(1.0) / full).toFixed(2)} of the way in the first 5 ms, ${(lvl(1.04) / full).toFixed(2)} by 40 ms`)
+  check(Math.abs(side(r, 2.6) / side(r, 1.6) - 0.5) < 0.05, `and its loudness goes to half of how it began when asked (${(side(r, 2.6) / side(r, 1.6)).toFixed(2)})`)
+  // A named tone is not taken by the world's or the music's notes: six held, then thirty more asked for.
+  const t = new Synth(sr); t.define(1, compile(pipe)); t.set(SET.roomGain, 0)
+  for (let i = 0; i < 6; i++) t.notes([0, 1, 300 + 40 * i, 1, 0.5, 0, 0.3, 0.3, 0, 0, 0, 10 + i])
+  t.render(l.subarray(0, 4800), r.subarray(0, 4800))
+  for (let i = 0; i < 30; i++) t.notes([0, 1, 900 + 20 * i, 1, 0.5, 2, 0.1, 0.1, 0, 0, i % 2, 0])
+  t.render(l.subarray(0, 4800), r.subarray(0, 4800))
+  check(t.named().sort((a, b) => a - b).join() === '10,11,12,13,14,15', `six tones held by name are all still sounding after thirty more notes are asked for (${t.named().length} of 6)`)
+  for (const id of [NaN, -1, 0, 9, 1e9]) t.place(id, NaN, 1e9, -5, NaN, 1e9)
+  t.render(l.subarray(0, 4800), r.subarray(0, 4800))
+  check(l.subarray(0, 4800).every(Number.isFinite) && ears.peak(l.subarray(0, 4800)) <= 0.891, 'and rubbish given as a place does no harm')
+}
+
 console.log('Played by hand')
 {
   const sr = 48000, s = new Synth(sr), pipe = { how: 'blown', hard: 0.7, rough: 0.1, shape: 'hollow', pitch: 587, ring: 0.1, damp: 0.6, gain: 0.8 }, string = { how: 'plucked', hard: 0.6, rough: 0.1, shape: 'string', pitch: 196, ring: 5, damp: 0.4, gain: 0.8 }, key = { how: 'struck', hard: 0.5, rough: 0.03, shape: 'string', pitch: 262, ring: 5, damp: 0.4, gain: 0.8 }

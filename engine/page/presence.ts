@@ -19,7 +19,7 @@ export const seedOf = (name: string) => { let h = 2166136261; for (const ch of n
 /** No move at all: what a body comes to rest in. */
 const REST: Move = { keys: [{ t: 0 }], hold: true }
 
-export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void } {
+export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void; where(by: string): readonly [number, number, number] | null } {
   const asked = new URLSearchParams(location.search).get('name')
   let kept = ''
   try { kept = localStorage.getItem('village.name') ?? '' } catch { /* a page that may keep nothing */ }
@@ -91,5 +91,5 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
     }
     return shown
   })
-  return { get count() { return others.size }, name, say }
+  return { get count() { return others.size }, name, say, /** Where someone is shown now (their feet), by the name the world knows them by: for what is heard on them (#247). */ where: (by) => others.get(by)?.shown ?? null }
 }

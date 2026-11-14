@@ -8,7 +8,7 @@
 import { SET, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
 import { LIKES } from './likes.ts'
-import { patch as readPatch, type Patch } from './patch.ts'
+import { toned, patch as readPatch, type Patch } from './patch.ts'
 import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
 import { MODES, MOODS, PACE, moodKey } from './music/compose.ts'
@@ -32,6 +32,8 @@ export interface Scene {
   bodies(): number
   /** The hour of the day, 0 to 24. */
   hour(): number
+  /** Where someone or a living thing is shown now, by the name the world knows them by (cells): 'here' for whoever is at this page, null if they are not shown. For sounds that stay on them. */
+  who?(id: string): readonly [number, number, number] | 'here' | null
   /** Whether something is being made for whoever is at this page. */
   making(): boolean
   /** What a cell is (the core's `world_kind`). */
@@ -58,7 +60,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
   /** What it has played: blows heard as themselves, blows folded into the heap's grinding. */
-  const count = { blows: 0, folded: 0, tellings: 0, moved: 0, rules: 0, spoken: 0 }
+  const count = { blows: 0, folded: 0, tellings: 0, moved: 0, rules: 0, spoken: 0, followed: 0 }
   const stuff = (kind: number) => MATERIALS[kind & 15] ?? 'brick'
   /** How big a piece of so many cells is against a patch's own size (30 cm). */
   const sized = (cells: number) => Math.min(8, Math.max(0.4, (Math.cbrt(cells) / M) / 0.3))
@@ -89,17 +91,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     let patches: Patch[], held = false
     if (typeof s.like === 'string' && Object.hasOwn(LIKES, s.like)) { patches = LIKES[s.like].patches; held = !!LIKES[s.like].held }
     else {
-      let key: string
-      try { key = JSON.stringify(s.patch) } catch { return }
-      if (!key || key.length > 1500) return
-      let p = written.get(key)
-      if (!p) {
-        const read = readPatch(s.patch)
-        if ('refused' in read) return
-        p = read.patch
-        if (written.size >= 96) { const [oldest, gone] = written.entries().next().value!; written.delete(oldest); voice.forget(gone) }
-      } else written.delete(key)
-      written.set(key, p)
+      const p = own(s.patch)
+      if (!p) return
       patches = [p]; held = p.how === 'blown' || p.how === 'rubbed'
     }
     const hz = Array.isArray(s.hz) ? s.hz.slice(0, 8).map((n) => num(n, 16, 12000, 0)).filter((n) => n > 0) : []
@@ -107,6 +100,93 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     count.rules++
     const where = at as [number, number, number]
     for (let i = 0; i < Math.max(1, hz.length); i++) for (const p of patches) voice.play(p, { at: where, force: force * (0.94 + 0.12 * Math.random()), size, pitch: hz[i] ?? 0, dur, after: i * gap, reach })
+  }
+  /** A patch a rule wrote, read as a stranger's and kept by its JSON; null if it is not one. */
+  const own = (data: unknown): Patch | null => {
+    let key: string
+    try { key = JSON.stringify(data) } catch { return null }
+    if (!key || key.length > 1500) return null
+    let p = written.get(key)
+    if (!p) {
+      const read = readPatch(data)
+      if ('refused' in read) return null
+      p = read.patch
+      if (written.size >= 96) { const [oldest, gone] = written.entries().next().value!; written.delete(oldest); voice.forget(gone) }
+    } else written.delete(key)
+    written.set(key, p)
+    return p
+  }
+  /**
+   * Sounds that stay on someone (plugins/sound, `as`): what is so, said whenever it changes, every one of them each
+   * time. Each is placed every frame where its maker is shown. One that is held is one note, moved and bent while
+   * it sounds; one that is struck is made again as often as it says. Only the nearest few are sounded.
+   */
+  interface Follow { on: string; what: string; patches: Patch[]; held: boolean; hz: number; force: number; size: number; reach: number; every: number; ids: number[]; hzNow: number; forceNow: number; began: number; sent: number; put: string; next: number; gain: number; lost: number }
+  const following = new Map<string, Follow>()
+  const NEAREST = 6
+  const quiet = (f: Follow) => { for (const id of f.ids) voice.release(id); f.ids = [] }
+  const follows = (v: unknown) => {
+    const list = v && typeof v === 'object' && Array.isArray((v as { follows?: unknown }).follows) ? (v as { follows: unknown[] }).follows.slice(0, 32) : []
+    const seen = new Set<string>()
+    for (const one of list) {
+      if (!one || typeof one !== 'object') continue
+      const s = one as Record<string, unknown>
+      if (typeof s.key !== 'string' || s.key.length > 100 || typeof s.on !== 'string' || s.on.length > 100) continue
+      let patches: Patch[], held: boolean, what: string
+      if (typeof s.like === 'string' && Object.hasOwn(LIKES, s.like)) { patches = LIKES[s.like].patches; held = !!LIKES[s.like].held; what = s.like }
+      else { const p = own(s.patch); if (!p) continue; patches = [p]; held = p.how === 'blown' || p.how === 'rubbed'; what = JSON.stringify(s.patch) }
+      const every = held ? 0 : num(s.every, 80, 2000, 0) / 1000
+      if (!held && !every) continue
+      seen.add(s.key)
+      const hz = num(s.hz, 16, 12000, 0), force = num(s.force, 0.02, 1, 0.7), size = num(s.size, 0.25, 4, 1), reach = num(s.reach, 2, 300, 10)
+      const had = following.get(s.key)
+      // The same sound, changed: its pitch and loudness move in the note that is sounding. Another sound, or another size, starts again.
+      if (had && had.what === what && had.size === size) { had.on = s.on; had.hz = hz; had.force = force; had.reach = reach; had.every = every; continue }
+      if (had) quiet(had)
+      following.set(s.key, { on: s.on, what, patches, held, hz, force, size, reach, every, ids: [], hzNow: hz, forceNow: force, began: force, sent: 1, put: '', next: 0, gain: 0, lost: 0 })
+    }
+    for (const [key, f] of following) if (!seen.has(key)) { quiet(f); following.delete(key) }
+  }
+  /** Each frame: every sound that follows is put where its maker is shown, the nearest few sounded. */
+  const followed = (eye: readonly [number, number, number], dt: number) => {
+    if (!following.size) return
+    const now = voice.context.currentTime, placed: { f: Follow; at: readonly [number, number, number] }[] = []
+    for (const f of following.values()) {
+      const w = scene.who?.(f.on) ?? null
+      const at = w === 'here' ? eye : w
+      f.gain = at ? voice.hear(at, f.reach).gain : 0
+      if (at && f.gain >= 0.004) placed.push({ f, at }); else quiet(f)
+    }
+    placed.sort((a, b) => b.f.gain - a.f.gain)
+    const named = voice.told?.named
+    for (let i = 0; i < placed.length; i++) {
+      const { f, at } = placed[i]
+      if (i >= NEAREST) { quiet(f); continue }
+      // Pitch and loudness go to what the rule last said over a third of a second: a rule speaks twice a second, and a motor does not step.
+      const k = 1 - Math.exp(-dt / 0.3)
+      if (f.hz > 0 && f.hzNow > 0) f.hzNow *= (f.hz / f.hzNow) ** k; else f.hzNow = f.hz
+      f.forceNow += (f.force - f.forceNow) * k
+      if (!f.held) {
+        // Struck again as often as it says, a little unevenly, where its maker is then.
+        if (now >= f.next) { f.next = Math.max(now, f.next) + f.every * (0.92 + 0.16 * Math.random()); count.followed++; for (const p of f.patches) voice.play(p, { at, force: f.force * (0.9 + 0.2 * Math.random()), size: f.size, pitch: f.hz, reach: f.reach, travels: false }) }
+        continue
+      }
+      // A held note that is no longer among those sounding (taken, or never begun) is begun again.
+      if (f.ids.length && named && now - f.lost > 2 && !f.ids.every((id) => named.includes(id))) { quiet(f); f.lost = now }
+      if (!f.ids.length) {
+        if (now - f.lost < 0.3 && f.lost) continue
+        f.began = f.forceNow; f.lost = now; f.sent = f.hzNow || 1; f.put = ''
+        for (const p of f.patches) { const id = voice.hold(p, { at, force: f.began, size: f.size, pitch: f.hzNow, reach: f.reach, travels: false, bus: 0 }); if (id) f.ids.push(id) }
+        if (f.ids.length) count.followed++
+        continue
+      }
+      const bend = f.hzNow > 0 && Math.abs(f.hzNow / f.sent - 1) > 0.0005
+      // The audio thread is told only when where it is heard from, or how loud it is, has changed.
+      const h = voice.hear(at, f.reach), level = Math.min(2, (f.forceNow / f.began) ** 1.2), put = `${h.gain.toFixed(3)} ${h.pan.toFixed(3)} ${Math.round(h.lp / 50)} ${level.toFixed(3)}`
+      for (const id of f.ids) { if (put !== f.put) voice.place(id, at, f.reach, level); if (bend) voice.glide(id, f.hzNow) }
+      f.put = put
+      if (bend) f.sent = f.hzNow
+    }
   }
   /** What the realm's music is like, if a rule has said: the mood's name and how much of it is in. */
   let realm: { key: string; pace: number; drive: number | null; now: boolean } | null = null
@@ -117,7 +197,9 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     realm = { key: moodKey(m.like, 0, typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : ''), pace: num(m.pace, PACE[0], PACE[1], 0), drive: typeof m.drive === 'number' ? num(m.drive, 0, 1, 0) : null, now: m.now === true }
   }
   return {
-    voice, blast, count, music, sounded, tuned,
+    voice, blast, count, music, sounded, tuned, follows,
+    /** The sounds that follow someone now, for checks: which is on whom, whether it sounds, its pitch as it is. */
+    get following() { return [...following].map(([key, f]) => ({ key, on: f.on, sounding: f.held ? f.ids.length > 0 : f.gain >= 0.004, hz: f.hzNow, gain: f.gain })) },
     /** Someone said something (text, where): given a voice one of two ways, if the page asked for one (`?voices=babble` or `speech`). A direction being tried. */
     spoke(said: { name: string; text: string; at?: readonly [number, number, number] }, way: string | null) { if (way === 'babble' || way === 'speech') count.spoken += speak(voice, way as Way, said) },
     get things() { return things },
@@ -243,6 +325,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
         music.steady = !!realm
         music.tick()
       }
+      followed(eye, dt)
       voice.listen(eye, yaw)
     },
   }

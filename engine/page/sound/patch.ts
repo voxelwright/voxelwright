@@ -128,6 +128,9 @@ export function sounds(v: unknown): { sounds: Sounds } | { refused: string } {
 }
 
 /** A patch as numbers for the synthesiser. Only a patch that `patch` passed is to be given. */
+/** Whether a patch is one long tone that can be held, bent and moved while it sounds: what is blown, or a string, tube, pipe or hollow that is rubbed. Anything else rings by itself once begun. */
+export const toned = (p: Pick<Patch, 'how' | 'shape'>): boolean => p.how === 'blown' || (p.how === 'rubbed' && ['string', 'tube', 'pipe', 'hollow'].includes(p.shape ?? ''))
+
 export function compile(p: Patch): Compiled {
   const ratios = p.modes ? p.modes.map((m) => m[0]) : [...SHAPES[p.shape!]]
   const where = p.where ?? 0.23
@@ -141,7 +144,7 @@ export function compile(p: Patch): Compiled {
   return {
     how: HOWS.indexOf(p.how), tau, rough: p.rough, ratios, gains, pitch: p.pitch, ring: p.ring, damp: p.damp, bend: p.bend ?? 0, waver: p.waver ?? 0, hard: p.hard,
     tilt: p.modes ? 0.3 : TILT[p.shape!] ?? 0.3, where, strung: p.how === 'plucked' && p.shape === 'string' ? 1 : 0,
-    tone: p.how === 'blown' || (p.how === 'rubbed' && ['string', 'tube', 'pipe', 'hollow'].includes(p.shape ?? '')) ? 1 : 0,
+    tone: toned(p) ? 1 : 0,
     pieces: p.pieces?.count ?? 0, over: p.pieces?.over ?? 0, spread: p.pieces?.spread ?? 0,
     airFrom: p.air?.from ?? 0, airTo: p.air?.to ?? 0, airFor: p.air?.for ?? 0, airQ: p.air?.q ?? 1, airGain: p.air?.gain ?? 0, gain: p.gain,
   }

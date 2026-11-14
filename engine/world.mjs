@@ -544,7 +544,7 @@ does.set('show', hand.show)
 // Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
-const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { core: () => core, folk, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
+const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { core: () => core, folk, living: (id) => alive.get(id)?.pose?.at ?? null, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
