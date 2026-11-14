@@ -37,3 +37,12 @@ export function stream(edits: readonly Edit[]): Int32Array {
   for (const e of edits) { out.set(e.words, at); at += e.words.length }
   return out
 }
+
+/** Rows of cells finer than the world's (#259, an experiment; the core's `Edit::Fine`): x0, x1, y, z count cells of which `grain` (4 or 8) lie along one of the world's, the box is in the world's cells. */
+export function fineRows(runs: Int32Array, box: readonly [number, number, number, number, number, number], grain = 4): Edit {
+  const words = new Int32Array(2 + runs.length)
+  words[0] = grain === 8 ? 4 : 3
+  words[1] = runs.length / 5
+  words.set(runs, 2)
+  return { words, box }
+}

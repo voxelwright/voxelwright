@@ -16,7 +16,8 @@ struct U {
   sun: vec3f, pad2: f32,
   // The body's middle of mass from the anchor, and in its own cells; where its low corner was in the world when
   // it came loose (its cells keep their shades); and how it is turned, as the three columns of a matrix.
-  pos: vec3f, pad3: f32,
+  // cell: how big one of the body's cells is, in the world's (1 for what came loose from it; less for a thing made finer).
+  pos: vec3f, cell: f32,
   cells: vec3i, pad4: i32,
   com: vec3f, pad5: f32,
   c0: vec3f, pad6: f32,
@@ -56,7 +57,7 @@ const FAR = 100000.0;
   else if (axis == 2u) { p += vec3f(cu * long, cv, side); n = vec3f(0.0, 0.0, side * 2.0 - 1.0); }
   else { p += vec3f(side, cv, cu * long); n = vec3f(side * 2.0 - 1.0, 0.0, 0.0); }
   let turned = mat3x3f(u.c0, u.c1, u.c2);
-  let world = u.pos + turned * (p - u.com) - u.eye;
+  let world = u.pos + turned * ((p - u.com) * u.cell) - u.eye;
   let d = dot(world, u.forward);
   var out: Out;
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -71,7 +72,9 @@ ${PAINT}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let m = looks.material[in.kind & 15u];
   // The cell as it was in the world when the body came loose, and the face as it then looked.
-  let albedo = paint(in.kind, vec3i(floor(in.at - in.n * 0.5)) + u.cells, in.n, 1.0, fract(in.at - in.n * 0.5), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022));
+  // Paint goes by the world's cells: a finer thing's boards and bricks are the size the town's are.
+  let inside = (in.at - in.n * 0.5) * u.cell;
+  let albedo = paint(in.kind, vec3i(floor(inside)) + u.cells, in.n, 1.0, fract(inside), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022));
   var direct = max(dot(in.facing, u.sun), 0.0);
   if (direct > 0.0) {
     // In the world's shadow where the sun's maps say so; where they cannot say, in the sun.
@@ -88,12 +91,14 @@ export interface Piece {
   /** Its middle of mass in the world's finest cells, and its turn (x, y, z, w). */
   pos: [number, number, number]
   rot: [number, number, number, number]
+  /** How big one of its cells is, in the world's cells. */
+  cell: number
   destroy(): void
 }
 
 export interface Pieces {
   add(born: Born): Piece
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number]): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites): void
   readonly count: number
   /** How many faces are drawn a frame. */
   readonly faces: number
@@ -120,11 +125,11 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       device.queue.writeBuffer(faces, 0, born.faces)
       const uniforms = device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], faces, uniforms, bind, count: born.faces.length / 2, destroy() { live.delete(piece); faces.destroy(); uniforms.destroy() } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces, uniforms, bind, count: born.faces.length / 2, destroy() { live.delete(piece); faces.destroy(); uniforms.destroy() } }
       live.add(piece)
       return piece
     },
-    draw(encoder, to, view, sun) {
+    draw(encoder, to, view, sun, timing) {
       if (!live.size) return
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
       const block = new ArrayBuffer(176), f = new Float32Array(block), i32 = new Int32Array(block)
@@ -132,12 +137,13 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
+        ...(timing ? { timestampWrites: timing } : {}),
       })
       pass.setPipeline(pipeline)
       pass.setBindGroup(1, lit)
       for (const piece of live) {
         const [x, y, z, w] = piece.rot, b = piece.born
-        f.set([piece.pos[0] - anchor[0], piece.pos[1] - anchor[1], piece.pos[2] - anchor[2]], 20)
+        f.set([piece.pos[0] - anchor[0], piece.pos[1] - anchor[1], piece.pos[2] - anchor[2], piece.cell], 20)
         i32.set(b.low, 24)
         f.set(b.com, 28)
         // The turn as a matrix, a column at a time.

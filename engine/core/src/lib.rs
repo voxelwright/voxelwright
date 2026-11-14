@@ -30,6 +30,9 @@ pub enum Edit {
     /// Rows of cells set or emptied, each by itself in every copy however coarse: what many edits of rows come to
     /// (`merged`).
     Rows(Vec<scratch::Run>),
+    /// Rows of cells finer than the world's (#259, an experiment): x0, x1, y, z count cells of which 4 (the second
+    /// number is 2) or 8 (it is 3) lie along one of the world's.
+    Fine(Vec<scratch::Run>, u32),
 }
 
 /// One sector's cells as the world stands: the city's rules, then the edits, in order.
@@ -45,9 +48,11 @@ pub fn fill_of<'a>(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: 
         match e {
             // The edge's lumps are the blast's own: the same wherever it is worked out.
             Edit::Ball { centre, radius, kind: 0 } => s.blast(*centre, *radius, hash::hash(centre[0], centre[2], centre[1] as u32)),
-            Edit::Ball { centre, radius, kind } => s.ball(*centre, *radius, *kind, 0, 0, None),
+            Edit::Ball { centre, radius, kind } => s.ball(*centre, *radius, scratch::plain(*kind), 0, 0, None),
             Edit::Runs(runs) => s.runs(runs, true),
             Edit::Rows(runs) => s.runs(runs, false),
+            // A sector that does not take them says so itself (`Scratch::refused`).
+            Edit::Fine(runs, shift) => drop(s.fine_runs(runs, *shift)),
         }
     }
 }
@@ -55,21 +60,30 @@ pub fn fill_of<'a>(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: 
 /// One sector of the world as it stands, as a tree.
 pub fn sector(s: &mut Scratch, sx: i32, sy: i32, sz: i32, lod: u32, edits: &[Edit], out: &mut Vec<u32>) -> Whole {
     fill(s, sx, sy, sz, lod, edits);
-    tree::encode(&s.cells, out)
+    tree::encode_fine(&s.cells, &s.fine_of, &s.fine, out)
 }
 
 /// Edits as whole numbers, one after another: 0, x, y, z, radius, kind for a ball; 1, how many rows, then x0, x1, y, z, kind for each;
-/// 2 as 1, for rows that many edits came to.
+/// 2 as 1, for rows that many edits came to; 3 as 1, for rows of cells a quarter the size (x0, x1, y, z in quarter cells); 4 as 3, in cells an eighth the size.
+///
+/// The numbers come from outside the core (a page, another player): any numbers at all are read without harm. An
+/// edit is taken whole or not at all: one that says it has fewer than no rows, or more numbers than there are, is not
+/// read, and nor is anything after it, for where the next would begin is not known. Any number but 0, 2, 3 and 4 that
+/// begins an edit is read as 1, as it always was. No kind read has the mark of finer cells (kinds.rs `FINE`): that is
+/// the core's own to give, so nothing that is told of an edit, the solver included, sees one from outside.
 pub fn read_edits(words: &[i32]) -> Vec<Edit> {
     let (mut out, mut i) = (Vec::new(), 0);
     while i < words.len() {
         if words[i] == 0 {
-            out.push(Edit::Ball { centre: [words[i + 1], words[i + 2], words[i + 3]], radius: words[i + 4], kind: words[i + 5] as tree::Kind });
+            let Some(w) = words.get(i + 1..i + 6) else { break };
+            out.push(Edit::Ball { centre: [w[0], w[1], w[2]], radius: w[3], kind: scratch::plain(w[4] as tree::Kind) });
             i += 6;
         } else {
-            let n = words[i + 1] as usize;
-            let rows = words[i + 2..i + 2 + n * 5].chunks_exact(5).map(|r| scratch::Run { x0: r[0], x1: r[1], y: r[2], z: r[3], kind: r[4] as tree::Kind }).collect();
-            out.push(if words[i] == 2 { Edit::Rows(rows) } else { Edit::Runs(rows) });
+            let Some(n) = words.get(i + 1).and_then(|&n| usize::try_from(n).ok()) else { break };
+            // No more rows than there are numbers left, so this cannot overflow.
+            let Some(w) = (n <= (words.len() - i - 2) / 5).then(|| &words[i + 2..i + 2 + n * 5]) else { break };
+            let rows = w.chunks_exact(5).map(|r| scratch::Run { x0: r[0], x1: r[1], y: r[2], z: r[3], kind: scratch::plain(r[4] as tree::Kind) }).collect();
+            out.push(match words[i] { 2 => Edit::Rows(rows), 3 => Edit::Fine(rows, 2), 4 => Edit::Fine(rows, 3), _ => Edit::Runs(rows) });
             i += 2 + n * 5;
         }
     }
@@ -88,10 +102,13 @@ struct Instance {
     merged: Vec<i32>,
     /// What has come loose and moves, in the one instance that is asked to move it.
     bodies: Option<Box<bodies::Bodies>>,
+    /// For `make_finer`: the finer sector's cells, and which sector of the world's own cells the scratch now holds.
+    finer: Vec<tree::Kind>,
+    finer_of: Option<[i32; 3]>,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None });
 }
 
 /// Room for edits of `words` whole numbers (see `read_edits`); write them at the address returned. They stay for every call until asked for again.
@@ -125,12 +142,62 @@ pub extern "C" fn merged_words() -> *const i32 {
     INSTANCE.with_borrow(|i| i.merged.as_ptr())
 }
 
+/// Whether cells may hold finer cells (#259, the page's `bricks`): not, until told. Where they may not, an edit of
+/// tag 3 or 4 changes nothing in any copy, and each sector it is made with counts it in `fine_refused`.
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_cells(on: u32) {
+    INSTANCE.with_borrow_mut(|i| i.scratch.finer = on != 0)
+}
+
+/// How many edits of finer cells the sector last made by `make_sector` refused whole: the switch is off, or the
+/// sector's limits (scratch.rs `FINE_BLOCKS`, `TREE_WORDS`).
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_refused() -> u32 {
+    INSTANCE.with_borrow(|i| i.scratch.refused)
+}
+
 /// Makes a sector. Returns how many words its tree is: 0 for all air, 1 for all one kind (that kind is the one word), else the tree. The words are at `tree_words`.
 #[unsafe(no_mangle)]
 pub extern "C" fn make_sector(sx: i32, sy: i32, sz: i32, lod: u32) -> usize {
     INSTANCE.with_borrow_mut(|i| {
+        i.finer_of = None;
         let edits = read_edits(&i.edits);
         match sector(&mut i.scratch, sx, sy, sz, lod, &edits, &mut i.tree) {
+            Whole::Empty => 0,
+            Whole::Uniform(kind) => {
+                i.tree.clear();
+                i.tree.push(kind as u32);
+                1
+            }
+            Whole::Tree(words) => words,
+        }
+    })
+}
+
+/// Makes a sector of cells finer than the world's (#259, an experiment): one 2^`fine`-th each way of the sector of the
+/// world's own cells it lies in, every cell of that written 2^`fine` times each way. `sx`, `sy`, `sz` count sectors of
+/// the finer cells. It holds no more shape than the world's cells do: it is what a finer box round the eye would hold
+/// where nothing fine has been made, and so what such a box costs to make, keep and march. No edits are applied.
+#[unsafe(no_mangle)]
+pub extern "C" fn make_finer(sx: i32, sy: i32, sz: i32, fine: u32) -> usize {
+    use tree::{at, SIDE};
+    INSTANCE.with_borrow_mut(|i| {
+        let parent = [sx >> fine, sy >> fine, sz >> fine];
+        if i.finer_of != Some(parent) {
+            fill(&mut i.scratch, parent[0], parent[1], parent[2], 0, &[]);
+            i.finer_of = Some(parent);
+        }
+        let part = SIDE >> fine;
+        let off = [sx, sy, sz].map(|v| (v & ((1 << fine) - 1)) as usize * part);
+        i.finer.resize(tree::CELLS, 0);
+        for y in 0..SIDE {
+            for z in 0..SIDE {
+                for x in 0..SIDE {
+                    i.finer[at(x, y, z)] = i.scratch.cells[at(off[0] + (x >> fine), off[1] + (y >> fine), off[2] + (z >> fine))];
+                }
+            }
+        }
+        match tree::encode(&i.finer, &mut i.tree) {
             Whole::Empty => 0,
             Whole::Uniform(kind) => {
                 i.tree.clear();
@@ -353,4 +420,304 @@ pub extern "C" fn living_end(id: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn living_place(id: u32, x: f32, y: f32, z: f32, qx: f32, qy: f32, qz: f32, qw: f32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).place(id, [x, y, z], [qx, qy, qz, qw]) as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kinds::FINE;
+    use crate::scratch::{FINE_BLOCKS, Run, TREE_WORDS};
+    use crate::tree::{CELLS, Kind, SIDE, at};
+
+    /// A sector made of edits as a page sends them, with cells allowed to hold finer cells.
+    fn made(words: &[i32], sx: i32, sy: i32, sz: i32, lod: u32) -> (Scratch, Vec<u32>, Whole) {
+        let (mut s, mut tree) = (Scratch::new(), Vec::new());
+        s.finer = true;
+        let whole = sector(&mut s, sx, sy, sz, lod, &read_edits(words), &mut tree);
+        (s, tree, whole)
+    }
+
+    /// What must hold of any sector made of any edits: a cell has the mark only with a block of its own that is
+    /// neither empty nor all one kind, the limits hold, and the tree is sound and says the same.
+    fn sane(s: &Scratch, tree: &[u32], whole: Whole) {
+        let marked: Vec<usize> = (0..CELLS).filter(|&i| s.cells[i] & FINE != 0).collect();
+        assert!(s.lod == 0 && s.finer || marked.is_empty(), "a mark where no cell may hold finer cells");
+        assert!(marked.len() <= FINE_BLOCKS && s.fine.len() <= 2 * FINE_BLOCKS, "{} blocks, room for {}", marked.len(), s.fine.len());
+        let mut blocks = std::collections::HashSet::new();
+        for &i in &marked {
+            let block = *s.fine_of.get(&(i as u32)).expect("a cell with the mark and no block");
+            assert!(blocks.insert(block), "two cells share a block");
+            let b = &s.fine[block as usize];
+            assert!(b.iter().any(|&k| k != 0) && b.iter().any(|&k| k != b[0]), "a block that is empty or all one kind");
+            assert!(b.iter().all(|&k| k & FINE == 0), "a mark inside a block");
+        }
+        match whole {
+            Whole::Tree(words) => {
+                assert!(words == tree.len() && words <= TREE_WORDS, "{words} words");
+                assert_eq!(tree::tests::sound(tree), marked.len());
+            }
+            Whole::Uniform(kind) => assert_eq!(kind & FINE, 0),
+            Whole::Empty => {}
+        }
+    }
+
+    /// Defect 1: no edit can give a cell the mark, so rows of finer cells never look for a block that is not there.
+    #[test]
+    fn a_plain_row_of_a_marked_kind_then_fine_rows_on_its_cell() {
+        for tag in [0, 1, 2] {
+            let first: &[i32] = if tag == 0 { &[0, 10, 5, 5, 0, 0x0541] } else { &[tag, 1, 10, 11, 5, 5, 0x0541] };
+            for (fine, x, yz) in [(3, 40, 20), (4, 80, 40)] {
+                let (s, tree, whole) = made(&[first, &[fine, 1, x, x + 1, yz, yz, 0x0509]].concat(), 0, 0, 0, 0);
+                sane(&s, &tree, whole);
+                assert_eq!(s.cells[at(10, 5, 5)], 0x0501 | FINE, "most of the cell is the first edit's kind, without the mark it came with");
+                assert_eq!(tree::fine_at(&tree, 80, 40, 40), 0x0509);
+                assert_eq!(tree::fine_at(&tree, 87, 47, 47), 0x0501);
+            }
+        }
+    }
+
+    /// Defect 2: a row of kind 0 into air leaves no block behind, and a marked kind written there after is a plain cell.
+    #[test]
+    fn a_fine_row_of_nothing_into_air_then_a_marked_kind() {
+        let (s, tree, whole) = made(&[3, 1, 40, 41, 2600, 20, 0, 1, 1, 10, 11, 650, 5, 0x0541], 0, 10, 0, 0);
+        sane(&s, &tree, whole);
+        assert_eq!(s.cells[at(10, 10, 5)], 0x0501);
+        assert!(s.fine_of.is_empty());
+    }
+
+    /// One row of eighth cells across every line of cells of sector (0, 10, 0): a block for each of its 262,144 cells.
+    fn a_block_for_every_cell() -> Vec<i32> {
+        let mut words = vec![4, 4096];
+        for y in 0..64 {
+            for z in 0..64 {
+                words.extend([0, 512, (640 + y) * 8, z * 8, 0x0509]);
+            }
+        }
+        words
+    }
+
+    /// Defect 3: an edit that would give a sector more blocks than it may hold is refused whole. The sector is as it
+    /// was, says so, and took no room for the blocks.
+    #[test]
+    fn an_edit_of_too_many_blocks_is_refused_whole() {
+        let before: &[i32] = &[3, 2, 40, 41, 2600, 20, 0x0509, 43, 44, 2600, 20, 0x0303];
+        let (was, was_tree, _) = made(before, 0, 10, 0, 0);
+        let (s, tree, whole) = made(&[before, &a_block_for_every_cell()].concat(), 0, 10, 0, 0);
+        sane(&s, &tree, whole);
+        assert_eq!(s.refused, 1);
+        assert!(s.cells == was.cells && tree == was_tree, "the sector is as it was before the edit");
+        assert!(s.fine.capacity() <= 64, "room for {} blocks was taken", s.fine.capacity());
+        // Taking away from a sector that is full is not refused: not where the rows pass through air, nor where they
+        // empty whole cells that had no block.
+        let full = Edit::Fine((0..FINE_BLOCKS as i32).map(|i| Run { x0: (i % 64) * 8, x1: (i % 64) * 8 + 1, y: 5120 + (i / 4096) * 8, z: (i / 64 % 64) * 8, kind: 0x0509 }).collect(), 3);
+        let solid = Edit::Runs(vec![Run { x0: 0, x1: 64, y: 700, z: 0, kind: 0x0303 }]);
+        // Half of the blocks, a row of whole cells, and 32,768 cells of air.
+        let half = (0..64 * 16).map(|i| Run { x0: 0, x1: 512, y: 5120 + i / 64, z: (i % 64) * 8, kind: 0 });
+        let row = (0..64).map(|i| Run { x0: 0, x1: 512, y: 5600 + i / 8, z: i % 8, kind: 0 });
+        let air = (0..512).map(|i| Run { x0: 0, x1: 512, y: 5300 + (i / 64) * 8, z: (i % 64) * 8, kind: 0 });
+        let away = Edit::Fine(half.chain(row).chain(air).collect(), 3);
+        let (mut s, mut tree) = (Scratch::new(), Vec::new());
+        s.finer = true;
+        let whole = sector(&mut s, 0, 10, 0, 0, &[full.clone(), solid.clone()], &mut tree);
+        sane(&s, &tree, whole);
+        assert_eq!((s.refused, s.fine_of.len()), (0, FINE_BLOCKS));
+        let whole = sector(&mut s, 0, 10, 0, 0, &[full.clone(), solid.clone(), Edit::Fine(vec![Run { x0: 9, x1: 10, y: 5200, z: 9, kind: 0x0509 }], 3)], &mut tree);
+        sane(&s, &tree, whole);
+        assert_eq!((s.refused, s.fine_of.len()), (1, FINE_BLOCKS));
+        let whole = sector(&mut s, 0, 10, 0, 0, &[full, solid, away], &mut tree);
+        sane(&s, &tree, whole);
+        assert_eq!((s.refused, s.fine_of.len(), s.cells[at(5, 60, 0)]), (0, FINE_BLOCKS / 2, 0));
+    }
+
+    /// Defect 3: an edit whose blocks could take the sector's tree past its limit is refused whole, and one after it
+    /// that takes blocks away is taken.
+    #[test]
+    fn an_edit_of_too_many_words_is_refused_whole() {
+        // Blocks 8 a side, full, of two kinds in sheets turn about, a leaf apart: each is 16 words of mask, one, 256
+        // of kinds, and its leaf's table of 64.
+        let rows = |cells: std::ops::Range<i32>, kinds: [Kind; 2]| {
+            let mut rows = Vec::new();
+            for c in cells {
+                let (x, y, z) = ((c % 16) * 32, 5120 + (c / 256) * 32, (c / 16 % 16) * 32);
+                for i in 0..64 {
+                    rows.push(Run { x0: x, x1: x + 8, y: y + i / 8, z: z + i % 8, kind: kinds[i as usize % 2] });
+                }
+            }
+            Edit::Fine(rows, 3)
+        };
+        let (mut s, mut tree, mut other) = (Scratch::new(), Vec::new(), Vec::new());
+        s.finer = true;
+        let mut edits = vec![rows(0..1000, [0x0509, 0x0303])];
+        let whole = sector(&mut s, 0, 10, 0, 0, &edits, &mut tree);
+        sane(&s, &tree, whole);
+        assert_eq!((s.refused, s.fine_of.len()), (0, 1000));
+        let was = s.cells.clone();
+        // The next changes half of those blocks and adds a thousand more.
+        edits.push(rows(500..2000, [0x0303, 0x0509]));
+        edits.push(rows(0..600, [0, 0]));
+        let whole = sector(&mut s, 0, 10, 0, 0, &edits[..2], &mut other);
+        sane(&s, &other, whole);
+        assert_eq!((s.refused, s.fine_of.len()), (1, 1000));
+        assert!(s.cells == was && other == tree, "the sector is as it was before the edit");
+        let whole = sector(&mut s, 0, 10, 0, 0, &edits, &mut other);
+        sane(&s, &other, whole);
+        assert_eq!((s.refused, s.fine_of.len()), (1, 400));
+    }
+
+    /// Defect 4: what rows of finer cells put in the world, the same rows of kind 0 take away, in every copy.
+    #[test]
+    fn a_fine_thing_taken_away_is_gone_from_the_coarser_copies() {
+        let thing = |kind: i32| {
+            let mut words = vec![4, 256];
+            for y in 5200..5216 {
+                for z in 32..48 {
+                    words.extend([32, 48, y, z, kind]);
+                }
+            }
+            words
+        };
+        let (put, gone) = (thing(0x0509), thing(0));
+        for lod in 0..4 {
+            let (sy, cell) = (10 >> lod, at(4 >> lod, (650 >> lod) & 63, 4 >> lod));
+            let plain = made(&[], 0, sy, 0, lod).0.cells;
+            let there = made(&put, 0, sy, 0, lod).0.cells;
+            // The thing is two of the world's cells each way: a copy twice as coarse has it as one cell, the next has not.
+            assert_eq!(there[cell], if lod < 2 { 0x0509 } else { plain[cell] }, "{lod} times coarser");
+            for words in [[&put[..], &gone].concat(), [&put[..], &put, &gone].concat()] {
+                let (s, tree, whole) = made(&words, 0, sy, 0, lod);
+                sane(&s, &tree, whole);
+                assert!(s.cells == plain, "{lod} times coarser the thing is still there");
+            }
+            assert!(made(&[&gone[..], &put].concat(), 0, sy, 0, lod).0.cells == there, "{lod} times coarser, taken away and then put");
+        }
+    }
+
+    /// Defect 7: a row of finer cells across a far sector is one fill, not a count for each fine cell it covers.
+    #[test]
+    fn fine_rows_across_a_far_sector_are_quick() {
+        let n = 2048;
+        // 13,000 such rows were 15 s when each fine cell was counted (4,000 were 4.7 s).
+        let mut words = vec![4, 13000];
+        for i in 0..13000 {
+            words.extend([-(1 << 30), 1 << 30, n / 2 + n * (i % 64), n / 2 + n * (i / 64 % 64), 0x0509]);
+        }
+        let began = std::time::Instant::now();
+        let (s, tree, whole) = made(&words, 0, 0, 0, 8);
+        assert!(began.elapsed().as_millis() < 3000, "{} ms", began.elapsed().as_millis());
+        sane(&s, &tree, whole);
+        assert_eq!(s.cells[at(63, 63, 61)], 0x0509);
+    }
+
+    /// With the switch off, as it is until a page says otherwise, an edit of finer cells changes nothing in any copy:
+    /// each sector is what it is without the edit, and says it refused it.
+    #[test]
+    fn with_the_switch_off_fine_rows_change_nothing() {
+        let plain: &[i32] = &[1, 1, 3, 9, 650, 5, 0x0509];
+        let fine: Vec<i32> = (3..=4).flat_map(|tag| [tag, 2, 0, 4096, 2600 << (tag - 3), 16 << (tag - 3), 0x0303, 40, 41, 2600 << (tag - 3), 20 << (tag - 3), 0]).collect();
+        for lod in 0..4 {
+            let (mut s, mut tree, mut other) = (Scratch::new(), Vec::new(), Vec::new());
+            let whole = sector(&mut s, 0, 10 >> lod, 0, lod, &read_edits(&[plain, &fine, plain].concat()), &mut tree);
+            sane(&s, &tree, whole);
+            assert_eq!(s.refused, 2);
+            let cells = s.cells.clone();
+            assert_eq!(sector(&mut s, 0, 10 >> lod, 0, lod, &read_edits(&[plain, plain].concat()), &mut other), whole);
+            assert!(s.cells == cells && tree == other && s.refused == 0, "{lod} times coarser the sector differs");
+            // And on, it is taken: in the finest copy the rows are there.
+            s.finer = true;
+            sector(&mut s, 0, 10 >> lod, 0, lod, &read_edits(&[plain, &fine, plain].concat()), &mut other);
+            assert!(s.refused == 0 && (lod > 0 || s.cells != cells));
+        }
+    }
+
+    /// Numbers that are not whole edits: what can be read is, and the rest is left.
+    #[test]
+    fn edits_cut_short_are_not_read() {
+        let whole = [0, 1, 2, 3, 4, 5, 1, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        assert_eq!(read_edits(&whole).len(), 2);
+        for cut in 0..whole.len() {
+            assert_eq!(read_edits(&whole[..cut]).len(), (cut >= 6) as usize, "cut at {cut}");
+        }
+        for words in [&[1][..], &[3, -1, 0, 0, 0, 0, 0], &[4, i32::MAX, 1, 2, 3, 4, 5], &[2, i32::MIN], &[0, 1, 2], &[3, 2, 1, 2, 3, 4, 5, 6]] {
+            assert!(read_edits(words).is_empty());
+        }
+        assert_eq!(read_edits(&[7, 0, -9, 1, 1, 2, 3, 4, 5, 3, 1]).len(), 2);
+    }
+
+    /// Defect 5, and all of them together: edits are numbers from outside, and the core takes any of them. Several
+    /// thousand strings of edits by a fixed seed (every tag and some that are none, counts that lie, strings cut short,
+    /// places at the ends of the numbers and crowded into a few cells so that edits meet, kinds of every bit) are
+    /// applied to sectors at several coarsenesses. Nothing panics, the limits hold, and no cell has the mark without
+    /// a block.
+    #[test]
+    fn any_numbers_are_edits_that_do_no_harm() {
+        struct Dice(u64);
+        impl Dice {
+            fn next(&mut self) -> u64 {
+                self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let mut z = self.0;
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                z ^ (z >> 31)
+            }
+            /// One of `n`.
+            fn of(&mut self, n: u64) -> u64 {
+                self.next() % n
+            }
+        }
+        const ENDS: [i32; 10] = [i32::MIN, i32::MIN + 1, i32::MAX, i32::MAX - 1, 0, -1, 1, i32::MAX / 2, i32::MIN / 2, 1 << 30];
+        let mut d = Dice(0x2590_0259);
+        let (mut s, mut tree) = (Scratch::new(), Vec::new());
+        let (mut marked, mut refused, mut read) = (0, 0, 0);
+        for round in 0..4000 {
+            let lod = [0, 0, 0, 0, 1, 2, 5, 8][d.of(8) as usize];
+            // A sector in the air, one at the ground, one far off and below zero.
+            let [sx, sy, sz] = [[0, 10 >> lod, 0], [0, 0, 0], [-3, 2, -(1 << 20) >> lod]][d.of(3) as usize];
+            let low = [sx, sy, sz].map(|v| (v as i64 * SIDE as i64) << lod);
+            // A few cells of the sector that this round's edits crowd into, in the world's cells.
+            let hot: Vec<[i64; 3]> = (0..3).map(|_| low.map(|v| v + (d.of(64) << lod) as i64)).collect();
+            let wide = 1u64 << lod;
+            let mut words = Vec::new();
+            for _ in 0..1 + d.of(6) {
+                let tag = [0, 1, 1, 2, 3, 3, 3, 4, 4, 4, 5, -1][d.of(12) as usize];
+                let per: i64 = match tag { 3 => 4, 4 => 8, _ => 1 };
+                let place = |d: &mut Dice, axis: usize| -> i32 {
+                    match d.of(20) {
+                        0 => ENDS[d.of(10) as usize],
+                        1 => d.next() as i32,
+                        2..=4 => ((low[axis] + d.of(96 * wide) as i64 - 16 * wide as i64) * per) as i32,
+                        _ => (hot[d.of(3) as usize][axis] * per + d.of(3 * per as u64 * wide) as i64 - per) as i32,
+                    }
+                };
+                let kind = |d: &mut Dice| match d.of(4) { 0 => d.next() as i32, 1 => 0, 2 => 0x0509 + d.of(3) as i32, _ => 0x0340 + d.of(16) as i32 };
+                if tag == 0 {
+                    let radius = match d.of(10) { 0 => ENDS[d.of(10) as usize], 1 => d.next() as i32, _ => d.of(6 * wide) as i32 };
+                    words.extend([0, place(&mut d, 0), place(&mut d, 1), place(&mut d, 2), radius, kind(&mut d)]);
+                    continue;
+                }
+                let rows = match d.of(12) { 0 => 0, 1 => 300, _ => 1 + d.of(24) } as i32;
+                words.extend([tag, match d.of(40) { 0 => -1, 1 => rows + 1, 2 => i32::MAX, _ => rows }]);
+                for _ in 0..rows {
+                    let x0 = place(&mut d, 0);
+                    let x1 = match d.of(8) { 0 => place(&mut d, 0), 1 => x0.wrapping_add(d.of(70 * per as u64 * wide) as i32), _ => x0.wrapping_add(1 + d.of(2 * per as u64 * wide) as i32) };
+                    words.extend([x0, x1, place(&mut d, 1), place(&mut d, 2), kind(&mut d)]);
+                }
+            }
+            if d.of(10) == 0 {
+                words.truncate(d.of(words.len() as u64 + 1) as usize);
+            }
+            let edits = read_edits(&words);
+            read += edits.len();
+            for e in &edits {
+                bodies::reach(e);
+            }
+            scratch::merged(&edits, lod, [low[0] as i32, (low[0] as i32).wrapping_add((SIDE as i32) << lod)], [low[2] as i32, (low[2] as i32).wrapping_add((SIDE as i32) << lod)]);
+            s.finer = round % 8 != 7;
+            let whole = sector(&mut s, sx, sy, sz, lod, &edits, &mut tree);
+            sane(&s, &tree, whole);
+            marked += s.cells.iter().filter(|&&k| k & FINE != 0).count();
+            refused += s.refused;
+        }
+        // The edits met: there were cells of finer cells, and edits refused where the switch was off.
+        assert!(read > 8000 && marked > 20000 && refused > 500, "{read} edits read, {marked} cells of finer cells, {refused} refused");
+    }
 }

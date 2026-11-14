@@ -6,7 +6,8 @@ import { shader, type Target } from '../probe/gpu.ts'
 import { SUN_SIDE, SUN_TILE, SunMaps } from './sun.ts'
 import { SIDE, type World } from './world.ts'
 
-export const MAX_LEVELS = 10
+// One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
+export const MAX_LEVELS = 10 + Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? '').get('fine') ?? 0) - 1)
 
 /** The colours every thing in the world shares: 0 is the material's own, 1 to 15 white to black, then 24 hues in ten tones (kinds.rs). */
 export function palette(): Float32Array<ArrayBuffer> {
@@ -102,7 +103,8 @@ struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
 `
 
 /** The sun's shadow at a point, from its maps: needs `g` (the globals) and `sunMap`. */
-export const SUNLIT = /* wgsl */ `
+/** `sunlit`; with `marks` (#259, `bricks=1` unless `finesun=0`) it also says where a cell of finer cells could shade the point. */
+const sunlitText = (marks: boolean) => /* wgsl */ `
 // Whether the sun reaches a point: 1 where it does, 0 where it does not, between the two across a shadow's edge,
 // and -1 where the maps cannot say. p is on a face whose normal is n, in box level. The map asked is the finest one
 // that holds the point's line to the sun and has that tile drawn; four of its texels are weighed, so an edge is soft.
@@ -124,15 +126,27 @@ fn sunlit(p: vec3f, n: vec3f, level: u32) -> f32 {
     let between = uv + sl.base - 0.5;
     let low = vec2i(floor(between)) + ${SUN_SIDE};
     let f = fract(between);
-    let s00 = step(textureLoad(sunMap, low & wrap, L, 0).r, d);
+${marks ? `    let r00 = textureLoad(sunMap, low & wrap, L, 0).r;
+    let r10 = textureLoad(sunMap, (low + vec2i(1, 0)) & wrap, L, 0).r;
+    let r01 = textureLoad(sunMap, (low + vec2i(0, 1)) & wrap, L, 0).r;
+    let r11 = textureLoad(sunMap, (low + vec2i(1, 1)) & wrap, L, 0).r;
+    // What a texel's line last left may be a cell of finer cells (#259): the number's lowest bit says so (fs_sun). A
+    // point such a cell could shade is not answered from the map, which holds the whole cell as solid: -2, ask the world.
+    if (((((bitcast<u32>(r00) & u32(d < r00)) | (bitcast<u32>(r10) & u32(d < r10)) | (bitcast<u32>(r01) & u32(d < r01)) | (bitcast<u32>(r11) & u32(d < r11)))) & 1u) != 0u) { return -2.0; }
+    let s00 = step(r00, d);
+    let s10 = step(r10, d);
+    let s01 = step(r01, d);
+    let s11 = step(r11, d);
+` : `    let s00 = step(textureLoad(sunMap, low & wrap, L, 0).r, d);
     let s10 = step(textureLoad(sunMap, (low + vec2i(1, 0)) & wrap, L, 0).r, d);
     let s01 = step(textureLoad(sunMap, (low + vec2i(0, 1)) & wrap, L, 0).r, d);
     let s11 = step(textureLoad(sunMap, (low + vec2i(1, 1)) & wrap, L, 0).r, d);
-    return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+`}    return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
   }
   return -1.0;
 }
 `
+export const SUNLIT = sunlitText(false)
 
 /** How a face is lit and how light becomes a picture: the same for the world and for bodies. */
 export const LIGHT = /* wgsl */ `
@@ -257,6 +271,157 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
   return mix(base * max(v, 0.2), over.rgb, over.a);
 }
 `
+
+/**
+ * A cell that holds finer cells (#259, `?bricks=1`; the core's tree.rs `encode_fine`). The march knows nothing of
+ * them: it stops at such a cell as at any other, and its text is the same with the switch on or off (a walk of the
+ * block inside the leaf's loop made every look 5% dearer with nothing fine in the world). What the march met is
+ * looked at after it, here: a cell whose kind has the mark (64) has a block of 4 x 4 x 4 or 8 x 8 x 8 cells, found
+ * again from the cell's place and walked. Where the ray meets one of them that is what it has met; where it passes
+ * between them it is marched on from the cell's far side.
+ */
+/** How many cells of finer cells a ray may pass through between their cells before one is taken whole (`tries`, for measuring). */
+const TRIES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('tries') ?? 16)
+const FINER = /* wgsl */ `
+// Where a cell's block of finer cells is in its sector's tree (and, in the top bit, whether it is 8 a side and not
+// 4): 0 where the cell holds none. The cell's leaf is found from the top: this is asked of a ray that met such a
+// cell, and of a texel of the sun's maps.
+fn fineWord(entry: u32, c: vec3i) -> u32 {
+  if (entry == 0u || (entry & UNIFORM) != 0u) { return 0u; }
+  let mid = midOf(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
+  if (mid < 2u) { return 0u; }
+  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
+  let midLo = pool[mid]; let midHi = pool[mid + 1u];
+  let bit = cl.x + 4u * cl.z + 16u * cl.y;
+  if (!has(midLo, midHi, bit)) { return 0u; }
+  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
+  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return 0u; }
+  let leafLo = pool[leaf]; let leafHi = pool[leaf + 1u];
+  let cc = vec3u(c) & vec3u(3u);
+  let cell = cc.x + 4u * cc.z + 16u * cc.y;
+  if (!has(leafLo, leafHi, cell)) { return 0u; }
+  let nth = before(leafLo, leafHi, cell);
+  let kinds = entry + pool[leaf + 2u];
+  if (((pool[kinds + (nth >> 1u)] >> (16u * (nth & 1u))) & 64u) == 0u) { return 0u; }
+  return pool[kinds + ((countOneBits(leafLo) + countOneBits(leafHi) + 1u) >> 1u) + nth];
+}
+`
+
+const REFINE = /* wgsl */ `
+// What a ray met inside a cell of finer cells: kind 0 where it passed between them, and where it leaves the cell.
+struct Fine { t: f32, kind: u32, n: vec3f, leave: f32 }
+fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
+  let lv = g.level[hit.level];
+  let c = hit.cell - lv.cells;
+  let q0 = (ro - lv.boxMin) * lv.scale;
+  let k = (1.0 / rd) / lv.scale;
+  let ahead = max(sign(rd), vec3f(0.0));
+  let toward = vec3i(sign(rd));
+  let out = ((vec3f(c) + ahead) - q0) * k;
+  var r: Fine;
+  r.kind = 0u;
+  r.leave = min(out.x, min(out.y, out.z)) + 0.002 / lv.scale;
+  let entry = sectorOf(c, hit.level);
+  let word = fineWord(entry, c);
+  if (word == 0u) { return r; }
+  // The block: 4 or 8 cells a side, a mask of them, then their kinds.
+  let block = entry + (word & 0x7fffffffu);
+  let side = select(4, 8, (word >> 31u) != 0u);
+  let fs = f32(side);
+  let words = u32(side * side * side) >> 5u;
+  var sub = clamp(vec3i(floor((q0 + rd * (hit.t * lv.scale) - vec3f(c)) * fs)), vec3i(0), vec3i(side - 1));
+  var next = ((vec3f(c) + (vec3f(sub) + ahead) / fs) - q0) * k;
+  let each = abs(k) / fs;
+  r.t = hit.t;
+  r.n = hit.n;
+  for (var j = 0; j < 24; j++) {
+    let bit = u32(sub.x + side * (sub.z + side * sub.y));
+    if (((pool[block + (bit >> 5u)] >> (bit & 31u)) & 1u) != 0u) {
+      let one = pool[block + words];
+      if ((one & UNIFORM) != 0u) { r.kind = (one & 0xffffu) | 64u; return r; }
+      // Its kind is as far along as there are cells before it.
+      var i = countOneBits(pool[block + (bit >> 5u)] & ((1u << (bit & 31u)) - 1u));
+      for (var w = 0u; w < (bit >> 5u); w++) { i += countOneBits(pool[block + w]); }
+      r.kind = ((pool[block + words + 1u + (i >> 1u)] >> (16u * (i & 1u))) & 0xffffu) | 64u;
+      return r;
+    }
+    if (next.x <= next.y && next.x <= next.z) {
+      r.t = next.x; next.x += each.x; sub.x += toward.x; r.n = vec3f(-f32(toward.x), 0.0, 0.0);
+    } else if (next.y <= next.z) {
+      r.t = next.y; next.y += each.y; sub.y += toward.y; r.n = vec3f(0.0, -f32(toward.y), 0.0);
+    } else {
+      r.t = next.z; next.z += each.z; sub.z += toward.z; r.n = vec3f(0.0, 0.0, -f32(toward.z));
+    }
+    if (any(sub < vec3i(0)) || any(sub >= vec3i(side))) { break; }
+    work++;
+  }
+  return r;
+}
+// A ray that met a cell of finer cells: what it meets in it, or in what lies past it.
+fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rough: bool, eyed: bool) -> Hit {
+  var hit = met;
+  for (var tries = 0u; tries < ${TRIES}u; tries++) {
+    // A cell of finer cells narrower than the ray is taken whole, as any node is.
+    if ((wide + spread * hit.t) * g.level[hit.level].scale >= 1.0) { break; }
+    let f = finer(ro, rd, hit);
+    if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; break; }
+    // Between them: on from the cell's far side. The last of many such cells is taken whole.
+    hit = march(ro, rd, f.leave, hit.level, most, wide, spread, rough, false, eyed);
+    if ((hit.kind & 64u) == 0u) { break; }
+  }
+  return hit;
+}
+`
+
+/**
+ * What `trace` does with what the march met, where cells may hold finer cells. The first call of the march is the one
+ * there always was, with the same things handed to it: one call in a loop, begun from wherever the last ended, was 2%
+ * dearer at the street with nothing fine in the world. Only a ray that met a cell of finer cells goes on to `refine`.
+ */
+const MARCHED = (bricks: boolean | undefined) => /* wgsl */ `var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through, eyed);${!bricks ? '' : `
+  if ((hit.kind & 64u) != 0u && !through) { hit = refine(ro, rd, hit, most, wide, spread, rough, eyed); }`}`
+
+const INLOOP = new URLSearchParams(globalThis.location?.search ?? '').get('walk') === 'loop'
+
+/** The walk of a cell's block inside the leaf's loop (the other way, `walk=loop`): nothing is read for a cell without the mark. */
+const BLOCK = /* wgsl */ `
+          if ((kind & 64u) == 0u || width >= 1.0) { break; }
+          let word = pool[leafChild + ((countOneBits(leafLo) + countOneBits(leafHi) + 1u) >> 1u) + nth];
+          let block = entry + (word & 0x7fffffffu);
+          let fside = select(4, 8, (word >> 31u) != 0u);
+          let ff = f32(fside);
+          let fwords = u32(fside * fside * fside) >> 5u;
+          var sub = clamp(vec3i(floor((q0 + rd * (t * lv.scale) - vec3f(cell)) * ff)), vec3i(0), vec3i(fside - 1));
+          var fnext = ((vec3f(cell) + (vec3f(sub) + ahead) / ff) - q0) * k;
+          var ft = t;
+          var fnorm = n;
+          var found = false;
+          var fbit = 0u;
+          for (var j = 0; j < 24; j++) {
+            fbit = u32(sub.x + fside * (sub.z + fside * sub.y));
+            if (((pool[block + (fbit >> 5u)] >> (fbit & 31u)) & 1u) != 0u) { found = true; break; }
+            if (fnext.x <= fnext.y && fnext.x <= fnext.z) {
+              ft = fnext.x; fnext.x += each.x / ff; sub.x += toward.x; fnorm = vec3f(-f32(toward.x), 0.0, 0.0);
+            } else if (fnext.y <= fnext.z) {
+              ft = fnext.y; fnext.y += each.y / ff; sub.y += toward.y; fnorm = vec3f(0.0, -f32(toward.y), 0.0);
+            } else {
+              ft = fnext.z; fnext.z += each.z / ff; sub.z += toward.z; fnorm = vec3f(0.0, 0.0, -f32(toward.z));
+            }
+            if (any(sub < vec3i(0)) || any(sub >= vec3i(fside))) { break; }
+            work++;
+          }
+          if (found) {
+            let one = pool[block + fwords];
+            if ((one & UNIFORM) != 0u) { kind = (one & 0xffffu) | 0x10040u; } else {
+              var fi = countOneBits(pool[block + (fbit >> 5u)] & ((1u << (fbit & 31u)) - 1u));
+              for (var w = 0u; w < (fbit >> 5u); w++) { fi += countOneBits(pool[block + w]); }
+              kind = ((pool[block + fwords + 1u + (fi >> 1u)] >> (16u * (fi & 1u))) & 0xffffu) | 0x10040u;
+            }
+            t = ft;
+            n = fnorm;
+            break;
+          }
+          kind = 0u;`
 
 const code = (world: World, grid = world.options.grid) => /* wgsl */ `
 ${GLOBALS}
@@ -523,7 +688,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
         if (full && !through) {
           let nth = before(leafLo, leafHi, bit);
           kind = ((pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu) | 0x10000u;
-          break;
+          ${world.options.bricks && INLOOP ? BLOCK : 'break;'}
         }
         if (side.x <= side.y && side.x <= side.z) {
           t = side.x; side.x += each.x; cell.x += toward.x; n = vec3f(-f32(toward.x), 0.0, 0.0);
@@ -532,7 +697,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
         } else {
           t = side.z; side.z += each.z; cell.z += toward.z; n = vec3f(0.0, 0.0, -f32(toward.z));
         }
-        if (full) { hit.t = t; hit.kind = 1u; }
+        if (full${world.options.bricks && INLOOP ? ' && through' : ''}) { hit.t = t; hit.kind = 1u; }
         if (any((cell >> vec3u(2u)) != leaf)) { break; }
         work++;
       }
@@ -558,6 +723,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   hit.left = L >= g.levels;
   return hit;
 }
+${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
 // What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
 // lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
 // that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
@@ -566,7 +732,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 // one more test a pass in there, or even one more number kept and one more min() a box, made every look a tenth
 // dearer, sea in it or not.
 fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
-  var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through, eyed);
+  ${MARCHED(world.options.bricks && !INLOOP)}
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -658,7 +824,7 @@ fn sky(rd: vec3f) -> vec3f {
   return col;
 }
 
-${SUNLIT}
+${sunlitText(!!world.options.fineSun)}
 // A box's sector that holds a cell: where its tree is (or, with UNIFORM, the one kind it is), 0 for none. Outside the box there is none.
 fn sectorOf(c: vec3i, L: u32) -> u32 {
   let lv = g.level[L];
@@ -794,6 +960,9 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {
     var sunny = -1.0;
+    ${world.options.bricks && !world.options.fineSun ? `// A face finer than its cell: the sun's maps hold its whole cell as solid, so it is asked about from past the cell, towards the sun.
+    // (Without a branch: one here made every lit pixel a hundredth dearer.)
+    at += g.sun * (1.8 * f32((hit.kind >> 6u) & 1u));` : ''}
     if (g.sunMaps != 0u) { sunny = sunlit(at, n, hit.level); }
     if (sunny < 0.0 && shadows == 1u) {
       // No map drawn here yet: ask the world itself.
@@ -806,7 +975,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var open = 1.0;
   // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
   let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
-  if (shadows == 1u && faced && !slope && (g.flags & 32u) == 0u && wide > 1.5) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
+  if (shadows == 1u && faced && !slope && (g.flags & 32u) == 0u && wide > 1.5${world.options.bricks ? ' && (hit.kind & 64u) == 0u' : ''}) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
   // A sign is lamp in any colour but a street lamp's own: it is lit only when the lights are.
   let ci = (hit.kind >> 8u) & 255u;
   let sign = stuff == 15u && ci != 46u;
@@ -968,7 +1137,10 @@ fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   let hit = trace(o, g.sun, come + 0.01 * sunTile.texel, sunTile.level, 768u, 0.0, 0.0, false, true, false);
   // The line starts wherever the eye is level with, so what it last left may well be behind that: only its kind says it met nothing.
   if (hit.kind == 0u) { return vec4f(-1e30, 0.0, 0.0, 1.0); }
-  return vec4f(dot(o, g.sun) + hit.t + g.sunFar, 0.0, 0.0, 1.0);
+  ${world.options.fineSun ? `// Whether what the line last left is a cell of finer cells goes in the number's lowest bit (sunlit).
+  let inside = vec3i(floor((o + g.sun * (hit.t - 0.01 / lv.scale) - lv.boxMin) * lv.scale));
+  let marked = fineWord(sectorOf(inside, sunTile.level), inside) != 0u;
+  return vec4f(bitcast<f32>((bitcast<u32>(dot(o, g.sun) + hit.t + g.sunFar) & 0xfffffffeu) | u32(marked)), 0.0, 0.0, 1.0);` : 'return vec4f(dot(o, g.sun) + hit.t + g.sunFar, 0.0, 0.0, 1.0);'}
 }
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {

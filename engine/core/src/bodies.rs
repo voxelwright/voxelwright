@@ -170,17 +170,27 @@ pub struct Ground {
 }
 
 /// The box an edit can change (high corner exclusive). A blast reaches as far as the weakest material gives: under three radii.
-fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
+/// Whatever numbers the edit holds, the box is worked out without running over: it stops at the ends of the numbers.
+pub(crate) fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
     match e {
         Edit::Ball { centre, radius, kind } => {
-            let r = if *kind == 0 { radius * 3 + 2 } else { radius + 1 };
-            (centre.map(|c| c - r), centre.map(|c| c + r + 1))
+            let r = if *kind == 0 { radius.saturating_mul(3).saturating_add(2) } else { radius.saturating_add(1) };
+            (centre.map(|c| c.saturating_sub(r)), centre.map(|c| c.saturating_add(r).saturating_add(1)))
         }
         Edit::Runs(runs) | Edit::Rows(runs) => {
             let (mut lo, mut hi) = ([i32::MAX; 3], [i32::MIN; 3]);
             for r in runs {
                 lo = [lo[0].min(r.x0), lo[1].min(r.y), lo[2].min(r.z)];
-                hi = [hi[0].max(r.x1), hi[1].max(r.y + 1), hi[2].max(r.z + 1)];
+                hi = [hi[0].max(r.x1), hi[1].max(r.y.saturating_add(1)), hi[2].max(r.z.saturating_add(1))];
+            }
+            (lo, hi)
+        }
+        // Rows of quarter cells (#259): the solver is not told of them yet; this is only the box they would reach.
+        Edit::Fine(runs, shift) => {
+            let (mut lo, mut hi, s) = ([i32::MAX; 3], [i32::MIN; 3], (*shift).min(31));
+            for r in runs {
+                lo = [lo[0].min(r.x0 >> s), lo[1].min(r.y >> s), lo[2].min(r.z >> s)];
+                hi = [hi[0].max(((r.x1 as i64 + (1i64 << s) - 1) >> s) as i32), hi[1].max((r.y >> s).saturating_add(1)), hi[2].max((r.z >> s).saturating_add(1))];
             }
             (lo, hi)
         }
@@ -2127,6 +2137,14 @@ fn squared(q: Q) -> (Q, bool) {
 
 #[cfg(test)]
 mod tests {
+    /// The box of rows of finer cells that end at the last whole number: its high corner is past its low one.
+    #[test]
+    fn the_box_of_fine_rows_at_the_end_of_the_numbers() {
+        let edits = crate::read_edits(&[3, 1, 2147483646, 2147483647, 0, 0, 0x0509, 4, 1, i32::MIN, i32::MIN + 9, i32::MAX, i32::MIN, 1]);
+        assert_eq!(super::reach(&edits[0]), ([536870911, 0, 0], [536870912, 1, 1]));
+        assert_eq!(super::reach(&edits[1]), ([-268435456, 268435455, -268435456], [-268435454, 268435456, -268435455]));
+    }
+
     use super::*;
     use crate::kinds::{BRICK, CONCRETE, OWN, kind};
 

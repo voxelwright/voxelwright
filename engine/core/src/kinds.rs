@@ -54,6 +54,9 @@ pub const fn rubble(kind: Kind) -> bool {
 /// later in a blast of its own (bodies.rs `go_up`), which may catch the next. It is still its material, to draw and
 /// to weigh. Nothing in the town is made of it yet: a model or an edit puts it there.
 pub const CHARGED: Kind = 32;
+/// Bit 6 (#259, an experiment): the cell holds a block of 4 x 4 x 4 cells a quarter its size. Its own kind is what
+/// most of them are: all that anything but the tree and the march knows of it.
+pub const FINE: Kind = 64;
 #[inline]
 pub const fn charged(kind: Kind) -> bool {
     kind & CHARGED != 0

@@ -16,9 +16,10 @@ import { space } from './space.ts'
 import { link } from './link.ts'
 import { car, living } from './living.ts'
 import { puffs } from './puffs.ts'
-import { ball, rows, stream, type Edit } from './edits.ts'
+import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk } from './people.ts'
 import { pieces, type Piece } from './pieces.ts'
+import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -47,6 +48,8 @@ const over = hud(controls)
 
 /** Cells in a metre. */
 const M = 10
+/** `?fine=1` or `2` (#259, an experiment): the world's finest cells are 5 or 2.5 cm, in one or two more boxes round the eye that hold the core's cells written out finer. Only the march knows: nothing else drawn or done is scaled. */
+const FINE = 1 << Number(query.get('fine') ?? 0)
 const { report, post } = reporter('city-4')
 const flying = (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
 
@@ -59,7 +62,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number }
+  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
@@ -75,8 +78,11 @@ async function main() {
   const world = new World(device, {
     merge,
     grid,
-    levels: Number(query.get('levels') ?? (phone ? 8 : 9)),
+    levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
     poolWords: (poolMb << 20) / 4,
+    fine: Number(query.get('fine') ?? 0),
+    bricks: query.get('bricks') === '1',
+    fineSun: query.get('bricks') === '1' && query.get('finesun') !== '0',
     workers: Number(query.get('workers') ?? Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2))),
   })
   const march = await marcher(device, gpu.format, world)
@@ -121,7 +127,7 @@ async function main() {
     const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]] as const
     // Under the sea: under its top, where the ground by itself lies under it too (not in a pit dug on land).
     march.under = pose.y < 0 && core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) < -1
-    return { eye: [pose.x * M, pose.y * M, pose.z * M], forward, right, up, tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) }
+    return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward, right, up, tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) }
   }
   /** Where a place in the world is on the screen (CSS pixels), or null behind the eye: for what the hud keeps beside a thing. */
   const project = (at: readonly [number, number, number]): [number, number] | null => {
@@ -612,14 +618,44 @@ async function main() {
   }
 
   /** The march from here at the device's own pace, ms a frame at the canvas's full size: for comparing two settings fairly. */
-  const paced = async (withFlags = flags, withPeople = false, withWand = false) => {
+  const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false) => {
     const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
     paused = true
     // With the people in sight drawn over it too, if asked: what they cost the GPU is the difference.
-    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0) }, 100)
+    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withPieces) falling.draw(encoder, target, v, march.sun.s) }, 100)
     paused = false
     to.destroy()
     return p.ms
+  }
+
+  /**
+   * The GPU's own time for the march and for the bodies drawn over it, each pass by its own clock, at the canvas's full
+   * size: the least and the middle of `times` frames, ms. On a GPU other threads share, the wall clock of `paced` says
+   * how busy they are; a pass's own least time says more nearly what the pass costs (#259).
+   */
+  const passes = async (withFlags = flags, times = 40) => {
+    if (!gpu.canTime) return null
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
+    const set = device.createQuerySet({ type: 'timestamp', count: 4 }), resolved = device.createBuffer({ size: 32, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }), read = device.createBuffer({ size: 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    const march_: number[] = [], bodies_: number[] = []
+    paused = true
+    for (let i = 0; i < times; i++) {
+      const encoder = device.createCommandEncoder()
+      march.draw(encoder, to, v, withFlags, 0, { querySet: set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 })
+      falling.draw(encoder, to, v, march.sun.s, { querySet: set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 })
+      encoder.resolveQuerySet(set, 0, 4, resolved, 0)
+      encoder.copyBufferToBuffer(resolved, 0, read, 0, 32)
+      device.queue.submit([encoder.finish()])
+      await read.mapAsync(GPUMapMode.READ)
+      const [a, b, c, d] = new BigUint64Array(read.getMappedRange().slice(0))
+      read.unmap()
+      march_.push(Number(b - a) / 1e6)
+      if (falling.count) bodies_.push(Number(d - c) / 1e6)
+    }
+    paused = false
+    to.destroy(); set.destroy(); resolved.destroy(); read.destroy()
+    const sum = (xs: number[]) => { const s = [...xs].sort((x, y) => x - y); return s.length ? { least: s[0], middle: s[s.length >> 1] } : null }
+    return { march: sum(march_), bodies: sum(bodies_) }
   }
 
   /**
@@ -665,6 +701,60 @@ async function main() {
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   // The wand's spells, on a line of their own (#246).
   Object.assign((globalThis as unknown as { engine: object }).engine, { magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
+
+  // A thing of finer cells stood beside the world (#259, fine.ts): cells as base64 of 16-bit kinds, its size, where
+  // the middle of its foot is (the world's cells), how many of its cells make one of the world's, a turn about y.
+  const fine = (cells: string, size: [number, number, number], at: [number, number, number], per = 4, turn: number | [number, number, number, number] = 0) => {
+    const kinds = new Uint16Array(Uint8Array.from(atob(cells), (c) => c.charCodeAt(0)).buffer)
+    const piece = falling.add(thing(kinds, size))
+    Object.assign(piece, { pos: at, rot: typeof turn === 'number' ? [0, Math.sin(turn / 2), 0, Math.cos(turn / 2)] : turn, cell: 1 / per })
+    beside.set(piece, { kinds, size, per })
+    return piece
+  }
+  // The handover (#259, `?bricks=1`): such a thing, where it lies and as it is turned, becomes finer cells of the
+  // world, and is no longer drawn beside it. One edit of rows, known to this page's picture only.
+  const beside = new Map<object, { kinds: Uint16Array; size: [number, number, number]; per: number }>()
+  // An edit of finer cells is taken whole or not at all. Each sector of the finest box it reaches is made with it
+  // here first, on the page's own core, after the edits already there: if one refuses it (the switch is off, or the
+  // sector would hold more blocks or words than it may: the core's scratch.rs `FINE_BLOCKS`, `TREE_WORDS`) it is not
+  // made part of the world, and the caller is told. A sector that has refused an edit from elsewhere refuses these too.
+  const taken = (edit: Edit) => {
+    core.fine_cells(world.options.bricks ? 1 : 0)
+    const lo = [0, 1, 2].map((a) => Math.floor(edit.box[a] / 64)), hi = [3, 4, 5].map((a) => Math.floor((edit.box[a] - 1) / 64))
+    for (let sz = lo[2]; sz <= hi[2]; sz++) for (let sx = lo[0]; sx <= hi[0]; sx++) {
+      const words = stream([...world.reaching(sx, sz), edit]), room = core.edits_room(words.length)
+      new Int32Array(core.memory.buffer, room, words.length).set(words)
+      for (let sy = lo[1]; sy <= hi[1]; sy++) {
+        core.make_sector(sx, sy, sz, 0)
+        if (core.fine_refused()) { console.warn(`an edit of finer cells was refused: ${world.options.bricks ? `sector ${sx} ${sy} ${sz} would hold too much` : 'cells hold no finer cells here (bricks=1)'}`); return false }
+      }
+    }
+    change(edit)
+    return true
+  }
+  const fineRest = (grain = 4) => {
+    let rows = 0, cells = 0, refused = 0
+    for (const [piece, t] of beside) {
+      const p = piece as { born: { com: [number, number, number] }; pos: [number, number, number]; rot: [number, number, number, number]; destroy(): void }
+      const r = restedRows(t.kinds, t.size, p.born.com, p.pos, p.rot, t.per, grain)
+      put()
+      // One the world refuses stays as it was, beside the world.
+      if (!taken(fineRows(r.runs, r.box, grain))) { refused++; continue }
+      p.destroy()
+      beside.delete(piece)
+      rows += r.runs.length / 5; cells += r.cells
+    }
+    return { rows, cells, refused }
+  }
+  // The same thing as cells of the world itself, a quarter or an eighth the size (#259, `?bricks=1`): one edit of rows, known to
+  // this page's picture only (the solver, a shared world and other pages are not told). Returns how many rows it was: 0
+  // when the world refused it.
+  const fineEdit = (cells: string, size: [number, number, number], at: [number, number, number], quarters = 0, grain = 4) => {
+    const { runs, box } = rowsOf(new Uint16Array(Uint8Array.from(atob(cells), (c) => c.charCodeAt(0)).buffer), size, at, quarters, grain)
+    put()
+    return taken(fineRows(runs, box, grain)) ? runs.length / 5 : 0
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, pause: (on: boolean) => { paused = on } })
 
   // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
   if (query.get('living') === 'car') void (async () => {

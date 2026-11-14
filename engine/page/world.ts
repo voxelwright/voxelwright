@@ -19,6 +19,12 @@ export interface WorldOptions {
   /** How many words of trees the GPU keeps. */
   poolWords: number
   workers: number
+  /** How many times finer than the core's own the finest cells here are (#259, an experiment; worker.ts). */
+  fine?: number
+  /** Whether cells may hold cells a quarter their size (#259, an experiment): the marcher then walks them (march.ts BLOCK). */
+  bricks?: boolean
+  /** With `bricks`, unless `finesun=0`: the sun's maps say where a cell of finer cells is, so that its shadow is asked of the world at its own grain (march.ts `sunlitText`). */
+  fineSun?: boolean
   /** Edits of rows, one after another, as one edit that leaves the column from x0, z0 to x1, z1 the same in the copy `lod` times coarser (the core's `merge_rows`). */
   merge(edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit
 }
@@ -131,7 +137,11 @@ export interface WorldStats {
   made: number
   makeMs: number
   full: number
+  /** How many times a sector made here refused an edit of finer cells whole (#259): the switch is off, or the sector's limits (the core's scratch.rs). The edit is still in the list, and other sectors may show it. */
+  refused: number
   wholeLevels: number
+  /** For each box: sectors made, the workers' time making them (ms), and the words of trees it now keeps. */
+  boxes: { made: number; ms: number; words: number }[]
 }
 
 export class World {
@@ -164,7 +174,7 @@ export class World {
     this.pool = new Pool(poolWords)
     this.poolBuffer = device.createBuffer({ label: 'trees', size: poolWords * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
     this.topBuffer = device.createBuffer({ label: 'boxes', size: this.stride * levels * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
-    this.stats = { ready: 0, wanted: 0, stale: 0, flying: 0, poolUsed: 0, poolWords, made: 0, makeMs: 0, full: 0, wholeLevels: 0 }
+    this.stats = { ready: 0, wanted: 0, stale: 0, flying: 0, poolUsed: 0, poolWords, made: 0, makeMs: 0, full: 0, refused: 0, wholeLevels: 0, boxes: Array.from({ length: levels }, () => ({ made: 0, ms: 0, words: 0 })) }
     for (let i = 0; i < options.workers; i++) {
       const worker = new Worker('/page/worker.ts', { type: 'module' })
       const slot = { worker, busy: 0 }
@@ -196,6 +206,9 @@ export class World {
     }
     this.plan = true
   }
+
+  /** The edits that reach a column of the finest box's sectors, in order. */
+  reaching(sx: number, sz: number): readonly Edit[] { return this.reach[0]?.get(column(sx, sz)) ?? [] }
 
   /** Everything done to the world so far, in order. */
   done(): readonly Edit[] { return this.edits }
@@ -279,7 +292,7 @@ export class World {
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
         w.busy++
-        w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights } satisfies Ask)
+        w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
       }
     }
   }
@@ -292,7 +305,7 @@ export class World {
     const size = SIDE << level, out: Edit[] = []
     for (let i = 0; i < reach.length;) {
       let j = i
-      while (j < reach.length && reach[j].words[0] !== 0) j++
+      while (j < reach.length && reach[j].words[0] !== 0 && reach[j].words[0] < 3) j++
       if (j - i >= 2) out.push(this.options.merge(reach.slice(i, j), level, sx * size, (sx + 1) * size, sz * size, (sz + 1) * size))
       else if (j > i) out.push(reach[i])
       if (j < reach.length) out.push(reach[j])
@@ -307,6 +320,9 @@ export class World {
     const level = this.levels[answer.level]
     let at = 0
     this.stats.makeMs += answer.ms
+    this.stats.refused += answer.refused
+    this.stats.boxes[answer.level].ms += answer.ms
+    this.stats.boxes[answer.level].made += answer.sizes.length
     for (let i = 0; i < answer.sizes.length; i++) {
       const n = answer.sizes[i], sy = answer.y0 + i, from = at
       at += n
@@ -337,6 +353,7 @@ export class World {
     let ready = 0, wanted = 0, flying = 0, stale = 0, wholeLevels = 0
     for (const level of this.levels) {
       for (const s of level.state) { if (s >= READY) ready++; else wanted++; if (s === FLYING || s === STALE_FLYING) flying++; if (s >= STALE) stale++ }
+      this.stats.boxes[level.index].words = level.size.reduce((n, v) => n + v, 0)
       if (level.dirty) {
         level.dirty = false
         this.roofs(level)

@@ -229,7 +229,7 @@ again stands it up there. A thing lives once its record's `controls` has a motor
 `cargo test --release living` proves the car, a broom that hovers, flies and rolls, and a frog that hops, natively.
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
-`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=0` (no music) `?name=Ada` (in a shared world).
+`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?bricks=1` (with `&finesun=0`, `&walk=loop`) and `?fine=1` or `2` (#259, experiments in shape finer than a cell: the cell-engine skill says what each is, and what an edit of finer cells may be; without `bricks=1` such an edit is refused whole) `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=0` (no music) `?name=Ada` (in a shared world).
 
 To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
 `node live.mjs` run after each merge so that the link serves main and not a working tree.

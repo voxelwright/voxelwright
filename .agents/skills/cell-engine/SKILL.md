@@ -1676,6 +1676,137 @@ full speed: say it again four times a second.
   figure, no hinged parts, no behaviour scripts. A thing's feet see the standing world only: it drives through
   nothing but does not ride up onto another body. No shadow under it (no body casts one).
 
+## Shape finer than a cell: three ways measured (#259, November 13)
+
+A made thing at 2.5 cm cells is a metre or two across and up to 54,000 cells. Three ways to hold and draw one were
+built as far as a measurement needs, each behind a switch that is off by default. With all off the bench is the
+baseline's (`street all` 33.50 against 33.56). `node test/finer.mjs --beside | --boxes | --bricks` repeats each;
+things are read from `~/.village/engine/finer/things`. M1 Pro, 2560 x 1440, bench places, the fixed work at 1.39 to
+1.44 ms (quiet) unless said.
+
+- **Beside the world** (`page/fine.ts` `thing`, `engine.fine(...)`): the thing's outside faces through `pieces.ts`,
+  whose cells now have a size (`cell`, 0.25). A piano is 5,509 rows of faces, 44 kB, and costs nothing that can be told
+  (1.002 of the street without it, 12 pairs). Ten phone boxes more 1.009, a hundred (637,000 rows) 1.019, 0.7 ms.
+  A thousand were 7 to 20% on a GPU by then busy, and 1.8 ms of this thread (a buffer write and a draw each).
+  It is a picture only: no shadow cast, not in mirrors, a pick goes through it, nothing meets or breaks it.
+- **Finer boxes round the eye** (`?fine=1|2`, core `make_finer`): one or two more boxes whose sectors are parts of a
+  10 cm sector, each cell written out 2 or 4 times each way. The march does not mind: street all 0.98 of today's for
+  both, roofs 1.05 to 1.06, from 130 m up 1.02 to 1.03; steps a pixel within 2 either way. Trees at the street: 28 MB
+  more for the 5 cm box and 6.5 MB more for the 2.5 cm box (what is written out finer is all whole nodes; real fine
+  shape would cost more). Sectors 0.8 to 1.0 ms each, 2,048 a box. A 2.5 cm box is 25.6 m across and 12.8 m tall.
+  Only the march was scaled (`view()`); bodies, people, picks, edits and the rules of look that count in cells
+  (risers, corners, paint) were not, and show wrong in that mode.
+- **A cell that holds 4 x 4 x 4** (`?bricks=1`; `kinds.rs` `FINE` bit 6, `scratch.rs` `fine_runs`, `tree.rs`
+  `encode_fine` and `fine_at`, edit tag 3, `march.ts` `BLOCK`, `engine.fineEdit(...)`): one more level under a leaf's
+  cell, only where a thing is. A leaf with such a cell has a word a cell after its kinds: where the cell's block is. A
+  block is a mask of 64 and one kind, or its kinds. The cell's own kind is what most of its fine cells are, so
+  everything that reads kinds still sees a cell. As first built, with the walk in the leaf's loop, the marcher was
+  about 5% dearer with nothing fine in the world (the next section says how that went, and what it costs now). The
+  piano in view: 7%. A hundred phone boxes filling the view: rays 0.97, all 1.05. The piano is 2,489 rows to send and
+  59 kB of tree (1.1 bytes a fine cell, 2.5 a surface cell); a phone box 8,323 rows and 55 kB. Its sector is made in 6
+  ms. It is seen in glass, picked, and casts a shadow whose edge is a 10 cm cell wide: the sun's maps take a cell
+  with fine cells as solid, so a fine face asks about the sun from 1.8 cells towards it and is not asked about corners.
+  Coarser copies took a cell where the rows filled as much as half a sheet (changed since: the third section below);
+  with 100 things' rows a far column took up to 30 ms to make (every row is walked). The solver is not told: bit 6 is
+  in no rule of `support`, `bodies` or `fire`.
+  A hammer blow on the piano empties whole 10 cm cells of it in the picture (one sector made again in 3 ms) and nothing
+  falls. `serve.mjs` takes only edits of tags 0 and 1, so a shared world would refuse tag 3 as it stands.
+- **The GPU's own pass clock is no use on this Mac**: the march's pass and the pass after it read the same time. On a
+  busy GPU (the fixed work at 2 to 39 ms) only pairs turn about and counts say anything; two pages can be timed turn
+  about if each is stopped (`engine.pause(true)`) while the other runs, and a page is opened only after the one
+  before it is stopped (a second page did not come up in 90 s beside one drawing at full size).
+
+
+## A cell that holds finer cells, made free where nothing is fine (#259, November 13, second pass)
+
+`?bricks=1`. M1 Pro, Chrome, 2560 x 1440, the fixed work at 1.39 to 1.45 ms throughout. Every figure is pages turn
+about with which goes first rotating (`node test/finer.mjs --free`): one as things are, a second the same, one with
+the switch. Two pages that are the same read 0.98 to 1.02 of each other, so nothing under 1% can be told here. With
+the plain page first every round (as `--bricks` once was) this form read 2% high where there was nothing to tell.
+
+- **The march's text is main's, switch on or off** (`diff` of `fn march` says so). It stops at a cell with the mark
+  (64) as at any cell; `trace` then calls `refine`, which finds the cell's block from the top of its sector
+  (`fineWord`), walks it (`finer`), and where the ray passes between the finer cells begins the march again from
+  the cell's far side. With nothing fine in the world, at the five bench places: rays 0.96 to 1.00 of a plain page,
+  all on 0.99 to 1.007.
+- **What costs here is not steps.** Each of these made every frame dearer with nothing fine in the world: the walk
+  in the leaf's loop, 4.5 to 5%, whether or not it read anything before testing the mark; the march called in a loop
+  in `trace` in place of the one call, 2%; a longer `refine` that walked on cell by cell, 3%, without being run; one
+  line in `lit` that moves where a fine face asks about the sun (`finesun=0` has it), 0.5 to 1% of all on. The first
+  call of the march must be the one main has, with the same things handed to it.
+- **In view it is dear, and the price is marches begun again, not steps.** A piano 5 m off with `finesun=0`: rays
+  1.11 to 1.12, all 1.08 to 1.09, for 0.3 steps a pixel more. Allowed 2 marches begun again and not 16 it is 1.03; 4,
+  1.06 (`&tries=`; past the limit a cell is drawn whole). A hundred phone boxes filling the street, plain page first:
+  rays 1.26, all 1.32. The walk in the leaf's loop (`&walk=loop`, kept) is the other way about: 5% always, the piano
+  1.07 and 1.05, the hundred phone boxes 0.96 and 1.03. A page that chose between the two shaders by what its world
+  holds would have both; not built.
+- **A block is 4 or 8 a side** (`Edit::Fine(rows, 2 | 3)`, edit tags 3 and 4, `fineRows(…, grain)`): the top bit of a
+  cell's word says 8, and its mask is then 16 words (x + 8 z + 64 y). The scratch holds every block 8 a side; one
+  whose cells are alike in twos is written 4 a side, so things of 2.5 cm weigh what they did. Kept things of 1.25 cm:
+  sneakers 250 rows, 4.9 kB of tree; a teddy bear 714 rows, 8.6 kB; a fern on a stool 1,960 rows, 43.5 kB; a mug a
+  metre across 13,264 rows (157 over an edit's 13,107), 241 kB. Counted, not built: 2 x 2 x 2 blocks of 4 a side
+  would be 1 to 1.9 times lighter; a block of 4 in a block of 4 (0.625 cm) 2 to 5 times heavier. With `finesun=0`,
+  the sneakers and the bear from 1.8 m up: rays 1.09, all 1.08; from 1 m off at knee height 1.22 and 1.16 (1.16 and
+  1.12 by `walk=loop`); the mug 3 m off from 1.8 m up 1.13 and 1.10.
+- **Shadows at the thing's own grain** (part of the switch; `&finesun=0` leaves them out): a texel of a sun map whose
+  line last left a cell of finer cells says so in its number's lowest bit (`fs_sun`), and `sunlit` answers -2 for a
+  point such a cell could shade: `lit` then asks the world, whose rays walk blocks. The piano: all on 1.14 (1.08
+  without); the small things from 1.8 m up 1.20, from 1 m 1.35 (1.08 and 1.16 without). A marked point seen in a
+  mirror is taken as in shadow. Asking for the marks only where the map says shadow cost 2 to 3% everywhere: most of
+  a street is in shadow.
+- **The handover** (`engine.fineRest`, `fine.ts` `restedRows`): a thing drawn beside the world, lying turned, becomes
+  finer cells of the world where it lies: every finer cell whose middle lies in one of the thing's cells takes its
+  kind. A piano tipped 112 degrees: 53,795 cells from 53,764, 5,862 rows, 62 kB. It is the page's doing: the solver's
+  bodies are 10 cm cells and put down as such (`bodies.rs`), so a thing that falls by the solver is not yet this.
+- **The phone's settings in Chrome on the Mac** (not a phone; 1170 x 2532, 8 x 8 x 8 sectors a box, 8 boxes, a
+  128 MB pool; `finesun=0`): nothing fine, 0.98 to 0.99 of a plain page, rays and all; the piano 5 m off, rays 1.21,
+  all 1.15. `engine.steps` fails at that width (a row of 1170 pixels is not a multiple of 256 bytes).
+
+
+## Finer cells and numbers from outside (#259, November 13, after the review)
+
+An edit is numbers from a page or another player. The core takes any numbers: nothing in reading or applying them
+panics, reads past an end or grows without limit (`any_numbers_are_edits_that_do_no_harm`, 4,000 strings of edits by
+a fixed seed, 10 s). A panic in the worker's core cannot be recovered from (the build aborts and the instance's
+borrow stays taken), so there must be none.
+
+- **The mark (bit 6) is the scratch's own.** A cell has it only while it has a block that is neither empty nor all
+  one kind. `fine_runs` alone gives it; every kind an edit brings is stripped of it (`scratch::plain`), and
+  `encode_fine` writes it only where there is a block that holds something, so `fineWord` in the shader always finds
+  a table. Kinds therefore have 15 bits to use: 0xffff comes back as 0xffbf.
+- **The limits, in `scratch.rs`.** A sector holds at most `FINE_BLOCKS` (16,384) blocks, one edit of finer cells
+  reaches at most that many of its cells, and its tree is at most `TREE_WORDS` (524,288 words, 2 MiB): a tree of
+  cells alone is never over `PLAIN_WORDS` (147,716), and the blocks with a 64-word table for each leaf that has one
+  may add the rest. An edit of finer cells that would pass any of them is refused whole by that sector, which is then
+  as it was before it: the reach is counted before anything is taken, and the other two are known once the edit has
+  been tried on blocks of its own, the old ones kept until then. A row of kind 0 does not reach a cell of air, so
+  taking things away from a full sector is taken unless it cuts into more whole cells than there is room for. The
+  scratch holds at most twice `FINE_BLOCKS` blocks (1 KiB each) while an edit is tried, uses again what a block gave
+  back, and keeps room for 1,024 from one sector to the next.
+- **What the limits let stand.** PHONE
+- **What the page is told.** `engine.fineEdit` and `fineRest` first make each sector of the finest box the edit
+  reaches with it, on the page's own core (`taken` in `main.ts`); if one refuses it the edit is not made part of the
+  world, `fineEdit` answers 0 rows, `fineRest` leaves the thing beside the world and counts it in `refused`, and the
+  console says which sector. An edit that reached the workers another way and is refused there is counted in
+  `engine.world.stats.refused` (the core's `fine_refused` after `make_sector`); that edit stays in the list, the
+  sectors that took it show it, and so do the coarser copies, which have no blocks and no limit.
+- **The switch is in the core too** (`fine_cells(1)`, the worker says it with every ask, off until told). Off, an
+  edit of tag 3 or 4 changes nothing in any copy and is counted as refused; `main` would have read the same numbers
+  as rows of 10 cm cells. `test/city.mjs` asks for one on a plain page.
+- **Coarser copies sample rows of finer cells as they do rows of cells**: a row through the middle of a coarse cell
+  sets or empties it, a later row over an earlier, one fill a row. Counting how much of the cell the rows filled
+  could not take anything away again (a thing deleted stayed in the far copies) and made a hash-map update for each
+  fine cell a row covered (131,072 for one row across a sector 256 times coarser). A fine thing thinner than a
+  coarse cell is now in a far copy only where a row of it passes through that cell's middle.
+- **An edit cut short is not read**, nor anything after it (where the next begins is not known); a count below zero
+  or past the numbers there are is the same. Places at the ends of the numbers are worked out in 64 bits.
+- **The march's text is 597cd71a's**, and with nothing fine the switch reads the same on both, timed turn about on
+  one afternoon (fixed work 1.39 to 1.48 ms): all on 1.020 at the street, 1.021 at the fronts, 1.024 far, against
+  1.020, 1.024 and 1.035 for 597cd71a; rays 1.00 to 1.02. That is 1 to 3% for the switch with shadows at the thing's
+  grain, not the 0.99 to 1.007 written above before those shadows were part of it; with `finesun=0` it is 1.01 to
+  1.02 against a second plain page, and two plain pages read 1.00 to 1.02 of each other.
+- **Not done**: the solver's `Ground::rows` walks a row's whole length a sector at a time (a row from one end of the
+  numbers to the other is 67 million lookups), and `merged` lays rows of one line one by one; both are as on `main`.
 
 ## Making from inside the page (#244, November 13)
 
