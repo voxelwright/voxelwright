@@ -282,6 +282,11 @@ on foot as they do flying.
   they get off). A page that gets on or off by itself says so (`POST /world/drive {by, id, on}`). Rules hear `ride`,
   `world.things` says `riders`, and everyone sees a rider sitting where the thing is: the world's process carries
   them ten times a second, so at speed a rider is drawn up to half a metre behind.
+- **Where a thrown thing lands**: the rule that threw it hears `landed` the first time it meets the world and no
+  body (`{at, speed, met, from, tag}`; `tag` is the word it gave `world.throw`), from the core's `STRUCK` record
+  against the world. And a rule breaks and burns: `world.blast({at, radius, spark})` and `world.ignite({at, radius})`,
+  by the calls an ask from anyone makes, with its caps (40 and 8 cells) and 4 and 8 a second a rule. What they break
+  is in the world's log as any blast's is.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

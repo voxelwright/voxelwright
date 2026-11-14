@@ -16,6 +16,8 @@ const MATERIALS = ['air', 'earth', 'rock', 'grass', 'sand', 'water', 'asphalt', 
 const SPEED = [10, 700], SIZE = [1, 4], THROWS_A_SECOND = 20, REMEMBERED = 15_000
 /** The fastest a push, the longest on the ground (seconds), and how soon the same two may be told of again (ms). */
 const PUSH_MOST = 400, DOWN_MOST = 60, AGAIN = 400
+/** What a rule may break and burn: the widest blast and fire (cells: as an ask from anyone), and how many of each a second. */
+const BLAST_MOST = 40, FIRE_MOST = 8, BLASTS_A_SECOND = 4, FIRES_A_SECOND = 8
 /** How long a ghost is carried on after its person was last told of, seconds. */
 const CARRIED = 0.2
 const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
@@ -29,8 +31,12 @@ const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number
  * @param happen  every rule that listens hears it: (event, e)
  * @param hear    one rule hears it: (rule id, event, e)
  * @param thing   which living thing a body of the core is, by its thing's id, or undefined
+ * @param blast   breaks the world at a place, as an ask does: (at, radius, spark)
+ * @param ignite  lights what burns at a place, as an ask does: (at, radius)
  */
-export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
+export function blows({ core, folk, tell, post, told, happen, hear, thing, blast, ignite }) {
+  /** How many blasts and fires each rule asked for this second. */
+  const blasted = new Map(), lit = new Map()
   /** Ghosts by who they stand for, and who by ghost. */
   const ghosts = new Map(), whose = new Map()
   /** What was thrown, by its body: the rule, from whom, when. And how many each rule threw this second. */
@@ -80,7 +86,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
     for (const [by, ghost] of ghosts) if (!folk.has(by)) { core.living_vanish(ghost); ghosts.delete(by); whose.delete(ghost); going.delete(by) }
     for (const [body, t] of thrown) if (now - t.t > REMEMBERED) thrown.delete(body)
     for (const [pair, t] of lately) if (now - t > AGAIN) lately.delete(pair)
-    threw.clear()
+    threw.clear(); blasted.clear(); lit.clear()
   }
   /** What the core said: who was struck by what, and what a blow would have done to someone at a page. */
   function heed(words, now) {
@@ -92,7 +98,15 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
       const tag = words[i], n = words[i + 1], at = i + 2
       if (tag === 6) pieces = thrown.get(words[at]) ?? null
       else if (tag === 2 && pieces) thrown.set(words[at], { ...pieces, t: now })
-      else if (tag === 10) {
+      else if (tag === 10 && (words[at] === 0 || words[at + 1] === 0)) {
+        // What was thrown met the world, and no body: its rule hears where, once for each thing thrown.
+        const body = words[at] || words[at + 1], t = thrown.get(body)
+        if (t && !t.landed && !pieces) {
+          t.landed = true
+          const kind = words[at + (words[at] ? 8 : 7)], thrower = t.from && folk.get(t.from)
+          hear(t.rule, 'landed', { at: [f[at + 2], f[at + 3], f[at + 4]].map((v) => Math.round(v)), speed: Math.round(f[at + 5]), met: MATERIALS[kind & 15] ?? 'ground', ...(thrower ? { from: who(thrower) } : {}), ...(t.tag ? { tag: t.tag } : {}) })
+        }
+      } else if (tag === 10) {
         const a = words[at], b = words[at + 1], hit = whose.has(a) ? a : whose.has(b) ? b : 0, other = hit === a ? b : a
         const p = hit && folk.get(whose.get(hit)), pair = `${hit}:${other}`
         // What was thrown strikes each person once: it bounces off them, falls at their feet and would be told again.
@@ -131,6 +145,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
       if (!Number.isInteger(size) || size < SIZE[0] || size > SIZE[1]) return wrong(`a thrown thing's size is ${SIZE[0]} to ${SIZE[1]}: the half of a ball, in cells`)
       if (material < 1 || material === 5) return wrong(`a thrown thing is made of one of: ${MATERIALS.filter((m, i) => i > 0 && i !== 5).join(', ')}`)
       if (w.stays !== undefined && typeof w.stays !== 'boolean') return wrong('whether a thrown thing stays where it stops is true or false')
+      if (w.tag !== undefined && (typeof w.tag !== 'string' || w.tag.length > 24)) return wrong('a thrown thing\'s tag is a word of the rule\'s own, up to 24 letters: it comes back when the thing lands')
       const start = thrower ? [thrower.at[0], thrower.at[1] + CHEST, thrower.at[2]] : w.from
       let way = target ? [target.at[0] - start[0], target.at[1] + CHEST - start[1], target.at[2] - start[2]] : three(w.at) ? w.at.map((v, a) => v - start[a]) : w.to
       const far = Math.hypot(...way)
@@ -143,11 +158,31 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing }) {
       const words = core.bodies_throw(from[0], from[1], from[2], dir[0] * speed, dir[1] * speed, dir[2] * speed, size, material)
       const said = new Uint32Array(core.memory.buffer, core.bodies_words(), words)
       for (let i = 0; i < said.length; i += 2 + said[i + 1]) if (said[i] === 2) {
-        thrown.set(said[i + 2], { rule: rule.id, from: thrower?.by, t: now, hit: new Set() })
+        thrown.set(said[i + 2], { rule: rule.id, from: thrower?.by, t: now, hit: new Set(), tag: w.tag })
         // Unless it is to stay, it passes: where it stops it is gone, and no street fills with shot.
         if (!w.stays) core.bodies_passing(said[i + 2])
       }
       told(words)
+    },
+    /** `world.blast({at, radius, spark})`: breaks what stands within so many cells of a place, as an ask from anyone does. */
+    blast(rule, w, now, wrong) {
+      if (!three(w.at)) return wrong('a blast is at a place: at: [x, y, z]')
+      const radius = w.radius ?? 8
+      if (!Number.isInteger(radius) || radius < 1 || radius > BLAST_MOST) return wrong(`a blast's radius is a whole number of cells from 1 to ${BLAST_MOST}`)
+      const n = (blasted.get(rule.id) ?? 0) + 1
+      blasted.set(rule.id, n)
+      if (n > BLASTS_A_SECOND) return wrong(`a rule sets off at most ${BLASTS_A_SECOND} blasts a second`)
+      blast(w.at.map(Math.round), radius, w.spark === true)
+    },
+    /** `world.ignite({at, radius})`: lights what burns within so many cells of a place. */
+    ignite(rule, w, now, wrong) {
+      if (!three(w.at)) return wrong('a fire is lit at a place: at: [x, y, z]')
+      const radius = w.radius ?? 2
+      if (!Number.isInteger(radius) || radius < 1 || radius > FIRE_MOST) return wrong(`a fire is lit within a whole number of cells from 1 to ${FIRE_MOST}`)
+      const n = (lit.get(rule.id) ?? 0) + 1
+      lit.set(rule.id, n)
+      if (n > FIRES_A_SECOND) return wrong(`a rule lights at most ${FIRES_A_SECOND} fires a second`)
+      ignite(w.at.map(Math.round), radius)
     },
     /** `world.push(id, {to, speed})`: someone is pushed along a way. */
     push(rule, w, now, wrong) {

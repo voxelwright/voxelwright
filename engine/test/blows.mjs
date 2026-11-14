@@ -44,7 +44,15 @@ on('said', (world, e) => {
   if (/throw at the post/.test(e.text)) world.throw({from: 'pitcher', at: 'post', speed: 250, size: 2, material: 'wood'})
   if (/push me/.test(e.text)) world.push(e.by, {to: [0, 0.4, 1], speed: 90})
   if (/down/.test(e.text)) world.down(e.by, {for: 2.5})
+  if (/lob/.test(e.text)) world.throw({from: 'pitcher', to: [1, 0.35, 0], speed: 110, material: 'steel', tag: 'lob'})
+  const where = /burn (-?[0-9]+) (-?[0-9]+) (-?[0-9]+)/.exec(e.text)
+  if (where) world.ignite({at: [Number(where[1]), Number(where[2]), Number(where[3])], radius: 2})
+  if (/too wide/.test(e.text)) world.blast({at: [800, 170, 4083], radius: 99})
   if (/too hard/.test(e.text)) world.throw({from: 'pitcher', at: e.by, speed: 9999})
+})
+on('landed', (world, e) => {
+  world.actor('pitcher', {say: 'landed ' + (e.tag || '') + ' on ' + e.met + ' at ' + e.at.join(' ') + ' going ' + e.speed + (e.from ? ' from ' + e.from.id : '')})
+  if (e.tag === 'lob') world.blast({at: e.at, radius: 6})
 })
 on('struck', (world, e) => {
   world.keep.hits += 1
@@ -99,6 +107,32 @@ try {
   for (let i = 0; i < 10; i++) { await fetch(`${server.url}/world/drive`, { method: 'POST', body: JSON.stringify({ by: 'tester', id: ref, go: 1, turn: 0, rise: 0 }) }); await ada.waitForTimeout(300) }
   const car = await until('a blow by the car', (t) => /^struck Ada by thing /.test(t), 20)
   check(!!car && car.includes(ref), `a car driven into her is a blow by a thing, named ("${car}")`)
+  // What is thrown and meets no body lands: its rule hears where, how fast and on what, and can break the world there.
+  const cell = async (x, y, z) => (await (await fetch(`${server.url}/world/at?x=${x}&y=${y}&z=${z}`)).json())
+  await ada.evaluate(() => globalThis.engine.say('lob'))
+  const fell = await until('where it landed', (t) => /^landed lob on /.test(t), 40)
+  const m = fell && /^landed lob on (\w+) at (-?\d+) (-?\d+) (-?\d+) going (\d+) from pitcher/.exec(fell)
+  check(!!m && Number(m[2]) > 860 && Number(m[5]) > 20, `a thing thrown up the street that meets nobody lands, and its rule hears it: "${fell}"`)
+  if (m) {
+    const [x, y, z] = [Number(m[2]), Number(m[3]), Number(m[4])]
+    let under = null
+    for (let i = 0; i < 20; i++) { under = await cell(x, y - 2, z); if (under.kind === 0) break; await ada.waitForTimeout(250) }
+    const pieces = await ada.evaluate(() => globalThis.engine.fell.pieces)
+    check(under?.kind === 0, `the rule sets off a blast where it landed (world.blast): the street two cells under it is gone (${pieces} pieces came loose on her page)`)
+    if (out) { await ben.evaluate(([x, y, z]) => { const e = globalThis.engine; Object.assign(e.pose, { x: x / 10 - 3, y: y / 10 + 2.5, z: z / 10 + 3, yaw: 0.8, pitch: -0.5 }) }, [x, y, z]); await ben.waitForTimeout(1500); await ben.screenshot({ path: join(out, 'blast-where-it-landed.png') }) }
+    // A fire lit by a rule: a block of wood up the street, and the rule told where.
+    const rows = []
+    for (let dy = 0; dy < 6; dy++) for (let dz = -3; dz < 3; dz++) rows.push(x + 40, x + 46, y + dy, z + dz, 10)
+    await post('ask', { by: 'tester', edit: [1, rows.length / 5, ...rows], release: [x + 43, y + 8, z] })
+    await ada.waitForTimeout(800)
+    await ada.evaluate((at) => globalThis.engine.say(`burn ${at.join(' ')}`), [x + 43, y + 3, z])
+    await ada.waitForFunction(() => globalThis.engine.burning > 0, null, { timeout: 8000 }).catch(() => {})
+    const alight = await ada.evaluate(() => globalThis.engine.burning)
+    check(alight > 0, `the rule lights a block of wood (world.ignite): ${alight} cells are alight on her page`)
+  }
+  await ada.evaluate(() => globalThis.engine.say('too wide'))
+  await ada.waitForTimeout(1200)
+  check(/blast's radius is a whole number of cells from 1 to 40/.test(JSON.stringify((await (await fetch(`${server.url}/world/rules`)).json()).find((r) => r.id === 'pitcher'))), 'a blast too wide is refused, and the rule is told why')
   // Out of range.
   await ada.evaluate(() => globalThis.engine.say('too hard'))
   await ada.waitForTimeout(1200)

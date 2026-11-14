@@ -571,10 +571,12 @@ const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessag
 const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated() })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
-const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id } })
+const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id }, blast: (at, radius, spark) => { shock(at, radius); told(core.bodies_blast(at[0], at[1], at[2], radius, -1, spark ? 1 : 0), true); nudged = true }, ignite: (at, radius) => { core.bodies_ignite(at[0], at[1], at[2], radius); told(core.bodies_advance(0), false); nudged = true } })
 does.set('throw', blow.throw)
 does.set('push', blow.push)
 does.set('down', blow.down)
+does.set('blast', blow.blast)
+does.set('ignite', blow.ignite)
 does.set('clock', body.clock)
 does.set('drive', driven.drive)
 does.set('seat', driven.seat)
